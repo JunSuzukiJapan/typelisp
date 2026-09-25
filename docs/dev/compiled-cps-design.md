@@ -172,6 +172,26 @@ M:N でスレッド間を動かすのは後者で、前者は main スレッド�
 無い。`compile-loop` の後退辺に 1 箇所ポーリングを入れれば埋まる（C7、Phase C の完了
 条件ではない）。
 
+**2026-09-24 に壁は外れた**（[os-threads-design.md](os-threads-design.md)、経緯は
+implementation-log.md の同日の節）。上の見立てのうち当たったものと外れたもの:
+
+- **当たった**: codegen には何も足していない。STW GC の safepoint は `cons`・
+  `rt_loop_safepoint`（C7 の後退辺。256 回ごとの yield とは別に毎回 GC 要求を見る）・
+  drive の step 境界・`leave_native` の 4 つで、compiled コードが自分から止まる点は
+  C7 のポーリングだけで足りた。タスクがヒープ上のデータなので、`CompiledTask` は
+  `Value: Send` だけで OS スレッド間を移動できた（`assert_send` の番人は
+  `crates/typelisp-rt/tests/sched_send_test.rs`）。
+- **「driver ループがそのまま safepoint」は半分だけ**: driver 往復は GC 点にしてよい
+  場所だが、「全確保が GC 点」にはできなかった。`alloc_string`/`alloc_boxed` は一度も
+  GC しなかったので呼び手が未ルート値を抱えたまま呼んでいる——safepoint は「そこで
+  GC が起きてよいと呼び手が既に約束している点」だけ。
+- **壁の大きさ**: 予想どおり並行機構本体より大きかった。`Heap` を「スレッドごとの
+  ビュー + `Arc<HeapShared>`」に分け（API は無変更）、thread_local の表を「ランタイム
+  実体ごとの `Arc`」にし、飛行中の unwind 状態をタスクへ移した。
+- **インタプリタは動かない側に残った**: スレッド間を動くのは compiled 鎖だけ、という
+  上の線引きがそのまま `typl` の規則になった。ワーカー上の compiled タスクが
+  インタプリタを要すると main へ移送され、以後戻らない（`Progress::NeedsMain`）。
+
 ## 6. 唯一残る非コルーチン境界 — C FFI
 
 C は「呼んだら結果が返る」しか知らないので、`defffi` のコールバック thunk

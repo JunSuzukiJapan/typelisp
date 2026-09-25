@@ -11803,3 +11803,107 @@ AOT の `defvar` 初期化子は `main` と同じスケジューラの下で走�
 関連 [[typelisp-aot-scheduler]] [[typelisp-c5-boundaries-to-the-driver]]
 [[typelisp-c3-compiled-suspension]] [[typelisp-dangling-active-heap]]
 [[typelisp-c6-abi-never-implicit]] [[typelisp-visibility-pub]]
+
+## goroutine を OS スレッドで走らせる + `Thread<T>`（2026-09-18〜09-24）
+
+2026-09-08 の B6' で「マルチコア並列が無い」を v1 の制限として受け入れていたのを外した。
+プランは `~/.claude/plans/goroutine-os-goroutine-os-twinkly-thacker.md`、ブランチ
+`feature/os-threads`。設計と、Phase ごとの「実装と上の案からの差分」は
+[os-threads-design.md](os-threads-design.md) にある——この節は経緯と、差分が生まれた理由だけ。
+
+**ユーザの決定**（2026-09-18）: GIL 段階を置かず最初から真の並列（stop-the-world GC）。
+直接 OS スレッドは `go`↔`Task<T>`/`wait` と対称の `thread`↔`Thread<T>`/`join`。
+AOT と `typl` の両方で、`typl` では compiled な `go` もワーカーへ出し、interpreted に
+触れたら main へ移送して戻さない。
+
+**壁はスケジューラでなくヒープにあった。** `Scheduler<B>` は最初から「ロックで共有」でも
+所有権の形が変わらないよう書かれていた。止めていたのは `Value` が `*mut Cell` を持つ
+`!Send`、`ACTIVE_HEAP` が 1 つの thread_local、`Heap` がアリーナ・`Vec` のスロット表・
+ルートスタックを 1 構造体に持つこと。
+
+**レビューで崩れた前提 3 つ**（着手前）: (1) `IN_FLIGHT_TAG`/`CAUGHT_UNWIND`/
+`in_flight_throw` は**単一スレッドでも既に**タスク切替を跨いでいた（`unwind-protect` の
+cleanup は任意の式なので throw 飛行中に `sleep` できる）。(2) `GLOBAL_INDEX`/`VTABLES`/
+`STREAMS` が thread_local なのは `cargo test` の隔離のためで、プロセス大域にすると壊れる
+→「ランタイム実体ごとの `Arc` + thread_local はそのハンドル」。(3) `destroy_retired_llvm`
+は次の JIT 構築で旧本体を全破棄する——ワーカーが走らせている最中の本体も。
+
+**Phase 0〜1（d87f31f〜09a82e6）: 単一スレッドのまま意味不変で下ごしらえ。** 段ごとに
+全テスト green。`RootStack` を `Box` 化してビューが生ポインタで持つ（1a）、`str_slots`/
+`box_slots`/`permanent_roots` を chunk 式の `Slab<T>` に（1b。`Index`/`IndexMut` を
+実装したので約 90 の呼び出し元は無変更）、`HeapShared` を 7 段で切り出して
+`Heap::attach`（1c）、thread_local の表を `RtShared`/`PrintShared` の `Arc` に（1d）、
+飛行中の unwind 状態をタスクへ（1e、上の (1) の潜在バグを退行テスト付きで直した）、
+prelude の `WaitGroup` と `Mutex::unlock` を RMW の無い形に（1f。副産物として 0 に戻った
+`WaitGroup` をもう一度使えるようになった）。`AllocCache` は見送った——cons の cache は
+他ビューの GC の sweep から見えないので、無効化手順（Phase 2 の仕事）なしに入れると
+セルを二重に払い出す。結局 Phase 2 でも入れていない（正しさには要らない）。
+
+**Phase 2（ce82810, da24694）: stop-the-world GC。** 計画の「全確保の slow path を
+safepoint に」は誤りだった。`alloc_string`/`alloc_boxed` は一度も GC しなかったので
+呼び手が未ルート値を抱えて呼んでいる。**safepoint は「そこで GC が起きてよいと呼び手が
+既に約束している点」だけ**——`cons`・`rt_loop_safepoint`・drive の step 境界・
+`leave_native`。新しいテストが最初に踏んだのは `cons` の「空か確認」と「pop」が別の
+critical section だったこと（他スレッドに最後のセルを取られて null pop）。ストリーム表で
+**ロックは native の内側で取って内側で離す**規則が生まれた: 外で持ったまま
+`leave_native` で park すると、そのロックを native の外で待つスレッドを collector が待ち、
+デッドロックになる（テストはハングとして現れる）。native を増やすと GC 点が増えるので、
+直前に抱えている値のルートが要る。
+
+**Phase 3（bfb932a）: スケジューラの多スレッド化（AOT）。** `SchedShared`
+（parking_lot の `Mutex`、待つ側は全員 native）+ `drive_main`/`drive_worker`。起こす
+仕組みは `Scheduler::dirty` 1 本にして「起こし忘れ」を操作ごとに書けない形にした。
+単一スレッドでは見えなかった穴が 3 つ: parking_lot の `read` は待機 writer の後ろに並ぶ
+ので、`&self` から read ガードを返す API を 1 スレッドが 2 つ持つと（`rt_str_eq`）
+デッドロック → 全部 `read_recursive`。`chan_recv` の pop した値が無ルートだった。
+リーダマクロ表・位置表・AOT の印字登録がワーカーから見えなかった。AOT は
+`typelisp-front` の staticlib をリンクするので、heap/rt を変えたら front も build し直さ
+ないと古いランタイムのまま走る。
+
+**Phase 4（98d0805）: `thread`/`Thread<T>`/`join`。** 専用 OS スレッドに pin された
+タスク（`TaskSlot::pinned` + `pinned_ready`）。「every task is blocked」の判定に
+`pinned_ready` を足し忘れると、専用スレッドがまだ取っていないだけの ready タスクを
+見落としてデッドロックと誤判定する。`Thread::current-id` のように所有者の型引数が
+シグネチャに現れない builtin 静的メソッドのため、チェッカーに「builtin なら `()` で
+埋める」規則を足した。
+
+**Phase 5（fc3ca14）: `typl`。** 案からの大きな差分は 2 つ。(1) ワーカーを常駐させず
+**drive 1 回ぶんだけ**立てる（`Crew`）——常駐させると REPL の入力待ちの間も main が
+safepoint に来なければならず、`Interp` の `Drop` で join する側がビューを持たない。
+(2) 「`eval` で `NeedsMain`」は、`eval`/`macroexpand`/`read` が中断点でない普通の
+`rt_*` 呼び出しなのでそのままでは作れず、`core_bridge` が前に `rt_suspend_main` を置く
+形になった（extern 追加で島と prelude を再生成、どちらも 2 回目で不動点）。`EvalError`
+を共有スケジューラに置こうとして `Loc::file: Rc<str>` が `Send` を妨げ、調べると
+`HeapShared` の位置表が `Rc<str>` 入りの `Loc` を**既に**スレッド間で共有していた
+（Phase 3 からの潜在バグ）→ `Arc<str>`。JIT 本体の破棄は「立っている鎖」
+（`coroutine::live_chains`）がある間延期。Phase 4 の穴として、JIT の `compile` の
+呼び出しグラフが `Thread::current-id` を拒否していた（AOT は `rt_*` に下ろすので通って
+いた）。
+
+**Phase 6（この節）: 文書。** `TODO.md` の「マルチコア並列が無い」を消し、意図的に
+受け入れた制限（データ競合は未定義・interpreted に触れたタスクは main 固定・非 main での
+interpreted な印字メソッドは panic・`typl` のワーカーは drive 1 回ぶん・C コールバック内は
+中断不可）に置き換えた。`functions.md` §20 に「`typl` では 1 本で走る」という Phase 5 前の
+記述が残っていたので直した。`compiled-cps-design.md` §5 に見立ての答え合わせを足した。
+
+**教訓**:
+
+1. **「単一スレッドでは起きない」は「単一スレッドでは観測していない」だった。**
+   飛行中の unwind 状態（1e）と位置表の `Rc<str>`（Phase 5）は、どちらも並列化の前から
+   ある潜在バグで、並列化の設計を書く・型に `Send` を要求する、という別の作業が
+   見つけた。
+2. **GC 点を増やす変更は、その直前の値のルートを要求する。** safepoint・native 区間・
+   ロック取得のどれを足しても同じで、Phase 2〜3 の穴の半分はこれ。
+3. **ロック周りのバグはハングとして現れる。** 再帰 read（Phase 3）もストリーム表
+   （Phase 2）も、テストは失敗せず止まった。どのスレッドが safepoint に来ないかを
+   名指す watchdog（debug で 5 秒）と、規則にした「ロックは native の内側で取って
+   内側で離す」「ロックを待つ側は全員 native」がこの種の穴の置き場所を決めている。
+
+**検証**: 各 Phase 末に `scripts/test-serial.sh` 全 green（Phase 1 の途中までは当時
+赤だった `editor_keyword_sync_test` を除く。d3458e6 で解消）。新テストは
+`TYPELISP_THREADS=1` と `=4` で答えが同じことを見る（`tests/os_threads_test.rs`・
+`tests/typl_threads_test.rs`）。並列性は時間でなく thread id の集合で観測した。
+
+関連 [[typelisp-os-threads-plan]] [[typelisp-aot-scheduler]]
+[[typelisp-c7-loop-safepoint]] [[typelisp-dangling-active-heap]]
+[[typelisp-island-regen-fixpoint]]

@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-09-18 / ブランチ: `feature/aot-scheduler-limits`
+最終更新: 2026-09-25 / ブランチ: `feature/os-threads`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
@@ -8,9 +8,7 @@
 
 ## 残っている作業
 
-| 作業 | 中身 |
-|---|---|
-| エディタのキーワード表にソケット層の名前を足す | `tests/editor_keyword_sync_test.rs` の `vscode_grammar_knows_every_registry_name` / `emacs_mode_knows_every_registry_name` が赤（2026-09-18 時点で 78 名が未登録）。`editor/vscode/syntaxes/typelisp.tmLanguage.json` と `editor/emacs/typelisp-mode.el` はネットワーク層（TCP/TLS/Unix/UDP/DNS）より前から無変更。テストが未登録の名前を列挙する。ユーザ向けの名前（`tcp-connect`・`tls-listen`・`with-connection` など）は 2 ファイルに足し、ユーザ向けでない名前（prelude の糊が呼ぶ `net-*` の内部ビルトインなど）は同テストの `is_excluded` に分類で足す |
+今は無い。
 
 **軽量スレッド（goroutine 相当）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
@@ -33,12 +31,23 @@ B1/B2（スケジューラ・`go`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
 経緯は [implementation-log.md](implementation-log.md) の 2 つの節
 （2026-09-17 分と 2026-09-18 分）。
 
-プランが残した制限で**まだ残っているもの**は 2 つあり、どちらも v1 の範囲として
-意図的に受け入れたもの：
+**タスクが複数の OS スレッドで同時に走るようになった（2026-09-18〜09-24）。**
+プランは `~/.claude/plans/goroutine-os-goroutine-os-twinkly-thacker.md`、設計と
+計画からの差分は [os-threads-design.md](os-threads-design.md)。`Heap` を「スレッドごとの
+ビュー + `Arc<HeapShared>`」に分け、stop-the-world GC を入れ、スケジューラを
+`TYPELISP_THREADS` 本（main 込み）で回す。AOT と `typl` の両方。専用 OS スレッドの
+`thread`/`Thread<T>`/`join` も入った。経緯は [implementation-log.md](implementation-log.md)
+の 2026-09-24 の節。
+
+**意図的に受け入れている制限**（ユーザに見えるものは [syntax.md §12.6](../syntax.md) にも
+書いてある）:
 
 | 制限 | 中身 |
 |---|---|
-| マルチコア並列が無い | `Heap` は `!Send` で `ACTIVE_HEAP` は 1 つの thread_local。ヒープを共有可能にする作業は並行機構本体より大きい（プラン B6' に 3 案の比較がある） |
+| データ競合は未定義 | Go と同じ立場。`Mutex<T>`/`Chan<T>` を通さずに複数タスクから同じ値を書き換えた結果は保証しない（`Value` の torn write、`Vector` の push や `HashTable` の同時変更は Rust の UB になりうる）。ランタイム内部の共有表だけがロックで守られる（os-threads-design.md §6） |
+| `typl` で interpreted に触れたタスクは以後インタプリタのスレッドに固定 | インタプリタ（`Interp`）は `Rc`/`RefCell` で main スレッド専用。ワーカー上の compiled タスクが interpreted な関数値の apply・コンパイルされていない `:dyn` メソッド・`eval`/`macroexpand`/`read` に当たると `NeedsMain` で main へ移送され、戻らない（§8「実装（Phase 5）」） |
+| main 以外のスレッドでは interpreted な `print-object`/`format` の `~/name/` を走らせられない | ワーカー・専用スレッドがそういう値を印字すると catchable な panic。`(compile T::print-object)` するか main から印字する。`thread` の推移的コンパイルは印字メソッドを対象に含めない |
+| `typl` のワーカーはトップレベルの評価 1 回ぶんだけ生きる | drive の終わりに各スレッドの「今の 1 歩」を待って止める。`thread` の中でブロックし続ける C 関数（`defffi`）があると、その呼び出しが返るまでトップレベルの評価が終わらない。AOT のワーカーは常駐 |
 | C の FFI コールバックの中では中断できない | C は「呼んだら結果が返る」しか知らない。Phase C で「compiled では中断できない」からここまで縮んだ |
 
 作業を始めるときはここに項目を足し、終わったら（経緯・設計判断を
@@ -56,6 +65,7 @@ B1/B2（スケジューラ・`go`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
 | 片付いた作業の一覧・横断的な教訓 | [completed-work.md](completed-work.md) |
 | 完了した実装の経緯・設計判断 | [implementation-log.md](implementation-log.md) |
 | 言語仕様の確定事項・非採用と決めた機能 | [language-design.md](language-design.md)（非採用リストは §9） |
+| goroutine を OS スレッドで走らせる設計（ヒープ 2 層・STW GC・スケジューラ・`Thread<T>`） | [os-threads-design.md](os-threads-design.md) |
 | 評価器を CPS 化した設計（Phase A） | [cps-evaluator-design.md](cps-evaluator-design.md) |
 | 並行機構のユーザ向けリファレンス | [syntax.md §12](../syntax.md)（`go`/`select`）と [functions.md §20](../functions.md)（型・メソッド） |
 | コンパイル出力のコルーチン ABI（Phase C、C0〜C7） | [compiled-cps-design.md](compiled-cps-design.md) |

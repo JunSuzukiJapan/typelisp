@@ -14,6 +14,26 @@
 
 ---
 
+**タスクを複数の OS スレッドで同時に走らせる + `Thread<T>`**（2026-09-18〜09-24、プランは
+`~/.claude/plans/goroutine-os-goroutine-os-twinkly-thacker.md`）。**Phase 0〜6 すべて完了**。
+設計は [os-threads-design.md](os-threads-design.md)、経緯は
+[implementation-log.md](implementation-log.md) の同名の節。下の「軽量スレッド」が
+残した制限のうち「マルチコア並列が無い」はこれで消えた。
+
+- **Phase 0〜1**: 単一スレッドのまま、`Heap` を「スレッドごとのビュー +
+  `Arc<HeapShared>`」へ（`&mut Heap` の API は無変更）。thread_local の表を
+  `RtShared`/`PrintShared` に、飛行中の unwind 状態をタスクへ
+- **Phase 2**: stop-the-world GC（`ThreadRegistry`・safepoint・native 区間）
+- **Phase 3〜4**: AOT のスケジューラを `TYPELISP_THREADS` 本で回す、`thread`/`Thread<T>`/`join`
+- **Phase 5**: `typl`。compiled なタスクはワーカーで走り、インタプリタが要ると main へ移送
+- **Phase 6**: 残る制限を [TODO.md](TODO.md) と [syntax.md §12.6](../syntax.md) に明記
+
+**並行と無関係に効く教訓**: 並列化の前からあった潜在バグが 2 つ（飛行中の unwind 状態、
+位置表の `Rc<str>`）、並列化の設計を書く・型に `Send` を要求する作業から見つかった。
+「単一スレッドでは起きない」は「単一スレッドでは観測していない」だった。
+
+---
+
 **軽量スレッド（Go の goroutine 相当）を入れた**（2026-09-08〜09-12、プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`）。**3 つの Phase すべて完了**。
 ユーザ向けリファレンスは [syntax.md §12](../syntax.md)（`go`/`select`）と
