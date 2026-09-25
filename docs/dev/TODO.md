@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-09-25 / ブランチ: `feature/os-threads`
+最終更新: 2026-09-25 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
