@@ -110,8 +110,21 @@ scripts/with-llvm-env.sh cargo build
 scripts/with-llvm-env.sh cargo test
 ```
 
-`LLVM_SYS_170_PREFIX` を自分のシェルで既に export 済みなら、素の `cargo build`/`cargo test`
-でも動く（このスクリプトは便宜上のラッパーであり必須ではない）。シェルの環境変数が古い
+`scripts/setup-cargo-env.sh` を 1 度走らせれば、同じ値を `.cargo/config.toml`（git 管理外）に
+書くので素の `cargo build`/`cargo test` で動く。`LLVM_SYS_170_PREFIX` を自分のシェルで既に
+export 済みでも同じ（macOS では下の `MACOSX_DEPLOYMENT_TARGET` も要る）。
+
+macOS では両スクリプトが `MACOSX_DEPLOYMENT_TARGET` も設定する。値は
+`scripts/macos-deployment-target.sh` がツールチェーンの libstd のオブジェクトから読む
+（Rust 1.98 の x86_64 では 15.0。`rustc --print deployment-target` の既定値 10.12 より高い）。
+未設定だと rustc・`cc` クレート（rustls が使う ring の C/アセンブリ。既定は SDK の版）・
+`compile-file` のリンク（Apple clang の既定）が別々の最低 OS 版を選び、ld が「より新しい
+macOS 向けのオブジェクト」と警告する——なので build.rs は未設定ならビルドを止める。
+**Rust のツールチェーンを上げたら `scripts/setup-cargo-env.sh` を走らせ直す。**
+libstd が見つからない・オブジェクトの版が 1 つに揃わない・版が読めない場合はスクリプトが
+理由と対処法を出して止まる（黙って別の値を選ばない）。値を自分で決めて進めるなら
+`scripts/setup-cargo-env.sh --deployment-target <version>`、または
+`MACOSX_DEPLOYMENT_TARGET=<version> scripts/with-llvm-env.sh cargo ...`（export 済みの値は尊重する）。シェルの環境変数が古い
 LLVMバージョンを指す等でシャドウされていると、素の `cargo` は `LLVMConstShl` 等の未定義
 シンボルでリンクエラーになることがある——その場合は上記スクリプト経由で実行すること。
 

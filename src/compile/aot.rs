@@ -63,7 +63,7 @@ use std::rc::Rc;
 
 use inkwell::context::Context;
 use inkwell::module::Module;
-use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine};
+use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 use inkwell::values::{CallSiteValue, InstructionOpcode, Operand};
 use inkwell::AddressSpace;
 use inkwell::OptimizationLevel;
@@ -1140,7 +1140,7 @@ fn staticlib_path() -> String {
 fn host_target_machine() -> Result<TargetMachine, String> {
     Target::initialize_native(&InitializationConfig::default())
         .map_err(|e| format!("failed to initialize native target: {}", e))?;
-    let triple = TargetMachine::get_default_triple();
+    let triple = host_triple()?;
     let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
     target
         .create_target_machine(
@@ -1152,6 +1152,34 @@ fn host_target_machine() -> Result<TargetMachine, String> {
             CodeModel::Default,
         )
         .ok_or_else(|| "failed to create a target machine for the host triple".to_string())
+}
+
+/// The host triple, with the minimum macOS version the executable is linked
+/// for (see [`macos_version_min`]). LLVM's default names the running OS
+/// (`x86_64-apple-darwin24.6.0`), which would make the object claim a newer
+/// macOS than the static library beside it and the executable it goes into.
+#[cfg(target_os = "macos")]
+fn host_triple() -> Result<TargetTriple, String> {
+    let default = TargetMachine::get_default_triple();
+    let default = default.as_str().to_string_lossy();
+    let arch = default
+        .split_once("-apple-")
+        .map(|(arch, _)| arch)
+        .ok_or_else(|| format!("internal error: the host triple `{}` is not an Apple one", default))?;
+    Ok(TargetTriple::create(&format!("{}-apple-macosx{}", arch, macos_version_min())))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn host_triple() -> Result<TargetTriple, String> {
+    Ok(TargetMachine::get_default_triple())
+}
+
+/// The minimum macOS version this build of `typl` was compiled for, which is
+/// what its static library's objects claim — `compile-file` links for the same
+/// one rather than Apple clang's default (`build.rs` says why).
+#[cfg(target_os = "macos")]
+fn macos_version_min() -> &'static str {
+    env!("TYPELISP_MACOSX_DEPLOYMENT_TARGET")
 }
 
 /// `module` as host assembly text — `(disassemble name)`'s answer.
@@ -1266,7 +1294,10 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
     // `-l` for every library a `defffi` named. Nothing is needed for a
     // declaration without one: what it reaches is already linked (libc comes
     // with `cc`, and the rest is in the static library beside it).
-    let status = Command::new("cc")
+    let mut link = Command::new("cc");
+    #[cfg(target_os = "macos")]
+    link.arg(format!("-mmacosx-version-min={}", macos_version_min()));
+    let status = link
         .arg(&object_path)
         .arg(staticlib_path())
         .args(libraries.iter().map(|l| format!("-l{}", l)))
