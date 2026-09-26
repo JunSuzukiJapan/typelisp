@@ -1807,15 +1807,16 @@ user-visible capacity."
 ;; it is pure arithmetic on values the language already has, which is the
 ;; side of the Rust-builtin policy line it falls on.
 ;;
-;; The **32-bit** variant, deliberately, and exactly: `i32` arithmetic is
-;; arithmetic modulo 2^32 read as signed (`docs/functions.md` §1b), which is
-;; the ring FNV-32 is defined over — so `h * prime` here *is* FNV-32's step,
-;; with no masking to arrange it. The offset basis is written as the signed
-;; reading of its 32-bit pattern (`0x811C9DC5`, whose top bit is set) for the
-;; same reason. The final `*sxhash-mask*` is what makes the result the
-;; non-negative 30-bit fixnum `Hash`'s contract promises.
-(pub defconstant (*fnv-offset-basis* int) -2128831035)
-(pub defconstant (*fnv-prime* int) 16777619)
+;; The **32-bit** variant, deliberately, and exactly: `u32` arithmetic is
+;; arithmetic modulo 2^32 (`docs/functions.md` §1), which is the ring FNV-32
+;; is defined over — so `h * prime` here *is* FNV-32's step, with no masking
+;; to arrange it. The running hash has to stay `u32`: in `int` it would never
+;; wrap, and would grow by the prime's 24 bits with every character. Each
+;; code point is folded in through its low 32 bits, which is all of it (a
+;; Unicode scalar value fits 21). The final `*sxhash-mask*` is what makes the
+;; result the non-negative 30-bit fixnum `Hash`'s contract promises.
+(pub defconstant (*fnv-offset-basis* u32) 2166136261)
+(pub defconstant (*fnv-prime* u32) 16777619)
 
 (pub defun sxhash-string ((s string)) int
   "FNV-1a over `s`'s code points — the hash `string`'s `Hash` impl uses."
@@ -1823,9 +1824,9 @@ user-visible capacity."
     (progn
       (while (< i n)
         (progn
-          (setf h (* (logxor h (char->int (ref s i))) *fnv-prime*))
+          (setf h (* (logxor h (as u32 (char->int (ref s i)))) *fnv-prime*))
           (setf i (+ i 1))))
-      (logand h *sxhash-mask*))))
+      (logand (as int h) *sxhash-mask*))))
 
 (impl Hash int    (sxhash ((self Self)) int (logand self *sxhash-mask*)))
 (impl Hash i32    (sxhash ((self Self)) int (logand (as int self) *sxhash-mask*)))

@@ -2,11 +2,11 @@
 ;; 中順巡回を実装する。
 (defenum tree
   (leaf)
-  (node i32 tree tree))
+  (node int tree tree))
 
 (use tree)
 
-(defun insert ((t tree) (x i32)) tree
+(defun insert ((t tree) (x int)) tree
   (match t
     ((leaf) (node x (leaf) (leaf)))
     ((node v l r)
@@ -15,7 +15,7 @@
        ((> x v) (node v l (insert r x)))
        (else t)))))
 
-(defun contains ((t tree) (x i32)) bool
+(defun contains ((t tree) (x int)) bool
   (match t
     ((leaf) false)
     ((node v l r)
@@ -33,13 +33,13 @@
      (print " ")
      (inorder-print r))))
 
-(defun build ((xs Vector<i32>)) tree
+(defun build ((xs Vector<int>)) tree
   (let ((t (the tree (leaf))))
     (doiter (x (iter xs))
       (setf t (insert t x)))
     t))
 
-(let ((xs (the Vector<i32> (Vector::new))))
+(let ((xs (the Vector<int> (Vector::new))))
   (push xs 5) (push xs 3) (push xs 8) (push xs 1) (push xs 4)
   (push xs 7) (push xs 9) (push xs 2) (push xs 6)
   (let ((t (build xs)))

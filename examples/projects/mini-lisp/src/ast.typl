@@ -1,7 +1,7 @@
 ;; ミニLispの構文木。整数専用の小さな式言語:
 ;; リテラル・変数参照・二項演算・if・define・begin(逐次実行)。
 (pub defenum lexpr
-  (lit i32)
+  (lit int)
   (var string)
   (binop string lexpr lexpr)
   (iff lexpr lexpr lexpr)

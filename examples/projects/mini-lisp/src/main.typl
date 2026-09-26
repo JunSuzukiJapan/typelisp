@@ -4,7 +4,7 @@
 (use eval::eval)
 
 (defun repl () ()
-  (let ((env (the HashTable<string,i32> (HashTable::new))))
+  (let ((env (the HashTable<string,int> (HashTable::new))))
     (loop
       (print "lisp> ")
       (let ((line (read-line *standard-input*)))

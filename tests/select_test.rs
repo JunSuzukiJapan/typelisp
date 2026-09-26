@@ -298,7 +298,7 @@ fn the_arms_types_are_joined() {
                    (b (the Chan<int> (Chan::new 0))))
                (select ((v (recv a)) 1) ((v (recv b)) "two"))))"#,
     );
-    assert!(e.contains("I32") || e.contains("Str"), "got: {}", e);
+    assert!(e.contains("`i32`") || e.contains("`string`"), "got: {}", e);
 }
 
 /// A receive arm needs a channel, and says so rather than complaining about
@@ -317,7 +317,7 @@ fn a_send_arms_value_is_checked() {
              (let ((a (the Chan<int> (Chan::new 1))))
                (select ((send a "x") 1))))"#,
     );
-    assert!(e.contains("I32") || e.contains("Str"), "got: {}", e);
+    assert!(e.contains("`i32`") || e.contains("`string`"), "got: {}", e);
 }
 
 // ---- the timeout idiom ---------------------------------------------------

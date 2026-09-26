@@ -111,14 +111,15 @@ CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と §4 の
 | `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `f64→f64` | 超越関数。`log` は自然対数 |
 | `log`（2引数） | `(log x base)` | `(f64,f64)→f64` | 底を指定した対数。チェッカーが `(/ (log x) (log base))` へ展開する糖衣（§4） |
 | `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL の2引数版（`(floor 7.0 2.0)`→商2・剰余1）に相当。§1 の同名メソッドと同じ設計（`car`=商、`cdr`=剰余） |
-| `float->int` | `(float->int x)` | `f64→i32` | ゼロ方向への切り捨てで `i32` へ変換 |
-| `float->int` | `(float->int x)` | `f64→int` | ゼロ方向への切り捨てで `int` へ変換 |
+| `float->int` | `(float->int x)` | `f64→int` | ゼロ方向への切り捨てで `int` へ変換（CL の `truncate`。どんな大きさの有限値でも正確）。無限大・NaN は panic。固定幅が要るなら `(as i32 x)`（`int->W` が続く） |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 正確な二進有理数として `ratio` へ変換（CL の `rational`） |
+| `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 浮動小数点の幅の変換。`float->f32` は最近接へ丸め、`float->f64` は常に正確。`(as f32 x)` の実体 |
+| `try-float->f32` `try-float->f64` | `(op x)` | `f64→Option<f32>` / `→Option<f64>` | 同じ変換を問いとして。丸めで値が変わるなら `none`（`f64` への拡大は常に `some`）。`(try-as f32 x)` の実体 |
 | `ffloor` `fceiling` `fround` `ftruncate` | `(op x)` | `f64→f64` | CL の同名関数。上の `floor`/`ceiling`/`round`/`truncate` の別名——CL では無印の方が整数を返すので、`f` 付きの方がこの言語の挙動に一致する |
-| `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→i32` | それぞれ 2 / 53 / 53（`0.0` の precision だけ 0）。`f64` は常に IEEE-754 binary64 なので定数 |
+| `float-radix` `float-digits` `float-precision` | `(op x)` | `f64→int` | それぞれ 2 / 53 / 53（`0.0` の precision だけ 0）。`f64` は常に IEEE-754 binary64 なので定数 |
 | `float-sign` | `(float-sign x)` | `f64→f64` | `1.0` か `-1.0` |
-| `scale-float` | `(scale-float x n)` | `(f64,i32)→f64` | `x * 2^n` |
-| `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,i32>` | 仮数（`[1/2,1)`、符号なし）と指数。CL は3値返しだが多値は非採用なので、符号は `float-sign` が担う |
+| `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
+| `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | 仮数（`[1/2,1)`、符号なし）と指数。CL は3値返しだが多値は非採用なので、符号は `float-sign` が担う |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | 同じ分解を厳密な 53 ビット整数の仮数で。`仮数 * 2^指数` がちょうど元の値 |
 | `rationalize` | `(rationalize x)` | `f64→ratio` | **その float に読み戻る最も簡単な**有理数（`(rationalize 0.1)` は `1/10`）。厳密な二進値が要るなら `float->ratio` |
 
@@ -140,7 +141,7 @@ CL の `integer`、そしてこの言語の**整数**——未注釈の整数リ
 切り詰め / 判定（§1 の `int->W` / `try-int->W` と同じ意味）。
 
 かつての `int` 型はこの型に統合された。`Sexpr` の変種も `int` 1 つ（`(int n)` は fixnum も
-多倍長も受ける）で、`(int n)` は書けない。
+多倍長も受ける）で、`(bignum n)` は書けない（書くとその旨のエラーになる）。
 
 添字や個数を取る組み込み（`substring`、`Vector` の `get`、`ash` の桁数など）は `int` を受けるが、
 fixnum に入らない値を渡すと実行時エラー（「an integer argument does not fit a fixnum」）になる。
@@ -153,7 +154,7 @@ fixnum に入らない値を渡すと実行時エラー（「an integer argument
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
 | `eq` `eql` `equal` `equalp` | `(op a b)` | `(int,int)→bool` | すべて `=` |
-| `logand` `logior` `logxor` `lognot` `logtest` `logcount` `integer-length` `logbitp` `ash` | | | `int` と同じ（無限桁の 2 の補数） |
+| `logand` `logior` `logxor` `lognot` `logtest` `logcount` `integer-length` `logbitp` `ash` | | | §4.4 と同じ（無限桁の 2 の補数） |
 | `int->float` `int->ratio` `int->char` `try-int->char` | | | §1 と同じ |
 | `int->W` `try-int->W` | `(int->W x)` | `int→W` | 切り詰め / 判定。`W` は 6 幅と `c-long`/`c-ulong` |
 | `int->int` | | `int→int` | 恒等（固定幅・C 語の側の `int->int` が拡大。§1） |
@@ -296,7 +297,7 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 | 名前 | 型 | 値 |
 |---|---|---|
 | `pi` | `f64` | `3.141592653589793` |
-| `boole-clr` `boole-set` `boole-1` `boole-2` `boole-c1` `boole-c2` `boole-and` `boole-ior` `boole-xor` `boole-eqv` `boole-nand` `boole-nor` `boole-andc1` `boole-andc2` `boole-orc1` `boole-orc2` | `i32` | `boole` に渡す演算コード（CL のキーワードの代わり） |
+| `boole-clr` `boole-set` `boole-1` `boole-2` `boole-c1` `boole-c2` `boole-and` `boole-ior` `boole-xor` `boole-eqv` `boole-nand` `boole-nor` `boole-andc1` `boole-andc2` `boole-orc1` `boole-orc2` | `int` | `boole` に渡す演算コード（CL のキーワードの代わり） |
 
 数値限界定数（CLHS 12.1.4.2 / 12.1.3）:
 
@@ -341,11 +342,11 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 終わらない。
 
 **バイト指定子**。CL の `byte` が返す不透明なオブジェクトの代わりに、既存の
-`cons-cell<i32,i32>`（`car`=サイズ、`cdr`=位置）を流用する。サイズも位置もビットの個数なので、
-取り出される整数がどの幅でも `i32`。
+`cons-cell<int,int>`（`car`=サイズ、`cdr`=位置）を流用する。サイズも位置もビットの個数なので、
+取り出される整数がどの幅でも `int`。
 
 **整数が第 1 引数——CL と順番が違う。** CL は `(ldb bytespec integer)` と書くが、この言語では
-それだと*指定子*が受け手の位置に来る。指定子の型は適用先によらず `cons-cell<i32,i32>` の 1 種類
+それだと*指定子*が受け手の位置に来る。指定子の型は適用先によらず `cons-cell<int,int>` の 1 種類
 なので、それを受け手にした単一ディスパッチのメソッドは整数型を 1 つしか担当できず、実際
 `ldb` は長らく `i32` 専用だった。他のビット演算はすべて `(op integer ...)` の形（`(logand a b)`・
 `(ash x count)`・`(lognot x)`）で、逆だったのは `ldb` 系と `logbitp` だけ。残りの引数は CL の
@@ -357,14 +358,14 @@ CL の `numberp`/`integerp`/`floatp` 等の**型述語は無い**——静的型
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `byte` | `(byte size position)` | `(i32,i32)→cons-cell<i32,i32>` | バイト指定子を作る |
-| `byte-size` / `byte-position` | `(byte-size b)` | `cons-cell<i32,i32>→i32` | 成分を取り出す |
-| `ldb` | `(ldb x b)` | `(T,cons-cell<i32,i32>)→T` | `x` から指定バイトを取り出して右詰め |
-| `ldb-test` | `(ldb-test x b)` | `(T,cons-cell<i32,i32>)→bool` | 指定バイトに立っているビットがあるか |
-| `mask-field` | `(mask-field x b)` | `(T,cons-cell<i32,i32>)→T` | 指定バイト以外を 0 にする（位置は保つ） |
-| `dpb` | `(dpb x newbyte b)` | `(T,T,cons-cell<i32,i32>)→T` | 右詰めの `newbyte` を `x` の指定バイトへ埋める |
-| `deposit-field` | `(deposit-field x newbyte b)` | `(T,T,cons-cell<i32,i32>)→T` | `dpb` の「位置を保ったまま」版 |
-| `boole` | `(boole op a b)` | `(i32,T,T)→T` | `op`（§4.3 の `boole-*` 定数）で選んだ 16 種の2項論理演算 |
+| `byte` | `(byte size position)` | `(int,int)→cons-cell<int,int>` | バイト指定子を作る |
+| `byte-size` / `byte-position` | `(byte-size b)` | `cons-cell<int,int>→int` | 成分を取り出す |
+| `ldb` | `(ldb x b)` | `(T,cons-cell<int,int>)→T` | `x` から指定バイトを取り出して右詰め |
+| `ldb-test` | `(ldb-test x b)` | `(T,cons-cell<int,int>)→bool` | 指定バイトに立っているビットがあるか |
+| `mask-field` | `(mask-field x b)` | `(T,cons-cell<int,int>)→T` | 指定バイト以外を 0 にする（位置は保つ） |
+| `dpb` | `(dpb x newbyte b)` | `(T,T,cons-cell<int,int>)→T` | 右詰めの `newbyte` を `x` の指定バイトへ埋める |
+| `deposit-field` | `(deposit-field x newbyte b)` | `(T,T,cons-cell<int,int>)→T` | `dpb` の「位置を保ったまま」版 |
+| `boole` | `(boole op a b)` | `(int,T,T)→T` | `op`（§4.3 の `boole-*` 定数）で選んだ 16 種の2項論理演算 |
 
 `T` は `Bits` を実装する型、つまり `i8`/`i16`/`i32`/`u8`/`u16`/`u32`/`int`。`boole` だけ
 `op` が先頭のまま——自由関数は何もディスパッチしないので整数が受け手の位置を争う必要が無く、
@@ -377,11 +378,11 @@ xorshift64 で、インタプリタと compiled コードは同じ列を返す�
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `random` | `(random n [state])` | `i32 &optional random-state → i32` | `0` 以上 `n` 未満の乱数。状態を省略すると `*random-state*` から引いて進める |
+| `random` | `(random n [state])` | `int &optional random-state → int` | `0` 以上 `n` 未満の乱数。状態を省略すると `*random-state*` から引いて進める |
 | `make-random-state` | `(make-random-state [state])` | `&optional random-state → random-state` | 引数なしなら新しい状態、渡せばその複製（複製は同じ列を再生する） |
 | `random-state-p` | `(random-state-p x)` | `random-state→bool` | 常に `true`（静的型が既に他の型を排除しているため。CL との対応のためだけに在る） |
 | `*random-state*` | — | `random-state` | `random` の既定の状態。動的束縛が無いので**代入可能なグローバル**（`setf` で差し替える） |
-| `seed-random-state` | `(seed-random-state n)` | `i32→random-state` | その整数が名指す状態。同じ種は必ず同じ列を再生する |
+| `seed-random-state` | `(seed-random-state n)` | `int→random-state` | その整数が名指す状態。同じ種は必ず同じ列を再生する |
 
 `make-random-state` の新しい状態は壁時計からシードを採るので、実行を跨いで再現はできない。
 再現したいときは `seed-random-state` を使う:
@@ -418,7 +419,7 @@ xorshift64 で、インタプリタと compiled コードは同じ列を返す�
 | `get-internal-real-time` | `(get-internal-real-time)` | `()→internal-time` | プロセス基準の経過時間 |
 | `get-internal-run-time` | `(get-internal-run-time)` | `()→internal-time` | このプロセスが使った **CPU 時間**（ユーザ＋システム、`getrusage`）|
 | `internal-time-seconds` | `(internal-time-seconds it)` | `internal-time→f64` | 秒数として。2つの読みの差を報告するときの形 |
-| `internal-time-units-per-second` | — | `i32` | `1000000`（マイクロ秒）＝`microsecond` フィールドの単位。CL 同様、値は処理系の選択 |
+| `internal-time-units-per-second` | — | `int` | `1000000`（マイクロ秒）＝`microsecond` フィールドの単位。CL 同様、値は処理系の選択 |
 | `time` | `(time form)` | マクロ | `form` を実行し、実時間と CPU 時間を1行ずつ印字して `form` の値をそのまま返す |
 
 実時間と CPU 時間は別のことを言う。I/O 待ちが主な処理は両者が大きく開き、その差こそが
@@ -429,11 +430,11 @@ xorshift64 で、インタプリタと compiled コードは同じ列を返す�
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `decoded-time` | — | `defstruct` | `second` / `minute` / `hour` / `date` / `month` / `year` / `day-of-week` / `daylight-p` / `zone` の**9フィールド**。CL の9個の返り値を1つの構造体にしたもの（多値が無いため） |
-| `decode-universal-time` | `(decode-universal-time ut &optional zone)` | `(universal-time,i32)→decoded-time` | 万国時を暦の成分へ。`zone` はグリニッジ以西の時間数（CL と同じ向き）。**省略すると地方時**（CL と同じ） |
-| `encode-universal-time` | `(encode-universal-time sec min hour date month year &optional zone)` | `(i32×6,i32)→universal-time` | 逆向き。`zone` を省くと引数は**地方時**として読まれる |
+| `decode-universal-time` | `(decode-universal-time ut &optional zone)` | `(universal-time,int)→decoded-time` | 万国時を暦の成分へ。`zone` はグリニッジ以西の時間数（CL と同じ向き）。**省略すると地方時**（CL と同じ） |
+| `encode-universal-time` | `(encode-universal-time sec min hour date month year &optional zone)` | `(int×6,int)→universal-time` | 逆向き。`zone` を省くと引数は**地方時**として読まれる |
 | `get-decoded-time` | `(get-decoded-time)` | `()→decoded-time` | いまを地方時で分解したもの |
-| `timezone-offset-seconds` | `(timezone-offset-seconds day second)` | `(i32,i32)→Option<i32>` | その万国時における地方時のグリニッジ以西**秒**数。上2つの既定の土台 |
-| `timezone-daylight-p` | `(timezone-daylight-p day second)` | `(i32,i32)→Option<bool>` | その万国時に夏時間が施行されていたか |
+| `timezone-offset-seconds` | `(timezone-offset-seconds day second)` | `(int,int)→Option<int>` | その万国時における地方時のグリニッジ以西**秒**数。上2つの既定の土台 |
+| `timezone-daylight-p` | `(timezone-daylight-p day second)` | `(int,int)→Option<bool>` | その万国時に夏時間が施行されていたか |
 
 `day-of-week` は CL と同じく **0 が月曜、6 が日曜**。万国時 0（1900-01-01）が月曜なので、
 単なる剰余で出る。暦の計算は Howard Hinnant の `civil_from_days` / `days_from_civil` を
@@ -445,7 +446,7 @@ CL の紀元へずらしたもので、表も閏年の場合分けも持たな�
 `zone` の単位は CL と同じ「グリニッジ以西の**時間**数」で、UTC+9 は `-9` と読む。ただし
 **引数は整数、結果の `zone` フィールドは `f64`**。実在するオフセットは時間の整数倍とは限らず
 （インドは +5:30、ネパールは +5:45）、報告値を丸めると黙って嘘になるため。手で書く zone は
-整数時間なので引数側は `i32` のままにしてある。
+整数時間なので引数側は `int` にしてある。
 
 `zone` を明示したときは CL の規定どおり `daylight-p` は `false`、`zone` は渡した値そのもの
 （*If a time-zone is supplied, daylight saving time information is ignored*）。
@@ -485,9 +486,8 @@ CL が認める答えで、SBCL も同じものを返す。`machine-type` と `m
 `./prog a b` なら実行ファイル自身。**どちらの走らせ方でも同じ添字で同じ引数が読める**ようにこう
 決めてある（`typl` は自分の名前と `--heap-cells` 等の大域フラグを取り除いてから渡す）。
 
-`machine-instance`（ホスト名）・`software-version`・`short-site-name` / `long-site-name` は
-無い。ホスト名の取得には `libc` が要り、残りは CL でも `NIL` を返してよいことになっている——
-中身の無い定数を並べるより、無い方を選んだ。
+`machine-instance`（ホスト名）・`machine-version`・`software-version` は OS に訊く
+（`uname`、`machine-version` は `sysctl`／`/proc/cpuinfo`）。訊いても答えが得られなければ `none`。
 
 ### 4.8 ユーザへの問いかけ
 
@@ -519,15 +519,16 @@ CL が認める答えで、SBCL も同じものを返す。`machine-type` と `m
 
 | 欄 | 型 | 中身 |
 |---|---|---|
-| `capacity` / `live` / `free` | `i32` | cons アリーナ全体と、その内訳。3 つは必ず `live + free = capacity` |
-| `symbols` / `strings` / `boxes` | `i32` | ヒープが持つ他の 3 種の現在数 |
+| `capacity` / `live` / `free` | `int` | cons アリーナ全体と、その内訳。3 つは必ず `live + free = capacity` |
+| `symbols` / `strings` / `boxes` | `int` | ヒープが持つ他の 3 種の現在数 |
 | `gc-count` | `int` | この処理系が始めてからの収集回数 |
 | `growable` | `bool` | アリーナがまだ伸びうるか |
 
-**`gc-count` だけ `int`** なのは、ここで唯一「アリーナで頭打ちにならない数」だから。
-数え上げは全部アリーナの大きさに縛られ、`i32` で数えられないアリーナはこの機械が
-持てないアリーナ（2^31 セル ≒ 51GB）——だから `typl --heap-cells` は
-`i32` を超える要求をその場で断る。収集回数だけは上がり続けるので、丸めない型を与えてある。
+欄はすべて `int`。数え上げはアリーナの大きさに縛られるが、収集回数だけは上がり続け、
+何週間も走るプロセスなら 2^31 を超えうる——固定幅にしてはいけないのはそのため
+（fixnum に入らなくなれば多倍長になるだけ）。だから `typl --heap-cells` に報告のための
+上限は無い。断るのはアドレス空間に入りきらない要求だけで、それはその場で上限の値とともに
+エラーになる（足りないのが実メモリなら、確保の時点で失敗する）。
 成長の**上限**は報告しない: ここで唯一アリーナに縛られない数（アリーナの倍数）で、
 読み手が知りたいのは可否のほうだから。
 
@@ -572,7 +573,7 @@ Symbol/Sexpr 再設計 Phase 4b 以降、`cons`/`car`/`cdr` は `Sexpr` 専用�
 | `car` | `(car p)` | `cons-cell<A,B>→A` | 先頭（`defstruct` フィールドアクセサ、インスタンスメソッドとして呼べる） |
 | `cdr` | `(cdr p)` | `cons-cell<A,B>→B` | 残り（同上） |
 
-`read` が返すデータ型 `Sexpr`（`i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | Char | Bool | Sym | Str | Cons | Bignum | Ratio | Path`）
+`read` が返すデータ型 `Sexpr`（`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path` の 16 変種）
 自体のセル操作は、上記の汎用 `cons`/`car`/`cdr` とは別の内部 island 層 `sexpr-*` が担う
 （`read`/`eval`/`print`/`defmacro`/自己ホストコンパイラ `compiler.rs` の内部でのみ使われ、
 ユーザー向けライブラリ関数からは `sexpr-*` を直接呼ぶ場面はほぼ無い）。
@@ -656,8 +657,8 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | `filter` | `(filter it pred)` | `(Iter<A>,(fn (A) bool))→Vector<A>` | 条件を満たす要素のみ |
 | `remove-if` | `(remove-if it pred)` | `(Iter<A>,(fn (A) bool))→Vector<A>` | 条件を満たす要素を除く |
 | `find-if` | `(find-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<A>` | 条件を満たす最初の要素 |
-| `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<i32>` | 条件を満たす最初の位置 |
-| `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→i32` | 条件を満たす個数 |
+| `position-if` | `(position-if it pred)` | `(Iter<A>,(fn (A) bool))→Option<int>` | 条件を満たす最初の位置 |
+| `count-if` | `(count-if it pred)` | `(Iter<A>,(fn (A) bool))→int` | 条件を満たす個数 |
 | `every` | `(every it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 全要素が条件を満たすか |
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | いずれかが条件を満たすか（CL の `some` 相当、`Some` 構成子との衝突回避名） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左畳み込み |
@@ -667,14 +668,14 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `length` | `(length it)` | `Iter<A>→i32` | 要素数 |
+| `length` | `(length it)` | `Iter<A>→int` | 要素数 |
 | `append` | `(append a b ...)` | `(Iter<A>,Iter<A>,...)→Vector<A>` | イテレータを連結。3 個以上は checker が 2 引数の `append` の左畳み込みに展開する（途中の結果は `(iter ...)` で次へ渡る） |
 | `concatenate` | `(concatenate 'vector it ...)` / `(concatenate 'string s ...)` | `→Vector<A>` / `→string` | CL の `concatenate`。結果の型は**引用したシンボルのリテラル**で書く（CL は実行時の型指定子）。`'vector` は 1 個以上、`'string` は 0 個以上（0 個なら `""`）。`Sexpr` のリストは対象外（`sexpr-append`） |
 | `reverse` | `(reverse it)` | `Iter<A>→Vector<A>` | 反転（非破壊） |
-| `nth` | `(nth n it)` | `(i32,Iter<A>)→Option<A>` | `n` 番目の要素（範囲外は `None`） |
-| `elt` | `(elt it n)` | `(Iter<A>,i32)→Option<A>` | `nth` の引数順違い版 |
-| `take` | `(take it n)` | `(Iter<A>,i32)→Vector<A>` | 先頭 `n` 個 |
-| `subseq` | `(subseq it start end)` | `(Iter<A>,i32,i32)→Vector<A>` | `[start,end)`（`end` は長さでクランプ） |
+| `nth` | `(nth n it)` | `(int,Iter<A>)→Option<A>` | `n` 番目の要素（範囲外は `None`） |
+| `elt` | `(elt it n)` | `(Iter<A>,int)→Option<A>` | `nth` の引数順違い版 |
+| `take` | `(take it n)` | `(Iter<A>,int)→Vector<A>` | 先頭 `n` 個 |
+| `subseq` | `(subseq it start end)` | `(Iter<A>,int,int)→Vector<A>` | `[start,end)`（`end` は長さでクランプ） |
 | `last` | `(last it)` | `Iter<A>→Option<A>` | 最後の**要素**（CL の「最後のセル」ではない） |
 | `butlast` | `(butlast it)` | `Iter<A>→Vector<A>` | 最後の要素を除く |
 
@@ -684,8 +685,8 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 |---|---|---|---|
 | `member` | `(member x it)` | `(A,Iter<A>)→bool` where `Eq A` | `x` と等しい要素があるか（CL と違い残りリストではなく `bool`） |
 | `find` | `(find x it)` | `(A,Iter<A>)→Option<A>` where `Eq A` | `x` と等しい最初の要素（CL 本来の `find`。デフォルト `:test` の `eql` に相当） |
-| `position` | `(position x it)` | `(A,Iter<A>)→Option<i32>` where `Eq A` | `x` と等しい最初の位置 |
-| `count` | `(count x it)` | `(A,Iter<A>)→i32` where `Eq A` | `x` と等しい要素の個数 |
+| `position` | `(position x it)` | `(A,Iter<A>)→Option<int>` where `Eq A` | `x` と等しい最初の位置 |
+| `count` | `(count x it)` | `(A,Iter<A>)→int` where `Eq A` | `x` と等しい要素の個数 |
 | `sort` | `(sort it cmp)` | `(Iter<A>,(fn (A A) bool))→Vector<A>` | CL 本来の `(sort sequence predicate)`。安定な非破壊挿入ソート。`cmp` は「第1引数が第2引数より真に前」で `true` |
 | `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | `car` が `k` と等しい最初のペア。値は `(cdr p)` で取り出す |
 
@@ -714,7 +715,7 @@ Phase 6.5 の再設計で、旧来の `Sexpr` リスト用ライブラリは **`
 | `rest` | `(rest it)` | `Iter<A>→Vector<A>` | 先頭を除いた残り（共有される tail cons ではなく新しい `Vector`） |
 | `copy-seq` | `(copy-seq it)` | `Iter<A>→Vector<A>` | イテレータを `Vector` に実体化（CL `copy-seq`/`copy-list`） |
 | `revappend` | `(revappend a b)` | `(Iter<A>,Iter<A>)→Vector<A>` | `a` を反転して `b` を続ける |
-| `Vector::filled` | `(Vector::filled n x)` | `(i32,T)→Vector<T>` | `x` を `n` 個（CL `make-list`/`make-sequence`）。`Vector::new` と同じく型引数は期待型から来るので、裸の `let` には `the` が要る |
+| `Vector::filled` | `(Vector::filled n x)` | `(int,T)→Vector<T>` | `x` を `n` 個（CL `make-list`/`make-sequence`）。`Vector::new` と同じく型引数は期待型から来るので、裸の `let` には `the` が要る |
 | `member-if` `member-if-not` | `(member-if it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `member` と同じく **`bool`**（イテレータに返すべき tail cons が無い） |
 | `notany` `notevery` | `(notany it pred)` | `(Iter<A>,(fn (A) bool))→bool` | `any`/`every` の否定 |
 | `find-if-not` `position-if-not` `count-if-not` `remove-if-not` | `(op it pred)` | 各正版と同型 | 述語を否定した版 |
@@ -761,9 +762,9 @@ CL のシーケンス関数が取るキーワード `:key` / `:test` / `:test-no
 | `:key` | `(fn (A) A)` | 比較・述語にかける前に要素へ適用する射影 |
 | `:test` | `(fn (A A) bool)` | `Eq` 境界の `equals` の代わりに使う等価判定。第1引数が**探している項目**、第2引数が（`:key` 適用後の）要素——CL と同じ順 |
 | `:test-not` | `(fn (A A) bool)` | `:test` の否定 |
-| `:start` `:end` | `i32` | 走査する窓 `[start, end)`。添字は列全体に対するもの |
+| `:start` `:end` | `int` | 走査する窓 `[start, end)`。添字は列全体に対するもの |
 | `:from-end` | `bool` | 探索は**最後の**一致を答える。`:count` と併せると影響を受けるのは末尾側から |
-| `:count` | `i32` | `remove`／`substitute` 系が影響を与える最大個数 |
+| `:count` | `int` | `remove`／`substitute` 系が影響を与える最大個数 |
 
 どの関数がどれを取るかは CL に従う:
 
@@ -961,9 +962,9 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 |---|---|---|---|
 | `upcase` | `(upcase s)` | `string→string` | 大文字化（ASCII のみ）。CL の `string-upcase` と同じく新しい文字列を返す。`string` は不変なので破壊版 `nstring-upcase` は無く、これが代わりになる |
 | `downcase` | `(downcase s)` | `string→string` | 小文字化（ASCII のみ）。`nstring-downcase` の代わり（`upcase` と同じ） |
-| `length` | `(length s)` | `string→i32` | 文字数 |
-| `ref` | `(ref s i)` | `(string,i32)→char` | `i` 番目の文字。範囲外は panic |
-| `substring` | `(substring s start end)` | `(string,i32,i32)→string` | 部分文字列 `[start,end)` |
+| `length` | `(length s)` | `string→int` | 文字数 |
+| `ref` | `(ref s i)` | `(string,int)→char` | `i` 番目の文字。範囲外は panic |
+| `substring` | `(substring s start end)` | `(string,int,int)→string` | 部分文字列 `[start,end)` |
 | `append` | `(append s1 s2 ...)` | `(string,string,...)→string` | 連結。3 個以上も書ける（`(concatenate 'string ...)` と同じ） |
 | `<` `<=` `>` `>=` | `(op s1 s2)` | `(string,string)→bool` | 辞書順比較（`i32` 等と同じくレシーバ型で多重定義） |
 | `lt` | `(lt s1 s2)` | `(string,string)→bool` | 辞書順の狭義小なり（`<` の旧 CL カタログ名） |
@@ -972,13 +973,13 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `equalp` | `(equalp s1 s2)` | `(string,string)→bool` | 内容比較（大文字小文字を無視、ASCII のみ） |
 | `/=` | `(/= s1 s2)` | `(string,string)→bool` | 内容が異なるか（CL `string/=`。可変長形は隣接ペア比較——§4.1） |
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op s1 s2)` | `(string,string)→bool` | 大文字小文字を無視した順序比較（CL `string-lessp` 等）。共通接頭辞なら短い方が小 |
-| `string::filled` | `(string::filled n c)` | `(i32,char)→string` | `c` を `n` 個並べた文字列（CL `make-string`） |
-| `search` | `(search s sub)` | `(string,string)→Option<i32>` | `sub` が最初に現れる位置。**CL の `search` は引数順が逆**（`(search pattern sequence)`）。空文字列は 0。キーワードは §6.3 |
-| `mismatch` | `(mismatch a b)` | `(string,string)→Option<i32>` | 最初に食い違う位置。`equal` なときだけ `none`。片方が接頭辞なら短い方の末尾。キーワードは §6.3 |
+| `string::filled` | `(string::filled n c)` | `(int,char)→string` | `c` を `n` 個並べた文字列（CL `make-string`） |
+| `search` | `(search s sub)` | `(string,string)→Option<int>` | `sub` が最初に現れる位置。**CL の `search` は引数順が逆**（`(search pattern sequence)`）。空文字列は 0。キーワードは §6.3 |
+| `mismatch` | `(mismatch a b)` | `(string,string)→Option<int>` | 最初に食い違う位置。`equal` なときだけ `none`。片方が接頭辞なら短い方の末尾。キーワードは §6.3 |
 | `trim` `left-trim` `right-trim` | `(trim s)` / `(trim s bag)` | `(string,string?)→string` | 両端/左/右から `bag` に含まれる文字を除く（CL `string-trim` 等）。`bag` 省略時は空白類 `" \t\n\r"` |
 | `capitalize` | `(capitalize s)` | `string→string` | 各語の先頭を大文字・残りを小文字（CL `string-capitalize`）。語＝英数字の極大連続 |
 | `split` | `(split s sep)` | `(string,string)→Vector<string>` | `sep` で分割。CL に対応物は無い。連続する区切りは空要素を生む。`sep` が空なら panic |
-| `to-string` | `(to-string x)` | `T→string` | `~a` 相当の文字列化。`i32`/`f64`/`bool`/`char`/`string` に実装（CL `princ-to-string`） |
+| `to-string` | `(to-string x)` | `T→string` | `~a` 相当の文字列化。`int`/`i32`/`f64`/`bool`/`char`/`string` に実装（CL `princ-to-string`） |
 
 `trim` 系と `digit-weight`/`digit->char`（§9）は `defmethod` でなく `defun`。かつて
 `defmethod` が `&optional` を受け付けなかった名残で、今は受け付ける（§21 の `accept`）。
@@ -995,7 +996,7 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `digitp` | `(digitp c)` | `char→bool` | ASCII 数字か |
 | `eq` `eql` `equal` | `(op c1 c2)` | `(char,char)→bool` | 値の比較 |
 | `equalp` | `(equalp c1 c2)` | `(char,char)→bool` | 大文字小文字を無視した値の比較 |
-| `char->int` | `(char->int c)` | `char→i32` | Unicode スカラ値（逆方向は §1 の `int->char`/`try-int->char`） |
+| `char->int` | `(char->int c)` | `char→int` | Unicode スカラ値（逆方向は §1 の `int->char`/`try-int->char`） |
 | `char->string` | `(char->string c)` | `char→string` | 1文字だけの文字列。CL は `string` 関数が指定子を取って兼ねるが、この言語には指定子が無いので向きを名前に出している |
 | `/=` | `(/= c1 c2)` | `(char,char)→bool` | 値が異なるか（CL `char/=`。**可変長形は隣接ペア比較**で、全ペア相異を問う CL とは異なる——§4.1） |
 | `lessp` `greaterp` `not-lessp` `not-greaterp` | `(op c1 c2)` | `(char,char)→bool` | 大文字小文字を無視した順序比較（CL `char-lessp` 等）。等値版は既存の `equalp`（CL `char-equal`） |
@@ -1003,8 +1004,8 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
 | `alphanumericp` | `(alphanumericp c)` | `char→bool` | 英字または数字か（CL 同名） |
 | `graphicp` | `(graphicp c)` | `char→bool` | 印字可能か。空白は含み、改行・タブは含まない（CL `graphic-char-p`） |
 | `standardp` | `(standardp c)` | `char→bool` | CL の標準文字 96 個か＝`graphicp` に改行を足したもの（CL `standard-char-p`） |
-| `digit-weight` | `(digit-weight c)` / `(digit-weight c radix)` | `(char,i32?)→Option<i32>` | その基数での数字の**重み**（CL `digit-char-p` 本来の意味）。既存の `digitp` は `bool` のまま据え置き |
-| `digit->char` | `(digit->char w)` / `(digit->char w radix)` | `(i32,i32?)→Option<char>` | 重み `w` を表す文字。10 以上は大文字（CL `digit-char`。基数は最大 36） |
+| `digit-weight` | `(digit-weight c)` / `(digit-weight c radix)` | `(char,int?)→Option<int>` | その基数での数字の**重み**（CL `digit-char-p` 本来の意味）。既存の `digitp` は `bool` のまま据え置き |
+| `digit->char` | `(digit->char w)` / `(digit->char w radix)` | `(int,int?)→Option<char>` | 重み `w` を表す文字。10 以上は大文字（CL `digit-char`。基数は最大 36） |
 | `char->name` | `(char->name c)` | `char→Option<string>` | 文字名。名前を持つのはリーダの表にある 7 つだけ（CL `char-name`） |
 | `name->char` | `(name->char s)` | `string→Option<char>` | 文字名から文字。大文字小文字を無視し、リーダの別名（`linefeed`/`null`）も受ける（CL `name-char`） |
 
@@ -1026,11 +1027,12 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 |---|---|---|---|
 | `new` | `(Vector::new)` | `()→Vector<T>` | 空のベクタを作る（static） |
 | `push` | `(push v x)` | `(Vector<T>,T)→Unit` | 末尾に追加 |
-| `get` | `(get v i)` | `(Vector<T>,i32)→T` | `i` 番目を読む。範囲外は panic |
-| `set` | `(set v i x)` | `(Vector<T>,i32,T)→Unit` | `i` 番目を書き換える。範囲外は panic |
-| `len` | `(len v)` | `Vector<T>→i32` | 要素数 |
+| `get` | `(get v i)` | `(Vector<T>,int)→T` | `i` 番目を読む。範囲外は panic |
+| `set` | `(set v i x)` | `(Vector<T>,int,T)→Unit` | `i` 番目を書き換える。範囲外は panic |
+| `len` | `(len v)` | `Vector<T>→int` | 要素数 |
 | `pop` | `(pop v)` | `Vector<T>→Option<T>` | 末尾を取り除いて返す。空なら `None`（`get`/`set` と異なり範囲外でも panic しない） |
 | `iter` | `(iter v)` | `Vector<T>→vector-iter<T>` | `Iter` を実装するカーソルを作る（ライブラリ定義） |
+| `pushnew` | `(pushnew v x)` | `(Vector<T>,T)→Unit` where `Eq T` | `x` と等しい要素が無ければ末尾に追加（CL `pushnew`。場所を書き換える必要が無いのでマクロではなくメソッド） |
 
 `map`/`filter` は§6（`Iter` トレイト上のジェネリック関数）で実装済み——`(map (iter v) f)` のように
 `Vector<T>` を `iter` でカーソル化して渡す。
@@ -1050,26 +1052,35 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 | `get` | `(get h k)` | `(HashTable<K,V>,K)→Option<V>` | 検索 |
 | `set` | `(set h k v)` | `(HashTable<K,V>,K,V)→Unit` | 挿入・上書き |
 | `remove` | `(remove h k)` | `(HashTable<K,V>,K)→Option<V>` | 削除し、あれば旧値を返す |
-| `count` | `(count h)` | `HashTable<K,V>→i32` | 要素数 |
+| `count` | `(count h)` | `HashTable<K,V>→int` | 要素数 |
 | `clear` | `(clear h)` | `HashTable<K,V>→Unit` | 全削除 |
 | `keys` | `(keys h)` | `HashTable<K,V>→Vector<K>` | キーのスナップショット |
 | `values` | `(values h)` | `HashTable<K,V>→Vector<V>` | 値のスナップショット |
 | `entries` | `(entries h)` | `HashTable<K,V>→Vector<cons-cell<K,V>>` | `(k . v)` ペアのスナップショット |
 | `iter` | `(iter h)` | `HashTable<K,V>→hashtable-iter<K,V>` | `Iter` を実装するカーソル（ライブラリ定義）。要素は `(k . v)` の `cons-cell`。CL の `with-hash-table-iterator` に当たり、`doiter`/`map`/`filter` など `Iter` の関数がそのまま使える |
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL `maphash` |
-| `size` | `(size h)` | `HashTable<K,V>→i32` | CL `hash-table-size`。この表では占有数（＝`count`） |
+| `size` | `(size h)` | `HashTable<K,V>→int` | CL `hash-table-size`。この表では占有数（＝`count`） |
 
 **キーの型は `Hash` を実装していれば何でもよい**——`defstruct`/`defenum` も含めて。
 `get`/`set`/`remove` は `(where (Hash K))` を持つので、実装していない型をキーにした表は
 **型エラー**（`f64` に `Hash` が無いのは `NaN` のため）。
 
 ```lisp
-(defstruct point (x i32) (y i32))
+(deftrait Hash (Eq)
+  (sxhash ((self Self)) int))              ; 非負で fixnum に入る値を返す
+```
+
+実装済み: `int` と 6 つの固定幅整数、`bool`、`char`、`string`、`symbol`（浮動小数点数には無い）。
+自前の型では、結果を `*sxhash-mask*`（2^30-1）で `logand` して非負に保つ。文字列を
+ハッシュしたいときは `string` の実装が使っている `(sxhash-string s)`（FNV-1a）を呼べる。
+
+```lisp
+(defstruct point (x int) (y int))
 (impl Eq point
   (equals ((self Self) (other Self)) bool
     (if (= self::x other::x) (= self::y other::y) false)))
 (impl Hash point
-  (sxhash ((self Self)) i32 (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
+  (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (point::new 1 2) "a")
@@ -1093,24 +1104,24 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<i32>,T)→Array<T>` | CL `make-array`。`dims` は複製される。`init` が全セルの初期値（CL の `:initial-element`。この言語に「未束縛のセル」は無いので必須）。`:fill-pointer` は 1 次元のときだけ |
-| `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<i32>)→T` | CL `aref` / `(setf (aref …))`。添字が範囲外なら panic |
+| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL `make-array`。`dims` は複製される。`init` が全セルの初期値（CL の `:initial-element`。この言語に「未束縛のセル」は無いので必須）。`:fill-pointer` は 1 次元のときだけ |
+| `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | CL `aref` / `(setf (aref …))`。添字が範囲外なら panic |
 | `aref` | `(aref a i j …)` | — | 裸の添字で書く CL の綴り。**チェッカーの糖衣**で上の `get`/`set` に展開される（§4.1 の可変長演算子と同じ手口）。`(setf (aref a i j) v)` も同じ |
-| `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,i32)→T` | CL `row-major-aref`。平坦な添字 |
-| `rank` | `(rank a)` | `Array<T>→i32` | CL `array-rank` |
-| `dimension` | `(dimension a n)` | `(Array<T>,i32)→i32` | CL `array-dimension` |
-| `dimensions` | `(dimensions a)` | `Array<T>→Vector<i32>` | CL `array-dimensions`。CL が新しいリストを返すのと同じく**複製**を返す |
-| `total-size` | `(total-size a)` | `Array<T>→i32` | CL `array-total-size`（fill pointer とは無関係の確保済みセル数） |
-| `len` | `(len a)` | `Array<T>→i32` | CL の配列に対する `length`。fill pointer があればその値、無ければ `total-size` |
-| `in-bounds` | `(in-bounds a idx)` | `(Array<T>,Vector<i32>)→bool` | CL `array-in-bounds-p`。添字の**個数**が違っても偽（エラーではない） |
-| `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<i32>)→i32` | CL `array-row-major-index` |
-| `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<i32>,T)→Unit` | CL `adjust-array`。ランクは変えられない。範囲に残る要素は添字ごと保存、増えたセルは `init`。CL と違い配列を返さない（この言語の配列は全部 adjustable なので、返す第 2 の配列が無い） |
+| `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | CL `row-major-aref`。平坦な添字 |
+| `rank` | `(rank a)` | `Array<T>→int` | CL `array-rank` |
+| `dimension` | `(dimension a n)` | `(Array<T>,int)→int` | CL `array-dimension` |
+| `dimensions` | `(dimensions a)` | `Array<T>→Vector<int>` | CL `array-dimensions`。CL が新しいリストを返すのと同じく**複製**を返す |
+| `total-size` | `(total-size a)` | `Array<T>→int` | CL `array-total-size`（fill pointer とは無関係の確保済みセル数） |
+| `len` | `(len a)` | `Array<T>→int` | CL の配列に対する `length`。fill pointer があればその値、無ければ `total-size` |
+| `in-bounds` | `(in-bounds a idx)` | `(Array<T>,Vector<int>)→bool` | CL `array-in-bounds-p`。添字の**個数**が違っても偽（エラーではない） |
+| `row-major-index` | `(row-major-index a idx)` | `(Array<T>,Vector<int>)→int` | CL `array-row-major-index` |
+| `adjust` | `(adjust a dims init)` | `(Array<T>,Vector<int>,T)→Unit` | CL `adjust-array`。ランクは変えられない。範囲に残る要素は添字ごと保存、増えたセルは `init`。CL と違い配列を返さない（この言語の配列は全部 adjustable なので、返す第 2 の配列が無い） |
 | `push-extend` | `(push-extend a x)` | `(Array<T>,T)→Unit` | CL `vector-push-extend`。fill pointer が無ければ panic |
 | `pop` | `(pop a)` | `Array<T>→Option<T>` | CL `vector-pop`。空なら `none`（`Vector<T>` の `pop` と同じ） |
-| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<i32>` | fill pointer（無ければ `none`）。`(setf a::fill-pointer …)` で書ける |
+| `fill-pointer` | `(fill-pointer a)` | `Array<T>→Option<int>` | fill pointer（無ければ `none`）。`(setf a::fill-pointer …)` で書ける |
 | `iter` | `(iter a)` | `Array<T>→array-iter<T>` | row-major 順のカーソル。fill pointer があればそこで止まる |
 
-- **添字は `Vector<i32>`**。`defmethod` はアリティで解決するので「末尾に同じ型の引数が
+- **添字は `Vector<int>`**。`defmethod` はアリティで解決するので「末尾に同じ型の引数が
   何個か続く」形を宣言できない。`aref` の糖衣がその差を埋めている。
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` /
   `array-has-fill-pointer-p` は**無い**。受け手の静的型が既に答えている問い。
@@ -1118,7 +1129,7 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
   fill pointer）で、作るときに使うものではない。`Array::make` を使う。
 - **印字は CL の配列構文**。ランク 1 は `#(1 2 3)`、それ以外は `#nA` と次元ぶんの括弧
   （`#2A((1 2 3) (4 5 6))`）、ランク 0 は `#0A5`。fill pointer があればそこで切る。
-  `*print-array*`（§15.1）を偽にすると形だけの `#<array 2x3>` になる。
+  `*print-array*`（§15.3）を偽にすると形だけの `#<array 2x3>` になる。
   要素の印字には `print-object` を使うので、`Array<T>` のこの `print-object` は
   `(where (print-object T))` を持つ——スカラは全部その実装を持っているが、
   `print-object` を書いていない `defstruct` を要素にした配列だけは組み込みの
@@ -1126,15 +1137,15 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
 
 ## 11.2 `BitVector`（ビットベクタ）
 
-固定長のビット列。`Vector<i32>` に **1 語 31bit** で詰めた prelude の `defstruct`
+固定長のビット列。`Vector<int>` に **1 語 31bit** で詰めた prelude の `defstruct`
 （64bit にしない理由は [dev/completed-work.md](dev/completed-work.md) の整数切り詰めの節）。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `i32→BitVector` | 長さ `n`、全ビット 0 |
-| `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,i32)→bool` | 範囲外は panic |
-| `bit` / `sbit` | `(bit v i)` | `(BitVector,i32)→bool` | CL の綴り。`(setf (bit v i) b)` も書ける。CL の `sbit` は simple なビットベクタを要求する点だけが `bit` と違うが、この言語のビットベクタは 1 種類しかない |
-| `len` | `(len v)` | `BitVector→i32` | ビット数 |
+| `make` | `(BitVector::make n)` | `int→BitVector` | 長さ `n`、全ビット 0 |
+| `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | 範囲外は panic |
+| `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | CL の綴り。`(setf (bit v i) b)` も書ける。CL の `sbit` は simple なビットベクタを要求する点だけが `bit` と違うが、この言語のビットベクタは 1 種類しかない |
+| `len` | `(len v)` | `BitVector→int` | ビット数 |
 | `bit-and` `bit-ior` `bit-xor` `bit-eqv` `bit-nand` `bit-nor` `bit-andc1` `bit-andc2` `bit-orc1` `bit-orc2` | `(op a b)` | `(BitVector,BitVector)→BitVector` | 新しいビットベクタを返す。長さが違えば panic。CL の第 3 引数（結果の書き込み先）は無い |
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | 補集合 |
 
@@ -1149,8 +1160,9 @@ Unicode の性質）。`char-int` は `char->int` と同じ。
   (next ((self Self)) Option<Item>))
 ```
 
-`Vector<T>`/`HashTable<K,V>` はそれぞれ `vector-iter<T>`/`hashtable-iter<K,V>` を介して `Iter` を
-実装している（`(iter コレクション)` でカーソルを取得）。`Sexpr` のリストには意図的に `Iter` を
+`Vector<T>`/`HashTable<K,V>`/`Array<T>` はそれぞれ `vector-iter<T>`/`hashtable-iter<K,V>`/
+`array-iter<T>` を介して `Iter` を実装している（`(iter コレクション)` でカーソルを取得）。
+`Chan<T>` は自分自身が `Iter`（`recv` が `next` に当たる。§20.2）。`Sexpr` のリストには意図的に `Iter` を
 実装していない（要素型が一様でないため）。ユーザ定義の `deftrait`/`impl` で独自のコレクションに
 `Iter` を実装すれば、そのまま `doiter` で回せる（[syntax.md](syntax.md) 参照）。
 
@@ -1189,7 +1201,8 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `greater-equal` | `(greater-equal a b)` | `(A,A)→bool` where `Ord A` | `a >= b` |
 
 `Eq` 実装済み: 全数値型（`i8`〜`u32` / `f32` / `f64` / `int` / `ratio`）と `bool` `char`
-`string` `symbol`、および `cons-cell<A,B>`（要素が `Eq` なら再帰的に）。`Ord` 実装済み:
+`string` `symbol` `complex`、`Sexpr`（`eq`、つまり同一性。`match` の値パターンが使う——
+[syntax.md](syntax.md) の `match`）、および `cons-cell<A,B>`（要素が `Eq` なら再帰的に）。`Ord` 実装済み:
 全数値型と `char` `string`、および `cons-cell<A,B>`（辞書順、要素が `Ord` なら）。メソッド名が組み込み演算子
 （`= /= < <= > >=`）・`eq`/`lt` と重複
 しないのは、組み込みは再定義できず各実装がそれらへ委譲するため。スカラの比較演算子そのものは
@@ -1210,7 +1223,8 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
   (bit-and ((self Self) (other Self)) Self)
   (bit-or  ((self Self) (other Self)) Self)
   (bit-xor ((self Self) (other Self)) Self)
-  (bit-not ((self Self)) Self))
+  (bit-not ((self Self)) Self)
+  (shift ((self Self) (count int)) Self))                 ; 距離は常に int（§4.4 の ash と同じ）
 (deftrait Number (Add Sub Mul Div Rem Ord))               ; メソッド無し・6つの合成
 ```
 
@@ -1243,7 +1257,7 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→Symbol` | 新しいシンボル。名前は `" <prefix><n>"` で `n` は `*gensym-counter*`。先頭の空白はソースに書けないので、生成した束縛が書かれた名前と衝突しない |
-| `*gensym-counter*` | 変数 | `i32` | `gensym` が次に使う番号。CL 同様、読んでも設定してもよい |
+| `*gensym-counter*` | 変数 | `int` | `gensym` が次に使う番号。CL 同様、読んでも設定してもよい |
 | `macroexpand-1` | `(macroexpand-1 form)` | `Sexpr→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しを 1 段展開。`none` は「マクロ呼び出しではない」 |
 | `macroexpand` | `(macroexpand form)` | `Sexpr→Result<Sexpr,EvalError>` | マクロでなくなるまで繰り返す |
 | `complement` | `(complement pred)` | `(fn (A) bool)→(fn (A) bool)` | 述語の否定 |
@@ -1251,7 +1265,7 @@ Rust の `PartialEq`/`PartialOrd` に相当（名前は `Eq`/`Ord`）。ジェ�
 | `warn` | `(warn control args...)` | `(string,...)→()` | `*error-output*` へ `WARNING: ` 付きで 1 行書いて**続行**する。`Result` を返しもせずプログラムを終わらせもせずに報告する唯一の手段 |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | グローバルを `body` の間だけ差し替え、抜けるときに戻す。CL はこれを `let` と書くが、この言語の `let` は常に字句束縛なので別名（Emacs Lisp の同名マクロと同じ役目）。復元は `unwind-protect` の cleanup なので、正常終了・`throw`・`panic`・`break`/`return` のどれで抜けても走る。**スレッドごとの束縛ではない** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 印字制御変数を全部標準値に、`*read-eval*` を `true` に `dlet` する（§15.3、[syntax.md](syntax.md) §1） |
-| `exit` | `(exit code)` | `i32→!` | プロセスを終了する |
+| `exit` | `(exit code)` | `int→!` | プロセスを終了する |
 | `dump` | `(dump path)` | `string→bool` | いまの環境（型情報 + コンパイル済み本体）を1ファイルへ書き出す。`typl --image <path>` で立ち上げ直せる。`compile`/`compile-file` と同じくインタプリタ専用（コンパイル済み関数からは呼べない） |
 
 `macroexpand-1` が返すのは `Option`——CL は「展開したか」を第 2 返り値で伝えるが、多値が
@@ -1490,8 +1504,8 @@ CL では特殊変数（`let` で動的に束縛する）だが、typelisp に�
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
 | `*print-pretty*` | `bool` | `false` | 真なら `~a`/`~s`/`~w` と pretty ディレクティブが整形経路に入る |
-| `*print-right-margin*` | `i32` | `80` | 右マージン（桁）。0 以下は「マージン無し＝折らない」 |
-| `*print-miser-width*` | `i32` | `0` | miser スタイルに入る幅。0 以下は CL の `nil`（miser 無効）に相当 |
+| `*print-right-margin*` | `int` | `80` | 右マージン（桁）。0 以下は「マージン無し＝折らない」 |
+| `*print-miser-width*` | `int` | `0` | miser スタイルに入る幅。0 以下は CL の `nil`（miser 無効）に相当 |
 
 既定が `false` なのは、既存プログラムの出力を一切変えないため（CL でも初期値は処理系定義）。
 `pprint` 系と `pprint-logical-block` は `*print-pretty*` に関わらず常に整形する（CL の `pprint` の定義通り）。
@@ -1540,14 +1554,14 @@ CL では特殊変数（`let` で動的に束縛する）だが、typelisp に�
 | `pprint-list-exhausted` | `(pprint-list-exhausted)` | リストが尽きたか |
 | `pprint-exit-if-list-exhausted` | `(pprint-exit-if-list-exhausted)` | 尽きていれば囲む `loop` を `break`（マクロ） |
 
-typelisp には第一級ストリームが無いので、**開いている論理ブロックは暗黙のインタプリタ状態**（GC ヒープと
+論理ブロックはストリームを引数に取らない——**開いている論理ブロックは暗黙の状態**（GC ヒープと
 同じ扱い）。最も外側の `pprint-logical-block` が開始し、それが閉じたときに一括で整形して標準出力へ書く。
 開いている間は `print`/`println`/`(format true ...)`/`pprint` の出力もすべてそのブロックへ入るので、
 **内容は普通の `print` で書き、改行位置だけ `pprint-newline` 等で指定する**——CL のコードとほぼ同じ形になる。
 
-`pprint-exit-if-list-exhausted` は CL ではブロックからの非局所脱出だが、typelisp に汎用の脱出機構は
-無いので**囲む `loop` からの `break`** として実装している。CL 側の定型もつねに `loop` の中に書くので、
-実用上の書き味は変わらない。
+`pprint-exit-if-list-exhausted` は CL では `pprint-logical-block` からの非局所脱出だが、ここでは
+**囲む `loop` からの `break`** として実装している（`pprint-logical-block` は `block` を張らない）。
+CL 側の定型もつねに `loop` の中に書くので、実用上の書き味は変わらない。
 
 ```lisp
 (setf *print-right-margin* 24)
@@ -1577,7 +1591,7 @@ typelisp には第一級ストリームが無いので、**開いている論理
 `print-object`（CLHS 22.1.4）に対応する。
 
 ```lisp
-(deftrait print-object
+(deftrait print-object ()
   (print-object ((self Self) (escape bool)) string))
 ```
 
@@ -1649,8 +1663,8 @@ CLHS 22.1.1 の「値のどこまでを印字するか」を決める制御変�
 
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
-| `*print-level*` | `i32` | `0` | この深さ以上に入れ子になったオブジェクトを `#` で置き換える。印字対象そのものが深さ 0。0 以下は無制限 |
-| `*print-length*` | `i32` | `0` | リストの要素（`defstruct`/`defenum` 値のフィールドも）をこの個数まで印字し、残りを `...` にする。0 以下は無制限 |
+| `*print-level*` | `int` | `0` | この深さ以上に入れ子になったオブジェクトを `#` で置き換える。印字対象そのものが深さ 0。0 以下は無制限 |
+| `*print-length*` | `int` | `0` | リストの要素（`defstruct`/`defenum` 値のフィールドも）をこの個数まで印字し、残りを `...` にする。0 以下は無制限 |
 | `*print-circle*` | `bool` | `false` | 真なら、印字前に値を走査して**2回以上現れるオブジェクトにラベルを振る**。最初の出現が `#n=…`、以降が `#n#` |
 
 CL は「無制限」を `nil` で表すが typelisp に `nil` は無いので、`*print-right-margin*` 等と同じく
@@ -1677,13 +1691,12 @@ CL は「無制限」を `nil` で表すが typelisp に `nil` は無いので�
 cons セルは作成後に書き換えられないので、`'(1 2 3)` のようなリストが循環することはない）:
 
 ```lisp
-(defenum link (no-link) (to node))
-(defstruct node (val i32) (next link))
+(defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (link::no-link))))
-  (setf a::next (link::to a))       ; a が a 自身を指す
+(let ((a (node::new 1 (Option::none))))
+  (setf a::next (Option::some a))   ; a が a 自身を指す
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node 1 (to #1#)>
+  (println "~a" a))                 ; => #1=#<node 1 (some #1#)>
 ```
 
 ラベルは**1回の印字対象ごとに 1 から振り直す**（CL と同じ）。循環していなくても、同じ
@@ -1703,11 +1716,11 @@ cons セルは作成後に書き換えられないので、`'(1 2 3)` のよう�
 
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
-| `*print-base*` | `i32` | `10` | 整数（固定幅と `int`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
+| `*print-base*` | `int` | `10` | 整数（固定幅と `int`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
 | `*print-radix*` | `bool` | `false` | 真なら基数の印を付ける。`#b`/`#o`/`#x`、それ以外は `#NNr`、基数 10 は末尾の `.`。印は符号の**前**（`#x-ff`） |
 | `*print-case*` | `symbol` | `:downcase` | シンボル名の大小。`:upcase` / `:downcase` / `:capitalize`（CL と同じ綴り。この言語のキーワードは自己評価する `symbol`） |
 | `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
-| `*print-lines*` | `i32` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 以下は無制限 |
+| `*print-lines*` | `int` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 以下は無制限 |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` が `prin1` と `princ` のどちらをするか。**これを読むのはその 2 つだけ** |
 | `*print-array*` | `bool` | `true` | `Array<T>` が中身を見せるか。真なら CL の配列構文（`#(1 2 3)` / `#2A((1 2) (3 4))`）、偽なら形だけの `#<array 2x3>` |
 
@@ -1754,7 +1767,7 @@ CL はこれらを `let` で束縛するが、この言語の `let` は字句束
 | `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL の `parse-integer`。前後の空白（`trim` と同じ集合）を読み飛ばし、符号 `+`/`-` を 1 つ、続けて `radix` 進（既定 10、2〜36。10 より上の桁は大文字小文字どちらでも）の数字を読む。桁数に上限は無い（`int`）。それ以外の文字が残れば `Err`。`:junk-allowed true` なら最初の非数字で読むのをやめて残りを無視する——ただし数字が 1 つも無ければ `Err`（CL の `nil` に当たる）。CL の第 2 値（読み終わり位置）は返さない。範囲外の `radix` は panic（テキストではなく呼び出し側の誤り） |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。Rust の `str::parse::<f64>` と同じ受理範囲（`inf`/`nan`含む） |
 | `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（`typl`/REPL がソーステキストを読むのと同じ reader を使う）。不完全な括弧・文字列などは `Err`。CL の `read-from-string` に当たる——ストリームから読むのは `read-sexpr`（§18.5） |
-| `read-from-string` | `(read-from-string s [start])` | `(string,i32)→Result<cons-cell<Sexpr,i32>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |
+| `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |
 | `read-from-string-preserving-whitespace` | 同上 | 同上 | 同上だが datum を終わらせた空白を消費しない。違いは返る位置に出る |
 | `eval` | `(eval form)` | `Sexpr→Result<Sexpr,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
 
@@ -1777,8 +1790,8 @@ preserving 版は 2 を返す。
 
 リーダが読む数値表記は10進のほか、CL の **radix マクロ** `#b`（2進）・`#o`（8進）・
 `#x`（16進）・`#NNr`（基数 NN、2〜36）。`0x` 接頭辞は無い——CL に無い C 由来の構文だったので
-2026-09-01 に廃止した。`0xff` は数値ではなくシンボルとして読まれる（CL と同じ）。符号は印の**後ろ**（`#x-ff`）で、`i32` に収まらなければ
-`int` になる。`*print-radix*`（§15.3）が印字するのはこの表記なので、印字したものはそのまま
+2026-09-01 に廃止した。`0xff` は数値ではなくシンボルとして読まれる（CL と同じ）。符号は印の**後ろ**（`#x-ff`）。他の整数リテラルと同じく
+既定の型は `int` で、期待される型が固定幅ならその型になる。`*print-radix*`（§15.3）が印字するのはこの表記なので、印字したものはそのまま
 読み戻せる。CL の `*read-base*` は無い——理由は cl-parity-plan.md Stage 7b の表に記録した。
 
 ### `eval` の意味論（Common Lisp 準拠）
@@ -1896,7 +1909,7 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 | `read-line` | `(read-line s)` | `(S)→Option<string>` | 次の改行まで（改行は消費して除去）。改行で終わらない最終行も返る |
 | `read-all` | `(read-all s)` | `(S)→string` | 残り全部 |
 | `read-char-no-hang` | `(read-char-no-hang s)` | `(S)→Option<char>` | すでに手元にある1文字だけ。待たされるくらいなら `none` |
-| `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,i32)→i32` | 最大 `n` 文字を `v` へ push し、実際に読めた数を返す。`n` に満たないのは末尾のときだけ |
+| `read-sequence` | `(read-sequence s v n)` | `(S,Vector<char>,int)→int` | 最大 `n` 文字を `v` へ push し、実際に読めた数を返す。`n` に満たないのは末尾のときだけ |
 
 `listen` は `InputStream`（`CharInput` の親）にある:
 
@@ -1958,14 +1971,14 @@ panic ではない）。ファイル名は文字列でも `pathname` でもよ�
 CL 同様、`close` 後でも取り出せる。
 
 **バイト I/O** は `ByteInput`/`ByteOutput`。`InputStream`/`OutputStream` の `Item` を
-`i32` に固定したもので、`CharInput`/`CharOutput` が `char` に固定しているのと同じ形。
+`int` に固定したもので、`CharInput`/`CharOutput` が `char` に固定しているのと同じ形。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `read-byte` | `(read-byte s)` | `(S)→Option<i32>` where `ByteInput S` | 次の1バイト。ファイル終端で `none` |
-| `write-byte` | `(write-byte s b)` | `(S,i32)→()` where `ByteOutput S` | 1バイト書く。0..255 の外はエラー |
-| `read-sequence` | `(read-sequence s v n)` | `(S,Vector<i32>,i32)→i32` where `ByteInput S` | 文字版と同じものをバイトで |
-| `write-sequence` | `(write-sequence s v)` | `(S,Vector<i32>)→()` where `ByteOutput S` | 同上 |
+| `read-byte` | `(read-byte s)` | `(S)→Option<int>` where `ByteInput S` | 次の1バイト。ファイル終端で `none` |
+| `write-byte` | `(write-byte s b)` | `(S,int)→()` where `ByteOutput S` | 1バイト書く。0..255 の外はエラー |
+| `read-sequence` | `(read-sequence s v n)` | `(S,Vector<int>,int)→int` where `ByteInput S` | 文字版と同じものをバイトで |
+| `write-sequence` | `(write-sequence s v)` | `(S,Vector<int>)→()` where `ByteOutput S` | 同上 |
 
 CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出し**で決めるが、
 ここでは要素型はストリームの**型**なので、違うのは開く関数の側になる。文字ストリームから
@@ -2161,23 +2174,23 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
 
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
-| `Chan::new` | `(the Chan<i32> (Chan::new 0))` | `(i32)→Chan<T>` | 容量 `n` のチャネル。`0` はランデブー（バッファ無し） |
+| `Chan::new` | `(the Chan<int> (Chan::new 0))` | `(int)→Chan<T>` | 容量 `n` のチャネル。`0` はランデブー（バッファ無し） |
 | `send` | `(send ch v)` | `(Chan<T>,T)→()` | 空きが出るまで待って渡す |
 | `recv` | `(recv ch)` | `(Chan<T>)→Option<T>` | 値が来るまで待つ。閉じて空なら `none` |
 | `close` | `(close ch)` | `(Chan<T>)→()` | 閉じる |
-| `len` | `(len ch)` | `(Chan<T>)→i32` | いまバッファにある個数 |
-| `cap` | `(cap ch)` | `(Chan<T>)→i32` | 容量 |
+| `len` | `(len ch)` | `(Chan<T>)→int` | いまバッファにある個数 |
+| `cap` | `(cap ch)` | `(Chan<T>)→int` | 容量 |
 
 **型引数は `the` で決める**（`(the Vector<i32> (Vector::new))` と同じ慣用句）。容量は
 **必ず書く**——Go が `make(chan int)` と `make(chan int, 16)` を書き分けるのと同じ 2 つを、
 `(Chan::new 0)` と `(Chan::new 16)` で書く。
 
 ```lisp
-(defun produce ((ch Chan<i32>) (n i32)) ()
+(defun produce ((ch Chan<int>) (n int)) ()
   (dotimes (i n) (send ch (* i 2)))
   (close ch))
 
-(let ((ch (the Chan<i32> (Chan::new 2))))
+(let ((ch (the Chan<int> (Chan::new 2))))
   (task (produce ch 5))
   (doiter (v ch) (println "~a" v)))       ; Go の for v := range ch
 ```
@@ -2209,7 +2222,7 @@ CL がパス名指定子（文字列 or パス名）を受ける場所で、こ�
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
 | `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | 何も未完了でない群 |
-| `add` | `(add wg 1)` | `(WaitGroup,i32)→()` | カウンタに足す。仕事を始める前に |
+| `add` | `(add wg 1)` | `(WaitGroup,int)→()` | カウンタに足す。仕事を始める前に |
 | `done` | `(done wg)` | `(WaitGroup)→()` | 1 つ終わった。0 で全待機者が解放される |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | 0 になるまで待つ。何タスクからでも |
 

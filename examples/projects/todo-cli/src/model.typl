@@ -1,11 +1,11 @@
 ;; ToDo 1件分のデータ。
 (pub defstruct todo-item
-  (pub id i32)
+  (pub id int)
   (pub text string)
   (pub done bool))
 
 ;; 他モジュールから `(use model::todo-item)` した先で `todo-item::new` を直接
 ;; 呼ぶより、コンストラクタをこの定義モジュール自身でラップして公開する方が
 ;; 素直に動く(型エイリアス越しの `型::静的メンバ` 呼び出しは現状サポート外)。
-(pub defun make-todo ((id i32) (text string) (done bool)) todo-item
+(pub defun make-todo ((id int) (text string) (done bool)) todo-item
   (todo-item::new id text done))

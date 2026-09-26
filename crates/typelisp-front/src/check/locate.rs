@@ -207,7 +207,7 @@ pub fn hover_text(heap: &Heap, node: Value, def_locs: &DefLocs, docs: &Docs) -> 
     let ty = heap
         .cons_loc(node)
         .and_then(|l| def_locs.node_types.get(&(l.line, l.col)))
-        .map(|t| format!("{:?}", t));
+        .map(|t| t.to_string());
     match (ty, doc_for(heap, node, docs)) {
         (Some(ty), Some(doc)) => format!("{}\n\n{}", ty, doc),
         (Some(ty), None) => ty,

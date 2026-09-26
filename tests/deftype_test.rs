@@ -135,7 +135,7 @@ fn a_mismatch_reports_the_expansion_not_the_alias() {
         (f \"x\")
     ";
     let msg = check_err(src);
-    assert!(msg.contains("Int"), "unexpected message: {}", msg);
+    assert!(msg.contains("`int`"), "unexpected message: {}", msg);
     assert!(!msg.contains("meters"), "the alias should be gone by now: {}", msg);
 }
 

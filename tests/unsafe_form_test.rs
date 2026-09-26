@@ -219,11 +219,11 @@ fn its_body_is_still_type_checked() {
     // Permission is not an escape from the type system: `unsafe` grants the
     // right to write particular operations, not the right to write nonsense.
     let e = check_err("(unsafe (+ 1 \"two\"))");
-    assert!(e.contains("Str"), "unexpected error: {}", e);
+    assert!(e.contains("`string`"), "unexpected error: {}", e);
 }
 
 #[test]
 fn its_type_is_its_last_form_s_type() {
     let e = check_err("(defun f () string (unsafe 1))");
-    assert!(e.contains("Str") && e.contains("Int"), "unexpected error: {}", e);
+    assert!(e.contains("`string`") && e.contains("`int`"), "unexpected error: {}", e);
 }

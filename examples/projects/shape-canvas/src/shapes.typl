@@ -13,9 +13,9 @@
   (label ((self Self)) string)
   (paint ((self Self) (cv canvas)) ()))
 
-(defstruct rect (x i32) (y i32) (w i32) (h i32))
-(defstruct circle (cx i32) (cy i32) (r i32))
-(defstruct hline (x i32) (y i32) (len i32))
+(defstruct rect (x int) (y int) (w int) (h int))
+(defstruct circle (cx int) (cy int) (r int))
+(defstruct hline (x int) (y int) (len int))
 
 (impl Shape rect
   (label ((self Self)) string "rect")
@@ -103,7 +103,7 @@
 
 ;; ws[from..] を全部整数として読む。1つでも読めなければ bad-number で打ち切る。
 ;; typelisp に `?` は無いので、失敗の持ち上げは match で明示的に書く。
-(defun scan-nums ((ws Vector<string>) (from i32) (acc Vector<i32>)) Result<Vector<i32>, :dyn Error>
+(defun scan-nums ((ws Vector<string>) (from int) (acc Vector<int>)) Result<Vector<int>, :dyn Error>
   (if (>= from (len ws))
       (result::ok acc)
       (match (parse-int (get ws from))
@@ -112,7 +112,7 @@
 
 ;; 具象型を返しているのに戻り型は :dyn Shape ── 戻り位置は暗黙 coercion が
 ;; 効くので、(as :dyn Shape ...) と書かなくても箱詰めされる。
-(defun build-shape ((kind string) (ns Vector<i32>)) Result<:dyn Shape, :dyn Error>
+(defun build-shape ((kind string) (ns Vector<int>)) Result<:dyn Shape, :dyn Error>
   (cond
     ((and (equal kind "rect") (= (len ns) 4))
      (result::ok (rect::new (get ns 0) (get ns 1) (get ns 2) (get ns 3))))
@@ -127,11 +127,11 @@
   (let ((ws (split-words line)))
     (if (= (len ws) 0)
         (result::err (bad-command::new "(blank line)"))
-        (match (scan-nums ws 1 (the Vector<i32> (Vector::new)))
+        (match (scan-nums ws 1 (the Vector<int> (Vector::new)))
           ((ok ns) (build-shape (get ws 0) ns))
           ((err e) (result::err e))))))
 
-(defun collect-scene ((lines Vector<string>) (i i32) (scene Vector<:dyn Shape>)) Result<Vector<:dyn Shape>, :dyn Error>
+(defun collect-scene ((lines Vector<string>) (i int) (scene Vector<:dyn Shape>)) Result<Vector<:dyn Shape>, :dyn Error>
   (if (>= i (len lines))
       (result::ok scene)
       (match (parse-line (get lines i))

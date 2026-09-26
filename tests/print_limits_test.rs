@@ -26,11 +26,10 @@ fn fmt(src: &str) -> String {
 /// returns a `node` whose `next` points back at itself. Prepended to the
 /// sources that need one.
 const CYCLE_DEFS: &str = r#"
-    (defenum link (no-link) (to node))
-    (defstruct node (val int) (next link))
+    (defstruct node (val int) (next Option<node>))
     (defun cycle () node
-      (let ((a (node::new 1 (link::no-link))))
-        (setf a::next (link::to a))
+      (let ((a (node::new 1 (Option::none))))
+        (setf a::next (Option::some a))
         a))
 "#;
 
@@ -197,7 +196,7 @@ fn a_circular_structure_prints_with_labels_instead_of_recursing() {
     "#
     );
     // `#1=` marks the definition, `#1#` the reference back to it.
-    assert_eq!(fmt(&src), "#1=#<node 1 (to #1#)>");
+    assert_eq!(fmt(&src), "#1=#<node 1 (some #1#)>");
 }
 
 #[test]
@@ -259,7 +258,7 @@ fn a_cycle_reached_through_two_paths_gets_one_label() {
           (format false "~a" (list a a)))
     "#
     );
-    assert_eq!(fmt(&src), "(#1=#<node 1 (to #1#)> #1#)");
+    assert_eq!(fmt(&src), "(#1=#<node 1 (some #1#)> #1#)");
 }
 
 // ---------------------------------------------------------------------------

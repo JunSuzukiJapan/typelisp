@@ -2,7 +2,7 @@
 ;; define で書き加えていく)。
 (use ast::lexpr)
 
-(pub defun eval ((e lexpr) (env HashTable<string,i32>)) i32
+(pub defun eval ((e lexpr) (env HashTable<string,int>)) int
   (match e
     ((lit v) v)
     ((var name) (unwrap (get env name)))

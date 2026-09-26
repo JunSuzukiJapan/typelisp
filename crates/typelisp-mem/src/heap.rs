@@ -547,6 +547,15 @@ impl Heap {
     /// appended chunks up to [`GROWTH_FACTOR`] times that — call
     /// `set_growth_limit(0)` for a strictly fixed arena.
     ///
+    /// The largest initial capacity [`Self::with_capacity`] can be asked
+    /// for: the one chunk it allocates is a single `[Cell]`, and a Rust
+    /// allocation is at most `isize::MAX` bytes. A request past this is not
+    /// memory the machine lacks but an arena no address space can hold, so a
+    /// driver can refuse it by name instead of letting the allocation panic.
+    pub const fn max_capacity() -> usize {
+        isize::MAX as usize / std::mem::size_of::<Cell>()
+    }
+
     /// Growth is the default because the heap now holds the *program*, not just
     /// its data: since the checker lowers code into cons cells, an initial
     /// capacity cannot be chosen up front to fit a program whose size is only
@@ -560,6 +569,7 @@ impl Heap {
     /// numbers should always have meant. Proportional rather than absolute so a
     /// deliberately tiny heap stays deliberately tiny.
     pub fn with_capacity(capacity: usize) -> Heap {
+        assert!(capacity <= Self::max_capacity(), "cons arena of {} cells exceeds the address space", capacity);
         let (chunk, free) = Self::alloc_chunk(capacity, ptr::null_mut());
         let arena = Arena { chunks: vec![chunk], cap: capacity, growth_limit: capacity.saturating_mul(GROWTH_FACTOR), free, free_count: capacity };
 

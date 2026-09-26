@@ -41,7 +41,7 @@ fn locates_the_smallest_enclosing_call() {
     // integer-literal arguments carry no location of their own (see
     // `check::locate`'s module doc comment).
     let node = locate_node(&h, &body, FILE, 2, 22).expect("expected a located node");
-    assert_eq!(hover_text(&h, node, &def_locs, &docs), format!("{:?}", Type::Int));
+    assert_eq!(hover_text(&h, node, &def_locs, &docs), Type::Int.to_string());
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn hover_on_a_local_variable_reference_finds_the_variable_not_its_enclosing_call
     let (h, body, def_locs, docs) = program(src);
     // Column 29 is `x` itself in `(if x 1 2)`.
     let node = locate_node(&h, &body, FILE, 1, 29).expect("expected a located node");
-    assert_eq!(hover_text(&h, node, &def_locs, &docs), format!("{:?}", Type::Bool));
+    assert_eq!(hover_text(&h, node, &def_locs, &docs), Type::Bool.to_string());
 }
 
 #[test]
@@ -170,7 +170,7 @@ fn hover_on_a_let_bound_local_finds_its_own_type() {
     // to `n` too under the pre-span closest-preceding-start search, but with
     // true containment it correctly resolves to the enclosing `if` instead.)
     let node = locate_node(&h, &body, FILE, 1, 37).expect("expected a located node");
-    assert_eq!(hover_text(&h, node, &def_locs, &docs), format!("{:?}", Type::Bool));
+    assert_eq!(hover_text(&h, node, &def_locs, &docs), Type::Bool.to_string());
 }
 
 #[test]

@@ -2,12 +2,12 @@
 ;; canvas 側は一切知らない ── trait も :dyn もこのモジュールには出てこない。
 (pub defstruct canvas
   (pub cells Vector<Vector<char>>)
-  (pub w i32)
-  (pub h i32))
+  (pub w int)
+  (pub h int))
 
 ;; 型エイリアス越しの `型::静的メンバ` 呼び出しは現状サポート外なので、
 ;; コンストラクタは定義モジュール自身でラップして公開する。
-(pub defun make-canvas ((w i32) (h i32)) canvas
+(pub defun make-canvas ((w int) (h int)) canvas
   (let ((cells (the Vector<Vector<char>> (Vector::new))))
     (dotimes (y h)
       (let ((row (the Vector<char> (Vector::new))))
@@ -17,7 +17,7 @@
     (canvas::new cells w h)))
 
 ;; 範囲外の点は黙って捨てる(図形側が境界を気にしなくて済むように)。
-(pub defun plot ((cv canvas) (x i32) (y i32) (ch char)) ()
+(pub defun plot ((cv canvas) (x int) (y int) (ch char)) ()
   (when (and (>= x 0) (>= y 0) (< x (w cv)) (< y (h cv)))
     (set (get (cells cv) y) x ch)))
 

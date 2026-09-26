@@ -281,6 +281,77 @@ pub enum Type {
     CULong,
 }
 
+/// The type as a program would write it — `Vector<int>`, `Option<Sexpr>`,
+/// `:dyn Error`, `(fn (int) bool)` — for error messages and the LSP's hover.
+///
+/// `Debug` is the representation (`Named(Path(["vector"]), [Int])`), which
+/// reads as an internal detail in front of a user; the registry key
+/// ([`crate::type_key::type_key_of_type`]) is the runtime's spelling and
+/// writes a trait object as `dyn Trait`, which is not what the reader
+/// accepts. The reader lowercases every name, so the built-in generic types
+/// are given back the capitals the documentation spells them with.
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn args(f: &mut fmt::Formatter, ts: &[Type]) -> fmt::Result {
+            write!(f, "<")?;
+            for (i, t) in ts.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ",")?;
+                }
+                write!(f, "{}", t)?;
+            }
+            write!(f, ">")
+        }
+        match self {
+            Type::Named(p, ts) => {
+                let written = if p.is_simple() { builtin_spelling(p.last_segment()) } else { None };
+                match written {
+                    Some(w) => write!(f, "{}", w)?,
+                    None => write!(f, "{}", p)?,
+                }
+                if ts.is_empty() { Ok(()) } else { args(f, ts) }
+            }
+            Type::Dyn(p, pins) => {
+                write!(f, ":dyn {}", p)?;
+                if pins.is_empty() { Ok(()) } else { args(f, pins) }
+            }
+            Type::Fn(ps, rest, r) => {
+                write!(f, "(fn (")?;
+                for (i, t) in ps.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", t)?;
+                }
+                if let Some(t) = rest {
+                    if !ps.is_empty() {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "&rest {}", t)?;
+                }
+                write!(f, ") {})", r)
+            }
+            other => write!(f, "{}", crate::type_key::type_key_of_type(other)),
+        }
+    }
+}
+
+/// The documented spelling of a built-in type whose name the reader has
+/// lowercased, or `None` for every other name.
+fn builtin_spelling(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "option" => "Option",
+        "result" => "Result",
+        "sexpr" => "Sexpr",
+        "vector" => "Vector",
+        "hashtable" => "HashTable",
+        "chan" => "Chan",
+        "task" => "Task",
+        "thread" => "Thread",
+        _ => return None,
+    })
+}
+
 impl Type {
     /// The six built-in integer types (`i8`/`i16`/`i32`, `u8`/`u16`/`u32`).
     /// The one authoritative list, so callers that need to single out "an

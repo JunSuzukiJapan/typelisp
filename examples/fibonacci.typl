@@ -1,6 +1,6 @@
 ;; フィボナッチ数列。再帰ではなく反復で計算する(labels による相互再帰の例は
 ;; ミニLispインタプリタ側で扱うので、ここは単純なループに絞る)。
-(defun fib ((n i32)) i32
+(defun fib ((n int)) int
   (let ((a 0) (b 1))
     (dotimes (i n)
       (let ((next (+ a b)))

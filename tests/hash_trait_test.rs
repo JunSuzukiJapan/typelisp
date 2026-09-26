@@ -36,6 +36,19 @@ fn a_strings_hash_is_fnv_1a_over_its_code_points() {
 }
 
 #[test]
+fn a_long_strings_hash_stays_32_bit_fnv() {
+    // FNV-1a's running hash lives in the ring mod 2^32. Kept in `int`, it
+    // never wrapped: the final mask still gave the right low bits, but every
+    // character grew the intermediate by the prime's 24 bits, so a string of
+    // n characters built a bignum of about 24n bits along the way. The value
+    // is pinned against a reference FNV-1a over "x" * 2000.
+    let src = "(let ((s \"\") (i 0)) \
+                 (progn (while (< i 2000) (progn (setf s (append s \"x\")) (setf i (+ i 1)))) \
+                        (sxhash s)))";
+    assert_eq!(eval_ok(src), Value::Int(571932421));
+}
+
+#[test]
 fn equal_values_hash_equal() {
     // The contract, for each scalar the prelude implements.
     assert_eq!(eval_ok("(= (sxhash \"hi\") (sxhash \"hi\"))"), Value::Bool(true));

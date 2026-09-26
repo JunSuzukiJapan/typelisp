@@ -125,7 +125,7 @@ fn an_int_literal_takes_its_expected_type_at_any_size() {
 #[test]
 fn int_and_the_fixed_widths_do_not_mix_silently() {
     let msg = check_err("(+ (the int 1) (the i32 2))");
-    assert!(msg.contains("Int") && msg.contains("I32"), "{}", msg);
+    assert!(msg.contains("`int`") && msg.contains("`i32`"), "{}", msg);
 }
 
 /// The conversions and the bitwise catalog, compiled and interpreted: every

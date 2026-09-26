@@ -144,20 +144,19 @@ fn parse_heap_cells(args: Vec<String>) -> (usize, Vec<String>) {
 
 /// Parses the value half of `--heap-cells`; exits with a diagnostic if it is
 /// not a positive integer (zero is rejected — an empty arena exhausts on the
-/// first `cons`, so it is never a useful request).
+/// first `cons`, so it is never a useful request) or if the arena could not
+/// fit in any address space ([`typelisp::Heap::max_capacity`]).
 ///
-/// The ceiling is `i32::MAX` cells, because that is the largest arena `room`
-/// can report on: `heap-info`'s counts are `i32`, the language's widest
-/// fixed-width integer. It costs nothing real — 2^31 cells is about 51 GB of
-/// arena — and stating the limit here is the alternative to `heap-info`
-/// silently truncating a number it was asked for.
+/// There is no smaller ceiling: `heap-info` reports every count as an `int`,
+/// so any arena this process can hold is one `room` can describe. A request
+/// the machine merely lacks the memory for fails at the allocation itself.
 fn parse_heap_cells_value(v: &str) -> usize {
-    const MAX_HEAP_CELLS: usize = i32::MAX as usize;
+    let max = typelisp::Heap::max_capacity();
     match v.parse::<usize>() {
-        Ok(n) if n > MAX_HEAP_CELLS => {
+        Ok(n) if n > max => {
             eprintln!(
-                "--heap-cells: `{}` is more cells than this implementation can count ({} is the maximum)",
-                v, MAX_HEAP_CELLS
+                "--heap-cells: `{}` cells would not fit in this machine's address space ({} is the maximum)",
+                v, max
             );
             std::process::exit(1);
         }

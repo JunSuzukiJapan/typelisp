@@ -427,7 +427,7 @@ fn the_element_type_is_checked() {
     let e = check_err(
         r#"(defun main () () (let ((ch (the Chan<int> (Chan::new 1)))) (send ch "x")))"#,
     );
-    assert!(e.contains("Int") && e.contains("Str"), "got: {}", e);
+    assert!(e.contains("`int`") && e.contains("`string`"), "got: {}", e);
 }
 
 /// `Chan<int>` and `Chan<string>` are different types, even though the
@@ -438,7 +438,7 @@ fn two_instantiations_are_different_types() {
         r#"(defun take ((ch Chan<int>)) () ())
            (defun main () () (take (the Chan<string> (Chan::new 1))))"#,
     );
-    assert!(e.contains("chan"), "got: {}", e);
+    assert!(e.contains("Chan<int>") && e.contains("Chan<string>"), "got: {}", e);
 }
 
 /// The capacity is written, always. The plan wrote it `&optional`; an omitted

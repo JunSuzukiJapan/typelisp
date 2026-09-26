@@ -470,6 +470,7 @@ struct Escapes {
     loops: Vec<Type>,
     blocks: Vec<BlockFrame>,
     unsafe_depth: u32,
+    type_names: Vec<HashSet<String>>,
 }
 
 /// A generic `defun`'s retained raw source form, for re-checking at each
@@ -878,6 +879,22 @@ pub struct Checker {
     /// source that is not inside the `unsafe` that happened to trigger the
     /// instantiation. That is the same reason it clears `loop_stack`.
     unsafe_depth: Cell<u32>,
+    /// The type variables each enclosing definition binds, innermost last —
+    /// what lets [`Self::parse_type_here_at`] tell a type variable from a
+    /// type name that resolves to nothing.
+    ///
+    /// Both are a bare name `canon` cannot resolve, so without this an
+    /// unknown name was accepted as if it were a type variable and surfaced
+    /// much later, as a mismatch between two spellings of the same name.
+    /// Each definition pushes a frame of the variables its declaration part
+    /// introduces: the `<...>` of a `defun`/`defstruct`/`defenum`/`deftype`
+    /// name, the unresolved names of a `defmethod` receiver or an `impl`
+    /// target (plus `impl<T>`'s own), a `deftrait`'s `Self` and associated
+    /// types — and nothing for the forms that bind none. While the stack is
+    /// non-empty every name must be a type or one of the frames' variables.
+    /// [`Self::enter_specialization`] clears it for the same reason it clears
+    /// `loop_stack`: a specialization re-checks with every variable bound.
+    type_names: RefCell<Vec<HashSet<String>>>,
     /// The type each `catch`/`throw` symbol carries, learned from the first
     /// use of that symbol and enforced on every later one.
     ///
@@ -1053,6 +1070,7 @@ impl Checker {
             loop_stack: RefCell::new(Vec::new()),
             block_stack: RefCell::new(Vec::new()),
             unsafe_depth: Cell::new(0),
+            type_names: RefCell::new(Vec::new()),
             throw_tags: RefCell::new(std::collections::BTreeMap::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
@@ -1810,7 +1828,7 @@ impl Checker {
                 let path = match ty {
                     Type::Named(p, _) => p.clone(),
                     other => prim_type_path(other).ok_or_else(|| {
-                        Error::TypeError(format!("(the {:?} pattern): not a named type", other))
+                        Error::TypeError(format!("(the `{}` pattern): not a named type", other))
                     })?,
                 };
                 let mut f = Items::new(heap);
@@ -2473,6 +2491,13 @@ impl Checker {
         result
     }
 
+    /// [`Self::check_defsignature_form`] with its type variables (a `defsignature` binds none) in scope for
+    /// [`Self::reject_unknown_type_name`].
+    fn check_defsignature(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool) -> Result<TopLevelForm, Error> {
+        let vars = Vec::new();
+        self.with_type_names(vars, |c| c.check_defsignature_form(heap, parts, parts_locs, public))
+    }
+
     /// `(defsignature name (T...) Ret)` — a forward declaration.
     ///
     /// Top-level `defun`s are checked and executed one form at a time, in
@@ -2511,7 +2536,7 @@ impl Checker {
     ///   what the code registering it needs, so a type is a genuinely harder
     ///   case than a function; `defmethod` follows from that, since a method
     ///   registers into its owner's `TypeDef`.
-    fn check_defsignature(
+    fn check_defsignature_form(
         &mut self,
         heap: &mut Heap,
         parts: &[Value],
@@ -3359,7 +3384,7 @@ impl Checker {
         }
         let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
             Error::TypeError(format!(
-                "&rest: element type {:?} has no Sexpr encoding (use a number, bool/char/string/Sexpr)",
+                "&rest: element type `{}` has no Sexpr encoding (use a number, bool/char/string/Sexpr)",
                 elem_ty
             ))
         })?;
@@ -3910,8 +3935,116 @@ impl Checker {
             self.record_type_span(span);
         }
         self.reject_trait_in_type_position(&ty)?;
+        self.reject_unknown_type_name(&ty)?;
         Self::reject_raw_word_nested(&ty)?;
         Ok(ty)
+    }
+
+    /// Run `f` with the type variables `vars` in scope for
+    /// [`Self::reject_unknown_type_name`] — see [`Self::type_names`]. The
+    /// frame is popped whether `f` succeeds or not.
+    fn with_type_names<R>(&mut self, vars: Vec<String>, f: impl FnOnce(&mut Self) -> R) -> R {
+        self.type_names.borrow_mut().push(vars.into_iter().collect());
+        let r = f(self);
+        self.type_names.borrow_mut().pop();
+        r
+    }
+
+    /// The type variables a definition's header binds: the `<...>` of its
+    /// name, which is either the first part itself (`f<T>`, `box<T>`) or the
+    /// head of a `defstruct` option list (`(box<T> (:copier ...))`). A name
+    /// that does not parse binds nothing here; the definition's own name
+    /// parsing reports it.
+    fn header_type_vars(heap: &Heap, name: Option<&Value>) -> Vec<String> {
+        let sym = match name {
+            Some(Value::Symbol(id)) => Some(*id),
+            Some(v @ Value::Cons(_)) => match heap.list_to_vec(*v).ok().and_then(|xs| xs.first().copied()) {
+                Some(Value::Symbol(id)) => Some(id),
+                _ => None,
+            },
+            _ => None,
+        };
+        sym.and_then(|id| parse_generic_name_header(heap.symbol_name(id)).ok()).map(|(_, ps)| ps).unwrap_or_default()
+    }
+
+    /// The type variables a written type introduces by naming them: every
+    /// bare name in it that resolves to no type. This is how a `defmethod`
+    /// receiver or an `impl` target declares its variables — they have no
+    /// `<...>` header of their own. A type that does not parse declares
+    /// nothing; parsing it for real reports the error.
+    fn written_type_vars(&self, heap: &Heap, v: Value) -> Vec<String> {
+        fn walk(c: &Checker, t: &Type, out: &mut Vec<String>) {
+            match t {
+                Type::Named(p, args) => {
+                    if args.is_empty() && p.is_simple() && c.reg.type_def(p).is_none() {
+                        out.push(p.last_segment().to_string());
+                    }
+                    args.iter().for_each(|a| walk(c, a, out));
+                }
+                Type::Dyn(_, pins) => pins.iter().for_each(|a| walk(c, a, out)),
+                Type::Fn(ps, rest, r) => {
+                    ps.iter().for_each(|a| walk(c, a, out));
+                    if let Some(t) = rest {
+                        walk(c, t, out);
+                    }
+                    walk(c, r, out);
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        if let Ok(t) = crate::types::parse_type(heap, v) {
+            walk(self, &self.canon(&t), &mut out);
+        }
+        out
+    }
+
+    /// A written type that names something that is neither a type visible
+    /// here nor a type variable of an enclosing definition's declaration
+    /// part (see [`Self::type_names`]). Every top-level definition that
+    /// writes types pushes a frame, so outside a definition — a bare
+    /// top-level expression — nothing is checked here and the name simply
+    /// fails later as the unresolved type it is.
+    fn reject_unknown_type_name(&self, ty: &Type) -> Result<(), Error> {
+        if self.type_names.borrow().is_empty() {
+            return Ok(());
+        }
+        match self.first_unknown_type_name(ty) {
+            None => Ok(()),
+            Some(p) => Err(Error::TypeError(format!(
+                "unknown type `{}`: no type of that name is visible here. A type has to be defined \
+                 before the first form that names it — types have no forward declaration \
+                 (`defsignature` declares functions only). If `{}` is meant to be a type variable, \
+                 declare it: in the name of a `defun`/`defstruct`/`defenum`/`deftype` (`name<{}>`), \
+                 in a `defmethod` receiver or an `impl` target (`box<{}>`), or as a `deftrait`'s \
+                 `(type {})`.",
+                p, p, p, p, p
+            ))),
+        }
+    }
+
+    fn first_unknown_type_name(&self, ty: &Type) -> Option<Path> {
+        match ty {
+            Type::Named(p, args) => {
+                let known = self.reg.type_def(p).is_some()
+                    || (p.is_simple() && {
+                        let name = p.last_segment();
+                        self.type_var_bindings.contains_key(name)
+                            || self.type_names.borrow().iter().any(|frame| frame.contains(name))
+                    });
+                if !known {
+                    return Some(p.clone());
+                }
+                args.iter().find_map(|a| self.first_unknown_type_name(a))
+            }
+            Type::Dyn(_, pins) => pins.iter().find_map(|a| self.first_unknown_type_name(a)),
+            Type::Fn(ps, rest, r) => ps
+                .iter()
+                .find_map(|a| self.first_unknown_type_name(a))
+                .or_else(|| rest.as_deref().and_then(|t| self.first_unknown_type_name(t)))
+                .or_else(|| self.first_unknown_type_name(r)),
+            _ => None,
+        }
     }
 
     /// Rule C, half one: a raw word may be a whole type, never part of one.
@@ -4119,10 +4252,18 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevelForm, Error> {
-        if parts.len() >= 2 && params_declare_opt_key(heap, parts[1])? {
-            return self.check_defun_opt_key(heap, interp, parts, parts_locs, public, def_loc);
-        }
-        self.check_defun_fixed(heap, interp, parts, parts_locs, public, def_loc)
+        // The name first: a malformed header (the old `(name T...)` list form)
+        // has its own error, which an unknown-type report on `T` would hide.
+        let vars = match parts.first() {
+            Some(&name) => self.parse_defun_name(heap, name)?.1,
+            None => Vec::new(),
+        };
+        self.with_type_names(vars, |c| {
+            if parts.len() >= 2 && params_declare_opt_key(heap, parts[1])? {
+                return c.check_defun_opt_key(heap, interp, parts, parts_locs, public, def_loc);
+            }
+            c.check_defun_fixed(heap, interp, parts, parts_locs, public, def_loc)
+        })
     }
 
     /// The ordinary (no `&optional`/`&key`) `defun` path — every existing
@@ -4317,7 +4458,7 @@ impl Checker {
             if default_raw.is_some() && type_has_param(decl_ty, &type_param_set) {
                 return Err(Error::TypeError(format!(
                     "defun {}: &optional parameter `{}` may not default when its type mentions the \
-                     function's own type parameter — declare it with no default (`Option<{:?}>`) instead",
+                     function's own type parameter — declare it with no default (`Option<{}>`) instead",
                     name, pname, decl_ty
                 )));
             }
@@ -4329,7 +4470,7 @@ impl Checker {
             if default_raw.is_some() && type_has_param(decl_ty, &type_param_set) {
                 return Err(Error::TypeError(format!(
                     "defun {}: &key parameter `{}` may not default when its type mentions the \
-                     function's own type parameter — declare it with no default (`Option<{:?}>`) instead",
+                     function's own type parameter — declare it with no default (`Option<{}>`) instead",
                     name, pname, decl_ty
                 )));
             }
@@ -4656,8 +4797,13 @@ impl Checker {
         // says nothing about the template's own body, which was written
         // somewhere else entirely.
         let saved_unsafe = self.unsafe_depth.replace(0);
+        let saved_type_names = std::mem::take(&mut *self.type_names.borrow_mut());
         let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
-        (saved_ns, Escapes { loops: saved_loops, blocks: saved_blocks, unsafe_depth: saved_unsafe }, saved_bindings)
+        (
+            saved_ns,
+            Escapes { loops: saved_loops, blocks: saved_blocks, unsafe_depth: saved_unsafe, type_names: saved_type_names },
+            saved_bindings,
+        )
     }
 
     fn exit_specialization(
@@ -4670,6 +4816,7 @@ impl Checker {
         *self.loop_stack.borrow_mut() = saved.loops;
         *self.block_stack.borrow_mut() = saved.blocks;
         self.unsafe_depth.set(saved.unsafe_depth);
+        *self.type_names.borrow_mut() = saved.type_names;
         self.ns = saved_ns;
     }
 
@@ -5742,7 +5889,7 @@ impl Checker {
         let parent_ty = self.parse_type_here_at(heap, parent_form, loc)?;
         let Type::Named(parent_path, args) = &parent_ty else {
             return Err(Error::TypeError(format!(
-                "defstruct: (:include {:?}) — a struct is what can be included",
+                "defstruct: (:include `{}`) — a struct is what can be included",
                 parent_ty
             )));
         };
@@ -5924,6 +6071,29 @@ impl Checker {
 
     // ---- deftrait / impl ---------------------------------------------------
 
+    /// [`Self::check_deftrait_form`] with the trait's type variables in scope:
+    /// `Self`, and every associated type it declares with `(type Name)`.
+    fn check_deftrait(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+    ) -> Result<TopLevelForm, Error> {
+        let mut vars = vec!["self".to_string()];
+        for item in parts.iter().skip(2) {
+            let Ok(elems) = heap.list_to_vec(*item) else { continue };
+            if let [Value::Symbol(head), Value::Symbol(name)] = elems.as_slice() {
+                if heap.symbol_name(*head) == "type" {
+                    vars.push(heap.symbol_name(*name).to_string());
+                }
+            }
+        }
+        self.with_type_names(vars, |c| c.check_deftrait_form(heap, interp, parts, parts_locs, public, def_loc))
+    }
+
     /// `(deftrait Name (Super...) (type AssocName)... (method-name ((self Self) params...) Ret)...)`:
     /// declares a trait as a set of method signature *templates* (no
     /// bodies) — `Self` and any declared associated type name are usable as
@@ -5943,7 +6113,7 @@ impl Checker {
     /// the supertrait has associated types to pin: exactly
     /// `Checker::parse_where_clause`'s bound shape minus the type-variable
     /// slot, since a supertrait's variable is always `Self`.
-    fn check_deftrait(
+    fn check_deftrait_form(
         &mut self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
@@ -6155,7 +6325,15 @@ impl Checker {
     /// *own* default bodies, which are checked in the trait's namespace
     /// (`Checker::check_defmethod_in`'s `body_ns`) and so stood outside the
     /// implementing module by construction.
+    /// [`Self::check_impl_form`] with the type variables its target writes
+    /// (`box<T>` in `(impl print-object box<T> ...)`) in scope — see
+    /// [`Self::check_defmethod_in`].
     fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
+        let vars = parts.get(1).map(|t| self.written_type_vars(heap, *t)).unwrap_or_default();
+        self.with_type_names(vars, |c| c.check_impl_form(heap, interp, parts, parts_locs))
+    }
+
+    fn check_impl_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError("impl: (impl TraitName TargetType (type AssocName Type)... (method ...)...)".into()));
         }
@@ -6872,6 +7050,23 @@ impl Checker {
         }
     }
 
+    /// [`Self::check_impl_generic_form`] with `impl<T>`'s own parameters, and
+    /// any the target writes, in scope.
+    fn check_impl_generic(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        head_params: Vec<String>,
+    ) -> Result<TopLevelForm, Error> {
+        let mut vars = head_params.clone();
+        if let Some(t) = parts.get(1) {
+            vars.extend(self.written_type_vars(heap, *t));
+        }
+        self.with_type_names(vars, |c| c.check_impl_generic_form(heap, interp, parts, parts_locs, head_params))
+    }
+
     /// `(impl<T> Trait Target ...)` — an `impl` whose head declares type
     /// parameters.
     ///
@@ -6881,7 +7076,7 @@ impl Checker {
     /// there is a single owning `AdtDef` and the ordinary path already
     /// handles it — the parameters are then only documentation, since
     /// `check_defmethod` infers them from the receiver.
-    fn check_impl_generic(
+    fn check_impl_generic_form(
         &mut self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
@@ -8093,6 +8288,34 @@ impl Checker {
         self.check_defmethod_in(heap, interp, parts, parts_locs, public, def_loc, None)
     }
 
+    /// [`Self::check_defmethod_in_form`] with the method's type variables in
+    /// scope for [`Self::reject_unknown_type_name`]. A method has no `<...>`
+    /// of its own: its type variables are the unresolved names its *receiver*
+    /// writes (`(self Vector<T>)`, or `Vector<T>` for a static method) — the
+    /// declaration part. A name that turns up anywhere else and is neither a
+    /// type nor one of those is unknown.
+    #[allow(clippy::too_many_arguments)]
+    fn check_defmethod_in(
+        &mut self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        parts: &[Value],
+        parts_locs: &[Option<Loc>],
+        public: bool,
+        def_loc: Option<Loc>,
+        body_ns: Option<Vec<String>>,
+    ) -> Result<TopLevelForm, Error> {
+        let recv = parts.get(1).and_then(|ps| heap.list_to_vec(*ps).ok()).and_then(|ps| ps.first().copied());
+        let recv_ty = match recv {
+            Some(v @ Value::Cons(_)) => heap.list_to_vec(v).ok().and_then(|xs| xs.get(1).copied()),
+            other => other,
+        };
+        let vars = recv_ty.map(|t| self.written_type_vars(heap, t)).unwrap_or_default();
+        self.with_type_names(vars, |c| {
+            c.check_defmethod_in_form(heap, interp, parts, parts_locs, public, def_loc, body_ns)
+        })
+    }
+
     /// [`Self::check_defmethod`], with the *body*'s namespace optionally
     /// overridden — how `check_impl` replays a trait's default method body.
     ///
@@ -8103,7 +8326,7 @@ impl Checker {
     /// by contrast, was written inside the `deftrait` and must resolve the
     /// helpers visible *there* — including that module's private ones.
     #[allow(clippy::too_many_arguments)]
-    fn check_defmethod_in(
+    fn check_defmethod_in_form(
         &mut self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
@@ -8463,6 +8686,13 @@ impl Checker {
         })
     }
 
+    /// [`Self::check_defstruct_form`] with its type variables (the `<...>` of the struct's name) in scope for
+    /// [`Self::reject_unknown_type_name`].
+    fn check_defstruct(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
+        let vars = Self::header_type_vars(heap, parts.first());
+        self.with_type_names(vars, |c| c.check_defstruct_form(heap, interp, parts, parts_locs, public, def_loc))
+    }
+
     /// `(defstruct Name (field Type)...)` — or, generically,
     /// `(defstruct Name<T1,T2...> (field Type)...)`, the name position
     /// parsed exactly like `(defun name<T1,T2...> ...)`'s
@@ -8491,7 +8721,7 @@ impl Checker {
     /// `Module` arm just runs `body` in order and never reads `path`, so this
     /// carries none of an actual `(module ...)`'s namespace-nesting semantics.
     #[allow(clippy::too_many_arguments)]
-    fn check_defstruct(
+    fn check_defstruct_form(
         &mut self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
@@ -9047,6 +9277,19 @@ impl Checker {
         out.finish_list()
     }
 
+    /// [`Self::check_deftype_form`] with its type variables (the `<...>` of the alias's name) in scope for
+    /// [`Self::reject_unknown_type_name`]. The alias's own name is let through
+    /// too, so that an alias that mentions itself is reported as exactly that.
+    fn check_deftype(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
+        let mut vars = Self::header_type_vars(heap, parts.first());
+        if let Some(Value::Symbol(id)) = parts.first() {
+            if let Ok((name, _)) = parse_generic_name_header(heap.symbol_name(*id)) {
+                vars.push(name.to_string());
+            }
+        }
+        self.with_type_names(vars, |c| c.check_deftype_form(heap, parts, parts_locs, public, def_loc))
+    }
+
     /// `(deftype Name Type)` — or, generically, `(deftype Name<T,U> Type)`,
     /// the name position parsed exactly like a `defun`'s
     /// ([`Self::parse_defun_name`]) — CL's `deftype`, narrowed to what a
@@ -9077,7 +9320,7 @@ impl Checker {
     /// Registers into [`Namespace::type_aliases`], which shares the
     /// type/trait name space ([`Self::check_type_trait_clash`]). Emits an
     /// empty `module` form: like `deftrait`, there is nothing to run.
-    fn check_deftype(
+    fn check_deftype_form(
         &mut self,
         heap: &mut Heap,
         parts: &[Value],
@@ -9149,6 +9392,13 @@ impl Checker {
         forms::module_form(heap, &fq, &[])
     }
 
+    /// [`Self::check_defenum_form`] with its type variables (the `<...>` of the enum's name) in scope for
+    /// [`Self::reject_unknown_type_name`].
+    fn check_defenum(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
+        let vars = Self::header_type_vars(heap, parts.first());
+        self.with_type_names(vars, |c| c.check_defenum_form(heap, parts, parts_locs, public, def_loc))
+    }
+
     /// `(defenum Name (Variant Type...)...)` — or generically
     /// `(defenum Name<T1,T2...> ...)` — a user-defined sum type: a
     /// multi-variant `AdtKind::Sum` `AdtDef`, structurally identical to the
@@ -9164,7 +9414,7 @@ impl Checker {
     /// accessors/setters are synthesized: an enum value is immutable and its
     /// fields are positional, so there's nothing to run at exec time either —
     /// hence a bare `TopLevel::Defenum` rather than a `Module` bundle.
-    fn check_defenum(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
+    fn check_defenum_form(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("defenum: (defenum Name (Variant Type...)...)".into()));
         }
@@ -9336,6 +9586,18 @@ impl Checker {
             return Ok(());
         }
         let ns = self.cur_ns();
+        // A path that names this namespace's own definition of `bare` —
+        // `(use tree)` after `(defenum tree ...)`, the way to bring a type's
+        // constructors into bare scope — collides with nothing: the alias and
+        // the definition are the same thing, and the constructors it brings in
+        // are what the form is for.
+        let own = target.len() == 1 && target[0] == bare
+            || (target.len() == self.ns.len() + 1
+                && target[..self.ns.len()] == self.ns[..]
+                && target[self.ns.len()] == bare);
+        if own {
+            return Ok(());
+        }
         // The same path imported again binds what is already bound.
         if ns.aliases.get(bare).map(|a| a.as_slice()) == Some(target)
             || ns.mod_aliases.get(bare).map(|a| a.as_slice()) == Some(target)
@@ -9986,7 +10248,7 @@ impl Checker {
                     }
                 }
                 return Err(Error::TypeError(format!(
-                    "type mismatch: expected {:?}, found {:?}",
+                    "type mismatch: expected `{}`, found `{}`",
                     e, typed.ty
                 )));
             }
@@ -10579,7 +10841,7 @@ impl Checker {
     ) -> Result<Checked, Error> {
         let (params, rest, ret) = match &callee.ty {
             Type::Fn(p, r, ret) => (p.clone(), r.clone(), (**ret).clone()),
-            other => return Err(Error::TypeError(format!("value is not callable: {:?}", other))),
+            other => return Err(Error::TypeError(format!("value is not callable: `{}`", other))),
         };
         let fixed = params.len();
         match &rest {
@@ -10647,7 +10909,7 @@ impl Checker {
                     "apply: function has no `&rest` parameter to apply a list to".into(),
                 ))
             }
-            other => return Err(Error::TypeError(format!("apply: value is not callable: {:?}", other))),
+            other => return Err(Error::TypeError(format!("apply: value is not callable: `{}`", other))),
         };
         let (fixed_args, list_arg) = args[1..].split_at(args.len() - 2);
         if fixed_args.len() != params.len() {
@@ -11535,7 +11797,7 @@ impl Checker {
                 // through. `Never` is a value that never arrives.
                 if value.ty != elem && value.ty != Type::Never {
                     return Err(Error::TypeError(format!(
-                        "select: this channel carries {:?}, and the value sent is {:?}",
+                        "select: this channel carries `{}`, and the value sent is `{}`",
                         elem, value.ty
                     )));
                 }
@@ -11608,7 +11870,7 @@ impl Checker {
         match ty {
             Type::Named(p, args) if *p == Path::root("chan") && args.len() == 1 => Ok(args[0].clone()),
             other => Err(Error::TypeError(format!(
-                "select: `{}` needs a Chan<T>, and this is {:?}",
+                "select: `{}` needs a Chan<T>, and this is `{}`",
                 what, other
             ))),
         }
@@ -11698,7 +11960,7 @@ impl Checker {
 
         let (panic_method, try_method) = as_conversion(&src.ty, &target).ok_or_else(|| {
             Error::TypeError(format!(
-                "{}: no conversion from {:?} to {:?} (as/try-as cover only the numeric/char catalog: int/f64/bignum/ratio/char)",
+                "{}: no conversion from `{}` to `{}` (as/try-as cover only the numeric/char catalog: int/f64/bignum/ratio/char)",
                 form_name, src.ty, target
             ))
         })?;
@@ -12639,7 +12901,7 @@ impl Checker {
         };
         let recv = self.check_at(heap, interp, env, *recv_form, None, None)?;
         let Type::Named(type_fq, _) = &recv.ty else {
-            return Err(Error::TypeError(format!("setf: {:?} has no settable accessor `{}`", recv.ty, accessor)));
+            return Err(Error::TypeError(format!("setf: `{}` has no settable accessor `{}`", recv.ty, accessor)));
         };
         let type_fq = type_fq.clone();
         let mut candidates = vec![format!("set-{}", accessor)];
@@ -13322,6 +13584,13 @@ impl Checker {
         self.try_instance_method(heap, interp, env, method, &swapped_args, &swapped_locs)
     }
 
+    /// [`Self::check_defvar_form`] with its type variables (a global binds none) in scope for
+    /// [`Self::reject_unknown_type_name`].
+    fn check_defvar(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], mutable: bool, public: bool, def_loc: Option<Loc>, reassign: bool) -> Result<TopLevelForm, Error> {
+        let vars = Vec::new();
+        self.with_type_names(vars, |c| c.check_defvar_form(heap, interp, parts, mutable, public, def_loc, reassign))
+    }
+
     /// `(defvar (name Type) value)` / `(defconstant (name Type) value)`.
     /// Registers a global in the current namespace. The declared type is
     /// *mandatory* — a global's type is part of the program's public
@@ -13339,7 +13608,7 @@ impl Checker {
     /// re-loading a file keeps whatever the session has since put there, and
     /// `defparameter` always assigns. See [`Self::defvar_form`] for where the
     /// distinction is carried.
-    fn check_defvar(
+    fn check_defvar_form(
         &mut self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
@@ -13616,7 +13885,7 @@ impl Checker {
             Some(_) if matches!(ty, Type::Never) => Ok(()),
             Some(known) if known == ty => Ok(()),
             Some(known) => Err(Error::TypeError(format!(
-                "{}: `{}` carries {:?}, but this use carries {:?}",
+                "{}: `{}` carries `{}`, but this use carries `{}`",
                 who, tag, known, ty
             ))),
             None => {
@@ -14172,7 +14441,7 @@ impl Checker {
         {
             return Err(Error::TypeError(format!(
                 "format: the destination must be `true` (stdout), `false` (build the string only), \
-                 or a stream implementing `CharOutput` — found `{:?}`",
+                 or a stream implementing `CharOutput` — found `{}`",
                 dest_ty
             )));
         }
@@ -14908,7 +15177,7 @@ impl Checker {
                         if !satisfied {
                             return Err(Error::TypeError(format!(
                                 "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
-                                 which has no `where` bound declaring it implements {:?} — the enclosing function's \
+                                 which has no `where` bound declaring it implements `{}` — the enclosing function's \
                                  signature needs a matching `where` clause on `{}`",
                                 name, tparam, var_name, tb.trait_path, var_name
                             )));
@@ -14924,7 +15193,7 @@ impl Checker {
             let Some(type_fq) = type_fq else { continue };
             let def = self.reg.type_def(&type_fq).ok_or_else(|| {
                 Error::TypeError(format!(
-                    "{}: type {:?} does not implement a trait required by `where` clause on type parameter `{}`",
+                    "{}: type `{}` does not implement a trait required by `where` clause on type parameter `{}`",
                     name, concrete, tparam
                 ))
             })?;
@@ -14934,7 +15203,7 @@ impl Checker {
                 // materialization).
                 if !self.type_implements(concrete, tb, 0) {
                     return Err(Error::TypeError(format!(
-                        "{}: type {:?} does not implement trait {:?} required by `where` clause on type parameter `{}`",
+                        "{}: type `{}` does not implement trait `{}` required by `where` clause on type parameter `{}`",
                         name, concrete, tb.trait_path, tparam
                     )));
                 }
@@ -14960,8 +15229,12 @@ impl Checker {
                         Some(actual) if self.type_is_open(&actual) => {}
                         actual => {
                             return Err(Error::TypeError(format!(
-                                "{}: type {:?}'s associated type `{}` is {:?}, but `where` clause requires {:?}",
-                                name, concrete, assoc_name, actual, declared_ty
+                                "{}: type `{}`'s associated type `{}` is `{}`, but `where` clause requires `{}`",
+                                name,
+                                concrete,
+                                assoc_name,
+                                actual.map(|t| t.to_string()).unwrap_or_else(|| "undefined".to_string()),
+                                declared_ty
                             )));
                         }
                     }
@@ -15427,7 +15700,7 @@ impl Checker {
                 // No variants to count: every arm was a value test, and a
                 // value test can only ever be a partial answer.
                 None => format!(
-                    "non-exhaustive match on {:?}: a type with no variants can only be matched \
+                    "non-exhaustive match on `{}`: a type with no variants can only be matched \
                      by value, so a `_` arm is required",
                     scrut.ty
                 ),
@@ -15556,7 +15829,7 @@ impl Checker {
             }
             Value::Str(_) | Value::Boxed(_) => self.value_pattern(heap, interp, env, expected, v, loc),
             Value::Cons(_) => self.check_ctor_pattern(heap, interp, env, expected, v),
-            other => Err(Error::TypeError(format!("pattern does not match {:?}: {:?}", expected, other))),
+            other => Err(Error::TypeError(format!("pattern does not match `{}`: `{}`", expected, core::print(heap, other)))),
         }
     }
 
@@ -15622,7 +15895,7 @@ impl Checker {
         // not what went wrong: the type is one nothing can compare.
         if !self.implements_eq(env, expected) {
             return Err(Error::TypeError(format!(
-                "pattern: `{}` cannot be compared by value — its type {:?} does not implement `Eq`",
+                "pattern: `{}` cannot be compared by value — its type `{}` does not implement `Eq`",
                 core::print(heap, expr),
                 expected
             )));
@@ -15638,7 +15911,7 @@ impl Checker {
         let checked = self.check_at(heap, interp, &guard_env, form, Some(&Type::Bool), loc)?;
         if checked.ty != Type::Bool && checked.ty != Type::Never {
             return Err(Error::TypeError(format!(
-                "pattern: comparing with `equals` produced {:?}, not a bool",
+                "pattern: comparing with `equals` produced `{}`, not a bool",
                 checked.ty
             )));
         }
@@ -15903,7 +16176,7 @@ impl Checker {
         let ty = self.parse_type_here_at(heap, parts[1], parts_locs[1].1.as_ref())?;
         if !self.is_heap_repr(&ty) {
             return Err(Error::TypeError(format!(
-                "pattern: `{:?}` has no Sexpr representation, cannot downcast with `the`",
+                "pattern: `{}` has no Sexpr representation, cannot downcast with `the`",
                 ty
             )));
         }
@@ -16027,7 +16300,7 @@ impl Checker {
             if let Some(e) = expected {
                 if *e != Type::Unit {
                     return Err(Error::TypeError(format!(
-                        "empty body has type Unit, expected {:?}",
+                        "empty body has type Unit, expected `{}`",
                         e
                     )));
                 }
@@ -16064,7 +16337,7 @@ impl Checker {
         match ty {
             Type::Named(n, args) if self.reg.type_def(n).is_some() => Ok((n.clone(), args.clone())),
             other => Err(Error::TypeError(format!(
-                "expected a data type, found {:?}",
+                "expected a data type, found `{}`",
                 other
             ))),
         }
@@ -16233,7 +16506,7 @@ fn non_never(t: &Type) -> Option<&Type> {
 /// constrains the result.
 fn join_types(a: &Type, b: &Type) -> Result<Type, Error> {
     merge_holes(a, b).ok_or_else(|| {
-        Error::TypeError(format!("branches have incompatible types: {:?} vs {:?}", a, b))
+        Error::TypeError(format!("branches have incompatible types: `{}` vs `{}`", a, b))
     })
 }
 
@@ -16705,7 +16978,7 @@ fn unify(
             return match subst.get(&key) {
                 Some(bound) if bound == actual => Ok(()),
                 Some(bound) => Err(Error::TypeError(format!(
-                    "conflicting types for `{}`: {:?} vs {:?}",
+                    "conflicting types for `{}`: `{}` vs `{}`",
                     key, bound, actual
                 ))),
                 None => {
@@ -16740,7 +17013,7 @@ fn unify(
                 (None, None) => {}
                 _ => {
                     return Err(Error::TypeError(format!(
-                        "type mismatch: expected {:?}, found {:?}",
+                        "type mismatch: expected `{}`, found `{}`",
                         tmpl, actual
                     )))
                 }
@@ -16749,7 +17022,7 @@ fn unify(
         }
         _ if tmpl == actual => Ok(()),
         _ => Err(Error::TypeError(format!(
-            "type mismatch: expected {:?}, found {:?}",
+            "type mismatch: expected `{}`, found `{}`",
             tmpl, actual
         ))),
     }
@@ -16816,6 +17089,10 @@ fn path_to_segs(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
 /// Docstrings, parameter *names* and the body play no part: a signature is
 /// the types, `pub`, and the `&rest` tail.
 fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(), Error> {
+    let show_rest = |r: &Option<Type>| match r {
+        Some(t) => format!("`&rest {}`", t),
+        None => "none".to_string(),
+    };
     let mismatch = |what: &str, decl: String, def: String| {
         Err(Error::TypeError(format!(
             "`{}` does not match its `defsignature`: {} declared as {}, defined as {}",
@@ -16831,14 +17108,14 @@ fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(),
     }
     for (i, (d, f)) in declared.params.iter().zip(&defined.params).enumerate() {
         if d != f {
-            return mismatch(&format!("parameter {}", i + 1), format!("{:?}", d), format!("{:?}", f));
+            return mismatch(&format!("parameter {}", i + 1), format!("`{}`", d), format!("`{}`", f));
         }
     }
     if declared.ret != defined.ret {
-        return mismatch("return type", format!("{:?}", declared.ret), format!("{:?}", defined.ret));
+        return mismatch("return type", format!("`{}`", declared.ret), format!("`{}`", defined.ret));
     }
     if declared.rest != defined.rest {
-        return mismatch("`&rest`", format!("{:?}", declared.rest), format!("{:?}", defined.rest));
+        return mismatch("`&rest`", show_rest(&declared.rest), show_rest(&defined.rest));
     }
     if !defined.type_params.is_empty() {
         return mismatch("type parameters", "none".to_string(), format!("{:?}", defined.type_params));

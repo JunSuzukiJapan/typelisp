@@ -1,7 +1,7 @@
 ;; エラトステネスの篩: n 未満の素数をすべて求める。Vector<bool> を「消し込み済みか」
 ;; のフラグ表として使う。
-(defun sieve ((n i32)) Vector<i32>
-  (let ((is-composite (the Vector<bool> (Vector::new))) (result (the Vector<i32> (Vector::new))))
+(defun sieve ((n int)) Vector<int>
+  (let ((is-composite (the Vector<bool> (Vector::new))) (result (the Vector<int> (Vector::new))))
     (dotimes (i n)
       (push is-composite false))
     (dotimes (i n)

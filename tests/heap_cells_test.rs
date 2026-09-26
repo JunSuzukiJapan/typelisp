@@ -70,19 +70,18 @@ fn run_typl_stderr(flags: &[&str], input: &str) -> (i32, String) {
     (out.status.code().expect("typl did not exit normally"), String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
-/// A capacity above `i32::MAX` is refused, and the message says what the
-/// ceiling is rather than just that the number is wrong.
-///
-/// The ceiling is not arbitrary: `room` answers with a `heap-info` whose cell
-/// counts are `int` (`gc-count` alone is a `bignum`, being the one field an
-/// arena size does not bound). A capacity the report could not *name* would
-/// have to be truncated there, and a truncated count is a lie told at the far
-/// end from where it could still be explained. Refusing at the flag says it
-/// once, while the number is still the one the user typed.
+/// A capacity no address space could hold is refused by name, before the
+/// allocation would panic on it. (The old `i32::MAX` ceiling is gone: it
+/// existed because `heap-info` counted cells in `i32`, and it now counts in
+/// `int`.)
 #[test]
-fn a_capacity_beyond_what_room_can_report_is_rejected_with_its_ceiling() {
-    let (code, err) = run_typl_stderr(&["--heap-cells", "2147483648"], "");
+fn a_capacity_beyond_the_address_space_is_rejected_with_its_ceiling() {
+    let (code, err) = run_typl_stderr(&["--heap-cells", "10000000000000000000"], "");
     assert_eq!(code, 1, "stderr was: {}", err);
-    assert!(err.contains("more cells than this implementation can count"), "stderr was: {}", err);
-    assert!(err.contains("2147483647"), "the message names the ceiling; stderr was: {}", err);
+    assert!(err.contains("would not fit in this machine's address space"), "stderr was: {}", err);
+    assert!(
+        err.contains(&typelisp::Heap::max_capacity().to_string()),
+        "the message names the ceiling; stderr was: {}",
+        err
+    );
 }

@@ -5,7 +5,7 @@
 
 (pub defstruct cursor
   (toks Vector<string>)
-  (pos i32))
+  (pos int))
 
 (defun peek ((c cursor)) string
   (if (>= (pos c) (len (toks c))) ")" (get (toks c) (pos c))))

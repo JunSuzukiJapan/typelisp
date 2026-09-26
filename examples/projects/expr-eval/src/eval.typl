@@ -1,7 +1,7 @@
 ;; 構文木 (expr) の評価。
 (use parser::expr)
 
-(pub defun eval ((e expr)) i32
+(pub defun eval ((e expr)) int
   (match e
     ((num v) v)
     ((add a b) (+ (eval a) (eval b)))

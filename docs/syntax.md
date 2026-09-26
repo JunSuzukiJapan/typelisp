@@ -61,7 +61,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 型はソース上では通常のシンボルまたはリストとして書く。
 
-- **プリミティブ型**: `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string`。
+- **プリミティブ型**: `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string` `symbol`。
   `int` が整数（CL の integer——63bit 即値と多倍長のあいだを自動で行き来する、
   [functions.md](functions.md) §2.4）、6 つの固定幅は幅と符号を名乗る型
   （64bit 幅の整数型は無い——[functions.md](functions.md) §1 参照）
@@ -100,11 +100,12 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   位置にもそのまま渡せる（アップキャスト）。継承関係の無いトレイトへは渡せない — 制限は §5.2。
   `:dyn` を型位置以外に書くとエラー。詳細は [dev/language-design.md](dev/language-design.md) §5.2。
 - 組み込みジェネリック型: `Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、
-  `Sexpr`、`HashTable<K,V>`、`Vector<T>`。`Option<T>` は Rust と同じくニッチ表現——`T` の値が
-  空リストの語になり得ないかぎり箱を作らず、`some v` は `v` そのもの、`none` は空リストの即値
+  `Sexpr`、`HashTable<K,V>`、`Vector<T>`、並行機構の `Task<T>` / `Thread<T>` / `Chan<T>`（§12）。
+  `Option<T>` は Rust と同じくニッチ表現——`T` の値が空リストの語になり得ないかぎり箱を作らず、`some v` は `v` そのもの、`none` は空リストの即値
   （入れ子の `Option`、`()`、生の C 語だけが箱に入る）。詳細は functions.md §7.0。組み込みの具象エラー型は `ParseIntError` /
-  `ParseFloatError` / `ReadError` / `EvalError` / `FileError`（`Error` は型ではなく prelude のトレイト
-  ——`:dyn Error` として使う）。詳細は functions.md を参照。
+  `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`、prelude の構造体として
+  `SimpleError` / `WrappedError`（`Error` は型ではなく prelude のトレイト——`:dyn Error` として使う）。
+  詳細は functions.md を参照。
 - **型とトレイトは同じ名前空間**（Rust と同じ）: 同一モジュール内で型（`defstruct`/`defenum`）と
   トレイト（`deftrait`）に同じ名前は付けられない。
 
@@ -121,8 +122,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - ジェネリック関数は名前に山括弧で型パラメータを書く: `(defun name<T1,T2...> (params) Ret body...)`
   （型位置の `Vector<T>` と同じ山括弧構文。旧来の `(name T1 T2...)` リスト形式は廃止）。
 - `defun`/`lambda`/`defmethod` は末尾に `&rest (name Type)` を書くと可変長引数を受け取れる:
-  `(defun name ((a Type1) &rest (xs Type2)) Ret body...)`（本体内では `xs` は常に `Sexpr` の
-  リストとして束縛される。呼び出し側の各実引数は `Type2` として個別に型検査される）。
+  `(defun name ((a Type1) &rest (xs Type2)) Ret body...)`（本体内では `xs` は常に `Option<Sexpr>`
+  ——S 式のリスト——として束縛される。呼び出し側の各実引数は `Type2` として個別に型検査されてから
+  `Sexpr` へ包まれる）。
   `defmacro` にも独自の `&rest` があるが、常に無型の `Sexpr` である点が異なる（`defun`/`lambda`
   は要素型を明示する）。`fn` 型でも `(fn (T1... &rest Te) Ret)` の形で可変長関数の型を書ける。
 - **`&optional` / `&key`**（`defun` と `defmethod`。`lambda`/`labels` は後述の理由で対象外、
@@ -436,6 +438,14 @@ GC は `ptr` を追跡しない。ヒープの外を指しているので、そ�
   - ゲッター `(field-name instance)`、糖衣構文 `instance::field-name`
   - セッター `(set-field-name instance value)`、糖衣構文 `(setf instance::field-name value)`
 - 構造体自体を `pub` にするには `(pub defstruct ...)` のように先頭に `pub` を付ける。
+- **型は名指すより前に定義する**。フィールドの型に自分自身は書ける（`(next Option<node>)`）が、
+  後で定義する型は書けない——型には `defsignature` に当たる前方宣言が無い。まだ定義していない
+  名前は、`defun` の引数型でも `the` でも同じく `unknown type` のエラーになる。したがって互いを
+  参照し合う 2 つの型は書けない。
+- **型変数は宣言部に書いたものだけ**。`defun`/`defstruct`/`defenum`/`deftype` は名前の `<T>`、
+  `defmethod` は受け手の型（`(self box<T>)`、静的メソッドなら `box<T>`）、`impl` は対象の型と
+  `impl<T>`、`deftrait` は `Self` と `(type Item)` の関連型。それ以外の場所——引数・戻り値・本体の
+  `the`/`lambda`——に初めて現れる名前は型変数にはならず、`unknown type` になる。
 - **docstring**: 名前の直後、フィールド列の前に文字列リテラルを置くと docstring になる
   （`(defstruct Name "doc" (field Type)...)` — CL の `defstruct` と同じ位置）。フィールドは常に
   `(name Type ...)` の形で裸の文字列にはなり得ないため曖昧性は無い。`(documentation Name)` で
@@ -715,15 +725,19 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 
 ```lisp
 (pub defun ...)
+(pub defsignature ...)
+(pub defffi ...)
 (pub defvar ...)
+(pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
 (pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftype ...)
 ```
 
-`pub` が付けられるのは上記7種類のみ（`module`/`use`/`deftrait`/`impl` には付けられない）。
+`pub` が付けられるのは上記11種類のみ（`module`/`use`/`deftrait`/`impl` には付けられない）。
 定義形を括弧で包む `(pub (defun ...))` 形式ではなく、`pub` の直後に定義キーワードを続ける。
 1つの `pub` が公開指定できる定義は1つだけ（複数の定義の一括指定はできない）。
 
@@ -933,7 +947,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* 3 (* r r)))     ; 型名先頭のフィールド分解
+    ((circle r) (* (* r r) 3))     ; 型名先頭のフィールド分解
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1032,9 +1046,9 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 一意なので裸でもキーワード（`:=`）でも読む。
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<i32> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<i32> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1081,7 +1095,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 ```
 
 `:finally (return 0)` を省くと**型エラー**になる。`block` の規則がそのまま効くだけで
-（§5.0）、脱出の型 `i32` と、尽きたときにループが残す `()` が合わない。
+（§5.0）、脱出の型 `int` と、尽きたときにループが残す `()` が合わない。
 
 **ループの値**は、集約節があればその蓄積（複数あれば最初のもの）、`:always`/`:never` なら
 `true`、`:thereis` なら `none`、どれも無ければ `()`。`:finally` の最後が `(return e)` なら
@@ -1190,11 +1204,12 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
 見ておらず、関数を何段跨いでも同じタグの `catch` に届く。
 
 ```lisp
-(defun find-first ((xs Sexpr)) i32
+(defun find-first ((xs Option<Sexpr>)) int
   (catch 'found
-    (dolist (x xs)
-      (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
-    -1))                            ; 見つからなければ通常どおり末尾の値
+    (progn
+      (dolist (x xs)
+        (match x ((int n) (if (> n 10) (throw 'found n) ())) (_ ())))
+      -1)))                         ; 見つからなければ通常どおり末尾の値
 ```
 
 - **タグはリテラルシンボルのみ**（`'done`）。CL と違い評価されない。
@@ -1234,13 +1249,16 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 ここでの可視性は他の参照と同じ扱いで、「在るがここからは見えない」は「解決しない」と同じく
 チェック時に落ちる。
 
-呼び先も推移的にコンパイルされるので、**コンパイルできない組み込みを（間接的にでも）呼ぶ関数は
-コンパイルできない**。プロセスが落ちるのではなく、その旨を述べるエラーで断られる:
+呼び先も推移的にコンパイルされるので、**コンパイルできないものを（間接的にでも）呼ぶ関数は
+コンパイルできない**。プロセスが落ちるのではなく、その旨を述べるエラーで断られる。
+コンパイルできない組み込みは下記のとおり 2026-09-03 に無くなったので、いまこの形で断られるのは
+インタプリタ専用の操作（後述）を呼ぶ関数だけ:
 
 ```lisp
-(defun f ((s string)) string (upcase s))
+(defun g () int 1)
+(defun f () () (progn (trace g) ()))
 (compile f)
-; => compile: "f" calls "string::upcase", a builtin method with no compiled implementation
+; => trace: `(trace ...)` is an interpreter-only action and cannot itself be compiled
 ```
 
 2026-08-14 に prelude 側の穴を、2026-08-18 にシステム組み込み・等価述語・印字・リーダの

@@ -2,10 +2,10 @@
 ;; グライダーを数世代分コンソールに描画する。
 (defstruct board
   (cells Vector<Vector<bool>>)
-  (w i32)
-  (h i32))
+  (w int)
+  (h int))
 
-(defun make-board ((w i32) (h i32)) board
+(defun make-board ((w int) (h int)) board
   (let ((cells (the Vector<Vector<bool>> (Vector::new))))
     (dotimes (y h)
       (let ((row (the Vector<bool> (Vector::new))))
@@ -14,15 +14,15 @@
         (push cells row)))
     (board::new cells w h)))
 
-(defun cell-at ((b board) (x i32) (y i32)) bool
+(defun cell-at ((b board) (x int) (y int)) bool
   (if (or (< x 0) (< y 0) (>= x (w b)) (>= y (h b)))
       false
       (get (get (cells b) y) x)))
 
-(defun set-cell ((b board) (x i32) (y i32) (v bool)) ()
+(defun set-cell ((b board) (x int) (y int) (v bool)) ()
   (set (get (cells b) y) x v))
 
-(defun live-neighbors ((b board) (x i32) (y i32)) i32
+(defun live-neighbors ((b board) (x int) (y int)) int
   (let ((count 0))
     (dotimes (dy 3)
       (dotimes (dx 3)

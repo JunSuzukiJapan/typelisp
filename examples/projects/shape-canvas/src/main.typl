@@ -19,7 +19,7 @@
 
 ;; 文脈を足さず具象エラーを広げるだけなら prelude の as-dyn-error 一発で済む
 ;; (文脈を足す例は shapes.typl の bad-number ── ParseIntError を自前の型で包む)。
-(defun canvas-width ((s string)) Result<i32, :dyn Error>
+(defun canvas-width ((s string)) Result<int, :dyn Error>
   (as-dyn-error (parse-int s)))
 
 (defun lines-of ((a string) (b string) (c string)) Vector<string>

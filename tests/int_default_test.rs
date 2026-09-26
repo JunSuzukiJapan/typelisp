@@ -31,7 +31,7 @@ fn an_unannotated_literal_is_an_int() {
     // error, so this is the literal's type being asked directly.
     assert_eq!(eval_ok("(the int 42)"), Value::Int(42));
     let msg = check_err("(the i32 (let ((x 42)) x))");
-    assert!(msg.contains("Int") && msg.contains("I32"), "{}", msg);
+    assert!(msg.contains("`int`") && msg.contains("`i32`"), "{}", msg);
     // Past `i32`, past `i64`: still one type, and the reader made the datum
     // in the shape its size demands.
     assert_eq!(eval_string("(format false \"~a\" 3000000000)"), "3000000000");

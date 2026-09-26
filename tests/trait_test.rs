@@ -608,7 +608,7 @@ fn an_unused_default_body_is_type_checked_at_the_deftrait() {
            (n ((self Self)) int)
            (twice ((self Self)) int \"two\"))",
     );
-    assert!(m.contains("expected Int") || m.contains("expected Str"), "{}", m);
+    assert!(m.contains("expected `int`") || m.contains("expected `string`"), "{}", m);
 }
 
 #[test]
@@ -674,7 +674,7 @@ fn a_default_body_rejected_at_the_declaration_leaves_no_half_trait_behind() {
          (defstruct s (n int))
          (impl T s (n ((self Self)) int self::n))",
     );
-    assert!(m.contains("expected Int") || m.contains("expected Str"), "{}", m);
+    assert!(m.contains("expected `int`") || m.contains("expected `string`"), "{}", m);
 }
 
 // ---- impl conformance ----------------------------------------------------

@@ -1,18 +1,18 @@
 ;; 迷路の最短経路探索 (幅優先探索)。盤面は文字列の Vector（'#' が壁、'.' が通路）、
-;; HashTable<i32,i32> をキュー代わりの Vector と組み合わせた距離テーブルとして使う。
+;; HashTable<int,int> をキュー代わりの Vector と組み合わせた距離テーブルとして使う。
 ;; 座標 (x, y) は y*width+x の1次元インデックス(id)にエンコードする。
 
-(defun idx ((x i32) (y i32) (w i32)) i32 (+ (* y w) x))
+(defun idx ((x int) (y int) (w int)) int (+ (* y w) x))
 
-(defun in-bounds ((x i32) (y i32) (w i32) (h i32)) bool
+(defun in-bounds ((x int) (y int) (w int) (h int)) bool
   (and (>= x 0) (>= y 0) (< x w) (< y h)))
 
-(defun wall? ((rows Vector<string>) (x i32) (y i32)) bool
+(defun wall? ((rows Vector<string>) (x int) (y int)) bool
   (equal (ref (get rows y) x) #\#))
 
-(defun bfs ((rows Vector<string>) (w i32) (h i32) (sx i32) (sy i32) (gx i32) (gy i32)) i32
-  (let ((dist (the HashTable<i32,i32> (HashTable::new)))
-        (queue (the Vector<i32> (Vector::new)))
+(defun bfs ((rows Vector<string>) (w int) (h int) (sx int) (sy int) (gx int) (gy int)) int
+  (let ((dist (the HashTable<int,int> (HashTable::new)))
+        (queue (the Vector<int> (Vector::new)))
         (head 0))
     (set dist (idx sx sy w) 0)
     (push queue (idx sx sy w))

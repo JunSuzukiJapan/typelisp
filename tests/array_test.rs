@@ -267,7 +267,7 @@ fn the_element_type_is_the_arrays_type_argument() {
 fn an_element_of_the_wrong_type_is_a_type_error() {
     let src = "(let ((a (Array::make (dims1 2) 0))) (set a (dims1 0) \"x\"))";
     let msg = check_err(&with_dims(src));
-    assert!(msg.contains("Str") || msg.contains("string"), "{}", msg);
+    assert!(msg.contains("`string`"), "{}", msg);
 }
 
 // ---- `aref` sugar -----------------------------------------------------------

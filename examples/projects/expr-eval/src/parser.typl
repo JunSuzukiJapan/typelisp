@@ -3,7 +3,7 @@
 (use lexer::token)
 
 (pub defenum expr
-  (num i32)
+  (num int)
   (add expr expr)
   (sub expr expr)
   (mul expr expr)
@@ -14,7 +14,7 @@
 ;; カーソル: token列上の現在位置。フィールドは defstruct のセッターで進める。
 (pub defstruct cursor
   (toks Vector<token>)
-  (pos i32))
+  (pos int))
 
 (defun at-end ((c cursor)) bool
   (>= (pos c) (len (toks c))))

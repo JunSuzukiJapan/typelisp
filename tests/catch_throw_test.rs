@@ -151,7 +151,7 @@ fn one_tag_cannot_carry_two_types() {
         "#);
     // The second use is checked *against* what the first established, so the
     // mismatch is reported at the offending value rather than after the fact.
-    assert!(err.contains("expected Int, found Bool"), "unexpected error: {}", err);
+    assert!(err.contains("expected `int`, found `bool`"), "unexpected error: {}", err);
 }
 
 /// `unwind-protect` on the ordinary path: the cleanup runs after the protected

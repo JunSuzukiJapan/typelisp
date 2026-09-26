@@ -354,7 +354,7 @@ fn sleep_takes_seconds_as_a_float() {
     let r = Reader::new();
     let vs = r.read_all(&mut h, "(sleep 1)").expect("read failed");
     let err = chk.check_form(&mut h, &interp, vs[0]).expect_err("an integer literal is not an f64");
-    assert!(err.to_string().contains("F64"), "{}", err);
+    assert!(err.to_string().contains("`f64`"), "{}", err);
 }
 
 // ----------------------------------------------------------------------

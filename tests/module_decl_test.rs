@@ -200,6 +200,21 @@ fn an_import_shadowed_by_a_local_definition_is_reported() {
 }
 
 #[test]
+fn using_a_type_defined_here_for_its_constructors_is_not_a_collision() {
+    // `(use tree)` right after `(defenum tree ...)` is how a type's variants
+    // become bare names. The alias names the very definition it would
+    // "lose" to, so there is nothing to report — it used to say the import
+    // did nothing, while removing it broke every bare `(node ...)`.
+    let files = vec![(
+        "main.typl",
+        "(defenum tree (leaf) (node int))\n(use tree)\n(match (node 5) ((node n) n) ((leaf) 0))\n",
+    )];
+    let (v, warnings) = run("use_own_type", &files, "main.typl").expect("load failed");
+    assert_eq!(v, Some(Value::Int(5)));
+    assert!(warnings.is_empty(), "unexpected warnings: {:?}", warnings);
+}
+
+#[test]
 fn the_order_of_the_two_does_not_change_who_wins() {
     let mut files = TWO_HELPERS.to_vec();
     files.push((
