@@ -89,6 +89,7 @@ typl main.typl        # => 25
 ```lisp
 (use geometry)              ; モジュールを取り込む。geometry::dist2 と書いて使う
 (use geometry::dist2)       ; 関数を取り込む。dist2 と裸の名前で使える
+(use geometry::point)       ; 型を取り込む。point::new、point::origin、型注釈の point と書ける
 (use a::f b::g)             ; 複数をまとめて書ける
 ```
 

@@ -3419,13 +3419,35 @@ impl Checker {
         Ok(Checked::new(forms::rooted(heap, acc.form), acc.ty))
     }
 
-    /// Resolve a bare (unqualified) type name by walking the ancestor chain
-    /// (see [`Self::ns_ancestors`]) — shared by [`Self::resolve_type_name`]'s
-    /// simple-path case and [`Self::resolve_type_path`]'s no-module-qualifier
-    /// case (`Type::member` written with a bare `Type`, e.g. `Option::some`,
-    /// which reaches here via an empty `mods` prefix and needs exactly the
-    /// same lookup a type annotation would use).
+    /// Resolve a bare (unqualified) type name: a `use` alias first, then the
+    /// ancestor chain (see [`Self::ns_ancestors`]). Every place a bare type
+    /// name is written goes through here — a type annotation
+    /// ([`Self::resolve_type_name`]), the `Type` of `Type::member`
+    /// ([`Self::resolve_type_path`] with no module qualifier), a pattern head,
+    /// `compile`/`documentation` of `Type::method` — so a type brought in by
+    /// `(use m::point)` is the same `point` in all of them.
+    ///
+    /// An alias that names something other than a type (`(use m::f)`) does
+    /// not answer the question, and the chain is searched as for any name.
     fn resolve_bare_type(&self, name: &str) -> Option<Path> {
+        if let Some(target) = self.lookup_alias(name) {
+            // A one-segment target is a root-level name; resolving it through
+            // `resolve_type_path` would come back here and consult the same
+            // alias again.
+            let found = match target.as_slice() {
+                [only] => self.resolve_unaliased_bare_type(only),
+                _ => self.resolve_type_path(&target),
+            };
+            if found.is_some() {
+                return found;
+            }
+        }
+        self.resolve_unaliased_bare_type(name)
+    }
+
+    /// [`Self::resolve_bare_type`] without the `use` alias: the ancestor
+    /// chain alone.
+    fn resolve_unaliased_bare_type(&self, name: &str) -> Option<Path> {
         for prefix in self.ns_ancestors() {
             if let Some(m) = self.reg.root.module(prefix) {
                 if let Some(def) = m.types.get(name) {
@@ -3551,16 +3573,7 @@ impl Checker {
     /// unchanged.
     fn resolve_type_name(&self, path: &Path) -> Path {
         if path.is_simple() {
-            let name = path.last_segment();
-            if let Some(target) = self.lookup_alias(name) {
-                if let Some(tp) = self.resolve_type_path(&target) {
-                    return tp;
-                }
-            }
-            if let Some(tp) = self.resolve_bare_type(name) {
-                return tp;
-            }
-            return path.clone();
+            return self.resolve_bare_type(path.last_segment()).unwrap_or_else(|| path.clone());
         }
         self.resolve_type_path(path.segments()).unwrap_or_else(|| path.clone())
     }

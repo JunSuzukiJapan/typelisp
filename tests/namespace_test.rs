@@ -181,6 +181,20 @@ fn use_hashtable_makes_its_static_new_callable_bare() {
     assert_eq!(program(src).expect("check failed").0, "expr");
 }
 
+/// A type brought in by `use` is one name wherever a type name is written:
+/// the annotation, the `Type::` of a constructor or static function, and a
+/// pattern head all resolve `p` to `m::p`.
+#[test]
+fn a_used_type_is_the_same_name_in_type_member_position() {
+    let def = "(module m (pub defstruct p (pub x i32)) (pub defmethod origin (p) p (p::new 0))) (use m::p)";
+    let m_p = Type::Named(Path::of(&["m", "p"]), vec![]);
+    assert_eq!(ty_program(&format!("{} (p::new 1)", def)), m_p);
+    assert_eq!(ty_program(&format!("{} (p::origin)", def)), m_p);
+    assert_eq!(ty_program(&format!("{} (defun f ((v p)) p v) (f (p::new 2))", def)), m_p);
+    let pattern = format!("{} (match (the Sexpr (p::new 3)) ((p x) x) (_ 0))", def);
+    assert_eq!(ty_program(&pattern), Type::I32);
+}
+
 #[test]
 fn use_is_scoped_to_its_own_namespace() {
     // `use`d inside `m`, `some` stays bare-unresolved at the root.
