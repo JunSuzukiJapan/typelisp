@@ -393,6 +393,34 @@ pub struct BlanketImpl {
 /// child modules, and `use` aliases. `Foo::Bar` is resolved by descending into
 /// the child module `Foo` and looking up `Bar` there. (Types are *not*
 /// namespaces — they own associated items in [`AdtDef::assoc`].)
+/// A `def-c-struct`: a struct laid out the way C lays it out, which exists
+/// only behind a typed pointer (`Type::PtrTo`) into memory an `(unsafe ...)`
+/// allocated. The layout is computed once, when the definition is checked,
+/// by C's rules on an LP64 target.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CStructDef {
+    /// The struct's fully-qualified name, its identity (`Type::CStruct`).
+    pub name: Path,
+    pub fields: Vec<CField>,
+    /// `sizeof`, trailing padding included.
+    pub size: u64,
+    /// `_Alignof`.
+    pub align: u64,
+    /// See [`FnSig::public`].
+    pub public: bool,
+}
+
+/// One field of a [`CStructDef`].
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CField {
+    pub name: String,
+    /// A C scalar type, `ptr`, a `Type::PtrTo`, or a `Type::CStruct` held
+    /// by value.
+    pub ty: Type,
+    /// `offsetof`.
+    pub offset: u64,
+}
+
 /// A `deftype` alias: `(deftype name<T...> Body)`. `body` is stored already
 /// canonicalized and already alias-expanded, which is what makes expansion at
 /// a use site a single non-recursive substitution and makes an alias cycle
@@ -455,6 +483,11 @@ pub struct Namespace {
     /// through different machinery (`check_construct` vs `check_assoc_call`)
     /// — see `Checker::check_use`/`Checker::check_list`.
     pub static_uses: HashMap<String, (Path, String)>,
+    /// `def-c-struct`s defined directly here, keyed by unqualified name. In
+    /// the type/trait name space ([`Self::types`] and [`Self::type_aliases`]
+    /// refuse the same name), but a table of its own: a C struct is not a
+    /// type any value has — only a typed pointer's pointee.
+    pub c_structs: HashMap<String, CStructDef>,
 }
 
 impl Namespace {

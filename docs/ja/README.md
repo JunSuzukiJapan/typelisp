@@ -8,7 +8,7 @@ typelisp は静的型付きの Lisp です。インストールとビルドの�
 - [モジュールとファイル構成](guide/modules.md)：`use`、`pub`、ファイルとモジュールの対応
 - [コンパイル](guide/compile.md)：JIT、AOT で実行ファイルを作る方法、ダンプ
 - [ファイル I/O、ストリーム、ネットワーク](guide/io.md)：ファイル、パス名、TCP / TLS / UDP、名前解決
-- [C FFI](guide/ffi.md)：`defffi` で C の関数を呼ぶ
+- [C FFI](guide/ffi.md)：`defffi` で C の関数を呼ぶ（コールバック、`def-c-struct` による C の構造体を含む）
 - [エディタ連携](guide/editors.md)：`typl-lsp` と VS Code / Emacs の設定
 - [Common Lisp から来た人へ](guide/from-common-lisp.md)：CL との違いと書き換え方
 

@@ -22,7 +22,9 @@ use super::forms;
 use super::repr::Repr;
 use crate::dump::{CheckerDelta, RegistrySignature};
 
+mod c_struct;
 mod ffi_callback;
+use c_struct::type_mentions_typed_ptr;
 use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, TypeAlias, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
@@ -69,7 +71,7 @@ const CL_COMPARISON_OPERATORS: &[&str] = &[
 /// past there still cannot become a value outside `unsafe`.
 fn type_mentions_raw_word(ty: &Type) -> bool {
     match ty {
-        Type::Ptr | Type::CLong | Type::CULong => true,
+        Type::Ptr | Type::CLong | Type::CULong | Type::PtrTo(_) => true,
         Type::Named(_, args) | Type::Dyn(_, args) => args.iter().any(type_mentions_raw_word),
         Type::Fn(ps, rest, ret) => {
             ps.iter().any(type_mentions_raw_word)
@@ -434,6 +436,11 @@ impl Definable for TypeAlias {
         false
     }
 }
+impl Definable for crate::check::registry::CStructDef {
+    fn builtin(&self) -> bool {
+        false
+    }
+}
 impl Definable for VarInfo {
     fn builtin(&self) -> bool {
         self.builtin
@@ -478,6 +485,7 @@ struct Escapes {
     loops: Vec<Type>,
     blocks: Vec<BlockFrame>,
     unsafe_depth: u32,
+    c_arena: Option<bool>,
     type_names: Vec<HashSet<String>>,
 }
 
@@ -796,6 +804,11 @@ fn tag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
     core::tagged(heap, "tag-int", &[e])
 }
 
+/// Where a `def-c-struct` may be written, for the errors that find one
+/// elsewhere.
+const DEF_C_STRUCT_PLACE: &str = "def-c-struct is written at top level, inside `(unsafe ...)`: \
+     (unsafe (def-c-struct name (field type)...))";
+
 /// How deep a blanket impl's own bounds may be chased before the search is
 /// declared non-terminating (`impl<T> A T (where (B T))` together with
 /// `impl<T> B T (where (A T))` would recur forever). Small on purpose:
@@ -1070,6 +1083,14 @@ pub struct Checker {
     labels_scopes: RefCell<Vec<ffi_callback::LabelsScope>>,
     /// Numbers lifted definitions' names.
     callback_seq: Cell<u64>,
+    /// The `(unsafe ...)` that owns `c-alloc`s here: `None` outside one (or
+    /// at the start of a function body), `Some(allocated)` inside — see
+    /// `checker::c_struct`.
+    c_arena: Cell<Option<bool>>,
+    /// Nodes of this top-level form whose value is a typed pointer, which a
+    /// `task`/`thread` must not be handed. Compared by identity only; every
+    /// node stays rooted until the form is done, so none is reused meanwhile.
+    typed_ptr_nodes: RefCell<Vec<Value>>,
     /// Holes ([`Self::infer_probe`]) made and still standing in the tree
     /// checked so far. Snapshotted around each probe and restored when the
     /// probed subtree is thrown away, so it counts holes in *retained* output
@@ -1115,6 +1136,8 @@ impl Checker {
             lifted: RefCell::new(Vec::new()),
             labels_scopes: RefCell::new(Vec::new()),
             callback_seq: Cell::new(0),
+            c_arena: Cell::new(None),
+            typed_ptr_nodes: RefCell::new(Vec::new()),
         }
     }
 
@@ -2392,6 +2415,14 @@ impl Checker {
                 kind, name
             )));
         }
+        // A `def-c-struct` is in the same name space: `(ptr name)` would
+        // otherwise mean one thing and `name` another.
+        if kind != "C struct" && self.cur_ns().c_structs.contains_key(name) {
+            return Err(Error::TypeError(format!(
+                "cannot define {} `{}`: a `def-c-struct` of that name already exists here",
+                kind, name
+            )));
+        }
         Ok(())
     }
 
@@ -2435,6 +2466,8 @@ impl Checker {
         // Belongs to *this* form: a definition must not report the previous
         // form's expression type — see [`Self::expr_type`].
         self.expr_ty = None;
+        self.typed_ptr_nodes.borrow_mut().clear();
+        self.c_arena.set(None);
         let primary = self.check_form_dispatch(heap, interp, v, loc.clone());
         // Rooted before the drain below, not after: `drain_specializations`
         // re-checks a whole template per instantiation, so it allocates heavily,
@@ -2935,6 +2968,15 @@ impl Checker {
                 if head == "impl" && !head_params.is_empty() {
                     return self.check_impl_generic(heap, interp, &elems[1..], parts_locs, head_params);
                 }
+                // `(unsafe (def-c-struct ...)...)` declares C structs; any
+                // other top-level `unsafe` is an expression.
+                match heap.symbol_name(*id) {
+                    "unsafe" if Self::unsafe_declares_c_structs(heap, &elems[1..])? => {
+                        return self.check_c_struct_block(heap, &elems[1..], parts_locs, def_loc);
+                    }
+                    "def-c-struct" => return Err(Error::TypeError(DEF_C_STRUCT_PLACE.into())),
+                    _ => {}
+                }
                 match id.well_known() {
                     wk::PUB => return self.check_pub(heap, interp, &elems[1..], parts_locs, def_loc),
                     wk::DEFUN => return self.check_defun(heap, interp, &elems[1..], parts_locs, false, def_loc),
@@ -3030,6 +3072,9 @@ impl Checker {
                 wk::DEFENUM => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFTYPE => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
                 _ => {}
+            }
+            if heap.symbol_name(id) == "def-c-struct" {
+                return Err(Error::TypeError(DEF_C_STRUCT_PLACE.into()));
             }
         }
         Err(Error::TypeError(
@@ -3277,11 +3322,11 @@ impl Checker {
                 | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "task" | "thread" | "select"
                 | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
-                | "pprint-logical-block"
+                | "pprint-logical-block" | "c-alloc" | "c-ref" | "c-deref"
                 // top-level forms (`check_form_dispatch`)
                 | "pub" | "defun" | "defsignature" | "defffi" | "defvar" | "defparameter" | "defconstant" | "defmacro" | "module"
                 | "defmethod" | "defstruct" | "defenum" | "deftrait" | "deftype" | "impl" | "use" | "load"
-                | "import" | "shadowing-import" | "in-module"
+                | "import" | "shadowing-import" | "in-module" | "def-c-struct"
         )
     }
 
@@ -3927,6 +3972,10 @@ impl Checker {
                 Err(e) => return Some(Err(e)),
             }
         };
+        // A pointer to a `def-c-struct`: the field is read out of C memory.
+        if matches!(recv.ty, Type::PtrTo(_)) {
+            return self.c_field_get(heap, interp, recv, method);
+        }
         let Type::Named(type_fq, _) = &recv.ty else { return None };
         let af = self.reg.type_def(type_fq)?.assoc.get(method)?;
         if !af.instance || !self.assoc_visible(type_fq, af) {
@@ -3997,6 +4046,7 @@ impl Checker {
                 rest.as_ref().map(|t| Box::new(self.canon(t))),
                 Box::new(self.canon(r)),
             ),
+            Type::PtrTo(inner) => Type::PtrTo(Box::new(self.canon_pointee(inner))),
             other => other.clone(),
         }
     }
@@ -4034,6 +4084,7 @@ impl Checker {
         self.reject_trait_in_type_position(&ty)?;
         self.reject_unknown_type_name(&ty)?;
         Self::reject_raw_word_nested(&ty)?;
+        self.reject_bad_pointee(&ty)?;
         Ok(ty)
     }
 
@@ -4140,6 +4191,7 @@ impl Checker {
                 .find_map(|a| self.first_unknown_type_name(a))
                 .or_else(|| rest.as_deref().and_then(|t| self.first_unknown_type_name(t)))
                 .or_else(|| self.first_unknown_type_name(r)),
+            Type::PtrTo(inner) => self.first_unknown_type_name(inner),
             _ => None,
         }
     }
@@ -4894,11 +4946,18 @@ impl Checker {
         // says nothing about the template's own body, which was written
         // somewhere else entirely.
         let saved_unsafe = self.unsafe_depth.replace(0);
+        let saved_arena = self.c_arena.replace(None);
         let saved_type_names = std::mem::take(&mut *self.type_names.borrow_mut());
         let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
         (
             saved_ns,
-            Escapes { loops: saved_loops, blocks: saved_blocks, unsafe_depth: saved_unsafe, type_names: saved_type_names },
+            Escapes {
+                loops: saved_loops,
+                blocks: saved_blocks,
+                unsafe_depth: saved_unsafe,
+                c_arena: saved_arena,
+                type_names: saved_type_names,
+            },
             saved_bindings,
         )
     }
@@ -4913,6 +4972,7 @@ impl Checker {
         *self.loop_stack.borrow_mut() = saved.loops;
         *self.block_stack.borrow_mut() = saved.blocks;
         self.unsafe_depth.set(saved.unsafe_depth);
+        self.c_arena.set(saved.c_arena);
         *self.type_names.borrow_mut() = saved.type_names;
         self.ns = saved_ns;
     }
@@ -9980,6 +10040,7 @@ impl Checker {
                         None => e,
                     });
                 }
+                self.note_typed_ptr_node(&checked);
                 // Root the node for the rest of this top-level form, with no
                 // matching pop of its own (`check_form_at` truncates the stack
                 // back to where it started).
@@ -10436,19 +10497,15 @@ impl Checker {
             // the same reason `progn` produces none — sequencing already has
             // a spelling — so nothing downstream of the checker learns that
             // `unsafe` was ever written. Permission is a question about the
-            // source, and it is answered here.
-            "unsafe" => {
-                self.unsafe_depth.set(self.unsafe_depth.get() + 1);
-                let result = self.check_seq(heap, interp, env, args, arg_locs, expected);
-                // Restored on the error path too: in recovery mode the
-                // checker keeps going after this returns `Err`, and a depth
-                // left standing would make every later form in the file
-                // unsafe.
-                self.unsafe_depth.set(self.unsafe_depth.get() - 1);
-                let (body, ty) = result?;
-                let form = self.let_form(heap, &[], &body)?;
-                return Ok(Checked::new(form, ty));
-            }
+            // source, and it is answered here. The one exception is the
+            // `unsafe` that owns `c-alloc`s: it frees them when it is left,
+            // which does need a node (`checker::c_struct`).
+            "unsafe" => return self.check_unsafe(heap, interp, env, args, arg_locs, expected),
+            // The typed-pointer forms — `checker::c_struct`.
+            "c-alloc" => return self.check_c_alloc(heap, interp, env, args, arg_locs),
+            "c-ref" => return self.check_c_ref(heap, interp, env, args, arg_locs),
+            "c-deref" => return self.check_c_deref(heap, interp, env, args, arg_locs),
+            "def-c-struct" => return Err(Error::TypeError(DEF_C_STRUCT_PLACE.into())),
             "setf" => return self.check_setf(heap, interp, env, args, arg_locs),
             "incf" => return self.check_incf_decf(heap, interp, env, args, "+"),
             "decf" => return self.check_incf_decf(heap, interp, env, args, "-"),
@@ -10648,10 +10705,12 @@ impl Checker {
         // an anonymous function has not got.
         let saved = self.loop_stack.replace(Vec::new());
         let saved_blocks = self.block_stack.replace(Vec::new());
-        let result = self.check_seq(heap, interp, &child, &args[2..], &arg_locs[2..], Some(&ret));
+        let result = self.with_own_arena(|| self.check_seq(heap, interp, &child, &args[2..], &arg_locs[2..], Some(&ret)));
         self.block_stack.replace(saved_blocks);
         self.loop_stack.replace(saved);
         let (body, _) = result?;
+        let bound: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
+        self.reject_captured_typed_ptrs(heap, env, &body, &bound, "a `lambda`")?;
         let form = self.lambda_form(heap, &params, &ret, &body)?;
         Ok(Checked::new(form, fn_ty))
     }
@@ -10895,7 +10954,7 @@ impl Checker {
         // Open while every body and the trailing body are checked, so a C
         // callback naming one of these functions can be told apart from a
         // variable — see `checker::ffi_callback`.
-        self.open_labels_scope(env.vars.len(), names);
+        self.open_labels_scope(env.vars.len(), names.clone());
         let checked = (|| -> Result<(Vec<LabelsDef>, Vec<Value>, Type), Error> {
             let mut defs = Vec::new();
             for Spec { name, params, param_locs, ret, raw_body, body_locs } in parsed {
@@ -10908,19 +10967,14 @@ impl Checker {
                 // works inside it the way it does in a `defun`.
                 let saved = self.loop_stack.replace(Vec::new());
                 let saved_blocks = self.block_stack.replace(Vec::new());
-                let result = self.check_block_body(
-                    heap,
-                    interp,
-                    &fn_env,
-                    &raw_body,
-                    &body_locs,
-                    &name,
-                    ret.clone(),
-                    Some(&ret),
-                );
+                let result = self.with_own_arena(|| {
+                    self.check_block_body(heap, interp, &fn_env, &raw_body, &body_locs, &name, ret.clone(), Some(&ret))
+                });
                 self.block_stack.replace(saved_blocks);
                 self.loop_stack.replace(saved);
                 let (body, _, used) = result?;
+                let bound: Vec<String> = params.iter().map(|(n, _)| n.clone()).chain(names.iter().cloned()).collect();
+                self.reject_captured_typed_ptrs(heap, env, &body, &bound, &format!("the `labels` function `{}`", name))?;
                 let body = if used {
                     let seq = self.let_form(heap, &[], &body)?;
                     let seq = forms::rooted(heap, seq);
@@ -11879,6 +11933,7 @@ impl Checker {
         if !is_call {
             return Err(Error::TypeError(format!("`{}` needs a call, and this is not one. {}", form_name, shape)));
         }
+        self.reject_typed_ptr_task_args(heap, inner.form, form_name)?;
         let ret = self.repr_form(heap, &inner.ty)?;
         let form = forms::spawn_form(heap, form_name, ret, inner.form)?;
         let ty = match kind {
@@ -12107,6 +12162,12 @@ impl Checker {
         // Identity: same type, a no-op cast.
         if src.ty == target {
             return if try_variant { wrap_some(heap, self, src, target) } else { Ok(src) };
+        }
+        // A typed pointer forgets its pointee, to be handed to a C function
+        // declared with `ptr` (`qsort`'s `void *`). The same word; there is
+        // no way back.
+        if matches!(src.ty, Type::PtrTo(_)) && target == Type::Ptr && !try_variant {
+            return Ok(Checked::new(src.form, Type::Ptr));
         }
         // Between two integer widths, or between the two float widths: a real
         // conversion. A type name means its width and its signedness
@@ -13009,6 +13070,11 @@ impl Checker {
         } else {
             return Err(Error::TypeError(format!("setf: unbound variable: {}", recv_name)));
         };
+        if matches!(recv.ty, Type::PtrTo(_)) {
+            if let Some(r) = self.c_field_set(heap, interp, env, recv.clone(), field, value, value_loc.as_ref()) {
+                return r;
+            }
+        }
         let Type::Named(type_fq, _) = &recv.ty else {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv_name, field)));
         };
@@ -13072,6 +13138,9 @@ impl Checker {
             return Err(Error::TypeError("setf: place's head must be a function name".into()));
         };
         let accessor = heap.symbol_name(head_id).to_string();
+        if accessor == "c-deref" {
+            return self.check_c_deref_set(heap, interp, env, rest, value);
+        }
         // `(setf (aref a i j) v)`: variadic bare subscripts, which no
         // `set-...` method can take. Rewritten into `Array<T>`'s own
         // `Vector<i32>`-subscript `set` by the same expansion the reading
@@ -14063,6 +14132,13 @@ impl Checker {
     /// Records that `tag` carries `ty`, or checks it against what an earlier
     /// `catch`/`throw` on the same symbol already established.
     fn unify_throw_tag(&self, tag: &str, ty: &Type, who: &str) -> Result<(), Error> {
+        if type_mentions_typed_ptr(ty) {
+            return Err(Error::TypeError(format!(
+                "{}: `{}` would carry `{}`, and a typed pointer cannot leave the `unsafe` that \
+                 allocated its memory — a `catch` outside it would receive freed memory",
+                who, tag, ty
+            )));
+        }
         let mut tags = self.throw_tags.borrow_mut();
         match tags.get(tag) {
             // `Never` never pins a tag down: it is what a `body` consisting
@@ -15067,6 +15143,13 @@ impl Checker {
         };
         let ty = subst_apply(&sig.ret, &subst);
         let form = self.call_form(heap, &r, &typed)?;
+        // A typed pointer a C function returned has to point into memory an
+        // `unsafe` here allocated.
+        if let (true, Type::PtrTo(pointee)) = (sig.ffi, &ty) {
+            let form = forms::rooted(heap, form);
+            let form = self.c_checked_from_c(heap, form, pointee)?;
+            return Ok(Checked::new(form, ty));
+        }
         Ok(Checked::new(form, ty))
     }
 

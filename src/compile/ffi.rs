@@ -99,6 +99,11 @@ impl CType {
         if typelisp_front::ffi_callback::split_fn_key(key).is_some() {
             return Some(CType::Ptr);
         }
+        // A typed pointer is an address like any other; which C object it
+        // points at is checked by the runtime, not the C signature.
+        if typed_pointee(key).is_some() {
+            return Some(CType::Ptr);
+        }
         // Covers the six widths *and* `c-long`/`c-ulong`, which that function
         // answers 64 for — the one place the LP64 assumption is written down.
         if let Some((bits, signed)) = typelisp_front::types::int_width_signed(key) {
@@ -704,6 +709,11 @@ pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBod
 // its answer into the C value it returns. Both conversions are the ones the
 // thunk already has, run in the other direction.
 
+/// The pointee's key of a typed pointer's key (`(ptr point)` → `point`).
+fn typed_pointee(key: &str) -> Option<&str> {
+    key.strip_prefix("(ptr ")?.strip_suffix(')')
+}
+
 /// A callback's C parameter and return types, from their type keys — or why
 /// C cannot call a function with them.
 fn callback_ctypes(params: &[String], ret: &str) -> Result<(Vec<CType>, CType), String> {
@@ -745,6 +755,7 @@ fn emit_callback_entry(
     name: &str,
     target: IntValue<'static>,
     params: &[CType],
+    pointees: &[Option<String>],
     ret: CType,
 ) -> Result<FunctionValue<'static>, String> {
     let ctx = llvm_context();
@@ -781,8 +792,8 @@ fn emit_callback_entry(
 
     call_shim(&builder, shim("rt_ffi_callback_enter"), scratch, one, zero, "cb_enter")?;
 
-    // `[target, n, kind0, word0, ...]` — see `rt_ffi_callback_invoke`.
-    let len = 2 + 2 * params.len();
+    // `[target, n, kind0, word0, aux0, ...]` — see `rt_ffi_callback_invoke`.
+    let len = 2 + 3 * params.len();
     let words = builder
         .build_alloca(i64_ty.array_type(len as u32), "cb_args")
         .map_err(|e| format!("ffi: failed to reserve the callback argument array: {}", e))?;
@@ -799,19 +810,32 @@ fn emit_callback_entry(
     store(1, i64_ty.const_int(params.len() as u64, false))?;
     for (i, c) in params.iter().enumerate() {
         let v = entry.get_nth_param(i as u32).expect("the entry has one parameter per declared type");
-        let (kind, word) = match c {
+        let (kind, word, aux) = match (c, pointees.get(i).and_then(|p| p.as_deref())) {
             // Copied into a typelisp string by the runtime, where a bad one
             // can fail inside the callback rather than here.
-            CType::Str => (
+            (CType::Str, _) => (
                 1,
                 builder
                     .build_ptr_to_int(v.into_pointer_value(), i64_ty, "cb_cstr")
                     .map_err(|e| format!("ffi: failed to take a string argument's address: {}", e))?,
+                zero,
             ),
-            _ => (0, c_to_word(&builder, v, *c)?),
+            // A typed pointer, checked by the runtime against the memory
+            // `unsafe`s allocated — `aux` is the pointee's key, as a C string.
+            (_, Some(pointee)) => {
+                let key = builder
+                    .build_global_string_ptr(pointee, "cb_pointee")
+                    .map_err(|e| format!("ffi: failed to emit a pointee key: {}", e))?;
+                let key = builder
+                    .build_ptr_to_int(key.as_pointer_value(), i64_ty, "cb_pointee_addr")
+                    .map_err(|e| format!("ffi: failed to take a pointee key's address: {}", e))?;
+                (2, c_to_word(&builder, v, *c)?, key)
+            }
+            _ => (0, c_to_word(&builder, v, *c)?, zero),
         };
-        store(2 + 2 * i, i64_ty.const_int(kind, false))?;
-        store(3 + 2 * i, word)?;
+        store(2 + 3 * i, i64_ty.const_int(kind, false))?;
+        store(3 + 3 * i, word)?;
+        store(4 + 3 * i, aux)?;
     }
     let call = builder
         .build_call(
@@ -854,12 +878,18 @@ pub(crate) fn emit_callback_entry_in_module(
     sig: &typelisp_front::ffi_callback::CallbackSig,
 ) -> Result<FunctionValue<'static>, String> {
     let (params, ret) = callback_sig_ctypes(sig)?;
+    let pointees = callback_pointees(sig);
     let symbol = crate::compile::symbols::user_symbol_name(&sig.path);
     let body = module
         .get_function(&symbol)
         .ok_or_else(|| format!("compile-file: `{}` is passed to C as a callback but was not compiled", sig.path))?;
     let target = body.as_global_value().as_pointer_value().const_to_int(llvm_context().i64_type());
-    emit_callback_entry(module, name, target, &params, ret)
+    emit_callback_entry(module, name, target, &params, &pointees, ret)
+}
+
+/// Each parameter's pointee key, for the ones that are typed pointers.
+fn callback_pointees(sig: &typelisp_front::ffi_callback::CallbackSig) -> Vec<Option<String>> {
+    sig.params.iter().map(|p| typed_pointee(p).map(str::to_string)).collect()
 }
 
 thread_local! {
@@ -893,7 +923,7 @@ pub fn callback_entry(
     let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let module = llvm_context().create_module("ffi_callback");
     let target = llvm_context().i64_type().const_int(body.address() as u64, false);
-    let entry = emit_callback_entry(&module, "ffi_callback_entry", target, &params, ret)?;
+    let entry = emit_callback_entry(&module, "ffi_callback_entry", target, &params, &callback_pointees(&sig), ret)?;
     let name = entry.get_name().to_str().map_err(|e| format!("ffi: entry name: {}", e))?.to_string();
     module
         .verify()

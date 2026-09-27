@@ -24,6 +24,7 @@ pub mod types;
 pub mod type_key;
 pub mod check;
 pub mod eval;
+pub mod c_struct;
 pub mod ffi_callback;
 pub mod core_macros;
 pub mod prelude;

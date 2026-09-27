@@ -2265,6 +2265,13 @@ impl Interp {
             let addr = self.callback_address(heap, &key)?;
             return Ok((State::Apply(Value::Int(addr as i64)), None));
         }
+        // The memory behind `def-c-struct`s and typed pointers
+        // (`checker::c_struct`'s lowering).
+        if path.is_simple() {
+            if let Some(result) = crate::c_struct::eval(heap, path.last_segment(), &argv) {
+                return Ok((State::Apply(result?), None));
+            }
+        }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, form, &f, argv);
         }

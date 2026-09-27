@@ -62,12 +62,13 @@ mutual recursion at top level, since forms are checked in source order.
 like `defsignature' it has no body here, so neither takes an indent rule.")
 
 (defconst typelisp-type-definition-forms
-  '("defstruct" "defenum" "deftrait" "deftype")
+  '("defstruct" "defenum" "deftrait" "deftype" "def-c-struct")
   "Definition forms whose defined name is a type, trait or type-alias name.
 Types and traits share one namespace (as in Rust), which is why they share a
 rule here: within a module a `defstruct'/`defenum' and a `deftrait' cannot
 take the same name.  A `deftype' alias occupies that same namespace -- it is
-a spelling for a type, expanded where it is written.")
+a spelling for a type, expanded where it is written -- and so does a
+`def-c-struct', a struct laid out for C that only a typed pointer reaches.")
 
 (defconst typelisp-variable-definition-forms
   '("defvar" "defparameter" "defconstant")
@@ -79,6 +80,8 @@ session has changed.")
 (defconst typelisp-special-forms
   '(;; binding & conditionals (docs/ja/reference/syntax.md §4)
     "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn" "unsafe"
+    ;; memory for `def-c-struct's and typed pointers, inside `unsafe'
+    "c-alloc" "c-ref" "c-deref"
     "the" "match" "if-let" "while-let"
     ;; CL's chapter-5 control forms (cl-parity-plan.md Phase 4a, §4/§7)
     "ecase" "ccase" "prog1" "prog2" "setq" "psetq" "psetf"
@@ -922,6 +925,7 @@ has already claimed it for `font-lock-string-face'."
     ("defenum"     . defun)
     ("deftrait"    . defun)
     ("deftype"     . defun)
+    ("def-c-struct" . defun)
     ("defvar"      . defun)
     ("defconstant" . defun)
     ("module"      . defun)

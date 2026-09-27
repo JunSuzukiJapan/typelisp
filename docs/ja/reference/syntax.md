@@ -260,7 +260,8 @@ C の識別子は含めないため。C 名を省くと名前がそのまま C �
 ```
 
 書ける型は `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `()`（void）`string`
-`ptr` `c-long` `c-ulong`。
+`ptr` `c-long` `c-ulong`、それに型付きポインタ `(ptr T)`
+（[後述](#def-c-struct-と型付きポインタ--c-の構造体を確保する)）。
 
 `string` は `const char *`。typelisp の文字列は NUL 終端されておらず自身が NUL を含みうるので、
 **渡すときは C 文字列へ複製**し、呼び出しが終わったら解放する。文字列の中に NUL があれば
@@ -420,6 +421,94 @@ AOT（`compile-file`）でも同じように動く。C が呼ぶ入口は実行�
 標準ライブラリ（prelude）は `defffi` を使わない。標準ライブラリはどの実行ファイルにも丸ごと
 入るので、そこに `:library` の付いた宣言があると、FFI を使わないプログラムまでそのライブラリを
 リンクすることになるため。
+
+#### def-c-struct と型付きポインタ —— C の構造体を確保する
+
+```lisp
+(unsafe
+  (def-c-struct 名前 (フィールド 型)...)
+  ...)
+(unsafe (pub def-c-struct ...))
+```
+
+C と同じ配置の構造体を宣言する。トップレベルの `unsafe` の中にだけ書ける（その `unsafe` には
+`def-c-struct` 以外を書けない）。名前の直後に docstring を置ける。
+
+フィールドに書ける型は `i8` `i16` `i32` `u8` `u16` `u32` `c-long` `c-ulong` `f32` `f64` `bool`
+`ptr`、型付きポインタ `(ptr T)`、それに別の `def-c-struct`（値として埋め込む）。配置（各
+フィールドのオフセット、構造体のサイズと整列）は C の規則で計算する（LP64 を前提にする）。
+自分自身を指すフィールドは書けるが、自分自身を埋め込むことはできない。
+
+```lisp
+(unsafe
+  (def-c-struct point (x i32) (y f64))              ; x は 0、y は 8、サイズ 16
+  (def-c-struct seg (a point) (b point) (next (ptr seg))))
+```
+
+`def-c-struct` の名前は型の名前空間に入る（同じモジュールに同名の `defstruct` などは置けない）
+が、**値の型ではない**。`(defun f ((p point)) ...)` とは書けず、現れるのは型付きポインタの
+指す先としてだけ。
+
+**型付きポインタ `(ptr T)`** は、`T` を指すアドレス。`T` は上のフィールドに書ける型のどれか。
+`ptr` と同じ生の機械語で、置ける場所の規則も同じ（引数・戻り型・局所変数だけ、`unsafe` の
+中でだけ値にできる）。
+
+確保と読み書きは次の形で書く。どれも `unsafe` の中でだけ使える。
+
+| 形 | 意味 |
+|---|---|
+| `(c-alloc T)` / `(c-alloc T n)` | `T` を `n` 個（省略時 1 個）確保する。中身は 0 で埋まる。`(ptr T)` を返す |
+| `(c-ref p i)` | `p` から `i` 個目の要素へのポインタ。確保した範囲の外ならエラー |
+| `(c-deref p)` / `(setf (c-deref p) v)` | `p` の指すスカラを読む・書く |
+| `p::field` / `(setf p::field v)` | 構造体のフィールドを読む・書く。埋め込んだ構造体のフィールドは、読むとそのアドレス（`(ptr 内側の型)`）になる |
+| `(as ptr p)` | 型を忘れて `ptr` にする（`qsort` の `void *` などへ渡すため）。逆向きの変換は無い |
+
+```lisp
+(defun sum-x ((n int)) int
+  (unsafe
+    (let ((ps (c-alloc point n)))
+      (dotimes (i n)
+        (let ((p (c-ref ps i)))
+          (setf p::x (as i32 i))))
+      (let ((total 0))
+        (dotimes (i n)
+          (let ((p (c-ref ps i)))
+            (setf total (+ total (as int p::x)))))
+        total))))
+```
+
+**確保したメモリは、それを確保した `unsafe` を出ると解放される。** 持ち主になるのは、同じ関数の
+中で字句的に一番外側の `unsafe`。正常に終わっても、`panic` や `throw`、`return-from` で抜けても
+解放する。`lambda` と `labels` の関数は別の関数なので、`c-alloc` にはその中に自分の `unsafe` が
+要る。
+
+そのため、型付きポインタは確保した `unsafe` の外へ出せない。次はどれも型検査でエラーになる。
+
+- `unsafe` 式の値にする（したがって関数から返すこともできない）
+- クロージャ（`lambda`、`labels`）で捕捉する
+- `task` / `thread` に渡す
+- `throw` で投げる
+
+`unsafe` の外で値を使いたいときは、`unsafe` の中で `defstruct` や数値へコピーしてから返す。
+
+**C 側で確保したメモリは扱わない。** C から型付きポインタとして入ってくる値——`defffi` の
+戻り値、コールバックの引数、ポインタ型フィールドを読んだ値——は、実行時に、生きている
+`c-alloc` の確保の中の、その型の値の位置を指しているかを確かめ、違えばエラーにする。NULL も
+エラー。C が確保したメモリや NULL を受けたいときは、型の無い `ptr` で受ける（中身は読めない）。
+
+```lisp
+(unsafe (def-c-struct item (key i32) (tag u8)))
+(defffi (c-qsort "qsort") (ptr c-ulong c-ulong (fn ((ptr item) (ptr item)) i32)) ())
+
+(unsafe
+  (let ((xs (c-alloc item 4)))
+    ...
+    (c-qsort (as ptr xs) 4 8 (lambda ((a (ptr item)) (b (ptr item))) i32 (- a::key b::key)))
+    ...))
+```
+
+コールバックの引数が検査で断られたときは、コールバックの中の失敗と同じく、C 関数が戻った
+時点で呼び出し元へ伝わる。
 
 ### 3.4 defvar / defparameter / defconstant — グローバル変数
 
@@ -843,8 +932,12 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 `progn` と同じ——本体を順に評価し、最後の値を返す。スコープも作らず、関数の境界でもない
 （`break` / `return-from` は素通りして外へ抜ける）。違うのは、この中でだけ書けるものがある点。
 
-いま `unsafe` を要求するのは 2 つ。[defffi](#33-defffi--c-関数の宣言ffi) で宣言した C 関数の
-呼び出しと、生の機械語（`ptr` / `c-long` / `c-ulong`）を値にすること。
+いま `unsafe` を要求するのは 3 つ。[defffi](#33-defffi--c-関数の宣言ffi) で宣言した C 関数の
+呼び出し、生の機械語（`ptr` / `c-long` / `c-ulong` / `(ptr T)`）を値にすること、それに
+[`def-c-struct` と `c-alloc`](#def-c-struct-と型付きポインタ--c-の構造体を確保する)。
+
+`c-alloc` で確保したメモリは、同じ関数の中で一番外側の `unsafe` を出るときに解放される。
+その `unsafe` だけは `progn` と違い、出るときに解放する処理を持つ。
 
 `unsafe` が引き受けるのは、コンパイラが確かめられない次の前提:
 

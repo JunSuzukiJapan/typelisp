@@ -47,6 +47,7 @@ C の関数を typelisp から呼ぶ方法を説明します。宣言できる�
 | `string` | `const char *` |
 | `c-long` / `c-ulong` | `long` / `unsigned long`（`size_t` `int64_t` なども） |
 | `ptr` | 任意のポインタ（`void *` `FILE *` など） |
+| `(ptr T)` | `T` へのポインタ（[7 節](#7-c-の構造体)） |
 
 ### 文字列
 
@@ -132,7 +133,56 @@ C の関数に typelisp の関数を渡して、呼び返してもらえます�
 - 呼び返せるのは、typelisp が呼んだ C の関数が走っている間だけです。`atexit` やシグナル
   ハンドラから呼ばれるような使い方はできません。
 
-## 7. できないこと
+## 7. C の構造体
+
+C の関数に構造体の配列などを渡したいときは、`def-c-struct` で C と同じ配置の構造体を宣言し、
+`unsafe` の中で確保します。
+
+```lisp
+(unsafe (def-c-struct item (key i32) (tag u8)))    ; トップレベルの unsafe の中で宣言する
+
+(defffi (c-qsort "qsort") (ptr c-ulong c-ulong (fn ((ptr item) (ptr item)) i32)) ())
+
+(defun put ((xs (ptr item)) (i int) (k i32)) i32
+  (unsafe (let ((p (c-ref xs i))) (setf p::key k))))
+
+(defun key-at ((xs (ptr item)) (i int)) int
+  (unsafe (let ((p (c-ref xs i))) (as int p::key))))
+
+(defun sorted-keys () int
+  (unsafe
+    (let ((xs (c-alloc item 4)))                    ; item を 4 個。中身は 0
+      (put xs 0 3) (put xs 1 1) (put xs 2 4) (put xs 3 2)
+      (c-qsort (as ptr xs) 4 8
+               (lambda ((a (ptr item)) (b (ptr item))) i32 (- a::key b::key)))
+      (+ (* 1000 (key-at xs 0)) (* 100 (key-at xs 1))
+         (* 10 (key-at xs 2)) (key-at xs 3)))))
+
+(sorted-keys)    ; => 1234
+```
+
+- `(c-alloc T n)` は `T` を `n` 個確保して `(ptr T)` を返します。`(c-ref p i)` は `i` 個目への
+  ポインタ、`p::field` はフィールド、`(c-deref p)` は `i32` などのスカラへのポインタの中身です。
+  どれも `setf` で書き込めます。
+- `(as ptr p)` で型の無い `ptr` にして、`void *` を取る C の関数に渡します。
+- `item` のサイズ（ここでは 8）と各フィールドの位置は、C と同じ規則で決まります。
+
+### 確保したメモリの寿命
+
+確保したメモリは、その関数の中で一番外側の `unsafe` を出た時点で解放されます。`panic` や
+`throw` で抜けた場合も同じです。そのため `(ptr T)` の値は `unsafe` の外へ持ち出せません。
+`unsafe` の値にする、クロージャで捕捉する、`task` に渡す、`throw` で投げる、のどれも型検査で
+エラーになります。外で使いたい値は、`unsafe` の中で数値や `defstruct` にコピーしてください。
+
+`lambda` や `labels` の関数の中で確保するときは、その中に `unsafe` を書きます。
+
+### C が確保したメモリ
+
+`(ptr T)` として C から受け取ったポインタ（`defffi` の戻り値、コールバックの引数など）は、
+`c-alloc` で確保したメモリの中を指していなければエラーになります。C が `malloc` したメモリや
+NULL を受け取る関数は、型の無い `ptr` で宣言してください。
+
+## 8. できないこと
 
 - **可変長引数の関数**（`printf` など）は宣言できません。可変長部分は固定引数と別の規則で
   渡されるためです。使う引数の個数ごとに別の名前で宣言してください。

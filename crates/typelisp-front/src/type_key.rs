@@ -269,6 +269,8 @@ pub fn type_key_of_type(t: &Type) -> String {
         Type::Symbol => "symbol".into(),
         Type::Unit => "()".into(),
         Type::Never => "!".into(),
+        Type::PtrTo(t) => format!("(ptr {})", type_key_of_type(t)),
+        Type::CStruct(p) => p.to_string(),
         Type::Named(p, args) if args.is_empty() => p.to_string(),
         Type::Named(p, args) => {
             format!("{}<{}>", p, args.iter().map(type_key_of_type).collect::<Vec<_>>().join(","))

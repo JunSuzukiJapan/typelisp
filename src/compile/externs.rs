@@ -41,6 +41,10 @@
 /// decision already lives, leaves the island nothing to re-derive; it calls
 /// whatever the bridge named.
 pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
+    // The memory behind `def-c-struct`s and typed pointers.
+    if let Some(sym) = typelisp_front::c_struct::rt_symbol(name) {
+        return Some(sym);
+    }
     Some(match name {
         // A C callback's entry address — `typelisp_front::ffi_callback`.
         typelisp_front::ffi_callback::ADDRESS_BUILTIN => "rt_ffi_callback_address",
@@ -516,7 +520,10 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 310] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 318] {
+    use typelisp_rt::c_mem::{
+        rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
+    };
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
     use typelisp_rt::ffi_callback::{
         rt_ffi_callback_address, rt_ffi_callback_enter, rt_ffi_callback_invoke, rt_ffi_callback_leave,
@@ -746,6 +753,16 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 310] {
         ("rt_ffi_callback_enter", rt_ffi_callback_enter as *const () as usize),
         ("rt_ffi_callback_invoke", rt_ffi_callback_invoke as *const () as usize),
         ("rt_ffi_callback_leave", rt_ffi_callback_leave as *const () as usize),
+        // The memory behind `def-c-struct`s and typed pointers
+        // (`typelisp_front::c_struct`).
+        ("rt_c_arena_open", rt_c_arena_open as *const () as usize),
+        ("rt_c_arena_close", rt_c_arena_close as *const () as usize),
+        ("rt_c_alloc", rt_c_alloc as *const () as usize),
+        ("rt_c_ptr_check", rt_c_ptr_check as *const () as usize),
+        ("rt_c_index", rt_c_index as *const () as usize),
+        ("rt_c_offset", rt_c_offset as *const () as usize),
+        ("rt_c_load", rt_c_load as *const () as usize),
+        ("rt_c_store", rt_c_store as *const () as usize),
         ("rt_str_new", rt_str_new as *const () as usize),
         ("rt_str_length", rt_str_length as *const () as usize),
         ("rt_str_ref", rt_str_ref as *const () as usize),

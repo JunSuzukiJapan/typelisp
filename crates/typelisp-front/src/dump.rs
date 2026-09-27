@@ -38,7 +38,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::check::registry::{AdtDef, BlanketImpl, Docs, FnSig, MacroDef, Namespace, TraitDef, TypeAlias, VarInfo};
+use crate::check::registry::{AdtDef, BlanketImpl, CStructDef, Docs, FnSig, MacroDef, Namespace, TraitDef, TypeAlias, VarInfo};
 use crate::owned_form::OwnedForm;
 use crate::types::Path;
 use crate::Type;
@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 12;
+pub const FORMAT_VERSION: u32 = 13;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -77,6 +77,7 @@ pub mod cat {
     pub const METHOD_TEMPLATE: u8 = 21;
     pub const TYPE_ALIAS: u8 = 22;
     pub const STRUCT_DEFAULT: u8 = 23;
+    pub const C_STRUCT: u8 = 24;
 }
 
 /// One registry entry, with its value already serialized.
@@ -152,6 +153,7 @@ impl RegistrySignature {
             cat::METHOD_TEMPLATE => "method-template",
             cat::TYPE_ALIAS => "type-alias",
             cat::STRUCT_DEFAULT => "struct-defaults",
+            cat::C_STRUCT => "c-struct",
             _ => "doc",
         };
         let mut out = Vec::new();
@@ -393,6 +395,7 @@ fn walk_ns(
     table!(cat::MOD_ALIAS, ns.mod_aliases);
     table!(cat::STATIC_USE, ns.static_uses);
     table!(cat::TYPE_ALIAS, ns.type_aliases);
+    table!(cat::C_STRUCT, ns.c_structs);
     // Positional, not keyed: at most one blanket `impl` may cover any trait,
     // so the index is a stable identity for as long as the list only grows.
     for (i, imp) in ns.blanket_impls.iter().enumerate() {
@@ -512,6 +515,10 @@ pub fn apply_entries(
             cat::TYPE_ALIAS => {
                 let v: TypeAlias = bincode::deserialize(&e.payload).map_err(|err| read_failed("type alias", err))?;
                 root.module_mut(&e.ns).type_aliases.insert(e.name, v);
+            }
+            cat::C_STRUCT => {
+                let v: CStructDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("C struct", err))?;
+                root.module_mut(&e.ns).c_structs.insert(e.name, v);
             }
             cat::STRUCT_DEFAULT => {
                 let v: Vec<Option<OwnedForm>> =

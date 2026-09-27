@@ -174,10 +174,13 @@ pub unsafe extern "C" fn rt_ffi_callback_leave(_args: *const i64, _argc: u32) ->
     0
 }
 
-/// Runs the callback: `args` is `[function address, n, kind0, word0, ...,
-/// kind(n-1), word(n-1)]`, the function a coroutine-ABI body. A kind of `0`
-/// is a word already in the function's own representation; `1` is a C
-/// string's address, copied into a typelisp string here.
+/// Runs the callback: `args` is `[function address, n, kind0, word0, aux0,
+/// ..., kind(n-1), word(n-1), aux(n-1)]`, the function a coroutine-ABI body.
+/// A kind of `0` is a word already in the function's own representation; `1`
+/// is a C string's address, copied into a typelisp string here; `2` is a
+/// typed pointer, whose `aux` is the address of its pointee's key (a C
+/// string) — it has to point at such an object in memory an `unsafe`
+/// allocated ([`crate::c_mem::check`]). `aux` is otherwise unused.
 ///
 /// Answers the function's value, or `0` when it failed or an earlier
 /// callback's failure is still waiting — see the module comment. Never
@@ -198,18 +201,26 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
     }
     let f: crate::coroutine::CoroutineFn = std::mem::transmute(*args as usize);
     let n = *args.add(1) as usize;
-    if argc as usize != 2 + 2 * n {
+    if argc as usize != 2 + 3 * n {
         fatal("rt_ffi_callback_invoke: the argument count does not match the words given");
     }
-    let pairs: Vec<(i64, i64)> = (0..n).map(|i| (*args.add(2 + 2 * i), *args.add(3 + 2 * i))).collect();
+    let triples: Vec<(i64, i64, i64)> =
+        (0..n).map(|i| (*args.add(2 + 3 * i), *args.add(3 + 3 * i), *args.add(4 + 3 * i))).collect();
     let run = std::panic::AssertUnwindSafe(|| {
         let mut words = Vec::with_capacity(n);
-        for (kind, word) in &pairs {
+        for (kind, word, aux) in &triples {
             words.push(match kind {
                 0 => *word,
                 // Allocating a string never collects, so the strings made
                 // before the body starts need no roots of their own.
                 1 => callback_string(*word),
+                2 => {
+                    let key = std::ffi::CStr::from_ptr(*aux as usize as *const std::ffi::c_char).to_string_lossy();
+                    match crate::c_mem::check(*word as usize, &key) {
+                        Ok(()) => *word,
+                        Err(msg) => raise(msg),
+                    }
+                }
                 k => fatal(&format!("rt_ffi_callback_invoke: unknown argument kind {}", k)),
             });
         }

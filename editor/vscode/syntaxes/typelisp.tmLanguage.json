@@ -132,7 +132,7 @@
       }
     },
     "type-definition": {
-      "match": "\\(\\s*(?:(pub)\\s+)?(defstruct|deftrait|defenum|deftype)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
+      "match": "\\(\\s*(?:(pub)\\s+)?(defstruct|def\\-c\\-struct|deftrait|defenum|deftype)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])\\s*\\(?\\s*([-A-Za-z0-9_?!*/+.%&^~:<>=]+)?",
       "captures": {
         "1": {
           "name": "storage.modifier.typelisp"
@@ -182,7 +182,7 @@
       "name": "storage.modifier.lambda-list.typelisp"
     },
     "special-form": {
-      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|symbol\\-macrolet|pprint\\-tabular|unwind\\-protect|documentation|pprint\\-linear|disassemble|pprint\\-fill|return\\-from|source\\-file|unreachable|quasiquote|while\\-let|macrolet|compile|dotimes|println|rotatef|unquote|untrace|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|select|shiftf|thread|try\\-as|unless|unsafe|apply|block|break|catch|ccase|ecase|match|panic|print|prog1|prog2|progn|psetf|psetq|quote|throw|trace|until|while|case|cond|decf|incf|let*|list|loop|setf|setq|step|task|todo|when|and|do*|let|the|as|do|ed|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
+      "match": "(?<![-A-Za-z0-9_?!*/+.%&^~:<>=])(?:pprint\\-logical\\-block|unquote\\-splicing|symbol\\-macrolet|pprint\\-tabular|unwind\\-protect|documentation|pprint\\-linear|disassemble|pprint\\-fill|c\\-deref|c\\-alloc|return\\-from|source\\-file|unreachable|quasiquote|while\\-let|macrolet|compile|dotimes|println|rotatef|unquote|untrace|doiter|dolist|format|if\\-let|labels|lambda|pprint|return|select|shiftf|thread|try\\-as|unless|unsafe|apply|block|break|catch|ccase|ecase|match|panic|print|prog1|prog2|progn|psetf|psetq|quote|throw|trace|until|while|case|cond|decf|incf|let*|list|loop|c\\-ref|setf|setq|step|task|todo|when|and|do*|let|the|as|do|ed|if|or)(?![-A-Za-z0-9_?!*/+.%&^~:<>=])",
       "name": "keyword.control.typelisp"
     },
     "clause": {

@@ -279,6 +279,21 @@ pub enum Type {
     /// `#[cfg(unix)]` split in `typelisp_rt::os` is the same assumption).
     CLong,
     CULong,
+    /// A typed C pointer, `(ptr T)`: the address of a `T` laid out as C lays
+    /// it out, where `T` is one of the C scalar types, `ptr`, another typed
+    /// pointer, or a `def-c-struct` ([`Self::CStruct`]).
+    ///
+    /// A raw machine word like [`Self::Ptr`], confined by the same rules and
+    /// by one more: the memory it points at belongs to the `(unsafe ...)`
+    /// that allocated it and is freed when that form is left, so a typed
+    /// pointer can never be the value of an `unsafe` form, be captured by a
+    /// closure, go to a task, or be thrown. One that comes from C — a
+    /// callback's argument, a `defffi` result, a pointer field read back —
+    /// must point into memory such an `unsafe` allocated, or it is an error.
+    PtrTo(Box<Type>),
+    /// A `def-c-struct`, by its fully-qualified path. Never the type of a
+    /// value: it only ever appears as the pointee of a [`Self::PtrTo`].
+    CStruct(Path),
 }
 
 /// The type as a program would write it — `Vector<int>`, `Option<Sexpr>`,
@@ -497,7 +512,9 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::Char => "char",
         Type::Str => "string",
         Type::Symbol => "symbol",
-        Type::Unit | Type::Never | Type::Named(..) | Type::Dyn(..) | Type::Fn(..) => return None,
+        Type::Unit | Type::Never | Type::Named(..) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) => {
+            return None
+        }
     };
     Some(Path::root(name))
 }
@@ -566,6 +583,7 @@ pub fn parse_type_spanned(
         // the `(fn ...)` case since both are lists.
         Value::Cons(_) if is_dyn_form(heap, v) => parse_dyn_type(heap, v, out),
         Value::Cons(_) if is_fn_form(heap, v) => parse_fn_type(heap, v, out),
+        Value::Cons(_) if is_ptr_form(heap, v) => parse_ptr_type(heap, v, out),
         Value::Cons(_) => parse_applied_type(heap, v, out),
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
     }
@@ -581,6 +599,22 @@ pub fn is_dyn_form(heap: &Heap, v: Value) -> bool {
 /// one rather than as a mis-shaped type application.
 fn is_fn_form(heap: &Heap, v: Value) -> bool {
     matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::FN))
+}
+
+/// Whether `v` is a `(ptr ...)` list — a typed C pointer.
+fn is_ptr_form(heap: &Heap, v: Value) -> bool {
+    matches!(heap.car(v), Ok(Value::Symbol(id)) if heap.symbol_name(id) == "ptr")
+}
+
+/// Parse `(ptr T)` into [`Type::PtrTo`]. What `T` may be is the checker's
+/// question (it needs the `def-c-struct` table); this only reads the shape.
+fn parse_ptr_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+    let elems = heap.list_to_vec_locs(v)?;
+    if elems.len() != 2 {
+        return Err(Error::TypeError("a typed pointer is written (ptr T), with exactly one type".to_string()));
+    }
+    let pointee = parse_type_spanned(heap, elems[1].0, elems[1].1.as_ref(), out)?;
+    Ok(Type::PtrTo(Box::new(pointee)))
 }
 
 /// Parse the *applied* spelling of a generic type — `(vector char)`, the

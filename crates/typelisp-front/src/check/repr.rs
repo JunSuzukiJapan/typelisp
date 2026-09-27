@@ -240,7 +240,7 @@ impl Repr {
             // no arithmetic), and ahead of everything else for the same reason
             // the `Handle` arm is early: falling through to the tagged
             // catch-all would shift a pointer left by three.
-            Type::Ptr | Type::CLong | Type::CULong => Repr::RawWord,
+            Type::Ptr | Type::CLong | Type::CULong | Type::PtrTo(_) => Repr::RawWord,
             Type::Int => Repr::Int,
             _ if ty.is_integer() => Repr::Narrow,
             _ if is_llvm_handle_ty(ty) => Repr::Handle,

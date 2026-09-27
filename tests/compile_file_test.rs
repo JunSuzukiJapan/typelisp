@@ -1944,3 +1944,45 @@ fn a_panic_in_a_callback_ends_an_aot_executable_after_the_c_call() {
     assert_eq!(code, 1, "stderr was: {}", err);
     assert!(err.contains("boom"), "stderr was: {}", err);
 }
+
+/// `def-c-struct` in an executable: an array of C structs allocated inside
+/// `unsafe`, sorted by `qsort` with a callback that reads their fields, and
+/// a pointer C allocated refused when it is read as a typed pointer.
+#[test]
+fn an_aot_executable_sorts_c_structs() {
+    let (code, err) = compile_and_capture(
+        "aot_c_structs",
+        r#"
+(unsafe (def-c-struct item (key i32) (tag u8)))
+(defffi (c-qsort "qsort") (ptr c-ulong c-ulong (fn ((ptr item) (ptr item)) i32)) ())
+
+(defun put ((xs (ptr item)) (i int) (k i32)) i32
+  (unsafe (let ((p (c-ref xs i))) (setf p::key k))))
+(defun key-at ((xs (ptr item)) (i int)) int
+  (unsafe (let ((p (c-ref xs i))) (as int p::key))))
+
+(defun sorted-keys () int
+  (unsafe
+    (let ((xs (c-alloc item 4)))
+      (put xs 0 3) (put xs 1 1) (put xs 2 4) (put xs 3 2)
+      (c-qsort (as ptr xs) 4 8 (lambda ((a (ptr item)) (b (ptr item))) i32 (- a::key b::key)))
+      (+ (* 1000 (key-at xs 0)) (* 100 (key-at xs 1)) (* 10 (key-at xs 2)) (key-at xs 3)))))
+
+(defun main () int (if (= (sorted-keys) 1234) 0 1))
+"#,
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+#[test]
+fn an_aot_executable_refuses_a_typed_pointer_into_c_memory() {
+    let (code, err) = compile_and_capture(
+        "aot_c_struct_c_memory",
+        r#"
+(defffi (c-malloc "malloc") (c-ulong) (ptr i32))
+(defun main () int (unsafe (as int (c-deref (c-malloc 4)))))
+"#,
+    );
+    assert_eq!(code, 1, "stderr was: {}", err);
+    assert!(err.contains("does not point into memory an `unsafe` allocated"), "stderr was: {}", err);
+}
