@@ -333,7 +333,7 @@ pub(crate) fn declare_external_compiled_function(module: &Rc<RefCell<Module<'sta
 /// The captures counterpart of [`compiled_fn_type`]: `i64 name(i64* args,
 /// i32 argc, i64* env, i32 env_len)` — used for a `labels` sibling whenever
 /// its block's shared captured-name list
-/// (`compile::core_freevars::free_vars`) is non-empty, and (labels/closures
+/// (`check::freevars::free_vars`) is non-empty, and (labels/closures
 /// Stage 4) for *every* function ever wrapped into a `ClosureBox` via
 /// `build-make-closure`, capturing or not — see that builtin's doc comment
 /// (`registry::llvm_builder_def`) for why unifying on one ABI regardless of

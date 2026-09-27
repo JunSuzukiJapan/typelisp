@@ -101,7 +101,38 @@ C の関数を typelisp から呼ぶ方法を説明します。宣言できる�
 で実行ファイルにできます。`:library` で指定したライブラリはリンク時に自動で追加されるので、
 `compile-file` に引数を足す必要はありません。
 
-## 6. できないこと
+## 6. コールバック
+
+C の関数に typelisp の関数を渡して、呼び返してもらえます。`defffi` の引数型に関数型を書き、
+呼ぶときにはその位置に関数名か `lambda` 式を書きます。
+
+```lisp
+(defffi (c-free "free") (ptr) ())
+(defffi (c-strdup "strdup") (string) ptr)
+(defffi (c-strncmp "strncmp") (ptr ptr c-ulong) i32)
+(defffi (text-of "strstr") (ptr string) string)          ; strstr(p, "") は p を返す
+(defffi (c-qsort "qsort") (ptr c-ulong c-ulong (fn (ptr ptr) i32)) ())
+
+(defun sort-chars ((s string)) string
+  (unsafe
+    (let ((buf (c-strdup s)))
+      (c-qsort buf (as c-ulong (length s)) 1
+               (lambda ((a ptr) (b ptr)) i32 (c-strncmp a b 1)))
+      (let ((r (text-of buf ""))) (c-free buf) r))))
+
+(sort-chars "cadb")    ; => "abcd"
+```
+
+- 渡せるのは、**自由変数の無い**関数だけです。トップレベル関数、`lambda`、`labels` の局所関数の
+  どれでも使えますが、外側の局所変数を参照していると型検査でエラーになります。C は宣言した
+  引数しか渡さないので、捕捉した変数を届ける方法が無いためです。状態を持たせたいときは
+  グローバル変数を使います。
+- 関数を入れた変数は渡せません。その場に関数名か `lambda` 式を書いてください。
+- コールバックの中で起きた `panic` や `throw` は、C の関数が戻った後で呼び出し元に伝わります。
+- 呼び返せるのは、typelisp が呼んだ C の関数が走っている間だけです。`atexit` やシグナル
+  ハンドラから呼ばれるような使い方はできません。
+
+## 7. できないこと
 
 - **可変長引数の関数**（`printf` など）は宣言できません。可変長部分は固定引数と別の規則で
   渡されるためです。使う引数の個数ごとに別の名前で宣言してください。
@@ -114,4 +145,3 @@ C の関数を typelisp から呼ぶ方法を説明します。宣言できる�
   (unsafe (lambda ((n i32)) i32 (c-abs n)))
   ```
 
-- C 側から typelisp の関数を呼び返す（コールバック）手段はありません。

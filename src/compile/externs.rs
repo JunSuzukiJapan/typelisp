@@ -42,6 +42,8 @@
 /// whatever the bridge named.
 pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
     Some(match name {
+        // A C callback's entry address — `typelisp_front::ffi_callback`.
+        typelisp_front::ffi_callback::ADDRESS_BUILTIN => "rt_ffi_callback_address",
         "sexpr-car" => "rt_car",
         "sexpr-cdr" => "rt_cdr",
         "sexpr-cons" => "rt_cons",
@@ -291,8 +293,15 @@ pub(crate) fn rt_static_method_symbol(type_local: &str, method: &str) -> Option<
 /// [`RT_SUSPEND_MAIN`] in front of every call to one, so that a compiled task
 /// a worker thread is stepping moves to the interpreter's thread before it
 /// makes the call — and there is no other way into these from compiled code.
+///
+/// `rt_ffi_callback_address` is here for a session: the first time a
+/// callback is asked for, the interpreter's backend compiles its entry. An
+/// executable registered every entry at startup and only looks one up.
 pub(crate) fn needs_interpreter(name: &str) -> bool {
-    matches!(name, "rt_eval" | "rt_macroexpand" | "rt_macroexpand_1" | "rt_read" | "rt_read_datum_at")
+    matches!(
+        name,
+        "rt_eval" | "rt_macroexpand" | "rt_macroexpand_1" | "rt_read" | "rt_read_datum_at" | "rt_ffi_callback_address"
+    )
 }
 
 /// The suspension [`needs_interpreter`]'s calls are preceded by —
@@ -507,8 +516,12 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 305] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 310] {
     use typelisp_rt::equality::{rt_sexpr_eql, rt_sexpr_equal, rt_sexpr_equalp};
+    use typelisp_rt::ffi_callback::{
+        rt_ffi_callback_address, rt_ffi_callback_enter, rt_ffi_callback_invoke, rt_ffi_callback_leave,
+        rt_ffi_callback_register,
+    };
     // The printing family. These are the one group of shims defined outside
     // `typelisp-rt` — see `typelisp_print::shim`'s module doc comment for why
     // the linker requires that.
@@ -728,6 +741,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 305] {
         ("rt_ffi_string_from_cstr", rt_ffi_string_from_cstr as *const () as usize),
         ("rt_ffi_enter_native", rt_ffi_enter_native as *const () as usize),
         ("rt_ffi_leave_native", rt_ffi_leave_native as *const () as usize),
+        ("rt_ffi_callback_address", rt_ffi_callback_address as *const () as usize),
+        ("rt_ffi_callback_register", rt_ffi_callback_register as *const () as usize),
+        ("rt_ffi_callback_enter", rt_ffi_callback_enter as *const () as usize),
+        ("rt_ffi_callback_invoke", rt_ffi_callback_invoke as *const () as usize),
+        ("rt_ffi_callback_leave", rt_ffi_callback_leave as *const () as usize),
         ("rt_str_new", rt_str_new as *const () as usize),
         ("rt_str_length", rt_str_length as *const () as usize),
         ("rt_str_ref", rt_str_ref as *const () as usize),

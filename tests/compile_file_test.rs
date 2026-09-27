@@ -1885,3 +1885,62 @@ fn an_eval_carrying_program_can_use_a_macro_that_calls_gensym() {
     );
     assert_eq!(code, 2, "stderr was: {}", err);
 }
+
+// ---- C callbacks ---------------------------------------------------------
+
+const QSORT_AOT: &str = r#"
+(defffi (c-free "free") (ptr) ())
+(defffi (c-strdup "strdup") (string) ptr)
+(defffi (c-strncmp "strncmp") (ptr ptr c-ulong) i32)
+(defffi (c-strcmp "strcmp") (string string) i32)
+(defffi (text-of "strstr") (ptr string) string)
+(defffi (c-qsort "qsort") (ptr c-ulong c-ulong (fn (ptr ptr) i32)) ())
+(defun desc ((a ptr) (b ptr)) i32 (unsafe (c-strncmp b a 1)))
+(defun sorted-with ((s string) (how int)) string
+  (unsafe
+    (let ((buf (c-strdup s)))
+      (if (= how 0)
+          (c-qsort buf 4 1 desc)
+          (if (= how 1)
+              (c-qsort buf 4 1 (lambda ((a ptr) (b ptr)) i32 (c-strncmp a b 1)))
+              (labels ((cmp ((a ptr) (b ptr)) i32 (flip (c-strncmp a b 1)))
+                       (flip ((n i32)) i32 (- (the i32 0) n)))
+                (c-qsort buf 4 1 cmp))))
+      (let ((r (text-of buf ""))) (c-free buf) r))))
+"#;
+
+/// A top-level function, a `lambda` and a local function, each handed to
+/// `qsort` from an executable: the entries were emitted into it and
+/// registered by its `main`.
+#[test]
+fn an_aot_executable_passes_callbacks_to_c() {
+    let (code, err) = compile_and_capture(
+        "aot_ffi_callbacks",
+        &format!(
+            "{}(defun main () int
+                 (if (and (= (unsafe (c-strcmp (sorted-with \"cadb\" 0) \"dcba\")) 0)
+                          (= (unsafe (c-strcmp (sorted-with \"cadb\" 1) \"abcd\")) 0)
+                          (= (unsafe (c-strcmp (sorted-with \"cadb\" 2) \"dcba\")) 0))
+                     0 1))",
+            QSORT_AOT
+        ),
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// A `panic` in a callback is raised once `qsort` returns, and ends the
+/// executable the way any other `panic` does.
+#[test]
+fn a_panic_in_a_callback_ends_an_aot_executable_after_the_c_call() {
+    let (code, err) = compile_and_capture(
+        "aot_ffi_callback_panic",
+        &format!(
+            "{}(defun main () int
+                 (unsafe (c-qsort (c-strdup \"dcba\") 4 1 (lambda ((a ptr) (b ptr)) i32 (panic \"boom\"))))
+                 0)",
+            QSORT_AOT
+        ),
+    );
+    assert_eq!(code, 1, "stderr was: {}", err);
+    assert!(err.contains("boom"), "stderr was: {}", err);
+}

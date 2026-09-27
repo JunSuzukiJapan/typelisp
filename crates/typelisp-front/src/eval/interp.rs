@@ -685,6 +685,15 @@ pub struct Interp {
     /// in this interpreter's module tree — on a worker as on the main thread
     /// before the interpreter joined. Set by `shim::rt_eval_init`.
     pub(crate) executable_printer: std::cell::Cell<bool>,
+    /// The C callback entries this session has made, by key
+    /// (`crate::ffi_callback`), each with the compiled body it runs — kept so
+    /// the code stays alive while C may hold the entry, and compared on every
+    /// lookup so a redefined function gets an entry of its own. Per session,
+    /// not per process: an entry runs code this session compiled.
+    callback_entries: RefCell<HashMap<String, (usize, Rc<dyn CompiledBody>)>>,
+    /// The bodies of entries [`Self::callback_entries`] has replaced: C may
+    /// still call an old entry, so what it runs must not be freed.
+    retired_callback_bodies: RefCell<Vec<Rc<dyn CompiledBody>>>,
     /// A shared handle to the live `Checker`, set by [`Self::set_checker`] on
     /// the drivers that support runtime `eval` (the CLI's `run_file`/`repl`
     /// and the LSP). `None` in throwaway/AOT/bootstrap/test
@@ -946,6 +955,8 @@ impl Interp {
             root.register_enum(&name, EnumDef { variants, templates });
         }
         Interp {
+            callback_entries: RefCell::new(HashMap::new()),
+            retired_callback_bodies: RefCell::new(Vec::new()),
             root: RefCell::new(root),
             checker: None,
             compiled_globals: RefCell::new(HashMap::new()),
@@ -1599,6 +1610,35 @@ impl Interp {
     /// leak leaves the slot dangling — which the rest of the process then
     /// follows, since an AOT program has no later crossing to refresh it.
     /// Re-registering the moved address is what closes that.
+    /// The address of the entry C calls for the callback `key` names — made
+    /// by the backend the first time it is asked for, and again whenever the
+    /// function has since been redefined or recompiled.
+    pub(crate) fn callback_address(&self, heap: &mut Heap, key: &str) -> Result<usize, EvalError> {
+        self.make_callback_entry(heap, key).map_err(EvalError::Panic)
+    }
+
+    /// [`Self::callback_address`], failing as a message — the shape the
+    /// runtime's factory answers in.
+    fn make_callback_entry(&self, heap: &mut Heap, key: &str) -> Result<usize, String> {
+        let sig = crate::ffi_callback::CallbackSig::parse(key)?;
+        let current = self
+            .root
+            .borrow()
+            .get_fn(&crate::dump::parse_path(&sig.path))
+            .and_then(|f| f.compiled.borrow().clone());
+        if let (Some((addr, body)), Some(now)) = (self.callback_entries.borrow().get(key), &current) {
+            if Rc::ptr_eq(body, now) {
+                return Ok(*addr);
+            }
+        }
+        let make = backend("a C callback").map_err(|e| e.to_string())?.callback_entry;
+        let (addr, body) = make(self, heap, key)?;
+        if let Some((_, old)) = self.callback_entries.borrow_mut().insert(key.to_string(), (addr, body)) {
+            self.retired_callback_bodies.borrow_mut().push(old);
+        }
+        Ok(addr)
+    }
+
     pub fn install_print_hooks(&self) {
         ACTIVE_INTERP.with(|cell| cell.set(self as *const Interp));
         typelisp_print::runtime::set_print_hooks(Some(INTERP_PRINT_HOOKS));
@@ -4386,6 +4426,10 @@ pub struct Backend {
     /// decides where a `FnDef` lives stays the one place that puts anything
     /// into it (`Interp::exec`).
     pub define_ffi: DefineFfiFn,
+    /// Makes the entry C calls for a callback — `crate::ffi_callback`'s key
+    /// names the function and its C signature — and answers its address.
+    /// The function is compiled first if it is not already.
+    pub callback_entry: fn(&Interp, &mut Heap, &str) -> Result<(usize, Rc<dyn CompiledBody>), String>,
 }
 
 thread_local! {
@@ -4399,8 +4443,28 @@ thread_local! {
 }
 
 /// Registers the LLVM backend for this thread.
+///
+/// Also installs the runtime's way to make a C callback entry compiled code
+/// asks for (`typelisp_rt::ffi_callback`): a session with a backend can make
+/// one, and an executable, which never calls this, registered all of its own
+/// at startup.
 pub fn set_backend(backend: Backend) {
     BACKEND.with(|cell| cell.set(Some(backend)));
+    typelisp_rt::ffi_callback::set_factory(callback_entry_from_compiled_code);
+}
+
+/// [`typelisp_rt::ffi_callback::set_factory`]'s factory: the entry for `key`,
+/// made through the interpreter compiled code is running under. The call
+/// that asks is made on that interpreter's thread (the bridge puts it there,
+/// `externs::needs_interpreter`), which is where the interpreter is active.
+fn callback_entry_from_compiled_code(key: &str) -> Result<usize, String> {
+    // SAFETY: the runtime asks only from inside a compiled call, which
+    // registered this thread's heap on the way in.
+    let heap = unsafe { typelisp_abi::active_heap() };
+    match with_active_interp(|i| i.make_callback_entry(heap, key)) {
+        Some(r) => r,
+        None => Err("ffi: a C callback was asked for with no interpreter running on this thread".to_string()),
+    }
 }
 
 /// The registered backend, or an error naming what needed it.

@@ -2130,7 +2130,7 @@ pub fn llvm_module_def() -> AdtDef {
     // ABI a `labels` block with outer-scope captures needs — `i64 name(i64*
     // args, i32 argc, i64* env, i32 env_len)` — used instead of
     // `add-function` exactly when that block's shared captured-name list
-    // (`compile::core_freevars::free_vars`) is non-empty. Every sibling in
+    // (`check::freevars::free_vars`) is non-empty. Every sibling in
     // such a block shares this one extended signature, even ones whose own
     // body doesn't reference every captured name (see `compiler.rs`'s
     // `compile-labels` doc comment for why captures aren't computed

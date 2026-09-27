@@ -18,7 +18,7 @@ use std::path::Path;
 
 fn main() {
     // This ran on a thread with an explicit 64MB stack until 2026-09-08.
-    // Building the dump drives `core_freevars`'s walk over `compile-function`'s
+    // Building the dump drives `check::freevars`'s walk over `compile-function`'s
     // huge `labels` body, which checks and runs the self-hosted compiler, and
     // the evaluator recursed once per `if`-nesting level along the way. That
     // half now runs on a continuation stack in the heap

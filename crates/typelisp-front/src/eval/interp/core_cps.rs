@@ -2254,6 +2254,17 @@ impl Interp {
             let d = io_deadline(super::rt_f64(heap, &secs)?)?;
             return Ok((State::Blocked(io_wait(heap, &argv, Some(d))?), None));
         }
+        // A C callback's entry address — the checker's lowering of a callback
+        // argument (`checker::ffi_callback`). The answer is a raw word, which
+        // is how the interpreter carries a `ptr`.
+        if path == crate::Path::root(crate::ffi_callback::ADDRESS_BUILTIN) {
+            let key = match argv.first() {
+                Some(Value::Str(id)) => heap.string(*id).to_string(),
+                _ => return Err(EvalError::Internal("ffi: a callback address without its key".to_string())),
+            };
+            let addr = self.callback_address(heap, &key)?;
+            return Ok((State::Apply(Value::Int(addr as i64)), None));
+        }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, form, &f, argv);
         }

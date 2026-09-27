@@ -6179,7 +6179,7 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
     let globals = HashMap::new();
     // What the driver does before translating a body: any binding something
     // nested captures must be a cell from the moment it is bound.
-    let cells = typelisp::compile::core_freevars::names_captured_by_nested(&h, &[form])
+    let cells = typelisp::check::freevars::names_captured_by_nested(&h, &[form])
         .expect("the capture walk failed");
     let cx = Ctx::new(&definitions, &globals).with_cell_names(&cells);
     let island = typelisp::compile::core_bridge::to_island(&mut h, form, cx).expect("bridge failed");

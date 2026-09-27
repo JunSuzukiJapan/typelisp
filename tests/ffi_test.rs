@@ -534,3 +534,170 @@ fn a_generic_declaration_is_refused() {
     let e = err(r#"(defffi (c-id<t> "abs") (t) t)"#);
     assert!(!e.is_empty(), "a generic FFI declaration must not be accepted");
 }
+
+// ---------------------------------------------------------------- callbacks
+//
+// A `defffi` parameter declared `(fn (T...) R)` takes a function C calls
+// back. libc's `qsort` is the caller: its comparator gets two pointers into
+// the buffer, which `strncmp` compares a byte at a time, and `strstr(p, "")`
+// reads the sorted buffer back as a string.
+
+const QSORT: &str = r#"
+(defffi (c-free "free") (ptr) ())
+(defffi (c-strdup "strdup") (string) ptr)
+(defffi (c-strncmp "strncmp") (ptr ptr c-ulong) i32)
+(defffi (text-of "strstr") (ptr string) string)
+(defffi (c-qsort "qsort") (ptr c-ulong c-ulong (fn (ptr ptr) i32)) ())
+"#;
+
+/// `body` inside a function that sorts the 4 bytes of `s` with `(c-qsort buf 4 1 CMP)`,
+/// where `CMP` is written by `body` — and the sorted text.
+fn sorted(defs: &str, cmp: &str) -> String {
+    text(&format!(
+        "{}{}
+         (defun sort4 ((s string)) string
+           (unsafe
+             (let ((buf (c-strdup s)))
+               {}
+               (let ((r (text-of buf \"\"))) (c-free buf) r))))
+         (sort4 \"cadb\")",
+        QSORT, defs, cmp
+    ))
+}
+
+#[test]
+fn a_top_level_function_is_a_callback() {
+    let src = "(defun desc ((a ptr) (b ptr)) i32 (unsafe (c-strncmp b a 1)))";
+    assert_eq!(sorted(src, "(c-qsort buf 4 1 desc)"), "dcba");
+}
+
+#[test]
+fn a_lambda_without_free_variables_is_a_callback() {
+    assert_eq!(sorted("", "(c-qsort buf 4 1 (lambda ((a ptr) (b ptr)) i32 (c-strncmp a b 1)))"), "abcd");
+}
+
+/// The local function and the sibling it calls are lifted together.
+#[test]
+fn a_local_function_without_free_variables_is_a_callback() {
+    let cmp = "(labels ((cmp ((a ptr) (b ptr)) i32 (flip (c-strncmp a b 1)))
+                        (flip ((n i32)) i32 (- (the i32 0) n)))
+                 (c-qsort buf 4 1 cmp))";
+    assert_eq!(sorted("", cmp), "dcba");
+}
+
+/// The same three, with the function that passes them compiled.
+#[test]
+fn a_compiled_caller_passes_callbacks() {
+    let src = format!(
+        "{}
+         (defun desc ((a ptr) (b ptr)) i32 (unsafe (c-strncmp b a 1)))
+         (defun sort3 ((s string)) string
+           (unsafe
+             (let ((buf (c-strdup s)))
+               (c-qsort buf 3 1 desc)
+               (let ((r1 (text-of buf \"\")))
+                 (c-qsort buf 3 1 (lambda ((a ptr) (b ptr)) i32 (c-strncmp a b 1)))
+                 (let ((r2 (text-of buf \"\")))
+                   (c-free buf)
+                   (append r1 r2))))))
+         (compile sort3)
+         (sort3 \"bca\")",
+        QSORT
+    );
+    assert_eq!(text(&src), "cbaabc");
+}
+
+#[test]
+fn a_lambda_that_captures_is_refused() {
+    let e = err(&format!(
+        "{}(defun f ((k i32)) () (unsafe (c-qsort (c-strdup \"ab\") 2 1 (lambda ((a ptr) (b ptr)) i32 k))))",
+        QSORT
+    ));
+    assert!(e.contains("refers to `k`"), "unexpected error: {}", e);
+}
+
+/// A sibling's capture is the passed function's too: they share one
+/// environment.
+#[test]
+fn a_local_function_whose_sibling_captures_is_refused() {
+    let e = err(&format!(
+        "{}(defun f ((k i32)) ()
+             (unsafe (labels ((g ((a ptr) (b ptr)) i32 (h)) (h () i32 k))
+                       (c-qsort (c-strdup \"ab\") 2 1 g))))",
+        QSORT
+    ));
+    assert!(e.contains("`h` refers to `k`"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_variable_holding_a_function_is_refused() {
+    let e = err(&format!(
+        "{}(defun f () ()
+             (unsafe (let ((k (lambda ((a ptr) (b ptr)) i32 0))) (c-qsort (c-strdup \"ab\") 2 1 k))))",
+        QSORT
+    ));
+    assert!(e.contains("`k` is a variable"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_callback_cannot_return_a_string() {
+    let e = err(r#"(defffi (c-q "qsort") (ptr c-ulong c-ulong (fn (ptr ptr) string)) ())"#);
+    assert!(e.contains("cannot return `string`"), "unexpected error: {}", e);
+}
+
+/// A `panic` in the callback does not unwind through `qsort`: it is raised
+/// once `qsort` returns, as the error of the call around it.
+#[test]
+fn a_panic_in_a_callback_is_raised_after_the_c_call_returns() {
+    let e = err(&format!(
+        "{}(unsafe (c-qsort (c-strdup \"dcba\") 4 1 (lambda ((a ptr) (b ptr)) i32 (panic \"boom\"))))",
+        QSORT
+    ));
+    assert!(e.contains("boom"), "unexpected error: {}", e);
+}
+
+/// Once a callback has failed, C's further calls to it return at once
+/// without running it: the comparator ran exactly once.
+#[test]
+fn a_failed_callback_is_not_run_again_before_the_c_call_returns() {
+    let src = format!(
+        "{}(defvar (calls int) 0)
+         (catch 'out
+           (progn
+             (unsafe (c-qsort (c-strdup \"dcba\") 4 1
+                              (lambda ((a ptr) (b ptr)) i32 (progn (setf calls (+ calls 1)) (throw 'out ())))))
+             ()))
+         calls",
+        QSORT
+    );
+    assert_eq!(int(&src), 1);
+}
+
+/// A `throw` out of the callback reaches the `catch` around the C call.
+#[test]
+fn a_throw_out_of_a_callback_reaches_the_catch_around_the_c_call() {
+    let src = format!(
+        "{}(defun f () int
+             (catch 'out
+               (progn (unsafe (c-qsort (c-strdup \"dcba\") 4 1 (lambda ((a ptr) (b ptr)) i32 (throw 'out 7)))) 0)))
+         (f)",
+        QSORT
+    );
+    assert_eq!(int(&src), 7);
+}
+
+/// Redefining a function passed to C before gives it an entry of its own:
+/// the next call runs the new body, not the one the first entry was made for.
+#[test]
+fn a_redefined_callback_runs_its_new_body() {
+    let src = format!(
+        "{}(defun cmp ((a ptr) (b ptr)) i32 (unsafe (c-strncmp a b 1)))
+         (defun sort4 ((s string)) string
+           (unsafe (let ((buf (c-strdup s))) (c-qsort buf 4 1 cmp) (let ((r (text-of buf \"\"))) (c-free buf) r))))
+         (defvar (first string) (sort4 \"cadb\"))
+         (defun cmp ((a ptr) (b ptr)) i32 (unsafe (c-strncmp b a 1)))
+         (append first (sort4 \"cadb\"))",
+        QSORT
+    );
+    assert_eq!(text(&src), "abcddcba");
+}

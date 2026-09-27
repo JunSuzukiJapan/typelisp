@@ -51,7 +51,7 @@
 //! places that write to an existing slot a second time (or, for a cell-kind
 //! name, to the cell itself — see just below). A `setf` on a *captured*
 //! name now genuinely shares — closure-representation unification, Stage 4:
-//! any name `core_freevars::names_captured_by_nested` finds referenced inside a
+//! any name `check::freevars::names_captured_by_nested` finds referenced inside a
 //! nested `lambda`/`labels` is promoted, at `bind-params`/`bind-let-values`
 //! time, to a shared `BoxedObj::Cell` (`rt_cell_new`) instead of an ordinary
 //! stack slot — a captured name is *always* one of these (every entry a

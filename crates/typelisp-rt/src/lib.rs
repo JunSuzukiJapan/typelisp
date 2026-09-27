@@ -47,6 +47,7 @@ pub use typelisp_read;
 pub mod coroutine;
 
 pub mod equality;
+pub mod ffi_callback;
 pub mod integer;
 pub mod net;
 pub mod net_builtin;
@@ -3364,9 +3365,14 @@ pub unsafe extern "C" fn rt_ffi_enter_native(_args: *const i64, _argc: u32) -> i
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread, inside `rt_ffi_enter_native`.
+///
+/// Also where a callback's failure kept while C was running is re-raised —
+/// the first point after the C call where unwinding is defined again (see
+/// [`ffi_callback`]). Hence `C-unwind`.
 #[no_mangle]
-pub unsafe extern "C" fn rt_ffi_leave_native(_args: *const i64, _argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_ffi_leave_native(_args: *const i64, _argc: u32) -> i64 {
     active_heap().leave_native();
+    ffi_callback::resume_pending();
     0
 }
 

@@ -66,7 +66,7 @@ use super::symbols::{
     callee_symbol_name, fresh_lambda_name, llvm_op_id, user_method_symbol_name, DynTables,
     HASHTABLE_BUILTIN_METHODS, VECTOR_BUILTIN_METHODS,
 };
-use super::core_freevars::{free_vars, names_captured_by_nested};
+use typelisp_front::check::freevars::{free_vars, names_captured_by_nested};
 
 /// Which types this translation can mention are `defstruct`s.
 ///
@@ -261,11 +261,11 @@ impl<'a> Ctx<'a> {
     ///
     /// A function body's own bindings that something nested inside captures
     /// have to be cells from the moment they are bound, so the driver computes
-    /// them once — [`core_freevars::names_captured_by_nested`] over the body —
+    /// them once — [`freevars::names_captured_by_nested`] over the body —
     /// and hands them in here before translating it. Without this the closure
     /// would read through a cell the binder never created.
     ///
-    /// [`core_freevars::names_captured_by_nested`]: super::core_freevars::names_captured_by_nested
+    /// [`freevars::names_captured_by_nested`]: typelisp_front::check::freevars::names_captured_by_nested
     pub fn with_cell_names(self, names: &'a HashSet<SymRef>) -> Ctx<'a> {
         Ctx { cell_names: names, ..self }
     }
@@ -2659,7 +2659,7 @@ fn cell_bindings(heap: &mut Heap, cells: &[(SymRef, Repr)], cx: Ctx) -> Result<V
 /// sub-patterns bind at the per-field representations that node carries (one
 /// per sub-pattern — `check_ctor_pattern` builds both lists in one loop).
 ///
-/// The name half of this walk is [`super::core_freevars`]'s own
+/// The name half of this walk is [`typelisp_front::check::freevars`]'s own
 /// `pattern_bindings`; this one exists because the *representations* are what
 /// the body needs, and only the bridge has them.
 fn pattern_bindings(
@@ -3160,7 +3160,7 @@ mod tests {
         h.push_root(core_form);
         // What the driver does before translating a function body: the
         // bindings something nested captures have to be cells from the start.
-        let cells = crate::compile::core_freevars::names_captured_by_nested(&h, &[core_form])
+        let cells = typelisp_front::check::freevars::names_captured_by_nested(&h, &[core_form])
             .expect("the capture walk failed");
         let cx = Ctx::new(&definitions, &globals).with_cell_names(&cells);
         let island =

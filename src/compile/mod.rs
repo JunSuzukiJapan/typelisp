@@ -19,7 +19,6 @@ pub fn runtime_function_names() -> Vec<&'static str> {
 pub mod aot;
 pub mod bootstrap;
 pub mod core_bridge;
-pub mod core_freevars;
 pub mod driver;
 pub mod dump;
 pub mod externs;
@@ -48,6 +47,7 @@ pub fn install_llvm_backend() {
         compile_file: aot::compile_file,
         dump_image: dump::dump_image,
         define_ffi: ffi::define_ffi,
+        callback_entry: ffi::callback_entry,
     });
 }
 pub mod prelude_bootstrap;

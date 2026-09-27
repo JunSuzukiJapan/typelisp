@@ -63,6 +63,13 @@ pub fn set_active_heap(heap: *mut Heap) {
     ACTIVE_HEAP.with(|cell| cell.set(heap));
 }
 
+/// Whether this thread has an active `Heap` registered — asked by the one
+/// entry point that can be reached from a thread typelisp never ran on (a C
+/// callback), where [`active_heap`] would dereference nothing.
+pub fn heap_registered() -> bool {
+    !ACTIVE_HEAP.with(|cell| cell.get()).is_null()
+}
+
 /// Dereferences the current thread's active `Heap`.
 ///
 /// # Safety

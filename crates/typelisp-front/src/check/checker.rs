@@ -21,6 +21,8 @@ use super::fold;
 use super::forms;
 use super::repr::Repr;
 use crate::dump::{CheckerDelta, RegistrySignature};
+
+mod ffi_callback;
 use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, TypeAlias, VarInfo, Variant};
 
 /// Expands a macro call *during* type-checking: `path` names a `defmacro`,
@@ -291,6 +293,12 @@ impl Env {
 
     fn get(&self, name: &str) -> Option<&Type> {
         self.vars.iter().rev().find(|(n, _, _)| n == name).map(|(_, t, _)| t)
+    }
+
+    /// Where the nearest binding of `name` sits in [`Self::vars`] — stable
+    /// down a chain of `extended` environments, which only ever append.
+    fn position(&self, name: &str) -> Option<usize> {
+        self.vars.iter().rposition(|(n, _, _)| n == name)
     }
 
     /// The nearest binding of `name`'s own recorded source position, if any —
@@ -1052,6 +1060,16 @@ pub struct Checker {
     /// holds the table). The interpreter needs none of it: it has the whole
     /// method table at hand and looks the name up when the directive runs.
     format_calls: RefCell<BTreeSet<(Path, String)>>,
+    /// Every C callback entry asked for so far, by key — see
+    /// [`Self::ffi_callback_keys`].
+    callback_keys: RefCell<BTreeSet<String>>,
+    /// Definitions lifted out of this form for a C callback, placed ahead of
+    /// it by [`Self::check_form_at`] — see `checker::ffi_callback`.
+    lifted: RefCell<Vec<ffi_callback::LiftedCallback>>,
+    /// The `labels` blocks whose names are in scope, innermost last.
+    labels_scopes: RefCell<Vec<ffi_callback::LabelsScope>>,
+    /// Numbers lifted definitions' names.
+    callback_seq: Cell<u64>,
     /// Holes ([`Self::infer_probe`]) made and still standing in the tree
     /// checked so far. Snapshotted around each probe and restored when the
     /// probed subtree is thrown away, so it counts holes in *retained* output
@@ -1093,6 +1111,10 @@ impl Checker {
             infer_probe: Cell::new(false),
             probe_holes: Cell::new(0),
             format_calls: RefCell::new(BTreeSet::new()),
+            callback_keys: RefCell::new(BTreeSet::new()),
+            lifted: RefCell::new(Vec::new()),
+            labels_scopes: RefCell::new(Vec::new()),
+            callback_seq: Cell::new(0),
         }
     }
 
@@ -2054,8 +2076,13 @@ impl Checker {
             None => Value::Empty,
         };
         f.push(lib);
-        let named: Vec<(String, Type)> =
-            params.iter().enumerate().map(|(i, t)| (format!("a{}", i), t.clone())).collect();
+        // A callback parameter crosses as the entry's address — a raw word —
+        // whatever function type it was declared with.
+        let named: Vec<(String, Type)> = params
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (format!("a{}", i), if matches!(t, Type::Fn(..)) { Type::Ptr } else { t.clone() }))
+            .collect();
         let ps = self.param_list_form(f.heap(), &named)?;
         f.push(ps);
         let r = self.repr_form(f.heap(), ret)?;
@@ -2451,9 +2478,17 @@ impl Checker {
         // aren't rolled back either).
         self.reg.def_locs.local_refs.extend(self.local_refs.borrow_mut().drain());
         self.reg.def_locs.node_types.extend(self.node_types.borrow_mut().drain());
+        // Definitions lifted for C callbacks (`checker::ffi_callback`) join the
+        // bundle after the instantiations — a lifted body may call one — and
+        // ahead of the form that asked for them.
+        let lifted = std::mem::take(&mut *self.lifted.borrow_mut());
         let result = match bundled {
-            Ok((specs, tl)) if specs.is_empty() => Ok(tl),
+            Ok((specs, tl)) if specs.is_empty() && lifted.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
+                for l in lifted {
+                    self.reg.root.module_mut(l.path.parent()).fns.insert(l.path.last_segment().to_string(), l.sig);
+                    specs.push(l.form);
+                }
                 specs.push(tl);
                 forms::module_form(heap, &Path::root(MONO_BUNDLE_MODULE), &specs)
             }
@@ -2554,7 +2589,7 @@ impl Checker {
                 name
             )));
         }
-        let (params, rest) = self.parse_signature_params(heap, parts[1])?;
+        let (params, rest) = self.parse_signature_params(heap, parts[1], false)?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
 
         let fq_name = self.fq(&name);
@@ -2597,7 +2632,10 @@ impl Checker {
     /// A `defsignature`'s parameter list: bare types, with an optional
     /// trailing `&rest T`. The `(name type)` pairs `defun` writes have no
     /// counterpart here — see [`Self::check_defsignature`].
-    fn parse_signature_params(&self, heap: &Heap, v: Value) -> Result<(Vec<Type>, Option<Type>), Error> {
+    ///
+    /// `callbacks` is `defffi`'s: a parameter may then be a function type
+    /// C calls back through (see [`Self::parse_callback_type_at`]).
+    fn parse_signature_params(&self, heap: &Heap, v: Value, callbacks: bool) -> Result<(Vec<Type>, Option<Type>), Error> {
         let elems_locs = heap.list_to_vec_locs(v)?;
         let is_rest_marker =
             |p: &Value| matches!(p, Value::Symbol(id) if id.is(wk::REST));
@@ -2625,9 +2663,55 @@ impl Checker {
         };
         let mut params = Vec::with_capacity(fixed.len());
         for (v, loc) in fixed {
-            params.push(self.parse_type_here_at(heap, *v, loc.as_ref())?);
+            let ty = if callbacks {
+                self.parse_callback_type_at(heap, *v, loc.as_ref())?
+            } else {
+                self.parse_type_here_at(heap, *v, loc.as_ref())?
+            };
+            params.push(ty);
         }
         Ok((params, rest_ty))
+    }
+
+    /// A `defffi` parameter type: [`Self::parse_type_here_at`]'s, except
+    /// that a function type — a callback C will call — may take and answer
+    /// raw words. It never lands in a tagged slot: the argument crosses to C
+    /// as the address of an entry (`checker::ffi_callback`), and the raw
+    /// words inside it are the C arguments and answer of that entry.
+    ///
+    /// Whether each type inside can be spelled in C is the backend's question,
+    /// as it is for every other `defffi` type.
+    fn parse_callback_type_at(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
+        let mut spans = Vec::new();
+        let written = parse_type_spanned(heap, v, loc, &mut spans)?;
+        self.check_type_alias_arity(&written)?;
+        let ty = self.canon(&written);
+        for span in &spans {
+            self.record_type_span(span);
+        }
+        self.reject_trait_in_type_position(&ty)?;
+        self.reject_unknown_type_name(&ty)?;
+        match &ty {
+            Type::Fn(params, rest, ret) => {
+                if rest.is_some() {
+                    return Err(Error::TypeError(
+                        "defffi: a callback cannot be variadic — C calls it with a fixed signature".into(),
+                    ));
+                }
+                for t in params.iter().chain(std::iter::once(&**ret)) {
+                    if matches!(t, Type::Fn(..)) {
+                        return Err(Error::TypeError(format!(
+                            "defffi: `{}` is a callback taking or returning a function, which C \
+                             could only do through another callback — declare that one as `ptr`",
+                            crate::type_key::type_key_of_type(&ty)
+                        )));
+                    }
+                    Self::reject_raw_word_nested(t)?;
+                }
+            }
+            _ => Self::reject_raw_word_nested(&ty)?,
+        }
+        Ok(ty)
     }
 
     /// `(defffi name (T...) Ret [:library "name"])` — a C function, declared.
@@ -2667,7 +2751,7 @@ impl Checker {
             ));
         }
         let (name, c_symbol) = Self::parse_defffi_name(heap, parts[0])?;
-        let (params, rest) = self.parse_signature_params(heap, parts[1])?;
+        let (params, rest) = self.parse_signature_params(heap, parts[1], true)?;
         if rest.is_some() {
             return Err(Error::TypeError(
                 "defffi: `&rest` cannot be declared — a variadic C function passes its variadic \
@@ -10806,45 +10890,61 @@ impl Checker {
         // Every function's name is visible to every body (including its
         // own) and to the trailing `body` — registered up front, like
         // `check_defun`'s pre-body signature insert.
+        let names: Vec<String> = sigs.iter().map(|(n, _, _)| n.clone()).collect();
         let labels_env = env.extended_with_locs(sigs)?;
-
-        let mut defs = Vec::new();
-        for Spec { name, params, param_locs, ret, raw_body, body_locs } in parsed {
-            let binds: Vec<(String, Type, Option<Loc>)> =
-                params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
-            let fn_env = labels_env.extended_with_locs(binds)?;
-            // A new function boundary, same as `lambda`: `break`/`return`
-            // can't reach an outer loop through it. A local function *does*
-            // get CL's implicit block, named after itself, so `return-from`
-            // works inside it the way it does in a `defun`.
-            let saved = self.loop_stack.replace(Vec::new());
-            let saved_blocks = self.block_stack.replace(Vec::new());
-            let result = self.check_block_body(
-                heap,
-                interp,
-                &fn_env,
-                &raw_body,
-                &body_locs,
-                &name,
-                ret.clone(),
-                Some(&ret),
-            );
-            self.block_stack.replace(saved_blocks);
-            self.loop_stack.replace(saved);
-            let (body, _, used) = result?;
-            let body = if used {
-                let seq = self.let_form(heap, &[], &body)?;
-                let seq = forms::rooted(heap, seq);
-                let repr = self.repr_form(heap, &ret)?;
-                vec![forms::block_form(heap, &name, seq, repr)?]
-            } else {
-                body
-            };
-            defs.push((name, params, ret, body));
+        // Open while every body and the trailing body are checked, so a C
+        // callback naming one of these functions can be told apart from a
+        // variable — see `checker::ffi_callback`.
+        self.open_labels_scope(env.vars.len(), names);
+        let checked = (|| -> Result<(Vec<LabelsDef>, Vec<Value>, Type), Error> {
+            let mut defs = Vec::new();
+            for Spec { name, params, param_locs, ret, raw_body, body_locs } in parsed {
+                let binds: Vec<(String, Type, Option<Loc>)> =
+                    params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)).collect();
+                let fn_env = labels_env.extended_with_locs(binds)?;
+                // A new function boundary, same as `lambda`: `break`/`return`
+                // can't reach an outer loop through it. A local function *does*
+                // get CL's implicit block, named after itself, so `return-from`
+                // works inside it the way it does in a `defun`.
+                let saved = self.loop_stack.replace(Vec::new());
+                let saved_blocks = self.block_stack.replace(Vec::new());
+                let result = self.check_block_body(
+                    heap,
+                    interp,
+                    &fn_env,
+                    &raw_body,
+                    &body_locs,
+                    &name,
+                    ret.clone(),
+                    Some(&ret),
+                );
+                self.block_stack.replace(saved_blocks);
+                self.loop_stack.replace(saved);
+                let (body, _, used) = result?;
+                let body = if used {
+                    let seq = self.let_form(heap, &[], &body)?;
+                    let seq = forms::rooted(heap, seq);
+                    let repr = self.repr_form(heap, &ret)?;
+                    vec![forms::block_form(heap, &name, seq, repr)?]
+                } else {
+                    body
+                };
+                defs.push((name, params, ret, body));
+            }
+            let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], &arg_locs[1..], expected)?;
+            Ok((defs, body, ty))
+        })();
+        match checked {
+            Ok((defs, body, ty)) => {
+                self.close_labels_scope(heap, Some(&defs))?;
+                let form = self.labels_form(heap, &defs, &body)?;
+                Ok(Checked::new(form, ty))
+            }
+            Err(e) => {
+                self.close_labels_scope(heap, None)?;
+                Err(e)
+            }
         }
-        let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], &arg_locs[1..], expected)?;
-        let form = self.labels_form(heap, &defs, &body)?;
-        Ok(Checked::new(form, ty))
     }
 
     /// Type-check applying a function *value* `callee` to `args`. If
@@ -14930,6 +15030,12 @@ impl Checker {
         let mut subst: BTreeMap<String, Type> = BTreeMap::new();
         let mut typed = Vec::new();
         for (i, (arg, pty)) in args[..fixed].iter().zip(sig.params.iter()).enumerate() {
+            // A C function's function-typed parameter takes a callback: the
+            // argument becomes the address of the entry C calls.
+            if sig.ffi && matches!(pty, Type::Fn(..)) {
+                typed.push(self.check_callback_arg(heap, interp, env, *arg, nth_loc(arg_locs, i), pty, name)?);
+                continue;
+            }
             let st = subst_apply(pty, &subst);
             let exp = if type_has_param(&st, &params) { None } else { Some(st) };
             let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;

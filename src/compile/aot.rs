@@ -579,6 +579,15 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let result = {
         let m = module.borrow();
+        // One entry per C callback the program passes (`checker::ffi_callback`),
+        // each running a function compiled into this module; the generated
+        // `main` registers them before anything runs.
+        let mut callback_entries = Vec::new();
+        for (i, key) in chk.ffi_callback_keys().into_iter().enumerate() {
+            let sig = typelisp_front::ffi_callback::CallbackSig::parse(&key)?;
+            let entry = crate::compile::ffi::emit_callback_entry_in_module(&m, &format!("tl_ffi_callback_entry${}", i), &sig)?;
+            callback_entries.push((key, entry));
+        }
         build_main_wrapper(
             ctx,
             &m,
@@ -589,6 +598,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &interp.field_template_descriptors(),
             &print_objects,
             &format_calls,
+            &callback_entries,
             eval_env.as_deref(),
             main_returns_int,
         )
@@ -647,6 +657,7 @@ fn build_main_wrapper(
     field_templates: &[(String, i64, i64, String)],
     print_objects: &[(String, String)],
     format_calls: &[(String, String, String)],
+    callback_entries: &[(String, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<&[u8]>,
     main_returns_int: bool,
 ) -> Result<(), String> {
@@ -748,6 +759,21 @@ fn build_main_wrapper(
                 .build_call(rt_upcast_set, &[args_ptr.into(), ctx.i32_type().const_int(3, false).into()], "upcast_set_result")
                 .map_err(|e| format!("failed to build rt_upcast_set call: {}", e))?;
         }
+    }
+    // The C callback entries (`typelisp_rt::ffi_callback`): the key a callback
+    // argument looks up, and the entry's address. Constants only, like the
+    // tables above.
+    for (i, (key, entry)) in callback_entries.iter().enumerate() {
+        let i64_ty = ctx.i64_type();
+        let g = builder
+            .build_global_string_ptr(key, &format!("ffi_callback_key${}", i))
+            .map_err(|e| format!("failed to build a callback key: {}", e))?;
+        let words = [
+            g.as_pointer_value().const_to_int(i64_ty),
+            i64_ty.const_int(key.len() as u64, false),
+            entry.as_global_value().as_pointer_value().const_to_int(i64_ty),
+        ];
+        call_shim(ctx, module, &builder, "rt_ffi_callback_register", &words)?;
     }
     // The printer's two program facts (`typelisp_print::aot`): an enum's
     // variant *names* and each type's `print-object`, neither of which a
@@ -1369,9 +1395,15 @@ mod tests {
             inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
             inkwell::values::ValueKind::Instruction(_) => panic!("rt_ping call produced no value"),
         };
-        builder.build_return(Some(&result)).unwrap();
+        // A `main` that returns normally exits 0 whatever it answers
+        // (`rt_run_entry`), so the answer leaves through `exit` instead.
+        let exit_ty = ctx.void_type().fn_type(&[ctx.i32_type().into()], false);
+        let exit = module.add_function("exit", exit_ty, None);
+        let code = builder.build_int_truncate(result, ctx.i32_type(), "code").unwrap();
+        builder.build_call(exit, &[code.into()], "").unwrap();
+        builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1410,7 +1442,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

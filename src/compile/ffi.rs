@@ -92,6 +92,13 @@ impl CType {
     /// `defffi` node carries — one producer, so there is nothing to keep in
     /// agreement.
     fn from_key(key: &str) -> Option<CType> {
+        // A callback parameter: what crosses is the address of the entry C
+        // calls (`typelisp_front::ffi_callback`), so to the thunk it is a
+        // pointer. Whether the callback's own types can be spelled is
+        // [`callback_ctypes`]'s question.
+        if typelisp_front::ffi_callback::split_fn_key(key).is_some() {
+            return Some(CType::Ptr);
+        }
         // Covers the six widths *and* `c-long`/`c-ulong`, which that function
         // answers 64 for — the one place the LP64 assumption is written down.
         if let Some((bits, signed)) = typelisp_front::types::int_width_signed(key) {
@@ -258,7 +265,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
                 .map_err(|e| format!("ffi: failed to make a pointer from a C string: {}", e))?;
             call_args.push(p.into());
         } else {
-            call_args.push(word_to_c(&builder, word, *c)?);
+            call_args.push(word_to_c(&builder, word, *c)?.into());
         }
     }
 
@@ -414,6 +421,13 @@ fn call_shim(
 /// Every declared parameter as a [`CType`], or an error naming the first one
 /// that is not spellable in C.
 fn ctypes(keys: &[String], decl: &FfiDecl) -> Result<Vec<CType>, String> {
+    // A callback parameter's own types are checked here, at the declaration,
+    // rather than when an entry is first made for it.
+    for k in keys {
+        if let Some((params, ret)) = typelisp_front::ffi_callback::split_fn_key(k) {
+            callback_ctypes(&params, &ret).map_err(|e| format!("defffi: `{}`: {}", decl.path, e))?;
+        }
+    }
     keys.iter()
         .map(|k| match CType::from_key(k) {
             Some(CType::Void) => Err(format!(
@@ -440,7 +454,7 @@ fn word_to_c(
     builder: &inkwell::builder::Builder<'static>,
     word: IntValue<'static>,
     c: CType,
-) -> Result<BasicMetadataValueEnum<'static>, String> {
+) -> Result<BasicValueEnum<'static>, String> {
     let ctx = llvm_context();
     Ok(match c {
         // A `ptr` is already the whole word; it only has to become a pointer.
@@ -678,4 +692,220 @@ pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBod
         .map_err(|e| format!("ffi: failed to JIT the thunk for `{}`: {}", decl.c_symbol, e))?;
     let addr = code.address();
     Ok(Rc::new(FfiThunk { code, addr }))
+}
+
+// ---- C calling back: the entries ------------------------------------------
+//
+// A `defffi` parameter declared `(fn (T...) R)` hands C the address of an
+// **entry**: a function with that C signature which runs a typelisp function.
+// The mirror image of a thunk. A thunk turns words into C values, calls C and
+// turns the answer back; an entry turns C values into words, runs the
+// function (`typelisp_rt::ffi_callback::rt_ffi_callback_invoke`) and turns
+// its answer into the C value it returns. Both conversions are the ones the
+// thunk already has, run in the other direction.
+
+/// A callback's C parameter and return types, from their type keys — or why
+/// C cannot call a function with them.
+fn callback_ctypes(params: &[String], ret: &str) -> Result<(Vec<CType>, CType), String> {
+    let mut out = Vec::with_capacity(params.len());
+    for p in params {
+        match CType::from_key(p) {
+            Some(CType::Void) => return Err("a callback parameter cannot be `()`".to_string()),
+            Some(c) => out.push(c),
+            None => {
+                return Err(format!(
+                    "a callback takes `{}`, which the FFI cannot spell in C. It can spell the \
+                     integer widths (i8/i16/i32/u8/u16/u32), c-long, c-ulong, f32, f64, bool, \
+                     string and ptr.",
+                    p
+                ))
+            }
+        }
+    }
+    let ret = match CType::from_key(ret) {
+        // Who would free it? C did not make it and cannot know how.
+        Some(CType::Str) => {
+            return Err(
+                "a callback cannot return `string` — C would be handed memory nobody frees. \
+                 Return a `ptr` to memory C owns instead."
+                    .to_string(),
+            )
+        }
+        Some(c) => c,
+        None => return Err(format!("a callback returns `{}`, which the FFI cannot spell in C", ret)),
+    };
+    Ok((out, ret))
+}
+
+/// Emit an entry named `name` into `module`: a function with the C signature
+/// `params`/`ret` that runs the coroutine-ABI body at `target` — a constant
+/// address (JIT) or a function of the same module (AOT).
+fn emit_callback_entry(
+    module: &Module<'static>,
+    name: &str,
+    target: IntValue<'static>,
+    params: &[CType],
+    ret: CType,
+) -> Result<FunctionValue<'static>, String> {
+    let ctx = llvm_context();
+    let i64_ty = ctx.i64_type();
+    let builder = ctx.create_builder();
+    let arg_tys: Vec<BasicMetadataTypeEnum<'static>> =
+        params.iter().map(|c| c.llvm().expect("a callback parameter is never void").into()).collect();
+    let fn_ty = match ret.llvm() {
+        Some(t) => t.fn_type(&arg_tys, false),
+        None => ctx.void_type().fn_type(&arg_tys, false),
+    };
+    let entry = module.add_function(name, fn_ty, None);
+    // The same extensions a call site asks for, from the callee's side: C
+    // extends a narrow argument before the call and expects a narrow answer
+    // already extended.
+    for (i, c) in params.iter().enumerate() {
+        if let Some(attr) = c.extension_attribute() {
+            add_attribute(entry, inkwell::attributes::AttributeLoc::Param(i as u32), attr);
+        }
+    }
+    if let Some(attr) = ret.extension_attribute() {
+        add_attribute(entry, inkwell::attributes::AttributeLoc::Return, attr);
+    }
+    builder.position_at_end(ctx.append_basic_block(entry, "entry"));
+    let shim = |n: &str| match module.get_function(n) {
+        Some(f) => f,
+        None => module.add_function(n, compiled_fn_type(), None),
+    };
+    let scratch = builder
+        .build_alloca(i64_ty, "cb_scratch")
+        .map_err(|e| format!("ffi: failed to reserve the callback scratch slot: {}", e))?;
+    let one = ctx.i32_type().const_int(1, false);
+    let zero = i64_ty.const_zero();
+
+    call_shim(&builder, shim("rt_ffi_callback_enter"), scratch, one, zero, "cb_enter")?;
+
+    // `[target, n, kind0, word0, ...]` — see `rt_ffi_callback_invoke`.
+    let len = 2 + 2 * params.len();
+    let words = builder
+        .build_alloca(i64_ty.array_type(len as u32), "cb_args")
+        .map_err(|e| format!("ffi: failed to reserve the callback argument array: {}", e))?;
+    let store = |i: usize, w: IntValue<'static>| -> Result<(), String> {
+        let slot = unsafe {
+            builder
+                .build_gep(i64_ty, words, &[i64_ty.const_int(i as u64, false)], "cb_arg_slot")
+                .map_err(|e| format!("ffi: failed to index the callback argument array: {}", e))?
+        };
+        builder.build_store(slot, w).map_err(|e| format!("ffi: failed to store a callback argument: {}", e))?;
+        Ok(())
+    };
+    store(0, target)?;
+    store(1, i64_ty.const_int(params.len() as u64, false))?;
+    for (i, c) in params.iter().enumerate() {
+        let v = entry.get_nth_param(i as u32).expect("the entry has one parameter per declared type");
+        let (kind, word) = match c {
+            // Copied into a typelisp string by the runtime, where a bad one
+            // can fail inside the callback rather than here.
+            CType::Str => (
+                1,
+                builder
+                    .build_ptr_to_int(v.into_pointer_value(), i64_ty, "cb_cstr")
+                    .map_err(|e| format!("ffi: failed to take a string argument's address: {}", e))?,
+            ),
+            _ => (0, c_to_word(&builder, v, *c)?),
+        };
+        store(2 + 2 * i, i64_ty.const_int(kind, false))?;
+        store(3 + 2 * i, word)?;
+    }
+    let call = builder
+        .build_call(
+            shim("rt_ffi_callback_invoke"),
+            &[words.into(), ctx.i32_type().const_int(len as u64, false).into()],
+            "cb_value",
+        )
+        .map_err(|e| format!("ffi: failed to call the callback: {}", e))?;
+    let value = match call.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+        inkwell::values::ValueKind::Instruction(_) => {
+            return Err("internal error: the callback runner produced no value".to_string())
+        }
+    };
+    // Converted before the native section is re-entered, though it touches
+    // no heap: every step after `rt_ffi_callback_leave` is C's.
+    let out = match ret {
+        CType::Void => None,
+        _ => Some(word_to_c(&builder, value, ret)?),
+    };
+    call_shim(&builder, shim("rt_ffi_callback_leave"), scratch, one, zero, "cb_leave")?;
+    match out {
+        Some(v) => builder.build_return(Some(&v)),
+        None => builder.build_return(None),
+    }
+    .map_err(|e| format!("ffi: failed to build the callback's return: {}", e))?;
+    Ok(entry)
+}
+
+/// The C types a callback key declares.
+fn callback_sig_ctypes(sig: &typelisp_front::ffi_callback::CallbackSig) -> Result<(Vec<CType>, CType), String> {
+    callback_ctypes(&sig.params, &sig.ret)
+}
+
+/// [`emit_callback_entry`] for the callback `sig` names, into an executable's
+/// module: the body is the module's own compiled function.
+pub(crate) fn emit_callback_entry_in_module(
+    module: &Module<'static>,
+    name: &str,
+    sig: &typelisp_front::ffi_callback::CallbackSig,
+) -> Result<FunctionValue<'static>, String> {
+    let (params, ret) = callback_sig_ctypes(sig)?;
+    let symbol = crate::compile::symbols::user_symbol_name(&sig.path);
+    let body = module
+        .get_function(&symbol)
+        .ok_or_else(|| format!("compile-file: `{}` is passed to C as a callback but was not compiled", sig.path))?;
+    let target = body.as_global_value().as_pointer_value().const_to_int(llvm_context().i64_type());
+    emit_callback_entry(module, name, target, &params, ret)
+}
+
+thread_local! {
+    /// The code of every entry made on this thread. Never dropped: C may keep
+    /// an entry's address for as long as the process lives. (The body an
+    /// entry runs is kept alive by the interpreter's own table.)
+    static SESSION_ENTRIES: std::cell::RefCell<Vec<CompiledFn>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// `Backend::callback_entry`: compile the function `key` names if it is not
+/// already, emit its entry and JIT it.
+pub fn callback_entry(
+    interp: &Interp,
+    heap: &mut typelisp_mem::Heap,
+    key: &str,
+) -> Result<(usize, Rc<dyn CompiledBody>), String> {
+    let sig = typelisp_front::ffi_callback::CallbackSig::parse(key)?;
+    let (params, ret) = callback_sig_ctypes(&sig)?;
+    let path = typelisp_front::dump::parse_path(&sig.path);
+    let compiled = |interp: &Interp| interp.root.borrow().get_fn(&path).and_then(|f| f.compiled.borrow().clone());
+    if compiled(interp).is_none() {
+        let target = crate::CompileTarget::Fn(typelisp_front::check::resolved::Ref::synthetic(path.clone()));
+        crate::compile::driver::compile_function(interp, heap, &target)
+            .map_err(|e| format!("ffi: `{}` is passed to C as a callback and cannot be compiled: {}", path, e))?;
+    }
+    let body = compiled(interp).ok_or_else(|| format!("ffi: compiling `{}` left it without a body", path))?;
+    if body.body_abi() != typelisp_abi::BODY_ABI_COROUTINE {
+        return Err(format!("internal error: `{}` is compiled under the classic ABI", path));
+    }
+
+    let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let module = llvm_context().create_module("ffi_callback");
+    let target = llvm_context().i64_type().const_int(body.address() as u64, false);
+    let entry = emit_callback_entry(&module, "ffi_callback_entry", target, &params, ret)?;
+    let name = entry.get_name().to_str().map_err(|e| format!("ffi: entry name: {}", e))?.to_string();
+    module
+        .verify()
+        .map_err(|e| format!("ffi: the callback entry for `{}` is not valid IR: {}", path, e.to_string()))?;
+    let externals: Vec<(String, usize)> = crate::compile::externs::rt_extern_functions()
+        .iter()
+        .filter(|(n, _)| module.get_function(n).is_some())
+        .map(|(n, a)| (n.to_string(), *a))
+        .collect();
+    let code = CompiledFn::new(&module, &name, &externals, typelisp_abi::BODY_ABI_CLASSIC)
+        .map_err(|e| format!("ffi: failed to JIT the callback entry for `{}`: {}", path, e))?;
+    let addr = code.address();
+    SESSION_ENTRIES.with(|v| v.borrow_mut().push(code));
+    Ok((addr, body))
 }
