@@ -1,0 +1,117 @@
+# C FFI（defffi）
+
+C の関数を typelisp から呼ぶ方法を説明します。宣言できる型と制約の一覧は
+[構文リファレンス 3.3](../reference/syntax.md#33-defffi--c-関数の宣言ffi) にあります。
+
+## 1. 関数を宣言して呼ぶ
+
+`defffi` で C 関数の名前と型を宣言します。
+
+```lisp
+(defffi (c-getpid "getpid") () i32)            ; typelisp 側の名前と C のシンボル名
+(defffi (c-strlen "strlen") (string) c-ulong)
+(defffi (c-cos "cos") (f64) f64 :library "m")  ; libm から探す
+```
+
+呼び出しは `(unsafe ...)` で包みます。
+
+```lisp
+(unsafe (c-getpid))        ; => 12345
+(unsafe (c-cos 0.0))       ; => 1.0
+```
+
+`unsafe` が必要なのは、宣言した型が C 側の本当の型と合っているかを、コンパイラが確かめられない
+からです。`unsafe` と書くことで、その確認を書き手が引き受けたことになります。付け忘れると、
+その旨を説明するエラーになります。
+
+## 2. 安全なラッパを作る
+
+`unsafe` は 1 か所に閉じ込め、外には普通の関数として見せるのが想定された使い方です。
+
+```lisp
+(defun pid () i32 (unsafe (c-getpid)))
+(defun str-len ((s string)) int (as int (unsafe (c-strlen s))))
+
+(pid)              ; 呼ぶ側に unsafe はいらない
+(str-len "hello")  ; => 5
+```
+
+## 3. 型の対応
+
+| typelisp | C |
+|---|---|
+| `i8` `i16` `i32` / `u8` `u16` `u32` | 同じ幅の整数 |
+| `f32` / `f64` | `float` / `double` |
+| `bool` | `bool`（`_Bool`） |
+| `()` | `void` |
+| `string` | `const char *` |
+| `c-long` / `c-ulong` | `long` / `unsigned long`（`size_t` `int64_t` なども） |
+| `ptr` | 任意のポインタ（`void *` `FILE *` など） |
+
+### 文字列
+
+- `string` を渡すと、NUL 終端した C 文字列にコピーしてから渡し、呼び出しが終わったら解放します。
+  文字列の途中に NUL があるとエラーになります。
+- `string` を返す関数の結果もコピーされます。C 側のメモリは解放しません。呼び出し側が解放すべき
+  文字列を返す関数（`strdup` など）は、`ptr` で受けて自分で `free` してください。
+- `string` を返すと宣言した関数が NULL を返すとエラーになります。NULL を返しうる関数
+  （`getenv` など）は `ptr` で受けてください。
+
+### `c-long` / `c-ulong` / `ptr`
+
+これらは C との境界を渡すためだけの型で、**算術はできません**。typelisp の整数として使うときは
+`as` で変換します。
+
+```lisp
+(as int (unsafe (c-strlen s)))      ; int は 64bit の値を落とさない
+(try-as i32 (unsafe (c-strlen s)))  ; i32 に入らなければ none
+(unsafe (c-malloc 16))              ; 整数リテラルはそのまま渡せる
+```
+
+`ptr` は C の関数に渡し返すための値です。typelisp の側で中身を読む手段はありません。
+
+```lisp
+(defffi (c-malloc "malloc") (c-ulong) ptr)
+(defffi (c-free "free") (ptr) ())
+
+(unsafe (let ((p (c-malloc 16)))
+          (c-free p)
+          ()))
+```
+
+これらの型は、関数の引数・戻り値・局所変数にだけ置けます。構造体のフィールド、グローバル変数、
+`Vector` などの型引数には置けません。
+
+## 4. ライブラリを指定する
+
+`:library` を省くと、プロセスに既にリンクされているもの（libc など）からシンボルを探します。
+それ以外のライブラリの関数は `:library` で指定します。
+
+```lisp
+(defffi (sqlite-version "sqlite3_libversion") () string :library "sqlite3")
+```
+
+- `"sqlite3"` のような短い名前は、`libsqlite3.dylib`、`libsqlite3.so` の順に探します。
+- `/` を含む名前はパスとして扱います。
+- 宣言したシンボルが見つからなければ、その名前を挙げたエラーになります。
+
+## 5. AOT コンパイル
+
+`defffi` を使ったプログラムも、そのまま [`compile-file`](compile.md#3-aot-コンパイルで実行ファイルを作る)
+で実行ファイルにできます。`:library` で指定したライブラリはリンク時に自動で追加されるので、
+`compile-file` に引数を足す必要はありません。
+
+## 6. できないこと
+
+- **可変長引数の関数**（`printf` など）は宣言できません。可変長部分は固定引数と別の規則で
+  渡されるためです。使う引数の個数ごとに別の名前で宣言してください。
+- **構造体の値渡し・値返し**はできません。ポインタで受け渡す関数を使ってください。
+- **ジェネリックな宣言**はできません。
+- **組み込み関数と同じ名前**は付けられません。
+- **関数値として渡せません。** `(map xs c-abs)` のように渡すことはできないので、`lambda` で包みます。
+
+  ```lisp
+  (unsafe (lambda ((n i32)) i32 (c-abs n)))
+  ```
+
+- C 側から typelisp の関数を呼び返す（コールバック）手段はありません。

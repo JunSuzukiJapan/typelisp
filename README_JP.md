@@ -72,6 +72,15 @@ target/debug/typl foo.typl     # foo.typl を実行する
 
 日本語の文書の一覧は [docs/ja/README.md](docs/ja/README.md) にあります。
 
+### ガイド
+
+- [モジュールとファイル構成](docs/ja/guide/modules.md)
+- [コンパイル](docs/ja/guide/compile.md)
+- [ファイル I/O、ストリーム、ネットワーク](docs/ja/guide/io.md)
+- [C FFI](docs/ja/guide/ffi.md)
+- [エディタ連携](docs/ja/guide/editors.md)
+- [Common Lisp から来た人へ](docs/ja/guide/from-common-lisp.md)
+
 ### リファレンス
 
 - [構文リファレンス](docs/ja/reference/syntax.md)
