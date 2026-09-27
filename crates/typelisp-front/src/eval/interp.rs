@@ -686,8 +686,8 @@ pub struct Interp {
     /// before the interpreter joined. Set by `shim::rt_eval_init`.
     pub(crate) executable_printer: std::cell::Cell<bool>,
     /// A shared handle to the live `Checker`, set by [`Self::set_checker`] on
-    /// the drivers that support runtime `eval` (the CLI's `run_file`/`repl`/
-    /// `compile_module` and the LSP). `None` in throwaway/AOT/bootstrap/test
+    /// the drivers that support runtime `eval` (the CLI's `run_file`/`repl`
+    /// and the LSP). `None` in throwaway/AOT/bootstrap/test
     /// contexts, where `eval` returns an error rather than type-checking at
     /// runtime. The `Rc<RefCell<..>>` is the same cell the driver checks
     /// top-level forms through; the borrow discipline (never hold a checker

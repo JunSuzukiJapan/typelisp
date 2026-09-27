@@ -33,7 +33,7 @@ Emacs 版は [../emacs/](../emacs/README.md)。両者は同じキーワード表
 - **Outline / breadcrumbs / `Ctrl+Shift+O`**（関数・メソッド・マクロ・型・トレイト・
   `impl`・変数・モジュール）
 - **`typl-lsp` 連携**（診断・hover・定義ジャンプ・補完・semantic tokens）
-- **`typl` CLI コマンド**（実行・fasl 化・REPL）
+- **`typl` CLI コマンド**（実行・REPL）
 
 言語サーバ以外はすべて拡張単体で動くので、`typl-lsp` をビルドしていないチェックアウトでも
 ハイライト・インデント・Outline・（ファイル内に閉じた）型ハイライトは使える。
@@ -61,7 +61,6 @@ npm run compile
 | キー | コマンド | 内容 |
 |---|---|---|
 | `Ctrl+Alt+R` | `typelisp.runFile` | 保存して `typl FILE` で実行 |
-| `Ctrl+Alt+K` | `typelisp.compileModule` | `typl compile-module FILE` で fasl へプリコンパイル |
 | `Ctrl+Alt+Z` | `typelisp.repl` | `typl` の REPL を起動 |
 
 コマンドパレットには `typelisp: Restart Language Server` もある。

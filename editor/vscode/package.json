@@ -48,11 +48,6 @@
         "category": "typelisp"
       },
       {
-        "command": "typelisp.compileModule",
-        "title": "typelisp: Compile File to fasl",
-        "category": "typelisp"
-      },
-      {
         "command": "typelisp.repl",
         "title": "typelisp: Start REPL",
         "category": "typelisp"
@@ -67,11 +62,6 @@
       {
         "command": "typelisp.runFile",
         "key": "ctrl+alt+r",
-        "when": "editorLangId == typelisp"
-      },
-      {
-        "command": "typelisp.compileModule",
-        "key": "ctrl+alt+k",
         "when": "editorLangId == typelisp"
       },
       {

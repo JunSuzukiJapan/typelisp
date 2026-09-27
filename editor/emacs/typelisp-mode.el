@@ -1094,8 +1094,8 @@ headers come along for free: `<' and `>' are symbol constituents in
 
 (defcustom typelisp-program "typl"
   "Name of (or path to) the typelisp CLI executable.
-Invoked as `typl FILE' to run a source file, and `typl compile-module FILE'
-to precompile one to a fasl."
+Invoked as `typl FILE' to run a source file, and with no argument for the
+REPL."
   :type 'string
   :group 'typelisp)
 
@@ -1137,13 +1137,6 @@ Its `use' dependencies are resolved through the project's `typelisp.toml'
   (interactive)
   (typelisp--run nil))
 
-(defun typelisp-compile-module ()
-  "Precompile the current buffer's file to a fasl with `typl compile-module'.
-Only definitions are captured -- a top-level expression in the file is an
-error, since a fasl is a module rather than a script."
-  (interactive)
-  (typelisp--run '("compile-module")))
-
 (defun typelisp-repl ()
   "Start the typelisp REPL (`typl' with no file argument) in a comint buffer."
   (interactive)
@@ -1155,7 +1148,6 @@ error, since a fasl is a module rather than a script."
 (defvar typelisp-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-c") #'typelisp-run-buffer)
-    (define-key map (kbd "C-c C-k") #'typelisp-compile-module)
     (define-key map (kbd "C-c C-z") #'typelisp-repl)
     map)
   "Keymap for `typelisp-mode'.")

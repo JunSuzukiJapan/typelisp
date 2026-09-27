@@ -36,7 +36,6 @@ VS Code 版は [../vscode/](../vscode/README.md)。両者は同じキーワー�
 | キー | コマンド | 内容 |
 |---|---|---|
 | `C-c C-c` | `typelisp-run-buffer` | 保存して `typl FILE` で実行（`compile` 経由。エラー行へジャンプ可） |
-| `C-c C-k` | `typelisp-compile-module` | `typl compile-module FILE` で fasl へプリコンパイル |
 | `C-c C-z` | `typelisp-repl` | `typl` の REPL を comint バッファで起動 |
 
 `typl` の場所は `typelisp-program`（既定 `"typl"`）で指定する。

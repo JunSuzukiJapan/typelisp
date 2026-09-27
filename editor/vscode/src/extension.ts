@@ -51,7 +51,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(
     vscode.commands.registerCommand("typelisp.runFile", () => runCli([])),
-    vscode.commands.registerCommand("typelisp.compileModule", () => runCli(["compile-module"])),
     vscode.commands.registerCommand("typelisp.repl", startRepl),
     vscode.commands.registerCommand("typelisp.restartServer", async () => {
       await stopClient();
