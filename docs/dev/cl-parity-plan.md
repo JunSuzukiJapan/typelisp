@@ -30,7 +30,7 @@
 | **CLOS** — `defclass`/`make-instance`/`slot-value`/`with-slots`/`with-accessors`/`slot-boundp`/`slot-makunbound`/`defgeneric`/`call-next-method`/`next-method-p`/`:before` `:after` `:around`/`define-method-combination`/`initialize-instance`/`shared-initialize`/`reinitialize-instance`/`change-class`/`update-instance-for-*`/`make-load-form` | `deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置き換える既定方針（language-design.md §5.1/§5.2/§6）。単一・静的ディスパッチであることが型システムの前提になっている |
 | **ワイルドカードパス名・論理パス名**、パス名のホスト/デバイス/バージョン成分 | language-design.md §9。この処理系が走る環境に対応物が無い |
 | **`set-pprint-dispatch` / `*print-pprint-dispatch*` / `copy-pprint-dispatch`** | language-design.md §9。`print-object` トレイトで置き換え済み |
-| **`input-stream-p` / `output-stream-p` / `stream-element-type`** | 方向も要素型も型が持つ（functions.md §18.7） |
+| **`input-stream-p` / `output-stream-p` / `stream-element-type`** | 方向も要素型も型が持つ（旧 `docs/functions.md` §18.7（現 [streams-files.md](../ja/reference/functions/streams-files.md) §10）） |
 | **`?`/`try` 構文、`!`/`?` の命名接尾辞** | language-design.md §7.3 |
 | **`Sexpr` への `Iter<Item>` 実装** | language-design.md §9。要素型が固定されないリストにジェネリックな `Iter<Item>` を被せるのは型システム上不適切。反復手段は `dolist` |
 
@@ -122,7 +122,7 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
    `src/compile/externs.rs` の 3 表（`rt_builtin_symbol` 43行 / `native_lowered_primitive_methods`
    190行 / `rt_extern_functions()`。**配列長も手で直す**）→ `src/compiler.rs` SOURCE の
    `*-native-method?` と `compile-assoc` の lowering → `scripts/regen-compiler-island.sh` →
-   `scripts/regen-prelude-bitcode.sh`（**島が先**）→ エディタ定義 2 箇所 → `docs/functions.md`。
+   `scripts/regen-prelude-bitcode.sh`（**島が先**）→ エディタ定義 2 箇所 → 旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)）。
    **Rust 側の表だけ足して島の lowering を足さないと、島の `get-function` がエラー報告ではなく
    プロセスを abort する**（externs.rs 210行付近の警告。`char->string` で実際に起きた）。
    番人は `the_rust_and_island_native_method_lists_agree`。
@@ -146,7 +146,7 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
     再生成スクリプト名つきのエラーになる。
 11. **`Error` トレイトの具象型は現在 5 つ**: `ParseIntError`/`ParseFloatError`/`ReadError`/
     `EvalError`/`FileError`（`registry.rs` の `builtin_error_defs` 1008行）。
-    **`docs/functions.md` §7.1 の表は 4 つしか載せておらず `FileError` が漏れている**。
+    **旧 `docs/functions.md` §7.1（現 [option-result.md](../ja/reference/functions/option-result.md) §3） の表は 4 つしか載せておらず `FileError` が漏れている**。
 12. **`panic` は `catch`/`throw` と別系統で捕捉手段が無い**。`catch` は `EvalError::Throw` しか
     見ない（`core_eval.rs` 400-428行）。`unwind-protect` の cleanup だけは走る（同 435-460行）。
 
@@ -230,7 +230,7 @@ prelude.rs:95-104 が既に選んでいた道（"redesigned on top of `Vector<T>
 **状態: 完了（2026-08-20、保留 2 項目とも 2026-09-03 に解消）。** 実装は `prelude.rs` の `SOURCE`
 （`gcd`/`lcm` のアリティだけ checker 糖衣）で、`PRELUDE_COMPILE_UNSUPPORTED` に穴を開けずに
 通っている。テストは `tests/numeric_catalog_test.rs`（8 本）、ドキュメントは
-[functions.md](../functions.md) §1／§2／§4.1／§4.3。
+旧 `docs/functions.md` §1／§2／§4.1／§4.3（現 [numbers.md](../ja/reference/functions/numbers.md) §1・§4・§8.1・§10）。
 
 入ったもの: `ffloor`/`fceiling`/`fround`/`ftruncate`（既存の `f64` `floor` 等の別名——
 CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言語の挙動に一致する）、
@@ -283,14 +283,14 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
    （`(round 2.5)`=`3.0`）が、CL は**偶数側へ**丸めるので `2`。Rust の `f64::round` を
    そのまま使っている既存の挙動。`fround` を `round` と一致させる方を優先してこの差は
    引き継いだ（別々に丸める 2 つの名前が並ぶ方が悪い）。直すなら `round` 本体で、
-   `round` は島が lowering しているので島側も同時に変わる。functions.md §2 に注記した。
+   `round` は島が lowering しているので島側も同時に変わる。旧 `docs/functions.md` §2（現 [numbers.md](../ja/reference/functions/numbers.md) §4） に注記した。
 
 
 ### Stage 1d — 複素数
 
 **状態: 完了（2026-08-21）。ただし方式を変えた。** 詳細は
 [implementation-log.md](implementation-log.md) の該当節、カタログは
-[functions.md](../functions.md) §2.6、テストは `tests/numeric_widths_test.rs`（6 本）。
+旧 `docs/functions.md` §2.6（現 [numbers.md](../ja/reference/functions/numbers.md) §6）、テストは `tests/numeric_widths_test.rs`（6 本）。
 
 着手前の計画は「`bignum`/`ratio` と同じ heap-boxed 方式（`TAG_BOXED` ポインタ）で新設。
 前例をそのまま踏襲できる」だったが、**その前例が成り立つ理由がここには無い**——
@@ -325,7 +325,7 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 **状態: 2a / 2b とも完了（2026-08-20）。** 実装は全て `prelude.rs` の `SOURCE` に入り、
 `PRELUDE_COMPILE_UNSUPPORTED` に穴を開けずに（＝JIT/AOT 対応込みで）通っている。
 テストは `tests/char_string_catalog_test.rs`（18 本）、ドキュメントは
-[functions.md](../functions.md) §8/§9。
+旧 `docs/functions.md` §8/§9（現 [collections.md](../ja/reference/functions/collections.md) §1・§2）。
 
 **計画から変えた点 4 つ**:
 
@@ -376,7 +376,7 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
   この穴があったからだが、既にあってテストも通っているものを触る理由が無い。制約が
   無くなったことだけをコメントに書いた。
 
-これで [syntax.md](../syntax.md) §10 の「コンパイルできない組み込み」の表は**空**になった。
+これで 旧 `docs/syntax.md` §10（現 [syntax.md](../ja/reference/syntax.md) §10） の「コンパイルできない組み込み」の表は**空**になった。
 
 ### Stage 2a — 文字
 
@@ -386,7 +386,7 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 `char-code-limit`。
 **`digit-char-p` は CL 準拠へ変更**——現在 `digitp` は `bool` を返すが CL は数字の重み。
 `Option<i32>` ＋基数引数にする（既存の `digitp` は別名として残すか、破壊的変更にするかを
-実施時に判断し、`docs/functions.md` §9 に記す）。
+実施時に判断し、旧 `docs/functions.md` §9（現 [collections.md](../ja/reference/functions/collections.md) §2） に記す）。
 
 ### Stage 2b — 文字列
 
@@ -412,7 +412,7 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 
 **状態: 3a / 3b / 3c / 3d すべて完了（2026-08-20）。** 全て `prelude.rs` の `SOURCE` に入り、
 `PRELUDE_COMPILE_UNSUPPORTED` に穴を開けずに通っている。テストは
-`tests/seq_catalog_test.rs`（18 本）、ドキュメントは [functions.md](../functions.md) §6.1／§6.2。
+`tests/seq_catalog_test.rs`（18 本）、ドキュメントは 旧 `docs/functions.md` §6.1／§6.2（現 [sequences.md](../ja/reference/functions/sequences.md) §5・§7）。
 
 **計画から変えた点 5 つ**:
 
@@ -461,7 +461,7 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 `caar`〜`cddddr` の 28 個は `cons-cell` のネストを受け手とする `defmethod`（Phase 0.1b 次第）。
 
 - `member` は CL 本来の「残りのリスト」を返す形（`Vector<T>` 受け手なら `Vector<A>`）にする。
-  既存の Iter 版 `member` が `bool` を返す差分は互換のため据え置き、`docs/functions.md` §6 に明記。
+  既存の Iter 版 `member` が `bool` を返す差分は互換のため据え置き、旧 `docs/functions.md` §6（現 [sequences.md](../ja/reference/functions/sequences.md) §4） に明記。
 - `last` は CL の「最後のセル」ではなく既存どおり「最後の要素」。CL との差を表に残す。
 
 ### Stage 3b — 述語版・否定版・写像の穴埋め
@@ -497,7 +497,7 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 ### Stage 3e — シーケンス API のキーワード引数
 
 **状態: 完了（2026-08-21）。** 実装は `prelude.rs` の `SOURCE`、テストは
-`tests/seq_keywords_test.rs`、カタログは [functions.md](../functions.md) §6.3。
+`tests/seq_keywords_test.rs`、カタログは 旧 `docs/functions.md` §6.3（現 [sequences.md](../ja/reference/functions/sequences.md) §6）。
 
 **前提の訂正**: 本文は「`lambda` と `defmethod` の `&optional`/`&key` 対応（Phase 5b）」を
 前提に挙げていたが、**Phase 5b は要らなかった**。Stage 3a が受け手を `Iter` 実装型に
@@ -509,7 +509,7 @@ CL では**無印の方が整数を返す**ので、`f` 付きの方がこの言
 **`defmethod` 側（2026-09-03）**。`delete`/`delete-if`/`delete-if-not`/
 `delete-duplicates`/`nsubstitute`/`nsubstitute-if`/`fill`/`replace` と、`string` の
 `search`/`mismatch` に CL のキーワード集合を持たせた。テストは
-`tests/seq_keywords_test.rs` の末尾、カタログは [functions.md](../functions.md) §6.3。
+`tests/seq_keywords_test.rs` の末尾、カタログは 旧 `docs/functions.md` §6.3（現 [sequences.md](../ja/reference/functions/sequences.md) §6）。
 
 - **転送はできない、どちらの向きにも。** キーワード引数は本体では `Option` として
   受け取り、呼び先のキーワードは裸の値を要求する——そして
@@ -580,7 +580,7 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
 `prog`/`prog*` だけは非採用（下記）。テストは `tests/control_forms_test.rs`（20 本）、
 `tests/block_test.rs`（26 本）、`tests/environment_catalog_test.rs` の `sleep` 2 本、
 `loop` の `:named` は Stage 4b 側（`tests/loop_dsl_test.rs`）。ドキュメントは
-[syntax.md](../syntax.md) §4／§5／§5.0／§7 と [functions.md](../functions.md) §4.7。
+旧 `docs/syntax.md` §4／§5／§5.0／§7（現 [syntax.md](../ja/reference/syntax.md) §4・§5・§5.1・§7） と 旧 `docs/functions.md` §4.7（現 [system.md](../ja/reference/functions/system.md) §3）。
 
 入ったもの: `prog1`/`prog2`、`do*`、`ecase`/`ccase`、`setq`/`psetq`/`psetf`、`pushnew`。
 いずれも prelude の `defmacro`（`pushnew` だけ `Vector<T>` の `defmethod`）。
@@ -589,7 +589,7 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
 
 **`block` / `return-from` は完了（2026-09-04）。** 経緯と設計判断は
 [implementation-log.md](implementation-log.md) の該当節、仕様は
-[syntax.md](../syntax.md) §5.0、テストは `tests/block_test.rs`（26 本、うち 5 本は
+旧 `docs/syntax.md` §5.0（現 [syntax.md](../ja/reference/syntax.md) §5.1）、テストは `tests/block_test.rs`（26 本、うち 5 本は
 コンパイル経路、1 本は `gc_stress`）。見立てのうち当たっていたもの・外れていたものは:
 
 - checker 側が `loop_stack` と同型で足りる、は当たり。`block_stack` は
@@ -650,7 +650,7 @@ CL の既定は最後を残す。以前の挙動は `:from-end true`。
 **状態: 完了（2026-08-21、`:named` は 2026-09-05）。** 実装は
 `crates/typelisp-front/src/check/loop_dsl.rs`（節の読み取りと再構成）と
 `Checker::check_loop_dsl`（型を決める側）、テストは `tests/loop_dsl_test.rs`（28 本）、
-ドキュメントは [syntax.md](../syntax.md) §5.1。
+ドキュメントは 旧 `docs/syntax.md` §5.1（現 [syntax.md](../ja/reference/syntax.md) §5.2）。
 
 分岐は Phase 0.6 の結論どおり **第 1 要素がキーワードかどうか**。CL 自身の simple loop
 規則と同じなので、既に書かれている `loop` は 1 つも意味が変わらない。
@@ -691,7 +691,7 @@ acc)` へ展開すれば要素型が推論で決まる」——決まらない:
 `macroexpand`/`macroexpand-1`、`complement`、`gensym` のプレフィクス引数と
 `*gensym-counter*`、`macrolet`/`symbol-macrolet`。残りは「入れない」理由つきで確定
 （下記）。テストは `tests/macro_tools_test.rs`、ドキュメントは
-[functions.md](../functions.md) §14／§14.1。
+旧 `docs/functions.md` §14／§14.1（現 [system.md](../ja/reference/functions/system.md) §8・§9）。
 
 **`macroexpand-1` は `Option<Sexpr>` を返す。** CL は「展開したか」を第 2 返り値で伝えるが
 多値が無いので、`none` が「マクロ呼び出しではない」を表す。CL の真偽値より情報が多い——
@@ -719,7 +719,7 @@ acc)` へ展開すれば要素型が推論で決まる」——決まらない:
 `Checker` にスコープ付きの表（`local_macros`/`local_symbol_macros`、どちらも `RefCell`）
 を足し、`resolve_macro` がレジストリより先にそれを引き、`MacroExpander` に
 `define_macro` を 1 つ足した。テストは `tests/macro_tools_test.rs`、ドキュメントは
-[functions.md](../functions.md) §14.1。
+旧 `docs/functions.md` §14.1（現 [system.md](../ja/reference/functions/system.md) §9）。
 
 計画に書いていなかったことが 2 つある。
 
@@ -1297,7 +1297,7 @@ readtable に「終端かどうか」の区別を持たせていないので、�
   「リーダに手渡せるもの」でなければならないが、リーダを呼ぶのは Rust 側のドライバで、
   渡す先が無い。
 - **`readtable-case` も作らない**。**このリーダは既に CL の `:downcase` を固定で行って
-  いる**（syntax.md §1）。残る 3 設定のうち `:upcase` は CL 既定だがここでは全ソースが
+  いる**（旧 `docs/syntax.md` §1（現 [syntax.md](../ja/reference/syntax.md) §1））。残る 3 設定のうち `:upcase` は CL 既定だがここでは全ソースが
   小文字前提なので持ち込めず、`:invert` は `:upcase` の補正なので同じ。意味があるのは
   `:preserve` だけで、それは「識別子の大文字小文字を区別する」という**言語の決定**で
   あってリーダの設定ではない（Rust がそうであるように）。
@@ -1392,7 +1392,7 @@ readtable に「終端かどうか」の区別を持たせていないので、�
 
 **状態: 完了（2026-08-20）**、ただし 4 群は保留（下記）。テストは
 `tests/environment_catalog_test.rs`（12 本）、ドキュメントは
-[functions.md](../functions.md) §4.6／§4.7／§4.8／§18.5／§19.2。
+旧 `docs/functions.md` §4.6／§4.7／§4.8／§18.5／§19.2（現 [system.md](../ja/reference/functions/system.md) §1・§3・§4・[streams-files.md](../ja/reference/functions/streams-files.md) §6・§9.2）。
 
 入ったもの:
 
@@ -1462,14 +1462,14 @@ readtable に「終端かどうか」の区別を持たせていないので、�
 
 **状態: 完了（2026-09-05）**。テストは `tests/trace_test.rs`（16 本）と
 `tests/repl_tools_test.rs`（19 本）、ドキュメントは
-[functions.md](../functions.md) §4.9 と [syntax.md](../syntax.md) §10。
+旧 `docs/functions.md` §4.9（現 [system.md](../ja/reference/functions/system.md) §5） と 旧 `docs/syntax.md` §10（現 [syntax.md](../ja/reference/syntax.md) §10）。
 
 入ったもの: `room` / `heap-info` / `dribble` / `ed` / `trace` / `untrace` / `step` /
 `disassemble`。
 
 **分類が設計の核心だった。** `compile`/`compile-file`/`dump` が「コンパイルできない
 組み込み」の表に入らないのは、コンパイルできないのではなく*コンパイルする側*だから
-（syntax.md §10）。7 つはその線でちょうど 2 つに割れる:
+（旧 `docs/syntax.md` §10（現 [syntax.md](../ja/reference/syntax.md) §10））。7 つはその線でちょうど 2 つに割れる:
 
 - **インタプリタ専用**（同じ族）: `trace` / `untrace` / `step` / `disassemble`。
   走っているインタプリタの呼び出し経路や scope 木に作用するので、AOT 実行ファイルには
@@ -1596,7 +1596,7 @@ CL コードの移植と実用スクリプトで真っ先に当たる。
    `--lib` の `the_rust_and_island_native_method_lists_agree`
 4. `editor/emacs/typelisp-mode.el` と `editor/vscode/syntaxes/typelisp.tmLanguage.json` の
    **両方**に新しい名前を追加
-5. `docs/functions.md` / `docs/syntax.md` を更新し、
+5. 旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)） / 旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)） を更新し、
    [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) の該当行を ✅ へ
 6. [implementation-log.md](implementation-log.md) に経緯・設計判断を追記、
    [TODO.md](TODO.md) から当該 Phase を消す
@@ -1673,7 +1673,7 @@ D-2 は実在するが、`typl` の通常の起動には出ていない。
 | | `constantly` / `complement` | **Phase 4c** |
 | §2.2 型とクラス | `typep`/`type-of`/`subtypep`/`check-type`/`type-error` | 対象外 (D1)(D3) |
 | | `coerce`（数値・文字） | **Phase 1b** |
-| | `coerce`（シーケンス変換） | 対象外（functions.md §10 の結論。`Vector<T>`↔`Sexpr` は表現が根本的に違う） |
+| | `coerce`（シーケンス変換） | 対象外（旧 `docs/functions.md` §10（現 [collections.md](../ja/reference/functions/collections.md) §3） の結論。`Vector<T>`↔`Sexpr` は表現が根本的に違う） |
 | | `deftype` | **Phase 5c** |
 | §2.3 データと制御 | 多値一式 | 対象外 |
 | | `setf` の `defsetf`/`define-setf-expander` | 対象外（静的型があるので不要、地図 §3-3 の結論） |
@@ -1781,9 +1781,9 @@ D-2 は実在するが、`typl` の通常の起動には出ていない。
 
 | 覆すもの | 書き換える場所 |
 |---|---|
-| **(D4) 破壊的操作を原則採らない** → 実現可能なものは採る | language-design.md §0 の (D4)、functions.md §5 の「`set-car`/`set-cdr` は完全に撤去済み」 |
-| **(D5) 動的束縛が無いので CL の制御変数は代入可能なグローバルに読み替える** → 読み替えは維持しつつ、スコープ付き再束縛を足す | language-design.md §0 の (D5)、functions.md §15.1 |
-| **小整数型・`f32` は型登録だけ** → 全演算を付ける | registry.rs の `with_builtins`（551-576行）、functions.md §1 |
+| **(D4) 破壊的操作を原則採らない** → 実現可能なものは採る | language-design.md §0 の (D4)、旧 `docs/functions.md` §5（現 [sequences.md](../ja/reference/functions/sequences.md) §1） の「`set-car`/`set-cdr` は完全に撤去済み」 |
+| **(D5) 動的束縛が無いので CL の制御変数は代入可能なグローバルに読み替える** → 読み替えは維持しつつ、スコープ付き再束縛を足す | language-design.md §0 の (D5)、旧 `docs/functions.md` §15.1（現 [printing.md](../ja/reference/functions/printing.md) §4） |
+| **小整数型・`f32` は型登録だけ** → 全演算を付ける | registry.rs の `with_builtins`（551-576行）、旧 `docs/functions.md` §1（現 [numbers.md](../ja/reference/functions/numbers.md) §1） |
 
 **`prelude.rs` 95-104 行の `Sexpr` 降格は覆さない。**あのコメントが禁じていたのは
 「`Sexpr` 専用の自由関数が裸の CL 名を独占すること」であって、CL 名そのものではない。
@@ -1795,7 +1795,7 @@ D-2 は実在するが、`typl` の通常の起動には出ていない。
 
 **4 件とも解消済み（2026-08-20、Phase 3 と同じコミット）。**
 
-1. ~~**`docs/functions.md` §7.1 のエラー型表が 4 つしかない**~~（`FileError` を追加）。
+1. ~~**旧 `docs/functions.md` §7.1（現 [option-result.md](../ja/reference/functions/option-result.md) §3） のエラー型表が 4 つしかない**~~（`FileError` を追加）。
 2. ~~**地図 §3-2 の「`lambda` と `defmethod` はいまも `&rest` のみ」が不正確**~~
    （`lambda` は `&rest` のみ、`defmethod` は `&rest` すら受け付けない、に修正。2 箇所）。
 3. ~~**`.gitattributes` が `src/compiler_island.bc binary` を指している**~~

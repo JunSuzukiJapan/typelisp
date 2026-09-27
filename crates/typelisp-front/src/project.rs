@@ -746,7 +746,7 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
         // What it registers has to exist *now*, which a `defun` in the same
         // file does not: that one is collected into the module's bundle and
         // runs when the bundle does. So the function is written as a
-        // `lambda`, or comes from the prelude. See `docs/syntax.md`.
+        // `lambda`, or comes from the prelude. See `docs/ja/reference/syntax.md` §11.
         Some(wk::EXPR) => core::field(heap, tl, 0).map(|e| is_readtable_registration(heap, e)).unwrap_or(false),
         Some(wk::MODULE) => {
             let bundle = match core::field(heap, tl, 0) {

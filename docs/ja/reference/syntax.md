@@ -1,7 +1,8 @@
 # typelisp 構文リファレンス
 
 typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メソッドの一覧は
-[functions.md](functions.md) を参照。
+[組み込み関数](functions/README.md)、型の一覧は [types.md](types.md)、エラーメッセージの読み方は
+[errors.md](errors.md) を参照。
 
 ## 1. 字句要素
 
@@ -13,9 +14,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   - `(load ...)` と REPL は 1 フォームずつ評価するので、**同じテキストの手前で定義した関数**を
     呼べる（CL の `load`）。
   - モジュールファイルは単位として検査され実行は `use` した側なので、`#.` から届くのは
-    prelude と、そのセッションが既に実行したものだけ。ファイル自身の定義も、`use` した
+    標準ライブラリと、そのセッションが既に実行したものだけ。ファイル自身の定義も、`use` した
     モジュールの定義も**まだ走っていない**（CL の `compile-file` で `eval-when` が要るのと同じ）。
-  - `read-from-string` のような純粋な読みには評価器が無いので、`#.` はその旨のエラーになる。
+  - プログラムの中の `read` / `read-from-string` も `#.` を評価する（CL と同じ）。
   - `*read-eval*`（既定 `true`）を `false` にすると、`#.` はどこでも読み取りエラーになる——
     データとして読むテキストに実行させないためのスイッチ（CL と同じ）。`#.` のたびに読むので、
     `setf` は次に読むフォームから効く。`with-standard-io-syntax` の中では `true`。
@@ -23,7 +24,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **整数**: 10進（`42`, `-7`）。符号 `+`/`-` を前置可能。10進以外は CL の radix マクロ
   `#b`/`#o`/`#x`/`#NNr` で書く（符号は印の後ろ、`#x-ff`）。`0x` 接頭辞は CL に無いので
   採らない——`0xff` はシンボルとして読まれる。
-  型注釈のない整数リテラルは既定で `int`（任意精度、[functions.md](functions.md) §2.4）——大きさに
+  型注釈のない整数リテラルは既定で `int`（任意精度、[数値](functions/numbers.md#3-任意精度整数-int)）——大きさに
   上限は無い。**期待される型が固定幅の整数型ならその型になり、その型が持てる値かどうかが
   検査される**——`(the u8 300)` は型エラー（切り詰めが欲しければ `(as u8 300)` と書く）。
   `(the u32 4294967295)` や `(the u32 #xFFFFFFFF)` はこの規則で書ける。`int` の値が 63bit の
@@ -43,18 +44,18 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   `":foo"`（typelisp にはパッケージ機構が無いため、CL の `symbol-name` とは異なる）。
   `:` 単独や `:a:b` のように追加のコロンを含むものは読み取りエラー。判定は `keywordp`。
   先頭が `::` のものはキーワードではなく絶対パス（下記）。
-  なお `:dyn` は型位置専用の予約キーワードで、それ以外の場所に書くとエラーになる（§2 参照）。
+  なお `:dyn` は型位置専用の予約キーワードで、それ以外の場所に書くとエラーになる（[2 章](#2-型の書き方)参照）。
 - **リスト**: `(a b c)`。ドット対 `(a . b)` も読み取り可能。
 - **空リスト `()`**: 文脈によって `Unit` 型の値、または `Option<Sexpr>` の `none` になる。
   **`Sexpr` に空リストの変種は無い**——`Sexpr` は「空でない S 式」を表し、S 式データの型は
-  `Option<Sexpr>` である（§match の「`Option<Sexpr>` のパターン」参照）。
+  `Option<Sexpr>` である（[4.3 match](#43-match--パターンマッチ) の「`Option<Sexpr>` のパターン」参照）。
 - **quote/quasiquote/unquote**:
   - `'x` → `(quote x)`
   - `` `x `` → `(quasiquote x)`
   - `,x` → `(unquote x)`（quasiquote の中でのみ意味を持つ）
   - `,@x` → `(unquote-splicing x)`（リスト要素として展開時に結合される）
-- **パス `::`**: `foo::bar` はソース上でセグメント列に分割され、専用の `Value::Path` になる
-  （文字列としては保持されない）。`::foo` のように先頭が `::` の場合はルートからの絶対パス。
+- **パス `::`**: `foo::bar` はモジュール・型・メンバをたどるパスとして読まれる（1 つの
+  シンボル名にはならない）。`::foo` のように先頭が `::` の場合はルートからの絶対パス。
   ジェネリック引数の内側の `::`（`Vec<a::b>` など）はパス区切りとして扱われない。
 
 ## 2. 型の書き方
@@ -63,33 +64,31 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 - **プリミティブ型**: `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string` `symbol`。
   `int` が整数（CL の integer——63bit 即値と多倍長のあいだを自動で行き来する、
-  [functions.md](functions.md) §2.4）、6 つの固定幅は幅と符号を名乗る型
-  （64bit 幅の整数型は無い——[functions.md](functions.md) §1 参照）
+  [数値](functions/numbers.md#3-任意精度整数-int)）、6 つの固定幅は幅と符号を名乗る型
+  （64bit 幅の整数型は無い——[数値](functions/numbers.md#1-固定幅整数)参照）。
 - **有理数型**: `ratio`（既約な有理数）。CL 準拠でヒープ確保され、`int`/`f64` 等との暗黙変換は
-  ない（`as`/`try-as` または変換メソッドで明示。functions.md 参照）。
+  ない（`as`/`try-as` または変換メソッドで明示する。[数値](functions/numbers.md#5-有理数-ratio)参照）。
 - **C 境界の生の語**: `ptr`（不透明ポインタ）、`c-long` / `c-ulong`。FFI 専用で、値にするには
-  `(unsafe ...)` が要り、置ける場所も限られる（[§3 defffi](#ptr--c-long--c-ulong--生の機械語)）。
+  `(unsafe ...)` が要り、置ける場所も限られる（[3.3 defffi](#ptr--c-long--c-ulong--生の機械語)）。
   64bit 整数が欲しい場面でこれを使ってはいけない——算術は付いていない。
-- **不透明な可変型**: `random-state`（PRNG の状態）。ネイティブ表現なので
-  `Vector<T>`/`HashTable<K,V>`/`Sexpr` には入れられない（`Option<T>`/`Result<T,E>` には入る）。
+- **不透明な可変型**: `random-state`（乱数生成器の状態）。`Vector<T>`/`HashTable<K,V>`/`Sexpr` には
+  入れられない（`Option<T>`/`Result<T,E>` には入る）。
 - **Unit 型**: `()`
 - **Never 型**: `!`（`panic`/`unreachable`/`todo`/`return`しないループ 等、発散する式の型。
   任意の期待型に適合する）
 - **関数型**: `(fn (引数型...) 戻り値型)`。可変長引数を持つ関数型は
   `(fn (引数型... &rest 要素型) 戻り値型)`。
-- **ジェネリック型**: `Name<T1,T2,...>`（空白なしの1トークンとして読み取られ、内部で分解される）。
+- **ジェネリック型**: `Name<T1,T2,...>`（空白なしの1トークンとして読み取られる）。
   例: `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`。
   型引数には unit 型 `()` も書ける（`Result<(), FileError>`）。`(`/`)` は本来トークンを
   切るデリミタだが、山括弧が開いている間に限りこの2文字の組だけが通る。`()` は
-  フィールド型・引数型としても使え、`compile`（JIT/AOT）にも対応している。
+  フィールド型・引数型としても使える。
 - **ジェネリック型の適用形**: `(Name T1 T2 ...)` — `Name<T1,T2,...>` と同じ型を指す
   リスト形式の綴り。例: `(vector char)` は `Vector<char>` と同一。
   名前形が普通の書き方で、こちらは**型引数が名前で綴れない場合のためにある**——
   型引数はそれ自体が型式だが、1トークンの名前の中に書けるのは名前・`()`・`:dyn` だけで、
   関数型は書けない（`Vector<(fn (i32) i32)>` という綴りは存在しない）。
-  トレイトの関連型を署名に代入すると `impl` が束縛した任意の型が現れうるので、
-  代入結果はこの形で出る（[dev/implementation-log.md](dev/implementation-log.md) の
-  「関連型が総称名の内側にある場合」参照）。
+  トレイトの関連型を署名に代入した結果など、処理系が型を表示するときにもこの形で出ることがある。
 - **修飾型名**: `module::Type` のように `::` で修飾できる。
 - **trait オブジェクト型**: `:dyn Trait`（空白区切りの2語で1つの型）。実行時に具象型が決まる値を
   表し、trait のメソッド呼び出しは vtable 経由の動的ディスパッチになる。関連型を持つ trait は
@@ -97,21 +96,21 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   内側にも書ける: `Vector<:dyn Drawable>` `HashTable<string, :dyn Drawable>`。
   具象値は期待位置で自動的に箱詰めされ、明示形は `(as :dyn Trait 式)`。
   `:dyn Sub` の値はスーパトレイト（推移的に継承しているものすべて）の `:dyn Super` を要求する
-  位置にもそのまま渡せる（アップキャスト）。継承関係の無いトレイトへは渡せない — 制限は §5.2。
-  `:dyn` を型位置以外に書くとエラー。詳細は [dev/language-design.md](dev/language-design.md) §5.2。
+  位置にもそのまま渡せる（アップキャスト）。継承関係の無いトレイトへは渡せない。
+  `:dyn` にできるトレイトの条件は [3.9 deftrait / impl](#39-deftrait--impl--トレイト機構) を参照。
+  `:dyn` を型位置以外に書くとエラー。
 - 組み込みジェネリック型: `Option<T>`（`Some(T)` / `None`）、`Result<T,E>`（`Ok(T)` / `Err(E)`）、
-  `Sexpr`、`HashTable<K,V>`、`Vector<T>`、並行機構の `Task<T>` / `Thread<T>` / `Chan<T>`（§12）。
-  `Option<T>` は Rust と同じくニッチ表現——`T` の値が空リストの語になり得ないかぎり箱を作らず、`some v` は `v` そのもの、`none` は空リストの即値
-  （入れ子の `Option`、`()`、生の C 語だけが箱に入る）。詳細は functions.md §7.0。組み込みの具象エラー型は `ParseIntError` /
-  `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`、prelude の構造体として
-  `SimpleError` / `WrappedError`（`Error` は型ではなく prelude のトレイト——`:dyn Error` として使う）。
-  詳細は functions.md を参照。
+  `HashTable<K,V>`、`Vector<T>`、並行機構の `Task<T>` / `Thread<T>` / `Chan<T>`（[12 章](#12-並行機構タスク)）。
+  S 式データの型 `Sexpr` もある。組み込みの具象エラー型は `ParseIntError` /
+  `ParseFloatError` / `ReadError` / `EvalError` / `FileError` / `NetError`、標準ライブラリの構造体として
+  `SimpleError` / `WrappedError`（`Error` は型ではなくトレイト——`:dyn Error` として使う）。
+  一覧は [types.md](types.md)。
 - **型とトレイトは同じ名前空間**（Rust と同じ）: 同一モジュール内で型（`defstruct`/`defenum`）と
   トレイト（`deftrait`）に同じ名前は付けられない。
 
 ## 3. トップレベル定義
 
-### defun — 関数定義
+### 3.1 defun — 関数定義
 
 ```lisp
 (defun name ((arg1 Type1) (arg2 Type2) ...) RetType
@@ -173,9 +172,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
     呼び出し（`impl` の宣言から埋める）が別物になる。vtable スロットのアリティは固定。
   - **`lambda` / `labels` では使えない**（`&rest` は使える）。省略された引数を埋めるには
     呼び出し側が**呼ばれる側の検査済みデフォルト式**を読む必要があり、それは名前で解決した
-    シグネチャからしか手に入らない。`lambda` は値として渡され、その値を説明するのは `Type::Fn`
-    だけ——そこに式を置く場所は無いし、置けば「同じシグネチャでデフォルトだけ違う 2 つの
-    ラムダ」が別の型になってしまう。`&rest` は型の話に閉じているので `Type::Fn` に枠がある。
+    シグネチャからしか手に入らない。`lambda` は値として渡され、その値を説明するのは関数型
+    `(fn ...)` だけ——そこに式を置く場所は無いし、置けば「同じシグネチャでデフォルトだけ違う 2 つの
+    ラムダ」が別の型になってしまう。`&rest` は型の話に閉じているので関数型に書ける。
 - **前方参照は `defsignature` で宣言する**（下記）。宣言していない名前は、定義より前では
   呼べない——トップレベルは 1 フォームずつ、ソース順に検査・実行されるため。
 - トレイト境界を要求する場合は本体の直前に `where` 節を書く:
@@ -185,9 +184,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   （CL 準拠）。ただし後ろに本体フォームが最低1つ続く場合のみ——単独の文字列は戻り値のままで
   docstring とは区別されない: `(defun f () string "doc" "value")` は docstring 付きで `"value"` を
   返すが、`(defun f () string "value")` は docstring なしで `"value"` を返す。
-  `(documentation name)` で取り出せる（§ documentation）。
+  `(documentation name)` で取り出せる（[docstring](functions/system.md#7-docstring--documentation)）。
 
-### defsignature — 前方宣言
+### 3.2 defsignature — 前方宣言
 
 ```lisp
 (defsignature name (引数型...) 戻り型)
@@ -215,19 +214,19 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 
 宣言できないものが 3 つある:
 
-- **ジェネリック関数**。実体化には保持した本体が要り（`request_fn_specialization`）、宣言には
-  本体が無い。前方呼び出しは解決してから実体化に失敗するので、宣言の時点で断る。
+- **ジェネリック関数**。型ごとの実体を作るには本体が要り、宣言には本体が無い。前方呼び出しは
+  解決できても実体化に失敗するので、宣言の時点で断る。
 - **`&optional`/`&key`**。そのシグネチャは各デフォルト値の**検査済み**式を含み（引数省略時に
   呼び出し側へそのまま埋め込まれる）、宣言にはそれを置く場所が無い。
 - **`defun` 以外**。`defmacro` は展開にマクロ本体が**実行済み**である必要があり、シグネチャ
   登録では代替できない。型（`defstruct`/`defenum`/`deftrait`）は、その登録が「型を登録する
-  コード自身が必要とするもの」でシグネチャのように自己完結しない。`defmethod` は所有型の
-  `TypeDef` に登録するので型に従う。
+  コード自身が必要とするもの」でシグネチャのように自己完結しない。`defmethod` は所有する型に
+  登録されるので型に従う。
 
 CL の対応物は `(declaim (ftype (function (i32) bool) even2?))` だが、あちらは宣言システム
 一式を伴い、かつ**助言**でしかない。こちらは静的型付けなので宣言は検査される。
 
-### defffi — C 関数の宣言（FFI）
+### 3.3 defffi — C 関数の宣言（FFI）
 
 ```lisp
 (defffi (名前 "c_symbol") (引数型...) 戻り型)
@@ -304,7 +303,7 @@ C の識別子は含めないため。C 名を省くと名前がそのまま C �
 ```
 
 **`i64` / `u64` と呼ばないのは意図的。** この言語には 64bit 整数型が無い——タグ付きの即値は
-63bit しかないため（[§2](#2-型の書き方)）。`c-long` という名前は「これは C との境界を渡る語で
+63bit しかないため（[2 章](#2-型の書き方)）。`c-long` という名前は「これは C との境界を渡る語で
 あって、この言語の整数ではない」と言っている。
 
 **算術は付いていない。** `(+ x 1)` は書けない。付けられるのに付けていないのは、どこにも保存
@@ -347,11 +346,11 @@ GC は `ptr` を追跡しない。ヒープの外を指しているので、そ�
 宣言できないものが 4 つある:
 
 - **可変長引数**（`printf`）。可変長部分は固定引数と別の規則で渡される（AArch64 Darwin では
-  スタック）ので、固定シグネチャから組んだ thunk では正しくならない。`&rest` は拒否される。
-- **構造体の値渡し・値返し**。同じ理由（プラットフォームの分類規則を thunk が再実装することに
-  なる）。書ける型を上の一覧に閉じることで、綴れないようにしてある。
+  スタック）ので、固定シグネチャからは正しく呼べない。`&rest` は拒否される。
+- **構造体の値渡し・値返し**。同じ理由（プラットフォームごとの受け渡し規則に依存する）。
+  書ける型を上の一覧に閉じることで、綴れないようにしてある。
 - **ジェネリック**。C に対応物が無い。
-- **組み込みと同じ名前**。コンパイル済みの呼び出しはその名前でランタイムのシムに解決されて
+- **組み込みと同じ名前**。コンパイル済みの呼び出しはその名前で組み込みに解決されて
   しまうので、静かに間違うより断る。
 
 **値として渡せない**。`(map f xs)` の `f` に FFI 宣言をそのまま書くことはできない——関数値は
@@ -364,26 +363,18 @@ GC は `ptr` を追跡しない。ヒープの外を指しているので、そ�
 `(disassemble c-abs)` も断られる。表示できるのは C 側の機械語で、それはこのコンパイラが
 作ったものではない。`(compile c-abs)` は成功する（何もしない——既にコンパイル済みなので）。
 
-**AOT（`compile-file`）でも動く。** thunk は実行ファイルのモジュールに入り、C 関数そのものは
-リンカが解決する。`:library` を書いた宣言があれば、そのライブラリが `-l` としてリンク行に
+**AOT（`compile-file`）でも動く。** C 関数そのものはリンカが解決する。`:library` を書いた宣言があれば、そのライブラリが `-l` としてリンク行に
 足される（重複は1つにまとめられる）——`compile-file` に引数を足す必要は無い。ソースを読んで
 いるのは compile-file 自身なので、宣言から集められる。
 
 ビルド時にもシンボルを引く。存在しない関数を宣言していれば、リンクエラーより先に、名前を
 名指ししたエラーになる。
 
-**prelude は FFI を宣言しない**（方針として）。prelude はどの実行ファイルにも丸ごと入るので、
-そこに `:library` の付いた宣言が1つでもあれば、FFI を使わないプログラムまでそのライブラリを
-リンクすることになる。処理系自身が C を呼ぶ必要が生じたときは、`crates/typelisp-rt` に
-`rt_*` シムを足す既存の道を使う——そちらはワークスペースが依存先を選んでいる。`defffi` は
-言語のユーザーのための入口。
+標準ライブラリ（prelude）は `defffi` を使わない。標準ライブラリはどの実行ファイルにも丸ごと
+入るので、そこに `:library` の付いた宣言があると、FFI を使わないプログラムまでそのライブラリを
+リンクすることになるため。
 
-**実装**: 宣言ごとに thunk を1つ LLVM で生成する。共有 ABI（`i64 f(const i64*, u32)`）を持ち、
-引数の語を宣言された C の型へ変換し、本物のシグネチャで呼び、戻り値を語へ戻す関数。thunk の
-シンボル名は `defun` の本体と同じ規則で付くので、コンパイル済みの呼び出し側は普通の呼び出しを
-出すだけでよく、自己ホストのコンパイラ（`src/compiler.rs`）は FFI の存在を知らない。
-
-### defvar / defparameter / defconstant — グローバル変数
+### 3.4 defvar / defparameter / defconstant — グローバル変数
 
 ```lisp
 (defvar (name Type) init-expr)        ; まだ束縛されていないときだけ初期化する
@@ -402,7 +393,7 @@ GC は `ptr` を追跡しない。ヒープの外を指しているので、そ�
 
 型注釈は必須（初期化式から推論しない）。`defvar` は書き換え可能、`defconstant` は不可（`setf` でエラー）。
 
-### defmethod — メソッド定義
+### 3.5 defmethod — メソッド定義
 
 ```lisp
 ; インスタンスメソッド: (m obj args...) の形で呼べる
@@ -416,7 +407,7 @@ GC は `ptr` を追跡しない。ヒープの外を指しているので、そ�
 同じ規則で docstring を置ける（`where` 節の直後、本体の先頭、後ろに本体フォームが続く場合のみ）。
 `impl` 内のメソッドも同様——`(documentation Type::method)` で取り出す。
 
-### defstruct — 構造体（ユーザ定義型）
+### 3.6 defstruct — 構造体（ユーザ定義型）
 
 ```lisp
 (defstruct Name
@@ -495,7 +486,7 @@ GC は `ptr` を追跡しない。ヒープの外を指しているので、そ�
   - **`:type` / `:initial-offset` / `:named`** — 値の表現をリストやベクタに置き換える指定。
     表現はコンパイラのもので、言語からは観測できない。
 
-### defenum — 列挙型（直和型・ユーザ定義タグ付き共用体）
+### 3.7 defenum — 列挙型（直和型）
 
 ```lisp
 (defenum Name
@@ -524,7 +515,7 @@ GC は `ptr` を追跡しない。ヒープの外を指しているので、そ�
 - **docstring**: `defstruct` と同じ位置・同じ規則——名前の直後、バリアント列の前
   （`(defenum Name "doc" (Variant ...)...)`）。`(documentation Name)` で取り出す。
 
-### deftype — 型別名
+### 3.8 deftype — 型別名
 
 ```lisp
 (deftype meters i32)
@@ -554,7 +545,7 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
   と同名にはできない）。`(pub deftype ...)` で公開、`(use m::meters)` で取り込める。
 - **docstring**: 名前の直後、型の前（`(deftype Name "doc" Type)`）。
 
-### deftrait / impl — トレイト機構
+### 3.9 deftrait / impl — トレイト機構
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 継承リストは必須。無ければ ()
@@ -569,7 +560,7 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
 ```
 
 `impl` によって各メソッドは `TargetType` の通常の `defmethod` として登録される。ジェネリック関数の
-`where` 節でトレイト境界として参照する（§ defun 参照）。トレイト名には `m::Trait` のような
+`where` 節でトレイト境界として参照する（[3.1 defun](#31-defun--関数定義) 参照）。トレイト名には `m::Trait` のような
 `::` パスも書ける。
 
 **継承リスト（必須）**: トレイト名の直後に必ず書く。要素は素のトレイト名か、そのトレイトが
@@ -617,18 +608,19 @@ REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust
 docstring を持てる（`(deftrait Name () "doc" (type ...) (method ...)...)`）。本体を持たないシグネチャに
 docstring は書けない——末尾の文字列はそれ自体がデフォルト実装の戻り値になるので、両者を区別できない。
 
-`prelude.rs` が提供する標準トレイト: **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の
+標準ライブラリが提供するトレイト: **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の
 基盤）・**`Eq`**（`equals`。`not-equals` はデフォルト実装）・**`Ord`**（`Eq` を継承。`less` のみ
 実装必須で `less-equal`／`greater`／`greater-equal` はデフォルト実装）・**`Error`**（`message`／
 `source`。エラー型を一様に扱うための `:dyn Error`）・**`print-object`**（型ごとの印字表現）・
 **`Pathish`**（パス名指定子＝文字列 or `pathname`）・ストリーム階層 **`Stream`** →
 **`InputStream`**／**`OutputStream`** → **`CharInput`**／**`CharOutput`** → **`PeekInput`**。
-`Iter`/`Eq`/`Ord` は主要なスカラ型と `cons-cell<A,B>` に実装済み
-（詳細は [functions.md](functions.md) §12・§12.1・§7.1・§15.2・§18・§19）。
-自前のコレクション型に `Iter` を `impl` すれば `doiter`（§5）や `map`／`filter`／`sort` 等がそのまま使える。
+どの型がどのトレイトを実装しているかは [types.md](types.md)、各トレイトのメソッドは
+[トレイト](functions/traits.md)・[エラー型](functions/option-result.md#3-エラー型と-error-トレイト)・
+[print-object](functions/printing.md#5-print-object型ごとの印字表現)・[ストリーム](functions/streams-files.md)。
+自前のコレクション型に `Iter` を `impl` すれば `doiter`（5 章）や `map`／`filter`／`sort` 等がそのまま使える。
 
 トレイトの呼び出しは既定で**静的**（レシーバの静的型で解決）。実行時に具象型が決まる値を扱いたい
-場合は trait オブジェクト型 `:dyn Trait`（§2）を使うと vtable 経由の動的ディスパッチになる:
+場合は trait オブジェクト型 `:dyn Trait`（2 章）を使うと vtable 経由の動的ディスパッチになる:
 
 ```lisp
 (deftrait Drawable () (draw ((self Self)) string))
@@ -644,10 +636,9 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 `:dyn Trait` にできるのは「全メソッドが `self` レシーバを持ち、`Self` をレシーバ以外に使わず、
 メソッド自身がジェネリックでも可変長でもない」トレイトだけ（継承したメソッドも同じ条件を満たす
 必要がある）。箱に入れられるのはヒープ表現を持つ型
-（`defstruct`/`defenum` 等）で、プリミティブ型は入れられない。詳細と設計理由は
-[dev/language-design.md](dev/language-design.md) §5.2。
+（`defstruct`/`defenum` 等）で、プリミティブ型は入れられない。
 
-### module / use — 名前空間
+### 3.10 module / use — 名前空間
 
 ```lisp
 (module path body...)      ; path は foo または foo::bar のようなセグメント列
@@ -679,7 +670,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   このシステムではファイルが既にモジュールなので「選ぶ」対象が無く、フォームにできるのは
   入れ子にすることだけだから。
 
-### ファイル↔モジュール対応（マルチファイルプロジェクト）
+### 3.11 ファイルとモジュールの対応（複数ファイルのプロジェクト）
 
 ソースルートからの相対ファイルパスがそのままモジュールパスになる:
 `<root>/geo/point.typl` の内容は暗黙にモジュール `geo::point` に包まれる
@@ -694,18 +685,17 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   対応するファイル（`geo/point.typl`）が自動で読み込まれ、型チェックされて登録される。
   `use a::b::c` は `a/b/c.typl` → `a/b.typl` → `a.typl` の最長プレフィックス順で探す
   （`c` がモジュール内アイテムの可能性があるため）。他モジュールから見える定義には
-  `pub` が必要（§ pub）。
+  `pub` が必要（[3.13 pub](#313-pub--公開指定)）。
 - **循環参照はエラー**: `circular module dependency: a -> b -> a` の形で連鎖が報告される。
 - **実行**: `typl <file.typl>` でファイルを実行できる（引数なしなら REPL）。REPL の `use` も
   同じ規約でファイルを解決する。
 - **cons アリーナ容量**: `typl --heap-cells N` で cons セルのアリーナ**初期容量**を指定できる
-  （既定 65536。`--heap-cells=N` 形も可、ファイル実行/REPL 共通）。チェッカーがコード自体を
-  cons セルへ落とすようになって以降、必要量はプログラムを読むまで分からないので、アリーナは
-  足りなくなればチャンクを**追加して伸びる**（既存セルは動かないのでポインタは有効なまま）。
-  伸びる上限は初期容量の 256 倍で、そこを超えた確保が `heap exhausted` になる——つまり初期容量は
-  「最初にこれだけ確保する」、上限は「ここを越えたらリークとみなす」という意味。
+  （既定 65536。`--heap-cells=N` 形も可、ファイル実行/REPL 共通）。アリーナは足りなくなれば
+  **追加して伸びる**。伸びる上限は初期容量の 256 倍で、そこを超えた確保が `heap exhausted` に
+  なる——つまり初期容量は「最初にこれだけ確保する」、上限は「ここを越えたらリークとみなす」という
+  意味。
 
-### load — フラットロード
+### 3.12 load — フラットロード
 
 ```lisp
 (load "path")   ; トップレベル専用。path は文字列リテラル
@@ -721,7 +711,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   その手前のフォームは実行済みになる。`use` で読み込むモジュールファイルはこれと違い、
   1 単位として検査され、実行は `use` した側に任される（CL の `compile-file` に相当）。
 
-### pub — 公開指定
+### 3.13 pub — 公開指定
 
 ```lisp
 (pub defun ...)
@@ -741,7 +731,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 定義形を括弧で包む `(pub (defun ...))` 形式ではなく、`pub` の直後に定義キーワードを続ける。
 1つの `pub` が公開指定できる定義は1つだけ（複数の定義の一括指定はできない）。
 
-### defmacro — マクロ定義
+### 3.14 defmacro — マクロ定義
 
 ```lisp
 (defmacro name (必須... &optional opt... &rest rest-name &key key...) body...)
@@ -757,7 +747,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
     （順不同）。省略時はデフォルト式（無ければ `nil`）。未知のキーワードや奇数個の `:key` 列はエラー。
 - 例: `(defmacro pair (x &optional (y 1)) ...)` / `(defmacro make (&key (a 0) (b 9)) ...)`。
 
-### macrolet / symbol-macrolet — 局所的なマクロ束縛
+### 3.15 macrolet / symbol-macrolet — 局所的なマクロ束縛
 
 ```lisp
 (macrolet ((name (ラムダリスト) body...) ...) body...)   ; 字句スコープのマクロ
@@ -766,7 +756,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 
 どちらも**式**の特殊形で、実行時には何も残らない（本体がコンパイルされるのは展開後の形）。
 ラムダリストは `defmacro` と同じ。詳しい規則と例は
-[functions.md](functions.md) §14.1。
+[局所的なマクロ束縛](functions/system.md#9-局所的なマクロ束縛macrolet--symbol-macrolet)。
 
 ## 4. 束縛・条件分岐
 
@@ -791,13 +781,13 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (or expr...)                        ; 短絡評価。0引数なら false。defmacro
 (progn body...)                     ; 順次実行、最後の値を返す
 (unsafe body...)                    ; progn と同じ。加えて FFI 呼び出しと生の語を
-                                     ; 書く許可を与える。§3 defffi を参照
+                                     ; 書く許可を与える。3.3 defffi を参照
 (prog1 form more...)                ; 全部評価し、値は form のもの。defmacro
 (prog2 a b more...)                 ; 全部評価し、値は b のもの。defmacro
 (the Type expr)                     ; 型注釈（実行時の効果なし）
 ```
 
-### unsafe — 検査できない前提を引き受ける
+### 4.1 unsafe — 検査できない前提を引き受ける
 
 ```lisp
 (unsafe body...)
@@ -806,7 +796,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 `progn` と同じ——本体を順に評価し、最後の値を返す。スコープも作らず、関数の境界でもない
 （`break` / `return-from` は素通りして外へ抜ける）。違うのは、この中でだけ書けるものがある点。
 
-いま `unsafe` を要求するのは 2 つ。[defffi](#defffi--c-関数の宣言ffi) で宣言した C 関数の
+いま `unsafe` を要求するのは 2 つ。[defffi](#33-defffi--c-関数の宣言ffi) で宣言した C 関数の
 呼び出しと、生の機械語（`ptr` / `c-long` / `c-ulong`）を値にすること。
 
 `unsafe` が引き受けるのは、コンパイラが確かめられない次の前提:
@@ -815,8 +805,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   レジスタに載り、戻り値は間違った幅で読まれる。
 - **メモリ安全**。C 側が渡されたものをどう扱うか。
 - **プロセス大域の状態**。環境変数・シグナルハンドラ・`errno`。たとえば `setenv` を FFI で
-  呼ぶと、この処理系の `decode-universal-time` が使う `localtime_r` の健全性の前提が崩れる
-  （`crates/typelisp-rt/src/os.rs` の該当コメントを参照）。
+  呼ぶと、この処理系の `decode-universal-time` が地方時を求めるときの前提が崩れる。
 - **スレッド安全**。
 
 型検査からの逃げ道ではない。`(unsafe (+ 1 "two"))` は通らない。許されるのは特定の**操作**を
@@ -826,7 +815,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ブロック内のクロージャと同じ）——その値が後で `unsafe` の外から呼ばれることはありうるが、
 そこに書いたこと自体が責任を引き受ける行為だとみなす。
 
-### destructuring-bind — リストを形で分解する
+### 4.2 destructuring-bind — リストを形で分解する
 
 ```lisp
 (destructuring-bind ラムダリスト form body...)
@@ -854,7 +843,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 - `&optional` / `&key` のデフォルト式は**使うときだけ評価**される（CL と同じ）。
 - CL の `&allow-other-keys` に当たるものは無い（`defmacro` にも無い）。
 
-### match — パターンマッチ
+### 4.3 match — パターンマッチ
 
 ```lisp
 (match expr
@@ -870,7 +859,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   裸名で書くとアリティエラーになるので、`(circle r)` のように括弧で書く
 - **即値リテラル**: 整数 / `true`/`false` / 文字 — 語の比較
 - **値リテラル**: 文字列 / 浮動小数点 / シンボル（`'foo`）/ 多倍長の整数 / ratio — その型の
-  `Eq::equals`（§2 のトレイト）による値比較。文字列は内容比較であって同一性比較ではない
+  `Eq::equals`（[トレイト](functions/traits.md#2-eq--ord比較)）による値比較。文字列は内容比較であって同一性比較ではない
 - `(= expr)` — 任意の式を評価し、`Eq::equals` で比較する。リテラル構文を持たない型
   （`defstruct` インスタンス、グローバル、計算結果）を比較する唯一の書き方であり、
   ユーザ定義の `Eq` 実装がそのまま比較規則になる。`expr` はその腕の位置から見えるものを何でも
@@ -888,7 +877,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ```
 
 即値でないリテラル（文字列 / 浮動小数点 / 多倍長の整数 / ratio）は `Sexpr` に対して**書けない**。
-それらの `eq` は `Str`・箱・cons セルの同一性なので「型は通るが決してマッチしない腕」になるため、
+それらの `eq` はオブジェクトの同一性を比べるので「型は通るが決してマッチしない腕」になるため、
 変種パターンを名指すエラーにしてある——`(str "hi")` と書けば `string` に分解されて内容比較になる。
 `(= expr)` は明示的に `equals` を求めているので、この制限は掛からない。
 
@@ -906,12 +895,12 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 
 `Sexpr` スクルーティニーに対しては、上記の組み込み16変種パターンに加えて **downcast パターン**
 （ユーザ定義 ADT インスタンスの取り出し）が書ける — `(list p 42)` のように `Sexpr` へ暗黙変換された
-`defstruct`（§3）/`defenum`（§3）インスタンスを `match` で取り戻す構文:
+`defstruct`/`defenum`（3 章）のインスタンスを `match` で取り戻す構文:
 
 - `(TypeName sub-pattern...)` — **型名**を先頭に置くフィールド分解（struct 専用、`defstruct` は変種が
   常に1つなので変種名でなく型名で書く）。例: `(defstruct point (x f64) (y f64))` に対し `(point x y)`。
 - 裸の変種名 `(VariantName sub-pattern...)` — `defenum` の変種抽出。`(use EnumType)` 済みで可視な
-  bare 名として解決される（`resolve_ctor` と同じ可視性規則）。例: `(defenum color (red) (blue))` の
+  裸の名前として解決される（構成子を呼ぶときと同じ可視性規則）。例: `(defenum color (red) (blue))` の
   `(use color)` 後に `(red)` `(blue)`。可視な複数 enum で変種名が衝突する場合は曖昧エラーになるため、
   修飾形 `(EnumType::VariantName ...)` でも書ける（`use` 不要）。
 - `(the Type pattern)` — 型全体でのdowncast（丸ごと束縛）。フィールド分解せず、値をそのまま
@@ -940,7 +929,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 この糖衣は `Option<Sexpr>` **ちょうど**にしか掛からない。`Option<Option<Sexpr>>` では
 `(int n)` がどちらの層を剥がしたのか決まらないので、通常どおり 2 段の `match` を書く。
 
-**trait オブジェクト（`:dyn Trait`、§2）のスクルーティニー**にも同じ downcast パターンがそのまま
+**trait オブジェクト（`:dyn Trait`、2 章）のスクルーティニー**にも同じ downcast パターンがそのまま
 使える——`match` は箱を外してから上の `Sexpr` パターン機構に渡すので、追加の構文はない。実装型の
 集合は開いているので網羅にはならず、`_` が必須:
 
@@ -965,10 +954,8 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 （`(point ...)`)/裸変種形は使えず、`(the point<i32> p)` のように `the` で明示する。
 
 **downcast は実体化まで見る。** 明示した型引数は照合に使われる——`(the point<i32> p)` は
-`point<i32>` の値だけを通し、`point<string>` は素通りして次の腕へ行く。値が自分の実体化を
-型キーとして持っている（`print-object` のディスパッチと同じ仕組み、
-[functions.md](functions.md) §15.2）ためで、型引数を捨てて基底名だけで比べていたときは
-`point<string>` が `(the point<i32> ...)` に通り、フィールドを `i32` として読んでいた。
+`point<i32>` の値だけを通し、`point<string>` は素通りして次の腕へ行く。値が自分の型引数まで
+含めた型を覚えているため（`print-object` の選択と同じ仕組み）。
 
 ```lisp
 (if-let (pattern val) then els)     ; val が pattern にマッチすれば then（束縛あり）、失敗なら els。defmacro
@@ -999,7 +986,7 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 `lambda` の境界は越えられない）。`loop` の型は内部で見つかった `break`/`return` の値型の合流型
 （一度も脱出しなければ `!`）。関数から抜けたいときは次の `return-from` を使う。
 
-### 5.0 `block` / `return-from` — 名前付きの脱出（cl-parity-plan.md Phase 4a）
+### 5.1 `block` / `return-from` — 名前付きの脱出
 
 ```lisp
 (block name body...)                ; 名前付きの脱出先。値は最後のフォーム、
@@ -1026,16 +1013,15 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 - 同名の `block` が入れ子なら**内側が勝つ**（CL の遮蔽規則）。
 - **関数の境界は越えられない**。`lambda` の中から外の `block` へは抜けられない
   （`lambda` はブロックを張らない——CL の暗黙ブロックは*名前*を要求し、無名関数には無い）。
-  越える必要があるものは `catch`/`throw`（§8、こちらは**動的**）。
+  越える必要があるものは `catch`/`throw`（8 章、こちらは**動的**）。
 
-`break`/`return`(§5) と同じ**静的**な脱出なので、コンパイル済みコードでは
+`break`/`return`（5 章）と同じ**静的**な脱出なので、コンパイル済みコードでは
 コンパイル時に決まっている基本ブロックへの分岐になる。途中に `unwind-protect` があれば
-その `cleanup` は走る（§8）。
+その `cleanup` は走る（8 章）。
 
-`return-from` を一度も書かなければ、その関数のコードは block が無かったときとまったく同じ
-（チェッカーは名前が実際に使われたときだけ `block` ノードを出す）。
+`return-from` を一度も書かなければ、暗黙の block は何のコストも持たない。
 
-### 5.1 拡張 `loop`（CL の LOOP DSL、cl-parity-plan.md Phase 4b）
+### 5.2 拡張 `loop`（CL の LOOP 構文）
 
 `loop` の**第 1 要素がキーワードなら**節の並びとして読む。そうでなければ上の単純ループの
 ままで、既に書かれている `loop` の意味は変わらない（CL 自身の simple loop 規則と同じ）。
@@ -1085,7 +1071,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 **`:named name`**（他のどの節よりも先に、1 つだけ）はループ全体を `(block name …)` で囲む。
 `(return-from name e)` が入れ子のループの中からでも一気に脱出でき、`:return` と同じく
 `:finally` は走らない。名前を付けなければ block も張らない——CL の無名 `loop` は `block nil`
-を張るが、ここに `nil` は無く、`break`/`return`（§5）が既に「直近のループを抜ける」を持って
+を張るが、ここに `nil` は無く、`break`/`return`（5 章）が既に「直近のループを抜ける」を持って
 いる。
 
 ```lisp
@@ -1095,7 +1081,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 ```
 
 `:finally (return 0)` を省くと**型エラー**になる。`block` の規則がそのまま効くだけで
-（§5.0）、脱出の型 `int` と、尽きたときにループが残す `()` が合わない。
+（5.1）、脱出の型 `int` と、尽きたときにループが残す `()` が合わない。
 
 **ループの値**は、集約節があればその蓄積（複数あれば最初のもの）、`:always`/`:never` なら
 `true`、`:thereis` なら `none`、どれも無ければ `()`。`:finally` の最後が `(return e)` なら
@@ -1109,10 +1095,8 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 - **`:return` だけ書いて集約も `:finally` も無いのはエラー**。CL は尽きたとき nil を返すが、
   ここにはそれが無いので「尽きたときの値」をループが言う必要がある。
 - `:and` による並行節の連結、`:being`/ハッシュ表の専用反復、`:it`、`:nconc` は入っていない。
-- `:collect` の要素型はチェッカーが集約式を先に検査して決め、`(the Vector<T> …)` として
-  書き込む。`Vector::new` の型引数は期待型から前向きに来るので、後ろの `push` からは
-  決まらない（計画のこの前提は誤りだった）。関数型のように**書き表せない型**を集めようと
-  するとその旨のエラーになる。
+- `:collect` の要素型は集約式の型から決まる。関数型のように**型名として書き表せない型**を
+  集めようとするとその旨のエラーになる。
 
 ## 6. 関数値・呼び出し
 
@@ -1134,7 +1118,9 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
                                      ; (accessor recv key...) 形の呼び出し形。recv の静的な
                                      ; 型が set-{accessor} というインスタンスメソッドを
                                      ; 持てば成立（Vector<T>・HashTable<K,V> の get は
-                                     ; 例外的に set が対応、それ以外は set-アクセサ名）
+                                     ; 例外的に set が対応、それ以外は set-アクセサ名）。
+                                     ; 値は代入した値（CL と同じ）。したがって
+                                     ; (if c (setf x 1) ()) は then と else の型が合わない
 (incf place)  (incf place delta)    ; place += delta（省略時 delta=1）。結果は setf 同様
 (decf place)  (decf place delta)    ; place -= delta（省略時 delta=1）
 (rotatef place1 place2 ... placeN)  ; N個の place を巡回シフト（新place1=旧place2, ...,
@@ -1142,15 +1128,15 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 (shiftf place1 ... placeN newvalue) ; place2..N の値を左へシフトし、newvalue を placeN へ。
                                      ; 戻り値は旧 place1 の値
 (list e1 e2 ... en)                 ; (cons e1 (cons e2 (... ()))) への展開。0引数なら ()
-                                     ; 各要素は Sexpr へ暗黙変換される（CL のcons同様、任意の値を
-                                     ; 保持できる）: スカラ(int/i32/f64/ratio/char/bool/string/
-                                     ; symbol)は対応する Sexpr コンストラクタでラップ、defstruct/
-                                     ; defenum/Vector<T>/HashTable<K,V> 等ヒープ表現ADTは無変換の
-                                     ; まま retype（実行時コストなし）。&rest/format引数も同様。
+                                     ; 各要素は Sexpr へ暗黙変換される（CL の cons 同様、任意の値を
+                                     ; 保持できる）。スカラ（int/i32/f64/ratio/char/bool/string/
+                                     ; symbol）は対応する Sexpr の変種に包まれ、defstruct/defenum/
+                                     ; Vector<T>/HashTable<K,V> などはそのまま入る（変換の
+                                     ; コストは無い）。&rest/format の引数も同様。
 (source-file)                       ; このフォームが読まれたファイル名（string）。チェック時に
-                                     ; 定数畳み込みされる。CL の *load-pathname* に当たるが変数では
+                                     ; 定数として決まる。CL の *load-pathname* に当たるが変数では
                                      ; ない——モジュールの本体は検査の後に実行されるので「いま
-                                     ; ロード中」は当てにならず、チェッカーのほうは常に知っている。
+                                     ; ロード中」は当てにならず、検査の時点なら常に分かっている。
                                      ; ファイルでないソースはリーダの呼び名（<stdin>/<input>）
 (quote datum)                       ; 'datum と同義。評価せず Sexpr データとして返す
 (quasiquote template)               ; `template と同義。,/,@ でテンプレート内に式を埋め込む
@@ -1172,7 +1158,7 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 
 `print`/`println`/`format`/`pprint` 系は特殊形なので、可変長引数（`pprint` 系は1つの対象）は
 各自の型のまま `Sexpr` へ包まれて渡る——`(println "~a" my-struct)` がそのまま動くのはこのため。
-書式ディレクティブと pretty printer の詳細は [functions.md](functions.md) §15 / §15.1。
+書式ディレクティブと pretty printer の詳細は [書式ディレクティブ](functions/format.md) と [印字](functions/printing.md#4-pretty-printer)。
 
 `as`/`try-as` が扱えるのは数値・文字カタログのみ（`int`・固定幅整数型・`f32`/`f64`/`ratio`/`char`
 間）。同一型は無変換。**整数の幅どうし（`int` を含む）・`f32`↔`f64` は本物の変換**——`as` は
@@ -1180,16 +1166,16 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 拡大、`(as i32 n)` は `int` からの切り詰め。整数→`char` は範囲外で失敗しうるので `as` は panic・
 `try-as` は `None`。それ以外（拡大変換や `float->int`/`ratio->int` の切り捨て）は常に成功する。
 `float->int`/`ratio->int`/`char->int` は `int` に着地し、より狭い幅を頼まれれば `int->W` を
-続けて呼ぶ。内部的には対応する変換メソッド（functions.md の `int->char`/`int->int`/`int->W` 等）へ
+続けて呼ぶ。対応する変換メソッド（[数値](functions/numbers.md)の `int->char`/`int->int`/`int->W` 等）へ
 展開される糖衣構文。
 
 `documentation` は `quote`/`compile` と同様、`name` を評価せず未評価の裸シンボル/`::`パスとして
 読む特殊形。CL の `(documentation 'name 'function)` と違い型引数は取らない——`name` を変数→関数→型
 →トレイト→マクロの順（裸識別子を式として評価するときと同じ優先順位）で解決し、見つかった定義の
 docstring を返す（`(documentation Type::method)` はメソッド専用）。解決自体に失敗する（そんな名前の
-定義が無い）のは check 時のエラー、定義はあるが docstring が無い場合は `Option::none`。すべて check
-時に定数として畳み込まれる——実行時のルックアップは発生しない（checker は常にどこへ解決するか知って
-いるため）。モジュール修飾された自由名（`mod::name`、`Type::method` を除く）は現状非対応。
+定義が無い）のはチェック時のエラー、定義はあるが docstring が無い場合は `Option::none`。すべて
+チェック時に定数として決まる——実行時のルックアップは発生しない。モジュール修飾された自由名
+（`mod::name`、`Type::method` を除く）は非対応。
 
 ## 8. 非局所脱出（catch / throw / unwind-protect）
 
@@ -1200,7 +1186,7 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
 (unwind-protect protected cleanup)  ; protected をどう抜けても cleanup を走らせる
 ```
 
-`break`/`return`（§5）と違い、これは**動的**な脱出——`throw` は自分を囲む `catch` を字句的に
+`break`/`return`（5 章）と違い、これは**動的**な脱出——`throw` は自分を囲む `catch` を字句的に
 見ておらず、関数を何段跨いでも同じタグの `catch` に届く。
 
 ```lisp
@@ -1223,8 +1209,8 @@ docstring を返す（`(documentation Type::method)` はメソッド専用）。
 - 入れ子の `unwind-protect` は内側から順に走る。`protected` の**内側**のループを抜ける
   `break` は `protected` から出ていないので、その `cleanup` は走らない。
 
-CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`）は採用していない
-（[language-design.md](dev/language-design.md) §9）。
+CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`）は採用していない。
+静的型付けと合わないため、回復できる失敗は `Result` で表す（9 章）。
 
 ## 9. エラー処理の方針
 
@@ -1243,7 +1229,7 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 ```
 
 `compile` は特殊形で、`name` は評価されず未評価の裸シンボル/`::`パスとして読む（文字列は型エラー）。
-ジェネリックな関数は対象にできない——単型化は使用箇所ごとに走るので、単一のコンパイル済み本体が
+ジェネリックな関数は対象にできない——型ごとの実体は使用箇所ごとに作られるので、単一のコンパイル済み本体が
 存在しない。**解決できない名前はチェック時のエラー**であり、実行時まで持ち越されない
 （型は在るがそのメソッドが無い場合／型も関数も無い場合／裸の未定義名、で別々のメッセージになる）。
 ここでの可視性は他の参照と同じ扱いで、「在るがここからは見えない」は「解決しない」と同じく
@@ -1251,8 +1237,8 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 
 呼び先も推移的にコンパイルされるので、**コンパイルできないものを（間接的にでも）呼ぶ関数は
 コンパイルできない**。プロセスが落ちるのではなく、その旨を述べるエラーで断られる。
-コンパイルできない組み込みは下記のとおり 2026-09-03 に無くなったので、いまこの形で断られるのは
-インタプリタ専用の操作（後述）を呼ぶ関数だけ:
+組み込み関数はすべてコンパイルできるので、この形で断られるのは次のインタプリタ専用の操作を
+呼ぶ関数だけ:
 
 ```lisp
 (defun g () int 1)
@@ -1261,65 +1247,25 @@ CL のコンディション（`define-condition`/`handler-bind`/`invoke-restart`
 ; => trace: `(trace ...)` is an interpreter-only action and cannot itself be compiled
 ```
 
-2026-08-14 に prelude 側の穴を、2026-08-18 にシステム組み込み・等価述語・印字・リーダの
-穴を、2026-08-19 に `eval` を塞ぎ、**2026-09-03 に `char` の `upcase` / `downcase` /
-`alphap` / `digitp` と整数の `int->char`**（cl-parity-plan.md Phase 2 の残タスク）を
-塞いだ。5 つはそれぞれ `rt_char_upcase` / `rt_char_downcase` / `rt_char_alphap` /
-`rt_char_digitp` / `rt_int_to_char` を呼ぶ（`externs::native_lowered_primitive_methods`
-の `char` 行と整数行）。ASCII 限定という規則は**シムが持っている**ので、コンパイル済みの
-答えがインタプリタの答えから離れようがない。`int->char` だけが失敗しうる（Unicode
-スカラ値でないコードポイント）ので、これだけが raise する側の呼び出し規約で宣言されている。
-
-**この表は 2026-09-03 に空になった。** 残っていたのは 3 群で、順に:
-`string::upcase`/`downcase`（`rt_str_upcase`/`rt_str_downcase`）、`Option` を返す変換
-（`try-int->char`・`try-int->W`・`try-float->f32|f64`——判定だけを行う
-`rt_int_fits`/`rt_int_fits_char`/`rt_f64_fits_f32` と、島の `build-try-option` が
-`some`/`none` の箱を組む）、多倍長整数の `ash`/`logbitp`/`logtest`/`logcount`/
-`integer-length`。
-
-どれも prelude からは到達しないので `PRELUDE_COMPILE_UNSUPPORTED` には現れなかった
-——ユーザーが自分で呼び出しを書いたときだけ出る穴で、`compile_test.rs` の
-`the_builtins_that_used_to_block_compilation_now_lower` がその書き方で全部を踏んでいる。
-
-`native_lowered_primitive_methods` と島の `*-native-method?` が一致することは
-`the_rust_and_island_native_method_lists_agree` が、**この 2 つがレジストリの組み込み
-メソッドを網羅していること**は `every_registered_builtin_method_on_a_native_receiver_lowers`
-が保証する。後者は「新しい組み込みを足したら、それを呼ぶ `defun` をコンパイルしてみるまで
-穴が空いたか分からない」という状態を無くすために足した——この表が手作業で埋められていた
-理由がそれだった。
-
-唯一の例外は `print`/`println` で、これは穴ではない。レジストリは受け手ごとに登録している
-（インタプリタの `eval_builtin_method` が受け手で分岐するため）が、チェッカーがメソッド解決の
-前に特殊形として横取りする（`Checker::check_print_like`——制御文字列がリテラルでなければ
-ならない）ので `Expr::Assoc` になることが無く、lowering を要求されることもない。
-
-`compile`/`compile-file`/`dump`、および `trace`/`untrace`/`step`/`disassemble`
-（[functions.md](functions.md) §4.9）はこの表に入らない——定義上インタプリタ専用の操作で、
-コンパイルできないのではなくコンパイルする側だから（`dump` が書き出すのはインタプリタの環境
-そのもので、AOT 実行ファイルにはその環境が無い。`trace` が見ているのも `step` が止まるのも
-走っているインタプリタの呼び出し経路で、`disassemble` は*コンパイラそのもの*）。
-これらを呼ぶ `defun` をコンパイルしようとすると、穴の報告ではなく
-「`(trace ...)` is an interpreter-only action and cannot itself be compiled」と断られる。
-`room`/`dribble`/`ed` は**この族ではない**——ヒープ統計も dribble の sink も実行時のもので、
-エディタを起動するのはプロセス呼び出しなので、普通にコンパイルできる。
-ジェネリックな関数がコンパイルできないのは
-上記のとおり単型化の帰結であって、組み込みの穴ではない。
+インタプリタ専用なのは `compile`/`compile-file`/`dump` と、`trace`/`untrace`/`step`/`disassemble`
+（[処理系の道具](functions/system.md#5-処理系の道具clhs-252)）。これらはコンパイルできないのではなく、
+コンパイルする側の操作である（`dump` が書き出すのはインタプリタの環境そのもので、AOT 実行ファイルには
+その環境が無い。`trace` が見ているのも `step` が止まるのも走っているインタプリタの呼び出し経路で、
+`disassemble` はコンパイラそのものを使う）。`room`/`dribble`/`ed` はこの仲間ではなく、普通に
+コンパイルできる。
 
 コンパイル**できる**もの: ストリーム・ファイル I/O、`random`、`gensym`、
 `symbol->string`/`string->symbol`、`parse-int`/`parse-float`、`get-universal-time`/
 `get-internal-real-time`、`exit`、超越関数、ビット演算、`catch`/`throw`/`unwind-protect`、
 `eq`/`eql`/`equal`/`equalp` の4つ全部（`case` もこれで全型でコンパイルできる）、
 `print`/`println`/`format`/`pprint` と `pprint-logical-block` を含む印字一式、`read`、
-そして `eval`。prelude は事前コンパイル済みで出荷される。
+そして `eval`。標準ライブラリはコンパイル済みの状態で同梱されている。
 
-印字・リーダ・フロントエンド（チェッカーとインタプリタ）は、必要な実行ファイルだけが払うように
-**独立したクレート**に分けてある（`typelisp-print` / `typelisp-read` / `typelisp-front`）。
-リンカはアーカイブのメンバ単位で引くので、印字しないプログラムに書式エンジンは入らない——
-`(defun main () i32 42)` の AOT 出力で実測 3,530,224 バイト（印字シンボル 0 個・リーダシンボル
-0 個・フロントエンドシンボル 0 個）、同じ出力に `println` を1つ足すと 3,877,648 バイト
-（印字 124 個）、`read` を1つ足すと 3,647,960 バイト（リーダ 24 個・印字は 0 個のまま）。
+AOT 実行ファイルには、プログラムが使う機能のぶんだけが入る。印字しないプログラムに書式エンジンは
+入らず、`read` を呼ばないプログラムにリーダは入らず、`eval` を呼ばないプログラムにチェッカーと
+インタプリタは入らない。
 
-### ダンプ
+### 10.1 ダンプ
 
 ```lisp
 (dump "session.typld")     ; 書き出す
@@ -1329,16 +1275,10 @@ typl --image session.typld prog.typl   # そこから起動する
 typl --image session.typld             # REPL も同じ
 ```
 
-**コンパイラがネイティブ本体を作る場所では、型情報も一緒に作る。** その対を 1 ファイルに
-収めたものがダンプで、prelude も、コンパイラ島も、`compile-file` が実行ファイルへ埋め込む
-`eval` の環境も、`(dump ...)` の出力も同じ形式である。ファイルは**単位（unit）の並び**で、
-各単位が「そのコンパイルが足した検査済み状態」と「その本体のビットコード」を持つ。
-ロードは先頭から順に適用するだけ。
-
-`(dump path)` が書くのは、いまのセッションが読み込んだ単位（prelude と島、あるいは
-`--image` で渡されたダンプの単位）をそのまま並べたものに、**セッション自身が定義したもの**の
-単位を1つ足したもの。だから出力は自己完結していて、`typl --image` で同じ環境が立ち上がる。
-セッション中に `(compile f)` したものは、ビットコードとして書き出される。
+ダンプは、型情報とコンパイル済みの本体を 1 ファイルに収めたもの。`(dump path)` が書くのは、
+いまのセッションが読み込んだもの（標準ライブラリ、あるいは `--image` で渡されたダンプ）に、
+**セッション自身が定義したもの**を足したもの。だから出力は自己完結していて、`typl --image` で
+同じ環境が立ち上がる。セッション中に `(compile f)` したものは、コンパイル済みの形で書き出される。
 
 保存されるのは**定義であって履歴ではない**:
 
@@ -1349,53 +1289,42 @@ typl --image session.typld             # REPL も同じ
   外部メモリ——という問題群がまるごと消える。
 - `save-lisp-and-die` と違い、**プロセスは死なない**。書き出しはイメージを壊さないため。
 
-prelude と島の単位は、それを作ったときの `SOURCE` のダイジェストを持っている。読み込む
-実行ファイルの `SOURCE` と食い違えばエラーになる（再生成スクリプト名つき）。異なるビルドが
-書いたイメージを黙って受け入れることはない。
+ダンプは、それを書いた処理系の標準ライブラリとコンパイラの版を記録している。版の違う `typl` で
+読み込もうとするとエラーになり、黙って受け入れることはない。
 
-### AOT 実行ファイルの中の `eval`
+### 10.2 AOT 実行ファイルの中の `eval`
 
-`eval` は「現在の大域環境」に対して型検査してから評価する（[functions.md](functions.md) §16）。
+`eval` は「現在の大域環境」に対して型検査してから評価する（[解析・評価](functions/system.md#6-解析評価)）。
 その環境——チェッカーが引く署名・型・マクロの表と、インタプリタが実行できる本体——は
 **機械語には入っていない**。コンパイル済みの関数はアドレスに置かれたシンボルでしかなく、
 引数の型も、名前から本体を引く表も持っていないからである。
 
 そこで `compile-file` は `eval` を呼ぶプログラムに限って、**その環境をコンパイル時に組み立てて
-実行ファイルに書き込む**——上のダンプと同じ形式で、prelude の単位（コミット済み成果物から
-そのまま）とプログラム自身の単位の2つ。起動時にやるのは復元だけで、ソースを読み直すことも
-型検査し直すことも無い。`eval` を呼ばないプログラムには何も足さない。
-
-保存されるのは「型情報」ではなく**検査済み状態**である。署名だけでは `(eval '(f 1))` は型検査を
-通ったあと実行するものが無い。だから検査済みトップレベルフォームも一緒に入っていて、復元は
-それを実行してインタプリタ側の表を埋める。
+実行ファイルに書き込む**。形式はダンプと同じで、標準ライブラリの分とプログラム自身の分が入る。
+起動時にやるのは復元だけで、ソースを読み直すことも型検査し直すことも無い。`eval` を呼ばない
+プログラムには何も足さない。
 
 帰結:
 
-- **起動に時間がかかる**。`(defun main () i32 0)` に `eval` を1つ足した実行ファイルで実測
-  **0.05 秒**（front を最適化ビルドしたとき。参考として `typl` 自身の起動は 1.45 秒）。
-  ヒープも大きめ（`1 << 18` セル）に取る。
-- **サイズが増える**。同じ比較で 3.53MB → 8.4MB。チェッカーとインタプリタのコード、および
-  環境スナップショットのぶん。
+- **起動に時間がかかり、実行ファイルが大きくなる**。チェッカーとインタプリタのコードと、
+  環境のスナップショットが入るため。ヒープも大きめに取る。
 - **eval したフォームは解釈実行される**。プログラム自身の関数を呼ぶ形を eval しても、走るのは
   スナップショットが持っている解釈実行用の本体のほう。結果は同じで、速度だけが違う。
 
 グローバル変数の記憶域はコンパイル済みコードと**共有される**（同じスロット）。`defvar` の
-初期化子はコンパイル済みの初期化列が1回だけ走らせ、復元のほうはスキップする——副作用のある
+初期化子はコンパイル済みの初期化が1回だけ走らせ、復元のほうはスキップする——副作用のある
 初期化子が二度走らないため。
 
-`compile-file` はコンパイラ島だけでなく prelude も読む（その本体を実行ファイルへ埋め込む）
-ので、`abs`/`gcd` のような prelude 関数だけでなく `(impl print-object ...)` も
-`(defmethod print-object ...)` と同じく AOT で書ける——トレイト本体は prelude にあるが、
-それも読み込まれているため。
+`compile-file` は標準ライブラリも読む（その本体を実行ファイルへ埋め込む）ので、`abs`/`gcd` のような
+標準ライブラリの関数も、`(impl print-object ...)` も、`(defmethod print-object ...)` と同じく
+AOT で使える。
 
 `compile-file` は `use`（および `import`/`shadowing-import`）も受理する。エントリファイルの
 `(use m)` は `typl file.typl` と同じ規則でファイルを探し、見つかった依存ファイルも
 コンパイルして実行ファイルへリンクする——`main.typl` が `(use http)` で `http.typl` を
-`use` する構成（`examples/projects/http`）もそのまま AOT 化できる。エントリファイル自身の
+読む構成もそのまま AOT 化できる。エントリファイル自身の
 定義は（`typl file.typl` と違い）ルート名前空間に留まる——`(module m ...)` で明示的に
 くくった場合はそのモジュール修飾名で呼ぶ。
-
-内部実装（LLVM バックエンド）の詳細は開発用ドキュメント（[docs/dev/](dev/)）を参照。
 
 ## 11. リーダマクロ（readtable）
 
@@ -1432,42 +1361,39 @@ prelude と島の単位は、それを作ったときの `SOURCE` のダイジ�
 `make-dispatch-macro-character` に当たるものは**無い**。登録がその役をしてしまうので、
 別の段として残しても何もすることが無い。
 
-**いつ効くか**は `#.`（§1）と同じで、読み込み経路によって変わる:
+**いつ効くか**は `#.`（1 章）と同じで、読み込み経路によって変わる:
 
 - REPL と `(load ...)` は 1 フォームずつ実行するので、**手前のフォームで定義した関数**を
   そのまま登録できる。
 - モジュールファイルは単位として検査され実行は後——なので `set-macro-character` /
   `set-dispatch-macro-character` の**呼び出しだけが即時実行される**
-  （`project::needs_immediate_exec`、CL の `(eval-when (:compile-toplevel) ...)` の役）。
+  （CL の `(eval-when (:compile-toplevel) ...)` の役）。
   即時に走る以上、**渡す関数はその時点で在らねばならない**。同じファイルの `defun` は
-  まだ走っていないので、`lambda` で書くか、prelude / 既に走ったものを使う。
+  まだ走っていないので、`lambda` で書くか、標準ライブラリか既に走ったものを使う。
   トップレベルの呼び出しだけが対象で、`progn` や `let` の中は見ない。
-- 純粋な読み（評価器を渡されていない `Reader`）では、マクロ文字はその旨のエラーになる。
 
-組み込みの `read` / `read-from-string` も readtable を見る（CL と同じ）。コンパイル済みの
-実行ファイルでも動くが、そのぶん**チェッカーとインタプリタが実行ファイルに入る**——
-`eval` と同じ値段で、理由も同じ（登録した関数を呼ぶのは評価器の仕事）。
+組み込みの `read` / `read-from-string` も readtable を見る（CL と同じ）。
 
 **無いもの**: `*readtable*` と `copy-readtable`、および `readtable-case`。前の 2 つは
 readtable が**値でない**ため——値なら「リーダに手渡せるもの」でなければならないが、
-リーダを呼ぶのは Rust 側のドライバで、渡す先が無い。`readtable-case` は、この言語のリーダが
-常に小文字化する（CL の `:downcase`）と§1 で決めているため。
+ソースを読むリーダはプログラムの外側にあり、渡す先が無い。`readtable-case` は、この言語のリーダが
+常に小文字化する（CL の `:downcase`）と 1 章で決めているため。
 
 
 ## 12. 並行機構（タスク）
 
 **タスクは軽量スレッド**（Go で言えば `go` 文で起こすもの）で、協調的に走る（プリエンプションは
-無い）。切り替えはカーネルを通らず、実行状態は Rust のスタックではなくヒープ上にあるので、
+無い）。切り替えはカーネルを通らず、実行状態は機械スタックではなくヒープ上にあるので、
 タスクは安く大量に作れる。
 
 **タスクは複数の OS スレッドで同時に走る**（マルチコア並列）。スレッド数は環境変数
 `TYPELISP_THREADS`（`main` を走らせるスレッドを含む総数、既定はマシンの並列度）。
-`typl` では **compiled なタスクだけ**が他のスレッドで走り、interpreted なタスクは
-インタプリタのスレッドで走る（§12.6）。共有データは `Mutex<T>` か `Chan<T>` を通す
-——通さない同時の読み書きは Go と同じく未定義（§12.6）。
+`typl` では**コンパイル済みのタスクだけ**が他のスレッドで走り、解釈実行されるタスクは
+インタプリタのスレッドで走る（12.7）。共有データは `Mutex<T>` か `Chan<T>` を通す
+——通さない同時の読み書きは Go と同じく未定義（12.7）。
 
-語彙のうち**特殊形はこの 3 つだけ**で、残りはふつうの関数・メソッド・マクロ
-（[functions.md §20](functions.md#20-タスクとチャネル)）。
+語彙のうち**特殊形は `task` / `thread` / `select` の 3 つだけ**で、残りはふつうの関数・メソッド・マクロ
+（[タスクとチャネル](functions/concurrency.md)）。
 
 ### 12.1 `task` — タスクを起動する
 
@@ -1494,7 +1420,7 @@ readtable が**値でない**ため——値なら「リーダに手渡せるも
 `lambda` は戻り型注釈が必須で、マクロは `(f a b)` の戻り型を知らない。知っているのは
 チェッカーだけ。
 
-### 12.1.1 `thread` — 専用の OS スレッドでタスクを起動する
+### 12.2 `thread` — 専用の OS スレッドでタスクを起動する
 
 ```lisp
 (thread (f arg...))                 ; Thread<T> を返す。T は f の戻り型
@@ -1511,12 +1437,12 @@ readtable が**値でない**ため——値なら「リーダに手渡せるも
 - panic の規則は `task` と同じ（プロセス全体が落ちる）。`main` が返ればプロセスが終わる。
 - 関数として書きたいときは `(Thread::spawn (lambda () T body...))`（Rust の
   `std::thread::spawn`）。
-- **専用スレッドで走るのは compiled なコードだけ。** `typl` で interpreted な
+- **専用スレッドで走るのはコンパイル済みのコードだけ。** `typl` で解釈実行中に
   `(thread (f ...))` を評価すると、`f`（とそこから呼ばれるもの）をその場でコンパイルして
-  から走らせる。コンパイルできない呼び出し——interpreted な `lambda` の値、構造体の
-  構築など——は、スレッドを起こす前に catchable な panic になる。
+  から走らせる。コンパイルできない呼び出し——解釈実行される `lambda` の値、構造体の
+  構築など——は、スレッドを起こす前に catch できる panic になる。
 
-### 12.2 `select` — 複数のチャネル操作を同時に待つ
+### 12.3 `select` — 複数のチャネル操作を同時に待つ
 
 ```lisp
 (select
@@ -1534,8 +1460,7 @@ readtable が**値でない**ため——値なら「リーダに手渡せるも
   `select` も同様——本体をそのまま書いたのと同じだから。
 
 **チャネル式と送る値は、どの腕が選ばれるかに関わらず左から 1 度だけ評価される**
-（`case` がキーに対して持つのと同じ規律）。チェッカーがそれらを `select` を囲む `let` に
-括り出すことでそうなっている。
+（`case` がキーに対して持つのと同じ規律）。
 
 ```lisp
 (select                             ; タイムアウト付き受信
@@ -1543,10 +1468,10 @@ readtable が**値でない**ため——値なら「リーダに手渡せるも
   ((z (recv (after 0.5))) (println "timeout")))
 ```
 
-`after`（[functions.md §20.5](functions.md#205-after--時間で届くチャネル)）は
+`after`（[時間で届くチャネル](functions/concurrency.md#5-after--時間で届くチャネル)）は
 「`sec` 秒後に 1 つ届くチャネル」で、Go の `time.After` に当たる。
 
-### 12.3 既存の機能との関係
+### 12.4 ほかの機能との関係
 
 | 機能 | タスクとの関係 |
 |---|---|
@@ -1558,66 +1483,62 @@ readtable が**値でない**ため——値なら「リーダに手渡せるも
 | 標準出力 | 全タスクが共有する。`println` 1 回の出力が他と行の途中で混ざることは無い |
 | `compile` / `eval` | 制限は無い。タスクの中の `(compile f)` は通る |
 
-### 12.4 譲る場所
+### 12.5 切り替わる場所
 
 協調的スケジューリングなので、**切り替わるのは書いた場所だけ**：`(yield)`、`(sleep ...)`、
 `(wait ...)`、**待つことになったチャネル操作**（`send`/`recv`/`select`）、そして
 **待つことになったソケット操作**（`accept`／`tcp-connect`（名前解決を含む）／ソケットへの
-読み書き／`recv-from`、[functions.md §21](functions.md#21-ネットワークtcp--tls--unix-ドメイン--udp)）。ソケットは全部 non-blocking で、
-用意できていなければ prelude のループが `(net-wait h interest)` でタスクを止め、スケジューラが
-`poll` の答えで起こす——Go の netpoller と同じ形。スケジューラが OS を待つ場所は 1 つで、
-走れるタスクが無いときに「最寄りの `sleep` 期限まで `poll`」する。
+読み書き／`recv-from`、[ネットワーク](functions/network.md)）。ソケットは全部 non-blocking で、
+用意できていなければそのタスクだけが止まり、OS が準備できたと答えたときに再開する——Go の
+netpoller と同じ形。走れるタスクが無いときだけ、処理系は最寄りの `sleep` 期限まで OS を待つ。
 
 その場で答えが出るチャネル操作——バッファに空きのある `send`、値のある `recv`、
 `(len ch)`/`(cap ch)`/`(close ch)`/`(Chan::new n)`——は**番を消費しない**。読み取りで
 勝手に割り込まれないということで、`(sleep 0.0)` が CL 流の「譲る 0 秒」であるのとは
 別の扱いになっている。
 
-**v1 にプリエンプションは無い。** 何も呼ばないタイトループは他のタスクを飢えさせる
-——ただしコンパイル済みのループは後退辺で定期的にスケジューラへ手を渡すので、
-compiled なタイトループは飢えさせない（Phase C7）。
+**プリエンプションは無い。** 何も呼ばないタイトループは他のタスクを飢えさせる
+——ただしコンパイル済みのループは定期的にスケジューラへ手を渡すので、
+コンパイル済みのタイトループは飢えさせない。
 
-### 12.5 compiled コードとの境界
+### 12.6 コンパイル済みコードとタスク
 
-compiled なコードもタスクを中断できる（Phase C）。`compile-file` で作った実行ファイルも
-同じで、`main` はスケジューラの main タスクとして走る——`task`・`sleep`・`wait`・チャネル・
+コンパイル済みのコードもタスクを中断できる。`compile-file` で作った実行ファイルも
+同じで、`main` はスケジューラのメインタスクとして走る——`task`・`sleep`・`wait`・チャネル・
 ソケット待ちのどれも `typl` と同じ意味で動き、`main` が返ればプロセスが終わって残りの
-タスクは打ち切られる（Go と同じ）。スケジューラはランタイム（`typelisp-rt`）のもので、
-インタプリタを実行ファイルに持ち込まない。
+タスクは打ち切られる（Go と同じ）。スケジューラのためにインタプリタが実行ファイルへ
+入ることは無い。
 
-残る例外は「C の FFI コールバックの中」だけで、そこでは**待つことになった**操作が
+例外は「C の FFI コールバックの中」だけで、そこでは**待つことになった**操作が
 エラーになる（黙ってデッドロックするより親切なので）——`defffi` で渡した関数が C から
-呼ばれている間は C のスタックが積まれており、そこに継続は無い。
+呼ばれている間は C のスタックが積まれており、タスクを中断して後で再開する手段が無い。
 
-もう一つ別の意味での「機械スタックの上で呼ばれる経路」——`print-object` メソッド、
-`format` の `~/name/`、リーダマクロ、`eval` の中、AOT 実行ファイルの `defvar` 初期化子——
-は継続を置く場所こそ無いが、駆動しているスケジューラに直接尋ねられるので事情が違う：
-**待たずに答えが出る操作は通り**（バッファに値のある `(recv ch)`、受信済みデータのある
+次の場所も、タスクの途中で呼ばれる関数でありながら中断はできない：`print-object` メソッド、
+`format` の `~/name/`、リーダマクロ、`eval` の中、AOT 実行ファイルの `defvar` 初期化子。
+ここでは**待たずに答えが出る操作は通り**（バッファに値のある `(recv ch)`、受信済みデータのある
 ソケットの `read-line`、`(task ...)`、`(yield)` など）、**本当に待つことになる操作は
 エラーになる**（プロセスを落とすのではなく、`` `recv` cannot block: ... `` のような
-catchable なエラーとして）。AOT 実行ファイルの `print-object`/`~/name/`、`defvar` 初期化子
-もここに含まれる——`main` と同じスケジューラの下でタスクとして走るので、interpreted な
-経路と同じだけ動く。
+catch できるエラーとして）。
 
-### 12.6 Go との違い
+### 12.7 Go との違い
 
-- **`typl` で他のスレッドへ出るのは compiled なタスクだけ。** インタプリタの状態は
-  スレッド間で共有できないので、interpreted な `task` のタスクはインタプリタのスレッドで
-  走る。compiled なタスクも、interpreted な関数値を呼ぶ・誰もコンパイルしていない
+- **`typl` で他のスレッドへ出るのはコンパイル済みのタスクだけ。** インタプリタの状態は
+  スレッド間で共有できないので、解釈実行される `task` のタスクはインタプリタのスレッドで
+  走る。コンパイル済みのタスクも、解釈実行される関数値を呼ぶ・誰もコンパイルしていない
   `:dyn` メソッドを呼ぶ・`eval`/`macroexpand`/`read` を呼ぶ時点で**インタプリタの
-  スレッドへ移り、以後そこに留まる**（戻らない）。長い処理の途中で一度でも interpreted な
+  スレッドへ移り、以後そこに留まる**（戻らない）。長い処理の途中で一度でも解釈実行される
   コードに触れると、残りはインタプリタのスレッドで走る。
 - **`typl` のワーカーはトップレベルの評価 1 回ぶんだけ生きる。** REPL の入力待ちの間や
   トップレベルの形の合間には、他のスレッドはタスクを進めない（残ったタスクは次の評価で
   続きから走る）。評価の終わりには各スレッドが今の一歩を終えるのを待つので、`thread` の中で
   ブロックし続ける C 関数（`defffi`）があると、それが返るまで評価が終わらない。
-- **ワーカー上の印字**: interpreted な `print-object`／`~/name/` メソッドは他のスレッドでは
-  走らせられないので、そういう値を他のスレッドで印字すると catchable な panic になる
-  （`(compile T::print-object)` するか、main タスクから印字する）。
+- **ワーカー上の印字**: 解釈実行される `print-object`／`~/name/` メソッドは他のスレッドでは
+  走らせられないので、そういう値を他のスレッドで印字すると catch できる panic になる
+  （`(compile T::print-object)` するか、メインタスクから印字する）。
 - **データ競合は未定義**（Go と同じ立場）。`Mutex<T>`・`Chan<T>` を通さずに複数のタスクから
   同じ値を書き換えた結果は保証されない。
 - **`task` は値を返す。** Go の `go` 文と違い `Task<T>` が返り、`(wait t)` で結果を取れる。
 - **nil チャネルが無い。** Go の fan-in の定石（閉じたチャネルを `nil` にして `select` の腕から
   外す）は書けないので、入力ごとに 1 タスク立てて `WaitGroup` で合流する
-  （[functions.md §20.4](functions.md#204-waitgroup--n-個の完了待ち)）。Go でもこちらが
+  （[WaitGroup](functions/concurrency.md#4-waitgroup--n-個の完了待ち)）。Go でもこちらが
   推奨される書き方だが、**Go から移る人が最初に困る差**。

@@ -326,7 +326,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         // compile bridge reads back through `Interp::compile_definitions`.
         // A declaration, not a body to emit: `Interp::exec` resolved the
         // symbol and hung a thunk on the `FnDef`, and there is nothing here to
-        // compile. (The prelude itself declares no FFI — see `docs/syntax.md`
+        // compile. (The prelude itself declares no FFI — see `docs/ja/reference/syntax.md` §3.3
         // — but a dump replaying one reaches this walk.)
         "defstruct" | "defenum" | "use" | "defffi" => {}
         other => {

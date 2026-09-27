@@ -50,7 +50,7 @@
    削除するのは 64bit 幅の 4 つ（`i64`/`u64`/`isize`/`usize`）だけ。残る
    `i8`/`i16`/`i32`/`u8`/`u16`/`u32`/`f32`/`f64` は**例外なく**名乗ったビット数で
    振る舞う——「狭い幅はデータを名指すためのもので、計算する型ではない」という
-   [functions.md](../functions.md) §1b の方針は、これで全面的に撤回になる。
+   旧 `docs/functions.md` §1b（現 [numbers.md](../ja/reference/functions/numbers.md) §1） の方針は、これで全面的に撤回になる。
 
 **なぜ `f64` は消さなくてよいか（`i64` との違い）**: `f64` の値は**ヒープの箱**
 （`BoxedObj::Float(f64)`）で、タグが付くのは箱の id のほう。だから 64bit の
@@ -220,7 +220,7 @@ Rust の `as i32` / `as u32` で書ける。
 ### 3.8 `f32` は本物の binary32 にする（監査結果 + 決定事項 7）
 
 「静的な型は幅を名乗るのに、実行時はその幅で扱わない」は整数だけの話ではない。
-**これは見落としではなく、明文化された方針**だった——[functions.md](../functions.md) §1b:
+**これは見落としではなく、明文化された方針**だった——旧 `docs/functions.md` §1b（現 [numbers.md](../ja/reference/functions/numbers.md) §1）:
 
 > **幅は静的な区別だけで、実行時表現は共通**——整数はどの型でも `i64`、浮動小数点は
 > どちらも `f64` なので、`u8` の算術は 8 ビットで巻き戻らず、`f32` の算術は f32 精度に
@@ -265,7 +265,7 @@ f32 の正規化:  Rust なら `x as f32 as f64` / LLVM なら `fptrunc double�
 
 **波及**（§3.7 と共通）:
 
-- [functions.md](../functions.md) §1b の「幅は静的な区別だけで、実行時表現は共通」の段落は
+- 旧 `docs/functions.md` §1b（現 [numbers.md](../ja/reference/functions/numbers.md) §1） の「幅は静的な区別だけで、実行時表現は共通」の段落は
   **丸ごと書き換え**。
 - 「CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と述語）は
   `i32`/`i64`/`f64`/`bignum`/`ratio` のまま」という線引きも、その理由

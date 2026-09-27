@@ -109,14 +109,17 @@ impl EvalError {
     /// `Break`/`Return`/`ReturnFrom`/`Throw`
     /// non-local-exit signals are returned unchanged — they are control flow,
     /// not errors, and whatever catches them matches on the bare variant. An
-    /// already-located error also keeps its original (innermost) location.
+    /// already-located error keeps its original (innermost) location, unless
+    /// that location is inside the standard library ([`Loc::is_library`]):
+    /// then the caller's location replaces it, so an `(unwrap none)` reports
+    /// the program's call to `unwrap` rather than the library's `panic` line.
+    /// Applied at every frame on the way out, this settles on the innermost
+    /// location in the program's own source.
     pub fn at(self, loc: Loc) -> EvalError {
         match self {
-            EvalError::Break
-            | EvalError::Return(_)
-            | EvalError::ReturnFrom(..)
-            | EvalError::Throw(..)
-            | EvalError::At(..) => self,
+            EvalError::Break | EvalError::Return(_) | EvalError::ReturnFrom(..) | EvalError::Throw(..) => self,
+            EvalError::At(inner_loc, inner) if inner_loc.is_library() => EvalError::At(loc, inner),
+            EvalError::At(..) => self,
             other => EvalError::At(loc, Box::new(other)),
         }
     }

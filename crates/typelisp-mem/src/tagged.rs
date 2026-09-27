@@ -44,7 +44,7 @@
 //!
 //! Why a fixnum is 63 bits and not 64: some bit has to say "not a pointer".
 //! The language has no 64-bit integer type for exactly this reason
-//! (`docs/functions.md` §1); the arbitrary-precision `int` promotes to a
+//! (`docs/ja/reference/functions/numbers.md` §1); the arbitrary-precision `int` promotes to a
 //! bignum box above this range instead of dropping bits, and [`encode`]
 //! aborts rather than truncate if handed a wider `Value::Int` — a `Value::Int`
 //! is also how raw C words travel through the *interpreter*, and those must

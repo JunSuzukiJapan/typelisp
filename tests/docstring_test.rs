@@ -211,3 +211,23 @@ fn documentation_on_unbound_name_is_a_check_error() {
     let msg = check_err("(documentation totally-undefined-name)");
     assert!(msg.contains("documentation"), "unexpected message: {}", msg);
 }
+
+// ---- deftype ----------------------------------------------------------------
+
+#[test]
+fn deftype_docstring_is_returned_by_documentation() {
+    let src = r#"
+        (deftype meters "Length in meters." i32)
+        (unwrap-or (documentation meters) "none")
+    "#;
+    assert_eq!(eval_string(src), "Length in meters.");
+}
+
+#[test]
+fn deftype_without_docstring_has_no_documentation() {
+    let src = r#"
+        (deftype meters i32)
+        (is-none (documentation meters))
+    "#;
+    assert_eq!(eval_ok(src), Value::Bool(true));
+}

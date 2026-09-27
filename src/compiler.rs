@@ -1546,7 +1546,7 @@ pub const SOURCE: &str = r#"
 
 ;; `v` rounded to binary32 when the receiver is `f32` and the method's result
 ;; is a float — what makes `f32` arithmetic binary32 arithmetic rather than
-;; `f64` arithmetic under another name (`docs/functions.md` §1b). Every other
+;; `f64` arithmetic under another name (`docs/ja/reference/functions/numbers.md` §1). Every other
 ;; case returns `v` untouched.
 (defun round-f32-if ((builder llvm-builder) (type-name string) (method string) (v llvm-value)) llvm-value
   (if (if (equal type-name "f32") (float-result-method? method) false)

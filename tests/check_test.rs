@@ -157,6 +157,30 @@ fn assert_type_error_with_prelude(src: &str) {
     }
 }
 
+/// A method name that exists on *other* types is not a missing function: the
+/// report names the first argument's type (which selects the method) and the
+/// types that do have it, instead of "no such function".
+#[test]
+fn a_method_missing_on_the_receivers_type_names_the_type_and_the_owners() {
+    match program_with_prelude("(upcase 1)") {
+        Err(Error::TypeError(m)) => {
+            assert!(m.contains("no method `upcase` for type `int`"), "{}", m);
+            assert!(m.contains("`char`") && m.contains("`string`"), "{}", m);
+        }
+        other => panic!("expected TypeError, got {:?}", other),
+    }
+}
+
+/// A name no type has as a method, and no function has either, is still
+/// reported as a missing function.
+#[test]
+fn a_name_that_is_nobodys_method_is_still_no_such_function() {
+    match program_with_prelude("(frobnicate 1)") {
+        Err(Error::NoSuchFunction(n)) => assert_eq!(n, "frobnicate"),
+        other => panic!("expected NoSuchFunction, got {:?}", other),
+    }
+}
+
 // ---- literals ---------------------------------------------------------------
 
 #[test]

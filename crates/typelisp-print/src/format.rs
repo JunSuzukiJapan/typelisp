@@ -121,7 +121,7 @@ pub struct PrintVars {
     /// `print-not-readable` for values with no readable form; this language
     /// has nothing to signal (no conditions) and no way to decide the question
     /// for a user type whose `print-object` may print anything, so that half
-    /// is deliberately absent — see `docs/functions.md` §15.3.
+    /// is deliberately absent — see `docs/ja/reference/functions/printing.md` §6.2.
     pub readably: bool,
 }
 

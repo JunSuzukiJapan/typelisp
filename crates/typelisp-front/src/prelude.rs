@@ -531,7 +531,7 @@ pub const SOURCE: &str = r##"
 ;; `upper-casep`/`char->name`/`digit->char` — the same collapse
 ;; `alpha-char-p`->`alphap` and `zerop`/`evenp` already made, and the same
 ;; `char->int`/`char->string` conversion spelling this type already carries.
-;; `docs/functions.md` §9 lists the CL correspondence for each.
+;; `docs/ja/reference/functions/collections.md` §2 lists the CL correspondence for each.
 ;;
 ;; EVERY body below works on `char->int` code points and never calls
 ;; `upcase`/`downcase`/`alphap`/`digitp`/`int->char`. That was once a
@@ -556,7 +556,7 @@ pub const SOURCE: &str = r##"
   (if (and (>= n 65) (<= n 90)) (+ n 32) n))
 
 ;; `char/=`: CL's inequality. `char` had `equal` but no `/=`, so the checker's
-;; variadic `/=` sugar (`check_variadic_cmp`, functions.md §4.1) had no binary
+;; variadic `/=` sugar (`check_variadic_cmp`, `docs/ja/reference/functions/numbers.md` §8.1) had no binary
 ;; method to expand onto for characters.
 (defmethod /= ((self char) (b char)) bool (not (equal self b)))
 ;; The case-insensitive order comparisons (`char-lessp` and friends). CL
@@ -745,7 +745,7 @@ pub const SOURCE: &str = r##"
 ;; `search`: the index where `sub` first occurs in `self`, or `none`.
 ;; CL spells the arguments the other way round (`(search pattern sequence)`);
 ;; this takes the receiver first like every other method here, and
-;; `docs/functions.md` §8 records the difference.
+;; `docs/ja/reference/functions/collections.md` §1 records the difference.
 ;; The empty string occurs at index 0, as CL says.
 ;;
 ;; **The window keywords are named, not numbered.** CL calls them
@@ -1742,8 +1742,8 @@ user-visible capacity."
 ;; does not buy: `"a"`, a float, a bignum/ratio or a quoted list, whose
 ;; `eq` is the identity of a `Str`/box/cons cell. `(str "a")` — the
 ;; variant pattern, which destructures to a `string` and compares *that* by
-;; content — is the spelling for those, and `docs/syntax.md`'s `match`
-;; section says so.
+;; content — is the spelling for those, and `docs/ja/reference/syntax.md`'s
+;; `match` section (§4.3) says so.
 ;; `Self` here is `Sexpr` — the *non-empty* S-expression — while `eq` takes
 ;; `Option<Sexpr>`, the type an S-expression datum has. Wrapping is what
 ;; bridges the two, and it is free: under the niche `(Option::some x)` is `x`.
@@ -1808,7 +1808,7 @@ user-visible capacity."
 ;; side of the Rust-builtin policy line it falls on.
 ;;
 ;; The **32-bit** variant, deliberately, and exactly: `u32` arithmetic is
-;; arithmetic modulo 2^32 (`docs/functions.md` §1), which is the ring FNV-32
+;; arithmetic modulo 2^32 (`docs/ja/reference/functions/numbers.md` §1), which is the ring FNV-32
 ;; is defined over — so `h * prime` here *is* FNV-32's step, with no masking
 ;; to arrange it. The running hash has to stay `u32`: in `int` it would never
 ;; wrap, and would grow by the prime's 24 bits with every character. Each
@@ -2446,7 +2446,7 @@ user-visible capacity."
 ;; exactly as `map`/`filter` are already reached.
 ;;
 ;; The departures from CL that the `Iter` shape forces (documented above and in
-;; functions.md §6) carry over unchanged: a search reports `bool`/`Option`
+;; `docs/ja/reference/functions/sequences.md` §4) carry over unchanged: a search reports `bool`/`Option`
 ;; rather than the tail cons, and everything that CL returns as a fresh list
 ;; comes back as a `Vector<A>`.
 
@@ -3132,7 +3132,7 @@ user-visible capacity."
 
 ;; CL's `ffloor`/`fceiling`/`fround`/`ftruncate`: round, but stay a float.
 ;; This language's `f64` `floor`/`ceiling`/`round`/`truncate` *already* return
-;; `f64` (functions.md §2) — CL's undecorated names return an integer, so it is
+;; `f64` (`docs/ja/reference/functions/numbers.md` §4) — CL's undecorated names return an integer, so it is
 ;; the `f`-prefixed CL names that these match. Thin aliases, kept so ported CL
 ;; reads unchanged.
 (defmethod ffloor ((self f64)) f64 (floor self))
@@ -3310,7 +3310,7 @@ user-visible capacity."
 ;; `ccase` is `ecase` plus a restart letting the user supply a new value.
 ;; Restarts are not taken (language-design.md §9), and with no restart the two
 ;; are the same form — so `ccase` is defined as the same expansion rather than
-;; left out, and `docs/functions.md` records that they coincide here.
+;; left out, and `docs/ja/reference/syntax.md` §4 records that they coincide here.
 
 ;; `setq`: CL's variable-only assignment, and its multi-pair form. `setf` is
 ;; the general one here, so this is a spelling rather than a mechanism —
@@ -3977,7 +3977,7 @@ user-visible capacity."
   (type Item)
   ;; `read-item` yields the next item, or `none` at end of input. Said in a
   ;; comment because a bodyless signature cannot carry a docstring: a trailing
-  ;; string *is* the default body (syntax.md §deftrait), and one typed
+  ;; string *is* the default body (`docs/ja/reference/syntax.md` §3.9), and one typed
   ;; `string` where `Option<Item>` is declared -- which is exactly what this
   ;; docstring used to be, unnoticed until `deftrait` began checking its
   ;; default bodies at the declaration.
@@ -6172,7 +6172,7 @@ user-visible capacity."
 ;;
 ;; A prelude type for the same reason `Array<T>` above is one: a bit vector is
 ;; a packed word sequence and a length, and `Vector<i32>` plus the integer
-;; bit operations (§4.4 of `docs/functions.md`) are all that takes.
+;; bit operations (§11 of `docs/ja/reference/functions/numbers.md`) are all that takes.
 ;;
 ;; **31 bits to a word, not 32.** The word type is `i32` — the widest
 ;; fixed-width integer there is — and its 32nd bit is the sign. Packing 31
@@ -6404,7 +6404,7 @@ user-visible capacity."
 ;; restores in an `unwind-protect` cleanup. That is enough to be indistinguishable
 ;; from a dynamic binding for single-threaded code, because the cleanup runs
 ;; however the body is left: normally, by `throw`, by `panic`, or by
-;; `break`/`return` (syntax.md §8).
+;; `break`/`return` (`docs/ja/reference/syntax.md` §8).
 ;;
 ;; What it is *not*: per-thread. A real special variable has one binding per
 ;; thread; this has one global that a body borrows and gives back.
@@ -6682,7 +6682,7 @@ pub fn load_interpreted_with(
     crate::core_macros::load_with(heap, chk, interp, on_checked);
 
     let r = Reader::new();
-    let mut forms = r.forms(SOURCE);
+    let mut forms = r.forms_in(crate::LIBRARY_FILE, SOURCE);
     while let Some((v, _)) = forms.next_form(heap).expect("prelude: read failed") {
         on_read(heap, v);
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");

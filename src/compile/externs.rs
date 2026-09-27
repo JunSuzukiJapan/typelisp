@@ -186,7 +186,7 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // The REPL tool layer's runtime half. `trace`/`untrace`/`step`/
         // `disassemble` have no row and never will — those are
         // interpreter-only forms, the same category `compile`/`compile-file`/
-        // `dump` are in (docs/syntax.md §10). These three are ordinary
+        // `dump` are in (`docs/ja/reference/syntax.md` §10). These three are ordinary
         // builtins: the heap statistics and the dribble sink are the
         // runtime's own, and launching an editor is a process call.
         "heap-info" => "rt_heap_info",
@@ -363,7 +363,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
             "int->c-long", "int->c-ulong",
             // The `Option`-returning halves. No prelude definition reaches
             // them; they are lowered so a user's own `(try-as u8 n)` can be
-            // compiled — see `docs/syntax.md` §10.
+            // compiled — see `docs/ja/reference/syntax.md` §10.
             "try-int->char",
             "try-int->i8", "try-int->i16", "try-int->i32", "try-int->u8", "try-int->u16", "try-int->u32",
             "try-int->c-long", "try-int->c-ulong",
@@ -970,14 +970,13 @@ mod scc_tests {
     use crate::eval::interp::{FnDef, Interp};
     use crate::types::Path;
 
-    /// Surface `defun`/`defmethod` syntax can never actually exercise the
-    /// mutual-recursion branch of [`Interp::compute_sccs`]/
-    /// [`Interp::compile_scc`]: `Checker::check_form_at` checks one top-level
-    /// form at a time, in file order, so a `defun` can only ever call a name
-    /// already registered *earlier* — `docs/syntax.md`'s own description of
-    /// `labels` ("相互再帰可能なローカル関数定義") confirms mutual recursion
-    /// is deliberately a `labels`-only, local-scope feature, not something a
-    /// pair of top-level `defun`s can express. So this bypasses the checker
+    /// Exercises the mutual-recursion branch of [`Interp::compute_sccs`]/
+    /// [`Interp::compile_scc`] without going through surface syntax.
+    /// `Checker::check_form_at` checks one top-level form at a time, in file
+    /// order, so a pair of top-level `defun`s can call each other only when
+    /// the later one is declared first with `defsignature`
+    /// (`docs/ja/reference/syntax.md` §3.2) — which makes the test depend on
+    /// the checker's forward-declaration rules. So this bypasses the checker
     /// entirely — inserting two hand-built [`FnDef`]s that call each other
     /// straight into [`Interp::fns`], the same "same-module direct access"
     /// trick this file's own [`Interp`] fields allow — to prove the SCC
@@ -1142,7 +1141,7 @@ mod native_method_list_tests {
     /// Neither list above is checked against the **registry**, and that gap is
     /// the one a user falls into: a builtin the registry registers and neither
     /// side lowers is a method an ordinary call can name, and naming it makes
-    /// the calling `defun` uncompilable. `docs/syntax.md` §10 carried a table
+    /// the calling `defun` uncompilable. The syntax reference's §10 carried a table
     /// of exactly those, filled in by hand as they were discovered; this is
     /// the check that keeps it empty without anyone having to notice.
     ///

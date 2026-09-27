@@ -2862,7 +2862,7 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     m.insert("float->ratio".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Ratio), instance: true, builtin: true });
     // `float->f32`/`float->f64` and `try-float->f32`: a cast between the two
     // float *widths*, a real conversion now that `f32` is binary32 rather
-    // than a label on an `f64` (`docs/functions.md` §1b). `float->f32` rounds
+    // than a label on an `f64` (`docs/ja/reference/functions/numbers.md` §1). `float->f32` rounds
     // to nearest, `float->f64` is exact in both directions (every binary32
     // value is a binary64 value), and `try-float->f32` answers `none` when
     // the rounding would lose something — the question `try-as` asks.

@@ -1023,7 +1023,7 @@ impl Interp {
     /// cannot recognize, so it is written as `none`/`(some ...)` here, around
     /// the payload's own rendering. Everything else renders as itself —
     /// `Option<Sexpr>` included, which prints as the S-expression it is
-    /// (functions.md §15).
+    /// (`docs/ja/reference/functions/printing.md` §1).
     pub(super) fn trace_render(&self, heap: &mut Heap, v: Value, repr: Option<&Repr>) -> String {
         if matches!(repr, Some(Repr::Niche(p)) if **p != Repr::Sexpr) {
             if v == Value::Empty {

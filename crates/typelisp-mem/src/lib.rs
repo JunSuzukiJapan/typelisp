@@ -16,7 +16,7 @@ pub mod symbols;
 pub mod tagged;
 pub mod value;
 
-pub use errors::{Error, Loc};
+pub use errors::{Error, Loc, LIBRARY_FILE};
 pub use heap::{base_type_key, inner_type_key, Heap, RootScope, RootStackId};
 pub use option::{instantiate_key_template, is_niched_option_key, option_payload_niches, option_prints_wrapped, type_key_args};
 pub use symbols::{wk, NsId, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};

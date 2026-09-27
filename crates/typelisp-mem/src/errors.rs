@@ -26,7 +26,23 @@ pub struct Loc {
     pub end_col: u32,
 }
 
+/// The file name the standard library's own source is read under — the
+/// prelude and the core macro layer.
+///
+/// Distinct from `<input>`, the name every other unnamed text gets (a string
+/// passed to `read`, `eval`'s forms), so a location can tell *library* code
+/// from the program's. A runtime error raised inside the library is reported
+/// at the program's call into it, not at the library line that raised it:
+/// see `EvalError::at` in the front end.
+pub const LIBRARY_FILE: &str = "<prelude>";
+
 impl Loc {
+    /// Whether this location is inside the standard library's own source
+    /// ([`LIBRARY_FILE`]).
+    pub fn is_library(&self) -> bool {
+        &*self.file == LIBRARY_FILE
+    }
+
     /// A degenerate (point-only) location: the end is set equal to the start.
     /// Use [`Loc::with_end`] afterwards when the true extent is known.
     pub fn new(file: Arc<str>, line: u32, col: u32) -> Loc {

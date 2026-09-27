@@ -1,7 +1,7 @@
 //! `eval` as compiled code calls it.
 //!
 //! The last of the builtins that used to make a function uncompilable
-//! (`docs/syntax.md` §10). Unlike the other ten `rt_*` shims defined outside
+//! (`docs/ja/reference/syntax.md` §10 now says every builtin compiles). Unlike the other ten `rt_*` shims defined outside
 //! `typelisp-rt`, this one cannot be a small self-contained routine: `eval`
 //! type-checks a form against the program's environment and then runs it, so
 //! its implementation *is* the checker and the interpreter. That is why they

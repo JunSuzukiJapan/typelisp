@@ -120,9 +120,9 @@ heap.intern_type_key(&type_key_of(p))           // "gen"
 
 ### Stage 6 — 締め
 
-`scripts/test-serial.sh`（直列の全実行）。docs（`functions.md` の
+`scripts/test-serial.sh`（直列の全実行）。docs（旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)） の
 `print-object` の「ジェネリック型には効かない（既知の穴）」を消す、
-`syntax.md` の downcast の項に「実体化まで見る」を書く）。
+旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)） の downcast の項に「実体化まで見る」を書く）。
 
 ## 4. リスク
 

@@ -337,6 +337,12 @@ enum Frame {
     /// declared return representation the value is rendered by (a niched
     /// `Option` prints as one only if the renderer is told).
     TracedCall { name: String, depth: usize, ret: Option<Repr> },
+    /// A call from the program into the standard library, open around the
+    /// library body. Carries nothing: its whole content is the location the
+    /// stack records with it — the program's call site — which is where an
+    /// error raised inside the library is reported (see [`Interp::enter_fn`]
+    /// and the `State::Unwind` step). A value passes straight through.
+    LibraryCall,
     /// A compiled chain is standing and this task was put down waiting for
     /// something. When the value arrives, put it in the chain's value slot and
     /// keep driving.
@@ -485,7 +491,7 @@ impl CpsStack {
             }
             // Names and tags are `String`s, and an exit carries its value in
             // the state slots rather than here. So do the stepping flags.
-            Frame::Step { .. } | Frame::TracedCall { .. } | Frame::DriveCompiled { .. } => {}
+            Frame::Step { .. } | Frame::TracedCall { .. } | Frame::DriveCompiled { .. } | Frame::LibraryCall => {}
             Frame::Block { .. } | Frame::Catch { .. } | Frame::Return | Frame::ReturnFrom { .. } | Frame::Throw { .. } => {}
             Frame::Args { form, done, env, .. } => {
                 heap.push_root(*form);
@@ -708,7 +714,8 @@ fn escaped_task_failure(e: EvalError) -> EvalError {
 }
 
 /// Places `e` at `loc`, if there is one. `EvalError::at` keeps the innermost
-/// location, so calling this more than once on the way out is harmless.
+/// location in the program's own source, so calling this more than once on
+/// the way out is harmless.
 fn place(e: EvalError, loc: Option<crate::Loc>) -> EvalError {
     match loc {
         Some(l) => e.at(l),
@@ -1126,6 +1133,11 @@ impl Interp {
             State::Unwind(e) => match task.stack.pop() {
                 None => return Progress::Done(Err(e)),
                 Some((frame, fbase, loc)) => {
+                    // An error raised inside the standard library is reported
+                    // where the program called into it: each frame it leaves
+                    // offers its own location, and `EvalError::at` takes it
+                    // only while the one attached is still a library line.
+                    let e = if e.loc().is_some_and(|l| l.is_library()) { place(e, loc.clone()) } else { e };
                     let (next, pushed) = match self.unwind_through(heap, frame, e) {
                         Ok(pair) => pair,
                         // An error *while* unwinding replaces the exit in
@@ -2080,7 +2092,19 @@ impl Interp {
     /// **its last form is a tail jump**. `Interp::apply` — the other way into a
     /// body, for a caller that is a Rust frame — cannot do that: it evaluates
     /// the last form with that frame still waiting on it.
-    fn enter_fn(&self, heap: &mut Heap, f: &Rc<FnDef>, argv: Vec<Value>) -> Result<(State, Option<Frame>), EvalError> {
+    ///
+    /// `call_form` is the form making the call. It decides one thing: whether
+    /// this is the program calling into the standard library, which costs the
+    /// call its tail position so that the call site stays on the stack
+    /// ([`Frame::LibraryCall`]). A library body calling another keeps its tail
+    /// jump — the frame is only needed at the border.
+    fn enter_fn(
+        &self,
+        heap: &mut Heap,
+        call_form: Value,
+        f: &Rc<FnDef>,
+        argv: Vec<Value>,
+    ) -> Result<(State, Option<Frame>), EvalError> {
         // Tracing and stepping report a call *around* the callee, in CL's own
         // shape: `  0: (fact 3)` going in and `  0: fact returned 6` coming
         // out. That needs a frame to come back to, so a watched call gives up
@@ -2094,6 +2118,8 @@ impl Interp {
         let watch = if watched {
             let depth = self.trace_call_entry(heap, f, &argv, stepping)?;
             Some(Frame::TracedCall { name: f.name.clone(), depth, ret: f.sig.as_ref().map(|s| s.1.clone()) })
+        } else if Self::enters_library(heap, call_form, f) {
+            Some(Frame::LibraryCall)
         } else {
             None
         };
@@ -2109,6 +2135,8 @@ impl Interp {
             if compiled.body_abi() == typelisp_abi::BODY_ABI_COROUTINE {
                 let watch = match &watch {
                     Some(Frame::TracedCall { name, depth, ret }) => Some((name.clone(), *depth, ret.clone())),
+                    // A compiled body reports no location of its own, so there
+                    // is no library line to replace: no frame is needed.
                     _ => None,
                 };
                 let start = DriveStart {
@@ -2189,6 +2217,15 @@ impl Interp {
         sequence_state(heap, body, env)
     }
 
+    /// Whether calling `f` from `call_form` crosses from the program into the
+    /// standard library: the call site is outside the library's source and
+    /// `f`'s body is inside it. Read off the locations the forms carry; a form
+    /// with none (synthesized by expansion) counts as the program's.
+    fn enters_library(heap: &Heap, call_form: Value, f: &FnDef) -> bool {
+        let caller_in_library = heap.cons_loc(call_form).is_some_and(|l| l.is_library());
+        !caller_in_library && f.body.iter().find_map(|b| heap.cons_loc(*b)).is_some_and(|l| l.is_library())
+    }
+
     fn finish_call(&self, heap: &mut Heap, form: Value, argv: Vec<Value>) -> Result<(State, Option<Frame>), EvalError> {
         let written = self.name_list(heap, form, 0, "call")?;
         let home = self.name_list(heap, form, 1, "call")?;
@@ -2218,7 +2255,7 @@ impl Interp {
             return Ok((State::Blocked(io_wait(heap, &argv, Some(d))?), None));
         }
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
-            return self.enter_fn(heap, &f, argv);
+            return self.enter_fn(heap, form, &f, argv);
         }
         // Otherwise a built-in operator, which lives at the root and so is
         // always spelled as a bare name.
@@ -2446,7 +2483,7 @@ impl Interp {
     fn finish_assoc_resolved(
         &self,
         heap: &mut Heap,
-        _form: Value,
+        form: Value,
         argv: Vec<Value>,
         type_name: crate::Path,
         method: String,
@@ -2455,7 +2492,7 @@ impl Interp {
     ) -> Result<(State, Option<Frame>), EvalError> {
         let f = self.root.borrow().resolve_method(&home, &type_name, &method);
         match f {
-            Some(f) => self.enter_fn(heap, &f, argv),
+            Some(f) => self.enter_fn(heap, form, &f, argv),
             None => match super::eval_builtin_method(heap, &type_name, &method, &argv, &ret_key) {
                 Some(result) => Ok((State::Apply(result?), None)),
                 None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
@@ -2500,7 +2537,7 @@ impl Interp {
         // direct lookup, not `resolve_method`'s `home`-relative one.
         let f = self.root.borrow().get_method(&target_type, &target_method);
         match f {
-            Some(f) => self.enter_fn(heap, &f, argv),
+            Some(f) => self.enter_fn(heap, form, &f, argv),
             None => Err(EvalError::NoSuchFunction(format!("{}::{}", target_type, target_method))),
         }
     }
@@ -2588,7 +2625,7 @@ impl Interp {
                         )))
                     }
                 }
-                // `setf` returns the value assigned (docs/syntax.md §7).
+                // `setf` returns the value assigned (`docs/ja/reference/syntax.md` §7).
                 Ok((State::Apply(v), None))
             }
 
@@ -2682,6 +2719,8 @@ impl Interp {
                 self.trace_call_exit(heap, &name, depth, ret.as_ref(), Ok(v));
                 Ok((State::Apply(v), None))
             }
+
+            Frame::LibraryCall => Ok((State::Apply(v), None)),
 
             // Boxing is where the concrete type is still known, so it is
             // where every vtable this value could be viewed through gets
@@ -2896,6 +2935,8 @@ impl Interp {
                 self.trace_call_exit(heap, &name, depth, ret.as_ref(), Err(&exit));
                 Ok((State::Unwind(exit), None))
             }
+
+            Frame::LibraryCall => Ok((State::Unwind(exit), None)),
 
             // The cleanup runs on *every* way out, with the exit parked in a
             // frame until it is done.

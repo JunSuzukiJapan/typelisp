@@ -111,7 +111,7 @@ fn a_break_out_of_a_loop_around_the_body_still_restores() {
 
 #[test]
 fn a_return_out_of_the_body_still_restores() {
-    // `return` leaves the nearest enclosing loop (syntax.md §5), so the loop
+    // `return` leaves the nearest enclosing loop (`docs/ja/reference/syntax.md` §5), so the loop
     // is what the body is inside of here.
     let src = "(defun f () int (loop (dlet ((*depth* 3)) (return (peek)))))
                (+ (* 10 (f)) (peek))";

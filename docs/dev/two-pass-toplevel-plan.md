@@ -14,7 +14,7 @@
 > `predeclare_program` は「最初のフォームを検査する前に**全フォームを読む**」ことを要求し、
 > それはリーダマクロ(読み込み中にユーザコードを走らせる、cl-parity-plan.md Phase 8c)と
 > 正面から衝突する。前方参照は明示的な宣言 **`defsignature`** に置き換えた
-> (docs/syntax.md の該当節)。問題 (3) の成果 — 島がトップレベル defun の集まりであること —
+> (旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)） の該当節)。問題 (3) の成果 — 島がトップレベル defun の集まりであること —
 > はそのまま残っており、リングは SOURCE 冒頭の `defsignature` ブロック 65 件で宣言している。
 > 以下の Phase 1 の記述は、その時点の設計として残す。
 
@@ -163,7 +163,7 @@ main.rs:452 の REPL は単発フォームなので対象外・現状維持を�
   変更は無し(predeclared は一時状態でシリアライズ対象外)。
 
 ### Stage 1.6 — docs
-syntax.md(前方参照可に)、language-design.md、既知の制限一覧
+旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)）(前方参照可に)、language-design.md、既知の制限一覧
 (型の前方参照・prelude 内 lambda マクロ制約・マクロ本体の展開時制約)。
 
 ## Phase 2 — **解決済み・不要**(2026-07-31)

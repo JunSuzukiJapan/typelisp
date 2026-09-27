@@ -42,7 +42,7 @@ pub fn is_niched_option_key(key: &str) -> bool {
 /// `Option` ([`is_niched_option_key`]) other than `Option<sexpr>`.
 /// `Option<sexpr>` is S-expression data — the S-expression *is* the value
 /// and the empty list is its `none` — and prints as the datum it is, `()`
-/// included, wherever it sits (functions.md §15). Every other niche has no
+/// included, wherever it sits (`docs/ja/reference/functions/printing.md` §1). Every other niche has no
 /// such reading, so the wrapper the word cannot carry is written back.
 pub fn option_prints_wrapped(key: &str) -> bool {
     is_niched_option_key(key) && inner_type_key(key) != Some("sexpr")

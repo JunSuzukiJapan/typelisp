@@ -49,7 +49,7 @@
   は対象外（`Sexpr` の表現を持たないため従来通り型エラー）。`match` 側は `Sexpr` スクルーティニーに
   対する **downcast パターン**（型名先頭のフィールド分解 `(point x y)`／裸または修飾の enum 変種名
   `(red)`/`(color::red)`／丸ごと束縛 `(the point p)`）で取り出す——構文の詳細は
-  [syntax.md](../syntax.md) の `match` 節。ランタイムテストは boxed オブジェクトが持つ
+  [syntax.md](../ja/reference/syntax.md) の `match` 節。ランタイムテストは boxed オブジェクトが持つ
   インターン済み型 identity（`TypeKeyId`）の比較（+ enum は variant index）で、downcast パターンは `Sexpr` 本来の11変種の網羅性カバレッジには
   数えない。`equal` は CL 同様 struct/enum に対し同一性（`eq`）のまま、`equalp` はスロットごとの
   再帰比較に拡張。
@@ -234,7 +234,7 @@
 シグネチャを先行登録していた（`Checker::predeclare_program`）が、それは「最初のフォームを検査する
 前に全フォームを**読む**」ことを要求し、リーダマクロ（読み込み中にユーザコードを走らせる）と
 両立しない。暗黙の先読みを明示の宣言に替えたことで、検査はソース順の 1 パスになった。
-宣言できないものと、その理由は[syntax.md](../syntax.md)の`defsignature`節にある——
+宣言できないものと、その理由は[syntax.md](../ja/reference/syntax.md)の`defsignature`節にある——
 マクロは「登録では足りず実行済みである必要がある」から、型は「型の登録は、型を登録するコード
 自身が必要とするもの」でシグネチャのように自己完結しないから、ジェネリック関数は実体化に
 本体が要るから。
@@ -293,7 +293,7 @@
 > 実装状況: 本節（§4）のカタログはほぼ全項目が実装済み——i8/i16/i32/u8/u16/u32/f32/f64/bignum/ratio の
 > 算術・比較、`Sexpr`/`Symbol`/`char`/`string` 操作、`Option`/`Result` ヘルパー、`HashTable<K,V>`/
 > `Vector<T>` の関連メソッド、`compile`/`compile-file` まで含む。個別の未実装項目は
-> [functions.md](../functions.md) の該当箇所に明記。`Sexpr` の実行時値は §1 のとおり cons ヒープ
+> [functions/](../ja/reference/functions/README.md) の該当箇所に明記。`Sexpr` の実行時値は §1 のとおり cons ヒープ
 > （GC 管理）に統合済み。
 
 ### 4.1 Rust 組み込み（primitive）
@@ -774,7 +774,7 @@ compiled 側では `break`/`return` を「最内の cleanup ブロックへの `
   （`deftrait`/`impl`/`where`境界）は2026-06-30（§5.1）、動的ディスパッチ（trait オブジェクト
   `:dyn Trait`、vtable方式）は2026-07-25（§5.2、当初「実装しない」としていた方針からの転換）。
 - 関数カタログ（§4）の実装本体は eval（step4）以降。**§4の実装状況は現時点でほぼ完了**——残る
-  未実装項目は[functions.md](../functions.md)参照。
+  未実装項目は[functions/](../ja/reference/functions/README.md)参照。
 - `defmacro` の構造化ラムダリスト（`&rest`/`&optional`/`&key` すべて実装済み——2026-07-24。
   デフォルト式は展開時評価・先行パラメータ参照可、`&key` は `:name 値`）、マクロの
   `use`-alias 解決（こちらは未実装）。**`,@`（unquote-splicing）は2026-06-19実装済み**（commit `853bbdb`）。
@@ -827,16 +827,16 @@ compiled 側では `break`/`return` を「最内の cleanup ブロックへの `
   整形関数登録表」。文字列キーもプリンタのシグネチャも無検査で、「登録時点で分かっていた型を
   捨ててから `match` で復元する」形になり、静的型付け言語には合わない——CL のもう一方の機構
   である CLOS 総称関数 `print-object` に相当する **`print-object` トレイト**を 2026-07-26 に
-  採用してこちらを置き換えた（[functions.md](../functions.md) §15.2）。判断の経緯は
+  採用してこちらを置き換えた（[printing.md](../ja/reference/functions/printing.md) §5）。判断の経緯は
   [implementation-log.md](implementation-log.md) の `print-object` トレイトの節。
 
 - **ワイルドカードパス名・論理パス名（`logical-pathname`）、およびパス名のホスト/デバイス/
-  バージョン成分**: 2026-08-05 のパス名層で採用しないと確定（[functions.md](../functions.md) §19）。
+  バージョン成分**: 2026-08-05 のパス名層で採用しないと確定（[streams-files.md](../ja/reference/functions/streams-files.md) §9）。
   いずれも CL が対応した「複数のファイルシステム世代」のための機能で、この処理系が走る環境には
   対応物が無い。パス名は `/` 区切りのディレクトリ成分・名前・型だけを持つ。
 - **`input-stream-p` / `output-stream-p` / `stream-element-type`**: ストリームの方向も要素型も
   **型が持つ**（`CharInput`/`CharOutput` はトレイト）ので、実行時に尋ねる問いにならない
-  （[functions.md](../functions.md) §18.7）。
+  （[streams-files.md](../ja/reference/functions/streams-files.md) §10）。
 
 CL 全体と突き合わせた「無いもの」の網羅リストは
 [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) にある。
