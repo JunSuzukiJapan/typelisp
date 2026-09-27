@@ -435,6 +435,9 @@ fn disassembling_one_says_why_it_cannot() {
 fn calling_one_outside_unsafe_is_a_type_error() {
     let e = err(r#"(defffi (c-abs "abs") (i32) i32) (c-abs -5)"#);
     assert!(e.contains("unsafe"), "unexpected error: {}", e);
+    // The message is one paragraph: the source's line breaks must not leak
+    // the next line's indentation into it.
+    assert!(!e.contains("  "), "message carries a run of spaces: {:?}", e);
 }
 
 #[test]

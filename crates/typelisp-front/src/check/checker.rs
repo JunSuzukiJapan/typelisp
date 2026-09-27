@@ -14867,7 +14867,10 @@ impl Checker {
         // delegation too, though a `defffi` declares neither.
         if sig.ffi && self.unsafe_depth.get() == 0 {
             return Err(Error::TypeError(format!(
-                "`{}` is a C function declared by `defffi`, so calling it needs `(unsafe ...)`.                  Whether its declared signature is the one the C function really has is not                  something this compiler can check — `unsafe` is where that is taken on. Wrap the                  call, or wrap it once inside a `defun` that offers a checked signature.",
+                "`{}` is a C function declared by `defffi`, so calling it needs `(unsafe ...)`. \
+                 Whether its declared signature is the one the C function really has is not \
+                 something this compiler can check — `unsafe` is where that is taken on. Wrap the \
+                 call, or wrap it once inside a `defun` that offers a checked signature.",
                 name
             )));
         }
