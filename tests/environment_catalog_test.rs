@@ -311,6 +311,34 @@ fn a_missing_path_is_an_err_not_a_panic() {
     assert_eq!(show(&format!("(directory-p \"{}\")", missing)), "false");
 }
 
+/// `directory` answers with truenames (CL: "the truenames of those files"):
+/// absolute and canonical whatever form the argument was written in, with a
+/// symlink resolved to its target — and a symlink whose target is missing is
+/// no file that is present, so it is not listed.
+#[cfg(unix)]
+#[test]
+fn directory_lists_truenames() {
+    let base = std::env::temp_dir().join(format!("typelisp-dir-truename-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let listed = base.join("listed");
+    let elsewhere = base.join("elsewhere");
+    std::fs::create_dir_all(&listed).expect("create the listed directory");
+    std::fs::create_dir_all(&elsewhere).expect("create the target directory");
+    std::fs::write(listed.join("plain.txt"), "x").expect("write a file");
+    std::fs::write(elsewhere.join("target.txt"), "y").expect("write the link target");
+    std::os::unix::fs::symlink(elsewhere.join("target.txt"), listed.join("link.txt")).expect("make a link");
+    std::os::unix::fs::symlink(base.join("missing.txt"), listed.join("dangling.txt")).expect("make a dangling link");
+
+    // Spelled with a `..` detour so the argument is not already a truename.
+    let spelled = format!("{}/../listed", elsewhere.to_string_lossy());
+    let got = show(&format!("(sort (iter (unwrap (directory \"{}\"))) (lambda ((a string) (b string)) bool (less a b)))", spelled));
+    let canon = |p: std::path::PathBuf| std::fs::canonicalize(p).expect("canonicalize").to_string_lossy().into_owned();
+    let mut want = vec![canon(listed.join("plain.txt")), canon(elsewhere.join("target.txt"))];
+    want.sort();
+    assert_eq!(got, format!("#<vector<string> {}>", want.join(" ")));
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// `Pathish` in front of each means a `pathname` is as ordinary an argument
 /// as a string — the property the wrappers exist for.
 #[test]

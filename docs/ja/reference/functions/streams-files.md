@@ -147,7 +147,7 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
 | `file-write-date` | `(file-write-date name)` | `(P)→Result<universal-time,FileError>` where `Pathish P` | 最終更新時刻。**万国時**なので `decode-universal-time`（[時間](system.md#2-日時への分解合成)）が読める |
 | `file-author` | `(file-author name)` | `(P)→Result<Option<string>,FileError>` where `Pathish P` | 所有者のログイン名。ファイルが無ければ `Err`、所有者の uid にパスワードデータベースの項目が無ければ `Ok(none)`——CL が分けている2つをそのまま分けている |
 | `directory-p` | `(directory-p name)` | `(P)→bool` where `Pathish P` | ディレクトリか。**無い場合も `false`** ——両者を分けるのは `probe-file` |
-| `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 中身を絶対パスで並べる。`.`/`..` は入らない。順序は OS のまま |
+| `directory` | `(directory name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 中身を truename（`truename` と同じく、シンボリックリンクを解いた絶対パス）で並べる。リンク先の無いシンボリックリンクは入らない。`.`/`..` は入らない。順序は OS のまま |
 | `ensure-directories-exist` | `(ensure-directories-exist name)` | `(P)→Result<(),FileError>` where `Pathish P` | 親ごと作る。既にあれば成功 |
 
 ファイルを名指しする引数は全て**文字列でも `pathname` でもよい**——CL のパス名指定子と同じ扱いで、

@@ -346,10 +346,15 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             let p = arg!(text(heap, args, 0, name));
             Ok(Value::Bool(std::path::Path::new(&p).is_dir()))
         }
-        // Entries as full paths, in whatever order the OS reports them:
-        // `readdir` order carries no meaning, so sorting belongs to the
-        // caller that wants a stable listing, not here. `.` and `..` are not
-        // entries — `read_dir` does not yield them.
+        // Entries as truenames, in whatever order the OS reports them: CL's
+        // `directory` answers with "the truenames of those files", so each
+        // entry is absolute with its symlinks resolved — the same thing
+        // `file-truename` answers for it. A symlink whose target is missing
+        // names no file that is present, so it is not an entry (CL lists
+        // files present in the file system; `probe-file` says `false` for
+        // it too). `readdir` order carries no meaning, so sorting belongs to
+        // the caller that wants a stable listing, not here. `.` and `..` are
+        // not entries — `read_dir` does not yield them.
         //
         // Allocating every element before the vector box is safe as written:
         // `alloc_string` and `alloc_struct` never collect (only `Heap::cons`
@@ -364,7 +369,17 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             let mut names: Vec<String> = Vec::new();
             for entry in entries {
                 match entry {
-                    Ok(e) => names.push(e.path().to_string_lossy().into_owned()),
+                    Ok(e) => match std::fs::canonicalize(e.path()) {
+                        Ok(t) => names.push(t.to_string_lossy().into_owned()),
+                        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(err) => {
+                            return Some(Ok(result_err(
+                                heap,
+                                name,
+                                format!("directory: {}: {}", e.path().display(), err),
+                            )))
+                        }
+                    },
                     Err(e) => return Some(Ok(result_err(heap, name, format!("directory: {}: {}", p, e)))),
                 }
             }

@@ -5557,7 +5557,9 @@ user-visible capacity."
   (file-directory-p (namestring name)))
 
 (pub defun directory<P> ((name P)) Result<Vector<string>, FileError> (where (Pathish P))
-  "The entries of directory `name`, as full paths.
+  "The entries of directory `name`, as truenames: absolute, with symlinks
+   resolved, as `truename` would give them (CL's `directory` returns
+   truenames). A symlink whose target is missing is not an entry.
 
    Narrower than CL's `directory`, which matches a wildcard pathname: there
    are no wildcards in this language's pathnames, so there is nothing to
