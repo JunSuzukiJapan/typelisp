@@ -143,3 +143,58 @@ fn a_definition_made_by_a_compiled_functions_eval_survives_the_call() {
     );
     assert!(out.contains("49"), "stdout was:\n{}", out);
 }
+
+/// A struct evaluates to itself (CL's self-evaluating objects, CLHS
+/// 3.1.2.1.3): `eval` answers with the very object, so a write through the
+/// result is seen through the original. It used to be taken for a float
+/// literal and fail with an internal error.
+#[test]
+fn a_struct_evaluates_to_itself() {
+    let out = repl_stdout(
+        "(defstruct q (x i32))\n\
+         (defvar (v q) (q::new 7))\n\
+         (match (eval v) ((ok s) (match s ((the q w) (progn (setf w::x 8) v::x)) (_ -1))) ((err _) -2))\n\
+         :quit\n",
+    );
+    assert!(out.contains('8'), "stdout was:\n{}", out);
+}
+
+/// So does any other heap value that reaches `eval` as data — here the
+/// `Result` `read` answers with, passed without being unwrapped.
+#[test]
+fn a_result_evaluates_to_itself() {
+    let out = repl_stdout("(eval (read \"(+ 1 2)\"))\n:quit\n");
+    assert!(out.contains("(ok (ok (+ 1 2)))"), "stdout was:\n{}", out);
+}
+
+/// A function holding such an object as a literal — a macro spliced it into
+/// the body — runs interpreted, and `compile` refuses it by name rather than
+/// compiling a copy that would not be the same object.
+#[test]
+fn compiling_code_that_holds_a_struct_literal_is_refused_by_name() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_typl"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to start the typl binary");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            b"(defstruct q (x i32))\n\
+              (defun keep ((s Sexpr)) Sexpr s)\n\
+              (defmacro lit-q () (list (quote keep) (q::new 5)))\n\
+              (defun f () Sexpr (lit-q))\n\
+              (f)\n\
+              (compile f)\n\
+              :quit\n",
+        )
+        .expect("failed to write stdin");
+    let out = child.wait_with_output().expect("failed to wait on typl");
+    let stdout = String::from_utf8(out.stdout).expect("stdout was not utf-8");
+    let stderr = String::from_utf8(out.stderr).expect("stderr was not utf-8");
+    assert!(stdout.contains("#<q 5>"), "stdout was:\n{}", stdout);
+    assert!(stderr.contains("holds a `q` object as a literal"), "stderr was:\n{}", stderr);
+}

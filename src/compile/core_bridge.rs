@@ -1907,13 +1907,27 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             let fields = f.as_slice().to_vec();
             sexpr_construct(f.heap(), SEXPR_CONS, &fields)
         }
-        // Anything else in a quoted datum is a value the reader cannot
-        // produce, so reaching this means something built a `quote` node by
-        // hand out of a value that is not data.
-        other => Err(Error::TypeError(format!(
-            "compile: {:?} is not something a quoted datum can contain",
-            other
-        ))),
+        // Any other box is an object the reader cannot produce — a struct, an
+        // enum value, a `Vector` — that a macro expansion or `eval` placed in
+        // the form, where it evaluates to itself (`Checker::check_atom`). The
+        // interpreter hands back that very object; compiled code could only
+        // rebuild a copy from its parts, which is a different object (CL's
+        // `compile` keeps literal objects `eql` to the source's). So it is
+        // refused rather than miscompiled — the same answer CL's
+        // `compile-file` gives an object it cannot externalize.
+        Value::Boxed(id) => {
+            // Only a struct or enum box carries a type name to report.
+            let what = match crate::type_key::heap_type_key(heap, id) {
+                Some(key) => format!("a `{}` object", key),
+                None => "an object".to_string(),
+            };
+            Err(Error::TypeError(format!(
+                "compile: the code holds {} as a literal (a macro expansion or `eval` put it \
+                 there); compiled code rebuilds quoted data from its parts and cannot refer to an \
+                 object that already exists, so it cannot be compiled",
+                what
+            )))
+        }
     }
 }
 

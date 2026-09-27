@@ -10035,7 +10035,7 @@ impl Checker {
             //
             // The value is rounded to binary32 in the same step, which is
             // what the type already claims of it.
-            Value::Boxed(id) => {
+            Value::Boxed(id) if heap.is_f64(id) || heap.is_f32(id) => {
                 let ty = float_lit_ty(expected);
                 let boxed = if ty == Type::F32 && heap.is_f64(id) {
                     let f = heap.f64_value(id);
@@ -10045,6 +10045,16 @@ impl Checker {
                 };
                 Checked::new(core::tagged(heap, "float-any-width", &[boxed])?, ty)
             }
+            // Any other box is an object no reader ever produced — a struct,
+            // an enum value, a `Vector`, a closure — that reached a form
+            // because a program put it into S-expression data: `(eval x)` of
+            // a value converted to `Sexpr`, or a macro splicing one into its
+            // expansion. CL evaluates such an object to itself (CLHS
+            // 3.1.2.1.3, "self-evaluating objects"), so it is a quote of
+            // itself: the same node, and the same type a quote of a non-empty
+            // datum has — the checker knows it only as an object inside
+            // S-expression data.
+            Value::Boxed(_) => Checked::new(forms::quote_form(heap, v)?, sexpr_ty()),
             Value::Bool(b) => Checked::new(core::tagged(heap, "bool", &[Value::Bool(b)])?, Type::Bool),
             Value::Char(c) => Checked::new(core::tagged(heap, "char", &[Value::Char(c)])?, Type::Char),
             Value::Str(s) => Checked::new(core::tagged(heap, "str", &[Value::Str(s)])?, Type::Str),
