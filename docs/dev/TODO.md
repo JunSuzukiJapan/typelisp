@@ -39,7 +39,7 @@ B1/B2（スケジューラ・`task`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B
 `thread`/`Thread<T>`/`join` も入った。経緯は [implementation-log.md](implementation-log.md)
 の 2026-09-24 の節。
 
-**意図的に受け入れている制限**（ユーザに見えるものは [syntax.md §12.6](../syntax.md) にも
+**意図的に受け入れている制限**（ユーザに見えるものは [syntax.md](../ja/reference/syntax.md) §12.7 にも
 書いてある）:
 
 | 制限 | 中身 |
@@ -67,9 +67,9 @@ B1/B2（スケジューラ・`task`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B
 | 言語仕様の確定事項・非採用と決めた機能 | [language-design.md](language-design.md)（非採用リストは §9） |
 | タスクを OS スレッドで走らせる設計（ヒープ 2 層・STW GC・スケジューラ・`Thread<T>`） | [os-threads-design.md](os-threads-design.md) |
 | 評価器を CPS 化した設計（Phase A） | [cps-evaluator-design.md](cps-evaluator-design.md) |
-| 並行機構のユーザ向けリファレンス | [syntax.md §12](../syntax.md)（`task`/`select`）と [functions.md §20](../functions.md)（型・メソッド） |
+| 並行機構のユーザ向けリファレンス | [syntax.md](../ja/reference/syntax.md) §12（`task`/`select`）と [concurrency.md](../ja/reference/functions/concurrency.md)（型・メソッド） |
 | コンパイル出力のコルーチン ABI（Phase C、C0〜C7） | [compiled-cps-design.md](compiled-cps-design.md) |
 | Common Lisp と比べてまだ無いクラス・メソッド | [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) |
 | それを埋める実行計画（Phase / 対象外の理由 / 完了判定） | [cl-parity-plan.md](cl-parity-plan.md) |
 | ビルド・テストの実行方法 | [development.md](development.md) |
-| ユーザ向けの関数・構文リファレンス | [functions.md](../functions.md) / [syntax.md](../syntax.md) |
+| ユーザ向けの関数・構文リファレンス | [functions/](../ja/reference/functions/README.md) / [syntax.md](../ja/reference/syntax.md) |

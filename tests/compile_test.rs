@@ -5118,7 +5118,7 @@ fn compile_dispatches_i32_bitwise_operators_and_agrees_with_the_interpreter() {
 
 /// The builtins that had no compiled lowering, now that they do.
 ///
-/// `docs/syntax.md` §10 carried a table of "builtins with no compiled
+/// The syntax reference's §10 carried a table of "builtins with no compiled
 /// implementation" — methods a user's own `defun` could name and thereby
 /// become uncompilable. It had three rows, and this covers all three:
 /// `string::upcase`/`downcase` (`rt_str_upcase`/`rt_str_downcase`), the

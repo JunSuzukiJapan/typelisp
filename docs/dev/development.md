@@ -78,7 +78,7 @@ scripts/clean-stale-objects.sh --dry-run    # 件数だけ数える
 `src/compiler_island.typld`（自己ホストコンパイラ島）と
 `crates/typelisp-front/src/prelude.typld`（事前コンパイルされた prelude）はどちらもコミット
 されたバイナリ成果物で、対応する `SOURCE` を編集したら再生成が要る。番人テストが一致するまで
-落ち続ける。1 ファイルに**検査済み状態とビットコードの両方**が入っている（[syntax.md](../syntax.md)
+落ち続ける。1 ファイルに**検査済み状態とビットコードの両方**が入っている（[syntax.md](../ja/reference/syntax.md)
 §10「ダンプ」）。
 
 ```sh

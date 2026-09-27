@@ -82,7 +82,7 @@ cargo build --release --bin typl-lsp
 ```
 
 `use` によるファイルをまたぐ参照はプロジェクトルートの `typelisp.toml` を上方探索して解決される
-（詳細は [docs/syntax.md](../../docs/syntax.md) の「ファイル↔モジュール対応」節）。
+（詳細は [docs/ja/reference/syntax.md](../../docs/ja/reference/syntax.md#311-ファイルとモジュールの対応複数ファイルのプロジェクト) の「ファイルとモジュールの対応」節）。
 
 ## タスクの problem matcher
 

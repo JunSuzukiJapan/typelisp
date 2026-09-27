@@ -47,7 +47,7 @@
   残っている制約は `string` が不変であることと、`Sexpr` の cons セルを書き換えないこと
   （`car` のソース位置がずれる）の 2 つ。
 - **(D5) 動的束縛（special 変数）が無い**: `let` は常に字句束縛。CL の `*print-\*`/`*read-\*` 等の
-  制御変数は「代入可能なグローバル」に読み替えている（functions.md §15.1）。
+  制御変数は「代入可能なグローバル」に読み替えている（[printing.md](../ja/reference/functions/printing.md) §4）。
   2026-08-22（Phase 7b）に**スコープ付きの差し替え `dlet`** を入れた——保存 → 代入 →
   `unwind-protect` で復元。単スレッドでは CL の動的束縛と区別が付かない（cleanup は
   `throw`/`panic`/`break`/`return` でも走る）。**スレッドごとの束縛ではない**点だけが違う。
@@ -126,7 +126,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `readtable` | ⚠️ | 2026-09-05（Phase 8c）にリーダマクロが入った（§2.20）。ただし表は値ではない——`*readtable*`/`copy-readtable` は「入れない」で確定 |
 | `random-state` | ✅ | 2026-07-31。`random-state` 型（ネイティブの xorshift 状態）＋ `make-random-state` / `random-state-p` / `*random-state*`。`(random n &optional state)` で状態を明示できる |
 | `restart` | ⛔ | (D3) |
-| `condition` および全サブクラス（`serious-condition`/`error`/`warning`/`simple-condition`/`arithmetic-error`/`division-by-zero`/`floating-point-*`/`cell-error`/`unbound-variable`/`unbound-slot`/`undefined-function`/`control-error`/`file-error`/`package-error`/`parse-error`/`print-not-readable`/`program-error`/`reader-error`/`storage-condition`/`stream-error`/`end-of-file`/`type-error`/`style-warning` …） | ⛔ | (D3)。代替は `Error` トレイト＋操作ごとの具象エラー型（`ParseIntError`/`ParseFloatError`/`ReadError`/`EvalError`）＋ユーザ定義エラー型（functions.md §7.1）。**CL の標準コンディション型に一対一で対応する型は無い** |
+| `condition` および全サブクラス（`serious-condition`/`error`/`warning`/`simple-condition`/`arithmetic-error`/`division-by-zero`/`floating-point-*`/`cell-error`/`unbound-variable`/`unbound-slot`/`undefined-function`/`control-error`/`file-error`/`package-error`/`parse-error`/`print-not-readable`/`program-error`/`reader-error`/`storage-condition`/`stream-error`/`end-of-file`/`type-error`/`style-warning` …） | ⛔ | (D3)。代替は `Error` トレイト＋操作ごとの具象エラー型（`ParseIntError`/`ParseFloatError`/`ReadError`/`EvalError`）＋ユーザ定義エラー型（[option-result.md](../ja/reference/functions/option-result.md) §3）。**CL の標準コンディション型に一対一で対応する型は無い** |
 
 ---
 
@@ -138,10 +138,10 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| `eval` | ✅ | 戻り型は `Result<Sexpr,EvalError>` 固定（functions.md §16） |
+| `eval` | ✅ | 戻り型は `Result<Sexpr,EvalError>` 固定（[system.md](../ja/reference/functions/system.md) §6） |
 | `macroexpand` / `macroexpand-1` / `*macroexpand-hook*` | ⚠️ | `macroexpand` / `macroexpand-1` ✅（4c。チェッカーと同じ 1 段展開器を共有）。`macroexpand-1` は CL の第 2 返り値の代わりに `Option<Sexpr>` を返す。`*macroexpand-hook*` は入れない（7b）——展開はチェッカーの中で起きるので、ユーザ関数を挟むには展開ごとにインタプリタを呼び返す必要があり、目的（追跡）は `macroexpand` が満たす |
 | `eval-when` | ⛔ | 入れない。`compile-file` は定義形を全部実行し裸のトップレベル式を拒否するので、CL の 3 situation が常に一致する（4c で確定） |
-| `macrolet` / `symbol-macrolet` | ✅ | 2026-09-03。`check_defmacro` を検査側（`&self`）と登録側に割り、`Checker` にスコープ付きの表を足した。`docs/functions.md` §14.1 |
+| `macrolet` / `symbol-macrolet` | ✅ | 2026-09-03。`check_defmacro` を検査側（`&self`）と登録側に割り、`Checker` にスコープ付きの表を足した。[system.md](../ja/reference/functions/system.md) §9 |
 | `define-compiler-macro` / `compiler-macro-function` | ⛔ | 入れない。コンパイラ用の別展開経路を持つと `macroexpand` の答えと実際のコンパイル結果がずれる（4c で確定） |
 | `load-time-value` | ⛔ | 入れない。`eval-when` と同じ理由でロード時と実行時が分かれていない（4c で確定） |
 | `declare` / `declaim` / `proclaim` / `locally` | ⛔ | 型宣言は不要 (D1)、`optimize`/`inline`/`special` も現状概念が無い |
@@ -176,7 +176,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `push` / `pop` | ⚠️ | `Vector<T>` のメソッドとして存在（`(push vec item)`、受け手が先）。2026-07-30、`(push item vec)` という CL の引数順も同名のまま両立するようにした（`Checker::try_instance_method_swapped` — 通常の受け手優先解決が失敗した場合だけ引数を入れ替えて再試行する2引数汎用フォールバック）。`Vector<T>` は参照型（ヒープ上で直接変異）なので CL のような setf 展開は不要。`pushnew` は 2026-08-20（Phase 4a）に `defmethod` として追加——CL がマクロなのは place を書き換えるためで、ここは受け手がその場で変異するので不要。`remf` はプロパティリストごと対象外（§2.12） |
 | `block` / `return-from` | ✅ | 2026-09-04（Phase 4a）。**静的**な脱出で、字句的な入れ子を跨いで名前付きブロックへ抜けられる。`unwind-protect` の cleanup も走る。拡張 `loop` の `:named` もこの上に載っている |
 | `tagbody` / `go` | ⛔ | goto |
-| `catch` / `throw` | ✅ | 2026-08-16 実装（syntax.md §8 / language-design.md §7.5）。**動的**な脱出で、関数を何段跨いでも同じタグの `catch` に届く。CL との差は**タグがリテラルシンボル限定**（評価されない）で、そのシンボルが飛ぶ値の型を運ぶこと（`Checker::throw_tags`。計算したタグでは突き合わせる型が無くなる）。`throw` の型は `!`、`(catch 'tag e)` の型は `e` の型とタグの型の合流 |
+| `catch` / `throw` | ✅ | 2026-08-16 実装（[syntax.md](../ja/reference/syntax.md) §8 / language-design.md §7.5）。**動的**な脱出で、関数を何段跨いでも同じタグの `catch` に届く。CL との差は**タグがリテラルシンボル限定**（評価されない）で、そのシンボルが飛ぶ値の型を運ぶこと（`Checker::throw_tags`。計算したタグでは突き合わせる型が無くなる）。`throw` の型は `!`、`(catch 'tag e)` の型は `e` の型とタグの型の合流 |
 | `unwind-protect` | ✅ | 2026-08-16 実装。`cleanup` は `protected` をどう抜けても走る——正常終了・`throw`・`panic` に加えて `break`/`return` でも。interpreted / compiled 両経路（compiled 側は「上げうる呼び出しを保護経由にする」方式、[[typelisp-compiled-catch-throw]]） |
 | `destructuring-bind` | ✅ | 2026-09-05（Phase 4a）。prelude の `defmacro`。リストは `Sexpr` しか無いので、束縛される変数は全部 `Option<Sexpr>` |
 | `prog1` / `prog2` | ✅ | `defmacro`（2026-08-20、Phase 4a） |
@@ -189,7 +189,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 
 | CL | 状態 | 備考 |
 |---|---|---|
-| 拡張 `loop`（`for`/`in`/`across`/`collect`/`sum`/`when`/`finally` …） | ✅ | 2026-08-21（Phase 4b）、`:named` は 2026-09-05。checker の糖衣（`check/loop_dsl.rs`）。先頭がキーワードでない `(loop body...)` は従来どおりの無限ループ（[syntax.md](../syntax.md) §5.1） |
+| 拡張 `loop`（`for`/`in`/`across`/`collect`/`sum`/`when`/`finally` …） | ✅ | 2026-08-21（Phase 4b）、`:named` は 2026-09-05。checker の糖衣（`check/loop_dsl.rs`）。先頭がキーワードでない `(loop body...)` は従来どおりの無限ループ（[syntax.md](../ja/reference/syntax.md) §5.2） |
 | `do` / `do*` | ✅ | 両方 `defmacro`。`do` は並行ステップ、`do*` は `let*` 束縛と順次代入（2026-08-20、Phase 4a） |
 | `dolist` / `dotimes` | ✅ | `dolist` は `Sexpr` の cons リストを歩く（要素は `Sexpr`）。`doiter` が `Iter` 版 |
 | `mapc` / `mapcar` / `mapcan` / `mapl` / `maplist` / `mapcon` | ✅ | すべて `Iter` 上。`mapcar` は `map`（1 本）と `map2`（2 本を並べて走査、短い方で止まる）。`mapc`/`mapcan`/`maplist` は 2026-08-20（Phase 3b）、`mapl`/`mapcon` は 2026-09-25。末尾は共有構造ではなく毎回新しい `Vector<A>` |
@@ -205,7 +205,7 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 | `defgeneric` / `defmethod`（CLOS の） / `call-next-method` / `next-method-p` / `:before` `:after` `:around` / `define-method-combination` | ⛔ | typelisp の `defmethod` は「受け手の静的型で一意に解決する単一ディスパッチ」で別物。多重ディスパッチもメソッド結合も無い |
 | `initialize-instance` / `shared-initialize` / `reinitialize-instance` / `change-class` / `update-instance-for-*` | ⛔ | コンストラクタは自動生成の `new` のみ。初期化フックが無い |
 | `class-of` / `find-class` / `class-name` / MOP 全般 | ⛔ | (D1) |
-| `print-object` | ✅ | トレイトとして実装済み（functions.md §15.2） |
+| `print-object` | ✅ | トレイトとして実装済み（[printing.md](../ja/reference/functions/printing.md) §5） |
 | `describe` / `describe-object` / `inspect` | ⛔ | 実行時に値の型を問う操作 (D1)（cl-parity-plan.md §0）。`~s` と `print-object` がある程度代替する |
 | `make-load-form` | ⛔ | CLOS と同じ群として対象外（cl-parity-plan.md §0） |
 
@@ -234,7 +234,7 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 | CL | 状態 |
 |---|---|
 | `define-condition` / `make-condition` | ⛔（`defstruct`/`defenum` + `impl Error` が代替） |
-| `simple-error` | ✅ | `SimpleError`（`(simple-error msg)`）。functions.md §7.1 |
+| `simple-error` | ✅ | `SimpleError`（`(simple-error msg)`）。[option-result.md](../ja/reference/functions/option-result.md) §3 |
 | `warn` | ✅ | `*error-output*` へ `WARNING: ` 付きで書いて**続行**する。この言語で「`Result` を返しもせずプログラムを終わらせもせずに報告する」唯一の手段 |
 | `assert` | ⚠️ | 偽なら panic。メッセージ省略時はテストを*書かれたまま*名指す。CL の restart は無い（提供する物が無い）ので、CL の「全部断られたとき」の動作に落ちる |
 | `signal` / `error` / `cerror` / `break` | ⛔（`panic` と `Result`）。`error` に当たるのは「`Result` に `SimpleError` を載せる」か `panic` |
@@ -343,7 +343,7 @@ intrinsicが無いため `rt_f64_*` シム。`bignum`/`ratio` の `max`/`min` �
 | `alphanumericp` `graphic-char-p` `standard-char-p` `upper-case-p` `lower-case-p` `both-case-p` | ✅ | `alphanumericp`/`graphicp`/`standardp`/`upper-casep`/`lower-casep`/`both-casep`（2026-08-20、Phase 2a） |
 | `characterp` | ⛔ | 静的型付け（D1） |
 | `char-name` / `name-char` / `char-int` / `digit-char` | ✅ | `char->name`/`name->char`（リーダの文字名表の 7 つ）／`char-int` は既存の `char->int` と同じ／`digit->char`（基数引数つき）——2026-08-20、Phase 2a |
-| `char-code-limit` | ⛔ | 入れない（2a）。`char` は Unicode スカラ値で、上限は言語の性質ではない（[functions.md](../functions.md) §9） |
+| `char-code-limit` | ⛔ | 入れない（2a）。`char` は Unicode スカラ値で、上限は言語の性質ではない（[collections.md](../ja/reference/functions/collections.md) §2） |
 
 ### 2.12 コンス（CLHS 14）
 
@@ -415,7 +415,7 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 
 ### 2.15 シーケンス（CLHS 17）
 
-`Iter` トレイト上のジェネリック関数として一通り揃っている（functions.md §6）。差分だけ:
+`Iter` トレイト上のジェネリック関数として一通り揃っている（[sequences.md](../ja/reference/functions/sequences.md) §4）。差分だけ:
 
 | CL | 状態 | 備考 |
 |---|---|---|
@@ -429,7 +429,7 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 | `remove` / `remove-duplicates` / `delete` / `delete-if` / `delete-duplicates` | ✅ | 全部（2026-08-20、Phase 3）。`delete-if-not` も。(D4) は撤回 |
 | `notany` / `notevery` / `count-if-not` / `find-if-not` / `remove-if-not` | ✅ | 5つとも（2026-08-20、Phase 3） |
 | `search` / `mismatch` | ✅ | `string` 上（Phase 2b）に加え、任意の `Iter` 上の部分列検索（2026-09-25、`Eq` 境界）。キーワードは `string` 版と同じ——`search` だけ番号でなく名前（受け手が先なので CL の番号は逆の意味になる） |
-| `make-sequence` / `coerce`（シーケンス変換） | ⚠️ | `make-sequence` は `Vector::filled`（Phase 3a）。`coerce` は対象外——`Vector<T>` ↔ `Sexpr` リストの相互変換は**言語仕様上不可**と結論済み（functions.md §10） |
+| `make-sequence` / `coerce`（シーケンス変換） | ⚠️ | `make-sequence` は `Vector::filled`（Phase 3a）。`coerce` は対象外——`Vector<T>` ↔ `Sexpr` リストの相互変換は**言語仕様上不可**と結論済み（[collections.md](../ja/reference/functions/collections.md) §3） |
 | `nreverse` | ⛔ | (D4) |
 
 ### 2.16 ハッシュテーブル（CLHS 18）
@@ -446,7 +446,7 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 ### 2.17 パス名（CLHS 19）・ファイル（CLHS 20）
 
 2026-08-02（ストリーム/ファイル）と 2026-08-05（パス名）で実装済み。以下は残差
-（functions.md §18/§19）。
+（[streams-files.md](../ja/reference/functions/streams-files.md) §9）。
 
 | CL | 状態 | 備考 |
 |---|---|---|
@@ -461,7 +461,7 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 
 ### 2.18 ストリーム（CLHS 21）
 
-2026-08-02 にトレイト階層として実装済み（functions.md §18）。クラス階層ではなくトレイト階層
+2026-08-02 にトレイト階層として実装済み（[streams-files.md](../ja/reference/functions/streams-files.md)）。クラス階層ではなくトレイト階層
 なので、CL のクラス判定関数群は「型が答える問い」に置き換わっている。
 
 | CL | 状態 | 備考 |
@@ -483,7 +483,7 @@ prelude の `defstruct`（`Array<T>` は `Vector<T>` 2 本、`BitVector` は詰�
 
 ### 2.19 プリンタ（CLHS 22）
 
-format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）。差分:
+format と pretty printer は実装済み（[printing.md](../ja/reference/functions/printing.md) §1・§4・§5）。差分:
 
 | CL | 状態 | 備考 |
 |---|---|---|
@@ -493,13 +493,13 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `print-object` | ✅ | トレイト |
 | `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*` | ✅ | 通常のグローバル変数（(D5) のため動的束縛でなく `setf`） |
 | `*print-escape*` | ✅ | 2026-08-23（Phase 8a）。`prin1` と `princ` の既定の選び分けで、`print-object` の `escape` 引数にも渡る |
-| `*print-circle*` / `*print-level*` / `*print-length*` | ✅ | 2026-07-29 実装（functions.md §15.3）。`*print-circle*` は共有・循環構造を `#n=`/`#n#` でラベル付けし、後の2つは `#`/`...` で打ち切る。CL の `nil`（無制限）は 0 以下で表す |
+| `*print-circle*` / `*print-level*` / `*print-length*` | ✅ | 2026-07-29 実装（[printing.md](../ja/reference/functions/printing.md) §6）。`*print-circle*` は共有・循環構造を `#n=`/`#n#` でラベル付けし、後の2つは `#`/`...` で打ち切る。CL の `nil`（無制限）は 0 以下で表す |
 | `*print-base*` / `*print-radix*` | ✅ | 2026-08-22（Phase 7b）。2〜36 の外は印字エラー。印は符号の前（`#x-ff`）で、リーダの radix マクロが読み戻せる |
 | `*print-case*` | ✅ | 同上。CL と同じ `:upcase`/`:downcase`/`:capitalize`。既定は `:downcase`——CL の `:upcase` と同じ「格納されているまま」の意味（このリーダは小文字で格納する） |
 | `*print-lines*` | ✅ | 同上。pretty printer の行数上限、打ち切りは CL と同じ `..` |
 | `*print-readably*` | ⚠️ | 同上。エスケープを強制し `*print-level*`/`*print-length*` を無効化する分は入っている。**読めない値にエラーを上げる半分は無い**（上げるコンディションが無く、`print-object` が何でも印字しうる型について可否を決められない） |
 | `*print-gensym*` | ⛔ | 未 intern シンボルが無い |
-| `*print-array*` | ✅ | 2026-09-03。`Array<T>` の `print-object` と一緒に入った（`docs/functions.md` §15.1）|
+| `*print-array*` | ✅ | 2026-09-03。`Array<T>` の `print-object` と一緒に入った（[printing.md](../ja/reference/functions/printing.md) §6.2）|
 | `with-standard-io-syntax` | ✅ | 2026-08-22（Phase 7b）。上を全部標準値に `dlet` する |
 | `set-pprint-dispatch` / `*print-pprint-dispatch*` / `copy-pprint-dispatch` | ⛔ | 採用しないと確定済み（language-design.md §9、`print-object` トレイトで置き換え） |
 | `write-byte` / `read-byte` | ✅ | バイトストリームのメソッド（値は 0〜255、`write-byte` は範囲外を拒否する） |
@@ -532,7 +532,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
 | `sleep` | ✅ | 2026-09-05。`(sleep secs)`、`secs` は `f64` の秒（`(sleep 1)` は型エラー）。§2.21 と同じもの |
 | `room` / `ed` / `dribble` | ✅ | 2026-09-05（Phase 9e）。`room` は `heap-info`（`defstruct`）を印字し、その構造体自体も公開——CL は印字しか持たないが、プログラムが数を取る手段が要る。`dribble` は出力がプロセスを出る 3 つの扉すべてを記録する |
 | `apropos` / `apropos-list` / `inspect` / `describe` | ⛔ | 対象外 (D1)（cl-parity-plan.md §0） |
-| `documentation` / docstring | ✅ | 2026-07-30実装。`defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftrait` が docstring を持てる（位置は各フォームの CL 規則通り）。`documentation` は名前を評価せず解決する特殊形（`quote`/`compile` と同様）で check 時に定数へ畳み込まれる。LSP hover にも統合済み。`(setf documentation)` は対象外（functions.md §17） |
+| `documentation` / docstring | ✅ | 2026-07-30実装。`defun`/`defmethod`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftrait` が docstring を持てる（位置は各フォームの CL 規則通り）。`documentation` は名前を評価せず解決する特殊形（`quote`/`compile` と同様）で check 時に定数へ畳み込まれる。LSP hover にも統合済み。`(setf documentation)` は対象外（[system.md](../ja/reference/functions/system.md) §7） |
 | `lisp-implementation-type` / `lisp-implementation-version` / `machine-type` / `software-type` | ✅ | 2026-08-20 実装（Phase 9c）。版数は Cargo から、機種と OS は `std::env::consts` から、いずれもコンパイル時に決まる |
 | `machine-version` / `machine-instance` / `software-version` / `short-site-name` / `long-site-name` | ✅ | 2026-09-05 実装（`libc` 採用）。全部 `Option<string>`——CL の *or nil if no such name can be determined* に対応。`machine-instance`/`software-version` は `uname`、`machine-version` は実行中のチップ名（macOS は `sysctlbyname`、Linux は `/proc/cpuinfo`）。site 名は POSIX に記録場所が無いので**常に `none`**で、これは捏造した定数ではなく CL が認める答え（SBCL も同じ） |
 | `user-homedir-pathname` | ✅ | 2026-08-20 実装（Phase 9c）。`$HOME` が無ければ `none`（CL も `NIL` を許す）。環境変数を読む `getenv` と、CL に無い `command-line-args` も同時に入った |
@@ -585,7 +585,7 @@ format と pretty printer は実装済み（functions.md §15/§15.1/§15.2）�
    ビットベクタは 2026-08-22（Phase 6b/6c）。いずれも単独の機構ではなく「同じ層の関数が束で
    無い」箇所だったので、束ごと入れてある。
 9. ~~**`*print-circle*` / `*print-level*` / `*print-length*`**~~ — **2026-07-29 実装済み**
-   （functions.md §15.3、[implementation-log.md](implementation-log.md) の該当節）。着手前は
+   （[printing.md](../ja/reference/functions/printing.md) §6、[implementation-log.md](implementation-log.md) の該当節）。着手前は
    「循環構造を印字するとプロセスが落ちる」状態だった——`defstruct` のフィールドを `setf` で
    自分自身へ向けた値を `println` するとスタックオーバーフローで abort することを確認しており、
    `*print-circle*` を真にすればラベル付き（`#1=…#1#`）で印字できるようになった。

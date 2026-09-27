@@ -64,7 +64,7 @@ fn char_inequality_is_the_negation_of_equal() {
 /// The checker's variadic `/=` sugar folds onto the binary method, so adding
 /// the method is what makes the n-ary form work on characters at all.
 ///
-/// The n-ary form compares *adjacent* pairs (`functions.md` §4.1: `(cmp a b
+/// The n-ary form compares *adjacent* pairs (`docs/ja/reference/functions/numbers.md` §8.1: `(cmp a b
 /// c)` becomes `(and (cmp a b) (cmp b c))`), which is where this language
 /// parts company with CL — CL's `char/=` asks whether all the arguments are
 /// pairwise distinct, so `(char/= #\a #\b #\a)` is false there and true

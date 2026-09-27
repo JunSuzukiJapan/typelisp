@@ -26,7 +26,7 @@
 - **Phase 2**: stop-the-world GC（`ThreadRegistry`・safepoint・native 区間）
 - **Phase 3〜4**: AOT のスケジューラを `TYPELISP_THREADS` 本で回す、`thread`/`Thread<T>`/`join`
 - **Phase 5**: `typl`。compiled なタスクはワーカーで走り、インタプリタが要ると main へ移送
-- **Phase 6**: 残る制限を [TODO.md](TODO.md) と [syntax.md §12.6](../syntax.md) に明記
+- **Phase 6**: 残る制限を [TODO.md](TODO.md) と 旧 `docs/syntax.md` §12.6（現 [syntax.md](../ja/reference/syntax.md) §12.7） に明記
 
 **並行と無関係に効く教訓**: 並列化の前からあった潜在バグが 2 つ（飛行中の unwind 状態、
 位置表の `Rc<str>`）、並列化の設計を書く・型に `Send` を要求する作業から見つかった。
@@ -36,8 +36,8 @@
 
 **軽量スレッド（タスク）を入れた**（2026-09-08〜09-12、プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`）。**3 つの Phase すべて完了**。
-ユーザ向けリファレンスは [syntax.md §12](../syntax.md)（`go`/`select`）と
-[functions.md §20](../functions.md)（型・メソッド）。
+ユーザ向けリファレンスは 旧 `docs/syntax.md` §12（現 [syntax.md](../ja/reference/syntax.md) §12）（`go`/`select`）と
+旧 `docs/functions.md` §20（現 [concurrency.md](../ja/reference/functions/concurrency.md)）（型・メソッド）。
 
 - **Phase A**: 評価器の CPS 化。実行状態を Rust のスタックからヒープへ。副産物として
   深い再帰が書けるようになり、`RUST_MIN_STACK=32MB` と bootstrap の 64MB スタックが
@@ -113,7 +113,7 @@ cl-parity-plan.md の範囲外——CL に `defffi` は無い——で、埋め�
 | Phase | 状態 |
 |---|---|
 | 0（実装前に確かめる 6 件） | **完了** 2026-08-20。結果と、それが計画本体に強いた訂正は同計画の該当節 |
-| 1（数値層 1a〜1d） | **全完了**（1a/1b/1d は 2026-08-21）。1c の保留 2 項目は **2026-09-03 に両方解消**——乱数は `seed-random-state`、`ldb`/`dpb`/`boole` は整数を第 1 引数に移して `Bits` 境界付きの総称に（`logbitp` も同じ並びへ）。途中で `ash` のバグも直した（第 2 引数が値と同じ型で、符号なし幅に右シフトが無かった。距離は `i32` に）。1d の complex は prelude の `defstruct`（成分は `f64` 固定、`(sqrt -1.0)` は実数 NaN のまま——[implementation-log.md](implementation-log.md) 該当節）。Phase 2 が残した「char/int の native lowering 5 つ」は **2026-09-03 完了**——直後に [syntax.md](../syntax.md) §10 の「コンパイルできない組み込み」の表も**空にした**——`string::upcase`/`downcase`、`try-*` 系（`Option` を返す変換）、`bignum` の残りのビット演算の 3 群。どれも prelude から到達しないので `PRELUDE_COMPILE_UNSUPPORTED` には現れず、ユーザーが自分で呼んだときだけ出る穴だった |
+| 1（数値層 1a〜1d） | **全完了**（1a/1b/1d は 2026-08-21）。1c の保留 2 項目は **2026-09-03 に両方解消**——乱数は `seed-random-state`、`ldb`/`dpb`/`boole` は整数を第 1 引数に移して `Bits` 境界付きの総称に（`logbitp` も同じ並びへ）。途中で `ash` のバグも直した（第 2 引数が値と同じ型で、符号なし幅に右シフトが無かった。距離は `i32` に）。1d の complex は prelude の `defstruct`（成分は `f64` 固定、`(sqrt -1.0)` は実数 NaN のまま——[implementation-log.md](implementation-log.md) 該当節）。Phase 2 が残した「char/int の native lowering 5 つ」は **2026-09-03 完了**——直後に 旧 `docs/syntax.md` §10（現 [syntax.md](../ja/reference/syntax.md) §10） の「コンパイルできない組み込み」の表も**空にした**——`string::upcase`/`downcase`、`try-*` 系（`Option` を返す変換）、`bignum` の残りのビット演算の 3 群。どれも prelude から到達しないので `PRELUDE_COMPILE_UNSUPPORTED` には現れず、ユーザーが自分で呼んだときだけ出る穴だった |
 | 2（文字・文字列 2a/2b） | **完了** 2026-08-20 |
 | 3（リスト・シーケンス 3a〜3e） | **全完了**（3e は 2026-08-21、`defmethod` 側は 2026-09-03）。3e は Phase 5b に依存しなかった——対象は全部ジェネリック `defun` で、`defun` の `&key` は既に通っていた。残っていた `defmethod` 側（破壊的操作と `search`/`mismatch`）も CL のキーワード集合を持つ。`search` のキーワードだけ番号でなく名前にした（受け手が先なので CL の番号は逆の意味になる） |
 | 4（制御構造・マクロ） | **4a 部分完了** 2026-08-20（`prog1`/`prog2`/`do*`/`ecase`/`ccase`/`setq`/`psetq`/`psetf`/`pushnew`）。**`block`/`return-from` は 2026-09-04 完了**（`tests/block_test.rs` 26 本、うち 5 本はコンパイル経路・1 本は `gc_stress`。島の引数列は 3 本増え、引き回しは 162 箇所。いちばん重かったのは引き回しではなく `unwind-protect` との相互作用で、静的脱出が cleanup を走らせる仕組みが「脱出先は 1 つ」を前提にしていた。`forms.rs` の既知のルート漏れの窓に 5 件目を落として `gc_stress` で釣った）。**4a 完了** 2026-09-05——`loop` の `:named`（`block` が入って機械的になった）、`destructuring-bind`（**プランの「型を与える手段が無い」は前提が誤り**——リストは `Sexpr` しか無いので束縛は全部 `Option<Sexpr>`。prelude のマクロで checker には 1 行も足していない）、`sleep`（`f64` の秒）。`prog`/`prog*` は非採用（`tagbody` 抜きでは `let`+`block` そのもので、ブロック名 `nil` を持ち込む理由が無い）。**4b 完了** 2026-08-21（`:named` を除く拡張 `loop`）。**4c 完了** 2026-09-03（`macroexpand`/`macroexpand-1`、`complement`、`gensym` のプレフィクスと `*gensym-counter*` が 2026-08-21、`macrolet`/`symbol-macrolet` が 09-03。他の項目は「入れない」理由つきで確定）。**Phase 4 全完了** |
@@ -191,7 +191,7 @@ Phase 6a/6c で見つかった**コンパイル済みコードの整数切り詰
 `u32` は「32bit を符号なしとして扱う」以上の意味を持たない——`(+ (the u8 200) (the u8 100))`
 は 44、`(+ 2147483647 1)` は `-2147483648`。**`f32` も本物の binary32** で、
 `(/ (the f32 1.0) (the f32 3.0))` は `f64` の答えとは違う。これで
-[functions.md](../functions.md) §1b の「幅は静的な区別だけで、実行時表現は共通」という
+旧 `docs/functions.md` §1b（現 [numbers.md](../ja/reference/functions/numbers.md) §1） の「幅は静的な区別だけで、実行時表現は共通」という
 明文の方針は全面的に撤回された。
 
 単なる置換で済まなかった 7 箇所の結末:
@@ -331,6 +331,6 @@ JIT しているぶん」は**2 段階で解消した**。JIT 6 回ぶんは 202
 2026-08-20 に「ダンプ」（ビットコードと型情報を 1 ファイルに対で持つ）を入れ、起動は
 1.50s → 1.07s になった。経緯は [implementation-log.md](implementation-log.md) の該当節。
 
-2026-08-19 に「呼ぶとコンパイルできなくなるもの」（[syntax.md](../syntax.md) §10）の最後の1つ
+2026-08-19 に「呼ぶとコンパイルできなくなるもの」（旧 `docs/syntax.md` §10（現 [syntax.md](../ja/reference/syntax.md) §10））の最後の1つ
 `eval` を閉じ、あの表は空になった。経緯・設計判断は
 [implementation-log.md](implementation-log.md) の該当節。

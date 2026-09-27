@@ -270,7 +270,7 @@ pub fn file_owner(_path: &str) -> std::io::Result<Option<String>> {
 /// writes that declaration, which is exactly what `(unsafe ...)` is for — the
 /// mark that a premise nothing can check has been taken on. A program that
 /// writes the environment from one thread while another asks for the time zone
-/// has the race, and `docs/syntax.md` lists process-global state among the
+/// has the race, and `docs/ja/reference/syntax.md` §4.1 lists process-global state among the
 /// things `unsafe` accepts responsibility for. Adding a `setenv` *builtin*
 /// — reachable with no `unsafe` at all — is still the thing not to do.
 ///

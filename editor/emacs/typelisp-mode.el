@@ -77,7 +77,7 @@ CL's distinction, which is what makes re-loading a file keep the values a
 session has changed.")
 
 (defconst typelisp-special-forms
-  '(;; binding & conditionals (docs/syntax.md §4)
+  '(;; binding & conditionals (docs/ja/reference/syntax.md §4)
     "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn" "unsafe"
     "the" "match" "if-let" "while-let"
     ;; CL's chapter-5 control forms (cl-parity-plan.md Phase 4a, §4/§7)
@@ -96,7 +96,7 @@ session has changed.")
     "catch" "throw" "unwind-protect"
     ;; function values & application (§6)
     "lambda" "labels" "apply"
-    ;; local macro bindings (functions.md §14.1) — like `labels', but the
+    ;; local macro bindings (docs/ja/reference/functions/system.md §9) — like `labels', but the
     ;; names they bind are not values
     "macrolet" "symbol-macrolet"
     ;; other special forms (§7)
@@ -112,9 +112,9 @@ session has changed.")
     ;; (Stage 9b) — CL's `*load-pathname*' in the place it can be right
     "source-file"
     ;; formatted output — special forms so that each variadic argument keeps
-    ;; its own type on the way into `Sexpr' (functions.md §15)
+    ;; its own type on the way into `Sexpr' (docs/ja/reference/functions/printing.md §1)
     "print" "println" "format"
-    ;; pretty printer (functions.md §15.1)
+    ;; pretty printer (docs/ja/reference/functions/printing.md §4)
     "pprint" "pprint-fill" "pprint-linear" "pprint-tabular"
     "pprint-logical-block")
   "Control-flow and other special forms.")
@@ -137,7 +137,7 @@ already holds.")
 function types; `&optional' and `&key' are `defmacro'-only.")
 
 (defconst typelisp-builtin-functions
-  '(;; streams and files (functions.md §18)
+  '(;; streams and files (docs/ja/reference/functions/streams-files.md)
     "at-line-start" "char->string" "close" "copy-stream" "delete-file"
     "direction-append" "direction-input" "direction-output" "finish-output"
     "fresh-line" "get-output-stream-string" "make-broadcast-stream" "make-concatenated-stream"
@@ -155,7 +155,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; the `sync' layer: a wait group's three, and a mutex's two plus the
     ;; macro that pairs them (`add'/`make' are shared with other types)
     "done" "lock" "unlock" "with-lock"
-    ;; the readtable (syntax.md §11)
+    ;; the readtable (docs/ja/reference/syntax.md §11)
     "get-dispatch-macro-character" "get-macro-character"
     "set-dispatch-macro-character" "set-macro-character"
     "read-datum-at" "read-delimited-list" "read-from-string"
@@ -168,7 +168,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "terpri" "unread-char" "with-input-from-string" "with-open-file" "with-output-to-string"
     "write-char" "write-file-string" "write-item" "write-line"
     "write-lines" "write-string"
-    ;; pathnames (functions.md §19)
+    ;; pathnames (docs/ja/reference/functions/streams-files.md §9)
     "directory-namestring" "enough-namestring" "file-namestring" "make-pathname"
     "merge-pathnames" "namestring" "parse-namestring" "pathname-absolute-p"
     "pathname-directory" "pathname-name" "pathname-type" "to-pathname"
@@ -372,7 +372,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; `dribble-start'/`dribble-stop'/`ed-open' are the primitives the
     ;; `dribble' function and the `ed' special form reduce to.
     "room" "heap-info" "dribble" "dribble-start" "dribble-stop" "ed-open")
-  "Builtin functions and methods from the standard catalog (docs/functions.md).")
+  "Builtin functions and methods from the standard catalog (docs/ja/reference/functions/).")
 
 (defconst typelisp-primitive-types
   '("i8" "i16" "i32" "u8" "u16" "u32"
@@ -382,12 +382,12 @@ function types; `&optional' and `&key' are `defmacro'-only.")
 Includes the arbitrary-precision `int' (a fixnum that becomes a bignum box
 past 63 bits) and the heap-boxed `ratio', which are their own static types
 with no implicit conversion to or from the fixed-width numerics
-(docs/syntax.md §2), and the opaque mutable `random-state' PRNG stream
+(docs/ja/reference/syntax.md §2), and the opaque mutable `random-state' PRNG stream
 (CLHS 12.1.6).
 
 `ptr' / `c-long' / `c-ulong' are the C-boundary words: only writable inside
-`unsafe', and only as an argument, a return type or a local (docs/syntax.md
-§3).")
+`unsafe', and only as an argument, a return type or a local (docs/ja/reference/syntax.md
+§3.3).")
 
 (defconst typelisp-builtin-types
   '(;; stream traits and concrete stream types (§18)
@@ -457,7 +457,7 @@ with no implicit conversion to or from the fixed-width numerics
   "Regexp matching an opening paren, optionally followed by `pub '.
 Visibility is spelled flat -- `(pub defun f ...)', not `(pub (defun f ...))'
 -- so every definition-form rule has to allow the marker between the paren
-and the form's own head (docs/syntax.md §3).")
+and the form's own head (docs/ja/reference/syntax.md §3).")
 
 (defconst typelisp--number-rx
   (concat "\\_<[-+]?\\(?:"
@@ -467,7 +467,7 @@ and the form's own head (docs/syntax.md §3).")
           "\\|[0-9]+[eE][-+]?[0-9]+"    ; float in exponent-only form: 1e5
           "\\|[0-9]+"                   ; decimal integer (an `int', any width)
           "\\)\\_>")
-  "Regexp matching a numeric literal (docs/syntax.md §1).")
+  "Regexp matching a numeric literal (docs/ja/reference/syntax.md §1).")
 
 (defconst typelisp--format-directive-rx
   (concat "~"
@@ -479,7 +479,7 @@ and the form's own head (docs/syntax.md §3).")
           ;; rejected by the formatter, so leaving one unhighlighted is a hint
           ;; rather than a gap.
           "\\(?:[][a-zA-Z%&|~$_^<>{}();*?]\\|\n\\)")
-  "Regexp matching a `format' control-string directive (docs/functions.md §15).")
+  "Regexp matching a `format' control-string directive (docs/ja/reference/functions/format.md).")
 
 ;;; Types this buffer defines -------------------------------------------------
 
@@ -1133,7 +1133,7 @@ would silently check the previous revision."
 (defun typelisp-run-buffer ()
   "Run the current buffer's file with `typl FILE'.
 Its `use' dependencies are resolved through the project's `typelisp.toml'
-(docs/syntax.md, \"ファイル↔モジュール対応\")."
+(docs/ja/reference/syntax.md §3.11)."
   (interactive)
   (typelisp--run nil))
 

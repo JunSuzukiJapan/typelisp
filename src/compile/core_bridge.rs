@@ -741,7 +741,7 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         // evaluator, and `disassemble` *is* the compiler. All unreachable
         // from any compilable source, and refused rather than given a
         // lowering — the same category `compile-file` and `dump` are in
-        // (docs/syntax.md §10).
+        // (`docs/ja/reference/syntax.md` §10).
         //
         // `room`/`dribble`/`ed` are deliberately absent from this list: they
         // are ordinary builtins, and a `defun` that calls one compiles.

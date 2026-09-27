@@ -92,7 +92,7 @@ cargo build --release --bin typl-lsp
 診断（構文/型エラーと再定義 warning を `textDocument/publishDiagnostics` で通知）・hover・
 定義ジャンプ（goto-definition）・補完（`:` をトリガ文字に登録済み）・semantic tokens に対応。
 `use` によるファイルをまたぐ参照は解決される（プロジェクトルートの `typelisp.toml` を上方探索、
-詳細は `docs/syntax.md` の「ファイル↔モジュール対応」節）。開いているエディタバッファの
+詳細は `docs/ja/reference/syntax.md` の「ファイルとモジュールの対応」節）。開いているエディタバッファの
 未保存編集は依存ファイル・依存元双方の診断に即座に反映される。
 
 ### 型名のハイライト（semantic tokens）

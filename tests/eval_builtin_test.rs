@@ -102,7 +102,7 @@ fn a_global_shadowed_by_a_local_is_still_seen_by_its_global_value() {
 // ---- `eval` from inside compiled code ----------------------------------
 //
 // Until 2026-08-19 a `defun` that called `eval` could not be compiled at all
-// (`docs/syntax.md` §10's table, the last entry in it). It lowers to
+// (the table the syntax reference's §10 carried then, the last entry in it). It lowers to
 // `rt_eval` now — `typelisp_front::shim` — which under JIT finds the running
 // interpreter through the same thread-local the printer's hooks use, so the
 // compiled body evaluates against the *program's* environment rather than one

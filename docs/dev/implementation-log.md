@@ -3450,7 +3450,7 @@ Stage 6: defun/lambda/labels/matchアームの複数式body対応（`ast_bridge:
 
 **Stage 5実装時の発見（Stage 7設計に影響）**: 別々のトップレベル`defun`同士の構文上の相互再帰は
 現行チェッカー（`Checker::check_form_at`がトップレベルformを出現順に1つずつ検査、前方参照不可）
-では**そもそも記述不能**（`docs/syntax.md`が`labels`を「相互再帰可能なローカル関数定義」と
+では**そもそも記述不能**（旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)）が`labels`を「相互再帰可能なローカル関数定義」と
 明記する通り、相互再帰は`labels`専用の言語機能）。Stage 5のSCC機構は当初ユーザー可視の
 プログラムからは（生成した`FnDef`を直接`Interp::fns`へ注入する`src/eval/interp.rs`の
 `scc_tests`モジュールでのみ）到達しなかったが、**Stage 7で各`labels`siblingが独立JIT単位になった
@@ -4183,15 +4183,15 @@ builtinのassoc関数（`Option::some`等）が「no such function」/「unresol
 
 ---
 
-## `Vector<T>::pop`実装 + `functions.md`の記載整理（2026-07-22）
+## `Vector<T>::pop`実装 + 旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)）の記載整理（2026-07-22）
 
-`docs/functions.md`のVector<T>節に残っていた「`pop`/`map`/`filter`/リスト変換などは未実装」という
+旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)）のVector<T>節に残っていた「`pop`/`map`/`filter`/リスト変換などは未実装」という
 注記を精査したところ、`map`/`filter`は既にPhase 6.5の`Iter`ジェネリック関数として実装済み（注記が
 古いだけ）、`pop`とリスト変換だけが実際に未実装と判明。リスト変換（`Vector<T>`⇔`Sexpr`リスト）は
 言語仕様上不可能——`cons`は`cons<T,U>`という異種ペア型で`(cons 1 "hello")`の型は
 `cons<i32, cons<str, null>>`（1つめと2つめの要素の型が異なる）であり、`Sexpr`のリストはこの異種
 入れ子`cons`連鎖である一方`Vector<T>`は単一要素型`T`のみのコレクションなので、汎用変換関数は
-型パラメータでは表現できない——という理由を`functions.md`に明記した上で対象外を確定。
+型パラメータでは表現できない——という理由を旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)）に明記した上で対象外を確定。
 
 `pop`はHashTable::get/removeと同じ「空/未検出はNone、範囲外ではpanicしない」設計
 （`Option<T>`返し）で新規実装。`Vec::pop`のRust標準シグネチャとも一致し、旧（2026-06-23に全面
@@ -4229,12 +4229,12 @@ builtinのassoc関数（`Option::some`等）が「no such function」/「unresol
 起動時に指定できるようにした。`main.rs` の `parse_heap_cells` が全 run モード（`run`/REPL/
 `compile-module`）共通のグローバルフラグとして先頭でパースし、各経路の `Heap::with_capacity`
 へ渡す。不正値・0・値なしはロード前に `exit 1` で弾く。`tests/heap_cells_test.rs`（引数解析の
-out-of-process テスト）、docs は [language-design.md](language-design.md) §2 / [syntax.md](../syntax.md) を更新。
+out-of-process テスト）、docs は [language-design.md](language-design.md) §2 / 旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)） を更新。
 
 ## `format` の書式指定子 + `print`/`println` の書式指定統一（2026-07-23、旧 TODO T1）
 
 CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`println` を実装。詳細は
-[functions.md](../functions.md) §15 を参照。
+旧 `docs/functions.md` §15（現 [printing.md](../ja/reference/functions/printing.md) §1） を参照。
 
 - **API**: `(format dest control args...)`（`dest`: `true`=CL の `t` で標準出力+文字列返し／`false`=CL の
   `nil` で文字列返しのみ）、`(print control args...)`／`(println control args...)`。旧来の単一値
@@ -4292,7 +4292,7 @@ CL 準拠 `format` と、書式ディレクティブを解釈する `print`/`pri
 
 C++ の vtbl 方式による動的ディスパッチを、インタプリタ／JIT／AOT の3経路すべてで実装した。
 言語仕様としての説明は [language-design.md](language-design.md) §5.2、構文は
-[syntax.md](../syntax.md) §1・§2。ここには**設計判断の経緯**だけを残す。
+旧 `docs/syntax.md` §1・§2（現 [syntax.md](../ja/reference/syntax.md) §1・§2）。ここには**設計判断の経緯**だけを残す。
 
 ### なぜ vptr をオブジェクトでなく dyn 値の側に持つのか
 
@@ -4460,7 +4460,7 @@ prelude に `Error` トレイト（`message` / `source`）と4型の `impl`、�
 Tier2（`pprint-logical-block` 等のユーザ呼び出し可能 API）が対象。Tier3（`set-pprint-dispatch`）は
 **未実装で TODO に残した**——理由は下記「Tier3 を見送った理由」。
 
-利用者向けの仕様は [functions.md](../functions.md) §15.1。
+利用者向けの仕様は 旧 `docs/functions.md` §15.1（現 [printing.md](../ja/reference/functions/printing.md) §4）。
 
 ### 中核: XP をストリームではなく2パスで実装した（[pprint.rs](../../crates/typelisp-print/src/pprint.rs)）
 
@@ -4553,7 +4553,7 @@ T5 は「前提は T4 動的ディスパッチ、それが済めば残るは可�
 
 pretty printer の Tier3 として残していた `set-pprint-dispatch` を実装しようとして、
 **目標設定そのものがこの言語では間違っていた**と判明したので、`print-object` トレイトへ
-差し替えた。利用者向け仕様は [functions.md](../functions.md) §15.2。
+差し替えた。利用者向け仕様は 旧 `docs/functions.md` §15.2（現 [printing.md](../ja/reference/functions/printing.md) §5）。
 
 ### なぜ `set-pprint-dispatch` を採らなかったか
 
@@ -4733,7 +4733,7 @@ legend（`lsp.rs` の `SEMANTIC_TOKEN_TYPES` と両エディタの対応表）�
 
 CLHS 22.1.1 の「値のどこまでを印字するか」を決める3変数。
 [cl-missing-classes-and-methods.md](cl-missing-classes-and-methods.md) §3 の8番目として挙げていた
-項目で、ユーザ向け仕様は [functions.md](../functions.md) §15.3。
+項目で、ユーザ向け仕様は 旧 `docs/functions.md` §15.3（現 [printing.md](../ja/reference/functions/printing.md) §6）。
 
 ### 着手前の状態は「落ちる」だった
 
@@ -5466,7 +5466,7 @@ Rust は `impl<T: Ord> Clamp for T { ... }` の本体を、使われるかどう
 ### prelude のバグを1件その場で捕まえた
 
 `InputStream::read-item` は**本体の無いシグネチャに docstring を書いていた**。
-syntax.md が明記しているとおり（CL の `defun` と同じ規則）、後ろにフォームが続かない末尾の
+旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)） が明記しているとおり（CL の `defun` と同じ規則）、後ろにフォームが続かない末尾の
 文字列は docstring ではなく**本体**なので、これは「`Option<Item>` を宣言して `string` を返す
 デフォルト実装」だった。`read-item` を省略する `impl` が1つも無かったので、それまで誰も
 replay せず気づかれていない。コメントに落として解消した。この穴のためにこの検査を入れた、
@@ -5541,14 +5541,14 @@ checker が名前を知らないので**到達不能な死にコード**。同�
 
 放置されていたのは `examples/projects/` の3本（todo-cli / mini-lisp / expr-eval）が
 旧綴りのままだったせいで、3本とも check で落ちていた（`no such function: read-line`）。
-`docs/functions.md` §15 の表にも `(read-line)` が残っていた。
+旧 `docs/functions.md` §15（現 [printing.md](../ja/reference/functions/printing.md) §1） の表にも `(read-line)` が残っていた。
 
 標準入力への道を1本にする方針で始末した:
 
 - `eval_read_line` とディスパッチ分岐を削除。
 - サンプル3本を `(read-line *standard-input*)` に。標準ストリームは prelude の
   `*standard-input*`（`standard-stream`、`CharInput` 実装済み）。
-- `docs/functions.md` §15 の行を削除し、代わりに「標準入力を読むのは `*standard-input*` に対する
+- 旧 `docs/functions.md` §15（現 [printing.md](../ja/reference/functions/printing.md) §1） の行を削除し、代わりに「標準入力を読むのは `*standard-input*` に対する
   `CharInput` のメソッド」と §18.1 への案内を書いた。
 
 `print`/`println`/`format` は書式展開の近道として標準出力側に残る（これらは flush まで面倒を
@@ -5794,7 +5794,7 @@ destination の型エラーとして報告する（型変数と `:dyn` は書き
 どこからでも見えるので、prelude 内では露見していなかった。
 
 呼び出し側も同じ理由で壊れていた（`(module m ...)` の中で `impl Eq` した型に対する
-`(equals ...)` が root から呼べない）。`pub` は `impl` には書けない（docs/syntax.md §pub）
+`(equals ...)` が root から呼べない）。`pub` は `impl` には書けない（旧 `docs/syntax.md` §pub（現 [syntax.md](../ja/reference/syntax.md) §3.13））
 ので、**private な trait impl は表現できないものを実装が勝手に作っていた**ことになる。
 Rust も trait impl に可視性を持たない（トレイトのメソッドは値がある所ならどこでも呼べる）。
 そこで `check_impl` は常に public でメソッドを登録するようにした。回帰テストは
@@ -7043,7 +7043,7 @@ AOT は `tests/compile_file_test.rs` に 2 本（exit 134 → exit 1 + `panic: d
 
 ## 「呼ぶとコンパイルできなくなるもの」を潰す（2026-08-18）
 
-`docs/syntax.md` §10 に、呼ぶと `(compile f)` が通らなくなる組み込みの表があった。6項目
+旧 `docs/syntax.md` §10（現 [syntax.md](../ja/reference/syntax.md) §10） に、呼ぶと `(compile f)` が通らなくなる組み込みの表があった。6項目
 （システム組み込み・等価述語・印字一式・`read`・`eval`）。この作業でそれを1項目（`eval`）まで
 減らした。手口は2つで、**ネイティブ shim を書く**か、**インタプリタ側にしか無い実装を
 切り出してランタイム側へ下ろす**か。
@@ -7410,7 +7410,7 @@ JIT/AOT 対応込み。文字・文字列カタログ（Phase 2）、リスト/�
 選んでいた慣習に合わせる**方が一貫した——`alpha-char-p`→`alphap`、`zerop`/`evenp` の
 `p` 接尾辞、`char->int`/`char->string` の変換名。なので `char-lessp`→`lessp`、
 `upper-case-p`→`upper-casep`、`char-name`→`char->name`、`digit-char`→`digit->char`、
-`make-string`→`string::filled`。別名は増やしていない（CL 対応は functions.md の表が持つ）。
+`make-string`→`string::filled`。別名は増やしていない（CL 対応は 旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)） の表が持つ）。
 
 Phase 3 では計画から**外れた**。§1.2 は「同じ CL 名を受け手型ごとに `defmethod` で定義する」と
 していたが、既存の `Iter` ライブラリ（`map`/`filter`/`length`/`nth`/…）がジェネリック `defun` で
@@ -7749,7 +7749,7 @@ f32 精度に丸めない。
 「静的な型が `i32` か `i64` かに関わらず一様な `i64`」と明言している）。
 本当に幅どおりに巻き戻す/丸めるなら、インタプリタと島の両方に幅を運んで両方でマスク・
 `fptrunc` する必要があり、片方だけ直せば**解釈と compiled が食い違う**——いちばん悪い結末。
-そこまでやる価値があるかは別の判断なので、`docs/functions.md` §1 に明記して据え置いた。
+そこまでやる価値があるかは別の判断なので、旧 `docs/functions.md` §1（現 [numbers.md](../ja/reference/functions/numbers.md) §1） に明記して据え置いた。
 
 この決定のおかげで **Stage 1b は変換表ではなく張り替えになった**。整数どうし・浮動小数点
 どうしの `as` は実行時に何もしない（`try-as` は常に `some`）。変換メソッドの名前に幅が
@@ -7824,7 +7824,7 @@ Phase 0.2 が見つけていたとおり、`(deftrait Add () (+ ((self Self) (ot
    `sqrt` の戻りが合併型だからで、ここでは `f64` の `sqrt` は `f64` を返すしかない。
    複素数は複素数の引数から出る:`(sqrt (complex::new -1.0 0.0))` が `i`。
 
-どちらも `docs/functions.md` §2.6 に書いた。
+どちらも 旧 `docs/functions.md` §2.6（現 [numbers.md](../ja/reference/functions/numbers.md) §6） に書いた。
 
 ### 演算子はここでは名乗れる
 
@@ -7933,7 +7933,7 @@ CL 自身が `:test` の既定を `eql` としているのと同じ形——**�
 ### 挙動を変えたもの
 
 **`remove-duplicates` の既定**。以前は無条件に最初の出現を残していたが、CL の既定は
-最後を残す。以前の挙動は `:from-end true` で得られる。`docs/functions.md` §6.1/§6.3 と
+最後を残す。以前の挙動は `:from-end true` で得られる。旧 `docs/functions.md` §6.1/§6.3（現 [sequences.md](../ja/reference/functions/sequences.md) §5・§6） と
 `seq_catalog_test` の該当テストを直した。
 
 **副産物**: `position-if-not` を足した。この節の見出しコメントが「CL が持つ `-if`/`-if-not`
@@ -8941,7 +8941,7 @@ prelude の 1 件（`read-delimited-list` → `sexpr-list-from`）は定義順�
   受け手の名前は誰も書いていない）
 - `src/compiler.rs`（島）— `compile-pattern-test` の `pat-guard` 分岐、`compile-match` の
   条件付き root。**島の再生成は 2 回**（emit が変わったので不動点に達するまで）
-- `docs/syntax.md` §4 match、`tests/match_value_test.rs`（16 本、全部 interp と compiled の両方）、
+- 旧 `docs/syntax.md` §4（現 [syntax.md](../ja/reference/syntax.md) §4） match、`tests/match_value_test.rs`（16 本、全部 interp と compiled の両方）、
   `tests/core_vocabulary_test.rs`（`pat-guard` を語彙に追加）、`tests/check_test.rs`
   （「スカラは match できない」テストを「catchall が要る」テストへ）
 
@@ -9724,7 +9724,7 @@ TODO.md の「未修正のバグ」5 件の最後、#2（`i64` の切り詰め�
 
 ### 型名は幅と符号そのもの
 
-同じ作業で、**「幅は静的な区別だけ」という明文の方針**（[functions.md](../functions.md) §1b）を
+同じ作業で、**「幅は静的な区別だけ」という明文の方針**（旧 `docs/functions.md` §1b（現 [numbers.md](../ja/reference/functions/numbers.md) §1））を
 全面的に撤回した。`i32` は「32bit を符号付きとして扱う」、`u32` は「32bit を符号なしとして
 扱う」以上の意味を持たない。`f32` も本物の binary32。
 
@@ -9938,7 +9938,7 @@ prelude のメソッドは**それ自体がインタプリタ**で、しかも�
 コンパイル済みの `char` は生のコードポイント——のに対し、この検査があることが
 シムである理由そのもの。
 
-これで [syntax.md](../syntax.md) §10 の「コンパイルできない組み込み」の表は空になった。
+これで 旧 `docs/syntax.md` §10（現 [syntax.md](../ja/reference/syntax.md) §10） の「コンパイルできない組み込み」の表は空になった。
 
 ---
 
@@ -10008,7 +10008,7 @@ real 38.94    user 0.03    sys 0.00
 
 [cl-parity-plan.md](cl-parity-plan.md) Phase 4a の主役。CL の**字句的**な名前付き脱出と、
 `defun`/`defmethod`/`labels` が自分の名前で張る暗黙ブロック。仕様は
-[syntax.md](../syntax.md) §5.0、テストは `tests/block_test.rs`（25 本、うち 5 本は
+旧 `docs/syntax.md` §5.0（現 [syntax.md](../ja/reference/syntax.md) §5.1）、テストは `tests/block_test.rs`（25 本、うち 5 本は
 コンパイル経路）。
 
 ### 名前はチェック時に消える
@@ -10267,7 +10267,7 @@ baked in per site
 - **`*readtable*` / `copy-readtable`** — readtable を値にするなら「リーダに手渡せるもの」
   でなければならないが、リーダを呼ぶのは Rust 側のドライバで、渡す先が無い。
 - **`readtable-case`** — このリーダは既に CL の `:downcase` を固定で行っている
-  （syntax.md §1）。意味を持ちうるのは `:preserve` だけで、それは「識別子の大文字小文字を
+  （旧 `docs/syntax.md` §1（現 [syntax.md](../ja/reference/syntax.md) §1））。意味を持ちうるのは `:preserve` だけで、それは「識別子の大文字小文字を
   区別する」という言語の決定であってリーダの設定ではない。
 
 ## 2026-09-05（続き） — Phase 4a の残り: `loop :named` / `destructuring-bind` / `sleep`
@@ -10506,7 +10506,7 @@ prelude の `Pathish` ラッパにした——`file-truename`→`truename` と�
 ### 分類が設計の核心
 
 `compile`/`compile-file`/`dump` が「コンパイルできない組み込み」の表
-（[syntax.md](../syntax.md) §10）に入らないのは、コンパイルできないのではなく
+（旧 `docs/syntax.md` §10（現 [syntax.md](../ja/reference/syntax.md) §10））に入らないのは、コンパイルできないのではなく
 **コンパイルする側**だから。7 つはその線でちょうど 2 つに割れた。
 
 - **インタプリタ専用**（同じ族）: `trace` / `untrace` / `step` / `disassemble`。
@@ -10717,7 +10717,7 @@ C の系として、`Sexpr` にも入らない（`sexpr_ctor_for` が `None`）�
 **1. `(as bignum ...)` が C の語から通らなかった。** `as_conversion` の `from` 側は
 `is_integer()` しか見ておらず、`c-long` / `c-ulong` は素通りして「no conversion」になる。
 `(as i32 x)` は切り詰め、`(try-as i32 x)` は `none`——つまり `i32` に入らない `size_t` を
-**読む手段が 1 つも無かった**。プランにも [syntax.md](../syntax.md) にも `(as bignum ...)` と
+**読む手段が 1 つも無かった**。プランにも 旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)） にも `(as bignum ...)` と
 書いてあったのに。`bignum` だけを許す腕を足した（`f64` は丸め、`ratio`/`char` は機械語の
 意味ではない）。
 
@@ -10744,7 +10744,7 @@ C の系として、`Sexpr` にも入らない（`sexpr_ctor_for` が `None`）�
 thunk が再実装することになる。**綴れる型を閉じることで構造的に不可能に**してあり、
 `&rest` は拒否される。ジェネリックも同じく（C に対応物が無い）。
 
-**prelude は FFI を宣言しない**を方針として明文化した（[syntax.md](../syntax.md)）。
+**prelude は FFI を宣言しない**を方針として明文化した（旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)））。
 prelude はどの実行ファイルにも丸ごと入るので、`:library` の付いた宣言が 1 つでもあれば
 FFI を使わないプログラムまでそのライブラリをリンクすることになる。処理系自身が C を
 呼ぶ必要が出たら `rt_*` シムを足す既存の道を使う——そちらはワークスペースが依存先を
@@ -11450,7 +11450,7 @@ lowering の段階で、**スカラ組み込みメソッドの全引数がリテ
 
 ネットワーク層の v1。`tcp-connect`／`tcp-listen`／`accept` と、接続の 2 つの見え方
 `tcp-stream`（文字）／`tcp-byte-stream`（バイト）、`NetError`、`with-connection`
-（docs/functions.md §21）。動く例は `examples/projects/echo-server/`。
+（旧 `docs/functions.md` §21（現 [network.md](../ja/reference/functions/network.md)））。動く例は `examples/projects/echo-server/`。
 
 **先に決めたこと: OS スレッド化（M:N）より前にやる、ただし readiness ベースで。** ソケットは
 全部 non-blocking で、Rust の `net-*` 組み込み（`crates/typelisp-rt/src/net.rs` /
@@ -11883,7 +11883,7 @@ safepoint に来なければならず、`Interp` の `Drop` で join する側�
 **Phase 6（この節）: 文書。** `TODO.md` の「マルチコア並列が無い」を消し、意図的に
 受け入れた制限（データ競合は未定義・interpreted に触れたタスクは main 固定・非 main での
 interpreted な印字メソッドは panic・`typl` のワーカーは drive 1 回ぶん・C コールバック内は
-中断不可）に置き換えた。`functions.md` §20 に「`typl` では 1 本で走る」という Phase 5 前の
+中断不可）に置き換えた。旧 `docs/functions.md` §20（現 [concurrency.md](../ja/reference/functions/concurrency.md)） に「`typl` では 1 本で走る」という Phase 5 前の
 記述が残っていたので直した。`compiled-cps-design.md` §5 に見立ての答え合わせを足した。
 
 **教訓**:

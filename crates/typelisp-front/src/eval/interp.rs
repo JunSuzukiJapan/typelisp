@@ -3377,7 +3377,7 @@ fn eval_float_builtin(heap: &mut Heap, name: &str, args: &[Value], single: bool)
 ///
 /// The *arithmetic* is the one the type names: it is computed in binary64 and
 /// rounded here, which is what makes `f32` binary32 rather than a label on an
-/// `f64` (`docs/functions.md` §1b). And the box is the one the type names
+/// `f64` (`docs/ja/reference/functions/numbers.md` §1). And the box is the one the type names
 /// too — an `f32` result goes in an `f32` box, so that everything downstream
 /// (printing, `eql`, a dump) can still tell which width it is.
 fn float_at(heap: &mut Heap, v: f64, single: bool) -> Value {

@@ -284,7 +284,7 @@ fn variant_names_resolve_inside_a_nested_structure() {
     );
     // The niche prints transparently: `Option<Sexpr>` *is* the S-expression,
     // so there is no wrapper to name. This is the visible spec change from
-    // moving the empty list into `Option` (`docs/functions.md` §15).
+    // moving the empty list into `Option` (`docs/ja/reference/functions/printing.md` §1).
     assert_eq!(fmt(r#"(format false "~a" (list (option::some 1) 2))"#), "(1 2)");
 }
 

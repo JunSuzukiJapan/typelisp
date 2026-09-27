@@ -13,7 +13,7 @@ Phase 4b と Phase 5 は元々一体だったが、リスク分離のため Phas
 **Phase 6.5（ユーザー面リスト/ペア走査 API の `cons<T,U>`/`Vector<T>`/`Iter` 上での再設計）と
 Phase 6.6（その残ギャップ解消＝impl メソッドの `where` 節＋compile の `equals`/`less` 対応）も完了**。
 **Phase 7（ドキュメント整備）も完了を確認**（2026-07-22、`docs/dev/TODO.md`からの棚卸しで
-`docs/functions.md`/`docs/syntax.md`/`docs/dev/language-design.md`を突き合わせ——`gensym`の型表記
+旧 `docs/functions.md`/`docs/syntax.md`（現 [functions/](../ja/reference/functions/README.md)・[syntax.md](../ja/reference/syntax.md)）/`docs/dev/language-design.md`を突き合わせ——`gensym`の型表記
 `()→Symbol`、`Symbol`独立プリミティブ型としての記載、`Vector<T>`への一本化、`cons`/`car`/`cdr`の
 `cons<T,U>`化、`match`のenum専用化、`Sexpr`が内部island層である旨、いずれも既に反映済みだった。
 下記「Phase 7」節参照）。`defenum`（ユーザー多variant sum型）は本再設計とは別に
@@ -463,10 +463,10 @@ compile＋未 compile エラー5本）、typelisp-rt（rt_str_lt 1本）。
 検証: `scripts/test-serial.sh` 全 green、clippy ゼロ。
 
 ### Phase 7 — ドキュメント＆メモリ更新【✅ 完了 / 確認: 2026-07-22】
-- `docs/functions.md`（§5/§6/§12/§14）・`docs/syntax.md`・`docs/dev/language-design.md`: Symbol、Vector ベースのコレクション、
-  cons<T,U>、match enum 専用、Sexpr=内部島 を反映。2026-07-22時点で全項目確認済み——`functions.md:279`の
-  `gensym`は`()→Symbol`、`functions.md:97-105`で`Symbol`が`Sexpr`と別の独立プリミティブ型と明記、
-  `functions.md:201-`で`Vector<T>`への一本化、`functions.md:58-`で`cons<T,U>`化、`language-design.md`
+- 旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)）（§5/§6/§12/§14）・旧 `docs/syntax.md`（現 [syntax.md](../ja/reference/syntax.md)）・`docs/dev/language-design.md`: Symbol、Vector ベースのコレクション、
+  cons<T,U>、match enum 専用、Sexpr=内部島 を反映。2026-07-22時点で全項目確認済み——旧 `docs/functions.md:279`の
+  `gensym`は`()→Symbol`、旧 `docs/functions.md:97-105`で`Symbol`が`Sexpr`と別の独立プリミティブ型と明記、
+  旧 `docs/functions.md:201-`で`Vector<T>`への一本化、旧 `docs/functions.md:58-`で`cons<T,U>`化、`language-design.md`
   各所で`Sexpr`が内部island層である旨、いずれも反映済みだった（本節作成時点＝Phase 0では未更新だったが、
   以降のPhase進行中に随時追記されていたため、着手時点では既に完了扱いにできる状態だった）。
 - メモリ: 本再設計の要点を記録（[[typelisp-sexpr-rtvalue-unification]] の続きとして）。

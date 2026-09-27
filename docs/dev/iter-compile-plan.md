@@ -107,7 +107,7 @@ compile される。したがって本課題の本質は「底のプリミティ
   `compile-sexpr-field`（既存のstruct-fieldデコードをそのまま再利用——box内の値表現規約は
   struct-fieldのそれと一致）でデコードし、`Some`/`None`ボックスを直接組み立てる。テスト:
   `compile_test` 4件（found/absent/passthrough文字列/remove）。
-- **Stage E — docs & memory**: `functions.md`/`language-design.md` 更新、TODO.md の将来課題項を解消、
+- **Stage E — docs & memory**: 旧 `docs/functions.md`（現 [functions/](../ja/reference/functions/README.md)）/`language-design.md` 更新、TODO.md の将来課題項を解消、
   メモリ記録。
 
 ### 達成した設計上の要点

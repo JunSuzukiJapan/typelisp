@@ -516,7 +516,7 @@ fn is_incomplete(e: &Error) -> bool {
 /// niche-represented `Option<T>` (`check::repr::Repr::Niche`) is a bare
 /// word the value alone cannot be recognized by, and prints as `none` /
 /// `(some ...)` only because the type says so. `Option<Sexpr>` is the
-/// documented exception (functions.md §15): S-expression data prints as
+/// documented exception (`docs/ja/reference/functions/printing.md` §1): S-expression data prints as
 /// the S-expression, the empty list as `()`.
 fn format_value(heap: &Heap, reg: &Registry, ty: Option<&Type>, v: &Value) -> String {
     if let Some(ty) = ty {
