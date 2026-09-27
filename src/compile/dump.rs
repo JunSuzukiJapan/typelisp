@@ -157,7 +157,14 @@ pub fn capture_program_dump(
     // executable rebuilds its own from the units written below
     // (`typelisp_front::dump::restore_dump`), and *that* is where the globals
     // get bound to the storage the startup sequence made for them.
-    apply_types(heap, &mut chk, &mut interp, prelude_state)?;
+    //
+    // With the prelude's globals given storage here, in their recorded slots,
+    // as `compile_file`'s own environment has them: checking the program
+    // expands its macros, and a prelude macro reads and writes prelude
+    // globals while it expands (`with-open-file`'s `gensym` bumps
+    // `*gensym-counter*`). Bound by `bind_globals` alone, the name pointed at
+    // a slot this process never made.
+    load_unit_types_only(heap, &mut chk, &mut interp, prelude_state)?;
 
     let before = chk.signature(heap)?;
     typelisp_front::dump::bind_globals(&interp, globals);
@@ -192,6 +199,14 @@ pub fn capture_program_dump(
         // The warnings were already reported by the caller's own check of this
         // same source; repeating them would double every one.
         let _ = chk.take_warnings();
+        // The trailing `(main)` that starts the program under `typl
+        // file.typl`: `compile_file` reads and drops it (`is_entry_call`), and
+        // so does this replay. Running it here would run the program at
+        // compile time, and recording it would run it again when the
+        // executable restores this environment, before its real `main`.
+        if super::aot::is_trailing_main(heap, tl) {
+            continue;
+        }
         heap.push_root(tl);
         forms.push(tl);
         if typelisp_front::dump::already_initialized_global(heap, &interp, tl) {

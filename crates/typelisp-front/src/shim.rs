@@ -301,7 +301,10 @@ unsafe fn run_program_result(
             }
             other => fatal(&format!("main declared to return int answered {:?}", other)),
         },
-        Ok(v) => Ok(encode(v)),
+        // A `()`-returning `main` that returns normally exits 0 — the same
+        // answer `typelisp_rt::rt_run_program` gives; the word `()` is
+        // encoded as is not an exit code.
+        Ok(_) => Ok(typelisp_rt::EXIT_CODE_SUCCESS),
         Err(e) => {
             eprintln!("{}", e);
             Err(typelisp_rt::EXIT_CODE_PANIC)

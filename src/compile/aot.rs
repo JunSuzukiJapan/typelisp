@@ -197,6 +197,14 @@ fn collect_aot_item(
     Ok(())
 }
 
+/// Whether the checked top-level form `tl` is the `(main)` line an AOT
+/// source may end with — [`is_entry_call`] for a caller holding a form of any
+/// kind and no entry path of its own (the `eval` environment's replay,
+/// `compile::dump::capture_program_dump`, which must drop the same line).
+pub(crate) fn is_trailing_main(heap: &Heap, tl: Value) -> bool {
+    core::op(heap, tl) == Some("expr") && is_entry_call(heap, tl, &Path::root(ENTRY_POINT_NAME))
+}
+
 /// Whether a top-level `(expr ...)` is `(main)` — a call of the entry
 /// point, resolved to `entry_path`, with no arguments — the one expression
 /// an AOT source may carry. `entry_path` is always `Path::root(ENTRY_POINT_NAME)`:

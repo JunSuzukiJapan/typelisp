@@ -2578,6 +2578,11 @@ pub unsafe extern "C-unwind" fn rt_panic(args: *const i64, argc: u32) -> i64 {
 /// code for the same reason — see [`run_entry_payload`].
 pub const EXIT_CODE_PANIC: i64 = 1;
 
+/// The exit code of a program whose `()`-returning `main` returned normally.
+/// Named, and not the value `main` answered, because that answer is the word
+/// `()` is encoded as, which differs between the entry shims' decodings.
+pub const EXIT_CODE_SUCCESS: i64 = 0;
+
 /// Runs an AOT executable's compiled entry point (`tl_main`) with a catch
 /// around it, returning its exit code — or, if a `(panic ...)` unwound out of
 /// it, printing the message and returning [`EXIT_CODE_PANIC`].
@@ -2603,7 +2608,13 @@ pub const EXIT_CODE_PANIC: i64 = 1;
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
     let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = std::mem::transmute(entry as usize);
-    let call = std::panic::AssertUnwindSafe(|| f(std::ptr::null(), 0));
+    // Only a `()`-returning `main` reaches this shim (`compile::aot` refuses
+    // an `int` one under this ABI), and a `main` that returns normally exits
+    // 0 — whatever word its `()` happens to be.
+    let call = std::panic::AssertUnwindSafe(|| {
+        f(std::ptr::null(), 0);
+        EXIT_CODE_SUCCESS
+    });
     run_entry_payload(std::panic::catch_unwind(call))
 }
 
@@ -2640,8 +2651,10 @@ pub unsafe extern "C" fn rt_run_entry(entry: i64) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn rt_run_program(args: *const i64, argc: u32) -> i64 {
     let program = read_program(args, argc, "rt_run_program");
+    // A `()`-returning `main` that returns normally exits 0; the word its
+    // `()` is encoded as is not an exit code.
     let call = std::panic::AssertUnwindSafe(|| match run_program(&program) {
-        Ok(v) => encode(v),
+        Ok(_) => EXIT_CODE_SUCCESS,
         Err(code) => code,
     });
     run_entry_payload(std::panic::catch_unwind(call))

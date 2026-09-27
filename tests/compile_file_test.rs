@@ -1791,3 +1791,97 @@ fn a_collecting_initialiser_leaves_the_later_forms_intact() {
     );
     assert_eq!(code, 0, "stderr was: {}", err);
 }
+
+/// An `eval`-carrying program's trailing `(main)` is dropped the way any
+/// other program's is. Building the `eval` environment replays the source, and
+/// that replay used to run `(main)` at compile time and record it, so the
+/// executable ran the program once more at startup before its real `main`.
+/// `main` here leaves a mark per run in a file: none after the build, one
+/// after a run.
+#[test]
+fn an_eval_carrying_program_runs_main_once_and_never_at_compile_time() {
+    let dir = tmp_dir();
+    let marks = dir.join("aot_eval_trailing_main.marks");
+    let _ = std::fs::remove_file(&marks);
+    let marks_s = marks.to_string_lossy().replace('\\', "/");
+    let src_path = dir.join("aot_eval_trailing_main.typl");
+    let out_path = dir.join("aot_eval_trailing_main");
+    let source = format!(
+        r#"
+        (defun main () ()
+          (match (with-open-file (o "{}" direction-append) (write-string o "x"))
+            ((ok _) ())
+            ((err e) (panic (message e))))
+          (match (eval (quote (+ 1 2)))
+            ((ok _) ())
+            ((err e) (panic (message e)))))
+        (main)
+        "#,
+        marks_s
+    );
+    std::fs::write(&src_path, source).expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+        .expect("compile_file failed");
+    assert!(!marks.exists(), "compile-file ran `main`");
+
+    let out = Command::new(&out_path).output().expect("failed to run the compiled executable");
+    assert_eq!(out.status.code(), Some(0), "stderr was: {}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read_to_string(&marks).expect("main left no mark"), "x");
+}
+
+/// A `()`-returning `main` that returns normally exits 0 under either entry
+/// shim. The `eval`-carrying one used to exit with the word `()` is encoded as.
+#[test]
+fn an_eval_carrying_unit_main_exits_zero() {
+    let (code, err) = compile_and_capture(
+        "aot_eval_unit_main",
+        r#"
+        (defun main () ()
+          (match (eval (quote (+ 1 2)))
+            ((ok _) ())
+            ((err e) (panic (message e)))))
+        "#,
+    );
+    assert_eq!(code, 0, "stderr was: {}", err);
+}
+
+/// A struct evaluates to itself (CL's self-evaluating objects): `eval` hands
+/// back the very object, so a write through the result is seen through the
+/// original.
+#[test]
+fn an_aot_executable_evaluates_a_struct_to_itself() {
+    let (code, err) = compile_and_capture(
+        "aot_eval_struct_self",
+        r#"
+        (defstruct q (x i32))
+        (defun main () int
+          (let ((v (q::new 7)))
+            (match (eval v)
+              ((ok s) (match s
+                        ((the q w) (progn (setf w::x 8) (as int v::x)))
+                        (_ -1)))
+              ((err _) -2))))
+        "#,
+    );
+    assert_eq!(code, 8, "stderr was: {}", err);
+}
+
+/// A prelude macro that touches a prelude global while it expands
+/// (`with-output-to-string` calls `gensym`, which bumps `*gensym-counter*`)
+/// in an `eval`-carrying program. The `eval` environment is checked at
+/// compile time, and it used to name the prelude's globals without making
+/// their storage, so the expansion failed with "unknown compiled id".
+#[test]
+fn an_eval_carrying_program_can_use_a_macro_that_calls_gensym() {
+    let (code, err) = compile_and_capture(
+        "aot_eval_gensym_macro",
+        r#"
+        (defun main () int
+          (let ((s (with-output-to-string (o) (write-string o "ab"))))
+            (match (eval (quote (+ 1 2)))
+              ((ok _) (length s))
+              ((err _) -1))))
+        "#,
+    );
+    assert_eq!(code, 2, "stderr was: {}", err);
+}
