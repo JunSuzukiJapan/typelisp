@@ -940,3 +940,43 @@ fn runtime_error_carries_source_location() {
     assert_eq!(loc.line, 2, "should point at the `(panic ...)` form on line 2");
     assert!(matches!(err.kind(), EvalError::Panic(_)));
 }
+
+/// Runs `src` (read as `prog.typl`) against a loaded prelude and returns the
+/// first runtime error.
+fn first_runtime_error_with_prelude(src: &str) -> EvalError {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    let vs = r.read_all_in(&mut h, "prog.typl", src).expect("read failed");
+    for v in vs {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Err(e) = interp.exec(&mut h, tl) {
+            return e;
+        }
+    }
+    panic!("expected a runtime error");
+}
+
+/// A panic raised inside the standard library is reported where the program
+/// called into it — `(unwrap o)` on line 2 — not at the library's own
+/// `(panic ...)` line, which the program cannot see or change.
+#[test]
+fn a_panic_inside_the_library_is_placed_at_the_programs_call() {
+    let src = "(defun first-or-die ((o Option<int>)) int\n  (unwrap o))\n(first-or-die (Option::none))";
+    let err = first_runtime_error_with_prelude(src);
+    let loc = err.loc().expect("runtime error should carry a location");
+    assert_eq!((&*loc.file, loc.line, loc.col), ("prog.typl", 2, 3), "{}", err);
+    assert!(matches!(err.kind(), EvalError::Panic(m) if m.contains("unwrap")), "{}", err);
+}
+
+/// The other half of the same rule: a panic in the program's own code keeps
+/// its own location even when the library called it (a lambda run by `map`).
+#[test]
+fn a_panic_in_a_callback_the_library_runs_keeps_its_own_location() {
+    let src = "(let ((v (the Vector<int> (Vector::new))))\n  (push v 1)\n  (map (iter v) (lambda ((x int)) int\n    (panic \"in the lambda\"))))";
+    let err = first_runtime_error_with_prelude(src);
+    let loc = err.loc().expect("runtime error should carry a location");
+    assert_eq!((&*loc.file, loc.line), ("prog.typl", 4), "{}", err);
+}

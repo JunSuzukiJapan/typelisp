@@ -266,7 +266,7 @@ fn a_method_call_the_bounds_do_not_justify_is_rejected() {
            (tag ((self Self)) int (rank self)))"
     );
     let m = eval_err(&src);
-    assert!(m.contains("NoSuchFunction") || m.contains("no such function"), "{}", m);
+    assert!(m.contains("no method `rank` for type variable `t`"), "{}", m);
 }
 
 #[test]

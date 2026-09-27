@@ -6317,7 +6317,7 @@ impl Checker {
     ///
     /// Every method registered here is **public**, and there is no way to ask
     /// for anything else: `pub` may not be attached to an `impl`
-    /// (`docs/syntax.md` §pub), so a private trait impl is not something a
+    /// (`docs/ja/reference/syntax.md` §3.13), so a private trait impl is not something a
     /// program can express — and Rust, whose visibility rules this follows,
     /// has no such thing either (a trait's methods are callable wherever the
     /// value is). Registering them privately instead made a trait method
@@ -11123,8 +11123,12 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
+        // The receiver's type, once checked — what the final report names
+        // when no method matched.
+        let mut recv_ty: Option<Type> = None;
         if !args.is_empty() {
             let mut recv = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
+            recv_ty = Some(recv.ty.clone());
             // Trait-object receiver: one of the trait's own methods dispatches
             // through the vtable; anything else is the built-in `Sexpr`
             // catalog (`eq`/`equal`/`print`/...), which applies to a trait
@@ -11271,7 +11275,62 @@ impl Checker {
                 }
             }
         }
+        // A name that is a method of *other* types is not a missing function:
+        // the call picked its method by the first argument's type, and that
+        // type has none by this name. Saying "no such function" there sends
+        // the reader looking for a typo in a name that exists.
+        if let Some(recv_ty) = recv_ty {
+            let owners = self.types_with_instance_method(method);
+            if !owners.is_empty() {
+                // A type variable (a generic body's `T`) has exactly the methods its
+                // `where` bounds give it, so that is what to say — which concrete
+                // types happen to have the name is beside the point.
+                if let Type::Named(p, args) = &recv_ty {
+                    if args.is_empty() && p.is_simple() && self.reg.type_def(p).is_none() {
+                        return Err(Error::TypeError(format!(
+                            "no method `{}` for type variable `{}`: none of the traits in its `where` bounds provides `{}`",
+                            method, recv_ty, method
+                        )));
+                    }
+                }
+                const SHOWN: usize = 8;
+                let mut list = owners.iter().take(SHOWN).map(|t| format!("`{}`", t)).collect::<Vec<_>>().join(", ");
+                if owners.len() > SHOWN {
+                    list.push_str(&format!(" and {} more", owners.len() - SHOWN));
+                }
+                return Err(Error::TypeError(format!(
+                    "no method `{}` for type `{}` (the type of the first argument, which selects the method); `{}` is a method of {}",
+                    method, recv_ty, method, list
+                )));
+            }
+        }
         Err(Error::NoSuchFunction(method.to_string()))
+    }
+
+    /// Every type, in any module, that has an instance method named `method`
+    /// — the types a failed method call could have meant. Named the way a
+    /// program writes them: bare for a root type, qualified otherwise.
+    /// Sorted, so the message is the same from run to run.
+    fn types_with_instance_method(&self, method: &str) -> Vec<String> {
+        fn walk(ns: &Namespace, method: &str, out: &mut Vec<String>) {
+            for def in ns.types.values() {
+                if def.assoc.get(method).is_some_and(|af| af.instance) {
+                    out.push(if def.name.parent().is_empty() {
+                        def.name.last_segment().to_string()
+                    } else {
+                        def.name.segments().join("::")
+                    });
+                }
+            }
+            for child in ns.modules.values() {
+                walk(child, method, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(&self.reg.root, method, &mut out);
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// Check a call to a type-associated function. For an instance method the
@@ -12225,7 +12284,7 @@ impl Checker {
     /// deferring it.
     ///
     /// Prints and answers `()`, as CL does. Interpreter-only, the same
-    /// category `compile`/`compile-file`/`dump` are in (docs/syntax.md §10):
+    /// category `compile`/`compile-file`/`dump` are in (`docs/ja/reference/syntax.md` §10):
     /// it is not that it cannot be compiled, it is that it is the compiler.
     fn check_disassemble(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
         let (name_arg, llvm_ir) = match args {
@@ -12325,8 +12384,8 @@ impl Checker {
     /// (`Registry::docs` and `Registry::def_locs`, which are keyed
     /// identically and populated at the same registration points), so what
     /// they can share is exactly this: the ladder that decides which column
-    /// to read. A bare name is tried as a variable, a function, a type, a
-    /// trait, then a macro — first hit wins, the same var-before-fn priority
+    /// to read. A bare name is tried as a variable, a function, a type (or a
+    /// `deftype` alias), a trait, then a macro — first hit wins, the same var-before-fn priority
     /// a bare identifier gets as an ordinary expression.
     ///
     /// Resolving to nothing is a check-time error, like any other unbound
@@ -12341,6 +12400,10 @@ impl Checker {
                     Ok(DefRef::Fn(path))
                 } else if let Some(path) = self.resolve_bare_type(name) {
                     Ok(DefRef::Type(path))
+                } else if let Some(alias) = self.resolve_type_alias(&Path::of(&[name])) {
+                    // A `deftype` alias keeps its docstring and location in the
+                    // type columns, under its own fully-qualified name.
+                    Ok(DefRef::Type(alias.name))
                 } else if let Ok(path) = self.resolve_trait_name(name) {
                     Ok(DefRef::Trait(path))
                 } else if let Some((path, _)) = self.resolve_macro(name) {
