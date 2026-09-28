@@ -118,6 +118,15 @@ typl --version    # バージョンを表示する
 
 日本語の文書の一覧は [docs/ja/README.md](docs/ja/README.md) にあります。
 
+### チュートリアル
+
+- [入門](docs/ja/tutorial/intro.md)
+- [型の基本](docs/ja/tutorial/types.md)
+- [トレイト](docs/ja/tutorial/traits.md)
+- [マクロ](docs/ja/tutorial/macros.md)
+- [エラー処理](docs/ja/tutorial/errors.md)
+- [並行処理](docs/ja/tutorial/concurrency.md)
+
 ### ガイド
 
 - [モジュールとファイル構成](docs/ja/guide/modules.md)

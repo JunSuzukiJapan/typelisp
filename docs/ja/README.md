@@ -3,6 +3,17 @@
 typelisp は静的型付きの Lisp です。インストールとビルドの方法はリポジトリ直下の
 [README_JP.md](../../README_JP.md) を参照してください。
 
+## チュートリアル
+
+はじめての人は上から順に読んでください。
+
+- [入門](tutorial/intro.md)：REPL、関数、変数、条件分岐、繰り返し、リストと `Vector`
+- [型の基本](tutorial/types.md)：静的型、`Option`、`Result`、構造体、列挙型、ジェネリクス
+- [トレイト](tutorial/traits.md)：`deftrait` / `impl`、トレイト境界、`:dyn`
+- [マクロ](tutorial/macros.md)：`defmacro`、準クオート、`gensym`、`macrolet`
+- [エラー処理](tutorial/errors.md)：`Result`、`panic`、`catch` / `throw`、`unwind-protect`
+- [並行処理](tutorial/concurrency.md)：タスク、チャネル、`select`、`Mutex`、`thread`
+
 ## ガイド
 
 - [モジュールとファイル構成](guide/modules.md)：`use`、`pub`、ファイルとモジュールの対応

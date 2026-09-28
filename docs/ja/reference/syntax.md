@@ -771,8 +771,16 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 
 `:dyn Trait` にできるのは「全メソッドが `self` レシーバを持ち、`Self` をレシーバ以外に使わず、
 メソッド自身がジェネリックでも可変長でもない」トレイトだけ（継承したメソッドも同じ条件を満たす
-必要がある）。箱に入れられるのはヒープ表現を持つ型
-（`defstruct`/`defenum` 等）で、プリミティブ型は入れられない。
+必要がある）。
+
+`:dyn` の箱に入れられるのは、値がヒープ上の表現を持つ型だけ:
+
+| 入れられる | 入れられない |
+|---|---|
+| `defstruct` / `defenum` の型（`Vector<T>`、`cons-cell<A,B>`、`Result<T,E>`、標準ライブラリの構造体を含む）、`HashTable<K,V>`、`Sexpr`、`int`、`ratio`、`f64`、`string`、`random-state` | 固定幅の整数（`i8`〜`u32`）、`f32`、`bool`、`char`、`symbol`、`()`、関数型、箱を持たない `Option<T>`（[Option の実行時表現](functions/option-result.md#2-optiont-の実行時表現)） |
+
+入れられない型の値を `:dyn` の位置に置くと型エラーになる。そうした値を `:dyn` で扱いたいときは、
+`(defstruct flag (v bool))` のように構造体で包む。
 
 ### 3.10 module / use — 名前空間
 
