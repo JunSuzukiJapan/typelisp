@@ -176,6 +176,25 @@ fn dribble_records_both_kinds_of_output_until_it_is_closed() {
     assert!(!text.contains("after the dribble closed"), "recording did not stop: {:?}", text);
 }
 
+/// A builtin `println` method taken as a function value prints through the
+/// same door as the `println` form, so the dribble records it too.
+#[test]
+fn dribble_records_a_builtin_print_method_used_as_a_value() {
+    let path = temp_path("method.log");
+    let _ = std::fs::remove_file(&path);
+    let (h, _) = eval(&format!(
+        "(match (dribble \"{}\") ((ok _) ()) ((err e) (println \"start failed: ~a\" (message e))))\n\
+         (defun call-it ((f (fn (bool) ())) (b bool)) () (f b))\n\
+         (call-it println true)\n\
+         (match (dribble) ((ok _) ()) ((err e) (println \"stop failed: ~a\" (message e))))",
+        path.display()
+    ));
+    drop(h);
+    let text = std::fs::read_to_string(&path).expect("the dribble file should exist");
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(text, "true\n");
+}
+
 /// Starting a second dribble closes the first, as CL's does — what was
 /// already written stays written, and nothing after goes to the old file.
 #[test]

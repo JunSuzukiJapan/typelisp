@@ -18,7 +18,6 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
 use std::rc::Rc;
 
 use num_bigint::BigInt;
@@ -4003,15 +4002,11 @@ fn format_float_for_print(f: f64) -> String {
 }
 
 
-/// Native, like the printer's own `write_stdout` — see its doc comment.
+/// The builtin `print`/`println` methods' output, through the printer's own
+/// door so that it reaches a dribble file like every other print does.
 fn write_stdout(heap: &mut Heap, text: &str, newline: bool) -> Result<Value, EvalError> {
-    heap.native(|| {
-        let mut out = std::io::stdout();
-        let write_result = if newline { writeln!(out, "{}", text) } else { write!(out, "{}", text) };
-        write_result.and_then(|()| out.flush())
-    })
-    .map(|()| Value::Empty)
-    .map_err(|e| EvalError::Panic(format!("print: {}", e)))
+    let text = if newline { format!("{}\n", text) } else { text.to_string() };
+    typelisp_print::runtime::write_stdout(heap, &text).map(|()| Value::Empty).map_err(EvalError::Panic)
 }
 
 /// `parse-float` (`registry.rs`'s free-function entry): an `f64` literal via

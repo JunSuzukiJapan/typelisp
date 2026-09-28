@@ -322,7 +322,7 @@ pub fn list_exhausted(heap: &Heap) -> bool {
 ///
 /// Native (`docs/dev/os-threads-design.md` §4): the write can wait on a full
 /// pipe, and on stdout's lock while another thread waits on one.
-fn write_stdout(heap: &mut Heap, text: &str) -> Result<(), String> {
+pub fn write_stdout(heap: &mut Heap, text: &str) -> Result<(), String> {
     // One of the three doors a session's output leaves by; see
     // `typelisp_abi::dribble`'s module docs for the other two.
     typelisp_abi::dribble::note(text);
