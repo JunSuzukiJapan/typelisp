@@ -63,10 +63,21 @@ cargo build --release  # リリースビルド（target/release/）
 ```sh
 target/debug/typl              # REPL を起動する
 target/debug/typl foo.typl     # foo.typl を実行する
+target/debug/typl -c foo.typl  # foo.typl をコンパイルして実行ファイル foo を作る
 ```
 
-`compile-file` で作る実行ファイルは、ビルドしたリポジトリの `target/` にある静的ライブラリを
-リンクします。そのため、`typl` をビルドしたリポジトリは移動したり削除したりしないでください。
+`typl -c` や `compile-file` で作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` を
+リンクします。何も指定しなければ、`typl` をビルドしたリポジトリの `target/debug/`（リリースビルドなら
+`target/release/`）にあるものを使います。リポジトリを移動・削除するときは、このファイルを別の
+フォルダへコピーしておき、`--lib-dir` でそのフォルダを指定してください。
+
+```sh
+cp target/release/libtypelisp_front.a ~/lib/typelisp/
+typl --lib-dir ~/lib/typelisp -c foo.typl
+```
+
+`libtypelisp_front.a` は、そのファイルと同時にビルドした `typl` でしか使えません。`typl` を
+ビルドし直したら、コピーも取り直してください。
 
 ## 文書
 

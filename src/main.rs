@@ -4,6 +4,8 @@
 //! `Interp` pipeline, using `rustyline` for Emacs-style line editing/history
 //! (Ctrl+P/Ctrl+N to move through history, Ctrl+R to search it, etc. — all
 //! `rustyline`'s default `EditMode::Emacs` bindings, matching bash/readline).
+//! With `-c SOURCE [-o OUTPUT]`, AOT-compiles `SOURCE` to an executable
+//! instead, the same thing `(compile-file SOURCE OUTPUT)` does.
 
 use std::cell::RefCell;
 use std::path::{Path as FsPath, PathBuf};
@@ -39,6 +41,29 @@ fn main() -> rustyline::Result<()> {
     // A global `--image FILE` (or `--image=FILE`) starts from a dump written by
     // `(dump ...)` instead of the prelude and island compiled into this binary.
     let (image, args) = parse_image(args);
+    // A global `--lib-dir DIR` (or `--lib-dir=DIR`) names the folder holding
+    // the static library an AOT executable links, for `-c` and for every
+    // `(compile-file ...)` this process runs.
+    let (lib_dir, args) = parse_lib_dir(args);
+    if let Some(dir) = lib_dir {
+        if let Err(e) = typelisp::compile::aot::set_lib_dir(dir) {
+            eprintln!("--lib-dir: {}", e);
+            std::process::exit(1);
+        }
+    }
+    if args.first().map(String::as_str) == Some("-c") {
+        // The executable is compiled in an environment of its own
+        // (`compile::aot::compile_file`), which none of these flags reach;
+        // refused rather than accepted and ignored.
+        for (given, flag) in [(heap_cells.is_some(), "--heap-cells"), (!features.is_empty(), "--feature"), (image.is_some(), "--image")] {
+            if given {
+                eprintln!("-c: {} has no effect on compilation", flag);
+                std::process::exit(1);
+            }
+        }
+        std::process::exit(compile_command(&args[1..]));
+    }
+    let heap_cells = heap_cells.unwrap_or(DEFAULT_HEAP_CELLS);
     // The first non-flag argument names a source file to run;
     // with none, start the REPL.
     //
@@ -58,6 +83,75 @@ fn main() -> rustyline::Result<()> {
     // `--heap-cells` and friends into a program's view of its arguments.
     typelisp_rt::sys_builtin::set_command_line_args(vec!["typl".to_string()]);
     repl(heap_cells, features, image)
+}
+
+/// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c`. Without
+/// `-o`, the executable is `SOURCE` with its `.typl` extension removed.
+/// Returns the process exit code.
+fn compile_command(args: &[String]) -> i32 {
+    let mut source = None;
+    let mut output = None;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "-o" {
+            match it.next() {
+                Some(v) => output = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("-o: needs a path for the executable");
+                    return 1;
+                }
+            }
+        } else if source.is_none() && !a.starts_with('-') {
+            source = Some(PathBuf::from(a));
+        } else {
+            eprintln!("-c: unexpected argument `{}` (usage: typl -c SOURCE [-o OUTPUT])", a);
+            return 1;
+        }
+    }
+    let Some(source) = source else {
+        eprintln!("-c: needs a source file (usage: typl -c SOURCE [-o OUTPUT])");
+        return 1;
+    };
+    let output = match output {
+        Some(o) => o,
+        None if source.extension().is_some_and(|e| e == "typl") => source.with_extension(""),
+        None => {
+            eprintln!("-c: {} does not end in .typl, so give the executable's name with -o", source.display());
+            return 1;
+        }
+    };
+    match typelisp::compile::aot::compile_file(&source.to_string_lossy(), &output.to_string_lossy()) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            1
+        }
+    }
+}
+
+/// Parses a global `--lib-dir DIR` / `--lib-dir=DIR` flag out of `args`,
+/// returning the folder and the remaining arguments with the flag removed.
+/// Exits with a diagnostic on a missing value. A later occurrence wins.
+fn parse_lib_dir(args: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
+    let mut dir = None;
+    let mut rest = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--lib-dir" {
+            match it.next() {
+                Some(v) => dir = Some(PathBuf::from(v)),
+                None => {
+                    eprintln!("--lib-dir: needs a folder");
+                    std::process::exit(1);
+                }
+            }
+        } else if let Some(v) = a.strip_prefix("--lib-dir=") {
+            dir = Some(PathBuf::from(v));
+        } else {
+            rest.push(a);
+        }
+    }
+    (dir, rest)
 }
 
 /// Parses a global `--image FILE` / `--image=FILE` flag out of `args`,
@@ -115,26 +209,26 @@ fn parse_features(args: Vec<String>) -> (Vec<String>, Vec<String>) {
 }
 
 /// Parses a global `--heap-cells N` / `--heap-cells=N` flag out of `args`,
-/// returning the requested cons-arena capacity (defaulting to
-/// [`DEFAULT_HEAP_CELLS`]) and the remaining arguments with the flag and its
-/// value removed. Exits the process with a diagnostic on a missing or invalid
+/// returning the requested cons-arena capacity (`None` when the flag is
+/// absent; the caller applies [`DEFAULT_HEAP_CELLS`]) and the remaining
+/// arguments with the flag and its value removed. Exits the process with a diagnostic on a missing or invalid
 /// value — the flag sizes a one-shot allocation, so a typo is better caught
 /// before any work than silently ignored. A later occurrence wins.
-fn parse_heap_cells(args: Vec<String>) -> (usize, Vec<String>) {
-    let mut capacity = DEFAULT_HEAP_CELLS;
+fn parse_heap_cells(args: Vec<String>) -> (Option<usize>, Vec<String>) {
+    let mut capacity = None;
     let mut rest = Vec::with_capacity(args.len());
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         if a == "--heap-cells" {
             match it.next() {
-                Some(v) => capacity = parse_heap_cells_value(&v),
+                Some(v) => capacity = Some(parse_heap_cells_value(&v)),
                 None => {
                     eprintln!("--heap-cells: needs a positive integer (number of cons cells)");
                     std::process::exit(1);
                 }
             }
         } else if let Some(v) = a.strip_prefix("--heap-cells=") {
-            capacity = parse_heap_cells_value(v);
+            capacity = Some(parse_heap_cells_value(v));
         } else {
             rest.push(a);
         }

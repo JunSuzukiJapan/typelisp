@@ -7,7 +7,7 @@ typelisp のプログラムは、何もしなければインタプリタで実�
 | 手段 | 使い方 | 結果 |
 |---|---|---|
 | JIT コンパイル | `(compile name)` | 実行中のセッションの関数がネイティブコードに置き換わる |
-| AOT コンパイル | `(compile-file "src.typl" "out")` | 単体で動く実行ファイルができる |
+| AOT コンパイル | `typl -c src.typl` または `(compile-file "src.typl" "out")` | 単体で動く実行ファイルができる |
 | ダンプ | `(dump "file.typld")` | 定義を保存し、`typl --image` で同じ環境から起動できる |
 
 ## 1. 準備
@@ -15,8 +15,9 @@ typelisp のプログラムは、何もしなければインタプリタで実�
 コンパイルには LLVM 17 を使います。[README_JP.md](../../../README_JP.md) の手順で `typl` を
 ビルドできていれば、追加の準備はいりません。
 
-AOT コンパイルで作る実行ファイルは、`typl` をビルドしたリポジトリの `target/` にある
-ライブラリをリンクします。リポジトリを移動・削除すると `compile-file` が使えなくなります。
+AOT コンパイルで作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` をリンクします。
+何も指定しなければ、`typl` をビルドしたリポジトリの `target/` にあるものを使います。別の場所に
+置いたものを使うには、`typl` の起動時に `--lib-dir` でそのフォルダを指定します（3.2 節）。
 macOS ではリンクに Xcode Command Line Tools を使います。
 
 ## 2. JIT コンパイル
@@ -70,7 +71,21 @@ macOS ではリンクに Xcode Command Line Tools を使います。
 
 ### 3.2 コンパイルする
 
-REPL から `compile-file` を呼びます。
+コマンドラインからは `typl -c` を使います。
+
+```sh
+$ typl -c hello.typl            # hello ができる
+$ typl -c hello.typl -o fib     # 実行ファイルの名前を fib にする
+$ ./hello a b
+args: #<vector<string> ./hello a b>
+fib(25) = 75025
+```
+
+`-o` を省略すると、ソースファイル名から `.typl` を除いた名前の実行ファイルが、ソースファイルと
+同じフォルダにできます。ソースファイル名が `.typl` で終わらないときは `-o` が必要です。
+`-c` を使うときは、`--image` `--heap-cells` `--feature` は指定できません。
+
+REPL やプログラムの中から `compile-file` を呼んでも同じことができます。
 
 ```sh
 $ typl
@@ -90,6 +105,17 @@ fib(25) = 75025
 
 ファイル名は **`typl` を起動したカレントディレクトリ**から解決されます。`build.typl` の場所
 からではありません。
+
+リンクする `libtypelisp_front.a` をビルドしたリポジトリの外に置いたときは、そのフォルダを
+`--lib-dir` で指定します。`typl -c` と `compile-file` のどちらにも効きます。
+
+```sh
+$ typl --lib-dir ~/lib/typelisp -c hello.typl
+$ typl --lib-dir ~/lib/typelisp build.typl
+```
+
+指定したフォルダに `libtypelisp_front.a` が無ければ、エラーで止まります。このファイルは、同時に
+ビルドした `typl` でしか使えません。`typl` をビルドし直したら、コピーも取り直してください。
 
 ### 3.3 AOT コンパイルできるファイルの形
 

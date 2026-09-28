@@ -1157,9 +1157,36 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
 /// `scripts/test-serial.sh` builds the staticlib first for exactly this
 /// reason; a bare `cargo test --test compile_file_test` needs it built by
 /// hand.
-fn staticlib_path() -> String {
+///
+/// `typl --lib-dir DIR` replaces the whole path with `DIR/`[`STATICLIB_NAME`]
+/// ([`set_lib_dir`]), so an installed `typl` can link against a copy of the
+/// archive instead of the repository it was built in.
+fn staticlib_path() -> std::path::PathBuf {
+    if let Some(dir) = LIB_DIR.get() {
+        return dir.join(STATICLIB_NAME);
+    }
     let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
-    format!("{}/target/{}/libtypelisp_front.a", env!("CARGO_MANIFEST_DIR"), profile)
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(profile).join(STATICLIB_NAME)
+}
+
+/// The file name of the archive every AOT executable links; see
+/// [`staticlib_path`].
+pub const STATICLIB_NAME: &str = "libtypelisp_front.a";
+
+/// The folder `typl --lib-dir` named, for the rest of the process.
+static LIB_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+
+/// Makes every later `compile-file` in this process link `dir`'s
+/// [`STATICLIB_NAME`] instead of the one in the build tree.
+///
+/// Refuses a folder that does not hold the archive: the build tree's copy is
+/// not consulted once a folder has been named, so a mistyped one would
+/// otherwise surface only as a linker error at the first `compile-file`.
+pub fn set_lib_dir(dir: std::path::PathBuf) -> Result<(), String> {
+    if !dir.join(STATICLIB_NAME).is_file() {
+        return Err(format!("{} has no {}", dir.display(), STATICLIB_NAME));
+    }
+    LIB_DIR.set(dir).map_err(|_| "the library folder is already set".to_string())
 }
 
 /// A [`TargetMachine`] for the machine this process is running on.
