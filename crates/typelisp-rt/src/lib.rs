@@ -186,21 +186,7 @@ pub unsafe extern "C" fn rt_cons(args: *const i64, argc: u32) -> i64 {
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_car(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_car: expected 1 argument");
-    }
-    // The empty list's `car` is the empty list, as in CL. Both sides are
-    // `Option<Sexpr>` now, so this is `none` in and `none` out — and it has
-    // to agree with the interpreter's `sexpr-car`, or the same walk would
-    // end differently depending on whether its caller was compiled.
-    let arg = decode(*args);
-    if arg.is_empty() {
-        return encode(arg);
-    }
-    match active_heap().car(arg) {
-        Ok(v) => encode(v),
-        Err(_) => fatal("rt_car: argument is not a cons"),
-    }
+    cons_half(args, argc, "rt_car", Heap::car)
 }
 
 /// `(cdr c)` for compiled code — see [`rt_car`]'s doc comment.
@@ -210,20 +196,32 @@ pub unsafe extern "C" fn rt_car(args: *const i64, argc: u32) -> i64 {
 /// Same as [`rt_car`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
+    cons_half(args, argc, "rt_cdr", Heap::cdr)
+}
+
+/// The body of [`rt_car`] and [`rt_cdr`], which differ only in the half they
+/// read.
+///
+/// The empty list's `car` and `cdr` are the empty list, as in CL. Both sides
+/// are `Option<Sexpr>` now, so this is `none` in and `none` out — and it has
+/// to agree with the interpreter's `sexpr-car`/`sexpr-cdr`, or the same walk
+/// would end differently depending on whether its caller was compiled.
+unsafe fn cons_half(
+    args: *const i64,
+    argc: u32,
+    who: &str,
+    half: fn(&Heap, Value) -> Result<Value, typelisp_mem::Error>,
+) -> i64 {
     if argc < 1 {
-        fatal("rt_cdr: expected 1 argument");
+        fatal(&format!("{}: expected 1 argument", who));
     }
-    // The empty list's `cdr` is the empty list, as in CL. Both sides are
-    // `Option<Sexpr>` now, so this is `none` in and `none` out — and it has
-    // to agree with the interpreter's `sexpr-cdr`, or the same walk would
-    // end differently depending on whether its caller was compiled.
     let arg = decode(*args);
     if arg.is_empty() {
         return encode(arg);
     }
-    match active_heap().cdr(arg) {
+    match half(active_heap(), arg) {
         Ok(v) => encode(v),
-        Err(_) => fatal("rt_cdr: argument is not a cons"),
+        Err(_) => fatal(&format!("{}: argument is not a cons", who)),
     }
 }
 
@@ -238,15 +236,7 @@ pub unsafe extern "C" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
 /// a `Heap` must already be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_set_car(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_set_car: expected 2 arguments");
-    }
-    let c = decode(*args);
-    let val = decode(*args.add(1));
-    match active_heap().set_car(c, val) {
-        Ok(()) => 0,
-        Err(_) => fatal("rt_set_car: first argument is not a cons"),
-    }
+    set_cons_half(args, argc, "rt_set_car", Heap::set_car)
 }
 
 /// `(rplacd c val)` for compiled code — see [`rt_set_car`]'s doc comment.
@@ -256,14 +246,25 @@ pub unsafe extern "C" fn rt_set_car(args: *const i64, argc: u32) -> i64 {
 /// Same as [`rt_set_car`].
 #[no_mangle]
 pub unsafe extern "C" fn rt_set_cdr(args: *const i64, argc: u32) -> i64 {
+    set_cons_half(args, argc, "rt_set_cdr", Heap::set_cdr)
+}
+
+/// The body of [`rt_set_car`] and [`rt_set_cdr`], which differ only in the
+/// half they write.
+unsafe fn set_cons_half(
+    args: *const i64,
+    argc: u32,
+    who: &str,
+    set: fn(&mut Heap, Value, Value) -> Result<(), typelisp_mem::Error>,
+) -> i64 {
     if argc < 2 {
-        fatal("rt_set_cdr: expected 2 arguments");
+        fatal(&format!("{}: expected 2 arguments", who));
     }
     let c = decode(*args);
     let val = decode(*args.add(1));
-    match active_heap().set_cdr(c, val) {
+    match set(active_heap(), c, val) {
         Ok(()) => 0,
-        Err(_) => fatal("rt_set_cdr: first argument is not a cons"),
+        Err(_) => fatal(&format!("{}: first argument is not a cons", who)),
     }
 }
 
@@ -1683,21 +1684,8 @@ pub unsafe extern "C" fn rt_pending_argc(_args: *const i64, _argc: u32) -> i64 {
 /// `argc` must be `>= 1`.
 #[no_mangle]
 pub unsafe extern "C" fn rt_pending_arg(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_pending_arg: expected 1 argument");
-    }
-    let i = *args;
-    if i < 0 {
-        fatal(&format!("rt_pending_arg: {} is not an argument index", i));
-    }
-    match typelisp_abi::call_state::pending_arg(i as usize) {
-        Some(w) => w,
-        None => fatal(&format!(
-            "rt_pending_arg: argument {} was not passed (the driver left {})",
-            i,
-            typelisp_abi::call_state::pending_argc()
-        )),
-    }
+    use typelisp_abi::call_state::{pending_arg, pending_argc};
+    pending_word(args, argc, "rt_pending_arg", "argument", "an argument", pending_arg, pending_argc)
 }
 
 /// `(rt-pending-envc)` for compiled code — how many captures the driver left.
@@ -1722,20 +1710,33 @@ pub unsafe extern "C" fn rt_pending_envc(_args: *const i64, _argc: u32) -> i64 {
 /// `argc` must be `>= 1`.
 #[no_mangle]
 pub unsafe extern "C" fn rt_pending_env(args: *const i64, argc: u32) -> i64 {
+    use typelisp_abi::call_state::{pending_env, pending_envc};
+    pending_word(args, argc, "rt_pending_env", "capture", "a capture", pending_env, pending_envc)
+}
+
+/// The body of [`rt_pending_arg`] and [`rt_pending_env`]: word `args[0]` of
+/// one of the driver's two lists, read by `get`, where `count` says how many
+/// the driver left. `what` names an entry of that list in the messages, and
+/// `a_what` is the same name with its article.
+unsafe fn pending_word(
+    args: *const i64,
+    argc: u32,
+    who: &str,
+    what: &str,
+    a_what: &str,
+    get: fn(usize) -> Option<i64>,
+    count: fn() -> usize,
+) -> i64 {
     if argc < 1 {
-        fatal("rt_pending_env: expected 1 argument");
+        fatal(&format!("{}: expected 1 argument", who));
     }
     let i = *args;
     if i < 0 {
-        fatal(&format!("rt_pending_env: {} is not a capture index", i));
+        fatal(&format!("{}: {} is not {} index", who, i, a_what));
     }
-    match typelisp_abi::call_state::pending_env(i as usize) {
+    match get(i as usize) {
         Some(w) => w,
-        None => fatal(&format!(
-            "rt_pending_env: capture {} was not passed (the driver left {})",
-            i,
-            typelisp_abi::call_state::pending_envc()
-        )),
+        None => fatal(&format!("{}: {} {} was not passed (the driver left {})", who, what, i, count())),
     }
 }
 

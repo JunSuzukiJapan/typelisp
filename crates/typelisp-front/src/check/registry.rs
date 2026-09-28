@@ -252,8 +252,8 @@ pub struct AdtDef {
     pub public: bool,
     /// See [`FnSig::builtin`].
     pub builtin: bool,
-    /// See [`AdtKind`]. `Sum` for every built-in ADT; only `defstruct`
-    /// produces `Struct`.
+    /// See [`AdtKind`]. `defstruct` produces `Struct`, as do the built-in
+    /// `vector`, `task`, `thread` and `chan`; every other built-in is `Sum`.
     pub kind: AdtKind,
     /// Field names, in declaration order — empty for every `Sum`-kind type
     /// (`Variant::fields` there is positional only, e.g. `Some(T)`'s field
@@ -708,16 +708,7 @@ impl Registry {
                 ref t if t.is_float() => float_assoc(t.clone()),
                 _ => BTreeMap::new(),
             };
-            root.add_type(AdtDef {
-                name,
-                params: Vec::new(),
-                variants: Vec::new(),
-                assoc,
-                public: true,
-                builtin: true,
-                kind: AdtKind::Sum,
-                field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
-            });
+            root.add_type(builtin_adt(name, &[], AdtKind::Sum, Vec::new(), assoc));
         }
         // `random-state` (CL's `random-state`): a mutable PRNG stream, its
         // actual bit-twiddling done in Rust (`interp::eval_random_state_next`
@@ -1048,38 +1039,43 @@ fn collect_trait_impls(ns: &Namespace, trait_path: &Path, out: &mut Vec<Path>) {
     }
 }
 
-/// `Option<T> = Some(T) | None`.
-fn option_def() -> AdtDef {
+/// A built-in type: public, and with none of what only a user definition
+/// carries (field names, `impl`s, trait-associated types).
+fn builtin_adt(
+    name: Path,
+    params: &[&str],
+    kind: AdtKind,
+    variants: Vec<Variant>,
+    assoc: BTreeMap<String, AssocFn>,
+) -> AdtDef {
     AdtDef {
-        name: Path::root("option"),
-        params: vec!["t".to_string()],
-        variants: vec![
-            Variant { name: "some".to_string(), fields: vec![tvar("t")] },
-            Variant { name: "none".to_string(), fields: vec![] },
-        ],
-        assoc: BTreeMap::new(),
+        name,
+        params: params.iter().map(|p| p.to_string()).collect(),
+        variants,
+        assoc,
         public: true,
         builtin: true,
-        kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
+        kind,
+        field_names: Vec::new(),
+        impls: Vec::new(),
+        trait_assoc: BTreeMap::new(),
     }
+}
+
+/// `Option<T> = Some(T) | None`.
+fn option_def() -> AdtDef {
+    builtin_adt(Path::root("option"), &["t"], AdtKind::Sum, vec![
+        Variant { name: "some".to_string(), fields: vec![tvar("t")] },
+        Variant { name: "none".to_string(), fields: vec![] },
+    ], BTreeMap::new())
 }
 
 /// `Result<T, E> = Ok(T) | Err(E)`.
 fn result_def() -> AdtDef {
-    AdtDef {
-        name: Path::root("result"),
-        params: vec!["t".to_string(), "e".to_string()],
-        variants: vec![
-            Variant { name: "ok".to_string(), fields: vec![tvar("t")] },
-            Variant { name: "err".to_string(), fields: vec![tvar("e")] },
-        ],
-        assoc: BTreeMap::new(),
-        public: true,
-        builtin: true,
-        kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
-    }
+    builtin_adt(Path::root("result"), &["t", "e"], AdtKind::Sum, vec![
+        Variant { name: "ok".to_string(), fields: vec![tvar("t")] },
+        Variant { name: "err".to_string(), fields: vec![tvar("e")] },
+    ], BTreeMap::new())
 }
 
 /// THE built-in sum types whose values exist at runtime as `BoxedObj::Enum`:
@@ -1516,16 +1512,7 @@ pub fn is_builtin_error_type(p: &Path) -> bool {
 fn builtin_error_defs() -> Vec<AdtDef> {
     BUILTIN_ERROR_TYPES
         .iter()
-        .map(|&name| AdtDef {
-            name: Path::root(name),
-            params: vec![],
-            variants: vec![Variant { name: name.to_string(), fields: vec![Type::Str] }],
-            assoc: BTreeMap::new(),
-            public: true,
-            builtin: true,
-            kind: AdtKind::Sum,
-            field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
-        })
+        .map(|&name| builtin_adt(Path::root(name), &[], AdtKind::Sum, vec![Variant { name: name.to_string(), fields: vec![Type::Str] }], BTreeMap::new()))
         .collect()
 }
 
@@ -1549,75 +1536,66 @@ fn builtin_error_defs() -> Vec<AdtDef> {
 /// burned into the island's IR and into compiled code — keep their values.
 /// Renumbering them buys nothing and would invalidate every artifact.
 fn sexpr_def() -> AdtDef {
-    AdtDef {
-        name: Path::root("sexpr"),
-        params: vec![],
-        variants: vec![
-            // Index 0, and never constructible — see this function's doc
-            // comment. `Checker` rejects it by name.
-            Variant { name: "nil".to_string(), fields: vec![] },
-            // Index 1: `int`, the language's integer — a fixnum or a bignum
-            // box, the value's own word, so construction and extraction are
-            // both the identity. This slot was `i32` while that was the
-            // default integer; the number is burned into the island's IR,
-            // the name is what changed, and `i32` went to the end.
-            Variant { name: "int".to_string(), fields: vec![Type::Int] },
-            Variant { name: "f64".to_string(), fields: vec![Type::F64] },
-            Variant { name: "char".to_string(), fields: vec![Type::Char] },
-            Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
-            Variant { name: "sym".to_string(), fields: vec![Type::Symbol] },
-            Variant { name: "str".to_string(), fields: vec![Type::Str] },
-            Variant { name: "cons".to_string(), fields: vec![option_of(sexpr()), option_of(sexpr())] },
-            // Index 8, retired with the `bignum` type: a bignum box is an
-            // `int` (index 1). Never constructible and never matchable —
-            // `Checker` refuses it by name, as it does `nil` — and kept only
-            // so nothing after it renumbers.
-            Variant { name: "bignum".to_string(), fields: vec![Type::Int] },
-            Variant { name: "ratio".to_string(), fields: vec![Type::Ratio] },
-            // A `::`-qualified path (e.g. `dep::head`), the reader's
-            // `Value::Path` (`crate::mem::Value`) made matchable. Its single
-            // field is a proper `Sexpr` list of `sym`s (its segments, in
-            // written order) — the same shape a quoted `'(dep head)` list
-            // already has — not a re-stringified `"dep::head"`: a segment
-            // once split out of the reader's token stays a real `Symbol`,
-            // never gets flattened back into text, and the list's own
-            // length/`car`/`cdr` give the segment count and per-segment
-            // access for free through the ordinary list-processing
-            // machinery, instead of needing a second parse. Building this
-            // list means allocating fresh `Cons` cells during pattern
-            // matching itself, which none of the other variants'
-            // `match_sexpr_ctor` arms need to (they only ever read
-            // already-heap-resident data) — see that function's own doc
-            // comment for the GC-rooting this requires.
-            Variant { name: "path".to_string(), fields: vec![option_of(sexpr())] },
-            // Index 11 onwards: the widths that used to be folded into `i32`
-            // and `f64` above. Appended rather than inserted, because the
-            // variant numbers are burned into the island's IR and into
-            // compiled code, and because `Repr::field_kind` reads off the
-            // same numbering (`Unit` was moved out to 100 to make room).
-            //
-            // Eight numeric variants where there were two. `Sexpr` is the
-            // one place a value's type is not written down anywhere else, so
-            // it is the one place every width has to be its own variant —
-            // folding `u8` and `i32` into one `int` did not merely lose the
-            // name, it let `(the u32 4000000000)` come back out as an `i32`
-            // holding a number no `i32` can hold.
-            Variant { name: "f32".to_string(), fields: vec![Type::F32] },
-            Variant { name: "i8".to_string(), fields: vec![Type::I8] },
-            Variant { name: "i16".to_string(), fields: vec![Type::I16] },
-            Variant { name: "u8".to_string(), fields: vec![Type::U8] },
-            Variant { name: "u16".to_string(), fields: vec![Type::U16] },
-            Variant { name: "u32".to_string(), fields: vec![Type::U32] },
-            // Index 17: `i32`, boxed like the five above it, since `int`
-            // took the bare fixnum word. Appended for the usual reason.
-            Variant { name: "i32".to_string(), fields: vec![Type::I32] },
-        ],
-        assoc: sexpr_assoc(),
-        public: true,
-        builtin: true,
-        kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
-    }
+    builtin_adt(Path::root("sexpr"), &[], AdtKind::Sum, vec![
+        // Index 0, and never constructible — see this function's doc
+        // comment. `Checker` rejects it by name.
+        Variant { name: "nil".to_string(), fields: vec![] },
+        // Index 1: `int`, the language's integer — a fixnum or a bignum
+        // box, the value's own word, so construction and extraction are
+        // both the identity. This slot was `i32` while that was the
+        // default integer; the number is burned into the island's IR,
+        // the name is what changed, and `i32` went to the end.
+        Variant { name: "int".to_string(), fields: vec![Type::Int] },
+        Variant { name: "f64".to_string(), fields: vec![Type::F64] },
+        Variant { name: "char".to_string(), fields: vec![Type::Char] },
+        Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
+        Variant { name: "sym".to_string(), fields: vec![Type::Symbol] },
+        Variant { name: "str".to_string(), fields: vec![Type::Str] },
+        Variant { name: "cons".to_string(), fields: vec![option_of(sexpr()), option_of(sexpr())] },
+        // Index 8, retired with the `bignum` type: a bignum box is an
+        // `int` (index 1). Never constructible and never matchable —
+        // `Checker` refuses it by name, as it does `nil` — and kept only
+        // so nothing after it renumbers.
+        Variant { name: "bignum".to_string(), fields: vec![Type::Int] },
+        Variant { name: "ratio".to_string(), fields: vec![Type::Ratio] },
+        // A `::`-qualified path (e.g. `dep::head`), the reader's
+        // `Value::Path` (`crate::mem::Value`) made matchable. Its single
+        // field is a proper `Sexpr` list of `sym`s (its segments, in
+        // written order) — the same shape a quoted `'(dep head)` list
+        // already has — not a re-stringified `"dep::head"`: a segment
+        // once split out of the reader's token stays a real `Symbol`,
+        // never gets flattened back into text, and the list's own
+        // length/`car`/`cdr` give the segment count and per-segment
+        // access for free through the ordinary list-processing
+        // machinery, instead of needing a second parse. Building this
+        // list means allocating fresh `Cons` cells during pattern
+        // matching itself, which none of the other variants'
+        // `match_sexpr_ctor` arms need to (they only ever read
+        // already-heap-resident data) — see that function's own doc
+        // comment for the GC-rooting this requires.
+        Variant { name: "path".to_string(), fields: vec![option_of(sexpr())] },
+        // Index 11 onwards: the widths that used to be folded into `i32`
+        // and `f64` above. Appended rather than inserted, because the
+        // variant numbers are burned into the island's IR and into
+        // compiled code, and because `Repr::field_kind` reads off the
+        // same numbering (`Unit` was moved out to 100 to make room).
+        //
+        // Eight numeric variants where there were two. `Sexpr` is the
+        // one place a value's type is not written down anywhere else, so
+        // it is the one place every width has to be its own variant —
+        // folding `u8` and `i32` into one `int` did not merely lose the
+        // name, it let `(the u32 4000000000)` come back out as an `i32`
+        // holding a number no `i32` can hold.
+        Variant { name: "f32".to_string(), fields: vec![Type::F32] },
+        Variant { name: "i8".to_string(), fields: vec![Type::I8] },
+        Variant { name: "i16".to_string(), fields: vec![Type::I16] },
+        Variant { name: "u8".to_string(), fields: vec![Type::U8] },
+        Variant { name: "u16".to_string(), fields: vec![Type::U16] },
+        Variant { name: "u32".to_string(), fields: vec![Type::U32] },
+        // Index 17: `i32`, boxed like the five above it, since `int`
+        // took the bare fixnum word. Appended for the usual reason.
+        Variant { name: "i32".to_string(), fields: vec![Type::I32] },
+    ], sexpr_assoc())
 }
 
 /// `eq`/`eql`: true CL identity on `Sexpr` — comparing the underlying
@@ -1798,16 +1776,7 @@ fn hashtable_def() -> AdtDef {
             builtin: true,
         },
     );
-    AdtDef {
-        name: Path::root("hashtable"),
-        params: vec!["k".to_string(), "v".to_string()],
-        variants: vec![],
-        assoc,
-        public: true,
-        builtin: true,
-        kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
-    }
+    builtin_adt(Path::root("hashtable"), &["k", "v"], AdtKind::Sum, Vec::new(), assoc)
 }
 
 fn vector_ty() -> Type {
@@ -1860,16 +1829,7 @@ fn vector_def() -> AdtDef {
         "pop".to_string(),
         AssocFn { sig: FnSig::builtin(vec![vector_ty()], option_of(tvar("t"))), instance: true, builtin: true },
     );
-    AdtDef {
-        name: Path::root("vector"),
-        params: vec!["t".to_string()],
-        variants: vec![],
-        assoc,
-        public: true,
-        builtin: true,
-        kind: AdtKind::Struct,
-        field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
-    }
+    builtin_adt(Path::root("vector"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Task<T>`, the type `(task (f ...))` yields.
@@ -1909,18 +1869,7 @@ fn task_def() -> AdtDef {
             builtin: true,
         },
     );
-    AdtDef {
-        name: Path::root("task"),
-        params: vec!["t".to_string()],
-        variants: vec![],
-        assoc,
-        public: true,
-        builtin: true,
-        kind: AdtKind::Struct,
-        field_names: Vec::new(),
-        impls: Vec::new(),
-        trait_assoc: BTreeMap::new(),
-    }
+    builtin_adt(Path::root("task"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Thread<T>`, the type `(thread (f ...))` yields — spelled once, here, for
@@ -1959,18 +1908,7 @@ fn thread_def() -> AdtDef {
         "available-parallelism".to_string(),
         AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true },
     );
-    AdtDef {
-        name: Path::root("thread"),
-        params: vec!["t".to_string()],
-        variants: vec![],
-        assoc,
-        public: true,
-        builtin: true,
-        kind: AdtKind::Struct,
-        field_names: Vec::new(),
-        impls: Vec::new(),
-        trait_assoc: BTreeMap::new(),
-    }
+    builtin_adt(Path::root("thread"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Chan<T>`, the channel type.
@@ -2041,18 +1979,7 @@ fn chan_def() -> AdtDef {
         "cap".to_string(),
         AssocFn { sig: sig(vec![chan], Type::Int), instance: true, builtin: true },
     );
-    AdtDef {
-        name: Path::root("chan"),
-        params: vec!["t".to_string()],
-        variants: vec![],
-        assoc,
-        public: true,
-        builtin: true,
-        kind: AdtKind::Struct,
-        field_names: Vec::new(),
-        impls: Vec::new(),
-        trait_assoc: BTreeMap::new(),
-    }
+    builtin_adt(Path::root("chan"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 fn scope_ty() -> Type {
@@ -2106,16 +2033,7 @@ fn scope_def() -> AdtDef {
             builtin: true,
         },
     );
-    AdtDef {
-        name: Path::root("scope"),
-        params: vec!["v".to_string()],
-        variants: vec![],
-        assoc,
-        public: true,
-        builtin: true,
-        kind: AdtKind::Sum,
-        field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new(),
-    }
+    builtin_adt(Path::root("scope"), &["v"], AdtKind::Sum, Vec::new(), assoc)
 }
 
 
@@ -2178,7 +2096,7 @@ pub fn llvm_module_def() -> AdtDef {
     // What comes back is a status word, not the value; the value is in the
     // frame, which is what makes stopping mid-body sayable at all.
     assoc.insert("add-coroutine-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
-    AdtDef { name: Path::root("llvm-module"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
+    builtin_adt(Path::root("llvm-module"), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// A declared LLVM function (a `Module::add-function` result).
@@ -2189,13 +2107,13 @@ pub fn llvm_function_def() -> AdtDef {
     // *logical* argument out of the `i64*` array the old ABI passes. Under the
     // coroutine ABI the frame is a real parameter, so there is no array.
     assoc.insert("function-param".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Int], llvm_value_ty(), true));
-    AdtDef { name: Path::root("llvm-function"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
+    builtin_adt(Path::root("llvm-function"), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// An LLVM basic block. No methods of its own yet (Phase 0) — produced by
 /// `llvm-function::append-block`, consumed by `llvm-builder::position-at-end`.
 fn llvm_basic_block_def() -> AdtDef {
-    AdtDef { name: Path::root("llvm-basic-block"), params: vec![], variants: vec![], assoc: BTreeMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
+    builtin_adt(Path::root("llvm-basic-block"), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
 }
 
 /// An IR builder. `load-arg` reads logical parameter `index` out of a
@@ -2586,13 +2504,13 @@ pub fn llvm_builder_def() -> AdtDef {
     // names its callee to the driver rather than being a `call` instruction
     // with it, so the target has to be a value that can be handed over.
     assoc.insert("build-fn-address".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty()], llvm_value_ty(), true));
-    AdtDef { name: Path::root("llvm-builder"), params: vec![], variants: vec![], assoc, public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
+    builtin_adt(Path::root("llvm-builder"), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// An LLVM SSA value (e.g. a constant). No methods of its own yet — produced
 /// by `llvm-builder::const-word`, consumed by `llvm-builder::build-ret`.
 fn llvm_value_def() -> AdtDef {
-    AdtDef { name: Path::root("llvm-value"), params: vec![], variants: vec![], assoc: BTreeMap::new(), public: true, builtin: true, kind: AdtKind::Sum, field_names: Vec::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
+    builtin_adt(Path::root("llvm-value"), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
 }
 
 /// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/dev/cl-equivalence-catalog.md)
