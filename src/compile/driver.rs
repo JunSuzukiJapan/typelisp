@@ -242,6 +242,33 @@ pub fn add_compiled_function(
     translate_and_compile(interp, heap, module, &params, &body, internal_name, &HashSet::new())
 }
 
+/// Registers, before translation starts, everything `body` refers to by an
+/// id that `ast_to_sexpr` bakes into the emitted IR as a constant.
+fn prepare_targets(interp: &Interp, heap: &mut Heap, body: &[Value]) -> Result<(), EvalError> {
+    let targets = crate::compile::core_bridge::collect_targets(heap, body).map_err(|e| EvalError::Panic(e.to_string()))?;
+    // Every global read or assigned needs a compiled-global slot: globals are
+    // looked up by id, not by name (see `Ctx::globals`'s doc comment), so
+    // there is nothing to resolve lazily mid-translation the way
+    // `compile-call`'s `get-function` can for an ordinary function name.
+    for target in &targets.globals {
+        interp.promote_global(heap, target)?;
+    }
+    // Every trait object boxed needs its vtable id, and every upcast target
+    // its trait id, for the same reason.
+    for site in &targets.dyn_boxes {
+        interp.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
+    }
+    for to_trait in &targets.dyn_upcasts {
+        interp.trait_id_for(to_trait);
+    }
+    // A trait dispatched on natively from here on: see
+    // `Interp::dyn_dispatch_compiled`.
+    for trait_path in &targets.dyn_traits {
+        interp.dyn_dispatch_compiled.borrow_mut().insert(trait_path.clone());
+    }
+    Ok(())
+}
+
 /// The AST-bridge-and-emit half of [`crate::eval::interp::Interp::add_compiled_function`],
 /// factored out (no behavior change for that caller) so closure
 /// unification Stage 7's [`crate::eval::interp::Interp::jit_define_closure`] can drive the same
@@ -273,30 +300,7 @@ pub fn translate_and_compile(
     internal_name: &str,
     extra_exclude_from_cell_names: &HashSet<String>,
 ) -> Result<(), EvalError> {
-    // Every global this body reads/assigns must have a compiled-global
-    // slot before translation starts — `ast_to_sexpr` looks each one up
-    // by id, not by name (see `Ctx::globals`'s doc comment), so there is
-    // nothing to resolve lazily mid-translation the way `compile-call`'s
-    // `get-function` can for an ordinary function name.
-    let targets = match crate::compile::core_bridge::collect_targets(heap, body) {
-        Ok(t) => t,
-        Err(e) => return Err(EvalError::Panic(e.to_string())),
-    };
-    for target in &targets.globals {
-        interp.promote_global(heap, target)?;
-    }
-    // Every trait object this body boxes needs its vtable id before
-    // translation starts, for the same reason a global needs its slot:
-    // `ast_to_sexpr` bakes the id into the emitted IR as a constant.
-    for site in &targets.dyn_boxes {
-        interp.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
-    }
-    for to_trait in &targets.dyn_upcasts {
-        interp.trait_id_for(to_trait);
-    }
-    for trait_path in &targets.dyn_traits {
-        interp.dyn_dispatch_compiled.borrow_mut().insert(trait_path.clone());
-    }
+    prepare_targets(interp, heap, body)?;
     // `core_bridge` is deliberately `Registry`-free, so hand it the type
     // definitions as a plain flattened snapshot of the scope tree —
     // exactly what `exec` recorded there from each `defstruct`/`defenum`
@@ -434,22 +438,9 @@ pub fn add_compiled_global_init(
     // `core_bridge::global_init` reads the declared representation off the
     // form to know how the global's storage is tagged, which the
     // initializer alone does not say.
-    let body = std::slice::from_ref(&form);
-    let targets = match crate::compile::core_bridge::collect_targets(heap, body) {
-        Ok(t) => t,
-        Err(e) => return Err(EvalError::Panic(e.to_string())),
-    };
     // The initializer may reference *other* globals (an earlier `defvar`'s
-    // value), so the same promotion pass an ordinary body gets applies.
-    for target in &targets.globals {
-        interp.promote_global(heap, target)?;
-    }
-    for site in &targets.dyn_boxes {
-        interp.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
-    }
-    for to_trait in &targets.dyn_upcasts {
-        interp.trait_id_for(to_trait);
-    }
+    // value), so it gets the same preparation an ordinary body does.
+    prepare_targets(interp, heap, std::slice::from_ref(&form))?;
     let defs = compile_definitions(interp);
     let compiled_globals = interp.compiled_globals.borrow();
     let vtable_ids = interp.vtable_ids.borrow();

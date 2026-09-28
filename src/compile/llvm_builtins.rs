@@ -208,6 +208,42 @@ fn expect_llvm_value(v: &Value) -> Result<BasicValueEnum<'static>, EvalError> {
     }
 }
 
+fn expect_int(v: &Value) -> Result<i64, EvalError> {
+    match v {
+        Value::Int(n) => Ok(*n),
+        other => Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
+    }
+}
+
+/// The address of word `index` in the `i64` array at `array_ptr`: the GEP
+/// every builtin that reads or writes such an array starts with. `who` names
+/// the builtin in the error.
+fn i64_word_ptr(
+    b: &Builder<'static>,
+    array_ptr: PointerValue<'static>,
+    index: u64,
+    name: &str,
+    who: &str,
+) -> Result<PointerValue<'static>, EvalError> {
+    let ctx = crate::compile::llvm_context();
+    let idx_val = ctx.i64_type().const_int(index, false);
+    unsafe { b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], name) }
+        .map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
+}
+
+/// Loads word `index` of the `i64` array at `array_ptr`.
+fn load_i64_word(
+    b: &Builder<'static>,
+    array_ptr: PointerValue<'static>,
+    index: u64,
+    names: (&str, &str),
+    who: &str,
+) -> Result<BasicValueEnum<'static>, EvalError> {
+    let elem_ptr = i64_word_ptr(b, array_ptr, index, names.0, who)?;
+    let ctx = crate::compile::llvm_context();
+    b.build_load(ctx.i64_type(), elem_ptr, names.1).map_err(|e| EvalError::Internal(format!("{}: {}", who, e)))
+}
+
 fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
     let name = expect_str(heap, &args[0])?;
     let module = crate::compile::llvm_context().create_module(&name);
@@ -408,10 +444,7 @@ fn llvm_builder_position_at_end(args: &[Value]) -> Result<Value, EvalError> {
 /// together in IR rather than asking for one here.
 fn llvm_builder_const_word(args: &[Value]) -> Result<Value, EvalError> {
     let _builder = expect_llvm_builder(&args[0])?;
-    let n = match &args[1] {
-        Value::Int(n) => *n,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let n = expect_int(&args[1])?;
     let value = crate::compile::llvm_context().i64_type().const_int(n as u64, false);
     Ok(llvm_value_value(value.into()))
 }
@@ -433,23 +466,12 @@ fn llvm_builder_build_ret(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_load_arg(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let function = expect_llvm_function(&args[1])?;
-    let index = match &args[2] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let index = expect_int(&args[2])? as u64;
     let args_ptr = function
         .get_nth_param(0)
         .ok_or_else(|| EvalError::Internal("load-arg: function has no args parameter".into()))?
         .into_pointer_value();
-    let ctx = crate::compile::llvm_context();
-    let idx_val = ctx.i64_type().const_int(index, false);
-    let b = builder.borrow();
-    let elem_ptr = unsafe {
-        b.build_gep(ctx.i64_type(), args_ptr, &[idx_val], "arg_ptr")
-            .map_err(|e| EvalError::Internal(format!("load-arg: {}", e)))?
-    };
-    let loaded =
-        b.build_load(ctx.i64_type(), elem_ptr, "arg_val").map_err(|e| EvalError::Internal(format!("load-arg: {}", e)))?;
+    let loaded = load_i64_word(&builder.borrow(), args_ptr, index, ("arg_ptr", "arg_val"), "load-arg")?;
     Ok(llvm_value_value(loaded))
 }
 
@@ -461,23 +483,12 @@ fn llvm_builder_load_arg(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_load_env(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let function = expect_llvm_function(&args[1])?;
-    let index = match &args[2] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let index = expect_int(&args[2])? as u64;
     let env_ptr = function
         .get_nth_param(2)
         .ok_or_else(|| EvalError::Internal("load-env: function has no env parameter".into()))?
         .into_pointer_value();
-    let ctx = crate::compile::llvm_context();
-    let idx_val = ctx.i64_type().const_int(index, false);
-    let b = builder.borrow();
-    let elem_ptr = unsafe {
-        b.build_gep(ctx.i64_type(), env_ptr, &[idx_val], "env_ptr")
-            .map_err(|e| EvalError::Internal(format!("load-env: {}", e)))?
-    };
-    let loaded =
-        b.build_load(ctx.i64_type(), elem_ptr, "env_val").map_err(|e| EvalError::Internal(format!("load-env: {}", e)))?;
+    let loaded = load_i64_word(&builder.borrow(), env_ptr, index, ("env_ptr", "env_val"), "load-env")?;
     Ok(llvm_value_value(loaded))
 }
 
@@ -778,10 +789,7 @@ fn llvm_builder_build_int_overflow(args: &[Value], name: &str, intrinsic_name: &
 /// `ctx.i64_type()` itself, regardless of the alloca's nominal array type.
 fn llvm_builder_alloca_args(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let count = match &args[1] {
-        Value::Int(n) => *n as u32,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let count = expect_int(&args[1])? as u32;
     let ctx = crate::compile::llvm_context();
     let array_ty = ctx.i64_type().array_type(count);
     let b = builder.borrow();
@@ -827,17 +835,10 @@ fn llvm_builder_alloca_args(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_store_arg(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    let index = match &args[2] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let index = expect_int(&args[2])? as u64;
     let value = expect_llvm_value(&args[3])?.into_int_value();
-    let ctx = crate::compile::llvm_context();
-    let idx_val = ctx.i64_type().const_int(index, false);
     let b = builder.borrow();
-    let elem_ptr = unsafe {
-        b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], "store_arg_ptr").map_err(|e| EvalError::Internal(format!("store-arg: {}", e)))?
-    };
+    let elem_ptr = i64_word_ptr(&b, array_ptr, index, "store_arg_ptr", "store-arg")?;
     b.build_store(elem_ptr, value).map_err(|e| EvalError::Internal(format!("store-arg: {}", e)))?;
     Ok(Value::Empty)
 }
@@ -851,17 +852,8 @@ fn llvm_builder_store_arg(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_load_raw(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    let index = match &args[2] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
-    let ctx = crate::compile::llvm_context();
-    let idx_val = ctx.i64_type().const_int(index, false);
-    let b = builder.borrow();
-    let elem_ptr = unsafe {
-        b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], "load_raw_ptr").map_err(|e| EvalError::Internal(format!("load-raw: {}", e)))?
-    };
-    let loaded = b.build_load(ctx.i64_type(), elem_ptr, "load_raw_val").map_err(|e| EvalError::Internal(format!("load-raw: {}", e)))?;
+    let index = expect_int(&args[2])? as u64;
+    let loaded = load_i64_word(&builder.borrow(), array_ptr, index, ("load_raw_ptr", "load_raw_val"), "load-raw")?;
     Ok(llvm_value_value(loaded))
 }
 
@@ -878,17 +870,8 @@ fn llvm_builder_load_raw(args: &[Value]) -> Result<Value, EvalError> {
 fn llvm_builder_build_slot_ptr(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let array_ptr = expect_llvm_value(&args[1])?.into_pointer_value();
-    let index = match &args[2] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
-    let ctx = crate::compile::llvm_context();
-    let idx_val = ctx.i64_type().const_int(index, false);
-    let b = builder.borrow();
-    let elem_ptr = unsafe {
-        b.build_gep(ctx.i64_type(), array_ptr, &[idx_val], "slot_ptr")
-            .map_err(|e| EvalError::Internal(format!("build-slot-ptr: {}", e)))?
-    };
+    let index = expect_int(&args[2])? as u64;
+    let elem_ptr = i64_word_ptr(&builder.borrow(), array_ptr, index, "slot_ptr", "build-slot-ptr")?;
     Ok(llvm_value_value(elem_ptr.into()))
 }
 
@@ -1884,10 +1867,7 @@ fn llvm_builder_build_call(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let target = expect_llvm_function(&args[1])?;
     let args_ptr = expect_llvm_value(&args[2])?;
-    let argc = match &args[3] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let argc = expect_int(&args[3])? as u64;
     let ctx = crate::compile::llvm_context();
     let argc_val = ctx.i32_type().const_int(argc, false);
     let call = builder
@@ -1908,15 +1888,9 @@ fn llvm_builder_build_call_with_env(args: &[Value]) -> Result<Value, EvalError> 
     let builder = expect_llvm_builder(&args[0])?;
     let target = expect_llvm_function(&args[1])?;
     let args_ptr = expect_llvm_value(&args[2])?;
-    let argc = match &args[3] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let argc = expect_int(&args[3])? as u64;
     let env_ptr = expect_llvm_value(&args[4])?;
-    let env_len = match &args[5] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let env_len = expect_int(&args[5])? as u64;
     let ctx = crate::compile::llvm_context();
     let argc_val = ctx.i32_type().const_int(argc, false);
     let env_len_val = ctx.i32_type().const_int(env_len, false);
@@ -1955,20 +1929,14 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
     let module = expect_llvm_module(&args[1])?;
     let target = expect_llvm_function(&args[2])?;
     let env_ptr = expect_llvm_value(&args[3])?.into_pointer_value();
-    let env_len = match &args[4] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let env_len = expect_int(&args[4])? as u64;
     // The mask arrives as two 32-bit halves: it has one bit per captured slot
     // and the island's widest fixed-width integer is `i32`, so 64 slots do not
     // fit one of its words. Each half is a *bit pattern* (`pow2` doubles into
     // `i32`'s sign bit for slot 31), so it is masked back to 32 bits here
     // rather than sign-extended.
     let mask_half = |i: usize| -> Result<u64, EvalError> {
-        match &args[i] {
-            Value::Int(n) => Ok(*n as u64 & 0xFFFF_FFFF),
-            other => Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-        }
+        Ok(expect_int(&args[i])? as u64 & 0xFFFF_FFFF)
     };
     let sexpr_mask = mask_half(5)? | (mask_half(6)? << 32);
     let ctx = crate::compile::llvm_context();
@@ -2054,10 +2022,7 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
 /// without baking in `ClosureBox`'s fixed header layout.
 fn llvm_builder_build_malloc(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let count = match &args[1] {
-        Value::Int(n) => *n as u64,
-        other => return Err(EvalError::Internal(format!("expected an Int, got {:?}", other))),
-    };
+    let count = expect_int(&args[1])? as u64;
     let ctx = crate::compile::llvm_context();
     let count_val = ctx.i64_type().const_int(count, false);
     let ptr = builder

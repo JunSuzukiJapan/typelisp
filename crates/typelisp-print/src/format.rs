@@ -798,17 +798,15 @@ impl State<'_> {
                 let list = self.next_arg()?;
                 let sublists = list_to_vec(self.heap, list);
                 let mut count = 0;
-                for (i, sub) in sublists.iter().enumerate() {
+                for sub in &sublists {
                     if max >= 0 && count >= max {
                         break;
                     }
-                    if i == 0 || !sublists.is_empty() {
-                        let elems = list_to_vec(self.heap, *sub);
-                        if matches!(run_body(self, elems, out)?, Flow::Escape) {
-                            break;
-                        }
-                        count += 1;
+                    let elems = list_to_vec(self.heap, *sub);
+                    if matches!(run_body(self, elems, out)?, Flow::Escape) {
+                        break;
                     }
+                    count += 1;
                 }
                 if sublists.is_empty() && close_colon {
                     let _ = run_body(self, Vec::new(), out)?;

@@ -343,21 +343,8 @@ fn diagnostics_for(
     text: &str,
     overlay: HashMap<PathBuf, String>,
 ) -> (Vec<Diagnostic>, HashSet<PathBuf>, Option<Analysis>) {
-    let mut heap = Heap::with_capacity(1 << 16);
-    let reader = Reader::new();
-    let mut checker = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker, &mut interp);
-    checker.set_recover(true);
-
-    let fs_file = FsPath::new(file);
-    let dir = fs_file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
-    let src_root = find_src_root(&dir).unwrap_or(dir);
-    let mut loader = Loader::new(src_root);
-    loader.set_overlay(overlay);
-
+    let CheckedDocument { heap, checker, mut loader, result, .. } = check_document(file, text, overlay);
     let mut diagnostics = Vec::new();
-    let result = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, text);
     for w in checker.take_warnings() {
         diagnostics.push(warning_diagnostic(w));
     }
@@ -385,6 +372,37 @@ fn diagnostics_for(
         diagnostics.push(error_diagnostic(&e, file));
     }
     (diagnostics, loader.loaded_files().clone(), analysis)
+}
+
+/// What a recover-mode check of one document leaves behind: the heap its
+/// tree lives in, the checker and loader holding its results, and `result`,
+/// which is `Err` only on a reader error.
+struct CheckedDocument {
+    heap: Heap,
+    checker: Checker,
+    loader: Loader,
+    src_root: PathBuf,
+    result: Result<(), Error>,
+}
+
+/// Checks `file`, whose text is `text`, with a fresh prelude-loaded
+/// environment in error-recovery mode ([`Checker::set_recover`]). Other files
+/// of the project are read from `overlay` first, then from disk.
+fn check_document(file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> CheckedDocument {
+    let mut heap = Heap::with_capacity(1 << 16);
+    let reader = Reader::new();
+    let mut checker = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut heap, &mut checker, &mut interp);
+    checker.set_recover(true);
+
+    let fs_file = FsPath::new(file);
+    let dir = fs_file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    let src_root = find_src_root(&dir).unwrap_or(dir);
+    let mut loader = Loader::new(src_root.clone());
+    loader.set_overlay(overlay);
+    let result = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, text);
+    CheckedDocument { heap, checker, loader, src_root, result }
 }
 
 /// One open document's last check that produced a tree (in recover mode, any
@@ -609,21 +627,8 @@ fn candidates_for(
     line: u32,
     col: u32,
 ) -> Vec<CompletionCandidate> {
-    let mut heap = Heap::with_capacity(1 << 16);
-    let reader = Reader::new();
-    let mut checker = Checker::new();
-    let mut interp = Interp::new();
-    load_prelude(&mut heap, &mut checker, &mut interp);
-    checker.set_recover(true);
-
-    let fs_file = FsPath::new(file);
-    let dir = fs_file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
-    let src_root = find_src_root(&dir).unwrap_or_else(|| dir.clone());
-    let mut loader = Loader::new(src_root.clone());
-    loader.set_overlay(overlay);
-    let _ = loader.load_entry_src(&mut heap, &reader, &mut checker, &mut interp, fs_file, patched_text);
-
-    let module_path = module_segs_for(fs_file, &src_root).unwrap_or_default();
+    let CheckedDocument { heap, checker, mut loader, src_root, .. } = check_document(file, patched_text, overlay);
+    let module_path = module_segs_for(FsPath::new(file), &src_root).unwrap_or_default();
     let mut candidates = completion_candidates(checker.registry(), &module_path);
     // Same extraction `diagnostics_for` uses for `Analysis.body`. Unlike there,
     // this heap is dropped at the end of the call — `completion_locals` returns

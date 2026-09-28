@@ -169,29 +169,38 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
     }
 }
 
-/// Parses a global `--lib-dir DIR` / `--lib-dir=DIR` flag out of `args`,
-/// returning the folder and the remaining arguments with the flag removed.
-/// Exits with a diagnostic on a missing value. A later occurrence wins.
-fn parse_lib_dir(args: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
-    let mut dir = None;
+/// Removes every `FLAG VALUE` / `FLAG=VALUE` occurrence of `flag` from
+/// `args`, returning the values in the order given and the remaining
+/// arguments. Exits with `FLAG: missing` when `flag` is the last argument and
+/// so has no value.
+fn take_flag_values(args: Vec<String>, flag: &str, missing: &str) -> (Vec<String>, Vec<String>) {
+    let mut values = Vec::new();
     let mut rest = Vec::with_capacity(args.len());
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
-        if a == "--lib-dir" {
+        if a == flag {
             match it.next() {
-                Some(v) => dir = Some(PathBuf::from(v)),
+                Some(v) => values.push(v),
                 None => {
-                    eprintln!("--lib-dir: needs a folder");
+                    eprintln!("{}: {}", flag, missing);
                     std::process::exit(1);
                 }
             }
-        } else if let Some(v) = a.strip_prefix("--lib-dir=") {
-            dir = Some(PathBuf::from(v));
+        } else if let Some(v) = a.strip_prefix(flag).and_then(|v| v.strip_prefix('=')) {
+            values.push(v.to_string());
         } else {
             rest.push(a);
         }
     }
-    (dir, rest)
+    (values, rest)
+}
+
+/// Parses a global `--lib-dir DIR` / `--lib-dir=DIR` flag out of `args`,
+/// returning the folder and the remaining arguments with the flag removed.
+/// Exits with a diagnostic on a missing value. A later occurrence wins.
+fn parse_lib_dir(args: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
+    let (dirs, rest) = take_flag_values(args, "--lib-dir", "needs a folder");
+    (dirs.last().map(PathBuf::from), rest)
 }
 
 /// Parses a global `--image FILE` / `--image=FILE` flag out of `args`,
@@ -201,25 +210,8 @@ fn parse_lib_dir(args: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
 /// [`parse_heap_cells`] does: a typo here silently starts a different
 /// environment than the one asked for. A later occurrence wins.
 fn parse_image(args: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
-    let mut image = None;
-    let mut rest = Vec::with_capacity(args.len());
-    let mut it = args.into_iter();
-    while let Some(a) = it.next() {
-        if a == "--image" {
-            match it.next() {
-                Some(v) => image = Some(PathBuf::from(v)),
-                None => {
-                    eprintln!("--image: needs a path to a dump");
-                    std::process::exit(1);
-                }
-            }
-        } else if let Some(v) = a.strip_prefix("--image=") {
-            image = Some(PathBuf::from(v));
-        } else {
-            rest.push(a);
-        }
-    }
-    (image, rest)
+    let (images, rest) = take_flag_values(args, "--image", "needs a path to a dump");
+    (images.last().map(PathBuf::from), rest)
 }
 
 /// Parses zero or more `--feature NAME` / `--feature=NAME` flags out of
@@ -227,25 +219,7 @@ fn parse_image(args: Vec<String>) -> (Option<PathBuf>, Vec<String>) {
 /// the remaining arguments with every occurrence removed. A later duplicate
 /// of the same name is harmless — `Features::with` inserts into a set.
 fn parse_features(args: Vec<String>) -> (Vec<String>, Vec<String>) {
-    let mut features = Vec::new();
-    let mut rest = Vec::with_capacity(args.len());
-    let mut it = args.into_iter();
-    while let Some(a) = it.next() {
-        if a == "--feature" {
-            match it.next() {
-                Some(v) => features.push(v),
-                None => {
-                    eprintln!("--feature: needs a feature name");
-                    std::process::exit(1);
-                }
-            }
-        } else if let Some(v) = a.strip_prefix("--feature=") {
-            features.push(v.to_string());
-        } else {
-            rest.push(a);
-        }
-    }
-    (features, rest)
+    take_flag_values(args, "--feature", "needs a feature name")
 }
 
 /// Parses a global `--heap-cells N` / `--heap-cells=N` flag out of `args`,
@@ -255,25 +229,13 @@ fn parse_features(args: Vec<String>) -> (Vec<String>, Vec<String>) {
 /// value — the flag sizes a one-shot allocation, so a typo is better caught
 /// before any work than silently ignored. A later occurrence wins.
 fn parse_heap_cells(args: Vec<String>) -> (Option<usize>, Vec<String>) {
-    let mut capacity = None;
-    let mut rest = Vec::with_capacity(args.len());
-    let mut it = args.into_iter();
-    while let Some(a) = it.next() {
-        if a == "--heap-cells" {
-            match it.next() {
-                Some(v) => capacity = Some(parse_heap_cells_value(&v)),
-                None => {
-                    eprintln!("--heap-cells: needs a positive integer (number of cons cells)");
-                    std::process::exit(1);
-                }
-            }
-        } else if let Some(v) = a.strip_prefix("--heap-cells=") {
-            capacity = Some(parse_heap_cells_value(v));
-        } else {
-            rest.push(a);
-        }
+    let (values, rest) = take_flag_values(args, "--heap-cells", "needs a positive integer (number of cons cells)");
+    // Every occurrence is validated, not only the one that wins.
+    let mut cells = None;
+    for v in &values {
+        cells = Some(parse_heap_cells_value(v));
     }
-    (capacity, rest)
+    (cells, rest)
 }
 
 /// Parses the value half of `--heap-cells`; exits with a diagnostic if it is
