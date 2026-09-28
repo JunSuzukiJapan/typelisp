@@ -1,5 +1,8 @@
+;; Fibonacci sequence, computed iteratively rather than recursively (mutual
+;; recursion through labels is shown in the expr-eval parser, so this one sticks
+;; to a simple loop).
 ;; フィボナッチ数列。再帰ではなく反復で計算する(labels による相互再帰の例は
-;; ミニLispインタプリタ側で扱うので、ここは単純なループに絞る)。
+;; expr-eval の構文解析器で扱うので、ここは単純なループに絞る)。
 (defun fib ((n int)) int
   (let ((a 0) (b 1))
     (dotimes (i n)

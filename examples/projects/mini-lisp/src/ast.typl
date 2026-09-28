@@ -1,3 +1,5 @@
+;; Syntax tree of the mini Lisp, a small integer-only expression language:
+;; literals, variable references, binary operations, if, define, begin (sequencing).
 ;; ミニLispの構文木。整数専用の小さな式言語:
 ;; リテラル・変数参照・二項演算・if・define・begin(逐次実行)。
 (pub defenum lexpr

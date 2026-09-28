@@ -1,3 +1,7 @@
+;; Shortest path through a maze (breadth-first search). The board is a Vector of
+;; strings ('#' is a wall, '.' is a passage); a HashTable<int,int> serves as the
+;; distance table, together with a Vector standing in for the queue.
+;; A coordinate (x, y) is encoded as the one-dimensional index (id) y*width+x.
 ;; 迷路の最短経路探索 (幅優先探索)。盤面は文字列の Vector（'#' が壁、'.' が通路）、
 ;; HashTable<int,int> をキュー代わりの Vector と組み合わせた距離テーブルとして使う。
 ;; 座標 (x, y) は y*width+x の1次元インデックス(id)にエンコードする。

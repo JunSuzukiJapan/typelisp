@@ -1,3 +1,4 @@
+;; Storage for ToDo items: a HashTable<int,todo-item> looked up by id.
 ;; ToDo の保存領域。HashTable<int,todo-item> で id 引き。
 (use model::todo-item)
 (use model::make-todo)

@@ -1,3 +1,10 @@
+;; A sample that draws shapes on an ASCII canvas. The scene is a Vector<:dyn Shape>,
+;; so the single (paint s cv) in the drawing loop is dispatched dynamically to the
+;; implementation for each concrete type. Parse failures of different kinds come
+;; back gathered into one Result<T, :dyn Error>.
+;; Note also that the type name :dyn Shape never appears in this file -- the scene's
+;; type is inferred from parse-scene's return type, so the driver need not even know
+;; that shapes exist.
 ;; ASCII キャンバスに図形を描くサンプル。シーンは Vector<:dyn Shape> なので、
 ;; 描画ループのたった1つの (paint s cv) が具象型ごとの実装へ動的に振り分けられる。
 ;; パースの失敗は種類の違うエラーが Result<T, :dyn Error> の1本にまとまって返る。
@@ -9,6 +16,8 @@
 (use shapes::draw-scene)
 (use shapes::list-scene)
 
+;; Error is a prelude trait, so it can be used here without knowing what is inside
+;; shapes. Following source reaches the built-in ParseIntError wrapped by bad-number.
 ;; Error は prelude のトレイトなので、shapes の中身を知らなくてもここで使える。
 ;; source をたどると bad-number が包んだ組み込みの ParseIntError まで届く。
 (defun explain ((e :dyn Error)) ()
@@ -17,6 +26,9 @@
     ((some inner) (println "  caused by: ~a" (message inner)))
     ((none) ())))
 
+;; To just widen a concrete error without adding context, prelude's as-dyn-error
+;; is all it takes (for an example that adds context, see bad-number in shapes.typl,
+;; which wraps ParseIntError in its own type).
 ;; 文脈を足さず具象エラーを広げるだけなら prelude の as-dyn-error 一発で済む
 ;; (文脈を足す例は shapes.typl の bad-number ── ParseIntError を自前の型で包む)。
 (defun canvas-width ((s string)) Result<int, :dyn Error>
@@ -44,6 +56,8 @@
 
 (run "24" (lines-of "rect 0 0 24 11" "circle 11 5 4" "hline 3 8 18"))
 
+;; The inputs below fail. All three are different concrete error types, but explain
+;; takes a single :dyn Error and handles them without knowing which one it got.
 ;; 以下は失敗する入力。3つとも別々の具象エラー型だが、explain は :dyn Error を
 ;; 1つ受け取るだけで、どれが来たかを知らずに扱える。
 (println "")

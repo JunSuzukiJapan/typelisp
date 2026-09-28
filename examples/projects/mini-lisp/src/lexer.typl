@@ -1,3 +1,5 @@
+;; Lexer: split the source string into "(" / ")" / other tokens (symbols, numbers).
+;; It does not use typelisp's own read/Sexpr; it scans the raw string by hand.
 ;; 字句解析: ソース文字列を "(" / ")" / それ以外のトークン(記号・数値)に分割する。
 ;; typelisp 本体の read/Sexpr は使わず、文字列そのままを自前で走査する。
 (pub defun tokenize ((s string)) Vector<string>

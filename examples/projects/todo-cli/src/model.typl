@@ -1,9 +1,14 @@
+;; The data for a single ToDo item.
 ;; ToDo 1件分のデータ。
 (pub defstruct todo-item
   (pub id int)
   (pub text string)
   (pub done bool))
 
+;; Rather than calling `todo-item::new` directly after `(use model::todo-item)` in
+;; another module, it works more smoothly for this defining module to wrap the
+;; constructor itself and export it (calling `Type::static-member` through a type
+;; alias is not supported yet).
 ;; 他モジュールから `(use model::todo-item)` した先で `todo-item::new` を直接
 ;; 呼ぶより、コンストラクタをこの定義モジュール自身でラップして公開する方が
 ;; 素直に動く(型エイリアス越しの `型::静的メンバ` 呼び出しは現状サポート外)。

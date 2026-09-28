@@ -1,3 +1,5 @@
+;; Evaluation of the syntax tree (lexpr). env is the environment mapping variable
+;; names to values (reused for the whole session, and extended by define).
 ;; 構文木 (lexpr) の評価。env は変数名 -> 値 の環境(セッション全体で使い回し、
 ;; define で書き加えていく)。
 (use ast::lexpr)

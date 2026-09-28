@@ -1,3 +1,5 @@
+;; Conway's Game of Life. The board is a Vector<Vector<bool>>; a glider is
+;; drawn to the console over several generations.
 ;; ライフゲーム (Conway's Game of Life)。盤面は Vector<Vector<bool>>、
 ;; グライダーを数世代分コンソールに描画する。
 (defstruct board
@@ -46,6 +48,7 @@
     (println ""))
   (println "----------"))
 
+;; Place a glider on a 5x5 board and advance it four generations.
 ;; 5x5 の盤にグライダーを置いて4世代進める。
 (let ((b (make-board 6 6)))
   (set-cell b 1 0 true)

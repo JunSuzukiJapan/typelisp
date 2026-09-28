@@ -1,3 +1,5 @@
+;; Mini-Lisp REPL. Variables bound with define stay in the environment for the
+;; rest of the session.
 ;; ミニLisp REPL。define した変数はセッションを通じて環境に残る。
 (use lexer::tokenize)
 (use parser::parse)

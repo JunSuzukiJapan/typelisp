@@ -1,3 +1,8 @@
+;; The shapes. Everything involving `:dyn` is confined to this module.
+;; Two things to look at -- (1) shapes of different concrete types are mixed in a
+;; Vector<:dyn Shape>, and the single (paint s cv) in the drawing loop is dispatched
+;; to each implementation. (2) Parse failures of different kinds are returned
+;; gathered into one Result<T, :dyn Error>.
 ;; 図形たち。`:dyn` に関わるものは全部このモジュールに閉じている。
 ;; 見どころは2つ ── (1) 具象型の違う図形を Vector<:dyn Shape> に混ぜ、描画ループの
 ;; たった1つの (paint s cv) が実装ごとに振り分けられる。(2) パースの失敗は種類の
@@ -5,6 +10,10 @@
 (use canvas::canvas)
 (use canvas::plot)
 
+;; The common interface of shapes. paint promises only "draw yourself onto the
+;; canvas"; which shapes exist is visible neither to callers nor to the canvas.
+;; Every method has a self receiver and Self appears nowhere but the receiver, so
+;; this trait can be made :dyn (object safety).
 ;; 図形の共通インタフェース。paint は「自分をキャンバスへ描く」だけを約束し、
 ;; どんな図形が存在するかは呼び出し側にもキャンバスにも見えない。
 ;; 全メソッドが self レシーバを持ち Self をレシーバ以外に書いていないので、
@@ -27,6 +36,8 @@
       (plot cv self::x (+ self::y j) #\|)
       (plot cv (+ self::x (- self::w 1)) (+ self::y j) #\|))))
 
+;; Character cells are tall, so vertical distance counts double to make it look round.
+;; Only cells within r of r*r are plotted (i.e. just the outline).
 ;; 文字セルは縦長なので、縦方向の距離を2倍に数えて丸く見せる。
 ;; r*r との差が r 以内のセルだけ打つ(＝輪郭だけ)。
 (impl Shape circle
@@ -45,19 +56,29 @@
     (dotimes (i self::len)
       (plot cv (+ self::x i) self::y #\=))))
 
+;; An empty Vector<:dyn Shape>. Vector::new takes its element type from the
+;; expected type, so the return type annotation is borrowed as the place to give it.
 ;; 空の Vector<:dyn Shape>。Vector::new は期待型から要素型を決めるので、
 ;; 型を与える置き場所として戻り型注釈を借りている。
 (defun empty-scene () Vector<:dyn Shape>
   (Vector::new))
 
+;; ---- The heart of :dyn -------------------------------------------------
 ;; ---- ここが :dyn の本題 -------------------------------------------------
 
+;; scene is a single vector mixing rect / circle / hline. Even so, all we write is
+;; one (paint s cv), and the vtable decides at run time which implementation runs.
 ;; scene の中身は rect / circle / hline が混在した1本のベクタ。それでも書くのは
 ;; (paint s cv) ひとつだけで、どの実装が走るかは実行時に vtable が決める。
 (pub defun draw-scene ((cv canvas) (scene Vector<:dyn Shape>)) ()
   (doiter (s (iter scene))
     (paint s cv)))
 
+;; A trait object can be narrowed to a concrete type with match. The set of
+;; implementing types is open (more impls may be added later), so the match is never
+;; exhaustive and `_` is required.
+;; Note also that dynamic dispatch of (label s) and downcasting live side by side in
+;; the same body.
 ;; trait オブジェクトは match で具象型へ落とせる。実装型の集合は開いている
 ;; (あとから impl が増えうる)ので網羅にはならず、`_` が必須。
 ;; 同じ本体の中で (label s) の動的ディスパッチと downcast が同居している点にも注目。
@@ -71,14 +92,20 @@
   (doiter (s (iter scene))
     (println "  - ~a" (describe s))))
 
+;; ---- Parsing: gathering errors of different kinds into :dyn Error ---------
 ;; ---- パース: 種類の違うエラーを :dyn Error に集める ----------------------
 
+;; Unknown command / wrong number of arguments. There is no further cause to follow,
+;; so `source` is not written -- the Error trait's default implementation returns none.
 ;; 知らないコマンド / 引数の個数違い。これ以上たどる原因は無いので `source` は書かない
 ;; ——Error トレイトのデフォルト実装が none を返す。
 (defstruct bad-command (detail string))
 (impl Error bad-command
   (message ((self Self)) string (append "bad command: " self::detail)))
 
+;; An argument that should be an integer could not be read. It wraps the built-in
+;; ParseIntError as its cause, so following source reaches the lower-level message
+;; (the same as Rust's Error::source).
 ;; 整数のはずの引数が読めなかった。原因として組み込みの ParseIntError を包むので、
 ;; source をたどると下位のメッセージまで届く(Rust の Error::source と同じ)。
 (defstruct bad-number (word string) (cause ParseIntError))
@@ -86,6 +113,7 @@
   (message ((self Self)) string (append "not a number: " self::word))
   (source ((self Self)) Option<:dyn Error> (option::some self::cause)))
 
+;; Strings have no split, so we cut on whitespace by hand.
 ;; 文字列に split は無いので空白区切りは自前で刻む。
 (defun split-words ((s string)) Vector<string>
   (let ((out (the Vector<string> (Vector::new)))
@@ -101,6 +129,8 @@
           (push out (substring s start i)))))
     out))
 
+;; Read all of ws[from..] as integers. If any one fails, stop with bad-number.
+;; typelisp has no `?`, so propagating the failure is written out with match.
 ;; ws[from..] を全部整数として読む。1つでも読めなければ bad-number で打ち切る。
 ;; typelisp に `?` は無いので、失敗の持ち上げは match で明示的に書く。
 (defun scan-nums ((ws Vector<string>) (from int) (acc Vector<int>)) Result<Vector<int>, :dyn Error>
@@ -110,6 +140,8 @@
         ((ok n) (push acc n) (scan-nums ws (+ from 1) acc))
         ((err e) (result::err (bad-number::new (get ws from) e))))))
 
+;; A concrete type is returned but the return type is :dyn Shape -- implicit coercion
+;; applies in return position, so it is boxed without writing (as :dyn Shape ...).
 ;; 具象型を返しているのに戻り型は :dyn Shape ── 戻り位置は暗黙 coercion が
 ;; 効くので、(as :dyn Shape ...) と書かなくても箱詰めされる。
 (defun build-shape ((kind string) (ns Vector<int>)) Result<:dyn Shape, :dyn Error>
@@ -120,6 +152,7 @@
      (result::ok (circle::new (get ns 0) (get ns 1) (get ns 2))))
     ((and (equal kind "hline") (= (len ns) 3))
      (result::ok (hline::new (get ns 0) (get ns 1) (get ns 2))))
+    ;; Both an unknown name and a wrong number of arguments end up here.
     ;; 名前が知らないものだった場合も、引数の個数が合わない場合もここへ落ちる。
     (else (result::err (bad-command::new (format false "~a with ~d args" kind (len ns)))))))
 
@@ -138,6 +171,9 @@
         ((ok s) (push scene s) (collect-scene lines (+ i 1) scene))
         ((err e) (result::err e)))))
 
+;; Turn one-shape-per-line descriptions like "circle 11 5 4" into a scene.
+;; bad-command and bad-number are different types, but both are :dyn Error, so a
+;; single return type is enough.
 ;; "circle 11 5 4" のような1行1図形の記述をシーンへ。bad-command と bad-number は
 ;; 別の型だが、どちらも :dyn Error なので戻り型は1つで足りる。
 (pub defun parse-scene ((lines Vector<string>)) Result<Vector<:dyn Shape>, :dyn Error>

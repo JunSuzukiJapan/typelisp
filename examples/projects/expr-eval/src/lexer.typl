@@ -1,3 +1,4 @@
+;; Lexer: cut an arithmetic expression string into a Vector<token>.
 ;; 字句解析: 数式の文字列を Vector<token> に切り出す。
 (pub defenum token
   (tnum int)

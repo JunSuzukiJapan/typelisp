@@ -1,3 +1,6 @@
+;; A drawing surface made of a character grid. Shapes only plot points here; the
+;; canvas knows nothing about which shapes exist -- neither trait nor :dyn appears
+;; in this module.
 ;; 文字グリッドの描画面。図形はここへ点を打つだけで、どんな図形が存在するかを
 ;; canvas 側は一切知らない ── trait も :dyn もこのモジュールには出てこない。
 (pub defstruct canvas
@@ -5,6 +8,8 @@
   (pub w int)
   (pub h int))
 
+;; Calling `Type::static-member` through a type alias is not supported yet, so the
+;; defining module wraps the constructor itself and exports that.
 ;; 型エイリアス越しの `型::静的メンバ` 呼び出しは現状サポート外なので、
 ;; コンストラクタは定義モジュール自身でラップして公開する。
 (pub defun make-canvas ((w int) (h int)) canvas
@@ -16,6 +21,8 @@
         (push cells row)))
     (canvas::new cells w h)))
 
+;; Points out of range are silently dropped (so shapes need not care about the
+;; bounds).
 ;; 範囲外の点は黙って捨てる(図形側が境界を気にしなくて済むように)。
 (pub defun plot ((cv canvas) (x int) (y int) (ch char)) ()
   (when (and (>= x 0) (>= y 0) (< x (w cv)) (< y (h cv)))

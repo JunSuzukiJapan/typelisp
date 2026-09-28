@@ -1,3 +1,5 @@
+;; Parser: build the syntax tree (expr) for arithmetic and parentheses from the
+;; token sequence (recursive descent, operator precedence).
 ;; 構文解析: token 列から四則演算+丸括弧の構文木 (expr) を作る
 ;; (再帰下降・演算子優先順位法)。
 (use lexer::token)
@@ -11,6 +13,8 @@
 
 (use expr)
 
+;; Cursor: the current position in the token sequence. The field is advanced with
+;; the defstruct setter.
 ;; カーソル: token列上の現在位置。フィールドは defstruct のセッターで進める。
 (pub defstruct cursor
   (toks Vector<token>)
@@ -19,6 +23,8 @@
 (defun at-end ((c cursor)) bool
   (>= (pos c) (len (toks c))))
 
+;; At the end, return trparen as a sentinel meaning "no more operators follow"
+;; (factor never calls peek at the end, so this only serves to end the operator loops).
 ;; 末尾に達したら「これ以上演算子は続かない」ことを示す番兵として trparen を返す
 ;; (factor は末尾で peek を呼ばないので、演算子ループの終了判定にしか使われない)。
 (defun peek ((c cursor)) token
@@ -32,8 +38,13 @@
 (defun tok-is-star ((tk token)) bool (match tk ((tstar) true) (_ false)))
 (defun tok-is-slash ((tk token)) bool (match tk ((tslash) true) (_ false)))
 
-;; parse-expr/parse-term/parse-factor は互いを呼び合う(丸括弧を挟んだ相互再帰)ので、
-;; トップレベル defun の前方参照不可(自己再帰のみ許可)を避けて labels でまとめる。
+;; parse-expr/parse-term/parse-factor call one another (mutual recursion through
+;; parentheses). Inside labels they all see each other, so they are grouped there.
+;; As top-level defuns, any of them called before its definition would first need
+;; a defsignature.
+;; parse-expr/parse-term/parse-factor は互いを呼び合う(丸括弧を挟んだ相互再帰)。
+;; labels の中では互いが見えるので、ここにまとめる。トップレベルの defun にするなら、
+;; 定義より前で呼ばれるものを defsignature で先に宣言しておく必要がある。
 (pub defun parse ((toks Vector<token>)) expr
   (labels
       ((parse-factor ((c cursor)) expr

@@ -1,3 +1,4 @@
+;; Evaluation of the syntax tree (expr).
 ;; 構文木 (expr) の評価。
 (use parser::expr)
 

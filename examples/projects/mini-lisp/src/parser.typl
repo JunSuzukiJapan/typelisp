@@ -1,6 +1,9 @@
+;; Parser: build an lexpr tree from the token sequence (Vector<string>).
+;; Nested parentheses are handled directly by parse-expr calling itself. With no
+;; mutual recursion, it needs neither labels nor a defsignature.
 ;; 構文解析: token 列 (Vector<string>) から lexpr の木を組み立てる。
-;; 入れ子の丸括弧は parse-expr 自身の再帰呼び出しでそのまま処理できるので
-;; (defun の前方参照不可を回避するための labels は不要)。
+;; 入れ子の丸括弧は parse-expr 自身の再帰呼び出しでそのまま処理できる。
+;; 相互再帰が無いので、labels も defsignature も要らない。
 (use ast::lexpr)
 
 (pub defstruct cursor

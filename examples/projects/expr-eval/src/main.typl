@@ -1,3 +1,6 @@
+;; Interactive calculator for the four arithmetic operations and parentheses.
+;; Runs the three-stage lexer -> parser -> eval pipeline one line at a time with
+;; `(read-line *standard-input*)`. An empty line or EOF ends it.
 ;; 四則演算+丸括弧の対話計算機。lexer -> parser -> eval の3段パイプラインを
 ;; `(read-line *standard-input*)` で1行ずつ回す。空行またはEOFで終了する。
 (use lexer::tokenize)

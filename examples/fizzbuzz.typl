@@ -1,3 +1,5 @@
+;; FizzBuzz: print 1..n, replacing multiples of 3 with "Fizz", multiples of 5
+;; with "Buzz", and multiples of both with "FizzBuzz".
 ;; FizzBuzz: 1..n を表示し、3の倍数は "Fizz"、5の倍数は "Buzz"、
 ;; どちらの倍数でもある数は "FizzBuzz" に置き換える。
 (defun fizzbuzz ((n int)) ()

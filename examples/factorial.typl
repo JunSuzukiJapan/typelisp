@@ -1,3 +1,5 @@
+;; Factorial. `int` becomes a bignum automatically once it exceeds 63 bits, so
+;; we can keep multiplying without worrying about overflow.
 ;; 階乗。`int` は 63bit を超えると自動的に多倍長になるので、桁あふれを気にせず掛けていける。
 (defun factorial ((n int)) int
   (let ((acc 1))
