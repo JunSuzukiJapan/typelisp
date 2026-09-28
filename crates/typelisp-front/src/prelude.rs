@@ -3434,6 +3434,21 @@ user-visible capacity."
 (impl print-object string  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object symbol  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 
+;; How an error prints, the way SBCL prints a condition: `~a` is its report
+;; (the message, as CLHS 9.1.3 has a condition print when `*print-escape*`
+;; is false), `~s` names the type around it (`#<simpleerror "boom">`).
+(defun error-print-object<E> ((e E) (escape bool) (name string)) string (where (Error E))
+  (if escape (format false "#<~a ~s>" name (message e)) (message e)))
+
+(impl print-object ParseIntError
+  (print-object ((self Self) (escape bool)) string (error-print-object self escape "parseinterror")))
+(impl print-object ParseFloatError
+  (print-object ((self Self) (escape bool)) string (error-print-object self escape "parsefloaterror")))
+(impl print-object ReadError
+  (print-object ((self Self) (escape bool)) string (error-print-object self escape "readerror")))
+(impl print-object EvalError
+  (print-object ((self Self) (escape bool)) string (error-print-object self escape "evalerror")))
+
 ;; `pprint-exit-if-list-exhausted` (CLHS): leave the enclosing
 ;; `pprint-logical-block` when its list is used up. CL implements this as a
 ;; non-local exit from the block; typelisp has no general escape, so it exits
@@ -3606,6 +3621,16 @@ user-visible capacity."
   "A `get-internal-real-time` reading: whole seconds since the process's
    reference point, and the microsecond within that second (0..999999)."
   (pub second int) (pub microsecond int))
+
+;; Both print as the integer CL has for them (SBCL's `get-universal-time` and
+;; `get-internal-real-time` return plain integers): seconds since 1900 for a
+;; universal time, `internal-time-units-per-second` ticks for an internal one.
+(impl print-object universal-time
+  (print-object ((self Self) (escape bool)) string
+    (format false "~d" (+ (* self::day 86400) self::second))))
+(impl print-object internal-time
+  (print-object ((self Self) (escape bool)) string
+    (format false "~d" (+ (* self::second internal-time-units-per-second) self::microsecond))))
 
 (pub defun internal-time-seconds ((it internal-time)) f64
   "`it` as a number of seconds — what a difference of two readings is
@@ -3877,6 +3902,12 @@ user-visible capacity."
 (impl Pathish pathname
   (namestring ((self Self)) string (append (pathname-directory-part self) (pathname-file-part self)))
   (to-pathname ((self Self)) pathname self))
+
+;; CL's `#P"..."` (CLHS 22.1.3.11) when it has to read back, the namestring
+;; otherwise — SBCL's two answers.
+(impl print-object pathname
+  (print-object ((self Self) (escape bool)) string
+    (if escape (format false "#P~s" (namestring self)) (namestring self))))
 
 (pub defun make-pathname (&key (directory Vector<string> (Vector::new))
                                (name string)
@@ -4150,8 +4181,31 @@ user-visible capacity."
 (pub defstruct string-output-stream (h i32))
 (pub defstruct standard-stream (h i32))
 
+;; A stream prints the way SBCL prints one: its type, what it is attached to
+;; (`for "file /tmp/a.txt"`, `for "standard output"`, a socket's addresses)
+;; and its identity in braces — the handle, where SBCL shows an address.
+;; SBCL drops only the package prefix for `~a`, and there is none here, so
+;; `escape` changes nothing.
+(defun stream-print-object ((type string) (h i32)) string
+  (let ((d (stream-describe h)))
+    (if (equal d "")
+        (format false "#<~a {~d}>" type h)
+        (format false "#<~a ~a {~d}>" type d h))))
+(impl print-object file-stream
+  (print-object ((self Self) (escape bool)) string (stream-print-object "file-stream" self::h)))
+(impl print-object binary-file-stream
+  (print-object ((self Self) (escape bool)) string (stream-print-object "binary-file-stream" self::h)))
+(impl print-object string-input-stream
+  (print-object ((self Self) (escape bool)) string (stream-print-object "string-input-stream" self::h)))
+(impl print-object string-output-stream
+  (print-object ((self Self) (escape bool)) string (stream-print-object "string-output-stream" self::h)))
+(impl print-object standard-stream
+  (print-object ((self Self) (escape bool)) string (stream-print-object "standard-stream" self::h)))
+
 (impl Error FileError
   (message ((self Self)) string (match self ((FileError m) m))))
+(impl print-object FileError
+  (print-object ((self Self) (escape bool)) string (error-print-object self escape "fileerror")))
 
 ;; `unwrap-io` turns the native layer's `Result` into a panic, for the
 ;; operations whose failure means the program is already broken (writing to a
@@ -4277,9 +4331,17 @@ user-visible capacity."
 (pub defstruct socket-stream (h i32))
 (pub defstruct socket-byte-stream (h i32))
 (pub defstruct socket-listener (h i32))
+(impl print-object socket-stream
+  (print-object ((self Self) (escape bool)) string (stream-print-object "socket-stream" self::h)))
+(impl print-object socket-byte-stream
+  (print-object ((self Self) (escape bool)) string (stream-print-object "socket-byte-stream" self::h)))
+(impl print-object socket-listener
+  (print-object ((self Self) (escape bool)) string (stream-print-object "socket-listener" self::h)))
 
 (impl Error NetError
   (message ((self Self)) string (match self ((NetError m) m))))
+(impl print-object NetError
+  (print-object ((self Self) (escape bool)) string (error-print-object self escape "neterror")))
 
 ;; `unwrap-io`'s twin: the socket operations whose failure means the program
 ;; is already broken (a closed handle) panic; the ordinary failures -- a
@@ -4666,6 +4728,8 @@ user-visible capacity."
 ;; `string->utf8`/`utf8->string` below convert.
 
 (pub defstruct udp-socket (h i32))
+(impl print-object udp-socket
+  (print-object ((self Self) (escape bool)) string (stream-print-object "udp-socket" self::h)))
 (pub defstruct datagram (pub bytes Vector<int>) (pub from string))
 
 (pub defun udp-bind ((host string) (port int)) Result<udp-socket, NetError>
@@ -4802,6 +4866,11 @@ user-visible capacity."
 ;; is a struct and one method, with no native support whatsoever.
 
 (pub defstruct broadcast-stream (parts Vector<:dyn CharOutput>))
+;; The composites print as SBCL's do: a broadcast stream by name alone, the
+;; others with the streams they are made of, under SBCL's own labels. They
+;; hold no handle, so there is no identity to show in braces.
+(impl print-object broadcast-stream
+  (print-object ((self Self) (escape bool)) string "#<broadcast-stream>"))
 (impl Stream broadcast-stream
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () (doiter (p (iter self::parts)) (close p))))
@@ -4829,6 +4898,9 @@ user-visible capacity."
     (doiter (p (iter self::parts)) (finish-output p))))
 
 (pub defstruct two-way-stream (in :dyn CharInput) (out :dyn CharOutput))
+(impl print-object two-way-stream
+  (print-object ((self Self) (escape bool)) string
+    (format false "#<two-way-stream :input-stream ~s :output-stream ~s>" self::in self::out)))
 (impl Stream two-way-stream
   (open-stream-p ((self Self)) bool (open-stream-p self::in))
   (close ((self Self)) () (progn (close self::in) (close self::out))))
@@ -4847,6 +4919,9 @@ user-visible capacity."
 
 ;; Reads from `in`, echoing every character actually read to `out`.
 (pub defstruct echo-stream (in :dyn CharInput) (out :dyn CharOutput))
+(impl print-object echo-stream
+  (print-object ((self Self) (escape bool)) string
+    (format false "#<echo-stream :input-stream ~s :output-stream ~s>" self::in self::out)))
 (impl Stream echo-stream
   (open-stream-p ((self Self)) bool (open-stream-p self::in))
   (close ((self Self)) () (progn (close self::in) (close self::out))))
@@ -4882,12 +4957,25 @@ user-visible capacity."
   (listen ((self Self)) bool
     (if (>= self::at (len self::parts)) false (listen (get self::parts self::at)))))
 (impl CharInput concatenated-stream)
+;; SBCL shows the streams still to be read, which is where `at` points.
+(impl print-object concatenated-stream
+  (print-object ((self Self) (escape bool)) string
+    (let ((out "") (i self::at))
+      (while (< i (len self::parts))
+        (setf out (if (equal out "")
+                      (format false "~s" (get self::parts i))
+                      (format false "~a ~s" out (get self::parts i))))
+        (setf i (+ i 1)))
+      (format false "#<concatenated-stream :streams (~a)>" out))))
 
 ;; Gives any input stream one character of pushback, so that a stream without
 ;; pushback of its own (a composite, or a user type) can still be `read` from.
 ;; A composite like every other: a struct, one field of state, no native
 ;; support.
 (pub defstruct peek-stream (inner :dyn CharInput) (pending Option<char>))
+(impl print-object peek-stream
+  (print-object ((self Self) (escape bool)) string
+    (format false "#<peek-stream :stream ~s>" self::inner)))
 (impl Stream peek-stream
   (open-stream-p ((self Self)) bool (open-stream-p self::inner))
   (close ((self Self)) () (close self::inner)))
@@ -5632,6 +5720,16 @@ user-visible capacity."
   (pub symbols int) (pub strings int) (pub boxes int)
   (pub gc-count int) (pub growable bool))
 
+;; Read at a glance, the way `room` reads: how full the arena is first, then
+;; the other counts, each with its unit.
+(impl print-object heap-info
+  (print-object ((self Self) (escape bool)) string
+    (format false "#<heap-info ~d of ~d cells live (~d%), ~d free, ~d symbols, ~d strings, ~d boxes, ~d collections, ~a>"
+            self::live self::capacity
+            (if (= self::capacity 0) 0 (/ (* self::live 100) self::capacity))
+            self::free self::symbols self::strings self::boxes self::gc-count
+            (if self::growable "growable" "fixed size"))))
+
 (pub defun room (&optional (verbose bool)) ()
   "Print what the heap looks like right now (CL's `room`), to
    `*standard-output*`.
@@ -5696,6 +5794,22 @@ user-visible capacity."
   (pub second int) (pub minute int) (pub hour int)
   (pub date int) (pub month int) (pub year int) (pub day-of-week int)
   (pub daylight-p bool) (pub zone f64))
+
+;; Read as a date and a clock: `#<decoded-time 2026-09-28 13:40:24 +09:00
+;; Mon>`. CL's zone is hours *west* of Greenwich and leaves daylight saving
+;; out, so the offset shown is its negation plus the hour daylight saving
+;; adds, and a `dst` marks when it does. Day 0 is Monday (CL's numbering).
+(impl print-object decoded-time
+  (print-object ((self Self) (escape bool)) string
+    (let* ((offset (+ (as int (* self::zone -60.0)) (if self::daylight-p 60 0)))
+           (sign (if (< offset 0) "-" "+"))
+           (mag (abs offset)))
+      (format false "#<decoded-time ~4,'0d-~2,'0d-~2,'0d ~2,'0d:~2,'0d:~2,'0d ~a~2,'0d:~2,'0d ~a~a>"
+              self::year self::month self::date self::hour self::minute self::second
+              sign (/ mag 60) (mod mag 60)
+              (ecase self::day-of-week
+                (0 "Mon") (1 "Tue") (2 "Wed") (3 "Thu") (4 "Fri") (5 "Sat") (6 "Sun"))
+              (if self::daylight-p " dst" "")))))
 
 ;; The civil-calendar conversions are Howard Hinnant's `civil_from_days` /
 ;; `days_from_civil`, shifted from the Unix epoch to CL's. They are exact
@@ -6332,6 +6446,8 @@ user-visible capacity."
   (text string))
 (impl Error SimpleError
   (message ((self Self)) string self::text))
+(impl print-object SimpleError
+  (print-object ((self Self) (escape bool)) string (error-print-object self escape "simpleerror")))
 
 ;; CL's `simple-error` is what `(error "...")` signals; the same
 ;; convenience here is a constructor that formats, since a `Result` is
@@ -6348,6 +6464,8 @@ user-visible capacity."
 (impl Error WrappedError
   (message ((self Self)) string self::text)
   (source ((self Self)) Option<:dyn Error> (Option::some self::cause)))
+(impl print-object WrappedError
+  (print-object ((self Self) (escape bool)) string (error-print-object self escape "wrappederror")))
 
 ;; `(wrap-error "reading the config" e)` — the same widening `as-dyn-error`
 ;; does, with a sentence attached. Generic over the cause's concrete type for

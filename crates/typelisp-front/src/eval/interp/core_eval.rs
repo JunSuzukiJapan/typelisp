@@ -1011,7 +1011,11 @@ impl Interp {
 
     /// One value as `~s` would print it — the same printer `format` uses, so
     /// a `print-object` method and the `*print-*` control variables apply to
-    /// a trace line exactly as they do to a program's own output.
+    /// a trace line and to the REPL's echo of a result exactly as they do to
+    /// a program's own output. This is the one place a value is turned into
+    /// display text outside `format` itself; a second renderer drifts (the
+    /// REPL's own copy once dropped a `Vector`'s element type and ignored
+    /// `print-object`).
     ///
     /// Built and laid out here rather than emitted: `emit` would merge into an
     /// open `pprint-logical-block` session, and a trace line that arrives in
@@ -1024,28 +1028,32 @@ impl Interp {
     /// the payload's own rendering. Everything else renders as itself —
     /// `Option<Sexpr>` included, which prints as the S-expression it is
     /// (`docs/ja/reference/functions/printing.md` §1).
-    pub(super) fn trace_render(&self, heap: &mut Heap, v: Value, repr: Option<&Repr>) -> String {
+    ///
+    /// `Err` is a `print-object` method failing, or the heap running out.
+    pub fn render_readably(&self, heap: &mut Heap, v: Value, repr: Option<&Repr>) -> Result<String, String> {
         if matches!(repr, Some(Repr::Niche(p)) if **p != Repr::Sexpr) {
             if v == Value::Empty {
-                return "none".to_string();
+                return Ok("none".to_string());
             }
-            return format!("(some {})", self.trace_render(heap, v, None));
+            return Ok(format!("(some {})", self.render_readably(heap, v, None)?));
         }
         self.install_print_hooks();
         // `core::list` roots `v` across the one `cons` it takes to wrap it, and
         // rooting the finished list keeps `v` reachable through the format run,
         // which allocates.
-        match core::list(heap, &[v]) {
-            Ok(list) => {
-                heap.push_root(list);
-                let opts = typelisp_print::runtime::current_opts(heap);
-                let text = typelisp_print::runtime::build_format(heap, "~s", list)
-                    .map(|out| typelisp_print::format::finish(out, &opts));
-                heap.pop_root();
-                text.unwrap_or_else(|_| "#<unprintable>".to_string())
-            }
-            Err(_) => "#<unprintable>".to_string(),
-        }
+        let list = core::list(heap, &[v]).map_err(|e| e.to_string())?;
+        heap.push_root(list);
+        let opts = typelisp_print::runtime::current_opts(heap);
+        let text = typelisp_print::runtime::build_format(heap, "~s", list)
+            .map(|out| typelisp_print::format::finish(out, &opts));
+        heap.pop_root();
+        text
+    }
+
+    /// [`Self::render_readably`] for a trace line, which reports the value it
+    /// could not render rather than abandoning the trace.
+    fn trace_render(&self, heap: &mut Heap, v: Value, repr: Option<&Repr>) -> String {
+        self.render_readably(heap, v, repr).unwrap_or_else(|e| format!("#<unprintable: {}>", e))
     }
 
     /// A registered function as a closure value, capturing nothing.
@@ -1894,16 +1902,24 @@ impl Interp {
                 let templates = core::field(heap, tl, 2)
                     .ok_or_else(|| EvalError::Internal("exec: (defstruct ..) has no field template list".to_string()))?;
                 let templates = str_list(heap, templates, "defstruct")?;
-                if templates.len() != fields.len() {
+                let names = core::field(heap, tl, 3)
+                    .ok_or_else(|| EvalError::Internal("exec: (defstruct ..) has no field name list".to_string()))?;
+                let names = str_list(heap, names, "defstruct")?;
+                if templates.len() != fields.len() || names.len() != fields.len() {
                     return Err(EvalError::Internal(format!(
-                        "exec: (defstruct ..) has {} field(s) but {} template(s)",
+                        "exec: (defstruct ..) has {} field(s) but {} template(s) and {} name(s)",
                         fields.len(),
-                        templates.len()
+                        templates.len(),
+                        names.len()
                     )));
                 }
                 self.root.borrow_mut().get_or_create(name.parent()).types.insert(
                     name.last_segment().to_string(),
-                    scope::TypeEntry::Struct { reprs: fields, templates: scope::FieldTemplates::Positional(templates) },
+                    scope::TypeEntry::Struct {
+                        reprs: fields,
+                        templates: scope::FieldTemplates::Positional(templates),
+                        names,
+                    },
                 );
                 self.printer_tables_changed();
                 Ok(None)

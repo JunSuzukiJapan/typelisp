@@ -473,34 +473,32 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // tables because the address has to name a function *this file* compiled:
     // `compile-file` compiles every top-level body in the file, so an `impl
     // print-object` in it is here whether or not anything calls it.
-    let print_objects: Vec<(String, String)> = items
+    let mut print_objects: Vec<(String, String)> = items
         .iter()
-        .filter_map(|item| {
-            let node = item.node_name();
-            let symbol = item.symbol_name();
-            // Two shapes, because a generic type's `print-object` is
-            // monomorphized: `point::print-object` for a plain type, and
-            // `gen::print-object <i32>` for one instantiation of a generic —
-            // whose *value* carries the key `gen<i32>`, so that is what the
-            // table has to be keyed by (`type_key::specialized_method_name`
-            // is the same correspondence read the other way).
-            let (type_name, targs) = match node.rsplit_once("::print-object") {
-                Some((ty, "")) => (ty, None),
-                Some((ty, rest)) => {
-                    let args = rest.strip_prefix(" <")?.strip_suffix('>')?;
-                    (ty, Some(args))
-                }
-                None => return None,
-            };
-            let path = Path::from_segments(type_name.split("::").map(str::to_string).collect());
-            let base = crate::type_key::type_key_of(&path).into_owned();
-            let key = match targs {
-                Some(args) => format!("{}<{}>", base, args),
-                None => base,
-            };
-            Some((key, symbol))
-        })
+        .filter_map(|item| Some((print_object_key(&item.node_name())?, item.symbol_name())))
         .collect();
+    // The prelude's own `print-object`s (`complex`, `pathname`, the streams,
+    // the error types, ...), which no item of this file names: they are
+    // chosen by the printer at run time, never called. Their bodies are in
+    // the module already — the prelude bitcode was linked in whole above —
+    // so registering them is all that is missing; without it an executable
+    // printed a `complex` as `#<complex re: 1.0 im: 2.0>` where `typl` said
+    // `#C(1.0 2.0)`. A type this file implements itself is already listed.
+    {
+        let m = module.borrow();
+        let mut prelude_methods: Vec<(String, String)> = m
+            .get_functions()
+            .filter(|f| f.count_basic_blocks() > 0)
+            .filter_map(|f| {
+                let symbol = f.get_name().to_str().ok()?.to_string();
+                let node = symbol.strip_prefix(crate::compile::USER_SYMBOL_PREFIX)?;
+                Some((print_object_key(node)?, symbol))
+            })
+            .filter(|(key, _)| !print_objects.iter().any(|(k, _)| k == key))
+            .collect();
+        prelude_methods.sort();
+        print_objects.extend(prelude_methods);
+    }
 
     // The methods a `~/name/` directive in this file can reach, from the
     // checker's scan of each literal control string
@@ -596,6 +594,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &interp.upcast_descriptors(),
             &interp.enum_variant_descriptors(),
             &interp.field_template_descriptors(),
+            &interp.field_name_descriptors(),
             &print_objects,
             &format_calls,
             &callback_entries,
@@ -612,6 +611,32 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // binding rather than `?`s so the failing paths take this route too.
     drop(module);
     result
+}
+
+/// The type key a `print-object` method is registered under, from its node
+/// name — `None` for any other function.
+///
+/// Two shapes, because a generic type's `print-object` is monomorphized:
+/// `point::print-object` for a plain type, and `gen::print-object <i32>` for
+/// one instantiation of a generic — whose *value* carries the key `gen<i32>`,
+/// so that is what the table has to be keyed by
+/// (`type_key::specialized_method_name` is the same correspondence read the
+/// other way).
+fn print_object_key(node: &str) -> Option<String> {
+    let (type_name, targs) = match node.rsplit_once("::print-object") {
+        Some((ty, "")) => (ty, None),
+        Some((ty, rest)) => {
+            let args = rest.strip_prefix(" <")?.strip_suffix('>')?;
+            (ty, Some(args))
+        }
+        None => return None,
+    };
+    let path = Path::from_segments(type_name.split("::").map(str::to_string).collect());
+    let base = crate::type_key::type_key_of(&path).into_owned();
+    Some(match targs {
+        Some(args) => format!("{}<{}>", base, args),
+        None => base,
+    })
 }
 
 /// Adds a real, C-ABI `main` to `module` that calls the compiled entry
@@ -655,6 +680,7 @@ fn build_main_wrapper(
     upcasts: &[(u32, u32, u32)],
     enum_variants: &[(String, usize, String)],
     field_templates: &[(String, i64, i64, String)],
+    field_names: &[(String, i64, String)],
     print_objects: &[(String, String)],
     format_calls: &[(String, String, String)],
     callback_entries: &[(String, inkwell::values::FunctionValue<'static>)],
@@ -837,6 +863,11 @@ fn build_main_wrapper(
                 "rt_print_field_template",
                 &[key_ptr, key_len, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), t_ptr, t_len],
             )?;
+        }
+        for (key, index, name) in field_names {
+            let (key_ptr, key_len) = literal(&builder, key)?;
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(&builder, "rt_print_field_name", &[key_ptr, key_len, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
         }
         for (key, symbol) in print_objects {
             let target = module.get_function(symbol).ok_or_else(|| {
@@ -1430,7 +1461,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1469,7 +1500,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

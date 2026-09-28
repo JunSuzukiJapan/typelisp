@@ -463,7 +463,7 @@ fn an_array_of_a_type_with_no_print_object_still_builds() {
              (progn (push d 1)
                (let ((a (Array::make d (plain::new 1))))
                  (equal (format false "~a" a)
-                        "#<array<plain> #<vector<int> 1> #<vector<plain> #<plain 1>> none>"))))"##,
+                        "#<array<plain> dims: #<vector<int> 1> data: #<vector<plain> #<plain n: 1>> fill-pointer: none>"))))"##,
     );
 }
 

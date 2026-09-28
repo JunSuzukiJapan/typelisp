@@ -82,7 +82,7 @@ impl TaskBody for Probe {
             Probe::Parent { children, spawned, handles, waited, sum } => {
                 if *spawned < *children {
                     *spawned += 1;
-                    return Progress::Blocked(Waiting::Spawn(Value::Int(*spawned)));
+                    return Progress::Blocked(Waiting::Spawn(Value::Int(*spawned), "task<int>".to_string()));
                 }
                 if *waited < handles.len() {
                     let id = task_id_of(heap, Some(handles[*waited])).expect("a task handle");

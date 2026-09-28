@@ -46,7 +46,7 @@
 //! `Rc`s and run only on its own thread ([`TaskBody::runs_anywhere`]); its
 //! compiled ones go to workers that live for one drive ([`install_crew`]).
 
-use typelisp_mem::{Heap, RootScope, RootStackId, TypeKeyId, Value};
+use typelisp_mem::{Heap, RootScope, RootStackId, Value};
 
 // ---- what a task is to the scheduler ---------------------------------------
 
@@ -194,13 +194,14 @@ pub enum Waiting {
     /// the scheduler's, and only the driver can reach it.
     ///
     /// The closure is rooted through the asking task's state slot while the
-    /// operation is in flight, as a parked `send`'s value is.
-    Spawn(Value),
+    /// operation is in flight, as a parked `send`'s value is. The string is
+    /// the handle's type key ([`task_handle`]).
+    Spawn(Value, String),
     /// `(thread ...)` — [`Waiting::Spawn`] for a task that runs on an OS
     /// thread of its own, started for it ([`Scheduler::try_now`]), and
     /// answered with a `Thread<T>` handle. Rooted the way `Spawn`'s closure
-    /// is.
-    SpawnThread(Value),
+    /// is, and keyed the way its handle is.
+    SpawnThread(Value, String),
     /// The interpreter's thread — asked before a call only the interpreter
     /// can answer (`call_state::SUSPEND_MAIN`). Never a wait: a body that can
     /// move there has done so before asking (`Progress::NeedsMain`), and to
@@ -260,8 +261,9 @@ pub enum SelectOp {
 /// records why). `Send` and `Recv` are the two that can.
 #[derive(Clone, PartialEq, Debug)]
 pub enum ChanOp {
-    /// `(Chan::new cap)` — answers with the handle.
-    New(i64),
+    /// `(Chan::new cap)` — answers with the handle, built under the
+    /// channel's type key (`chan<int>`), which the site spelled.
+    New(i64, String),
     /// `(len ch)` — how many values are buffered.
     Len(ChanId),
     /// `(cap ch)` — how many fit.
@@ -315,36 +317,32 @@ struct Chan {
 
 // ---- handles -----------------------------------------------------------------
 
-/// The runtime value of a `Task<T>`: a boxed struct holding the scheduler's id.
+/// The runtime value of a `Task<T>`: a boxed struct holding the scheduler's id,
+/// under the handle's own type key (`task<int>`).
 ///
-/// The key carries no type argument. `Task<i32>` and `Task<string>` are the
-/// same thing at run time — no fields to read, and `wait`'s return type is
-/// spelled at the call site — so a type argument here would distinguish nothing.
-/// That is unlike `Vector<T>`, where the site has to carry its elements'
-/// representation because the definition cannot tell you.
-///
-/// The key is one of `typelisp_mem`'s pre-interned ones (`TypeKeyId::TASK`),
-/// because this crate has no `Path` to derive it from — the same arrangement
-/// `NetError` and `heap-info` have, checked by
-/// `tests/type_identity_guard_test.rs`.
-pub fn task_handle(heap: &mut Heap, id: TaskId) -> Value {
-    heap.alloc_struct(TypeKeyId::TASK, vec![Value::Int(id.0 as i64)])
+/// The key is the one the checker spelled for this `task` node and every
+/// layer below passed along: nothing here has a type to read the
+/// instantiation off, and a handle prints as its type (`#<task<int> 1>`),
+/// the way a `Vector<T>` does. The id is not a number a program may read.
+pub fn task_handle(heap: &mut Heap, id: TaskId, key: &str) -> Value {
+    let key = heap.intern_type_key(key);
+    heap.alloc_struct(key, vec![Value::Int(id.0 as i64)])
 }
 
-/// The runtime value of a `Chan<T>`: a boxed struct holding the scheduler's id.
-///
-/// Carries no type argument, for [`task_handle`]'s reason: `Chan<i32>` and
-/// `Chan<string>` are the same thing at run time, and the element type is
-/// spelled at every site that puts one in or takes one out.
-pub fn chan_handle(heap: &mut Heap, id: ChanId) -> Value {
-    heap.alloc_struct(TypeKeyId::CHAN, vec![Value::Int(id.0 as i64)])
+/// The runtime value of a `Chan<T>`: a boxed struct holding the scheduler's
+/// id, under the channel's type key (`chan<int>`) — [`task_handle`]'s
+/// arrangement, the key coming from the `Chan::new` site.
+pub fn chan_handle(heap: &mut Heap, id: ChanId, key: &str) -> Value {
+    let key = heap.intern_type_key(key);
+    heap.alloc_struct(key, vec![Value::Int(id.0 as i64)])
 }
 
-/// The runtime value of a `Thread<T>`: a [`task_handle`] under the
-/// `thread` key. `join` reads it with [`task_id_of`], because a thread *is*
-/// a task to the scheduler — one it runs on an OS thread of its own.
-pub fn thread_handle(heap: &mut Heap, id: TaskId) -> Value {
-    heap.alloc_struct(TypeKeyId::THREAD, vec![Value::Int(id.0 as i64)])
+/// The runtime value of a `Thread<T>`: a [`task_handle`] under a `thread<T>`
+/// key. `join` reads it with [`task_id_of`], because a thread *is* a task to
+/// the scheduler — one it runs on an OS thread of its own.
+pub fn thread_handle(heap: &mut Heap, id: TaskId, key: &str) -> Value {
+    let key = heap.intern_type_key(key);
+    heap.alloc_struct(key, vec![Value::Int(id.0 as i64)])
 }
 
 /// The scheduler id inside a `Task<T>` handle.
@@ -385,8 +383,8 @@ pub fn waiting_name(w: &Waiting) -> &'static str {
         // The other three answer at once, so they never reach a message that
         // says something could not block. Neither does a spawn.
         Waiting::Chan(_) => "a channel operation",
-        Waiting::Spawn(_) => "`task`",
-        Waiting::SpawnThread(_) => "`thread`",
+        Waiting::Spawn(..) => "`task`",
+        Waiting::SpawnThread(..) => "`thread`",
         Waiting::Main => "a call that needs the interpreter",
         Waiting::Io { .. } => "a socket operation",
     }
@@ -806,14 +804,16 @@ impl<B: TaskBody> Scheduler<B> {
             // Admitted and nothing is run: the starting task keeps its turn,
             // and the new one is picked up when some task yields, waits or
             // finishes — which is what `task` promises.
-            Waiting::Spawn(closure) => {
+            Waiting::Spawn(closure, key) => {
                 let closure = *closure;
                 let id = self.admit(heap, |heap| B::start_closure(heap, closure));
-                Some(Ok(task_handle(heap, id)))
+                Some(Ok(task_handle(heap, id, key)))
             }
             // The same, on a thread of its own — which starts now, and takes
             // the task as soon as it gets the lock this is holding.
-            Waiting::SpawnThread(closure) => Some(self.admit_thread(heap, *closure).map(|id| thread_handle(heap, id))),
+            Waiting::SpawnThread(closure, key) => {
+                Some(self.admit_thread(heap, *closure).map(|id| thread_handle(heap, id, key)))
+            }
             Waiting::Main => Some(Ok(Value::Empty)),
             // One descriptor, zero timeout: ready now or not. A `poll` that
             // fails (a descriptor closed under the task) is reported as
@@ -899,12 +899,12 @@ impl<B: TaskBody> Scheduler<B> {
     /// [`Self::try_now`] for the channel operations.
     fn try_chan(&mut self, heap: &mut Heap, op: &ChanOp) -> Option<Result<Value, SchedError>> {
         match op {
-            ChanOp::New(cap) => {
+            ChanOp::New(cap, key) => {
                 if *cap < 0 {
                     return Some(Err(SchedError::Panic(format!("Chan::new: {} is not a capacity a channel can have", cap))));
                 }
                 let id = self.chan_new(heap, *cap as usize);
-                Some(Ok(chan_handle(heap, id)))
+                Some(Ok(chan_handle(heap, id, key)))
             }
             ChanOp::Len(c) => Some(Ok(Value::Int(self.chans[c.0].len as i64))),
             ChanOp::Cap(c) => Some(Ok(Value::Int(self.chans[c.0].cap as i64))),
@@ -947,8 +947,8 @@ impl<B: TaskBody> Scheduler<B> {
                     Waiting::Task(_)
                     | Waiting::Chan(_)
                     | Waiting::Select { .. }
-                    | Waiting::Spawn(_)
-                    | Waiting::SpawnThread(_)
+                    | Waiting::Spawn(..)
+                    | Waiting::SpawnThread(..)
                     | Waiting::Main => {
                         self.slots[id.0] = Slot::Blocked(slot, w);
                     }
@@ -1487,7 +1487,7 @@ impl<B: TaskBody> AnswerNow for SchedShared<B> {
 /// `select`'s send arms.
 fn waiting_values(w: &Waiting) -> Vec<Value> {
     match w {
-        Waiting::Chan(ChanOp::Send(_, v)) | Waiting::Spawn(v) | Waiting::SpawnThread(v) => vec![*v],
+        Waiting::Chan(ChanOp::Send(_, v)) | Waiting::Spawn(v, _) | Waiting::SpawnThread(v, _) => vec![*v],
         Waiting::Select { ops, .. } => ops
             .iter()
             .filter_map(|op| match op {
@@ -2067,6 +2067,20 @@ pub fn sleep_wait(secs: f64) -> Result<Waiting, SchedError> {
     Ok(Waiting::Until(std::time::Instant::now() + d))
 }
 
+/// A type key a compiled suspension site appended as its second word — a
+/// tagged string the bridge put there, because a word on its own does not
+/// name the type the answer is built as. `what` is the operation and `ty` the
+/// type the key spells, for the message a malformed site gets.
+fn key_word(heap: &Heap, word: i64, what: &str, ty: &str) -> Result<String, SchedError> {
+    match typelisp_abi::decode(word) {
+        Value::Str(id) => Ok(heap.string(id).to_string()),
+        other => Err(SchedError::Internal(format!(
+            "a compiled {} carried {:?} where its {} key should be",
+            what, other, ty
+        ))),
+    }
+}
+
 /// What a compiled frame that just returned `STATUS_SUSPEND` is waiting for,
 /// and how its answer will come back.
 ///
@@ -2120,11 +2134,23 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // own `Repr::field_kind` because the driver has only a word.
         // The capacity is an ordinary `i32` argument, so it crosses raw — the
         // suspension site tags only what the driver could not otherwise read.
-        cs::SUSPEND_CHAN_NEW => Ok((Waiting::Chan(ChanOp::New(payload)), Wake::Tagged)),
+        // The second word is the channel's type key, a string the bridge
+        // appended at the site (as `recv`'s `Option<T>` key is).
+        cs::SUSPEND_CHAN_NEW => {
+            let key = key_word(heap, second, "`Chan::new`", "`Chan<T>`")?;
+            Ok((Waiting::Chan(ChanOp::New(payload, key)), Wake::Tagged))
+        }
         // The closure is tagged, and the answer — the handle — comes back
-        // tagged like every other typed wake value.
-        cs::SUSPEND_TASK => Ok((Waiting::Spawn(typelisp_abi::decode(payload)), Wake::Tagged)),
-        cs::SUSPEND_THREAD => Ok((Waiting::SpawnThread(typelisp_abi::decode(payload)), Wake::Tagged)),
+        // tagged like every other typed wake value. The second word is the
+        // handle's type key, appended by the bridge.
+        cs::SUSPEND_TASK => {
+            let key = key_word(heap, second, "`task`", "`Task<T>`")?;
+            Ok((Waiting::Spawn(typelisp_abi::decode(payload), key), Wake::Tagged))
+        }
+        cs::SUSPEND_THREAD => {
+            let key = key_word(heap, second, "`thread`", "`Thread<T>`")?;
+            Ok((Waiting::SpawnThread(typelisp_abi::decode(payload), key), Wake::Tagged))
+        }
         cs::SUSPEND_MAIN => Ok((Waiting::Main, Wake::Unit)),
         // `Wake::Tagged` for every typed answer: a wake value always crosses
         // back **tagged**, whatever its type, and the resume block decodes it
@@ -2144,15 +2170,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         }
         cs::SUSPEND_CHAN_RECV => {
             let c = chan_id_of(heap, Some(typelisp_abi::decode(payload)))?;
-            let key = match typelisp_abi::decode(second) {
-                Value::Str(id) => heap.string(id).to_string(),
-                other => {
-                    return Err(SchedError::Internal(format!(
-                        "a compiled `recv` carried {:?} where its `Option<T>` key should be",
-                        other
-                    )))
-                }
-            };
+            let key = key_word(heap, second, "`recv`", "`Option<T>`")?;
             Ok((Waiting::Chan(ChanOp::Recv(c, key)), Wake::Tagged))
         }
         // The arms travel in their own slot, and every word in them is
@@ -2425,8 +2443,8 @@ impl CompiledTask {
         let held = match &self.state {
             CompiledState::Start(closure) => *closure,
             CompiledState::Blocked(Waiting::Chan(ChanOp::Send(_, v)))
-            | CompiledState::Blocked(Waiting::Spawn(v))
-            | CompiledState::Blocked(Waiting::SpawnThread(v)) => *v,
+            | CompiledState::Blocked(Waiting::Spawn(v, _))
+            | CompiledState::Blocked(Waiting::SpawnThread(v, _)) => *v,
             _ => Value::Empty,
         };
         heap.set_root(self.sbase, held);

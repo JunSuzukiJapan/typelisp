@@ -195,6 +195,6 @@ fn compiling_code_that_holds_a_struct_literal_is_refused_by_name() {
     let out = child.wait_with_output().expect("failed to wait on typl");
     let stdout = String::from_utf8(out.stdout).expect("stdout was not utf-8");
     let stderr = String::from_utf8(out.stderr).expect("stderr was not utf-8");
-    assert!(stdout.contains("#<q 5>"), "stdout was:\n{}", stdout);
+    assert!(stdout.contains("#<q x: 5>"), "stdout was:\n{}", stdout);
     assert!(stderr.contains("holds a `q` object as a literal"), "stderr was:\n{}", stderr);
 }

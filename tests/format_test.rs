@@ -266,10 +266,90 @@ fn built_in_enum_values_print_their_variant_names() {
 }
 
 #[test]
-fn a_built_in_error_value_prints_its_type_name() {
-    // The message text is the builtin's own wording; only the shape matters.
-    let s = fmt(r#"(format false "~a" (parse-int "zz"))"#);
-    assert!(s.starts_with("(err (parseinterror "), "got {}", s);
+fn a_built_in_error_value_prints_like_an_sbcl_condition() {
+    // SBCL's two answers for a condition: `~s` names the type around the
+    // report, `~a` is the report alone. The message text is the builtin's
+    // own wording; only the shape matters.
+    let s = fmt(r#"(format false "~s" (parse-int "zz"))"#);
+    assert!(s.starts_with("(err #<parseinterror \"parse-int: "), "got {}", s);
+    let a = fmt(r#"(format false "~a" (parse-int "zz"))"#);
+    assert!(a.starts_with("(err parse-int: "), "got {}", a);
+    assert_eq!(fmt(r#"(format false "~s" (simple-error "boom"))"#), "#<simpleerror \"boom\">");
+    assert_eq!(fmt(r#"(format false "~a" (simple-error "boom"))"#), "boom");
+    assert_eq!(fmt(r#"(format false "~s" (wrap-error "outer" (simple-error "inner")))"#), "#<wrappederror \"outer\">");
+}
+
+#[test]
+fn a_pathname_prints_as_sbcl_does() {
+    assert_eq!(fmt(r#"(format false "~s" (to-pathname "/tmp/a.txt"))"#), "#P\"/tmp/a.txt\"");
+    assert_eq!(fmt(r#"(format false "~a" (to-pathname "/tmp/a.txt"))"#), "/tmp/a.txt");
+    assert_eq!(fmt(r#"(format false "~s" (make-pathname :name "a" :type "txt"))"#), "#P\"a.txt\"");
+}
+
+#[test]
+fn a_time_prints_as_the_integer_cl_has_for_it() {
+    assert_eq!(fmt(r#"(format false "~s" (universal-time::new 2 5))"#), "172805");
+    assert_eq!(fmt(r#"(format false "~a" (internal-time::new 3 250))"#), "3000250");
+}
+
+#[test]
+fn a_struct_prints_its_field_names() {
+    // `x: 1`, not `:x 1`, which would read as a keyword argument.
+    assert_eq!(fmt(r#"(defstruct point (x int) (y int)) (format false "~s" (point::new 1 2))"#), "#<point x: 1 y: 2>");
+    assert_eq!(
+        fmt(r#"(defstruct tag (name string)) (format false "~s ~a" (tag::new "a") (tag::new "b"))"#),
+        "#<tag name: \"a\"> #<tag name: b>"
+    );
+    // A `Vector<T>`'s fields are its elements, which have no names.
+    assert_eq!(fmt(r#"(format false "~s" (loop :for i :from 1 :to 2 :collect i))"#), "#<vector<int> 1 2>");
+}
+
+#[test]
+fn a_stream_prints_as_sbcl_does() {
+    let std_out = fmt(r#"(format false "~s" *standard-output*)"#);
+    assert!(std_out.starts_with("#<standard-stream for \"standard output\" {"), "got {}", std_out);
+    let sos = fmt(r#"(format false "~s" (make-string-output-stream))"#);
+    assert!(sos.starts_with("#<string-output-stream {") && sos.ends_with("}>"), "got {}", sos);
+    let two = fmt(r#"(format false "~s" (make-two-way-stream (make-string-input-stream "a") (make-string-output-stream)))"#);
+    assert!(
+        two.starts_with("#<two-way-stream :input-stream #<string-input-stream {") && two.contains(":output-stream #<string-output-stream {"),
+        "got {}",
+        two
+    );
+}
+
+#[test]
+fn a_decoded_time_prints_as_a_date_and_a_clock() {
+    assert_eq!(
+        fmt(r#"(format false "~s" (decode-universal-time (universal-time::new 45000 3723) 0))"#),
+        "#<decoded-time 2023-03-17 01:02:03 +00:00 Fri>"
+    );
+    // CL's zone is hours *west*, without daylight saving; the offset shown is
+    // the clock's own.
+    assert_eq!(
+        fmt(r#"(format false "~s" (decoded-time::new 5 4 3 2 1 2000 6 true 5.0))"#),
+        "#<decoded-time 2000-01-02 03:04:05 -04:00 Sun dst>"
+    );
+}
+
+#[test]
+fn heap_info_prints_how_full_the_arena_is() {
+    assert_eq!(
+        fmt(r#"(format false "~s" (heap-info::new 100 25 75 1 2 3 4 true))"#),
+        "#<heap-info 25 of 100 cells live (25%), 75 free, 1 symbols, 2 strings, 3 boxes, 4 collections, growable>"
+    );
+}
+
+#[test]
+fn a_generic_handle_prints_its_type_arguments() {
+    assert_eq!(
+        fmt(r#"(format false "~s" (the HashTable<string,int> (HashTable::new)))"#),
+        "#<hashtable<string,int> count=0>"
+    );
+    let chan = fmt(r#"(format false "~s" (the Chan<string> (Chan::new 1)))"#);
+    assert!(chan.starts_with("#<chan<string> "), "got {}", chan);
+    let task = fmt(r#"(defun three () int 3) (format false "~s" (task (three)))"#);
+    assert!(task.starts_with("#<task<int> "), "got {}", task);
 }
 
 #[test]

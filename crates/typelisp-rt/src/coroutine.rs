@@ -678,34 +678,36 @@ pub fn set_frame_value(heap: &mut Heap, f: Value, w: i64) {
 
 /// `(task ...)` for compiled code: hand the scheduler a closure to run as a
 /// new task. `args[0]` is the closure, tagged — a heap box, rooted by the
-/// frame slot it sits in. The answer is the `Task<T>` handle, and it arrives
-/// on the next activation like every other suspension's.
+/// frame slot it sits in; `args[1]` is the handle's type key (`task<int>`), a
+/// string the bridge appended, since nothing below the site knows `T`. The
+/// answer is the `Task<T>` handle, and it arrives on the next activation like
+/// every other suspension's.
 ///
 /// # Safety
 ///
-/// `args` must point to `argc >= 1` valid `i64`s.
+/// `args` must point to `argc >= 2` valid `i64`s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_suspend_task(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        typelisp_abi::fatal("rt_suspend_task: expected the closure to start");
+    if argc < 2 {
+        typelisp_abi::fatal("rt_suspend_task: expected the closure to start and the handle's type key");
     }
-    call_state::set_pending_suspend(call_state::SUSPEND_TASK, *args);
+    call_state::set_pending_suspend_2(call_state::SUSPEND_TASK, *args, *args.add(1));
     0
 }
 
 /// `(thread ...)` for compiled code: [`rt_suspend_task`]'s closure, for a task
-/// the scheduler runs on an OS thread of its own. The answer is the
-/// `Thread<T>` handle.
+/// the scheduler runs on an OS thread of its own. `args[1]` is the handle's
+/// type key (`thread<int>`). The answer is the `Thread<T>` handle.
 ///
 /// # Safety
 ///
-/// `args` must point to `argc >= 1` valid `i64`s.
+/// `args` must point to `argc >= 2` valid `i64`s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_suspend_thread(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        typelisp_abi::fatal("rt_suspend_thread: expected the closure to start");
+    if argc < 2 {
+        typelisp_abi::fatal("rt_suspend_thread: expected the closure to start and the handle's type key");
     }
-    call_state::set_pending_suspend(call_state::SUSPEND_THREAD, *args);
+    call_state::set_pending_suspend_2(call_state::SUSPEND_THREAD, *args, *args.add(1));
     0
 }
 
@@ -877,16 +879,20 @@ pub unsafe extern "C" fn rt_suspend_wait(args: *const i64, argc: u32) -> i64 {
 /// Each shim only *records*; none of them touches a channel, and none of them
 /// blocks. That is the same division the other `rt_suspend_*` shims draw.
 ///
+/// `(Chan::new cap)`'s own `args[1]` is the channel's type key
+/// (`chan<int>`), a string the bridge appended at the site — `recv`'s
+/// arrangement for its `Option<T>` key.
+///
 /// # Safety
 ///
 /// `argc` must be at least as large as the number of words each reads, and
 /// `args` must point to that many valid `i64`s.
 #[no_mangle]
 pub unsafe extern "C" fn rt_suspend_chan_new(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        crate::fatal("rt_suspend_chan_new: expected 1 argument");
+    if argc < 2 {
+        crate::fatal("rt_suspend_chan_new: expected 2 arguments (the capacity and the channel's type key)");
     }
-    call_state::set_pending_suspend(call_state::SUSPEND_CHAN_NEW, *args);
+    call_state::set_pending_suspend_2(call_state::SUSPEND_CHAN_NEW, *args, *args.add(1));
     0
 }
 

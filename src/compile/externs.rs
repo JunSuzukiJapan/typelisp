@@ -164,6 +164,7 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "stream-open-file" => "rt_stream_open_file",
         "stream-close" => "rt_stream_close",
         "stream-open-p" => "rt_stream_open_p",
+        "stream-describe" => "rt_stream_describe",
         "stream-input-p" => "rt_stream_input_p",
         "stream-output-p" => "rt_stream_output_p",
         "stream-read-char" => "rt_stream_read_char",
@@ -520,7 +521,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 318] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 320] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -536,7 +537,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 318] {
         rt_format, rt_pprint, rt_pprint_block_end, rt_pprint_block_start, rt_pprint_indent,
         rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab, rt_print, rt_println,
     };
-    use typelisp_print::aot::{rt_format_call_method, rt_print_enum_variant, rt_print_field_template, rt_print_object_method};
+    use typelisp_print::aot::{
+        rt_format_call_method, rt_print_enum_variant, rt_print_field_name, rt_print_field_template, rt_print_object_method,
+    };
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
     use typelisp_rt::coroutine::{
@@ -576,7 +579,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 318] {
         rt_net_udp_bind, rt_net_udp_last_sender, rt_net_udp_recv, rt_net_udp_send_to,
         rt_net_unix_connect, rt_net_unix_listen,
         rt_stream_at_line_start, rt_stream_close,
-        rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p,
+        rt_stream_finish_output, rt_stream_input_p, rt_stream_listen, rt_stream_open_file, rt_stream_open_p, rt_stream_describe,
         rt_stream_output_p, rt_stream_position, rt_stream_read_byte, rt_stream_read_char, rt_stream_stderr, rt_stream_stdin, rt_stream_stdout,
         rt_set_macro_character, rt_get_macro_character, rt_set_dispatch_macro_character, rt_get_dispatch_macro_character,
         rt_stream_string_input, rt_stream_string_output, rt_stream_take_output_string, rt_stream_unread_char,
@@ -682,6 +685,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 318] {
         // either there.
         ("rt_print_enum_variant", rt_print_enum_variant as *const () as usize),
         ("rt_print_field_template", rt_print_field_template as *const () as usize),
+        ("rt_print_field_name", rt_print_field_name as *const () as usize),
         ("rt_print_object_method", rt_print_object_method as *const () as usize),
         // The `~/name/` directive's own table: one entry per `(type, method)`
         // the checker found by scanning this program's literal control
@@ -866,6 +870,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 318] {
         ("rt_stream_open_file", rt_stream_open_file as *const () as usize),
         ("rt_stream_close", rt_stream_close as *const () as usize),
         ("rt_stream_open_p", rt_stream_open_p as *const () as usize),
+        ("rt_stream_describe", rt_stream_describe as *const () as usize),
         ("rt_stream_input_p", rt_stream_input_p as *const () as usize),
         ("rt_stream_output_p", rt_stream_output_p as *const () as usize),
         ("rt_stream_read_char", rt_stream_read_char as *const () as usize),

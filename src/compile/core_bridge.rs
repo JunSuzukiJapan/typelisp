@@ -115,9 +115,11 @@ impl Definitions {
     pub fn record(&mut self, heap: &Heap, form: Value) -> Result<(), Error> {
         let Some(tag) = core::op_sym(heap, form) else { return Ok(()) };
         match tag.well_known() {
+            // Only the path is read: what follows it (`(REPR...) (TEMPLATE...)
+            // (NAME...)`) is the interpreter's and the printer's.
             wk::DEFSTRUCT => {
                 let parts = core::fields(heap, form)?;
-                let [path, _fields] = parts[..] else { return Err(malformed(heap, form)) };
+                let [path, ..] = parts[..] else { return Err(malformed(heap, form)) };
                 let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
                 self.structs.insert(path);
             }
@@ -912,8 +914,9 @@ fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
     }
 }
 
-/// `(task RET-R CALL)` -> `(let ((g R E)...) (spawn RET-R (lambda () RET-R
-/// (tag RET-R CALL'))))`, and from there to the island.
+/// `(task RET-R KEY CALL)` -> `(let ((g R E)...) (spawn RET-R KEY (lambda ()
+/// RET-R (tag RET-R CALL'))))`, and from there to the island. `KEY` is the
+/// handle's type key, carried through for [`translate_spawn`].
 ///
 /// **The call happens in a task, and what a task runs is a compiled
 /// closure.** So a compiled `task` does what the interpreted one does *up to*
@@ -938,11 +941,12 @@ fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
 /// paths ([`translate_let`], [`translate_lambda`]), so captures, kinds and
 /// rooting are decided the way they are for a lambda a program wrote.
 ///
-/// `(thread RET-R CALL)` is the same rewriting with `spawn-thread` for
+/// `(thread RET-R KEY CALL)` is the same rewriting with `spawn-thread` for
 /// `spawn` — `spawn` names which.
 fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> Result<Value, Error> {
     let ret_repr = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
-    let call = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+    let key = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+    let call = core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?;
     let tag = core::op(heap, call).ok_or_else(|| malformed(heap, form))?.to_string();
     let (skip, repr_at) = call_node_shape(&tag).ok_or_else(|| {
         Error::TypeError(format!("compile: `task` wraps a `{}`, which is not a call (internal error)", tag))
@@ -1012,7 +1016,7 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> R
     s.push_root(no_params);
     let lambda = core::tagged(&mut s, "lambda", &[no_params, ret_repr, tagged])?;
     s.push_root(lambda);
-    let spawn = core::tagged(&mut s, spawn, &[ret_repr, lambda])?;
+    let spawn = core::tagged(&mut s, spawn, &[ret_repr, key, lambda])?;
     s.push_root(spawn);
     let let_form = core::tagged(&mut s, "let", &[binds_list, spawn])?;
     s.push_root(let_form);
@@ -1022,9 +1026,9 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> R
     translate_let(&mut s, let_form, inner)
 }
 
-/// `(spawn RET-R LAMBDA)` -> `(suspend "rt_suspend_task" KIND -1 0 (2 .
-/// LAMBDA'))`: build the closure, hand it to the scheduler, and wake with the
-/// task's handle.
+/// `(spawn RET-R KEY LAMBDA)` -> `(suspend "rt_suspend_task" KIND -1 0 (2 .
+/// LAMBDA') (KIND . KEY'))`: build the closure, hand it to the scheduler with
+/// the handle's type key, and wake with the task's handle.
 ///
 /// The island's ordinary suspension node, so the site is a `(suspend ...)`
 /// like `wait`'s: the shim records the closure, the activation ends with
@@ -1034,12 +1038,18 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> R
 ///
 /// Only [`translate_spawn_call`] builds this node; the checker never does.
 ///
-/// `(spawn-thread RET-R LAMBDA)` is the same with `rt_suspend_thread`, and
-/// wakes with a `Thread<T>` handle — `shim` names which.
+/// `(spawn-thread RET-R KEY LAMBDA)` is the same with `rt_suspend_thread`,
+/// and wakes with a `Thread<T>` handle — `shim` names which.
 fn translate_spawn(heap: &mut Heap, form: Value, shim: &str, cx: Ctx) -> Result<Value, Error> {
-    let lambda = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
+    let Some(Value::Str(key_id)) = core::field(heap, form, 1) else { return Err(malformed(heap, form)) };
+    let lambda = core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?;
+    let key = heap.string(key_id).to_string();
+    let key = str_form(heap, &key)?;
+    heap.push_root(key);
     let kind = Repr::Struct.field_kind();
-    suspend_node(heap, shim, kind, None, &[Repr::Fn], &[lambda], cx, None)
+    let node = suspend_node(heap, shim, kind, None, &[Repr::Fn], &[lambda], cx, Some(key));
+    heap.pop_root();
+    node
 }
 
 /// `(tag R E)` -> `(tag KIND E')`: `E`'s value in its tagged form, per its
@@ -1143,9 +1153,11 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
 /// that *does* know tags it, per `Repr::field_kind`, exactly as a value going
 /// into a struct field is tagged.
 ///
-/// `trailing` is an argument that is **already an island form** — `recv`'s
-/// `Option<T>` key, which nothing in the core IR names and which therefore has
-/// no core form to translate. It is appended as one more ordinary argument.
+/// `trailing` is an argument that is **already an island form** — a type key
+/// the answer is built under (`recv`'s `Option<T>`, `Chan::new`'s `Chan<T>`,
+/// a `task`'s `Task<T>`), which the core IR carries as a plain string and
+/// which therefore has no core form to translate. It is appended as one more
+/// ordinary argument.
 fn suspend_node(
     heap: &mut Heap,
     name: &str,
@@ -1225,7 +1237,10 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             // other side could derive it, since a buffer holds tagged words
             // and a word does not name its type. `vector-op`'s `pop` carries
             // the same string for the same reason.
-            if method == "recv" {
+            // `(Chan::new cap)` carries the channel's own key the same way:
+            // the handle is built by the scheduler, which has no type to read
+            // `T` off.
+            if method == "recv" || method == "new" {
                 let key = str_form(heap, &ret_key)?;
                 return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, Some(key));
             }

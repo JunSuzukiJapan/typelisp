@@ -45,8 +45,8 @@
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p none>
+(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -196,7 +196,7 @@ CL 側の定型もつねに `loop` の中に書くので、書き味は変わら
 | `escape` | CL の `*print-escape*`。`~s`/`prin1`/`pprint` で `true`（読み戻せる表現）、`~a`/`princ` で `false`（人間向け）。気にしない実装は無視してよい |
 
 戻り値の `string` がそのまま出力に流れる。`impl` を書かない型は組み込みの表現
-（`#<point 1 2>` の形）で印字される。
+（`#<point x: 1 y: 2>` の形）で印字される。
 
 ```lisp
 (defstruct point (x i32) (y i32))
@@ -212,6 +212,25 @@ CL 側の定型もつねに `loop` の中に書くので、書き味は変わら
 
 pretty printer とも合成される（4 章）。`*print-pretty*` が真なら、実装が返した文字列を
 含むリストが右マージンで折り返される。
+
+標準ライブラリの型の印字表現。CL に同じものがある型は SBCL と同じ形にしてある。REPL が
+結果を表示するときも `~s` と同じ表現になる。
+
+| 型 | `~s` | `~a` |
+|---|---|---|
+| `Vector<T>` | `#<vector<int> 1 2 3>` | 同左（要素は `~a` で） |
+| `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | 同左 |
+| `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>`（数字は処理系内の番号） | 同左 |
+| `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
+| `universal-time` / `internal-time` | 整数（CL の `get-universal-time` / `get-internal-real-time` の値） | 同左 |
+| エラー型（`ParseIntError`、`SimpleError` など） | `#<simpleerror "boom">` | メッセージだけ（`boom`） |
+| `complex` | `#C(1.0 2.0)` | 同左 |
+| `Array<T>` | `#2A((0 0) (0 0))` | 同左 |
+| ストリーム | `#<file-stream for "file /tmp/a.txt" {7}>`、`#<string-output-stream {5}>`、`#<two-way-stream :input-stream … :output-stream …>` | 同左 |
+| ソケット | `#<socket-stream for "socket 127.0.0.1:5000, peer: 127.0.0.1:6000" {10}>`、`#<socket-listener 0.0.0.0:8080, fd: 6 {13}>` | 同左 |
+| `decoded-time` | `#<decoded-time 2026-09-28 13:40:24 +09:00 Mon>`（夏時間なら末尾に `dst`） | 同左 |
+| `heap-info` | `#<heap-info 176246 of 262144 cells live (67%), 85898 free, 2058 symbols, 5928 strings, 199 boxes, 2 collections, growable>` | 同左 |
+| `defstruct` の型 | `#<point x: 1 y: 2>`（フィールド名と値） | 同左（フィールドは `~a` で） |
 
 規則:
 
@@ -277,7 +296,7 @@ CL は「無制限」を `nil` で表すが、この言語に `nil` は無いの
 (let ((a (node::new 1 (Option::none))))
   (setf a::next (Option::some a))   ; a が a 自身を指す
   (setf *print-circle* true)
-  (println "~a" a))                 ; => #1=#<node 1 (some #1#)>
+  (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>
 ```
 
 ラベルは**1回の印字対象ごとに 1 から振り直す**（CL と同じ）。循環していなくても、同じ

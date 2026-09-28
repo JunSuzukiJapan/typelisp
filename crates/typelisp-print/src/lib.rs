@@ -67,6 +67,13 @@ pub trait PrintEnv {
     /// beside it.
     fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> bool;
 
+    /// The name the definition of the struct whose type key is `type_key`
+    /// gives field `index`, which prints before the field's value
+    /// (`#<point x: 1 y: 2>`). `None` for a type whose fields have no names
+    /// — a `Vector<T>`'s elements, a handle's id — which print positionally,
+    /// and for a type this environment has never heard of.
+    fn field_name(&self, type_key: &str, index: usize) -> Option<String>;
+
     /// `v`'s own `print-object` rendering, or `None` when its type has no
     /// such method (the overwhelmingly common case — the caller then falls
     /// back to the built-in representation).
@@ -115,6 +122,10 @@ impl PrintEnv for BarePrintEnv {
 
     fn field_is_niched_option(&self, _type_key: &str, _variant: Option<usize>, _index: usize) -> bool {
         false
+    }
+
+    fn field_name(&self, _type_key: &str, _index: usize) -> Option<String> {
+        None
     }
 
     fn print_object(&self, _heap: &mut Heap, _v: Value, _escape: bool) -> Result<Option<String>, String> {

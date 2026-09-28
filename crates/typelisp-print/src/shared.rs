@@ -30,6 +30,10 @@ pub struct PrintShared {
     /// `rt_print_field_template` — what says a struct or enum field holds a
     /// niche-represented `Option` (`PrintEnv::field_is_niched_option`).
     pub(crate) field_templates: RwLock<HashMap<(String, i64, i64), String>>,
+    /// `(base type key, field index) -> field name`, filled by
+    /// `rt_print_field_name` — what a struct prints before each field's
+    /// value (`PrintEnv::field_name`).
+    pub(crate) field_names: RwLock<HashMap<(String, i64), String>>,
     /// `type key -> the address of that type's compiled `print-object``,
     /// filled by `rt_print_object_method`.
     pub(crate) print_object: RwLock<HashMap<String, usize>>,

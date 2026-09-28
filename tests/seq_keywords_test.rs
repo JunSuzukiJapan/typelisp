@@ -78,11 +78,11 @@ fn key_reaches_the_predicate_variants_and_the_alist_searches() {
     // car is 2 — and the whole pair comes back, not the projection.
     assert_eq!(
         with_fixtures("(assoc 1 (iter al) :key (lambda ((k int)) int (- k 1)))"),
-        "(some #<cons-cell<int,string> 2 two>)"
+        "(some #<cons-cell<int,string> car: 2 cdr: two>)"
     );
     assert_eq!(
         with_fixtures("(rassoc \"ONE\" (iter al) :key (lambda ((s string)) string (upcase s)))"),
-        "(some #<cons-cell<int,string> 1 one>)"
+        "(some #<cons-cell<int,string> car: 1 cdr: one>)"
     );
 }
 
@@ -227,7 +227,7 @@ fn every_function_still_answers_with_no_keywords_at_all() {
     assert_eq!(with_fixtures("(remove 2 (iter a))"), "#<vector<int> 1 3>");
     assert_eq!(with_fixtures("(substitute 9 2 (iter a))"), "#<vector<int> 1 9 9 3>");
     assert_eq!(with_fixtures("(union (iter a) (iter b))"), "#<vector<int> 1 2 3 4>");
-    assert_eq!(with_fixtures("(assoc 2 (iter al))"), "(some #<cons-cell<int,string> 2 two>)");
+    assert_eq!(with_fixtures("(assoc 2 (iter al))"), "(some #<cons-cell<int,string> car: 2 cdr: two>)");
     assert_eq!(
         with_fixtures("(sort (iter b) (lambda ((p int) (q int)) bool (> p q)))"),
         "#<vector<int> 4 3 2>"

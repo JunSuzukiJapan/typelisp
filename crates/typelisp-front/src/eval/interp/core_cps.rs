@@ -208,12 +208,13 @@ enum DriveCallee {
 enum Spawn {
     /// It is made here.
     No,
-    /// `(task CALL)`: it becomes a task of its own.
-    Task,
+    /// `(task CALL)`: it becomes a task of its own, whose handle is built
+    /// under this type key (`task<int>`).
+    Task(String),
     /// `(thread CALL)`: it becomes a task on an OS thread of its own, which
     /// enters the compiled callee; the answer is read back by the node's
-    /// result representation.
-    Thread(Repr),
+    /// result representation, and the handle is built under the key.
+    Thread(Repr, String),
 }
 
 /// The `ArgsKind` of an already-checked call node — what `(task CALL)` wraps.
@@ -749,8 +750,8 @@ fn set_state(heap: &mut Heap, sbase: usize, state: &State) {
         // of the `let` the checker wrapped around it, so the environment the
         // task's `Frame::SelectArm` roots already holds them all.
         State::Blocked(Waiting::Chan(ChanOp::Send(_, v)))
-        | State::Blocked(Waiting::Spawn(v))
-        | State::Blocked(Waiting::SpawnThread(v)) => {
+        | State::Blocked(Waiting::Spawn(v, _))
+        | State::Blocked(Waiting::SpawnThread(v, _)) => {
             heap.set_root(sbase, *v);
             heap.set_root(sbase + 1, Value::Empty);
         }
@@ -1182,7 +1183,7 @@ impl Interp {
         // says so — a program that never blocks should not be interleaved by
         // asking a channel how full it is.
         if let State::Blocked(
-            w @ (Waiting::Chan(_) | Waiting::Select { .. } | Waiting::Spawn(_) | Waiting::SpawnThread(_)),
+            w @ (Waiting::Chan(_) | Waiting::Select { .. } | Waiting::Spawn(..) | Waiting::SpawnThread(..)),
         ) = &next
         {
             // Rooted *first*: a parked `send`'s value lives in the state slot
@@ -1476,8 +1477,9 @@ impl Interp {
 
             Op::Task => {
                 // Field 0 is the result representation, read by the bridge and
-                // by nothing here.
-                let call = core::field(heap, form, 1)
+                // by nothing here; field 1 the handle's type key.
+                let key = str_field(heap, form, 1, "task")?;
+                let call = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (task ..) has no call".to_string()))?;
                 match call_kind(heap, call)? {
                     // `(task (f x))` where `f` is a *value*: the callee is a form
@@ -1488,10 +1490,10 @@ impl Interp {
                         let callee = core::field(heap, call, 0).ok_or_else(|| {
                             EvalError::Internal("eval: (apply ..) has no callee".to_string())
                         })?;
-                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Task }, loc.clone());
+                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Task(key) }, loc.clone());
                         Ok(State::Eval(callee, env))
                     }
-                    kind => self.start_args(heap, stack, call, env, kind, Spawn::Task, loc),
+                    kind => self.start_args(heap, stack, call, env, kind, Spawn::Task(key), loc),
                 }
             }
 
@@ -1499,22 +1501,24 @@ impl Interp {
             // `task`'s are, and the call itself moves to an OS thread of its
             // own — as compiled code, which is all that thread can run
             // (`Self::spawn_thread`). Field 0 is the result representation,
-            // which reads the compiled callee's answer back.
+            // which reads the compiled callee's answer back; field 1 the
+            // handle's type key.
             Op::Thread => {
                 let ret = core::field(heap, form, 0)
                     .and_then(|r| Repr::read(heap, r))
                     .ok_or_else(|| EvalError::Internal("eval: (thread ..) has no result representation".to_string()))?;
-                let call = core::field(heap, form, 1)
+                let key = str_field(heap, form, 1, "thread")?;
+                let call = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (thread ..) has no call".to_string()))?;
                 match call_kind(heap, call)? {
                     ArgsKind::Apply => {
                         let callee = core::field(heap, call, 0).ok_or_else(|| {
                             EvalError::Internal("eval: (apply ..) has no callee".to_string())
                         })?;
-                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Thread(ret) }, loc.clone());
+                        stack.push(heap, Frame::ApplyCallee { form: call, env, spawn: Spawn::Thread(ret, key) }, loc.clone());
                         Ok(State::Eval(callee, env))
                     }
-                    kind => self.start_args(heap, stack, call, env, kind, Spawn::Thread(ret), loc),
+                    kind => self.start_args(heap, stack, call, env, kind, Spawn::Thread(ret, key), loc),
                 }
             }
 
@@ -1874,12 +1878,12 @@ impl Interp {
         // entering it here would make the `task` a plain call.
         match spawn {
             Spawn::No => {}
-            Spawn::Task => {
-                let handle = self.spawn_task(heap, form, argv, kind)?;
+            Spawn::Task(key) => {
+                let handle = self.spawn_task(heap, form, argv, kind, &key)?;
                 return Ok((State::Apply(handle), None));
             }
-            Spawn::Thread(ret) => {
-                let handle = self.spawn_thread(heap, form, argv, kind, ret)?;
+            Spawn::Thread(ret, key) => {
+                let handle = self.spawn_thread(heap, form, argv, kind, ret, &key)?;
                 return Ok((State::Apply(handle), None));
             }
         }
@@ -1941,6 +1945,7 @@ impl Interp {
         form: Value,
         argv: Vec<Value>,
         kind: ArgsKind,
+        key: &str,
     ) -> Result<Value, EvalError> {
         let argv_list = core::list(heap, &argv).map_err(heap_err)?;
         heap.push_root(argv_list);
@@ -1951,7 +1956,7 @@ impl Interp {
             .lock(heap)
             .admit(heap, |heap| TyplBody::interpreted(Task::start_call(heap, form, argv_list, kind)));
         heap.pop_root();
-        Ok(sched::task_handle(heap, id))
+        Ok(sched::task_handle(heap, id, key))
     }
 
     /// Hands a fully-evaluated call to a task on an OS thread of its own —
@@ -1975,6 +1980,7 @@ impl Interp {
         argv: Vec<Value>,
         kind: ArgsKind,
         ret: Repr,
+        key: &str,
     ) -> Result<Value, EvalError> {
         let not_compilable = |what: String, why: String| {
             EvalError::Panic(format!("thread: {} {}; a thread runs only compiled code", what, why))
@@ -2054,7 +2060,7 @@ impl Interp {
             TyplBody::compiled(sched::CompiledTask::enter_with(heap, entry, words, held, answer))
         });
         heap.pop_root();
-        Ok(sched::thread_handle(heap, admitted?))
+        Ok(sched::thread_handle(heap, admitted?, key))
     }
 
     /// The coroutine-ABI entry of `f`, compiling it first — and everything it
@@ -2461,7 +2467,9 @@ impl Interp {
         if type_name == crate::Path::root("chan") {
             let op = match method.as_str() {
                 "new" => match argv.first() {
-                    Some(Value::Int(n)) => ChanOp::New(*n),
+                    // `ret_key` is the channel's own type (`chan<int>`), which
+                    // the handle is built under.
+                    Some(Value::Int(n)) => ChanOp::New(*n, ret_key.clone()),
                     other => {
                         return Err(EvalError::Internal(format!(
                             "Chan::new: {:?} is not a capacity",

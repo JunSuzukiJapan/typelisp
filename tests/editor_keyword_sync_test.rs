@@ -165,7 +165,7 @@ fn is_excluded(name: &str) -> bool {
     // `Result` into a panic, `io-ok` pins an error type, and the last four
     // are the pathname layer's own string surgery (`namestring` and the
     // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 33] = [
+    const PRELUDE_PRIVATE: [&str; 34] = [
         "unwrap-io",
         // The network layer's prelude-private helpers, `unwrap-io`'s
         // counterparts: `unwrap-net` panics on a native `NetError`, the
@@ -230,6 +230,10 @@ fn is_excluded(name: &str) -> bool {
         "array-print-stride",
         "array-print-sub",
         "array-print-dims",
+        // The shared body of the built-in error types' `print-object` impls
+        // (SBCL's two answers for a condition). A user writes `print-object`,
+        // or just prints the error.
+        "error-print-object",
         // `BitVector`'s word-level internals (Phase 6c): the shared body of
         // the `bit-and` family, and the "clear the bits past the length"
         // step every operation that can set them ends with.

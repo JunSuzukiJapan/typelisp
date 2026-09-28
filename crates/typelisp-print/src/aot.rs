@@ -82,6 +82,12 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
             None => false,
         }
     },
+    // The name registered for the field, under the key's *base* for the
+    // reason `enum_variant_name` gives.
+    field_name: |key, index| {
+        let base = typelisp_mem::base_type_key(key).to_string();
+        crate::shared::print_shared().field_names.read().get(&(base, index as i64)).cloned()
+    },
     print_object: aot_print_object,
     format_call: aot_format_call,
     opts: BARE_HOOKS.opts,
@@ -258,6 +264,25 @@ pub unsafe extern "C" fn rt_print_field_template(args: *const i64, argc: u32) ->
     let template = static_str(args, 4, "rt_print_field_template");
     install();
     crate::shared::print_shared().field_templates.write().insert((key.to_string(), variant, index), template.to_string());
+    0
+}
+
+/// Registers one struct field's name: `args` is `[key_ptr, key_len, index,
+/// name_ptr, name_len]`. See `Interp::field_name_descriptors`.
+///
+/// # Safety
+///
+/// `args` must point to 5 valid `i64`s in those representations.
+#[no_mangle]
+pub unsafe extern "C" fn rt_print_field_name(args: *const i64, argc: u32) -> i64 {
+    if argc < 5 {
+        fatal("rt_print_field_name: expected 5 arguments");
+    }
+    let key = static_str(args, 0, "rt_print_field_name");
+    let index = *args.add(2);
+    let name = static_str(args, 3, "rt_print_field_name");
+    install();
+    crate::shared::print_shared().field_names.write().insert((key.to_string(), index), name.to_string());
     0
 }
 

@@ -141,7 +141,7 @@ fn values_are_printed_the_way_the_program_prints_them() {
          (trace pt::total)\n\
          (total (pt::new 3 4))",
     );
-    assert_eq!(out, "  0: (pt::total #<pt 3 4>)\n  0: pt::total returned 7\n");
+    assert_eq!(out, "  0: (pt::total #<pt x: 3 y: 4>)\n  0: pt::total returned 7\n");
 }
 
 /// A `throw` past a traced frame is reported rather than silently leaving a
@@ -392,7 +392,7 @@ fn trace_rendering_holds_its_roots_under_gc_stress() {
         text
     }
     let plain = run(false);
-    assert!(plain.contains("#<pt 1 2>"), "the unstressed transcript is wrong to begin with: {:?}", plain);
+    assert!(plain.contains("#<pt x: 1 y: 2>"), "the unstressed transcript is wrong to begin with: {:?}", plain);
     assert_eq!(run(true), plain, "the collector is visible in what a trace reports");
 }
 

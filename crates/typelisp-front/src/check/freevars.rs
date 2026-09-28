@@ -309,15 +309,17 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // looks exactly like walking a node and fails with "the free-variable
         // walk does not know the tag `vector`" — `field-get`'s trap below.
         wk::LOOP => from(1),
-        // `(task RET-R CALL)` — the call it wraps is an ordinary node, and every
-        // name in it (callee and arguments alike) is read from the scope the
-        // `task` is written in, because that is where they are evaluated. The
-        // representation ahead of it is not a form.
-        wk::TASK | wk::THREAD => from(1),
-        // `(spawn RET-R LAMBDA)` / `(spawn-thread RET-R LAMBDA)` / `(tag R E)`
-        // — the bridge's own rewriting of a `task` or `thread`
-        // (`translate_spawn_call`): one form each, past a representation.
-        wk::SPAWN | wk::SPAWN_THREAD | wk::TAG => from(1),
+        // `(task RET-R KEY CALL)` — the call it wraps is an ordinary node, and
+        // every name in it (callee and arguments alike) is read from the scope
+        // the `task` is written in, because that is where they are evaluated.
+        // The representation and the handle's key ahead of it are not forms.
+        wk::TASK | wk::THREAD => from(2),
+        // `(spawn RET-R KEY LAMBDA)` / `(spawn-thread RET-R KEY LAMBDA)` — the
+        // bridge's own rewriting of a `task` or `thread`
+        // (`translate_spawn_call`): one form, past a representation and a key.
+        wk::SPAWN | wk::SPAWN_THREAD => from(2),
+        // `(tag R E)` — the closure's result, past a representation.
+        wk::TAG => from(1),
         // `(step FORM)` — the form is an ordinary expression and names
         // whatever the surrounding scope holds. The three REPL tool nodes
         // beside it (`trace`/`untrace`/`disassemble-fn`) carry only resolved

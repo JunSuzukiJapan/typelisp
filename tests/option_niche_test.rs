@@ -273,9 +273,9 @@ fn a_niched_option_still_prints_as_some_and_none() {
     const NAMES: &[&str] = &["mk-pair", "mk-gen", "mk-gen-none", "mk-shape", "mk-vec", "mk-nested", "mk-ok", "opt"];
     assert_eq!(both(DEFS, NAMES, "(opt true)"), "(some 5)");
     assert_eq!(both(DEFS, NAMES, "(opt false)"), "none");
-    assert_eq!(both(DEFS, NAMES, "(mk-pair)"), "#<pair (some 1) none>");
-    assert_eq!(both(DEFS, NAMES, "(mk-gen)"), "#<gen<option<int>> (some 3)>");
-    assert_eq!(both(DEFS, NAMES, "(mk-gen-none)"), "#<gen<option<int>> none>");
+    assert_eq!(both(DEFS, NAMES, "(mk-pair)"), "#<pair a: (some 1) b: none>");
+    assert_eq!(both(DEFS, NAMES, "(mk-gen)"), "#<gen<option<int>> v: (some 3)>");
+    assert_eq!(both(DEFS, NAMES, "(mk-gen-none)"), "#<gen<option<int>> v: none>");
     assert_eq!(both(DEFS, NAMES, "(mk-shape)"), "(circle (some 1.5))");
     assert_eq!(both(DEFS, NAMES, "(mk-vec)"), "#<vector<option<int>> (some 1) none>");
     assert_eq!(both(DEFS, NAMES, "(mk-nested)"), "(some none)");

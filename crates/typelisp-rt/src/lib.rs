@@ -5044,6 +5044,7 @@ stream_shim!(rt_stream_string_output, "stream-string-output", [], raw);
 stream_shim!(rt_stream_open_file, "stream-open-file", [str, int], tagged);
 stream_shim!(rt_stream_close, "stream-close", [int], tagged);
 stream_shim!(rt_stream_open_p, "stream-open-p", [int], bool);
+stream_shim!(rt_stream_describe, "stream-describe", [int], tagged);
 stream_shim!(rt_stream_input_p, "stream-input-p", [int], tagged);
 stream_shim!(rt_stream_output_p, "stream-output-p", [int], tagged);
 stream_shim!(rt_stream_read_char, "stream-read-char", [int], tagged);

@@ -393,7 +393,7 @@ fn a_nested_value_dispatches_too() {
 #[test]
 fn a_type_without_an_impl_keeps_the_built_in_representation() {
     let out = stdout_of(r#"(defstruct plain (n int)) (print "~a" (plain::new 7))"#);
-    assert!(out.ends_with("plain 7>"), "unexpected output: {}", out);
+    assert!(out.ends_with("plain n: 7>"), "unexpected output: {}", out);
 }
 
 #[test]
@@ -407,7 +407,7 @@ fn a_method_named_print_object_that_is_not_the_trait_is_ignored() {
         (print "~a" (thing::new 7))
     "#,
     );
-    assert!(out.ends_with("thing 7>"), "unexpected output: {}", out);
+    assert!(out.ends_with("thing n: 7>"), "unexpected output: {}", out);
 }
 
 #[test]
@@ -421,7 +421,7 @@ fn a_print_object_that_prints_itself_falls_back_instead_of_looping() {
         (print "~a" (loopy::new 1))
     "#,
     );
-    assert!(out.starts_with("<#<") && out.ends_with("loopy 1>>"), "unexpected output: {}", out);
+    assert!(out.starts_with("<#<") && out.ends_with("loopy n: 1>>"), "unexpected output: {}", out);
 }
 
 #[test]

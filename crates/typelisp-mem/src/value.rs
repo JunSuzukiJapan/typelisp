@@ -194,9 +194,6 @@ pub const BUILTIN_TYPE_KEYS: &[&str] = &[
     "internal-time",
     "heap-info",
     "neterror",
-    "task",
-    "chan",
-    "thread",
 ];
 
 impl TypeKeyId {
@@ -219,15 +216,6 @@ impl TypeKeyId {
     /// `NetError` — what every `net-*` builtin fails with. Appended after
     /// the rest so no existing id moved.
     pub const NET_ERROR: TypeKeyId = TypeKeyId(14);
-    /// `Task<T>` and `Chan<T>` handles — a boxed struct holding the
-    /// scheduler's id, built by `typelisp_rt::sched` on both sides of the
-    /// compile boundary. No type argument in the key: the two are the same
-    /// thing at run time whatever `T` is.
-    pub const TASK: TypeKeyId = TypeKeyId(15);
-    pub const CHAN: TypeKeyId = TypeKeyId(16);
-    /// `Thread<T>` — the same box a `Task<T>` is (the scheduler's id), under
-    /// its own key so that a thread prints as one.
-    pub const THREAD: TypeKeyId = TypeKeyId(17);
 
     pub fn as_u32(&self) -> u32 {
         self.0

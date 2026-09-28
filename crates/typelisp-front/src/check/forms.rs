@@ -206,7 +206,7 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
     core::tagged(heap, "block", &[name, body, repr])
 }
 
-/// `(task RET-R CALL)` — run `CALL` in a new task.
+/// `(task RET-R KEY CALL)` — run `CALL` in a new task.
 ///
 /// One field, and it is an already-checked call node (`call`/`assoc`/
 /// `dyn-call`/`apply`). The callee and the arguments inside it are evaluated by
@@ -227,12 +227,18 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 /// a closure that makes the call and hands the result to the scheduler
 /// **tagged**, and only the representation says how to tag a raw word.
 ///
-/// `tag` is `"task"` or `"thread"`: `(thread RET-R CALL)` is the same node for
-/// a task that runs on an OS thread of its own.
-pub(super) fn spawn_form(heap: &mut Heap, tag: &str, ret: Value, call: Value) -> Result<Value, Error> {
+/// `key` is the handle's own type key (`task<int>`): the handle is built by
+/// the scheduler, which has no type of its own to read an instantiation off,
+/// and a handle prints as its type (`#<task<int> 1>`).
+///
+/// `tag` is `"task"` or `"thread"`: `(thread RET-R KEY CALL)` is the same node
+/// for a task that runs on an OS thread of its own.
+pub(super) fn spawn_form(heap: &mut Heap, tag: &str, ret: Value, key: &str, call: Value) -> Result<Value, Error> {
     let call = rooted(heap, call);
     let ret = rooted(heap, ret);
-    let form = core::tagged(heap, tag, &[ret, call])?;
+    let key = heap.alloc_string(key.to_string());
+    let key = rooted(heap, key);
+    let form = core::tagged(heap, tag, &[ret, key, call])?;
     Ok(rooted(heap, form))
 }
 

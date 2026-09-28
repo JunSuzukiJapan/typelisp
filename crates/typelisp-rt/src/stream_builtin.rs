@@ -200,6 +200,14 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
             let h = arg!(int(args, 0, name));
             Ok(Value::Bool(with_streams(heap, |t| t.is_open(h))))
         }
+        // A handle the prelude holds is always one the table issued, so a
+        // failure here is a broken invariant, reported on this function's
+        // error channel like a malformed argument.
+        "stream-describe" => {
+            let h = arg!(int(args, 0, name));
+            let text = arg!(with_streams(heap, |t| t.describe(h)).map_err(|e| format!("{}: {}", name, e)));
+            Ok(heap.alloc_string(text))
+        }
         "stream-input-p" => {
             let h = arg!(int(args, 0, name));
             wrap!(with_streams(heap, |t| t.is_input(h)), |v: bool| Value::Bool(v))

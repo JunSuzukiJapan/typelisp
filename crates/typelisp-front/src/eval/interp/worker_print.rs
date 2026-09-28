@@ -44,6 +44,8 @@ pub(crate) struct PrintSnapshot {
     /// `(base type key, variant or NO_VARIANT, index or EVERY_FIELD) ->
     /// the field's type key template` — `Interp::field_template_descriptors`.
     field_templates: HashMap<(String, i64, i64), String>,
+    /// `(base type key, index) -> field name` — `Interp::field_name_descriptors`.
+    field_names: HashMap<(String, i64), String>,
     /// Every method with a `print-object` or a `~/name/` method's signature,
     /// by `(receiver type path, method name)`.
     methods: HashMap<(Path, String), PrintMethod>,
@@ -124,6 +126,10 @@ const WORKER_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
             }
             None => false,
         }
+    },
+    field_name: |key, index| {
+        let base = crate::type_key::split_key(key).0.to_string();
+        current().field_names.get(&(base, index as i64)).cloned()
     },
     print_object: worker_print_object,
     format_call: worker_format_call,
@@ -248,6 +254,9 @@ impl Interp {
         }
         for (key, variant, index, template) in self.field_template_descriptors() {
             snapshot.field_templates.insert((key, variant, index), template);
+        }
+        for (key, index, name) in self.field_name_descriptors() {
+            snapshot.field_names.insert((key, index), name);
         }
         let mut methods = Vec::new();
         self.root.borrow().collect_methods(&[], &mut methods);

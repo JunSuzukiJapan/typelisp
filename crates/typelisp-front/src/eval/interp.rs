@@ -921,6 +921,7 @@ impl Interp {
             scope::TypeEntry::Struct {
                 reprs: Vec::new(),
                 templates: scope::FieldTemplates::Uniform("$0".to_string()),
+                names: Vec::new(),
             },
         );
         // `Option`/`Result`/the four concrete error types are `AdtKind::Sum`
@@ -1145,6 +1146,22 @@ impl Interp {
         // `collect_struct_and_enum_types` returns a `HashMap`, so sort for a
         // deterministic startup sequence — two runs of `compile-file` on the
         // same source must produce the same executable.
+        out.sort();
+        out
+    }
+
+    /// Every struct's field names, spelled for
+    /// `typelisp_print::aot::rt_print_field_name`: `(base type key, index,
+    /// name)` — the executable's copy of what [`Self::field_name`] reads from
+    /// the scope tree here. Sorted, for the same reason
+    /// [`Self::enum_variant_descriptors`] is.
+    pub fn field_name_descriptors(&self) -> Vec<(String, i64, String)> {
+        let mut raw = Vec::new();
+        self.root.borrow().collect_field_names(&[], &mut raw);
+        let mut out: Vec<(String, i64, String)> = raw
+            .into_iter()
+            .map(|(path, index, name)| (crate::type_key::type_key_of(&path).into_owned(), index as i64, name))
+            .collect();
         out.sort();
         out
     }
@@ -2687,6 +2704,14 @@ impl Interp {
         let Some(template) = root.field_template(&path, variant, index) else { return false };
         let args = typelisp_mem::type_key_args(type_key);
         typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(template, &args))
+    }
+
+    /// The name the struct's definition gives field `index`, from the scope
+    /// tree. See [`typelisp_print::PrintEnv::field_name`].
+    fn field_name(&self, type_key: &str, index: usize) -> Option<String> {
+        let base = crate::type_key::split_key(type_key).0;
+        let path = Path::from_segments(base.split("::").map(str::to_string).collect());
+        self.root.borrow().field_name(&path, index).map(str::to_string)
     }
 
     pub(crate) fn print_vars(&self, heap: &Heap) -> crate::eval::format::PrintVars {
@@ -4825,6 +4850,7 @@ const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
     field_is_niched_option: |type_key, variant, index| {
         with_active_interp(|i| i.field_is_niched_option(type_key, variant, index)).unwrap_or(false)
     },
+    field_name: |type_key, index| with_active_interp(|i| i.field_name(type_key, index))?,
     print_object: |heap, v, escape| match with_active_interp(|i| i.print_object(heap, v, escape)) {
         Some(r) => r,
         // No interpreter registered: the printer is running under a bare

@@ -41,6 +41,8 @@ pub struct PrintHooks {
     /// `(type_key, variant, index) -> is a niched Option`. See
     /// [`PrintEnv::field_is_niched_option`].
     pub field_is_niched_option: fn(&str, Option<usize>, usize) -> bool,
+    /// `(type_key, index) -> field name`. See [`PrintEnv::field_name`].
+    pub field_name: fn(&str, usize) -> Option<String>,
     /// `(heap, value, escape) -> rendering`. See [`PrintEnv::print_object`].
     pub print_object: fn(&mut Heap, Value, bool) -> Result<Option<String>, String>,
     /// `(heap, name, value, colon, at) -> rendering`, for `~/name/`. See
@@ -67,6 +69,7 @@ pub struct PrintHooks {
 pub const BARE_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |_, _| None,
     field_is_niched_option: |_, _, _| false,
+    field_name: |_, _| None,
     print_object: |_, _, _| Ok(None),
     format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program to look the method up in", name)),
     opts: |_| Opts::default(),
@@ -104,6 +107,10 @@ impl PrintEnv for RtPrintEnv {
 
     fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> bool {
         (self.hooks.field_is_niched_option)(type_key, variant, index)
+    }
+
+    fn field_name(&self, type_key: &str, index: usize) -> Option<String> {
+        (self.hooks.field_name)(type_key, index)
     }
 
     fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {

@@ -795,6 +795,16 @@ fn field_template_list(heap: &mut Heap, params: &[String], fields: &[Type]) -> R
     items.finish_list()
 }
 
+/// A list of strings, each rooted as it is made — `defstruct`'s field names.
+fn string_list(heap: &mut Heap, items: &[String]) -> Result<Value, Error> {
+    let mut list = Items::new(heap);
+    for s in items {
+        let v = list.heap().alloc_string(s.clone());
+        list.push(v);
+    }
+    list.finish_list()
+}
+
 fn untag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
     core::tagged(heap, "untag-int", &[e])
 }
@@ -2244,12 +2254,21 @@ impl Checker {
         f.finish("defvar")
     }
 
-    /// `(defstruct PATH (REPR...) (TEMPLATE...))` — the type's field
-    /// representations, which is where the bridge reads a `construct`'s and
-    /// a pattern's field kinds from, then each field's type as a key
-    /// template (`type_key::field_key_template`), which is how the printer
-    /// tells a niche-represented `Option` field from the bare word it holds.
-    fn defstruct_form(&self, heap: &mut Heap, name: &Path, params: &[String], fields: &[Type]) -> Result<Value, Error> {
+    /// `(defstruct PATH (REPR...) (TEMPLATE...) (NAME...))` — the type's
+    /// field representations, which is where the bridge reads a
+    /// `construct`'s and a pattern's field kinds from, then each field's type
+    /// as a key template (`type_key::field_key_template`), which is how the
+    /// printer tells a niche-represented `Option` field from the bare word it
+    /// holds, then each field's name, which the printer writes before its
+    /// value (`#<point x: 1 y: 2>`).
+    fn defstruct_form(
+        &self,
+        heap: &mut Heap,
+        name: &Path,
+        params: &[String],
+        fields: &[Type],
+        names: &[String],
+    ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = forms::path_form(f.heap(), name);
         f.push(path);
@@ -2257,6 +2276,8 @@ impl Checker {
         f.push(reprs);
         let templates = field_template_list(f.heap(), params, fields)?;
         f.push(templates);
+        let names = string_list(f.heap(), names)?;
+        f.push(names);
         f.finish("defstruct")
     }
 
@@ -8111,9 +8132,10 @@ impl Checker {
             )));
         }
         // The fat box holds one `Value`, so the concrete value must have a
-        // heap representation. This excludes the primitives even though they
-        // can carry `impl`s (`impl Eq i32`) — hence a per-*type* rule rather
-        // than a per-trait one: `:dyn Eq` is fine for a `defstruct`.
+        // heap representation (`is_heap_repr`). That admits `int`/`f64`/
+        // `string`/`ratio` but not the fixed widths, `f32`, `bool`, `char` or
+        // `symbol`, even though those can carry `impl`s (`impl Eq i32`) —
+        // hence a per-*type* rule rather than a per-trait one.
         if !self.is_heap_repr(concrete) {
             return Err(Error::TypeError(format!(
                 "`{}` has no heap representation (its values are not `Sexpr`-encodable), so it cannot be boxed as `:dyn {}`",
@@ -8990,7 +9012,7 @@ impl Checker {
         // `(defstruct ...)` node goes first because the type has to exist
         // before its methods.
         let mut members = Items::new(heap);
-        let def_node = self.defstruct_form(members.heap(), &type_fq, &type_params, &field_types)?;
+        let def_node = self.defstruct_form(members.heap(), &type_fq, &type_params, &field_types, &field_names)?;
         members.push(def_node);
         for (i, field) in fields.iter().enumerate() {
             let (field_name, field_ty) = (&field.name, &field.ty);
@@ -11935,11 +11957,12 @@ impl Checker {
         }
         self.reject_typed_ptr_task_args(heap, inner.form, form_name)?;
         let ret = self.repr_form(heap, &inner.ty)?;
-        let form = forms::spawn_form(heap, form_name, ret, inner.form)?;
         let ty = match kind {
             SpawnKind::Task => super::registry::task_of(inner.ty),
             SpawnKind::Thread => super::registry::thread_of(inner.ty),
         };
+        let key = crate::type_key::type_key_of_type(&ty);
+        let form = forms::spawn_form(heap, form_name, ret, &key, inner.form)?;
         Ok(Checked::new(form, ty))
     }
 

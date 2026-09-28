@@ -1163,6 +1163,9 @@ fn register_stream_builtins(root: &mut Namespace) {
     // Lifetime and interrogation.
     native("stream-close", vec![h.clone()], unit_or_err.clone());
     native("stream-open-p", vec![h.clone()], Type::Bool);
+    // What the stream is attached to, for its printed form (`for "file
+    // /tmp/a.txt"`) — `StreamTable::describe`.
+    native("stream-describe", vec![h.clone()], Type::Str);
     native("stream-input-p", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
     native("stream-output-p", vec![h.clone()], result_of(Type::Bool, file_err.clone()));
 

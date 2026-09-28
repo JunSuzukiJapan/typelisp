@@ -96,7 +96,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | 同上 |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` | [print-object](functions/printing.md#5-print-object型ごとの印字表現) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` 組み込みのエラー型すべて | [print-object](functions/printing.md#5-print-object型ごとの印字表現) |
 
 `cons-cell<A,B>` の `Eq`/`Ord` は、要素の型が `Eq`/`Ord` を実装しているときに使える。
 

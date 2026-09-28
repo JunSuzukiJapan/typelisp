@@ -594,11 +594,27 @@ fn try_run_pending(
             match interp.exec(heap, tl) {
                 // The REPL's other half of `dribble`: the value echoed back.
                 Ok(Some(v)) => {
-                    let chk = checker.borrow();
-                    let text = format_value(heap, chk.registry(), chk.expr_type(), &v);
-                    typelisp_abi::dribble::note(&text);
-                    typelisp_abi::dribble::note("\n");
-                    println!("{}", text);
+                    // The form's checked type decides how a niched `Option`
+                    // prints — the word alone cannot say it is one.
+                    let repr = {
+                        let chk = checker.borrow();
+                        let reg = chk.registry();
+                        chk.expr_type().map(|ty| check::repr::Repr::of_by(ty, &|p| reg.type_def(p).map(|d| d.kind)))
+                    };
+                    heap.push_root(v);
+                    let rendered = interp.render_readably(heap, v, repr.as_ref());
+                    heap.pop_root();
+                    match rendered {
+                        Ok(text) => {
+                            typelisp_abi::dribble::note(&text);
+                            typelisp_abi::dribble::note("\n");
+                            println!("{}", text);
+                        }
+                        Err(e) => {
+                            eprintln!("error: {}", e);
+                            break;
+                        }
+                    }
                 }
                 Ok(None) => {}
                 Err(e) => {
@@ -643,200 +659,3 @@ fn is_incomplete(e: &Error) -> bool {
     )
 }
 
-/// Format a value for REPL output, in the reader's own syntax where
-/// possible (so the printed form can be pasted back in).
-///
-/// `ty` is the form's checked type, when the checker has one: a
-/// niche-represented `Option<T>` (`check::repr::Repr::Niche`) is a bare
-/// word the value alone cannot be recognized by, and prints as `none` /
-/// `(some ...)` only because the type says so. `Option<Sexpr>` is the
-/// documented exception (`docs/ja/reference/functions/printing.md` §1): S-expression data prints as
-/// the S-expression, the empty list as `()`.
-fn format_value(heap: &Heap, reg: &Registry, ty: Option<&Type>, v: &Value) -> String {
-    if let Some(ty) = ty {
-        let repr = check::repr::Repr::of_by(ty, &|p| reg.type_def(p).map(|d| d.kind));
-        if repr.niche_payload().is_some_and(|p| *p != check::repr::Repr::Sexpr) {
-            return match v {
-                Value::Empty => "none".to_string(),
-                _ => format!("(some {})", format_value(heap, reg, None, v)),
-            };
-        }
-    }
-    match v {
-        Value::Int(i) => i.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Char(c) => format!("#\\{}", c),
-        Value::Empty => "()".to_string(),
-        sv => format_sexpr(heap, reg, *sv),
-    }
-}
-
-/// Format a `mem::Value` recursively, in the reader's own syntax. `reg` recovers an enum box's
-/// variant *name* (the runtime stores only the index) so `(some 1)` prints
-/// the way it always has.
-fn format_sexpr(heap: &Heap, reg: &Registry, v: Value) -> String {
-    match v {
-        Value::Empty => "()".to_string(),
-        Value::Int(i) => i.to_string(),
-        // `Sexpr::f64`, a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance,
-        // a `HashTable<K,V>`, and an enum value are all heap-boxed
-        // (`Value::Boxed`, see `BoxedObj`) — `heap.is_struct`/
-        // `is_hashtable`/`is_enum` tell them apart. A boxed struct prints
-        // positionally (no field names at runtime), recursing through this
-        // same function for each field.
-        Value::Boxed(id) if heap.is_struct(id) => {
-            let key = type_key::heap_type_key(heap, id).expect("a struct box has a type name").to_string();
-            let parts: Vec<String> = (0..heap.struct_field_count(id))
-                .map(|i| format_field(heap, reg, &key, None, i, heap.struct_field(id, i)))
-                .collect();
-            format!("#<{} {}>", type_key::heap_type_path(heap, id).expect("a struct box has a type name"), parts.join(" "))
-        }
-        // An enum value prints as its variant name applied to its fields —
-        // `(some 1)` / a bare `none` — the exact shape the old
-        // `RtValue::Data` arm produced. The box stores the *type* name and
-        // variant *index*; the variant's name lives only in the checker's
-        // registry, looked up by re-parsing the stored `Path` string.
-        Value::Boxed(id) if heap.is_enum(id) => {
-            let type_path = type_key::heap_type_path(heap, id).expect("an enum box has a type name");
-            let variant = heap.enum_variant(id);
-            let name = reg
-                .type_def(&type_path)
-                .and_then(|d| d.variants.get(variant))
-                .map(|v| v.name.clone())
-                .unwrap_or_else(|| "<unknown-variant>".to_string());
-            if heap.enum_field_count(id) == 0 {
-                name
-            } else {
-                let key = type_key::heap_type_key(heap, id).expect("an enum box has a type name").to_string();
-                let parts: Vec<String> = (0..heap.enum_field_count(id))
-                    .map(|i| format_field(heap, reg, &key, Some(variant), i, heap.enum_field(id, i)))
-                    .collect();
-                format!("({} {})", name, parts.join(" "))
-            }
-        }
-        Value::Boxed(id) if heap.is_hashtable(id) => format!("#<hashtable count={}>", heap.hashtable_count(id)),
-        // A `Scope<V>` with heap-repr `V` is boxed too since Stage 8, and
-        // prints the same way a native-`V` scope always did.
-        Value::Boxed(id) if heap.is_scope(id) => format!("#<scope depth={}>", heap.scope_frame_count(id)),
-        // A closure is a boxed value, printed opaquely — and identically
-        // whether it was compiled or is being tree-walked
-        // (`BoxedObj::CompiledClosure` / `BoxedObj::Closure`). Which one a
-        // given `lambda` became is a matter of whether the JIT took it, not
-        // anything about the value, so printing must not tell them apart.
-        Value::Boxed(id) if heap.is_compiled_closure(id) || heap.is_closure(id) => "#<closure>".to_string(),
-        // The other kind of function value: a built-in reified as a value,
-        // which prints as its name rather than opaquely — there is nothing
-        // else to show, and the name is exactly what identifies it.
-        Value::Boxed(id) if heap.is_builtin_fn(id) => match heap.builtin_fn_recv(id) {
-            None => format!("#<builtin {}>", heap.builtin_fn_name(id)),
-            Some(pid) => format!(
-                "#<builtin {}::{}>",
-                crate::types::path_from_id(heap, pid),
-                heap.builtin_fn_name(id)
-            ),
-        },
-        // CL prints a `random-state` unreadably (implementation-defined) too —
-        // its seed is an implementation detail, not part of the value.
-        Value::Boxed(id) if heap.is_random_state(id) => "#<random-state>".to_string(),
-        Value::Boxed(id) if heap.is_bignum(id) => heap.bignum_value(id).to_string(),
-        Value::Boxed(id) if heap.is_ratio(id) => {
-            let r = heap.ratio_value(id);
-            format!("{}/{}", r.numer(), r.denom())
-        }
-        // A narrow integer inside a `Sexpr` prints as the number it is — the
-        // same text an `i32` of that value gives. The box carries the width so
-        // the *type* survives, not to make the number look different.
-        Value::Boxed(id) if heap.narrow_box(id).is_some() => {
-            heap.narrow_box(id).expect("just tested").value.to_string()
-        }
-        // Positively `is_f64`/`is_f32`: the bare fall-through these replace
-        // read every other box kind as an `f64`, which the accessor answers
-        // with a panic.
-        Value::Boxed(id) if heap.is_f64(id) => format_f64(heap.f64_value(id)),
-        Value::Boxed(id) if heap.is_f32(id) => format_f32(heap.f32_value(id)),
-        Value::Boxed(_) => "#<unprintable>".to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Char(c) => format!("#\\{}", c),
-        Value::Symbol(id) => heap.symbol_name(id).to_string(),
-        Value::Str(id) => format!("{:?}", heap.string(id)),
-        Value::Path(id) => heap
-            .path_segments(id)
-            .iter()
-            .map(|s| heap.symbol_name(*s))
-            .collect::<Vec<_>>()
-            .join("::"),
-        Value::Cons(_) => format_list(heap, reg, v),
-    }
-}
-
-/// One field of a struct or enum box — as the value it is, unless the
-/// registry says the field's type (the definition's, instantiated by the
-/// box's own key) is a niche-represented `Option`, which the word cannot
-/// say for itself. The same question `typelisp_print` asks its
-/// `PrintEnv`, answered here from the checker's registry directly.
-fn format_field(heap: &Heap, reg: &Registry, key: &str, variant: Option<usize>, index: usize, f: Value) -> String {
-    let (base, _) = type_key::split_key(key);
-    let path = Path::from_segments(base.split("::").map(str::to_string).collect());
-    let args = typelisp_mem::type_key_args(key);
-    // A `Vector<T>`'s fields are its elements, every one a `T` — the
-    // registry records no fields for it, so the template is spelled here.
-    let niched = if types::path_is_builtin(&path, "vector") {
-        typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template("$0", &args))
-    } else {
-        reg.type_def(&path).is_some_and(|def| {
-            let fields = match variant {
-                Some(v) => def.variants.get(v).map(|v| &v.fields),
-                None => def.variants.first().map(|v| &v.fields),
-            };
-            fields.and_then(|fs| fs.get(index)).is_some_and(|field_ty| {
-                let template = type_key::field_key_template(&def.params, field_ty);
-                typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(&template, &args))
-            })
-        })
-    };
-    if !niched {
-        return format_sexpr(heap, reg, f);
-    }
-    match f {
-        Value::Empty => "none".to_string(),
-        _ => format!("(some {})", format_sexpr(heap, reg, f)),
-    }
-}
-
-fn format_list(heap: &Heap, reg: &Registry, mut v: Value) -> String {
-    let mut parts = Vec::new();
-    loop {
-        match v {
-            Value::Cons(_) => {
-                // Safe: `v` was just matched as `Cons`, so `car`/`cdr` cannot
-                // return `Error::NotACons` here.
-                let car = heap.car(v).expect("cons car");
-                parts.push(format_sexpr(heap, reg, car));
-                v = heap.cdr(v).expect("cons cdr");
-            }
-            Value::Empty => return format!("({})", parts.join(" ")),
-            other => return format!("({} . {})", parts.join(" "), format_sexpr(heap, reg, other)),
-        }
-    }
-}
-
-/// Render an `f64` guaranteeing a decimal point, so e.g. `2.0` doesn't print
-/// as `2` (which would be confusable with an `Int`).
-fn format_f64(f: f64) -> String {
-    if f.is_finite() && f == f.trunc() {
-        format!("{:.1}", f)
-    } else {
-        f.to_string()
-    }
-}
-
-/// [`format_f64`] for an `f32` — `f32::to_string` is the shortest text that
-/// reads back as the same binary32 value, which is a different (shorter)
-/// answer than the widened `f64`'s.
-fn format_f32(f: f32) -> String {
-    if f.is_finite() && f == f.trunc() {
-        format!("{:.1}", f)
-    } else {
-        f.to_string()
-    }
-}

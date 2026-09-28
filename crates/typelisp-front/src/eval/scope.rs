@@ -55,7 +55,11 @@ pub(crate) enum TypeEntry {
     /// that reuses the struct representation but whose fields are internal
     /// (`Vector<T>`) records no representations: nothing ever names those
     /// fields. Its *elements* still print, so it records a uniform template.
-    Struct { reprs: Vec<crate::check::repr::Repr>, templates: FieldTemplates },
+    ///
+    /// `names` are the fields' names, which the printer writes before each
+    /// value (`#<point x: 1 y: 2>`). Empty for a type whose fields are its
+    /// elements, which print positionally (`#<vector<int> 1 2 3>`).
+    Struct { reprs: Vec<crate::check::repr::Repr>, templates: FieldTemplates, names: Vec<String> },
     /// A `defenum` — carries the same per-variant field-type data
     /// `enum_defs` used to.
     Enum(EnumDef),
@@ -191,6 +195,44 @@ impl ModuleScope {
             (TypeEntry::Enum(def), Some(v)) => def.templates.get(v)?.get(index).map(String::as_str),
             (TypeEntry::Struct { templates, .. }, None) => templates.get(index),
             _ => None,
+        }
+    }
+
+    /// The name of field `index` of the struct registered at `name`, or `None`
+    /// when no struct is registered there or its fields have no names (a
+    /// `Vector<T>`'s elements). The printer's third question
+    /// ([`typelisp_print::PrintEnv::field_name`]).
+    pub(crate) fn field_name(&self, name: &Path, index: usize) -> Option<&str> {
+        let mut ns = self;
+        for seg in name.parent() {
+            ns = ns.children.get(seg)?;
+        }
+        match ns.types.get(name.last_segment())? {
+            TypeEntry::Struct { names, .. } => names.get(index).map(String::as_str),
+            TypeEntry::Enum(_) => None,
+        }
+    }
+
+    /// Every registered struct's field names, as `(path, index, name)` in tree
+    /// order — for an AOT executable's startup registration
+    /// (`typelisp_print::aot::rt_print_field_name`) and a worker thread's
+    /// printer snapshot, the same two readers [`Self::collect_field_templates`]
+    /// has.
+    pub(crate) fn collect_field_names(&self, prefix: &[String], out: &mut Vec<(Path, usize, String)>) {
+        for (name, entry) in &self.types {
+            if let TypeEntry::Struct { names, .. } = entry {
+                let mut segs = prefix.to_vec();
+                segs.push(name.clone());
+                let path = Path::from_segments(segs);
+                for (i, n) in names.iter().enumerate() {
+                    out.push((path.clone(), i, n.clone()));
+                }
+            }
+        }
+        for (name, child) in &self.children {
+            let mut segs = prefix.to_vec();
+            segs.push(name.clone());
+            child.collect_field_names(&segs, out);
         }
     }
 

@@ -100,7 +100,7 @@ fn print_level_applies_to_struct_and_enum_values() {
         (setf *print-level* 1)
         (format false "~a" (pair::new (pt::new 1 2) (pt::new 3 4)))
     "#;
-    assert_eq!(fmt(src), "#<pair # #>");
+    assert_eq!(fmt(src), "#<pair a: # b: #>");
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ fn print_length_truncates_struct_fields() {
         (setf *print-length* 2)
         (format false "~a" (quad::new 1 2 3 4))
     "#;
-    assert_eq!(fmt(src), "#<quad 1 2 ...>");
+    assert_eq!(fmt(src), "#<quad a: 1 b: 2 ...>");
 }
 
 #[test]
@@ -196,7 +196,7 @@ fn a_circular_structure_prints_with_labels_instead_of_recursing() {
     "#
     );
     // `#1=` marks the definition, `#1#` the reference back to it.
-    assert_eq!(fmt(&src), "#1=#<node 1 (some #1#)>");
+    assert_eq!(fmt(&src), "#1=#<node val: 1 next: (some #1#)>");
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn a_cycle_reached_through_two_paths_gets_one_label() {
           (format false "~a" (list a a)))
     "#
     );
-    assert_eq!(fmt(&src), "(#1=#<node 1 (some #1#)> #1#)");
+    assert_eq!(fmt(&src), "(#1=#<node val: 1 next: (some #1#)> #1#)");
 }
 
 // ---------------------------------------------------------------------------

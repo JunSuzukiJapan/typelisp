@@ -133,22 +133,22 @@ fn substitute_replaces_by_value_and_by_predicate() {
 fn the_alist_catalog_searches_by_key_value_and_predicate() {
     assert_eq!(
         with_fixtures("(assoc-if (iter al) (lambda ((k int)) bool (= k 2)))"),
-        "(some #<cons-cell<int,string> 2 two>)"
+        "(some #<cons-cell<int,string> car: 2 cdr: two>)"
     );
-    assert_eq!(with_fixtures("(rassoc \"two\" (iter al))"), "(some #<cons-cell<int,string> 2 two>)");
+    assert_eq!(with_fixtures("(rassoc \"two\" (iter al))"), "(some #<cons-cell<int,string> car: 2 cdr: two>)");
     assert_eq!(
         with_fixtures("(rassoc-if (iter al) (lambda ((s string)) bool (equal s \"one\")))"),
-        "(some #<cons-cell<int,string> 1 one>)"
+        "(some #<cons-cell<int,string> car: 1 cdr: one>)"
     );
     // `acons` puts the new pair in front, as CL's cons does.
     assert_eq!(
         with_fixtures("(acons 3 \"three\" (iter al))"),
-        "#<vector<cons-cell<int,string>> #<cons-cell<int,string> 3 three> #<cons-cell<int,string> 1 one> #<cons-cell<int,string> 2 two>>"
+        "#<vector<cons-cell<int,string>> #<cons-cell<int,string> car: 3 cdr: three> #<cons-cell<int,string> car: 1 cdr: one> #<cons-cell<int,string> car: 2 cdr: two>>"
     );
     // `pairlis` stops at the shorter of the two.
     assert_eq!(
         with_fixtures("(pairlis (iter a) (iter b))"),
-        "#<vector<cons-cell<int,int>> #<cons-cell<int,int> 1 2> #<cons-cell<int,int> 2 3> #<cons-cell<int,int> 2 4>>"
+        "#<vector<cons-cell<int,int>> #<cons-cell<int,int> car: 1 cdr: 2> #<cons-cell<int,int> car: 2 cdr: 3> #<cons-cell<int,int> car: 2 cdr: 4>>"
     );
 }
 
@@ -276,8 +276,8 @@ fn nconc_appends_into_the_receiver_and_nreconc_reverses_first() {
 /// `cons-cell`'s own `set-car`/`set-cdr` return `()`.
 #[test]
 fn rplaca_and_rplacd_return_the_mutated_cell() {
-    assert_eq!(show("(rplaca (cons 1 2) 9)"), "#<cons-cell<int,int> 9 2>");
-    assert_eq!(show("(rplacd (rplaca (cons 1 2) 9) 8)"), "#<cons-cell<int,int> 9 8>");
+    assert_eq!(show("(rplaca (cons 1 2) 9)"), "#<cons-cell<int,int> car: 9 cdr: 2>");
+    assert_eq!(show("(rplacd (rplaca (cons 1 2) 9) 8)"), "#<cons-cell<int,int> car: 9 cdr: 8>");
 }
 
 // ------------------------------------------- filled in on 2026-09-25

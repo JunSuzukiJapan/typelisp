@@ -1824,7 +1824,7 @@ enum ShareState {
 /// they are deliberately *not* keys: two references to one float box are not
 /// interesting sharing, and labelling them `#1=` would be noise. Hash tables
 /// are excluded for the same practical reason — they render as
-/// `#<hashtable count=N>` without recursing, so they can neither cycle nor
+/// `#<hashtable<K,V> count=N>` without recursing, so they can neither cycle nor
 /// usefully be labelled.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 enum NodeKey {
@@ -2137,6 +2137,13 @@ impl Renderer {
                         break;
                     }
                     out.push(' ');
+                    // `x: 1` — the name the definition gives the field, when it
+                    // gives one. Not `:x`, which would read as a keyword
+                    // argument (`(point::make :x 1)`).
+                    if let Some(name) = ctx.env.field_name(&key, i) {
+                        out.push_str(&name);
+                        out.push_str(": ");
+                    }
                     // Read the field out before the recursive call: `heap` is
                     // `&mut` here (the `print-object` dispatch needs it), so the
                     // read cannot stay borrowed across it.
@@ -2180,9 +2187,13 @@ impl Renderer {
                     out.push(')');
                 }
             }
-            Value::Boxed(id) if heap.is_hashtable(id) => {
-                out.push_str(&format!("#<hashtable count={}>", heap.hashtable_count(id)))
-            }
+            // Named by its whole type, as a `Vector<T>` is: the table carries
+            // its instantiation (`hashtable<string,int>`) from `HashTable::new`.
+            Value::Boxed(id) if heap.is_hashtable(id) => out.push_str(&format!(
+                "#<{} count={}>",
+                heap.struct_type_name(id),
+                heap.hashtable_count(id)
+            )),
             Value::Boxed(id) if heap.is_scope(id) => {
                 out.push_str(&format!("#<scope depth={}>", heap.scope_frame_count(id)))
             }

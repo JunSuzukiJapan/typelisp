@@ -292,12 +292,46 @@ pub(crate) struct StreamObj {
     /// The last character written, for `fresh-line`'s "only if not already at
     /// the start of a line" rule.
     pub(crate) last_written: Option<char>,
+    /// What the stream is attached to, as the printer shows it
+    /// ([`StreamTable::describe`]) — recorded where only the opener knows it
+    /// (a file's path), and on `close` for a socket, whose addresses go with
+    /// its descriptor.
+    described: Option<String>,
 }
 
 impl StreamObj {
     pub(crate) fn new(backend: Backend, input: bool, output: bool) -> StreamObj {
-        StreamObj { backend, pushback: Vec::new(), input, output, last_written: None }
+        StreamObj { backend, pushback: Vec::new(), input, output, last_written: None, described: None }
     }
+}
+
+/// What a live backend is attached to, the way SBCL names it inside
+/// `#<...>`: `for "file /tmp/a.txt"` for an fd-stream, `for "socket local,
+/// peer: remote"` for a connected socket's stream, `local, fd: N` for a
+/// socket object, and nothing for a string stream. A file's path is not
+/// here — only the opener has it, and records it on the stream.
+fn describe_backend(backend: &Backend) -> StreamResult<String> {
+    let io = |e: std::io::Error| format!("describe: {}", e);
+    Ok(match backend {
+        Backend::Stdin => "for \"standard input\"".to_string(),
+        Backend::Stdout => "for \"standard output\"".to_string(),
+        Backend::Stderr => "for \"standard error\"".to_string(),
+        // A connection whose peer has gone has no peer address any more; it
+        // is described by what it still has.
+        Backend::Tcp { sock, .. } => match sock.peer_address() {
+            Ok(peer) => format!("for \"socket {}, peer: {}\"", sock.local_address().map_err(io)?, peer),
+            Err(_) => format!("for \"socket {}\"", sock.local_address().map_err(io)?),
+        },
+        Backend::Listener { listen, .. } => format!("{}, fd: {}", listen.local_address().map_err(io)?, listen.raw_fd()),
+        Backend::Udp { sock, .. } => {
+            use std::os::unix::io::AsRawFd;
+            format!("{}, fd: {}", sock.local_addr().map_err(io)?, sock.as_raw_fd())
+        }
+        Backend::StringIn { .. } | Backend::StringOut(_) | Backend::Resolver { .. } | Backend::Closed => String::new(),
+        Backend::FileIn(_) | Backend::FileOut(_) => {
+            return Err("describe: a file stream was opened without recording its path".to_string())
+        }
+    })
 }
 
 /// A stream handle as typelisp sees it: an opaque `i64`. Handles start at 1,
@@ -361,6 +395,17 @@ impl StreamTable {
         self.insert(StreamObj::new(Backend::Stdin, true, false))
     }
 
+    /// What stream `h` is attached to, for the printer (`#<file-stream for
+    /// "file /tmp/a.txt" {3}>`): see [`describe_backend`]. A closed stream
+    /// keeps the description it had.
+    pub fn describe(&mut self, h: Handle) -> StreamResult<String> {
+        let s = self.get(h)?;
+        match &s.described {
+            Some(d) => Ok(d.clone()),
+            None => describe_backend(&s.backend),
+        }
+    }
+
     pub fn stdout(&mut self) -> Handle {
         self.insert(StreamObj::new(Backend::Stdout, false, true))
     }
@@ -400,6 +445,8 @@ impl StreamTable {
             }
             other => return Err(format!("open: unknown mode {}", other)),
         };
+        let mut obj = obj;
+        obj.described = Some(format!("for \"file {}\"", path));
         Ok(self.insert(obj))
     }
 
@@ -431,6 +478,11 @@ impl StreamTable {
         // The socket file is the listener's address: gone with the listener.
         if let Backend::Listener { listen: Listen::Unix { path, .. }, .. } = &s.backend {
             let _ = std::fs::remove_file(path);
+        }
+        // What it was attached to outlives the descriptor, as an SBCL
+        // fd-stream's name does.
+        if s.described.is_none() {
+            s.described = Some(describe_backend(&s.backend)?);
         }
         // A string output stream keeps its text: CL allows
         // `get-output-stream-string` after `close`.
