@@ -923,7 +923,11 @@ pub const PROGRAM_LABEL: &str = "<program>";
 ///
 /// Applies each unit in order. No bitcode is installed — a dump embedded in an
 /// executable carries none, and this crate has no installer anyway.
-pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8]) -> Result<crate::Interp, String> {
+///
+/// `ns` (`::`-joined) is the namespace a later eval'd form is checked in: the
+/// entry file's module, where `typl file.typl` places one too, so a bare name
+/// in it resolves to the program's own definition.
+pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8], ns: &str) -> Result<crate::Interp, String> {
     let mut chk = crate::Checker::new();
     // Before anything runs: `Interp::new` resets the runtime global table
     // (`typelisp_rt::reset_global_table`), which is why an AOT program's startup
@@ -945,6 +949,7 @@ pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8]) -> Result<crate::Inter
     }
 
     chk.take_warnings();
+    chk.set_current_ns(ns.split("::").map(str::to_string).collect());
     interp.set_checker(std::rc::Rc::new(std::cell::RefCell::new(chk)));
     Ok(interp)
 }

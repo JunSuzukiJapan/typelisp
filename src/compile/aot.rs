@@ -35,22 +35,21 @@
 //! C runtime's startup code calls the executable's `main` expecting
 //! roughly `int main(void)` (Phase 2 doesn't thread argc/argv through to
 //! typelisp). Those two signatures aren't link-compatible, so the file's
-//! `main` defun is compiled under the internal name `tl_main` instead, and
-//! [`build_main_wrapper`] adds a separate, hand-built LLVM function
-//! actually named `main` that just calls `tl_main` and truncates its `i64`
+//! `main` defun keeps its ordinary mangled symbol (`tl_p::main` for `p.typl`),
+//! and [`build_main_wrapper`] adds a separate, hand-built LLVM function
+//! actually named `main` that just calls it and truncates its `i64`
 //! result to the `i32` process exit code.
 //!
 //! ## `use` and modules
 //!
-//! A `(use ...)` in the entry file loads the dependency it names through
-//! the same [`crate::project::Loader`] `typl file.typl` uses, each under
-//! its own file-derived module path (`Loader::load_uses_in`). The entry
-//! file itself is the one exception: unlike `Loader::load_entry` (which
-//! wraps *every* file it loads, entry included, in `<stem>`), the entry
-//! file here stays at the root namespace — narrower than what `Loader`
-//! would do on its own, and deliberately so, since wrapping it would change
-//! `tl_main`/`ENTRY_POINT_INTERNAL_NAME` and everything downstream of it
-//! that assumes a bare root `main`. A `defun main` anywhere else — inside a
+//! The entry file is a module, exactly as under `typl file.typl`
+//! (`Loader::load_entry`): its items live under the path its location
+//! derives to (`project::module_segs_for`), so `p.typl`'s `point` is
+//! `p::point` in an executable as it is in the interpreter, and a value
+//! prints the same either way. A `(use ...)` in it loads the dependency it
+//! names through the same [`crate::project::Loader`], each under its own
+//! file-derived module path (`Loader::load_uses_in`). The entry point is the
+//! entry file's own `main`; a `defun main` anywhere else — inside a
 //! `(module ...)` in the entry file, or anywhere in a `use`d file — can
 //! never be reached as an entry point, so [`collect_aot_item`] rejects it
 //! outright rather than silently compiling dead code under a confusing
@@ -73,7 +72,6 @@ use crate::compile::symbols::CompiledItem;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 
 const ENTRY_POINT_NAME: &str = "main";
-const ENTRY_POINT_INTERNAL_NAME: &str = "tl_main";
 
 /// Registers one checked top-level form with `interp` and records what
 /// [`compile_file`] must do with it: a compiled body to emit (`items`), a
@@ -82,11 +80,9 @@ const ENTRY_POINT_INTERNAL_NAME: &str = "tl_main";
 /// Recurses into a `(module ...)`, which covers three shapes at once — the
 /// monomorphization bundle a generic instantiation comes wrapped in, the
 /// `(module ...)` a user writes, and the per-target-type grouping
-/// `Checker::check_impl` returns for an `impl` block. (The entry file itself
-/// is *not* one of these: unlike `typl file.typl`'s own `Loader::load_entry`,
-/// [`compile_file`] keeps the entry file at the root namespace and only
-/// wraps a `use`d dependency in its file-derived module — see the module doc
-/// comment.) These are just containers of the same items; the enclosing
+/// `Checker::check_impl` returns for an `impl` block, and the file-derived
+/// module a `use`d dependency comes wrapped in. These are just containers of
+/// the same items; the enclosing
 /// module is already baked into
 /// each item's own fully-qualified `Path`, so flattening loses nothing —
 /// each `defun`/`defmethod` becomes a [`CompiledItem`] by that full path,
@@ -117,18 +113,18 @@ fn collect_aot_item(
     let defvar_meta = match tag.as_str() {
         "defun" => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
-            // A `defun main` anywhere but the program's root is never called
-            // — the entry point is always `entry_path` (`Path::root("main")`)
-            // — so it is almost certainly a mistake (entry code written
-            // inside a `module`, or a `use`d file's own unrelated `main`)
-            // rather than an intentional name. Reject it outright rather
-            // than silently compiling dead code under a confusing name.
+            // A `defun main` other than the entry file's own is never called
+            // — the entry point is always `entry_path` — so it is almost
+            // certainly a mistake (entry code written inside a `module`, or a
+            // `use`d file's own unrelated `main`) rather than an intentional
+            // name. Reject it outright rather than silently compiling dead
+            // code under a confusing name.
             if path.last_segment() == ENTRY_POINT_NAME && &path != entry_path {
                 return Err(format!(
-                    "compile-file: `{}` is named `{}`, but only the top-level `defun main` at \
-                     the program's root is the entry point — rename this one (a `defun main` \
+                    "compile-file: `{}` is named `{}`, but only the entry file's top-level \
+                     `defun main` (`{}`) is the entry point — rename this one (a `defun main` \
                      nested in a module, or in a `use`d file, is never called)",
-                    path, ENTRY_POINT_NAME
+                    path, ENTRY_POINT_NAME, entry_path
                 ));
             }
             items.push(CompiledItem::Fn(path));
@@ -199,17 +195,23 @@ fn collect_aot_item(
 
 /// Whether the checked top-level form `tl` is the `(main)` line an AOT
 /// source may end with — [`is_entry_call`] for a caller holding a form of any
-/// kind and no entry path of its own (the `eval` environment's replay,
-/// `compile::dump::capture_program_dump`, which must drop the same line).
-pub(crate) fn is_trailing_main(heap: &Heap, tl: Value) -> bool {
-    core::op(heap, tl) == Some("expr") && is_entry_call(heap, tl, &Path::root(ENTRY_POINT_NAME))
+/// kind (the `eval` environment's replay, `compile::dump::capture_program_dump`,
+/// which must drop the same line).
+pub(crate) fn is_trailing_main(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
+    core::op(heap, tl) == Some("expr") && is_entry_call(heap, tl, entry_path)
+}
+
+/// The entry point of an entry file whose module path is `segs`: its own
+/// `main`, which is where a bare `(main)` written in it resolves.
+pub(crate) fn entry_point_path(segs: &[String]) -> Path {
+    let mut segs = segs.to_vec();
+    segs.push(ENTRY_POINT_NAME.to_string());
+    Path::from_segments(segs)
 }
 
 /// Whether a top-level `(expr ...)` is `(main)` — a call of the entry
-/// point, resolved to `entry_path`, with no arguments — the one expression
-/// an AOT source may carry. `entry_path` is always `Path::root(ENTRY_POINT_NAME)`:
-/// the entry file stays at the root namespace (see the module doc comment),
-/// so a bare `(main)` written in it resolves there too.
+/// point, resolved to `entry_path` ([`entry_point_path`]), with no
+/// arguments — the one expression an AOT source may carry.
 fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     let Some(form) = core::field(heap, tl, 0) else { return false };
     if core::op(heap, form) != Some("call") {
@@ -254,22 +256,18 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         .map(std::path::Path::to_path_buf)
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let src_root = crate::project::find_src_root(&entry_dir).unwrap_or(entry_dir);
-    // The entry *file's own* items stay at the root namespace, exactly as
-    // before `use` was supported — only a *dependency* a `use` names is
-    // loaded as a module of its own, under its file-derived path. This is
-    // narrower than `typl file.typl`'s own `Loader::load_entry` (which
-    // wraps the entry file too, in `<stem>`), and deliberately so: keeping
-    // the entry file at root is what lets every existing AOT source — and
-    // `ENTRY_POINT_INTERNAL_NAME`/`is_entry_call`'s bare `main` — go on
-    // meaning exactly what it always has, while a `(use ...)` in it still
-    // resolves like any other `use`.
+    // The entry file is the module its location derives to, as under `typl
+    // file.typl` (see the module doc comment): the same path, so the same
+    // type names and the same printed values.
+    let entry_segs = crate::project::module_segs_for(entry_path_on_disk, &src_root).map_err(|e| e.to_string())?;
     let mut loader = crate::project::Loader::new(src_root.clone());
 
     let reader = Reader::new();
-    // One form at a time, like every other loader (`Reader::forms_in`): the
-    // file an AOT build reads is the same file the interpreter reads, so it
-    // has to be read the same way.
-    let mut forms = reader.forms_in(source_path, &source);
+    // One form at a time, like every other loader (`Reader::forms_within`):
+    // the file an AOT build reads is the same file the interpreter reads, so
+    // it has to be read the same way — its symbols interned in its module.
+    let mut forms = reader.forms_within(source_path, &source, typelisp_front::mem::symbols::ns_of(&entry_segs));
+    chk.enter_file_module(&entry_segs);
 
     // Every top-level form in an AOT source file must be something with a
     // compiled body or none at all: `defun`/`defmethod` (bodies),
@@ -289,7 +287,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let mut items: Vec<CompiledItem> = Vec::new();
     let mut defvar_inits: Vec<(Path, Value)> = Vec::new();
     let mut ffi_decls: Vec<typelisp_front::eval::interp::FfiDecl> = Vec::new();
-    let entry_path = Path::root(ENTRY_POINT_NAME);
+    let entry_path = entry_point_path(&entry_segs);
     let mut entry_forms: Vec<TopLevelForm> = Vec::new();
     loop {
         let next = {
@@ -317,6 +315,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         heap.push_root(tl);
         entry_forms.push(tl);
     }
+    chk.exit_file_module(entry_segs.len());
     for w in chk.take_warnings() {
         eprintln!("{}", w);
     }
@@ -441,8 +440,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     for item in &items {
         // Every user body's own LLVM symbol name gets the `tl_` prefix
         // (`crate::compile::USER_SYMBOL_PREFIX`) — `main` is no longer a
-        // special case: `user_symbol_name("main")` already produces
-        // `ENTRY_POINT_INTERNAL_NAME` ("tl_main"). A `defmethod`'s symbol is
+        // special case: `build_main_wrapper` calls it by that same symbol
+        // (`tl_p::main` for `p.typl`). A `defmethod`'s symbol is
         // `user_method_symbol_name`'s `tl_type::method`, exactly what a
         // compiled call site emits.
         crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), &item.node_name(), &item.symbol_name()).map_err(|e| e.to_string())?;
@@ -561,7 +560,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // at the top for its own `interp`.
     let eval_env: Option<Vec<u8>> = if calls_eval {
         let mut env_heap = Heap::with_capacity(EVAL_HEAP_CAPACITY);
-        Some(crate::compile::dump::capture_program_dump(&mut env_heap, &source, &src_root, &eval_globals)?)
+        Some(crate::compile::dump::capture_program_dump(&mut env_heap, &source, &src_root, &entry_segs, &eval_globals)?)
     } else {
         None
     };
@@ -571,8 +570,12 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // none), a fixed-width integer the raw word.
     let main_returns_int = chk
         .registry()
-        .fn_sig(&Path::root("main"))
+        .fn_sig(&entry_path)
         .is_some_and(|sig| sig.ret == crate::Type::Int);
+    // The namespace an eval'd form is checked in: the entry file's module, as
+    // `typl file.typl` places it (`run_file`), so a bare name in it resolves
+    // to the program's own definition.
+    let eval_ns = entry_segs.join("::");
 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let result = {
@@ -589,6 +592,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         build_main_wrapper(
             ctx,
             &m,
+            &CompiledItem::Fn(entry_path.clone()).symbol_name(),
             &global_init_names,
             &interp.vtable_descriptors(),
             &interp.upcast_descriptors(),
@@ -598,7 +602,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &print_objects,
             &format_calls,
             &callback_entries,
-            eval_env.as_deref(),
+            eval_env.as_deref().map(|bytes| (bytes, eval_ns.as_str())),
             main_returns_int,
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
@@ -640,7 +644,8 @@ fn print_object_key(node: &str) -> Option<String> {
 }
 
 /// Adds a real, C-ABI `main` to `module` that calls the compiled entry
-/// point (`tl_main`, see [`ENTRY_POINT_INTERNAL_NAME`]) with no logical
+/// point (the symbol `entry_symbol`, `tl_p::main` for `p.typl` — called
+/// `tl_main` below) with no logical
 /// arguments and returns its `i64` result truncated to an `i32` exit code.
 /// See the module doc comment for why this can't just compile the file's
 /// `main` defun under that name directly.
@@ -671,10 +676,12 @@ fn print_object_key(node: &str) -> Option<String> {
 /// `eval_env` is `Some` only for a program that calls `eval`: the
 /// environment, already built and serialized (`typelisp_front::dump`), for
 /// the startup to read back into [`EVAL_HEAP_CAPACITY`] cells before `main`
-/// proper begins.
+/// proper begins, and the namespace (`p`, `::`-joined) an eval'd form is
+/// checked in.
 fn build_main_wrapper(
     ctx: &'static Context,
     module: &Module<'static>,
+    entry_symbol: &str,
     global_init_names: &[String],
     vtables: &[(u32, Vec<(Path, String)>)],
     upcasts: &[(u32, u32, u32)],
@@ -684,11 +691,11 @@ fn build_main_wrapper(
     print_objects: &[(String, String)],
     format_calls: &[(String, String, String)],
     callback_entries: &[(String, inkwell::values::FunctionValue<'static>)],
-    eval_env: Option<&[u8]>,
+    eval_env: Option<(&[u8], &str)>,
     main_returns_int: bool,
 ) -> Result<(), String> {
     let tl_main = module
-        .get_function(ENTRY_POINT_INTERNAL_NAME)
+        .get_function(entry_symbol)
         .ok_or_else(|| "internal error: compiled entry point not found in module".to_string())?;
 
     let i32_type = ctx.i32_type();
@@ -892,17 +899,25 @@ fn build_main_wrapper(
     // pre-heap stores. Emitted, like the printer's block above, only when the
     // module actually calls `rt_eval`: naming the shim is what pulls the
     // checker and the interpreter into the executable.
-    if let Some(bytes) = eval_env {
+    if let Some((bytes, ns)) = eval_env {
         let i64_ty = ctx.i64_type();
         let blob = module.add_global(ctx.i8_type().array_type(bytes.len() as u32), None, "typelisp_eval_env");
         blob.set_initializer(&ctx.const_string(bytes, false));
         blob.set_constant(true);
+        let ns_str = builder
+            .build_global_string_ptr(ns, "typelisp_eval_ns")
+            .map_err(|e| format!("failed to build the eval namespace string: {}", e))?;
         call_shim(
             ctx,
             module,
             &builder,
             "rt_eval_state",
-            &[blob.as_pointer_value().const_to_int(i64_ty), i64_ty.const_int(bytes.len() as u64, false)],
+            &[
+                blob.as_pointer_value().const_to_int(i64_ty),
+                i64_ty.const_int(bytes.len() as u64, false),
+                ns_str.as_pointer_value().const_to_int(i64_ty),
+                i64_ty.const_int(ns.len() as u64, false),
+            ],
         )?;
     }
     // AOT's counterpart to the JIT path's `Interp::eval` calling
@@ -1413,7 +1428,7 @@ mod tests {
 
     use inkwell::AddressSpace;
 
-    use super::{build_main_wrapper, write_executable, ENTRY_POINT_INTERNAL_NAME};
+    use super::{build_main_wrapper, write_executable};
     use crate::compile::{llvm_context, COMPILE_LOCK};
 
     fn tmp_path(name: &str) -> PathBuf {
@@ -1440,7 +1455,7 @@ mod tests {
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let rt_ping = module.add_function("rt_ping", fn_ty, None);
-        let tl_main = module.add_function(ENTRY_POINT_INTERNAL_NAME, fn_ty, None);
+        let tl_main = module.add_function("tl_main", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(tl_main, "entry");
@@ -1461,7 +1476,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1486,7 +1501,7 @@ mod tests {
         let ptr_ty = ctx.ptr_type(AddressSpace::default());
         let fn_ty = ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false);
         let rt_heap_live_count = module.add_function("rt_heap_live_count", fn_ty, None);
-        let tl_main = module.add_function(ENTRY_POINT_INTERNAL_NAME, fn_ty, None);
+        let tl_main = module.add_function("tl_main", fn_ty, None);
 
         let builder = ctx.create_builder();
         let entry = ctx.append_basic_block(tl_main, "entry");
@@ -1500,7 +1515,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

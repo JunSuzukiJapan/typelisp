@@ -1476,9 +1476,9 @@ AOT で使える。
 `compile-file` は `use`（および `import`/`shadowing-import`）も受理する。エントリファイルの
 `(use m)` は `typl file.typl` と同じ規則でファイルを探し、見つかった依存ファイルも
 コンパイルして実行ファイルへリンクする——`main.typl` が `(use http)` で `http.typl` を
-読む構成もそのまま AOT 化できる。エントリファイル自身の
-定義は（`typl file.typl` と違い）ルート名前空間に留まる——`(module m ...)` で明示的に
-くくった場合はそのモジュール修飾名で呼ぶ。
+読む構成もそのまま AOT 化できる。エントリファイル自身の定義も `typl file.typl` と同じく
+ファイル名のモジュールに入る（`p.typl` の `point` は `p::point`）。そのため値の表示
+（`#<p::point x: 1 y: 2>`）もどちらで実行しても同じになる。
 
 ## 11. リーダマクロ（readtable）
 

@@ -141,6 +141,7 @@ pub fn capture_program_dump(
     heap: &mut Heap,
     source: &str,
     src_root: &std::path::Path,
+    entry_segs: &[String],
     globals: &[(String, usize)],
 ) -> Result<Vec<u8>, String> {
     let prelude = typelisp_front::dump::parse(typelisp_front::prelude::DUMP, "prelude")?;
@@ -186,8 +187,17 @@ pub fn capture_program_dump(
     // named has to resolve against something.
     let mut loader = typelisp_front::project::Loader::new(src_root.to_path_buf());
     // Read, check and run one form before the next is read — the same order
-    // the session being recorded ran them in (`Reader::forms_in`).
-    let mut program = reader.forms_in(typelisp_front::dump::PROGRAM_LABEL, source);
+    // the session being recorded ran them in (`Reader::forms_within`) — and in
+    // the entry file's own module, `entry_segs`, as `compile_file` read it:
+    // the replay has to arrive at the same paths the machine code was
+    // compiled against.
+    let mut program = reader.forms_within(
+        typelisp_front::dump::PROGRAM_LABEL,
+        source,
+        typelisp_front::mem::symbols::ns_of(entry_segs),
+    );
+    let entry_path = super::aot::entry_point_path(entry_segs);
+    chk.enter_file_module(entry_segs);
     loop {
         let next = {
             let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &interp);
@@ -204,7 +214,7 @@ pub fn capture_program_dump(
         // so does this replay. Running it here would run the program at
         // compile time, and recording it would run it again when the
         // executable restores this environment, before its real `main`.
-        if super::aot::is_trailing_main(heap, tl) {
+        if super::aot::is_trailing_main(heap, tl, &entry_path) {
             continue;
         }
         heap.push_root(tl);
@@ -214,6 +224,7 @@ pub fn capture_program_dump(
         }
         interp.exec(heap, tl).map_err(|e| e.to_string())?;
     }
+    chk.exit_file_module(entry_segs.len());
     // Every dependency's own bundle (`Loader::pending`, one `(module PATH
     // body...)` wrapper per file — `Interp::exec` already knows how to run
     // one of those directly, the same way `compile_file`'s flattening

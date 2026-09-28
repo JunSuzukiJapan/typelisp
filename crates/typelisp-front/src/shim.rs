@@ -39,9 +39,10 @@ use typelisp_abi::{active_heap, encode, fatal, tagged_arg};
 use crate::eval::interp::{with_active_interp, Interp};
 
 thread_local! {
-    /// The embedded environment dump, from [`rt_eval_state`]. A `&'static [u8]`
-    /// because it points into the executable's read-only data.
-    static EVAL_DUMP: Cell<Option<&'static [u8]>> = const { Cell::new(None) };
+    /// The embedded environment dump and the namespace an eval'd form is
+    /// checked in, from [`rt_eval_state`]. `'static` because both point into
+    /// the executable's read-only data.
+    static EVAL_DUMP: Cell<Option<(&'static [u8], &'static str)>> = const { Cell::new(None) };
 
     /// The environment [`rt_eval_init`] rebuilt, or null under JIT where the
     /// running `Interp` is used instead.
@@ -54,19 +55,26 @@ thread_local! {
     static AOT_ENV: Cell<*const Interp> = const { Cell::new(std::ptr::null()) };
 }
 
-/// Registers the embedded environment dump: `args` is `[ptr, len]`.
+/// Registers the embedded environment dump: `args` is `[ptr, len, ns_ptr,
+/// ns_len]`, the dump and the `::`-joined namespace an eval'd form is checked
+/// in (the entry file's module).
 ///
 /// # Safety
 ///
-/// `args` must point to 2 valid `i64`s naming immortal bytes.
+/// `args` must point to 4 valid `i64`s naming immortal bytes, the second pair
+/// UTF-8.
 #[no_mangle]
 pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_eval_state: expected 2 arguments");
+    if argc < 4 {
+        fatal("rt_eval_state: expected 4 arguments");
     }
-    let ptr = *args as usize as *const u8;
-    let len = *args.add(1) as usize;
-    EVAL_DUMP.with(|c| c.set(Some(std::slice::from_raw_parts(ptr, len))));
+    let bytes = std::slice::from_raw_parts(*args as usize as *const u8, *args.add(1) as usize);
+    let ns_bytes = std::slice::from_raw_parts(*args.add(2) as usize as *const u8, *args.add(3) as usize);
+    let ns = match std::str::from_utf8(ns_bytes) {
+        Ok(s) => s,
+        Err(e) => fatal(&format!("rt_eval_state: the namespace is not UTF-8: {}", e)),
+    };
+    EVAL_DUMP.with(|c| c.set(Some((bytes, ns))));
     0
 }
 
@@ -85,11 +93,11 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_eval_init(_args: *const i64, _argc: u32) -> i64 {
-    let bytes = match EVAL_DUMP.with(|c| c.get()) {
+    let (bytes, ns) = match EVAL_DUMP.with(|c| c.get()) {
         Some(b) => b,
         None => fatal("rt_eval_init: the environment dump was never registered"),
     };
-    let interp = match crate::dump::restore_dump(active_heap(), bytes) {
+    let interp = match crate::dump::restore_dump(active_heap(), bytes, ns) {
         Ok(i) => i,
         Err(e) => fatal(&format!("rt_eval_init: {}", e)),
     };
