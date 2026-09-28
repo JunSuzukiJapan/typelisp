@@ -57,17 +57,45 @@ cargo build --release  # リリースビルド（target/release/）
 
 | 実行ファイル | 役割 |
 |---|---|
-| `typl` | 処理系本体。引数なしで REPL、ファイルを渡すとそのファイルを実行します |
+| `typl` | 処理系本体（使い方は次の「実行方法」） |
 | `typl-lsp` | 言語サーバ（エディタ連携用） |
 
+## 実行方法
+
+`typl` の起動のしかたは次の3通りです。以下の例では、`target/debug/`（リリースビルドなら
+`target/release/`）にある `typl` にパスが通っているものとします。
+
+### インタラクティブモード（REPL）
+
+引数を付けずに起動すると、インタラクティブモード（REPL）になります。式を1つ入力するたびに、
+その場で評価して結果を表示します。`:quit` または `:exit` で終了します。
+
 ```sh
-target/debug/typl              # REPL を起動する
-target/debug/typl foo.typl     # foo.typl を実行する
-target/debug/typl -c foo.typl  # foo.typl をコンパイルして実行ファイル foo を作る
+typl
 ```
 
-`typl -c` や `compile-file` で作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` を
-リンクします。何も指定しなければ、`typl` をビルドしたリポジトリの `target/debug/`（リリースビルドなら
+### ファイルを実行する
+
+ファイル名だけを指定すると、そのファイルを実行します。ファイル名より後ろに書いた引数は、
+プログラムに渡されます（`(command-line-args)` で受け取れます）。
+
+```sh
+typl foo.typl
+typl foo.typl a b c
+```
+
+### ファイルをコンパイルする
+
+`-c` または `--compile` を指定すると、そのファイルをコンパイルして実行ファイルを作ります。
+`-o` を省くと、ファイル名から `.typl` を除いた名前の実行ファイル（この例では `foo`）ができます。
+
+```sh
+typl -c foo.typl
+typl --compile foo.typl -o bar
+```
+
+コンパイルして作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` をリンクします。
+何も指定しなければ、`typl` をビルドしたリポジトリの `target/debug/`（リリースビルドなら
 `target/release/`）にあるものを使います。リポジトリを移動・削除するときは、このファイルを別の
 フォルダへコピーしておき、`--lib-dir` でそのフォルダを指定してください。
 
@@ -78,6 +106,13 @@ typl --lib-dir ~/lib/typelisp -c foo.typl
 
 `libtypelisp_front.a` は、そのファイルと同時にビルドした `typl` でしか使えません。`typl` を
 ビルドし直したら、コピーも取り直してください。
+
+### その他のオプション
+
+```sh
+typl --help       # オプションの一覧を表示する
+typl --version    # バージョンを表示する
+```
 
 ## 文書
 

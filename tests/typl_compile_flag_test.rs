@@ -114,3 +114,21 @@ fn dash_c_refuses_what_it_cannot_use() {
         assert!(!out.stderr.is_empty(), "{:?}", args);
     }
 }
+
+#[test]
+fn dash_dash_compile_is_dash_c() {
+    let dir = tmp_dir("typl-dash-dash-compile");
+    let src = dir.join("hello.typl");
+    let exe = dir.join("hello");
+    std::fs::write(&src, HELLO).unwrap();
+    let _ = std::fs::remove_file(&exe);
+
+    let out = typl(&["--compile", src.to_str().unwrap()]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let run = Command::new(&exe).output().expect("failed to run the compiled executable");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "hello\n");
+
+    let out = typl(&["--image", "x.typld", "--compile", "a.typl"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).starts_with("--compile:"));
+}

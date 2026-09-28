@@ -4,8 +4,9 @@
 //! `Interp` pipeline, using `rustyline` for Emacs-style line editing/history
 //! (Ctrl+P/Ctrl+N to move through history, Ctrl+R to search it, etc. — all
 //! `rustyline`'s default `EditMode::Emacs` bindings, matching bash/readline).
-//! With `-c SOURCE [-o OUTPUT]`, AOT-compiles `SOURCE` to an executable
-//! instead, the same thing `(compile-file SOURCE OUTPUT)` does.
+//! With `-c SOURCE [-o OUTPUT]` (or `--compile`), AOT-compiles `SOURCE` to
+//! an executable instead, the same thing `(compile-file SOURCE OUTPUT)` does.
+//! `--help` and `--version` print and exit.
 
 use std::cell::RefCell;
 use std::path::{Path as FsPath, PathBuf};
@@ -26,6 +27,33 @@ const PROMPT_CONTINUE: &str = "...   ";
 /// same `1 << 16` the runtime paths have always allocated.
 const DEFAULT_HEAP_CELLS: usize = 1 << 16;
 
+/// What `typl --version` reports. Provisional until the first release fixes
+/// the number, and independent of the crates' `Cargo.toml` versions until then.
+const TYPL_VERSION: &str = "0.0.1";
+
+/// What `typl --help` prints.
+const HELP: &str = "\
+Usage:
+  typl [OPTIONS]                                 start the REPL
+  typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
+  typl [--lib-dir DIR] -c SOURCE [-o OUTPUT]     compile SOURCE to an executable
+
+Options:
+  -c, --compile SOURCE   compile SOURCE to a native executable
+  -o OUTPUT              name of the executable (default: SOURCE without .typl)
+  --lib-dir DIR          link DIR/libtypelisp_front.a into compiled executables
+                         (default: the one in the tree typl was built in)
+  --image FILE           start from a dump written by (dump ...)
+  --heap-cells N         initial capacity of the cons arena, in cells
+  --feature NAME         add a feature for #+/#- (repeatable)
+  --on-redefine=POLICY   on redefinition: warn (default), error or silent
+  --help                 print this help and exit
+  --version              print the version and exit
+
+--help and --version after FILE are passed to the program.
+--image, --heap-cells and --feature cannot be combined with -c.
+";
+
 fn main() -> rustyline::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // A global `--heap-cells N` (or `--heap-cells=N`) sizes the fixed cons
@@ -45,23 +73,34 @@ fn main() -> rustyline::Result<()> {
     // the static library an AOT executable links, for `-c` and for every
     // `(compile-file ...)` this process runs.
     let (lib_dir, args) = parse_lib_dir(args);
+    // `--help`/`--version` are `typl`'s only among the options before a
+    // script's name; from the name on, they are the script's own arguments.
+    let own = &args[..args.iter().position(|a| !a.starts_with("--")).unwrap_or(args.len())];
+    if own.iter().any(|a| a == "--help") {
+        print!("{}", HELP);
+        std::process::exit(0);
+    }
+    if own.iter().any(|a| a == "--version") {
+        println!("typl {}", TYPL_VERSION);
+        std::process::exit(0);
+    }
     if let Some(dir) = lib_dir {
         if let Err(e) = typelisp::compile::aot::set_lib_dir(dir) {
             eprintln!("--lib-dir: {}", e);
             std::process::exit(1);
         }
     }
-    if args.first().map(String::as_str) == Some("-c") {
+    if let Some(flag) = args.first().filter(|a| *a == "-c" || *a == "--compile") {
         // The executable is compiled in an environment of its own
         // (`compile::aot::compile_file`), which none of these flags reach;
         // refused rather than accepted and ignored.
-        for (given, flag) in [(heap_cells.is_some(), "--heap-cells"), (!features.is_empty(), "--feature"), (image.is_some(), "--image")] {
+        for (given, given_flag) in [(heap_cells.is_some(), "--heap-cells"), (!features.is_empty(), "--feature"), (image.is_some(), "--image")] {
             if given {
-                eprintln!("-c: {} has no effect on compilation", flag);
+                eprintln!("{}: {} has no effect on compilation", flag, given_flag);
                 std::process::exit(1);
             }
         }
-        std::process::exit(compile_command(&args[1..]));
+        std::process::exit(compile_command(flag, &args[1..]));
     }
     let heap_cells = heap_cells.unwrap_or(DEFAULT_HEAP_CELLS);
     // The first non-flag argument names a source file to run;
@@ -85,10 +124,11 @@ fn main() -> rustyline::Result<()> {
     repl(heap_cells, features, image)
 }
 
-/// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c`. Without
-/// `-o`, the executable is `SOURCE` with its `.typl` extension removed.
-/// Returns the process exit code.
-fn compile_command(args: &[String]) -> i32 {
+/// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c` (or
+/// `--compile`, which `flag` names for the diagnostics). Without `-o`, the
+/// executable is `SOURCE` with its `.typl` extension removed. Returns the
+/// process exit code.
+fn compile_command(flag: &str, args: &[String]) -> i32 {
     let mut source = None;
     let mut output = None;
     let mut it = args.iter();
@@ -104,19 +144,19 @@ fn compile_command(args: &[String]) -> i32 {
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("-c: unexpected argument `{}` (usage: typl -c SOURCE [-o OUTPUT])", a);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT])", flag, a, flag);
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("-c: needs a source file (usage: typl -c SOURCE [-o OUTPUT])");
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT])", flag, flag);
         return 1;
     };
     let output = match output {
         Some(o) => o,
         None if source.extension().is_some_and(|e| e == "typl") => source.with_extension(""),
         None => {
-            eprintln!("-c: {} does not end in .typl, so give the executable's name with -o", source.display());
+            eprintln!("{}: {} does not end in .typl, so give the executable's name with -o", flag, source.display());
             return 1;
         }
     };

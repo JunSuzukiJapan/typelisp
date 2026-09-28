@@ -71,7 +71,7 @@ macOS ではリンクに Xcode Command Line Tools を使います。
 
 ### 3.2 コンパイルする
 
-コマンドラインからは `typl -c` を使います。
+コマンドラインからは `typl -c`（`typl --compile` も同じ）を使います。
 
 ```sh
 $ typl -c hello.typl            # hello ができる
@@ -83,7 +83,7 @@ fib(25) = 75025
 
 `-o` を省略すると、ソースファイル名から `.typl` を除いた名前の実行ファイルが、ソースファイルと
 同じフォルダにできます。ソースファイル名が `.typl` で終わらないときは `-o` が必要です。
-`-c` を使うときは、`--image` `--heap-cells` `--feature` は指定できません。
+`-c`（`--compile`）を使うときは、`--image` `--heap-cells` `--feature` は指定できません。
 
 REPL やプログラムの中から `compile-file` を呼んでも同じことができます。
 

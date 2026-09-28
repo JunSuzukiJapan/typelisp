@@ -1405,7 +1405,7 @@ AOT 実行ファイルには、プログラムが使う機能のぶんだけが�
 入らず、`read` を呼ばないプログラムにリーダは入らず、`eval` を呼ばないプログラムにチェッカーと
 インタプリタは入らない。
 
-コマンドラインからは `typl -c src-path [-o out-path]` で `compile-file` と同じことができる。
+コマンドラインからは `typl -c src-path [-o out-path]`（`-c` は `--compile` とも書ける）で `compile-file` と同じことができる。
 `-o` を省くと、`src-path` から拡張子 `.typl` を除いたものが出力になる。実行ファイルにリンクする
 静的ライブラリ `libtypelisp_front.a` は、既定では `typl` をビルドした場所のものを使う。
 `typl --lib-dir DIR` を指定すると `DIR` にあるものを使い（`-c` にも `compile-file` にも効く）、
