@@ -3778,11 +3778,6 @@ fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_key: &s
     }
 }
 
-/// An `int` as text, for `print`/`println`.
-fn int_to_string(heap: &Heap, v: &Value) -> Result<String, EvalError> {
-    Ok(expect_int(heap, v)?.into_big().to_string())
-}
-
 /// Evaluate a built-in `ratio` arithmetic/comparison instance method
 /// (`registry::ratio_assoc`). Core operations: `+ - * /` (`/` panics on a zero
 /// divisor). CL's `mod`/`rem`/`expt`/`abs`/`signum` on rationals live in
@@ -3983,32 +3978,6 @@ fn int_pair(args: &[Value], who: &str) -> Result<(i64, i64), EvalError> {
     }
 }
 
-/// Shared tail of every scalar `print`/`println` method (`registry.rs`'s
-/// per-type `"print"`/`"println"` entries): writes `text` to stdout, with a
-/// trailing newline iff `newline`, and flushes immediately — a script's
-/// stdout isn't a terminal when piped (e.g. into a reader at the far end of a
-/// pipe, or a test harness), so it isn't line-buffered there, and a prompt
-/// printed via `print` (no newline) must still be visible before the process
-/// blocks reading stdin.
-/// `f64` display for `print`/`println` — an integral finite value prints
-/// with an explicit `.0` (matching `main.rs`'s REPL-echo `format_float`), so
-/// `(println 1.0)` doesn't come out indistinguishable from `(println 1)`.
-fn format_float_for_print(f: f64) -> String {
-    if f.is_finite() && f == f.trunc() {
-        format!("{:.1}", f)
-    } else {
-        f.to_string()
-    }
-}
-
-
-/// The builtin `print`/`println` methods' output, through the printer's own
-/// door so that it reaches a dribble file like every other print does.
-fn write_stdout(heap: &mut Heap, text: &str, newline: bool) -> Result<Value, EvalError> {
-    let text = if newline { format!("{}\n", text) } else { text.to_string() };
-    typelisp_print::runtime::write_stdout(heap, &text).map(|()| Value::Empty).map_err(EvalError::Panic)
-}
-
 /// `parse-float` (`registry.rs`'s free-function entry): an `f64` literal via
 /// `str::parse` (accepts everything Rust's own `FromStr for f64` does,
 /// including `inf`/`nan`), `Err` on anything else.
@@ -4178,8 +4147,6 @@ pub(crate) fn eval_builtin_method(
             "eq" | "eql" => Some(string_identity_eq(args)),
             "equal" => Some(string_content_eq(heap, args)),
             "equalp" => Some(string_content_eqp(heap, args)),
-            "print" => Some(expect_str(heap, &args[0]).map(|s| s.to_string()).and_then(|s| write_stdout(heap, &s, false))),
-            "println" => Some(expect_str(heap, &args[0]).map(|s| s.to_string()).and_then(|s| write_stdout(heap, &s, true))),
             _ => None,
         };
     }
@@ -4198,8 +4165,6 @@ pub(crate) fn eval_builtin_method(
             "equalp" => Some(char_eqp(args)),
             "char->string" => Some(expect_char(&args[0]).map(|c| c.to_string()).map(|s| str_rt(heap, s))),
             "char->int" => Some(char_to_int(args)),
-            "print" => Some(expect_char(&args[0]).and_then(|c| write_stdout(heap, &c.to_string(), false))),
-            "println" => Some(expect_char(&args[0]).and_then(|c| write_stdout(heap, &c.to_string(), true))),
             _ => None,
         };
     }
@@ -4228,8 +4193,6 @@ pub(crate) fn eval_builtin_method(
                 let (w, sg) = width_cast_target(method, "try-int->").expect("just matched");
                 Some(try_int_to_width(heap, args, w, sg, ret_key))
             }
-            "print" => Some(rt_i64(&args[0]).and_then(|n| write_stdout(heap, &n.to_string(), false))),
-            "println" => Some(rt_i64(&args[0]).and_then(|n| write_stdout(heap, &n.to_string(), true))),
             _ => None,
         };
     }
@@ -4272,8 +4235,6 @@ pub(crate) fn eval_builtin_method(
             "log" => Some(float_unary(heap, args, f64::ln, single)),
             "float->int" => Some(float_to_int(heap, args)),
             "float->ratio" => Some(float_to_ratio(heap, args)),
-            "print" => Some(rt_f64(heap, &args[0]).and_then(|f| write_stdout(heap, &format_float_for_print(f), false))),
-            "println" => Some(rt_f64(heap, &args[0]).and_then(|f| write_stdout(heap, &format_float_for_print(f), true))),
             _ => None,
         };
     }
@@ -4294,8 +4255,6 @@ pub(crate) fn eval_builtin_method(
                 let (w, sg) = width_cast_target(method, "try-int->").expect("just matched");
                 Some(integer_to_width(heap, args, w, sg, true, ret_key))
             }
-            "print" => Some(int_to_string(heap, &args[0]).and_then(|s| write_stdout(heap, &s, false))),
-            "println" => Some(int_to_string(heap, &args[0]).and_then(|s| write_stdout(heap, &s, true))),
             _ => None,
         };
     }
@@ -4309,16 +4268,12 @@ pub(crate) fn eval_builtin_method(
             "ratio->float" => Some(ratio_to_float(heap, args)),
             "numerator" => Some(ratio_numerator(heap, args)),
             "denominator" => Some(ratio_denominator(heap, args)),
-            "print" => Some(expect_ratio(heap, &args[0]).and_then(|r| write_stdout(heap, &format!("{}/{}", r.numer(), r.denom()), false))),
-            "println" => Some(expect_ratio(heap, &args[0]).and_then(|r| write_stdout(heap, &format!("{}/{}", r.numer(), r.denom()), true))),
             _ => None,
         };
     }
     if *type_name == Path::root("bool") {
         return match method {
             "eq" | "eql" | "equal" | "equalp" => Some(bool_eq(args)),
-            "print" => Some(expect_bool(&args[0]).and_then(|b| write_stdout(heap, &b.to_string(), false))),
-            "println" => Some(expect_bool(&args[0]).and_then(|b| write_stdout(heap, &b.to_string(), true))),
             _ => None,
         };
     }

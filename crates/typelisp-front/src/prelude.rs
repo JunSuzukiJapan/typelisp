@@ -371,6 +371,38 @@ pub const SOURCE: &str = r##"
   (let ((n (symbol->string s)))
     (if (> (length n) 0) (eql (ref n 0) #\:) false)))
 
+;; `print`/`println` as methods on each scalar type, so a bare `println` can be
+;; passed where a `(fn (T) ())` is expected. A call written as
+;; `(println ...)` is the format special form, which takes a control string;
+;; these are reached only as function values. Each prints its receiver the
+;; way `~a` does, through the same printer.
+(defmethod print ((self bool)) () (print "~a" self))
+(defmethod println ((self bool)) () (println "~a" self))
+(defmethod print ((self char)) () (print "~a" self))
+(defmethod println ((self char)) () (println "~a" self))
+(defmethod print ((self string)) () (print "~a" self))
+(defmethod println ((self string)) () (println "~a" self))
+(defmethod print ((self int)) () (print "~a" self))
+(defmethod println ((self int)) () (println "~a" self))
+(defmethod print ((self i8)) () (print "~a" self))
+(defmethod println ((self i8)) () (println "~a" self))
+(defmethod print ((self i16)) () (print "~a" self))
+(defmethod println ((self i16)) () (println "~a" self))
+(defmethod print ((self i32)) () (print "~a" self))
+(defmethod println ((self i32)) () (println "~a" self))
+(defmethod print ((self u8)) () (print "~a" self))
+(defmethod println ((self u8)) () (println "~a" self))
+(defmethod print ((self u16)) () (print "~a" self))
+(defmethod println ((self u16)) () (println "~a" self))
+(defmethod print ((self u32)) () (print "~a" self))
+(defmethod println ((self u32)) () (println "~a" self))
+(defmethod print ((self f32)) () (print "~a" self))
+(defmethod println ((self f32)) () (println "~a" self))
+(defmethod print ((self f64)) () (print "~a" self))
+(defmethod println ((self f64)) () (println "~a" self))
+(defmethod print ((self ratio)) () (print "~a" self))
+(defmethod println ((self ratio)) () (println "~a" self))
+
 ;; CL's numeric catalog beyond the primitive machine operations
 ;; (`+`/`-`/`*`/`/`/`mod`/comparisons/conversions, which are Rust builtins in
 ;; `registry.rs`): `abs`/`signum` (all numbers), `rem` (all reals), `gcd`/`lcm`

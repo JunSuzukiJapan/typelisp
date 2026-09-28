@@ -616,8 +616,7 @@ pub struct Registry {
     /// default. Sparse: only a `defstruct` that actually wrote one appears.
     ///
     /// A side table rather than an [`AdtDef`] field, for the same reason
-    /// [`Docs`] is one: every built-in type constructs an `AdtDef` literally
-    /// (thirty sites) and none of them has a slot default to record. What
+    /// [`Docs`] is one: no built-in type has a slot default to record. What
     /// needs it is `Checker::check_defstruct`'s generated constructors, and —
     /// across a module or a dump boundary — a child `defstruct` that
     /// `:include`s this one.
@@ -1634,8 +1633,6 @@ fn bool_assoc() -> BTreeMap<String, AssocFn> {
     for name in ["eq", "eql", "equal", "equalp"] {
         m.insert(name.to_string(), eq_fn());
     }
-    m.insert("print".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bool], Type::Unit), instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Bool], Type::Unit), instance: true, builtin: true });
     m
 }
 
@@ -2556,8 +2553,6 @@ fn string_assoc() -> BTreeMap<String, AssocFn> {
     // trailing newline (`crate::eval::interp::eval_builtin_method`'s
     // `"string"` arm). No quoting — unlike `format_value`'s reader-syntax
     // output for the REPL, this is for a program's own user-facing text.
-    m.insert("print".to_string(), method(vec![Type::Str], Type::Unit));
-    m.insert("println".to_string(), method(vec![Type::Str], Type::Unit));
     m
 }
 
@@ -2598,8 +2593,6 @@ fn char_assoc() -> BTreeMap<String, AssocFn> {
     // room for; the explicit name says which direction the conversion goes.
     m.insert("char->string".to_string(), method(vec![Type::Char], Type::Str));
     m.insert("char->int".to_string(), method(vec![Type::Char], Type::Int));
-    m.insert("print".to_string(), method(vec![Type::Char], Type::Unit));
-    m.insert("println".to_string(), method(vec![Type::Char], Type::Unit));
     m
 }
 
@@ -2732,8 +2725,6 @@ fn int_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
             AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(to)), instance: true, builtin: true },
         );
     }
-    m.insert("print".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Unit), instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig::builtin(vec![ty], Type::Unit), instance: true, builtin: true });
     m
 }
 
@@ -2765,8 +2756,6 @@ fn c_word_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
     // Always exact, which is what makes it the honest way to read a `size_t`
     // that does not fit in an `i32`.
     m.insert("int->int".to_string(), conv(Type::Int));
-    m.insert("print".to_string(), conv(Type::Unit));
-    m.insert("println".to_string(), conv(Type::Unit));
     m
 }
 
@@ -2835,8 +2824,6 @@ fn float_assoc(ty: Type) -> BTreeMap<String, AssocFn> {
         "try-float->f64".to_string(),
         AssocFn { sig: FnSig::builtin(vec![ty.clone()], option_of(Type::F64)), instance: true, builtin: true },
     );
-    m.insert("print".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone()], Type::Unit), instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig::builtin(vec![ty], Type::Unit), instance: true, builtin: true });
     m
 }
 
@@ -2882,8 +2869,6 @@ fn integer_assoc() -> BTreeMap<String, AssocFn> {
         m.insert(format!("int->{}", target), conv(to.clone()));
         m.insert(format!("try-int->{}", target), conv(option_of(to)));
     }
-    m.insert("print".to_string(), conv(Type::Unit));
-    m.insert("println".to_string(), conv(Type::Unit));
     m
 }
 
@@ -2912,8 +2897,6 @@ fn ratio_assoc() -> BTreeMap<String, AssocFn> {
     m.insert("ratio->float".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::F64), instance: true, builtin: true });
     m.insert("numerator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
     m.insert("denominator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
-    m.insert("print".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Unit), instance: true, builtin: true });
-    m.insert("println".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Unit), instance: true, builtin: true });
     m
 }
 

@@ -1185,20 +1185,10 @@ mod native_method_list_tests {
     /// of exactly those, filled in by hand as they were discovered; this is
     /// the check that keeps it empty without anyone having to notice.
     ///
-    /// `print`/`println` are the standing exception, and are not a hole. The
-    /// checker intercepts both as special forms before any method resolution
-    /// happens (`Checker::check_print_like` — the control string has to be a
-    /// literal, since its directives decide what the remaining arguments may
-    /// be), so neither ever becomes an `Expr::Assoc` for `call_graph_edges` to
-    /// reject or the island to lower; a qualified `(i32::print x)` is refused
-    /// at check time as an instance method. `registry::int_assoc` and its
-    /// siblings still register them because they are the receiver-typed
-    /// printing entry points `eval_builtin_method` dispatches on.
+    /// No exceptions: a method no call can name is still reachable as a
+    /// function value (`methodref`), which compiles to a call of the method.
     #[test]
     fn every_registered_builtin_method_on_a_native_receiver_lowers() {
-        // See this test's doc comment: registered, but unreachable as a method
-        // call, so no lowering can be asked for.
-        const CHECKER_SPECIAL_FORMS: [&str; 2] = ["print", "println"];
         let registry = typelisp_front::check::registry::Registry::with_builtins();
         let mut gaps: Vec<String> = Vec::new();
         for (_, type_locals) in PRIMITIVES {
@@ -1209,7 +1199,7 @@ mod native_method_list_tests {
                     .get(*type_local)
                     .unwrap_or_else(|| panic!("`{}` is not a built-in type in the registry", type_local));
                 for (method, f) in &def.assoc {
-                    if !f.builtin || CHECKER_SPECIAL_FORMS.contains(&method.as_str()) {
+                    if !f.builtin {
                         continue;
                     }
                     if !native_lowered_primitive_methods(type_local).contains(&method.as_str()) {

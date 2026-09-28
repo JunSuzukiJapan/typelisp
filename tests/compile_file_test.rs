@@ -68,6 +68,49 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
     );
 }
 
+/// `print`/`println` taken as function values print the same in an
+/// executable, interpreted, and after `compile`. They used to be Rust builtins
+/// only the interpreter implemented: the compiled tiers refused them, and the
+/// interpreter's `f32` one read its argument as an `f64` and failed.
+#[test]
+fn print_methods_as_values_print_the_same_on_every_tier() {
+    let program = r#"(defun p-bool ((f (fn (bool) ())) (x bool)) () (f x))
+           (defun p-int ((f (fn (int) ())) (x int)) () (f x))
+           (defun p-i8 ((f (fn (i8) ())) (x i8)) () (f x))
+           (defun p-f32 ((f (fn (f32) ())) (x f32)) () (f x))
+           (defun p-f64 ((f (fn (f64) ())) (x f64)) () (f x))
+           (defun p-char ((f (fn (char) ())) (x char)) () (f x))
+           (defun p-str ((f (fn (string) ())) (x string)) () (f x))
+           (defun main () ()
+             (p-bool println true)
+             (p-int print 12345678901234567890)
+             (p-str println "")
+             (p-i8 println (as i8 -7))
+             (p-f32 println (as f32 0.1))
+             (p-f64 println 1.0)
+             (p-char println #\x)
+             (p-str println "text"))"#;
+    let expected = "true\n12345678901234567890\n-7\n0.1\n1.0\nx\ntext\n";
+    let dir = tmp_dir();
+
+    let interpreted_path = dir.join("print_values_interp.typl");
+    std::fs::write(&interpreted_path, format!("{}\n(main)", program)).expect("failed to write test source file");
+    let interpreted = Command::new(env!("CARGO_BIN_EXE_typl")).arg(&interpreted_path).output().expect("failed to run typl");
+    assert_eq!(String::from_utf8_lossy(&interpreted.stdout), expected, "{}", String::from_utf8_lossy(&interpreted.stderr));
+
+    let jit_path = dir.join("print_values_jit.typl");
+    std::fs::write(&jit_path, format!("{}\n(compile main)\n(main)", program)).expect("failed to write test source file");
+    let jit = Command::new(env!("CARGO_BIN_EXE_typl")).arg(&jit_path).output().expect("failed to run typl");
+    assert_eq!(String::from_utf8_lossy(&jit.stdout), expected, "{}", String::from_utf8_lossy(&jit.stderr));
+
+    let aot_src = dir.join("print_values_aot.typl");
+    let aot_out = dir.join("print_values_aot");
+    std::fs::write(&aot_src, format!("{}\n(main)", program)).expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(aot_src.to_str().unwrap(), aot_out.to_str().unwrap()).expect("compile_file failed");
+    let compiled = Command::new(&aot_out).output().expect("failed to run the compiled executable");
+    assert_eq!(String::from_utf8_lossy(&compiled.stdout), expected, "{}", String::from_utf8_lossy(&compiled.stderr));
+}
+
 /// The same variant-name lookup, in a standalone executable.
 ///
 /// The AOT tier has its own table (`rt_print_enum_variant` fills it at
