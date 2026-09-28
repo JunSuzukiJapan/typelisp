@@ -238,61 +238,44 @@ impl ModuleScope {
 
     /// Resolve a `Call`/`FnRef` reference's `written` name segments from its
     /// lexical `home` module — the runtime re-derivation of
-    /// `Checker::resolve_fn`/`resolve_fn_path` (checker.rs:1061-1093).
+    /// `Checker::resolve_fn`/`resolve_fn_path`.
     ///
     /// A single-segment (bare) name walks `home`'s ancestor chain, nearest
-    /// module first, ending at root — exactly `Checker::ns_ancestors`
-    /// (checker.rs:958-966) — with **no `pub` check**: anything found on
-    /// that chain is in scope without qualification, matching
-    /// `resolve_fn`'s own behavior.
+    /// module first, ending at root — exactly `Checker::ns_ancestors` — with
+    /// **no `pub` check**: anything found on that chain is in scope without
+    /// qualification, matching `resolve_fn`'s own behavior.
     ///
     /// A multi-segment (explicitly qualified) name descends straight to the
     /// named module, then requires `public || in_scope(home, that module)`
     /// — `resolve_fn_path`'s cross-module gate.
     pub(crate) fn resolve_fn(&self, home: &[String], written: &[String]) -> Option<Rc<FnDef>> {
-        if written.len() <= 1 {
-            let name = written.first()?;
-            for k in (0..=home.len()).rev() {
-                if let Some(ns) = self.find(&home[..k]) {
-                    if let Some(f) = ns.fns.get(name) {
-                        return Some(f.clone());
-                    }
-                }
-            }
-            None
-        } else {
-            let (mods, last) = written.split_at(written.len() - 1);
-            let ns = self.find(mods)?;
-            let f = ns.fns.get(&last[0])?;
-            if !f.public && !in_scope(home, mods) {
-                return None;
-            }
-            Some(f.clone())
-        }
+        self.resolve(home, written, |ns, name| ns.fns.get(name).map(|f| (f.public, f.clone())))
     }
 
-    /// [`Self::resolve_fn`]'s twin for `Global`/`SetGlobal` — identical
-    /// shape, over `globals` instead of `fns`, mirroring
-    /// `Checker::resolve_global`/`resolve_global_path` (checker.rs:1374-1410).
+    /// [`Self::resolve_fn`] for `Global`/`SetGlobal`, over `globals` instead
+    /// of `fns`, mirroring `Checker::resolve_global`/`resolve_global_path`.
     pub(crate) fn resolve_global(&self, home: &[String], written: &[String]) -> Option<Slot> {
+        self.resolve(home, written, |ns, name| ns.globals.get(name).map(|g| (g.public, g.slot.clone())))
+    }
+
+    /// The walk [`Self::resolve_fn`] describes, over whichever table
+    /// `lookup` reads; `lookup` answers the entry's visibility and value.
+    fn resolve<T>(
+        &self,
+        home: &[String],
+        written: &[String],
+        lookup: impl Fn(&ModuleScope, &str) -> Option<(bool, T)>,
+    ) -> Option<T> {
         if written.len() <= 1 {
             let name = written.first()?;
-            for k in (0..=home.len()).rev() {
-                if let Some(ns) = self.find(&home[..k]) {
-                    if let Some(g) = ns.globals.get(name) {
-                        return Some(g.slot.clone());
-                    }
-                }
-            }
-            None
+            (0..=home.len()).rev().find_map(|k| lookup(self.find(&home[..k])?, name).map(|(_, v)| v))
         } else {
             let (mods, last) = written.split_at(written.len() - 1);
-            let ns = self.find(mods)?;
-            let g = ns.globals.get(&last[0])?;
-            if !g.public && !in_scope(home, mods) {
+            let (public, v) = lookup(self.find(mods)?, &last[0])?;
+            if !public && !in_scope(home, mods) {
                 return None;
             }
-            Some(g.slot.clone())
+            Some(v)
         }
     }
 

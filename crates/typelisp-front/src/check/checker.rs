@@ -3142,6 +3142,31 @@ impl Checker {
         (0..=self.ns.len()).rev().map(move |k| &self.ns[..k])
     }
 
+    /// The first hit `lookup` finds walking the ancestor chain, nearest module
+    /// first. `lookup` is given each module's absolute path along with it.
+    fn find_on_chain<T>(&self, mut lookup: impl FnMut(&[String], &Namespace) -> Option<T>) -> Option<T> {
+        self.ns_ancestors().find_map(|prefix| lookup(prefix, self.reg.root.module(prefix)?))
+    }
+
+    /// Looks up the last segment of `segs` in the module the other segments
+    /// name ([`Self::find_module`]), under the cross-module visibility rule:
+    /// a private item is found only from inside its own module. `lookup`
+    /// answers the item's visibility and value; the result carries the
+    /// item's absolute path.
+    fn find_in_module<T>(
+        &self,
+        segs: &[String],
+        lookup: impl FnOnce(&Namespace, &str) -> Option<(bool, T)>,
+    ) -> Option<(Path, T)> {
+        let (last, mods) = segs.split_last()?;
+        let (abs, m) = self.find_module(mods)?;
+        let (public, v) = lookup(m, last)?;
+        if !public && !self.in_scope(&abs) {
+            return None;
+        }
+        Some((item_path(&abs, last), v))
+    }
+
     /// Whether `item_ns` (a definition's owning module) is visible from the
     /// current namespace without needing `pub` — Rust-style module privacy:
     /// the current module IS `item_ns`, or is nested inside it (a
@@ -3251,34 +3276,12 @@ impl Checker {
         if let Some(path) = self.lookup_alias(name) {
             return self.resolve_fn_path(&path);
         }
-        for prefix in self.ns_ancestors() {
-            if let Some(m) = self.reg.root.module(prefix) {
-                if m.fns.contains_key(name) {
-                    let mut segs = prefix.to_vec();
-                    segs.push(name.to_string());
-                    return Some(Path::from_segments(segs));
-                }
-            }
-        }
-        None
+        self.find_on_chain(|prefix, m| m.fns.contains_key(name).then(|| item_path(prefix, name)))
     }
 
     /// Resolve a qualified `module::...::fn` path to its absolute [`Path`].
     fn resolve_fn_path(&self, segs: &[String]) -> Option<Path> {
-        if segs.is_empty() {
-            return None;
-        }
-        let (mods, last) = segs.split_at(segs.len() - 1);
-        let (abs, m) = self.find_module(mods)?;
-        if let Some(sig) = m.fns.get(&last[0]) {
-            if !sig.public && !self.in_scope(&abs) {
-                return None;
-            }
-            let mut full = abs;
-            full.push(last[0].clone());
-            return Some(Path::from_segments(full));
-        }
-        None
+        self.find_in_module(segs, |m, n| m.fns.get(n).map(|sig| (sig.public, ()))).map(|(path, ())| path)
     }
 
     /// Resolve a bare macro name to its absolute [`Path`] and the call-site
@@ -3294,16 +3297,7 @@ impl Checker {
                 return Some(found.clone());
             }
         }
-        for prefix in self.ns_ancestors() {
-            if let Some(m) = self.reg.root.module(prefix) {
-                if let Some(def) = m.macros.get(name) {
-                    let mut segs = prefix.to_vec();
-                    segs.push(name.to_string());
-                    return Some((Path::from_segments(segs), MacroShape::of(def)));
-                }
-            }
-        }
-        None
+        self.find_on_chain(|prefix, m| m.macros.get(name).map(|def| (item_path(prefix, name), MacroShape::of(def))))
     }
 
     /// Resolve a module-qualified macro name (`mod::macro-name`) to its
@@ -3312,18 +3306,7 @@ impl Checker {
     /// [`Self::resolve_fn_path`]'s module lookup and visibility rule (public
     /// unless the caller is in scope of the defining module).
     fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, MacroShape)> {
-        if segs.is_empty() {
-            return None;
-        }
-        let (mods, last) = segs.split_at(segs.len() - 1);
-        let (abs, m) = self.find_module(mods)?;
-        let def = m.macros.get(&last[0])?;
-        if !def.public && !self.in_scope(&abs) {
-            return None;
-        }
-        let mut full = abs;
-        full.push(last[0].clone());
-        Some((Path::from_segments(full), MacroShape::of(def)))
+        self.find_in_module(segs, |m, n| m.macros.get(n).map(|def| (def.public, MacroShape::of(def))))
     }
 
     /// Heads with built-in meaning — the expression special forms matched in
@@ -3439,14 +3422,7 @@ impl Checker {
     /// found this way is in scope by construction, so no separate `public`
     /// check is needed (mirrors [`Self::resolve_fn`]).
     fn resolve_ctor(&self, name: &str) -> Option<(Path, usize)> {
-        for prefix in self.ns_ancestors() {
-            if let Some(m) = self.reg.root.module(prefix) {
-                if let Some(hit) = m.ctors.get(name) {
-                    return Some(hit.clone());
-                }
-            }
-        }
-        None
+        self.find_on_chain(|_, m| m.ctors.get(name).cloned())
     }
 
     /// The `Sexpr` `cons` variant's `(type path, variant index)`, read from the
@@ -3598,36 +3574,19 @@ impl Checker {
     /// [`Self::resolve_bare_type`] without the `use` alias: the ancestor
     /// chain alone.
     fn resolve_unaliased_bare_type(&self, name: &str) -> Option<Path> {
-        for prefix in self.ns_ancestors() {
-            if let Some(m) = self.reg.root.module(prefix) {
-                if let Some(def) = m.types.get(name) {
-                    return Some(def.name.clone());
-                }
-            }
-        }
-        None
+        self.find_on_chain(|_, m| m.types.get(name).map(|def| def.name.clone()))
     }
 
     /// Resolve a `module::...::Type` segment path to the type's [`Path`].
     fn resolve_type_path(&self, segs: &[String]) -> Option<Path> {
-        if segs.is_empty() {
-            return None;
-        }
-        let (mods, local) = segs.split_at(segs.len() - 1);
+        let (local, mods) = segs.split_last()?;
         if mods.is_empty() {
             // No module qualifier — `find_module(&[])` would just hand back
             // the current namespace itself (its loop never runs), missing
             // every ancestor including root; walk the chain instead.
-            return self.resolve_bare_type(&local[0]);
+            return self.resolve_bare_type(local);
         }
-        let (abs, m) = self.find_module(mods)?;
-        if let Some(def) = m.types.get(&local[0]) {
-            if !def.public && !self.in_scope(&abs) {
-                return None;
-            }
-            return Some(def.name.clone());
-        }
-        None
+        self.find_in_module(segs, |m, n| m.types.get(n).map(|def| (def.public, def.name.clone()))).map(|(_, name)| name)
     }
 
     /// Resolve a written type name to a `deftype` alias, if it names one.
@@ -3644,40 +3603,18 @@ impl Checker {
                     return Some(a);
                 }
             }
-            for prefix in self.ns_ancestors() {
-                if let Some(m) = self.reg.root.module(prefix) {
-                    if let Some(a) = m.type_aliases.get(name) {
-                        return Some(a.clone());
-                    }
-                }
-            }
-            return None;
+            return self.find_on_chain(|_, m| m.type_aliases.get(name).cloned());
         }
         self.resolve_type_alias_path(path.segments())
     }
 
     /// [`Self::resolve_type_alias`] for a `module::...::Name` segment path.
     fn resolve_type_alias_path(&self, segs: &[String]) -> Option<TypeAlias> {
-        if segs.is_empty() {
-            return None;
-        }
-        let (mods, local) = segs.split_at(segs.len() - 1);
+        let (local, mods) = segs.split_last()?;
         if mods.is_empty() {
-            for prefix in self.ns_ancestors() {
-                if let Some(m) = self.reg.root.module(prefix) {
-                    if let Some(a) = m.type_aliases.get(&local[0]) {
-                        return Some(a.clone());
-                    }
-                }
-            }
-            return None;
+            return self.find_on_chain(|_, m| m.type_aliases.get(local).cloned());
         }
-        let (abs, m) = self.find_module(mods)?;
-        let a = m.type_aliases.get(&local[0])?;
-        if !a.public && !self.in_scope(&abs) {
-            return None;
-        }
-        Some(a.clone())
+        self.find_in_module(segs, |m, n| m.type_aliases.get(n).map(|a| (a.public, a.clone()))).map(|(_, a)| a)
     }
 
     /// Reject a `deftype` alias written with the wrong number of type
@@ -3734,34 +3671,12 @@ impl Checker {
         if let Some(p) = self.lookup_alias(name) {
             return self.resolve_global_path(&p);
         }
-        for prefix in self.ns_ancestors() {
-            if let Some(m) = self.reg.root.module(prefix) {
-                if let Some(vi) = m.vars.get(name) {
-                    let mut segs = prefix.to_vec();
-                    segs.push(name.to_string());
-                    return Some((Path::from_segments(segs), vi.clone()));
-                }
-            }
-        }
-        None
+        self.find_on_chain(|prefix, m| m.vars.get(name).map(|vi| (item_path(prefix, name), vi.clone())))
     }
 
     /// Resolve a qualified `module::...::global` path to its `(path, info)`.
     fn resolve_global_path(&self, segs: &[String]) -> Option<(Path, VarInfo)> {
-        if segs.is_empty() {
-            return None;
-        }
-        let (mods, last) = segs.split_at(segs.len() - 1);
-        let (abs, m) = self.find_module(mods)?;
-        if let Some(vi) = m.vars.get(&last[0]) {
-            if !vi.public && !self.in_scope(&abs) {
-                return None;
-            }
-            let mut full = abs;
-            full.push(last[0].clone());
-            return Some((Path::from_segments(full), vi.clone()));
-        }
-        None
+        self.find_in_module(segs, |m, n| m.vars.get(n).map(|vi| (vi.public, vi.clone())))
     }
 
     /// Reify a bare free-function name as a function value (`FnRef`), if it names
@@ -4588,18 +4503,7 @@ impl Checker {
         let fq_name = self.fq(&name);
         let (required, required_locs, optionals_raw, rest, keys_raw) = self.parse_defun_params_full(heap, parts[1])?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
-        let mut body_start = 3;
-        let mut bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
-        if let Some(form) = parts.get(3) {
-            if is_where_clause(heap, *form)? {
-                bounds = self.parse_where_clause(heap, *form)?;
-                body_start = 4;
-            }
-        }
-        let doc = take_leading_docstring(heap, parts, body_start);
-        if doc.is_some() {
-            body_start += 1;
-        }
+        let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
 
         self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
 
@@ -4751,19 +4655,32 @@ impl Checker {
         }
         let (params, param_locs, rest) = self.parse_params_rest(heap, parts[1])?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
-        let mut body_start = 3;
-        let mut bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
-        if let Some(form) = parts.get(3) {
+        let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
+        Ok((params, param_locs, rest, ret, bounds, body_start, doc))
+    }
+
+    /// Reads what may follow a signature's return type at `parts[at]`: an
+    /// optional `(where ...)` clause, then an optional docstring. Returns the
+    /// bounds, the index the body starts at, and the docstring.
+    #[allow(clippy::type_complexity)]
+    fn parse_where_and_docstring(
+        &self,
+        heap: &Heap,
+        parts: &[Value],
+        mut at: usize,
+    ) -> Result<(BTreeMap<String, Vec<TraitBound>>, usize, Option<String>), Error> {
+        let mut bounds = BTreeMap::new();
+        if let Some(form) = parts.get(at) {
             if is_where_clause(heap, *form)? {
                 bounds = self.parse_where_clause(heap, *form)?;
-                body_start = 4;
+                at += 1;
             }
         }
-        let doc = take_leading_docstring(heap, parts, body_start);
+        let doc = take_leading_docstring(heap, parts, at);
         if doc.is_some() {
-            body_start += 1;
+            at += 1;
         }
-        Ok((params, param_locs, rest, ret, bounds, body_start, doc))
+        Ok((bounds, at, doc))
     }
 
     // ---- monomorphization ---------------------------------------------------
@@ -6386,21 +6303,10 @@ impl Checker {
             // `(name (params) ret [where] [doc] body...)`. Everything past
             // `ret` is optional; with no body forms left this is an ordinary
             // bodyless signature, exactly as before defaults existed.
-            let mut at = 3;
-            let mut bounds = BTreeMap::new();
-            if let Some(f) = elems.get(at) {
-                if is_where_clause(heap, *f)? {
-                    bounds = self.parse_where_clause(heap, *f)?;
-                    at += 1;
-                }
-            }
             // The usual CL rule (`take_leading_docstring`): a string is a
             // docstring only when a body form follows, since a lone trailing
             // string is the default body's return value.
-            let mdoc = take_leading_docstring(heap, &elems, at);
-            if mdoc.is_some() {
-                at += 1;
-            }
+            let (bounds, at, mdoc) = self.parse_where_and_docstring(heap, &elems, 3)?;
             let sig = FnSig {
                 ffi: false,
                 type_params: vec![],
@@ -8832,20 +8738,7 @@ impl Checker {
             param_locs.push(loc.clone());
         }
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
-        // Optional `(where ...)` clause after the return type — identical
-        // peek to `parse_defun_sig`'s.
-        let mut body_start = 3;
-        let mut bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
-        if let Some(form) = parts.get(3) {
-            if is_where_clause(heap, *form)? {
-                bounds = self.parse_where_clause(heap, *form)?;
-                body_start = 4;
-            }
-        }
-        let doc = take_leading_docstring(heap, parts, body_start);
-        if doc.is_some() {
-            body_start += 1;
-        }
+        let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
         Ok(MethodSig {
             method,
             instance,
@@ -17435,6 +17328,13 @@ fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(),
     Ok(())
 }
 
+/// The absolute path of the item `name` defined in module `module`.
+fn item_path(module: &[String], name: &str) -> Path {
+    let mut segs = module.to_vec();
+    segs.push(name.to_string());
+    Path::from_segments(segs)
+}
+
 fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
     Ok(matches!(v, Value::Cons(_))
         && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if id.is(wk::WHERE)))
@@ -17444,10 +17344,9 @@ fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
 /// `defmacro`/`defmethod`: a string literal right before the body is a
 /// docstring only when at least one more body form follows it, since a
 /// *lone* trailing string is the function's return value, not
-/// documentation, and the two are otherwise indistinguishable. Used by
-/// `Self::parse_defun_sig`, `Self::check_defun_opt_key`,
-/// `Self::parse_defmethod_sig` and `Self::check_defmacro`, each of which
-/// bumps its own `body_start` by one when this returns `Some`.
+/// documentation, and the two are otherwise indistinguishable. A signature
+/// reads it through `Checker::parse_where_and_docstring`; `check_defmacro`
+/// and the struct/enum forms call it directly.
 fn take_leading_docstring(heap: &Heap, parts: &[Value], at: usize) -> Option<String> {
     match parts.get(at) {
         Some(Value::Str(id)) if parts.len() > at + 1 => Some(heap.string(*id).to_string()),

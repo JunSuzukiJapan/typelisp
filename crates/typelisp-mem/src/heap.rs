@@ -295,29 +295,69 @@ struct Interning {
     loc_ids: HashMap<crate::errors::Loc, LocId>,
 }
 
-/// The GC-collected string store: content, free list, mark bits, and the
-/// identity-preserving intern index for [`Heap::intern_string`]. Grouped
-/// under one lock rather than one apiece because `alloc_string`/`gc`'s
-/// sweep touch several of these together on every call — splitting them
-/// would only add lock traffic, not concurrency, since nothing needs one
-/// without the others.
-#[derive(Default)]
-struct StrStore {
-    slots: Slab<String>,
+/// A GC-collected slot store: content, free list, and mark bits. Grouped
+/// under one lock rather than one apiece because allocation and `gc`'s
+/// sweep touch all three together on every call — splitting them would only
+/// add lock traffic, not concurrency, since nothing needs one without the
+/// others.
+struct SlotStore<T> {
+    slots: Slab<T>,
     free: Vec<u32>,
     marks: Vec<bool>,
-    intern: HashMap<String, StrId>,
 }
 
-/// The GC-collected general boxed-object store (see [`BoxedObj`]) — same
-/// growable-slot-store shape as [`StrStore`], grouped under one lock for the
-/// same reason: `alloc_boxed`/`gc`'s sweep touch `slots`/`free`/`marks`
-/// together on every call.
+// Written by hand for the same reason as `Slab`'s: a derive would demand
+// `T: Default`.
+impl<T> Default for SlotStore<T> {
+    fn default() -> SlotStore<T> {
+        SlotStore { slots: Slab::new(), free: Vec::new(), marks: Vec::new() }
+    }
+}
+
+impl<T> SlotStore<T> {
+    /// Stores `item`, reusing a freed slot when there is one, and returns its
+    /// index. The slot starts unmarked.
+    fn alloc(&mut self, item: T) -> u32 {
+        if let Some(idx) = self.free.pop() {
+            self.slots[idx as usize] = Some(item);
+            self.marks[idx as usize] = false;
+            idx
+        } else {
+            let idx = self.slots.len() as u32;
+            self.slots.push(Some(item));
+            self.marks.push(false);
+            idx
+        }
+    }
+
+    fn occupied(&self) -> usize {
+        self.slots.iter().filter(|s| s.is_some()).count()
+    }
+
+    fn clear_marks(&mut self) {
+        for m in self.marks.iter_mut() {
+            *m = false;
+        }
+    }
+
+    /// Frees every occupied slot the mark phase did not reach, recycling its
+    /// index.
+    fn sweep(&mut self) {
+        for i in 0..self.slots.len() {
+            if self.slots[i].is_some() && !self.marks[i] {
+                self.slots[i] = None;
+                self.free.push(i as u32);
+            }
+        }
+    }
+}
+
+/// The string store plus the identity-preserving intern index for
+/// [`Heap::intern_string`], under the one lock: interning allocates.
 #[derive(Default)]
-struct BoxStore {
-    slots: Slab<BoxedObj>,
-    free: Vec<u32>,
-    marks: Vec<bool>,
+struct StrStore {
+    store: SlotStore<String>,
+    intern: HashMap<String, StrId>,
 }
 
 // ---- stop-the-world (`docs/dev/os-threads-design.md` §4) -------------------
@@ -453,7 +493,7 @@ pub struct HeapShared {
     strings: RwLock<StrStore>,
     // Same reasoning again, for `Heap::bignum_value`/`ratio_value`'s return
     // and `bucket`'s (`Heap::hashtable_bucket_count` and friends).
-    boxes: RwLock<BoxStore>,
+    boxes: RwLock<SlotStore<BoxedObj>>,
     // Liveness registry for `BoxedObj::Cell`s (see `alloc_cell`): a cell is
     // an *implicit* GC root for exactly as long as some binding holds the
     // `Arc<BoxId>` handed out at allocation. Registered here (weakly) rather
@@ -581,7 +621,7 @@ impl Heap {
             permanent_roots: Mutex::new(Slab::new()),
             interning: RwLock::new(Interning::default()),
             strings: RwLock::new(StrStore::default()),
-            boxes: RwLock::new(BoxStore::default()),
+            boxes: RwLock::new(SlotStore::default()),
             cell_registry: Mutex::new(Vec::new()),
             threads: ThreadRegistry::new(),
             gc_count: AtomicU64::new(0),
@@ -756,12 +796,12 @@ impl Heap {
 
     /// Strings currently allocated (occupied slots).
     pub fn string_count(&self) -> usize {
-        self.shared.strings.read_recursive().slots.iter().filter(|s| s.is_some()).count()
+        self.shared.strings.read_recursive().store.occupied()
     }
 
     /// Boxed objects currently allocated (occupied slots) — see [`BoxedObj`].
     pub fn box_count(&self) -> usize {
-        self.shared.boxes.read_recursive().slots.iter().filter(|b| b.is_some()).count()
+        self.shared.boxes.read_recursive().occupied()
     }
 
     // ---- roots ------------------------------------------------------------
@@ -1210,24 +1250,14 @@ impl Heap {
     /// Store a string, returning its `Value::Str`. Strings are GC-collected.
     pub fn alloc_string(&mut self, s: String) -> Value {
         self.debug_assert_not_native("alloc_string");
-        let mut strings = self.shared.strings.write();
-        if let Some(idx) = strings.free.pop() {
-            strings.slots[idx as usize] = Some(s);
-            strings.marks[idx as usize] = false;
-            Value::Str(StrId(idx))
-        } else {
-            let idx = strings.slots.len() as u32;
-            strings.slots.push(Some(s));
-            strings.marks.push(false);
-            Value::Str(StrId(idx))
-        }
+        Value::Str(StrId(self.shared.strings.write().store.alloc(s)))
     }
 
     /// The contents of a stored string. See `type_key_name`'s doc comment
     /// for why this returns a mapped guard rather than `&str`.
     pub fn string(&self, id: StrId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
         parking_lot::RwLockReadGuard::map(self.shared.strings.read_recursive(), |s| {
-            s.slots[id.0 as usize].as_deref().expect("dangling StrId")
+            s.store.slots[id.0 as usize].as_deref().expect("dangling StrId")
         })
     }
 
@@ -1274,10 +1304,9 @@ impl Heap {
     // ---- boxed objects ------------------------------------------------------
 
     /// Store a [`BoxedObj`], returning its `Value::Boxed`. Boxed objects are
-    /// GC-collected — same growable-slot-store shape as
-    /// [`alloc_string`](Self::alloc_string), generalized so `gc`'s mark phase
-    /// can trace into whatever `Value`s the payload itself holds (see
-    /// [`gc`](Self::gc)).
+    /// GC-collected — the same [`SlotStore`] as
+    /// [`alloc_string`](Self::alloc_string), and `gc`'s mark phase traces into
+    /// whatever `Value`s the payload itself holds (see [`gc`](Self::gc)).
     ///
     /// Not a safepoint, and neither is [`alloc_string`](Self::alloc_string):
     /// neither has ever collected, so callers hold unrooted values across
@@ -1285,17 +1314,7 @@ impl Heap {
     /// another thread's collection run here would sweep those.
     fn alloc_boxed(&mut self, obj: BoxedObj) -> Value {
         self.debug_assert_not_native("alloc_boxed");
-        let mut boxes = self.shared.boxes.write();
-        if let Some(idx) = boxes.free.pop() {
-            boxes.slots[idx as usize] = Some(obj);
-            boxes.marks[idx as usize] = false;
-            Value::Boxed(BoxId(idx))
-        } else {
-            let idx = boxes.slots.len() as u32;
-            boxes.slots.push(Some(obj));
-            boxes.marks.push(false);
-            Value::Boxed(BoxId(idx))
-        }
+        Value::Boxed(BoxId(self.shared.boxes.write().alloc(obj)))
     }
 
     /// Store an `f64`, returning its `Value::Boxed` — `Sexpr`'s `f64`
@@ -3020,12 +3039,8 @@ impl Heap {
         // is the discipline the design doc's lock-ordering rule depends on
         // (`docs/dev/os-threads-design.md` §2) — easier to keep from the
         // start than to retrofit once a second lock actually matters.
-        for m in self.shared.strings.write().marks.iter_mut() {
-            *m = false;
-        }
-        for m in self.shared.boxes.write().marks.iter_mut() {
-            *m = false;
-        }
+        self.shared.strings.write().store.clear_marks();
+        self.shared.boxes.write().clear_marks();
 
         // MARK: iterative DFS from the roots (no native recursion). Two
         // independent root sets feed the same walk — `roots` (the strict
@@ -3079,7 +3094,7 @@ impl Heap {
                     stack.push((*c.0).cdr);
                 },
                 Value::Str(s) => {
-                    self.shared.strings.write().marks[s.0 as usize] = true;
+                    self.shared.strings.write().store.marks[s.0 as usize] = true;
                 }
                 Value::Boxed(b) => {
                     let idx = b.0 as usize;
@@ -3136,25 +3151,9 @@ impl Heap {
         arena.free_count = new_free_count;
         drop(arena);
 
-        // SWEEP strings: free unmarked occupied slots, recycling indices.
-        let mut strings = self.shared.strings.write();
-        for i in 0..strings.slots.len() {
-            if strings.slots[i].is_some() && !strings.marks[i] {
-                strings.slots[i] = None;
-                strings.free.push(i as u32);
-            }
-        }
-        drop(strings);
-
-        // SWEEP boxed objects: same recycling scheme as strings.
-        let mut boxes = self.shared.boxes.write();
-        for i in 0..boxes.slots.len() {
-            if boxes.slots[i].is_some() && !boxes.marks[i] {
-                boxes.slots[i] = None;
-                boxes.free.push(i as u32);
-            }
-        }
-        drop(boxes);
+        // SWEEP strings and boxed objects, one lock at a time.
+        self.shared.strings.write().store.sweep();
+        self.shared.boxes.write().sweep();
 
         new_free_count - old_free
     }
