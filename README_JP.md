@@ -138,3 +138,17 @@ typl --version    # バージョンを表示する
 
 - [Emacs（typelisp-mode）](editor/emacs/README.md)
 - [VS Code](editor/vscode/README.md)
+
+## ライセンス
+
+typelisp は、次の2つのライセンスのどちらかを選んで利用できます。
+
+- MIT License（[LICENSE-MIT](LICENSE-MIT)）
+- Apache License, Version 2.0（[LICENSE-APACHE](LICENSE-APACHE)）
+
+どちらを選んだ場合も、[LICENSE-EXCEPTION](LICENSE-EXCEPTION) の例外が加わります。`typl -c` や
+`compile-file` で作った実行ファイルには typelisp の一部が含まれますが、その部分については
+typelisp の著作権表示やライセンス文を添えずに配布できます。
+
+typelisp への貢献は、特に断りのない限り、上と同じ条件（2つのライセンスのどちらか、および例外）で
+提供されたものとして扱います。

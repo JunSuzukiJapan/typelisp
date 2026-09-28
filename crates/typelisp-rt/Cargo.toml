@@ -2,6 +2,7 @@
 name = "typelisp-rt"
 version = "0.0.2"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 
 # `rlib` only. These `#[no_mangle]` shims still have to reach an AOT
 # executable as ordinary linker symbols, but `cc` takes one archive and this

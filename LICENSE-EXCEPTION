@@ -1,0 +1,17 @@
+typelisp Runtime Exception
+
+Copyright (c) 2021-2026 Jun Suzuki (JunSuzukiJapan@GitHub)
+
+typelisp is licensed under either the Apache License, Version 2.0
+(LICENSE-APACHE) or the MIT License (LICENSE-MIT), at your option. The
+following exception grants additional permission and applies whichever of the
+two licenses you choose.
+
+As an exception, if, as a result of compiling your source code with this
+Software (for example with `typl -c` or `compile-file`), portions of this
+Software are embedded into an Object form of such source code, you may
+redistribute such embedded portions in such Object form without complying with
+the conditions of Sections 4(a), 4(b) and 4(d) of the Apache License,
+Version 2.0, or with the condition of the MIT License that its copyright
+notice and permission notice be included in all copies or substantial
+portions of the Software.

@@ -2,6 +2,7 @@
 name = "typelisp-abi"
 version = "0.0.2"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 
 # The compiled-code calling convention, below every crate that defines `rt_*`
 # shims (`typelisp-rt`, `typelisp-print`). See the crate doc comment for why

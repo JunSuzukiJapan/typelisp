@@ -2,6 +2,7 @@
 name = "typelisp-print"
 version = "0.0.2"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 
 # The CL printer — `format`'s directive engine (CLHS 22.3) and the pretty
 # printer (22.2) — as its own crate rather than a module of `typelisp-rt`.

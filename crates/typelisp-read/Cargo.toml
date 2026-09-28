@@ -2,6 +2,7 @@
 name = "typelisp-read"
 version = "0.0.2"
 edition = "2021"
+license = "MIT OR Apache-2.0"
 
 # The CL reader, as its own crate rather than a module of `typelisp`, for the
 # same reason `typelisp-print` is one: a compiled function that calls `read`
