@@ -15,7 +15,7 @@
 extern crate typelisp;
 
 mod common;
-use common::{eval_string};
+use common::{eval_err, eval_string};
 
 /// The string the last form produced, panicking on any check/eval error.
 fn fmt(src: &str) -> String {
@@ -47,14 +47,32 @@ fn every_limit_is_off_by_default() {
 
 #[test]
 fn zero_means_unlimited() {
-    // typelisp has no `nil`, so 0 (and anything less) stands in for it — the
-    // same convention `*print-right-margin*`/`*print-miser-width*` use.
+    // typelisp has no `nil`, so 0 stands in for it — the same convention
+    // `*print-right-margin*`/`*print-miser-width*` use.
     let src = r#"
         (setf *print-level* 0)
-        (setf *print-length* -1)
+        (setf *print-length* 0)
         (format false "~a" '(1 (2 (3 (4)))))
     "#;
     assert_eq!(fmt(src), "(1 (2 (3 (4))))");
+}
+
+#[test]
+fn a_negative_limit_is_a_printing_error() {
+    // A negative limit means nothing, so it is refused rather than read as
+    // "no limit".
+    for var in ["*print-level*", "*print-length*", "*print-right-margin*", "*print-miser-width*", "*print-lines*"] {
+        let err = eval_err(&format!(r#"(setf {} -1) (format false "~a" 1)"#, var));
+        assert!(err.contains(var) && err.contains("got -1"), "{}: {}", var, err);
+    }
+}
+
+#[test]
+fn an_unknown_print_case_is_a_printing_error() {
+    // `*print-case*` is a `symbol`, so the checker lets any keyword in; the
+    // printer takes only CL's three and says so for anything else.
+    let err = eval_err(r#"(setf *print-case* :bogus) (format false "~a" 1)"#);
+    assert!(err.contains("*print-case*") && err.contains(":bogus"), "{}", err);
 }
 
 // ---------------------------------------------------------------------------

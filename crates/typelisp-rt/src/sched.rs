@@ -2182,7 +2182,9 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
             if words.len() < 2 {
                 return Err(SchedError::Internal("a compiled `select` carried no arms".to_string()));
             }
-            let n = untag(words[0]).max(0) as usize;
+            let n = usize::try_from(untag(words[0])).map_err(|_| {
+                SchedError::Internal(format!("a compiled `select` said it had {} arms", untag(words[0])))
+            })?;
             let has_else = untag(words[1]) != 0;
             if words.len() < 2 + 3 * n {
                 return Err(SchedError::Internal(format!(
@@ -2543,7 +2545,8 @@ unsafe fn unwind_failure(payload: Box<dyn std::any::Any + Send>) -> TaskFailure 
     };
     match payload.downcast::<typelisp_abi::CompiledThrow>() {
         Ok(_) => {
-            let tag = crate::take_throw().map(|(t, _)| t).unwrap_or_default();
+            let (tag, _) = crate::take_throw()
+                .unwrap_or_else(|| typelisp_abi::fatal("a compiled throw unwound with no throw in flight"));
             TaskFailure::Throw(tag)
         }
         Err(other) => std::panic::resume_unwind(other),

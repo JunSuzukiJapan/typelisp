@@ -91,19 +91,18 @@ pub enum Op {
     Tab { kind: TabKind, colnum: i64, colinc: i64 },
 }
 
-/// The `*print-pretty*` / `*print-right-margin*` / `*print-miser-width*`
-/// triple, read out of the interpreter's globals once per printing operation
-/// (`Interp::pretty_opts`). typelisp has no dynamic binding, so these are
-/// ordinary assignable globals rather than CL's special variables.
+/// The layout control variables (`*print-pretty*`, `*print-right-margin*`,
+/// `*print-miser-width*`, `*print-lines*`), read once per printing operation
+/// by [`crate::runtime::read_opts`].
 #[derive(Clone, Copy, Debug)]
 pub struct Opts {
     pub pretty: bool,
     pub margin: usize,
-    /// `None` when `*print-miser-width*` is 0 or negative ("off", CL's `nil`).
+    /// `None` when `*print-miser-width*` is 0 ("off", CL's `nil`).
     pub miser: Option<usize>,
     /// `*print-lines*`: stop after this many lines and mark the cut with
     /// `..`, CL's own marker. `None` is no limit (CL's `nil`), which is both
-    /// the default and what 0 or a negative global means.
+    /// the default and what a global of 0 means.
     pub lines: Option<usize>,
 }
 
@@ -545,7 +544,7 @@ impl Metrics {
                     w += self::width(prefix);
                     suffixes.push(self::width(suffix));
                 }
-                Item::Op(Op::BlockEnd) => w += suffixes.pop().unwrap_or(0),
+                Item::Op(Op::BlockEnd) => w += suffixes.pop().expect("every BlockEnd closes a BlockStart"),
                 Item::Op(Op::Newline(NewlineKind::Mandatory)) => h += 1,
                 Item::Op(_) => {}
             }
@@ -833,7 +832,6 @@ fn render_tabular(
     cut: bool,
     out: &mut Out,
 ) -> Result<(), String> {
-    let colinc = if colinc <= 0 { 1 } else { colinc };
     out.op(Op::BlockStart { prefix: "(".to_string(), per_line: false, suffix: ")".to_string() });
     for (i, e) in elems.iter().enumerate() {
         if i > 0 {

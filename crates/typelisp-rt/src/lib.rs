@@ -2744,6 +2744,9 @@ unsafe fn run_program(program: &Program) -> Result<Value, i64> {
         Ok(s) => std::sync::Arc::new(s),
         Err(e) => fatal(&format!("the scheduler could not be set up: {}", e)),
     };
+    // The printer reads the prelude's control variables from their compiled
+    // slots, and the id -> slot table is this crate's.
+    typelisp_print::aot::set_global_slots(global_perm_idx);
     let rt = crate::shared::rt_shared();
     let print = typelisp_print::shared::print_shared();
     let hooks = typelisp_print::runtime::print_hooks();
@@ -2846,7 +2849,8 @@ pub unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
             // the two front ends say the same thing about the same program.
             match payload.downcast::<CompiledThrow>() {
                 Ok(_) => {
-                    let tag = take_throw().map(|(t, _)| t).unwrap_or_default();
+                    let (tag, _) =
+                        take_throw().unwrap_or_else(|| fatal("a compiled throw unwound with no throw in flight"));
                     eprintln!("throw: no enclosing (catch '{}) for this throw", tag);
                     EXIT_CODE_PANIC
                 }
@@ -2995,7 +2999,12 @@ pub unsafe fn park_throw(tag: String, value: Value) {
 /// A `Heap` must be registered on this thread.
 pub unsafe fn take_throw() -> Option<(String, Value)> {
     let tag = IN_FLIGHT_TAG.with(|cell| cell.borrow_mut().take())?;
-    Some((tag, active_heap().in_flight_throw().unwrap_or(Value::Empty)))
+    // `park_throw` sets the two together, and every path that clears the
+    // value clears the tag with it.
+    let value = active_heap()
+        .in_flight_throw()
+        .unwrap_or_else(|| fatal(&format!("a throw to '{} is in flight without its value", tag)));
+    Some((tag, value))
 }
 
 /// Ends the flight: no throw is travelling any more, so the value it carried
@@ -4317,8 +4326,8 @@ pub fn xorshift64_step(x: u64) -> u64 {
 pub fn fresh_random_seed() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(1)
+        // A clock set before 1970 is as good a source of entropy as any.
+        .map_or_else(|before| before.duration().as_nanos() as u64, |d| d.as_nanos() as u64)
         | 1
 }
 

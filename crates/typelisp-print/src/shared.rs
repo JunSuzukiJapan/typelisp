@@ -43,6 +43,14 @@ pub struct PrintShared {
     /// scans each literal control string and names only the methods a `~/ /`
     /// in this program can actually reach.
     pub(crate) format_call: RwLock<HashMap<(String, String), usize>>,
+    /// `printer control variable -> its compiled global id`, filled by
+    /// `rt_print_global` — where the AOT hooks read `*print-base*` and the
+    /// rest from.
+    pub(crate) globals: RwLock<HashMap<String, usize>>,
+    /// Turns a compiled global id into its permanent-root position. The
+    /// runtime owns that table and installs this before the program runs
+    /// (`typelisp_print::aot::set_global_slots`); this crate sits below it.
+    pub(crate) global_slot: RwLock<Option<fn(usize) -> Option<usize>>>,
 }
 
 thread_local! {

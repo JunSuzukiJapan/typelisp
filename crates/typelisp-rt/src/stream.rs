@@ -618,13 +618,19 @@ impl StreamTable {
     /// unit nor useful without a seek to go with it.
     ///
     /// Pushback counts backwards, because an unread character has not been
-    /// consumed. The floor at zero is for the program that unreads more than
-    /// it read — CL leaves that undefined, and a negative position would
-    /// travel further than the mistake did.
+    /// consumed. A program that unread more than it read has no position —
+    /// CL leaves that undefined — and is told so.
     pub fn position(&mut self, h: Handle) -> StreamResult<i64> {
         let s = self.readable(h)?;
         match &s.backend {
-            Backend::StringIn { pos, .. } => Ok((*pos as i64 - s.pushback.len() as i64).max(0)),
+            Backend::StringIn { pos, .. } => match pos.checked_sub(s.pushback.len()) {
+                Some(p) => Ok(p as i64),
+                None => Err(format!(
+                    "stream-position: {} character(s) were unread but only {} read, so there is no position",
+                    s.pushback.len(),
+                    pos
+                )),
+            },
             _ => Err("stream-position: only a string input stream has a character position".to_string()),
         }
     }

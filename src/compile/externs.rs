@@ -521,7 +521,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 320] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 321] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -538,7 +538,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 320] {
         rt_pprint_list_exhausted, rt_pprint_newline, rt_pprint_pop, rt_pprint_tab, rt_print, rt_println,
     };
     use typelisp_print::aot::{
-        rt_format_call_method, rt_print_enum_variant, rt_print_field_name, rt_print_field_template, rt_print_object_method,
+        rt_format_call_method, rt_print_enum_variant, rt_print_field_name, rt_print_field_template, rt_print_global,
+        rt_print_object_method,
     };
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
@@ -693,6 +694,10 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 320] {
         // reason as the two above — the interpreter looks the name up in its
         // own method table when the directive runs.
         ("rt_format_call_method", rt_format_call_method as *const () as usize),
+        // Each printer control variable's compiled global id, so the
+        // executable's printer reads the value the program `setf`'d. AOT-only:
+        // the interpreter reads its own globals.
+        ("rt_print_global", rt_print_global as *const () as usize),
         ("rt_car", rt_car as *const () as usize),
         ("rt_cdr", rt_cdr as *const () as usize),
         ("rt_cons", rt_cons as *const () as usize),

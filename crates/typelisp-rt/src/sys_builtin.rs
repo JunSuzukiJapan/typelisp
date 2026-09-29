@@ -118,10 +118,15 @@ pub fn internal_time_value(heap: &mut Heap, micros: i64) -> Value {
 /// 1900-01-01 UTC — 2_208_988_800 seconds before the Unix one.
 pub fn get_universal_time() -> i64 {
     const UNIX_TO_CL_EPOCH_SECS: i64 = 2_208_988_800;
-    let unix_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
+    // A clock set before 1970 reads as negative Unix seconds, rounded down
+    // like every other instant.
+    let unix_secs = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => d.as_secs() as i64,
+        Err(before) => {
+            let d = before.duration();
+            -(d.as_secs() as i64) - i64::from(d.subsec_nanos() > 0)
+        }
+    };
     unix_secs + UNIX_TO_CL_EPOCH_SECS
 }
 

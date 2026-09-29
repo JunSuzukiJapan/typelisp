@@ -48,33 +48,128 @@ pub struct PrintHooks {
     /// `(heap, name, value, colon, at) -> rendering`, for `~/name/`. See
     /// [`PrintEnv::format_call`].
     pub format_call: fn(&mut Heap, &str, Value, bool, bool) -> Result<String, String>,
-    /// The three layout control variables (`*print-pretty*`,
-    /// `*print-right-margin*`, `*print-miser-width*`), read fresh per
-    /// printing operation — typelisp has no dynamic binding, so they are
-    /// ordinary globals a program may have `setf`'d since the last one.
-    pub opts: fn(&Heap) -> Opts,
-    /// The three "what to print" control variables (`*print-circle*`,
-    /// `*print-level*`, `*print-length*`), read the same way.
-    pub print_vars: fn(&Heap) -> PrintVars,
+    /// The layout control variables ([`read_opts`]), read fresh per printing
+    /// operation — they are ordinary globals a program may have `setf`'d
+    /// since the last one. An error is a value the printer cannot use.
+    pub opts: fn(&Heap) -> Result<Opts, String>,
+    /// The "what to print" control variables ([`read_print_vars`]), read the
+    /// same way.
+    pub print_vars: fn(&Heap) -> Result<PrintVars, String>,
 }
 
 /// The hooks a program with no environment installed gets: every enum prints
-/// `<unknown-variant>`, no type has a `print-object` method, and both sets of
-/// control variables are at their CL initial values.
+/// `<unknown-variant>`, no type has a `print-object` method, and the control
+/// variables cannot be read at all — there is no program to hold them.
 ///
-/// Reaching these is a registration bug, not something a program can provoke
-/// — but they are silent-and-plausible rather than a crash, because the one
-/// place it can legitimately happen is a unit test printing a value without
-/// standing a program up.
+/// Reaching these is a registration bug, not something a program can provoke.
+/// A unit test that prints without standing a program up installs its own
+/// hooks for the variables it needs.
 pub const BARE_HOOKS: PrintHooks = PrintHooks {
     enum_variant_name: |_, _| None,
     field_is_niched_option: |_, _, _| false,
     field_name: |_, _| None,
     print_object: |_, _, _| Ok(None),
     format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program to look the method up in", name)),
-    opts: |_| Opts::default(),
-    print_vars: |_| PrintVars::default(),
+    opts: |_| Err(NO_PROGRAM.to_string()),
+    print_vars: |_| Err(NO_PROGRAM.to_string()),
 };
+
+const NO_PROGRAM: &str = "printing needs a program to read the printer control variables from, and none is installed";
+
+/// Every printer control variable the renderer reads, as the prelude names
+/// them: what [`read_print_vars`] and [`read_opts`] ask for between them, and
+/// what an AOT executable's startup registers (`typelisp_print::aot`).
+pub const PRINTER_GLOBALS: [&str; 11] = [
+    "*print-circle*",
+    "*print-level*",
+    "*print-length*",
+    "*print-base*",
+    "*print-radix*",
+    "*print-case*",
+    "*print-readably*",
+    "*print-pretty*",
+    "*print-right-margin*",
+    "*print-miser-width*",
+    "*print-lines*",
+];
+
+/// Reads one printer control variable: `global` answers its current value, or
+/// why it has none. The checker fixed each one's type at its `defvar`, so a
+/// value of any other shape is a broken invariant, reported as such.
+fn read_bool(global: &dyn Fn(&str) -> Result<Value, String>, name: &str) -> Result<bool, String> {
+    match global(name)? {
+        Value::Bool(b) => Ok(b),
+        other => Err(format!("internal error: {} holds {:?}, not a bool", name, other)),
+    }
+}
+
+/// An `int` control variable: a fixnum, or a bignum no printer setting can
+/// use.
+fn read_int(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, String>, name: &str) -> Result<i64, String> {
+    match global(name)? {
+        Value::Int(n) => Ok(n),
+        Value::Boxed(id) if heap.is_bignum(id) => Err(format!("{} is {}, which is out of range", name, heap.bignum_value(id))),
+        other => Err(format!("internal error: {} holds {:?}, not an int", name, other)),
+    }
+}
+
+/// A limit: CL spells "no limit" `nil`, which this language does not have, so
+/// 0 stands in for it. A negative limit means nothing and is an error.
+fn read_limit(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, String>, name: &str) -> Result<Option<usize>, String> {
+    match read_int(heap, global, name)? {
+        0 => Ok(None),
+        n if n > 0 => Ok(Some(n as usize)),
+        n => Err(format!("{} must be 0 (no limit) or positive, got {}", name, n)),
+    }
+}
+
+/// The "what to print" control variables, through `global`.
+pub fn read_print_vars(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, String>) -> Result<PrintVars, String> {
+    let base = match read_int(heap, global, "*print-base*")? {
+        b if (2..=36).contains(&b) => b as u32,
+        b => return Err(format!("*print-base* must be between 2 and 36, got {}", b)),
+    };
+    // A keyword is an ordinary symbol whose interned name keeps the leading
+    // colon, not a type of its own — so the checker lets any symbol through
+    // and the three names CL defines are checked here.
+    let case = match global("*print-case*")? {
+        Value::Symbol(id) => match heap.symbol_name(id) {
+            ":upcase" => format::PrintCase::Upcase,
+            ":downcase" => format::PrintCase::Downcase,
+            ":capitalize" => format::PrintCase::Capitalize,
+            other => return Err(format!("*print-case* must be :upcase, :downcase or :capitalize, got {}", other)),
+        },
+        other => return Err(format!("internal error: *print-case* holds {:?}, not a symbol", other)),
+    };
+    Ok(PrintVars {
+        circle: read_bool(global, "*print-circle*")?,
+        level: read_limit(heap, global, "*print-level*")?,
+        length: read_limit(heap, global, "*print-length*")?,
+        base,
+        radix: read_bool(global, "*print-radix*")?,
+        case,
+        readably: read_bool(global, "*print-readably*")?,
+    })
+}
+
+/// The layout control variables, through `global`. Inside a
+/// `pprint-logical-block` the "stream" *is* a pretty stream, so everything
+/// printed into it pretty-prints regardless of `*print-pretty*` — the same
+/// thing CL's stream-type dispatch achieves.
+pub fn read_opts(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, String>) -> Result<Opts, String> {
+    let pretty = read_bool(global, "*print-pretty*")?;
+    let margin = match read_limit(heap, global, "*print-right-margin*")? {
+        Some(m) => m,
+        // A margin of 0: nothing is ever too wide, so nothing breaks.
+        None => 0,
+    };
+    Ok(Opts {
+        pretty: pretty || session_open(),
+        margin,
+        miser: read_limit(heap, global, "*print-miser-width*")?,
+        lines: read_limit(heap, global, "*print-lines*")?,
+    })
+}
 
 thread_local! {
     static HOOKS: RefCell<PrintHooks> = const { RefCell::new(BARE_HOOKS) };
@@ -137,18 +232,18 @@ struct PrettySession {
 /// Whether a logical block is open on this thread. Inside one the "stream"
 /// *is* a pretty stream, so everything printed into it pretty-prints
 /// regardless of `*print-pretty*` — the same thing CL's stream-type dispatch
-/// achieves. The interpreter's own `pretty_opts` consults this.
+/// achieves. [`read_opts`] consults this.
 pub fn session_open() -> bool {
     SESSION.with(|cell| cell.borrow().is_some())
 }
 
-/// The three layout control variables, as of right now.
-pub fn current_opts(heap: &Heap) -> Opts {
+/// The layout control variables, as of right now.
+pub fn current_opts(heap: &Heap) -> Result<Opts, String> {
     (print_hooks().opts)(heap)
 }
 
-/// The three "what to print" control variables, as of right now.
-pub fn current_print_vars(heap: &Heap) -> PrintVars {
+/// The "what to print" control variables, as of right now.
+pub fn current_print_vars(heap: &Heap) -> Result<PrintVars, String> {
     (print_hooks().print_vars)(heap)
 }
 
@@ -161,8 +256,8 @@ pub fn current_print_vars(heap: &Heap) -> PrintVars {
 /// starting column and without the enclosing block's indentation.
 pub fn build_format(heap: &mut Heap, control: &str, args: Value) -> Result<Out, String> {
     let env = RtPrintEnv { hooks: print_hooks() };
-    let opts = current_opts(heap);
-    let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap) };
+    let opts = current_opts(heap)?;
+    let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap)? };
     format::build(heap, ctx, control, args, &opts)
 }
 
@@ -176,13 +271,15 @@ pub fn build_pprint(heap: &mut Heap, which: &str, value: Value, colinc: i64) -> 
     let style = match which {
         "pprint-fill" => Style::Fill,
         "pprint-linear" => Style::Linear,
-        // CL's `pprint-tabular` defaults its column width to 16; the checker
-        // passes 0 when the caller omitted it.
-        "pprint-tabular" => Style::Tabular(if colinc <= 0 { 16 } else { colinc }),
+        // The checker passes CL's default of 16 when the caller omitted it.
+        "pprint-tabular" if colinc < 0 => {
+            return Err(format!("pprint-tabular: the column width must be non-negative, got {}", colinc))
+        }
+        "pprint-tabular" => Style::Tabular(colinc),
         _ => Style::Default,
     };
     let env = RtPrintEnv { hooks: print_hooks() };
-    let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap) };
+    let ctx = RenderCtx { env: &env, print_vars: current_print_vars(heap)? };
     let mut out = Out::new();
     if which == "pprint" {
         // CLHS: `pprint` outputs a newline *before* the object.
@@ -428,7 +525,7 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
             let control = arg_str(heap, args, 1, "format")?.to_string();
             let list = *args.get(2).ok_or_else(|| PrintError::Shape("format: expected 3 arguments".into()))?;
             let out = build_format(heap, &control, list).map_err(PrintError::Raise)?;
-            let opts = printing_opts(heap);
+            let opts = current_opts(heap).map_err(PrintError::Raise)?;
             let text = format::finish(out.clone(), &opts);
             if dest {
                 emit(heap, out, false, &opts).map_err(PrintError::Raise)?;
@@ -439,7 +536,7 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
             let control = arg_str(heap, args, 0, name)?.to_string();
             let list = *args.get(1).ok_or_else(|| PrintError::Shape(format!("{}: expected 2 arguments", name)))?;
             let out = build_format(heap, &control, list).map_err(PrintError::Raise)?;
-            let opts = printing_opts(heap);
+            let opts = current_opts(heap).map_err(PrintError::Raise)?;
             emit(heap, out, name == "println-rt", &opts).map_err(PrintError::Raise)?;
             Ok(Value::Empty)
         })(),
@@ -450,7 +547,7 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
             let value = *args.get(1).ok_or_else(|| PrintError::Shape("pprint: expected 3 arguments".into()))?;
             let colinc = arg_int(args, 2, "pprint")?;
             let out = build_pprint(heap, &which, value, colinc).map_err(PrintError::Raise)?;
-            let opts = printing_opts(heap);
+            let opts = current_opts(heap).map_err(PrintError::Raise)?;
             emit(heap, out, false, &opts).map_err(PrintError::Raise)?;
             Ok(Value::Empty)
         })(),
@@ -459,7 +556,7 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
             let prefix = arg_str(heap, args, 1, "pprint-logical-block")?.to_string();
             let per_line = arg_bool(args, 2, "pprint-logical-block")?;
             let suffix = arg_str(heap, args, 3, "pprint-logical-block")?.to_string();
-            let opts = printing_opts(heap);
+            let opts = current_opts(heap).map_err(PrintError::Raise)?;
             block_start(heap, obj, &prefix, per_line, &suffix, &opts);
             Ok(Value::Empty)
         })(),
@@ -505,6 +602,12 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
             };
             let colnum = arg_int(args, 1, "pprint-tab")?;
             let colinc = arg_int(args, 2, "pprint-tab")?;
+            if colnum < 0 || colinc < 0 {
+                return Err(PrintError::Raise(format!(
+                    "pprint-tab: colnum and colinc must be non-negative, got {} and {}",
+                    colnum, colinc
+                )));
+            }
             record_op(Op::Tab { kind, colnum, colinc });
             Ok(Value::Empty)
         })(),
@@ -515,18 +618,29 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
     Some(r)
 }
 
-/// The layout options one printing operation runs under: the control globals,
-/// with `pretty` forced on inside an open logical block — there the "stream"
-/// *is* a pretty stream, which is what CL's stream-type dispatch achieves.
-fn printing_opts(heap: &Heap) -> Opts {
-    let mut opts = current_opts(heap);
-    opts.pretty |= session_open();
-    opts
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [`BARE_HOOKS`] with the control variables at CL's initial values —
+    /// what these tests print under, having no program to hold them.
+    const TEST_HOOKS: PrintHooks = PrintHooks {
+        opts: |_| Ok(Opts::default()),
+        print_vars: |_| Ok(PrintVars::default()),
+        ..BARE_HOOKS
+    };
+
+    /// With no program installed there are no control variables, and printing
+    /// says so rather than guessing their values.
+    #[test]
+    fn bare_hooks_refuse_to_print() {
+        let mut heap = Heap::with_capacity(1 << 12);
+        set_print_hooks(None);
+
+        let args = heap.cons(Value::Int(7), Value::Empty).expect("heap has room");
+        let err = build_format(&mut heap, "~a", args).expect_err("no program, no printer variables");
+        assert!(err.contains("printer control variables"), "{}", err);
+    }
 
     /// The hook path — what a shim will use — renders through the same
     /// [`typelisp_print`] the interpreter does, and answers the two program
@@ -541,7 +655,7 @@ mod tests {
                 _ => None,
             },
             print_object: |_, _, _| Ok(None),
-            ..BARE_HOOKS
+            ..TEST_HOOKS
         }));
 
         let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
@@ -552,18 +666,20 @@ mod tests {
         set_print_hooks(None);
     }
 
-    /// With no environment installed the renderer still runs — it just cannot
+    /// With no enum names registered the renderer still runs — it just cannot
     /// name the variant. Loud rather than silent, on purpose: a
     /// `<unknown-variant>` in real output means a registration bug.
     #[test]
-    fn bare_hooks_render_an_unnamed_variant() {
+    fn unregistered_enum_names_render_an_unnamed_variant() {
         let mut heap = Heap::with_capacity(1 << 12);
-        set_print_hooks(None);
+        set_print_hooks(Some(TEST_HOOKS));
 
         let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
         let args = heap.cons(boxed, Value::Empty).expect("heap has room");
         let out = build_format(&mut heap, "~a", args).expect("format should succeed");
         assert_eq!(format::finish(out, &Opts::default()), "(<unknown-variant> 7)");
+
+        set_print_hooks(None);
     }
 
     /// A `print-object` hook wins over the built-in representation, and sees
@@ -574,7 +690,7 @@ mod tests {
 
         set_print_hooks(Some(PrintHooks {
             print_object: |_, _, escape| Ok(Some(if escape { "#<S>" } else { "#<A>" }.to_string())),
-            ..BARE_HOOKS
+            ..TEST_HOOKS
         }));
 
         let pt = heap.intern_type_key("pt");

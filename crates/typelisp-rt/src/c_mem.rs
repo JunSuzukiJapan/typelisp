@@ -93,14 +93,17 @@ pub fn arena_open() -> u64 {
     })
 }
 
-/// Frees every block `arena` owns and forgets the arena.
-pub fn arena_close(arena: u64) {
+/// Frees every block `arena` owns and forgets the arena. The checker opens
+/// and closes each arena exactly once, so an id that is not open is a broken
+/// invariant, not an empty arena.
+pub fn arena_close(arena: u64) -> Result<(), String> {
     with_state(|s| {
-        for base in s.arenas.remove(&arena).unwrap_or_default() {
-            if let Some(blk) = s.blocks.remove(&base) {
-                unsafe { std::alloc::dealloc(base as *mut u8, blk.layout) };
-            }
+        let bases = s.arenas.remove(&arena).ok_or_else(|| format!("c-arena-close: arena {} is not open", arena))?;
+        for base in bases {
+            let blk = s.blocks.remove(&base).ok_or_else(|| format!("c-arena-close: block {:#x} of arena {} is not live", base, arena))?;
+            unsafe { std::alloc::dealloc(base as *mut u8, blk.layout) };
         }
+        Ok(())
     })
 }
 
@@ -279,7 +282,9 @@ pub unsafe extern "C" fn rt_c_arena_open(_args: *const i64, _argc: u32) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn rt_c_arena_close(args: *const i64, argc: u32) -> i64 {
     let a = args_of(args, argc, 1, "rt_c_arena_close");
-    arena_close(a[0] as u64);
+    if let Err(msg) = arena_close(a[0] as u64) {
+        fatal(&msg);
+    }
     0
 }
 

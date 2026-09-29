@@ -707,6 +707,21 @@ fn peek_char_looks_without_consuming_and_unread_char_puts_back() {
 }
 
 #[test]
+fn a_string_stream_that_unread_more_than_it_read_has_no_position() {
+    // One character read, two pushed back: the position would be -1, which
+    // is no position at all, so the answer is an error rather than 0.
+    let v = eval_string(
+        r#"(let ((s (make-string-input-stream "xyz")))
+             (read-char s)
+             (unread-char s #\x)
+             (let ((one (stream-position s::h)))
+               (unread-char s #\w)
+               (format false "~a ~a" (unwrap one) (is-err (stream-position s::h)))))"#,
+    );
+    assert_eq!(v, "0 true");
+}
+
+#[test]
 fn a_stream_without_pushback_gets_it_by_wrapping() {
     // A composite has no pushback of its own; `peek-stream` adds it, which is
     // what lets `read-sexpr` run over one.

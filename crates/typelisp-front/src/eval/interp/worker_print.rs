@@ -70,10 +70,13 @@ enum GlobalRef {
 }
 
 impl PrintSnapshot {
-    fn global(&self, heap: &Heap, name: &str) -> Option<Value> {
-        match self.globals.get(name)? {
-            GlobalRef::Compiled(id) => typelisp_rt::global_perm_idx(*id).map(|i| heap.permanent_root(i)),
-            GlobalRef::Cell(slot) => Some(slot.get(heap)),
+    fn global(&self, heap: &Heap, name: &str) -> Result<Value, String> {
+        match self.globals.get(name) {
+            Some(GlobalRef::Compiled(id)) => typelisp_rt::global_perm_idx(*id)
+                .map(|i| heap.permanent_root(i))
+                .ok_or_else(|| format!("internal error: {} names compiled global {}, which has no slot", name, id)),
+            Some(GlobalRef::Cell(slot)) => Ok(slot.get(heap)),
+            None => Err(format!("{} is not defined: printing needs the prelude that defines it", name)),
         }
     }
 }
@@ -135,11 +138,11 @@ const WORKER_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
     format_call: worker_format_call,
     opts: |heap| {
         let snapshot = current();
-        super::pretty_opts_from(&|name| snapshot.global(heap, name))
+        typelisp_print::runtime::read_opts(heap, &|name| snapshot.global(heap, name))
     },
     print_vars: |heap| {
         let snapshot = current();
-        super::print_vars_from(&|name| snapshot.global(heap, name))
+        typelisp_print::runtime::read_print_vars(heap, &|name| snapshot.global(heap, name))
     },
 };
 
@@ -274,24 +277,14 @@ impl Interp {
             };
             snapshot.methods.insert((type_path, method), entry);
         }
-        // The names are the ones the two readers ask for, learned by asking:
-        // a variable added to either is in the snapshot without a list here
-        // to keep in step.
-        let asked = RefCell::new(Vec::new());
-        let record = |name: &str| -> Option<Value> {
-            asked.borrow_mut().push(name.to_string());
-            None
-        };
-        super::print_vars_from(&record);
-        super::pretty_opts_from(&record);
-        for name in asked.into_inner() {
-            let path = Path::root(&name);
+        for name in typelisp_print::runtime::PRINTER_GLOBALS {
+            let path = Path::root(name);
             let place = match self.compiled_global_id(&path) {
                 Some(id) => Some(GlobalRef::Compiled(id)),
                 None => self.root.borrow().get_global(&path).map(GlobalRef::Cell),
             };
             if let Some(place) = place {
-                snapshot.globals.insert(name, place);
+                snapshot.globals.insert(name.to_string(), place);
             }
         }
         *self.worker_print.write() = Arc::new(snapshot);

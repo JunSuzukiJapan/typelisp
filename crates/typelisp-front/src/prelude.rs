@@ -127,6 +127,22 @@ pub const SOURCE: &str = r##"
 (defmacro unreachable () `(panic "unreachable"))
 (defmacro todo () `(panic "todo"))
 
+;; The printer control variables (CLHS 22.1.1). Each is documented with the
+;; printing section further down; they are defined here, ahead of everything
+;; else, because printing reads all of them and `gensym` below already prints
+;; (it formats the names it makes).
+(pub defvar (*print-pretty* bool) false)
+(pub defvar (*print-right-margin* int) 80)
+(pub defvar (*print-miser-width* int) 0)
+(pub defvar (*print-circle* bool) false)
+(pub defvar (*print-level* int) 0)
+(pub defvar (*print-length* int) 0)
+(pub defvar (*print-base* int) 10)
+(pub defvar (*print-radix* bool) false)
+(pub defvar (*print-case* symbol) :downcase)
+(pub defvar (*print-readably* bool) false)
+(pub defvar (*print-lines* int) 0)
+
 ;; Loop/branch primitive reduction (LLVMコンパイラ作業に先立つ整理): `loop`/
 ;; `break`/`return` (looping) and `if`/`match` (branching) are the only forms
 ;; the checker/interpreter/compiler need to understand natively going
@@ -3382,13 +3398,13 @@ user-visible capacity."
 
 ;; ---------------------------------------------------------------------------
 ;; Pretty-printer controls (CLHS 22.1.1 / 22.2 — the `*print-*` variables the
-;; pretty printer consults).
+;; pretty printer consults). Defined at the top of this prelude.
 ;;
 ;; CL makes these *special* variables, so a caller rebinds them with `let` for
 ;; the extent of one printing operation. typelisp has no dynamic binding, so
 ;; they are ordinary assignable globals instead: `(setf *print-pretty* true)`
 ;; takes effect from the next `print`/`println`/`format` on and stays in
-;; effect. `Interp::pretty_opts` reads all three fresh at the start of every
+;; effect. The printer reads them fresh at the start of every
 ;; printing operation, so an assignment is picked up immediately.
 ;;
 ;; `*print-pretty*` is `false` by default (CL leaves the initial value
@@ -3396,9 +3412,10 @@ user-visible capacity."
 ;; output, and pretty printing is something a program opts into. `pprint` and
 ;; friends pretty-print unconditionally, as CL's do.
 ;;
-;; `*print-miser-width*` has no `nil` here — 0 (or less) is "miser style off",
-;; the same meaning CL gives `nil`. Likewise a `*print-right-margin*` of 0 or
-;; less means "no right margin", so nothing ever needs to break.
+;; `*print-miser-width*` has no `nil` here — 0 is "miser style off", the same
+;; meaning CL gives `nil`. Likewise a `*print-right-margin*` of 0 means "no
+;; right margin", so nothing ever needs to break. A negative value of either
+;; is a printing error.
 ;; `print-object` (CLHS 22.1.4 / the CLOS generic function of the same name):
 ;; a type's own printed representation. `print`/`println`/`format`/`pprint`
 ;; consult it for every value they render whose type implements it — including
@@ -3493,19 +3510,17 @@ user-visible capacity."
 ;;           (if (pprint-list-exhausted) () (progn (print " ") (pprint-newline :fill)))))
 (pub defmacro pprint-exit-if-list-exhausted ()
   `(if (pprint-list-exhausted) (break) ()))
-(pub defvar (*print-pretty* bool) false)
-(pub defvar (*print-right-margin* int) 80)
-(pub defvar (*print-miser-width* int) 0)
 
-;; The "what to print" controls (CLHS 22.1.1), read by `Interp::print_vars`
-;; on every printing operation just like the three above.
+;; The "what to print" controls (CLHS 22.1.1), read by the printer
+;; on every printing operation just like the layout controls. All of the printer
+;; control variables are defined at the top of this prelude.
 ;;
 ;; `*print-level*`/`*print-length*` bound how much of a nested structure is
 ;; shown: an object at `*print-level*` or deeper prints as `#`, and only the
 ;; first `*print-length*` elements of a list (or fields of a `defstruct`/
 ;; `defenum` value) print, the rest as `...`. CL spells "no limit" `nil`;
-;; here 0 or less means no limit, the same convention `*print-right-margin*`
-;; uses. Both default to unlimited, as CL's do.
+;; here 0 means no limit, the same convention `*print-right-margin*` uses, and
+;; a negative value is a printing error. Both default to unlimited, as CL's do.
 ;;
 ;; `*print-circle*` makes the printer walk the value first and label whatever
 ;; it reaches twice: the first occurrence prints as `#n=<object>` and every
@@ -3520,9 +3535,6 @@ user-visible capacity."
 ;;     (setf a::next (option::some a))
 ;;     (setf *print-circle* true)
 ;;     (println "~a" a))            ; => #1=#<node 1 (some #1#)>
-(pub defvar (*print-circle* bool) false)
-(pub defvar (*print-level* int) 0)
-(pub defvar (*print-length* int) 0)
 
 ;; The rest of CLHS 22.1.1's "what to print" controls (cl-parity-plan.md
 ;; Phase 7b). Rebind them for one printing operation with `dlet`, which is
@@ -3533,15 +3545,13 @@ user-visible capacity."
 ;; the marker that makes the result read back as the same number whatever
 ;; `*read-base*` is: `#b`/`#o`/`#x` or `#NNr` before the sign, and a trailing
 ;; `.` in base 10.
-(pub defvar (*print-base* int) 10)
-(pub defvar (*print-radix* bool) false)
 
 ;; `*print-case*` takes CL's own spelling: the keywords `:upcase`,
 ;; `:downcase` and `:capitalize`, which are self-evaluating `symbol`s here
 ;; (`Checker::check_symbol`). CL defaults to `:upcase` because its reader
 ;; stores symbol names upcased; this reader stores them downcased, so the
 ;; default that means the same thing ("print them as stored") is `:downcase`.
-(pub defvar (*print-case* symbol) :downcase)
+;; Any other symbol is a printing error.
 
 ;; `*print-readably*` prints so the result reads back as an equal object:
 ;; escapes on whatever the caller asked for, and the `*print-level*`/
@@ -3549,13 +3559,11 @@ user-visible capacity."
 ;; signals `print-not-readable` for a value with no readable form, and this
 ;; language has no condition to signal and no way to decide the question for
 ;; a type whose `print-object` may print anything at all.
-(pub defvar (*print-readably* bool) false)
 
 ;; `*print-lines*` caps how many lines one pretty-printed value may take,
 ;; marking the cut with CL's `..`. A layout control like
-;; `*print-right-margin*`, so it only bites while `*print-pretty*` is on; 0 or
-;; less is CL's `nil` (no limit).
-(pub defvar (*print-lines* int) 0)
+;; `*print-right-margin*`, so it only bites while `*print-pretty*` is on; 0 is
+;; CL's `nil` (no limit), and a negative value is a printing error.
 
 ;; `*print-array*` chooses whether an `Array<T>` shows its contents. True
 ;; (CL's default) prints CL's own array syntax -- `#(1 2 3)` for a rank-1

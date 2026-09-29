@@ -122,8 +122,17 @@ fn setf_on_a_struct_shared_via_a_list_is_visible_through_the_list() {
 fn println_format_accepts_a_struct_argument_via_a_tilde_a_directive() {
     // `wrap_rest_elem`'s heap-repr retype: `println`'s `&rest` args go
     // through the same path `&rest`/`format` args always did, now widened to
-    // accept a heap-repr ADT with no `sexpr_ctor_for` wrap.
-    eval_ok("(defstruct point (x int) (y int)) (println \"~a\" (point::new 1 2))");
+    // accept a heap-repr ADT with no `sexpr_ctor_for` wrap. Printing reads
+    // the prelude's printer control variables, so this one needs a prelude.
+    let src = "(defstruct point (x int) (y int)) (println \"~a\" (point::new 1 2))";
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    typelisp::load_prelude(&mut h, &mut chk, &mut interp);
+    for v in Reader::new().read_all(&mut h, src).expect("read failed") {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        interp.exec(&mut h, tl).expect("eval failed");
+    }
 }
 
 #[test]

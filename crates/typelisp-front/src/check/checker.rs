@@ -14741,11 +14741,12 @@ impl Checker {
         let value = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
         let elem_ty = value.ty.clone();
         let value = self.wrap_rest_elem(heap, &elem_ty, value)?;
-        // The column width is only meaningful to `pprint-tabular`; the other
-        // three take the default (1) so one builtin serves all four.
+        // The column width is only meaningful to `pprint-tabular`, whose CL
+        // default is 16; the other three ignore it, so one builtin serves all
+        // four.
         let colinc = match args.get(1) {
             Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I32), nth_loc(arg_locs, 1))?,
-            None => Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(0)])?, Type::I32),
+            None => Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(16)])?, Type::I32),
         };
         let which = Checked::new(forms::str_lit_form(heap, form)?, Type::Str);
         let r = Ref::synthetic(Path::root("pprint-rt"));

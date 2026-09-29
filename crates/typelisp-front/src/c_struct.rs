@@ -88,7 +88,7 @@ fn eval_known(heap: &mut Heap, name: &str, argv: &[Value]) -> Result<Value, Eval
     Ok(match name {
         ARENA_OPEN => Value::Int(c_mem::arena_open() as i64),
         ARENA_CLOSE => {
-            c_mem::arena_close(word(0)? as u64);
+            c_mem::arena_close(word(0)? as u64).map_err(EvalError::Internal)?;
             Value::Empty
         }
         ALLOC => Value::Int(c_mem::alloc(word(0)? as u64, word(1)?, &text(heap, 2)?).map_err(raised)? as i64),

@@ -105,8 +105,8 @@ CL の Lisp Pretty Printer（CLHS 22.2）に当たる。**行幅に収まらな�
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
 | `*print-pretty*` | `bool` | `false` | 真なら `~a`/`~s`/`~w` と pretty ディレクティブが整形経路に入る |
-| `*print-right-margin*` | `int` | `80` | 右マージン（桁）。0 以下は「マージン無し＝折らない」 |
-| `*print-miser-width*` | `int` | `0` | miser スタイルに入る幅。0 以下は CL の `nil`（miser 無効）に当たる |
+| `*print-right-margin*` | `int` | `80` | 右マージン（桁）。0 は「マージン無し＝折らない」。負の値は印字エラー |
+| `*print-miser-width*` | `int` | `0` | miser スタイルに入る幅。0 は CL の `nil`（miser 無効）に当たる。負の値は印字エラー |
 
 `pprint` 系と `pprint-logical-block` は `*print-pretty*` に関わらず常に整形する（CL の `pprint` の
 定義どおり）。
@@ -120,7 +120,7 @@ CL の Lisp Pretty Printer（CLHS 22.2）に当たる。**行幅に収まらな�
 | `pprint` | `(pprint x)` | 既定レイアウトで整形出力。CL 準拠で**先頭に改行**を出し、末尾には出さない |
 | `pprint-fill` | `(pprint-fill x)` | 1行に入るだけ詰める（語詰め）。改行は出さない |
 | `pprint-linear` | `(pprint-linear x)` | 全要素が1行に収まらなければ**1要素1行**。改行は出さない |
-| `pprint-tabular` | `(pprint-tabular x [colinc])` | `colinc` 桁の表形式（既定 16）。改行は出さない |
+| `pprint-tabular` | `(pprint-tabular x [colinc])` | `colinc` 桁の表形式（既定 16）。改行は出さない。負の `colinc` はエラー |
 
 既定レイアウト（`pprint` / `*print-pretty*` 下の `~a`）は、CL の既定 `*print-pprint-dispatch*` に倣って
 `(quote x)` を `'x` と略記し、`defun`/`let`/`if`/`lambda` 等のコード形は「頭部＋規定個数の引数を1行目、
@@ -146,7 +146,7 @@ CL の Lisp Pretty Printer（CLHS 22.2）に当たる。**行幅に収まらな�
 | `pprint-logical-block` | `(pprint-logical-block (obj :prefix p :per-line-prefix p :suffix s) body...)` | 論理ブロックを開く特殊形。`obj` は `pprint-pop` が辿るリスト（辿らないなら `()`）。`:prefix` と `:per-line-prefix` は排他（CL と同じ） |
 | `pprint-newline` | `(pprint-newline kind)` | 条件改行。`kind` は `:linear` / `:fill` / `:miser` / `:mandatory` |
 | `pprint-indent` | `(pprint-indent kind n)` | 字下げ。`kind` は `:block`（ブロック起点から）/ `:current`（現在桁から） |
-| `pprint-tab` | `(pprint-tab kind colnum colinc)` | タブ。`kind` は `:line` / `:section` / `:line-relative` / `:section-relative` |
+| `pprint-tab` | `(pprint-tab kind colnum colinc)` | タブ。`kind` は `:line` / `:section` / `:line-relative` / `:section-relative`。`colnum` と `colinc` は非負（負ならエラー） |
 | `pprint-pop` | `(pprint-pop)` | ブロックのリストから次の要素を取る（尽きていれば `()`） |
 | `pprint-list-exhausted` | `(pprint-list-exhausted)` | リストが尽きたか |
 | `pprint-exit-if-list-exhausted` | `(pprint-exit-if-list-exhausted)` | 尽きていれば囲む `loop` を `break`（マクロ） |
@@ -268,12 +268,12 @@ CLHS 22.1.1 の「値のどこまでを印字するか」を決める制御変�
 
 | 変数 | 型 | 既定 | 意味 |
 |---|---|---|---|
-| `*print-level*` | `int` | `0` | この深さ以上に入れ子になったオブジェクトを `#` で置き換える。印字対象そのものが深さ 0。0 以下は無制限 |
-| `*print-length*` | `int` | `0` | リストの要素（`defstruct`/`defenum` 値のフィールドも）をこの個数まで印字し、残りを `...` にする。0 以下は無制限 |
+| `*print-level*` | `int` | `0` | この深さ以上に入れ子になったオブジェクトを `#` で置き換える。印字対象そのものが深さ 0。0 は無制限 |
+| `*print-length*` | `int` | `0` | リストの要素（`defstruct`/`defenum` 値のフィールドも）をこの個数まで印字し、残りを `...` にする。0 は無制限 |
 | `*print-circle*` | `bool` | `false` | 真なら、印字前に値を走査して**2回以上現れるオブジェクトにラベルを振る**。最初の出現が `#n=…`、以降が `#n#` |
 
 CL は「無制限」を `nil` で表すが、この言語に `nil` は無いので、`*print-right-margin*` 等と同じく
-**0 以下を無制限**とする。既定はすべて「制限なし／ラベルなし」で、CL の初期値と一致する。
+**0 を無制限**とする。負の値は意味を持たないので印字エラーになる。既定はすべて「制限なし／ラベルなし」で、CL の初期値と一致する。
 
 ```lisp
 (setf *print-level* 2)
@@ -320,9 +320,9 @@ CL は「無制限」を `nil` で表すが、この言語に `nil` は無いの
 |---|---|---|---|
 | `*print-base*` | `int` | `10` | 整数（固定幅と `int`）を印字する基数。2〜36 の外は**印字エラー**（CL も範囲を規定している） |
 | `*print-radix*` | `bool` | `false` | 真なら基数の印を付ける。`#b`/`#o`/`#x`、それ以外は `#NNr`、基数 10 は末尾の `.`。印は符号の**前**（`#x-ff`） |
-| `*print-case*` | `symbol` | `:downcase` | シンボル名の大小。`:upcase` / `:downcase` / `:capitalize`（CL と同じ綴り） |
+| `*print-case*` | `symbol` | `:downcase` | シンボル名の大小。`:upcase` / `:downcase` / `:capitalize`（CL と同じ綴り）。それ以外のシンボルは印字エラー |
 | `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
-| `*print-lines*` | `int` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 以下は無制限 |
+| `*print-lines*` | `int` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 は無制限。負の値は印字エラー |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` が `prin1` と `princ` のどちらをするか。**これを読むのはその 2 つだけ** |
 | `*print-array*` | `bool` | `true` | `Array<T>` が中身を見せるか。真なら CL の配列構文（`#(1 2 3)` / `#2A((1 2) (3 4))`）、偽なら形だけの `#<array 2x3>` |
 

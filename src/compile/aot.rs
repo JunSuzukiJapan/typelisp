@@ -537,6 +537,19 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         })
         .collect::<Result<_, String>>()?;
 
+    // The printer control variables' compiled ids, for the startup to
+    // register: the prelude defines all of them, so each was promoted with
+    // the rest of its globals above.
+    let printer_globals: Vec<(&str, usize)> = typelisp_print::runtime::PRINTER_GLOBALS
+        .iter()
+        .map(|name| {
+            let id = interp
+                .compiled_global_id(&Path::root(name))
+                .ok_or_else(|| format!("internal error: printer variable {} was never promoted", name))?;
+            Ok((*name, id))
+        })
+        .collect::<Result<_, String>>()?;
+
     // Only when the program actually needs an interpreter ([`EVAL_SHIMS`]):
     // naming one of those shims is what makes the linker pull the checker and
     // the interpreter in, the same rule the printer's registration block
@@ -601,6 +614,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &interp.field_name_descriptors(),
             &print_objects,
             &format_calls,
+            &printer_globals,
             &callback_entries,
             eval_env.as_deref().map(|bytes| (bytes, eval_ns.as_str())),
             main_returns_int,
@@ -690,6 +704,7 @@ fn build_main_wrapper(
     field_names: &[(String, i64, String)],
     print_objects: &[(String, String)],
     format_calls: &[(String, String, String)],
+    printer_globals: &[(&str, usize)],
     callback_entries: &[(String, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], &str)>,
     main_returns_int: bool,
@@ -892,6 +907,10 @@ fn build_main_wrapper(
             let (name_ptr, name_len) = literal(&builder, method)?;
             let fn_ptr = classic_door(ctx, module, target)?;
             call(&builder, "rt_format_call_method", &[key_ptr, key_len, name_ptr, name_len, fn_ptr])?;
+        }
+        for (name, id) in printer_globals {
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
         }
     }
     // The environment `eval` needs, as one immutable blob. Registration only —
@@ -1476,7 +1495,7 @@ mod tests {
         builder.build_call(exit, &[code.into()], "").unwrap();
         builder.build_unreachable().unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
@@ -1515,7 +1534,7 @@ mod tests {
         };
         builder.build_return(Some(&result)).unwrap();
 
-        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
+        build_main_wrapper(ctx, &module, "tl_main", &[], &[], &[], &[], &[], &[], &[], &[], &[], &[], None, false).expect("build_main_wrapper failed");
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");

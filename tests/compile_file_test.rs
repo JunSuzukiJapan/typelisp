@@ -111,6 +111,36 @@ fn print_methods_as_values_print_the_same_on_every_tier() {
     assert_eq!(String::from_utf8_lossy(&compiled.stdout), expected, "{}", String::from_utf8_lossy(&compiled.stderr));
 }
 
+/// The printer control variables in a standalone executable: a `setf` of
+/// `*print-base*` and the rest reaches the executable's printer, which reads
+/// the compiled globals the startup registered (`rt_print_global`), and an
+/// unusable value is the same printing error the interpreter reports.
+#[test]
+fn printer_variables_take_effect_in_a_compiled_executable() {
+    let dir = tmp_dir();
+    let src = dir.join("printer_vars.typl");
+    let out = dir.join("printer_vars");
+    std::fs::write(
+        &src,
+        r#"(defun main () ()
+             (setf *print-base* 16)
+             (println "~a" 255)
+             (setf *print-case* :upcase)
+             (println "~s" 'hello)
+             (setf *print-length* 2)
+             (println "~a" '(1 2 3 4))
+             (setf *print-case* :bogus)
+             (println "~a" 1))"#,
+    )
+    .expect("failed to write test source file");
+    typelisp::compile::aot::compile_file(src.to_str().unwrap(), out.to_str().unwrap()).expect("compile_file failed");
+    let run = Command::new(&out).output().expect("failed to run the compiled executable");
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "ff\nHELLO\n(1 2 ...)\n");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(stderr.contains("*print-case*") && stderr.contains(":bogus"), "{}", stderr);
+    assert_ne!(run.status.code(), Some(0));
+}
+
 /// The same variant-name lookup, in a standalone executable.
 ///
 /// The AOT tier has its own table (`rt_print_enum_variant` fills it at

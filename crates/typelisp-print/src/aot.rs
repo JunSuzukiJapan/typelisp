@@ -9,15 +9,10 @@
 //! shims below into the generated `main`, turning those facts into tables
 //! before anything can print.
 //!
-//! # What is deliberately *not* registered
-//!
-//! The eleven printer control variables (`*print-pretty*`, `*print-circle*`,
-//! `*print-base*`, …). `compile-file` compiles one self-contained source
-//! file against the compiler island alone — it never loads the prelude,
-//! which is where those globals are defined — so an AOT program has none of
-//! them, and CL's initial values are the right and only answer. That is what
-//! [`crate::runtime::BARE_HOOKS`] already gives, and what the hooks here
-//! keep: `opts`/`print_vars` are its two verbatim.
+//! The printer control variables (`*print-pretty*`, `*print-base*`, …) are
+//! prelude globals the executable compiles in like any other, so the startup
+//! registers each one's compiled global id ([`rt_print_global`]) and the
+//! hooks read the live value from its slot on every printing operation.
 //!
 //! # Why the registration shims live here rather than in `typelisp-rt`
 //!
@@ -32,7 +27,7 @@ use std::cell::RefCell;
 use typelisp_abi::{decode, encode, fatal};
 use typelisp_mem::{Heap, Value};
 
-use crate::runtime::{set_print_hooks, PrintHooks, BARE_HOOKS};
+use crate::runtime::{set_print_hooks, PrintHooks};
 use crate::stored_type_key;
 
 // `(type key, variant index) -> variant name`, filled by
@@ -54,8 +49,8 @@ thread_local! {
     static PRINTING: RefCell<Vec<Value>> = const { RefCell::new(Vec::new()) };
 }
 
-/// The hooks an AOT executable prints under: the two tables above, and
-/// [`BARE_HOOKS`]' control variables (see the module doc comment).
+/// The hooks an AOT executable prints under: the tables its startup filled
+/// (see the module doc comment).
 const AOT_HOOKS: PrintHooks = PrintHooks {
     // The *base*: `rt_print_enum_variant` registers one entry per enum type,
     // while the key a value carries names its instantiation (`option<char>`).
@@ -90,9 +85,34 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
     },
     print_object: aot_print_object,
     format_call: aot_format_call,
-    opts: BARE_HOOKS.opts,
-    print_vars: BARE_HOOKS.print_vars,
+    opts: |heap| crate::runtime::read_opts(heap, &|name| aot_global(heap, name)),
+    print_vars: |heap| crate::runtime::read_print_vars(heap, &|name| aot_global(heap, name)),
 };
+
+/// A printer control variable's current value, from the compiled global slot
+/// [`rt_print_global`] registered for it. The prelude defines every one of
+/// them and the startup registers every one, so a missing entry is a broken
+/// startup sequence.
+fn aot_global(heap: &Heap, name: &str) -> Result<Value, String> {
+    let shared = crate::shared::print_shared();
+    let id = *shared
+        .globals
+        .read()
+        .get(name)
+        .ok_or_else(|| format!("internal error: printer variable {} was not registered at startup", name))?;
+    let slot_of = shared
+        .global_slot
+        .read()
+        .ok_or_else(|| "internal error: the runtime did not install its global table before printing".to_string())?;
+    let slot = slot_of(id).ok_or_else(|| format!("internal error: {} names compiled global {}, which has no slot", name, id))?;
+    Ok(heap.permanent_root(slot))
+}
+
+/// Installs how a compiled global id becomes its permanent-root position —
+/// what the runtime calls before the program's first initialiser runs.
+pub fn set_global_slots(slot_of: fn(usize) -> Option<usize>) {
+    *crate::shared::print_shared().global_slot.write() = Some(slot_of);
+}
 
 fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
     let Value::Boxed(id) = v else { return Ok(None) };
@@ -326,6 +346,24 @@ pub unsafe extern "C" fn rt_format_call_method(args: *const i64, argc: u32) -> i
     let addr = *args.add(4) as usize;
     install();
     crate::shared::print_shared().format_call.write().insert((key.to_string(), name.to_string()), addr);
+    0
+}
+
+/// Registers one printer control variable's compiled global: `args` is
+/// `[name_ptr, name_len, id]`.
+///
+/// # Safety
+///
+/// `args` must point to 3 valid `i64`s in those representations.
+#[no_mangle]
+pub unsafe extern "C" fn rt_print_global(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_print_global: expected 3 arguments");
+    }
+    let name = static_str(args, 0, "rt_print_global");
+    let id = *args.add(2) as usize;
+    install();
+    crate::shared::print_shared().globals.write().insert(name.to_string(), id);
     0
 }
 

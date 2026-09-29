@@ -1224,12 +1224,13 @@ impl Interp {
     ) -> State {
         match outcome {
             Ok(Ok(word)) => match self.finish_compiled(heap, word, &drive.start.ret, drive.crossing_roots) {
-                Ok(v) => {
-                    if let Some((name, depth, ret)) = &drive.start.watch {
-                        self.trace_call_exit(heap, name, *depth, ret.as_ref(), Ok(v));
-                    }
-                    State::Apply(v)
-                }
+                Ok(v) => match &drive.start.watch {
+                    Some((name, depth, ret)) => match self.trace_call_exit(heap, name, *depth, ret.as_ref(), Ok(v)) {
+                        Ok(()) => State::Apply(v),
+                        Err(e) => State::Unwind(e),
+                    },
+                    None => State::Apply(v),
+                },
                 Err(e) => State::Unwind(e),
             },
             // The chain stays exactly as it is, rooted by the prologues that
@@ -1995,7 +1996,7 @@ impl Interp {
                 };
                 let target = crate::CompileTarget::Fn(crate::check::resolved::Ref { written, home, resolved: path.clone() });
                 let body = self.compiled_for_thread(heap, &f, &target, &path.to_string())?;
-                let params = f.sig.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+                let params = compiled_params(&f, &path.to_string())?;
                 (sched::Entry::Body(body), params, argv)
             }
             ArgsKind::Assoc => {
@@ -2008,7 +2009,7 @@ impl Interp {
                 };
                 let target = crate::CompileTarget::Method { type_name, method, home };
                 let body = self.compiled_for_thread(heap, &f, &target, &name)?;
-                let params = f.sig.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+                let params = compiled_params(&f, &name)?;
                 (sched::Entry::Body(body), params, argv)
             }
             ArgsKind::Apply => {
@@ -2165,7 +2166,7 @@ impl Interp {
             // The call is over already, so a watch frame would have nothing to
             // wait for: report the return here instead.
             if let Some(Frame::TracedCall { name, depth, ret }) = watch {
-                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Ok(v));
+                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Ok(v))?;
             }
             return Ok((State::Apply(v), None));
         }
@@ -2742,7 +2743,7 @@ impl Interp {
             }
 
             Frame::TracedCall { name, depth, ret } => {
-                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Ok(v));
+                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Ok(v))?;
                 Ok((State::Apply(v), None))
             }
 
@@ -2958,7 +2959,9 @@ impl Interp {
             }
 
             Frame::TracedCall { name, depth, ret } => {
-                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Err(&exit));
+                // A trace that cannot be written supersedes the exit, as an
+                // error in an `unwind-protect` cleanup would.
+                self.trace_call_exit(heap, &name, depth, ret.as_ref(), Err(&exit))?;
                 Ok((State::Unwind(exit), None))
             }
 
@@ -3934,4 +3937,14 @@ mod tests {
         assert_eq!(eval_ok(&mut h, "(loop int-any-width (return (int-any-width 4)))"), Value::Int(4));
         assert_eq!(eval_ok(&mut h, "(catch (quote t) (throw (quote t) (int-any-width 5)))"), Value::Int(5));
     }
+}
+
+/// The parameter representations of a definition that was just compiled for
+/// a thread. Compiling one needs its signature, so a missing one is a broken
+/// invariant rather than a function of no parameters.
+fn compiled_params(f: &FnDef, name: &str) -> Result<Vec<Repr>, EvalError> {
+    f.sig
+        .as_ref()
+        .map(|s| s.0.clone())
+        .ok_or_else(|| EvalError::Internal(format!("thread: `{}` was compiled but has no signature", name)))
 }

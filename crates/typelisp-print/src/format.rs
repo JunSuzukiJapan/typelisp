@@ -93,12 +93,9 @@ pub struct RenderCtx<'a> {
 /// The CLHS 22.1.1 printer control variables that decide *what* a value
 /// renders as, as opposed to how it is laid out (that is [`Opts`]).
 ///
-/// CL spells "no limit" as `nil`; typelisp has no `nil`, so the prelude's
-/// globals are `i64`s where 0 or less means unlimited — the same convention
-/// `*print-right-margin*`/`*print-miser-width*` already use. [`Default`] is
-/// every limit off, base 10, and symbols as stored: CL's initial state, and
-/// what a bare `Interp` (no prelude loaded, as in some unit tests) falls back
-/// to.
+/// Read from the prelude's globals by [`crate::runtime::read_print_vars`].
+/// [`Default`] is every limit off, base 10, and symbols as stored: CL's
+/// initial state, which the prelude's `defvar`s also start from.
 #[derive(Clone, Copy)]
 pub struct PrintVars {
     /// `*print-circle*`: label shared and circular substructure with `#n=` /
@@ -110,12 +107,9 @@ pub struct PrintVars {
     /// `*print-length*`: at most this many elements/fields per list, struct or
     /// enum; the rest collapse to `...`.
     pub length: Option<usize>,
-    /// `*print-base*`: the radix integers print in. Kept as the raw `i64` the
-    /// global holds rather than a validated `u32`, because CL requires 2..=36
-    /// and this snapshot is taken where there is no way to report the
-    /// violation — [`PrintVars::radix_of`] validates at the point of use,
-    /// where the renderer can return an error.
-    pub base: i64,
+    /// `*print-base*`: the radix integers print in, already checked to be in
+    /// CL's 2..=36 when the variable was read.
+    pub base: u32,
     /// `*print-radix*`: prefix the digits with the radix marker (`#b`/`#o`/
     /// `#x`/`#NNr`, or a trailing `.` in base 10), so the printed form reads
     /// back as the same number whatever `*read-base*` is.
@@ -160,16 +154,6 @@ pub enum PrintCase {
 }
 
 impl PrintVars {
-    /// The validated `*print-base*`, or the message CL's "must be between 2
-    /// and 36" restriction deserves. Checked here rather than where the
-    /// snapshot is taken, because only the renderer has an error to return.
-    pub fn radix_of(&self) -> Result<u32, String> {
-        match self.base {
-            b if (2..=36).contains(&b) => Ok(b as u32),
-            b => Err(format!("*print-base* must be between 2 and 36, got {}", b)),
-        }
-    }
-
     /// `*print-level*`/`*print-length*` as this printing operation should
     /// apply them: both off under `*print-readably*`, which CL says overrides
     /// them so the output can be read back whole.
@@ -2686,7 +2670,7 @@ impl Renderer {
         decimal: impl FnOnce() -> String,
         digits: impl FnOnce(u32) -> String,
     ) -> Result<String, String> {
-        let radix = ctx.print_vars.radix_of()?;
+        let radix = ctx.print_vars.base;
         let body = if radix == 10 {
             decimal()
         } else {

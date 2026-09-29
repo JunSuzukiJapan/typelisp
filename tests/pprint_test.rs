@@ -12,7 +12,7 @@
 extern crate typelisp;
 
 mod common;
-use common::{check_err, eval_string, run};
+use common::{check_err, eval_err, eval_string, run};
 
 /// The string the last form produced, panicking on any check/eval error.
 fn fmt(src: &str) -> String {
@@ -457,4 +457,18 @@ fn a_print_object_that_conses_heavily_survives_collections() {
     assert_eq!(lines.len(), 100, "unexpected line count: {:?}", &lines[..lines.len().min(5)]);
     assert_eq!(lines[0], "(H0 H0)");
     assert_eq!(lines[99], "(H99 H99)");
+}
+
+#[test]
+fn pprint_tabular_refuses_a_negative_column_width() {
+    let err = eval_err("(pprint-tabular '(1 2) -1)");
+    assert!(err.contains("pprint-tabular") && err.contains("-1"), "{}", err);
+}
+
+#[test]
+fn pprint_tab_refuses_negative_columns() {
+    // CL requires both to be non-negative; a negative one used to reach the
+    // layout pass and abort the process there.
+    let err = eval_err(r#"(pprint-logical-block (() :prefix "(" :suffix ")") (pprint-tab :line -1 1))"#);
+    assert!(err.contains("pprint-tab") && err.contains("-1"), "{}", err);
 }

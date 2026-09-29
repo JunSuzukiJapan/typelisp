@@ -724,7 +724,7 @@ impl Interp {
                         "; note: `{}` has a compiled body — calls to it from other compiled code are not traced\n",
                         def.name
                     );
-                    self.trace_write(heap, &note);
+                    self.trace_write(heap, &note)?;
                 }
                 self.traced.borrow_mut().insert(def.name.clone());
             } else {
@@ -795,7 +795,10 @@ impl Interp {
     ) -> Result<Value, EvalError> {
         let depth = self.trace_call_entry(heap, f, &argv, stepping)?;
         let result = self.enter_plain(heap, f, argv);
-        self.trace_call_exit(heap, &f.name, depth, f.sig.as_ref().map(|s| &s.1), result.as_ref().copied());
+        // A trace that cannot be written supersedes the call's own outcome,
+        // the way an error in an `unwind-protect` cleanup supersedes the exit
+        // in flight.
+        self.trace_call_exit(heap, &f.name, depth, f.sig.as_ref().map(|s| &s.1), result.as_ref().copied())?;
         result
     }
 
@@ -845,9 +848,9 @@ impl Interp {
         } else {
             format!("({} {})", f.name, rendered.join(" "))
         };
-        self.trace_line(heap, depth, &call);
+        self.trace_line(heap, depth, &call)?;
         if stepping {
-            match self.step_prompt(heap) {
+            match self.step_prompt(heap)? {
                 StepCmd::Into => {}
                 // Quiet *below* this frame: the command is "run this call",
                 // and the frame it was given at is the one to ask at again.
@@ -866,7 +869,14 @@ impl Interp {
     /// The depth is restored *before* the return is reported, so the two lines
     /// of one call line up. An unwind is reported rather than silent: it is
     /// exactly the moment a trace is most worth having.
-    pub(super) fn trace_call_exit(&self, heap: &mut Heap, name: &str, depth: usize, ret: Option<&Repr>, outcome: Result<Value, &EvalError>) {
+    pub(super) fn trace_call_exit(
+        &self,
+        heap: &mut Heap,
+        name: &str,
+        depth: usize,
+        ret: Option<&Repr>,
+        outcome: Result<Value, &EvalError>,
+    ) -> Result<(), EvalError> {
         self.trace_depth.set(depth);
         if self.step_quiet_depth.get() == depth {
             self.step_quiet_depth.set(usize::MAX);
@@ -878,8 +888,9 @@ impl Interp {
                 // `trace_call_entry`.
                 heap.push_root(v);
                 let text = self.trace_render(heap, v, ret);
-                self.trace_line(heap, depth, &format!("{} returned {}", name, text));
+                let written = self.trace_line(heap, depth, &format!("{} returned {}", name, text));
                 heap.pop_root();
+                written
             }
             Err(e) => self.trace_line(heap, depth, &format!("{} exited non-locally: {}", name, e)),
         }
@@ -896,44 +907,38 @@ impl Interp {
     /// and is *not* newline-terminated — `write_str` on a stdout-backed
     /// stream writes through immediately, so it is visible before the read
     /// blocks.
-    pub(super) fn step_prompt(&self, heap: &mut Heap) -> StepCmd {
-        self.trace_write(heap, "step [s]tep-into [n]ext [c]ontinue [q]uit> ");
-        self.trace_flush(heap);
+    pub(super) fn step_prompt(&self, heap: &mut Heap) -> Result<StepCmd, EvalError> {
+        self.trace_write(heap, "step [s]tep-into [n]ext [c]ontinue [q]uit> ")?;
+        self.trace_flush(heap)?;
         let mut line = String::new();
         match heap.native(|| std::io::stdin().read_line(&mut line)) {
-            Ok(0) | Err(_) => return StepCmd::Continue,
+            Ok(0) => return Ok(StepCmd::Continue),
             Ok(_) => {}
+            Err(e) => return Err(EvalError::Panic(format!("step: could not read a command: {}", e))),
         }
-        match line.trim() {
+        Ok(match line.trim() {
             "" | "s" | "step" => StepCmd::Into,
             "n" | "next" => StepCmd::Over,
             "c" | "continue" => StepCmd::Continue,
             "q" | "quit" => StepCmd::Quit,
             other => {
-                self.trace_write(heap, &format!("; `{}` is not a step command; stepping into\n", other));
+                self.trace_write(heap, &format!("; `{}` is not a step command; stepping into\n", other))?;
                 StepCmd::Into
             }
-        }
+        })
     }
 
     /// Writes one trace line, indented for `depth` and numbered the way CL
-    /// numbers them.
-    ///
-    /// The destination is `*trace-output*`, which is what CL specifies and
-    /// what `time` already writes to. The global holds a `standard-stream`,
-    /// whose single field is the native handle — the one place outside the
-    /// prelude that reads it, and the reason it is read *defensively*: an
-    /// `Interp` with no prelude loaded (a unit test) has no such global, and
-    /// its trace still has to go somewhere. That somewhere is the printer's
-    /// own stdout, which is where `*trace-output*` points anyway by default.
-    pub(super) fn trace_line(&self, heap: &mut Heap, depth: usize, body: &str) {
+    /// numbers them, to `*trace-output*` — what CL specifies and what `time`
+    /// already writes to.
+    pub(super) fn trace_line(&self, heap: &mut Heap, depth: usize, body: &str) -> Result<(), EvalError> {
         let text = format!("{:width$}{}: {}\n", "", depth, body, width = 2 + depth * 2);
-        self.trace_write(heap, &text);
+        self.trace_write(heap, &text)
     }
 
     /// Puts `text` on `*trace-output*` verbatim — [`Self::trace_line`]'s
     /// destination half, also used for the notes `trace` itself emits.
-    fn trace_write(&self, heap: &mut Heap, text: &str) {
+    fn trace_write(&self, heap: &mut Heap, text: &str) -> Result<(), EvalError> {
         self.write_stream_global(heap, "*trace-output*", text)
     }
 
@@ -942,51 +947,38 @@ impl Interp {
     /// The step prompt deliberately ends without a newline, and stdout is
     /// line-buffered when it is a terminal — so without this the prompt would
     /// still be sitting in the buffer while `read_line` blocks, and a stepping
-    /// session would look hung rather than waiting. Only the stream path needs
-    /// it: the fallback in [`Self::write_stream_global`] goes through the
-    /// printer's `write_stdout`, which flushes for exactly this reason.
-    fn trace_flush(&self, heap: &mut Heap) {
-        if let Some(h) = self.stream_global(heap, "*trace-output*") {
-            let _ = typelisp_rt::stream::with_streams(heap, |t| t.finish_output(h));
-        }
+    /// session would look hung rather than waiting.
+    fn trace_flush(&self, heap: &mut Heap) -> Result<(), EvalError> {
+        let h = self.stream_global(heap, "*trace-output*")?;
+        typelisp_rt::stream::with_streams(heap, |t| t.finish_output(h)).map_err(EvalError::Panic)
     }
 
     /// Writes `text` to whatever stream the global `name` holds.
     ///
     /// This is how the tool layer honours CL's stream variables from Rust:
     /// the global holds a `standard-stream`, whose single field is the native
-    /// handle. It is the only place outside the prelude that reads that
-    /// field, and it reads it *defensively* — an `Interp` with no prelude
-    /// loaded (a unit test) has no such global, and the output still has to go
-    /// somewhere. That somewhere is the printer's own stdout, which is where
-    /// these variables point by default anyway.
-    fn write_stream_global(&self, heap: &mut Heap, name: &str, text: &str) {
-        match self.stream_global(heap, name) {
-            Some(h) => {
-                let _ = typelisp_rt::stream::with_streams(heap, |t| t.write_str(h, text));
-            }
-            None => {
-                let opts = typelisp_print::runtime::current_opts(heap);
-                let mut out = typelisp_print::pprint::Out::new();
-                for c in text.chars() {
-                    out.push(c);
-                }
-                let _ = typelisp_print::runtime::emit(heap, out, false, &opts);
-            }
-        }
+    /// handle.
+    fn write_stream_global(&self, heap: &mut Heap, name: &str, text: &str) -> Result<(), EvalError> {
+        let h = self.stream_global(heap, name)?;
+        typelisp_rt::stream::with_streams(heap, |t| t.write_str(h, text)).map_err(EvalError::Panic)
     }
 
-    /// The native stream handle a stream-valued global holds, if the prelude
-    /// that defines it is loaded and it still holds a stream-shaped value.
-    fn stream_global(&self, heap: &mut Heap, name: &str) -> Option<i64> {
-        let v = self.global_value(heap, &crate::Path::root(name))?;
-        let Value::Boxed(id) = v else { return None };
+    /// The native stream handle a stream-valued global holds. It is the only
+    /// place outside the prelude that reads a `standard-stream`'s field. The
+    /// prelude defines every such global with that type, so a missing one
+    /// means there is no prelude, and any other shape is a broken invariant.
+    fn stream_global(&self, heap: &mut Heap, name: &str) -> Result<i64, EvalError> {
+        let v = self.global_value(heap, &crate::Path::root(name)).ok_or_else(|| {
+            EvalError::Internal(format!("{} is not defined: writing to it needs the prelude that defines it", name))
+        })?;
+        let malformed = || EvalError::Internal(format!("{} holds {:?}, not a standard-stream", name, v));
+        let Value::Boxed(id) = v else { return Err(malformed()) };
         if !heap.is_struct(id) || heap.struct_field_count(id) < 1 {
-            return None;
+            return Err(malformed());
         }
         match heap.struct_field(id, 0) {
-            Value::Int(h) => Some(h),
-            _ => None,
+            Value::Int(h) => Ok(h),
+            _ => Err(malformed()),
         }
     }
 
@@ -1002,9 +994,9 @@ impl Interp {
         let llvm_ir = bool_field(heap, form, 1, "disassemble-fn")?;
         let target = self.compile_target(heap, payload, "disassemble-fn")?;
         let text = (crate::eval::interp::backend_disassemble_function()?)(self, heap, &target, llvm_ir)?;
-        self.write_stream_global(heap, "*standard-output*", &text);
+        self.write_stream_global(heap, "*standard-output*", &text)?;
         if !text.ends_with('\n') {
-            self.write_stream_global(heap, "*standard-output*", "\n");
+            self.write_stream_global(heap, "*standard-output*", "\n")?;
         }
         Ok(Value::Empty)
     }
@@ -1043,9 +1035,9 @@ impl Interp {
         // which allocates.
         let list = core::list(heap, &[v]).map_err(|e| e.to_string())?;
         heap.push_root(list);
-        let opts = typelisp_print::runtime::current_opts(heap);
-        let text = typelisp_print::runtime::build_format(heap, "~s", list)
-            .map(|out| typelisp_print::format::finish(out, &opts));
+        let text = typelisp_print::runtime::current_opts(heap).and_then(|opts| {
+            typelisp_print::runtime::build_format(heap, "~s", list).map(|out| typelisp_print::format::finish(out, &opts))
+        });
         heap.pop_root();
         text
     }
