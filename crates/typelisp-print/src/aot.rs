@@ -52,42 +52,75 @@ thread_local! {
 /// The hooks an AOT executable prints under: the tables its startup filled
 /// (see the module doc comment).
 const AOT_HOOKS: PrintHooks = PrintHooks {
-    // The *base*: `rt_print_enum_variant` registers one entry per enum type,
-    // while the key a value carries names its instantiation (`option<char>`).
-    enum_variant_name: |key, variant| {
-        let base = typelisp_mem::base_type_key(key);
-        crate::shared::print_shared().enum_names.read().get(&(base.to_string(), variant)).cloned()
-    },
-    // The template registered for the field, or the one registered for
-    // every field of the type (`Vector<T>`'s elements), instantiated by the
-    // arguments the value's own key carries.
+    enum_variant_name: |key, variant| variant_name_in(&crate::shared::print_shared().enum_names.read(), key, variant),
     field_is_niched_option: |key, variant, index| {
-        let base = typelisp_mem::base_type_key(key).to_string();
-        let variant = variant.map_or(NO_VARIANT, |v| v as i64);
-        let template = {
-            let shared = crate::shared::print_shared();
-            let t = shared.field_templates.read();
-            t.get(&(base.clone(), variant, index as i64)).or_else(|| t.get(&(base, variant, EVERY_FIELD))).cloned()
-        };
-        match template {
-            Some(template) => {
-                let args = typelisp_mem::type_key_args(key);
-                typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(&template, &args))
-            }
-            None => false,
-        }
+        field_is_niched_in(&crate::shared::print_shared().field_templates.read(), key, variant, index)
     },
-    // The name registered for the field, under the key's *base* for the
-    // reason `enum_variant_name` gives.
     field_name: |key, index| {
-        let base = typelisp_mem::base_type_key(key).to_string();
-        crate::shared::print_shared().field_names.read().get(&(base, index as i64)).cloned()
+        let shared = crate::shared::print_shared();
+        let names = shared.field_names.read();
+        let templates = shared.field_templates.read();
+        field_name_in(&names, &templates, key, index)
     },
     print_object: aot_print_object,
     format_call: aot_format_call,
     opts: |heap| crate::runtime::read_opts(heap, &|name| aot_global(heap, name)),
     print_vars: |heap| crate::runtime::read_print_vars(heap, &|name| aot_global(heap, name)),
 };
+
+/// `(base type key, variant) -> name`: what [`rt_print_enum_variant`] fills.
+pub type VariantNames = std::collections::HashMap<(String, usize), String>;
+/// `(base type key, variant or NO_VARIANT, index or EVERY_FIELD) -> template`:
+/// what [`rt_print_field_template`] fills.
+pub type FieldTemplates = std::collections::HashMap<(String, i64, i64), String>;
+/// `(base type key, index) -> field name`: what [`rt_print_field_name`] fills.
+pub type FieldNames = std::collections::HashMap<(String, i64), String>;
+
+/// The template registered for field `index` of `key`'s type, or the one
+/// registered for every field of it (`Vector<T>`'s elements). Looked up under
+/// the key's *base*: the tables hold one entry per type, while the key a
+/// value carries names its instantiation (`option<char>`).
+fn field_template_in<'t>(templates: &'t FieldTemplates, key: &str, variant: Option<usize>, index: usize) -> Option<&'t String> {
+    let base = typelisp_mem::base_type_key(key).to_string();
+    let variant = variant.map_or(NO_VARIANT, |v| v as i64);
+    templates.get(&(base.clone(), variant, index as i64)).or_else(|| templates.get(&(base, variant, EVERY_FIELD)))
+}
+
+/// [`crate::PrintEnv::enum_variant_name`] answered from a registration table
+/// — an AOT executable's, or a worker thread's copy of the interpreter's.
+pub fn variant_name_in(names: &VariantNames, key: &str, variant: usize) -> Result<String, String> {
+    let base = typelisp_mem::base_type_key(key);
+    names
+        .get(&(base.to_string(), variant))
+        .cloned()
+        .ok_or_else(|| format!("internal error: no name is registered for variant {} of `{}`", variant, key))
+}
+
+/// [`crate::PrintEnv::field_is_niched_option`] from a registration table: the
+/// field's template, instantiated by the arguments the value's own key
+/// carries. Every field of every registered type has a template, so a
+/// missing one is a broken registration.
+pub fn field_is_niched_in(templates: &FieldTemplates, key: &str, variant: Option<usize>, index: usize) -> Result<bool, String> {
+    let template = field_template_in(templates, key, variant, index)
+        .ok_or_else(|| format!("internal error: no type is registered for field {} of `{}`", index, key))?;
+    let args = typelisp_mem::type_key_args(key);
+    Ok(typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(template, &args)))
+}
+
+/// [`crate::PrintEnv::field_name`] from a registration table. The name table
+/// holds only named fields, so the template table — which holds every field
+/// of every struct — is what tells a positional field (`Ok(None)`) from a type
+/// nobody registered (`Err`).
+pub fn field_name_in(names: &FieldNames, templates: &FieldTemplates, key: &str, index: usize) -> Result<Option<String>, String> {
+    let base = typelisp_mem::base_type_key(key).to_string();
+    if let Some(name) = names.get(&(base, index as i64)) {
+        return Ok(Some(name.clone()));
+    }
+    match field_template_in(templates, key, None, index) {
+        Some(_) => Ok(None),
+        None => Err(format!("internal error: no struct `{}` with a field {} is registered", key, index)),
+    }
+}
 
 /// A printer control variable's current value, from the compiled global slot
 /// [`rt_print_global`] registered for it. The prelude defines every one of

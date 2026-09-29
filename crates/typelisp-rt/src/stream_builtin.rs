@@ -35,7 +35,7 @@ use crate::stream::with_streams;
 // `type_key::type_key_of` produces is asserted by
 // `tests/type_identity_guard_test.rs` — checked, not assumed, because the
 // failure it guards is silent: a value built here under a key nobody else
-// spells would be unmatchable and print as `<unknown-variant>`.
+// spells would be unmatchable and fail to print.
 //
 // `Vector<T>`'s box is a `Struct`, not an `Enum` — the "just a box + a name"
 // representation `value.rs`'s `BoxedObj` doc comment describes, whose *fields
@@ -51,7 +51,7 @@ use crate::stream::with_streams;
 /// builtin, and `tests/type_identity_guard_test.rs` compares every row
 /// against that builtin's own registry return type. Checked rather than
 /// assumed for the reason the module comment gives: a value built under a key
-/// nobody else spells is unmatchable and prints as `<unknown-variant>`.
+/// nobody else spells is unmatchable and fails to print.
 ///
 /// A builtin whose result is not a box (`stream-stdin`'s handle,
 /// `stream-open-p`'s `bool`) has no row and needs none.

@@ -853,6 +853,22 @@ impl Interp {
                 names: Vec::new(),
             },
         );
+        // `Task<T>`/`Thread<T>`/`Chan<T>` are the other built-in structs
+        // (`registry::task_def` and friends): a handle box holding the
+        // scheduler's id and nothing else, built by the runtime
+        // (`typelisp_rt::sched::task_handle`). Nothing constructs or matches
+        // one either, but it prints as its type and the id (`#<chan<int> 3>`),
+        // so the printer has to find it here — positionally, with no names.
+        for handle in ["task", "thread", "chan"] {
+            root.types.insert(
+                handle.to_string(),
+                scope::TypeEntry::Struct {
+                    reprs: Vec::new(),
+                    templates: scope::FieldTemplates::Positional(vec![crate::type_key::type_key_of_type(&crate::Type::Int)]),
+                    names: Vec::new(),
+                },
+            );
+        }
         // `Option`/`Result`/the four concrete error types are `AdtKind::Sum`
         // registrations in `Registry::with_builtins`
         // (`registry::builtin_sum_defs`, the single source both sides read)
@@ -2601,9 +2617,9 @@ impl Interp {
     /// precisely so this lookup never needs a second table to fall back to.
     /// Coming up empty means the lookup itself is broken (a stale key, an
     /// enum the tree was never told about), not that the name lives
-    /// somewhere else — which is why it prints as the loud
-    /// `<unknown-variant>` rather than anything plausible.
-    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Option<String> {
+    /// somewhere else — which is why it is a printing error rather than
+    /// anything plausible.
+    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Result<String, String> {
         // The *base*: a key carries its instantiation now (`option<char>`), and
         // the enum is registered under its bare path. Splitting is what
         // `heap_type_path` does for every other lookup; missing it here is why
@@ -2616,21 +2632,21 @@ impl Interp {
     /// The registered definition's field template, instantiated by the
     /// key's own arguments — `gen<option<int>>`'s field `$0` is
     /// `option<int>`, a niche. See [`typelisp_print::PrintEnv`].
-    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> bool {
+    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> Result<bool, String> {
         let base = crate::type_key::split_key(type_key).0;
         let path = Path::from_segments(base.split("::").map(str::to_string).collect());
         let root = self.root.borrow();
-        let Some(template) = root.field_template(&path, variant, index) else { return false };
+        let template = root.field_template(&path, variant, index)?;
         let args = typelisp_mem::type_key_args(type_key);
-        typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(template, &args))
+        Ok(typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(template, &args)))
     }
 
     /// The name the struct's definition gives field `index`, from the scope
     /// tree. See [`typelisp_print::PrintEnv::field_name`].
-    fn field_name(&self, type_key: &str, index: usize) -> Option<String> {
+    fn field_name(&self, type_key: &str, index: usize) -> Result<Option<String>, String> {
         let base = crate::type_key::split_key(type_key).0;
         let path = Path::from_segments(base.split("::").map(str::to_string).collect());
-        self.root.borrow().field_name(&path, index).map(str::to_string)
+        Ok(self.root.borrow().field_name(&path, index)?.map(str::to_string))
     }
 
     /// A printer control variable's current value, for
@@ -4704,17 +4720,18 @@ fn vector_pop(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, E
 /// the same reason: a nested `Interp` (`compile-file` builds its own) leaves
 /// the slot pointing at a finished one otherwise.
 const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::runtime::PrintHooks {
-    enum_variant_name: |type_key, variant| with_active_interp(|i| i.enum_variant_name(type_key, variant))?,
-    field_is_niched_option: |type_key, variant, index| {
-        with_active_interp(|i| i.field_is_niched_option(type_key, variant, index)).unwrap_or(false)
+    enum_variant_name: |type_key, variant| {
+        with_active_interp(|i| i.enum_variant_name(type_key, variant)).unwrap_or_else(|| Err(NO_INTERP_FOR_TYPES.to_string()))
     },
-    field_name: |type_key, index| with_active_interp(|i| i.field_name(type_key, index))?,
-    print_object: |heap, v, escape| match with_active_interp(|i| i.print_object(heap, v, escape)) {
-        Some(r) => r,
-        // No interpreter registered: the printer is running under a bare
-        // program (a unit test), where no type can have a `print-object`
-        // method because no program defined one.
-        None => Ok(None),
+    field_is_niched_option: |type_key, variant, index| {
+        with_active_interp(|i| i.field_is_niched_option(type_key, variant, index))
+            .unwrap_or_else(|| Err(NO_INTERP_FOR_TYPES.to_string()))
+    },
+    field_name: |type_key, index| {
+        with_active_interp(|i| i.field_name(type_key, index)).unwrap_or_else(|| Err(NO_INTERP_FOR_TYPES.to_string()))
+    },
+    print_object: |heap, v, escape| {
+        with_active_interp(|i| i.print_object(heap, v, escape)).unwrap_or_else(|| Err(NO_INTERP_FOR_METHODS.to_string()))
     },
     format_call: |heap, name, v, colon, at| match with_active_interp(|i| i.format_call(heap, name, v, colon, at)) {
         Some(r) => r,
@@ -4731,6 +4748,8 @@ const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
 };
 
 const NO_INTERP_FOR_PRINTER_VARS: &str = "printing needs a running program to read the printer control variables from";
+const NO_INTERP_FOR_TYPES: &str = "printing needs a running program to look its types up in";
+const NO_INTERP_FOR_METHODS: &str = "printing needs a running program to look `print-object` methods up in";
 
 /// The reader's [`typelisp_read::runtime::ReadHooks`] pointing at the
 /// interpreter — what makes the `read`/`read-datum-at` *builtins* honour `#.`

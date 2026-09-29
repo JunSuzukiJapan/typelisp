@@ -48,11 +48,10 @@ pub mod shim;
 /// interpreter, so its startup code registers the same facts as data (see
 /// `typelisp_rt::printer`) and answers from those.
 pub trait PrintEnv {
-    /// The name of `variant` of the enum whose type key is `type_key`, or
-    /// `None` when this environment has never heard of that type. `None`
-    /// prints as `<unknown-variant>` — a spelling disagreement, not a missing
-    /// feature, so it is deliberately loud.
-    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Option<String>;
+    /// The name of `variant` of the enum whose type key is `type_key`. `Err`
+    /// when this environment has never heard of that type or variant: every
+    /// enum a value can be of is registered, so that is a broken lookup.
+    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Result<String, String>;
 
     /// Whether field `index` of the struct (`variant` `None`) or enum
     /// variant (`variant` `Some`) whose type key is `type_key` is a
@@ -61,18 +60,16 @@ pub trait PrintEnv {
     /// say which `Option` it is (`typelisp_mem::option_prints_wrapped`;
     /// `Option<sexpr>` prints as the datum it is). The renderer cannot read
     /// that off the word, so it asks the program's definition: the field's
-    /// declared type, instantiated by the key the value carries. `false`
-    /// for a type or field this environment has never heard of, which then
-    /// prints the word as it is — and, for an enum, `<unknown-variant>`
-    /// beside it.
-    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> bool;
+    /// declared type, instantiated by the key the value carries. `Err` for a
+    /// type or field this environment has never heard of.
+    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> Result<bool, String>;
 
     /// The name the definition of the struct whose type key is `type_key`
     /// gives field `index`, which prints before the field's value
-    /// (`#<point x: 1 y: 2>`). `None` for a type whose fields have no names
-    /// — a `Vector<T>`'s elements, a handle's id — which print positionally,
-    /// and for a type this environment has never heard of.
-    fn field_name(&self, type_key: &str, index: usize) -> Option<String>;
+    /// (`#<point x: 1 y: 2>`). `Ok(None)` for a type whose fields have no
+    /// names — a `Vector<T>`'s elements, a handle's id — which print
+    /// positionally; `Err` for a type this environment has never heard of.
+    fn field_name(&self, type_key: &str, index: usize) -> Result<Option<String>, String>;
 
     /// `v`'s own `print-object` rendering, or `None` when its type has no
     /// such method (the overwhelmingly common case — the caller then falls
@@ -105,36 +102,6 @@ pub trait PrintEnv {
     /// A value with no heap type of its own (`i64`/`bool`/`char`) has no
     /// method table to look in, and says so.
     fn format_call(&self, heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String>;
-}
-
-/// A [`PrintEnv`] that knows nothing: every enum prints `<unknown-variant>`
-/// and no type has a `print-object` method.
-///
-/// Not a fallback for real programs — it exists so a unit test (and the
-/// bootstrap, before any program has been loaded) can render a value without
-/// standing up an interpreter.
-pub struct BarePrintEnv;
-
-impl PrintEnv for BarePrintEnv {
-    fn enum_variant_name(&self, _type_key: &str, _variant: usize) -> Option<String> {
-        None
-    }
-
-    fn field_is_niched_option(&self, _type_key: &str, _variant: Option<usize>, _index: usize) -> bool {
-        false
-    }
-
-    fn field_name(&self, _type_key: &str, _index: usize) -> Option<String> {
-        None
-    }
-
-    fn print_object(&self, _heap: &mut Heap, _v: Value, _escape: bool) -> Result<Option<String>, String> {
-        Ok(None)
-    }
-
-    fn format_call(&self, _heap: &mut Heap, name: &str, _v: Value, _colon: bool, _at: bool) -> Result<String, String> {
-        Err(format!("format: ~/{}/ needs a program to look the method up in", name))
-    }
 }
 
 /// The type key stored in boxed value `id`, or `None` when the box carries no
