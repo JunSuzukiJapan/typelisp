@@ -14,10 +14,11 @@
 //! ## Coverage
 //!
 //! Implemented: `~A ~S ~W`, `~D ~B ~O ~X ~R`, `~P`, `~C`, `~F ~E ~G ~$`,
-//! `~% ~& ~| ~~`, `~( ~)`, `~[ ~; ~]`, `~{ ~} ~^`, `~< ~> ~T`, `~* ~?`, the
-//! ignored-`~newline`, the pretty-printer directives `~_ ~I ~:T` and the
-//! logical-block form of `~<…~:>`, plus the numeric/`'c`/`v`/`#` prefix
-//! parameters and the `:`/`@` modifiers each directive gives meaning to.
+//! `~% ~& ~| ~~`, `~( ~)`, `~[ ~; ~]`, `~:[`, `~{ ~} ~^`, `~< ~> ~T`, `~*`,
+//! `~/name/`, the ignored-`~newline`, the pretty-printer directives
+//! `~_ ~I ~:T` and the logical-block form of `~<…~:>`, plus the
+//! numeric/`'c`/`v`/`#` prefix parameters and the `:`/`@` modifiers each
+//! directive gives meaning to.
 //!
 //! The pretty-printer directives (and the `*print-pretty*` path of
 //! `~A`/`~S`/`~W`) record [`Op`]s on the output buffer rather than emitting
@@ -25,12 +26,21 @@
 //! out text. With `*print-pretty*` false nothing records an op and the buffer
 //! is returned exactly as before.
 //!
-//! Deliberately unsupported (return a clear error): `~/name/` function-call
-//! dispatch — typelisp has no runtime function-by-name lookup with `format`'s
-//! calling convention. The `nil`-specific behavior of CL's `~:A`/`~@[` is
-//! adapted to typelisp's `false`, which has no `nil`.
+//! ## Strictness
+//!
+//! Nothing is coerced, clamped or ignored. A parameter or modifier a directive
+//! does not take, or a value outside its range, is an error when the control
+//! string is parsed ([`Head::validate`]); an argument of the wrong type, or a
+//! cursor move outside the arguments, is an error when it is met. CL's lenient
+//! rules — `~D` printing a non-integer as `~A`, `~:[` taking any value as a
+//! boolean — are not followed. Refused outright: `~?` (its control string
+//! arrives at run time, where nothing can check it), `~@[` (it tests for nil,
+//! which this language does not have) and the empty-bodied `~{~}`.
+//!
+//! [`check_arguments`] runs the same rules over the argument *types* before the
+//! program runs, which is where the checker reports them.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use typelisp_mem::{FloatBox, Heap, Value};
 
@@ -50,7 +60,7 @@ pub fn build(
     opts: &Opts,
 ) -> Result<Out, String> {
     let nodes = parse(control)?;
-    let items = list_to_vec(heap, args);
+    let items = list_to_vec(heap, args, "the argument list")?;
     let mut st = State { heap, ctx, args: items, pos: 0, opts: *opts };
     let mut out = Out::new();
     st.interp_seq(&nodes, &mut out)?;
@@ -211,15 +221,10 @@ pub fn finish(out: Out, opts: &Opts) -> String {
     }
 }
 
-/// Flattens a proper `Sexpr` list into its elements (an improper dotted tail is
-/// ignored — `format` arguments are always proper lists).
-fn list_to_vec(heap: &Heap, mut v: Value) -> Vec<Value> {
-    let mut out = Vec::new();
-    while let Value::Cons(_) = v {
-        out.push(heap.car(v).expect("cons car"));
-        v = heap.cdr(v).expect("cons cdr");
-    }
-    out
+/// The elements of a proper `Sexpr` list. `what` names the list in the error
+/// for anything else — an atom, or a list whose last cdr is not the empty list.
+fn list_to_vec(heap: &Heap, v: Value, what: &str) -> Result<Vec<Value>, String> {
+    heap.list_to_vec(v).map_err(|_| format!("format: {} is not a proper list", what))
 }
 
 // ===========================================================================
@@ -239,12 +244,147 @@ enum Param {
 }
 
 /// A parsed directive's shared header: its prefix parameters and `:`/`@`
-/// modifiers.
+/// modifiers, plus what each parameter slot accepts — filled in by
+/// [`Head::validate`] once the directive is known.
 #[derive(Clone, Debug, Default)]
 struct Head {
     params: Vec<Param>,
     colon: bool,
     at: bool,
+    kinds: &'static [ParamKind],
+}
+
+/// What one prefix-parameter slot of a directive accepts.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ParamKind {
+    /// An integer `>= 0`.
+    NonNeg,
+    /// An integer `>= 1`.
+    Pos,
+    /// Any integer.
+    Int,
+    /// A character (`'c`).
+    Char,
+    /// A radix, `2..=36`.
+    Radix,
+    /// A slot CL defines and this engine does not implement; naming it is an
+    /// error rather than a silently ignored value.
+    Unsupported(&'static str),
+}
+
+impl ParamKind {
+    /// Whether an integer value (a literal, or one read through `v`/`#`)
+    /// fits this slot.
+    fn check_int(self, n: i64) -> Result<(), String> {
+        match self {
+            ParamKind::NonNeg if n < 0 => Err(format!("{} is negative; this parameter must be 0 or more", n)),
+            ParamKind::Pos if n < 1 => Err(format!("{} is less than 1; this parameter must be 1 or more", n)),
+            ParamKind::Radix if !(2..=36).contains(&n) => Err(format!("radix {} is outside 2..36", n)),
+            ParamKind::Char => Err(format!("{} is an integer; this parameter takes a character ('c)", n)),
+            ParamKind::Unsupported(name) => Err(format!("the {} parameter is not supported", name)),
+            _ => Ok(()),
+        }
+    }
+}
+
+/// The parameter slots and modifiers one directive accepts.
+struct Spec {
+    kinds: &'static [ParamKind],
+    colon: bool,
+    at: bool,
+    /// Whether `:` and `@` may be given together.
+    both: bool,
+}
+
+const fn spec(kinds: &'static [ParamKind], colon: bool, at: bool, both: bool) -> Spec {
+    Spec { kinds, colon, at, both }
+}
+
+use ParamKind::{Char as PChar, Int as PInt, NonNeg, Pos, Radix, Unsupported};
+
+/// What each directive accepts, keyed by its (lowercased) character. The
+/// block directives have their own keys: `[` is a plain conditional, `:[` the
+/// boolean one, `<` justification, `L` a logical block (`~<…~:>`), and the
+/// separators and closers (`;`, `]`, `}`, `)`, `>`) are listed so a parameter
+/// written on one of them is refused like any other.
+fn directive_spec(key: char) -> Option<Spec> {
+    Some(match key {
+        'a' | 's' => spec(&[NonNeg, Pos, NonNeg, PChar], false, true, false),
+        'w' => spec(&[], false, false, false),
+        'd' | 'b' | 'o' | 'x' => spec(&[NonNeg, PChar, PChar, Pos], true, true, true),
+        'r' => spec(&[Radix, NonNeg, PChar, PChar, Pos], true, true, true),
+        'p' | 'c' => spec(&[], true, true, true),
+        'f' => spec(&[NonNeg, NonNeg, PInt, PChar, PChar], false, true, false),
+        'e' => spec(
+            &[NonNeg, NonNeg, Unsupported("exponent-digits"), Unsupported("scale"), Unsupported("overflowchar"), PChar, PChar],
+            false,
+            true,
+            false,
+        ),
+        'g' => spec(&[], false, true, false),
+        '$' => spec(&[NonNeg, NonNeg, NonNeg, PChar], true, true, true),
+        '%' | '&' | '|' | '~' => spec(&[NonNeg], false, false, false),
+        't' => spec(&[NonNeg, NonNeg], true, true, true),
+        '*' => spec(&[NonNeg], true, true, false),
+        '_' => spec(&[], true, true, true),
+        'i' => spec(&[PInt], true, false, false),
+        '^' => spec(&[PInt, PInt, PInt], false, false, false),
+        '\n' => spec(&[], true, true, false),
+        '(' => spec(&[], true, true, true),
+        '[' => spec(&[PInt], true, false, false),
+        '{' => spec(&[NonNeg], true, true, true),
+        '<' => spec(&[NonNeg, Pos, NonNeg, PChar], true, true, true),
+        'L' => spec(&[], true, true, true),
+        '/' => spec(&[], true, true, true),
+        ';' => spec(&[], true, true, false),
+        '}' => spec(&[], true, false, false),
+        '>' => spec(&[], true, false, false),
+        ']' | ')' => spec(&[], false, false, false),
+        _ => return None,
+    })
+}
+
+impl Head {
+    /// Checks this header against what directive `key` accepts (see
+    /// [`directive_spec`]) and records the slot kinds for interpretation.
+    /// `shown` is how the directive is named in the error.
+    fn validate(&mut self, key: char, shown: &str) -> Result<(), String> {
+        let Some(spec) = directive_spec(key) else {
+            return Err(format!("format: unknown directive ~{}", shown));
+        };
+        if self.colon && !spec.colon {
+            return Err(format!("format: ~{} does not take the `:` modifier", shown));
+        }
+        if self.at && !spec.at {
+            return Err(format!("format: ~{} does not take the `@` modifier", shown));
+        }
+        if self.colon && self.at && !spec.both {
+            return Err(format!("format: ~{} does not take `:` and `@` together", shown));
+        }
+        if self.params.len() > spec.kinds.len() {
+            return Err(format!(
+                "format: ~{} takes {} parameter{}, and {} were given",
+                shown,
+                spec.kinds.len(),
+                if spec.kinds.len() == 1 { "" } else { "s" },
+                self.params.len()
+            ));
+        }
+        for (i, (p, kind)) in self.params.iter().zip(spec.kinds).enumerate() {
+            let bad = |why: String| format!("format: ~{}, parameter {}: {}", shown, i + 1, why);
+            match (p, kind) {
+                (Param::Default, _) => {}
+                (_, ParamKind::Unsupported(name)) => return Err(bad(format!("the {} parameter is not supported", name))),
+                (Param::Int(n), k) => k.check_int(*n).map_err(bad)?,
+                (Param::Char(_), ParamKind::Char) => {}
+                (Param::Char(c), _) => return Err(bad(format!("'{} is a character; this parameter takes an integer", c))),
+                (Param::Count, ParamKind::Char) => return Err(bad("`#` is a count; this parameter takes a character".to_string())),
+                (Param::Count, _) | (Param::Arg, _) => {}
+            }
+        }
+        self.kinds = spec.kinds;
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -344,27 +484,52 @@ fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Nod
             nodes.push(Node::Text(std::mem::take(&mut text)));
         }
         *pos += 1; // consume '~'
-        let head = parse_head(chars, pos)?;
+        let mut head = parse_head(chars, pos)?;
         let Some(&ch) = chars.get(*pos) else {
             return Err("format: control string ends with a lone ~".to_string());
         };
         *pos += 1;
         let lower = ch.to_ascii_lowercase();
         if stops.contains(&lower) {
+            head.validate(lower, &lower.to_string())?;
             return Ok((nodes, Some(Stop { ch: lower, head })));
         }
         match lower {
             '(' => {
+                head.validate('(', "(")?;
                 let (body, stop) = parse_seq(chars, pos, &[')'])?;
                 match stop {
                     Some(s) if s.ch == ')' => nodes.push(Node::Case { head, body }),
                     _ => return Err("format: unterminated ~(".to_string()),
                 }
             }
-            '[' => nodes.push(parse_cond(chars, pos, head)?),
+            '[' => {
+                if head.at {
+                    return Err("format: ~@[ is not supported: it tests its argument for being non-nil, and this \
+                                language has no nil. Choose with a bool through ~:[false~;true~] instead."
+                        .to_string());
+                }
+                head.validate('[', "[")?;
+                if head.colon && !head.params.is_empty() {
+                    return Err("format: ~:[ chooses by its bool argument and takes no parameter".to_string());
+                }
+                nodes.push(parse_cond(chars, pos, head)?)
+            }
+            '?' => {
+                return Err("format: ~? is not supported: it takes its control string at run time, where \
+                            nothing can check the arguments it consumes. Write those directives into this \
+                            control string instead."
+                    .to_string())
+            }
             '{' => {
+                head.validate('{', "{")?;
                 let (body, stop) = parse_seq(chars, pos, &['}'])?;
                 match stop {
+                    Some(_) if body.is_empty() => {
+                        return Err("format: ~{~} with an empty body takes its directives from an argument \
+                                    at run time, which is not supported; write them inside the braces"
+                            .to_string())
+                    }
                     Some(s) if s.ch == '}' => nodes.push(Node::Iter { head, body, close_colon: s.head.colon }),
                     _ => return Err("format: unterminated ~{".to_string()),
                 }
@@ -391,10 +556,15 @@ fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Nod
                 if name.is_empty() {
                     return Err("format: ~// names no method".to_string());
                 }
+                head.validate('/', &format!("/{}/", name))?;
                 nodes.push(Node::Call { head, name: name.to_ascii_lowercase() });
             }
-            '^' => nodes.push(Node::Escape { head }),
+            '^' => {
+                head.validate('^', "^")?;
+                nodes.push(Node::Escape { head })
+            }
             '\n' => {
+                head.validate('\n', "<newline>")?;
                 // `~<newline>`: by default ignore the newline and the following
                 // whitespace; `~:` keeps the whitespace, `~@` keeps the newline.
                 if head.at {
@@ -406,7 +576,13 @@ fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Nod
                     }
                 }
             }
-            _ => nodes.push(Node::Dir { head, ch: lower }),
+            _ => {
+                head.validate(lower, &ch.to_string())?;
+                if lower == 'r' && matches!(head.params.first(), Some(Param::Default)) {
+                    return Err("format: ~r with parameters needs the radix as its first one".to_string());
+                }
+                nodes.push(Node::Dir { head, ch: lower })
+            }
         }
     }
     if !text.is_empty() {
@@ -426,6 +602,9 @@ fn parse_cond(chars: &[char], pos: &mut usize, head: Head) -> Result<Node, Strin
         clauses.push(body);
         match stop {
             Some(s) if s.ch == ';' => {
+                if s.head.at {
+                    return Err("format: ~@; separates the prefix of a logical block, not a ~[ clause".to_string());
+                }
                 if s.head.colon {
                     default = Some(clauses.len()); // the *next* clause
                 }
@@ -434,32 +613,56 @@ fn parse_cond(chars: &[char], pos: &mut usize, head: Head) -> Result<Node, Strin
             _ => return Err("format: unterminated ~[".to_string()),
         }
     }
+    if head.colon && (clauses.len() != 2 || default.is_some()) {
+        return Err("format: ~:[ has exactly two clauses, false and true: ~:[false~;true~]".to_string());
+    }
+    if default.is_some_and(|d| d + 1 != clauses.len()) {
+        return Err("format: ~:; marks the default clause, which has to be the last one".to_string());
+    }
     Ok(Node::Cond { head, clauses, default })
 }
 
 /// `~<…~;…~>`: segments separated by `~;`. A closing `~:>` (rather than `~>`)
 /// makes the whole directive a logical block instead of a justification.
-fn parse_just(chars: &[char], pos: &mut usize, head: Head) -> Result<Node, String> {
+fn parse_just(chars: &[char], pos: &mut usize, mut head: Head) -> Result<Node, String> {
     let mut segments = Vec::new();
     let mut sep_at = Vec::new();
-    loop {
+    let block = loop {
         let (body, stop) = parse_seq(chars, pos, &[';', '>'])?;
         segments.push(body);
         match stop {
             Some(s) if s.ch == ';' => {
-                sep_at.push(s.head.at);
-                continue;
-            }
-            Some(s) if s.ch == '>' => {
                 if s.head.colon {
-                    return Ok(Node::Block { head, segments, sep_at });
+                    return Err("format: ~:; (a line-overflow segment) is not supported".to_string());
                 }
-                break;
+                sep_at.push(s.head.at);
             }
+            Some(s) if s.ch == '>' => break s.head.colon,
             _ => return Err("format: unterminated ~<".to_string()),
         }
+    };
+    if !block {
+        if sep_at.contains(&true) {
+            return Err("format: ~@; marks a per-line prefix, which only a logical block (~<…~:>) has".to_string());
+        }
+        head.validate('<', "<")?;
+        return Ok(Node::Just { head, segments });
     }
-    Ok(Node::Just { head, segments })
+    head.validate('L', "<…~:>")?;
+    if segments.len() > 3 {
+        return Err("format: a logical block ~<…~:> has at most three segments: prefix, body, suffix".to_string());
+    }
+    if sep_at.iter().skip(1).any(|&at| at) {
+        return Err("format: only the separator after a logical block's prefix can be ~@;".to_string());
+    }
+    // The prefix and suffix are literal text; see [`literal_segment`].
+    if segments.len() >= 2 {
+        literal_segment(&segments[0])?;
+    }
+    if segments.len() == 3 {
+        literal_segment(&segments[2])?;
+    }
+    Ok(Node::Block { head, segments, sep_at })
 }
 
 /// The literal text of a `~<…~:>` prefix/suffix segment. CL requires these to
@@ -546,6 +749,490 @@ fn parse_head(chars: &[char], pos: &mut usize) -> Result<Head, String> {
 }
 
 // ===========================================================================
+// Static checking
+// ===========================================================================
+
+/// What the checker knows about one argument's type, for [`check_arguments`].
+#[derive(Clone, Debug)]
+pub struct ArgType {
+    pub kind: ArgKind,
+    /// The type as the user would write it, for messages.
+    pub shown: String,
+}
+
+/// The classes of argument type the directives distinguish.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ArgKind {
+    /// Any integer type.
+    Integer,
+    /// A real that is not an integer: `ratio`, `f32`, `f64`.
+    Real,
+    Char,
+    Bool,
+    Str,
+    /// `Option<Sexpr>`, the type of a list.
+    List,
+    /// `Sexpr`: it may hold anything, so a directive's demand on it is checked
+    /// when the value arrives.
+    Sexpr,
+    /// A type variable of a generic body that is not specialized yet. The
+    /// specialization is checked with the real type.
+    Unknown,
+    /// Any other type. Only the directives that print any value accept it.
+    Other,
+}
+
+/// What a directive demands of the argument it consumes.
+#[derive(Clone, Copy, PartialEq)]
+enum Need {
+    Any,
+    Integer,
+    Number,
+    Char,
+    Bool,
+    List,
+}
+
+impl Need {
+    fn describe(self) -> &'static str {
+        match self {
+            Need::Any => "a value",
+            Need::Integer => "an integer",
+            Need::Number => "a number",
+            Need::Char => "a char",
+            Need::Bool => "a bool",
+            Need::List => "a list (`Option<Sexpr>`)",
+        }
+    }
+
+    fn accepts(self, kind: ArgKind) -> bool {
+        match (self, kind) {
+            (_, ArgKind::Unknown | ArgKind::Sexpr) | (Need::Any, _) => true,
+            (Need::Integer, k) => k == ArgKind::Integer,
+            (Need::Number, k) => matches!(k, ArgKind::Integer | ArgKind::Real),
+            (Need::Char, k) => k == ArgKind::Char,
+            (Need::Bool, k) => k == ArgKind::Bool,
+            (Need::List, k) => k == ArgKind::List,
+        }
+    }
+}
+
+/// Checks the arguments of a `format`/`print`/`println` call against its
+/// literal control string, before the program runs: that every directive
+/// that consumes an argument has one, of a type it accepts.
+///
+/// The argument cursor is followed through the whole directive language. Where
+/// the path depends on a value only known at run time — which `~[` clause is
+/// chosen, whether a `~^` fires, how many times a `~@{` goes round — every
+/// possibility is followed, so a mistake on any of them is reported. The
+/// elements of a list argument (`~{`, `~:{`, `~<…~:>`) are `Sexpr`s whose
+/// count the type does not say; directives consuming them are checked when
+/// the elements arrive.
+///
+/// Extra arguments are allowed, as in CL.
+pub fn check_arguments(control: &str, args: &[ArgType]) -> Result<(), String> {
+    let nodes = parse(control)?;
+    Sim.seq(Frame::Static(args), &nodes, &BTreeSet::from([Cur::At(0)]))?;
+    Ok(())
+}
+
+/// The argument list a stretch of directives consumes from: the call's own
+/// arguments (or a known slice of them), or the elements of a list argument.
+#[derive(Clone, Copy)]
+enum Frame<'a> {
+    Static(&'a [ArgType]),
+    Elements,
+}
+
+/// Where the argument cursor can be. `Elements` is anywhere in a list whose
+/// length is unknown.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Cur {
+    At(usize),
+    Elements,
+}
+
+type Curs = BTreeSet<Cur>;
+
+/// Where a stretch of directives can leave the cursor: by running to its end,
+/// or by a `~^` that fired.
+#[derive(Default)]
+struct Exits {
+    normal: Curs,
+    escaped: Curs,
+}
+
+/// A prefix parameter's value as the check sees it.
+#[derive(Clone, Copy)]
+enum PVal {
+    Omitted,
+    Known(i64),
+    Unknown,
+}
+
+struct Sim;
+
+impl Sim {
+    /// Consumes one argument at `cur` for `what`, which demands `need`.
+    fn consume(&self, frame: Frame, cur: Cur, need: Need, what: &str) -> Result<Cur, String> {
+        match (frame, cur) {
+            (Frame::Static(args), Cur::At(p)) => {
+                let Some(arg) = args.get(p) else {
+                    return Err(format!(
+                        "format: {} has no argument left to consume ({} {} given)",
+                        what,
+                        args.len(),
+                        if args.len() == 1 { "is" } else { "are" }
+                    ));
+                };
+                if !need.accepts(arg.kind) {
+                    return Err(format!(
+                        "format: {} needs {}, but argument {} is `{}`",
+                        what,
+                        need.describe(),
+                        p + 1,
+                        arg.shown
+                    ));
+                }
+                Ok(Cur::At(p + 1))
+            }
+            _ => Ok(Cur::Elements),
+        }
+    }
+
+    /// The values of `head`'s prefix parameters, consuming the arguments its
+    /// `v` parameters read.
+    fn params(&self, frame: Frame, mut cur: Cur, head: &Head, what: &str) -> Result<(Cur, Vec<PVal>), String> {
+        let mut vals = Vec::new();
+        for (p, kind) in head.params.iter().zip(head.kinds) {
+            vals.push(match p {
+                Param::Int(n) => PVal::Known(*n),
+                Param::Char(c) => PVal::Known(*c as i64),
+                Param::Default => PVal::Omitted,
+                Param::Count => match (frame, cur) {
+                    (Frame::Static(args), Cur::At(i)) => {
+                        let n = (args.len() - i) as i64;
+                        kind.check_int(n).map_err(|why| format!("format: {}'s `#` parameter: {}", what, why))?;
+                        PVal::Known(n)
+                    }
+                    _ => PVal::Unknown,
+                },
+                Param::Arg => {
+                    let need = if *kind == ParamKind::Char { Need::Char } else { Need::Integer };
+                    cur = self.consume(frame, cur, need, &format!("{}'s `v` parameter", what))?;
+                    PVal::Unknown
+                }
+            });
+        }
+        Ok((cur, vals))
+    }
+
+    fn seq(&self, frame: Frame, nodes: &[Node], starts: &Curs) -> Result<Exits, String> {
+        let mut exits = Exits { normal: starts.clone(), escaped: Curs::new() };
+        for node in nodes {
+            let mut next = Exits { normal: Curs::new(), escaped: exits.escaped };
+            for &cur in &exits.normal {
+                let e = self.node(frame, node, cur)?;
+                next.normal.extend(e.normal);
+                next.escaped.extend(e.escaped);
+            }
+            exits = next;
+        }
+        Ok(exits)
+    }
+
+    fn node(&self, frame: Frame, node: &Node, cur: Cur) -> Result<Exits, String> {
+        let normal = |c: Cur| Exits { normal: Curs::from([c]), escaped: Curs::new() };
+        match node {
+            Node::Text(_) => Ok(normal(cur)),
+            Node::Dir { head, ch } => self.dir(frame, head, *ch, cur).map(normal),
+            Node::Call { head, name } => {
+                let what = format!("~/{}/", name);
+                let (cur, _) = self.params(frame, cur, head, &what)?;
+                self.consume(frame, cur, Need::Any, &what).map(normal)
+            }
+            Node::Case { body, .. } => self.seq(frame, body, &Curs::from([cur])),
+            Node::Escape { head } => {
+                let (cur, vals) = self.params(frame, cur, head, "~^")?;
+                let known: Option<Vec<i64>> = vals
+                    .iter()
+                    .filter(|v| !matches!(v, PVal::Omitted))
+                    .map(|v| match v {
+                        PVal::Known(n) => Some(*n),
+                        _ => None,
+                    })
+                    .collect();
+                let fires = match (known, frame, cur) {
+                    (Some(present), _, _) if !present.is_empty() => Some(match present.len() {
+                        1 => present[0] == 0,
+                        2 => present[0] == present[1],
+                        _ => present[0] <= present[1] && present[1] <= present[2],
+                    }),
+                    (Some(_), Frame::Static(args), Cur::At(p)) => Some(p == args.len()),
+                    _ => None,
+                };
+                let mut e = Exits::default();
+                if fires != Some(false) {
+                    e.escaped.insert(cur);
+                }
+                if fires != Some(true) {
+                    e.normal.insert(cur);
+                }
+                Ok(e)
+            }
+            Node::Cond { head, clauses, default } => {
+                let (selected, cur) = if head.colon {
+                    (None, self.consume(frame, cur, Need::Bool, "~:[")?)
+                } else if head.params.is_empty() {
+                    (None, self.consume(frame, cur, Need::Integer, "~[")?)
+                } else {
+                    let (cur, vals) = self.params(frame, cur, head, "~[")?;
+                    let sel = match vals[0] {
+                        PVal::Known(n) => Some(n),
+                        _ => None,
+                    };
+                    (sel, cur)
+                };
+                let start = Curs::from([cur]);
+                let mut e = Exits::default();
+                let mut run = |clause: &Vec<Node>| -> Result<(), String> {
+                    let r = self.seq(frame, clause, &start)?;
+                    e.normal.extend(r.normal);
+                    e.escaped.extend(r.escaped);
+                    Ok(())
+                };
+                match selected {
+                    Some(n) => {
+                        let idx = usize::try_from(n).ok().filter(|&i| i < clauses.len() && Some(i) != *default);
+                        match idx.or(*default) {
+                            Some(i) => run(&clauses[i])?,
+                            None => {
+                                e.normal.insert(cur);
+                            }
+                        }
+                    }
+                    None => {
+                        for clause in clauses {
+                            run(clause)?;
+                        }
+                        // Without a default clause, a selector matching no
+                        // clause runs none.
+                        if default.is_none() && !head.colon {
+                            e.normal.insert(cur);
+                        }
+                    }
+                }
+                Ok(e)
+            }
+            Node::Iter { head, body, close_colon } => {
+                let (cur, vals) = self.params(frame, cur, head, "~{")?;
+                self.iter(frame, head, body, *close_colon, vals.first().copied().unwrap_or(PVal::Omitted), cur)
+                    .map(normal_set)
+            }
+            Node::Just { head, segments } => {
+                let (cur, _) = self.params(frame, cur, head, "~<")?;
+                // The segments share the cursor; a `~^` in one skips the rest.
+                let mut e = Exits { normal: Curs::from([cur]), escaped: Curs::new() };
+                let mut done = Curs::new();
+                for seg in segments {
+                    let r = self.seq(frame, seg, &e.normal)?;
+                    done.extend(r.escaped);
+                    e.normal = r.normal;
+                }
+                e.normal.extend(done);
+                Ok(e)
+            }
+            Node::Block { head, segments, .. } => {
+                let body = if segments.len() == 1 { &segments[0] } else { &segments[1] };
+                if head.at {
+                    let r = self.seq(frame, body, &Curs::from([cur]))?;
+                    Ok(Exits { normal: r.normal.into_iter().chain(r.escaped).collect(), escaped: Curs::new() })
+                } else {
+                    let cur = self.consume(frame, cur, Need::List, "~<…~:>")?;
+                    self.seq(Frame::Elements, body, &Curs::from([Cur::Elements]))?;
+                    Ok(normal(cur))
+                }
+            }
+        }
+    }
+
+    fn dir(&self, frame: Frame, head: &Head, ch: char, cur: Cur) -> Result<Cur, String> {
+        let what = format!("~{}", ch);
+        let (cur, vals) = self.params(frame, cur, head, &what)?;
+        let need = match ch {
+            'a' | 's' | 'w' => Need::Any,
+            'd' | 'b' | 'o' | 'x' | 'r' => Need::Integer,
+            'c' => Need::Char,
+            'f' | 'e' | 'g' | '$' => Need::Number,
+            'p' => {
+                let cur = if head.colon {
+                    match cur {
+                        Cur::At(0) => {
+                            return Err("format: ~:p reuses the previous argument, and there is none".to_string())
+                        }
+                        Cur::At(p) => Cur::At(p - 1),
+                        Cur::Elements => Cur::Elements,
+                    }
+                } else {
+                    cur
+                };
+                return self.consume(frame, cur, Need::Integer, &what);
+            }
+            '*' => return self.goto(frame, head, vals.first().copied().unwrap_or(PVal::Omitted), cur),
+            _ => return Ok(cur),
+        };
+        self.consume(frame, cur, need, &what)
+    }
+
+    /// `~*`, `~:*`, `~@*`: moves the cursor.
+    fn goto(&self, frame: Frame, head: &Head, n: PVal, cur: Cur) -> Result<Cur, String> {
+        let (Frame::Static(args), Cur::At(p)) = (frame, cur) else { return Ok(Cur::Elements) };
+        let n = match n {
+            PVal::Known(n) => n,
+            PVal::Omitted if head.at => 0,
+            PVal::Omitted => 1,
+            PVal::Unknown => {
+                return Err("format: ~v* moves the argument cursor by an amount known only at run time, \
+                            so the directives after it cannot be checked"
+                    .to_string())
+            }
+        };
+        let target = if head.at {
+            n
+        } else if head.colon {
+            p as i64 - n
+        } else {
+            p as i64 + n
+        };
+        if target < 0 || target as usize > args.len() {
+            return Err(format!("format: ~* moves to argument {}, outside the {} given", target, args.len()));
+        }
+        Ok(Cur::At(target as usize))
+    }
+
+    /// Every way `~{…~}` (any of its four forms) can leave the cursor.
+    fn iter(&self, frame: Frame, head: &Head, body: &[Node], close_colon: bool, max: PVal, cur: Cur) -> Result<Curs, String> {
+        let empty = Frame::Static(&[]);
+        match (head.colon, head.at) {
+            // One list argument, whose elements the body consumes.
+            (false, false) | (true, false) => {
+                let what = if head.colon { "~:{" } else { "~{" };
+                let after = self.consume(frame, cur, Need::List, what)?;
+                self.seq(Frame::Elements, body, &Curs::from([Cur::Elements]))?;
+                // `~:}` runs the body once even for an empty list, with no
+                // arguments at all.
+                if close_colon {
+                    self.seq(empty, body, &Curs::from([Cur::At(0)]))?;
+                }
+                Ok(Curs::from([after]))
+            }
+            // `~:@{`: every remaining argument is a list.
+            (true, true) => match (frame, cur) {
+                (Frame::Static(args), Cur::At(p)) => {
+                    for (i, arg) in args.iter().enumerate().skip(p) {
+                        if !Need::List.accepts(arg.kind) {
+                            return Err(format!(
+                                "format: ~:@{{ takes each remaining argument as a list, but argument {} is `{}`",
+                                i + 1,
+                                arg.shown
+                            ));
+                        }
+                    }
+                    if p < args.len() {
+                        self.seq(Frame::Elements, body, &Curs::from([Cur::Elements]))?;
+                    } else if close_colon {
+                        self.seq(empty, body, &Curs::from([Cur::At(0)]))?;
+                    }
+                    Ok(Curs::from([Cur::At(args.len())]))
+                }
+                _ => {
+                    self.seq(Frame::Elements, body, &Curs::from([Cur::Elements]))?;
+                    if close_colon {
+                        self.seq(empty, body, &Curs::from([Cur::At(0)]))?;
+                    }
+                    Ok(Curs::from([Cur::Elements]))
+                }
+            },
+            // `~@{`: the body goes round over the remaining arguments.
+            (false, true) => match (frame, cur) {
+                (Frame::Static(args), Cur::At(p)) => {
+                    let rest = &args[p..];
+                    let ends = self.rounds(Frame::Static(rest), body, close_colon, max)?;
+                    Ok(ends
+                        .into_iter()
+                        .map(|c| match c {
+                            Cur::At(i) => Cur::At(p + i),
+                            Cur::Elements => Cur::Elements,
+                        })
+                        .collect())
+                }
+                _ => {
+                    self.seq(Frame::Elements, body, &Curs::from([Cur::Elements]))?;
+                    Ok(Curs::from([Cur::Elements]))
+                }
+            },
+        }
+    }
+
+    /// `~@{`'s loop over a known argument list: where it can stop.
+    fn rounds(&self, frame: Frame, body: &[Node], close_colon: bool, max: PVal) -> Result<Curs, String> {
+        let Frame::Static(args) = frame else { unreachable!("`~@{{` over the call's own arguments") };
+        if args.is_empty() {
+            if close_colon {
+                self.seq(frame, body, &Curs::from([Cur::At(0)]))?;
+            }
+            return Ok(Curs::from([Cur::At(0)]));
+        }
+        let mut ends = Curs::new();
+        let mut frontier = Curs::from([Cur::At(0)]);
+        let mut seen = frontier.clone();
+        let mut round: i64 = 0;
+        while !frontier.is_empty() {
+            let mut next = Curs::new();
+            for &cur in &frontier {
+                let Cur::At(p) = cur else { unreachable!("a known argument list has known positions") };
+                if p >= args.len() {
+                    ends.insert(cur);
+                    continue;
+                }
+                match max {
+                    PVal::Known(k) if round >= k => {
+                        ends.insert(cur);
+                        continue;
+                    }
+                    PVal::Unknown => {
+                        ends.insert(cur);
+                    }
+                    _ => {}
+                }
+                let r = self.seq(frame, body, &Curs::from([cur]))?;
+                ends.extend(r.escaped);
+                for n in r.normal {
+                    if n == cur && matches!(max, PVal::Omitted) {
+                        return Err(
+                            "format: an iteration of ~@{ can consume no argument, so it would never end".to_string()
+                        );
+                    }
+                    next.insert(n);
+                }
+            }
+            round += 1;
+            frontier = match max {
+                // A bounded loop may revisit a position on a later round.
+                PVal::Known(_) => next,
+                _ => next.difference(&seen).copied().collect(),
+            };
+            seen.extend(frontier.iter().copied());
+        }
+        Ok(ends)
+    }
+}
+
+fn normal_set(curs: Curs) -> Exits {
+    Exits { normal: curs, escaped: Curs::new() }
+}
+
+// ===========================================================================
 // Interpretation
 // ===========================================================================
 
@@ -569,7 +1256,7 @@ struct State<'a> {
 
 impl State<'_> {
     fn remaining(&self) -> usize {
-        self.args.len().saturating_sub(self.pos)
+        self.args.len() - self.pos
     }
 
     fn next_arg(&mut self) -> Result<Value, String> {
@@ -588,46 +1275,53 @@ impl State<'_> {
     /// Resolves a directive's prefix parameters to concrete integers, filling
     /// omitted/`Default` slots with `defaults` (positionally) and reading the
     /// `v`/`#` parameters from the argument stream / remaining count. A
-    /// `'c` character parameter yields its code point.
-    fn resolve_params(&mut self, params: &[Param], defaults: &[Option<i64>]) -> Result<Vec<Option<i64>>, String> {
+    /// character parameter yields its code point.
+    ///
+    /// Literal parameters were checked against the directive when the control
+    /// string was parsed ([`Head::validate`]); what `v` and `#` supply is
+    /// checked here, against the same slot kinds.
+    fn resolve_params(&mut self, head: &Head, defaults: &[Option<i64>]) -> Result<Vec<Option<i64>>, String> {
         let mut out = Vec::new();
-        for (i, p) in params.iter().enumerate() {
+        for (i, (p, kind)) in head.params.iter().zip(head.kinds).enumerate() {
+            let bad = |why: String| format!("format: parameter {}: {}", i + 1, why);
             let v = match p {
                 Param::Int(n) => Some(*n),
                 Param::Char(c) => Some(*c as i64),
-                Param::Count => Some(self.remaining() as i64),
-                Param::Arg => Some(self.param_from_arg()?),
+                Param::Count => {
+                    let n = self.remaining() as i64;
+                    kind.check_int(n).map_err(bad)?;
+                    Some(n)
+                }
+                Param::Arg => {
+                    let arg = self.next_arg()?;
+                    match (kind, arg) {
+                        (ParamKind::Char, Value::Char(c)) => Some(c as i64),
+                        (ParamKind::Char, _) => return Err(bad("its `v` argument must be a character".to_string())),
+                        (k, _) => {
+                            let n = int_of(self.heap, arg).ok_or_else(|| bad("its `v` argument must be an integer".to_string()))?;
+                            k.check_int(n).map_err(bad)?;
+                            Some(n)
+                        }
+                    }
+                }
                 Param::Default => defaults.get(i).copied().flatten(),
             };
             out.push(v);
         }
         // Pad with defaults for parameters the user omitted entirely.
-        for d in defaults.iter().skip(params.len()) {
+        for d in defaults.iter().skip(head.params.len()) {
             out.push(*d);
         }
         Ok(out)
     }
 
-    /// A `v` parameter consumes one argument, which must be an integer or a
-    /// character (its code point).
-    fn param_from_arg(&mut self) -> Result<i64, String> {
-        let arg = self.next_arg()?;
-        match arg {
-            Value::Char(c) => Ok(c as i64),
-            _ => int_of(self.heap, arg)
-                .ok_or_else(|| "format: a 'v' parameter requires an integer or character argument".to_string()),
-        }
-    }
-
-    /// A directive's `'c`-style character parameter (padding character), taken
-    /// from the resolved parameter at `idx` (an integer code point) or
-    /// `default`.
+    /// A directive's character parameter (a padding character) at `idx`, or
+    /// `default` when it was omitted.
     fn char_param(vals: &[Option<i64>], idx: usize, default: char) -> char {
-        vals.get(idx)
-            .copied()
-            .flatten()
-            .and_then(|n| char::from_u32(n as u32))
-            .unwrap_or(default)
+        match vals.get(idx).copied().flatten() {
+            Some(n) => char::from_u32(n as u32).expect("a character slot holds a checked character"),
+            None => default,
+        }
     }
 
     fn int_param(vals: &[Option<i64>], idx: usize, default: i64) -> i64 {
@@ -683,7 +1377,7 @@ impl State<'_> {
     /// parameters that means "no arguments remain"; `~n^` fires when `n` is
     /// zero; `~n,m^` when `n == m`; `~n,m,o^` when `n <= m <= o`.
     fn escape_fires(&mut self, head: &Head) -> Result<bool, String> {
-        let vals = self.resolve_params(&head.params, &[])?;
+        let vals = self.resolve_params(head, &[])?;
         let present: Vec<i64> = vals.iter().filter_map(|v| *v).collect();
         Ok(match present.len() {
             0 => self.remaining() == 0,
@@ -700,28 +1394,10 @@ impl State<'_> {
         default: Option<usize>,
         out: &mut Out,
     ) -> Result<Flow, String> {
-        if head.at {
-            // `~@[`: if the next arg is logically true, process the single
-            // clause *without* consuming the arg (the clause consumes it);
-            // otherwise consume it and output nothing.
-            let truthy = match self.peek_arg() {
-                Some(Value::Bool(false)) | None => false,
-                _ => true,
-            };
-            if truthy {
-                if let Some(clause) = clauses.first() {
-                    return self.interp_seq(clause, out);
-                }
-            } else {
-                let _ = self.next_arg();
-            }
-            return Ok(Flow::Normal);
-        }
         if head.colon {
             // `~:[false~;true~]`: choose by a boolean argument.
-            let b = match self.next_arg()? {
-                Value::Bool(b) => b,
-                _ => true, // any non-bool is "true" (generalized boolean)
+            let Value::Bool(b) = self.next_arg()? else {
+                return Err("format: ~:[ requires a bool argument".to_string());
             };
             let idx = if b { 1 } else { 0 };
             if let Some(clause) = clauses.get(idx) {
@@ -729,27 +1405,23 @@ impl State<'_> {
             }
             return Ok(Flow::Normal);
         }
-        // Plain `~[`: an integer argument selects the clause by index.
-        let arg = self.next_arg()?;
-        let Some(sel) = int_of(self.heap, arg) else {
-            return Err("format: ~[ requires an integer argument".to_string());
-        };
-        let chosen = if sel >= 0 && (sel as usize) < clauses.len() {
-            // A default clause (if any) is not selectable by index.
-            let idx = sel as usize;
-            if Some(idx) == default {
-                None
-            } else {
-                Some(idx)
+        // Plain `~[`: an integer selects the clause by index — the prefix
+        // parameter when there is one (`~1[`, `~v[`, `~#[`), otherwise the
+        // next argument.
+        let sel = if head.params.is_empty() {
+            let arg = self.next_arg()?;
+            match int_of(self.heap, arg) {
+                Some(n) => Some(n),
+                // An integer too large for a word selects no clause.
+                None if matches!(arg, Value::Boxed(id) if self.heap.is_bignum(id)) => None,
+                None => return Err("format: ~[ requires an integer argument".to_string()),
             }
         } else {
-            None
+            self.resolve_params(head, &[])?[0]
         };
-        let idx = chosen.or(default);
-        if let Some(i) = idx {
-            if let Some(clause) = clauses.get(i) {
-                return self.interp_seq(clause, out);
-            }
+        let chosen = sel.filter(|&n| n >= 0 && (n as usize) < clauses.len() && Some(n as usize) != default);
+        if let Some(clause) = chosen.map(|n| n as usize).or(default).and_then(|i| clauses.get(i)) {
+            return self.interp_seq(clause, out);
         }
         Ok(Flow::Normal)
     }
@@ -761,17 +1433,10 @@ impl State<'_> {
         close_colon: bool,
         out: &mut Out,
     ) -> Result<(), String> {
-        let vals = self.resolve_params(&head.params, &[])?;
+        let vals = self.resolve_params(head, &[])?;
         let max = Self::int_param(&vals, 0, -1); // -1 = unbounded
 
-        // The body may be empty (`~{~}`), meaning the *argument* supplies the
-        // control string. Parsing it lazily per use keeps that rare case cheap.
         let run_body = |st: &mut State, sublist: Vec<Value>, out: &mut Out| -> Result<Flow, String> {
-            if body.is_empty() {
-                return Err("format: ~{~} (empty-body indirection) needs a control-string argument; \
-                            write the directives inside the braces instead"
-                    .to_string());
-            }
             let saved = std::mem::replace(&mut st.args, sublist);
             let saved_pos = std::mem::replace(&mut st.pos, 0);
             let flow = st.interp_seq(body, out);
@@ -784,7 +1449,7 @@ impl State<'_> {
             // `~{`: one list argument; iterate its elements.
             (false, false) => {
                 let list = self.next_arg()?;
-                let elems = list_to_vec(self.heap, list);
+                let elems = list_to_vec(self.heap, list, "~{'s argument")?;
                 self.iterate_flat(&elems, body, max, close_colon, out)?;
             }
             // `~@{`: iterate over the remaining arguments in place.
@@ -796,13 +1461,13 @@ impl State<'_> {
             // `~:{`: one list of sublists; each iteration binds one sublist.
             (true, false) => {
                 let list = self.next_arg()?;
-                let sublists = list_to_vec(self.heap, list);
+                let sublists = list_to_vec(self.heap, list, "~:{'s argument")?;
                 let mut count = 0;
                 for sub in &sublists {
                     if max >= 0 && count >= max {
                         break;
                     }
-                    let elems = list_to_vec(self.heap, *sub);
+                    let elems = list_to_vec(self.heap, *sub, "an element of ~:{'s argument")?;
                     if matches!(run_body(self, elems, out)?, Flow::Escape) {
                         break;
                     }
@@ -821,7 +1486,7 @@ impl State<'_> {
                     if max >= 0 && count >= max {
                         break;
                     }
-                    let elems = list_to_vec(self.heap, *sub);
+                    let elems = list_to_vec(self.heap, *sub, "an argument of ~:@{")?;
                     if matches!(run_body(self, elems, out)?, Flow::Escape) {
                         break;
                     }
@@ -846,15 +1511,13 @@ impl State<'_> {
         close_colon: bool,
         out: &mut Out,
     ) -> Result<usize, String> {
-        if body.is_empty() {
-            return Err("format: ~{~} with an empty body is unsupported".to_string());
-        }
         if elems.is_empty() && close_colon {
             let saved = std::mem::take(&mut self.args);
             let saved_pos = std::mem::replace(&mut self.pos, 0);
-            let _ = self.interp_seq(body, out);
+            let r = self.interp_seq(body, out);
             self.args = saved;
             self.pos = saved_pos;
+            r?;
             return Ok(0);
         }
         let saved = std::mem::take(&mut self.args);
@@ -866,10 +1529,15 @@ impl State<'_> {
             if max >= 0 && iterations >= max {
                 break;
             }
+            let before = self.pos;
             let flow = self.interp_seq(body, out)?;
             iterations += 1;
             if matches!(flow, Flow::Escape) {
                 break;
+            }
+            // A pass that consumed nothing would repeat forever.
+            if self.pos == before && max < 0 {
+                return Err("format: an iteration of ~{ consumed no argument, so it would never end".to_string());
             }
         }
         let consumed = self.pos;
@@ -879,10 +1547,10 @@ impl State<'_> {
     }
 
     fn interp_just(&mut self, head: &Head, segments: &[Vec<Node>], out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(&head.params, &[Some(0), Some(1), Some(0)])?;
-        let mincol = Self::int_param(&vals, 0, 0).max(0) as usize;
-        let colinc = Self::int_param(&vals, 1, 1).max(1) as usize;
-        let minpad = Self::int_param(&vals, 2, 0).max(0) as usize;
+        let vals = self.resolve_params(head, &[Some(0), Some(1), Some(0)])?;
+        let mincol = Self::int_param(&vals, 0, 0) as usize;
+        let colinc = Self::int_param(&vals, 1, 1) as usize;
+        let minpad = Self::int_param(&vals, 2, 0) as usize;
         let padchar = Self::char_param(&vals, 3, ' ');
 
         // Interpret each segment (they share the argument cursor). A `~^` in a
@@ -941,7 +1609,7 @@ impl State<'_> {
                 self.interp_seq(body, out)?;
             } else {
                 let list = self.next_arg()?;
-                let sublist = list_to_vec(self.heap, list);
+                let sublist = list_to_vec(self.heap, list, "a logical block's argument")?;
                 let saved = std::mem::replace(&mut self.args, sublist);
                 let saved_pos = std::mem::replace(&mut self.pos, 0);
                 let r = self.interp_seq(body, out);
@@ -962,10 +1630,10 @@ impl State<'_> {
         match ch {
             'a' | 's' | 'w' => {
                 let standard = ch != 'a';
-                let vals = self.resolve_params(&head.params, &[Some(0), Some(1), Some(0)])?;
-                let mincol = Self::int_param(&vals, 0, 0).max(0) as usize;
-                let colinc = Self::int_param(&vals, 1, 1).max(1) as usize;
-                let minpad = Self::int_param(&vals, 2, 0).max(0) as usize;
+                let vals = self.resolve_params(head, &[Some(0), Some(1), Some(0)])?;
+                let mincol = Self::int_param(&vals, 0, 0) as usize;
+                let colinc = Self::int_param(&vals, 1, 1) as usize;
+                let minpad = Self::int_param(&vals, 2, 0) as usize;
                 let padchar = Self::char_param(&vals, 3, ' ');
                 let arg = self.next_arg()?;
                 // CL's `~A`/`~S`/`~W` all consult `*print-pretty*`. Padding
@@ -987,7 +1655,7 @@ impl State<'_> {
                     'x' => 16,
                     _ => 10,
                 };
-                self.emit_radix(head, radix, out)?;
+                self.emit_integer(head, ch, Some(radix), out)?;
             }
             'r' => self.emit_r(head, out)?,
             'c' => {
@@ -1000,15 +1668,17 @@ impl State<'_> {
             'p' => {
                 if head.colon {
                     // Back up to reuse the previous argument.
-                    self.pos = self.pos.saturating_sub(1);
+                    if self.pos == 0 {
+                        return Err("format: ~:p reuses the previous argument, and there is none".to_string());
+                    }
+                    self.pos -= 1;
                 }
                 let arg = self.next_arg()?;
                 let n = match arg {
                     _ if int_of(self.heap, arg).is_some() => int_of(self.heap, arg).expect("just tested"),
-                    Value::Boxed(id) if self.heap.is_bignum(id) => {
-                        if self.heap.bignum_value(id).to_string() == "1" { 1 } else { 2 }
-                    }
-                    _ => 2,
+                    // Every bignum is far from 1.
+                    Value::Boxed(id) if self.heap.is_bignum(id) => 2,
+                    _ => return Err("format: ~p requires an integer argument".to_string()),
                 };
                 out.push_str(if head.at {
                     if n == 1 { "y" } else { "ies" }
@@ -1023,14 +1693,14 @@ impl State<'_> {
             'g' => self.emit_g(head, out)?,
             '$' => self.emit_dollars(head, out)?,
             '%' => {
-                let vals = self.resolve_params(&head.params, &[Some(1)])?;
-                for _ in 0..Self::int_param(&vals, 0, 1).max(0) {
+                let vals = self.resolve_params(head, &[Some(1)])?;
+                for _ in 0..Self::int_param(&vals, 0, 1) {
                     out.push('\n');
                 }
             }
             '&' => {
-                let vals = self.resolve_params(&head.params, &[Some(1)])?;
-                let n = Self::int_param(&vals, 0, 1).max(0);
+                let vals = self.resolve_params(head, &[Some(1)])?;
+                let n = Self::int_param(&vals, 0, 1);
                 if n > 0 {
                     // Fresh-line: the first newline only if not already at BOL.
                     if !out.is_empty() && !out.ends_with('\n') {
@@ -1042,35 +1712,39 @@ impl State<'_> {
                 }
             }
             '|' => {
-                let vals = self.resolve_params(&head.params, &[Some(1)])?;
-                for _ in 0..Self::int_param(&vals, 0, 1).max(0) {
+                let vals = self.resolve_params(head, &[Some(1)])?;
+                for _ in 0..Self::int_param(&vals, 0, 1) {
                     out.push('\u{000c}');
                 }
             }
             '~' => {
-                let vals = self.resolve_params(&head.params, &[Some(1)])?;
-                for _ in 0..Self::int_param(&vals, 0, 1).max(0) {
+                let vals = self.resolve_params(head, &[Some(1)])?;
+                for _ in 0..Self::int_param(&vals, 0, 1) {
                     out.push('~');
                 }
             }
             't' => self.emit_tab(head, out)?,
             '*' => {
-                let vals = self.resolve_params(&head.params, &[])?;
-                if head.at {
+                let vals = self.resolve_params(head, &[])?;
+                let target = if head.at {
                     // Absolute goto (default index 0).
-                    let n = Self::int_param(&vals, 0, 0).max(0) as usize;
-                    self.pos = n.min(self.args.len());
+                    Self::int_param(&vals, 0, 0)
                 } else if head.colon {
                     // Back up n (default 1).
-                    let n = Self::int_param(&vals, 0, 1).max(0) as usize;
-                    self.pos = self.pos.saturating_sub(n);
+                    self.pos as i64 - Self::int_param(&vals, 0, 1)
                 } else {
                     // Skip n forward (default 1).
-                    let n = Self::int_param(&vals, 0, 1).max(0) as usize;
-                    self.pos = (self.pos + n).min(self.args.len());
+                    self.pos as i64 + Self::int_param(&vals, 0, 1)
+                };
+                if target < 0 || target as usize > self.args.len() {
+                    return Err(format!(
+                        "format: ~* moves to argument {}, outside the {} there are",
+                        target,
+                        self.args.len()
+                    ));
                 }
+                self.pos = target as usize;
             }
-            '?' => self.emit_indirection(head, out)?,
             // `~_` — a conditional newline (CL's `pprint-newline`). Plain is
             // `:linear`, `~:_` is `:fill`, `~@_` is `:miser`, `~:@_` is
             // `:mandatory`. Like every pretty directive it is a no-op when
@@ -1089,7 +1763,7 @@ impl State<'_> {
             // indentation to `n` past the block's own column (`~n:I`: past the
             // current output column).
             'i' => {
-                let vals = self.resolve_params(&head.params, &[Some(0)])?;
+                let vals = self.resolve_params(head, &[Some(0)])?;
                 let n = Self::int_param(&vals, 0, 0);
                 if self.opts.pretty {
                     out.op(Op::Indent(if head.colon { IndentKind::Current } else { IndentKind::Block }, n));
@@ -1102,23 +1776,29 @@ impl State<'_> {
         Ok(())
     }
 
-    fn emit_radix(&mut self, head: &Head, radix: u32, out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(&head.params, &[Some(0), None, None, Some(3)])?;
-        let mincol = Self::int_param(&vals, 0, 0).max(0) as usize;
-        let padchar = Self::char_param(&vals, 1, ' ');
-        let commachar = Self::char_param(&vals, 2, ',');
-        let comma_interval = Self::int_param(&vals, 3, 3).max(1) as usize;
-        let arg = self.next_arg()?;
-        let digits = match self.integer_in_radix(arg, radix) {
-            Some(s) => s,
-            None => {
-                // A non-integer prints in ~A form (CL's rule).
-                let mut s = String::new();
-                render_value(self.heap, self.ctx, arg, false, &mut s)?;
-                out.push_str(&pad(&s, mincol, 1, 0, padchar, true));
-                return Ok(());
-            }
+    /// `~D ~B ~O ~X`, and `~R` with a radix. `radix` is the directive's own,
+    /// or `None` for `~R`, which reads it from its first parameter; the
+    /// mincol, padchar, commachar and interval parameters follow.
+    fn emit_integer(&mut self, head: &Head, ch: char, radix: Option<u32>, out: &mut Out) -> Result<(), String> {
+        let at = usize::from(radix.is_none());
+        let defaults: &[Option<i64>] = if radix.is_none() {
+            &[None, Some(0), None, None, Some(3)]
+        } else {
+            &[Some(0), None, None, Some(3)]
         };
+        let vals = self.resolve_params(head, defaults)?;
+        let radix = match radix {
+            Some(r) => r,
+            None => vals[0].expect("~r reaches here only with its radix parameter") as u32,
+        };
+        let mincol = Self::int_param(&vals, at, 0) as usize;
+        let padchar = Self::char_param(&vals, at + 1, ' ');
+        let commachar = Self::char_param(&vals, at + 2, ',');
+        let comma_interval = Self::int_param(&vals, at + 3, 3) as usize;
+        let arg = self.next_arg()?;
+        let digits = self
+            .integer_in_radix(arg, radix)
+            .ok_or_else(|| format!("format: ~{} requires an integer argument", ch))?;
         let body = decorate_integer(&digits, head.colon, head.at, commachar, comma_interval);
         out.push_str(&pad(&body, mincol, 1, 0, padchar, true));
         Ok(())
@@ -1142,26 +1822,19 @@ impl State<'_> {
 
     fn emit_r(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         // `~nR` (a radix parameter present) behaves like `~D` in that radix.
-        let has_radix = matches!(head.params.first(), Some(Param::Int(_) | Param::Arg | Param::Count));
-        if has_radix {
-            let vals = self.resolve_params(&head.params, &[Some(10), Some(0), None, None, Some(3)])?;
-            let radix = Self::int_param(&vals, 0, 10).clamp(2, 36) as u32;
-            let mincol = Self::int_param(&vals, 1, 0).max(0) as usize;
-            let padchar = Self::char_param(&vals, 2, ' ');
-            let commachar = Self::char_param(&vals, 3, ',');
-            let comma_interval = Self::int_param(&vals, 4, 3).max(1) as usize;
-            let arg = self.next_arg()?;
-            let digits = self
-                .integer_in_radix(arg, radix)
-                .ok_or("format: ~R requires an integer argument")?;
-            let body = decorate_integer(&digits, head.colon, head.at, commachar, comma_interval);
-            out.push_str(&pad(&body, mincol, 1, 0, padchar, true));
-            return Ok(());
+        // A parse-time check made sure the first parameter, when there is
+        // any, is the radix.
+        if !head.params.is_empty() {
+            return self.emit_integer(head, 'r', None, out);
         }
         // No radix parameter: English/Roman spellings.
         let arg = self.next_arg()?;
-        let Some(n) = int_of(self.heap, arg) else {
-            return Err("format: ~R without a radix requires an integer argument".to_string());
+        let n = match int_of(self.heap, arg) {
+            Some(n) => n,
+            None if matches!(arg, Value::Boxed(id) if self.heap.is_bignum(id)) => {
+                return Err("format: ~r cannot spell an integer this large in words".to_string())
+            }
+            None => return Err("format: ~r requires an integer argument".to_string()),
         };
         let text = match (head.colon, head.at) {
             (false, false) => english_cardinal(n),
@@ -1174,11 +1847,11 @@ impl State<'_> {
     }
 
     fn emit_f(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(&head.params, &[None, None, Some(0), None, Some(' ' as i64)])?;
+        let vals = self.resolve_params(head, &[None, None, Some(0), None, Some(' ' as i64)])?;
         let w = Self::int_param(&vals, 0, -1);
         let d = Self::int_param(&vals, 1, -1);
         let k = Self::int_param(&vals, 2, 0);
-        let overflow = vals.get(3).copied().flatten().and_then(|n| char::from_u32(n as u32));
+        let overflow = vals[3].map(|_| Self::char_param(&vals, 3, ' '));
         let padchar = Self::char_param(&vals, 4, ' ');
         let f = self.next_float()?;
         let scaled = f * 10f64.powi(k as i32);
@@ -1201,13 +1874,13 @@ impl State<'_> {
 
     fn emit_e(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
         // `~w,d,e,k,overflow,padchar,exptcharE`. A pragmatic scientific form.
-        let vals = self.resolve_params(&head.params, &[None, None, None, Some(1), None, Some(' ' as i64), None])?;
+        let vals = self.resolve_params(head, &[None, None, None, Some(1), None, Some(' ' as i64), None])?;
         let w = Self::int_param(&vals, 0, -1);
         let d = Self::int_param(&vals, 1, 6);
-        let exptchar = vals.get(6).copied().flatten().and_then(|n| char::from_u32(n as u32)).unwrap_or('e');
+        let exptchar = Self::char_param(&vals, 6, 'e');
         let padchar = Self::char_param(&vals, 5, ' ');
         let f = self.next_float()?;
-        let mut s = format!("{:.*e}", d.max(0) as usize, f);
+        let mut s = format!("{:.*e}", d as usize, f);
         // Rust prints `1.5e2`; CL uses an explicit sign on the exponent.
         if let Some(idx) = s.find('e') {
             let (mant, exp) = s.split_at(idx);
@@ -1240,10 +1913,10 @@ impl State<'_> {
     }
 
     fn emit_dollars(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(&head.params, &[Some(2), Some(1), Some(0), Some(' ' as i64)])?;
-        let d = Self::int_param(&vals, 0, 2).max(0) as usize;
-        let n = Self::int_param(&vals, 1, 1).max(0) as usize;
-        let w = Self::int_param(&vals, 2, 0).max(0) as usize;
+        let vals = self.resolve_params(head, &[Some(2), Some(1), Some(0), Some(' ' as i64)])?;
+        let d = Self::int_param(&vals, 0, 2) as usize;
+        let n = Self::int_param(&vals, 1, 1) as usize;
+        let w = Self::int_param(&vals, 2, 0) as usize;
         let padchar = Self::char_param(&vals, 3, ' ');
         let f = self.next_float()?;
         let neg = f < 0.0;
@@ -1269,9 +1942,9 @@ impl State<'_> {
     }
 
     fn emit_tab(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        let vals = self.resolve_params(&head.params, &[Some(1), Some(1)])?;
-        let col = Self::int_param(&vals, 0, 1).max(0) as usize;
-        let inc = Self::int_param(&vals, 1, 1).max(1) as usize;
+        let vals = self.resolve_params(head, &[Some(1), Some(1)])?;
+        let col = Self::int_param(&vals, 0, 1);
+        let inc = Self::int_param(&vals, 1, 1);
         // Under the pretty printer the column a tab lands on isn't known until
         // the layout pass has chosen the line breaks, so record the tab
         // instead of padding here. `~:T`/`~:@T` measure from the enclosing
@@ -1284,64 +1957,24 @@ impl State<'_> {
                     (true, false) => TabKind::Section,
                     (true, true) => TabKind::SectionRelative,
                 },
-                colnum: col as i64,
-                colinc: inc as i64,
+                colnum: col,
+                colinc: inc,
             });
             return Ok(());
         }
+        // `~:T` is `pprint-tab :section`, which does nothing when
+        // `*print-pretty*` is false (CLHS `pprint-tab`).
+        if head.colon {
+            return Ok(());
+        }
         let cur = current_column(&out.text);
-        if head.colon || head.at {
-            // Relative tab: at least `col` spaces, then round up to `inc`.
-            let mut pad = col;
-            while !(cur + pad).is_multiple_of(inc) {
-                pad += 1;
-            }
-            for _ in 0..pad {
-                out.push(' ');
-            }
-        } else {
-            // Absolute tab: pad to column `col`, or to the next `inc` multiple.
-            if cur < col {
-                for _ in 0..(col - cur) {
-                    out.push(' ');
-                }
-            } else if inc > 1 {
-                let mut target = col;
-                while target <= cur {
-                    target += inc;
-                }
-                for _ in 0..(target - cur) {
-                    out.push(' ');
-                }
-            } else {
-                out.push(' ');
-            }
+        let target = pprint::tab_target(cur, 0, col, inc, head.at);
+        for _ in cur..target {
+            out.push(' ');
         }
         Ok(())
     }
 
-    fn emit_indirection(&mut self, head: &Head, out: &mut Out) -> Result<(), String> {
-        let control = match self.next_arg()? {
-            Value::Str(id) => self.heap.string(id).to_string(),
-            _ => return Err("format: ~? requires a control-string argument".to_string()),
-        };
-        let nodes = parse(&control)?;
-        if head.at {
-            // Consume further arguments from the current stream.
-            self.interp_seq(&nodes, out)?;
-        } else {
-            // The next argument is a list supplying this sub-format's arguments.
-            let list = self.next_arg()?;
-            let sublist = list_to_vec(self.heap, list);
-            let saved = std::mem::replace(&mut self.args, sublist);
-            let saved_pos = std::mem::replace(&mut self.pos, 0);
-            let r = self.interp_seq(&nodes, out);
-            self.args = saved;
-            self.pos = saved_pos;
-            r?;
-        }
-        Ok(())
-    }
 
     fn next_float(&mut self) -> Result<f64, String> {
         let v = self.next_arg()?;
@@ -1681,7 +2314,8 @@ fn english_cardinal(n: i64) -> String {
         if *g == 0 {
             continue;
         }
-        let scale = SCALES.get(i).copied().unwrap_or("");
+        // An `i64` has at most seven groups, and `SCALES` names all seven.
+        let scale = SCALES[i];
         parts.push(format!("{}{}", three_digits(*g), scale));
     }
     let text = parts.join(" ");

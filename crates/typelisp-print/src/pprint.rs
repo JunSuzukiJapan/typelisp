@@ -452,11 +452,15 @@ fn note_break(blocks: &mut [Block]) {
 /// Where a `pprint-tab` lands (CLHS `pprint-tab` / `~T`). A *relative* tab
 /// advances `colnum` columns from the current one and then to the next column
 /// that is a multiple of `colinc` counting from `origin`; an *absolute* tab
-/// goes to `origin + colnum`, or — when output is already past that — on in
-/// `colinc` steps until it reaches the current column.
-fn tab_target(col: usize, origin: usize, colnum: i64, colinc: i64, relative: bool) -> usize {
-    let colnum = colnum.max(0) as usize;
-    let colinc = colinc.max(0) as usize;
+/// goes to `origin + colnum`, or — when output is already at or past that —
+/// on by the fewest (at least one) `colinc` steps that reach the current
+/// column, and nowhere when `colinc` is 0.
+///
+/// `colnum` and `colinc` are non-negative: the directive's parameters are
+/// checked when the control string is parsed.
+pub(crate) fn tab_target(col: usize, origin: usize, colnum: i64, colinc: i64, relative: bool) -> usize {
+    let colnum = usize::try_from(colnum).expect("a checked, non-negative colnum");
+    let colinc = usize::try_from(colinc).expect("a checked, non-negative colinc");
     if relative {
         let mut target = col + colnum;
         if colinc > 1 {
@@ -467,10 +471,11 @@ fn tab_target(col: usize, origin: usize, colnum: i64, colinc: i64, relative: boo
         return target;
     }
     let mut target = origin + colnum;
-    if target < col {
+    if target <= col {
         if colinc == 0 {
             return col;
         }
+        target += colinc;
         while target < col {
             target += colinc;
         }

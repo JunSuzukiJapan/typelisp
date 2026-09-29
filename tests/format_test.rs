@@ -8,7 +8,7 @@
 extern crate typelisp;
 
 mod common;
-use common::{eval_string, run};
+use common::{check_err, eval_string, run};
 use typelisp::{load_prelude, Checker, Heap, Interp, Reader};
 
 /// `(format false <src-tail>)` → the produced `string`, panicking on any
@@ -70,21 +70,30 @@ fn extra_arguments_are_ignored() {
 }
 
 #[test]
-fn too_few_arguments_is_a_recoverable_error() {
-    let err = run(r#"(format false "~a ~a" 1)"#).unwrap_err();
+fn too_few_arguments_is_a_type_error() {
+    let msg = check_err(r#"(format false "~a ~a" 1)"#);
+    assert!(msg.contains("no argument left"), "got {:?}", msg);
+}
+
+/// The elements of a list argument are `Sexpr`s whose count the type does not
+/// say, so running out of them is found when it happens — as an error.
+#[test]
+fn too_few_list_elements_is_a_recoverable_error() {
+    let err = run(r#"(format false "~{~a ~a~}" '(1 2 3))"#).unwrap_err();
     assert!(format!("{:?}", err).contains("ran out of arguments"), "got {:?}", err);
 }
 
 #[test]
-fn unknown_directive_is_an_error() {
-    let err = run(r#"(format false "~q" 1)"#).unwrap_err();
-    assert!(format!("{:?}", err).contains("unknown directive"), "got {:?}", err);
+fn unknown_directive_is_a_type_error() {
+    let msg = check_err(r#"(format false "~q" 1)"#);
+    assert!(msg.contains("unknown directive"), "got {:?}", msg);
 }
 
+/// CL prints a non-integer `~D` argument as `~A`. This language checks it.
 #[test]
-fn decimal_on_a_non_integer_falls_back_to_aesthetic() {
-    // CL's rule: a non-integer ~D argument is printed in ~A form.
-    assert_eq!(fmt(r#"(format false "~d" "nope")"#), "nope");
+fn decimal_on_a_non_integer_is_a_type_error() {
+    let msg = check_err(r#"(format false "~d" "nope")"#);
+    assert!(msg.contains("~d needs an integer, but argument 1 is `string`"), "got {:?}", msg);
 }
 
 // ---- padding / justification -------------------------------------------------
@@ -180,11 +189,25 @@ fn conditional_default_clause() {
 }
 
 #[test]
-fn conditional_boolean_and_at() {
+fn conditional_boolean() {
     assert_eq!(fmt(r#"(format false "~:[no~;yes~]" true)"#), "yes");
     assert_eq!(fmt(r#"(format false "~:[no~;yes~]" false)"#), "no");
-    assert_eq!(fmt(r#"(format false "x~@[=~d~]" 7)"#), "x=7");
-    assert_eq!(fmt(r#"(format false "x~@[=~d~]" false)"#), "x");
+}
+
+/// `~@[` tests for non-nil, and there is no nil to test for.
+#[test]
+fn conditional_at_is_rejected() {
+    let msg = check_err(r#"(format false "x~@[=~d~]" 7)"#);
+    assert!(msg.contains("~@[ is not supported"), "got {:?}", msg);
+}
+
+/// A prefix parameter selects the clause in place of an argument; `~#[`
+/// selects by how many arguments remain.
+#[test]
+fn conditional_selector_from_a_parameter() {
+    assert_eq!(fmt(r#"(format false "~1[a~;b~;c~]")"#), "b");
+    assert_eq!(fmt(r#"(format false "~#[none~;one~;two~:;many~]" 1 2)"#), "two");
+    assert_eq!(fmt(r#"(format false "~v[a~;b~;c~]" 2)"#), "c");
 }
 
 // ---- iteration ---------------------------------------------------------------
@@ -217,10 +240,14 @@ fn skip_directive() {
     assert_eq!(fmt(r#"(format false "~a ~* ~a" 1 2 3)"#), "1  3");
 }
 
+/// `~?` reads its control string at run time, where nothing can check the
+/// arguments it consumes.
 #[test]
-fn indirection_directive() {
-    assert_eq!(fmt(r#"(format false "~?" "~d-~d" '(4 5))"#), "4-5");
-    assert_eq!(fmt(r#"(format false "~@?" "~d-~d" 4 5)"#), "4-5");
+fn indirection_is_rejected() {
+    for src in [r#"(format false "~?" "~d-~d" '(4 5))"#, r#"(format false "~@?" "~d-~d" 4 5)"#] {
+        let msg = check_err(src);
+        assert!(msg.contains("~? is not supported"), "{}: got {:?}", src, msg);
+    }
 }
 
 // ---- newline family ----------------------------------------------------------
@@ -385,4 +412,123 @@ fn a_bad_arg_type_is_a_static_type_error() {
         }
     }
     assert!(saw_err, "expected a type error for an Option format argument");
+}
+
+// ---- checking arguments against the directives ---------------------------------
+
+/// Every directive that consumes an argument checks its type, at check time.
+#[test]
+fn each_directive_checks_its_argument_type() {
+    let cases = [
+        (r#"(format false "~x" 1.5)"#, "~x needs an integer, but argument 1 is `f64`"),
+        (r#"(format false "~r" "x")"#, "~r needs an integer, but argument 1 is `string`"),
+        (r#"(format false "~c" 5)"#, "~c needs a char, but argument 1 is `int`"),
+        (r#"(format false "~f" "s")"#, "~f needs a number, but argument 1 is `string`"),
+        (r#"(format false "~$" #\a)"#, "~$ needs a number, but argument 1 is `char`"),
+        (r#"(format false "~p" "s")"#, "~p needs an integer, but argument 1 is `string`"),
+        (r#"(format false "~[a~;b~]" "s")"#, "~[ needs an integer, but argument 1 is `string`"),
+        (r#"(format false "~:[a~;b~]" 3)"#, "~:[ needs a bool, but argument 1 is `int`"),
+        (r#"(format false "~{~a~}" 5)"#, "~{ needs a list (`Option<Sexpr>`), but argument 1 is `int`"),
+        (r#"(format false "~{~a~}" (cons 1 2))"#, "~{ needs a list (`Option<Sexpr>`), but argument 1 is `cons-cell<int,int>`"),
+        (r#"(format false "~<~a~:>" 1)"#, "~<…~:> needs a list (`Option<Sexpr>`), but argument 1 is `int`"),
+        (r#"(format false "~va" "w" 1)"#, "~a's `v` parameter needs an integer, but argument 1 is `string`"),
+        (r#"(format false "~5,,,va" 1 1)"#, "~a's `v` parameter needs a char, but argument 1 is `int`"),
+    ];
+    for (src, want) in cases {
+        let msg = check_err(src);
+        assert!(msg.contains(want), "{}\n  want: {}\n  got:  {}", src, want, msg);
+    }
+}
+
+/// The cursor is followed through jumps, conditionals and iteration, so the
+/// argument a directive lands on is the one checked.
+#[test]
+fn the_argument_cursor_is_followed() {
+    assert_eq!(fmt(r#"(format false "~a~:*~d" 7)"#), "77");
+    assert_eq!(fmt(r#"(format false "~@{~a~^,~}" 1 2 3)"#), "1,2,3");
+    assert_eq!(fmt(r#"(format false "~2@*~a~0@*~a" 1 2 3)"#), "31");
+    let cases = [
+        // `~*` skips the string, so `~d` lands on it only without the skip.
+        (r#"(format false "~a~:*~d" "s")"#, "~d needs an integer, but argument 1 is `string`"),
+        // Either clause may run, so both are checked.
+        (r#"(format false "~:[~d~;~a~]" true "s")"#, "~d needs an integer, but argument 2 is `string`"),
+        // Each round of `~@{` lands on the next argument.
+        (r#"(format false "~@{~d~}" 1 2 "s")"#, "~d needs an integer, but argument 3 is `string`"),
+        (r#"(format false "~2*~a" 1)"#, "~* moves to argument 2, outside the 1 given"),
+        (r#"(format false "~:*~a" 1)"#, "~* moves to argument -1, outside the 1 given"),
+        (r#"(format false "~:p" 1)"#, "~:p reuses the previous argument, and there is none"),
+        (r#"(format false "~@{~a~:*~}" 1)"#, "an iteration of ~@{ can consume no argument"),
+        (r#"(format false "~v*~a" 1 2)"#, "~v* moves the argument cursor by an amount known only at run time"),
+    ];
+    for (src, want) in cases {
+        let msg = check_err(src);
+        assert!(msg.contains(want), "{}\n  want: {}\n  got:  {}", src, want, msg);
+    }
+}
+
+/// A `~^` that is sure to fire ends the format; the arguments it saves are not
+/// asked for.
+#[test]
+fn an_escape_that_fires_ends_the_check_too() {
+    assert_eq!(fmt(r#"(format false "x~^ ~a")"#), "x");
+    assert_eq!(fmt(r#"(format false "~a~^, ~a" 1)"#), "1");
+}
+
+/// The elements of a list argument are `Sexpr`s: what a directive demands of
+/// one is checked when it arrives, and a mismatch is an error, never a
+/// different rendering.
+#[test]
+fn a_list_element_of_the_wrong_type_is_a_recoverable_error() {
+    for (src, want) in [
+        (r#"(format false "~{~d~}" '(1 "a"))"#, "~d requires an integer argument"),
+        (r#"(format false "~{~c~}" '(1))"#, "~c requires a character argument"),
+        (r#"(format false "~:{~a~}" '(1 2))"#, "is not a proper list"),
+        (r#"(format false "~{~:[a~;b~]~}" '(1))"#, "~:[ requires a bool argument"),
+        (r#"(format false "~{~a~:*~}" '(1 2))"#, "consumed no argument"),
+    ] {
+        let err = run(src).unwrap_err();
+        assert!(format!("{:?}", err).contains(want), "{}\n  want: {}\n  got:  {:?}", src, want, err);
+    }
+}
+
+/// A parameter, modifier or structure the engine would ignore or bend is an
+/// error in the control string.
+#[test]
+fn a_directive_that_would_be_ignored_or_bent_is_rejected() {
+    let cases = [
+        (r#"(format false "~5,-1a" 1)"#, "~a, parameter 2: -1 is less than 1"),
+        (r#"(format false "~-3%")"#, "~%, parameter 1: -3 is negative"),
+        (r#"(format false "~40r" 1)"#, "~r, parameter 1: radix 40 is outside 2..36"),
+        (r#"(format false "~1,2,3,4,5a" 1)"#, "~a takes 4 parameters, and 5 were given"),
+        (r#"(format false "~5,65d" 1)"#, "~d, parameter 2: 65 is an integer; this parameter takes a character"),
+        (r#"(format false "~,,3e" 1.0)"#, "~e, parameter 3: the exponent-digits parameter is not supported"),
+        (r#"(format false "~5g" 1.0)"#, "~g takes 0 parameters"),
+        (r#"(format false "~:%")"#, "~% does not take the `:` modifier"),
+        (r#"(format false "~:a" 1)"#, "~a does not take the `:` modifier"),
+        (r#"(format false "~:@*" 1)"#, "~* does not take `:` and `@` together"),
+        (r#"(format false "~,5r" 1)"#, "~r with parameters needs the radix as its first one"),
+        (r#"(format false "~:[a~]" true)"#, "~:[ has exactly two clauses"),
+        (r#"(format false "~[a~:;b~;c~]" 1)"#, "~:; marks the default clause, which has to be the last one"),
+        (r#"(format false "~<a~;b~;c~;d~:>" '(1))"#, "at most three segments"),
+        (r#"(format false "~{~}" '(1))"#, "~{~} with an empty body"),
+        (r#"(format false "~5/show/" 1)"#, "~/show/ takes 0 parameters"),
+    ];
+    for (src, want) in cases {
+        let msg = check_err(src);
+        assert!(msg.contains(want), "{}\n  want: {}\n  got:  {}", src, want, msg);
+    }
+}
+
+/// `~colnum,colincT` follows CLHS 22.3.6.1: at or past `colnum`, it moves on
+/// by the fewest (at least one) `colinc` steps reaching the cursor, and a
+/// `colinc` of 0 moves nowhere. `~:T` is `pprint-tab`, which does nothing
+/// when `*print-pretty*` is false.
+#[test]
+fn tabulate_follows_the_standard() {
+    assert_eq!(fmt(r#"(format false "a~4t|")"#), "a   |");
+    assert_eq!(fmt(r#"(format false "a~1,4t|")"#), "a    |");
+    assert_eq!(fmt(r#"(format false "abcdef~1,4t|")"#), "abcdef   |");
+    assert_eq!(fmt(r#"(format false "abcde~1,4t|")"#), "abcde|");
+    assert_eq!(fmt(r#"(format false "ab~1,0t|")"#), "ab|");
+    assert_eq!(fmt(r#"(format false "ab~3:t|")"#), "ab|");
 }

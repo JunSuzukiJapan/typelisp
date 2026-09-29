@@ -14471,15 +14471,42 @@ impl Checker {
         }
     }
 
+    /// Checks the arguments of a `format`/`print`/`println` call against the
+    /// directives of its literal control string — see
+    /// [`typelisp_print::format::check_arguments`].
+    fn check_directive_arguments(&self, control: &str, items: &[Checked]) -> Result<(), Error> {
+        use typelisp_print::format::{ArgKind, ArgType};
+        let args: Vec<ArgType> = items
+            .iter()
+            .map(|item| {
+                let kind = match &item.ty {
+                    t if t.is_int_family() => ArgKind::Integer,
+                    Type::Ratio | Type::F32 | Type::F64 => ArgKind::Real,
+                    Type::Char => ArgKind::Char,
+                    Type::Bool => ArgKind::Bool,
+                    Type::Str => ArgKind::Str,
+                    // A diverging argument never reaches the directive.
+                    Type::Never => ArgKind::Unknown,
+                    t if *t == option_of_sexpr() => ArgKind::List,
+                    Type::Named(p, _) if crate::types::path_is_builtin(p, "sexpr") => ArgKind::Sexpr,
+                    // A type variable: no definition to ask until this body is
+                    // specialized, and the specialization is checked again.
+                    Type::Named(p, _) if self.reg.type_def(p).is_none() => ArgKind::Unknown,
+                    _ => ArgKind::Other,
+                };
+                ArgType { kind, shown: item.ty.to_string() }
+            })
+            .collect();
+        typelisp_print::format::check_arguments(control, &args).map_err(Error::TypeError)
+    }
+
     /// Records every `~/name/` in `control` against the types of the values
     /// it could be handed — see [`Self::format_calls`].
     ///
-    /// The directive picks its method by the *runtime* value's type, so this
-    /// cannot say which argument each `~/ /` will land on without modelling
-    /// the whole directive language (`~{`'s iteration, `~*`'s jumps). It does
-    /// not have to: registering every argument type at the site that answers
-    /// to the name is a superset of what can run, and that is what a startup
-    /// registration needs. Naming *no* type is the case worth reporting —
+    /// The directive picks its method by the *runtime* value's type, and
+    /// inside a list argument (`~{`) that type is not known here. Registering
+    /// every argument type at the site that answers to the name is a superset
+    /// of what can run, and that is what a startup registration needs. Naming *no* type is the case worth reporting —
     /// nothing this call could hand the directive has the method.
     ///
     /// A type nothing can be looked up on — a type variable in an unspecialized
@@ -14569,6 +14596,7 @@ impl Checker {
         for (i, &a) in args[2..].iter().enumerate() {
             items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 2 + i))?);
         }
+        self.check_directive_arguments(&control_text, &items)?;
         self.note_format_calls(&control_text, "format", &items)?;
         let list = self.cons_hetero_sexpr(heap, items)?;
         let r = Ref::synthetic(Path::root("format-rt"));
@@ -14673,6 +14701,7 @@ impl Checker {
         for (i, &a) in args[1..].iter().enumerate() {
             items.push(self.check_at(heap, interp, env, a, None, nth_loc(arg_locs, 1 + i))?);
         }
+        self.check_directive_arguments(&control_text, &items)?;
         self.note_format_calls(&control_text, what, &items)?;
         let list = self.cons_hetero_sexpr(heap, items)?;
         let r = Ref::synthetic(Path::root(builtin));

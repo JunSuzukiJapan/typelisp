@@ -12,7 +12,7 @@
 extern crate typelisp;
 
 mod common;
-use common::{eval_string, run};
+use common::{check_err, eval_string, run};
 
 /// The string the last form produced, panicking on any check/eval error.
 fn fmt(src: &str) -> String {
@@ -154,8 +154,8 @@ fn pretty_directives_are_no_ops_when_print_pretty_is_false() {
 
 #[test]
 fn a_non_literal_block_prefix_is_rejected() {
-    let err = run(r#"(format false "~<~a~;~a~;x~:>" '(a b))"#).expect_err("should fail");
-    assert!(format!("{:?}", err).contains("literal text"), "unexpected error: {:?}", err);
+    let msg = check_err(r#"(format false "~<~a~;~a~;x~:>" '(a b))"#);
+    assert!(msg.contains("literal text"), "unexpected error: {:?}", msg);
 }
 
 #[test]
