@@ -1109,6 +1109,15 @@ pub struct Checker {
     probe_holes: Cell<u32>,
 }
 
+/// The forms [`Checker::check_form_dispatch`] matches at top level. Each one
+/// defines or declares something for the whole program, so none of them
+/// means anything inside an expression.
+const TOPLEVEL_FORM_HEADS: &[&str] = &[
+    "pub", "defun", "defsignature", "defffi", "defvar", "defparameter", "defconstant", "defmacro", "module",
+    "defmethod", "defstruct", "defenum", "deftrait", "deftype", "impl", "use", "load", "import",
+    "shadowing-import", "in-module", "def-c-struct",
+];
+
 impl Checker {
     pub fn new() -> Checker {
         Checker {
@@ -3327,11 +3336,7 @@ impl Checker {
                 | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block" | "c-alloc" | "c-ref" | "c-deref"
-                // top-level forms (`check_form_dispatch`)
-                | "pub" | "defun" | "defsignature" | "defffi" | "defvar" | "defparameter" | "defconstant" | "defmacro" | "module"
-                | "defmethod" | "defstruct" | "defenum" | "deftrait" | "deftype" | "impl" | "use" | "load"
-                | "import" | "shadowing-import" | "in-module" | "def-c-struct"
-        )
+        ) || TOPLEVEL_FORM_HEADS.contains(&name)
     }
 
     /// If `v` is a compound form whose head resolves to a macro — a bare
@@ -10377,6 +10382,23 @@ impl Checker {
                 return self.check_apply(heap, interp, env, callee, args, arg_locs);
             }
         };
+        // A top-level-only form reaching expression position — written in a
+        // function body, or produced there by a macro. Without this it would
+        // be read as a call, and the first complaint would be about its
+        // arguments (the name being defined is not a bound variable) rather
+        // than about where it was written.
+        if TOPLEVEL_FORM_HEADS.contains(&head.as_str()) {
+            let hint = match head.as_str() {
+                "defvar" | "defparameter" | "defconstant" => " — bind a local value with `let`",
+                "defun" => " — define a local function with `labels`",
+                "defmacro" => " — define a local macro with `macrolet`",
+                _ => "",
+            };
+            return Err(Error::TypeError(format!(
+                "{}: only allowed at top level, not in expression position{}",
+                head, hint
+            )));
+        }
         // SPECIAL-FORM DISPATCH BEGIN
         // The arms below are the authoritative list of special forms. They have
         // no runtime representation to enumerate, so `tests/editor_keyword_sync_test.rs`
@@ -10472,16 +10494,6 @@ impl Checker {
             "source-file" => return self.check_source_file(heap, v, args),
             "quote" => return self.check_quote(heap, args),
             "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
-            // Top-level-only forms reaching expression position (e.g. a
-            // macro expanding to `(use ...)` inside a function body) get a
-            // clear error instead of the misleading "unbound variable" the
-            // fallthrough resolution below would produce.
-            "use" | "module" | "import" | "shadowing-import" | "in-module" => {
-                return Err(Error::TypeError(format!(
-                    "{}: only allowed at top level, not in expression position",
-                    head
-                )))
-            }
             _ => {}
         }
         // SPECIAL-FORM DISPATCH END

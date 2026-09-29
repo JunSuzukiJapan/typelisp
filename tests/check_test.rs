@@ -517,6 +517,37 @@ fn cannot_assign_to_constant() {
     assert!(matches!(result, Err(Error::TypeError(_))));
 }
 
+/// A definition written inside a function body is refused for where it was
+/// written — not read as a call whose first argument is an unbound variable,
+/// which is what `(defconstant num (factorial 10))` in a body used to report.
+#[test]
+fn a_definition_inside_a_body_is_refused_for_its_place() {
+    for (src, head, hint) in [
+        ("(defun f () int (defconstant (k int) 5) k)", "defconstant", "let"),
+        ("(defun f () int (defun g () int 1) 2)", "defun", "labels"),
+        ("(defun f () int (defstruct p (x int)) 2)", "defstruct", ""),
+    ] {
+        let mut h = typelisp::Heap::with_capacity(1 << 14);
+        let r = Reader::new();
+        let vs = r.read_all(&mut h, src).unwrap();
+        let mut chk = Checker::new();
+        let interp = typelisp::Interp::new();
+        let mut result = Ok(());
+        for v in vs {
+            if let Err(e) = chk.check_form(&mut h, &interp, v) {
+                result = Err(e.into_kind());
+            }
+        }
+        match result {
+            Err(Error::TypeError(msg)) => {
+                assert!(msg.contains(&format!("{}: only allowed at top level", head)), "{}: {}", src, msg);
+                assert!(msg.contains(hint), "{}: {}", src, msg);
+            }
+            other => panic!("{}: expected a type error, got {:?}", src, other),
+        }
+    }
+}
+
 #[test]
 fn while_condition_must_be_bool_and_is_unit() {
     assert_eq!(ty_with_prelude("(let ((i 0)) (while (< i 0) (setf i 1)))"), Type::Unit);
