@@ -12007,3 +12007,32 @@ interpreted な印字メソッドは panic・`typl` のワーカーは drive 1 �
 prelude を再生成（2 回目で不変）。テストは `seq_catalog_test` に 6 本、`read_time_eval_test` に
 3 本。
 
+
+## `cargo install` に対応する（2026-10-01）
+
+公開準備の一環。`cargo install --path .` で入れた `typl` が `-c`/`compile-file` を使えなかった。
+AOT 実行ファイルにリンクする `libtypelisp_front.a` を `CARGO_MANIFEST_DIR/target/<profile>/`
+から探していたが、`cargo install` は一時ディレクトリでビルドして実行ファイルしか残さないので、
+インストール後にはその場所に何も無い。
+
+- **リリースビルドの `typl` はアーカイブを中に持つ。** `build.rs` の `bundled_runtime` が
+  `PROFILE=release` のときだけ、別の cargo で `typelisp-front` の staticlib をビルドし、
+  `include_bytes!` で `aot.rs` に埋め込む。リンクのたびに出力ファイルの隣へ書き出し、リンク後に
+  消す。ビルドスクリプトは依存クレートの成果物に手が届かないので、cargo を入れ子で呼ぶしかない
+  （artifact dependencies は unstable）。入れ子の cargo は `OUT_DIR` の下に自分の target
+  ディレクトリを持つ——外側の cargo が `target/` のロックを握ったままだから。`--locked` で
+  ソースツリーの `Cargo.lock` を書き換えさせない。
+- **デバッグビルドは従来どおりビルドツリーのものをリンクする。** デバッグのアーカイブは 100MB を
+  超え、このクレートをリンクするテストバイナリ全部に載ってしまう。どちらを使うかはビルド時に
+  cfg（`typelisp_bundled_runtime`）で決まり、リンク時に探し回ることはしない。`--lib-dir` は
+  両方を上書きする。
+- **開発用の実行ファイルを入れない。** `typl-bootstrap-island`/`typl-bootstrap-prelude`/
+  `typl-bench-prelude` に `required-features = ["dev-tools"]` を付け、それを走らせる 3 本の
+  スクリプトが `--features dev-tools` を渡す。付けないと `cargo install` が 5 本とも
+  `~/.cargo/bin` に置く。
+- `cargo install` はリポジトリの `.cargo/config.toml` を読まない（設定の探索が
+  `$CARGO_HOME` から始まる）ので、README には `scripts/with-llvm-env.sh cargo install --locked
+  --path .` と書いた。
+
+リリースの `typl` はアーカイブのぶん大きくなり（インストール版で 91MB）、リリースビルドには
+入れ子の cargo のぶんの時間がかかる。

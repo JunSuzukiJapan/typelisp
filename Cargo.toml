@@ -13,7 +13,7 @@ members = ["crates/typelisp-abi", "crates/typelisp-front", "crates/typelisp-mem"
 # produce `typelisp-rt`'s `staticlib` artifact, since the root package only
 # needs its `rlib` to link against. Listing every member here makes them
 # explicit build targets too, the same as passing `-p typelisp-rt` — see
-# `aot.rs`'s `staticlib_path` doc comment for why that artifact has to exist
+# `aot.rs`'s `link_archive` doc comment for why that artifact has to exist
 # before any AOT test runs.
 default-members = [".", "crates/typelisp-abi", "crates/typelisp-front", "crates/typelisp-mem", "crates/typelisp-print", "crates/typelisp-read", "crates/typelisp-rt"]
 
@@ -37,6 +37,13 @@ lsp-types = "0.97"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# The executables that only matter to someone working on typelisp itself —
+# the two regenerators and the prelude benchmark below. Off by default so that
+# `cargo install` puts only `typl` and `typl-lsp` on a user's PATH; the scripts
+# that run them turn it on.
+[features]
+dev-tools = []
+
 [[bin]]
 name = "typl"
 path = "src/main.rs"
@@ -52,6 +59,7 @@ path = "src/bin/lsp.rs"
 [[bin]]
 name = "typl-bootstrap-island"
 path = "src/bin/bootstrap_island.rs"
+required-features = ["dev-tools"]
 
 # Regenerates the committed precompiled-prelude artifact
 # (src/prelude_compiled.bc). Run via scripts/regen-prelude-bitcode.sh whenever
@@ -60,6 +68,7 @@ path = "src/bin/bootstrap_island.rs"
 [[bin]]
 name = "typl-bootstrap-prelude"
 path = "src/bin/bootstrap_prelude.rs"
+required-features = ["dev-tools"]
 
 # Measures what the precompiled prelude is worth: the same workloads against a
 # compiled and an interpreted prelude, in one process. Run via
@@ -67,6 +76,7 @@ path = "src/bin/bootstrap_prelude.rs"
 [[bin]]
 name = "typl-bench-prelude"
 path = "src/bin/bench_prelude.rs"
+required-features = ["dev-tools"]
 
 # rustc shares generic instantiations across crates at opt-level 0 and 1, and
 # a shared instantiation is a *reference*: with it, `typelisp-rt`'s own objects

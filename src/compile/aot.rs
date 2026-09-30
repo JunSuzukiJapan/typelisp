@@ -1181,7 +1181,7 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
     false
 }
 
-/// The path to the `typelisp-rt` crate's `staticlib` artifact, which
+/// The `typelisp-rt` crate's `staticlib` artifact for one link, which
 /// exports the `#[no_mangle]` runtime shims in [`crate::compile::runtime`]
 /// (`rt_ping`/`rt_heap_init`/`rt_heap_live_count`, and from Stage 3 onward
 /// `rt_cons`/`rt_car`/...) as plain C symbols. Linked into every AOT
@@ -1205,48 +1205,77 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
 /// see its doc comment, and `Cargo.toml`'s `profile.dev.package` entries for
 /// the one thing that quietly breaks it.
 ///
-/// Computed from `CARGO_MANIFEST_DIR` + the build profile this very test/
-/// binary was compiled under (`debug_assertions` tracks `dev`/`test` vs
-/// `release`) rather than hardcoded — see the project's policy on
-/// machine-specific absolute paths. The workspace shares one `target/` dir at
-/// the repo root, so `CARGO_MANIFEST_DIR` (this crate's own root) is the
-/// right base for every member's artifacts.
+/// Where the archive comes from depends on how `typl` was built, and is
+/// fixed when it is built — never chosen at link time:
 ///
-/// **This artifact is not built by the `cargo` invocation that runs an AOT
-/// test.** `cargo test` builds `typelisp-front`'s *rlib* (the dependency this
-/// crate links) and never its `staticlib` target, so what is on disk here is
-/// whatever the last `cargo build -p typelisp-front` / `cargo build
-/// --workspace` left. Adding an `rt_*` shim therefore links against a runtime
-/// that predates it and fails with an undefined symbol — observed adding
-/// `rt_apply_any`, where the JIT tests all passed and only AOT broke.
+/// - A release build carries the archive inside itself (`build.rs`'s
+///   `bundled_runtime`) and writes it out beside the executable for each link.
+///   `cargo install` keeps nothing of the tree it built in, so this is what
+///   makes an installed `typl` able to compile at all.
+/// - A debug build links the one in the tree it was built in,
+///   `CARGO_MANIFEST_DIR/target/debug/`. The workspace shares one `target/`
+///   dir at the repo root, so `CARGO_MANIFEST_DIR` (this crate's own root) is
+///   the right base for every member's artifacts.
+///
+/// **In a debug build this artifact is not built by the `cargo` invocation
+/// that runs an AOT test.** `cargo test` builds `typelisp-front`'s *rlib* (the
+/// dependency this crate links) and never its `staticlib` target, so what is
+/// on disk here is whatever the last `cargo build -p typelisp-front` / `cargo
+/// build --workspace` left. Adding an `rt_*` shim therefore links against a
+/// runtime that predates it and fails with an undefined symbol — observed
+/// adding `rt_apply_any`, where the JIT tests all passed and only AOT broke.
 /// `scripts/test-serial.sh` builds the staticlib first for exactly this
 /// reason; a bare `cargo test --test compile_file_test` needs it built by
 /// hand.
 ///
-/// `typl --lib-dir DIR` replaces the whole path with `DIR/`[`STATICLIB_NAME`]
-/// ([`set_lib_dir`]), so an installed `typl` can link against a copy of the
-/// archive instead of the repository it was built in.
-fn staticlib_path() -> std::path::PathBuf {
+/// `typl --lib-dir DIR` replaces both with `DIR/`[`STATICLIB_NAME`]
+/// ([`set_lib_dir`]).
+fn link_archive(output_path: &str) -> Result<LinkArchive, String> {
     if let Some(dir) = LIB_DIR.get() {
-        return dir.join(STATICLIB_NAME);
+        return Ok(LinkArchive { path: dir.join(STATICLIB_NAME), written: false });
     }
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(profile).join(STATICLIB_NAME)
+    default_archive(output_path)
+}
+
+/// The archive one link names, and whether it is a copy written for that link
+/// alone (removed once the link is done).
+struct LinkArchive {
+    path: std::path::PathBuf,
+    written: bool,
+}
+
+/// The archive `build.rs` built and this binary carries; see [`link_archive`].
+#[cfg(typelisp_bundled_runtime)]
+static BUNDLED_STATICLIB: &[u8] = include_bytes!(env!("TYPELISP_BUNDLED_STATICLIB"));
+
+/// Named from `output_path` for the same reason the object file is: every
+/// caller already needs a distinct `output_path` of its own.
+#[cfg(typelisp_bundled_runtime)]
+fn default_archive(output_path: &str) -> Result<LinkArchive, String> {
+    let path = std::path::PathBuf::from(format!("{}.{}", output_path, STATICLIB_NAME));
+    fs::write(&path, BUNDLED_STATICLIB).map_err(|e| format!("failed to write {}: {}", path.display(), e))?;
+    Ok(LinkArchive { path, written: true })
+}
+
+#[cfg(not(typelisp_bundled_runtime))]
+fn default_archive(_output_path: &str) -> Result<LinkArchive, String> {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join(STATICLIB_NAME);
+    Ok(LinkArchive { path, written: false })
 }
 
 /// The file name of the archive every AOT executable links; see
-/// [`staticlib_path`].
+/// [`link_archive`].
 pub const STATICLIB_NAME: &str = "libtypelisp_front.a";
 
 /// The folder `typl --lib-dir` named, for the rest of the process.
 static LIB_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 /// Makes every later `compile-file` in this process link `dir`'s
-/// [`STATICLIB_NAME`] instead of the one in the build tree.
+/// [`STATICLIB_NAME`] instead of the default one ([`link_archive`]).
 ///
-/// Refuses a folder that does not hold the archive: the build tree's copy is
-/// not consulted once a folder has been named, so a mistyped one would
-/// otherwise surface only as a linker error at the first `compile-file`.
+/// Refuses a folder that does not hold the archive: the default one is not
+/// consulted once a folder has been named, so a mistyped one would otherwise
+/// surface only as a linker error at the first `compile-file`.
 pub fn set_lib_dir(dir: std::path::PathBuf) -> Result<(), String> {
     if !dir.join(STATICLIB_NAME).is_file() {
         return Err(format!("{} has no {}", dir.display(), STATICLIB_NAME));
@@ -1420,18 +1449,28 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
     // `-l` for every library a `defffi` named. Nothing is needed for a
     // declaration without one: what it reaches is already linked (libc comes
     // with `cc`, and the rest is in the static library beside it).
+    let archive = match link_archive(output_path) {
+        Ok(archive) => archive,
+        Err(e) => {
+            let _ = fs::remove_file(&object_path);
+            return Err(e);
+        }
+    };
     let mut link = Command::new("cc");
     #[cfg(target_os = "macos")]
     link.arg(format!("-mmacosx-version-min={}", macos_version_min()));
     let status = link
         .arg(&object_path)
-        .arg(staticlib_path())
+        .arg(&archive.path)
         .args(libraries.iter().map(|l| format!("-l{}", l)))
         .arg("-o")
         .arg(output_path)
         .status()
         .map_err(|e| format!("failed to invoke the system linker (`cc`): {}", e));
     let _ = fs::remove_file(&object_path);
+    if archive.written {
+        let _ = fs::remove_file(&archive.path);
+    }
     let status = status?;
 
     if !status.success() {
@@ -1458,7 +1497,7 @@ mod tests {
 
     /// Stage 0's proof that AOT-linked native code can call a `#[no_mangle]`
     /// Rust function from this crate's own `staticlib` artifact (see
-    /// `super::staticlib_path`'s doc comment) through nothing more than an
+    /// `super::link_archive`'s doc comment) through nothing more than an
     /// ordinary `declare` + `call` against the shared compiled-function ABI
     /// — no per-shim linking mechanism needed, the same way Stage 3 of
     /// labels/closures already lets one JIT-compiled function call another

@@ -13,4 +13,4 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-exec "$here/with-llvm-env.sh" cargo run --quiet --release --bin typl-bench-prelude
+exec "$here/with-llvm-env.sh" cargo run --quiet --release --features dev-tools --bin typl-bench-prelude

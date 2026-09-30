@@ -42,7 +42,8 @@ Options:
   -c, --compile SOURCE   compile SOURCE to a native executable
   -o OUTPUT              name of the executable (default: SOURCE without .typl)
   --lib-dir DIR          link DIR/libtypelisp_front.a into compiled executables
-                         (default: the one in the tree typl was built in)
+                         (default: the one built into a release typl, or
+                         the one in the tree a debug typl was built in)
   --image FILE           start from a dump written by (dump ...)
   --heap-cells N         initial capacity of the cons arena, in cells
   --feature NAME         add a feature for #+/#- (repeatable)
