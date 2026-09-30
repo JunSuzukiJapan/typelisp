@@ -453,6 +453,13 @@ well_known_symbols! {
      returns; only the checker does. `(task ...)` gives a `Task<T>` as
      `(thread ...)` gives a `Thread<T>`."
     TASK => "task"
+
+    "Appended for `destructuring-bind` (2026-09-30). `&body` is `&rest`'s
+     synonym in a destructuring lambda list, and the library recognizes it by
+     identity like the other lambda-list keywords. Outside the vocabulary each
+     module read its own `&body`, so the library's did not match one written
+     in a user's file."
+    AMP_BODY => "&body"
 }
 
 

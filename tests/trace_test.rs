@@ -28,10 +28,10 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader
 /// forms in between.
 fn traced(src: &str) -> String {
     let full = format!(
-        "(defvar (*cap* i32) (stream-string-output))\n\
+        "(defvar (*cap* i32) (%internal::stream-string-output))\n\
          (setf *trace-output* (standard-stream::new *cap*))\n\
          {}\n\
-         (match (stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
+         (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
         src
     );
     let mut h = Heap::with_capacity(1 << 16);
@@ -360,12 +360,12 @@ fn trace_rendering_holds_its_roots_under_gc_stress() {
     fn run(stress: bool) -> String {
         let src = "(defstruct pt (pub x int) (pub y int))\n\
                    (defun shift ((p pt) (d int) (s string)) int (+ p::x d))\n\
-                   (defvar (*cap* i32) (stream-string-output))\n\
+                   (defvar (*cap* i32) (%internal::stream-string-output))\n\
                    (setf *trace-output* (standard-stream::new *cap*))\n\
                    (trace shift)\n\
                    (shift (pt::new 1 2) 3 \"four\")\n\
                    (shift (pt::new 5 6) 7 \"eight\")\n\
-                   (match (stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))";
+                   (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))";
         let mut h = Heap::with_capacity(1 << 16);
         let mut chk = Checker::new();
         let mut interp = Interp::new();

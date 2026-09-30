@@ -269,12 +269,21 @@ fn the_runtime_result_keys_match_the_registry() {
     use typelisp::types::Path;
 
     let reg = Registry::with_builtins();
-    let expected = |name: &str| -> String {
-        let sig = reg
-            .fn_sig(&Path::root(name))
-            .unwrap_or_else(|| panic!("`{}` has a result-key row but no registry entry", name));
-        typelisp::type_key::type_key_of_type(&sig.ret)
+    // A builtin is registered at the root or in the library's internal
+    // module, and the shims key it by its bare name — so the name has to
+    // pick out exactly one of the two.
+    let sig_of = |name: &str| {
+        let found: Vec<_> = [Path::root(name), Path::internal(name)]
+            .iter()
+            .filter_map(|p| reg.fn_sig(p))
+            .collect();
+        match found.as_slice() {
+            [sig] => (*sig).clone(),
+            [] => panic!("`{}` has a result-key row but no registry entry", name),
+            _ => panic!("`{}` is registered both at the root and in the internal module", name),
+        }
     };
+    let expected = |name: &str| -> String { typelisp::type_key::type_key_of_type(&sig_of(name).ret) };
 
     for (name, key) in typelisp_rt::stream_builtin::RESULT_KEYS {
         assert_eq!(*key, expected(name), "`{}`'s result key", name);
@@ -306,7 +315,7 @@ fn the_runtime_result_keys_match_the_registry() {
     // registry's own type rather than by unwrapping the outer key's spelling,
     // so the check is about the identity and not about the parsing.
     let ok_payload = |name: &str| -> String {
-        let sig = reg.fn_sig(&Path::root(name)).expect("registered");
+        let sig = sig_of(name);
         match &sig.ret {
             typelisp::Type::Named(_, args) if !args.is_empty() => {
                 typelisp::type_key::type_key_of_type(&args[0])

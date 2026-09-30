@@ -2253,10 +2253,10 @@ impl Interp {
         }
         // `(net-wait h interest)` — "not before this socket is ready" — is
         // the third shape of the same thing.
-        if path == crate::Path::root("net-wait") {
+        if path == crate::Path::internal("net-wait") {
             return Ok((State::Blocked(io_wait(heap, &argv, None)?), None));
         }
-        if path == crate::Path::root("net-wait-for") {
+        if path == crate::Path::internal("net-wait-for") {
             let secs = argv.get(2).copied().ok_or_else(|| EvalError::Internal("net-wait-for: no timeout".to_string()))?;
             let d = io_deadline(super::rt_f64(heap, &secs)?)?;
             return Ok((State::Blocked(io_wait(heap, &argv, Some(d))?), None));
@@ -2282,10 +2282,12 @@ impl Interp {
         if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
             return self.enter_fn(heap, form, &f, argv);
         }
-        // Otherwise a built-in operator, which lives at the root and so is
-        // always spelled as a bare name.
-        if written.len() == 1 {
-            if let Some(result) = self.eval_builtin(heap, &written[0], &argv) {
+        // Otherwise a built-in operator, which lives at the root or in the
+        // library's internal module. Dispatched on the resolved path, not on
+        // the name as written: a library macro's expansion spells an internal
+        // one `%internal::name`.
+        if path.is_simple() || path.parent() == [crate::INTERNAL_MODULE] {
+            if let Some(result) = self.eval_builtin(heap, path.last_segment(), &argv) {
                 return Ok((State::Apply(result?), None));
             }
         }
@@ -3251,7 +3253,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(call (make-random-state-fresh) () make-random-state-fresh ())",
+            "(call (%internal make-random-state-fresh) () %internal::make-random-state-fresh ())",
         );
         assert!(matches!(v, Value::Boxed(_)), "expected a random-state box, got {:?}", v);
     }

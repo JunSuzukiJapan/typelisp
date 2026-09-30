@@ -494,14 +494,14 @@ pub const SOURCE: &str = r##"
             (and (> r (int->ratio 0)) (< b (int->ratio 0))))
         (+ r b)
         r)))
-(defun ratio-expt-int ((base ratio) (n int)) ratio
+(module %internal (pub defun ratio-expt-int ((base ratio) (n int)) ratio
   (if (< n 0)
-      (ratio-expt-int (/ (int->ratio 1) base) (- 0 n))
+      (%internal::ratio-expt-int (/ (int->ratio 1) base) (- 0 n))
       (if (= n 0) (int->ratio 1)
-          (* base (ratio-expt-int base (- n 1))))))
+          (* base (%internal::ratio-expt-int base (- n 1)))))))
 (defmethod expt ((self ratio) (e ratio)) ratio
   (if (= e (int->ratio (ratio->int e)))
-      (ratio-expt-int self (ratio->int e))
+      (%internal::ratio-expt-int self (ratio->int e))
       (panic "expt: ratio exponent must be integer-valued")))
 
 ;; CL's numeric predicates (`zerop`/`plusp`/`minusp`/`evenp`/`oddp`) and
@@ -594,14 +594,14 @@ pub const SOURCE: &str = r##"
 ;;
 ;; ASCII-only, like `char_assoc`'s own `upcase`/`alphap`: classifying a
 ;; non-ASCII code point needs Unicode tables the runtime does not carry.
-(defun ascii-alpha-code ((n int)) bool
-  (or (and (>= n 65) (<= n 90)) (and (>= n 97) (<= n 122))))
-(defun ascii-digit-code ((n int)) bool (and (>= n 48) (<= n 57)))
+(module %internal (pub defun ascii-alpha-code ((n int)) bool
+  (or (and (>= n 65) (<= n 90)) (and (>= n 97) (<= n 122)))))
+(module %internal (pub defun ascii-digit-code ((n int)) bool (and (>= n 48) (<= n 57))))
 ;; Case-folds an upper-case ASCII letter down, leaving everything else alone —
 ;; the code-point-level half of `char`'s `equalp`, reused by the four
 ;; case-insensitive order comparisons below.
-(defun ascii-downcase-code ((n int)) int
-  (if (and (>= n 65) (<= n 90)) (+ n 32) n))
+(module %internal (pub defun ascii-downcase-code ((n int)) int
+  (if (and (>= n 65) (<= n 90)) (+ n 32) n)))
 
 ;; `char/=`: CL's inequality. `char` had `equal` but no `/=`, so the checker's
 ;; variadic `/=` sugar (`check_variadic_cmp`, `docs/ja/reference/functions/numbers.md` §8.1) had no binary
@@ -611,13 +611,13 @@ pub const SOURCE: &str = r##"
 ;; defines them by case-folding both operands, which is what `equalp` on
 ;; `char` already does for equality — these are its ordering siblings.
 (defmethod lessp ((self char) (b char)) bool
-  (< (ascii-downcase-code (char->int self)) (ascii-downcase-code (char->int b))))
+  (< (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
 (defmethod greaterp ((self char) (b char)) bool
-  (> (ascii-downcase-code (char->int self)) (ascii-downcase-code (char->int b))))
+  (> (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
 (defmethod not-lessp ((self char) (b char)) bool
-  (>= (ascii-downcase-code (char->int self)) (ascii-downcase-code (char->int b))))
+  (>= (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
 (defmethod not-greaterp ((self char) (b char)) bool
-  (<= (ascii-downcase-code (char->int self)) (ascii-downcase-code (char->int b))))
+  (<= (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
 ;; Case classification. `both-casep` is CL's `both-case-p`: whether this
 ;; character has *both* cases, i.e. whether case conversion means anything for
 ;; it — true for ASCII letters, false for digits and punctuation.
@@ -625,9 +625,9 @@ pub const SOURCE: &str = r##"
   (let ((n (char->int self))) (and (>= n 65) (<= n 90))))
 (defmethod lower-casep ((self char)) bool
   (let ((n (char->int self))) (and (>= n 97) (<= n 122))))
-(defmethod both-casep ((self char)) bool (ascii-alpha-code (char->int self)))
+(defmethod both-casep ((self char)) bool (%internal::ascii-alpha-code (char->int self)))
 (defmethod alphanumericp ((self char)) bool
-  (let ((n (char->int self))) (or (ascii-alpha-code n) (ascii-digit-code n))))
+  (let ((n (char->int self))) (or (%internal::ascii-alpha-code n) (%internal::ascii-digit-code n))))
 ;; `graphic-char-p`: printable, space included, everything else excluded.
 (defmethod graphicp ((self char)) bool
   (let ((n (char->int self))) (and (>= n 32) (< n 127))))
@@ -652,7 +652,7 @@ pub const SOURCE: &str = r##"
   (let* ((n (char->int c))
          ;; `-1` means "not a digit character at all", which the range test
          ;; below rejects along with a weight too large for `radix`.
-         (w (cond ((ascii-digit-code n) (- n 48))
+         (w (cond ((%internal::ascii-digit-code n) (- n 48))
                   ((and (>= n 97) (<= n 122)) (+ (- n 97) 10))
                   ((and (>= n 65) (<= n 90)) (+ (- n 65) 10))
                   (else -1))))
@@ -703,32 +703,32 @@ pub const SOURCE: &str = r##"
 ;; `upcase`/`downcase` (unlowered on both `string` and `char`), so case
 ;; conversion goes through the two code-point helpers below, which index a
 ;; literal alphabet with `string`'s `ref` — lowered, unlike `int->char`.
-(defun ascii-upcase-char ((c char)) char
+(module %internal (pub defun ascii-upcase-char ((c char)) char
   (let ((n (char->int c)))
-    (if (and (>= n 97) (<= n 122)) (ref "ABCDEFGHIJKLMNOPQRSTUVWXYZ" (- n 97)) c)))
-(defun ascii-downcase-char ((c char)) char
+    (if (and (>= n 97) (<= n 122)) (ref "ABCDEFGHIJKLMNOPQRSTUVWXYZ" (- n 97)) c))))
+(module %internal (pub defun ascii-downcase-char ((c char)) char
   (let ((n (char->int c)))
-    (if (and (>= n 65) (<= n 90)) (ref "abcdefghijklmnopqrstuvwxyz" (- n 65)) c)))
+    (if (and (>= n 65) (<= n 90)) (ref "abcdefghijklmnopqrstuvwxyz" (- n 65)) c))))
 
 ;; `string/=`: CL's inequality, the counterpart of `char`'s `/=` above.
 (defmethod /= ((self string) (b string)) bool (not (equal self b)))
 ;; `string-lessp` and friends: CL's case-insensitive order comparisons.
 ;; Lexicographic on case-folded code points, with the shorter string first on
 ;; a common prefix — the same order `<` gives, folded.
-(defun string-fold-compare ((a string) (b string)) int
+(module %internal (pub defun string-fold-compare ((a string) (b string)) int
   "-1/0/1 for a < b / a = b / a > b, comparing case-folded code points."
   (let ((i 0) (n (min (length a) (length b))) (r 0))
     (progn
       (while (and (< i n) (= r 0))
-        (let ((x (ascii-downcase-code (char->int (ref a i))))
-              (y (ascii-downcase-code (char->int (ref b i)))))
+        (let ((x (%internal::ascii-downcase-code (char->int (ref a i))))
+              (y (%internal::ascii-downcase-code (char->int (ref b i)))))
           (progn (if (< x y) (setf r -1) (if (> x y) (setf r 1) 0)) (setf i (+ i 1)))))
       (if (/= r 0) r
-          (if (< (length a) (length b)) -1 (if (> (length a) (length b)) 1 0))))))
-(defmethod lessp ((self string) (b string)) bool (< (string-fold-compare self b) 0))
-(defmethod greaterp ((self string) (b string)) bool (> (string-fold-compare self b) 0))
-(defmethod not-lessp ((self string) (b string)) bool (>= (string-fold-compare self b) 0))
-(defmethod not-greaterp ((self string) (b string)) bool (<= (string-fold-compare self b) 0))
+          (if (< (length a) (length b)) -1 (if (> (length a) (length b)) 1 0)))))))
+(defmethod lessp ((self string) (b string)) bool (< (%internal::string-fold-compare self b) 0))
+(defmethod greaterp ((self string) (b string)) bool (> (%internal::string-fold-compare self b) 0))
+(defmethod not-lessp ((self string) (b string)) bool (>= (%internal::string-fold-compare self b) 0))
+(defmethod not-greaterp ((self string) (b string)) bool (<= (%internal::string-fold-compare self b) 0))
 
 ;; `make-string`: `n` copies of `c`. A static method, so it reads like every
 ;; other constructor in this language (`Vector::new`, `HashTable::new`) rather
@@ -749,37 +749,37 @@ pub const SOURCE: &str = r##"
 ;; mention the function's own type parameters (`Checker::check_defun_opt_key`),
 ;; and `:key`/`:test` are function types over the element type. A defaultless
 ;; parameter arrives as `Option<...>`, so the default lives in the body.
-(defun seq-in-bounds ((i int) (start Option<int>) (end Option<int>)) bool
+(module %internal (pub defun seq-in-bounds ((i int) (start Option<int>) (end Option<int>)) bool
   "Whether index `i` lies in the `:start`/`:end` window `[start, end)`."
   (if (match start ((some s) (< i s)) ((none) false))
       false
-      (match end ((some e) (< i e)) ((none) true))))
+      (match end ((some e) (< i e)) ((none) true)))))
 
-(defun seq-flag ((b Option<bool>)) bool
+(module %internal (pub defun seq-flag ((b Option<bool>)) bool
   "A boolean keyword (`:from-end`); false when the caller omitted it."
-  (match b ((some v) v) ((none) false)))
+  (match b ((some v) v) ((none) false))))
 
-(defun seq-limit ((n Option<int>)) int
+(module %internal (pub defun seq-limit ((n Option<int>)) int
   "`:count` as a plain limit; -1 (no limit) when the caller omitted it."
-  (match n ((some v) v) ((none) -1)))
+  (match n ((some v) v) ((none) -1))))
 
 ;; `seq-in-bounds` answers "is this index inside the window" for a scan that
 ;; walks the whole sequence anyway. The two below are for the other shape —
 ;; a loop that *starts* at the window and stops at its end (`replace`'s two
 ;; cursors), where the bound has to be a number before the loop begins.
-(defun seq-window-start ((s Option<int>)) int
+(module %internal (pub defun seq-window-start ((s Option<int>)) int
   "`:start` as an index; 0 when the caller omitted it."
-  (match s ((some v) v) ((none) 0)))
+  (match s ((some v) v) ((none) 0))))
 
-(defun seq-window-end ((e Option<int>) (n int)) int
+(module %internal (pub defun seq-window-end ((e Option<int>) (n int)) int
   "`:end` as an index; the sequence's length `n` when the caller omitted it."
-  (match e ((some v) v) ((none) n)))
+  (match e ((some v) v) ((none) n))))
 
 ;; Whether `n` characters of `a` from `ai` and of `b` from `bi` all satisfy
 ;; `same`, which is called with `b`'s character first — CL's rule for `:test`
 ;; in this family is that the *first* sequence's element goes first, and `b`
 ;; is the pattern at both call sites below.
-(defun string-window-equal ((a string) (ai int) (b string) (bi int) (n int)
+(module %internal (pub defun string-window-equal ((a string) (ai int) (b string) (bi int) (n int)
                             (same (fn (char char) bool)))
     bool
   (let ((k 0) (ok true))
@@ -788,7 +788,7 @@ pub const SOURCE: &str = r##"
         (progn
           (unless (same (ref b (+ bi k)) (ref a (+ ai k))) (setf ok false))
           (setf k (+ k 1))))
-      ok)))
+      ok))))
 
 ;; `search`: the index where `sub` first occurs in `self`, or `none`.
 ;; CL spells the arguments the other way round (`(search pattern sequence)`);
@@ -816,16 +816,16 @@ pub const SOURCE: &str = r##"
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
                               ((none) (equal (proj p) (proj q)))))))))
-      (let ((e (seq-window-end end (length self)))
-            (ps (seq-window-start sub-start))
-            (last (seq-flag from-end))
+      (let ((e (%internal::seq-window-end end (length self)))
+            (ps (%internal::seq-window-start sub-start))
+            (last (%internal::seq-flag from-end))
             (found (the Option<int> (option::none)))
-            (i (seq-window-start start)))
-        (let ((m (- (seq-window-end sub-end (length sub)) ps)))
+            (i (%internal::seq-window-start start)))
+        (let ((m (- (%internal::seq-window-end sub-end (length sub)) ps)))
           (progn
             (while (if (<= (+ i m) e) (if last true (is-none found)) false)
               (progn
-                (when (string-window-equal self i sub ps m same)
+                (when (%internal::string-window-equal self i sub ps m same)
                   (setf found (option::some i)))
                 (setf i (+ i 1))))
             found))))))
@@ -850,12 +850,12 @@ pub const SOURCE: &str = r##"
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
                               ((none) (equal (proj p) (proj q)))))))))
-      (let ((s1 (seq-window-start start1)) (e1 (seq-window-end end1 (length self)))
-            (s2 (seq-window-start start2)) (e2 (seq-window-end end2 (length b))))
+      (let ((s1 (%internal::seq-window-start start1)) (e1 (%internal::seq-window-end end1 (length self)))
+            (s2 (%internal::seq-window-start start2)) (e2 (%internal::seq-window-end end2 (length b))))
         (let ((n (min (- e1 s1) (- e2 s2)))
               (found (the Option<int> (option::none)))
               (k 0))
-          (if (seq-flag from-end)
+          (if (%internal::seq-flag from-end)
               (progn
                 (while (if (is-none found) (< k n) false)
                   (progn
@@ -880,21 +880,21 @@ pub const SOURCE: &str = r##"
 ;; sequence this language has). A free `defun` with an `&optional` default of
 ;; the usual whitespace — the same history as `digit-weight` above: written
 ;; before `defmethod` could take `&optional`, and left alone once it could.
-(defun char-in-bag ((c char) (bag string)) bool
+(module %internal (pub defun char-in-bag ((c char) (bag string)) bool
   (let ((i 0) (n (length bag)) (hit false))
     (progn
       (while (and (< i n) (not hit))
         (progn (if (equal (ref bag i) c) (progn (setf hit true) ()) ()) (setf i (+ i 1))))
-      hit)))
+      hit))))
 (defun left-trim ((s string) &optional (bag string " \t\n\r")) string
   (let ((i 0) (n (length s)))
     (progn
-      (while (and (< i n) (char-in-bag (ref s i) bag)) (setf i (+ i 1)))
+      (while (and (< i n) (%internal::char-in-bag (ref s i) bag)) (setf i (+ i 1)))
       (substring s i n))))
 (defun right-trim ((s string) &optional (bag string " \t\n\r")) string
   (let ((j (length s)))
     (progn
-      (while (and (> j 0) (char-in-bag (ref s (- j 1)) bag)) (setf j (- j 1)))
+      (while (and (> j 0) (%internal::char-in-bag (ref s (- j 1)) bag)) (setf j (- j 1)))
       (substring s 0 j))))
 (defun trim ((s string) &optional (bag string " \t\n\r")) string
   (right-trim (left-trim s bag) bag))
@@ -918,7 +918,7 @@ pub const SOURCE: &str = r##"
       (panic (format false "parse-int: radix ~a is not between 2 and 36" radix)))
     (let ((n (length s)) (i 0) (neg false) (acc 0) (digits 0) (going true))
       (progn
-        (while (and (< i n) (char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1)))
+        (while (and (< i n) (%internal::char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1)))
         (when (< i n)
           (cond ((equal (ref s i) #\-) (progn (setf neg true) (setf i (+ i 1)) ()))
                 ((equal (ref s i) #\+) (progn (setf i (+ i 1)) ()))
@@ -928,7 +928,7 @@ pub const SOURCE: &str = r##"
             ((some w) (progn (setf acc (+ (* acc radix) w)) (setf digits (+ digits 1)) (setf i (+ i 1)) ()))
             ((none) (progn (setf going false) ()))))
         (unless junk-allowed
-          (while (and (< i n) (char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1))))
+          (while (and (< i n) (%internal::char-in-bag (ref s i) " \t\n\r")) (setf i (+ i 1))))
         (if (or (= digits 0) (and (not junk-allowed) (< i n)))
             (the Result<int, ParseIntError>
               (result::err (ParseIntError::ParseIntError
@@ -945,7 +945,7 @@ pub const SOURCE: &str = r##"
           (progn
             (if (alphanumericp c)
                 (progn
-                  (setf out (append out (char->string (if in-word (ascii-downcase-char c) (ascii-upcase-char c)))))
+                  (setf out (append out (char->string (if in-word (%internal::ascii-downcase-char c) (%internal::ascii-upcase-char c)))))
                   (setf in-word true))
                 (progn (setf out (append out (char->string c))) (setf in-word false)))
             (setf i (+ i 1)))))
@@ -1134,18 +1134,18 @@ pub const SOURCE: &str = r##"
 ;; obvious shape: a defaulted parameter would need the whole remainder
 ;; duplicated into both arms, and the duplication compounds per `&optional`.
 
-(defun dbind-head ((l Option<Sexpr>) (ll Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-head ((l Option<Sexpr>) (ll Option<Sexpr>)) Option<Sexpr>
   "The first element of `l`; an error naming the lambda list if there is none."
   (match l
     ((cons a _) a)
-    (_ (panic (format false "destructuring-bind: too few elements for ~a" ll)))))
+    (_ (panic (format false "destructuring-bind: too few elements for ~a" ll))))))
 
-(defun dbind-end ((l Option<Sexpr>) (ll Option<Sexpr>)) ()
+(module %internal (pub defun dbind-end ((l Option<Sexpr>) (ll Option<Sexpr>)) ()
   "Nothing may be left over -- a lambda list is exact unless it says `&rest`
    or `&key`."
   (match l
     ((cons _ _) (panic (format false "destructuring-bind: too many elements for ~a" ll)))
-    (_ ())))
+    (_ ()))))
 
 ;; A `&key` parameter is looked up by the *name* of its keyword rather than by
 ;; the keyword itself, and the expansion carries the plain parameter name.
@@ -1153,11 +1153,11 @@ pub const SOURCE: &str = r##"
 ;; the only one there is is the reader -- which would make this form's meaning
 ;; depend on the readtable. So the `:` is put on at the point of comparison.
 
-(defun dbind-keyword-name ((name Option<Sexpr>)) string
+(module %internal (pub defun dbind-keyword-name ((name Option<Sexpr>)) string
   "The keyword a `&key` parameter is passed under, as text: `a` -> `\":a\"`."
-  (format false ":~a" name))
+  (format false ":~a" name)))
 
-(defun dbind-key-lookup ((l Option<Sexpr>) (name Option<Sexpr>)) Option<Option<Sexpr>>
+(module %internal (pub defun dbind-key-lookup ((l Option<Sexpr>) (name Option<Sexpr>)) Option<Option<Sexpr>>
   "The value the plist `l` gives the `&key` parameter `name`. The first one
    wins, as CL's does. `none` tells absent from present-and-`()`, which is
    what lets the default stay unevaluated."
@@ -1165,42 +1165,42 @@ pub const SOURCE: &str = r##"
     ((cons k rest)
       (match rest
         ((cons v more)
-          (if (and (sexpr-symp k) (equal (sexpr-sym-name k) (dbind-keyword-name name)))
+          (if (and (sexpr-symp k) (equal (sexpr-sym-name k) (%internal::dbind-keyword-name name)))
               (option::some v)
-              (dbind-key-lookup more name)))
+              (%internal::dbind-key-lookup more name)))
         (_ (panic "destructuring-bind: the &key part has an odd number of elements"))))
-    (_ (option::none))))
+    (_ (option::none)))))
 
-(defun dbind-name-memberp ((kw string) (params Option<Sexpr>)) bool
+(module %internal (pub defun dbind-name-memberp ((kw string) (params Option<Sexpr>)) bool
   "Whether the keyword named `kw` is one of `params`' parameter names."
   (match params
-    ((cons a rest) (if (equal kw (dbind-keyword-name a)) true (dbind-name-memberp kw rest)))
-    (_ false)))
+    ((cons a rest) (if (equal kw (%internal::dbind-keyword-name a)) true (%internal::dbind-name-memberp kw rest)))
+    (_ false))))
 
-(defun dbind-keys-known ((l Option<Sexpr>) (allowed Option<Sexpr>) (ll Option<Sexpr>)) ()
+(module %internal (pub defun dbind-keys-known ((l Option<Sexpr>) (allowed Option<Sexpr>) (ll Option<Sexpr>)) ()
   "Every keyword in the plist `l` is one the lambda list named. CL's
    `&allow-other-keys` has no counterpart, the same as in `defmacro`."
   (match l
     ((cons k rest)
       (match rest
         ((cons _ more)
-          (if (and (sexpr-symp k) (dbind-name-memberp (sexpr-sym-name k) allowed))
-              (dbind-keys-known more allowed ll)
+          (if (and (sexpr-symp k) (%internal::dbind-name-memberp (sexpr-sym-name k) allowed))
+              (%internal::dbind-keys-known more allowed ll)
               (panic (format false "destructuring-bind: ~a is not a keyword of ~a" k ll))))
         (_ (panic (format false "destructuring-bind: the &key part of ~a has an odd number of elements" ll)))))
-    (_ ())))
+    (_ ()))))
 
 ;; --- building the expansion ----------------------------------------------
 
-(defun dbind-par-name ((p Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-par-name ((p Option<Sexpr>)) Option<Sexpr>
   "A parameter's name: `x`, or the `x` of `(x default)`."
-  (match p ((cons a _) a) (_ p)))
+  (match p ((cons a _) a) (_ p))))
 
-(defun dbind-par-default ((p Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-par-default ((p Option<Sexpr>)) Option<Sexpr>
   "A parameter's default form, or `()` when it was written bare."
-  (match p ((cons _ d) (sexpr-car d)) (_ (quote ()))))
+  (match p ((cons _ d) (sexpr-car d)) (_ (quote ())))))
 
-(defun dbind-plain-name ((p Option<Sexpr>) (whole Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-plain-name ((p Option<Sexpr>) (whole Option<Sexpr>)) Option<Sexpr>
   "A parameter that may not carry a default: a required one, or the one after
    `&rest`. A list here can only be CL's *nested* lambda list, which is not
    supported -- and saying so is the whole point of this check, because
@@ -1208,32 +1208,32 @@ pub const SOURCE: &str = r##"
    bind the sublist to `b` without a word."
   (match p
     ((cons _ _) (panic (format false "destructuring-bind: ~a is a nested lambda list, which is not supported (in ~a)" p whole)))
-    (_ p)))
+    (_ p))))
 
-(defun dbind-keyword-list ((params Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-keyword-list ((params Option<Sexpr>)) Option<Sexpr>
   "The `&key` section's parameter names, for the unknown-key check."
-  (sexpr-map (lambda ((q Option<Sexpr>)) Option<Sexpr> (dbind-par-name q)) params))
+  (sexpr-map (lambda ((q Option<Sexpr>)) Option<Sexpr> (%internal::dbind-par-name q)) params)))
 
-(defun dbind-tail ((closed bool) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-tail ((closed bool) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
   "What runs once everything is bound: the body, preceded by the
    nothing-left-over check when the lambda list was an exact one."
   (if closed
-      `(progn (dbind-end ,tv (quote ,whole)) ,@body)
-      `(progn ,@body)))
+      `(progn (%internal::dbind-end ,tv (quote ,whole)) ,@body)
+      `(progn ,@body))))
 
-(defun dbind-keys ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-keys ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
   "The `&key` section: one binding per keyword, all reading the same tail."
   (match ll
     ((cons p rest)
       (let ((g (gensym)))
-        `(let ((,(dbind-par-name p)
-                 (match (dbind-key-lookup ,tv (quote ,(dbind-par-name p)))
+        `(let ((,(%internal::dbind-par-name p)
+                 (match (%internal::dbind-key-lookup ,tv (quote ,(%internal::dbind-par-name p)))
                    ((some ,g) ,g)
-                   ((none) ,(dbind-par-default p)))))
-           ,(dbind-keys rest tv whole body))))
-    (_ (dbind-tail false tv whole body))))
+                   ((none) ,(%internal::dbind-par-default p)))))
+           ,(%internal::dbind-keys rest tv whole body))))
+    (_ (%internal::dbind-tail false tv whole body)))))
 
-(defun dbind-restkey ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-restkey ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
   "The `&rest`/`&body` and `&key` sections. Its own function so that the
    required walk and the `&optional` walk can both hand off to it without
    calling each other -- nothing in the prelude may be forward-declared, and
@@ -1242,16 +1242,16 @@ pub const SOURCE: &str = r##"
     ((cons p rest)
       (cond
         ((or (equal p (quote &rest)) (equal p (quote &body)))
-         `(let ((,(dbind-plain-name (dbind-head rest whole) whole) ,tv))
-            ,(dbind-restkey (sexpr-cdr rest) tv whole body)))
+         `(let ((,(%internal::dbind-plain-name (%internal::dbind-head rest whole) whole) ,tv))
+            ,(%internal::dbind-restkey (sexpr-cdr rest) tv whole body)))
         ((equal p (quote &key))
          `(progn
-            (dbind-keys-known ,tv (quote ,(dbind-keyword-list rest)) (quote ,whole))
-            ,(dbind-keys rest tv whole body)))
+            (%internal::dbind-keys-known ,tv (quote ,(%internal::dbind-keyword-list rest)) (quote ,whole))
+            ,(%internal::dbind-keys rest tv whole body)))
         (true (panic (format false "destructuring-bind: ~a comes after &rest in ~a" p whole)))))
-    (_ (dbind-tail false tv whole body))))
+    (_ (%internal::dbind-tail false tv whole body)))))
 
-(defun dbind-opts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-opts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
   "The `&optional` section: the element if there is one, else the default --
    which is written into the arm that needs it, so it is not evaluated when
    the element was there."
@@ -1259,35 +1259,35 @@ pub const SOURCE: &str = r##"
     ((cons p rest)
       (cond
         ((or (equal p (quote &rest)) (equal p (quote &body)) (equal p (quote &key)))
-         (dbind-restkey ll tv whole body))
+         (%internal::dbind-restkey ll tv whole body))
         (true
           (let ((g (gensym)) (next (gensym)))
-            `(let* ((,(dbind-par-name p) (match ,tv ((cons ,g _) ,g) (_ ,(dbind-par-default p))))
+            `(let* ((,(%internal::dbind-par-name p) (match ,tv ((cons ,g _) ,g) (_ ,(%internal::dbind-par-default p))))
                     (,next (sexpr-cdr ,tv)))
-               ,(dbind-opts rest next whole body))))))
-    (_ (dbind-tail true tv whole body))))
+               ,(%internal::dbind-opts rest next whole body))))))
+    (_ (%internal::dbind-tail true tv whole body)))))
 
-(defun dbind-parts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun dbind-parts ((ll Option<Sexpr>) (tv Option<Sexpr>) (whole Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
   "The required section, and the hand-off to each marker's own builder."
   (match ll
     ((cons p rest)
       (cond
-        ((equal p (quote &optional)) (dbind-opts rest tv whole body))
+        ((equal p (quote &optional)) (%internal::dbind-opts rest tv whole body))
         ((or (equal p (quote &rest)) (equal p (quote &body)) (equal p (quote &key)))
-         (dbind-restkey ll tv whole body))
+         (%internal::dbind-restkey ll tv whole body))
         (true
           (let ((next (gensym)))
-            `(let* ((,(dbind-plain-name p whole) (dbind-head ,tv (quote ,whole)))
+            `(let* ((,(%internal::dbind-plain-name p whole) (%internal::dbind-head ,tv (quote ,whole)))
                     (,next (sexpr-cdr ,tv)))
-               ,(dbind-parts rest next whole body))))))
-    (_ (dbind-tail true tv whole body))))
+               ,(%internal::dbind-parts rest next whole body))))))
+    (_ (%internal::dbind-tail true tv whole body)))))
 
 (pub defmacro destructuring-bind (lambda-list form &rest body)
   "Bind the variables of `lambda-list` to the parts of the list `form`
    evaluates to, then run `body`. Every variable is an `Option<Sexpr>`."
   (let ((tv (gensym)))
     `(let ((,tv ,form))
-       ,(dbind-parts lambda-list tv lambda-list body))))
+       ,(%internal::dbind-parts lambda-list tv lambda-list body))))
 
 ;; `Iter`: the trait `doiter` requires every iterable type to implement — a single
 ;; `next` method returning the next element, or `(none)` once exhausted.
@@ -1393,7 +1393,7 @@ pub const SOURCE: &str = r##"
 ;; second pass it simply stops breaking, so the final match wins — which is
 ;; what "from the end" means for a one-shot forward cursor, and costs nothing
 ;; when it is off.
-(defun seq-find-core<I,A> ((it I) (hit (fn (int A) bool)) (last bool)) Option<A>
+(module %internal (pub defun seq-find-core<I,A> ((it I) (hit (fn (int A) bool)) (last bool)) Option<A>
   (where (Iter I (Item A)))
   (let ((result (the Option<A> (Option::none))) (i 0) (found false))
     (doiter (x it)
@@ -1401,9 +1401,9 @@ pub const SOURCE: &str = r##"
         (when (hit i x) (progn (setf result (Option::some x)) (setf found true) ()))
         (setf i (+ i 1))
         (if (if found (not last) false) (break) ())))
-    result))
+    result)))
 
-(defun seq-position-core<I,A> ((it I) (hit (fn (int A) bool)) (last bool)) Option<int>
+(module %internal (pub defun seq-position-core<I,A> ((it I) (hit (fn (int A) bool)) (last bool)) Option<int>
   (where (Iter I (Item A)))
   "[`seq-find-core`] reporting the index instead of the element. The index is
    into the whole sequence, not into the `:start`/`:end` window — CL's rule."
@@ -1413,14 +1413,14 @@ pub const SOURCE: &str = r##"
         (when (hit i x) (progn (setf result (Option::some i)) (setf found true) ()))
         (setf i (+ i 1))
         (if (if found (not last) false) (break) ())))
-    result))
+    result)))
 
-(defun seq-count-core<I,A> ((it I) (hit (fn (int A) bool))) int
+(module %internal (pub defun seq-count-core<I,A> ((it I) (hit (fn (int A) bool))) int
   (where (Iter I (Item A)))
   (let ((n 0) (i 0))
     (doiter (x it)
       (progn (when (hit i x) (setf n (+ n 1))) (setf i (+ i 1)) ()))
-    n))
+    n)))
 
 ;; `remove`/`substitute` and their `-if` variants. `act` decides what an
 ;; *affected* match contributes: `none` drops it, `(some v)` puts `v` in its
@@ -1437,7 +1437,7 @@ pub const SOURCE: &str = r##"
 ;; delegated to `copy-seq`
 ;; because `copy-seq` is defined further down this file, and a top-level
 ;; `defun` may only call a name already seen.
-(defun seq-edit-core<I,A> ((it I) (hit (fn (int A) bool)) (act (fn (A) Option<A>))
+(module %internal (pub defun seq-edit-core<I,A> ((it I) (hit (fn (int A) bool)) (act (fn (A) Option<A>))
                            (limit int) (last bool)) Vector<A>
   (where (Iter I (Item A)))
   (let ((buf (the Vector<A> (Vector::new))) (out (the Vector<A> (Vector::new)))
@@ -1463,23 +1463,23 @@ pub const SOURCE: &str = r##"
                     (progn (push out x) ()))
                 (setf i (+ i 1))
                 ())))
-          out)))))
+          out))))))
 
 ;; Whether any element of `hay` satisfies `hit` — the membership test the set
 ;; operations share, with their `:key`/`:test` already folded into `hit`.
-(defun seq-any-core<A> ((hay Vector<A>) (hit (fn (A) bool))) bool
+(module %internal (pub defun seq-any-core<A> ((hay Vector<A>) (hit (fn (A) bool))) bool
   (let ((found false) (i 0))
     (progn
       (while (if found false (< i (len hay)))
         (progn (when (hit (get hay i)) (setf found true)) (setf i (+ i 1)) ()))
-      found)))
+      found))))
 
 ;; The duplicate-removal both `remove-duplicates` and `delete-duplicates`
 ;; perform, with `:key`/`:test`/`:test-not` already folded into `same`.
 ;; `last` is `:from-end`, which chooses *which* of a group of equals survives:
 ;; off (CL's default) keeps the last, on keeps the first. An element outside
 ;; the `[start, end)` window is neither dropped nor compared against.
-(defun seq-dedup-core<I,A> ((it I) (same (fn (A A) bool))
+(module %internal (pub defun seq-dedup-core<I,A> ((it I) (same (fn (A A) bool))
                             (start Option<int>) (end Option<int>) (last bool))
     Vector<A>
   (where (Iter I (Item A)))
@@ -1489,12 +1489,12 @@ pub const SOURCE: &str = r##"
       (while (< i (len buf))
         (let ((x (get buf i)))
           (progn
-            (if (seq-in-bounds i start end)
+            (if (%internal::seq-in-bounds i start end)
                 (let ((dup false) (j (if last 0 (+ i 1))) (stop (if last i (len buf))))
                   (progn
                     (while (< j stop)
                       (progn
-                        (when (if (seq-in-bounds j start end) (same x (get buf j)) false)
+                        (when (if (%internal::seq-in-bounds j start end) (same x (get buf j)) false)
                           (setf dup true))
                         (setf j (+ j 1))
                         ()))
@@ -1503,13 +1503,13 @@ pub const SOURCE: &str = r##"
                 (progn (push out x) ()))
             (setf i (+ i 1))
             ())))
-      out)))
+      out))))
 
 ;; Non-destructive insertion sort, stable: the inner shift uses strict `cmp`,
 ;; so elements equal under `cmp` keep their input order. `proj` is `:key`,
 ;; already defaulted to the identity by the caller — CL compares the
 ;; projections, not the elements.
-(defun seq-sort-core<I,A> ((it I) (cmp (fn (A A) bool)) (proj (fn (A) A))) Vector<A>
+(module %internal (pub defun seq-sort-core<I,A> ((it I) (cmp (fn (A A) bool)) (proj (fn (A) A))) Vector<A>
   (where (Iter I (Item A)))
   (let ((out (the Vector<A> (Vector::new))))
     (doiter (x it)
@@ -1519,53 +1519,53 @@ pub const SOURCE: &str = r##"
           (set out j (get out (- j 1)))
           (setf j (- j 1)))
         (set out j x)))
-    out))
+    out)))
 
 (defun find-if<I,A> ((it I) (pred (fn (A) bool))
                      &key (key (fn (A) A)) (start int) (end int) (from-end bool))
     Option<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-find-core it
+    (%internal::seq-find-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (pred (proj y)) false))
-      (seq-flag from-end))))
+        (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
+      (%internal::seq-flag from-end))))
 (defun position-if<I,A> ((it I) (pred (fn (A) bool))
                          &key (key (fn (A) A)) (start int) (end int) (from-end bool))
     Option<int>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-position-core it
+    (%internal::seq-position-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (pred (proj y)) false))
-      (seq-flag from-end))))
+        (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
+      (%internal::seq-flag from-end))))
 (defun position-if-not<I,A> ((it I) (pred (fn (A) bool))
                              &key (key (fn (A) A)) (start int) (end int) (from-end bool))
     Option<int>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-position-core it
+    (%internal::seq-position-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (not (pred (proj y))) false))
-      (seq-flag from-end))))
+        (if (%internal::seq-in-bounds i start end) (not (pred (proj y))) false))
+      (%internal::seq-flag from-end))))
 (defun count-if<I,A> ((it I) (pred (fn (A) bool))
                       &key (key (fn (A) A)) (start int) (end int))
     int
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-count-core it
+    (%internal::seq-count-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (pred (proj y)) false)))))
+        (if (%internal::seq-in-bounds i start end) (pred (proj y)) false)))))
 (defun remove-if<I,A> ((it I) (pred (fn (A) bool))
                        &key (key (fn (A) A)) (start int) (end int) (from-end bool) (count int))
     Vector<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-edit-core it
+    (%internal::seq-edit-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (pred (proj y)) false))
+        (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
       (lambda ((y A)) Option<A> (Option::none))
-      (seq-limit count) (seq-flag from-end))))
+      (%internal::seq-limit count) (%internal::seq-flag from-end))))
 ;; `cons-cell<A,B>`: a generic 2-field product, needed below purely because
 ;; typelisp has no built-in tuple syntax. Named and shaped after Lisp's own
 ;; convention for storing two values — a cons cell, `car`/`cdr` — rather
@@ -1863,16 +1863,16 @@ user-visible capacity."
 ;; code point is folded in through its low 32 bits, which is all of it (a
 ;; Unicode scalar value fits 21). The final `*sxhash-mask*` is what makes the
 ;; result the non-negative 30-bit fixnum `Hash`'s contract promises.
-(pub defconstant (*fnv-offset-basis* u32) 2166136261)
-(pub defconstant (*fnv-prime* u32) 16777619)
+(module %internal (pub defconstant (*fnv-offset-basis* u32) 2166136261))
+(module %internal (pub defconstant (*fnv-prime* u32) 16777619))
 
 (pub defun sxhash-string ((s string)) int
   "FNV-1a over `s`'s code points — the hash `string`'s `Hash` impl uses."
-  (let ((h *fnv-offset-basis*) (i 0) (n (length s)))
+  (let ((h %internal::*fnv-offset-basis*) (i 0) (n (length s)))
     (progn
       (while (< i n)
         (progn
-          (setf h (* (logxor h (as u32 (char->int (ref s i)))) *fnv-prime*))
+          (setf h (* (logxor h (as u32 (char->int (ref s i)))) %internal::*fnv-prime*))
           (setf i (+ i 1))))
       (logand (as int h) *sxhash-mask*))))
 
@@ -1905,7 +1905,7 @@ user-visible capacity."
 ;; (`registry::hashtable_def`). `Hash`'s contract — `(equals x y)` implies
 ;; `(= (sxhash x) (sxhash y))` — is exactly what makes one bucket the right
 ;; and only place to look.
-(defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h int) (k K)) int
+(module %internal (pub defun hashtable-bucket-index<K,V> ((self HashTable<K,V>) (h int) (k K)) int
   (where (Hash K))
   "Where `k` sits in `h`'s bucket, or -1 when it is not there."
   (let ((n (bucket-count self h)) (i 0) (found -1))
@@ -1914,26 +1914,26 @@ user-visible capacity."
         (progn
           (when (equals (bucket-key self h i) k) (setf found i))
           (setf i (+ i 1))))
-      found)))
+      found))))
 
 (pub defmethod get ((self HashTable<K,V>) (k K)) Option<V>
   (where (Hash K))
   "The value `k` maps to, or `none`. CL's `gethash`."
-  (let* ((h (sxhash k)) (i (hashtable-bucket-index self h k)))
+  (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
     (if (< i 0) (Option::none) (Option::some (bucket-value self h i)))))
 
 (pub defmethod set ((self HashTable<K,V>) (k K) (v V)) ()
   (where (Hash K))
   "Maps `k` to `v`, replacing whatever it mapped to before. CL's
    `(setf (gethash k table) v)`."
-  (let* ((h (sxhash k)) (i (hashtable-bucket-index self h k)))
+  (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
     (bucket-put self h (if (< i 0) (bucket-count self h) i) k v)))
 
 (pub defmethod remove ((self HashTable<K,V>) (k K)) Option<V>
   (where (Hash K))
   "Removes `k` and answers the value it held, or `none`. CL's `remhash`
    answers a boolean; answering the value says that and more."
-  (let* ((h (sxhash k)) (i (hashtable-bucket-index self h k)))
+  (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
     (if (< i 0)
         (Option::none)
         (let ((v (bucket-value self h i)))
@@ -2153,15 +2153,15 @@ user-visible capacity."
 ;; exactly the low `size` bits. At a width where `size` reaches the width
 ;; itself the shift is `0` (`ash` past the width) and the complement is the
 ;; whole word, which is the right answer there too.
-(defun bits-mask<T> ((sample T) (size int)) T
+(module %internal (pub defun bits-mask<T> ((sample T) (size int)) T
   (where (Bits T))
-  (bit-not (shift (bit-not (bit-xor sample sample)) size)))
+  (bit-not (shift (bit-not (bit-xor sample sample)) size))))
 
 ;; `(ldb integer bytespec)`: extract the `size`-bit field starting at
 ;; `position`, right-justified.
 (pub defun ldb<T> ((n T) (spec cons-cell<int,int>)) T
   (where (Bits T))
-  (bit-and (shift n (* -1 (byte-position spec))) (bits-mask n (byte-size spec))))
+  (bit-and (shift n (* -1 (byte-position spec))) (%internal::bits-mask n (byte-size spec))))
 ;; `(ldb-test integer bytespec)`: does that field have any 1 bits?
 (pub defun ldb-test<T> ((n T) (spec cons-cell<int,int>)) bool
   (where (Bits T) (Eq T))
@@ -2170,12 +2170,12 @@ user-visible capacity."
 ;; right-justified.
 (pub defun mask-field<T> ((n T) (spec cons-cell<int,int>)) T
   (where (Bits T))
-  (bit-and n (shift (bits-mask n (byte-size spec)) (byte-position spec))))
+  (bit-and n (shift (%internal::bits-mask n (byte-size spec)) (byte-position spec))))
 ;; `(dpb integer newbyte bytespec)`: deposit `newbyte`'s low `size` bits into
 ;; that field of `integer`, leaving every other bit of `integer` untouched.
 (pub defun dpb<T> ((n T) (newbyte T) (spec cons-cell<int,int>)) T
   (where (Bits T))
-  (let ((mask (shift (bits-mask n (byte-size spec)) (byte-position spec))))
+  (let ((mask (shift (%internal::bits-mask n (byte-size spec)) (byte-position spec))))
     (bit-or (bit-and n (bit-not mask))
             (bit-and (shift newbyte (byte-position spec)) mask))))
 ;; `(deposit-field integer newbyte bytespec)`: like `dpb`, but `newbyte` is
@@ -2183,7 +2183,7 @@ user-visible capacity."
 ;; right-justified.
 (pub defun deposit-field<T> ((n T) (newbyte T) (spec cons-cell<int,int>)) T
   (where (Bits T))
-  (let ((mask (shift (bits-mask n (byte-size spec)) (byte-position spec))))
+  (let ((mask (shift (%internal::bits-mask n (byte-size spec)) (byte-position spec))))
     (bit-or (bit-and n (bit-not mask)) (bit-and newbyte mask))))
 
 ;; `(boole op a b)`: CL's 16-way generic bitwise-op selector. `op` is one of
@@ -2406,7 +2406,7 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (is-some (seq-find-core it (lambda ((i int) (y A)) bool (same x y)) false)))))
+      (is-some (%internal::seq-find-core it (lambda ((i int) (y A)) bool (same x y)) false)))))
 (defun find<I,A> ((x A) (it I)
                   &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                        (start int) (end int) (from-end bool))
@@ -2419,10 +2419,10 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-find-core it
+      (%internal::seq-find-core it
         (lambda ((i int) (y A)) bool
-          (if (seq-in-bounds i start end) (same x y) false))
-        (seq-flag from-end)))))
+          (if (%internal::seq-in-bounds i start end) (same x y) false))
+        (%internal::seq-flag from-end)))))
 (defun position<I,A> ((x A) (it I)
                       &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                            (start int) (end int) (from-end bool))
@@ -2435,10 +2435,10 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-position-core it
+      (%internal::seq-position-core it
         (lambda ((i int) (y A)) bool
-          (if (seq-in-bounds i start end) (same x y) false))
-        (seq-flag from-end)))))
+          (if (%internal::seq-in-bounds i start end) (same x y) false))
+        (%internal::seq-flag from-end)))))
 (defun count<I,A> ((x A) (it I)
                    &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                         (start int) (end int))
@@ -2451,9 +2451,9 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-count-core it
+      (%internal::seq-count-core it
         (lambda ((i int) (y A)) bool
-          (if (seq-in-bounds i start end) (same x y) false))))))
+          (if (%internal::seq-in-bounds i start end) (same x y) false))))))
 (defun every<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (let ((result true))
     (doiter (x it)
@@ -2467,7 +2467,7 @@ user-visible capacity."
 (defun sort<I,A> ((it I) (cmp (fn (A A) bool)) &key (key (fn (A) A))) Vector<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-sort-core it cmp proj)))
+    (%internal::seq-sort-core it cmp proj)))
 ;; `assoc` works over any iterator whose `Item` is a `cons-cell<K,V>` pair —
 ;; an alist (`Vector<cons-cell<K,V>>`) and a `HashTable<K,V>` (whose `iter`'s
 ;; `Item` is exactly `cons-cell<K,V>`) both qualify. Returns the whole
@@ -2483,7 +2483,7 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (same k (car p))) false))))
+      (%internal::seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (same k (car p))) false))))
 ;; ---------------------------------------------------------------------------
 ;; The rest of CL's list/sequence catalog — cl-parity-plan.md Phase 3a/3b/3c.
 ;;
@@ -2536,7 +2536,7 @@ user-visible capacity."
 ;; Whether `n` elements of `a` from `ai` and of `b` from `bi` all satisfy
 ;; `same`, called with `b`'s element first -- `string-window-equal` over
 ;; `Vector<A>`.
-(defun vector-window-equal<A> ((a Vector<A>) (ai int) (b Vector<A>) (bi int) (n int)
+(module %internal (pub defun vector-window-equal<A> ((a Vector<A>) (ai int) (b Vector<A>) (bi int) (n int)
                                (same (fn (A A) bool)))
     bool
   (let ((k 0) (ok true))
@@ -2545,7 +2545,7 @@ user-visible capacity."
         (progn
           (unless (same (get b (+ bi k)) (get a (+ ai k))) (setf ok false))
           (setf k (+ k 1))))
-      ok)))
+      ok))))
 (defun search<I,J,A> ((it I) (sub J)
                       &key (key (fn (A) A)) (test (fn (A A) bool))
                            (test-not (fn (A A) bool)) (from-end bool)
@@ -2561,16 +2561,16 @@ user-visible capacity."
                               ((none) (equals (proj p) (proj q))))))))
           (hay (copy-seq it))
           (pat (copy-seq sub)))
-      (let ((e (seq-window-end end (len hay)))
-            (ps (seq-window-start sub-start))
-            (last (seq-flag from-end))
+      (let ((e (%internal::seq-window-end end (len hay)))
+            (ps (%internal::seq-window-start sub-start))
+            (last (%internal::seq-flag from-end))
             (found (the Option<int> (option::none)))
-            (i (seq-window-start start)))
-        (let ((m (- (seq-window-end sub-end (len pat)) ps)))
+            (i (%internal::seq-window-start start)))
+        (let ((m (- (%internal::seq-window-end sub-end (len pat)) ps)))
           (progn
             (while (if (<= (+ i m) e) (if last true (is-none found)) false)
               (progn
-                (when (vector-window-equal hay i pat ps m same)
+                (when (%internal::vector-window-equal hay i pat ps m same)
                   (setf found (option::some i)))
                 (setf i (+ i 1))))
             found))))))
@@ -2589,12 +2589,12 @@ user-visible capacity."
                               ((none) (equals (proj p) (proj q))))))))
           (a (copy-seq it))
           (b (copy-seq other)))
-      (let ((s1 (seq-window-start start1)) (e1 (seq-window-end end1 (len a)))
-            (s2 (seq-window-start start2)) (e2 (seq-window-end end2 (len b))))
+      (let ((s1 (%internal::seq-window-start start1)) (e1 (%internal::seq-window-end end1 (len a)))
+            (s2 (%internal::seq-window-start start2)) (e2 (%internal::seq-window-end end2 (len b))))
         (let ((n (min (- e1 s1) (- e2 s2)))
               (found (the Option<int> (option::none)))
               (k 0))
-          (if (seq-flag from-end)
+          (if (%internal::seq-flag from-end)
               (progn
                 (while (if (is-none found) (< k n) false)
                   (progn
@@ -2668,11 +2668,11 @@ user-visible capacity."
 (defun member-if<I,A> ((it I) (pred (fn (A) bool)) &key (key (fn (A) A))) bool
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (is-some (seq-find-core it (lambda ((i int) (y A)) bool (pred (proj y))) false))))
+    (is-some (%internal::seq-find-core it (lambda ((i int) (y A)) bool (pred (proj y))) false))))
 (defun member-if-not<I,A> ((it I) (pred (fn (A) bool)) &key (key (fn (A) A))) bool
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (is-some (seq-find-core it (lambda ((i int) (y A)) bool (not (pred (proj y)))) false))))
+    (is-some (%internal::seq-find-core it (lambda ((i int) (y A)) bool (not (pred (proj y)))) false))))
 (defun notany<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
   (not (any it pred)))
 (defun notevery<I,A> ((it I) (pred (fn (A) bool))) bool (where (Iter I (Item A)))
@@ -2682,28 +2682,28 @@ user-visible capacity."
     Option<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-find-core it
+    (%internal::seq-find-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (not (pred (proj y))) false))
-      (seq-flag from-end))))
+        (if (%internal::seq-in-bounds i start end) (not (pred (proj y))) false))
+      (%internal::seq-flag from-end))))
 (defun count-if-not<I,A> ((it I) (pred (fn (A) bool))
                           &key (key (fn (A) A)) (start int) (end int))
     int
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-count-core it
+    (%internal::seq-count-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (not (pred (proj y))) false)))))
+        (if (%internal::seq-in-bounds i start end) (not (pred (proj y))) false)))))
 (defun remove-if-not<I,A> ((it I) (pred (fn (A) bool))
                            &key (key (fn (A) A)) (start int) (end int) (from-end bool) (count int))
     Vector<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-edit-core it
+    (%internal::seq-edit-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (not (pred (proj y))) false))
+        (if (%internal::seq-in-bounds i start end) (not (pred (proj y))) false))
       (lambda ((y A)) Option<A> (Option::none))
-      (seq-limit count) (seq-flag from-end))))
+      (%internal::seq-limit count) (%internal::seq-flag from-end))))
 (defun remove<I,A> ((x A) (it I)
                     &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                          (start int) (end int) (from-end bool) (count int))
@@ -2716,11 +2716,11 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-edit-core it
+      (%internal::seq-edit-core it
         (lambda ((i int) (y A)) bool
-          (if (seq-in-bounds i start end) (same x y) false))
+          (if (%internal::seq-in-bounds i start end) (same x y) false))
         (lambda ((y A)) Option<A> (Option::none))
-        (seq-limit count) (seq-flag from-end)))))
+        (%internal::seq-limit count) (%internal::seq-flag from-end)))))
 ;; `remove-duplicates`: **CL's rule, which is not what this used to do.**
 ;; The default keeps the *last* of each group of equals; `:from-end t` keeps
 ;; the first (the order-preserving dedup this function used to be
@@ -2739,7 +2739,7 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g (proj p) (proj q))))
                               ((none) (equals (proj p) (proj q)))))))))
-      (seq-dedup-core it same start end (seq-flag from-end)))))
+      (%internal::seq-dedup-core it same start end (%internal::seq-flag from-end)))))
 (defun substitute<I,A> ((new A) (old A) (it I)
                         &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool))
                              (start int) (end int) (from-end bool) (count int))
@@ -2752,27 +2752,27 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-edit-core it
+      (%internal::seq-edit-core it
         (lambda ((i int) (y A)) bool
-          (if (seq-in-bounds i start end) (same old y) false))
+          (if (%internal::seq-in-bounds i start end) (same old y) false))
         (lambda ((y A)) Option<A> (Option::some new))
-        (seq-limit count) (seq-flag from-end)))))
+        (%internal::seq-limit count) (%internal::seq-flag from-end)))))
 (defun substitute-if<I,A> ((new A) (pred (fn (A) bool)) (it I)
                            &key (key (fn (A) A)) (start int) (end int) (from-end bool) (count int))
     Vector<A>
   (where (Iter I (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-edit-core it
+    (%internal::seq-edit-core it
       (lambda ((i int) (y A)) bool
-        (if (seq-in-bounds i start end) (pred (proj y)) false))
+        (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
       (lambda ((y A)) Option<A> (Option::some new))
-      (seq-limit count) (seq-flag from-end))))
+      (%internal::seq-limit count) (%internal::seq-flag from-end))))
 ;; The association-list catalog around the existing `assoc`.
 (defun assoc-if<I,K,V> ((it I) (pred (fn (K) bool)) &key (key (fn (K) K)))
     Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y K)) K y)))))
-    (seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (pred (proj (car p)))) false)))
+    (%internal::seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (pred (proj (car p)))) false)))
 (defun rassoc<I,K,V> ((v V) (it I)
                       &key (key (fn (V) V)) (test (fn (V V) bool)) (test-not (fn (V V) bool)))
     Option<cons-cell<K,V>>
@@ -2784,12 +2784,12 @@ user-visible capacity."
                     ((none) (match test-not
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
-      (seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (same v (cdr p))) false))))
+      (%internal::seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (same v (cdr p))) false))))
 (defun rassoc-if<I,K,V> ((it I) (pred (fn (V) bool)) &key (key (fn (V) V)))
     Option<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y V)) V y)))))
-    (seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (pred (proj (cdr p)))) false)))
+    (%internal::seq-find-core it (lambda ((i int) (p cons-cell<K,V>)) bool (pred (proj (cdr p)))) false)))
 (defun acons<I,K,V> ((k K) (v V) (it I)) Vector<cons-cell<K,V>>
   (where (Iter I (Item cons-cell<K,V>)))
   (let ((out (the Vector<cons-cell<K,V>> (Vector::new))))
@@ -2845,7 +2845,7 @@ user-visible capacity."
 (defun merge<I,J,A> ((a I) (b J) (less (fn (A A) bool)) &key (key (fn (A) A))) Vector<A>
   (where (Iter I (Item A)) (Iter J (Item A)))
   (let ((proj (match key ((some f) f) ((none) (lambda ((y A)) A y)))))
-    (seq-sort-core (iter (append a b)) less proj)))
+    (%internal::seq-sort-core (iter (append a b)) less proj)))
 ;; --- Phase 3c: set operations, and the list-tail relations ---
 ;; All `Eq`-bounded and quadratic, like CL's own list-based versions. `union`
 ;; and friends return elements in first-appearance order rather than CL's
@@ -2881,7 +2881,7 @@ user-visible capacity."
                               ((some g) (not (g (proj p) (proj q))))
                               ((none) (equals (proj p) (proj q))))))))
           (v (copy-seq it)))
-      (if (seq-any-core v (lambda ((z A)) bool (same x z)))
+      (if (%internal::seq-any-core v (lambda ((z A)) bool (same x z)))
           v
           (let ((out (the Vector<A> (Vector::new))))
             (progn (push out x) (doiter (y (iter v)) (push out y)) out))))))
@@ -2899,9 +2899,9 @@ user-visible capacity."
           (out (the Vector<A> (Vector::new))))
       (progn
         (doiter (x a)
-          (when (not (seq-any-core out (lambda ((z A)) bool (same x z)))) (push out x)))
+          (when (not (%internal::seq-any-core out (lambda ((z A)) bool (same x z)))) (push out x)))
         (doiter (y b)
-          (when (not (seq-any-core out (lambda ((z A)) bool (same y z)))) (push out y)))
+          (when (not (%internal::seq-any-core out (lambda ((z A)) bool (same y z)))) (push out y)))
         out))))
 (defun intersection<I,J,A> ((a I) (b J)
                             &key (key (fn (A) A)) (test (fn (A A) bool)) (test-not (fn (A A) bool)))
@@ -2917,8 +2917,8 @@ user-visible capacity."
           (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
       (progn
         (doiter (x a)
-          (when (if (seq-any-core bv (lambda ((z A)) bool (same x z)))
-                    (not (seq-any-core out (lambda ((z A)) bool (same x z))))
+          (when (if (%internal::seq-any-core bv (lambda ((z A)) bool (same x z)))
+                    (not (%internal::seq-any-core out (lambda ((z A)) bool (same x z))))
                     false)
             (push out x)))
         out))))
@@ -2936,9 +2936,9 @@ user-visible capacity."
           (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
       (progn
         (doiter (x a)
-          (when (if (seq-any-core bv (lambda ((z A)) bool (same x z)))
+          (when (if (%internal::seq-any-core bv (lambda ((z A)) bool (same x z)))
                     false
-                    (not (seq-any-core out (lambda ((z A)) bool (same x z)))))
+                    (not (%internal::seq-any-core out (lambda ((z A)) bool (same x z)))))
             (push out x)))
         out))))
 (defun set-exclusive-or<I,J,A> ((a I) (b J)
@@ -2956,14 +2956,14 @@ user-visible capacity."
           (av (copy-seq a)) (bv (copy-seq b)) (out (the Vector<A> (Vector::new))))
       (progn
         (doiter (x (iter av))
-          (when (if (seq-any-core bv (lambda ((z A)) bool (same x z)))
+          (when (if (%internal::seq-any-core bv (lambda ((z A)) bool (same x z)))
                     false
-                    (not (seq-any-core out (lambda ((z A)) bool (same x z)))))
+                    (not (%internal::seq-any-core out (lambda ((z A)) bool (same x z)))))
             (push out x)))
         (doiter (y (iter bv))
-          (when (if (seq-any-core av (lambda ((z A)) bool (same y z)))
+          (when (if (%internal::seq-any-core av (lambda ((z A)) bool (same y z)))
                     false
-                    (not (seq-any-core out (lambda ((z A)) bool (same y z)))))
+                    (not (%internal::seq-any-core out (lambda ((z A)) bool (same y z)))))
             (push out y)))
         out))))
 (defun subsetp<I,J,A> ((a I) (b J)
@@ -2978,7 +2978,7 @@ user-visible capacity."
                               ((some g) (not (g (proj p) (proj q))))
                               ((none) (equals (proj p) (proj q))))))))
           (bv (copy-seq b)))
-      (every a (lambda ((x A)) bool (seq-any-core bv (lambda ((z A)) bool (same x z))))))))
+      (every a (lambda ((x A)) bool (%internal::seq-any-core bv (lambda ((z A)) bool (same x z))))))))
 ;; CL's `tailp`/`ldiff`. CL asks about shared *structure* (`tail` must be one
 ;; of `whole`'s own conses); with no shared structure to ask about, this asks
 ;; the observable question instead — is `tail` a suffix of `whole` by value.
@@ -3059,31 +3059,31 @@ user-visible capacity."
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
       (set-contents self
-        (seq-edit-core (iter self)
+        (%internal::seq-edit-core (iter self)
           (lambda ((i int) (y T)) bool
-            (if (seq-in-bounds i start end) (same x y) false))
+            (if (%internal::seq-in-bounds i start end) (same x y) false))
           (lambda ((y T)) Option<T> (Option::none))
-          (seq-limit count) (seq-flag from-end))))))
+          (%internal::seq-limit count) (%internal::seq-flag from-end))))))
 (defmethod delete-if ((self Vector<T>) (pred (fn (T) bool))
                       &key (key (fn (T) T)) (start int) (end int) (from-end bool) (count int))
     Vector<T>
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
     (set-contents self
-      (seq-edit-core (iter self)
+      (%internal::seq-edit-core (iter self)
         (lambda ((i int) (y T)) bool
-          (if (seq-in-bounds i start end) (pred (proj y)) false))
+          (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
         (lambda ((y T)) Option<T> (Option::none))
-        (seq-limit count) (seq-flag from-end)))))
+        (%internal::seq-limit count) (%internal::seq-flag from-end)))))
 (defmethod delete-if-not ((self Vector<T>) (pred (fn (T) bool))
                           &key (key (fn (T) T)) (start int) (end int) (from-end bool) (count int))
     Vector<T>
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
     (set-contents self
-      (seq-edit-core (iter self)
+      (%internal::seq-edit-core (iter self)
         (lambda ((i int) (y T)) bool
-          (if (seq-in-bounds i start end) (not (pred (proj y))) false))
+          (if (%internal::seq-in-bounds i start end) (not (pred (proj y))) false))
         (lambda ((y T)) Option<T> (Option::none))
-        (seq-limit count) (seq-flag from-end)))))
+        (%internal::seq-limit count) (%internal::seq-flag from-end)))))
 (defmethod delete-duplicates ((self Vector<T>)
                               &key (key (fn (T) T)) (test (fn (T T) bool))
                                    (test-not (fn (T T) bool))
@@ -3098,7 +3098,7 @@ user-visible capacity."
                               ((some g) (not (g (proj p) (proj q))))
                               ((none) (equals (proj p) (proj q)))))))))
       (set-contents self
-        (seq-dedup-core (iter self) same start end (seq-flag from-end))))))
+        (%internal::seq-dedup-core (iter self) same start end (%internal::seq-flag from-end))))))
 (defmethod nsubstitute ((self Vector<T>) (new T) (old T)
                         &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
                              (start int) (end int) (from-end bool) (count int))
@@ -3112,22 +3112,22 @@ user-visible capacity."
                               ((some g) (not (g p (proj q))))
                               ((none) (equals p (proj q)))))))))
       (set-contents self
-        (seq-edit-core (iter self)
+        (%internal::seq-edit-core (iter self)
           (lambda ((i int) (y T)) bool
-            (if (seq-in-bounds i start end) (same old y) false))
+            (if (%internal::seq-in-bounds i start end) (same old y) false))
           (lambda ((y T)) Option<T> (Option::some new))
-          (seq-limit count) (seq-flag from-end))))))
+          (%internal::seq-limit count) (%internal::seq-flag from-end))))))
 (defmethod nsubstitute-if ((self Vector<T>) (new T) (pred (fn (T) bool))
                            &key (key (fn (T) T)) (start int) (end int)
                                 (from-end bool) (count int))
     Vector<T>
   (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
     (set-contents self
-      (seq-edit-core (iter self)
+      (%internal::seq-edit-core (iter self)
         (lambda ((i int) (y T)) bool
-          (if (seq-in-bounds i start end) (pred (proj y)) false))
+          (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
         (lambda ((y T)) Option<T> (Option::some new))
-        (seq-limit count) (seq-flag from-end)))))
+        (%internal::seq-limit count) (%internal::seq-flag from-end)))))
 (defmethod nbutlast ((self Vector<T>)) Vector<T>
   (progn (if (> (len self) 0) (progn (pop self) ()) ()) self))
 ;; CL's `fill`/`replace`/`map-into` all write into an existing sequence and
@@ -3139,13 +3139,13 @@ user-visible capacity."
   (let ((i 0))
     (progn
       (while (< i (len self))
-        (progn (when (seq-in-bounds i start end) (set self i x)) (setf i (+ i 1))))
+        (progn (when (%internal::seq-in-bounds i start end) (set self i x)) (setf i (+ i 1))))
       self)))
 (defmethod replace ((self Vector<T>) (src Vector<T>)
                     &key (start1 int) (end1 int) (start2 int) (end2 int))
     Vector<T>
-  (let ((i (seq-window-start start1)) (j (seq-window-start start2))
-        (stop1 (seq-window-end end1 (len self))) (stop2 (seq-window-end end2 (len src))))
+  (let ((i (%internal::seq-window-start start1)) (j (%internal::seq-window-start start2))
+        (stop1 (%internal::seq-window-end end1 (len self))) (stop2 (%internal::seq-window-end end2 (len src))))
     (progn
       (while (if (< i stop1) (< j stop2) false)
         (progn (set self i (get src j)) (setf i (+ i 1)) (setf j (+ j 1))))
@@ -3486,17 +3486,17 @@ user-visible capacity."
 ;; How an error prints, the way SBCL prints a condition: `~a` is its report
 ;; (the message, as CLHS 9.1.3 has a condition print when `*print-escape*`
 ;; is false), `~s` names the type around it (`#<simpleerror "boom">`).
-(defun error-print-object<E> ((e E) (escape bool) (name string)) string (where (Error E))
-  (if escape (format false "#<~a ~s>" name (message e)) (message e)))
+(module %internal (pub defun error-print-object<E> ((e E) (escape bool) (name string)) string (where (Error E))
+  (if escape (format false "#<~a ~s>" name (message e)) (message e))))
 
 (impl print-object ParseIntError
-  (print-object ((self Self) (escape bool)) string (error-print-object self escape "parseinterror")))
+  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "parseinterror")))
 (impl print-object ParseFloatError
-  (print-object ((self Self) (escape bool)) string (error-print-object self escape "parsefloaterror")))
+  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "parsefloaterror")))
 (impl print-object ReadError
-  (print-object ((self Self) (escape bool)) string (error-print-object self escape "readerror")))
+  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "readerror")))
 (impl print-object EvalError
-  (print-object ((self Self) (escape bool)) string (error-print-object self escape "evalerror")))
+  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "evalerror")))
 
 ;; `pprint-exit-if-list-exhausted` (CLHS): leave the enclosing
 ;; `pprint-logical-block` when its list is used up. CL implements this as a
@@ -3603,15 +3603,15 @@ user-visible capacity."
 ;; default stream `random` draws from when no state is given; typelisp has no
 ;; dynamic binding, so — like every other `*...*` global in this prelude —
 ;; it's an ordinary assignable one instead, seeded fresh once at prelude load.
-(pub defvar (*random-state* random-state) (make-random-state-fresh))
+(pub defvar (*random-state* random-state) (%internal::make-random-state-fresh))
 
 ;; CL's `random`: `(random limit &optional random-state)`. Omitting the state
 ;; draws from (and advances) `*random-state*`; passing one draws from (and
 ;; advances) that instead.
 (pub defun random ((n int) &optional (state random-state)) int
   (match state
-    ((some s) (random-state-next s n))
-    ((none) (random-state-next *random-state* n))))
+    ((some s) (%internal::random-state-next s n))
+    ((none) (%internal::random-state-next *random-state* n))))
 
 ;; CL's `random-state-p`: always `true` for any argument that type-checks at
 ;; all — unlike CL, a statically typed `random-state` parameter already rules
@@ -3627,8 +3627,8 @@ user-visible capacity."
 ;; `nil` case); passing an explicit state still copies it, same as CL.
 (pub defun make-random-state (&optional (state random-state)) random-state
   (match state
-    ((some s) (random-state-copy s))
-    ((none) (make-random-state-fresh))))
+    ((some s) (%internal::random-state-copy s))
+    ((none) (%internal::make-random-state-fresh))))
 
 ;; ---------------------------------------------------------------------------
 ;; Time (CLHS 25.1). `internal-time-units-per-second` is CL's own constant of
@@ -3848,7 +3848,7 @@ user-visible capacity."
   (extension Option<string>)
   (absolutep bool))
 
-(defun split-on-slash ((s string)) Vector<string>
+(module %internal (pub defun split-on-slash ((s string)) Vector<string>
   "Every `/`-separated piece, empty ones included -- so a leading `/` yields a
    leading empty piece, and a trailing one a trailing empty piece."
   (let ((out (the Vector<string> (Vector::new))) (cur "") (i 0) (n (length s)))
@@ -3862,9 +3862,9 @@ user-visible capacity."
             (setf i (+ i 1))
             ())))
       (push out cur)
-      out)))
+      out))))
 
-(defun name-type-dot ((file string)) int
+(module %internal (pub defun name-type-dot ((file string)) int
   "Where the `.` separating name from type is, or -1. The *last* dot, and
    never the first character: `archive.tar.gz` is `archive.tar` of type `gz`,
    while `.gitignore` is all name, as in CL."
@@ -3875,12 +3875,12 @@ user-visible capacity."
           (if (equal (ref file i) #\.) (progn (setf at i) ()) ())
           (setf i (+ i 1))
           ()))
-      at)))
+      at))))
 
 (pub defun parse-namestring ((s string)) pathname
   "Take a file name apart. A trailing `/` (or an empty name) means a pathname
    with no name -- a directory."
-  (let ((parts (split-on-slash s))
+  (let ((parts (%internal::split-on-slash s))
         (dirs (the Vector<string> (Vector::new)))
         (file "")
         (i 0))
@@ -3901,19 +3901,19 @@ user-visible capacity."
         dirs
         (if (equal file "")
             (option::none)
-            (let ((at (name-type-dot file)))
+            (let ((at (%internal::name-type-dot file)))
               (if (< at 0) (option::some file) (option::some (substring file 0 at)))))
-        (let ((at (name-type-dot file)))
+        (let ((at (%internal::name-type-dot file)))
           (if (< at 0) (option::none) (option::some (substring file (+ at 1) (length file)))))
         (and (> (length s) 0) (equal (ref s 0) #\/))))))
 
-(defun pathname-file-part ((p pathname)) string
+(module %internal (pub defun pathname-file-part ((p pathname)) string
   "`name.type`, as text -- \"\" for a pathname naming only a directory."
   (append
     (match p::name ((some x) x) ((none) ""))
-    (match p::extension ((some x) (append "." x)) ((none) ""))))
+    (match p::extension ((some x) (append "." x)) ((none) "")))))
 
-(defun pathname-directory-part ((p pathname)) string
+(module %internal (pub defun pathname-directory-part ((p pathname)) string
   "The directory components, each with its `/`, after a leading `/` if the
    pathname is absolute."
   (let ((out (if p::absolutep "/" "")) (i 0) (n (len p::directory)))
@@ -3923,7 +3923,7 @@ user-visible capacity."
           (setf out (append (append out (get p::directory i)) "/"))
           (setf i (+ i 1))
           ()))
-      out)))
+      out))))
 
 ;; The pathname designator. Two implementations, and no more are expected:
 ;; the point is that a file operation can take either without asking which.
@@ -3940,7 +3940,7 @@ user-visible capacity."
   (to-pathname ((self Self)) pathname (parse-namestring self)))
 
 (impl Pathish pathname
-  (namestring ((self Self)) string (append (pathname-directory-part self) (pathname-file-part self)))
+  (namestring ((self Self)) string (append (%internal::pathname-directory-part self) (%internal::pathname-file-part self)))
   (to-pathname ((self Self)) pathname self))
 
 ;; CL's `#P"..."` (CLHS 22.1.3.11) when it has to read back, the namestring
@@ -3975,11 +3975,11 @@ user-visible capacity."
 
 (pub defun directory-namestring<P> ((p P)) string (where (Pathish P))
   "Everything up to and including the last `/`."
-  (pathname-directory-part (to-pathname p)))
+  (%internal::pathname-directory-part (to-pathname p)))
 
 (pub defun file-namestring<P> ((p P)) string (where (Pathish P))
   "The `name.type` part alone."
-  (pathname-file-part (to-pathname p)))
+  (%internal::pathname-file-part (to-pathname p)))
 
 (pub defun merge-pathnames<P,D> ((p P) (default D)) pathname (where (Pathish P) (Pathish D))
   "Fill in whatever `p` leaves out from `default`, as CL's does: a missing
@@ -4226,116 +4226,116 @@ user-visible capacity."
 ;; and its identity in braces — the handle, where SBCL shows an address.
 ;; SBCL drops only the package prefix for `~a`, and there is none here, so
 ;; `escape` changes nothing.
-(defun stream-print-object ((type string) (h i32)) string
-  (let ((d (stream-describe h)))
+(module %internal (pub defun stream-print-object ((type string) (h i32)) string
+  (let ((d (%internal::stream-describe h)))
     (if (equal d "")
         (format false "#<~a {~d}>" type h)
-        (format false "#<~a ~a {~d}>" type d h))))
+        (format false "#<~a ~a {~d}>" type d h)))))
 (impl print-object file-stream
-  (print-object ((self Self) (escape bool)) string (stream-print-object "file-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "file-stream" self::h)))
 (impl print-object binary-file-stream
-  (print-object ((self Self) (escape bool)) string (stream-print-object "binary-file-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "binary-file-stream" self::h)))
 (impl print-object string-input-stream
-  (print-object ((self Self) (escape bool)) string (stream-print-object "string-input-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "string-input-stream" self::h)))
 (impl print-object string-output-stream
-  (print-object ((self Self) (escape bool)) string (stream-print-object "string-output-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "string-output-stream" self::h)))
 (impl print-object standard-stream
-  (print-object ((self Self) (escape bool)) string (stream-print-object "standard-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "standard-stream" self::h)))
 
 (impl Error FileError
   (message ((self Self)) string (match self ((FileError m) m))))
 (impl print-object FileError
-  (print-object ((self Self) (escape bool)) string (error-print-object self escape "fileerror")))
+  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "fileerror")))
 
 ;; `unwrap-io` turns the native layer's `Result` into a panic, for the
 ;; operations whose failure means the program is already broken (writing to a
 ;; closed stream, a handle that is not what it claims). Operations whose
 ;; failure is ordinary -- opening a file, deleting one -- return `Result` to
 ;; the caller instead and never come through here.
-(defun unwrap-io<T> ((r Result<T, FileError>)) T
+(module %internal (pub defun unwrap-io<T> ((r Result<T, FileError>)) T
   (match r
     ((ok v) v)
-    ((err e) (panic (message e)))))
+    ((err e) (panic (message e))))))
 
 (impl Stream file-stream
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
 (impl InputStream file-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
-  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
+  (read-item ((self Self)) Option<char> (%internal::unwrap-io (%internal::stream-read-char self::h)))
+  (listen ((self Self)) bool (%internal::unwrap-io (%internal::stream-listen self::h))))
 (impl OutputStream file-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
-    (unwrap-io (stream-write-string self::h (char->string c)))))
+    (%internal::unwrap-io (%internal::stream-write-string self::h (char->string c)))))
 (impl CharInput file-stream)
 (impl PeekInput file-stream
-  (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
+  (unread-char ((self Self) (c char)) () (%internal::unwrap-io (%internal::stream-unread-char self::h c))))
 (impl CharOutput file-stream
   ;; Overridden: one native call per string beats one per character, and this
   ;; is the stream people write bulk output to.
   (write-string ((self Self) (s string)) ()
-    (unwrap-io (stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
+    (%internal::unwrap-io (%internal::stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (%internal::unwrap-io (%internal::stream-at-line-start self::h)))
+  (finish-output ((self Self)) () (%internal::unwrap-io (%internal::stream-finish-output self::h))))
 
 (impl Stream binary-file-stream
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
 (impl InputStream binary-file-stream
   (type Item int)
-  (read-item ((self Self)) Option<int> (unwrap-io (stream-read-byte self::h)))
-  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
+  (read-item ((self Self)) Option<int> (%internal::unwrap-io (%internal::stream-read-byte self::h)))
+  (listen ((self Self)) bool (%internal::unwrap-io (%internal::stream-listen self::h))))
 (impl OutputStream binary-file-stream
   (type Item int)
-  (write-item ((self Self) (b int)) () (unwrap-io (stream-write-byte self::h b))))
+  (write-item ((self Self) (b int)) () (%internal::unwrap-io (%internal::stream-write-byte self::h b))))
 (impl ByteInput binary-file-stream)
 (impl ByteOutput binary-file-stream
-  (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
+  (finish-output ((self Self)) () (%internal::unwrap-io (%internal::stream-finish-output self::h))))
 
 (impl Stream string-input-stream
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
 (impl InputStream string-input-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
+  (read-item ((self Self)) Option<char> (%internal::unwrap-io (%internal::stream-read-char self::h)))
   ;; The one kind that can honestly say `true`: the whole text is in memory.
-  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
+  (listen ((self Self)) bool (%internal::unwrap-io (%internal::stream-listen self::h))))
 (impl CharInput string-input-stream)
 (impl PeekInput string-input-stream
-  (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
+  (unread-char ((self Self) (c char)) () (%internal::unwrap-io (%internal::stream-unread-char self::h c))))
 
 (impl Stream string-output-stream
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
 (impl OutputStream string-output-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
-    (unwrap-io (stream-write-string self::h (char->string c)))))
+    (%internal::unwrap-io (%internal::stream-write-string self::h (char->string c)))))
 (impl CharOutput string-output-stream
   (write-string ((self Self) (s string)) ()
-    (unwrap-io (stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h))))
+    (%internal::unwrap-io (%internal::stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (%internal::unwrap-io (%internal::stream-at-line-start self::h))))
 
 (impl Stream standard-stream
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
 (impl InputStream standard-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (unwrap-io (stream-read-char self::h)))
-  (listen ((self Self)) bool (unwrap-io (stream-listen self::h))))
+  (read-item ((self Self)) Option<char> (%internal::unwrap-io (%internal::stream-read-char self::h)))
+  (listen ((self Self)) bool (%internal::unwrap-io (%internal::stream-listen self::h))))
 (impl OutputStream standard-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
-    (unwrap-io (stream-write-string self::h (char->string c)))))
+    (%internal::unwrap-io (%internal::stream-write-string self::h (char->string c)))))
 (impl CharInput standard-stream)
 (impl PeekInput standard-stream
-  (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
+  (unread-char ((self Self) (c char)) () (%internal::unwrap-io (%internal::stream-unread-char self::h c))))
 (impl CharOutput standard-stream
   (write-string ((self Self) (s string)) ()
-    (unwrap-io (stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (unwrap-io (stream-finish-output self::h))))
+    (%internal::unwrap-io (%internal::stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (%internal::unwrap-io (%internal::stream-at-line-start self::h)))
+  (finish-output ((self Self)) () (%internal::unwrap-io (%internal::stream-finish-output self::h))))
 
 ;; ---------------------------------------------------------------------------
 ;; Sockets. Three structs over one more kind of handle in the same native
@@ -4365,31 +4365,31 @@ user-visible capacity."
 ;; shape of Go's `bufio.Scanner.Err`, since `read-item` is an `Option` and
 ;; has no other way to say it. A server keeps serving its other clients.
 
-(pub defconstant (net-readable int) 0)
-(pub defconstant (net-writable int) 1)
+(module %internal (pub defconstant (net-readable int) 0))
+(module %internal (pub defconstant (net-writable int) 1))
 
 (pub defstruct socket-stream (h i32))
 (pub defstruct socket-byte-stream (h i32))
 (pub defstruct socket-listener (h i32))
 (impl print-object socket-stream
-  (print-object ((self Self) (escape bool)) string (stream-print-object "socket-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "socket-stream" self::h)))
 (impl print-object socket-byte-stream
-  (print-object ((self Self) (escape bool)) string (stream-print-object "socket-byte-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "socket-byte-stream" self::h)))
 (impl print-object socket-listener
-  (print-object ((self Self) (escape bool)) string (stream-print-object "socket-listener" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "socket-listener" self::h)))
 
 (impl Error NetError
   (message ((self Self)) string (match self ((NetError m) m))))
 (impl print-object NetError
-  (print-object ((self Self) (escape bool)) string (error-print-object self escape "neterror")))
+  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "neterror")))
 
 ;; `unwrap-io`'s twin: the socket operations whose failure means the program
 ;; is already broken (a closed handle) panic; the ordinary failures -- a
 ;; refused connect, a peer that went away mid-write -- come back as `Result`.
-(defun unwrap-net<T> ((r Result<T, NetError>)) T
+(module %internal (pub defun unwrap-net<T> ((r Result<T, NetError>)) T
   (match r
     ((ok v) v)
-    ((err e) (panic (message e)))))
+    ((err e) (panic (message e))))))
 
 ;; The three loops every socket operation is made of. Each takes the handle,
 ;; so the character and byte views share them.
@@ -4397,153 +4397,153 @@ user-visible capacity."
 ;; Send everything buffered, waiting for the socket whenever it is full --
 ;; or, on a TLS connection whose handshake is not done, for the peer's next
 ;; handshake message (readable), since nothing can be encrypted before it.
-(defun tcp-drain ((h i32)) ()
+(module %internal (pub defun tcp-drain ((h i32)) ()
   (loop
-    (match (unwrap-net (net-flush h))
+    (match (%internal::unwrap-net (%internal::net-flush h))
       ((none) (return))
-      ((some interest) (net-wait h interest)))))
+      ((some interest) (%internal::net-wait h interest))))))
 
 ;; The next character, or `none` at end of input. `net-pop-char` says `none`
 ;; when the buffer holds no whole character; `net-fill` then either adds bytes
 ;; (try again), reports end of input (`some 0`), or has nothing yet -- wait.
-(defun tcp-read-char ((h i32)) Option<char>
+(module %internal (pub defun tcp-read-char ((h i32)) Option<char>
   (loop
-    (match (unwrap-net (net-pop-char h))
+    (match (%internal::unwrap-net (%internal::net-pop-char h))
       ((some c) (return (option::some c)))
       ((none)
-       (match (unwrap-net (net-fill h))
+       (match (%internal::unwrap-net (%internal::net-fill h))
          ((some n) (when (eq n 0) (return (option::none))))
-         ((none) (net-wait h net-readable)))))))
+         ((none) (%internal::net-wait h %internal::net-readable))))))))
 
-(defun tcp-read-byte ((h i32)) Option<int>
+(module %internal (pub defun tcp-read-byte ((h i32)) Option<int>
   (loop
-    (match (unwrap-net (net-pop-byte h))
+    (match (%internal::unwrap-net (%internal::net-pop-byte h))
       ((some b) (return (option::some b)))
       ((none)
-       (match (unwrap-net (net-fill h))
+       (match (%internal::unwrap-net (%internal::net-fill h))
          ((some n) (when (eq n 0) (return (option::none))))
-         ((none) (net-wait h net-readable)))))))
+         ((none) (%internal::net-wait h %internal::net-readable))))))))
 
 ;; Closing drains first: what was written must reach the peer before the
 ;; socket goes. (`unwind-protect` is not needed here -- if the drain fails the
 ;; connection is already gone and `stream-close` on it is the right thing
 ;; to do next, which the panic from `unwrap-net` skips only by ending the
 ;; program.)
-(defun tcp-close ((h i32)) ()
-  (when (stream-open-p h) (tcp-drain h))
-  (unwrap-io (stream-close h)))
+(module %internal (pub defun tcp-close ((h i32)) ()
+  (when (%internal::stream-open-p h) (%internal::tcp-drain h))
+  (%internal::unwrap-io (%internal::stream-close h))))
 
 (impl Stream socket-stream
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (tcp-close self::h)))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::tcp-close self::h)))
 (impl InputStream socket-stream
   (type Item char)
-  (read-item ((self Self)) Option<char> (tcp-read-char self::h))
+  (read-item ((self Self)) Option<char> (%internal::tcp-read-char self::h))
   ;; True when something is already buffered: the one honest `true` a socket
   ;; can give, and what makes `read-char-no-hang` on it mean what it says.
-  (listen ((self Self)) bool (unwrap-net (net-buffered-p self::h))))
+  (listen ((self Self)) bool (%internal::unwrap-net (%internal::net-buffered-p self::h))))
 (impl OutputStream socket-stream
   (type Item char)
   (write-item ((self Self) (c char)) ()
-    (unwrap-net (net-push-string self::h (char->string c)))
-    (tcp-drain self::h)))
+    (%internal::unwrap-net (%internal::net-push-string self::h (char->string c)))
+    (%internal::tcp-drain self::h)))
 (impl CharInput socket-stream)
 (impl PeekInput socket-stream
-  (unread-char ((self Self) (c char)) () (unwrap-io (stream-unread-char self::h c))))
+  (unread-char ((self Self) (c char)) () (%internal::unwrap-io (%internal::stream-unread-char self::h c))))
 (impl CharOutput socket-stream
   ;; Write-through: each `write-string` reaches the peer before it returns,
   ;; as Go's `net.Conn.Write` does. A caller sending many small pieces can
   ;; batch them in a `string-output-stream` first.
   (write-string ((self Self) (s string)) ()
-    (unwrap-net (net-push-string self::h s))
-    (tcp-drain self::h))
-  (at-line-start ((self Self)) bool (unwrap-io (stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (tcp-drain self::h)))
+    (%internal::unwrap-net (%internal::net-push-string self::h s))
+    (%internal::tcp-drain self::h))
+  (at-line-start ((self Self)) bool (%internal::unwrap-io (%internal::stream-at-line-start self::h)))
+  (finish-output ((self Self)) () (%internal::tcp-drain self::h)))
 
 (impl Stream socket-byte-stream
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (tcp-close self::h)))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::tcp-close self::h)))
 (impl InputStream socket-byte-stream
   (type Item int)
-  (read-item ((self Self)) Option<int> (tcp-read-byte self::h))
-  (listen ((self Self)) bool (unwrap-net (net-buffered-p self::h))))
+  (read-item ((self Self)) Option<int> (%internal::tcp-read-byte self::h))
+  (listen ((self Self)) bool (%internal::unwrap-net (%internal::net-buffered-p self::h))))
 (impl OutputStream socket-byte-stream
   (type Item int)
   (write-item ((self Self) (b int)) ()
-    (unwrap-net (net-push-byte self::h b))
-    (tcp-drain self::h)))
+    (%internal::unwrap-net (%internal::net-push-byte self::h b))
+    (%internal::tcp-drain self::h)))
 (impl ByteInput socket-byte-stream)
 (impl ByteOutput socket-byte-stream
-  (finish-output ((self Self)) () (tcp-drain self::h)))
+  (finish-output ((self Self)) () (%internal::tcp-drain self::h)))
 
 (impl Stream socket-listener
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
 
 ;; Waiting with a clock. `net-wait-for` answers `false` when `secs` ran out
 ;; first; the operations that take a timeout turn that into a `NetError`, so
 ;; a caller sees one kind of failure whether the name did not resolve, the
 ;; host refused, or nobody answered in time.
-(defun tcp-wait-within ((h i32) (interest int) (timeout Option<f64>) (what string)) Result<(), NetError>
+(module %internal (pub defun tcp-wait-within ((h i32) (interest int) (timeout Option<f64>) (what string)) Result<(), NetError>
   (match timeout
-    ((none) (progn (net-wait h interest) (result::ok ())))
+    ((none) (progn (%internal::net-wait h interest) (result::ok ())))
     ((some secs)
-     (if (net-wait-for h interest secs)
+     (if (%internal::net-wait-for h interest secs)
          (result::ok ())
-         (result::err (NetError::NetError (append what ": timed out")))))))
+         (result::err (NetError::NetError (append what ": timed out"))))))))
 
 ;; The two steps every connect starts with: resolve the name on its thread,
 ;; then wait for the answer -- every address the name has, in the resolver's
 ;; order. A resolution handle is used once and closes itself when read.
-(defun tcp-resolve ((host string) (port int) (timeout Option<f64>)) Result<Vector<string>, NetError>
-  (match (net-resolve-begin host port)
+(module %internal (pub defun tcp-resolve ((host string) (port int) (timeout Option<f64>)) Result<Vector<string>, NetError>
+  (match (%internal::net-resolve-begin host port)
     ((err e) (result::err e))
     ((ok r)
      (loop
-       (match (tcp-wait-within r net-readable timeout "resolve")
+       (match (%internal::tcp-wait-within r %internal::net-readable timeout "resolve")
          ;; `the` on the first `return` the checker meets: a loop's type is
          ;; the join of its returns, and this one would fix `T` as `!`.
-         ((err e) (progn (unwrap-io (stream-close r)) (return (the Result<Vector<string>, NetError> (result::err e)))))
+         ((err e) (progn (%internal::unwrap-io (%internal::stream-close r)) (return (the Result<Vector<string>, NetError> (result::err e)))))
          ((ok _)
-          (match (net-resolve-finish r)
+          (match (%internal::net-resolve-finish r)
             ((ok (some addrs)) (return (result::ok addrs)))
             ((ok (none)) ())
-            ((err e) (return (result::err e))))))))))
+            ((err e) (return (result::err e)))))))))))
 
-(defun tcp-connect-one ((addr string) (timeout Option<f64>)) Result<i32, NetError>
-  (match (net-connect-begin addr)
+(module %internal (pub defun tcp-connect-one ((addr string) (timeout Option<f64>)) Result<i32, NetError>
+  (match (%internal::net-connect-begin addr)
     ((err e) (result::err e))
     ((ok h)
-     (match (tcp-wait-within h net-writable timeout "tcp-connect")
-       ((err e) (progn (unwrap-io (stream-close h)) (result::err e)))
+     (match (%internal::tcp-wait-within h %internal::net-writable timeout "tcp-connect")
+       ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (result::err e)))
        ((ok _)
-        (match (net-connect-finish h)
+        (match (%internal::net-connect-finish h)
           ((ok _) (result::ok h))
           ((err e)
-           (unwrap-io (stream-close h))
-           (result::err e))))))))
+           (%internal::unwrap-io (%internal::stream-close h))
+           (result::err e)))))))))
 
 ;; Each address in turn until one answers -- `localhost` is `::1` before
 ;; `127.0.0.1` on most machines, and a server listening on only one of them
 ;; is not a failure to connect. The error reported is the last one.
-(defun tcp-connect-addr ((addrs Vector<string>) (timeout Option<f64>)) Result<i32, NetError>
+(module %internal (pub defun tcp-connect-addr ((addrs Vector<string>) (timeout Option<f64>)) Result<i32, NetError>
   (let ((i 0) (n (len addrs)))
     (loop
-      (match (tcp-connect-one (get addrs i) timeout)
+      (match (%internal::tcp-connect-one (get addrs i) timeout)
         ((ok h) (return (the Result<i32, NetError> (result::ok h))))
         ((err e)
          (setf i (+ i 1))
-         (when (>= i n) (return (result::err e))))))))
+         (when (>= i n) (return (result::err e)))))))))
 
 (pub defun tcp-connect ((host string) (port int) &key (timeout f64)) Result<socket-stream, NetError>
   "Connect to `host` (a name or an address) on `port`. `Err` if the name does
    not resolve, the connection is refused, or -- with `:timeout` seconds
    given -- nobody answers in time: ordinary outcomes, not panics. The task
    waits for the name and the handshake; other tasks keep running."
-  (match (tcp-resolve host port timeout)
+  (match (%internal::tcp-resolve host port timeout)
     ((err e) (result::err e))
     ((ok addrs)
-     (match (tcp-connect-addr addrs timeout)
+     (match (%internal::tcp-connect-addr addrs timeout)
        ((ok h) (result::ok (socket-stream::new h)))
        ((err e) (result::err e))))))
 
@@ -4559,35 +4559,35 @@ user-visible capacity."
    side presents when the server asks for one. The result is an ordinary
    `socket-stream`; what crosses the socket is ciphertext. The handshake is
    done here, so a certificate that does not check out is this call's `Err`."
-  (match (tcp-resolve host port timeout)
+  (match (%internal::tcp-resolve host port timeout)
     ((err e) (result::err e))
     ((ok addrs)
-     (match (tcp-connect-addr addrs timeout)
+     (match (%internal::tcp-connect-addr addrs timeout)
        ((err e) (result::err e))
        ((ok h)
-        (match (net-tls-start h (match server-name ((some n) n) ((none) host)) ca-file cert-file key-file)
-          ((err e) (progn (unwrap-io (stream-close h)) (result::err e)))
+        (match (%internal::net-tls-start h (match server-name ((some n) n) ((none) host)) ca-file cert-file key-file)
+          ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (result::err e)))
           ((ok _)
            (loop
-             (match (net-tls-handshake h)
+             (match (%internal::net-tls-handshake h)
                ((ok (none)) (return (the Result<socket-stream, NetError> (result::ok (socket-stream::new h)))))
                ((ok (some interest))
-                (match (tcp-wait-within h interest timeout "tls-connect")
+                (match (%internal::tcp-wait-within h interest timeout "tls-connect")
                   ((ok _) ())
-                  ((err e) (progn (unwrap-io (stream-close h)) (return (result::err e))))))
-               ((err e) (progn (unwrap-io (stream-close h)) (return (result::err e)))))))))))))
+                  ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (return (result::err e))))))
+               ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (return (result::err e)))))))))))))
 
 (pub defun unix-connect ((path string)) Result<socket-stream, NetError>
   "Connect to the Unix-domain socket at `path`. A local connect completes
    at once or is refused -- there is nothing to wait for -- so no timeout."
-  (match (net-unix-connect path)
+  (match (%internal::net-unix-connect path)
     ((ok h) (result::ok (socket-stream::new h)))
     ((err e) (result::err e))))
 
 (pub defun unix-listen ((path string)) Result<socket-listener, NetError>
   "Listen on a Unix-domain socket at `path`, which must not exist yet; a
    leftover file is refused rather than replaced. `close` removes the file."
-  (match (net-unix-listen path)
+  (match (%internal::net-unix-listen path)
     ((ok h) (result::ok (socket-listener::new h)))
     ((err e) (result::err e))))
 
@@ -4595,7 +4595,7 @@ user-visible capacity."
   "Listen on `host`:`port` -- 127.0.0.1 for this machine only, 0.0.0.0 for
    every interface. Port `0` lets the OS pick a free one; `local-address`
    says which."
-  (match (net-listen host port)
+  (match (%internal::net-listen host port)
     ((ok h) (result::ok (socket-listener::new h)))
     ((err e) (result::err e))))
 
@@ -4612,7 +4612,7 @@ user-visible capacity."
    `socket-error` saying why. With `:client-ca` (PEM) every client must
    present a certificate issued by one in that file, and one that does not
    fails the same way; without it, clients are not asked for one."
-  (match (net-tls-listen host port cert-file key-file client-ca)
+  (match (%internal::net-tls-listen host port cert-file key-file client-ca)
     ((ok h) (result::ok (socket-listener::new h)))
     ((err e) (result::err e))))
 
@@ -4624,7 +4624,7 @@ user-visible capacity."
    Clients asking for a name nobody added, or sending none, get the
    certificate `tls-listen` was given. Takes effect for the next handshake;
    `requested-server-name` on a connection says which name it asked for."
-  (net-tls-add-certificate self::h name cert-file key-file))
+  (%internal::net-tls-add-certificate self::h name cert-file key-file))
 
 (pub defmethod accept ((self socket-listener) &key (timeout f64)) Result<socket-stream, NetError>
   "The next connection, waiting for one -- at most `:timeout` seconds if
@@ -4632,12 +4632,12 @@ user-visible capacity."
    `(loop (match (accept l) ((ok c) (task (serve c))) ((err e) ...)))`: one task
    per connection, each free to wait on its own socket."
   (loop
-    (match (net-accept self::h)
+    (match (%internal::net-accept self::h)
       ;; `the`: a loop's type is the join of its `return`s, and this one is
       ;; seen first with its `E` still a hole.
       ((ok (some h)) (return (the Result<socket-stream, NetError> (result::ok (socket-stream::new h)))))
       ((ok (none))
-       (match (tcp-wait-within self::h net-readable timeout "accept")
+       (match (%internal::tcp-wait-within self::h %internal::net-readable timeout "accept")
          ((ok _) ())
          ((err e) (return (result::err e)))))
       ((err e) (return (result::err e))))))
@@ -4648,14 +4648,14 @@ user-visible capacity."
    on a read: `(if (wait-readable c 5.0) (read-line c) ...)`. What it
    promises is that the *next* read will not park; a `read-line` may still
    wait for the rest of its line."
-  (if (unwrap-net (net-buffered-p self::h))
+  (if (%internal::unwrap-net (%internal::net-buffered-p self::h))
       true
-      (net-wait-for self::h net-readable secs)))
+      (%internal::net-wait-for self::h %internal::net-readable secs)))
 
 (pub defmethod wait-writable ((self socket-stream) (secs f64)) bool
   "Wait until the socket will take output, or `secs` run out: `true` if the
    former."
-  (net-wait-for self::h net-writable secs))
+  (%internal::net-wait-for self::h %internal::net-writable secs))
 
 (pub defmethod socket-error ((self socket-stream)) Option<NetError>
   "Why the peer's side of this connection is gone, if it is: the first
@@ -4664,13 +4664,13 @@ user-visible capacity."
    input, which is not a failure. Reads on a failed connection say `none`
    and writes go nowhere, so this is how to tell a client that finished
    from one that broke off, the way Go's `bufio.Scanner.Err` is."
-  (match (unwrap-net (net-socket-error self::h))
+  (match (%internal::unwrap-net (%internal::net-socket-error self::h))
     ((some m) (option::some (NetError::NetError m)))
     ((none) (option::none))))
 
 (pub defmethod socket-error ((self socket-byte-stream)) Option<NetError>
   "`socket-error` of the same connection, seen as bytes."
-  (match (unwrap-net (net-socket-error self::h))
+  (match (%internal::unwrap-net (%internal::net-socket-error self::h))
     ((some m) (option::some (NetError::NetError m)))
     ((none) (option::none))))
 
@@ -4681,7 +4681,7 @@ user-visible capacity."
    on the client it is the name the server's certificate was issued to.
    `none` on a plain connection, before the handshake, or when the peer sent
    no certificate (a server that did not ask for one)."
-  (unwrap-net (net-peer-subject self::h)))
+  (%internal::unwrap-net (%internal::net-peer-subject self::h)))
 
 (pub defmethod requested-server-name ((self socket-stream)) Option<string>
   "On a server-side TLS connection, the name the client asked for (SNI),
@@ -4689,7 +4689,7 @@ user-visible capacity."
    several names -- `tls-add-certificate` -- knows which site this is.
    `none` on a plain or client-side connection, or when the client sent no
    name (it connected by address)."
-  (unwrap-net (net-server-name self::h)))
+  (%internal::unwrap-net (%internal::net-server-name self::h)))
 
 (pub defmethod set-nodelay ((self socket-stream) (on bool)) ()
   "Whether small writes go out at once (Nagle's algorithm off). Each
@@ -4698,7 +4698,7 @@ user-visible capacity."
    peer's delayed ACK before the second leaves; a request/response protocol
    wants this `true`. A Unix-domain socket has no Nagle and accepts this as
    already so."
-  (unwrap-net (net-set-nodelay self::h on)))
+  (%internal::unwrap-net (%internal::net-set-nodelay self::h on)))
 
 (pub defmethod set-keepalive ((self socket-stream) (on bool)) ()
   "Whether the OS probes this connection while it is idle, so that a peer
@@ -4707,14 +4707,14 @@ user-visible capacity."
    OS default period is long (two hours on most systems);
    `set-keepalive-period` shortens it. A Unix-domain socket has no
    keepalive; asking is an error."
-  (unwrap-net (net-set-keepalive self::h on)))
+  (%internal::unwrap-net (%internal::net-set-keepalive self::h on)))
 
 (pub defmethod set-keepalive-period ((self socket-stream) (secs int)) ()
   "How long the connection must be idle before the first keepalive probe,
    and then how long between probes -- whole seconds, at least 1, the way
    Go's `SetKeepAlivePeriod` sets both. Takes effect with `set-keepalive`
    on."
-  (unwrap-net (net-set-keepalive-period self::h secs)))
+  (%internal::unwrap-net (%internal::net-set-keepalive-period self::h secs)))
 
 (pub defun byte-stream-of ((s socket-stream)) socket-byte-stream
   "The same connection as a byte stream. Both views share one buffer, so a
@@ -4729,19 +4729,19 @@ user-visible capacity."
   "Send what is buffered and close the sending side only: the peer reads end
    of input, and this side can still read the reply. What a request/response
    exchange says with -- the whole request has been sent."
-  (tcp-drain self::h)
-  (unwrap-net (net-shutdown-write self::h)))
+  (%internal::tcp-drain self::h)
+  (%internal::unwrap-net (%internal::net-shutdown-write self::h)))
 
 (pub defmethod local-address ((self socket-stream)) string
   "This side's address as `host:port`."
-  (unwrap-net (net-local-address self::h)))
+  (%internal::unwrap-net (%internal::net-local-address self::h)))
 (pub defmethod local-address ((self socket-listener)) string
   "The address being listened on, as `host:port`. After `(tcp-listen host 0)`
    this is how the chosen port is learned."
-  (unwrap-net (net-local-address self::h)))
+  (%internal::unwrap-net (%internal::net-local-address self::h)))
 (pub defmethod peer-address ((self socket-stream)) string
   "The other side's address as `host:port`."
-  (unwrap-net (net-peer-address self::h)))
+  (%internal::unwrap-net (%internal::net-peer-address self::h)))
 
 (pub defmacro with-connection (spec &rest body)
   "`(with-connection (var host port) body...)` -- connect, run the body,
@@ -4769,46 +4769,46 @@ user-visible capacity."
 
 (pub defstruct udp-socket (h i32))
 (impl print-object udp-socket
-  (print-object ((self Self) (escape bool)) string (stream-print-object "udp-socket" self::h)))
+  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "udp-socket" self::h)))
 (pub defstruct datagram (pub bytes Vector<int>) (pub from string))
 
 (pub defun udp-bind ((host string) (port int)) Result<udp-socket, NetError>
   "A UDP socket on `host`:`port` (`0`: any free port; `local-address` says
    which). Sending needs one too -- bind to port `0`."
-  (match (net-udp-bind host port)
+  (match (%internal::net-udp-bind host port)
     ((ok h) (result::ok (udp-socket::new h)))
     ((err e) (result::err e))))
 
 (impl Stream udp-socket
-  (open-stream-p ((self Self)) bool (stream-open-p self::h))
-  (close ((self Self)) () (unwrap-io (stream-close self::h))))
+  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
+  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
 
 (pub defmethod local-address ((self udp-socket)) string
   "This socket's address as `host:port`."
-  (unwrap-net (net-local-address self::h)))
+  (%internal::unwrap-net (%internal::net-local-address self::h)))
 
 (pub defmethod send-to ((self udp-socket) (host string) (port int) (bytes Vector<int>)) Result<(), NetError>
   "Send `bytes` as one datagram to `host`:`port`. Resolves the name (waiting
    for it), then sends -- waiting only if the socket's own buffer is full.
    Delivery is not confirmed; that is UDP."
-  (match (tcp-resolve host port (option::none))
+  (match (%internal::tcp-resolve host port (option::none))
     ((err e) (result::err e))
     ((ok addrs)
      (loop
-       (match (net-udp-send-to self::h (get addrs 0) bytes)
-         ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (net-wait self::h net-writable)))
+       (match (%internal::net-udp-send-to self::h (get addrs 0) bytes)
+         ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (%internal::net-wait self::h %internal::net-writable)))
          ((err e) (return (result::err e))))))))
 
 (pub defmethod recv-from ((self udp-socket) &key (timeout f64)) Result<datagram, NetError>
   "The next datagram, waiting for one -- at most `:timeout` seconds if given.
    `from` is the sender as `ip:port`, which `send-to` accepts back."
   (loop
-    (match (net-udp-recv self::h)
+    (match (%internal::net-udp-recv self::h)
       ((ok (some bytes))
        (return (the Result<datagram, NetError>
-                    (result::ok (datagram::new bytes (unwrap-net (net-udp-last-sender self::h)))))))
+                    (result::ok (datagram::new bytes (%internal::unwrap-net (%internal::net-udp-last-sender self::h)))))))
       ((ok (none))
-       (match (tcp-wait-within self::h net-readable timeout "recv-from")
+       (match (%internal::tcp-wait-within self::h %internal::net-readable timeout "recv-from")
          ((ok _) ())
          ((err e) (return (result::err e)))))
       ((err e) (return (result::err e))))))
@@ -4884,9 +4884,9 @@ user-visible capacity."
 ;; that numbering or publish the vtable addresses (see the check at the end of
 ;; `compile::prelude_bootstrap::build_dump`). Dispatching on an already-boxed
 ;; `:dyn` is fine, which is why the composed streams below work.
-(pub defvar (*standard-input*  standard-stream) (standard-stream::new (stream-stdin)))
-(pub defvar (*standard-output* standard-stream) (standard-stream::new (stream-stdout)))
-(pub defvar (*error-output*    standard-stream) (standard-stream::new (stream-stderr)))
+(pub defvar (*standard-input*  standard-stream) (standard-stream::new (%internal::stream-stdin)))
+(pub defvar (*standard-output* standard-stream) (standard-stream::new (%internal::stream-stdout)))
+(pub defvar (*error-output*    standard-stream) (standard-stream::new (%internal::stream-stderr)))
 
 ;; CL's `*trace-output*`: where a program's own progress reporting goes, as
 ;; opposed to its output (`*standard-output*`) or its errors (`*error-output*`).
@@ -4899,7 +4899,7 @@ user-visible capacity."
 ;; above), so those three are not here. A program can build its own
 ;; `(make-two-way-stream ...)` and pass it around; only the *prelude* is
 ;; barred from holding one in a global.
-(pub defvar (*trace-output* standard-stream) (standard-stream::new (stream-stdout)))
+(pub defvar (*trace-output* standard-stream) (standard-stream::new (%internal::stream-stdout)))
 
 ;; ---------------------------------------------------------------------------
 ;; Composite streams. These are the whole argument for the trait design: each
@@ -5040,16 +5040,16 @@ user-visible capacity."
 
 (pub defun make-string-input-stream ((s string)) string-input-stream
   "A stream that yields the characters of `s`."
-  (string-input-stream::new (stream-string-input s)))
+  (string-input-stream::new (%internal::stream-string-input s)))
 
 (pub defun make-string-output-stream () string-output-stream
   "A stream that accumulates what is written to it; drain it with
    `get-output-stream-string`."
-  (string-output-stream::new (stream-string-output)))
+  (string-output-stream::new (%internal::stream-string-output)))
 
 (pub defun get-output-stream-string ((s string-output-stream)) string
   "Everything written to `s` since the last call, clearing it."
-  (unwrap-io (stream-take-output-string s::h)))
+  (%internal::unwrap-io (%internal::stream-take-output-string s::h)))
 
 (pub defun make-broadcast-stream ((parts Vector<:dyn CharOutput>)) broadcast-stream
   "A stream that writes to every component, in order."
@@ -5082,7 +5082,7 @@ user-visible capacity."
   "Open `name` -- a string or a `pathname` -- in one of `direction-input` /
    `direction-output` / `direction-append`. `Err` if the file cannot be
    opened: a missing file is an ordinary outcome, not a panic."
-  (match (stream-open-file (namestring name) direction)
+  (match (%internal::stream-open-file (namestring name) direction)
     ((ok h) (result::ok (file-stream::new h)))
     ((err e) (result::err e))))
 
@@ -5095,7 +5095,7 @@ user-visible capacity."
 (pub defun open-binary<P> ((name P) (direction int)) Result<binary-file-stream, FileError> (where (Pathish P))
   "Open `name` for byte I/O in one of `direction-input` / `direction-output` /
    `direction-append`."
-  (match (stream-open-file (namestring name) direction)
+  (match (%internal::stream-open-file (namestring name) direction)
     ((ok h) (result::ok (binary-file-stream::new h)))
     ((err e) (result::err e))))
 
@@ -5232,22 +5232,22 @@ user-visible capacity."
 ;; depends on their exact spacing (a `Vector<:dyn CharOutput>` type token
 ;; reads as one symbol only while it stays on one line).
 
-(defun reader-whitespacep ((c char)) bool
-  (or (equal c #\space) (equal c #\newline) (equal c #\tab) (equal c #\return) (equal c #\page)))
+(module %internal (pub defun reader-whitespacep ((c char)) bool
+  (or (equal c #\space) (equal c #\newline) (equal c #\tab) (equal c #\return) (equal c #\page))))
 
 ;; The reader's own token terminators (`is_delimiter` in `src/read/reader.rs`).
 ;; `,` is deliberately absent from both: it stays usable inside a token so
 ;; that `Pair<K,V>` reads as one symbol.
-(defun reader-delimiterp ((c char)) bool
-  (or (reader-whitespacep c)
-      (equal c #\() (equal c #\)) (equal c #\") (equal c #\') (equal c #\`) (equal c #\;)))
+(module %internal (pub defun reader-delimiterp ((c char)) bool
+  (or (%internal::reader-whitespacep c)
+      (equal c #\() (equal c #\)) (equal c #\") (equal c #\') (equal c #\`) (equal c #\;))))
 
-(defun reader-skip-one<S> ((s S)) () (where (CharInput S))
+(module %internal (pub defun reader-skip-one<S> ((s S)) () (where (CharInput S))
   "Consume one character, discarding it -- always used where it has just been
    peeked at, so there is nothing to report."
-  (match (read-char s) (_ ())))
+  (match (read-char s) (_ ()))))
 
-(defun reader-stopp ((stop Option<char>) (c char)) bool
+(module %internal (pub defun reader-stopp ((stop Option<char>) (c char)) bool
   "Whether `c` is the caller-supplied extra delimiter. `read-delimited-list`
    is the only caller that has one: CL gets the same effect by making the
    terminator a *terminating macro character* in the readtable, and without
@@ -5255,9 +5255,9 @@ user-visible capacity."
    `(read-delimited-list #\\] s)` over `1]x` scans `1]x` as one atom."
   (match stop
     ((none) false)
-    ((some x) (equal c x))))
+    ((some x) (equal c x)))))
 
-(defun reader-scan-atom-until<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
+(module %internal (pub defun reader-scan-atom-until<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
   "An atom's characters, up to (not including) whatever ends it. The
    terminator is put back -- that, and only that, is why `read-sexpr` needs
    `PeekInput` rather than plain `CharInput`."
@@ -5266,16 +5266,16 @@ user-visible capacity."
       (match (peek-char s)
         ((none) (break))
         ((some c)
-         (if (or (reader-delimiterp c) (reader-stopp stop c))
+         (if (or (%internal::reader-delimiterp c) (%internal::reader-stopp stop c))
              (break)
-             (progn (reader-skip-one s) (setf out (append out (char->string c))) ())))))
-    out))
+             (progn (%internal::reader-skip-one s) (setf out (append out (char->string c))) ())))))
+    out)))
 
-(defun reader-scan-atom<S> ((s S)) string (where (PeekInput S))
+(module %internal (pub defun reader-scan-atom<S> ((s S)) string (where (PeekInput S))
   "An atom's characters, with only the reader's own delimiters ending it."
-  (reader-scan-atom-until s (the Option<char> (option::none))))
+  (%internal::reader-scan-atom-until s (the Option<char> (option::none)))))
 
-(defun reader-scan-name<S> ((s S)) string (where (PeekInput S))
+(module %internal (pub defun reader-scan-name<S> ((s S)) string (where (PeekInput S))
   "The rest of a `#\\newline`-style character name: alphanumerics and `-`."
   (let ((out ""))
     (loop
@@ -5283,11 +5283,11 @@ user-visible capacity."
         ((none) (break))
         ((some c)
          (if (or (alphap c) (digitp c) (equal c #\-))
-             (progn (reader-skip-one s) (setf out (append out (char->string c))) ())
+             (progn (%internal::reader-skip-one s) (setf out (append out (char->string c))) ())
              (break)))))
-    out))
+    out)))
 
-(defun reader-scan-string<S> ((s S)) string (where (PeekInput S))
+(module %internal (pub defun reader-scan-string<S> ((s S)) string (where (PeekInput S))
   "A string literal, from just after the opening quote through the closing
    one (which is returned with it). An unterminated one runs to end of input
    and `read` reports it."
@@ -5307,9 +5307,9 @@ user-visible capacity."
                 ((none) (break))
                 ((some e) (progn (setf out (append out (char->string e))) ()))))
              (else ()))))))
-    out))
+    out)))
 
-(defun reader-skip-block-comment<S> ((s S)) () (where (PeekInput S))
+(module %internal (pub defun reader-skip-block-comment<S> ((s S)) () (where (PeekInput S))
   "A `#| ... |#` comment, from just after the opening `#|`. Nests, as the
    reader's does."
   (let ((depth 1))
@@ -5321,15 +5321,15 @@ user-visible capacity."
          (cond
            ((equal c #\#)
             (match (peek-char s)
-              ((some n) (if (equal n #\|) (progn (reader-skip-one s) (setf depth (+ depth 1)) ()) ()))
+              ((some n) (if (equal n #\|) (progn (%internal::reader-skip-one s) (setf depth (+ depth 1)) ()) ()))
               ((none) ())))
            ((equal c #\|)
             (match (peek-char s)
-              ((some n) (if (equal n #\#) (progn (reader-skip-one s) (setf depth (- depth 1)) ()) ()))
+              ((some n) (if (equal n #\#) (progn (%internal::reader-skip-one s) (setf depth (- depth 1)) ()) ()))
               ((none) ())))
-           (else ())))))))
+           (else ()))))))))
 
-(defun reader-scan-atmosphere<S> ((s S)) string (where (PeekInput S))
+(module %internal (pub defun reader-scan-atmosphere<S> ((s S)) string (where (PeekInput S))
   "Whitespace and `;` line comments, verbatim. Stops at `#|`, which
    `reader-scan-datum` handles: telling `#|` from `#\\(` takes the `#`
    consumed first, and there is only one character of pushback."
@@ -5339,8 +5339,8 @@ user-visible capacity."
         ((none) (break))
         ((some c)
          (cond
-           ((reader-whitespacep c)
-            (progn (reader-skip-one s) (setf out (append out (char->string c))) ()))
+           ((%internal::reader-whitespacep c)
+            (progn (%internal::reader-skip-one s) (setf out (append out (char->string c))) ()))
            ((equal c #\;)
             (loop
               (match (read-char s)
@@ -5350,33 +5350,33 @@ user-visible capacity."
                    (setf out (append out (char->string d)))
                    (if (equal d #\newline) (break) ()))))))
            (else (break))))))
-    out))
+    out)))
 
-(defun reader-scan-hash<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
+(module %internal (pub defun reader-scan-hash<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
   "A `#`-token, from a peeked `#`. Returns \"\" for `#| ... |#`, which is a
    comment rather than a datum -- the caller keeps scanning."
   (progn
-    (reader-skip-one s)
+    (%internal::reader-skip-one s)
     (match (peek-char s)
       ((none) "#")
       ((some c)
        (cond
-         ((equal c #\|) (progn (reader-skip-one s) (reader-skip-block-comment s) ""))
+         ((equal c #\|) (progn (%internal::reader-skip-one s) (%internal::reader-skip-block-comment s) ""))
          ((equal c #\\)
           (progn
-            (reader-skip-one s)
+            (%internal::reader-skip-one s)
             (match (read-char s)
               ((none) "#\\")
               ((some first)
                (let ((out (append "#\\" (char->string first))))
                  ;; A multi-letter name only when it starts alphabetic --
                  ;; the reader's own rule, and what makes `#\(` end here.
-                 (if (alphap first) (append out (reader-scan-name s)) out))))))
+                 (if (alphap first) (append out (%internal::reader-scan-name s)) out))))))
          ;; Any other `#` syntax is not one the reader has; scan it as a token
          ;; and let `read` say so.
-         (else (append "#" (reader-scan-atom-until s stop))))))))
+         (else (append "#" (%internal::reader-scan-atom-until s stop)))))))))
 
-(defun reader-scan-datum-until<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
+(module %internal (pub defun reader-scan-datum-until<S> ((s S) (stop Option<char>)) string (where (PeekInput S))
   "The exact text of the next datum on `s`, or \"\" at end of input.
    Consumes the datum and the whitespace/comments before it, and nothing
    after it but the one character that ends an atom, which is put back."
@@ -5387,7 +5387,7 @@ user-visible capacity."
     ;; been taken at depth 0.
     (while going
       (progn
-        (let ((skipped (reader-scan-atmosphere s)))
+        (let ((skipped (%internal::reader-scan-atmosphere s)))
           ;; Leading atmosphere is dropped, interior atmosphere kept: the text
           ;; handed to `read` starts at the datum but is otherwise as written.
           (if (equal out "") () (progn (setf out (append out skipped)) ())))
@@ -5399,38 +5399,38 @@ user-visible capacity."
              ;; consumed -- but only where a datum could start, so a `]`
              ;; inside `(1 2]` still belongs to the list's own text and is
              ;; reported by `read` as the malformed list it is.
-             ((and (reader-stopp stop c) (= depth 0))
+             ((and (%internal::reader-stopp stop c) (= depth 0))
               (progn (setf going false) ()))
              ((equal c #\()
-              (progn (reader-skip-one s) (setf out (append out "(")) (setf depth (+ depth 1)) (setf wanted false) ()))
+              (progn (%internal::reader-skip-one s) (setf out (append out "(")) (setf depth (+ depth 1)) (setf wanted false) ()))
              ((equal c #\))
-              (progn (reader-skip-one s) (setf out (append out ")")) (setf depth (- depth 1)) (setf wanted false) ()))
+              (progn (%internal::reader-skip-one s) (setf out (append out ")")) (setf depth (- depth 1)) (setf wanted false) ()))
              ((equal c #\")
-              (progn (reader-skip-one s) (setf out (append out (reader-scan-string s))) (setf wanted false) ()))
+              (progn (%internal::reader-skip-one s) (setf out (append out (%internal::reader-scan-string s))) (setf wanted false) ()))
              ((or (equal c #\') (equal c #\`))
-              (progn (reader-skip-one s) (setf out (append out (char->string c))) (setf wanted true) ()))
+              (progn (%internal::reader-skip-one s) (setf out (append out (char->string c))) (setf wanted true) ()))
              ((equal c #\,)
               (progn
-                (reader-skip-one s)
+                (%internal::reader-skip-one s)
                 (setf out (append out ","))
                 ;; `,@` is one prefix, not `,` followed by an `@` atom.
                 (match (peek-char s)
-                  ((some n) (if (equal n #\@) (progn (reader-skip-one s) (setf out (append out "@")) ()) ()))
+                  ((some n) (if (equal n #\@) (progn (%internal::reader-skip-one s) (setf out (append out "@")) ()) ()))
                   ((none) ()))
                 (setf wanted true)
                 ()))
              ((equal c #\#)
-              (let ((text (reader-scan-hash s stop)))
+              (let ((text (%internal::reader-scan-hash s stop)))
                 (if (equal text "")
                     ()                                  ; a block comment: no datum yet
                     (progn (setf out (append out text)) (setf wanted false) ()))))
-             (else (progn (setf out (append out (reader-scan-atom-until s stop))) (setf wanted false) ())))))
+             (else (progn (setf out (append out (%internal::reader-scan-atom-until s stop))) (setf wanted false) ())))))
         (if (and (= depth 0) (not wanted)) (progn (setf going false) ()) ())))
-    out))
+    out)))
 
-(defun reader-scan-datum<S> ((s S)) string (where (PeekInput S))
+(module %internal (pub defun reader-scan-datum<S> ((s S)) string (where (PeekInput S))
   "The next datum's text, with only the reader's own delimiters ending it."
-  (reader-scan-datum-until s (the Option<char> (option::none))))
+  (%internal::reader-scan-datum-until s (the Option<char> (option::none)))))
 
 ;; `read-sexpr` とその仲間は「データが無かった」を `Ok(none)` ではなく専用の
 ;; バリアントで報告する。S 式リーダはデータ `()` を返せなければならず、空リストが
@@ -5447,22 +5447,22 @@ user-visible capacity."
    `read-preserving-whitespace`. `Ok(eof)` at end of input (so a read loop
    ends on a value rather than an error), `Err` if what is there is not a
    datum."
-  (let ((text (reader-scan-datum s)))
+  (let ((text (%internal::reader-scan-datum s)))
     (if (equal text "")
         (result::ok (ReadOutcome::eof))
         (match (read text)
           ((ok v) (result::ok (ReadOutcome::datum v)))
           ((err e) (result::err e))))))
 
-(defun reader-read-one-until<S> ((s S) (stop Option<char>)) Result<ReadOutcome, ReadError> (where (PeekInput S))
+(module %internal (pub defun reader-read-one-until<S> ((s S) (stop Option<char>)) Result<ReadOutcome, ReadError> (where (PeekInput S))
   "`read-sexpr-preserving-whitespace` with an extra delimiter -- what
    `read-delimited-list` reads each element with."
-  (let ((text (reader-scan-datum-until s stop)))
+  (let ((text (%internal::reader-scan-datum-until s stop)))
     (if (equal text "")
         (result::ok (ReadOutcome::eof))
         (match (read text)
           ((ok v) (result::ok (ReadOutcome::datum v)))
-          ((err e) (result::err e))))))
+          ((err e) (result::err e)))))))
 
 (pub defun read-sexpr<S> ((s S)) Result<ReadOutcome, ReadError> (where (PeekInput S))
   "Read one datum from `s` -- CL's `read`. `Ok(eof)` at end of input (so a
@@ -5479,7 +5479,7 @@ user-visible capacity."
       ;; belongs to whatever comes next.
       (match (peek-char s)
         ((none) ())
-        ((some c) (if (reader-whitespacep c) (reader-skip-one s) ())))
+        ((some c) (if (%internal::reader-whitespacep c) (%internal::reader-skip-one s) ())))
       v)))
 
 ;; CL's `read-from-string`, whose *second* return value is where reading
@@ -5494,14 +5494,14 @@ user-visible capacity."
   "One datum from `s` beginning at character index `start`, paired with the
    index reading stopped at. Consumes the whitespace character that ended the
    datum, as CL's `read-from-string` does."
-  (read-datum-at s start false))
+  (%internal::read-datum-at s start false))
 
 (pub defun read-from-string-preserving-whitespace ((s string) &optional (start int 0))
     Result<cons-cell<Option<Sexpr>, int>, ReadError>
   "`read-from-string` without consuming the whitespace that ended the datum --
    CL's `read-from-string` with `:preserve-whitespace t`. The difference shows
    in the returned index, and so in what the next read sees."
-  (read-datum-at s start true))
+  (%internal::read-datum-at s start true))
 
 ;; CL's `*read-eval*`: whether `#.` may run code. `false` makes every `#.` a
 ;; read error -- the switch for reading text that is data rather than
@@ -5525,21 +5525,21 @@ user-visible capacity."
 ;; to be moved to match. That is what the `cons-cell` carries -- the same
 ;; shape, and for the same reason, as `read-from-string`'s.
 
-(defun call-reader-macro ((f (fn (string-input-stream char) Option<Sexpr>)) (c char) (rest string))
+(module %internal (pub defun call-reader-macro ((f (fn (string-input-stream char) Option<Sexpr>)) (c char) (rest string))
     cons-cell<Option<Sexpr>, int>
   "Run the reader macro `f` on the character `c` that triggered it and the
    text after it, answering what it read and how much of `rest` it consumed."
   (let ((in (make-string-input-stream rest)))
     (let ((v (f in c)))
-      (cons v (unwrap-io (stream-position in::h))))))
+      (cons v (%internal::unwrap-io (%internal::stream-position in::h)))))))
 
-(defun sexpr-list-from ((v Vector<Option<Sexpr>>)) Option<Sexpr>
+(module %internal (pub defun sexpr-list-from ((v Vector<Option<Sexpr>>)) Option<Sexpr>
   "The elements of `v` as a list, front to back."
   (let ((out (quote ())) (i (- (len v) 1)))
     (progn
       (while (>= i 0)
         (progn (setf out (sexpr-cons (get v i) out)) (setf i (- i 1)) ()))
-      out)))
+      out))))
 
 ;; CL's `read-delimited-list`: every datum up to `terminator`, which is
 ;; consumed. Unterminated input is an error rather than a short list --
@@ -5557,7 +5557,7 @@ user-visible capacity."
     (progn
       (while going
         (progn
-          (reader-scan-atmosphere s)
+          (%internal::reader-scan-atmosphere s)
           (match (peek-char s)
             ((none)
              (progn
@@ -5567,8 +5567,8 @@ user-visible capacity."
                ()))
             ((some c)
              (if (equal c terminator)
-                 (progn (reader-skip-one s) (setf going false) ())
-                 (match (reader-read-one-until s (option::some terminator))
+                 (progn (%internal::reader-skip-one s) (setf going false) ())
+                 (match (%internal::reader-read-one-until s (option::some terminator))
                    ((err e) (progn (setf failed (option::some e)) (setf going false) ()))
                    ((ok found)
                     (match found
@@ -5581,7 +5581,7 @@ user-visible capacity."
                       ((datum v) (progn (push acc v) ()))))))))))
       (match failed
         ((some e) (result::err e))
-        ((none) (result::ok (sexpr-list-from acc)))))))
+        ((none) (result::ok (%internal::sexpr-list-from acc)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The `with-...` macros, which are the reason `close` rarely appears in user
@@ -5643,17 +5643,17 @@ user-visible capacity."
 
 (pub defun probe-file<P> ((name P)) bool (where (Pathish P))
   "Whether `name` exists."
-  (file-exists-p (namestring name)))
+  (%internal::file-exists-p (namestring name)))
 
 (pub defun delete-file<P> ((name P)) Result<(), FileError> (where (Pathish P))
   "Remove `name`. `Ok(())` on success."
-  (match (file-delete (namestring name))
+  (match (%internal::file-delete (namestring name))
     ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
 (pub defun rename-file<P,Q> ((from P) (to Q)) Result<(), FileError> (where (Pathish P) (Pathish Q))
   "Rename `from` to `to`. `Ok(())` on success."
-  (match (file-rename (namestring from) (namestring to))
+  (match (%internal::file-rename (namestring from) (namestring to))
     ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
@@ -5665,24 +5665,24 @@ user-visible capacity."
 (pub defun truename<P> ((name P)) Result<string, FileError> (where (Pathish P))
   "`name` with symlinks resolved and `.`/`..` removed, as an absolute path.
    `Err` if it does not exist -- resolving a path means looking at it."
-  (file-truename (namestring name)))
+  (%internal::file-truename (namestring name)))
 
 (pub defun file-write-date<P> ((name P)) Result<universal-time, FileError> (where (Pathish P))
   "When `name` was last modified, as a universal time -- the same scale
    `get-universal-time` counts on, so `decode-universal-time` reads it."
-  (file-modified-date (namestring name)))
+  (%internal::file-modified-date (namestring name)))
 
 (pub defun file-author<P> ((name P)) Result<Option<string>, FileError> (where (Pathish P))
   "Who owns file `name` (CLHS 20.1). `none` -- not an error -- when the
    owning user id has no entry in the password database: CL separates the
    two, saying `NIL` when the author cannot be determined and signalling
    only when the file itself is not there."
-  (file-owner-name (namestring name)))
+  (%internal::file-owner-name (namestring name)))
 
 (pub defun directory-p<P> ((name P)) bool (where (Pathish P))
   "Whether `name` is a directory. `false` for a plain file and for something
    that is not there at all; `probe-file` is what separates those two."
-  (file-directory-p (namestring name)))
+  (%internal::file-directory-p (namestring name)))
 
 (pub defun directory<P> ((name P)) Result<Vector<string>, FileError> (where (Pathish P))
   "The entries of directory `name`, as truenames: absolute, with symlinks
@@ -5694,12 +5694,12 @@ user-visible capacity."
    match and the argument simply names the directory to list. `.` and `..`
    are not entries. The order is the operating system's -- sort it if you
    need a stable one."
-  (file-list-directory (namestring name)))
+  (%internal::file-list-directory (namestring name)))
 
 (pub defun ensure-directories-exist<P> ((name P)) Result<(), FileError> (where (Pathish P))
   "Create directory `name` and any missing parent. `Ok(())` if it already
    exists -- that is what `ensure` means."
-  (match (file-create-directories (namestring name))
+  (match (%internal::file-create-directories (namestring name))
     ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
@@ -5807,8 +5807,8 @@ user-visible capacity."
    -- this language's shape for CL's supplied-p, and the reason one name can
    mean both `start` and `stop` the way CL's does."
   (match path
-    ((some p) (dribble-start p))
-    ((none) (dribble-stop))))
+    ((some p) (%internal::dribble-start p))
+    ((none) (%internal::dribble-stop))))
 
 ;; ---------------------------------------------------------------------------
 ;; Universal time, decomposed (CLHS 25.1).
@@ -5859,7 +5859,7 @@ user-visible capacity."
 ;; `days-from-civil` counts days from 1900-01-01, which is why the constant
 ;; 25567 (the days between the CL and Unix epochs) appears in both.
 
-(defun days-from-civil ((year int) (month int) (day int)) int
+(module %internal (pub defun days-from-civil ((year int) (month int) (day int)) int
   "Days from 1900-01-01 to this proleptic-Gregorian date. Years before 0 are
    out of range -- a universal time cannot name one."
   (let ((y (if (<= month 2) (- year 1) year))
@@ -5871,9 +5871,9 @@ user-visible capacity."
       (setf doe (- (+ (* yoe 365) (/ yoe 4) doy) (/ yoe 100)))
       ;; `- 719468` lands on the Unix epoch; `+ 25567` moves from there to
       ;; CL's, which is 25567 days earlier.
-      (+ (- (+ (* era 146097) doe) 719468) 25567))))
+      (+ (- (+ (* era 146097) doe) 719468) 25567)))))
 
-(defun ut-shift ((day int) (second int) (by int)) universal-time
+(module %internal (pub defun ut-shift ((day int) (second int) (by int)) universal-time
   "`(day, second)` moved `by` seconds, renormalised so the second is back
    inside one day.
 
@@ -5884,9 +5884,9 @@ user-visible capacity."
    disagree."
   (let ((s (+ second by)))
     (let ((sec (mod s 86400)))
-      (universal-time::new (+ day (/ (- s sec) 86400)) sec))))
+      (universal-time::new (+ day (/ (- s sec) 86400)) sec)))))
 
-(defun local-zone-west ((day int) (second int)) int
+(module %internal (pub defun local-zone-west ((day int) (second int)) int
   "Seconds west of Greenwich in the local zone, at that universal time.
 
    The offset is a property of the *instant*, not of the machine: the same
@@ -5895,15 +5895,15 @@ user-visible capacity."
    no other answer to give."
   (match (timezone-offset-seconds day second)
     ((some w) w)
-    ((none) (panic "the local time zone at this universal time is unknown"))))
+    ((none) (panic "the local time zone at this universal time is unknown")))))
 
-(defun local-zone-daylight ((day int) (second int)) bool
+(module %internal (pub defun local-zone-daylight ((day int) (second int)) bool
   "Whether daylight saving time was in force locally at that universal
    time -- CL's eighth returned value. Panics on the same unknown instant
    `local-zone-west` does."
   (match (timezone-daylight-p day second)
     ((some d) d)
-    ((none) (panic "the local time zone at this universal time is unknown"))))
+    ((none) (panic "the local time zone at this universal time is unknown")))))
 
 (pub defun encode-universal-time ((second int) (minute int) (hour int)
                                   (date int) (month int) (year int)
@@ -5911,10 +5911,10 @@ user-visible capacity."
   "The universal time for this date and time. `zone` is an offset in hours
    west of Greenwich, as CL's is; omitting it means the arguments are in
    *local* time, which is CL's default too."
-  (let ((day0 (days-from-civil year month date))
+  (let ((day0 (%internal::days-from-civil year month date))
         (s0 (+ (* hour 3600) (* minute 60) second)))
     (match zone
-      ((some z) (ut-shift day0 s0 (* z 3600)))
+      ((some z) (%internal::ut-shift day0 s0 (* z 3600)))
       ;; Local time is a guess and one correction, which is what SBCL's
       ;; `encode-universal-time` does. The components name a *local* time,
       ;; but the offset that turns them into a universal time is itself a
@@ -5924,13 +5924,13 @@ user-visible capacity."
       ;; a local time inside one is ambiguous in any case (CL does not say
       ;; which side to pick, and neither does this).
       ((none)
-       (let ((utc (ut-shift day0 s0 0)))
-         (let ((west0 (local-zone-west utc::day utc::second)))
-           (let ((guess (ut-shift utc::day utc::second west0)))
-             (let ((west1 (local-zone-west guess::day guess::second)))
-               (ut-shift guess::day guess::second (- west1 west0))))))))))
+       (let ((utc (%internal::ut-shift day0 s0 0)))
+         (let ((west0 (%internal::local-zone-west utc::day utc::second)))
+           (let ((guess (%internal::ut-shift utc::day utc::second west0)))
+             (let ((west1 (%internal::local-zone-west guess::day guess::second)))
+               (%internal::ut-shift guess::day guess::second (- west1 west0))))))))))
 
-(defun decode-at-west ((ut universal-time) (west int) (daylight bool)) decoded-time
+(module %internal (pub defun decode-at-west ((ut universal-time) (west int) (daylight bool)) decoded-time
   "`ut` broken into calendar components `west` seconds west of Greenwich.
    The shared body of both of `decode-universal-time`'s arms; the reported
    `zone` is `west` back in CL's hours, where a half-hour offset survives as
@@ -5961,7 +5961,7 @@ user-visible capacity."
           (decoded-time::new (mod secs 60) (mod (/ secs 60) 60) (/ secs 3600)
                              d m y (mod days 7)
                              daylight
-                             (/ (int->float west) (int->float 3600)))))))
+                             (/ (int->float west) (int->float 3600))))))))
 
 (pub defun decode-universal-time ((ut universal-time) &optional (zone int)) decoded-time
   "`ut` broken into its calendar components. `zone` is an offset in hours west
@@ -5975,10 +5975,10 @@ user-visible capacity."
    `day-of-week` is CL's: 0 is Monday, 6 is Sunday. 1900-01-01 -- universal
    time 0 -- was a Monday, which is what makes it a plain remainder."
   (match zone
-    ((some z) (decode-at-west ut (* z 3600) false))
-    ((none) (decode-at-west ut
-                            (local-zone-west ut::day ut::second)
-                            (local-zone-daylight ut::day ut::second)))))
+    ((some z) (%internal::decode-at-west ut (* z 3600) false))
+    ((none) (%internal::decode-at-west ut
+                            (%internal::local-zone-west ut::day ut::second)
+                            (%internal::local-zone-daylight ut::day ut::second)))))
 
 (pub defun get-decoded-time () decoded-time
   "Now, in local time, broken into its calendar components -- CL's
@@ -6191,7 +6191,7 @@ user-visible capacity."
 ;; Decode a row-major offset back into subscripts, into `out` (which must
 ;; already have one slot per dimension). The inverse of `row-major-index`'s
 ;; fold, so it runs the dimensions backwards: the last one varies fastest.
-(defun array-decode ((dims Vector<int>) (flat int) (out Vector<int>)) ()
+(module %internal (pub defun array-decode ((dims Vector<int>) (flat int) (out Vector<int>)) ()
   (let ((k (- (len dims) 1)) (rest flat))
     (while (>= k 0)
       (progn
@@ -6199,16 +6199,16 @@ user-visible capacity."
           (progn
             (set out k (mod rest d))
             (setf rest (/ rest d))))
-        (setf k (- k 1))))))
+        (setf k (- k 1)))))))
 
-(defun array-subs-in-bounds ((sub Vector<int>) (dims Vector<int>)) bool
+(module %internal (pub defun array-subs-in-bounds ((sub Vector<int>) (dims Vector<int>)) bool
   (let ((i 0) (ok true) (n (len sub)))
     (progn
       (while (< i n)
         (progn
           (setf ok (and ok (< (get sub i) (get dims i))))
           (setf i (+ i 1))))
-      ok)))
+      ok))))
 
 ;; CL's `adjust-array`: reshape in place, keeping every element whose
 ;; subscripts still name a cell. CL requires the new rank to match the old
@@ -6238,8 +6238,8 @@ user-visible capacity."
         (progn
           (while (< i n)
             (progn
-              (array-decode nd i sub)
-              (if (array-subs-in-bounds sub self::dims)
+              (%internal::array-decode nd i sub)
+              (if (%internal::array-subs-in-bounds sub self::dims)
                   (set moved i (get self::data (row-major-index self sub)))
                   ())
               (setf i (+ i 1))))
@@ -6271,18 +6271,18 @@ user-visible capacity."
 
 ;; How far apart two neighbours along dimension `d` are in row-major storage:
 ;; the product of every dimension after it.
-(defun array-print-stride<T> ((a Array<T>) (d int)) int
+(module %internal (pub defun array-print-stride<T> ((a Array<T>) (d int)) int
   (let ((s 1) (i (+ d 1)) (r (len a::dims)))
     (progn
       (while (< i r)
         (progn (setf s (* s (get a::dims i))) (setf i (+ i 1))))
-      s)))
+      s))))
 
 
 ;; The sub-array rooted at depth `d`, whose first element is at flat index
 ;; `off`. At `d` = the rank there is no dimension left to walk and the flat
 ;; index names an element, which is where the recursion bottoms out.
-(defun array-print-sub<T> ((a Array<T>) (d int) (off int) (escape bool)) string
+(module %internal (pub defun array-print-sub<T> ((a Array<T>) (d int) (off int) (escape bool)) string
   (where (print-object T))
   (if (>= d (len a::dims))
       (print-object (row-major-get a off) escape)
@@ -6290,19 +6290,19 @@ user-visible capacity."
       ;; array can have one — which is also the only rank where `d` can be
       ;; nothing but 0 here, so the depth needs no test of its own.
       (let ((n (if (= (len a::dims) 1) (len a) (get a::dims d)))
-            (stride (array-print-stride a d))
+            (stride (%internal::array-print-stride a d))
             (out "(")
             (i 0))
         (progn
           (while (< i n)
             (progn
               (setf out (append out (if (> i 0) " " "")))
-              (setf out (append out (array-print-sub a (+ d 1) (+ off (* i stride)) escape)))
+              (setf out (append out (%internal::array-print-sub a (+ d 1) (+ off (* i stride)) escape)))
               (setf i (+ i 1))))
-          (append out ")")))))
+          (append out ")"))))))
 
 ;; The shape alone, `2x3`, for the `*print-array*`-is-false rendering.
-(defun array-print-dims<T> ((a Array<T>)) string
+(module %internal (pub defun array-print-dims<T> ((a Array<T>)) string
   (let ((out "") (i 0) (r (len a::dims)))
     (progn
       (while (< i r)
@@ -6310,18 +6310,18 @@ user-visible capacity."
           (setf out (append out (if (> i 0) "x" "")))
           (setf out (append out (to-string (get a::dims i))))
           (setf i (+ i 1))))
-      out)))
+      out))))
 
 (impl print-object Array<T> (where (print-object T))
   (print-object ((self Self) (escape bool)) string
     (if *print-array*
         (let ((r (len self::dims)))
           (if (= r 1)
-              (append "#" (array-print-sub self 0 0 escape))
-              (format false "#~aA~a" r (array-print-sub self 0 0 escape))))
+              (append "#" (%internal::array-print-sub self 0 0 escape))
+              (format false "#~aA~a" r (%internal::array-print-sub self 0 0 escape))))
         (if (= (len self::dims) 0)
             "#<array>"
-            (format false "#<array ~a>" (array-print-dims self))))))
+            (format false "#<array ~a>" (%internal::array-print-dims self))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Bit vectors (CLHS 15.2) — cl-parity-plan.md Phase 6c.
@@ -6394,27 +6394,27 @@ user-visible capacity."
 ;; 2. The last word reaches past the length.
 ;;
 ;; Every operation that can do either ends here.
-(defconstant (*bitvector-word-mask* int) 2147483647)
-(defun bitvector-trim ((v BitVector)) ()
+(module %internal (pub defconstant (*bitvector-word-mask* int) 2147483647))
+(module %internal (pub defun bitvector-trim ((v BitVector)) ()
   (let ((n (len v::words)) (i 0))
     (progn
       (while (< i n)
         (progn
-          (set v::words i (logand (get v::words i) *bitvector-word-mask*))
+          (set v::words i (logand (get v::words i) %internal::*bitvector-word-mask*))
           (setf i (+ i 1))))
       (let ((used (mod v::nbits 31)))
         (if (= used 0)
             ()
             (set v::words (- n 1)
                  (logand (get v::words (- n 1))
-                         (- (ash (the int 1) used) (the int 1)))))))))
+                         (- (ash (the int 1) used) (the int 1))))))))))
 
 ;; The shared body of CL's `bit-and` family: same length in, a fresh bit
 ;; vector out, one word at a time. `who` is only for the length-mismatch
 ;; message. CL's optional third argument (write into an existing vector, or
 ;; into the first one when it is `t`) is not offered — the caller writes
 ;; `(setf a (bit-and a b))`, and the aliasing question never comes up.
-(defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (int int) int))) BitVector
+(module %internal (pub defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (int int) int))) BitVector
   (if (/= a::nbits b::nbits)
       (panic (format false "~a: bit vectors differ in length (~a and ~a)" who a::nbits b::nbits))
       (let ((out (BitVector::make a::nbits)) (i 0) (n (len a::words)))
@@ -6423,31 +6423,31 @@ user-visible capacity."
             (progn
               (set out::words i (f (get a::words i) (get b::words i)))
               (setf i (+ i 1))))
-          (bitvector-trim out)
-          out))))
+          (%internal::bitvector-trim out)
+          out)))))
 
 (pub defmethod bit-and ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-and" (lambda ((x int) (y int)) int (logand x y))))
+  (%internal::bitvector-zip self other "bit-and" (lambda ((x int) (y int)) int (logand x y))))
 (pub defmethod bit-ior ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-ior" (lambda ((x int) (y int)) int (logior x y))))
+  (%internal::bitvector-zip self other "bit-ior" (lambda ((x int) (y int)) int (logior x y))))
 (pub defmethod bit-xor ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-xor" (lambda ((x int) (y int)) int (logxor x y))))
+  (%internal::bitvector-zip self other "bit-xor" (lambda ((x int) (y int)) int (logxor x y))))
 ;; The rest of CL's family. Nothing new is needed for any of them: each is
 ;; the same word-wise walk over the integer operation of the same name.
 (pub defmethod bit-eqv ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-eqv" (lambda ((x int) (y int)) int (logeqv x y))))
+  (%internal::bitvector-zip self other "bit-eqv" (lambda ((x int) (y int)) int (logeqv x y))))
 (pub defmethod bit-nand ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-nand" (lambda ((x int) (y int)) int (lognand x y))))
+  (%internal::bitvector-zip self other "bit-nand" (lambda ((x int) (y int)) int (lognand x y))))
 (pub defmethod bit-nor ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-nor" (lambda ((x int) (y int)) int (lognor x y))))
+  (%internal::bitvector-zip self other "bit-nor" (lambda ((x int) (y int)) int (lognor x y))))
 (pub defmethod bit-andc1 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-andc1" (lambda ((x int) (y int)) int (logandc1 x y))))
+  (%internal::bitvector-zip self other "bit-andc1" (lambda ((x int) (y int)) int (logandc1 x y))))
 (pub defmethod bit-andc2 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-andc2" (lambda ((x int) (y int)) int (logandc2 x y))))
+  (%internal::bitvector-zip self other "bit-andc2" (lambda ((x int) (y int)) int (logandc2 x y))))
 (pub defmethod bit-orc1 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-orc1" (lambda ((x int) (y int)) int (logorc1 x y))))
+  (%internal::bitvector-zip self other "bit-orc1" (lambda ((x int) (y int)) int (logorc1 x y))))
 (pub defmethod bit-orc2 ((self BitVector) (other BitVector)) BitVector
-  (bitvector-zip self other "bit-orc2" (lambda ((x int) (y int)) int (logorc2 x y))))
+  (%internal::bitvector-zip self other "bit-orc2" (lambda ((x int) (y int)) int (logorc2 x y))))
 
 (pub defmethod bit-not ((self BitVector)) BitVector
   (let ((out (BitVector::make self::nbits)) (i 0) (n (len self::words)))
@@ -6456,7 +6456,7 @@ user-visible capacity."
         (progn
           (set out::words i (lognot (get self::words i)))
           (setf i (+ i 1))))
-      (bitvector-trim out)
+      (%internal::bitvector-trim out)
       out)))
 
 ;; ---------------------------------------------------------------------------
@@ -6487,7 +6487,7 @@ user-visible capacity."
 (impl Error SimpleError
   (message ((self Self)) string self::text))
 (impl print-object SimpleError
-  (print-object ((self Self) (escape bool)) string (error-print-object self escape "simpleerror")))
+  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "simpleerror")))
 
 ;; CL's `simple-error` is what `(error "...")` signals; the same
 ;; convenience here is a constructor that formats, since a `Result` is
@@ -6505,7 +6505,7 @@ user-visible capacity."
   (message ((self Self)) string self::text)
   (source ((self Self)) Option<:dyn Error> (Option::some self::cause)))
 (impl print-object WrappedError
-  (print-object ((self Self) (escape bool)) string (error-print-object self escape "wrappederror")))
+  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "wrappederror")))
 
 ;; `(wrap-error "reading the config" e)` — the same widening `as-dyn-error`
 ;; does, with a sentence attached. Generic over the cause's concrete type for
@@ -6569,12 +6569,12 @@ user-visible capacity."
 ;; What it is *not*: per-thread. A real special variable has one binding per
 ;; thread; this has one global that a body borrows and gives back.
 
-(defmacro dlet1 (place value &rest body)
+(module %internal (pub defmacro dlet1 (place value &rest body)
   (let ((saved (gensym)))
     `(let ((,saved ,place))
        (progn
          (setf ,place ,value)
-         (unwind-protect (progn ,@body) (setf ,place ,saved))))))
+         (unwind-protect (progn ,@body) (setf ,place ,saved)))))))
 
 (pub defmacro dlet (bindings &rest body)
   "Assign each global for the extent of `body`, restoring it on the way out
@@ -6583,7 +6583,7 @@ user-visible capacity."
   (if (sexpr-null bindings)
       (sexpr-cons (quote progn) body)
       (let ((b (sexpr-car bindings)))
-        `(dlet1 ,(sexpr-car b) ,(sexpr-car (sexpr-cdr b))
+        `(%internal::dlet1 ,(sexpr-car b) ,(sexpr-car (sexpr-cdr b))
                 (dlet ,(sexpr-cdr bindings) ,@body)))))
 
 
@@ -6628,9 +6628,9 @@ user-visible capacity."
   (next ((self Self)) Option<T> (recv self)))
 
 ;; The body of `after`, split out because `task` takes a call form.
-(defun sleep-then-send ((sec f64) (ch Chan<()>)) ()
+(module %internal (pub defun sleep-then-send ((sec f64) (ch Chan<()>)) ()
   (sleep sec)
-  (send ch ()))
+  (send ch ())))
 
 ;; `(recv (after 0.5))` is Go's `<-time.After(d)`: a channel that receives one
 ;; value `sec` seconds from now, and nothing after that. What makes a timeout
@@ -6640,7 +6640,7 @@ user-visible capacity."
 ;; the reason Go's own `time.After` buffers one.
 (pub defun after ((sec f64)) Chan<()>
   (let ((ch (the Chan<()> (Chan::new 1))))
-    (task (sleep-then-send sec ch))
+    (task (%internal::sleep-then-send sec ch))
     ch))
 
 
@@ -6684,7 +6684,7 @@ user-visible capacity."
 ;; The body of `add` and `done`: move the counter by `n` while holding its
 ;; token. Closing the gate before the token goes back means whoever next
 ;; reads zero also finds the gate closed.
-(defun wait-group-shift ((wg WaitGroup) (n int) (below-zero string)) ()
+(module %internal (pub defun wait-group-shift ((wg WaitGroup) (n int) (below-zero string)) ()
   (let* ((old (unwrap (recv wg::count)))
          (new (+ old n)))
     (if (< new 0)
@@ -6694,15 +6694,15 @@ user-visible capacity."
               (setf wg::gate (the Chan<()> (Chan::new 0)))
               ())
           (if (and (> old 0) (eq new 0)) (close wg::gate) ())
-          (send wg::count new)))))
+          (send wg::count new))))))
 
 (pub defmethod add ((self WaitGroup) (n int)) ()
   "Add `n` to the counter, before starting the work it counts."
-  (wait-group-shift self n "add: a wait group's counter went below zero"))
+  (%internal::wait-group-shift self n "add: a wait group's counter went below zero"))
 
 (pub defmethod done ((self WaitGroup)) ()
   "One of the counted things finished. At zero, every waiter is released."
-  (wait-group-shift self -1 "done: a wait group's counter went below zero"))
+  (%internal::wait-group-shift self -1 "done: a wait group's counter went below zero"))
 
 (pub defmethod wait ((self WaitGroup)) ()
   "Wait until the counter reaches zero. Any number of tasks may."

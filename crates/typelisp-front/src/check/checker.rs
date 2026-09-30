@@ -12597,12 +12597,12 @@ impl Checker {
         // rebuilt here, so the form and the builtin cannot drift apart.
         let ret = self
             .reg
-            .fn_sig(&Path::root("ed-open"))
+            .fn_sig(&Path::internal("ed-open"))
             .map(|sig| sig.ret.clone())
             .ok_or_else(|| Error::TypeError("ed: the `ed-open` builtin is not registered".into()))?;
         let file = Checked::new(forms::str_lit_form(heap, &file)?, Type::Str);
         let line = Checked::new(core::tagged(heap, "int", &[Value::Int(line)])?, Type::Int);
-        let r = Ref::synthetic(Path::root("ed-open"));
+        let r = Ref::synthetic(Path::internal("ed-open"));
         let node = self.call_form(heap, &r, &[file, line])?;
         Ok(Checked::new(node, ret))
     }

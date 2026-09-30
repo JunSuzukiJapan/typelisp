@@ -748,7 +748,7 @@ fn compile_returns_true_on_success() {
 /// `compile` support — so a variadic function compiles with no special-
 /// casing at all, as long as its body sticks to already-compilable
 /// operations on the rest list (e.g. `sexpr-car`/`sexpr-cdr`, which
-/// `is_rt_builtin_name` recognizes as `rt_*` shims rather than something
+/// `is_rt_builtin` recognizes as `rt_*` shims rather than something
 /// `compile_function_rec` needs to recursively compile).
 #[test]
 fn a_variadic_function_compiles_and_dispatches_to_native_code() {
@@ -2164,7 +2164,7 @@ fn compile_dispatches_a_dotimes_loop_that_terminates_via_its_internal_break() {
 /// since it too goes through `while`), *plus* a `match` on the `Sexpr` element
 /// and `sexpr-consp`/`sexpr-car`/`sexpr-cdr` walking — all already compilable
 /// (`Sexpr` `match` support, plus the `sexpr-*` `rt_*` shims
-/// `is_rt_builtin_name` recognizes). So a `dolist`-using function compiles with
+/// `is_rt_builtin` recognizes). So a `dolist`-using function compiles with
 /// no `dolist`-specific machinery: this sums the `(int n)` elements of a
 /// `Sexpr` list argument entirely in native code (the quoted list is built by
 /// the tree-walking interpreter and handed to the compiled function), asserting
@@ -3741,7 +3741,7 @@ fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
 /// symbol (`tl_rt_cons`, the `USER_SYMBOL_PREFIX` prefix) — it never
 /// collides with the real `rt_cons` runtime shim `compiler.rs`'s
 /// `compile-call` rewrites a bare `sexpr-cons` call to (see
-/// `is_rt_builtin_name`). Both the user's own `rt_cons` and the built-in
+/// `is_rt_builtin`). Both the user's own `rt_cons` and the built-in
 /// `sexpr-cons`/`match`-on-`cons` machinery work correctly side by side.
 #[test]
 fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_rt_cons_shim() {
@@ -3761,6 +3761,25 @@ fn compile_of_a_user_function_literally_named_rt_cons_does_not_collide_with_the_
     // sexpr-cons/car/cdr machinery still produces 5+9 = 14 unaffected;
     // 7+14 = 21.
     assert_eq!(v, Value::Int(21));
+}
+
+/// A builtin's *name* is not the builtin: a user's function spelled like one —
+/// at the root with the name of a builtin the library keeps in its internal
+/// module, or in a module with the name of a root builtin — is the user's own,
+/// and a compiled call reaches its body rather than the builtin's `rt_*` shim.
+/// Both used to reach the shim, while the interpreter called the user's.
+#[test]
+fn compile_of_a_user_function_spelled_like_a_builtin_calls_the_users_function() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (defun stream-describe ((h i32)) int 40)
+        (module m (pub defun getenv ((s string)) int 2))
+        (defun both () int (+ (stream-describe 7) (m::getenv "x")))
+        (compile both)
+        (both)
+        "#,
+    );
+    assert_eq!(v, Value::Int(42));
 }
 
 /// The three numeric boxed variants share `TAG_BOXED`, so their arms dispatch

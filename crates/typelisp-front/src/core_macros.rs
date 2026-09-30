@@ -82,10 +82,10 @@ pub const SOURCE: &str = r##"
 ;; content, which is the departure `docs/dev/cl-equivalence-catalog.md` records
 ;; under eq/eql/equal/equalp. Defined before its caller because definitions are
 ;; checked in source order.
-(defun case-key-atom-test ((key-form Symbol) (key Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun case-key-atom-test ((key-form Symbol) (key Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-symp key)
       (list (quote equal) key-form (list (quote quote) key))
-      (list (quote equal) key-form key)))
+      (list (quote equal) key-form key))))
 
 ;; `case-key-test`: one clause's key designator to the `bool` form that tests
 ;; it against `key-form` -- the `gensym`'d temporary `case` binds the scrutinee
@@ -114,17 +114,17 @@ pub const SOURCE: &str = r##"
 ;;
 ;; Iterates with `loop`/`break`/`setf` rather than `while`: `while` and `not`
 ;; are prelude definitions, and this layer loads before the prelude.
-(defun case-key-test ((key-form Symbol) (key Option<Sexpr>)) Option<Sexpr>
+(module %internal (pub defun case-key-test ((key-form Symbol) (key Option<Sexpr>)) Option<Sexpr>
   (if (sexpr-consp key)
       (if (if (sexpr-symp (sexpr-car key)) (equal (sexpr-sym-name (sexpr-car key)) "quote") false)
           (panic "case: a quoted key is not a key list -- write the bare symbol, not 'sym")
           (let ((acc (quote ())) (rest key))
             (loop
               (if (sexpr-null rest) (break) ())
-              (setf acc (sexpr-append acc (list (case-key-atom-test key-form (sexpr-car rest)))))
+              (setf acc (sexpr-append acc (list (%internal::case-key-atom-test key-form (sexpr-car rest)))))
               (setf rest (sexpr-cdr rest)))
             (sexpr-cons (quote or) acc)))
-      (case-key-atom-test key-form key)))
+      (%internal::case-key-atom-test key-form key))))
 
 ;; `case`: bind the scrutinee once, then a `cond` over the clause tests.
 ;;
@@ -143,7 +143,7 @@ pub const SOURCE: &str = r##"
       (let ((c (sexpr-car rest)))
         (setf out (sexpr-append out (list (if (eq (sexpr-car c) (quote else))
                                               c
-                                              (sexpr-cons (case-key-test tmp (sexpr-car c)) (sexpr-cdr c)))))))
+                                              (sexpr-cons (%internal::case-key-test tmp (sexpr-car c)) (sexpr-cdr c)))))))
       (setf rest (sexpr-cdr rest)))
     `(let ((,tmp ,expr)) (cond ,@out))))
 

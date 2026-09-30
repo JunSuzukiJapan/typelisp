@@ -161,7 +161,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; the readtable (docs/ja/reference/syntax.md §11)
     "get-dispatch-macro-character" "get-macro-character"
     "set-dispatch-macro-character" "set-macro-character"
-    "read-datum-at" "read-delimited-list" "read-from-string"
+    "read-delimited-list" "read-from-string"
     "read-from-string-preserving-whitespace" "read-sexpr-preserving-whitespace"
     "listen" "open-file" "open-input" "open-output" "open-stream-p" "peek-char"
     "read-byte" "write-byte"
@@ -218,9 +218,6 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "float->f32" "float->f64" "try-float->f32" "try-float->f64"
     "int->int" "ratio->int" "int->ratio"
     "float->ratio" "ratio->float" "numerator" "denominator"
-    ;; the prelude helper `expt' recurses through for a `ratio' base -- an
-    ;; ordinary root-namespace function, so it is callable and highlighted
-    "ratio-expt-int"
     "symbol->string" "string->symbol"
     ;; generic pair (cons-cell<A,B>); set-car/set-cdr were removed, mutate
     ;; via (setf p::car v)/(setf p::cdr v) instead
@@ -265,11 +262,6 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "char->name" "name->char"
     "filled" "search" "mismatch" "trim" "left-trim" "right-trim"
     "capitalize" "split"
-    ;; their code-point helpers -- ordinary public prelude functions, so the
-    ;; registry offers them and this list has to know them
-    "ascii-alpha-code" "ascii-digit-code" "ascii-downcase-code"
-    "ascii-upcase-char" "ascii-downcase-char"
-    "char-in-bag" "string-fold-compare"
     ;; higher-order combinators
     "identity" "const" "compose" "flip"
     ;; the CL list/sequence catalog (cl-parity-plan.md Phase 3a/3b/3c, §6.1) --
@@ -284,11 +276,6 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "rest" "revappend"
     "seq-equals" "set-difference" "set-exclusive-or" "subsetp" "substitute" "substitute-if"
     "tailp" "union"
-    ;; the Phase 3e keyword layer's shared loop cores (§6.3)
-    "seq-any-core" "seq-count-core" "seq-dedup-core" "seq-edit-core"
-    "seq-find-core" "seq-flag" "seq-in-bounds" "seq-limit"
-    "seq-position-core" "seq-sort-core" "seq-window-start" "seq-window-end"
-    "string-window-equal" "vector-window-equal"
     ;; the 28 `c*r' pair accessors (§6.1)
     "caaaar" "caaadr" "caaar" "caadar" "caaddr" "caadr"
     "caar" "cadaar" "cadadr" "cadar" "caddar" "cadddr"
@@ -342,11 +329,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; macro / system
     "gensym" "macroexpand" "macroexpand-1" "complement"
     "keywordp" "exit" "compile-file" "dump"
-    ;; random-state (CLHS 12.1.6).  `make-random-state-fresh'/
-    ;; `random-state-copy'/`random-state-next' are the native primitives
-    ;; `random'/`make-random-state'/`random-state-p' are built on.
-    "random-state-p" "make-random-state" "make-random-state-fresh"
-    "random-state-copy" "random-state-next" "seed-random-state"
+    ;; random-state (CLHS 12.1.6)
+    "random-state-p" "make-random-state" "seed-random-state"
     ;; time (CLHS 25.1).  `get-internal-run-time' is CPU time, its sibling
     ;; elapsed time; `time' reports both.
     "time" "get-universal-time" "get-internal-real-time"
@@ -371,10 +355,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; asking the user a question (CLHS 25.2)
     "y-or-n-p" "yes-or-no-p"
     ;; the REPL tool layer's ordinary functions (CLHS 25.2).  `heap-info' is
-    ;; what `room' prints and what a program reads the same numbers from;
-    ;; `dribble-start'/`dribble-stop'/`ed-open' are the primitives the
-    ;; `dribble' function and the `ed' special form reduce to.
-    "room" "heap-info" "dribble" "dribble-start" "dribble-stop" "ed-open")
+    ;; what `room' prints and what a program reads the same numbers from.
+    "room" "heap-info" "dribble")
   "Builtin functions and methods from the standard catalog (docs/ja/reference/functions/).")
 
 (defconst typelisp-primitive-types
@@ -395,7 +377,7 @@ with no implicit conversion to or from the fixed-width numerics
 (defconst typelisp-builtin-types
   '(;; stream traits and concrete stream types (§18)
     "broadcast-stream" "charinput" "charoutput" "concatenated-stream"
-    "binary-file-stream" "byteinput" "byteoutput"
+    "binary-file-stream" "file-stream" "byteinput" "byteoutput"
     "echo-stream" "fileerror" "inputstream" "outputstream" "peekinput"
     "peek-stream" "standard-stream" "stream" "string-input-stream"
     "string-output-stream" "two-way-stream"

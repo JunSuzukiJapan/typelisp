@@ -15,6 +15,11 @@
 //! from the registry rather than by grepping source means a new builtin is
 //! caught the moment it is registered, whichever layer defines it.
 //!
+//! The library's internal helpers live in their own module
+//! (`typelisp::INTERNAL_MODULE`), out of every user's scope, and are left out
+//! of the walk: an editor must not paint them as builtins, which the last test
+//! here checks the other way round.
+//!
 //! Special forms live in `Checker::check_list`'s dispatch, which has no runtime
 //! representation to enumerate, so those are read out of the source between two
 //! sentinel comments (see [`special_forms_from_checker`]).
@@ -30,7 +35,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path as FsPath, PathBuf};
 
 use typelisp::check::registry::Namespace;
-use typelisp::{load_prelude, Checker, Heap, Interp};
+use typelisp::{load_prelude, Checker, Heap, Interp, INTERNAL_MODULE};
 
 // ---------------------------------------------------------------- the truth
 
@@ -38,7 +43,12 @@ use typelisp::{load_prelude, Checker, Heap, Interp};
 /// functions, macros, global variables, types, traits, and the associated
 /// functions and trait methods reachable on them, across every namespace.
 fn registry_names() -> BTreeSet<String> {
-    collected().0.clone()
+    collected().names.clone()
+}
+
+/// The free functions, macros and globals of the library's internal module.
+fn internal_names() -> BTreeSet<String> {
+    collected().internal.clone()
 }
 
 /// The field names of every registered type, and the `set-` setters that go
@@ -47,7 +57,13 @@ fn registry_names() -> BTreeSet<String> {
 /// `vec` and `snapshot` are fields of the built-in iterator structs, and no
 /// editor should paint every occurrence of the word "pos" as a builtin.
 fn field_accessors() -> BTreeSet<String> {
-    collected().1.clone()
+    collected().fields.clone()
+}
+
+struct Collected {
+    names: BTreeSet<String>,
+    fields: BTreeSet<String>,
+    internal: BTreeSet<String>,
 }
 
 /// The registry walk, done once per process.
@@ -57,21 +73,30 @@ fn field_accessors() -> BTreeSet<String> {
 /// whole prelude once for every name in the registry, roughly 1800 loads and
 /// twenty minutes of the serial suite. The data is immutable once built and
 /// `OnceLock` is `Sync`, so the tests can still run in parallel.
-fn collected() -> &'static (BTreeSet<String>, BTreeSet<String>) {
-    static CACHE: std::sync::OnceLock<(BTreeSet<String>, BTreeSet<String>)> = std::sync::OnceLock::new();
+fn collected() -> &'static Collected {
+    static CACHE: std::sync::OnceLock<Collected> = std::sync::OnceLock::new();
     CACHE.get_or_init(build_collected)
 }
 
-fn build_collected() -> (BTreeSet<String>, BTreeSet<String>) {
+fn build_collected() -> Collected {
     let mut heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
 
+    let root = &chk.registry().root;
     let mut names = BTreeSet::new();
     let mut fields = BTreeSet::new();
-    collect_namespace(&chk.registry().root, &mut names, &mut fields);
-    (names, fields)
+    collect_namespace(root, &mut names, &mut fields);
+    let internal_ns = root.modules.get(INTERNAL_MODULE).expect("the library's internal module");
+    let internal = internal_ns
+        .fns
+        .keys()
+        .chain(internal_ns.macros.keys())
+        .chain(internal_ns.vars.keys())
+        .cloned()
+        .collect();
+    Collected { names, fields, internal }
 }
 
 fn collect_namespace(ns: &Namespace, out: &mut BTreeSet<String>, fields: &mut BTreeSet<String>) {
@@ -96,8 +121,10 @@ fn collect_namespace(ns: &Namespace, out: &mut BTreeSet<String>, fields: &mut BT
         out.insert(name.clone());
         out.extend(def.methods.keys().cloned());
     }
-    for child in ns.modules.values() {
-        collect_namespace(child, out, fields);
+    for (name, child) in &ns.modules {
+        if name != INTERNAL_MODULE {
+            collect_namespace(child, out, fields);
+        }
     }
 }
 
@@ -146,136 +173,17 @@ fn is_excluded(name: &str) -> bool {
     // user's own special variable gets the same treatment.
     let earmuffed = name.len() > 2 && name.starts_with('*') && name.ends_with('*');
 
-    // `destructuring-bind`'s expansion helpers. Half run inside the macro to
-    // build the expansion and half inside the expansion to check the shape;
-    // a user writes `destructuring-bind` and never one of these.
-    let dbind_helper = name.starts_with("dbind-");
-    // The native stream layer (`check::registry::register_stream_builtins`).
-    // These take an opaque `int` handle and exist only for the prelude's
-    // trait implementations to call; a user writes `read-char`/`write-string`
-    // on a stream value and never names one of these.
-    let native_stream = name.starts_with("stream-") || name.starts_with("file-");
-    // The native network layer (`check::registry::register_net_builtins`),
-    // the same shape as the stream layer above: an opaque `i32` handle, a
-    // `none` that means "would block" for the prelude's loop to turn into a
-    // `net-wait`. A user writes `tcp-connect`/`accept`/`read-line` on a
-    // `socket-stream` and never one of these.
-    let native_net = name.starts_with("net-");
-    // Prelude-private helpers with no `pub`: `unwrap-io` turns a native
-    // `Result` into a panic, `io-ok` pins an error type, and the last four
-    // are the pathname layer's own string surgery (`namestring` and the
-    // `pathname-*` readers are the surface a user writes).
-    const PRELUDE_PRIVATE: [&str; 34] = [
-        "unwrap-io",
-        // The network layer's prelude-private helpers, `unwrap-io`'s
-        // counterparts: `unwrap-net` panics on a native `NetError`, the
-        // `tcp-read-*`/`tcp-drain`/`tcp-close` family are the handle-level
-        // bodies of the `socket-stream` trait impls, and the rest are
-        // `tcp-connect`'s resolve-then-try-each-address machinery. A user
-        // writes `tcp-connect` and the stream traits.
-        "unwrap-net",
-        "tcp-read-char",
-        "tcp-read-byte",
-        "tcp-drain",
-        "tcp-close",
-        "tcp-wait-within",
-        "tcp-resolve",
-        "tcp-connect-one",
-        "tcp-connect-addr",
-        // `after`'s body, split out only because `task` takes a call form and
-        // not a thunk. A user writes `after`.
-        "sleep-then-send",
-        // The shared body of `WaitGroup`'s `add` and `done`: move the
-        // counter while holding its token. A user writes `add`/`done`.
-        "wait-group-shift",
-        // The bridge the *reader* calls a macro character's function
-        // through (Stage 8c): it wraps the unread text in a stream, calls
-        // the function, and reports how much of it was consumed. Reached
-        // only from Rust (`Interp::call_reader_macro_fn`); a user writes
-        // `set-macro-character`.
-        "call-reader-macro",
-        "io-ok",
-        "split-on-slash",
-        "name-type-dot",
-        "pathname-file-part",
-        "pathname-directory-part",
-        // The civil-calendar formula under `encode-universal-time` /
-        // `decode-universal-time` (Phase 9c). A user writes those two.
-        "days-from-civil",
-        // The rest of the universal-time machinery, private for the same
-        // reason: `ut-shift` renormalises a `(day, second)` pair after
-        // adding an offset, `decode-at-west` is the shared body of both of
-        // `decode-universal-time`'s arms, and the two `local-zone-*` turn
-        // the runtime's `Option` into a value or a panic. A user writes
-        // `decode-`/`encode-universal-time`.
-        "ut-shift",
-        "decode-at-west",
-        "local-zone-west",
-        "local-zone-daylight",
-        // `Array<T>`'s subscript arithmetic (Phase 6b): `array-decode` is
-        // `row-major-index`'s inverse and `array-subs-in-bounds` its
-        // range test, both used only by `adjust` walking the new index
-        // space. A user writes `row-major-index`/`in-bounds`.
-        "array-decode",
-        "array-subs-in-bounds",
-        // The low-`size`-bits mask the byte-specifier family is built on,
-        // in the operand's own type. It takes a sample value rather than a
-        // width because there is no way to spell "1 of type T" for an open
-        // `T`; a user writes `ldb` and its siblings.
-        "bits-mask",
-        // `Array<T>`'s printer (Phase 8a): the stride of one axis, the
-        // recursive per-axis walk that builds `(1 2 3)`, and the `2x3` in
-        // `#<array 2x3>` when `*print-array*` is off. A user writes
-        // `print-object`, or just prints the array.
-        "array-print-stride",
-        "array-print-sub",
-        "array-print-dims",
-        // The shared body of the built-in error types' `print-object` impls
-        // (SBCL's two answers for a condition). A user writes `print-object`,
-        // or just prints the error.
-        "error-print-object",
-        // `BitVector`'s word-level internals (Phase 6c): the shared body of
-        // the `bit-and` family, and the "clear the bits past the length"
-        // step every operation that can set them ends with.
-        "bitvector-zip",
-        "bitvector-trim",
-        // The one-binding worker `dlet` expands into, once per pair (Phase
-        // 7b). A user writes `dlet`, which takes a binding list.
-        "dlet1",
-        // `read-delimited-list`'s accumulator turned back into a list (Phase
-        // 8b). Collecting into a `Vector` and reversing once is how that
-        // function builds its result; nothing else needs the step.
-        "sexpr-list-from",
-    ];
-    // `read-sexpr`'s datum scanner, which finds where one datum ends so the
-    // text can go to `read`. Prelude-private, and a step finer-grained than
-    // anything a user writes.
-    let datum_scanner = name.starts_with("reader-");
-    // The core macro layer's expansion helpers
-    // (`typelisp_front::core_macros`): `case` turns each clause's key
-    // designator into a test with these, one for a key list and one for a
-    // single key. They register like any other `defun` because the layer
-    // loads with the prelude, but a user writes `case`.
-    let case_expander = name == "case-key-test" || name == "case-key-atom-test";
-    // `HashTable<K,V>`'s bucket layer (Phase 6a). The five `bucket-*` are
-    // registry builtins over the raw `int`-keyed storage and know nothing
-    // about hashing or key equality; `hashtable-bucket-index` is the
-    // prelude-private linear scan that supplies both. Together they are what
-    // `get`/`set`/`remove` are written in terms of, which is what a user
-    // writes -- the same relationship the native stream layer has to
-    // `read-char`/`write-string` above.
-    let hashtable_bucket = name.starts_with("bucket-") || name == "hashtable-bucket-index";
+    // `HashTable<K,V>`'s bucket layer (Phase 6a): registry builtins over the
+    // raw `int`-keyed storage that know nothing about hashing or key
+    // equality. They are what `get`/`set`/`remove` are written in terms of,
+    // which is what a user writes. Methods on the type, so they cannot move
+    // into the internal module the free-function helpers live in.
+    let hashtable_bucket = name.starts_with("bucket-");
 
     operator
         || type_param
         || earmuffed
-        || native_stream
-        || native_net
-        || datum_scanner
-        || case_expander
         || hashtable_bucket
-        || dbind_helper
-        || PRELUDE_PRIVATE.contains(&name)
         || name.ends_with("-rt")
         || ISLAND_PREFIXES.iter().any(|p| name.starts_with(p))
         || ISLAND_EXACT.contains(&name)
@@ -583,6 +491,28 @@ fn the_two_editors_agree_with_each_other() {
         "the editor definitions disagree:\n  only in Emacs:   {:?}\n  only in VS Code: {:?}",
         only_emacs,
         only_vscode
+    );
+}
+
+#[test]
+fn neither_editor_paints_an_internal_helper() {
+    // A name in the internal module is out of every user's scope, so a user's
+    // own definition of it is an ordinary identifier and must not be painted
+    // as a builtin.
+    let emacs = folded(&emacs_names());
+    let vscode = folded(&vscode_names());
+    let painted: BTreeSet<String> = internal_names()
+        .into_iter()
+        .filter(|n| {
+            let n = n.to_ascii_lowercase();
+            emacs.contains(&n) || vscode.contains(&n)
+        })
+        .collect();
+    assert!(
+        painted.is_empty(),
+        "names in `{}` that an editor lists as builtins -- remove them from both editor definitions:\n  {}",
+        INTERNAL_MODULE,
+        painted.iter().cloned().collect::<Vec<_>>().join(" ")
     );
 }
 

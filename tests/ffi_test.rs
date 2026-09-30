@@ -515,12 +515,28 @@ fn rest_cannot_be_declared() {
 }
 
 #[test]
-fn a_builtin_s_name_is_refused() {
-    // A compiled call to `sexpr-car` reaches the runtime shim by that name,
-    // so a declaration under it would be miscompiled rather than shadowed.
-    // In a module the checker's own redefinition check never sees the clash.
-    let e = err(r#"(module m (defffi (sexpr-car "abs") (i32) i32))"#);
-    assert!(e.contains("builtin"), "unexpected error: {}", e);
+fn a_builtin_s_name_is_refused_at_the_root() {
+    // The root is where `sexpr-car` lives, so this would replace it.
+    let e = err(r#"(defffi (sexpr-car "abs") (i32) i32)"#);
+    assert!(e.contains("built-in"), "unexpected error: {}", e);
+}
+
+#[test]
+fn a_declaration_in_a_module_may_share_a_builtin_s_name() {
+    // `m::sexpr-car` is not the builtin, and a compiled call to it reaches the
+    // C function rather than the builtin's runtime shim — a call is lowered by
+    // its path, not by its last segment.
+    assert_eq!(
+        int(
+            r#"
+            (module m (pub defffi (sexpr-car "abs") (i32) i32))
+            (defun f ((n i32)) i32 (unsafe (m::sexpr-car n)))
+            (compile f)
+            (f -7)
+            "#
+        ),
+        7
+    );
 }
 
 #[test]

@@ -15,6 +15,13 @@ use std::fmt;
 use typelisp_read::name_lexer::{NameLexer, NameTok};
 use crate::{wk, Error, Heap, Loc, PathId, SymRef, Value};
 
+/// The root child module the standard library keeps its internal helpers in:
+/// the prelude's own `defun`s a user never writes, the natives under them, and
+/// what a library macro's expansion calls. At the root they would be in scope
+/// everywhere, and a user's definition of the same name would replace the
+/// library's. The `%` keeps the name out of the way of a user's own modules.
+pub const INTERNAL_MODULE: &str = "%internal";
+
 /// A structured, fully-qualified path identifying a type, free function, or
 /// module — a sequence of lowercase segments (e.g. `geo::point` is
 /// `["geo", "point"]`). Used instead of a joined `"a::b"` string so identity is
@@ -38,6 +45,11 @@ impl Path {
     /// A single-segment path (a root-level name or a type variable).
     pub fn root(name: &str) -> Path {
         Path(vec![name.to_string()])
+    }
+
+    /// `name` inside [`INTERNAL_MODULE`].
+    pub fn internal(name: &str) -> Path {
+        Path(vec![INTERNAL_MODULE.to_string(), name.to_string()])
     }
 
     /// Build a path from owned segments (must be non-empty).

@@ -76,10 +76,10 @@ fn check_error(src: &str) -> String {
 /// pointed at a string output stream and read back.
 fn stdout_of(src: &str) -> String {
     eval_string(&format!(
-        "(defvar (*cap* i32) (stream-string-output))\n\
+        "(defvar (*cap* i32) (%internal::stream-string-output))\n\
          (setf *standard-output* (standard-stream::new *cap*))\n\
          {}\n\
-         (match (stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
+         (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
         src
     ))
 }
@@ -377,14 +377,14 @@ fn disassemble_can_print_llvm_ir_instead() {
 #[test]
 fn disassemble_leaves_the_definition_interpreted() {
     let after_disassemble = eval_string(
-        "(defvar (*cap* i32) (stream-string-output))\n\
+        "(defvar (*cap* i32) (%internal::stream-string-output))\n\
          (setf *trace-output* (standard-stream::new *cap*))\n\
          (defun f ((n int)) int (+ n 1))\n\
          (defun quiet () () ())\n\
-         (setf *standard-output* (standard-stream::new (stream-string-output)))\n\
+         (setf *standard-output* (standard-stream::new (%internal::stream-string-output)))\n\
          (disassemble f)\n\
          (trace f)\n\
-         (match (stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
+         (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
     );
     assert!(
         !after_disassemble.contains("has a compiled body"),

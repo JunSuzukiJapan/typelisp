@@ -285,9 +285,9 @@ fn waiting_on_a_closed_handle_is_a_panic() {
     // `net-wait` itself, below the prelude's loops: a handle that is closed
     // has nothing to wait on, and parking a task there would hang it.
     let src = r#"
-(let ((h (unwrap (net-listen "127.0.0.1" 0))))
-  (unwrap (stream-close h))
-  (net-wait h 0))"#;
+(let ((h (unwrap (%internal::net-listen "127.0.0.1" 0))))
+  (unwrap (%internal::stream-close h))
+  (%internal::net-wait h 0))"#;
     let e = err(src);
     assert!(e.contains("closed"), "{}", e);
 }

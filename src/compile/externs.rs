@@ -4,10 +4,11 @@
 //! Three tables, all of them backend concerns even though they name no LLVM
 //! type:
 //!
-//! - [`rt_builtin_symbol`]: the `rt_*` shim a *free* builtin lowers to. Read
-//!   by `compile::symbols::callee_symbol_name` when it decides whether to
-//!   mangle a name, and by the driver when it decides whether a call target
-//!   needs compiling first.
+//! - [`rt_builtin_symbol`]: the `rt_*` shim a *free* builtin lowers to, asked
+//!   through [`builtin_shim`], which also checks the call's path is where that
+//!   builtin lives. Read by `compile::symbols::callee_symbol_name` when it
+//!   decides whether to mangle a name, and by the driver when it decides
+//!   whether a call target needs compiling first.
 //! - [`native_lowered_primitive_methods`]: which builtin *methods* on a
 //!   primitive receiver the island lowers in place rather than calling.
 //! - [`rt_extern_functions`]: every shim, with its address — the JIT's
@@ -24,7 +25,7 @@
 /// These builtins can never be `compile`d themselves (no typelisp body —
 /// direct cons-heap or OS access, Rust-only), so [`Interp::compile_function`]
 /// excludes them from its normal "every call target must already be compiled"
-/// check ([`is_rt_builtin_name`]) and instead always wires them via
+/// check ([`is_rt_builtin`]) and instead always wires them via
 /// [`rt_extern_functions`]. The `sexpr-*` family is the island layer
 /// (Symbol/Sexpr redesign Phase 4b — the whole family since closure
 /// unification Stage 8, tag predicates and typed payload extractors included,
@@ -323,8 +324,39 @@ pub(crate) const RT_SUSPEND_PREFIX: &str = "rt_suspend_";
 /// ask what a free suspension answers with.
 pub(crate) const RT_SUSPEND_BOOL_ANSWER: &str = "rt_suspend_io_for";
 
-pub(crate) fn is_rt_builtin_name(name: &str) -> bool {
-    rt_builtin_symbol(name).is_some()
+/// The shim a call to `path` lowers to, when `path` is a free builtin.
+///
+/// [`rt_builtin_symbol`] answers for a bare name, and a name is not a
+/// function: a builtin lives at the root or in the library's internal module
+/// ([`typelisp_front::INTERNAL_MODULE`]), and the same last segment anywhere
+/// else — or an internal builtin's name at the root — is a user's own
+/// function, which has to reach its own compiled body.
+pub(crate) fn builtin_shim(path: &crate::Path) -> Option<&'static str> {
+    let name = path.last_segment();
+    let shim = rt_builtin_symbol(name)?;
+    let at_home = if internal_builtins().contains(name) {
+        path.parent() == [typelisp_front::INTERNAL_MODULE]
+    } else {
+        path.is_simple()
+    };
+    at_home.then_some(shim)
+}
+
+pub(crate) fn is_rt_builtin(path: &crate::Path) -> bool {
+    builtin_shim(path).is_some()
+}
+
+/// The names of the builtins the registry keeps in the internal module.
+fn internal_builtins() -> &'static std::collections::HashSet<String> {
+    static NAMES: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
+    NAMES.get_or_init(|| {
+        let reg = typelisp_front::check::Registry::with_builtins();
+        let ns = reg
+            .root
+            .module(&[typelisp_front::INTERNAL_MODULE.to_string()])
+            .expect("the registry keeps its internal builtins in their own module");
+        ns.fns.iter().filter(|(_, sig)| sig.builtin).map(|(name, _)| name.clone()).collect()
+    })
 }
 
 /// Whether a builtin method on a primitive receiver (`i64`/`i32`/`char`/

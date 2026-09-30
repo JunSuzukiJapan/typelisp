@@ -714,9 +714,9 @@ fn a_string_stream_that_unread_more_than_it_read_has_no_position() {
         r#"(let ((s (make-string-input-stream "xyz")))
              (read-char s)
              (unread-char s #\x)
-             (let ((one (stream-position s::h)))
+             (let ((one (%internal::stream-position s::h)))
                (unread-char s #\w)
-               (format false "~a ~a" (unwrap one) (is-err (stream-position s::h)))))"#,
+               (format false "~a ~a" (unwrap one) (is-err (%internal::stream-position s::h)))))"#,
     );
     assert_eq!(v, "0 true");
 }

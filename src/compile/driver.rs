@@ -35,7 +35,7 @@ use crate::eval::interp::{
     Interp, Uncompilable,
 };
 use crate::compile::externs::{
-    is_native_lowered_primitive_method, is_rt_builtin_name, rt_extern_functions,
+    is_native_lowered_primitive_method, is_rt_builtin, rt_extern_functions,
 };
 use crate::compile::symbols::{CompiledItem, HASHTABLE_BUILTIN_METHODS};
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES};
@@ -731,7 +731,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
         targets
             .calls
             .into_iter()
-            .filter(|p| *p != path && !is_rt_builtin_name(p.last_segment()))
+            .filter(|p| *p != path && !is_rt_builtin(p))
             .map(CallEdge::Fn),
     );
 

@@ -108,19 +108,16 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
     let mut global_inits: Vec<(Path, Value)> = Vec::new();
     for f in &state.forms {
         let tl = crate::owned_form::owned_to_value(heap, f).map_err(|e| e.to_string())?;
-        if !core::op_is(heap, tl, typelisp_mem::wk::DEFVAR) {
-            continue;
-        }
         // A *permanent* root, not `push_root`: these have to survive the whole
         // of `load_unit` and a compiler-island load after it, and the ordinary
         // root stack is a strict LIFO that every one of those callers pushes
         // and pops on. Rooted the LIFO way, they were collected out from under
         // the caller and turned up later as "a global initializer was built
         // from something that is not a `defvar`" — the cell had been recycled.
+        // Rooting the whole top-level form keeps a `defvar` nested in a
+        // `(module ...)` alive with it.
         heap.push_permanent_root(tl);
-        let path =
-            core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
-        global_inits.push((path, tl));
+        collect_defvars(heap, tl, &mut global_inits)?;
     }
 
     let globals = state.globals.clone();
@@ -148,6 +145,22 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
     }
 
     Ok(AotPrelude { bitcode: unit.bitcode, global_inits })
+}
+
+/// The `defvar`s in `tl`, in the order [`collect_item`] numbers them:
+/// recursing into a `(module ...)` the same way, so a global the library keeps
+/// in its internal module gets the slot the bitcode was compiled against.
+fn collect_defvars(heap: &Heap, tl: Value, out: &mut Vec<(Path, Value)>) -> Result<(), String> {
+    if core::op_is(heap, tl, typelisp_mem::wk::MODULE) {
+        let body = core::fields(heap, tl).map_err(|e| e.to_string())?;
+        for item in body.into_iter().skip(1) {
+            collect_defvars(heap, item, out)?;
+        }
+    } else if core::op_is(heap, tl, typelisp_mem::wk::DEFVAR) {
+        let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
+        out.push((path, tl));
+    }
+    Ok(())
 }
 
 /// What to run when the committed dump no longer matches `SOURCE`.

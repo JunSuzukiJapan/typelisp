@@ -650,15 +650,13 @@ impl CompiledBody for FfiThunk {
 /// The `Interp` is unused today and taken anyway, so this matches the shape of
 /// every other [`typelisp_front::eval::interp::Backend`] hook.
 pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBody>, String> {
-    // A declaration whose *last segment* is a builtin's name would be
-    // miscompiled rather than rejected: `symbols::callee_symbol_name` maps
-    // that name to the builtin's `rt_*` shim, so a compiled call site would
-    // reach the shim instead of this thunk — and in a module other than the
-    // root, the checker's own redefinition check never sees a clash to report.
-    // Cheap to say so here, where the name and the shim table are both in
-    // reach.
+    // A declaration at a builtin's own path would be miscompiled rather than
+    // rejected: `symbols::callee_symbol_name` maps that path to the builtin's
+    // `rt_*` shim, so a compiled call site would reach the shim instead of
+    // this thunk. Cheap to say so here, where the path and the shim table are
+    // both in reach.
     let last = decl.path.last_segment();
-    if crate::compile::externs::is_rt_builtin_name(last) {
+    if crate::compile::externs::is_rt_builtin(&decl.path) {
         return Err(format!(
             "defffi: `{}` is the name of a builtin, and a compiled call to it would reach the \
              builtin rather than the C function. Declare it under another name, with the C symbol \
