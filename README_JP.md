@@ -11,7 +11,7 @@ TypeLisp は静的型付きの Lisp です。
 具体的には、以下のようになります。
 
 ```
-(defun fun_name ((arg1 type1) (arg2 type2) ...) return_type
+(defun fun-name ((arg1 type1) (arg2 type2) ...) return-type
     body ...)
 ```
 
@@ -20,13 +20,13 @@ TypeLisp は静的型付きの Lisp です。
 ```
 (defstruct Point (x i32) (y i32))
 
-(defmethod print ((p Point))
-    (println "Point: (x ~d y ~d)" p.x p.y));
+(defmethod show ((p Point)) ()
+  (println "Point: (x ~d y ~d)" p::x p::y))
+
+(show (Point::new 1 2))
 ```
 
-
-
-## Examples
+## 例
 
 ### factorial
 
@@ -45,7 +45,7 @@ TypeLisp は静的型付きの Lisp です。
 ```
 (defun is-whitespace ((b int)) bool
   (case b
-    ((#x20 #x09 #x85 #x0a #x0b #x0c #x0d) true)
+    ((#x20 #x09 #x0a #x0b #x0c #x0d) true)
     (else false)))
 
 (defun main () ()
@@ -114,6 +114,38 @@ TypeLisp は静的型付きの Lisp です。
 
 (main)
 ```
+
+### そのほかの例
+
+[examples/](examples/) にあるプログラムは、ファイル名を指定して実行できます。上の wc と Trait の例も
+[examples/wc.typl](examples/wc.typl) と [examples/animals.typl](examples/animals.typl) にあります。
+
+```sh
+typl examples/fizzbuzz.typl
+typl examples/wc.typl README_JP.md
+```
+
+| ファイル | 内容 |
+|---|---|
+| [bst.typl](examples/bst.typl) | 二分探索木（`defenum` と `match`） |
+| [factorial.typl](examples/factorial.typl) | 階乗（63 ビットを超えると自動で多倍長になる） |
+| [fibonacci.typl](examples/fibonacci.typl) | フィボナッチ数列（ループ） |
+| [fizzbuzz.typl](examples/fizzbuzz.typl) | FizzBuzz |
+| [game_of_life.typl](examples/game_of_life.typl) | ライフゲーム |
+| [maze_bfs.typl](examples/maze_bfs.typl) | 迷路の最短経路（幅優先探索） |
+| [primes.typl](examples/primes.typl) | エラトステネスの篩 |
+
+[examples/projects/](examples/projects/) には、複数のファイルに分かれたプログラムがあります。
+`src/main.typl` を指定して実行します（例: `typl examples/projects/todo-cli/src/main.typl`）。
+
+| プロジェクト | 内容 |
+|---|---|
+| [echo-server](examples/projects/echo-server/) | 接続ごとにタスクを起動するエコーサーバ |
+| [expr-eval](examples/projects/expr-eval/) | 四則演算の対話計算機（字句解析、構文解析、評価） |
+| [http](examples/projects/http/) | HTTP/1.1 のサーバとクライアント（TLS 対応） |
+| [mini-lisp](examples/projects/mini-lisp/) | 小さな Lisp の REPL |
+| [shape-canvas](examples/projects/shape-canvas/) | 文字のキャンバスに図形を描く（`:dyn` とエラー型） |
+| [todo-cli](examples/projects/todo-cli/) | ToDo を管理するコマンドラインツール |
 
 ## インストールとビルド
 
