@@ -100,10 +100,10 @@ scripts/bench-prelude.sh            # 事前コンパイル済み prelude の効
 
 ## compile 機能のビルド
 
-`inkwell`（LLVM 17 バインディング）に依存するため `LLVM_SYS_170_PREFIX` が必要
-（`brew install llvm@17` 済みが前提）。**このパスはマシンごとに異なるため、リポジトリ内の
+`inkwell`（LLVM 22 バインディング）に依存するため `LLVM_SYS_221_PREFIX` が必要
+（`brew install llvm@22` 済みが前提）。**このパスはマシンごとに異なるため、リポジトリ内の
 どのファイルにも絶対パスをハードコードしない**——`scripts/with-llvm-env.sh` が
-`brew --prefix llvm@17` で都度動的解決する:
+`brew --prefix llvm@22` で都度動的解決する:
 
 ```sh
 scripts/with-llvm-env.sh cargo build
@@ -111,7 +111,7 @@ scripts/with-llvm-env.sh cargo test
 ```
 
 `scripts/setup-cargo-env.sh` を 1 度走らせれば、同じ値を `.cargo/config.toml`（git 管理外）に
-書くので素の `cargo build`/`cargo test` で動く。`LLVM_SYS_170_PREFIX` を自分のシェルで既に
+書くので素の `cargo build`/`cargo test` で動く。`LLVM_SYS_221_PREFIX` を自分のシェルで既に
 export 済みでも同じ（macOS では下の `MACOSX_DEPLOYMENT_TARGET` も要る）。
 
 macOS では両スクリプトが `MACOSX_DEPLOYMENT_TARGET` も設定する。値は

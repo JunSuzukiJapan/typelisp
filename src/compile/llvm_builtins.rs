@@ -253,10 +253,9 @@ fn llvm_module_create(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// Every compiled function gets the same fixed C ABI — `i64 name(i64* args,
 /// i32 argc)` — regardless of its typelisp-level arity (see
 /// `registry::llvm_module_def`'s doc comment for why); `llvm-builder::load-arg`
-/// reads a logical parameter back out of `args`. LLVM 17 defaults to opaque
-/// pointers (inkwell's `llvm17-0` feature doesn't pull in its
-/// `typed-pointers` feature — confirmed against inkwell's own `Cargo.toml`),
-/// so the parameter type is `Context::ptr_type`, not `IntType::ptr_type`.
+/// reads a logical parameter back out of `args`. LLVM 22 has only opaque
+/// pointers, so the parameter type is `Context::ptr_type`, not
+/// `IntType::ptr_type`.
 /// Shared by [`llvm_module_add_function`] and [`declare_external_function`]
 /// (labels/closures Stage 3's JIT-only forward declarations) — both declare
 /// a function under this exact same signature, just with or without a body.
@@ -783,7 +782,7 @@ fn llvm_builder_build_int_overflow(args: &[Value], name: &str, intrinsic_name: &
 /// be filled in by `store-arg` and passed to `build-call` — the compiled-IR
 /// equivalent of building the `i64* args` array every compiled function's
 /// fixed ABI expects (see `llvm_module_add_function`'s doc comment). Opaque
-/// pointers (LLVM 17's default) carry no element-type info of their own, so
+/// pointers (the only kind LLVM 22 has) carry no element-type info of their own, so
 /// this pointer is usable as a flat `i64*` exactly the way `load_arg`'s own
 /// `args_ptr` parameter already is — every GEP against it supplies
 /// `ctx.i64_type()` itself, regardless of the alloca's nominal array type.

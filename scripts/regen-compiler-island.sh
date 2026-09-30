@@ -19,7 +19,7 @@
 #
 #   scripts/regen-compiler-island.sh
 #
-# Delegates to with-llvm-env.sh for the LLVM 17 toolchain prefix (never
+# Delegates to with-llvm-env.sh for the LLVM 22 toolchain prefix (never
 # hardcode it — see that script). The bootstrap binary resolves the output
 # paths from CARGO_MANIFEST_DIR itself, so no paths are passed here.
 set -euo pipefail

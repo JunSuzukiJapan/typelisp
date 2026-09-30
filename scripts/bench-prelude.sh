@@ -8,7 +8,7 @@
 #
 #   scripts/bench-prelude.sh
 #
-# Delegates to with-llvm-env.sh for the LLVM 17 toolchain prefix (never
+# Delegates to with-llvm-env.sh for the LLVM 22 toolchain prefix (never
 # hardcode it — see that script).
 set -euo pipefail
 

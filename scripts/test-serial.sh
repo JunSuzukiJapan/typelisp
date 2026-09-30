@@ -45,13 +45,13 @@ set -uo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-# Pin LLVM 17 even if .cargo/config.toml wasn't generated (see
-# scripts/setup-cargo-env.sh) and the shell points LLVM_SYS_170_PREFIX
+# Pin LLVM 22 even if .cargo/config.toml wasn't generated (see
+# scripts/setup-cargo-env.sh) and the shell points LLVM_SYS_221_PREFIX
 # elsewhere.
 if command -v brew >/dev/null 2>&1; then
-    prefix="$(brew --prefix llvm@17 2>/dev/null || true)"
+    prefix="$(brew --prefix llvm@22 2>/dev/null || true)"
     if [ -n "$prefix" ] && [ -x "$prefix/bin/llvm-config" ]; then
-        export LLVM_SYS_170_PREFIX="$prefix"
+        export LLVM_SYS_221_PREFIX="$prefix"
     fi
 fi
 

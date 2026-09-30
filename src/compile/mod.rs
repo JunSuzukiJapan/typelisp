@@ -577,8 +577,8 @@ mod tests {
         let entry = ctx.append_basic_block(caller, "entry");
         builder.position_at_end(entry);
 
-        let tagged_one = i64_ty.const_int(1, false).const_shl(i64_ty.const_int(3, false));
-        let tagged_two = i64_ty.const_int(2, false).const_shl(i64_ty.const_int(3, false));
+        let tagged_one = i64_ty.const_int(1 << 3, false);
+        let tagged_two = i64_ty.const_int(2 << 3, false);
         let cons_args = builder.build_alloca(i64_ty.array_type(2), "cons_args").unwrap();
         let argc_zero32 = ctx.i32_type().const_int(0, false);
         let slot0 = unsafe { builder.build_gep(i64_ty, cons_args, &[argc_zero32], "slot0").unwrap() };

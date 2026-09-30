@@ -83,7 +83,7 @@ fn island_artifacts_are_fresh() {
 /// IR.
 ///
 /// A caveat for anyone seeing this fail with no local change: bitcode encoding
-/// is LLVM-version-specific, so a different LLVM 17 patch release can produce
+/// is LLVM-version-specific, so a different LLVM 22 patch release can produce
 /// different bytes. That is not a false alarm — it means the committed
 /// artifact really was built by a different compiler than the one in hand.
 #[test]
