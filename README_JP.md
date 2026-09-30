@@ -1,6 +1,98 @@
-# typelisp
+# TypeLisp
 
-typelisp は静的型付きの Lisp です。
+TypeLisp は静的型付きの Lisp です。
+文法などは主に、Common Lispを参考にしています。
+
+## 特徴
+
+### 関数定義
+
+関数を定義するときには、引数の型と戻り値の型を指定します。
+具体的には、以下のようになります。
+
+```
+(defun fun_name ((arg1 type1) (arg2 type2) ...) return_type
+    body ...)
+```
+
+### メソッド
+
+```
+(defstruct Point (x i32) (y i32))
+
+(defmethod print ((p Point))
+    (println "Point: (x ~d y ~d)" p.x p.y));
+```
+
+
+
+## Examples
+
+### factorial
+
+```
+(defun factorial ((n int)) int
+  (if (<= n 1)
+    1
+    (* n (factorial (- n 1))) ))
+
+(let ((num (factorial 10)))
+  (println "10! = ~d" num) )
+```
+
+### wc
+
+```
+(defun is-whitespace ((b int)) bool
+  (case b
+    ((#x20 #x09 #x85 #x0a #x0b #x0c #x0d) true)
+    (else false)))
+
+(defun main () ()
+  (let ((args (command-line-args)))
+    (when (< (len args) 2)
+      (println "usage: wc file")
+      (exit 0))
+
+    (let ((path (get args 1))
+          (char-count 0)
+          (word-count 0)
+          (line-count 0)
+          (in-word false))
+      (match (open-binary-input path)
+        ((ok file)
+         (progn
+           (loop (match (read-byte file)
+                   ((some b)
+                    (progn
+                      (incf char-count)
+                      (when (= b #x0a)
+                        (incf line-count))
+                      (if in-word
+                        (when (is-whitespace b)
+                          (setf in-word false))
+                        (unless (is-whitespace b)
+                          (setf in-word true)
+                          (incf word-count)))))
+                   ((none) (break))))
+           (close file)
+           (println "~10d ~10d ~10d ~a" line-count word-count char-count path)))
+        ((err e)
+         (progn
+           (println "wc: ~a" (message e))
+           (exit 1)))))))
+
+(main)
+```
+
+### Trait
+
+
+
+
+
+
+
 
 ## インストールとビルド
 
