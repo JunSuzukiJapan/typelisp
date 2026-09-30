@@ -12,7 +12,7 @@ typelisp のプログラムは、何もしなければインタプリタで実�
 
 ## 1. 準備
 
-コンパイルには LLVM 17 を使います。[README_JP.md](../../../README_JP.md) の手順で `typl` を
+コンパイルには LLVM 22 を使います。[README_JP.md](../../../README_JP.md) の手順で `typl` を
 ビルドできていれば、追加の準備はいりません。
 
 AOT コンパイルで作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` をリンクします。

@@ -152,13 +152,13 @@ typl examples/wc.typl README_JP.md
 ### 必要なもの
 
 - Rust（cargo）
-- LLVM 17
-- macOS では Xcode Command Line Tools（ビルド時に `xcrun` を使います）
+- LLVM 22
+- macOS では Xcode Command Line Tools（リンクに使います）
 
-LLVM 17 は Homebrew で入れられます。
+LLVM 22 は Homebrew で入れられます。
 
 ```sh
-brew install llvm@17
+brew install llvm@22
 ```
 
 ### 初回の設定
@@ -169,7 +169,7 @@ brew install llvm@17
 scripts/setup-cargo-env.sh
 ```
 
-このスクリプトは `brew --prefix llvm@17` で LLVM 17 の場所を調べ、`.cargo/config.toml` を生成します。
+このスクリプトは `brew --prefix llvm@22` で LLVM 22 の場所を調べ、`.cargo/config.toml` を生成します。
 このファイルはマシンごとに内容が違うので、Git の管理対象外です。macOS では、ビルドに使う最低 OS
 バージョン（`MACOSX_DEPLOYMENT_TARGET`）も書き込みます。Rust のツールチェーンを更新したときは、
 もう一度実行してください。
@@ -188,7 +188,7 @@ scripts/setup-cargo-env.sh --deployment-target 15.0
 scripts/with-llvm-env.sh cargo build
 ```
 
-Homebrew を使わない場合は、`LLVM_SYS_170_PREFIX` に LLVM 17 のインストール先を設定してください。
+Homebrew を使わない場合は、`LLVM_SYS_221_PREFIX` に LLVM 22 のインストール先を設定してください。
 macOS ではさらに `MACOSX_DEPLOYMENT_TARGET` も必要です。
 
 ### ビルド

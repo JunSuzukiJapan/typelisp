@@ -24,7 +24,7 @@ num-rational = "0.4"
 num-traits = "0.2"
 num-integer = "0.1"
 rustyline = "18"
-inkwell = { version = "0.9", features = ["llvm17-0"] }
+inkwell = { version = "0.9", features = ["llvm22-1"] }
 typelisp-abi = { path = "crates/typelisp-abi" }
 typelisp-front = { path = "crates/typelisp-front" }
 typelisp-mem = { path = "crates/typelisp-mem" }
