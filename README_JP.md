@@ -87,12 +87,33 @@ TypeLisp は静的型付きの Lisp です。
 
 ### Trait
 
+```
+(deftrait Animal ()
+  (name ((self Self)) string)
+  (sound ((self Self)) string)
+  (speak ((self Self)) string
+    (format false "~a says ~a" (name self) (sound self))))
 
+(defstruct Dog (nick string))
+(defstruct Cat (nick string))
 
+(impl Animal Dog
+  (name ((self Self)) string self::nick)
+  (sound ((self Self)) string "Woof"))
 
+(impl Animal Cat
+  (name ((self Self)) string self::nick)
+  (sound ((self Self)) string "Meow"))
 
+(defun main () ()
+  (let ((animals (the Vector<:dyn Animal> (Vector::new))))
+    (push animals (Dog::new "Pochi"))
+    (push animals (Cat::new "Tama"))
+    (doiter (a (iter animals))
+      (println "~a" (speak a)))))
 
-
+(main)
+```
 
 ## インストールとビルド
 
