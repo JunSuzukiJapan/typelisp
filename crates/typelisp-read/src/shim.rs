@@ -16,7 +16,7 @@ use crate::reader::Reader;
 // their names are the ones `type_key::type_key_of` produces is asserted by
 // `tests/type_identity_guard_test.rs` — checked, not assumed, because the
 // failure it guards is silent: a value built under a key nobody else spells
-// would be unmatchable and print as `<unknown-variant>`.
+// would be unmatchable and fail to print.
 //
 // `cons-cell<A,B>`'s box is a `Struct`: the prelude `defstruct`
 // `read-datum-at` pairs its datum with its end index in, since this language

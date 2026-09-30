@@ -40,12 +40,12 @@ use crate::Path;
 #[derive(Default)]
 pub(crate) struct PrintSnapshot {
     /// `(base type key, variant index) -> variant name`.
-    enum_names: HashMap<(String, usize), String>,
+    enum_names: typelisp_print::aot::VariantNames,
     /// `(base type key, variant or NO_VARIANT, index or EVERY_FIELD) ->
     /// the field's type key template` — `Interp::field_template_descriptors`.
-    field_templates: HashMap<(String, i64, i64), String>,
+    field_templates: typelisp_print::aot::FieldTemplates,
     /// `(base type key, index) -> field name` — `Interp::field_name_descriptors`.
-    field_names: HashMap<(String, i64), String>,
+    field_names: typelisp_print::aot::FieldNames,
     /// Every method with a `print-object` or a `~/name/` method's signature,
     /// by `(receiver type path, method name)`.
     methods: HashMap<(Path, String), PrintMethod>,
@@ -110,29 +110,13 @@ fn current() -> Arc<PrintSnapshot> {
 }
 
 const WORKER_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::runtime::PrintHooks {
-    enum_variant_name: |key, variant| {
-        let base = crate::type_key::split_key(key).0;
-        current().enum_names.get(&(base.to_string(), variant)).cloned()
-    },
+    enum_variant_name: |key, variant| typelisp_print::aot::variant_name_in(&current().enum_names, key, variant),
     field_is_niched_option: |key, variant, index| {
-        let base = crate::type_key::split_key(key).0.to_string();
-        let variant = variant.map_or(typelisp_print::aot::NO_VARIANT, |v| v as i64);
-        let snapshot = current();
-        let t = &snapshot.field_templates;
-        match t
-            .get(&(base.clone(), variant, index as i64))
-            .or_else(|| t.get(&(base, variant, typelisp_print::aot::EVERY_FIELD)))
-        {
-            Some(template) => {
-                let args = typelisp_mem::type_key_args(key);
-                typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(template, &args))
-            }
-            None => false,
-        }
+        typelisp_print::aot::field_is_niched_in(&current().field_templates, key, variant, index)
     },
     field_name: |key, index| {
-        let base = crate::type_key::split_key(key).0.to_string();
-        current().field_names.get(&(base, index as i64)).cloned()
+        let snapshot = current();
+        typelisp_print::aot::field_name_in(&snapshot.field_names, &snapshot.field_templates, key, index)
     },
     print_object: worker_print_object,
     format_call: worker_format_call,

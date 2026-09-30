@@ -1,0 +1,44 @@
+;; wc: count the lines, words and bytes of a file, like the Unix wc command.
+;; The file is read one byte at a time from a binary input stream.
+;; wc: Unix の wc コマンドと同じく、ファイルの行数・単語数・バイト数を数える。
+;; ファイルはバイナリの入力ストリームから1バイトずつ読む。
+(defun is-whitespace ((b int)) bool
+  (case b
+    ((#x20 #x09 #x0a #x0b #x0c #x0d) true)
+    (else false)))
+
+(defun main () ()
+  (let ((args (command-line-args)))
+    (when (< (len args) 2)
+      (println "usage: wc file")
+      (exit 0))
+
+    (let ((path (get args 1))
+          (char-count 0)
+          (word-count 0)
+          (line-count 0)
+          (in-word false))
+      (match (open-binary-input path)
+        ((ok file)
+         (progn
+           (loop (match (read-byte file)
+                   ((some b)
+                    (progn
+                      (incf char-count)
+                      (when (= b #x0a)
+                        (incf line-count))
+                      (if in-word
+                        (when (is-whitespace b)
+                          (setf in-word false))
+                        (unless (is-whitespace b)
+                          (setf in-word true)
+                          (incf word-count)))))
+                   ((none) (break))))
+           (close file)
+           (println "~10d ~10d ~10d ~a" line-count word-count char-count path)))
+        ((err e)
+         (progn
+           (println "wc: ~a" (message e))
+           (exit 1)))))))
+
+(main)

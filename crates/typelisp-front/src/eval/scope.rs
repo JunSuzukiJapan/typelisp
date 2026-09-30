@@ -161,55 +161,57 @@ impl ModuleScope {
         self.get_or_create(name.parent()).types.insert(name.last_segment().to_string(), TypeEntry::Enum(def));
     }
 
-    /// The name of `variant` of the enum registered at `name`, or `None` when
-    /// no enum is registered there.
-    ///
-    /// The printer's question ([`typelisp_print::PrintEnv::enum_variant_name`]):
-    /// an enum box stores its type key and variant *index*, never the name.
-    /// A direct walk down the module chain rather than
-    /// [`Self::collect_struct_and_enum_types`], because this is asked once per
-    /// enum *value* rendered and that one builds a map of every type in the
-    /// program.
-    pub(crate) fn enum_variant_name(&self, name: &Path, variant: usize) -> Option<String> {
+    /// The type registered at `name`, walking down the module chain directly
+    /// rather than through [`Self::collect_struct_and_enum_types`]: the
+    /// printer asks once per value it renders, and that one builds a map of
+    /// every type in the program.
+    fn type_entry(&self, name: &Path) -> Result<&TypeEntry, String> {
+        let unknown = || format!("internal error: no type `{}` is registered", name);
         let mut ns = self;
         for seg in name.parent() {
-            ns = ns.children.get(seg)?;
+            ns = ns.children.get(seg).ok_or_else(unknown)?;
         }
-        match ns.types.get(name.last_segment())? {
-            TypeEntry::Enum(def) => def.variants.get(variant).map(|(n, _)| n.clone()),
-            TypeEntry::Struct { .. } => None,
+        ns.types.get(name.last_segment()).ok_or_else(unknown)
+    }
+
+    /// The name of `variant` of the enum registered at `name` — the printer's
+    /// question ([`typelisp_print::PrintEnv::enum_variant_name`]): an enum box
+    /// stores its type key and variant *index*, never the name.
+    pub(crate) fn enum_variant_name(&self, name: &Path, variant: usize) -> Result<String, String> {
+        match self.type_entry(name)? {
+            TypeEntry::Enum(def) => def
+                .variants
+                .get(variant)
+                .map(|(n, _)| n.clone())
+                .ok_or_else(|| format!("internal error: enum `{}` has no variant {}", name, variant)),
+            TypeEntry::Struct { .. } => Err(format!("internal error: `{}` is a struct, not an enum", name)),
         }
     }
 
     /// The key template of field `index` of the type registered at `name` —
-    /// of `variant` for an enum, of the struct otherwise — or `None` when no
-    /// such type, variant or field is registered. The printer's other
-    /// question ([`typelisp_print::PrintEnv::field_is_niched_option`]),
-    /// walked the same way as [`Self::enum_variant_name`].
-    pub(crate) fn field_template(&self, name: &Path, variant: Option<usize>, index: usize) -> Option<&str> {
-        let mut ns = self;
-        for seg in name.parent() {
-            ns = ns.children.get(seg)?;
-        }
-        match (ns.types.get(name.last_segment())?, variant) {
-            (TypeEntry::Enum(def), Some(v)) => def.templates.get(v)?.get(index).map(String::as_str),
+    /// of `variant` for an enum, of the struct otherwise. The printer's other
+    /// question ([`typelisp_print::PrintEnv::field_is_niched_option`]).
+    pub(crate) fn field_template(&self, name: &Path, variant: Option<usize>, index: usize) -> Result<&str, String> {
+        let template = match (self.type_entry(name)?, variant) {
+            (TypeEntry::Enum(def), Some(v)) => def.templates.get(v).and_then(|ts| ts.get(index)).map(String::as_str),
             (TypeEntry::Struct { templates, .. }, None) => templates.get(index),
-            _ => None,
-        }
+            (TypeEntry::Enum(_), None) => return Err(format!("internal error: enum `{}` asked for as a struct", name)),
+            (TypeEntry::Struct { .. }, Some(_)) => return Err(format!("internal error: struct `{}` asked for as an enum", name)),
+        };
+        template.ok_or_else(|| format!("internal error: `{}` has no field {} (variant {:?})", name, index, variant))
     }
 
-    /// The name of field `index` of the struct registered at `name`, or `None`
-    /// when no struct is registered there or its fields have no names (a
-    /// `Vector<T>`'s elements). The printer's third question
-    /// ([`typelisp_print::PrintEnv::field_name`]).
-    pub(crate) fn field_name(&self, name: &Path, index: usize) -> Option<&str> {
-        let mut ns = self;
-        for seg in name.parent() {
-            ns = ns.children.get(seg)?;
-        }
-        match ns.types.get(name.last_segment())? {
-            TypeEntry::Struct { names, .. } => names.get(index).map(String::as_str),
-            TypeEntry::Enum(_) => None,
+    /// The name of field `index` of the struct registered at `name` —
+    /// `Ok(None)` when its fields have no names (a `Vector<T>`'s elements).
+    /// The printer's third question ([`typelisp_print::PrintEnv::field_name`]).
+    pub(crate) fn field_name(&self, name: &Path, index: usize) -> Result<Option<&str>, String> {
+        match self.type_entry(name)? {
+            TypeEntry::Struct { names, .. } if names.is_empty() => Ok(None),
+            TypeEntry::Struct { names, .. } => names
+                .get(index)
+                .map(|n| Some(n.as_str()))
+                .ok_or_else(|| format!("internal error: struct `{}` has no field {}", name, index)),
+            TypeEntry::Enum(_) => Err(format!("internal error: `{}` is an enum, not a struct", name)),
         }
     }
 

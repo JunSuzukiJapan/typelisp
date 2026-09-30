@@ -454,17 +454,19 @@ fn each_turn_of_a_loop_starts_a_task_over_its_own_binding() {
 /// Everything up to the call happens in the compiled body — that is what `task`
 /// promises anywhere — and only the call is handed over. The waiting is done
 /// by the interpreted caller, which is the half that can suspend.
+///
+/// Each task answers its own result and the caller waits for both, so the
+/// outcome does not depend on how the two are scheduled: they may run on
+/// different OS threads, in either order.
 #[test]
 fn a_compiled_body_can_start_tasks() {
     assert_eq!(
-        text_compiled(r#"(defvar (trail string) "")
-                (defun work ((name string)) ()
-                  (when true (setf trail (append trail name))))
-                (defun spawn-two () Task<()>
-                  (progn (task (work "a")) (task (work "b"))))
+        text_compiled(r#"(defun work ((name string)) string name)
+                (defun spawn-two () cons-cell<Task<string>,Task<string>>
+                  (cons (task (work "a")) (task (work "b"))))
                 (compile spawn-two)
-                (let ((t (spawn-two)))
-                  (progn (wait t) trail))"#),
+                (let ((ts (spawn-two)))
+                  (append (wait ts::car) (wait ts::cdr)))"#),
         "ab"
     );
 }

@@ -2624,7 +2624,7 @@ impl Renderer {
         depth: usize,
         out: &mut String,
     ) -> Result<(), String> {
-        if !ctx.env.field_is_niched_option(type_key, variant, index) {
+        if !ctx.env.field_is_niched_option(type_key, variant, index)? {
             return self.render(heap, ctx, f, standard, depth, out);
         }
         if f == Value::Empty {
@@ -2756,7 +2756,7 @@ impl Renderer {
                     // `x: 1` — the name the definition gives the field, when it
                     // gives one. Not `:x`, which would read as a keyword
                     // argument (`(point::make :x 1)`).
-                    if let Some(name) = ctx.env.field_name(&key, i) {
+                    if let Some(name) = ctx.env.field_name(&key, i)? {
                         out.push_str(&name);
                         out.push_str(": ");
                     }
@@ -2773,19 +2773,13 @@ impl Renderer {
                     .expect("an enum box has a type name")
                     .to_string();
                 let variant = heap.enum_variant(id);
-                // `enums` holds every `TypeEntry::Enum` in the interpreter's
-                // scope tree — a user `defenum`'s own exec, *and* the built-in
-                // sum types (`Option`/`Result`/the error types), which
-                // `Interp::new` seeds from `registry::builtin_sum_defs` up
-                // front (see that function's doc comment) precisely so this
-                // lookup never needs a second table to fall back to. Coming
-                // up empty here means the lookup itself is broken (a stale
-                // `Path`, an enum this table was never told about), not that
-                // the name lives somewhere else.
-                let name = ctx
-                    .env
-                    .enum_variant_name(&type_key, variant)
-                    .unwrap_or_else(|| "<unknown-variant>".to_string());
+                // Every enum is registered — a user `defenum`'s own exec, and
+                // the built-in sum types (`Option`/`Result`/the error types),
+                // which `Interp::new` seeds from `registry::builtin_sum_defs`
+                // up front — so a lookup that comes up empty is broken (a
+                // stale `Path`, an enum this table was never told about), and
+                // says so.
+                let name = ctx.env.enum_variant_name(&type_key, variant)?;
                 if heap.enum_field_count(id) == 0 {
                     out.push_str(&name);
                 } else {

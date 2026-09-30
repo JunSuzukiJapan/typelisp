@@ -37,12 +37,12 @@ use crate::PrintEnv;
 #[derive(Clone, Copy)]
 pub struct PrintHooks {
     /// `(type_key, variant) -> name`. See [`PrintEnv::enum_variant_name`].
-    pub enum_variant_name: fn(&str, usize) -> Option<String>,
+    pub enum_variant_name: fn(&str, usize) -> Result<String, String>,
     /// `(type_key, variant, index) -> is a niched Option`. See
     /// [`PrintEnv::field_is_niched_option`].
-    pub field_is_niched_option: fn(&str, Option<usize>, usize) -> bool,
+    pub field_is_niched_option: fn(&str, Option<usize>, usize) -> Result<bool, String>,
     /// `(type_key, index) -> field name`. See [`PrintEnv::field_name`].
-    pub field_name: fn(&str, usize) -> Option<String>,
+    pub field_name: fn(&str, usize) -> Result<Option<String>, String>,
     /// `(heap, value, escape) -> rendering`. See [`PrintEnv::print_object`].
     pub print_object: fn(&mut Heap, Value, bool) -> Result<Option<String>, String>,
     /// `(heap, name, value, colon, at) -> rendering`, for `~/name/`. See
@@ -57,24 +57,25 @@ pub struct PrintHooks {
     pub print_vars: fn(&Heap) -> Result<PrintVars, String>,
 }
 
-/// The hooks a program with no environment installed gets: every enum prints
-/// `<unknown-variant>`, no type has a `print-object` method, and the control
-/// variables cannot be read at all — there is no program to hold them.
+/// The hooks a program with no environment installed gets: every question
+/// about the program — its types, its methods, its control variables — is
+/// an error, because there is no program to answer it.
 ///
 /// Reaching these is a registration bug, not something a program can provoke.
 /// A unit test that prints without standing a program up installs its own
-/// hooks for the variables it needs.
+/// hooks for what it needs.
 pub const BARE_HOOKS: PrintHooks = PrintHooks {
-    enum_variant_name: |_, _| None,
-    field_is_niched_option: |_, _, _| false,
-    field_name: |_, _| None,
-    print_object: |_, _, _| Ok(None),
+    enum_variant_name: |key, _| Err(format!("printing a `{}` needs a program that defines it, and none is installed", key)),
+    field_is_niched_option: |key, _, _| Err(format!("printing a `{}` needs a program that defines it, and none is installed", key)),
+    field_name: |key, _| Err(format!("printing a `{}` needs a program that defines it, and none is installed", key)),
+    print_object: |_, _, _| Err(NO_PROGRAM_FOR_METHODS.to_string()),
     format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program to look the method up in", name)),
     opts: |_| Err(NO_PROGRAM.to_string()),
     print_vars: |_| Err(NO_PROGRAM.to_string()),
 };
 
 const NO_PROGRAM: &str = "printing needs a program to read the printer control variables from, and none is installed";
+const NO_PROGRAM_FOR_METHODS: &str = "printing needs a program to look up `print-object` methods in, and none is installed";
 
 /// Every printer control variable the renderer reads, as the prelude names
 /// them: what [`read_print_vars`] and [`read_opts`] ask for between them, and
@@ -196,15 +197,15 @@ struct RtPrintEnv {
 }
 
 impl PrintEnv for RtPrintEnv {
-    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Option<String> {
+    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Result<String, String> {
         (self.hooks.enum_variant_name)(type_key, variant)
     }
 
-    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> bool {
+    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> Result<bool, String> {
         (self.hooks.field_is_niched_option)(type_key, variant, index)
     }
 
-    fn field_name(&self, type_key: &str, index: usize) -> Option<String> {
+    fn field_name(&self, type_key: &str, index: usize) -> Result<Option<String>, String> {
         (self.hooks.field_name)(type_key, index)
     }
 
@@ -622,9 +623,11 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
 mod tests {
     use super::*;
 
-    /// [`BARE_HOOKS`] with the control variables at CL's initial values —
-    /// what these tests print under, having no program to hold them.
+    /// [`BARE_HOOKS`] with the control variables at CL's initial values and
+    /// no `print-object` methods — what these tests print under, having no
+    /// program to hold either.
     const TEST_HOOKS: PrintHooks = PrintHooks {
+        print_object: |_, _, _| Ok(None),
         opts: |_| Ok(Opts::default()),
         print_vars: |_| Ok(PrintVars::default()),
         ..BARE_HOOKS
@@ -643,7 +646,7 @@ mod tests {
     }
 
     /// The hook path — what a shim will use — renders through the same
-    /// [`typelisp_print`] the interpreter does, and answers the two program
+    /// [`typelisp_print`] the interpreter does, and answers the program's
     /// questions from whatever environment is installed.
     #[test]
     fn installed_hooks_supply_enum_names_and_print_object() {
@@ -651,9 +654,10 @@ mod tests {
 
         set_print_hooks(Some(PrintHooks {
             enum_variant_name: |key, variant| match (key, variant) {
-                ("option", 0) => Some("some".to_string()),
-                _ => None,
+                ("option", 0) => Ok("some".to_string()),
+                _ => Err(format!("no variant {} of {}", variant, key)),
             },
+            field_is_niched_option: |_, _, _| Ok(false),
             print_object: |_, _, _| Ok(None),
             ..TEST_HOOKS
         }));
@@ -666,18 +670,18 @@ mod tests {
         set_print_hooks(None);
     }
 
-    /// With no enum names registered the renderer still runs — it just cannot
-    /// name the variant. Loud rather than silent, on purpose: a
-    /// `<unknown-variant>` in real output means a registration bug.
+    /// An enum whose type the environment has never heard of is a printing
+    /// error, not a guessed rendering: every enum a value can be of is
+    /// registered, so reaching this means the registration is broken.
     #[test]
-    fn unregistered_enum_names_render_an_unnamed_variant() {
+    fn an_unregistered_enum_is_a_printing_error() {
         let mut heap = Heap::with_capacity(1 << 12);
         set_print_hooks(Some(TEST_HOOKS));
 
         let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
         let args = heap.cons(boxed, Value::Empty).expect("heap has room");
-        let out = build_format(&mut heap, "~a", args).expect("format should succeed");
-        assert_eq!(format::finish(out, &Opts::default()), "(<unknown-variant> 7)");
+        let err = build_format(&mut heap, "~a", args).expect_err("an unregistered enum");
+        assert!(err.contains("option"), "{}", err);
 
         set_print_hooks(None);
     }
