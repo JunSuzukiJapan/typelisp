@@ -315,13 +315,13 @@ fn macroexpand_1_result_uses_the_niche() {
 #[test]
 fn a_traced_call_prints_a_niched_option_by_its_declared_type() {
     let out = eval_string(
-        "(defvar (*cap* i32) (stream-string-output))\n\
+        "(defvar (*cap* i32) (%internal::stream-string-output))\n\
          (setf *trace-output* (standard-stream::new *cap*))\n\
          (defun opt ((o Option<int>)) Option<int> (match o ((some n) (option::some (+ n 1))) ((none) (option::none))))\n\
          (trace opt)\n\
          (opt (option::some 5))\n\
          (opt (option::none))\n\
-         (match (stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
+         (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
     );
     assert!(out.contains("(opt (some 5))"), "{:?}", out);
     assert!(out.contains("opt returned (some 6)"), "{:?}", out);

@@ -197,6 +197,23 @@ fn rest_takes_whatever_is_left_including_nothing() {
     assert_eq!(show("(destructuring-bind (a &body r) (quote (1 2)) r)"), "(2)");
 }
 
+/// `&body` written in a module is the library's `&body`: every module reads
+/// its own symbols, and one outside the fixed vocabulary was a different
+/// symbol in each — so the lambda list `(a &body r)` in a user's file read as
+/// three plain names.
+#[test]
+fn body_written_in_a_module_is_still_body() {
+    let (h, v) = run(
+        "(module m (pub defun tail () Option<Sexpr> (destructuring-bind (a &body r) (quote (1 2)) r)))\n\
+         (format false \"~a\" (m::tail))",
+    )
+    .expect("eval failed");
+    match v {
+        Value::Str(id) => assert_eq!(h.string(id).to_string(), "(2)"),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 #[test]
 fn optional_falls_back_to_its_default() {
     assert_eq!(show("(destructuring-bind (a &optional b) (quote (1)) (format false \"~a|~a\" a b))"), "1|()");

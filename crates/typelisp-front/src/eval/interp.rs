@@ -2826,7 +2826,11 @@ impl Interp {
         ch: char,
         rest: &str,
     ) -> Result<(Value, usize), String> {
-        let def = self.resolve_fn_def(READER_MACRO_GLUE).map_err(|e| e.to_string())?;
+        let def = self
+            .root
+            .borrow()
+            .get_fn(&Path::internal(READER_MACRO_GLUE))
+            .ok_or_else(|| format!("{}: not defined in {}", READER_MACRO_GLUE, crate::INTERNAL_MODULE))?;
         let mark = heap.root_count();
         // `f` is rooted first: allocating the string can collect, and the
         // readtable's permanent root is not the only thing that has to be
@@ -4489,7 +4493,7 @@ impl Interp {
 /// be the one `type_key::type_key_of_type` produces, which
 /// `tests/type_identity_guard_test.rs` checks against the registry.
 /// The prelude function the reader's macro-character hook goes through — see
-/// [`Interp::call_reader_macro_fn`].
+/// [`Interp::call_reader_macro_fn`]. It lives in [`crate::INTERNAL_MODULE`].
 const READER_MACRO_GLUE: &str = "call-reader-macro";
 
 const MACROEXPAND_RESULT_KEY: &str = "result<option<sexpr>,evalerror>";

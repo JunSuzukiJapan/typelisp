@@ -718,9 +718,10 @@ impl Registry {
         // `random-state` has nowhere else to hang an `&optional` parameter
         // off of, since `check_call_opt_key` only resolves `&optional`/`&key`
         // for a `defun`'s own `FnSig`, not an ad hoc native one.
-        root.fns.insert("make-random-state-fresh".to_string(), FnSig::builtin(vec![], Type::RandomState));
-        root.fns.insert("random-state-copy".to_string(), FnSig::builtin(vec![Type::RandomState], Type::RandomState));
-        root.fns.insert("random-state-next".to_string(), FnSig::builtin(vec![Type::RandomState, Type::Int], Type::Int));
+        let internal = internal_ns(&mut root);
+        internal.fns.insert("make-random-state-fresh".to_string(), FnSig::builtin(vec![], Type::RandomState));
+        internal.fns.insert("random-state-copy".to_string(), FnSig::builtin(vec![Type::RandomState], Type::RandomState));
+        internal.fns.insert("random-state-next".to_string(), FnSig::builtin(vec![Type::RandomState, Type::Int], Type::Int));
         // `seed-random-state` (SBCL's `sb-ext:seed-random-state`, not in the
         // standard): the stream a given integer names, for a caller who wants
         // a run to be reproducible. CL itself has no portable way to seed —
@@ -764,8 +765,8 @@ impl Registry {
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
-        register_stream_builtins(&mut root);
-        register_net_builtins(&mut root);
+        register_stream_builtins(internal_ns(&mut root));
+        register_net_builtins(internal_ns(&mut root));
         register_system_builtins(&mut root);
         register_readtable_builtins(&mut root);
         root.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
@@ -776,7 +777,7 @@ impl Registry {
         // `read-from-string-preserving-whitespace` are this with the two
         // `preserve` settings and a default `start`; the primitive keeps a
         // name of its own because the CL one is the prelude's.
-        root.fns.insert(
+        internal_ns(&mut root).fns.insert(
             "read-datum-at".to_string(),
             FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::root("cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(READ_ERROR), )),
         );
@@ -1123,6 +1124,12 @@ pub const NET_ERROR: &str = "neterror";
 pub const BUILTIN_ERROR_TYPES: [&str; 6] =
     [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR, FILE_ERROR, NET_ERROR];
 
+/// The module the library's internal helpers are registered in
+/// ([`crate::INTERNAL_MODULE`]).
+fn internal_ns(root: &mut Namespace) -> &mut Namespace {
+    root.module_mut(&[crate::INTERNAL_MODULE.to_string()])
+}
+
 /// The `stream-*` / `file-*` primitives (`eval::interp::Interp::
 /// eval_stream_builtin`). Deliberately minimal and untyped-looking: a stream
 /// is an opaque `i32` handle here, and the whole CL-shaped surface — the
@@ -1132,10 +1139,10 @@ pub const BUILTIN_ERROR_TYPES: [&str; 6] =
 ///
 /// Anything that can fail returns `Result<_, FileError>`; a missing file or a
 /// closed stream is something programs handle, not a bug.
-fn register_stream_builtins(root: &mut Namespace) {
+fn register_stream_builtins(ns: &mut Namespace) {
     let file_err = error_ty(FILE_ERROR);
     let mut native = |name: &str, params: Vec<Type>, ret: Type| {
-        root.fns.insert(
+        ns.fns.insert(
             name.to_string(),
             FnSig::builtin(params, ret),
         );
@@ -1197,8 +1204,7 @@ fn register_stream_builtins(root: &mut Namespace) {
     // a *primitive* under a `Pathish` prelude wrapper that carries the CL
     // name (`probe-file`, `delete-file`, `rename-file`, `truename`,
     // `file-write-date`, `directory-p`, `directory`,
-    // `ensure-directories-exist`) — which is also why the primitive's name
-    // never equals the CL one: both would live in this same root namespace.
+    // `ensure-directories-exist`).
     //
     // The `file-` prefix is load-bearing, not decorative: `Interp::
     // eval_builtin` routes every `stream-`/`file-` name to
@@ -1243,10 +1249,10 @@ fn register_stream_builtins(root: &mut Namespace) {
 /// and `yield` it is registered as an ordinary builtin and intercepted by the
 /// evaluator, because only a `State` can say "stop here". Its `interest` is
 /// `0` for readable and `1` for writable — `typelisp_rt::os::Interest`.
-fn register_net_builtins(root: &mut Namespace) {
+fn register_net_builtins(ns: &mut Namespace) {
     let net_err = error_ty(NET_ERROR);
     let mut native = |name: &str, params: Vec<Type>, ret: Type| {
-        root.fns.insert(
+        ns.fns.insert(
             name.to_string(),
             FnSig::builtin(params, ret),
         );
@@ -1424,11 +1430,12 @@ fn register_system_builtins(root: &mut Namespace) {
     // `dribble` itself is a prelude `defun` with an `&optional` path; these
     // two are the halves it dispatches to. Both `Result`, since both touch a
     // file — and stopping *flushes*, which is where a full disk is found.
-    native("dribble-start", vec![Type::Str], result_of(Type::Unit, file_err.clone()));
-    native("dribble-stop", vec![], result_of(Type::Unit, file_err.clone()));
+    let internal = internal_ns(root);
+    internal.fns.insert("dribble-start".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::Unit, file_err.clone())));
+    internal.fns.insert("dribble-stop".to_string(), FnSig::builtin(vec![], result_of(Type::Unit, file_err.clone())));
     // The runtime half of the `ed` special form, which resolved the name at
     // check time and reduced to this. Line 0 means "no line".
-    native("ed-open", vec![Type::Str, Type::Int], result_of(Type::Unit, file_err));
+    internal.fns.insert("ed-open".to_string(), FnSig::builtin(vec![Type::Str, Type::Int], result_of(Type::Unit, file_err)));
 }
 
 /// The type of a reader macro: what `set-macro-character` stores and what the

@@ -1,7 +1,7 @@
 # TypeLisp
 
 TypeLisp は静的型付きの Lisp です。
-文法などは主に、Common Lispを参考にしています。
+文法などは主にCommon Lispを参考にしています。
 
 ## 特徴
 

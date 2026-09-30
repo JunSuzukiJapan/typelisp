@@ -66,7 +66,7 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
         // was: `symbol->string`
         "keywordp",
         // was: `char::char->string`
-        "reader-whitespacep",
+        "%internal::reader-whitespacep",
         // was: `random-state-next` / `make-random-state-fresh`
         "random",
         "make-random-state",
