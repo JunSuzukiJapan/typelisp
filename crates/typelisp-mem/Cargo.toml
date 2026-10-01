@@ -1,8 +1,13 @@
 [package]
 name = "typelisp-mem"
-version = "0.0.2"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+description = "Cons heap and garbage collector of typelisp. Internal crate of typelisp; not meant to be used directly."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["lisp", "typelisp"]
+categories = ["compilers"]
 
 [lib]
 name = "typelisp_mem"

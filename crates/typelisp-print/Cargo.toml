@@ -1,8 +1,13 @@
 [package]
 name = "typelisp-print"
-version = "0.0.2"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+description = "Common Lisp style printer (format directives and pretty printer) of typelisp. Internal crate of typelisp; not meant to be used directly."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["lisp", "typelisp"]
+categories = ["compilers"]
 
 # The CL printer — `format`'s directive engine (CLHS 22.3) and the pretty
 # printer (22.2) — as its own crate rather than a module of `typelisp-rt`.
@@ -20,8 +25,8 @@ name = "typelisp_print"
 # `~r`/`~d`'s radix printing and `~f`/`~e`/`~$`'s float formatting reach for
 # `ToPrimitive`; nothing else here needs the numeric stack.
 num-traits = "0.2"
-typelisp-abi = { path = "../typelisp-abi" }
-typelisp-mem = { path = "../typelisp-mem" }
+typelisp-abi.workspace = true
+typelisp-mem.workspace = true
 # `PrintShared`'s lock (`docs/dev/os-threads-design.md` §5/Phase 1d) —
 # non-poisoning, same as `typelisp-mem`'s `HeapShared` already uses.
 parking_lot = "0.12"

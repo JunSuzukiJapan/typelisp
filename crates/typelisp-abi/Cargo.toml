@@ -1,8 +1,13 @@
 [package]
 name = "typelisp-abi"
-version = "0.0.2"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+description = "Calling convention shared by typelisp's compiled code and its runtime. Internal crate of typelisp; not meant to be used directly."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["lisp", "typelisp"]
+categories = ["compilers"]
 
 # The compiled-code calling convention, below every crate that defines `rt_*`
 # shims (`typelisp-rt`, `typelisp-print`). See the crate doc comment for why
@@ -11,4 +16,4 @@ license = "MIT OR Apache-2.0"
 name = "typelisp_abi"
 
 [dependencies]
-typelisp-mem = { path = "../typelisp-mem" }
+typelisp-mem.workspace = true

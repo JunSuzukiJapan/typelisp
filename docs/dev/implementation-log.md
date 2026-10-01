@@ -12072,3 +12072,21 @@ cargo と `compile-file` のリンクに渡すようにした。ring を作る�
 効いていたからだった。そこから「`cargo install` は `.cargo/config.toml` を読まない」という
 前の節の記述が誤りだと分かった（`[env]` を書いた試験用クレートで確認）。設定の効いていない
 状態を試すときは、`.cargo` の無い git clone を別の場所に作る。
+
+## 0.1.0 として crates.io 用のメタデータを用意する（2026-10-01）
+
+- バージョンを 0.1.0 にし、ルートの `[workspace.package]` に version/edition/license/repository を
+  置いて全クレートが継承する。`typl --version` は `CARGO_PKG_VERSION` を出す（それまでは
+  `Cargo.toml` と別に 0.0.1 を持っていた）。
+- ワークスペース内の依存は `[workspace.dependencies]` に `path` と `version` の両方を書いて継承する。
+  crates.io は `version` で、このツリーからのビルドは `path` で解決する。
+- 各クレートに description/readme/keywords/categories。内部クレートの README は「直接使う
+  ものではない」と書いた短いもの。ライセンスファイルはルートへのシンボリックリンク（cargo は
+  リンク先の中身をパッケージに入れる）。
+- ルートは `include` でソースだけを入れる。`tests/` を入れないので `cargo package` はテスト
+  ごとに「含まれないので無視する」と警告する（無害）。
+
+`cargo package --workspace` は 7 つとも通った（パッケージの中身だけからのデバッグビルド）。
+最大は typelisp-front の 2.4MB（上限 10MB）。確かめていないのは crates.io から入れたときの
+リリースビルドで、`build.rs` の入れ子の cargo（`--manifest-path` と `-p typelisp-front`
+`--locked`）がワークスペースの無いパッケージで動くかは、公開前に確かめる必要がある。
