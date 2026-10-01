@@ -1,8 +1,13 @@
 [package]
 name = "typelisp-read"
-version = "0.0.2"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+description = "Common Lisp style reader of typelisp. Internal crate of typelisp; not meant to be used directly."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["lisp", "typelisp"]
+categories = ["compilers"]
 
 # The CL reader, as its own crate rather than a module of `typelisp`, for the
 # same reason `typelisp-print` is one: a compiled function that calls `read`
@@ -17,5 +22,5 @@ name = "typelisp_read"
 # `#xFF`/`1/3` and the bignum overflow path.
 num-bigint = "0.4"
 num-rational = "0.4"
-typelisp-abi = { path = "../typelisp-abi" }
-typelisp-mem = { path = "../typelisp-mem" }
+typelisp-abi.workspace = true
+typelisp-mem.workspace = true

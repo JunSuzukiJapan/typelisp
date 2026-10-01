@@ -27,9 +27,9 @@ const PROMPT_CONTINUE: &str = "...   ";
 /// same `1 << 16` the runtime paths have always allocated.
 const DEFAULT_HEAP_CELLS: usize = 1 << 16;
 
-/// What `typl --version` reports. Provisional until the first release fixes
-/// the number, and independent of the crates' `Cargo.toml` versions until then.
-const TYPL_VERSION: &str = "0.0.1";
+/// What `typl --version` reports: the workspace's version, which every crate
+/// shares (`Cargo.toml`'s `[workspace.package]`).
+const TYPL_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// What `typl --help` prints.
 const HELP: &str = "\

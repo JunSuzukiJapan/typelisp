@@ -1,8 +1,13 @@
 [package]
 name = "typelisp-front"
-version = "0.0.2"
-edition = "2021"
-license = "MIT OR Apache-2.0"
+description = "Type checker, interpreter, module loader and standard library of typelisp. Internal crate of typelisp; not meant to be used directly."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["lisp", "typelisp"]
+categories = ["compilers"]
 
 # The front end of the language: reader glue, type checker, interpreter,
 # module loader, and the prelude source. Everything here is about *typelisp
@@ -19,11 +24,11 @@ name = "typelisp_front"
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
-typelisp-abi = { path = "../typelisp-abi" }
-typelisp-mem = { path = "../typelisp-mem" }
-typelisp-print = { path = "../typelisp-print" }
-typelisp-read = { path = "../typelisp-read" }
-typelisp-rt = { path = "../typelisp-rt" }
+typelisp-abi.workspace = true
+typelisp-mem.workspace = true
+typelisp-print.workspace = true
+typelisp-read.workspace = true
+typelisp-rt.workspace = true
 num-bigint = "0.4"
 num-rational = "0.4"
 num-traits = "0.2"
