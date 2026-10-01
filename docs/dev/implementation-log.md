@@ -12125,3 +12125,31 @@ quarantine 属性を付けないので Gatekeeper は見ない。
 手元のファイルを指す `file://` に差し替えたコピーで、インストール・入れ直し・チェックサム不一致
 （何も入れず既存のものも変えない）・存在しない版を確かめた。最新版の判定は本物の GitHub で
 確かめた（v0.1.0 を返し、アセットが無いので 404 で止まった）。
+
+## Apple Silicon の配布物を LLVM 公式のビルドから作る（2026-10-01）
+
+v0.1.0 の arm64 版を macOS 27 の Mac で Homebrew の llvm@22 から作ると、最低 macOS が 27.0 に
+なった（std 11.0、LLVM 27.0、zstd 26.0）。Homebrew の llvm@22 と zstd には `arm64_golden_gate`
+向けのボトルしか無い。
+
+LLVM 公式の `LLVM-22.1.8-macOS-ARM64.tar.xz` は `llvm-config` の minos が 14.0（SDK 14.5）で、
+静的ライブラリは 211 個、`llvm-config --libnames` はほかに Polly の 2 つを挙げる。中身は 2938 個
+すべて LLVM 22 の bitcode。
+
+- 同梱の `ld64.lld` でリンク: macOS 27 の SDK の `.tbd` を「unknown architecture」で読めない。
+- Apple の ld に `-lto_library` で同梱の `libLTO.dylib`: LTO は通るが `operator delete`・
+  `std::terminate` などが未定義（`-lc++` は渡っている）。原因は調べていない。
+- 各オブジェクトを同梱の clang で `-x ir -O2 -target arm64-apple-macos14.0` の機械語にし、
+  アーカイブを作り直す: 通った。16 コアで約 1 分。zstd 1.5.7 をソースから macOS 14.0 向けに
+  ビルドして静的リンク。typl・typl-lsp・`typl -c` の実行ファイルとも minos 14.0、リンク先は
+  `/usr/lib` だけ、JIT と AOT が動く。
+
+これを `scripts/dist/build.sh` の arm64 側にした（Intel はこれまでどおり Homebrew）。キャッシュ
+無しで 2 分 50 秒、キャッシュありで 11 秒。
+
+確かめていないこと: macOS 14・15 の Mac で実際に起動すること、JIT の速さが Homebrew 版と
+変わらないか。
+
+あわせて rustc 1.89.0 では、build.rs の入れ子の cargo が作った serde_derive の dylib を macOS 27
+の dyld が「mis-aligned LINKEDIT string pool」と言って読み込めなかった。1.98.1 では通った。
+

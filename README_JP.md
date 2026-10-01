@@ -157,7 +157,8 @@ curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/instal
 ```
 
 `~/.typelisp/bin` に入るので、表示に従って `PATH` に追加してください。`typl -c` で実行ファイルを
-作るには Xcode Command Line Tools（`xcode-select --install`）が必要です。
+作るには Xcode Command Line Tools（`xcode-select --install`）が必要です。ビルド済みの `typl` は
+Apple Silicon では macOS 14 以降、Intel では macOS 15 以降で動きます。
 
 インストール先は環境変数 `TYPELISP_HOME` で、バージョンは `TYPELISP_VERSION` で指定できます
 （指定しなければ最新のリリース）。

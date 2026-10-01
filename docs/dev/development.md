@@ -138,16 +138,21 @@ LLVMバージョンを指す等でシャドウされていると、素の `cargo
 ## 配布用の実行ファイル（macOS）
 
 `install.sh`（リポジトリのルート）が GitHub のリリースから取ってくる `typl` / `typl-lsp` は、
-CPU ごとの tar.gz と、その SHA-256 のファイル。Homebrew の LLVM は自分の CPU 向けしか入って
-いないので、各 CPU 向けのビルドはそれぞれの Mac で行う。
+CPU ごとの tar.gz と、その SHA-256 のファイル。各 CPU 向けのビルドはそれぞれの Mac で行う。
+LLVM は CPU によって出どころが違う: Apple Silicon は LLVM 公式のビルド済み配布物（`build.sh` が
+ダウンロードする）、Intel は Homebrew の llvm@22（LLVM に Intel の Mac 向けの配布物が無い）。
 
 ### 初めて使う Mac での準備（一度だけ）
 
 1. Xcode Command Line Tools を入れる（`xcode-select --install`）。`build.sh` が使う `otool`・`ar`
    と、確認に使う `cc` が入る。
-2. Homebrew で LLVM 22・zstd・GitHub CLI を入れる（`brew install llvm@22 zstd gh`）。
+2. Homebrew で GitHub CLI を入れる（`brew install gh`）。Intel の Mac では LLVM 22 と zstd も
+   入れる（`brew install llvm@22 zstd gh`）。Apple Silicon では要らない。
 3. Rust を入れる（rustup か `brew install rust`）。std が対象とする最低 macOS バージョンが、配る
-   実行ファイルの最低バージョンの候補になる（下の `build.sh` の説明）。
+   実行ファイルの最低バージョンの候補になる（下の `build.sh` の説明）。古い Rust は新しい macOS
+   で動かないことがある（rustc 1.89 は macOS 27 で、自分の作った proc-macro の dylib を dyld に
+   「mis-aligned LINKEDIT string pool」と言われて読み込めなかった）。`rustup update stable` で
+   新しくしておく。
 4. `gh auth login` で、このリポジトリのリリースに書き込めるアカウントにログインする。
 5. リポジトリを clone する（`git clone https://github.com/JunSuzukiJapan/typelisp.git`）。
    既にあれば `git pull` で main を最新にする。
@@ -169,7 +174,12 @@ git checkout main
 ```
 
 - `build.sh` が最初に表示する `minimum macOS:` の行が、その CPU 向けの `typl` が動く最も古い
-  macOS。Homebrew の LLVM や zstd がその Mac の macOS 向けにビルドされたものだと、ここが上がる。
+  macOS。Apple Silicon では LLVM 公式の配布物が対象とする macOS（22.1.8 では 14.0）になる。
+  Intel では、Homebrew の LLVM や zstd がその Mac の macOS 向けにビルドされたものだと、ここが
+  上がる。
+- Apple Silicon の初回は、LLVM 公式の配布物（約 1.4GB）のダウンロードと変換、zstd のビルドで
+  数分かかる。結果は `target/dist/cache`（約 420MB）に残り、2 回目からは使い回す。作り直すには
+  そのフォルダを消す。
 - `build.sh` は依存ライブラリが OS のものだけであることと、JIT と AOT が動くことを確かめ、
   そうでなければ止まる。
 - `scripts/dist/build.sh` は v0.1.0 のタグより後に入ったので、v0.1.0 のタグには無い。0.1.0 に
@@ -190,11 +200,23 @@ git checkout main
 `install.sh` はアセットの名前を `typelisp-<version>-<arch>.tar.gz`（`arch` は `x86_64` か
 `arm64`）と決め打ちしているので、名前を変えるなら両方を直す。
 
-`build.sh` が普通のリリースビルドと違うのは 2 点。zstd を静的にリンクする（Homebrew の LLVM は
-zstd 付きでビルドされていて、llvm-sys は `-lzstd` を渡す。`libzstd.a` だけを置いたフォルダを先に
-探させると、リンカは Homebrew の dylib でなくそちらを取る）。最低 macOS バージョンを、std・
-Homebrew の LLVM・Homebrew の zstd のうち最も高いものにする。リンク先が `/usr/lib` と
-`/System/Library` 以外にあればそこで止まる。
+`build.sh` が普通のリリースビルドと違うのは 2 点。zstd を静的にリンクする（LLVM は zstd 付きで
+ビルドされていて、llvm-sys は `-lzstd` を渡す。`libzstd.a` だけを置いたフォルダを先に探させると、
+リンカは Homebrew の dylib でなくそちらを取る）。最低 macOS バージョンを、std・LLVM・zstd のうち
+最も高いものにする。リンク先が `/usr/lib` と `/System/Library` 以外にあればそこで止まる。
+
+Apple Silicon で Homebrew の LLVM を使わないのは、Homebrew のボトルが最新の macOS 向けにしか
+無いため。macOS 27 の Mac で llvm@22 を使うと最低 macOS が 27.0 になった。LLVM 公式の
+`LLVM-<version>-macOS-ARM64.tar.xz` は古い macOS 向けにビルドされているが、静的ライブラリの中身が
+機械語でなく ThinLTO 用の LLVM bitcode なので、そのままではリンクできない。同梱の `ld64.lld` は
+新しい SDK の `.tbd` を読めず、Apple の ld に同梱の `libLTO.dylib` を使わせると C++ ランタイムの
+シンボル（`operator delete` など）が未定義になる。そこで `build.sh` は、`llvm-config --libnames`
+が挙げるアーカイブ（`libLLVM*.a` と Polly）の各オブジェクトを、同梱の clang で
+`llvm-config` 自身の最低 macOS 向けの機械語にしてから、アーカイブを元の順で作り直す。zstd も
+Homebrew のものは最新の macOS 向けなので、同じ macOS 向けにソースからビルドする。どちらも
+ダウンロードしたファイルの SHA-256 を `build.sh` に書いた値と照らす。LLVM や zstd の版を上げる
+ときは、版と SHA-256 の両方を書き換える。変換したライブラリはライブラリごとのコード生成なので、
+ThinLTO を通したものより JIT が遅い可能性はあるが、測っていない。
 
 Developer ID での署名はしない。curl でダウンロードしたファイルには quarantine 属性が付かず、
 Gatekeeper は見ない。Apple Silicon の実行ファイルに要る署名は、リンカが付ける ad-hoc 署名で
