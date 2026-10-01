@@ -159,15 +159,30 @@ static_zstd="$work/static-zstd"
 mkdir -p "$static_zstd"
 ln -s "$zstd_lib" "$static_zstd/libzstd.a"
 
+# Both in the environment and as `--config`: a `.cargo/config.toml` made by
+# scripts/setup-cargo-env.sh names them too, with `force = true`, which wins
+# over the environment — and names Homebrew's LLVM and std's minimum macOS,
+# not the ones chosen here. A `--config` wins over the file.
 export LLVM_SYS_221_PREFIX="$llvm_prefix"
 export MACOSX_DEPLOYMENT_TARGET="$minos"
+pinned=(
+    --config "env.LLVM_SYS_221_PREFIX.value=\"$llvm_prefix\"" --config env.LLVM_SYS_221_PREFIX.force=true
+    --config "env.MACOSX_DEPLOYMENT_TARGET.value=\"$minos\"" --config env.MACOSX_DEPLOYMENT_TARGET.force=true
+)
 for bin in typl typl-lsp; do
-    cargo rustc --locked --release --target-dir "$dist/build" --bin "$bin" -- -L "native=$static_zstd"
+    cargo "${pinned[@]}" rustc --locked --release --target-dir "$dist/build" --bin "$bin" -- -L "native=$static_zstd"
 done
 
 typl="$dist/build/release/typl"
 lsp="$dist/build/release/typl-lsp"
 for exe in "$typl" "$lsp"; do
+    # What the binary claims, read back rather than trusted: a value that did
+    # not reach the build (see `pinned` above) shows up here.
+    exe_minos="$(otool -l "$exe" | awk '$1 == "minos" { print $2; exit }')"
+    if [ "$exe_minos" != "$minos" ]; then
+        echo "error: $(basename "$exe") claims macOS $exe_minos, not the $minos it was built for" >&2
+        exit 1
+    fi
     foreign="$(otool -L "$exe" | tail -n +2 | awk '{ print $1 }' | grep -v -e '^/usr/lib/' -e '^/System/Library/' || true)"
     if [ -n "$foreign" ]; then
         echo "error: $(basename "$exe") links libraries outside the OS:" >&2
