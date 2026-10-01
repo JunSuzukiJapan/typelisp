@@ -1435,7 +1435,8 @@ fn host_target_machine() -> Result<TargetMachine, String> {
 /// The host triple, with the minimum macOS version the executable is linked
 /// for (see [`macos_version_min`]). LLVM's default names the running OS
 /// (`x86_64-apple-darwin24.6.0`), which would make the object claim a newer
-/// macOS than the static library beside it and the executable it goes into.
+/// macOS than the static library beside it and the executable it goes into;
+/// it is used only when this build has no version to name.
 #[cfg(target_os = "macos")]
 fn host_triple() -> Result<TargetTriple, String> {
     let default = TargetMachine::get_default_triple();
@@ -1444,7 +1445,10 @@ fn host_triple() -> Result<TargetTriple, String> {
         .split_once("-apple-")
         .map(|(arch, _)| arch)
         .ok_or_else(|| format!("internal error: the host triple `{}` is not an Apple one", default))?;
-    Ok(TargetTriple::create(&format!("{}-apple-macosx{}", arch, macos_version_min())))
+    match macos_version_min() {
+        Some(version) => Ok(TargetTriple::create(&format!("{}-apple-macosx{}", arch, version))),
+        None => Ok(TargetMachine::get_default_triple()),
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -1452,12 +1456,14 @@ fn host_triple() -> Result<TargetTriple, String> {
     Ok(TargetMachine::get_default_triple())
 }
 
-/// The minimum macOS version this build of `typl` was compiled for, which is
-/// what its static library's objects claim — `compile-file` links for the same
-/// one rather than Apple clang's default (`build.rs` says why).
+/// The minimum macOS version this build's static library was compiled for,
+/// which is what its objects claim — `compile-file` links for the same one
+/// rather than Apple clang's default (`build.rs` says why). `None` when
+/// `build.rs` had none: neither set nor readable from std. The link then
+/// takes the tools' defaults and may warn, but still works.
 #[cfg(target_os = "macos")]
-fn macos_version_min() -> &'static str {
-    env!("TYPELISP_MACOSX_DEPLOYMENT_TARGET")
+fn macos_version_min() -> Option<&'static str> {
+    option_env!("TYPELISP_MACOSX_DEPLOYMENT_TARGET")
 }
 
 /// `module` as host assembly text — `(disassemble name)`'s answer.
@@ -1581,7 +1587,9 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
     };
     let mut link = Command::new("cc");
     #[cfg(target_os = "macos")]
-    link.arg(format!("-mmacosx-version-min={}", macos_version_min()));
+    if let Some(version) = macos_version_min() {
+        link.arg(format!("-mmacosx-version-min={}", version));
+    }
     let status = link
         .arg(&object_path)
         .arg(&archive)

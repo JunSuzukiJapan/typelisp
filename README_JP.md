@@ -189,7 +189,8 @@ scripts/with-llvm-env.sh cargo build
 ```
 
 Homebrew を使わない場合は、`LLVM_SYS_221_PREFIX` に LLVM 22 のインストール先を設定してください。
-macOS ではさらに `MACOSX_DEPLOYMENT_TARGET` も必要です。
+macOS の最低 OS バージョン（`MACOSX_DEPLOYMENT_TARGET`）は、設定しなくてもビルドできます。設定
+しなければ、Rust の標準ライブラリが対象とするバージョンを使います。
 
 ### ビルド
 
@@ -210,13 +211,13 @@ cargo build --release  # リリースビルド（target/release/）
 `typl` と `typl-lsp` を `~/.cargo/bin` に入れるには、クローンしたリポジトリで次を実行します。
 
 ```sh
-scripts/with-llvm-env.sh cargo install --locked --path .
+cargo install --locked --path .
 ```
 
-`cargo install` はリポジトリの `.cargo/config.toml` を読みません。`scripts/setup-cargo-env.sh` を
-実行してあっても、`scripts/with-llvm-env.sh` 経由で実行してください。Homebrew を使わない場合は、
-`LLVM_SYS_221_PREFIX` と（macOS では）`MACOSX_DEPLOYMENT_TARGET` を設定してから
-`cargo install --locked --path .` を実行します。
+`cargo install --path` は、「初回の設定」で生成した `.cargo/config.toml` を読みます。設定ファイルを
+生成していない場合は、`scripts/with-llvm-env.sh cargo install --locked --path .` を実行します。
+Homebrew を使わない場合は、`LLVM_SYS_221_PREFIX` を設定してから `cargo install --locked --path .` を
+実行します。
 
 インストールした `typl` は、コンパイルに使う静的ライブラリを中に持っているので、インストール後に
 リポジトリを移動・削除しても `-c` や `compile-file` が使えます（次の「ファイルをコンパイルする」を

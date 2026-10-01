@@ -12044,9 +12044,31 @@ AOT 実行ファイルにリンクする `libtypelisp_front.a` を `CARGO_MANIFE
   `typl-bench-prelude` に `required-features = ["dev-tools"]` を付け、それを走らせる 3 本の
   スクリプトが `--features dev-tools` を渡す。付けないと `cargo install` が 5 本とも
   `~/.cargo/bin` に置く。
-- `cargo install` はリポジトリの `.cargo/config.toml` を読まない（設定の探索が
-  `$CARGO_HOME` から始まる）ので、README には `scripts/with-llvm-env.sh cargo install --locked
-  --path .` と書いた。
+- 当初「`cargo install` はリポジトリの `.cargo/config.toml` を読まない」と書いたが誤りだった
+  （次の節）。`cargo install --path P` は作業ディレクトリに関係なく `P` 側の
+  `.cargo/config.toml` を読む。
 
 リリースの `typl` はアーカイブのぶん大きくなり（インストール版で 91MB）、リリースビルドには
 入れ子の cargo のぶんの時間がかかる。
+
+## `MACOSX_DEPLOYMENT_TARGET` を必須でなくす（2026-10-01）
+
+crates.io への公開を考えると、利用者はスクリプトを持たないので、この値を自分で決められない。
+未設定で何が起きるかを確かめた（`.cargo` の無いクローンから、環境変数を外して `cargo install`）。
+
+- ビルドは通り、`typl` は 10.12 向け、`typl -c` の実行ファイルは 15.0 向けになり、どちらも
+  macOS 15 で動いた（TLS 接続込み）。壊れるものは無い。
+- 害は `typl -c` のたびに出る ld の警告 27 行だけ。全部 ring の C/アセンブリのオブジェクト
+  （SDK の版 26.2 向け）についてで、TLS を使わないプログラムでも出る。
+
+そこで build.rs は未設定でも止めず、libstd のオブジェクトから値を読んで（
+`scripts/macos-deployment-target.sh` を Rust で書いたもの）、内蔵ライブラリを作る内側の
+cargo と `compile-file` のリンクに渡すようにした。ring を作るのは内側の cargo なので、警告は
+0 行になる。外側のビルドは build.rs の時点で走っているので `typl` 自身のリンクは食い違った
+ままだが、cargo はリンク警告を表示しない。libstd から読めなければ値なしで続け、
+`cargo:warning` で理由を出す。利用者が値を設定すれば全部にそれを使う。
+
+最初の実験は全部 15.0 に揃って「何も起きない」に見えたが、リポジトリの `.cargo/config.toml` が
+効いていたからだった。そこから「`cargo install` は `.cargo/config.toml` を読まない」という
+前の節の記述が誤りだと分かった（`[env]` を書いた試験用クレートで確認）。設定の効いていない
+状態を試すときは、`.cargo` の無い git clone を別の場所に作る。

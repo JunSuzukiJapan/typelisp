@@ -1,8 +1,8 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo::rustc-check-cfg=cfg(typelisp_bundled_runtime)");
-    deployment_target();
-    bundled_runtime();
+    let deployment = deployment_target();
+    bundled_runtime(deployment.as_deref());
 }
 
 // A release `typl` carries the static library every AOT executable links
@@ -21,7 +21,12 @@ fn main() {
 // Release only. A debug build links the archive in the tree it was built in,
 // as before: the debug archive is over 100MB, and every test binary that links
 // this crate would carry a copy.
-fn bundled_runtime() {
+//
+// `deployment` is the minimum macOS version `deployment_target` chose. The
+// inner cargo is given it even when the outer one was not: this archive is
+// what `typl -c` links, so its objects are the ones that must agree with the
+// executable.
+fn bundled_runtime(deployment: Option<&str>) {
     if std::env::var("PROFILE").as_deref() != Ok("release") {
         return;
     }
@@ -33,7 +38,11 @@ fn bundled_runtime() {
         println!("cargo:rerun-if-changed={}", manifest_dir.join(input).display());
     }
     let target_dir = out_dir.join("runtime-target");
-    let status = std::process::Command::new(&cargo)
+    let mut build = std::process::Command::new(&cargo);
+    if let Some(version) = deployment {
+        build.env("MACOSX_DEPLOYMENT_TARGET", version);
+    }
+    let status = build
         .arg("build")
         .arg("--release")
         .arg("--locked")
@@ -68,28 +77,110 @@ fn bundled_runtime() {
 // ring's C and assembly for rustls — uses the installed SDK's version (26.2 on
 // an SDK newer than the OS), and the `cc` that `compile-file` links with uses
 // Apple clang's default. Objects then claim a newer OS than the binary they
-// are linked into. `scripts/setup-cargo-env.sh` / `scripts/with-llvm-env.sh`
-// set the variable from `scripts/macos-deployment-target.sh`, which makes rustc
-// and the `cc` crate use it; `compile-file` reads it from here, so an
-// executable is built for the same OS as the static library it links, however
-// `typl` itself was started.
-fn deployment_target() {
+// are linked into, and the linker says so: unset, every `typl -c` printed 27
+// warnings, one per ring object. Nothing stops working — measured on macOS 15
+// with an SDK for 26.2, `typl` and its executables ran, TLS included.
+//
+// So a value is not required. One a person sets is used everywhere
+// (`scripts/setup-cargo-env.sh` / `scripts/with-llvm-env.sh` set it from
+// `scripts/macos-deployment-target.sh`, which reaches rustc and the `cc`
+// crate for the whole build). Without one, this script reads std's the same
+// way and uses it where it can still reach: the inner cargo that builds the
+// archive `typl -c` links (`bundled_runtime`), and `compile-file`'s own link.
+// Out of reach is the outer build, already under way — `typl`'s own link
+// disagrees with std, but cargo does not show link warnings. When std's
+// cannot be read, the build goes on without a value and says why.
+//
+// Returns the version chosen, for `bundled_runtime`.
+fn deployment_target() -> Option<String> {
     println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("macos") {
-        return;
+        return None;
     }
-    let version = std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| {
-        panic!(
-            "build.rs: MACOSX_DEPLOYMENT_TARGET is not set. Run scripts/setup-cargo-env.sh once \
-             (or build through scripts/with-llvm-env.sh): without it the `cc` crate builds ring \
-             for the SDK's macOS version while rustc builds for its own, and the objects claim a \
-             newer OS than the binaries they are linked into"
-        )
-    });
-    assert!(
-        !version.is_empty() && version.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())),
-        "build.rs: MACOSX_DEPLOYMENT_TARGET `{}` is not a version like 10.12",
-        version
-    );
+    let version = match std::env::var("MACOSX_DEPLOYMENT_TARGET") {
+        Ok(version) => {
+            assert!(is_version(&version), "build.rs: MACOSX_DEPLOYMENT_TARGET `{}` is not a version like 10.12", version);
+            version
+        }
+        Err(_) => match std_deployment_target() {
+            Ok(version) => version,
+            Err(why) => {
+                println!(
+                    "cargo:warning=MACOSX_DEPLOYMENT_TARGET is not set and std's minimum macOS version \
+                     could not be read ({}); executables `typl -c` builds may be linked with warnings. \
+                     Set MACOSX_DEPLOYMENT_TARGET to choose one",
+                    why
+                );
+                return None;
+            }
+        },
+    };
     println!("cargo:rustc-env=TYPELISP_MACOSX_DEPLOYMENT_TARGET={}", version);
+    Some(version)
+}
+
+fn is_version(version: &str) -> bool {
+    !version.is_empty() && version.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
+// The minimum macOS version the objects of the toolchain's `libstd` name —
+// `scripts/macos-deployment-target.sh` in Rust. Read from the objects rather
+// than from `rustc --print deployment-target`, which answers rustc's own
+// default (10.12) and not what its prebuilt std was built for.
+fn std_deployment_target() -> Result<String, String> {
+    let rustc = std::env::var("RUSTC").map_err(|_| "cargo did not set RUSTC".to_string())?;
+    let target = std::env::var("TARGET").map_err(|_| "cargo did not set TARGET".to_string())?;
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").map_err(|_| "cargo did not set OUT_DIR".to_string())?);
+    let sysroot = run(std::process::Command::new(&rustc).args(["--print", "sysroot"]))?;
+    let libdir = std::path::Path::new(sysroot.trim()).join("lib").join("rustlib").join(&target).join("lib");
+    let rlibs: Vec<_> = std::fs::read_dir(&libdir)
+        .map_err(|e| format!("cannot read {}: {}", libdir.display(), e))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("libstd-") && n.ends_with(".rlib")))
+        .collect();
+    let [rlib] = rlibs.as_slice() else {
+        return Err(format!("expected one libstd rlib in {}, found {}", libdir.display(), rlibs.len()));
+    };
+    let work = out_dir.join("std-objects");
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| format!("cannot create {}: {}", work.display(), e))?;
+    run(std::process::Command::new("ar").arg("x").arg(rlib).current_dir(&work))?;
+    let mut versions = std::collections::BTreeSet::new();
+    for entry in std::fs::read_dir(&work).map_err(|e| format!("cannot read {}: {}", work.display(), e))? {
+        let path = entry.map_err(|e| format!("cannot read {}: {}", work.display(), e))?.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("o") {
+            continue;
+        }
+        let load_commands = run(std::process::Command::new("otool").arg("-l").arg(&path))?;
+        versions.insert(minimum_version(&load_commands).ok_or_else(|| format!("{} names no minimum macOS version", path.display()))?);
+    }
+    let _ = std::fs::remove_dir_all(&work);
+    match versions.len() {
+        1 => Ok(versions.into_iter().next().expect("one version")),
+        0 => Err(format!("{} holds no object files", rlib.display())),
+        _ => Err(format!("the objects of {} name more than one version: {:?}", rlib.display(), versions)),
+    }
+}
+
+// `otool -l`'s answer for one object: `minos` of `LC_BUILD_VERSION`, or
+// `version` of the older `LC_VERSION_MIN_MACOSX` (the line after `cmdsize`).
+fn minimum_version(load_commands: &str) -> Option<String> {
+    let mut prev = "";
+    for line in load_commands.lines() {
+        let mut words = line.split_whitespace();
+        let (Some(key), Some(value)) = (words.next(), words.next()) else { continue };
+        if key == "minos" || (key == "version" && prev == "cmdsize") {
+            return Some(value.to_string()).filter(|v| is_version(v));
+        }
+        prev = key;
+    }
+    None
+}
+
+fn run(command: &mut std::process::Command) -> Result<String, String> {
+    let output = command.output().map_err(|e| format!("cannot run {:?}: {}", command.get_program(), e))?;
+    if !output.status.success() {
+        return Err(format!("{:?} failed ({})", command.get_program(), output.status));
+    }
+    String::from_utf8(output.stdout).map_err(|_| format!("{:?} printed something that is not UTF-8", command.get_program()))
 }
