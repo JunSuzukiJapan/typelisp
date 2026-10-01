@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
 # Resolves the LLVM 22 toolchain prefix at run time via `brew --prefix` —
 # never hardcode this path, Homebrew's install prefix differs across
-# machines (Intel vs Apple Silicon, Linuxbrew, ...). Used as:
+# machines (Intel vs Apple Silicon). On Linux the
+# distribution's LLVM 22 is used, found by linux-llvm-prefix.sh. Used as:
 #   scripts/with-llvm-env.sh cargo build
 set -euo pipefail
 
-if ! command -v brew >/dev/null 2>&1; then
-    echo "error: brew not found; install LLVM 22 and set LLVM_SYS_221_PREFIX yourself" >&2
-    exit 1
-fi
+if [ "$(uname -s)" = Linux ]; then
+    LLVM_SYS_221_PREFIX="$("$(dirname "${BASH_SOURCE[0]}")/linux-llvm-prefix.sh")"
+    export LLVM_SYS_221_PREFIX
+else
+    if ! command -v brew >/dev/null 2>&1; then
+        echo "error: brew not found; install LLVM 22 and set LLVM_SYS_221_PREFIX yourself" >&2
+        exit 1
+    fi
 
-export LLVM_SYS_221_PREFIX="$(brew --prefix llvm@22)"
+    export LLVM_SYS_221_PREFIX="$(brew --prefix llvm@22)"
+fi
 
 # macOS: one minimum OS version for rustc, the `cc` crate (ring) and
 # `compile-file`'s link, the one the toolchain's std was built for — see

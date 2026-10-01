@@ -1214,10 +1214,10 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
 ///   later link uses that file. `cargo install` keeps nothing of the tree it
 ///   built in, so this is what makes an installed `typl` able to compile at
 ///   all.
-/// - A debug build links the one in the tree it was built in,
-///   `CARGO_MANIFEST_DIR/target/debug/`. The workspace shares one `target/`
-///   dir at the repo root, so `CARGO_MANIFEST_DIR` (this crate's own root) is
-///   the right base for every member's artifacts.
+/// - A debug build links the one beside its own artifacts,
+///   `<target dir>/debug/` — `CARGO_TARGET_DIR` when that is set. The
+///   workspace shares one target dir, so this crate's is every member's;
+///   `build.rs`'s `profile_dir` reads it from `OUT_DIR`.
 ///
 /// **In a debug build this artifact is not built by the `cargo` invocation
 /// that runs an AOT test.** `cargo test` builds `typelisp-front`'s *rlib* (the
@@ -1250,7 +1250,7 @@ fn default_archive() -> Result<std::path::PathBuf, String> {
 
 #[cfg(not(typelisp_bundled_runtime))]
 fn default_archive() -> Result<std::path::PathBuf, String> {
-    Ok(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join(STATICLIB_NAME))
+    Ok(std::path::PathBuf::from(env!("TYPELISP_PROFILE_DIR")).join(STATICLIB_NAME))
 }
 
 /// `$TYPELISP_HOME/lib/<build id>`, where this build's archive is written.
@@ -1426,7 +1426,7 @@ fn host_target_machine() -> Result<TargetMachine, String> {
             &TargetMachine::get_host_cpu_name().to_string(),
             &TargetMachine::get_host_cpu_features().to_string(),
             OptimizationLevel::None,
-            RelocMode::Default,
+            reloc_mode(),
             CodeModel::Default,
         )
         .ok_or_else(|| "failed to create a target machine for the host triple".to_string())
@@ -1455,6 +1455,29 @@ fn host_triple() -> Result<TargetTriple, String> {
 fn host_triple() -> Result<TargetTriple, String> {
     Ok(TargetMachine::get_default_triple())
 }
+
+/// Linux: position-independent code. `cc` links a PIE there by default, and
+/// LLVM's default for an ELF target is static code, which the linker can put
+/// into a PIE only by leaving relocations in `.text` (`DT_TEXTREL`).
+#[cfg(target_os = "linux")]
+fn reloc_mode() -> RelocMode {
+    RelocMode::PIC
+}
+
+#[cfg(not(target_os = "linux"))]
+fn reloc_mode() -> RelocMode {
+    RelocMode::Default
+}
+
+/// The system libraries the static library needs, which `cc` does not add
+/// by itself on Linux — rustc's `--print native-static-libs` for
+/// `typelisp-front`, without the `-lc` `cc` adds anyway. macOS needs none:
+/// `cc` links libSystem, which holds them all.
+#[cfg(target_os = "linux")]
+const SYSTEM_LIBRARIES: &[&str] = &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl"];
+
+#[cfg(not(target_os = "linux"))]
+const SYSTEM_LIBRARIES: &[&str] = &[];
 
 /// The minimum macOS version this build's static library was compiled for,
 /// which is what its objects claim — `compile-file` links for the same one
@@ -1594,6 +1617,7 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
         .arg(&object_path)
         .arg(&archive)
         .args(libraries.iter().map(|l| format!("-l{}", l)))
+        .args(SYSTEM_LIBRARIES)
         .arg("-o")
         .arg(output_path)
         .status()

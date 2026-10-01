@@ -56,8 +56,7 @@ fn lib_dir_links_a_copied_archive() {
     let dir = tmp_dir("typl-lib-dir-copy");
     let lib = dir.join("lib");
     std::fs::create_dir_all(&lib).unwrap();
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
-    let original = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(profile).join("libtypelisp_front.a");
+    let original = PathBuf::from(env!("TYPELISP_PROFILE_DIR")).join("libtypelisp_front.a");
     std::fs::copy(&original, lib.join("libtypelisp_front.a")).expect("the static library is not built");
     let src = dir.join("hello.typl");
     let exe = dir.join("hello");

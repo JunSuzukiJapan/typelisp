@@ -141,11 +141,7 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
     // Gating this on the hash check made every such addition fail the
     // install until the artifact was regenerated, for a mapping the
     // artifact had no use for.
-    let externals: Vec<(String, usize)> = rt_extern_functions()
-        .iter()
-        .filter(|(n, _)| module.get_function(n).is_some())
-        .map(|(n, addr)| (n.to_string(), *addr))
-        .collect();
+    let externals = crate::compile::runtime_externals(&module);
     let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals, lib.body_abi)
         .map_err(|e| format!("{} JIT install failed: {}", lib.label, e))?;
 
@@ -989,7 +985,7 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Resu
     // typelisp-hosted `compiler.rs` bug that emits
     // instructions after a block's terminator (the `compile-let`
     // GC-root-leak fix's own doc comment names this exact risk) would
-    // otherwise reach `CompiledFn::new_multi`'s `create_jit_execution_engine`
+    // otherwise reach `CompiledFn::new_multi`'s `jit_engine`
     // as malformed IR — undefined behavior in LLVM itself, not a
     // catchable Rust error. Verifying first turns that into a clean
     // `Panic` instead.

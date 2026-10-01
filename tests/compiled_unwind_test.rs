@@ -43,9 +43,20 @@ use std::sync::OnceLock;
 
 use inkwell::module::Linkage;
 use inkwell::values::ValueKind;
-use inkwell::{AddressSpace, OptimizationLevel};
+use inkwell::AddressSpace;
 
-use typelisp::compile::{llvm_context, COMPILE_LOCK};
+use typelisp::compile::{jit_engine, llvm_context, COMPILE_LOCK};
+
+// std's personality routine, by its symbol: the address the `protected`
+// probe's declaration of it is bound to. Never called from Rust.
+extern "C" {
+    fn rust_eh_personality();
+}
+
+/// The name a declaration was added under, as [`jit_engine`] takes it.
+fn callee_name(function: inkwell::values::FunctionValue<'static>) -> String {
+    function.get_name().to_string_lossy().into_owned()
+}
 
 /// The message [`typelisp_test_maybe_panic`] panics with, asserted on the
 /// caught payload so a test proves it caught *this* panic and not another.
@@ -130,8 +141,8 @@ fn probe() -> UnwindingProbe {
         builder.build_return(Some(&result)).unwrap();
         module.verify().expect("probe module failed verification");
 
-        let engine = module.create_jit_execution_engine(OptimizationLevel::None).expect("failed to create the JIT engine");
-        engine.add_global_mapping(&callee, typelisp_test_maybe_panic as *const () as usize);
+        let externals = [(callee_name(callee), typelisp_test_maybe_panic as *const () as usize)];
+        let engine = jit_engine(&module, &externals).expect("failed to create the JIT engine");
         let addr = engine.get_function_address("probe").expect("probe did not resolve");
         // Never dropped: see this static's doc comment.
         std::mem::forget(engine);
@@ -296,9 +307,14 @@ fn protected_probe() -> UnwindingProbe {
 
         module.verify().expect("protected module failed verification");
 
-        let engine = module.create_jit_execution_engine(OptimizationLevel::None).expect("failed to create the JIT engine");
-        engine.add_global_mapping(&callee, typelisp_test_maybe_panic as *const () as usize);
-        engine.add_global_mapping(&cleanup_fn, typelisp_test_cleanup_ran as *const () as usize);
+        // The personality too: it is a declaration like the other two, and
+        // left to the process lookup it is found on macOS and not on Linux.
+        let externals = [
+            (callee_name(callee), typelisp_test_maybe_panic as *const () as usize),
+            (callee_name(cleanup_fn), typelisp_test_cleanup_ran as *const () as usize),
+            (callee_name(personality), rust_eh_personality as *const () as usize),
+        ];
+        let engine = jit_engine(&module, &externals).expect("failed to create the JIT engine");
         let addr = engine.get_function_address("protected").expect("protected did not resolve");
         std::mem::forget(engine);
         addr as usize
