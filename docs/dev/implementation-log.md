@@ -12007,3 +12007,46 @@ interpreted な印字メソッドは panic・`typl` のワーカーは drive 1 �
 prelude を再生成（2 回目で不変）。テストは `seq_catalog_test` に 6 本、`read_time_eval_test` に
 3 本。
 
+
+## `cargo install` に対応する（2026-10-01）
+
+公開準備の一環。`cargo install --path .` で入れた `typl` が `-c`/`compile-file` を使えなかった。
+AOT 実行ファイルにリンクする `libtypelisp_front.a` を `CARGO_MANIFEST_DIR/target/<profile>/`
+から探していたが、`cargo install` は一時ディレクトリでビルドして実行ファイルしか残さないので、
+インストール後にはその場所に何も無い。
+
+- **リリースビルドの `typl` はアーカイブを中に持ち、初回のリンクで恒久的な場所へ書き出す。**
+  `build.rs` の `bundled_runtime` が `PROFILE=release` のときだけ、別の cargo で
+  `typelisp-front` の staticlib をビルドし、`include_bytes!` で `aot.rs` に埋め込む。ビルド
+  スクリプトは依存クレートの成果物に手が届かないので、cargo を入れ子で呼ぶしかない（artifact
+  dependencies は unstable）。入れ子の cargo は `OUT_DIR` の下に自分の target ディレクトリを
+  持つ——外側の cargo が `target/` のロックを握ったままだから。`--locked` でソースツリーの
+  `Cargo.lock` を書き換えさせない。
+  書き出し先は `$TYPELISP_HOME/lib/<ビルドID>/`（既定 `~/.typelisp`、`CARGO_HOME` と同じ形）。
+  ビルドIDは `build.rs` がアーカイブのバイト列から取るハッシュで、アーカイブは同時にビルドした
+  `typl` でしか使えないから、ファイルがあれば中身を見ずに信用してよい。同じフォルダの別名に
+  書いて rename するので、途中で落ちても半端なファイルが本名で残らない。
+  最初はリンクのたびに出力の隣へ書き出して消していたが、ユーザの指摘で改めた（毎回 20MB 余りを
+  書くのは無駄、ライブラリは恒久的な場所に置くもの）。初回起動時に置き場所をユーザに聞く案も
+  出たが、`typl -c` は Makefile・CI・stdin を使うスクリプトなど聞けない場面で走り、聞けない場面の
+  既定がどのみち要るので採らなかった。
+- **`typl --remove-lib`** はその `typl` のビルドIDのフォルダを、`--others` を付けると他の
+  ビルドIDのフォルダを、`--all` を付けると全部を消す。`lib/` の下でビルドIDの形（16 桁の
+  小文字 16 進）をしていないものには触れない。デバッグビルドは自分のビルドIDを持たないので、
+  `--all` 以外はエラーにする。`--others`/`--all` を `--remove-lib` なしで書くと、黙って無視せず
+  エラーにする。古いビルドIDの掃除にユーザは cargo sweep を挙げたが、あれは cargo の `target/`
+  を掃除する道具で `~/.typelisp/lib` は対象外なので、`--others` を足した。
+- **デバッグビルドは従来どおりビルドツリーのものをリンクする。** デバッグのアーカイブは 100MB を
+  超え、このクレートをリンクするテストバイナリ全部に載ってしまう。どちらを使うかはビルド時に
+  cfg（`typelisp_bundled_runtime`）で決まり、リンク時に探し回ることはしない。`--lib-dir` は
+  両方を上書きする。
+- **開発用の実行ファイルを入れない。** `typl-bootstrap-island`/`typl-bootstrap-prelude`/
+  `typl-bench-prelude` に `required-features = ["dev-tools"]` を付け、それを走らせる 3 本の
+  スクリプトが `--features dev-tools` を渡す。付けないと `cargo install` が 5 本とも
+  `~/.cargo/bin` に置く。
+- `cargo install` はリポジトリの `.cargo/config.toml` を読まない（設定の探索が
+  `$CARGO_HOME` から始まる）ので、README には `scripts/with-llvm-env.sh cargo install --locked
+  --path .` と書いた。
+
+リリースの `typl` はアーカイブのぶん大きくなり（インストール版で 91MB）、リリースビルドには
+入れ子の cargo のぶんの時間がかかる。

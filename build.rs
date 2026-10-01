@@ -1,6 +1,64 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo::rustc-check-cfg=cfg(typelisp_bundled_runtime)");
     deployment_target();
+    bundled_runtime();
+}
+
+// A release `typl` carries the static library every AOT executable links
+// (`compile::aot::link_archive`) inside itself, and writes it out to
+// `$TYPELISP_HOME/lib/<build id>/` the first time it links. `cargo install`
+// builds in a temporary directory and keeps only the executables, so the
+// archive it built along the way is gone by the time `typl -c` runs; the one
+// copy that survives is the one inside `typl`.
+//
+// The archive is `typelisp-front`'s `staticlib`, and a build script cannot
+// reach a dependency's artifacts, so it is built here by a cargo of its own.
+// That cargo gets a target directory of its own under `OUT_DIR`: the outer one
+// holds the lock on `target/` until this script returns. `--locked` keeps it
+// from rewriting `Cargo.lock` in the source tree it builds from.
+//
+// Release only. A debug build links the archive in the tree it was built in,
+// as before: the debug archive is over 100MB, and every test binary that links
+// this crate would carry a copy.
+fn bundled_runtime() {
+    if std::env::var("PROFILE").as_deref() != Ok("release") {
+        return;
+    }
+    let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets OUT_DIR"));
+    let target = std::env::var("TARGET").expect("cargo sets TARGET");
+    let cargo = std::env::var("CARGO").expect("cargo sets CARGO");
+    for input in ["crates", "Cargo.toml", "Cargo.lock"] {
+        println!("cargo:rerun-if-changed={}", manifest_dir.join(input).display());
+    }
+    let target_dir = out_dir.join("runtime-target");
+    let status = std::process::Command::new(&cargo)
+        .arg("build")
+        .arg("--release")
+        .arg("--locked")
+        .args(["-p", "typelisp-front"])
+        .arg("--manifest-path")
+        .arg(manifest_dir.join("Cargo.toml"))
+        .arg("--target")
+        .arg(&target)
+        .arg("--target-dir")
+        .arg(&target_dir)
+        .status()
+        .unwrap_or_else(|e| panic!("build.rs: failed to run {} to build typelisp-front's static library: {}", cargo, e));
+    assert!(status.success(), "build.rs: building typelisp-front's static library failed ({})", status);
+    let archive = target_dir.join(&target).join("release").join("libtypelisp_front.a");
+    assert!(archive.is_file(), "build.rs: {} was not built", archive.display());
+    println!("cargo:rustc-env=TYPELISP_BUNDLED_STATICLIB={}", archive.display());
+    // The name of the folder `typl` writes the archive to: a hash of its
+    // bytes, so a `typl` built again never links an archive another build
+    // wrote. Only compared for equality, within one machine, so `std`'s hasher
+    // is enough — the value is fixed here and carried in the binary.
+    let bytes = std::fs::read(&archive).unwrap_or_else(|e| panic!("build.rs: failed to read {}: {}", archive.display(), e));
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::hash::Hasher::write(&mut hasher, &bytes);
+    println!("cargo:rustc-env=TYPELISP_BUNDLED_STATICLIB_ID={:016x}", std::hash::Hasher::finish(&hasher));
+    println!("cargo:rustc-cfg=typelisp_bundled_runtime");
 }
 
 // Four things name a minimum macOS version, and they only agree when

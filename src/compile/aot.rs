@@ -1181,7 +1181,7 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
     false
 }
 
-/// The path to the `typelisp-rt` crate's `staticlib` artifact, which
+/// The `typelisp-rt` crate's `staticlib` artifact for one link, which
 /// exports the `#[no_mangle]` runtime shims in [`crate::compile::runtime`]
 /// (`rt_ping`/`rt_heap_init`/`rt_heap_live_count`, and from Stage 3 onward
 /// `rt_cons`/`rt_car`/...) as plain C symbols. Linked into every AOT
@@ -1205,48 +1205,200 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
 /// see its doc comment, and `Cargo.toml`'s `profile.dev.package` entries for
 /// the one thing that quietly breaks it.
 ///
-/// Computed from `CARGO_MANIFEST_DIR` + the build profile this very test/
-/// binary was compiled under (`debug_assertions` tracks `dev`/`test` vs
-/// `release`) rather than hardcoded — see the project's policy on
-/// machine-specific absolute paths. The workspace shares one `target/` dir at
-/// the repo root, so `CARGO_MANIFEST_DIR` (this crate's own root) is the
-/// right base for every member's artifacts.
+/// Where the archive comes from depends on how `typl` was built, and is
+/// fixed when it is built — never chosen at link time:
 ///
-/// **This artifact is not built by the `cargo` invocation that runs an AOT
-/// test.** `cargo test` builds `typelisp-front`'s *rlib* (the dependency this
-/// crate links) and never its `staticlib` target, so what is on disk here is
-/// whatever the last `cargo build -p typelisp-front` / `cargo build
-/// --workspace` left. Adding an `rt_*` shim therefore links against a runtime
-/// that predates it and fails with an undefined symbol — observed adding
-/// `rt_apply_any`, where the JIT tests all passed and only AOT broke.
+/// - A release build carries the archive inside itself (`build.rs`'s
+///   `bundled_runtime`) and writes it out once, at the first link that needs
+///   it, to `$TYPELISP_HOME/lib/<build id>/` ([`bundled_archive_dir`]); every
+///   later link uses that file. `cargo install` keeps nothing of the tree it
+///   built in, so this is what makes an installed `typl` able to compile at
+///   all.
+/// - A debug build links the one in the tree it was built in,
+///   `CARGO_MANIFEST_DIR/target/debug/`. The workspace shares one `target/`
+///   dir at the repo root, so `CARGO_MANIFEST_DIR` (this crate's own root) is
+///   the right base for every member's artifacts.
+///
+/// **In a debug build this artifact is not built by the `cargo` invocation
+/// that runs an AOT test.** `cargo test` builds `typelisp-front`'s *rlib* (the
+/// dependency this crate links) and never its `staticlib` target, so what is
+/// on disk here is whatever the last `cargo build -p typelisp-front` / `cargo
+/// build --workspace` left. Adding an `rt_*` shim therefore links against a
+/// runtime that predates it and fails with an undefined symbol — observed
+/// adding `rt_apply_any`, where the JIT tests all passed and only AOT broke.
 /// `scripts/test-serial.sh` builds the staticlib first for exactly this
 /// reason; a bare `cargo test --test compile_file_test` needs it built by
 /// hand.
 ///
-/// `typl --lib-dir DIR` replaces the whole path with `DIR/`[`STATICLIB_NAME`]
-/// ([`set_lib_dir`]), so an installed `typl` can link against a copy of the
-/// archive instead of the repository it was built in.
-fn staticlib_path() -> std::path::PathBuf {
+/// `typl --lib-dir DIR` replaces both with `DIR/`[`STATICLIB_NAME`]
+/// ([`set_lib_dir`]).
+fn link_archive() -> Result<std::path::PathBuf, String> {
     if let Some(dir) = LIB_DIR.get() {
-        return dir.join(STATICLIB_NAME);
+        return Ok(dir.join(STATICLIB_NAME));
     }
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
-    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join(profile).join(STATICLIB_NAME)
+    default_archive()
+}
+
+/// The archive `build.rs` built and this binary carries; see [`link_archive`].
+#[cfg(typelisp_bundled_runtime)]
+static BUNDLED_STATICLIB: &[u8] = include_bytes!(env!("TYPELISP_BUNDLED_STATICLIB"));
+
+#[cfg(typelisp_bundled_runtime)]
+fn default_archive() -> Result<std::path::PathBuf, String> {
+    write_archive_once(&bundled_archive_dir()?, BUNDLED_STATICLIB)
+}
+
+#[cfg(not(typelisp_bundled_runtime))]
+fn default_archive() -> Result<std::path::PathBuf, String> {
+    Ok(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join(STATICLIB_NAME))
+}
+
+/// `$TYPELISP_HOME/lib/<build id>`, where this build's archive is written.
+///
+/// The build id is a hash of the archive's bytes (`build.rs`), because an
+/// archive works only with the `typl` built together with it: a `typl` built
+/// again gets a folder of its own, and an existing file can be trusted
+/// without looking inside it.
+#[cfg(typelisp_bundled_runtime)]
+fn bundled_archive_dir() -> Result<std::path::PathBuf, String> {
+    Ok(typelisp_home()?.join("lib").join(env!("TYPELISP_BUNDLED_STATICLIB_ID")))
+}
+
+/// `TYPELISP_HOME`, or `~/.typelisp` when it is not set — the same shape as
+/// `CARGO_HOME` and `~/.cargo`.
+fn typelisp_home() -> Result<std::path::PathBuf, String> {
+    if let Some(home) = std::env::var_os("TYPELISP_HOME").filter(|h| !h.is_empty()) {
+        return Ok(std::path::PathBuf::from(home));
+    }
+    match std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+        Some(home) => Ok(std::path::PathBuf::from(home).join(".typelisp")),
+        None => Err("neither TYPELISP_HOME nor HOME is set, so there is nowhere to put the library \
+                     compiled executables link; set TYPELISP_HOME or pass --lib-dir"
+            .to_string()),
+    }
+}
+
+/// `dir/`[`STATICLIB_NAME`], written from `bytes` unless it is already there.
+///
+/// Written to a file of its own in the same folder and renamed into place, so
+/// a `typl` that dies mid-write leaves no half-written archive under the
+/// final name, and two writing at once each rename a whole one.
+#[cfg(any(typelisp_bundled_runtime, test))]
+fn write_archive_once(dir: &std::path::Path, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    let path = dir.join(STATICLIB_NAME);
+    if path.is_file() {
+        return Ok(path);
+    }
+    fs::create_dir_all(dir).map_err(|e| format!("failed to create {}: {}", dir.display(), e))?;
+    static WRITES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let partial = dir.join(format!(
+        ".{}.{}.{}",
+        STATICLIB_NAME,
+        std::process::id(),
+        WRITES.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    if let Err(e) = fs::write(&partial, bytes) {
+        let _ = fs::remove_file(&partial);
+        return Err(format!("failed to write {}: {}", partial.display(), e));
+    }
+    fs::rename(&partial, &path).map_err(|e| {
+        let _ = fs::remove_file(&partial);
+        format!("failed to move {} to {}: {}", partial.display(), path.display(), e)
+    })?;
+    Ok(path)
+}
+
+/// Which of the archives release `typl`s wrote `typl --remove-lib` removes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemoveLib {
+    /// This build's (`--remove-lib`).
+    This,
+    /// Every build's but this one's (`--remove-lib --others`): what is left
+    /// behind by `typl`s installed before this one.
+    Others,
+    /// Every build's (`--remove-lib --all`).
+    All,
+}
+
+/// `typl --remove-lib`: removes the build-id folders under
+/// `$TYPELISP_HOME/lib` that `which` names, and answers with the ones it
+/// removed.
+///
+/// Only folders named like a build id are touched; anything else a person put
+/// under `lib` is not `typl`'s to remove. A debug build has no build id of its
+/// own, so only [`RemoveLib::All`] means anything to it.
+pub fn remove_written_archives(which: RemoveLib) -> Result<Vec<std::path::PathBuf>, String> {
+    let own = own_build_id();
+    if own.is_none() && which != RemoveLib::All {
+        return Err("this typl is a debug build: it links the library in the tree it was built in, \
+                    has written none and has no build id of its own; --all removes every build's"
+            .to_string());
+    }
+    remove_archives_under(&typelisp_home()?.join("lib"), own, which)
+}
+
+/// [`remove_written_archives`] on the folder `root` for a build whose id is
+/// `own`.
+fn remove_archives_under(
+    root: &std::path::Path,
+    own: Option<&str>,
+    which: RemoveLib,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("failed to read {}: {}", root.display(), e)),
+    };
+    let mut removed = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("failed to read {}: {}", root.display(), e))?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str().filter(|n| is_build_id(n)) else { continue };
+        let is_own = own == Some(name);
+        let chosen = match which {
+            RemoveLib::This => is_own,
+            RemoveLib::Others => !is_own,
+            RemoveLib::All => true,
+        };
+        let path = entry.path();
+        if !chosen || !path.is_dir() {
+            continue;
+        }
+        fs::remove_dir_all(&path).map_err(|e| format!("failed to remove {}: {}", path.display(), e))?;
+        removed.push(path);
+    }
+    removed.sort();
+    Ok(removed)
+}
+
+#[cfg(typelisp_bundled_runtime)]
+fn own_build_id() -> Option<&'static str> {
+    Some(env!("TYPELISP_BUNDLED_STATICLIB_ID"))
+}
+
+#[cfg(not(typelisp_bundled_runtime))]
+fn own_build_id() -> Option<&'static str> {
+    None
+}
+
+/// The shape `build.rs` gives a build id: 16 lowercase hex digits.
+fn is_build_id(name: &str) -> bool {
+    name.len() == 16 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// The file name of the archive every AOT executable links; see
-/// [`staticlib_path`].
+/// [`link_archive`].
 pub const STATICLIB_NAME: &str = "libtypelisp_front.a";
 
 /// The folder `typl --lib-dir` named, for the rest of the process.
 static LIB_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
 /// Makes every later `compile-file` in this process link `dir`'s
-/// [`STATICLIB_NAME`] instead of the one in the build tree.
+/// [`STATICLIB_NAME`] instead of the default one ([`link_archive`]).
 ///
-/// Refuses a folder that does not hold the archive: the build tree's copy is
-/// not consulted once a folder has been named, so a mistyped one would
-/// otherwise surface only as a linker error at the first `compile-file`.
+/// Refuses a folder that does not hold the archive: the default one is not
+/// consulted once a folder has been named, so a mistyped one would otherwise
+/// surface only as a linker error at the first `compile-file`.
 pub fn set_lib_dir(dir: std::path::PathBuf) -> Result<(), String> {
     if !dir.join(STATICLIB_NAME).is_file() {
         return Err(format!("{} has no {}", dir.display(), STATICLIB_NAME));
@@ -1420,12 +1572,19 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
     // `-l` for every library a `defffi` named. Nothing is needed for a
     // declaration without one: what it reaches is already linked (libc comes
     // with `cc`, and the rest is in the static library beside it).
+    let archive = match link_archive() {
+        Ok(archive) => archive,
+        Err(e) => {
+            let _ = fs::remove_file(&object_path);
+            return Err(e);
+        }
+    };
     let mut link = Command::new("cc");
     #[cfg(target_os = "macos")]
     link.arg(format!("-mmacosx-version-min={}", macos_version_min()));
     let status = link
         .arg(&object_path)
-        .arg(staticlib_path())
+        .arg(&archive)
         .args(libraries.iter().map(|l| format!("-l{}", l)))
         .arg("-o")
         .arg(output_path)
@@ -1447,7 +1606,7 @@ mod tests {
 
     use inkwell::AddressSpace;
 
-    use super::{build_main_wrapper, write_executable};
+    use super::{build_main_wrapper, remove_archives_under, write_archive_once, write_executable, RemoveLib, STATICLIB_NAME};
     use crate::compile::{llvm_context, COMPILE_LOCK};
 
     fn tmp_path(name: &str) -> PathBuf {
@@ -1456,9 +1615,69 @@ mod tests {
         dir.join(name)
     }
 
+    /// `--remove-lib`, `--others` and `--all` each remove the build-id
+    /// folders they name, and none of them touches what is not a build id.
+    #[test]
+    fn remove_lib_removes_the_build_ids_it_names_and_nothing_else() {
+        let root = tmp_path("remove-lib");
+        let (own, old, older) = ("00000000000000aa", "00000000000000bb", "00000000000000cc");
+        let fill = || {
+            let _ = std::fs::remove_dir_all(&root);
+            for id in [own, old, older, "not-a-build-id"] {
+                write_archive_once(&root.join(id), b"archive").expect("the archive is written");
+            }
+        };
+        let left = || {
+            let mut names: Vec<String> =
+                std::fs::read_dir(&root).expect("the folder is there").map(|e| e.expect("an entry").file_name().into_string().expect("utf-8")).collect();
+            names.sort();
+            names
+        };
+        let removed = |which| -> Vec<String> {
+            remove_archives_under(&root, Some(own), which)
+                .expect("removal succeeds")
+                .iter()
+                .map(|p| p.file_name().expect("a name").to_str().expect("utf-8").to_string())
+                .collect()
+        };
+
+        fill();
+        assert_eq!(removed(RemoveLib::This), vec![own]);
+        assert_eq!(left(), vec![old, older, "not-a-build-id"]);
+        assert_eq!(removed(RemoveLib::This), Vec::<String>::new());
+
+        fill();
+        assert_eq!(removed(RemoveLib::Others), vec![old, older]);
+        assert_eq!(left(), vec![own, "not-a-build-id"]);
+
+        fill();
+        assert_eq!(removed(RemoveLib::All), vec![own, old, older]);
+        assert_eq!(left(), vec!["not-a-build-id"]);
+
+        std::fs::remove_dir_all(&root).expect("the folder can be removed");
+        assert_eq!(removed(RemoveLib::All), Vec::<String>::new());
+    }
+
+    /// A release `typl` writes its archive at the first link and reuses it
+    /// after: the second write is not a write, and nothing but the archive is
+    /// left in the folder.
+    #[test]
+    fn the_archive_is_written_once_and_left_in_place() {
+        let dir = tmp_path("archive-once");
+        let _ = std::fs::remove_dir_all(&dir);
+        let first = write_archive_once(&dir, b"first").expect("the first write succeeds");
+        assert_eq!(first, dir.join(STATICLIB_NAME));
+        let second = write_archive_once(&dir, b"second").expect("the second call succeeds");
+        assert_eq!(second, first);
+        assert_eq!(std::fs::read(&first).expect("the archive is there"), b"first");
+        let names: Vec<_> = std::fs::read_dir(&dir).expect("the folder is there").map(|e| e.expect("an entry").file_name()).collect();
+        assert_eq!(names, vec![std::ffi::OsString::from(STATICLIB_NAME)]);
+        std::fs::remove_dir_all(&dir).expect("the folder can be removed");
+    }
+
     /// Stage 0's proof that AOT-linked native code can call a `#[no_mangle]`
     /// Rust function from this crate's own `staticlib` artifact (see
-    /// `super::staticlib_path`'s doc comment) through nothing more than an
+    /// `super::link_archive`'s doc comment) through nothing more than an
     /// ordinary `declare` + `call` against the shared compiled-function ABI
     /// — no per-shim linking mechanism needed, the same way Stage 3 of
     /// labels/closures already lets one JIT-compiled function call another

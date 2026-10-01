@@ -42,15 +42,22 @@ Options:
   -c, --compile SOURCE   compile SOURCE to a native executable
   -o OUTPUT              name of the executable (default: SOURCE without .typl)
   --lib-dir DIR          link DIR/libtypelisp_front.a into compiled executables
-                         (default: the one in the tree typl was built in)
+                         (default: a release typl writes the one built into
+                         it to $TYPELISP_HOME/lib, ~/.typelisp/lib if unset;
+                         a debug typl uses the one in the tree it was built in)
   --image FILE           start from a dump written by (dump ...)
   --heap-cells N         initial capacity of the cons arena, in cells
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
+  --remove-lib           remove the library this typl wrote for compiled
+                         executables to link, and exit
+  --remove-lib --others  remove the ones other builds of typl wrote instead
+  --remove-lib --all     remove every build's
   --help                 print this help and exit
   --version              print the version and exit
 
---help and --version after FILE are passed to the program.
+--help, --version, --remove-lib, --others and --all after FILE are passed to
+the program.
 --image, --heap-cells and --feature cannot be combined with -c.
 ";
 
@@ -73,8 +80,9 @@ fn main() -> rustyline::Result<()> {
     // the static library an AOT executable links, for `-c` and for every
     // `(compile-file ...)` this process runs.
     let (lib_dir, args) = parse_lib_dir(args);
-    // `--help`/`--version` are `typl`'s only among the options before a
-    // script's name; from the name on, they are the script's own arguments.
+    // `--help`/`--version`/`--remove-lib` (and its `--others`/`--all`) are
+    // `typl`'s only among the options before a script's name; from the name
+    // on, they are the script's own arguments.
     let own = &args[..args.iter().position(|a| !a.starts_with("--")).unwrap_or(args.len())];
     if own.iter().any(|a| a == "--help") {
         print!("{}", HELP);
@@ -83,6 +91,39 @@ fn main() -> rustyline::Result<()> {
     if own.iter().any(|a| a == "--version") {
         println!("typl {}", TYPL_VERSION);
         std::process::exit(0);
+    }
+    // `--others`/`--all` say which libraries `--remove-lib` removes, and mean
+    // nothing without it — refused rather than ignored.
+    let (others, all) = (own.iter().any(|a| a == "--others"), own.iter().any(|a| a == "--all"));
+    if own.iter().any(|a| a == "--remove-lib") {
+        let which = match (others, all) {
+            (false, false) => typelisp::compile::aot::RemoveLib::This,
+            (true, false) => typelisp::compile::aot::RemoveLib::Others,
+            (false, true) => typelisp::compile::aot::RemoveLib::All,
+            (true, true) => {
+                eprintln!("--remove-lib: --others and --all cannot be combined");
+                std::process::exit(1);
+            }
+        };
+        match typelisp::compile::aot::remove_written_archives(which) {
+            Ok(removed) if removed.is_empty() => println!("no library to remove"),
+            Ok(removed) => {
+                for dir in removed {
+                    println!("removed {}", dir.display());
+                }
+            }
+            Err(e) => {
+                eprintln!("--remove-lib: {}", e);
+                std::process::exit(1);
+            }
+        }
+        std::process::exit(0);
+    }
+    for (given, flag) in [(others, "--others"), (all, "--all")] {
+        if given {
+            eprintln!("{}: only means something with --remove-lib", flag);
+            std::process::exit(1);
+        }
     }
     if let Some(dir) = lib_dir {
         if let Err(e) = typelisp::compile::aot::set_lib_dir(dir) {

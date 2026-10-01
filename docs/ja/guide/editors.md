@@ -18,7 +18,8 @@
 cargo build --release --bin typl-lsp
 ```
 
-`target/release/typl-lsp` ができます。
+`target/release/typl-lsp` ができます。[README_JP.md](../../../README_JP.md) の手順で
+`cargo install` した場合は、`typl` と一緒に `~/.cargo/bin/typl-lsp` に入っています。
 
 ## 2. VS Code
 

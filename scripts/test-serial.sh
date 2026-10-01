@@ -94,8 +94,8 @@ if [ "${#targets[@]}" -eq 0 ]; then
     done
 fi
 
-# The AOT tests (`compile_file_test`) link `target/<profile>/libtypelisp_front.a`
-# into every executable they build (`compile::aot::staticlib_path`), and
+# The AOT tests (`compile_file_test`) link `target/debug/libtypelisp_front.a`
+# into every executable they build (`compile::aot::link_archive`), and
 # `cargo test` does *not* produce it: it builds `typelisp-front`'s rlib, which is
 # a different target from its staticlib. Without this the AOT tests silently
 # link whatever `.a` was last left on disk, so a newly added `rt_*` shim fails

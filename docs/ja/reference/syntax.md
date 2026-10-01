@@ -1415,7 +1415,11 @@ AOT 実行ファイルには、プログラムが使う機能のぶんだけが�
 
 コマンドラインからは `typl -c src-path [-o out-path]`（`-c` は `--compile` とも書ける）で `compile-file` と同じことができる。
 `-o` を省くと、`src-path` から拡張子 `.typl` を除いたものが出力になる。実行ファイルにリンクする
-静的ライブラリ `libtypelisp_front.a` は、既定では `typl` をビルドした場所のものを使う。
+静的ライブラリ `libtypelisp_front.a` は、既定では、リリースビルドの `typl` なら `typl` が
+中に持っているものを初回のリンク時に `$TYPELISP_HOME/lib/<ビルドID>/`（`TYPELISP_HOME` が
+無ければ `~/.typelisp/lib/<ビルドID>/`）へ書き出して使い、デバッグビルドなら `typl` をビルドした
+場所のものを使う。`typl --remove-lib` は、その `typl` が書き出したものを削除する。
+`--others` を付けると他のビルドIDのものを、`--all` を付けるとすべてのビルドIDのものを削除する。
 `typl --lib-dir DIR` を指定すると `DIR` にあるものを使い（`-c` にも `compile-file` にも効く）、
 そこに無ければ起動時にエラーになる。
 

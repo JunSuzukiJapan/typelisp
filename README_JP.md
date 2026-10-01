@@ -205,10 +205,28 @@ cargo build --release  # リリースビルド（target/release/）
 | `typl` | 処理系本体（使い方は次の「実行方法」） |
 | `typl-lsp` | 言語サーバ（エディタ連携用） |
 
+### cargo install でインストールする
+
+`typl` と `typl-lsp` を `~/.cargo/bin` に入れるには、クローンしたリポジトリで次を実行します。
+
+```sh
+scripts/with-llvm-env.sh cargo install --locked --path .
+```
+
+`cargo install` はリポジトリの `.cargo/config.toml` を読みません。`scripts/setup-cargo-env.sh` を
+実行してあっても、`scripts/with-llvm-env.sh` 経由で実行してください。Homebrew を使わない場合は、
+`LLVM_SYS_221_PREFIX` と（macOS では）`MACOSX_DEPLOYMENT_TARGET` を設定してから
+`cargo install --locked --path .` を実行します。
+
+インストールした `typl` は、コンパイルに使う静的ライブラリを中に持っているので、インストール後に
+リポジトリを移動・削除しても `-c` や `compile-file` が使えます（次の「ファイルをコンパイルする」を
+参照）。
+
 ## 実行方法
 
-`typl` の起動のしかたは次の3通りです。以下の例では、`target/debug/`（リリースビルドなら
-`target/release/`）にある `typl` にパスが通っているものとします。
+`typl` の起動のしかたは次の3通りです。以下の例では、`typl` にパスが通っているものとします
+（`cargo install` で入れた場合、またはビルドした `target/debug/`・`target/release/` にパスを
+通した場合）。
 
 ### インタラクティブモード（REPL）
 
@@ -240,12 +258,32 @@ typl --compile foo.typl -o bar
 ```
 
 コンパイルして作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` をリンクします。
-何も指定しなければ、`typl` をビルドしたリポジトリの `target/debug/`（リリースビルドなら
-`target/release/`）にあるものを使います。リポジトリを移動・削除するときは、このファイルを別の
-フォルダへコピーしておき、`--lib-dir` でそのフォルダを指定してください。
+リリースビルドの `typl`（`cargo install` で入れたものを含む）は、このライブラリを中に持って
+いて、初めてコンパイルするときに `~/.typelisp/lib/<ビルドID>/` に書き出します。2回目からは
+書き出したものを使います。書き出す場所は環境変数 `TYPELISP_HOME` で変えられます（`TYPELISP_HOME`
+を設定すると `$TYPELISP_HOME/lib/<ビルドID>/` になります）。ビルドIDはライブラリの中身から
+決まるので、別の版の `typl` を入れると、次のコンパイルで新しいディレクトリに書き出されます。
+
+書き出したライブラリは、次のコマンドで削除できます。
 
 ```sh
-cp target/release/libtypelisp_front.a ~/lib/typelisp/
+typl --remove-lib           # この typl が書き出したものを削除する
+typl --remove-lib --others  # 別の版の typl が書き出したものを削除する
+typl --remove-lib --all     # すべての版のものを削除する
+```
+
+`typl` をアンインストールする前には `typl --remove-lib` を、入れ直した後には
+`typl --remove-lib --others` を実行すると、使われないライブラリが残りません。削除したものは、
+`typl` が次にコンパイルするときに書き出し直します。削除するのは `lib/` の下のビルドIDの
+ディレクトリだけで、それ以外のファイルには触れません。
+
+デバッグビルドの `typl` は、ビルドしたリポジトリの `target/debug/` にあるものを使い、何も
+書き出しません。
+
+別の場所に置いたライブラリを使うには、`--lib-dir` でそのフォルダを指定します。
+
+```sh
+cp target/debug/libtypelisp_front.a ~/lib/typelisp/
 typl --lib-dir ~/lib/typelisp -c foo.typl
 ```
 
@@ -255,8 +293,9 @@ typl --lib-dir ~/lib/typelisp -c foo.typl
 ### その他のオプション
 
 ```sh
-typl --help       # オプションの一覧を表示する
-typl --version    # バージョンを表示する
+typl --help        # オプションの一覧を表示する
+typl --version     # バージョンを表示する
+typl --remove-lib  # 書き出したライブラリを削除する（--others / --all も使える）
 ```
 
 ## 文書

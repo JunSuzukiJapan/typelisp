@@ -25,4 +25,4 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
-exec "$here/with-llvm-env.sh" cargo run --quiet --bin typl-bootstrap-island
+exec "$here/with-llvm-env.sh" cargo run --quiet --features dev-tools --bin typl-bootstrap-island
