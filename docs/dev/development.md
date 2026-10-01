@@ -66,12 +66,21 @@ macOS の dev プロファイルは `split-debuginfo = "unpacked"` が既定で�
 掃除:
 
 ```sh
-scripts/clean-stale-objects.sh              # 直近 2 日分の .o を残して削除
-scripts/clean-stale-objects.sh --dry-run    # 件数だけ数える
+scripts/clean-stale-objects.sh              # 直近 2 日分を残して削除
+scripts/clean-stale-objects.sh --dry-run    # 件数と大きさだけ数える
 ```
 
-再ビルドは起きない（cargo の fingerprint はこれらのファイルを追跡していない）。
+`.o` を消しても再ビルドは起きない（cargo の fingerprint はこれらのファイルを追跡していない）。
 失うのは、消した世代の `.o` を指しているバイナリのバックトレース行番号だけ。
+
+同じスクリプトが、古い実行ファイルも消す。テストバイナリと `[[bin]]` は `deps` に
+`<名前>-<16 桁のハッシュ>` で置かれ、コードや機能フラグが変わるたびに新しいハッシュで
+増えていく（テストバイナリは 1 本 100MB を超える）。同じ名前でより新しいものがあり、
+かつ 2 日より古いものを `.d` ごと消す。cargo は無くなったものを次のビルドで作り直すので、
+壊れることはない。2 日の条件は、機能フラグ違いで並んで使われている 2 つ
+（`--features dev-tools` の有無など）を作り直させないためにある。
+
+`deps` を入れ替えるので、`cargo` やテストが走っている間は実行しない。
 
 ## コミット済みダンプ成果物の再生成
 
