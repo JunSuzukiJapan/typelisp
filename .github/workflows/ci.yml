@@ -1,0 +1,110 @@
+# Every push and pull request: the workspace builds, and nothing in it — tests
+# included — has a warning. The test suite itself runs only for a release
+# (release.yml): it takes hours, serially (scripts/test-serial.sh says why).
+#
+# Tests are checked, not built: linked, the 130-odd test binaries come to more
+# than 15 GB, more than a hosted runner has free.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The toolchain this repository is developed with. Pinned so that a new
+  # stable's new lints do not fail a commit that changed nothing.
+  RUST_VERSION: "1.98.1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install LLVM 22
+        run: brew install llvm@22
+      - name: Install Rust
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      # Pins LLVM_SYS_221_PREFIX and the minimum macOS version for this
+      # runner, as on a developer's machine.
+      - name: Configure cargo
+        run: scripts/setup-cargo-env.sh
+      - uses: Swatinem/rust-cache@v2
+      - name: Check (warnings are errors)
+        run: cargo check --workspace --all-targets --locked
+        env:
+          RUSTFLAGS: -D warnings
+      - name: Build
+        run: cargo build --workspace --locked
+
+  linux:
+    name: Linux (${{ matrix.distro }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: ubuntu-24.04
+            image: ubuntu:24.04
+            apt_suite: noble
+          - distro: debian-13
+            image: debian:13
+            apt_suite: trixie
+          - distro: fedora-44
+            image: fedora:44
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      # Before checkout: without git, actions/checkout falls back to
+      # downloading a tarball, and cargo then sees no repository.
+      - name: Install build dependencies (apt)
+        if: matrix.apt_suite
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl gnupg build-essential pkg-config git \
+            zlib1g-dev libzstd-dev libxml2-dev
+          curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/${{ matrix.apt_suite }}/ llvm-toolchain-${{ matrix.apt_suite }}-22 main" \
+            > /etc/apt/sources.list.d/llvm.list
+          apt-get update
+          apt-get install -y --no-install-recommends llvm-22-dev libpolly-22-dev
+      - name: Install build dependencies (dnf)
+        if: startsWith(matrix.distro, 'fedora')
+        run: |
+          dnf install -y gcc gcc-c++ make pkgconf git which diffutils \
+            zlib-devel libzstd-devel libxml2-devel libffi-devel \
+            llvm-devel llvm-static
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain "$RUST_VERSION"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+      # Finds the distribution's LLVM 22 (scripts/linux-llvm-prefix.sh).
+      - name: Configure cargo
+        run: scripts/setup-cargo-env.sh
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.distro }}
+      - name: Check (warnings are errors)
+        run: cargo check --workspace --all-targets --locked
+        env:
+          RUSTFLAGS: -D warnings
+      - name: Build
+        run: cargo build --workspace --locked
