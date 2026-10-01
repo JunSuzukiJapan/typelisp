@@ -8,7 +8,8 @@
 # Why generate instead of commit: the prefix is machine-specific (Intel
 # `/usr/local` vs Apple Silicon `/opt/homebrew`), so it must be resolved at
 # setup time via `brew --prefix` and never hardcoded. The generated
-# `.cargo/config.toml` is git-ignored.
+# `.cargo/config.toml` is git-ignored. On Linux the distribution's LLVM 22 is
+# used instead, found by scripts/linux-llvm-prefix.sh.
 #
 # Run once after cloning:
 #   scripts/setup-cargo-env.sh
@@ -42,15 +43,19 @@ fi
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if ! command -v brew >/dev/null 2>&1; then
-    echo "error: brew not found; install LLVM 22 and set LLVM_SYS_221_PREFIX yourself" >&2
-    exit 1
-fi
+if [ "$(uname -s)" = Linux ]; then
+    prefix="$("$repo_root/scripts/linux-llvm-prefix.sh")"
+else
+    if ! command -v brew >/dev/null 2>&1; then
+        echo "error: brew not found; install LLVM 22 and set LLVM_SYS_221_PREFIX yourself" >&2
+        exit 1
+    fi
 
-prefix="$(brew --prefix llvm@22)"
-if [ ! -x "$prefix/bin/llvm-config" ]; then
-    echo "error: llvm@22 not found at $prefix; run 'brew install llvm@22'" >&2
-    exit 1
+    prefix="$(brew --prefix llvm@22)"
+    if [ ! -x "$prefix/bin/llvm-config" ]; then
+        echo "error: llvm@22 not found at $prefix; run 'brew install llvm@22'" >&2
+        exit 1
+    fi
 fi
 
 # macOS: one minimum OS version for rustc, the `cc` crate (ring) and

@@ -1426,7 +1426,7 @@ fn host_target_machine() -> Result<TargetMachine, String> {
             &TargetMachine::get_host_cpu_name().to_string(),
             &TargetMachine::get_host_cpu_features().to_string(),
             OptimizationLevel::None,
-            RelocMode::Default,
+            reloc_mode(),
             CodeModel::Default,
         )
         .ok_or_else(|| "failed to create a target machine for the host triple".to_string())
@@ -1455,6 +1455,29 @@ fn host_triple() -> Result<TargetTriple, String> {
 fn host_triple() -> Result<TargetTriple, String> {
     Ok(TargetMachine::get_default_triple())
 }
+
+/// Linux: position-independent code. `cc` links a PIE there by default, and
+/// LLVM's default for an ELF target is static code, which the linker can put
+/// into a PIE only by leaving relocations in `.text` (`DT_TEXTREL`).
+#[cfg(target_os = "linux")]
+fn reloc_mode() -> RelocMode {
+    RelocMode::PIC
+}
+
+#[cfg(not(target_os = "linux"))]
+fn reloc_mode() -> RelocMode {
+    RelocMode::Default
+}
+
+/// The system libraries the static library needs, which `cc` does not add
+/// by itself on Linux — rustc's `--print native-static-libs` for
+/// `typelisp-front`, without the `-lc` `cc` adds anyway. macOS needs none:
+/// `cc` links libSystem, which holds them all.
+#[cfg(target_os = "linux")]
+const SYSTEM_LIBRARIES: &[&str] = &["-lgcc_s", "-lutil", "-lrt", "-lpthread", "-lm", "-ldl"];
+
+#[cfg(not(target_os = "linux"))]
+const SYSTEM_LIBRARIES: &[&str] = &[];
 
 /// The minimum macOS version this build's static library was compiled for,
 /// which is what its objects claim — `compile-file` links for the same one
@@ -1594,6 +1617,7 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
         .arg(&object_path)
         .arg(&archive)
         .args(libraries.iter().map(|l| format!("-l{}", l)))
+        .args(SYSTEM_LIBRARIES)
         .arg("-o")
         .arg(output_path)
         .status()
