@@ -16,6 +16,74 @@ pub fn runtime_function_names() -> Vec<&'static str> {
     crate::compile::externs::rt_extern_functions().iter().map(|(name, _)| *name).collect()
 }
 
+/// `(name, address)` for every runtime function `module` declares — the part
+/// of [`jit_engine`]'s `externals` that the runtime supplies. A module that
+/// declares the whole set ([`runtime_function_names`]) gets the whole set
+/// back; one that declares three gets three.
+pub fn runtime_externals(module: &Module<'static>) -> Vec<(String, usize)> {
+    crate::compile::externs::rt_extern_functions()
+        .iter()
+        .filter(|(name, _)| module.get_function(name).is_some())
+        .map(|(name, addr)| (name.to_string(), *addr))
+        .collect()
+}
+
+/// A JIT execution engine over `module`, with every declaration in it bound
+/// to an address from `externals` — **the only way this crate makes one**.
+///
+/// Everything `module` declares without defining — a function with no body, a
+/// global with no initializer — must be named in `externals`, or this refuses
+/// before the engine exists. Not left to LLVM: what MCJIT does with a name no
+/// mapping covers is look it up in the running process, and what that finds
+/// depends on the OS. macOS shows an executable's own symbols to that lookup,
+/// so a forgotten mapping still works there; a Linux executable shows them
+/// only when linked with `-rdynamic`, and the lookup's failure is not an error
+/// — the call is left pointing at address 0, and the first sign of it is a
+/// SIGSEGV when that call runs. Checking here makes a forgotten mapping the
+/// same error, naming the symbol, on every OS.
+///
+/// LLVM's intrinsics (`llvm.*`) are the exception: they are declarations that
+/// code generation replaces, not calls into anything. What this cannot see is
+/// a call code generation itself inserts (a `memcpy` for a large copy, say),
+/// since no declaration of it is in `module`; those still go to the process
+/// lookup.
+///
+/// Must be called with [`COMPILE_LOCK`] held, like everything that touches
+/// the shared context.
+pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Result<ExecutionEngine<'static>, String> {
+    let mapped: std::collections::HashSet<&str> = externals.iter().map(|(name, _)| name.as_str()).collect();
+    let mut unbound: Vec<String> = Vec::new();
+    for function in module.get_functions() {
+        let name = function.get_name().to_string_lossy().into_owned();
+        if function.as_global_value().is_declaration() && !name.starts_with("llvm.") && !mapped.contains(name.as_str()) {
+            unbound.push(name);
+        }
+    }
+    for global in module.get_globals() {
+        let name = global.get_name().to_string_lossy().into_owned();
+        if global.is_declaration() && !mapped.contains(name.as_str()) {
+            unbound.push(name);
+        }
+    }
+    if !unbound.is_empty() {
+        return Err(format!(
+            "internal error: declared in the module but given no address: {}",
+            unbound.iter().map(|n| format!("`{}`", n)).collect::<Vec<_>>().join(", ")
+        ));
+    }
+    let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
+    for (name, addr) in externals {
+        match (module.get_function(name), module.get_global(name)) {
+            (Some(function), _) => engine.add_global_mapping(&function, *addr),
+            (None, Some(global)) => engine.add_global_mapping(&global, *addr),
+            (None, None) => {
+                return Err(format!("internal error: no forward declaration for \"{}\" in this module", name));
+            }
+        }
+    }
+    Ok(engine)
+}
+
 pub mod aot;
 pub mod bootstrap;
 pub mod core_bridge;
@@ -366,13 +434,7 @@ impl CompiledFn {
         body_abi: u8,
     ) -> Result<CompiledFn, String> {
         destroy_retired_llvm();
-        let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
-        for (name, addr) in externals {
-            let decl = module
-                .get_function(name)
-                .ok_or_else(|| format!("internal error: no forward declaration for \"{}\" in this module", name))?;
-            engine.add_global_mapping(&decl, *addr);
-        }
+        let engine = jit_engine(module, externals)?;
         let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
         Ok(CompiledFn { engine: Some(engine), addr, body_abi })
     }
@@ -404,13 +466,7 @@ impl CompiledFn {
         body_abi: u8,
     ) -> Result<Vec<CompiledFn>, String> {
         destroy_retired_llvm();
-        let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
-        for (name, addr) in externals {
-            let decl = module
-                .get_function(name)
-                .ok_or_else(|| format!("internal error: no forward declaration for \"{}\" in this module", name))?;
-            engine.add_global_mapping(&decl, *addr);
-        }
+        let engine = jit_engine(module, externals)?;
         fn_names
             .iter()
             .map(|fn_name| {

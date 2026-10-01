@@ -682,12 +682,7 @@ pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBod
     // because `CompiledFn::new` requires a forward declaration for each name
     // it is asked to map — the same filter `driver`'s bitcode path uses.
     let mut externals: Vec<(String, usize)> = vec![(decl.c_symbol.clone(), addr)];
-    externals.extend(
-        crate::compile::externs::rt_extern_functions()
-            .iter()
-            .filter(|(n, _)| module.get_function(n).is_some())
-            .map(|(n, a)| (n.to_string(), *a)),
-    );
+    externals.extend(crate::compile::runtime_externals(&module));
     // `name` is the coroutine entry `emit_thunk` put under the Lisp name, not
     // the classic marshalling body behind it — so that is the ABI recorded
     // here, and `FfiThunk` reads it back rather than restating it.
@@ -926,11 +921,7 @@ pub fn callback_entry(
     module
         .verify()
         .map_err(|e| format!("ffi: the callback entry for `{}` is not valid IR: {}", path, e.to_string()))?;
-    let externals: Vec<(String, usize)> = crate::compile::externs::rt_extern_functions()
-        .iter()
-        .filter(|(n, _)| module.get_function(n).is_some())
-        .map(|(n, a)| (n.to_string(), *a))
-        .collect();
+    let externals = crate::compile::runtime_externals(&module);
     let code = CompiledFn::new(&module, &name, &externals, typelisp_abi::BODY_ABI_CLASSIC)
         .map_err(|e| format!("ffi: failed to JIT the callback entry for `{}`: {}", path, e))?;
     let addr = code.address();

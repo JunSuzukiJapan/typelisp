@@ -7,8 +7,8 @@
 //! exercises `HashTable<K,V>`.
 
 extern crate typelisp;
+use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
-use inkwell::OptimizationLevel;
 use std::cell::RefCell;
 use std::rc::Rc;
 use typelisp::compile::COMPILE_LOCK;
@@ -128,6 +128,17 @@ fn eval_string(src: &str) -> String {
 /// warnings pointed out.
 fn expect_llvm_module(v: Value) -> Rc<RefCell<Module<'static>>> {
     typelisp::llvm_module_of(&v).expect("expected an llvm-module handle")
+}
+
+/// A JIT engine over a module a test built by hand, with each runtime
+/// function it declares bound to its address — through
+/// [`typelisp::compile::jit_engine`], like every engine the compiler makes, so
+/// a declaration with no address is an error here too rather than a call to
+/// address 0 on Linux.
+fn jit(module: &Rc<RefCell<Module<'static>>>) -> ExecutionEngine<'static> {
+    let module = module.borrow();
+    typelisp::compile::jit_engine(&module, &typelisp::compile::runtime_externals(&module))
+        .expect("failed to create JIT execution engine")
 }
 
 /// Like [`run`], but with the (typelisp-hosted) compiler body
@@ -395,10 +406,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "add2", &[10, 32]), 42);
 }
 
@@ -421,10 +429,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "outer", &[]), 5);
 }
 
@@ -459,16 +464,13 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "outer", &[3, 4]), 7);
 }
 
 /// Hands a real, JIT-executable `llvm-module` back to Rust (rather than its
 /// `to-string` dump, like `BUILD_ANSWER_MODULE`) so this test can prove
-/// `inkwell::Module::create_jit_execution_engine` actually runs code the
+/// [`typelisp::compile::jit_engine`] actually runs code the
 /// typelisp-built IR describes — not just that the IR text looks right.
 #[test]
 fn the_built_module_actually_jit_executes_to_42() {
@@ -486,10 +488,7 @@ fn the_built_module_actually_jit_executes_to_42() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let answer = unsafe {
         engine
             .get_function::<unsafe extern "C" fn() -> i64>("answer")
@@ -522,10 +521,7 @@ fn a_function_using_load_arg_and_build_add_computes_correctly() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let add2 = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("add2")
@@ -571,10 +567,7 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let quadruple = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("quadruple")
@@ -656,10 +649,7 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     module.borrow().verify().expect("the emitted module verifies");
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let caller = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(i64) -> i64>("caller")
@@ -922,10 +912,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "quadruple", &[5]), 20);
 }
 
@@ -1529,10 +1516,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
              (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "outer", &[]), 5);
@@ -1559,10 +1543,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "outer", &[10, 5]), 15);
@@ -1871,7 +1852,7 @@ fn the_compiler_body_compiles_an_integer_comparison() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "lt", &[3, 5]), 1);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "lt", &[5, 3]), 0);
 }
@@ -1913,7 +1894,7 @@ fn the_compiler_body_compiles_an_if_expression() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "maxab", &[10, 32]), 32);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "maxab", &[50, 3]), 50);
 }
@@ -1937,7 +1918,7 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module.borrow().create_jit_execution_engine(OptimizationLevel::None).expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     assert_eq!(
         run_coroutine_entry(&engine, &mut heap, "shadow_test", &[5]),
         104,
@@ -2221,10 +2202,7 @@ fn build_shl_and_build_ashr_round_trip_a_signed_fixnum_payload() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let round_trip = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("round_trip")
@@ -2261,10 +2239,7 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let round_trip = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("round_trip")
@@ -6235,10 +6210,7 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     assert_eq!(run_coroutine_entry(&engine, &mut heap, "add2", &[10, 32]), 42);
 }
 
@@ -6263,10 +6235,7 @@ fn the_island_compiles_a_bridged_let_and_if() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     for (a, b) in [(10i64, 4i64), (4, 10), (7, 7)] {
         assert_eq!(run_coroutine_entry(&engine, &mut heap, "absdiff", &[a, b]), (a - b).abs(), "a={} b={}", a, b);
     }
@@ -6349,10 +6318,7 @@ fn the_island_runs_a_bridged_loop() {
         &body,
     )));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     // A `loop` unwinds GC roots on the way out (`rt_truncate_sexpr_roots`), so
     // this needs a live heap even though the arithmetic itself never allocates.
     // It ran without one until 2026-09-08 by reading whatever `ACTIVE_HEAP`
@@ -6394,10 +6360,7 @@ fn the_island_runs_a_bridged_labels_block() {
     // local lives in a `BoxedObj::Frame`, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     for (n, want) in [(0i64, 1i64), (1, 1), (5, 120), (10, 3628800)] {
         assert_eq!(run_coroutine_entry(&engine, &mut heap, "fact", &[n]), want, "n={}", n);
     }
@@ -6505,10 +6468,7 @@ fn the_island_runs_a_whole_bridged_defun() {
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     for (x, want) in [(-5i64, 0i64), (0, 0), (7, 7), (10, 10), (99, 10)] {
         assert_eq!(run_coroutine_entry(&engine, &mut heap, &name, &[x, 0, 10]), want, "x={}", x);
     }
@@ -6973,10 +6933,7 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let two_halves = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(i64) -> i64>("two_halves")
@@ -7074,10 +7031,7 @@ fn the_driver_runs_a_two_frame_call_chain() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let outer = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(i64) -> i64>("outer")
@@ -7167,10 +7121,7 @@ fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
     // words — a resume block is reached only from the dispatch chain, so
     // nothing defined in the body reaches it.
     module.borrow().verify().expect("the emitted module verifies");
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let sum_to = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(i64) -> i64>("sum_to")
@@ -7233,10 +7184,7 @@ fn a_frames_size_is_patched_in_once_the_body_is_emitted() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let sized = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("sized_frame")
@@ -7294,10 +7242,7 @@ fn a_compiled_function_can_carry_a_local_in_a_heap_frame() {
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = module
-        .borrow()
-        .create_jit_execution_engine(OptimizationLevel::None)
-        .expect("failed to create JIT execution engine");
+    let engine = jit(&module);
     let roundtrip = unsafe {
         engine
             .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("frame_roundtrip")
