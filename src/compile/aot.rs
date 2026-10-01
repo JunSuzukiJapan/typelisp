@@ -1214,10 +1214,10 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
 ///   later link uses that file. `cargo install` keeps nothing of the tree it
 ///   built in, so this is what makes an installed `typl` able to compile at
 ///   all.
-/// - A debug build links the one in the tree it was built in,
-///   `CARGO_MANIFEST_DIR/target/debug/`. The workspace shares one `target/`
-///   dir at the repo root, so `CARGO_MANIFEST_DIR` (this crate's own root) is
-///   the right base for every member's artifacts.
+/// - A debug build links the one beside its own artifacts,
+///   `<target dir>/debug/` — `CARGO_TARGET_DIR` when that is set. The
+///   workspace shares one target dir, so this crate's is every member's;
+///   `build.rs`'s `profile_dir` reads it from `OUT_DIR`.
 ///
 /// **In a debug build this artifact is not built by the `cargo` invocation
 /// that runs an AOT test.** `cargo test` builds `typelisp-front`'s *rlib* (the
@@ -1250,7 +1250,7 @@ fn default_archive() -> Result<std::path::PathBuf, String> {
 
 #[cfg(not(typelisp_bundled_runtime))]
 fn default_archive() -> Result<std::path::PathBuf, String> {
-    Ok(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("debug").join(STATICLIB_NAME))
+    Ok(std::path::PathBuf::from(env!("TYPELISP_PROFILE_DIR")).join(STATICLIB_NAME))
 }
 
 /// `$TYPELISP_HOME/lib/<build id>`, where this build's archive is written.
