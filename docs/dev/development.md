@@ -141,9 +141,51 @@ LLVMバージョンを指す等でシャドウされていると、素の `cargo
 CPU ごとの tar.gz と、その SHA-256 のファイル。Homebrew の LLVM は自分の CPU 向けしか入って
 いないので、各 CPU 向けのビルドはそれぞれの Mac で行う。
 
-1. Intel の Mac と Apple Silicon の Mac で、それぞれ `scripts/dist/build.sh` を実行する。
-   `target/dist/typelisp-<version>-<arch>.tar.gz` と `.tar.gz.sha256` ができる。
-2. 4 つのファイルを `gh release upload v<version> ...` でリリースに添付する。
+### 初めて使う Mac での準備（一度だけ）
+
+1. Xcode Command Line Tools を入れる（`xcode-select --install`）。`build.sh` が使う `otool`・`ar`
+   と、確認に使う `cc` が入る。
+2. Homebrew で LLVM 22・zstd・GitHub CLI を入れる（`brew install llvm@22 zstd gh`）。
+3. Rust を入れる（rustup か `brew install rust`）。std が対象とする最低 macOS バージョンが、配る
+   実行ファイルの最低バージョンの候補になる（下の `build.sh` の説明）。
+4. `gh auth login` で、このリポジトリのリリースに書き込めるアカウントにログインする。
+5. リポジトリを clone する（`git clone https://github.com/JunSuzukiJapan/typelisp.git`）。
+   既にあれば `git pull` で main を最新にする。
+
+`scripts/setup-cargo-env.sh` は要らない。`build.sh` は LLVM の場所と最低 macOS バージョンを
+自分で決めて環境変数に設定する。
+
+### リリースのたびに
+
+リリースのタグ（`v<version>`）と GitHub のリリースができていることが前提。Intel の Mac と
+Apple Silicon の Mac のそれぞれで、リポジトリのルートで次を実行する。`<arch>` は Intel なら
+`x86_64`、Apple Silicon なら `arm64`。
+
+```sh
+git checkout v<version>
+scripts/dist/build.sh
+gh release upload v<version> target/dist/typelisp-<version>-<arch>.tar.gz target/dist/typelisp-<version>-<arch>.tar.gz.sha256
+git checkout main
+```
+
+- `build.sh` が最初に表示する `minimum macOS:` の行が、その CPU 向けの `typl` が動く最も古い
+  macOS。Homebrew の LLVM や zstd がその Mac の macOS 向けにビルドされたものだと、ここが上がる。
+- `build.sh` は依存ライブラリが OS のものだけであることと、JIT と AOT が動くことを確かめ、
+  そうでなければ止まる。
+- `scripts/dist/build.sh` は v0.1.0 のタグより後に入ったので、v0.1.0 のタグには無い。0.1.0 に
+  限っては `git checkout` をせず main のまま実行する（main とタグで `src/`・`crates/`・
+  `Cargo.toml`・`Cargo.lock`・`build.rs` に差が無いことは確かめてある。`git diff v0.1.0 main --
+  src crates Cargo.toml Cargo.lock build.rs` が空）。
+- 添付した後、その Mac で `install.sh` から入ることを確かめる。既に入れている typl を上書き
+  しないよう、インストール先を一時的なフォルダにする:
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_HOME=/tmp/typelisp-check sh
+  /tmp/typelisp-check/bin/typl --version
+  rm -rf /tmp/typelisp-check
+  ```
+
+### 仕組み
 
 `install.sh` はアセットの名前を `typelisp-<version>-<arch>.tar.gz`（`arch` は `x86_64` か
 `arm64`）と決め打ちしているので、名前を変えるなら両方を直す。
