@@ -1,6 +1,6 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-10-02 / ブランチ: `feat/linux-build`
+最終更新: 2026-10-02 / ブランチ: `feat/ci`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
@@ -8,11 +8,12 @@
 
 ## 残っている作業
 
-**CI/CD（作業中、ブランチ `feat/linux-build`）。** push/PR ごとにビルドと警告 0 を、
+**CI/CD（作業中、ブランチ `feat/ci`）。** push/PR ごとにビルドと警告 0 を、
 リリース（`v*` タグ）のときだけテスト全体を回す。対象は macOS と Linux
 （Ubuntu 24.04・Debian 13・Fedora 44 でテスト全体が通ることを 2026-10-02 に確認済み）。
-Arch は公式リポジトリに LLVM 22 の開発用パッケージ（`llvm-config`・ヘッダ）が無く
-（`llvm22-libs` だけ）、扱いが未定。crates.io への公開は手動のまま。
+Arch は対象外（2026-10-02 決定）：公式リポジトリの `llvm` が 23 で、LLVM 22 は
+実行時ライブラリ（`llvm22-libs`）しか無く `llvm-config`・ヘッダが無い。LLVM 23 へ移る
+ときに改めて考える。crates.io への公開は手動のまま。
 
 **JIT のシンボル解決に残る穴。** `compile::jit_engine` は、モジュールに宣言があるのに
 アドレスが渡されていない名前を OS に関係なく断る。ただし LLVM がコード生成の段階で
