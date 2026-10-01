@@ -12090,3 +12090,20 @@ cargo と `compile-file` のリンクに渡すようにした。ring を作る�
 最大は typelisp-front の 2.4MB（上限 10MB）。確かめていないのは crates.io から入れたときの
 リリースビルドで、`build.rs` の入れ子の cargo（`--manifest-path` と `-p typelisp-front`
 `--locked`）がワークスペースの無いパッケージで動くかは、公開前に確かめる必要がある。
+
+## 配布用の実行ファイルを作るスクリプト（2026-10-01）
+
+`scripts/dist/build.sh`（CPU ごと）と `scripts/dist/package.sh`（universal 化・署名・公証）。
+手順は [development.md](development.md) の「配布用の実行ファイル（macOS）」。
+
+- リリース版の typl は Homebrew の zstd に動的リンクしていて、Homebrew の無い Mac では起動しない。
+  llvm-sys は `llvm-config --system-libs` の `-lzstd` を dylib として渡すので、`libzstd.a` だけを
+  置いたフォルダを `-L` で先に探させると静的に取り込まれる。普通の `cargo install` では Homebrew
+  の llvm@22 が zstd を連れてくるので、これは配布用のビルドだけで行う。
+- 最低 macOS バージョンは std・LLVM・zstd の最も高いもの。この Intel の Mac では 3 つとも 15.0。
+- entitlement が本当に要るかは、外して署名し直して確かめた。JIT は `allow-unsigned-executable-memory`
+  が無いとカーネルに SIGKILL され（終了コード 137）、FFI は `disable-library-validation` が無いと
+  Homebrew の dylib を開けない。ad-hoc 署名でも hardened runtime の制限は掛かる。
+
+確かめていないこと: Apple Silicon でのビルド、universal binary、Developer ID での署名と公証。
+この Mac には署名用の証明書が無い。
