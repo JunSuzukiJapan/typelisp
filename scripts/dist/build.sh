@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Builds `typl` and `typl-lsp` for distribution, for the CPU of the Mac this
-# runs on, and leaves them in target/dist/typelisp-<version>-<arch>.tar.gz.
-# Run it once on an Intel Mac and once on an Apple Silicon Mac, then give both
-# archives to scripts/dist/package.sh on the Mac that holds the signing
-# certificate:
+# runs on, and leaves them in target/dist/typelisp-<version>-<arch>.tar.gz
+# with its SHA-256 beside it (.tar.gz.sha256). Run it once on an Intel Mac and
+# once on an Apple Silicon Mac, and attach all four files to the GitHub
+# release; install.sh at the repository root downloads them:
 #   scripts/dist/build.sh
+#   gh release upload v<version> target/dist/typelisp-<version>-<arch>.tar.gz target/dist/typelisp-<version>-<arch>.tar.gz.sha256
+#
+# The binaries are not signed with a Developer ID. A file curl downloads gets
+# no quarantine attribute, so Gatekeeper does not look at it; an Apple Silicon
+# binary needs only the ad-hoc signature the linker gives it.
 #
 # What differs from `cargo build --release`:
 #
@@ -96,8 +101,9 @@ printf '(defun main () i32 (println "ok") 0)\n' > "$work/aot.typl"
 
 version="$("$typl" --version | awk '{ print $2 }')"
 name="typelisp-$version-$arch"
-rm -rf "${dist:?}/$name" "$dist/$name.tar.gz"
+rm -rf "${dist:?}/$name" "$dist/$name.tar.gz" "$dist/$name.tar.gz.sha256"
 mkdir -p "$dist/$name"
-cp "$typl" "$lsp" "$dist/$name/"
+cp "$typl" "$lsp" LICENSE-APACHE LICENSE-MIT LICENSE-EXCEPTION "$dist/$name/"
 tar -C "$dist" -czf "$dist/$name.tar.gz" "$name"
-echo "wrote $dist/$name.tar.gz"
+(cd "$dist" && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+echo "wrote $dist/$name.tar.gz and $name.tar.gz.sha256"

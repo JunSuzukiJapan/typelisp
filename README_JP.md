@@ -147,7 +147,36 @@ typl examples/wc.typl README_JP.md
 | [shape-canvas](examples/projects/shape-canvas/) | 文字のキャンバスに図形を描く（`:dyn` とエラー型） |
 | [todo-cli](examples/projects/todo-cli/) | ToDo を管理するコマンドラインツール |
 
-## インストールとビルド
+## インストール
+
+macOS（Intel / Apple Silicon）では、ビルド済みの `typl` と `typl-lsp` を次のコマンドで
+インストールできます。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | sh
+```
+
+`~/.typelisp/bin` に入るので、表示に従って `PATH` に追加してください。`typl -c` で実行ファイルを
+作るには Xcode Command Line Tools（`xcode-select --install`）が必要です。
+
+インストール先は環境変数 `TYPELISP_HOME` で、バージョンは `TYPELISP_VERSION` で指定できます
+（指定しなければ最新のリリース）。
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_VERSION=0.1.0 sh
+```
+
+アンインストールするときは、`typl` が書き出したライブラリを削除してから、インストール先を
+削除します。
+
+```sh
+typl --remove-lib --all
+rm -rf ~/.typelisp
+```
+
+ソースからビルドする場合は、次の「ビルド」を参照してください。
+
+## ビルド
 
 ### 必要なもの
 
@@ -192,7 +221,7 @@ Homebrew を使わない場合は、`LLVM_SYS_221_PREFIX` に LLVM 22 のイン�
 macOS の最低 OS バージョン（`MACOSX_DEPLOYMENT_TARGET`）は、設定しなくてもビルドできます。設定
 しなければ、Rust の標準ライブラリが対象とするバージョンを使います。
 
-### ビルド
+### ビルドする
 
 ```sh
 cargo build            # デバッグビルド（target/debug/）
@@ -226,8 +255,8 @@ Homebrew を使わない場合は、`LLVM_SYS_221_PREFIX` を設定してから 
 ## 実行方法
 
 `typl` の起動のしかたは次の3通りです。以下の例では、`typl` にパスが通っているものとします
-（`cargo install` で入れた場合、またはビルドした `target/debug/`・`target/release/` にパスを
-通した場合）。
+（`install.sh` や `cargo install` で入れて `PATH` を通した場合、またはビルドした
+`target/debug/`・`target/release/` にパスを通した場合）。
 
 ### インタラクティブモード（REPL）
 
