@@ -12107,3 +12107,21 @@ cargo と `compile-file` のリンクに渡すようにした。ring を作る�
 
 確かめていないこと: Apple Silicon でのビルド、universal binary、Developer ID での署名と公証。
 この Mac には署名用の証明書が無い。
+
+## curl でインストールできるようにする（2026-10-01）
+
+ユーザの判断で Developer ID での署名はしないことにし、rustup と同じ `curl ... | sh` の形にした。
+手元の rustup・rustc・Homebrew の cargo/clang も署名されておらず quarantine 属性も無い——curl は
+quarantine 属性を付けないので Gatekeeper は見ない。
+
+- `install.sh`（ルート）: CPU を `sysctl hw.optional.arm64` で判定（Rosetta の下の `uname -m` は
+  x86_64 と答える）、最新版は `releases/latest` のリダイレクト先から読む（API を使わない）、
+  `.tar.gz.sha256` と照合してから `$TYPELISP_HOME/bin` に置く。実行ファイルは同じフォルダの別名に
+  コピーしてから rename するので、途中で止まっても古いものが壊れない。全体を `main` に入れて
+  最後の行で呼ぶので、途中で切れたダウンロードは何も実行しない。
+- `scripts/dist/build.sh` はチェックサムとライセンスファイルも出す。前の節の `package.sh` と
+  entitlement は消した。
+
+手元のファイルを指す `file://` に差し替えたコピーで、インストール・入れ直し・チェックサム不一致
+（何も入れず既存のものも変えない）・存在しない版を確かめた。最新版の判定は本物の GitHub で
+確かめた（v0.1.0 を返し、アセットが無いので 404 で止まった）。

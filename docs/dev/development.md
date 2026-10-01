@@ -137,24 +137,16 @@ LLVMバージョンを指す等でシャドウされていると、素の `cargo
 
 ## 配布用の実行ファイル（macOS）
 
-GitHub のリリースに添付する `typl` / `typl-lsp` は、Intel と Apple Silicon の両方で動く
-universal binary にし、Developer ID で署名して公証する。Homebrew の LLVM は自分の CPU 向けしか
-入っていないので、各 CPU 向けのビルドはそれぞれの Mac で行い、結合・署名・公証は証明書のある
-Mac で行う。
+`install.sh`（リポジトリのルート）が GitHub のリリースから取ってくる `typl` / `typl-lsp` は、
+CPU ごとの tar.gz と、その SHA-256 のファイル。Homebrew の LLVM は自分の CPU 向けしか入って
+いないので、各 CPU 向けのビルドはそれぞれの Mac で行う。
 
 1. Intel の Mac と Apple Silicon の Mac で、それぞれ `scripts/dist/build.sh` を実行する。
-   `target/dist/typelisp-<version>-<arch>.tar.gz` ができる。
-2. 証明書のある Mac に 2 つのアーカイブを集め、公証の認証情報を一度だけ保存しておく
-   （`xcrun notarytool store-credentials <profile>`）。
-3. 次を実行する。`target/dist/typelisp-<version>-macos-universal.zip` ができる。
+   `target/dist/typelisp-<version>-<arch>.tar.gz` と `.tar.gz.sha256` ができる。
+2. 4 つのファイルを `gh release upload v<version> ...` でリリースに添付する。
 
-   ```sh
-   TYPELISP_SIGN_IDENTITY="Developer ID Application: ..." \
-   TYPELISP_NOTARY_PROFILE=<profile> \
-   scripts/dist/package.sh target/dist/typelisp-<version>-x86_64.tar.gz target/dist/typelisp-<version>-arm64.tar.gz
-   ```
-
-4. `gh release upload v<version> <zip>` で添付する（スクリプトは添付しない）。
+`install.sh` はアセットの名前を `typelisp-<version>-<arch>.tar.gz`（`arch` は `x86_64` か
+`arm64`）と決め打ちしているので、名前を変えるなら両方を直す。
 
 `build.sh` が普通のリリースビルドと違うのは 2 点。zstd を静的にリンクする（Homebrew の LLVM は
 zstd 付きでビルドされていて、llvm-sys は `-lzstd` を渡す。`libzstd.a` だけを置いたフォルダを先に
@@ -162,17 +154,13 @@ zstd 付きでビルドされていて、llvm-sys は `-lzstd` を渡す。`libz
 Homebrew の LLVM・Homebrew の zstd のうち最も高いものにする。リンク先が `/usr/lib` と
 `/System/Library` 以外にあればそこで止まる。
 
-`package.sh` は hardened runtime（公証の条件）で署名する。typl には 2 つの例外が要る
-（`scripts/dist/*.entitlements`）。JIT が作った機械語を実行するための
-`allow-unsigned-executable-memory`（無いと最初の JIT でカーネルに SIGKILL される）と、`defffi` が
-他者の署名した C ライブラリを開くための `disable-library-validation`（無いと `dlopen` が失敗する）。
-typl-lsp は前者だけ（同梱の標準ライブラリがビットコードを JIT で読み込み、マクロ展開がそれを使う）。
-署名した後に JIT・AOT・FFI・typl-lsp を実際に動かして確かめる。
-
-`--no-notarize` と `TYPELISP_SIGN_IDENTITY=-`（ad-hoc 署名）で、証明書の無い Mac でも署名と
-entitlement を確かめられる。ad-hoc 署名でも hardened runtime の制限は掛かる。公証の結果は
-zip や裸の実行ファイルには staple できないので、ダウンロードした typl を初めて起動するときに
-Gatekeeper がオンラインで確かめる。
+Developer ID での署名はしない。curl でダウンロードしたファイルには quarantine 属性が付かず、
+Gatekeeper は見ない。Apple Silicon の実行ファイルに要る署名は、リンカが付ける ad-hoc 署名で
+足りる。ブラウザでダウンロードした tar.gz から取り出した typl は Gatekeeper に止められる。
+署名と公証をするなら hardened runtime が要り、typl には JIT 用の
+`com.apple.security.cs.allow-unsigned-executable-memory`（無いと最初の JIT でカーネルに SIGKILL
+される）と FFI 用の `com.apple.security.cs.disable-library-validation`（無いと `dlopen` が失敗
+する）が要る。どちらも外して確かめた。そのためのスクリプトは一度作って消した（コミット 9955789）。
 
 ## compile 機能の実装方針（未対応ノードの扱い）
 
