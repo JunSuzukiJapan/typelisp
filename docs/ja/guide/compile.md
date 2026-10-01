@@ -19,7 +19,8 @@ AOT コンパイルで作る実行ファイルには、静的ライブラリ `li
 リリースビルドの `typl`（`cargo install` で入れたものを含む）は、このライブラリを中に持って
 いるので、準備はいりません。初めてコンパイルするときに `~/.typelisp/lib/<ビルドID>/`
 （環境変数 `TYPELISP_HOME` を設定していれば `$TYPELISP_HOME/lib/<ビルドID>/`）に書き出し、
-以後はそれを使います。`typl --remove-lib` で削除できます。デバッグビルドの `typl` は、ビルドした
+以後はそれを使います。`typl --remove-lib` で削除できます（`--others` を付けると別の版の
+`typl` が書き出したもの、`--all` を付けるとすべて）。デバッグビルドの `typl` は、ビルドした
 リポジトリの `target/debug/` にあるものを使います。別の場所に置いたものを使うには、`typl` の
 起動時に `--lib-dir` でそのフォルダを指定します（3.2 節）。
 macOS ではリンクに Xcode Command Line Tools を使います。

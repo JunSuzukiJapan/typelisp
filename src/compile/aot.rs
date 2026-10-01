@@ -1266,7 +1266,6 @@ fn bundled_archive_dir() -> Result<std::path::PathBuf, String> {
 
 /// `TYPELISP_HOME`, or `~/.typelisp` when it is not set — the same shape as
 /// `CARGO_HOME` and `~/.cargo`.
-#[cfg(typelisp_bundled_runtime)]
 fn typelisp_home() -> Result<std::path::PathBuf, String> {
     if let Some(home) = std::env::var_os("TYPELISP_HOME").filter(|h| !h.is_empty()) {
         return Ok(std::path::PathBuf::from(home));
@@ -1309,26 +1308,82 @@ fn write_archive_once(dir: &std::path::Path, bytes: &[u8]) -> Result<std::path::
     Ok(path)
 }
 
-/// `typl --remove-lib`: removes the folder this build's archive was written
-/// to, and says which. `None` when there was nothing to remove.
+/// Which of the archives release `typl`s wrote `typl --remove-lib` removes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemoveLib {
+    /// This build's (`--remove-lib`).
+    This,
+    /// Every build's but this one's (`--remove-lib --others`): what is left
+    /// behind by `typl`s installed before this one.
+    Others,
+    /// Every build's (`--remove-lib --all`).
+    All,
+}
+
+/// `typl --remove-lib`: removes the build-id folders under
+/// `$TYPELISP_HOME/lib` that `which` names, and answers with the ones it
+/// removed.
 ///
-/// Only this build's: another build id's folder belongs to another `typl`,
-/// which may still be installed and in use.
-#[cfg(typelisp_bundled_runtime)]
-pub fn remove_bundled_archive() -> Result<Option<std::path::PathBuf>, String> {
-    let dir = bundled_archive_dir()?;
-    if !dir.exists() {
-        return Ok(None);
+/// Only folders named like a build id are touched; anything else a person put
+/// under `lib` is not `typl`'s to remove. A debug build has no build id of its
+/// own, so only [`RemoveLib::All`] means anything to it.
+pub fn remove_written_archives(which: RemoveLib) -> Result<Vec<std::path::PathBuf>, String> {
+    let own = own_build_id();
+    if own.is_none() && which != RemoveLib::All {
+        return Err("this typl is a debug build: it links the library in the tree it was built in, \
+                    has written none and has no build id of its own; --all removes every build's"
+            .to_string());
     }
-    fs::remove_dir_all(&dir).map_err(|e| format!("failed to remove {}: {}", dir.display(), e))?;
-    Ok(Some(dir))
+    remove_archives_under(&typelisp_home()?.join("lib"), own, which)
+}
+
+/// [`remove_written_archives`] on the folder `root` for a build whose id is
+/// `own`.
+fn remove_archives_under(
+    root: &std::path::Path,
+    own: Option<&str>,
+    which: RemoveLib,
+) -> Result<Vec<std::path::PathBuf>, String> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("failed to read {}: {}", root.display(), e)),
+    };
+    let mut removed = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("failed to read {}: {}", root.display(), e))?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str().filter(|n| is_build_id(n)) else { continue };
+        let is_own = own == Some(name);
+        let chosen = match which {
+            RemoveLib::This => is_own,
+            RemoveLib::Others => !is_own,
+            RemoveLib::All => true,
+        };
+        let path = entry.path();
+        if !chosen || !path.is_dir() {
+            continue;
+        }
+        fs::remove_dir_all(&path).map_err(|e| format!("failed to remove {}: {}", path.display(), e))?;
+        removed.push(path);
+    }
+    removed.sort();
+    Ok(removed)
+}
+
+#[cfg(typelisp_bundled_runtime)]
+fn own_build_id() -> Option<&'static str> {
+    Some(env!("TYPELISP_BUNDLED_STATICLIB_ID"))
 }
 
 #[cfg(not(typelisp_bundled_runtime))]
-pub fn remove_bundled_archive() -> Result<Option<std::path::PathBuf>, String> {
-    Err("this typl is a debug build: it links the library in the tree it was built in and has \
-         written none"
-        .to_string())
+fn own_build_id() -> Option<&'static str> {
+    None
+}
+
+/// The shape `build.rs` gives a build id: 16 lowercase hex digits.
+fn is_build_id(name: &str) -> bool {
+    name.len() == 16 && name.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 /// The file name of the archive every AOT executable links; see
@@ -1551,13 +1606,56 @@ mod tests {
 
     use inkwell::AddressSpace;
 
-    use super::{build_main_wrapper, write_archive_once, write_executable, STATICLIB_NAME};
+    use super::{build_main_wrapper, remove_archives_under, write_archive_once, write_executable, RemoveLib, STATICLIB_NAME};
     use crate::compile::{llvm_context, COMPILE_LOCK};
 
     fn tmp_path(name: &str) -> PathBuf {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target").join("aot-test-tmp");
         std::fs::create_dir_all(&dir).expect("failed to create the AOT test scratch dir");
         dir.join(name)
+    }
+
+    /// `--remove-lib`, `--others` and `--all` each remove the build-id
+    /// folders they name, and none of them touches what is not a build id.
+    #[test]
+    fn remove_lib_removes_the_build_ids_it_names_and_nothing_else() {
+        let root = tmp_path("remove-lib");
+        let (own, old, older) = ("00000000000000aa", "00000000000000bb", "00000000000000cc");
+        let fill = || {
+            let _ = std::fs::remove_dir_all(&root);
+            for id in [own, old, older, "not-a-build-id"] {
+                write_archive_once(&root.join(id), b"archive").expect("the archive is written");
+            }
+        };
+        let left = || {
+            let mut names: Vec<String> =
+                std::fs::read_dir(&root).expect("the folder is there").map(|e| e.expect("an entry").file_name().into_string().expect("utf-8")).collect();
+            names.sort();
+            names
+        };
+        let removed = |which| -> Vec<String> {
+            remove_archives_under(&root, Some(own), which)
+                .expect("removal succeeds")
+                .iter()
+                .map(|p| p.file_name().expect("a name").to_str().expect("utf-8").to_string())
+                .collect()
+        };
+
+        fill();
+        assert_eq!(removed(RemoveLib::This), vec![own]);
+        assert_eq!(left(), vec![old, older, "not-a-build-id"]);
+        assert_eq!(removed(RemoveLib::This), Vec::<String>::new());
+
+        fill();
+        assert_eq!(removed(RemoveLib::Others), vec![old, older]);
+        assert_eq!(left(), vec![own, "not-a-build-id"]);
+
+        fill();
+        assert_eq!(removed(RemoveLib::All), vec![own, old, older]);
+        assert_eq!(left(), vec!["not-a-build-id"]);
+
+        std::fs::remove_dir_all(&root).expect("the folder can be removed");
+        assert_eq!(removed(RemoveLib::All), Vec::<String>::new());
     }
 
     /// A release `typl` writes its archive at the first link and reuses it
