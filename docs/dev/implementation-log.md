@@ -12015,13 +12015,24 @@ AOT 実行ファイルにリンクする `libtypelisp_front.a` を `CARGO_MANIFE
 から探していたが、`cargo install` は一時ディレクトリでビルドして実行ファイルしか残さないので、
 インストール後にはその場所に何も無い。
 
-- **リリースビルドの `typl` はアーカイブを中に持つ。** `build.rs` の `bundled_runtime` が
-  `PROFILE=release` のときだけ、別の cargo で `typelisp-front` の staticlib をビルドし、
-  `include_bytes!` で `aot.rs` に埋め込む。リンクのたびに出力ファイルの隣へ書き出し、リンク後に
-  消す。ビルドスクリプトは依存クレートの成果物に手が届かないので、cargo を入れ子で呼ぶしかない
-  （artifact dependencies は unstable）。入れ子の cargo は `OUT_DIR` の下に自分の target
-  ディレクトリを持つ——外側の cargo が `target/` のロックを握ったままだから。`--locked` で
-  ソースツリーの `Cargo.lock` を書き換えさせない。
+- **リリースビルドの `typl` はアーカイブを中に持ち、初回のリンクで恒久的な場所へ書き出す。**
+  `build.rs` の `bundled_runtime` が `PROFILE=release` のときだけ、別の cargo で
+  `typelisp-front` の staticlib をビルドし、`include_bytes!` で `aot.rs` に埋め込む。ビルド
+  スクリプトは依存クレートの成果物に手が届かないので、cargo を入れ子で呼ぶしかない（artifact
+  dependencies は unstable）。入れ子の cargo は `OUT_DIR` の下に自分の target ディレクトリを
+  持つ——外側の cargo が `target/` のロックを握ったままだから。`--locked` でソースツリーの
+  `Cargo.lock` を書き換えさせない。
+  書き出し先は `$TYPELISP_HOME/lib/<ビルドID>/`（既定 `~/.typelisp`、`CARGO_HOME` と同じ形）。
+  ビルドIDは `build.rs` がアーカイブのバイト列から取るハッシュで、アーカイブは同時にビルドした
+  `typl` でしか使えないから、ファイルがあれば中身を見ずに信用してよい。同じフォルダの別名に
+  書いて rename するので、途中で落ちても半端なファイルが本名で残らない。
+  最初はリンクのたびに出力の隣へ書き出して消していたが、ユーザの指摘で改めた（毎回 20MB 余りを
+  書くのは無駄、ライブラリは恒久的な場所に置くもの）。初回起動時に置き場所をユーザに聞く案も
+  出たが、`typl -c` は Makefile・CI・stdin を使うスクリプトなど聞けない場面で走り、聞けない場面の
+  既定がどのみち要るので採らなかった。
+- **`typl --remove-lib`** はその `typl` のビルドIDのフォルダだけを消す。他のビルドIDのフォルダは
+  別の `typl` のもので、まだ使われているかもしれない。デバッグビルドは何も書き出さないので
+  エラーにする。
 - **デバッグビルドは従来どおりビルドツリーのものをリンクする。** デバッグのアーカイブは 100MB を
   超え、このクレートをリンクするテストバイナリ全部に載ってしまう。どちらを使うかはビルド時に
   cfg（`typelisp_bundled_runtime`）で決まり、リンク時に探し回ることはしない。`--lib-dir` は
@@ -12035,4 +12046,5 @@ AOT 実行ファイルにリンクする `libtypelisp_front.a` を `CARGO_MANIFE
   --path .` と書いた。
 
 リリースの `typl` はアーカイブのぶん大きくなり（インストール版で 91MB）、リリースビルドには
-入れ子の cargo のぶんの時間がかかる。
+入れ子の cargo のぶんの時間がかかる。古いビルドIDのフォルダは溜まる——README には、消しても
+使っている `typl` が書き出し直すと書いた。

@@ -42,16 +42,19 @@ Options:
   -c, --compile SOURCE   compile SOURCE to a native executable
   -o OUTPUT              name of the executable (default: SOURCE without .typl)
   --lib-dir DIR          link DIR/libtypelisp_front.a into compiled executables
-                         (default: the one built into a release typl, or
-                         the one in the tree a debug typl was built in)
+                         (default: a release typl writes the one built into
+                         it to $TYPELISP_HOME/lib, ~/.typelisp/lib if unset;
+                         a debug typl uses the one in the tree it was built in)
   --image FILE           start from a dump written by (dump ...)
   --heap-cells N         initial capacity of the cons arena, in cells
   --feature NAME         add a feature for #+/#- (repeatable)
   --on-redefine=POLICY   on redefinition: warn (default), error or silent
+  --remove-lib           remove the library this typl wrote for compiled
+                         executables to link, and exit
   --help                 print this help and exit
   --version              print the version and exit
 
---help and --version after FILE are passed to the program.
+--help, --version and --remove-lib after FILE are passed to the program.
 --image, --heap-cells and --feature cannot be combined with -c.
 ";
 
@@ -74,7 +77,7 @@ fn main() -> rustyline::Result<()> {
     // the static library an AOT executable links, for `-c` and for every
     // `(compile-file ...)` this process runs.
     let (lib_dir, args) = parse_lib_dir(args);
-    // `--help`/`--version` are `typl`'s only among the options before a
+    // `--help`/`--version`/`--remove-lib` are `typl`'s only among the options before a
     // script's name; from the name on, they are the script's own arguments.
     let own = &args[..args.iter().position(|a| !a.starts_with("--")).unwrap_or(args.len())];
     if own.iter().any(|a| a == "--help") {
@@ -83,6 +86,17 @@ fn main() -> rustyline::Result<()> {
     }
     if own.iter().any(|a| a == "--version") {
         println!("typl {}", TYPL_VERSION);
+        std::process::exit(0);
+    }
+    if own.iter().any(|a| a == "--remove-lib") {
+        match typelisp::compile::aot::remove_bundled_archive() {
+            Ok(Some(dir)) => println!("removed {}", dir.display()),
+            Ok(None) => println!("this typl has written no library"),
+            Err(e) => {
+                eprintln!("--remove-lib: {}", e);
+                std::process::exit(1);
+            }
+        }
         std::process::exit(0);
     }
     if let Some(dir) = lib_dir {

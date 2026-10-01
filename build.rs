@@ -6,10 +6,11 @@ fn main() {
 }
 
 // A release `typl` carries the static library every AOT executable links
-// (`compile::aot::staticlib_path`) inside itself. `cargo install` builds in a
-// temporary directory and keeps only the executables, so the archive it built
-// along the way is gone by the time `typl -c` runs; the one copy that survives
-// is the one inside `typl`.
+// (`compile::aot::link_archive`) inside itself, and writes it out to
+// `$TYPELISP_HOME/lib/<build id>/` the first time it links. `cargo install`
+// builds in a temporary directory and keeps only the executables, so the
+// archive it built along the way is gone by the time `typl -c` runs; the one
+// copy that survives is the one inside `typl`.
 //
 // The archive is `typelisp-front`'s `staticlib`, and a build script cannot
 // reach a dependency's artifacts, so it is built here by a cargo of its own.
@@ -49,6 +50,14 @@ fn bundled_runtime() {
     let archive = target_dir.join(&target).join("release").join("libtypelisp_front.a");
     assert!(archive.is_file(), "build.rs: {} was not built", archive.display());
     println!("cargo:rustc-env=TYPELISP_BUNDLED_STATICLIB={}", archive.display());
+    // The name of the folder `typl` writes the archive to: a hash of its
+    // bytes, so a `typl` built again never links an archive another build
+    // wrote. Only compared for equality, within one machine, so `std`'s hasher
+    // is enough — the value is fixed here and carried in the binary.
+    let bytes = std::fs::read(&archive).unwrap_or_else(|e| panic!("build.rs: failed to read {}: {}", archive.display(), e));
+    let mut hasher = std::hash::DefaultHasher::new();
+    std::hash::Hasher::write(&mut hasher, &bytes);
+    println!("cargo:rustc-env=TYPELISP_BUNDLED_STATICLIB_ID={:016x}", std::hash::Hasher::finish(&hasher));
     println!("cargo:rustc-cfg=typelisp_bundled_runtime");
 }
 
