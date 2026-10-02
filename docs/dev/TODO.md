@@ -25,6 +25,11 @@ panic が JIT のフレームを越えられない（`failed to initiate panic, 
 あり、`jit_engine` の `jit_as_elf` がモジュールを ELF として読ませて避けている。その代償
 として、名前が `_` で始まるライブラリ関数はプロセス内検索で見つからない
 （`_Unwind_Resume` だけは手で番地を渡している。ほかが現れれば黙って 0 を呼ぶ）。
+さらに macOS 15 の libunwind は、MCJIT が `__register_frame` で登録した FDE で landing
+pad に入ると落ちるので、`compile::jit_unwind` が独自のメモリマネージャを持ち、
+`__unw_add_find_dynamic_unwind_sections` で JIT のコードの `.eh_frame` を libunwind に
+直接教えている（MCJIT はメモリマネージャの失敗を捨てるので、`jit_engine` がコード生成を
+前倒しして失敗を拾う）。
 
 ORC なら、渡した名前（`LLVMOrcAbsoluteSymbols`）以外は解決せず、見つからない名前は
 必ずエラーで返し、プロセス内を探すのは明示的に足したときだけ（`_` の扱いはデータ
@@ -37,7 +42,9 @@ ORC + JITLink で動かし、panic がフレームを越えるか・渡してい
 Intel の macOS、Linux、arm64 で確かめる。未確認で最大の不確定要素は、C API で作った
 JITLink の層が `.eh_frame` を登録するか。駄目なら MCJIT に戻る。(2) `jit_engine` と
 `CompiledFn`（エンジンの寿命、`retire_llvm`）を移し、`jit_as_elf` と `_Unwind_Resume`
-の手渡しを外し、全環境でテスト全体を回す。
+の手渡しと `compile::jit_unwind` を外し、全環境でテスト全体を回す。`jit_unwind` を外せる
+かは、JITLink が登録する `.eh_frame` で macOS 15 の arm64 の landing pad に入れるかで
+決まるので、(1) の試作で macOS 15 も確かめる。
 
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
