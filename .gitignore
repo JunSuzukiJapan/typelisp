@@ -1,5 +1,7 @@
 /target
 /.cargo
+# Claude Code の個人用の設定 (権限など)。共有する設定は .claude/settings.json に書く
+/.claude/settings.local.json
 
 # graphify (https://github.com/Graphify-Labs/graphify)
 #
