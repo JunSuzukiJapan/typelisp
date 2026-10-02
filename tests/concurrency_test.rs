@@ -751,29 +751,37 @@ fn a_compiled_sleep_inside_an_unwind_protect_runs_the_cleanup_after() {
 /// unwind would have carried `b`'s tag and value instead of its own (or
 /// found nothing parked at all).
 ///
-/// `b` sleeps for less than `a`'s cleanup does, so it is guaranteed to run
-/// its own catch/throw round trip while `a` is still parked mid-unwind.
+/// Ordered by channels, not by how long anything sleeps: `a`'s cleanup hands
+/// `b` the go-ahead on `ready` and then waits on `go`, so `b` starts its own
+/// catch/throw round trip only once `a` is parked mid-unwind, and `a` cannot
+/// finish its cleanup until `b` has. (It used to be `b` sleeping 10 ms against
+/// `a`'s cleanup sleeping 50 ms, which a loaded CI runner did not keep apart.)
 /// `a`'s own throw must still resolve to its own tag and value once its
 /// cleanup finishes, and the trail must show `b` finished its turn before
 /// `a`'s cleanup did — `a`'s throw truly waited out `b`'s.
 #[test]
 fn a_task_switch_during_a_cleanup_does_not_corrupt_the_parked_throw() {
     let src = r#"(defvar (trail string) "")
-                 (defun a () int
+                 (defun a ((ready Chan<int>) (go Chan<int>)) int
                    (catch 'a-tag
                      (unwind-protect
                        (progn (setf trail (append trail "a1")) (throw 'a-tag 111))
-                       (progn (sleep 0.05) (setf trail (append trail " a2"))))))
-                 (defun b () int
+                       (progn
+                         (send ready 0)
+                         (unwrap (recv go))
+                         (setf trail (append trail " a2"))))))
+                 (defun b ((ready Chan<int>) (go Chan<int>)) int
                    (progn
-                     (sleep 0.01)
+                     (unwrap (recv ready))
                      (catch 'b-tag (throw 'b-tag 222))
                      (setf trail (append trail " b"))
+                     (send go 0)
                      0))
                  (compile a)
                  (compile b)
-                 (let ((ta (task (a))) (tb (task (b))))
-                   (+ (wait ta) (wait tb)))"#;
+                 (let ((ready (the Chan<int> (Chan::new 0))) (go (the Chan<int> (Chan::new 0))))
+                   (let ((ta (task (a ready go))) (tb (task (b ready go))))
+                     (+ (wait ta) (wait tb))))"#;
     assert_eq!(int_compiled(src), 111, "a's own throw must survive b's throw running while a was parked");
     assert_eq!(text_compiled(&format!("{} trail", src)), "a1 b a2", "b must finish its own throw before a's cleanup resumes");
 }
@@ -1000,24 +1008,28 @@ fn a_compiled_loop_safepoint_under_a_machine_frame_driver_just_resumes() {
 /// **An interpreted caller applying a compiled closure value may really
 /// wait** — the boundary the previous test's revised doc comment describes.
 /// `main` is the interpreter's own task: it starts `mark` under `task`, then
-/// calls the closure `f` directly (not through `task`) and the closure
-/// `sleep`s. If that call ran to completion atomically it would finish
-/// first regardless of how long it slept; `ba`, not `ab`, proves it
-/// genuinely parked the calling task and let `mark` run in the meantime —
-/// the same proof `a_compiled_loop_with_no_calls_still_yields_to_another_task`
-/// makes for a named compiled call.
+/// calls the closure `f` directly (not through `task`) and the closure waits
+/// on a channel that only `mark` sends on. `ba` proves it genuinely parked
+/// the calling task and let `mark` run in the meantime — the same proof
+/// `a_compiled_loop_with_no_calls_still_yields_to_another_task` makes for a
+/// named compiled call. A call that could not park would never see the send:
+/// the program would stop on the wait instead of answering at all. (It used
+/// to be the closure sleeping 50 ms against `mark` sleeping 10 ms, which a
+/// loaded CI runner did not keep apart — and a late `mark` reads `ab`, the
+/// same as the bug this test is for.)
 #[test]
 fn an_interpreted_caller_applying_a_compiled_closure_may_really_wait() {
     assert_eq!(
         text_compiled(
             r#"(defvar (trail string) "")
-               (defun make-worker () (fn () int)
-                 (lambda () int (progn (sleep 0.05) (setf trail (append trail "a")) 0)))
-               (defun mark () int (progn (sleep 0.01) (setf trail (append trail "b")) 0))
+               (defun make-worker ((ch Chan<int>)) (fn () int)
+                 (lambda () int (progn (unwrap (recv ch)) (setf trail (append trail "a")) 0)))
+               (defun mark ((ch Chan<int>)) int (progn (setf trail (append trail "b")) (send ch 0) 0))
                (compile make-worker)
                (compile mark)
-               (let ((f (make-worker)) (b (task (mark))))
-                 (progn (f) (wait b)))
+               (let ((ch (the Chan<int> (Chan::new 0))))
+                 (let ((f (make-worker ch)) (b (task (mark ch))))
+                   (progn (f) (wait b))))
                trail"#
         ),
         "ba"
