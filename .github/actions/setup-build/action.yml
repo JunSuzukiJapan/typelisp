@@ -24,7 +24,11 @@ runs:
     - name: Install LLVM 22 (Homebrew)
       if: runner.os == 'macOS'
       shell: bash
-      run: brew install llvm@22 coreutils
+      run: |
+        # A runner's network fails now and then (a DNS lookup, once); three
+        # tries, a little apart, before the job does.
+        retry() { for i in 1 2 3; do "$@" && return 0; if [ "$i" -lt 3 ]; then echo "retrying in $((i * 20))s: $*" >&2; sleep $((i * 20)); fi; done; return 1; }
+        retry brew install llvm@22 coreutils
 
     - name: Install build dependencies (apt)
       if: runner.os == 'Linux' && inputs.apt-suite != ''
@@ -32,21 +36,28 @@ runs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        apt-get update
-        apt-get install -y --no-install-recommends \
+        # A runner's network fails now and then (a DNS lookup, once); three
+        # tries, a little apart, before the job does.
+        retry() { for i in 1 2 3; do "$@" && return 0; if [ "$i" -lt 3 ]; then echo "retrying in $((i * 20))s: $*" >&2; sleep $((i * 20)); fi; done; return 1; }
+        retry apt-get update
+        retry apt-get install -y --no-install-recommends \
           ca-certificates curl gnupg build-essential pkg-config \
           zlib1g-dev libzstd-dev libxml2-dev
-        curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+        retry curl -fsSL -o /tmp/llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key
+        gpg --dearmor -o /usr/share/keyrings/llvm.gpg /tmp/llvm-snapshot.gpg.key
         echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/${{ inputs.apt-suite }}/ llvm-toolchain-${{ inputs.apt-suite }}-22 main" \
           > /etc/apt/sources.list.d/llvm.list
-        apt-get update
-        apt-get install -y --no-install-recommends llvm-22-dev libpolly-22-dev
+        retry apt-get update
+        retry apt-get install -y --no-install-recommends llvm-22-dev libpolly-22-dev
 
     - name: Install build dependencies (dnf)
       if: runner.os == 'Linux' && inputs.apt-suite == ''
       shell: bash
       run: |
-        dnf install -y gcc gcc-c++ make pkgconf which diffutils \
+        # A runner's network fails now and then (a DNS lookup, once); three
+        # tries, a little apart, before the job does.
+        retry() { for i in 1 2 3; do "$@" && return 0; if [ "$i" -lt 3 ]; then echo "retrying in $((i * 20))s: $*" >&2; sleep $((i * 20)); fi; done; return 1; }
+        retry dnf install -y gcc gcc-c++ make pkgconf which diffutils \
           zlib-devel libzstd-devel libxml2-devel libffi-devel \
           llvm-devel llvm-static
 
@@ -54,12 +65,16 @@ runs:
     - name: Install Rust
       shell: bash
       run: |
+        # A runner's network fails now and then (a DNS lookup, once); three
+        # tries, a little apart, before the job does.
+        retry() { for i in 1 2 3; do "$@" && return 0; if [ "$i" -lt 3 ]; then echo "retrying in $((i * 20))s: $*" >&2; sleep $((i * 20)); fi; done; return 1; }
         if ! command -v rustup >/dev/null 2>&1; then
-          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          retry curl -fsSL -o /tmp/rustup-init.sh https://sh.rustup.rs
+          sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain none
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.cargo/bin:$PATH"
         fi
-        rustup toolchain install "${{ inputs.rust-version }}" --profile minimal
+        retry rustup toolchain install "${{ inputs.rust-version }}" --profile minimal
         rustup default "${{ inputs.rust-version }}"
 
     # LLVM_SYS_221_PREFIX (Homebrew's llvm@22, or the distribution's found by
