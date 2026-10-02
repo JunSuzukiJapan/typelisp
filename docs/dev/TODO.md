@@ -46,6 +46,11 @@ JITLink の層が `.eh_frame` を登録するか。駄目なら MCJIT に戻る�
 かは、JITLink が登録する `.eh_frame` で macOS 15 の arm64 の landing pad に入れるかで
 決まるので、(1) の試作で macOS 15 も確かめる。
 
+計画は `~/.claude/plans/jit-orc-migration.md`。要点は 3 つ：LLVMContext は共有なので
+IR モジュールは渡さず、オブジェクトにして `LLVMOrcLLJITAddObjectFile` で渡す。コンパイル
+ごとに bare JITDylib を作り、外部の名前は `LLVMOrcAbsoluteSymbols` で定義する（プロセス
+検索は付けない）。`CompiledFn` は `ExecutionEngine` の代わりに JITDylib の共有を持つ。
+
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
 B1/B2（スケジューラ・`task`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
