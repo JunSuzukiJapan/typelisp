@@ -72,10 +72,27 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
         ));
     }
     #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-    let elf_externals = jit_as_elf(module)?;
+    let (engine, elf_externals) = {
+        let elf_externals = jit_as_elf(module)?;
+        // No frame pointer elimination flag set: the C API writes it onto
+        // every function as `"frame-pointer"="none"`, which is what the
+        // engine without a memory manager compiled them as.
+        let engine = module
+            .create_mcjit_execution_engine_with_memory_manager(
+                jit_unwind::UnwindingMemoryManager::default(),
+                OptimizationLevel::None,
+                inkwell::targets::CodeModel::JITDefault,
+                false,
+                false,
+            )
+            .map_err(|e| e.to_string())?;
+        (engine, elf_externals)
+    };
     #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
-    let elf_externals: Vec<(String, usize)> = Vec::new();
-    let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
+    let (engine, elf_externals) = (
+        module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?,
+        Vec::<(String, usize)>::new(),
+    );
     for (name, addr) in externals.iter().chain(&elf_externals) {
         match (module.get_function(name), module.get_global(name)) {
             (Some(function), _) => engine.add_global_mapping(&function, *addr),
@@ -165,6 +182,8 @@ fn jit_as_elf(module: &Module<'static>) -> Result<Vec<(String, usize)>, String> 
 
 pub mod aot;
 pub mod bootstrap;
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+mod jit_unwind;
 pub mod core_bridge;
 pub mod driver;
 pub mod dump;
