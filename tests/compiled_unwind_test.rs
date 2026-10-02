@@ -12,7 +12,10 @@
 //! **Level 1 — unwinding *through* a compiled frame**, which is all a catchable
 //! `panic` needs:
 //!
-//! 1. A panic does cross a JIT frame and reach `catch_unwind`.
+//! 1. A panic does cross a JIT frame and reach `catch_unwind`. On Apple
+//!    Silicon only because [`jit_engine`] has MCJIT load the code as ELF:
+//!    as Mach-O, the FDE it registers names the wrong address and the panic
+//!    aborts with `_URC_END_OF_STACK` (see `jit_as_elf` in `compile/mod.rs`).
 //! 2. **No `uwtable` attribute is needed**, so `compiler.rs`'s
 //!    `compile-function` and the island artifact are untouched.
 //! 3. **The execution engine must outlive the unwind.** Dropping it while the
