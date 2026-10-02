@@ -1,0 +1,69 @@
+name: Set up the build
+description: >
+  LLVM 22, the pinned Rust toolchain and a generated .cargo/config.toml — what
+  every job that builds typelisp needs, on macOS and in the Linux containers.
+  On Linux, git has to be installed and the repository checked out first:
+  actions/checkout leaves no repository behind without git, and this action is
+  read from the checkout.
+
+inputs:
+  rust-version:
+    description: The Rust toolchain to install and make the default.
+    required: true
+  apt-suite:
+    description: >
+      Debian/Ubuntu only: the suite apt.llvm.org is asked for (noble, trixie).
+      Empty everywhere else.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    # coreutils for `timeout`, which scripts/test-serial.sh will not run
+    # without and macOS does not ship.
+    - name: Install LLVM 22 (Homebrew)
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install llvm@22 coreutils
+
+    - name: Install build dependencies (apt)
+      if: runner.os == 'Linux' && inputs.apt-suite != ''
+      shell: bash
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        apt-get update
+        apt-get install -y --no-install-recommends \
+          ca-certificates curl gnupg build-essential pkg-config \
+          zlib1g-dev libzstd-dev libxml2-dev
+        curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /usr/share/keyrings/llvm.gpg
+        echo "deb [signed-by=/usr/share/keyrings/llvm.gpg] http://apt.llvm.org/${{ inputs.apt-suite }}/ llvm-toolchain-${{ inputs.apt-suite }}-22 main" \
+          > /etc/apt/sources.list.d/llvm.list
+        apt-get update
+        apt-get install -y --no-install-recommends llvm-22-dev libpolly-22-dev
+
+    - name: Install build dependencies (dnf)
+      if: runner.os == 'Linux' && inputs.apt-suite == ''
+      shell: bash
+      run: |
+        dnf install -y gcc gcc-c++ make pkgconf which diffutils \
+          zlib-devel libzstd-devel libxml2-devel libffi-devel \
+          llvm-devel llvm-static
+
+    # The macOS runners come with rustup; the containers do not.
+    - name: Install Rust
+      shell: bash
+      run: |
+        if ! command -v rustup >/dev/null 2>&1; then
+          curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+        fi
+        rustup toolchain install "${{ inputs.rust-version }}" --profile minimal
+        rustup default "${{ inputs.rust-version }}"
+
+    # LLVM_SYS_221_PREFIX (Homebrew's llvm@22, or the distribution's found by
+    # scripts/linux-llvm-prefix.sh) and, on macOS, the minimum OS version.
+    - name: Configure cargo
+      shell: bash
+      run: scripts/setup-cargo-env.sh

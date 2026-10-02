@@ -58,8 +58,14 @@ fn bundled_runtime(deployment: Option<&str>) {
     }
     let target_dir = out_dir.join("runtime-target");
     let mut build = std::process::Command::new(&cargo);
+    // As `--config` as well as in the environment: this cargo reads the
+    // repository's `.cargo/config.toml` too, and the value
+    // `scripts/setup-cargo-env.sh` writes there is `force = true`, which wins
+    // over the environment. A `--config` wins over the file.
     if let Some(version) = deployment {
         build.env("MACOSX_DEPLOYMENT_TARGET", version);
+        build.arg(format!("--config=env.MACOSX_DEPLOYMENT_TARGET.value=\"{}\"", version));
+        build.arg("--config=env.MACOSX_DEPLOYMENT_TARGET.force=true");
     }
     let status = build
         .arg("build")

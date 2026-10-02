@@ -1,0 +1,199 @@
+# A release: pushing a tag `v<version>` runs the whole test suite on every
+# platform CI builds on, builds the macOS distribution for both CPUs
+# (scripts/dist/build.sh), publishes a GitHub release with them, and installs
+# that release the way a user would (install.sh).
+#
+# Started by hand (workflow_dispatch), it stops after the distribution is
+# built: the tests and the build, with nothing published — how this workflow
+# itself is tried out.
+#
+# The tests are split four ways per platform (scripts/test-each.sh --shard):
+# serially, as they have to run, the suite takes hours, and a job gets six.
+# Publishing to crates.io stays a manual step.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  RUST_VERSION: "1.98.1"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # The version every crate here shares ([workspace.package]).
+      - name: Read the version, and match it against the tag
+        id: read
+        run: |
+          version="$(awk '/^\[workspace\.package\]/ { s = 1; next } /^\[/ { s = 0 } s && $1 == "version" { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
+          [ -n "$version" ] || { echo "error: no version in [workspace.package]" >&2; exit 1; }
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "error: the tag is $GITHUB_REF_NAME, but Cargo.toml says $version" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  test-macos:
+    name: Test macOS (${{ matrix.arch }}, ${{ matrix.shard }}/4)
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+        shard: [1, 2, 3, 4]
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+        with:
+          rust-version: ${{ env.RUST_VERSION }}
+      - name: Test
+        run: scripts/test-each.sh --shard ${{ matrix.shard }}/4
+
+  test-linux:
+    name: Test Linux (${{ matrix.distro }}, ${{ matrix.shard }}/4)
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [ubuntu-24.04, debian-13, fedora-44]
+        shard: [1, 2, 3, 4]
+        include:
+          - distro: ubuntu-24.04
+            image: ubuntu:24.04
+            apt-suite: noble
+          - distro: debian-13
+            image: debian:13
+            apt-suite: trixie
+          - distro: fedora-44
+            image: fedora:44
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    timeout-minutes: 360
+    steps:
+      - name: Install git
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git
+          else
+            dnf install -y git
+          fi
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-build
+        with:
+          rust-version: ${{ env.RUST_VERSION }}
+          apt-suite: ${{ matrix.apt-suite }}
+      - name: Test
+        run: scripts/test-each.sh --shard ${{ matrix.shard }}/4
+
+  dist:
+    name: Distribution (${{ matrix.arch }})
+    needs: [version, test-macos, test-linux]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      # setup-cargo-env.sh's `.cargo/config.toml` is left in place on purpose:
+      # build.sh has to win over it (on arm64 it names a different LLVM and
+      # minimum macOS), and checks that it did.
+      - uses: ./.github/actions/setup-build
+        with:
+          rust-version: ${{ env.RUST_VERSION }}
+      # arm64: LLVM's release build compiled to machine code, and zstd — made
+      # once per LLVM/zstd version (scripts/dist/build.sh names both).
+      - name: Restore the distribution cache
+        uses: actions/cache@v4
+        with:
+          path: target/dist/cache
+          key: dist-cache-${{ matrix.arch }}-${{ hashFiles('scripts/dist/build.sh') }}
+      - name: Build
+        run: scripts/dist/build.sh
+      - name: Check the archive's name
+        run: |
+          name="typelisp-${{ needs.version.outputs.version }}-${{ matrix.arch }}"
+          test -f "target/dist/$name.tar.gz" && test -f "target/dist/$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.arch }}
+          path: |
+            target/dist/typelisp-${{ needs.version.outputs.version }}-${{ matrix.arch }}.tar.gz
+            target/dist/typelisp-${{ needs.version.outputs.version }}-${{ matrix.arch }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish the release
+    if: github.ref_type == 'tag'
+    needs: [version, dist]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
+      # A draft first, published only once both CPUs' archives are on it:
+      # install.sh follows releases/latest, which never sees a draft.
+      - name: Create the release as a draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --draft --generate-notes \
+            --title "typelisp ${{ needs.version.outputs.version }}"
+      - name: Publish it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  install:
+    name: Install (${{ matrix.arch }})
+    needs: [version, release]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      # The command the README gives, unchanged: install.sh from main, the
+      # latest release. Getting this version back is what says the release
+      # just published is the one users now get.
+      - name: Install with install.sh
+        run: curl -fsSL "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh" | sh
+      - name: Check the version, the JIT and a compiled executable
+        run: |
+          typl="$HOME/.typelisp/bin/typl"
+          [ "$("$typl" --version | awk '{ print $2 }')" = "${{ needs.version.outputs.version }}" ]
+          cd "$RUNNER_TEMP"
+          printf '(defun fib ((n int)) int (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))\n(compile fib)\n(println "~a" (fib 20))\n' > jit.typl
+          [ "$("$typl" jit.typl)" = 6765 ]
+          printf '(defun main () i32 (println "ok") 0)\n' > aot.typl
+          "$typl" -c aot.typl -o aot
+          [ "$(./aot)" = ok ]
