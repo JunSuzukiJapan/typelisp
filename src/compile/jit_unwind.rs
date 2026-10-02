@@ -25,9 +25,15 @@
 //! The rest is what LLVM's `SectionMemoryManager` would do: each section gets
 //! its own pages, code becomes read+execute and read-only data read-only when
 //! MCJIT finalizes, and the pages go when the engine does. `__register_frame`
-//! still happens (it is MCJIT's, not the memory manager's), and is what the
-//! unwinder falls back to where `__unw_add_find_dynamic_unwind_sections` does
-//! not exist.
+//! still happens (it is MCJIT's, not the memory manager's), but the unwinder
+//! never gets as far as those FDEs for this code.
+//!
+//! Both libunwind functions this needs are linked directly, not looked up:
+//! `__unw_add_find_dynamic_unwind_sections` first appears in the macOS 14.0
+//! SDK's `libunwind.tbd` (libunwind 1600.112; absent from 13.3's, 1500.26),
+//! `__unw_remove_dynamic_eh_frame_section` is in 13.3's already, and 14.0 is
+//! the oldest macOS the distribution supports. On anything older, dyld refuses
+//! to start the program and names the missing symbol.
 
 use std::collections::BTreeMap;
 use std::ffi::{c_int, c_void};
@@ -41,7 +47,11 @@ extern "C" {
     fn munmap(addr: *mut c_void, len: usize) -> c_int;
     fn getpagesize() -> c_int;
     fn sys_icache_invalidate(start: *mut c_void, len: usize);
-    fn dlsym(handle: *mut c_void, symbol: *const u8) -> *mut c_void;
+    fn __unw_add_find_dynamic_unwind_sections(find: FindSections) -> c_int;
+    /// Drops every FDE-cache entry libunwind made under `dso_base`, which has
+    /// to happen before that `dso_base` can be freed and its address reused.
+    /// Named for its other use — the `.eh_frame` start is the key there.
+    fn __unw_remove_dynamic_eh_frame_section(dso_base: usize);
 }
 
 const PROT_READ: c_int = 0x1;
@@ -50,7 +60,6 @@ const PROT_EXEC: c_int = 0x4;
 const MAP_PRIVATE: c_int = 0x0002;
 const MAP_ANON: c_int = 0x1000;
 const MAP_FAILED: *mut c_void = !0usize as *mut c_void;
-const RTLD_DEFAULT: *mut c_void = -2isize as *mut c_void;
 
 /// libunwind's `struct unw_dynamic_unwind_sections`.
 #[repr(C)]
@@ -119,41 +128,25 @@ extern "C" fn find_sections(addr: usize, info: *mut DynamicUnwindSections) -> c_
     }
 }
 
-/// libunwind's `__unw_remove_dynamic_eh_frame_section`, if it has one: it
-/// drops every FDE-cache entry libunwind made under a `dso_base`, which has to
-/// happen before that `dso_base` can be freed and its address reused.
-type RemoveCached = unsafe extern "C" fn(dso_base: usize);
-
-struct Libunwind {
-    remove_cached: Option<RemoveCached>,
-}
-
-/// Registers [`find_sections`] once, and says whether it could.
-///
-/// Looked up rather than linked: the interface is newer than some of the
-/// macOS versions this runs on, and without it the code below still does the
-/// memory manager's job — only the landing-pad fix is missing.
-fn libunwind() -> Option<&'static Libunwind> {
-    static LIBUNWIND: OnceLock<Option<Libunwind>> = OnceLock::new();
-    LIBUNWIND
+/// Registers [`find_sections`] with libunwind, once per process. Called by
+/// [`super::jit_engine`] before it makes an engine, so a failure stops the
+/// compile with libunwind's reason rather than leaving landing pads to crash.
+pub(super) fn register_find_sections() -> Result<(), String> {
+    static REGISTERED: OnceLock<Result<(), String>> = OnceLock::new();
+    REGISTERED
         .get_or_init(|| {
-            // SAFETY: dlsym with NUL-terminated names; the results are the
-            // functions those names declare in libunwind.h / libunwind_ext.h.
-            unsafe {
-                let add = dlsym(RTLD_DEFAULT, b"__unw_add_find_dynamic_unwind_sections\0".as_ptr());
-                if add.is_null() {
-                    return None;
-                }
-                let add: unsafe extern "C" fn(FindSections) -> c_int = std::mem::transmute(add);
-                if add(find_sections) != 0 {
-                    return None;
-                }
-                let remove = dlsym(RTLD_DEFAULT, b"__unw_remove_dynamic_eh_frame_section\0".as_ptr());
-                let remove_cached = (!remove.is_null()).then(|| std::mem::transmute::<*mut c_void, RemoveCached>(remove));
-                Some(Libunwind { remove_cached })
+            // SAFETY: `find_sections` matches `unw_find_dynamic_unwind_sections`
+            // and lives for the whole process.
+            match unsafe { __unw_add_find_dynamic_unwind_sections(find_sections) } {
+                0 => Ok(()),
+                code => Err(format!(
+                    "internal error: __unw_add_find_dynamic_unwind_sections failed ({}), so compiled code \
+                     could not run a cleanup or catch a throw",
+                    code
+                )),
             }
         })
-        .as_ref()
+        .clone()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -210,12 +203,9 @@ impl UnwindingMemoryManager {
     }
 
     /// Makes the object whose sections are `self.sections[from..]` known to
-    /// [`find_sections`]. An object without an `.eh_frame` has nothing to
-    /// unwind with, so it is left to the unwinder's other lookups.
+    /// [`find_sections`]. An object without an `.eh_frame` has no frame the
+    /// unwinder could step through, so there is nothing to tell it.
     fn register(&mut self, from: usize) {
-        if libunwind().is_none() {
-            return;
-        }
         let new = &self.sections[from..];
         let Some(eh_frame) = new.iter().find(|s| s.eh_frame) else { return };
         let header = Box::into_raw(Box::new(MachHeader64 {
@@ -299,18 +289,12 @@ impl McjitMemoryManager for UnwindingMemoryManager {
             }
         }
         for registered in self.registered.drain(..) {
-            match libunwind().and_then(|l| l.remove_cached) {
-                Some(remove_cached) => {
-                    // SAFETY: drops libunwind's cache entries under this
-                    // header, after which nothing refers to it.
-                    unsafe {
-                        remove_cached(registered.header as usize);
-                        drop(Box::from_raw(registered.header));
-                    }
-                }
-                // Without a way to drop the cache entries, the header stays,
-                // so its address is never reused as another object's key.
-                None => {}
+            // SAFETY: drops libunwind's cache entries under this header, after
+            // which nothing refers to it; the header was `Box::into_raw`'d by
+            // `register` and is freed once.
+            unsafe {
+                __unw_remove_dynamic_eh_frame_section(registered.header as usize);
+                drop(Box::from_raw(registered.header));
             }
         }
         for section in self.sections.drain(..) {

@@ -73,6 +73,7 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
     }
     #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
     let (engine, elf_externals) = {
+        jit_unwind::register_find_sections()?;
         let elf_externals = jit_as_elf(module)?;
         // No frame pointer elimination flag set: the C API writes it onto
         // every function as `"frame-pointer"="none"`, which is what the
