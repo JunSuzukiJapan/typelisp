@@ -72,6 +72,8 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
         ));
     }
     #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    let failure = jit_unwind::Failure::default();
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
     let (engine, elf_externals) = {
         jit_unwind::register_find_sections()?;
         let elf_externals = jit_as_elf(module)?;
@@ -80,7 +82,7 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
         // engine without a memory manager compiled them as.
         let engine = module
             .create_mcjit_execution_engine_with_memory_manager(
-                jit_unwind::UnwindingMemoryManager::default(),
+                jit_unwind::UnwindingMemoryManager::new(failure.clone()),
                 OptimizationLevel::None,
                 inkwell::targets::CodeModel::JITDefault,
                 false,
@@ -103,6 +105,8 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
             }
         }
     }
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    jit_unwind::finalize_now(&engine, module, &failure)?;
     Ok(engine)
 }
 

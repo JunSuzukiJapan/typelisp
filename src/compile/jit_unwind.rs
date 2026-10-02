@@ -37,9 +37,11 @@
 
 use std::collections::BTreeMap;
 use std::ffi::{c_int, c_void};
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
+use inkwell::execution_engine::ExecutionEngine;
 use inkwell::memory_manager::McjitMemoryManager;
+use inkwell::module::{Linkage, Module};
 
 extern "C" {
     fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int, offset: i64) -> *mut c_void;
@@ -174,16 +176,40 @@ struct Registered {
     code_starts: Vec<usize>,
 }
 
+/// Where an [`UnwindingMemoryManager`] leaves the first thing that went wrong
+/// in it, for [`finalize_now`] to report.
+///
+/// Needed because nothing else would: MCJIT discards what `finalizeMemory`
+/// returns (`MCJIT::finalizeLoadedModules` and
+/// `RuntimeDyld::finalizeWithMemoryManagerLocking` in LLVM 22.1.8 both call it
+/// as a statement), so an `Err` from [`McjitMemoryManager::finalize_memory`]
+/// never reaches anyone.
+pub(super) type Failure = Arc<Mutex<Option<String>>>;
+
 /// See this module's doc comment.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct UnwindingMemoryManager {
     sections: Vec<Section>,
     /// How many of `sections` have been finalized; the rest arrived since.
     finalized: usize,
     registered: Vec<Registered>,
+    failure: Failure,
 }
 
 impl UnwindingMemoryManager {
+    pub(super) fn new(failure: Failure) -> UnwindingMemoryManager {
+        UnwindingMemoryManager { sections: Vec::new(), finalized: 0, registered: Vec::new(), failure }
+    }
+
+    /// Records `reason` unless something already was: the first failure is
+    /// the one that explains the rest.
+    fn fail(&self, reason: String) {
+        let mut failure = self.failure.lock().unwrap_or_else(|e| e.into_inner());
+        if failure.is_none() {
+            *failure = Some(reason);
+        }
+    }
+
     fn allocate(&mut self, size: usize, alignment: u32, kind: Kind, eh_frame: bool) -> *mut u8 {
         // SAFETY: getpagesize has no preconditions.
         let page = unsafe { getpagesize() } as usize;
@@ -203,11 +229,18 @@ impl UnwindingMemoryManager {
     }
 
     /// Makes the object whose sections are `self.sections[from..]` known to
-    /// [`find_sections`]. An object without an `.eh_frame` has no frame the
-    /// unwinder could step through, so there is nothing to tell it.
+    /// [`find_sections`]. With no code in them there is nothing to register;
+    /// code without an `.eh_frame` is a failure, since a panic or throw
+    /// through it could not be unwound.
     fn register(&mut self, from: usize) {
         let new = &self.sections[from..];
-        let Some(eh_frame) = new.iter().find(|s| s.eh_frame) else { return };
+        if !new.iter().any(|s| s.kind == Kind::Code && s.size > 0) {
+            return;
+        }
+        let Some(eh_frame) = new.iter().find(|s| s.eh_frame) else {
+            self.fail("internal error: the JIT produced code with no .eh_frame, so no panic or throw could unwind through it".to_string());
+            return;
+        };
         let header = Box::into_raw(Box::new(MachHeader64 {
             magic: MH_MAGIC_64,
             cputype: CPU_TYPE_ARM64,
@@ -264,7 +297,12 @@ impl McjitMemoryManager for UnwindingMemoryManager {
             };
             // SAFETY: the section's own mapping.
             if unsafe { mprotect(section.ptr as *mut c_void, section.mapped, prot) } != 0 {
-                return Err(format!("mprotect failed: {}", std::io::Error::last_os_error()));
+                let reason = format!(
+                    "internal error: could not protect the JIT's memory (mprotect: {})",
+                    std::io::Error::last_os_error()
+                );
+                self.fail(reason.clone());
+                return Err(reason);
             }
             if section.kind == Kind::Code {
                 // SAFETY: as above; the code was written through the data
@@ -302,5 +340,37 @@ impl McjitMemoryManager for UnwindingMemoryManager {
             unsafe { munmap(section.ptr as *mut c_void, section.mapped) };
         }
         self.finalized = 0;
+    }
+}
+
+/// Has MCJIT generate and finalize `module`'s code now, and returns whatever
+/// failed in its memory manager while it did.
+///
+/// MCJIT generates a module's code the first time a symbol in it is looked
+/// up, and finalizes memory after every lookup that succeeds. Looking up one
+/// function here moves the only generation there will be — every name is in
+/// this one module — to where a failure can still be returned from
+/// [`super::jit_engine`]. The finalizes after it see no new sections, so they
+/// have nothing left to fail.
+///
+/// A module with no function that can be looked up — none with a body, or
+/// only local ones — is never generated, by this or anything later: nothing
+/// is allocated, so nothing can fail. Such a module does reach here
+/// (`install_compiled_library` with no items, for one), and turning it away
+/// would make an empty library an error.
+pub(super) fn finalize_now(engine: &ExecutionEngine<'static>, module: &Module<'static>, failure: &Failure) -> Result<(), String> {
+    let Some(function) = module
+        .get_functions()
+        .find(|f| f.count_basic_blocks() > 0 && !matches!(f.get_linkage(), Linkage::Private | Linkage::Internal))
+    else {
+        return Ok(());
+    };
+    let name = function.get_name().to_string_lossy().into_owned();
+    engine
+        .get_function_address(&name)
+        .map_err(|e| format!("internal error: `{}` did not resolve in its own engine: {}", name, e))?;
+    match failure.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        Some(reason) => Err(reason),
+        None => Ok(()),
     }
 }
