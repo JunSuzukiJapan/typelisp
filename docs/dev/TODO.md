@@ -51,6 +51,13 @@ IR モジュールは渡さず、オブジェクトにして `LLVMOrcLLJITAddObj
 ごとに bare JITDylib を作り、外部の名前は `LLVMOrcAbsoluteSymbols` で定義する（プロセス
 検索は付けない）。`CompiledFn` は `ExecutionEngine` の代わりに JITDylib の共有を持つ。
 
+(1) の試作（`tests/orc_probe_test.rs`、ブランチ feature/jit-orc）は Intel macOS 15 と
+Linux x86_64（Ubuntu 24.04 / Debian 13 / Fedora 44）で通った：C API の既定の LLJIT で
+JITLink が `.eh_frame` を登録し、panic も cleanup の landing pad も動き、渡していない名前
+（コード生成が足す `_Unwind_Resume` も）は名前を含むエラーになる。C API では JITDylib を
+外せず、毎回新しく作ると 1 回あたり約 9 KiB 残るので、clear したものを使い回す（それで
+横ばい）。arm64（macOS 15 / 27、Linux aarch64）は未確認。
+
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
 B1/B2（スケジューラ・`task`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
