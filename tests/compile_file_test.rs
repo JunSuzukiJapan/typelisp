@@ -1666,15 +1666,23 @@ fn task_and_wait_run_in_a_standalone_executable() {
     assert_eq!(code, 0, "stderr was: {}", err);
 }
 
-/// `sleep` stops the task, not the thread: `a` is spawned first and would
-/// finish first if the whole process slept, so `ba` is the whole assertion
-/// (the same proof `concurrency_test` makes under the interpreter).
+/// `sleep` stops the task, not the thread: `a` is spawned first and sleeps in
+/// short steps until `b` has marked the trail, so `ba` is the whole assertion
+/// — if a `sleep` held the whole process, `b` could not run while `a` slept,
+/// and `a` gives up after five seconds and marks first. Waiting on the trail
+/// rather than sleeping a fixed time longer than `b` keeps a slow machine
+/// from reading as the bug: 80 ms against 20 ms was not enough on a CI
+/// runner.
 #[test]
 fn sleep_in_a_standalone_executable_stops_only_its_task() {
     let (code, err) = compile_and_capture(
         "sleep_aot",
         r#"(defvar (trail string) "")
-           (defun slow () int (progn (sleep 0.08) (setf trail (append trail "a")) 0))
+           (defun slow () int
+             (let ((i 0))
+               (loop (if (or (equal trail "b") (>= i 500)) (break) ()) (sleep 0.01) (setf i (+ i 1)))
+               (setf trail (append trail "a"))
+               0))
            (defun fast () int (progn (sleep 0.02) (setf trail (append trail "b")) 0))
            (defun main () int
              (let ((a (task (slow))) (b (task (fast))))
