@@ -66,10 +66,14 @@ jobs:
       # leaves no repository behind.
       - name: Install git
         run: |
+          # Three tries, as in setup-build: a runner's network fails now and then.
+          retry() { for i in 1 2 3; do "$@" && return 0; if [ "$i" -lt 3 ]; then echo "retrying in $((i * 20))s: $*" >&2; sleep $((i * 20)); fi; done; return 1; }
           if command -v apt-get >/dev/null; then
-            apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git
+            export DEBIAN_FRONTEND=noninteractive
+            retry apt-get update
+            retry apt-get install -y --no-install-recommends ca-certificates git
           else
-            dnf install -y git
+            retry dnf install -y git
           fi
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-build

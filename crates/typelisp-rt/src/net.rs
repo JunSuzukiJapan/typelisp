@@ -1333,18 +1333,21 @@ mod tests {
         let (c, s) = connected_pair(&mut t);
         t.close(c).unwrap();
         assert_eq!(fill_until_some(&mut t, s), 0);
-        let sfd = t.raw_fd(s).unwrap();
         // The first write may still succeed (the kernel accepts it and
-        // learns of the reset afterwards); one of a few will not.
+        // learns of the reset afterwards); a later one will not. When is up
+        // to the kernel and how busy the machine is, so this keeps writing
+        // until a deadline rather than a fixed number of times — and sleeps
+        // between writes: waiting for the socket to be writable does not
+        // wait at all, since it is.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut failed = None;
-        for _ in 0..10 {
+        while failed.is_none() && std::time::Instant::now() < deadline {
             t.net_push_string(s, "into the void\n").unwrap();
             let _ = t.net_flush(s).unwrap();
-            if let Some(why) = t.net_socket_error(s).unwrap() {
-                failed = Some(why);
-                break;
+            failed = t.net_socket_error(s).unwrap();
+            if failed.is_none() {
+                std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            crate::os::poll_ready(&[(sfd, crate::os::Interest::Writable)], Some(std::time::Duration::from_millis(50))).unwrap();
         }
         let why = failed.expect("writing to a closed peer was never noticed");
         assert!(why.starts_with("write:"), "{}", why);
