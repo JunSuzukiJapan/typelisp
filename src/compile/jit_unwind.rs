@@ -41,7 +41,7 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 use inkwell::execution_engine::ExecutionEngine;
 use inkwell::memory_manager::McjitMemoryManager;
-use inkwell::module::{Linkage, Module};
+use inkwell::module::Module;
 
 extern "C" {
     fn mmap(addr: *mut c_void, len: usize, prot: c_int, flags: c_int, fd: c_int, offset: i64) -> *mut c_void;
@@ -353,18 +353,13 @@ impl McjitMemoryManager for UnwindingMemoryManager {
 /// [`super::jit_engine`]. The finalizes after it see no new sections, so they
 /// have nothing left to fail.
 ///
-/// A module with no function that can be looked up — none with a body, or
-/// only local ones — is never generated, by this or anything later: nothing
-/// is allocated, so nothing can fail. Such a module does reach here
-/// (`install_compiled_library` with no items, for one), and turning it away
-/// would make an empty library an error.
+/// Every module this crate JITs has a function with a body: it is JIT'd to
+/// get that function's address.
 pub(super) fn finalize_now(engine: &ExecutionEngine<'static>, module: &Module<'static>, failure: &Failure) -> Result<(), String> {
-    let Some(function) = module
+    let function = module
         .get_functions()
-        .find(|f| f.count_basic_blocks() > 0 && !matches!(f.get_linkage(), Linkage::Private | Linkage::Internal))
-    else {
-        return Ok(());
-    };
+        .find(|f| f.count_basic_blocks() > 0)
+        .ok_or_else(|| "internal error: JIT'ing a module with no function body".to_string())?;
     let name = function.get_name().to_string_lossy().into_owned();
     engine
         .get_function_address(&name)
