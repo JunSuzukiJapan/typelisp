@@ -71,8 +71,12 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
             unbound.iter().map(|n| format!("`{}`", n)).collect::<Vec<_>>().join(", ")
         ));
     }
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    let elf_externals = jit_as_elf(module)?;
+    #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
+    let elf_externals: Vec<(String, usize)> = Vec::new();
     let engine = module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?;
-    for (name, addr) in externals {
+    for (name, addr) in externals.iter().chain(&elf_externals) {
         match (module.get_function(name), module.get_global(name)) {
             (Some(function), _) => engine.add_global_mapping(&function, *addr),
             (None, Some(global)) => engine.add_global_mapping(&global, *addr),
@@ -82,6 +86,81 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
         }
     }
     Ok(engine)
+}
+
+/// Apple Silicon only: has MCJIT load `module` as an ELF object rather than
+/// Mach-O, so that a panic can unwind through the code it produces.
+///
+/// The unwinder finds a compiled frame by the `.eh_frame` FDE MCJIT registers
+/// for it, and on arm64 Mach-O that FDE names the wrong address. The object's
+/// FDE carries its function's address as an `ARM64_RELOC_SUBTRACTOR` pair,
+/// which RuntimeDyld resolves to the correct value; then
+/// `RuntimeDyldMachOCRTPBase::registerEHFrames` runs `processFDE` over it,
+/// which subtracts the difference between where `__text` and `__eh_frame`
+/// sat in the object and where they were loaded. That correction is right on
+/// x86_64, whose `__eh_frame` has no relocations and so still holds the
+/// object-relative value, and wrong on arm64, where the value was already
+/// relocated: the FDE ends up off by that difference (seen: 0x3ff0), no frame
+/// matches it, and the first panic through compiled code ends the process
+/// with "failed to initiate panic, error 5" (`_URC_END_OF_STACK`). Checked
+/// against LLVM 22.1.8's source.
+///
+/// RuntimeDyld's ELF loader has no such pass, and its relocation alone leaves
+/// the FDE right. Only the object format changes: the OS stays `darwin`, so
+/// code generation keeps the Apple arm64 calling convention, and AArch64's
+/// JIT default of the large code model means nothing depends on where the
+/// code lands relative to the symbols it refers to. AOT is not involved — it
+/// writes Mach-O for the system linker, which handles the relocation itself.
+///
+/// The data layout is set with the triple because the two must agree on
+/// symbol mangling: Mach-O's prefixes `_`, ELF's does not, and MCJIT looks a
+/// name up by the module's. The modules this crate JITs are created with
+/// neither set, so this only chooses what MCJIT would otherwise have filled
+/// in for the Mach-O target.
+///
+/// One cost of ELF's mangling comes back as the result: `(name, address)` for
+/// the calls code generation inserts whose C name starts with `_`, declared
+/// into `module` here so [`jit_engine`] can map them like any other external.
+/// Left to MCJIT's process lookup, which on macOS strips one leading `_`
+/// because it expects Mach-O names, `_Unwind_Resume` — what every `resume`
+/// becomes — would be looked up as `Unwind_Resume`, not found, and called at
+/// address 0.
+#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+fn jit_as_elf(module: &Module<'static>) -> Result<Vec<(String, usize)>, String> {
+    use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetData, TargetMachine, TargetTriple};
+
+    static TRIPLE_AND_LAYOUT: OnceLock<Result<(String, String), String>> = OnceLock::new();
+    let (triple, layout) = TRIPLE_AND_LAYOUT
+        .get_or_init(|| {
+            Target::initialize_native(&InitializationConfig::default())
+                .map_err(|e| format!("failed to initialize native target: {}", e))?;
+            let host = TargetMachine::get_default_triple();
+            let triple = TargetTriple::create(&format!("{}-elf", host.as_str().to_string_lossy()));
+            let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
+            let machine = target
+                .create_target_machine(&triple, "", "", OptimizationLevel::None, RelocMode::Default, CodeModel::JITDefault)
+                .ok_or_else(|| format!("failed to create a target machine for `{}`", triple))?;
+            let layout = machine.get_target_data().get_data_layout().as_str().to_string_lossy().into_owned();
+            Ok((triple.as_str().to_string_lossy().into_owned(), layout))
+        })
+        .as_ref()
+        .map_err(|e| e.clone())?;
+    module.set_triple(&TargetTriple::create(triple));
+    module.set_data_layout(&TargetData::create(layout).get_data_layout());
+
+    extern "C" {
+        fn _Unwind_Resume();
+    }
+    let inserted: [(&str, usize); 1] = [("_Unwind_Resume", _Unwind_Resume as *const () as usize)];
+    let mut mapped = Vec::new();
+    for (name, addr) in inserted {
+        if module.get_function(name).is_none() {
+            let ctx = module.get_context();
+            module.add_function(name, ctx.void_type().fn_type(&[], false), Some(inkwell::module::Linkage::External));
+        }
+        mapped.push((name.to_string(), addr));
+    }
+    Ok(mapped)
 }
 
 pub mod aot;
