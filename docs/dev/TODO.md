@@ -56,8 +56,12 @@ Linux x86_64（Ubuntu 24.04 / Debian 13 / Fedora 44）で通った：C API の�
 JITLink が `.eh_frame` を登録し、panic も cleanup の landing pad も動き、渡していない名前
 （コード生成が足す `_Unwind_Resume` も）は名前を含むエラーになる。C API では JITDylib を
 外せず、毎回新しく作ると 1 回あたり約 9 KiB 残るので、clear したものを使い回す（それで
-横ばい）。arm64 の macOS 27（M4）でも同じく通った。未確認は arm64 の macOS 15 と
-Linux aarch64。
+横ばい）。arm64 の macOS 27（M4）でも同じく通った。未確認は Linux aarch64。
+
+arm64 macOS のサポートは 26 以降にする（2026-10-03 決定）。(2) で `jit_unwind` を外すときに
+まとめて行う：README（全言語）の「Apple Silicon では macOS 14 以降」を 26 以降に、`typl` の
+起動時に arm64 で 26 より前なら警告を 1 行出す（止めない）、CI の arm64 runner を
+`macos-15` から macOS 26 へ。
 
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
