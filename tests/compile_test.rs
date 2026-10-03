@@ -7,7 +7,7 @@
 //! exercises `HashTable<K,V>`.
 
 extern crate typelisp;
-use inkwell::execution_engine::ExecutionEngine;
+use typelisp::compile::orc::JitCode;
 use inkwell::module::Module;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -27,18 +27,8 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Int
 /// The hand-built modules elsewhere in this file, whose bodies are declared
 /// with `add-function`/`add-function-with-env` rather than emitted by
 /// `compile-function`, are genuinely classic and keep calling directly.
-fn run_coroutine_entry(
-    engine: &inkwell::execution_engine::ExecutionEngine<'_>,
-    heap: &mut Heap,
-    name: &str,
-    args: &[i64],
-) -> i64 {
-    let f = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(i64) -> i64>(name)
-            .unwrap_or_else(|_| panic!("failed to look up the compiled `{}` function", name))
-    };
-    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(f.as_raw()) };
+fn run_coroutine_entry(engine: &JitCode, heap: &mut Heap, name: &str, args: &[i64]) -> i64 {
+    let entry = unsafe { function::<typelisp::compile::coroutine::CoroutineFn>(engine, name) };
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
     stack.run(heap, entry, args).expect("the chain ran to an answer")
 }
@@ -135,10 +125,20 @@ fn expect_llvm_module(v: Value) -> Rc<RefCell<Module<'static>>> {
 /// [`typelisp::compile::jit_engine`], like every engine the compiler makes, so
 /// a declaration with no address is an error here too rather than a call to
 /// address 0 on Linux.
-fn jit(module: &Rc<RefCell<Module<'static>>>) -> ExecutionEngine<'static> {
+fn jit(module: &Rc<RefCell<Module<'static>>>) -> JitCode {
     let module = module.borrow();
     typelisp::compile::jit_engine(&module, &typelisp::compile::runtime_externals(&module))
-        .expect("failed to create JIT execution engine")
+        .expect("failed to JIT-compile the module")
+}
+
+/// The function `name` that `code`'s module defined, as a pointer of type `F`.
+///
+/// # Safety
+///
+/// `F` must be a function pointer type matching how the function was built.
+unsafe fn function<F: Copy>(code: &JitCode, name: &str) -> F {
+    let addr = code.address(name).unwrap_or_else(|e| panic!("failed to look up the compiled `{}` function: {}", name, e));
+    std::mem::transmute_copy::<usize, F>(&addr)
 }
 
 /// Like [`run`], but with the (typelisp-hosted) compiler body
@@ -489,12 +489,8 @@ fn the_built_module_actually_jit_executes_to_42() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let answer = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn() -> i64>("answer")
-            .expect("failed to look up the compiled `answer` function")
-    };
-    assert_eq!(unsafe { answer.call() }, 42);
+    let answer = unsafe { function::<unsafe extern "C" fn() -> i64>(&engine, "answer") };
+    assert_eq!(unsafe { answer() }, 42);
 }
 
 /// Exercises the fixed-ABI parameter convention (`registry::llvm_module_def`'s
@@ -522,13 +518,9 @@ fn a_function_using_load_arg_and_build_add_computes_correctly() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let add2 = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("add2")
-            .expect("failed to look up the compiled `add2` function")
-    };
+    let add2 = unsafe { function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&engine, "add2") };
     let argv: [i64; 2] = [3, 4];
-    assert_eq!(unsafe { add2.call(argv.as_ptr(), argv.len() as u32) }, 7);
+    assert_eq!(unsafe { add2(argv.as_ptr(), argv.len() as u32) }, 7);
 }
 
 /// `get-function`/`alloca-args`/`store-arg`/`build-call`: a direct call from
@@ -568,13 +560,9 @@ fn a_function_can_directly_call_another_function_in_the_same_module() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let quadruple = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("quadruple")
-            .expect("failed to look up the compiled `quadruple` function")
-    };
+    let quadruple = unsafe { function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&engine, "quadruple") };
     let argv: [i64; 1] = [5];
-    assert_eq!(unsafe { quadruple.call(argv.as_ptr(), argv.len() as u32) }, 20);
+    assert_eq!(unsafe { quadruple(argv.as_ptr(), argv.len() as u32) }, 20);
 }
 
 /// `build-make-closure`/`coroutine-apply`: a `BoxedObj::CompiledClosure`
@@ -650,16 +638,12 @@ fn a_closure_made_from_a_capturing_function_can_be_called_indirectly() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     module.borrow().verify().expect("the emitted module verifies");
     let engine = jit(&module);
-    let caller = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(i64) -> i64>("caller")
-            .expect("failed to look up the compiled `caller` function")
-    };
+    let caller = unsafe { function::<unsafe extern "C" fn(i64) -> i64>(&engine, "caller") };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
 
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
-    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(caller.as_raw()) };
+    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(caller as *const ()) };
     let answer = stack.run(&mut heap, entry, &[]).expect("the chain ran to an answer");
     assert_eq!(answer, 105, "the classic body's answer came back through the frame's value slot");
     assert_eq!(stack.depth(), 0, "and the caller's frame was popped");
@@ -943,7 +927,7 @@ fn the_compiler_body_compiles_a_self_referencing_call() {
 /// compiler-body tests above): `sum-of-squares` calls the *separately*
 /// `compile`d `square` twice. `Interp::compile_function`'s own module for
 /// `sum-of-squares` never contains `square`'s body, only a no-body forward
-/// declaration of it — proving the `add_global_mapping` wiring really does
+/// declaration of it — proving the link against its address really does
 /// reach the other, already-running JIT code, not just a coincidentally
 /// correct IR shape.
 #[test]
@@ -989,7 +973,7 @@ fn compile_transitively_compiles_a_called_function() {
 /// `(compile name)` JIT path rather than a hand-fed `Sexpr`: proves
 /// `Interp::compile_function`'s call-target collection correctly excludes
 /// self (no "must be compiled first" error, no forward declaration/
-/// `add_global_mapping` wiring attempted for its own name). Deliberately
+/// address attempted for its own name). Deliberately
 /// never *called* — see that test's doc comment for why.
 #[test]
 fn compile_succeeds_for_a_self_recursive_defun_without_being_run() {
@@ -2203,14 +2187,10 @@ fn build_shl_and_build_ashr_round_trip_a_signed_fixnum_payload() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let round_trip = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("round_trip")
-            .expect("failed to look up the compiled `round_trip` function")
-    };
+    let round_trip = unsafe { function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&engine, "round_trip") };
     for x in [0i64, 1, 42, -1, -5, i64::MIN >> 3, i64::MAX >> 3] {
         let argv: [i64; 1] = [x];
-        assert_eq!(unsafe { round_trip.call(argv.as_ptr(), argv.len() as u32) }, x, "round trip failed for {}", x);
+        assert_eq!(unsafe { round_trip(argv.as_ptr(), argv.len() as u32) }, x, "round trip failed for {}", x);
     }
 }
 
@@ -2240,16 +2220,12 @@ fn build_or_and_build_and_pack_and_read_back_a_tag() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let round_trip = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("round_trip")
-            .expect("failed to look up the compiled `round_trip` function")
-    };
+    let round_trip = unsafe { function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&engine, "round_trip") };
     // `combined` packs `tag-back * 1000 + idx-back` into one return value so
     // a single call proves both the tag (must read back as `2`) and the
     // payload (must read back as the original index) survived.
     let argv: [i64; 1] = [123];
-    assert_eq!(unsafe { round_trip.call(argv.as_ptr(), argv.len() as u32) }, 2123);
+    assert_eq!(unsafe { round_trip(argv.as_ptr(), argv.len() as u32) }, 2123);
 }
 
 // ---- Stage 6 of the Sexpr-representation plan: Construct/FieldGet/FieldSet --
@@ -2922,8 +2898,8 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
 /// were built from the receiver type's *local* name only (`tl_box::n` for
 /// *both* structs) — so `compiler.rs`'s `get-function "tl_box::n"` inside
 /// `sum-both`'s own module would resolve to the *same* declared value for
-/// both calls, and whichever real address `Interp::compile_scc` wired last
-/// via `add_global_mapping` would silently win for both — reading `x::n`
+/// both calls, and whichever real address `Interp::compile_scc` supplied last
+/// would silently win for both — reading `x::n`
 /// would return `y`'s field (or vice versa) instead of its own.
 #[test]
 fn compile_a_same_named_method_in_two_sibling_modules_does_not_alias_the_others_llvm_symbol() {
@@ -6934,16 +6910,12 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let two_halves = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(i64) -> i64>("two_halves")
-            .expect("failed to look up the compiled `two_halves` function")
-    };
+    let two_halves = unsafe { function::<unsafe extern "C" fn(i64) -> i64>(&engine, "two_halves") };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
 
     // First entry: no frame yet.
-    assert_eq!(unsafe { two_halves.call(0) }, typelisp_abi::STATUS_SUSPEND, "the first half suspends");
+    assert_eq!(unsafe { two_halves(0) }, typelisp_abi::STATUS_SUSPEND, "the first half suspends");
     let frame = typelisp_abi::call_state::take_current_frame().expect("the prologue published its frame");
     let id = match typelisp::decode(frame) {
         Value::Boxed(id) => id,
@@ -6953,7 +6925,7 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
     assert_eq!(heap.frame_word(id, 1), 40, "with the local it wrote still in the frame");
 
     // Resume with the same frame.
-    assert_eq!(unsafe { two_halves.call(frame) }, typelisp_abi::STATUS_RETURN, "the second half returns");
+    assert_eq!(unsafe { two_halves(frame) }, typelisp_abi::STATUS_RETURN, "the second half returns");
     assert_eq!(heap.frame_word(id, typelisp_abi::FRAME_VALUE_SLOT), 42, "40 survived the suspension");
 }
 
@@ -7032,16 +7004,12 @@ fn the_driver_runs_a_two_frame_call_chain() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let outer = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(i64) -> i64>("outer")
-            .expect("failed to look up the compiled `outer` function")
-    };
+    let outer = unsafe { function::<unsafe extern "C" fn(i64) -> i64>(&engine, "outer") };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
 
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
-    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(outer.as_raw()) };
+    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(outer as *const ()) };
     // The word is raw, not tagged: what the value slot means is the function's
     // declared return representation, which the driver deliberately does not
     // read. `inner` left 5; `outer` added 37 after being resumed with it.
@@ -7122,18 +7090,14 @@ fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
     // nothing defined in the body reaches it.
     module.borrow().verify().expect("the emitted module verifies");
     let engine = jit(&module);
-    let sum_to = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(i64) -> i64>("sum_to")
-            .expect("failed to look up the compiled `sum_to` function")
-    };
+    let sum_to = unsafe { function::<unsafe extern "C" fn(i64) -> i64>(&engine, "sum_to") };
     // Two frames per activation's worth of cells, with room to spare: the
     // frames are what the depth costs, and they are all live at the bottom.
     let mut heap = Heap::with_capacity(1 << 22);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
 
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
-    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(sum_to.as_raw()) };
+    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(sum_to as *const ()) };
     let n: i64 = 200_000;
     let answer = stack.run(&mut heap, entry, &[n]).expect("the recursion ran to an answer");
     assert_eq!(answer, n * (n + 1) / 2, "every frame added its own n on the way back up");
@@ -7185,15 +7149,11 @@ fn a_frames_size_is_patched_in_once_the_body_is_emitted() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let sized = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("sized_frame")
-            .expect("failed to look up the compiled `sized_frame` function")
-    };
+    let sized = unsafe { function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&engine, "sized_frame") };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let argv: [i64; 1] = [typelisp::encode(Value::Int(7))];
-    assert_eq!(unsafe { sized.call(argv.as_ptr(), argv.len() as u32) }, 0);
+    assert_eq!(unsafe { sized(argv.as_ptr(), argv.len() as u32) }, 0);
 
     let id = typelisp::BoxId::from_u32(0);
     assert!(heap.is_frame(id));
@@ -7243,15 +7203,11 @@ fn a_compiled_function_can_carry_a_local_in_a_heap_frame() {
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
-    let roundtrip = unsafe {
-        engine
-            .get_function::<unsafe extern "C" fn(*const i64, u32) -> i64>("frame_roundtrip")
-            .expect("failed to look up the compiled `frame_roundtrip` function")
-    };
+    let roundtrip = unsafe { function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&engine, "frame_roundtrip") };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let argv: [i64; 1] = [4242];
-    assert_eq!(unsafe { roundtrip.call(argv.as_ptr(), argv.len() as u32) }, 4242);
+    assert_eq!(unsafe { roundtrip(argv.as_ptr(), argv.len() as u32) }, 4242);
     // One frame, and it is the shape the collector was told about. The call
     // allocates nothing else, so it is box 0.
     assert_eq!(heap.box_count(), 1, "the call allocated exactly one box");

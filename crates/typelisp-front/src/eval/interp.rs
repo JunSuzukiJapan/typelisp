@@ -153,13 +153,13 @@ pub struct FnDef {
 /// What the interpreter needs from a compiled function body: where it is.
 ///
 /// A trait rather than the backend's own `crate::compile::CompiledFn`, so
-/// nothing here names a type that owns an LLVM `ExecutionEngine`. That struct
-/// is two fields — the engine, held only to keep the code alive, and this
-/// address — and every use of it from the evaluator is `.address()`. Naming
+/// nothing here names a type that owns JIT-compiled code. That struct is,
+/// for the evaluator, two things — the code, held only to keep it alive, and
+/// this address — and every use of it from the evaluator is `.address()`. Naming
 /// only the half the evaluator actually reads is what lets the front end stop
 /// depending on the backend.
 ///
-/// The implementor's `Drop` is what retires the engine, so holding
+/// The implementor's `Drop` is what retires the code, so holding
 /// `Rc<dyn CompiledBody>` here keeps the machine code alive exactly as
 /// holding the concrete type did.
 pub trait CompiledBody {

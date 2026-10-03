@@ -12,18 +12,14 @@
 //! **Level 1 — unwinding *through* a compiled frame**, which is all a catchable
 //! `panic` needs:
 //!
-//! 1. A panic does cross a JIT frame and reach `catch_unwind`. On Apple
-//!    Silicon only because [`jit_engine`] has MCJIT load the code as ELF:
-//!    as Mach-O, the FDE it registers names the wrong address and the panic
-//!    aborts with `_URC_END_OF_STACK` (see `jit_as_elf` in `compile/mod.rs`).
+//! 1. A panic does cross a JIT frame and reach `catch_unwind`.
 //! 2. **No `uwtable` attribute is needed**, so `compiler.rs`'s
 //!    `compile-function` and the island artifact are untouched.
-//! 3. **The execution engine must outlive the unwind.** Dropping it while the
-//!    panic is still propagating through its own code *deadlocks the next
-//!    unwind* — see [`a_second_panic_still_unwinds`].
-//!    [`typelisp::compile::CompiledFn`] keeps its engine alive for the life of
-//!    the process, so this is a constraint to preserve rather than one to fix,
-//!    but it is invisible until a second panic happens.
+//! 3. **The code must outlive the unwind.** Freeing it while the panic is
+//!    still propagating through it can leave the unwinder unable to finish the
+//!    *next* unwind (it hangs) — which is why [`typelisp::compile::CompiledFn`]
+//!    retires its code rather than dropping it. Freeing it *after* the unwind
+//!    is fine, and [`freed_code_does_not_break_the_next_unwind`] checks that.
 //!
 //! **Level 2 — running cleanup *inside* a compiled frame**, which is what an
 //! `unwind-protect` needs and level 1 does not provide:
@@ -71,9 +67,7 @@ const PANIC_MESSAGE: &str = "compiled-unwind probe";
 /// [`typelisp::compile::CompiledSignature`]: calling through a plain
 /// `extern "C"` pointer tells Rust the callee cannot unwind, which is exactly
 /// the assumption being broken here. Note this is also why the real fix cannot
-/// keep using `ExecutionEngine::get_function` — inkwell's
-/// `UnsafeFunctionPointer` is implemented for `unsafe extern "C" fn` only, so
-/// the address has to come from `get_function_address` and be transmuted.
+/// call through an `extern "C"` type — the address is transmuted to this.
 type UnwindingProbe = unsafe extern "C-unwind" fn(*const i64, u32) -> i64;
 
 /// Stands in for `typelisp_rt::rt_panic`: an `extern "C-unwind"` function the
@@ -96,60 +90,60 @@ pub extern "C-unwind" fn typelisp_test_maybe_panic(n: i64) -> i64 {
 }
 
 /// The probe's JIT-resolved address, built once and kept for the life of the
-/// process.
-///
-/// Built once on purpose. The execution engine owns the JIT'd code *and* the
-/// `.eh_frame` registration the unwinder walks; dropping it while a panic is
-/// still propagating through that code leaves the unwinder's registry in a
-/// state where the *next* unwind hangs. `CompiledFn` holds its engine for the
-/// life of the process too (`JitFunction` carries it internally), so building
-/// once here matches the real lifetime rather than dodging the problem.
+/// process — as a `CompiledFn` keeps its code for as long as anything may be
+/// running in it. [`freed_code_does_not_break_the_next_unwind`] builds its own.
 static PROBE: OnceLock<usize> = OnceLock::new();
 
-/// Builds `probe(args, argc) -> i64`, whose body is
-/// `typelisp_test_maybe_panic(args[0])`, and JITs it.
+/// Builds the module of `probe(args, argc) -> i64`, whose body is
+/// `typelisp_test_maybe_panic(args[0])`, and the externals it links against.
 ///
-/// Mirrors `CompiledFn::new`'s setup — same `(i64*, u32) -> i64` ABI, same
-/// `add_global_mapping` wiring for an external address — so a result here
-/// carries over to the real compile path. No `uwtable` attribute is set: that
-/// it works without one is part of what the probe establishes.
+/// Mirrors `CompiledFn::new`'s setup — same `(i64*, u32) -> i64` ABI, the
+/// external's address passed the same way — so a result here carries over to
+/// the real compile path. No `uwtable` attribute is set: that it works without
+/// one is part of what the probe establishes.
+///
+/// The caller must hold `COMPILE_LOCK`, and drop the module under it.
+fn build_probe() -> (inkwell::module::Module<'static>, Vec<(String, usize)>) {
+    let ctx = llvm_context();
+    let module = ctx.create_module("unwind_probe");
+    let i64_t = ctx.i64_type();
+    let i32_t = ctx.i32_type();
+
+    // The callee, declared with no body and given the real Rust function's
+    // address below — how an already-compiled external is linked in.
+    let callee_ty = i64_t.fn_type(&[i64_t.into()], false);
+    let callee = module.add_function("typelisp_test_maybe_panic", callee_ty, Some(Linkage::External));
+
+    let probe_ty = i64_t.fn_type(&[ctx.ptr_type(AddressSpace::default()).into(), i32_t.into()], false);
+    let probe = module.add_function("probe", probe_ty, None);
+
+    let builder = ctx.create_builder();
+    builder.position_at_end(ctx.append_basic_block(probe, "entry"));
+    let args_ptr = probe.get_nth_param(0).unwrap().into_pointer_value();
+    let first = builder.build_load(i64_t, args_ptr, "arg0").unwrap().into_int_value();
+    let called = builder.build_call(callee, &[first.into()], "call").unwrap();
+    let result = match called.try_as_basic_value() {
+        ValueKind::Basic(v) => v.into_int_value(),
+        ValueKind::Instruction(_) => panic!("the callee declaration produced no value"),
+    };
+    builder.build_return(Some(&result)).unwrap();
+    module.verify().expect("probe module failed verification");
+
+    let externals = vec![(callee_name(callee), typelisp_test_maybe_panic as *const () as usize)];
+    (module, externals)
+}
+
 fn probe() -> UnwindingProbe {
     let addr = *PROBE.get_or_init(|| {
         // The whole-process LLVM context is shared and not thread-safe; every
         // other LLVM-driving test takes this lock for the same reason.
         let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let ctx = llvm_context();
-        let module = ctx.create_module("unwind_probe");
-        let i64_t = ctx.i64_type();
-        let i32_t = ctx.i32_type();
-
-        // The callee, declared with no body and wired to the real Rust
-        // function's address below — how an already-compiled external is
-        // linked in.
-        let callee_ty = i64_t.fn_type(&[i64_t.into()], false);
-        let callee = module.add_function("typelisp_test_maybe_panic", callee_ty, Some(Linkage::External));
-
-        let probe_ty = i64_t.fn_type(&[ctx.ptr_type(AddressSpace::default()).into(), i32_t.into()], false);
-        let probe = module.add_function("probe", probe_ty, None);
-
-        let builder = ctx.create_builder();
-        builder.position_at_end(ctx.append_basic_block(probe, "entry"));
-        let args_ptr = probe.get_nth_param(0).unwrap().into_pointer_value();
-        let first = builder.build_load(i64_t, args_ptr, "arg0").unwrap().into_int_value();
-        let called = builder.build_call(callee, &[first.into()], "call").unwrap();
-        let result = match called.try_as_basic_value() {
-            ValueKind::Basic(v) => v.into_int_value(),
-            ValueKind::Instruction(_) => panic!("the callee declaration produced no value"),
-        };
-        builder.build_return(Some(&result)).unwrap();
-        module.verify().expect("probe module failed verification");
-
-        let externals = [(callee_name(callee), typelisp_test_maybe_panic as *const () as usize)];
-        let engine = jit_engine(&module, &externals).expect("failed to create the JIT engine");
-        let addr = engine.get_function_address("probe").expect("probe did not resolve");
+        let (module, externals) = build_probe();
+        let code = jit_engine(&module, &externals).expect("failed to JIT-compile the probe");
+        let addr = code.address("probe").expect("probe did not resolve");
         // Never dropped: see this static's doc comment.
-        std::mem::forget(engine);
-        addr as usize
+        std::mem::forget(code);
+        addr
     });
     unsafe { std::mem::transmute::<usize, UnwindingProbe>(addr) }
 }
@@ -200,16 +194,8 @@ fn a_panic_crosses_a_jit_frame_when_the_callee_is_c_unwind() {
     assert_eq!(caught_message(0), PANIC_MESSAGE);
 }
 
-/// The constraint that only shows up on the *second* panic: unwinding through
-/// JIT'd code has to stay repeatable, because a REPL session will do it over
-/// and over.
-///
-/// This deadlocked in the first version of this probe, which built a fresh
-/// module and engine per call: the engine was dropped while the panic was
-/// still propagating through its own code, and the next unwind then hung
-/// forever. Keeping the engine alive — what `CompiledFn` already does — is
-/// what makes it repeatable, so the real fix must not start dropping engines
-/// on the panic path.
+/// Unwinding through JIT'd code has to stay repeatable, because a REPL
+/// session will do it over and over.
 #[test]
 fn a_second_panic_still_unwinds() {
     assert_eq!(caught_message(0), PANIC_MESSAGE);
@@ -243,8 +229,7 @@ pub extern "C-unwind" fn typelisp_test_cleanup_ran() {
     CLEANUP_RUNS.fetch_add(1, Ordering::SeqCst);
 }
 
-/// The level-2 probe's address, built once and kept — same reasoning as
-/// [`PROBE`].
+/// The level-2 probe's address, built once and kept, like [`PROBE`].
 static PROTECTED_PROBE: OnceLock<usize> = OnceLock::new();
 
 /// Builds `protected(args, argc) -> i64`: the same call as [`probe`], but
@@ -310,17 +295,18 @@ fn protected_probe() -> UnwindingProbe {
 
         module.verify().expect("protected module failed verification");
 
-        // The personality too: it is a declaration like the other two, and
-        // left to the process lookup it is found on macOS and not on Linux.
+        // The personality too: it is a declaration like the other two. The
+        // `_Unwind_Resume` that `resume` becomes is not named here — code
+        // generation adds that call, and the JIT supplies it.
         let externals = [
             (callee_name(callee), typelisp_test_maybe_panic as *const () as usize),
             (callee_name(cleanup_fn), typelisp_test_cleanup_ran as *const () as usize),
             (callee_name(personality), rust_eh_personality as *const () as usize),
         ];
-        let engine = jit_engine(&module, &externals).expect("failed to create the JIT engine");
-        let addr = engine.get_function_address("protected").expect("protected did not resolve");
-        std::mem::forget(engine);
-        addr as usize
+        let code = jit_engine(&module, &externals).expect("failed to JIT-compile the protected probe");
+        let addr = code.address("protected").expect("protected did not resolve");
+        std::mem::forget(code);
+        addr
     });
     unsafe { std::mem::transmute::<usize, UnwindingProbe>(addr) }
 }
@@ -370,4 +356,109 @@ fn a_protected_frame_is_reusable_after_an_unwind() {
     }
     assert_eq!(CLEANUP_RUNS.load(Ordering::SeqCst), before + 3);
     assert_eq!(call_protected(50), 100);
+}
+
+// ---- what the JIT links against ---------------------------------------------
+
+/// Freeing JIT'd code after a panic has unwound through it leaves the next
+/// unwind working. A `CompiledFn` frees its code only through
+/// `compile::retire_llvm`, when no compiled chain stands, which is this case.
+///
+/// A hang is the failure this guards against, so the second unwind runs on a
+/// thread of its own and a hang fails the test instead of stopping it.
+#[test]
+fn freed_code_does_not_break_the_next_unwind() {
+    let compile = || {
+        let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let (module, externals) = build_probe();
+        let code = jit_engine(&module, &externals).expect("failed to JIT-compile the probe");
+        let f = unsafe { std::mem::transmute::<usize, UnwindingProbe>(code.address("probe").expect("probe did not resolve")) };
+        (code, f)
+    };
+    let unwind = |f: UnwindingProbe| {
+        without_panic_output(|| catch_unwind(AssertUnwindSafe(|| unsafe { f([0i64].as_ptr(), 1) })))
+            .expect_err("the panic did not propagate out of the JIT frame")
+            .downcast_ref::<String>()
+            .cloned()
+            .expect("panic payload was not the String this probe panics with")
+    };
+
+    let (first, f) = compile();
+    assert_eq!(unwind(f), PANIC_MESSAGE);
+    {
+        let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        drop(first);
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (second, g) = compile();
+        let _ = tx.send(unwind(g));
+        let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        drop(second);
+    });
+    let message = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("the second unwind hung or died");
+    assert_eq!(message, PANIC_MESSAGE);
+}
+
+/// A name the code calls that nobody supplied is an error naming it, on every
+/// OS — not a call to whatever the process happens to have under that name,
+/// nor to address 0.
+#[test]
+fn a_callee_nobody_supplied_is_an_error_naming_it() {
+    let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (module, _) = build_probe();
+    let err = jit_engine(&module, &[]).err().expect("a callee with no address was accepted");
+    assert!(err.contains("typelisp_test_maybe_panic"), "the error does not name the symbol: {}", err);
+}
+
+/// How many functions [`a_panic_crosses_any_function_of_a_large_module`]
+/// puts in its module: enough that one table page of unwind records could not
+/// hold them all, not only enough to have more than one.
+const MANY: usize = 1200;
+
+/// A panic unwinds through every function of a module, not only the first.
+///
+/// One-function modules — every other probe here — cannot tell. On Mach-O,
+/// LLVM 22.1.8's JITLink built an unwind table that covered the first function
+/// only when all the functions' unwind encodings were alike, and the first
+/// panic through any other one ended the process ("failed to initiate panic,
+/// error 5") — see `compile::orc::compact_unwind_as_dwarf`. A regression here
+/// aborts the test binary rather than failing this test.
+#[test]
+fn a_panic_crosses_any_function_of_a_large_module() {
+    let (code, names) = {
+        let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ctx = llvm_context();
+        let module = ctx.create_module("many_functions");
+        let i64_t = ctx.i64_type();
+        let callee = module.add_function("typelisp_test_maybe_panic", i64_t.fn_type(&[i64_t.into()], false), Some(Linkage::External));
+        let ty = i64_t.fn_type(&[ctx.ptr_type(AddressSpace::default()).into(), ctx.i32_type().into()], false);
+        let builder = ctx.create_builder();
+        let mut names = Vec::new();
+        for i in 0..MANY {
+            let name = format!("many_{}", i);
+            let f = module.add_function(&name, ty, None);
+            builder.position_at_end(ctx.append_basic_block(f, "entry"));
+            let arg = builder
+                .build_load(i64_t, f.get_nth_param(0).unwrap().into_pointer_value(), "arg0")
+                .unwrap()
+                .into_int_value();
+            let called = builder.build_call(callee, &[arg.into()], "call").unwrap();
+            let ValueKind::Basic(v) = called.try_as_basic_value() else { panic!("the callee declaration produced no value") };
+            builder.build_return(Some(&v.into_int_value())).unwrap();
+            names.push(name);
+        }
+        module.verify().expect("module failed verification");
+        let externals = [(callee_name(callee), typelisp_test_maybe_panic as *const () as usize)];
+        (jit_engine(&module, &externals).expect("failed to JIT-compile the module"), names)
+    };
+    for i in [0, 1, MANY / 2, MANY - 1] {
+        let f = unsafe { std::mem::transmute::<usize, UnwindingProbe>(code.address(&names[i]).expect("function did not resolve")) };
+        let payload = without_panic_output(|| catch_unwind(AssertUnwindSafe(|| unsafe { f([0i64].as_ptr(), 1) })))
+            .expect_err("the panic did not propagate out of the JIT frame");
+        assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some(PANIC_MESSAGE), "function {}", i);
+    }
+    // Freed only now, after every unwind through it has finished.
+    let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    drop(code);
 }

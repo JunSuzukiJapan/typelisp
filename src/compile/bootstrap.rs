@@ -61,7 +61,7 @@ use crate::{Checker, Heap, Interp, Reader, Value};
 /// (rt_* forward declarations + one `add_compiled_function` per defun, each
 /// defun's `labels` siblings emitted alongside it by the island's own
 /// `compile-labels`) minus the `main` wrapper — the island is a library of
-/// compiled functions, not an executable. No `add_global_mapping` is done
+/// compiled functions, not an executable. No addresses are supplied
 /// here: the rt_* addresses are supplied at load time by `load_aot`'s
 /// `CompiledFn::new_multi`, and the bitcode only needs to carry the
 /// declarations (which it does).

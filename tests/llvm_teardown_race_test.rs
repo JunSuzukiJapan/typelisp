@@ -2,44 +2,37 @@
 //! that is compiling.
 //!
 //! Every LLVM object in this process belongs to one shared `Context`
-//! (`compile::llvm_context`), and `COMPILE_LOCK` serializes the code that
-//! *builds* IR. Destruction was outside that rule: dropping an
-//! `ExecutionEngine` destroys the module of JIT'd code inside it, and
-//! `~Module` unregisters every value name from the Context's own tables. Since
-//! a `CompiledFn` dies wherever the `FnDef` holding it dies — usually an
-//! interpreter going out of scope, on a thread doing nothing LLVM-related — it
-//! raced any thread that happened to be compiling, and the crash landed in
-//! `llvm::Value::destroyValueName` naming nothing that would suggest a drop.
-//!
-//! The fix is `compile::retire_llvm`: an engine's last share is handed to a
-//! list and destroyed by whichever thread next takes the lock to compile.
+//! (`compile::llvm_context`), and `COMPILE_LOCK` serializes everything that
+//! touches it — destruction included, since `~Module` unregisters every value
+//! name from the Context's own tables. An interpreter's compiled bodies hold
+//! JIT'd code but no module (each module is dropped under the lock by the code
+//! that built it), and the code they hold is freed through
+//! `compile::retire_llvm`. A crash here, typically in
+//! `llvm::Value::destroyValueName`, means some LLVM object is again being
+//! destroyed wherever its owner happens to fall.
 //!
 //! This test spawns its own threads rather than relying on the harness running
 //! two `#[test]`s at once, so it means the same thing under
 //! `scripts/test-serial.sh` (`--test-threads=1`) as under a bare `cargo test`.
-//! It is a race, so it is a probe, not a proof: it reproduced the crash within
-//! seconds every time before the fix, which is enough to notice a regression.
+//! It is a race, so it is a probe, not a proof.
 
 use std::sync::{Arc, Barrier};
 
 use typelisp::{load_prelude, Checker, Heap, Interp, Reader, Value};
 
-/// How many build-and-drop cycles each thread runs. The pre-fix crash landed
-/// well inside this many; more only costs time.
+/// How many build-and-drop cycles each thread runs.
 const ROUNDS: usize = 12;
 
-/// Threads racing each other. Two suffice for the pairing that crashed (one
-/// tearing down, one installing); a third widens the window for free.
+/// Threads racing each other: one tearing down while another installs is the
+/// pairing that matters; a third widens the window for free.
 const THREADS: usize = 3;
 
 /// One cycle: build an interpreter with the prelude installed — which parses
-/// the prelude bitcode into the shared Context and JITs one engine's worth of
-/// compiled bodies — run something, then drop the lot. The drop is the half
-/// that used to be unsynchronized, and installing the prelude is the LLVM work
-/// on the other side of the race: the crash report that started this showed
-/// exactly this pairing, one thread in `MCJIT::~MCJIT` and another inside
-/// `install_compiled_library`'s bitcode parse. No `load_compiler`/`(compile
-/// f)` needed on top — those only make each cycle slower.
+/// the prelude bitcode into the shared Context and JITs its compiled bodies —
+/// run something, then drop the lot. The drop is one side of the race, and
+/// installing the prelude (`install_compiled_library`'s bitcode parse) is the
+/// LLVM work on the other. No `load_compiler`/`(compile f)` needed on top —
+/// those only make each cycle slower.
 fn build_prelude_and_drop() {
     let mut heap = Heap::with_capacity(1 << 16);
     let mut checker = Checker::new();
@@ -86,7 +79,7 @@ fn compile_and_drop() {
     assert_eq!(last, Value::Int(42), "the compiled function did not run");
 }
 
-/// The engine half: a thread dropping `CompiledFn`s while others install
+/// The code half: a thread dropping `CompiledFn`s while others install
 /// bitcode.
 #[test]
 fn interpreters_can_be_torn_down_while_another_thread_compiles() {
@@ -118,7 +111,7 @@ fn interpreters_can_be_torn_down_while_another_thread_compiles() {
 ///
 /// **This one never reproduced a crash**, with the fix reverted or in place
 /// (3/3 green either way, at six rounds and three compiles per round as well
-/// as at these numbers). Unlike the engine teardown above, the registry
+/// as at these numbers). Unlike the code teardown above, the registry
 /// teardown is guarded on the *rule* — destruction touches the shared Context,
 /// so it belongs under the lock — rather than on an observed failure. Kept
 /// because nothing else drives concurrent compiles to completion and then ends

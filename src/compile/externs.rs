@@ -12,7 +12,7 @@
 //! - [`native_lowered_primitive_methods`]: which builtin *methods* on a
 //!   primitive receiver the island lowers in place rather than calling.
 //! - [`rt_extern_functions`]: every shim, with its address — the JIT's
-//!   `add_global_mapping` list and the AOT module's forward-declaration list,
+//!   `externals` and the AOT module's forward-declaration list,
 //!   which have to be the same list.
 //!
 //! They live here rather than in `eval::interp` because nothing in the
@@ -499,7 +499,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// The fixed set of `typelisp_rt` shims every compiled function
 /// gets forward-declared and (JIT only — AOT resolves them as ordinary
 /// linker symbols against `typelisp-rt`'s `staticlib`, see
-/// `compile::aot::compile_file`) `add_global_mapping`-wired to, regardless
+/// `compile::aot::compile_file`) linked against by address, regardless
 /// of whether its own body actually calls any of them. Cheap enough (9
 /// extra declarations/mappings) to always include rather than checking
 /// which ones a given body's call targets actually need. `pub(crate)`:

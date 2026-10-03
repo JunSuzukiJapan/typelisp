@@ -496,11 +496,9 @@ pub fn add_compiled_global_init(
 /// `.expect()`, not a user-facing error; (2) forward-declared — no body
 /// — in this SCC's module *before* the compiler body runs for any of its
 /// members (`compile-call`'s `get-function` needs to find *something* by
-/// that name); (3) wired to the real, already-running JIT code's address
-/// via `add_global_mapping` *after* (`crate::compile::CompiledFn::
-/// new_multi`'s `externals` parameter) — can't happen any earlier, since
-/// the engine that will actually run this SCC's code doesn't exist until
-/// then. Self-recursion, and recursion among an SCC's own members, needs
+/// that name); (3) linked against the real, already-running JIT code's
+/// address when this SCC's module is JIT-compiled
+/// (`crate::compile::CompiledFn::new_multi`'s `externals` parameter). Self-recursion, and recursion among an SCC's own members, needs
 /// none of this: every member of the SCC is forward-declared under its
 /// own name in the *same* module before any of their bodies are
 /// translated, so `compile-function`'s own `(add-function m name)`
@@ -914,13 +912,13 @@ pub(crate) fn scc_strongconnect(
 /// disjoint one — see [`llvm_module_add_function`]'s doc comment) attaches
 /// that member's real body to it in place. Targets *outside* `members`
 /// are handled exactly like [`crate::eval::interp::Interp::call_graph_edges`]'s callers always
-/// have: forward-declared, then wired post-hoc via `add_global_mapping`
-/// (`externals`) to their already-compiled address — guaranteed to exist
+/// have: forward-declared, then linked against their already-compiled
+/// address (`externals`) — guaranteed to exist
 /// by [`crate::eval::interp::Interp::compute_sccs`]'s finish-order contract. The whole module is
 /// JIT'd exactly once via [`crate::compile::CompiledFn::new_multi`], so
-/// every member shares one execution engine (mutual calls within the SCC
-/// need no `add_global_mapping` entry at all — LLVM resolves them
-/// directly against the sibling's own definition in this same module).
+/// every member shares one piece of JIT'd code (mutual calls within the SCC
+/// need no `externals` entry at all — they resolve directly against the
+/// sibling's own definition in this same module).
 pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Result<(), EvalError> {
     emitted_layout_is_runnable().map_err(EvalError::Internal)?;
     let member_set: HashSet<&str> = members.iter().map(|s| s.as_str()).collect();

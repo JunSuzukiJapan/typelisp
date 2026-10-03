@@ -437,7 +437,7 @@ fn reconcile_unsupported(heap: &Heap, interp: &Interp, plan: &PreludePlan) -> Re
 /// is translated (the prelude's definitions reference each other freely — the
 /// numeric catalog's `gcd` calls `abs`, `signum` calls `abs`), then one
 /// `add_compiled_function` per item. No `main` wrapper and no
-/// `add_global_mapping`: this is a library of compiled functions, and the
+/// addresses: this is a library of compiled functions, and the
 /// `rt_*` addresses are supplied at install time by
 /// `Interp::install_compiled_library`.
 pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {

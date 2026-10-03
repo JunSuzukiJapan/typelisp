@@ -358,7 +358,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // builtin (`sexpr-car`, `eval`, `stream-read-char`, ...) arrives
         // already named for its shim, `symbols::callee_symbol_name` having
         // made that choice bridge-side. Unlike the JIT path
-        // (`Interp::compile_function`), no `add_global_mapping` is needed
+        // (`Interp::compile_function`), no addresses are passed
         // here: these resolve as ordinary linker symbols against
         // `typelisp-rt`'s `staticlib` once `write_executable` links it in.
         let ptr_ty = ctx.ptr_type(AddressSpace::default());

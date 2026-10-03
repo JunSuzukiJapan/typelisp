@@ -616,11 +616,11 @@ fn library_candidates(name: &str) -> Vec<String> {
     vec![format!("lib{}.{}", name, ext), format!("{}.{}", name, ext), name.to_string()]
 }
 
-/// A thunk, and the engine holding the code it lives in.
+/// A thunk, and the JIT-compiled code it lives in.
 struct FfiThunk {
     /// Held for its lifetime — dropping it would free the code at `addr`.
-    /// `CompiledFn` holds an `ExecutionEngine` share for exactly this reason;
-    /// see its doc comment. Also the one place that says which ABI the
+    /// `CompiledFn` holds a share of its code for exactly this reason; see its
+    /// doc comment. Also the one place that says which ABI the
     /// resolved entry answers to, which [`FfiThunk::body_abi`] reads back.
     code: CompiledFn,
     addr: usize,
