@@ -15,54 +15,24 @@ Arch は対象外（2026-10-02 決定）：公式リポジトリの `llvm` が 2
 実行時ライブラリ（`llvm22-libs`）しか無く `llvm-config`・ヘッダが無い。LLVM 23 へ移る
 ときに改めて考える。crates.io への公開は手動のまま。
 
-**JIT を MCJIT から ORC（LLJIT）へ移す（2026-10-02 決定、未着手）。** 根は MCJIT の
-2 つの性質：渡していない名前をプロセス内で探す（探し方は OS ごとに違い、macOS では
-先頭の `_` を 1 つ外す）こと、見つからなくてもエラーにせず番地 0 を埋めること。
-`compile::jit_engine` はモジュールに宣言がある名前の渡し忘れを断るが、コード生成が自分で
-足す呼び出し（`memcpy`、`__divti3` などの補助関数、`_Unwind_Resume`）は宣言が無いので
-捕まえられない。Apple Silicon では、Mach-O の FDE の番地を RuntimeDyld が二重に補正して
-panic が JIT のフレームを越えられない（`failed to initiate panic, error 5`）不具合も
-あり、`jit_engine` の `jit_as_elf` がモジュールを ELF として読ませて避けている。その代償
-として、名前が `_` で始まるライブラリ関数はプロセス内検索で見つからない
-（`_Unwind_Resume` だけは手で番地を渡している。ほかが現れれば黙って 0 を呼ぶ）。
-さらに macOS 15 の libunwind は、MCJIT が `__register_frame` で登録した FDE で landing
-pad に入ると落ちるので、`compile::jit_unwind` が独自のメモリマネージャを持ち、
-`__unw_add_find_dynamic_unwind_sections` で JIT のコードの `.eh_frame` を libunwind に
-直接教えている（MCJIT はメモリマネージャの失敗を捨てるので、`jit_engine` がコード生成を
-前倒しして失敗を拾う）。
+**JIT を MCJIT から ORC（LLJIT + JITLink）へ移す（ブランチ feature/jit-orc、段階 2 まで
+完了、main 未マージ）。** 計画は `~/.claude/plans/jit-orc-migration.md`。JIT は
+`compile::orc` にある：モジュールはオブジェクトにして `LLVMOrcLLJITAddObjectFile` で渡し
+（共有の LLVMContext は ThreadSafeContext に渡せない）、コンパイルごとの JITDylib に外部の
+名前を絶対番地で定義する。プロセス内の検索はしないので、渡していない名前は、コード生成が
+足したものも含めて、その名前を含むエラーになる。JITDylib は C API で外せないので clear して
+使い回す。Mach-O では LLVM 22.1.8 の JITLink が `__unwind_info` の範囲を早く閉じる不具合が
+あり、各モジュールの末尾に番兵関数を足して避けている（`orc::end_unwind_table`）。
+`jit_as_elf` と `compile::jit_unwind` は消した。全テストは Intel macOS 15、arm64 macOS 27、
+Linux x86_64 / aarch64（Ubuntu 24.04 / Debian 13 / Fedora 44）の 8 環境で通った。
 
-ORC なら、渡した名前（`LLVMOrcAbsoluteSymbols`）以外は解決せず、見つからない名前は
-必ずエラーで返し、プロセス内を探すのは明示的に足したときだけ（`_` の扱いはデータ
-レイアウトから決まる）。arm64 の Mach-O は JITLink で読むので RuntimeDyld の不具合を
-通らず、ELF の回避策も要らなくなるはず。必要な C API は `llvm-sys` 221.1.0 にある
-（inkwell は ORC を持たないので JIT の部分は `llvm-sys` を直接使う）。
-
-進め方は 2 段階：(1) 試作 — `tests/compiled_unwind_test.rs` と同じ最小のモジュールを
-ORC + JITLink で動かし、panic がフレームを越えるか・渡していない名前がエラーになるかを
-Intel の macOS、Linux、arm64 で確かめる。未確認で最大の不確定要素は、C API で作った
-JITLink の層が `.eh_frame` を登録するか。駄目なら MCJIT に戻る。(2) `jit_engine` と
-`CompiledFn`（エンジンの寿命、`retire_llvm`）を移し、`jit_as_elf` と `_Unwind_Resume`
-の手渡しと `compile::jit_unwind` を外し、全環境でテスト全体を回す。`jit_unwind` を外せる
-かは、JITLink が登録する `.eh_frame` で macOS 15 の arm64 の landing pad に入れるかで
-決まるので、(1) の試作で macOS 15 も確かめる。
-
-計画は `~/.claude/plans/jit-orc-migration.md`。要点は 3 つ：LLVMContext は共有なので
-IR モジュールは渡さず、オブジェクトにして `LLVMOrcLLJITAddObjectFile` で渡す。コンパイル
-ごとに bare JITDylib を作り、外部の名前は `LLVMOrcAbsoluteSymbols` で定義する（プロセス
-検索は付けない）。`CompiledFn` は `ExecutionEngine` の代わりに JITDylib の共有を持つ。
-
-(1) の試作（`tests/orc_probe_test.rs`、ブランチ feature/jit-orc）は Intel macOS 15 と
-Linux x86_64（Ubuntu 24.04 / Debian 13 / Fedora 44）で通った：C API の既定の LLJIT で
-JITLink が `.eh_frame` を登録し、panic も cleanup の landing pad も動き、渡していない名前
-（コード生成が足す `_Unwind_Resume` も）は名前を含むエラーになる。C API では JITDylib を
-外せず、毎回新しく作ると 1 回あたり約 9 KiB 残るので、clear したものを使い回す（それで
-横ばい）。arm64 の macOS 27（M4）と Linux aarch64（M4 の Docker で Ubuntu 24.04 /
-Debian 13 / Fedora 44）でも同じく通った。
-
-arm64 macOS のサポートは 26 以降にする（2026-10-03 決定）。(2) で `jit_unwind` を外すときに
-まとめて行う：README（全言語）の「Apple Silicon では macOS 14 以降」を 26 以降に、`typl` の
-起動時に arm64 で 26 より前なら警告を 1 行出す（止めない）、CI の arm64 runner を
-`macos-15` から macOS 26 へ。
+残り（段階 3）：
+- arm64 macOS のサポートを 26 以降にする（2026-10-03 決定）。README（全言語）の
+  「Apple Silicon では macOS 14 以降」を 26 以降に、`typl` と `typl-lsp` の起動時に arm64 で
+  26 より前なら警告を 1 行出す（止めない）、CI の arm64 runner を `macos-15` から macOS 26 へ。
+- `src/compiler.rs` の島の SOURCE 内のコメント 2 か所（`add_global_mapping`、「MCJIT and
+  the AOT linker」）を直し、島を再生成する。
+- 経緯を implementation-log.md へ移し、この節を消す。
 
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
