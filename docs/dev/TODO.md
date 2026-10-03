@@ -56,7 +56,8 @@ Linux x86_64（Ubuntu 24.04 / Debian 13 / Fedora 44）で通った：C API の�
 JITLink が `.eh_frame` を登録し、panic も cleanup の landing pad も動き、渡していない名前
 （コード生成が足す `_Unwind_Resume` も）は名前を含むエラーになる。C API では JITDylib を
 外せず、毎回新しく作ると 1 回あたり約 9 KiB 残るので、clear したものを使い回す（それで
-横ばい）。arm64（macOS 15 / 27、Linux aarch64）は未確認。
+横ばい）。arm64 の macOS 27（M4）でも同じく通った。未確認は arm64 の macOS 15 と
+Linux aarch64。
 
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
