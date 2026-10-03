@@ -15,9 +15,9 @@
 //! JITDylib. A name the object refers to and nothing defines is an error
 //! naming it, the same on every OS.
 //!
-//! On Mach-O the object's compact-unwind records are rewritten before linking
-//! ([`compact_unwind_as_dwarf`]), working around an LLVM bug that otherwise
-//! leaves every function but the first without unwind information.
+//! On Mach-O each module gets a last function that closes its unwind table
+//! ([`end_unwind_table`]), working around an LLVM bug that otherwise leaves
+//! most functions without unwind information.
 //!
 //! The C API cannot remove a JITDylib, only clear it, and a cleared one left
 //! behind still holds memory. So a cleared JITDylib is kept and handed to the
@@ -47,7 +47,11 @@ use llvm_sys::orc2::{
     LLVMOrcSymbolStringPoolEntryRef,
 };
 
+/// The personality routine of every landing pad this crate emits.
+const RUST_EH_PERSONALITY: &str = "rust_eh_personality";
+
 extern "C" {
+    fn rust_eh_personality();
     fn _Unwind_Resume();
     fn floor(x: f64) -> f64;
     fn ceil(x: f64) -> f64;
@@ -67,7 +71,8 @@ extern "C" {
 /// Functions code generation may call without the module declaring them, so
 /// no caller can pass them. Every JITDylib gets all of them.
 ///
-/// - `resume` becomes a call to `_Unwind_Resume`.
+/// - `resume` becomes a call to `_Unwind_Resume`, and [`end_unwind_table`]
+///   adds a landing pad under `rust_eh_personality`.
 /// - Each `f64` intrinsic the compiler emits (`llvm.floor.f64` and the rest,
 ///   in `llvm_builtins`) is either an instruction or a call to the libm
 ///   function of the same name, depending on the target and its features —
@@ -77,8 +82,9 @@ extern "C" {
 /// An intrinsic added to the compiler needs its libm function added here. A
 /// call missing from this list fails the JIT with the symbol's name, so
 /// nothing runs into address 0.
-fn codegen_helpers() -> [(&'static str, usize); 14] {
+fn codegen_helpers() -> [(&'static str, usize); 15] {
     [
+        (RUST_EH_PERSONALITY, rust_eh_personality as *const () as usize),
         ("_Unwind_Resume", _Unwind_Resume as *const () as usize),
         ("floor", floor as *const () as usize),
         ("ceil", ceil as *const () as usize),
@@ -103,6 +109,8 @@ struct Jit {
     /// The `LLJIT`'s data layout, set on every module before it is emitted.
     layout: String,
     triple: TargetTriple,
+    /// Whether the JIT links Mach-O objects (see [`end_unwind_table`]).
+    mach_o: bool,
 }
 
 // SAFETY: `LLJIT` is safe to use from any thread. The `TargetMachine` is used
@@ -185,7 +193,8 @@ fn jit() -> Result<&'static Jit, String> {
                 triple, ours, layout
             ));
         }
-        Ok(Jit { jit, machine, layout, triple })
+        let mach_o = triple.as_str().to_string_lossy().contains("-apple-");
+        Ok(Jit { jit, machine, layout, triple, mach_o })
     })
     .as_ref()
     .map_err(|e| e.clone())
@@ -324,89 +333,61 @@ impl Jit {
     }
 }
 
-/// Rewrites every `__LD,__compact_unwind` record of a Mach-O object to say
-/// "use the FDE", so the unwinder finds every function, not only the first.
+/// Name of the function [`end_unwind_table`] adds, and of the one it calls.
+const UNWIND_TABLE_END: &str = "typelisp.unwind_table_end";
+const UNWIND_TABLE_END_CALLEE: &str = "typelisp.unwind_table_end.callee";
+
+/// On Mach-O, adds a function to the end of `module` whose unwind record
+/// closes the unwind table after every other function.
 ///
-/// JITLink builds the `__unwind_info` that libunwind searches from these
-/// records, and LLVM 22.1.8 builds it wrong: it merges adjacent records with
-/// the same encoding, then ends the table's address range at the end of the
-/// *last remaining record's* function (`CompactUnwindManager::writeIndexes`).
-/// When every function has the same encoding — typical at `-O0` — one record
-/// remains and the table covers the first function alone. A panic through any
-/// other function then finds no unwind information ("failed to initiate
-/// panic, error 5"); JITLink has also dropped the FDEs the records made
+/// JITLink builds the `__unwind_info` that libunwind searches from the
+/// object's compact-unwind records, and LLVM 22.1.8 builds it wrong: it
+/// merges adjacent records with the same encoding — correct, a record covers
+/// up to the next one — and then ends the table at the end of the *last
+/// remaining record's* function (`CompactUnwindManager::writeIndexes`) rather
+/// than the last function's. When the module's last functions share an
+/// encoding, as most do at `-O0`, the table stops after the first of them and
+/// a panic through any of the rest finds no unwind information ("failed to
+/// initiate panic, error 5"). JITLink has dropped the FDEs those records made
 /// redundant, so there is nothing to fall back on.
 ///
-/// A record in DWARF mode is never merged, and JITLink keeps its function's
-/// FDE and writes the FDE's offset into the record. Code generation emits an
-/// FDE for every function on both x86_64 and arm64; one that is missing makes
-/// JITLink fail the link, naming the function. The records' own personality
-/// and LSDA fields are left alone: in DWARF mode the unwinder reads both from
-/// the FDE.
+/// A record in DWARF mode is never merged, so a last function whose record is
+/// in DWARF mode puts the end of the table after everything. This one has a
+/// personality and a landing pad, which code generation describes in DWARF on
+/// both x86_64 and arm64. Functions are laid out in module order, so it lands
+/// last. It is never called.
 ///
-/// Anything but a 64-bit Mach-O object (an ELF one, on Linux) is left as it is.
-fn compact_unwind_as_dwarf(object: &mut [u8]) -> Result<(), String> {
-    const MH_MAGIC_64: u32 = 0xfeed_facf;
-    const CPU_TYPE_X86_64: u32 = 0x0100_0007;
-    const CPU_TYPE_ARM64: u32 = 0x0100_000c;
-    const LC_SEGMENT_64: u32 = 0x19;
-    const HEADER_SIZE: usize = 32;
-    const SEGMENT_COMMAND_SIZE: usize = 72;
-    const SECTION_SIZE: usize = 80;
-    const RECORD_SIZE: usize = 32;
-    const ENCODING_OFFSET: usize = 12;
-
-    fn u32_at(object: &[u8], at: usize) -> Result<u32, String> {
-        object
-            .get(at..at + 4)
-            .map(|b| u32::from_le_bytes(b.try_into().expect("four bytes")))
-            .ok_or_else(|| format!("the JIT's Mach-O object ends before byte {}", at + 4))
+/// Rewriting the records instead does not work: on arm64, a function whose
+/// unwinding compact unwind can describe gets no FDE at all.
+fn end_unwind_table(module: &Module<'static>) -> Result<(), String> {
+    if module.get_function(UNWIND_TABLE_END).is_some() || module.get_function(UNWIND_TABLE_END_CALLEE).is_some() {
+        return Err(format!("internal error: the module was already JIT-compiled (it has `{}`)", UNWIND_TABLE_END));
     }
-    fn u64_at(object: &[u8], at: usize) -> Result<u64, String> {
-        object
-            .get(at..at + 8)
-            .map(|b| u64::from_le_bytes(b.try_into().expect("eight bytes")))
-            .ok_or_else(|| format!("the JIT's Mach-O object ends before byte {}", at + 8))
-    }
-
-    if object.len() < HEADER_SIZE || u32_at(object, 0)? != MH_MAGIC_64 {
-        return Ok(());
-    }
-    let dwarf_mode: u32 = match u32_at(object, 4)? {
-        CPU_TYPE_X86_64 => 0x0400_0000, // UNWIND_X86_64_MODE_DWARF
-        CPU_TYPE_ARM64 => 0x0300_0000,  // UNWIND_ARM64_MODE_DWARF
-        other => return Err(format!("the JIT's Mach-O object is for CPU type {:#x}, which has no DWARF mode here", other)),
+    let ctx = module.get_context();
+    let void_fn = ctx.void_type().fn_type(&[], false);
+    let personality = match module.get_function(RUST_EH_PERSONALITY) {
+        Some(f) => f,
+        None => module.add_function(RUST_EH_PERSONALITY, ctx.i32_type().fn_type(&[], true), None),
     };
-    let ncmds = u32_at(object, 16)? as usize;
-    let mut command = HEADER_SIZE;
-    for _ in 0..ncmds {
-        let cmd = u32_at(object, command)?;
-        let cmdsize = u32_at(object, command + 4)? as usize;
-        if cmd == LC_SEGMENT_64 {
-            let nsects = u32_at(object, command + 64)? as usize;
-            for i in 0..nsects {
-                let section = command + SEGMENT_COMMAND_SIZE + i * SECTION_SIZE;
-                let names = object
-                    .get(section..section + 32)
-                    .ok_or_else(|| format!("the JIT's Mach-O object ends inside section header {}", i))?;
-                if &names[..16] != b"__compact_unwind" || &names[16..21] != b"__LD\0" {
-                    continue;
-                }
-                let size = u64_at(object, section + 40)? as usize;
-                let offset = u32_at(object, section + 48)? as usize;
-                if size % RECORD_SIZE != 0 || object.len() < offset + size {
-                    return Err(format!(
-                        "the JIT's Mach-O object has a __compact_unwind of {} bytes at {}, not whole records inside the object",
-                        size, offset
-                    ));
-                }
-                for record in (offset..offset + size).step_by(RECORD_SIZE) {
-                    object[record + ENCODING_OFFSET..record + ENCODING_OFFSET + 4].copy_from_slice(&dwarf_mode.to_le_bytes());
-                }
-            }
-        }
-        command += cmdsize;
-    }
+    let callee = module.add_function(UNWIND_TABLE_END_CALLEE, void_fn, None);
+    let end = module.add_function(UNWIND_TABLE_END, void_fn, None);
+    end.set_personality_function(personality);
+    let builder = ctx.create_builder();
+    builder.position_at_end(ctx.append_basic_block(callee, "entry"));
+    builder.build_return(None).map_err(|e| e.to_string())?;
+    let entry = ctx.append_basic_block(end, "entry");
+    let normal = ctx.append_basic_block(end, "normal");
+    let pad = ctx.append_basic_block(end, "pad");
+    builder.position_at_end(entry);
+    builder.build_invoke(callee, &[], normal, pad, "").map_err(|e| e.to_string())?;
+    builder.position_at_end(normal);
+    builder.build_return(None).map_err(|e| e.to_string())?;
+    builder.position_at_end(pad);
+    let ptr = ctx.ptr_type(inkwell::AddressSpace::default());
+    let landing = builder
+        .build_landing_pad(ctx.struct_type(&[ptr.into(), ctx.i32_type().into()], false), personality, &[], true, "")
+        .map_err(|e| e.to_string())?;
+    builder.build_resume(landing).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -437,6 +418,9 @@ impl JitCode {
         let jit = jit()?;
         module.set_triple(&jit.triple);
         module.set_data_layout(&TargetData::create(&jit.layout).get_data_layout());
+        if jit.mach_o {
+            end_unwind_table(module)?;
+        }
         let object = jit.machine.write_to_memory_buffer(module, FileType::Object).map_err(|e| e.to_string())?;
         let defined: Vec<String> = module
             .get_functions()
@@ -458,8 +442,7 @@ impl JitCode {
         if !symbols.is_empty() {
             jit.define(dylib, &symbols)?;
         }
-        let mut bytes = object.as_slice().to_vec();
-        compact_unwind_as_dwarf(&mut bytes)?;
+        let bytes = object.as_slice();
         // SAFETY: the copy is handed to ORC, which takes ownership of it
         // whether or not the add succeeds.
         unsafe {

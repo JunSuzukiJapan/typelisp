@@ -419,11 +419,12 @@ const MANY: usize = 1200;
 /// A panic unwinds through every function of a module, not only the first.
 ///
 /// One-function modules — every other probe here — cannot tell. On Mach-O,
-/// LLVM 22.1.8's JITLink built an unwind table that covered the first function
-/// only when all the functions' unwind encodings were alike, and the first
-/// panic through any other one ended the process ("failed to initiate panic,
-/// error 5") — see `compile::orc::compact_unwind_as_dwarf`. A regression here
-/// aborts the test binary rather than failing this test.
+/// LLVM 22.1.8's JITLink ends a module's unwind table early when its last
+/// functions' unwind encodings are alike, and the first panic through a
+/// function past that end stops the process ("failed to initiate panic, error
+/// 5") — see `compile::orc::end_unwind_table`. On x86_64 these functions all
+/// share one encoding, so without the fix only the first is covered. A
+/// regression here aborts the test binary rather than failing this test.
 #[test]
 fn a_panic_crosses_any_function_of_a_large_module() {
     let (code, names) = {
