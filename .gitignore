@@ -33,3 +33,6 @@ graphify-out/????-??-??/
 graphify-out/cache/
 # チームで community labels を共有するなら次行を有効化して .graphify_* から除外する:
 # !graphify-out/.graphify_labels.json
+
+tmp/
+tmp/*
