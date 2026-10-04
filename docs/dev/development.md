@@ -144,36 +144,70 @@ libstd が見つからない・オブジェクトの版が 1 つに揃わない�
 LLVMバージョンを指す等でシャドウされていると、素の `cargo` は `LLVMConstShl` 等の未定義
 シンボルでリンクエラーになることがある——その場合は上記スクリプト経由で実行すること。
 
+## リリースの手順
+
+GitHub のリリース（macOS の配布用実行ファイル）は `.github/workflows/release.yml` が作る。
+crates.io への公開は手で行う。
+
+1. 版を上げる。全クレートの版はルートの `Cargo.toml` の `[workspace.package]` の `version` 1 つ。
+   同じファイルの `[workspace.dependencies]` にある内部クレートの `version` と、
+   `tests/typl_help_version_test.rs` の期待値も合わせて直し、`Cargo.lock` と一緒にコミットする。
+2. main に入れたら、Actions の Release を手で起動する（`gh workflow run release.yml --ref main`）。
+   手で起動したときは、全環境のテストと配布物のビルドまでで止まり、何も公開しない。テストは
+   環境ごとに 4 つに分けて走り、数時間かかる。
+3. `cargo publish --dry-run` を、下の 5. の順に通す。
+4. タグ `v<version>` を main に打って push する。release.yml が、タグと `[workspace.package]` の
+   版が合うことを確かめ、2. と同じテストとビルドをして、リリースを下書きで作って両 CPU の
+   tar.gz と SHA-256 を添付し、公開し、Intel と Apple Silicon の runner で `install.sh` から
+   入れて版・JIT・AOT を確かめる。リリースノートは `--generate-notes` が作るコミットの一覧なので、
+   書き直すなら公開後に `gh release edit` で差し替える。
+5. crates.io に、依存される側から順に公開する: typelisp-mem → typelisp-abi → typelisp-print →
+   typelisp-read → typelisp-rt → typelisp-front → typelisp。前のクレートが crates.io の索引に
+   載る前に次を出すと、依存が見つからずに止まる。
+
 ## 配布用の実行ファイル（macOS）
 
 `install.sh`（リポジトリのルート）が GitHub のリリースから取ってくる `typl` / `typl-lsp` は、
-CPU ごとの tar.gz と、その SHA-256 のファイル。各 CPU 向けのビルドはそれぞれの Mac で行う。
-LLVM は CPU によって出どころが違う: Apple Silicon は LLVM 公式のビルド済み配布物（`build.sh` が
-ダウンロードする）、Intel は Homebrew の llvm@22（LLVM に Intel の Mac 向けの配布物が無い）。
+CPU ごとの tar.gz と、その SHA-256 のファイル。`scripts/dist/build.sh` が、その CPU の Mac で作る
+（release.yml では `macos-26`（Apple Silicon）と `macos-15-intel` の runner）。LLVM は CPU によって
+出どころが違う: Apple Silicon は LLVM 公式のビルド済み配布物（`build.sh` がダウンロードする）、
+Intel は Homebrew の llvm@22（LLVM に Intel の Mac 向けの配布物が無い）。
 
-### 初めて使う Mac での準備（一度だけ）
+- `build.sh` が最初に表示する `minimum macOS:` の行が、その CPU 向けの `typl` が動く最も古い
+  macOS。Apple Silicon では LLVM 公式の配布物が対象とする macOS（22.1.8 では 14.0）になる。
+  ただし Apple Silicon でサポートするのは macOS 26 以降で、それより前では `typl` が起動時に
+  警告する（JIT のコードで landing pad に入ると、システムの unwinder が落ちる）。
+  Intel では、Homebrew の LLVM や zstd がその Mac の macOS 向けにビルドされたものだと、ここが
+  上がる。
+- `build.sh` は依存ライブラリが OS のものだけであることと、JIT と AOT が動くことを確かめ、
+  そうでなければ止まる。
+- Apple Silicon の初回は、LLVM 公式の配布物（約 1.4GB）のダウンロードと変換、zstd のビルドで
+  数分かかる。結果は `target/dist/cache`（約 420MB）に残り、2 回目からは使い回す（release.yml
+  では `build.sh` のハッシュをキーにキャッシュする）。作り直すにはそのフォルダを消す。
+
+### 手元の Mac で作る
+
+公開済みのリリースのファイルだけを差し替えるときなど、release.yml を通さずに作る場合。
+
+初めて使う Mac での準備（一度だけ）:
 
 1. Xcode Command Line Tools を入れる（`xcode-select --install`）。`build.sh` が使う `otool`・`ar`
    と、確認に使う `cc` が入る。
 2. Homebrew で GitHub CLI を入れる（`brew install gh`）。Intel の Mac では LLVM 22 と zstd も
    入れる（`brew install llvm@22 zstd gh`）。Apple Silicon では要らない。
 3. Rust を入れる（rustup か `brew install rust`）。std が対象とする最低 macOS バージョンが、配る
-   実行ファイルの最低バージョンの候補になる（下の `build.sh` の説明）。古い Rust は新しい macOS
+   実行ファイルの最低バージョンの候補になる（上の `minimum macOS:`）。古い Rust は新しい macOS
    で動かないことがある（rustc 1.89 は macOS 27 で、自分の作った proc-macro の dylib を dyld に
    「mis-aligned LINKEDIT string pool」と言われて読み込めなかった）。`rustup update stable` で
    新しくしておく。
 4. `gh auth login` で、このリポジトリのリリースに書き込めるアカウントにログインする。
 5. リポジトリを clone する（`git clone https://github.com/JunSuzukiJapan/typelisp.git`）。
-   既にあれば `git pull` で main を最新にする。
 
 `scripts/setup-cargo-env.sh` は要らない。`build.sh` は LLVM の場所と最低 macOS バージョンを
 自分で決めて環境変数に設定する。
 
-### リリースのたびに
-
-リリースのタグ（`v<version>`）と GitHub のリリースができていることが前提。Intel の Mac と
-Apple Silicon の Mac のそれぞれで、リポジトリのルートで次を実行する。`<arch>` は Intel なら
-`x86_64`、Apple Silicon なら `arm64`。
+作って添付する。`<arch>` は Intel なら `x86_64`、Apple Silicon なら `arm64`。同じ名前のファイルが
+既に添付されているときは `gh release upload` に `--clobber` を付ける。
 
 ```sh
 git checkout v<version>
@@ -182,29 +216,14 @@ gh release upload v<version> target/dist/typelisp-<version>-<arch>.tar.gz target
 git checkout main
 ```
 
-- `build.sh` が最初に表示する `minimum macOS:` の行が、その CPU 向けの `typl` が動く最も古い
-  macOS。Apple Silicon では LLVM 公式の配布物が対象とする macOS（22.1.8 では 14.0）になる。
-  ただし Apple Silicon でサポートするのは macOS 26 以降で、それより前では `typl` が起動時に
-  警告する（JIT のコードで landing pad に入ると、システムの unwinder が落ちる）。
-  Intel では、Homebrew の LLVM や zstd がその Mac の macOS 向けにビルドされたものだと、ここが
-  上がる。
-- Apple Silicon の初回は、LLVM 公式の配布物（約 1.4GB）のダウンロードと変換、zstd のビルドで
-  数分かかる。結果は `target/dist/cache`（約 420MB）に残り、2 回目からは使い回す。作り直すには
-  そのフォルダを消す。
-- `build.sh` は依存ライブラリが OS のものだけであることと、JIT と AOT が動くことを確かめ、
-  そうでなければ止まる。
-- `scripts/dist/build.sh` は v0.1.0 のタグより後に入ったので、v0.1.0 のタグには無い。0.1.0 に
-  限っては `git checkout` をせず main のまま実行する（main とタグで `src/`・`crates/`・
-  `Cargo.toml`・`Cargo.lock`・`build.rs` に差が無いことは確かめてある。`git diff v0.1.0 main --
-  src crates Cargo.toml Cargo.lock build.rs` が空）。
-- 添付した後、その Mac で `install.sh` から入ることを確かめる。既に入れている typl を上書き
-  しないよう、インストール先を一時的なフォルダにする:
+添付した後、その Mac で `install.sh` から入ることを確かめる。既に入れている typl を上書き
+しないよう、インストール先を一時的なフォルダにする:
 
-  ```sh
-  curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_HOME=/tmp/typelisp-check sh
-  /tmp/typelisp-check/bin/typl --version
-  rm -rf /tmp/typelisp-check
-  ```
+```sh
+curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_HOME=/tmp/typelisp-check sh
+/tmp/typelisp-check/bin/typl --version
+rm -rf /tmp/typelisp-check
+```
 
 ### 仕組み
 
