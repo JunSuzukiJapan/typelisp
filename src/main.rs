@@ -62,6 +62,9 @@ the program.
 ";
 
 fn main() -> rustyline::Result<()> {
+    if let Some(warning) = typelisp::compile::orc::unsupported_host_warning() {
+        eprintln!("{}", warning);
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     // A global `--heap-cells N` (or `--heap-cells=N`) sizes the fixed cons
     // arena every run mode below allocates; strip it (and its value) first so

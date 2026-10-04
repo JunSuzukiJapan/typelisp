@@ -184,6 +184,8 @@ git checkout main
 
 - `build.sh` が最初に表示する `minimum macOS:` の行が、その CPU 向けの `typl` が動く最も古い
   macOS。Apple Silicon では LLVM 公式の配布物が対象とする macOS（22.1.8 では 14.0）になる。
+  ただし Apple Silicon でサポートするのは macOS 26 以降で、それより前では `typl` が起動時に
+  警告する（JIT のコードで landing pad に入ると、システムの unwinder が落ちる）。
   Intel では、Homebrew の LLVM や zstd がその Mac の macOS 向けにビルドされたものだと、ここが
   上がる。
 - Apple Silicon の初回は、LLVM 公式の配布物（約 1.4GB）のダウンロードと変換、zstd のビルドで

@@ -86,6 +86,10 @@ use typelisp::project::{find_src_root, module_segs_for, Loader};
 use typelisp::*;
 
 fn main() {
+    // stderr is the editor's log for this server, not the protocol stream.
+    if let Some(warning) = typelisp::compile::orc::unsupported_host_warning() {
+        eprintln!("{}", warning);
+    }
     let (connection, io_threads) = Connection::stdio();
     // `run` takes `connection` by value so it (and the `Sender` it owns) is
     // dropped when the function returns, before `io_threads.join()` below —

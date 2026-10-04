@@ -490,3 +490,32 @@ impl Drop for JitCode {
         }
     }
 }
+
+/// The line `typl` and `typl-lsp` print at startup on an Apple Silicon Mac
+/// older than macOS 26, or `None` anywhere else. They keep running: what
+/// breaks there is narrower than the whole program. Before macOS 26 the
+/// system unwinder crashes when an exception from JIT code enters a landing
+/// pad, so a panic, a throw or an unwind-protect cleanup in JIT-compiled code
+/// can take the process down. An executable `typl -c` writes is linked
+/// ahead of time and is not affected.
+///
+/// The version is read as the Darwin kernel's major release (macOS 26 is
+/// Darwin 25). The macOS version itself is not used, because a binary built
+/// against an older SDK can be told a compatibility number in its place.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+pub fn unsupported_host_warning() -> Option<&'static str> {
+    let release = typelisp_rt::os::os_release().expect("uname reports a release");
+    let darwin: u32 = release
+        .split('.')
+        .next()
+        .and_then(|major| major.parse().ok())
+        .unwrap_or_else(|| panic!("uname's release `{}` does not start with a number", release));
+    (darwin < 25).then_some(
+        "warning: on Apple Silicon, typelisp needs macOS 26 or later; on this macOS, a panic, throw or unwind-protect in JIT-compiled code can crash",
+    )
+}
+
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+pub fn unsupported_host_warning() -> Option<&'static str> {
+    None
+}
