@@ -15,25 +15,6 @@ Arch は対象外（2026-10-02 決定）：公式リポジトリの `llvm` が 2
 実行時ライブラリ（`llvm22-libs`）しか無く `llvm-config`・ヘッダが無い。LLVM 23 へ移る
 ときに改めて考える。crates.io への公開は手動のまま。
 
-**JIT を MCJIT から ORC（LLJIT + JITLink）へ移す（ブランチ feature/jit-orc、段階 2 まで
-完了、main 未マージ）。** 計画は `~/.claude/plans/jit-orc-migration.md`。JIT は
-`compile::orc` にある：モジュールはオブジェクトにして `LLVMOrcLLJITAddObjectFile` で渡し
-（共有の LLVMContext は ThreadSafeContext に渡せない）、コンパイルごとの JITDylib に外部の
-名前を絶対番地で定義する。プロセス内の検索はしないので、渡していない名前は、コード生成が
-足したものも含めて、その名前を含むエラーになる。JITDylib は C API で外せないので clear して
-使い回す。Mach-O では LLVM 22.1.8 の JITLink が `__unwind_info` の範囲を早く閉じる不具合が
-あり、各モジュールの末尾に番兵関数を足して避けている（`orc::end_unwind_table`）。
-`jit_as_elf` と `compile::jit_unwind` は消した。全テストは Intel macOS 15、arm64 macOS 27、
-Linux x86_64 / aarch64（Ubuntu 24.04 / Debian 13 / Fedora 44）の 8 環境で通った。
-
-残り（段階 3）：
-- arm64 macOS のサポートを 26 以降にする（2026-10-03 決定）。README（全言語）の
-  「Apple Silicon では macOS 14 以降」を 26 以降に、`typl` と `typl-lsp` の起動時に arm64 で
-  26 より前なら警告を 1 行出す（止めない）、CI の arm64 runner を `macos-15` から macOS 26 へ。
-- `src/compiler.rs` の島の SOURCE 内のコメント 2 か所（`add_global_mapping`、「MCJIT and
-  the AOT linker」）を直し、島を再生成する。
-- 経緯を implementation-log.md へ移し、この節を消す。
-
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
 B1/B2（スケジューラ・`task`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5
