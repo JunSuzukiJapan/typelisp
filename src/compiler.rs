@@ -3340,10 +3340,11 @@ pub const SOURCE: &str = r#"
 ;; either already has `nm`'s real body in it (AOT's one
 ;; shared, file-ordered module — see `compile::aot`'s
 ;; doc comment) or a JIT-only forward declaration with
-;; no body that `Interp::compile_function` wires to
-;; the real address via `add_global_mapping` after
-;; this whole function is compiled (see that method's
-;; doc comment) — `get-function` doesn't need to know
+;; no body that `compile::driver::compile_function`
+;; binds to the real address, through the `externals`
+;; it hands the JIT, after this whole function is
+;; compiled (see that function's doc comment) —
+;; `get-function` doesn't need to know
 ;; which case it's in, since both already exist in `m`
 ;; by the time this runs. For a self-recursive call,
 ;; `nm` is `name` itself, already declared by
@@ -5657,7 +5658,7 @@ pub const SOURCE: &str = r#"
 ;; `extern "C-unwind"` declaration, and a plain `call`
 ;; to a function that unwinds needs no landing pad in
 ;; this frame — only a frame the unwinder can walk,
-;; which MCJIT and the AOT linker both give us (see
+;; which the JIT and the AOT linker both give us (see
 ;; `tests/compiled_unwind_test.rs`). `rt_match_fail`
 ;; still aborts, but that is a checker-guaranteed
 ;; unreachable, not a user-visible failure.

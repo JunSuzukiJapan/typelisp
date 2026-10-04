@@ -540,7 +540,7 @@ fn jit_and_aot_agree_on_a_labels_body() {
 /// closures Stage 3, top-level `Expr::Call`) rather than bare arithmetic or
 /// a `labels` form. The JIT path needs an extra `(compile square)` before
 /// `(compile main)` — `Interp::compile_function`'s own forward-declare +
-/// `add_global_mapping` requirement (see that method's doc comment) — that
+/// link-by-address requirement (see that method's doc comment) — that
 /// `compile::aot::compile_file`'s single shared module never needs (see
 /// that module's doc comment).
 #[test]

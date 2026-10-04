@@ -47,10 +47,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-15-intel]
+        runner: [macos-26, macos-15-intel]
         shard: [1, 2, 3, 4]
         include:
-          - runner: macos-15
+          - runner: macos-26
             arch: arm64
           - runner: macos-15-intel
             arch: x86_64
@@ -63,10 +63,6 @@ jobs:
           rust-version: ${{ env.RUST_VERSION }}
       - name: Test
         run: scripts/test-each.sh --shard ${{ matrix.shard }}/4
-        env:
-          # scripts/test-serial.sh's limit per target, raised from 1200 s:
-          # compile_test alone took 1140 s on an Intel runner.
-          TEST_TIMEOUT: "3600"
 
   test-linux:
     name: Test Linux (${{ matrix.distro }}, ${{ matrix.shard }}/4)
@@ -107,10 +103,6 @@ jobs:
           apt-suite: ${{ matrix.apt-suite }}
       - name: Test
         run: scripts/test-each.sh --shard ${{ matrix.shard }}/4
-        env:
-          # scripts/test-serial.sh's limit per target, raised from 1200 s:
-          # compile_test alone took 1140 s on an Intel runner.
-          TEST_TIMEOUT: "3600"
 
   dist:
     name: Distribution (${{ matrix.arch }})
@@ -119,7 +111,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-26
             arch: arm64
           - runner: macos-15-intel
             arch: x86_64
@@ -188,7 +180,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15
+          - runner: macos-26
             arch: arm64
           - runner: macos-15-intel
             arch: x86_64

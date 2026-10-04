@@ -335,9 +335,9 @@ fn llvm_function_param(args: &[Value]) -> Result<Value, EvalError> {
 /// ABI but **no body** — [`Interp::compile_function`]'s JIT-only step
 /// (labels/closures Stage 3, `call` to a different top-level function)
 /// that lets `compiler.rs`'s `compile-call` find an already-`compile`d
-/// function via `get-function` before the real call target is wired in via
-/// `add_global_mapping` once the engine running this declaration's own
-/// module exists (see that method's doc comment). Not exposed as an
+/// function via `get-function` before the real call target's address is supplied
+/// when this declaration's own module is JIT-compiled (see that method's doc
+/// comment). Not exposed as an
 /// `llvm-*` builtin — unlike [`llvm_module_add_function`], the typelisp
 /// compiler body itself never needs to call this; only the Rust-side JIT
 /// orchestration above does. Must be called with

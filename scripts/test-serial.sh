@@ -20,21 +20,23 @@
 # default `--test-threads=1`, since libtest takes the last occurrence), e.g.
 #   scripts/test-serial.sh -- --nocapture
 #
-# EACH TARGET GETS A TIMEOUT (`TEST_TIMEOUT`, default 1200s). Nothing else in
+# EACH TARGET GETS A TIMEOUT (`TEST_TIMEOUT`, default 3600s). Nothing else in
 # this repo bounds a test's running time: libtest has no per-test timeout on
 # stable, an evaluated (or compiled) Lisp loop has no fuel, and the executables
 # `compile_file_test` builds are waited on with `Command::status()`. Without
 # this, one runaway costs the whole run: on 2026-09-11 a malformed `loop` in a
 # hand-written core-IR test span for **nine hours** at 100% CPU on the *first*
 # target, and the run reported nothing at all — not even which file it was in.
-# `COMPILE_LOCK` is the other documented way to hang here (`compile::mod`'s
-# `retire_llvm` explains why locking in a `Drop` would "trade a rare crash for
-# a reliable hang"). A timed-out target is named in `TIMEDOUT:` at the end and
-# is a failure, not a skip.
+# `COMPILE_LOCK` is the other way to hang here: it is not reentrant, so taking
+# it where it is already held waits forever. A timed-out target is named in
+# `TIMEDOUT:` at the end and is a failure, not a skip.
 #
-# 1200s is over three times the slowest target measured (island_self_compile_test
-# ~375s, compile_file_test ~182s). Raise it with `TEST_TIMEOUT=3600 scripts/...`
-# on a cold cache or a slower machine rather than removing it.
+# 3600s is about twice the slowest targets measured on the slowest machines the
+# suite runs on: compile_file_test, ~30 minutes in an x86_64 Linux VM (colima),
+# where each of its tests links an executable against the debug
+# `libtypelisp_front.a`, and compile_test, ~19 minutes on an Intel GitHub
+# runner. On a recent Mac neither takes more than a few minutes. Raise it with
+# `TEST_TIMEOUT=7200 scripts/...` on a slower machine rather than removing it.
 #
 # **If you pipe this script, pass `grep --line-buffered` (or `stdbuf -oL`).**
 # grep buffers by block when its output is not a terminal, so a plain
@@ -114,7 +116,7 @@ if [ -z "$timeout_bin" ]; then
     echo "        This script will not run the suite unbounded — see its header comment."
     exit 1
 fi
-: "${TEST_TIMEOUT:=1200}"
+: "${TEST_TIMEOUT:=3600}"
 
 echo "=== cargo build -p typelisp-front (staticlib for the AOT tests) ==="
 cargo build -p typelisp-front || { echo "FAILED: building typelisp-front's staticlib"; exit 1; }

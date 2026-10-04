@@ -15,7 +15,7 @@
 //! Every function here is declared under the exact same ABI as a compiled
 //! typelisp function (`unsafe extern "C" fn(*const i64, u32) -> i64`,
 //! `typelisp::compile::CompiledSignature`) — so the existing cross-function-
-//! call wiring (JIT: `add_global_mapping`'s `externals` list in
+//! call wiring (JIT: the `externals` list of
 //! `typelisp::compile::CompiledFn::new`; AOT: ordinary linker symbol
 //! resolution against this crate's `staticlib`, see `typelisp::compile::aot`'s
 //! `write_executable`) treats a call to one of these exactly like a call to
@@ -25,7 +25,7 @@
 //!
 //! `rt_ping` is Stage 0's deliberately trivial placeholder: it exists only
 //! to prove that *some* Rust function defined in this crate is callable
-//! from both a JIT-compiled function (via `add_global_mapping`) and an
+//! from both a JIT-compiled function (via its `externals`) and an
 //! AOT-linked native executable (via the system linker) before any real
 //! heap/Sexpr machinery is built on top.
 
@@ -2542,16 +2542,14 @@ pub unsafe extern "C" fn rt_match_fail(_args: *const i64, _argc: u32) -> i64 {
 /// process (the Rustonomicon's "FFI and unwinding"), which is exactly what
 /// this function used to do on purpose. Rust 1.71 stabilized the `-unwind`
 /// ABI strings for this case; `tests/compiled_unwind_test.rs` is the probe
-/// that established the rest of the pipeline cooperates — MCJIT's frames are
-/// walkable by the system unwinder, and no `uwtable` attribute is needed on
-/// the generated functions.
+/// that established the rest of the pipeline cooperates — JIT-compiled frames
+/// are walkable by the system unwinder, and no `uwtable` attribute is needed
+/// on the generated functions.
 ///
-/// One non-obvious constraint comes with it: **the `ExecutionEngine` owning
-/// the frames being unwound through must outlive the unwind.** Dropping it
-/// mid-unwind leaves the unwinder's registry in a state where the *next*
-/// unwind hangs forever. `CompiledFn` already holds its engine for the life
-/// of the process, so nothing has to change — but nothing may start dropping
-/// engines on this path either.
+/// One non-obvious constraint comes with it: **the code being unwound through
+/// must outlive the unwind.** Freeing it mid-unwind can leave the unwinder
+/// unable to finish the *next* unwind. `CompiledFn` frees its code only
+/// through `compile::retire_llvm`, when no compiled chain stands.
 ///
 /// # Safety
 ///

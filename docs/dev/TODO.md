@@ -15,37 +15,6 @@ Arch は対象外（2026-10-02 決定）：公式リポジトリの `llvm` が 2
 実行時ライブラリ（`llvm22-libs`）しか無く `llvm-config`・ヘッダが無い。LLVM 23 へ移る
 ときに改めて考える。crates.io への公開は手動のまま。
 
-**JIT を MCJIT から ORC（LLJIT）へ移す（2026-10-02 決定、未着手）。** 根は MCJIT の
-2 つの性質：渡していない名前をプロセス内で探す（探し方は OS ごとに違い、macOS では
-先頭の `_` を 1 つ外す）こと、見つからなくてもエラーにせず番地 0 を埋めること。
-`compile::jit_engine` はモジュールに宣言がある名前の渡し忘れを断るが、コード生成が自分で
-足す呼び出し（`memcpy`、`__divti3` などの補助関数、`_Unwind_Resume`）は宣言が無いので
-捕まえられない。Apple Silicon では、Mach-O の FDE の番地を RuntimeDyld が二重に補正して
-panic が JIT のフレームを越えられない（`failed to initiate panic, error 5`）不具合も
-あり、`jit_engine` の `jit_as_elf` がモジュールを ELF として読ませて避けている。その代償
-として、名前が `_` で始まるライブラリ関数はプロセス内検索で見つからない
-（`_Unwind_Resume` だけは手で番地を渡している。ほかが現れれば黙って 0 を呼ぶ）。
-さらに macOS 15 の libunwind は、MCJIT が `__register_frame` で登録した FDE で landing
-pad に入ると落ちるので、`compile::jit_unwind` が独自のメモリマネージャを持ち、
-`__unw_add_find_dynamic_unwind_sections` で JIT のコードの `.eh_frame` を libunwind に
-直接教えている（MCJIT はメモリマネージャの失敗を捨てるので、`jit_engine` がコード生成を
-前倒しして失敗を拾う）。
-
-ORC なら、渡した名前（`LLVMOrcAbsoluteSymbols`）以外は解決せず、見つからない名前は
-必ずエラーで返し、プロセス内を探すのは明示的に足したときだけ（`_` の扱いはデータ
-レイアウトから決まる）。arm64 の Mach-O は JITLink で読むので RuntimeDyld の不具合を
-通らず、ELF の回避策も要らなくなるはず。必要な C API は `llvm-sys` 221.1.0 にある
-（inkwell は ORC を持たないので JIT の部分は `llvm-sys` を直接使う）。
-
-進め方は 2 段階：(1) 試作 — `tests/compiled_unwind_test.rs` と同じ最小のモジュールを
-ORC + JITLink で動かし、panic がフレームを越えるか・渡していない名前がエラーになるかを
-Intel の macOS、Linux、arm64 で確かめる。未確認で最大の不確定要素は、C API で作った
-JITLink の層が `.eh_frame` を登録するか。駄目なら MCJIT に戻る。(2) `jit_engine` と
-`CompiledFn`（エンジンの寿命、`retire_llvm`）を移し、`jit_as_elf` と `_Unwind_Resume`
-の手渡しと `compile::jit_unwind` を外し、全環境でテスト全体を回す。`jit_unwind` を外せる
-かは、JITLink が登録する `.eh_frame` で macOS 15 の arm64 の landing pad に入れるかで
-決まるので、(1) の試作で macOS 15 も確かめる。
-
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、
 B1/B2（スケジューラ・`task`/`Task<T>`/`wait`/`yield`/`sleep`）、B3〜B5

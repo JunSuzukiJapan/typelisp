@@ -12153,3 +12153,61 @@ LLVM 公式の `LLVM-22.1.8-macOS-ARM64.tar.xz` は `llvm-config` の minos が 
 あわせて rustc 1.89.0 では、build.rs の入れ子の cargo が作った serde_derive の dylib を macOS 27
 の dyld が「mis-aligned LINKEDIT string pool」と言って読み込めなかった。1.98.1 では通った。
 
+
+## JIT を MCJIT から ORC（LLJIT + JITLink）へ移す（2026-10-02〜10-04）
+
+移した理由は 3 つ。MCJIT は渡していない名前をプロセス内で探し、見つからなければ番地 0 を
+埋める（コード生成が足す `memcpy`・`_Unwind_Resume` などは宣言の走査で捕まえられない）。
+arm64 Mach-O では RuntimeDyld が FDE を二重に補正するので、ELF として読ませて避けていた
+（`jit_as_elf`）。macOS 15 の libunwind は `__register_frame` の FDE で landing pad に入ると
+落ちるので、独自のメモリマネージャで unwind 区画を登録していた（`jit_unwind`）。
+
+いまの形（`compile::orc`）:
+
+- モジュールはオブジェクトにして `LLVMOrcLLJITAddObjectFile` で渡す。IR で渡すには
+  LLVMContext を ThreadSafeContext に預けることになるが、このクレートの context は
+  プロセスで共有しているので預けられない。データレイアウトは LLJIT が報告するものと一致させる。
+- コンパイルごとに JITDylib を 1 つ作り、外部の名前（ランタイム関数と compile 済みの関数）と
+  コード生成の補助関数を絶対番地で定義する。プロセス内の検索はしない。渡していない名前は
+  「Symbols not found: [...]」で、その名前を含むエラーになる。
+- 補助関数の表は、コンパイラが出す intrinsic から決めた。x86_64 では `llvm.floor.f64` などが
+  libm の `floor` 等の呼び出しに下ろされ、`frem` は `fmod` になる。
+- リンクの失敗では、lookup のエラーは「Failed to materialize」だけで、原因はセッションの
+  エラー報告先に届く。lookup が失敗したら報告先を読んで前に付ける。読まずにおくと、次の
+  compile のエラーとして出てしまう。
+- JITDylib は C API で外せないので、clear して次のコンパイルに使い回す。最小モジュールを
+  1 万回作って捨てると、毎回新しく作って clear すると 1 回あたり約 9 KiB 残り、使い回すと
+  横ばいだった（MCJIT と同じ）。
+- unwind 中にコードを外すと次の unwind がハングする制約は、MCJIT のときと同じ規則
+  （`retire_llvm` と `live_chains`）で守る。
+- `jit_as_elf` と `jit_unwind` は消した。
+
+**LLVM 22.1.8 の JITLink の不具合。** Mach-O では JITLink が `__compact_unwind` から
+`__unwind_info` を作る。`CompactUnwindManager::writeIndexes` は、同じ encoding の隣り合う
+記録を併合した後の最後の記録の関数の終わりで索引を閉じる。-O0 では関数の encoding がほぼ
+全部同じなので、表は先頭の関数しか覆わず、2 つ目以降の関数では panic が
+「failed to initiate panic, error 5」で abort した。試作は 1 関数のモジュールしか使って
+いなかったので見逃した。
+
+- 1 つ目の回避として、`__compact_unwind` の全記録を DWARF モードに書き換えた。Intel では
+  通ったが、arm64 では 134 ターゲット中 116 が落ちた。arm64 の Mach-O では、compact unwind で
+  表せる関数には FDE が出ないので、JITLink が「DWARF が要るのに __eh_frame が無い」と拒む。
+  x86_64 は全関数に FDE が出る。
+- 採用した回避では、各 Mach-O モジュールの末尾に番兵関数（personality と landing pad を持つ
+  `typelisp.unwind_table_end`）を足す（`orc::end_unwind_table`）。その記録は x86_64 でも
+  arm64 でも DWARF モードになって併合されないので、索引の終端が全関数の後ろになる。
+  オブジェクトのバイトには触らない。回帰テストは `compiled_unwind_test` の
+  `a_panic_crosses_any_function_of_a_large_module`。番兵を外すと abort する。
+- 効かなかったこと: `-emit-dwarf-unwind=always` を `LLVMParseCommandLineOptions` で渡しても
+  変わらなかった。`__compact_unwind` を取り除くこともできない。ORC は compact unwind の処理で
+  作られる DSO の基底シンボルを要求する。
+
+**サポート範囲。** arm64 macOS は 26 以降をサポートする（2026-10-03 決定）。15 は libunwind の
+不具合があり、14 は確かめていない。それより前の macOS では、`typl` と `typl-lsp` が起動時に
+警告を 1 行出して続ける。判定は Darwin のメジャー番号（macOS 26 = Darwin 25）で行う。
+CI の arm64 runner は `macos-26` にした。
+
+全テスト（3346 本）は、Intel macOS 15、arm64 macOS 27、Linux x86_64 と Linux aarch64
+（それぞれ Ubuntu 24.04 / Debian 13 / Fedora 44）の 8 環境で通った。Linux x86_64 の VM では
+`compile_file_test` が 1200 秒の制限を超えた（main でも同じ遅さ）。test-serial.sh の既定は
+3600 秒に上げた。

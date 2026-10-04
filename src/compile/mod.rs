@@ -28,173 +28,31 @@ pub fn runtime_externals(module: &Module<'static>) -> Vec<(String, usize)> {
         .collect()
 }
 
-/// A JIT execution engine over `module`, with every declaration in it bound
-/// to an address from `externals` — **the only way this crate makes one**.
+/// The JIT-compiled code of `module`, linked against `externals` — **the only
+/// way this crate JIT-compiles anything**.
 ///
-/// Everything `module` declares without defining — a function with no body, a
-/// global with no initializer — must be named in `externals`, or this refuses
-/// before the engine exists. Not left to LLVM: what MCJIT does with a name no
-/// mapping covers is look it up in the running process, and what that finds
-/// depends on the OS. macOS shows an executable's own symbols to that lookup,
-/// so a forgotten mapping still works there; a Linux executable shows them
-/// only when linked with `-rdynamic`, and the lookup's failure is not an error
-/// — the call is left pointing at address 0, and the first sign of it is a
-/// SIGSEGV when that call runs. Checking here makes a forgotten mapping the
-/// same error, naming the symbol, on every OS.
-///
-/// LLVM's intrinsics (`llvm.*`) are the exception: they are declarations that
-/// code generation replaces, not calls into anything. What this cannot see is
-/// a call code generation itself inserts (a `memcpy` for a large copy, say),
-/// since no declaration of it is in `module`; those still go to the process
-/// lookup.
+/// `externals` is `(name, address)` for everything `module` calls that it does
+/// not define. Nothing else is looked for: a name the code refers to and no
+/// external supplies — whether `module` declares it or code generation added
+/// the call itself — is an error naming that symbol, on every OS (see
+/// [`orc`]). Every function `module` defines is resolved here, so a failure to
+/// link is reported now rather than on first call.
 ///
 /// Must be called with [`COMPILE_LOCK`] held, like everything that touches
 /// the shared context.
-pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Result<ExecutionEngine<'static>, String> {
-    let mapped: std::collections::HashSet<&str> = externals.iter().map(|(name, _)| name.as_str()).collect();
-    let mut unbound: Vec<String> = Vec::new();
-    for function in module.get_functions() {
-        let name = function.get_name().to_string_lossy().into_owned();
-        if function.as_global_value().is_declaration() && !name.starts_with("llvm.") && !mapped.contains(name.as_str()) {
-            unbound.push(name);
-        }
-    }
-    for global in module.get_globals() {
-        let name = global.get_name().to_string_lossy().into_owned();
-        if global.is_declaration() && !mapped.contains(name.as_str()) {
-            unbound.push(name);
-        }
-    }
-    if !unbound.is_empty() {
-        return Err(format!(
-            "internal error: declared in the module but given no address: {}",
-            unbound.iter().map(|n| format!("`{}`", n)).collect::<Vec<_>>().join(", ")
-        ));
-    }
-    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-    let failure = jit_unwind::Failure::default();
-    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-    let (engine, elf_externals) = {
-        jit_unwind::register_find_sections()?;
-        let elf_externals = jit_as_elf(module)?;
-        // No frame pointer elimination flag set: the C API writes it onto
-        // every function as `"frame-pointer"="none"`, which is what the
-        // engine without a memory manager compiled them as.
-        let engine = module
-            .create_mcjit_execution_engine_with_memory_manager(
-                jit_unwind::UnwindingMemoryManager::new(failure.clone()),
-                OptimizationLevel::None,
-                inkwell::targets::CodeModel::JITDefault,
-                false,
-                false,
-            )
-            .map_err(|e| e.to_string())?;
-        (engine, elf_externals)
-    };
-    #[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
-    let (engine, elf_externals) = (
-        module.create_jit_execution_engine(OptimizationLevel::None).map_err(|e| e.to_string())?,
-        Vec::<(String, usize)>::new(),
-    );
-    for (name, addr) in externals.iter().chain(&elf_externals) {
-        match (module.get_function(name), module.get_global(name)) {
-            (Some(function), _) => engine.add_global_mapping(&function, *addr),
-            (None, Some(global)) => engine.add_global_mapping(&global, *addr),
-            (None, None) => {
-                return Err(format!("internal error: no forward declaration for \"{}\" in this module", name));
-            }
-        }
-    }
-    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-    jit_unwind::finalize_now(&engine, module, &failure)?;
-    Ok(engine)
-}
-
-/// Apple Silicon only: has MCJIT load `module` as an ELF object rather than
-/// Mach-O, so that a panic can unwind through the code it produces.
-///
-/// The unwinder finds a compiled frame by the `.eh_frame` FDE MCJIT registers
-/// for it, and on arm64 Mach-O that FDE names the wrong address. The object's
-/// FDE carries its function's address as an `ARM64_RELOC_SUBTRACTOR` pair,
-/// which RuntimeDyld resolves to the correct value; then
-/// `RuntimeDyldMachOCRTPBase::registerEHFrames` runs `processFDE` over it,
-/// which subtracts the difference between where `__text` and `__eh_frame`
-/// sat in the object and where they were loaded. That correction is right on
-/// x86_64, whose `__eh_frame` has no relocations and so still holds the
-/// object-relative value, and wrong on arm64, where the value was already
-/// relocated: the FDE ends up off by that difference (seen: 0x3ff0), no frame
-/// matches it, and the first panic through compiled code ends the process
-/// with "failed to initiate panic, error 5" (`_URC_END_OF_STACK`). Checked
-/// against LLVM 22.1.8's source.
-///
-/// RuntimeDyld's ELF loader has no such pass, and its relocation alone leaves
-/// the FDE right. Only the object format changes: the OS stays `darwin`, so
-/// code generation keeps the Apple arm64 calling convention, and AArch64's
-/// JIT default of the large code model means nothing depends on where the
-/// code lands relative to the symbols it refers to. AOT is not involved — it
-/// writes Mach-O for the system linker, which handles the relocation itself.
-///
-/// The data layout is set with the triple because the two must agree on
-/// symbol mangling: Mach-O's prefixes `_`, ELF's does not, and MCJIT looks a
-/// name up by the module's. The modules this crate JITs are created with
-/// neither set, so this only chooses what MCJIT would otherwise have filled
-/// in for the Mach-O target.
-///
-/// One cost of ELF's mangling comes back as the result: `(name, address)` for
-/// the calls code generation inserts whose C name starts with `_`, declared
-/// into `module` here so [`jit_engine`] can map them like any other external.
-/// Left to MCJIT's process lookup, which on macOS strips one leading `_`
-/// because it expects Mach-O names, `_Unwind_Resume` — what every `resume`
-/// becomes — would be looked up as `Unwind_Resume`, not found, and called at
-/// address 0.
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-fn jit_as_elf(module: &Module<'static>) -> Result<Vec<(String, usize)>, String> {
-    use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetData, TargetMachine, TargetTriple};
-
-    static TRIPLE_AND_LAYOUT: OnceLock<Result<(String, String), String>> = OnceLock::new();
-    let (triple, layout) = TRIPLE_AND_LAYOUT
-        .get_or_init(|| {
-            Target::initialize_native(&InitializationConfig::default())
-                .map_err(|e| format!("failed to initialize native target: {}", e))?;
-            let host = TargetMachine::get_default_triple();
-            let triple = TargetTriple::create(&format!("{}-elf", host.as_str().to_string_lossy()));
-            let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
-            let machine = target
-                .create_target_machine(&triple, "", "", OptimizationLevel::None, RelocMode::Default, CodeModel::JITDefault)
-                .ok_or_else(|| format!("failed to create a target machine for `{}`", triple))?;
-            let layout = machine.get_target_data().get_data_layout().as_str().to_string_lossy().into_owned();
-            Ok((triple.as_str().to_string_lossy().into_owned(), layout))
-        })
-        .as_ref()
-        .map_err(|e| e.clone())?;
-    module.set_triple(&TargetTriple::create(triple));
-    module.set_data_layout(&TargetData::create(layout).get_data_layout());
-
-    extern "C" {
-        fn _Unwind_Resume();
-    }
-    let inserted: [(&str, usize); 1] = [("_Unwind_Resume", _Unwind_Resume as *const () as usize)];
-    let mut mapped = Vec::new();
-    for (name, addr) in inserted {
-        if module.get_function(name).is_none() {
-            let ctx = module.get_context();
-            module.add_function(name, ctx.void_type().fn_type(&[], false), Some(inkwell::module::Linkage::External));
-        }
-        mapped.push((name.to_string(), addr));
-    }
-    Ok(mapped)
+pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Result<orc::JitCode, String> {
+    orc::JitCode::new(module, externals)
 }
 
 pub mod aot;
 pub mod bootstrap;
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
-mod jit_unwind;
 pub mod core_bridge;
 pub mod driver;
 pub mod dump;
 pub mod externs;
 pub mod ffi;
 pub mod llvm_builtins;
+pub mod orc;
 
 /// Registers this crate's `llvm-*` builtin implementations with the
 /// interpreter, for the current thread.
@@ -309,12 +167,10 @@ pub use typelisp_rt::coroutine;
 /// site — never at a second, easy-to-desync spot.
 pub const USER_SYMBOL_PREFIX: &str = "tl_";
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use inkwell::context::Context;
-use inkwell::execution_engine::ExecutionEngine;
 use inkwell::module::Module;
-use inkwell::OptimizationLevel;
 
 
 /// Serializes every LLVM-Context-touching operation. LLVM's C API is not
@@ -329,82 +185,52 @@ use inkwell::OptimizationLevel;
 /// past a rule written for calls — an interpreter going out of scope on one
 /// thread would tear a module down while another thread was building or
 /// parsing IR, and the crash landed in `llvm::Value::destroyValueName` with no
-/// hint that a drop was involved. Objects this crate owns now go through
-/// [`retire_llvm`] instead of being dropped where they happen to fall.
+/// hint that a drop was involved. A module is dropped where its builder holds
+/// this lock.
 pub static COMPILE_LOCK: Mutex<()> = Mutex::new(());
 
-/// LLVM objects waiting to be destroyed with [`COMPILE_LOCK`] held.
-///
-/// # Safety
-///
-/// `Send` is asserted because the value crosses threads *without being
-/// touched*: retiring moves it into [`RETIRED_LLVM`] and draining moves it
-/// back out, and nothing in between reads it. The only operations that ever
-/// run on the inner object are its creation and its destructor, and both
-/// happen under `COMPILE_LOCK` — creation because every construction site
-/// already holds it, destruction because [`destroy_retired_llvm`] is only
-/// called from a context that does.
-///
-/// That covers the reference counts inside, too, which is the subtler half:
-/// an `ExecutionEngine` is an `Rc` share, and a non-atomic refcount is
-/// exactly the thing a cross-thread move usually breaks. Here every
-/// increment is an `ExecutionEngine::clone` in [`CompiledFn::new_multi`]
-/// (lock held) and every decrement is a drop inside `destroy_retired_llvm`
-/// (lock held); moving a share into or out of the list changes no count.
-struct RetiredLlvm {
-    objects: Vec<Box<dyn std::any::Any>>,
-}
-
-// SAFETY: see the doc comment above.
-unsafe impl Send for RetiredLlvm {}
-
-/// Objects retired from any thread, destroyed by whichever thread next takes
-/// [`COMPILE_LOCK`] to compile something.
+/// JIT-compiled code whose last owner is gone, waiting until no compiled
+/// chain can be inside it.
 ///
 /// A plain `Mutex` of its own, never held together with anything but itself:
 /// retiring takes only this one, and draining takes it *inside*
 /// `COMPILE_LOCK`, so the two can't be acquired in opposite orders.
-static RETIRED_LLVM: Mutex<RetiredLlvm> = Mutex::new(RetiredLlvm { objects: Vec::new() });
+static RETIRED_CODE: Mutex<Vec<Arc<orc::JitCode>>> = Mutex::new(Vec::new());
 
-/// Hands `obj` over to be destroyed later, under [`COMPILE_LOCK`].
+/// Hands a share of `code` over, to be dropped by [`destroy_retired_llvm`]
+/// rather than where its owner happens to go out of scope.
 ///
-/// For LLVM objects whose owner goes out of scope somewhere that cannot take
-/// the lock — a `CompiledFn` dropped with the interpreter that held it, a
-/// module whose builder returned through `?`. Dropping such an object in
-/// place is the race this exists to remove, and locking in its `Drop` is not
-/// an option: plenty of call sites legitimately *hold* `COMPILE_LOCK` while
-/// an LLVM object of theirs goes out of scope (every `compile_test.rs` case
-/// that builds a module under the guard, for one), and `Mutex` is not
-/// reentrant, so that would trade a rare crash for a reliable hang.
+/// Dropping the last share frees the code and unregisters its unwind
+/// information, and that must not happen while anything is still in it: a
+/// task parked mid-call in a function since redefined, one a worker thread is
+/// stepping, or a panic unwinding through it (unregistering mid-unwind hangs
+/// the *next* unwind — see `tests/compiled_unwind_test.rs`). A `CompiledFn`
+/// dies wherever the `FnDef` holding it does, which knows none of that.
 ///
-/// The cost is that a retired object lives until someone compiles again with
-/// no compiled chain standing ([`destroy_retired_llvm`]) — the list is
-/// drained at the head of every such JIT construction, and a process that
-/// never compiles again is about to exit anyway. A program that always has a
-/// task parked mid-call keeps every body it ever retired.
-pub(crate) fn retire_llvm<T: 'static>(obj: T) {
-    RETIRED_LLVM.lock().unwrap_or_else(|e| e.into_inner()).objects.push(Box::new(obj));
+/// The cost is that retired code lives until someone compiles again with no
+/// compiled chain standing — the list is drained at the head of every JIT
+/// construction, and a process that never compiles again is about to exit
+/// anyway. A program that always has a task parked mid-call keeps every body
+/// it ever retired.
+pub(crate) fn retire_llvm(code: Arc<orc::JitCode>) {
+    RETIRED_CODE.lock().unwrap_or_else(|e| e.into_inner()).push(code);
 }
 
-/// Destroys everything [`retire_llvm`] has collected — unless a compiled
-/// chain is standing anywhere in the process, in which case everything waits
-/// for a later compilation.
+/// Drops everything [`retire_llvm`] has collected — unless a compiled chain is
+/// standing anywhere in the process, in which case everything waits for a
+/// later compilation.
 ///
-/// A retired module may still hold code a chain is in the middle of: a task
-/// parked mid-call in a function since redefined, or one a worker thread is
-/// stepping right now. Which modules a chain's frames point into is not
-/// recorded, so while any chain stands (`typelisp_rt::coroutine::live_chains`)
-/// nothing retired is destroyed.
-///
-/// The caller must hold [`COMPILE_LOCK`] — that is the entire point of the
-/// detour. The list is emptied first and dropped afterwards, so the inner
-/// `Mutex` is not held while destructors run.
+/// Which code a chain's frames point into is not recorded, so while any chain
+/// stands (`typelisp_rt::coroutine::live_chains`) nothing retired is dropped.
+/// Called with [`COMPILE_LOCK`] held, at the head of every JIT construction.
+/// The list is emptied first and dropped afterwards, so its `Mutex` is not
+/// held while the code is cleared.
 fn destroy_retired_llvm() {
     if typelisp_rt::coroutine::live_chains() > 0 {
         return;
     }
-    let objects = std::mem::take(&mut RETIRED_LLVM.lock().unwrap_or_else(|e| e.into_inner()).objects);
-    drop(objects);
+    let retired = std::mem::take(&mut *RETIRED_CODE.lock().unwrap_or_else(|e| e.into_inner()));
+    drop(retired);
 }
 
 /// `Context` holds a raw `LLVMContextRef`, so it isn't `Sync` and can't sit
@@ -462,36 +288,20 @@ pub fn llvm_context() -> &'static Context {
 /// promise broken the moment a `(panic ...)` fires.
 pub type CompiledSignature = unsafe extern "C-unwind" fn(*const i64, u32) -> i64;
 
-/// A JIT-compiled function: its entry address, and a share of the engine
-/// that owns the code at that address.
+/// A JIT-compiled function: its entry address, and a share of the code that
+/// address is in.
 ///
-/// Reached by address rather than through
-/// [`inkwell::execution_engine::JitFunction`], because inkwell's
-/// `UnsafeFunctionPointer` is implemented for `unsafe extern "C" fn` only —
-/// `ExecutionEngine::get_function` cannot name [`CompiledSignature`]'s
-/// `-unwind` ABI at all, so the address comes from `get_function_address` and
-/// the engine has to be held directly.
+/// The share matters twice over: it keeps the code itself, and the unwind
+/// information the system unwinder walks when a compiled `(panic ...)`
+/// unwinds. Every function of one module holds a share of the same
+/// [`orc::JitCode`], so a whole SCC's code lives as long as any member of it.
 ///
-/// What the engine keeps alive matters twice over: the code itself, and the
-/// `.eh_frame` registration the system unwinder walks when a compiled
-/// `(panic ...)` unwinds. Dropping an engine while a panic is still
-/// propagating through frames it owns leaves the unwinder unable to complete
-/// the *next* unwind — it hangs rather than fails, which
-/// `tests/compiled_unwind_test.rs` demonstrates. `ExecutionEngine` is
-/// reference-counted, so cloning one share per function is what keeps a whole
-/// SCC's engine alive as long as any member of it.
-///
-/// The share is given up through [`retire_llvm`] rather than dropped in
-/// place: the last one to go takes the whole engine — and the modules of IR
-/// inside it — down with it, and that teardown has to happen with
-/// [`COMPILE_LOCK`] held. Where a `CompiledFn` dies is not something it can
-/// choose; it goes wherever the `FnDef` holding it does, which is usually an
-/// interpreter being dropped by a thread doing nothing LLVM-related at all.
+/// The share is given up through [`retire_llvm`] rather than dropped in place
+/// — see there.
 pub struct CompiledFn {
-    /// Held for its lifetime, never called through — see this struct's doc
-    /// comment. `Option` only so [`Drop`] can move it out; it is `Some` for
-    /// the whole life of a `CompiledFn`.
-    engine: Option<ExecutionEngine<'static>>,
+    /// Held for its lifetime, never called through. `Option` only so [`Drop`]
+    /// can move it out; it is `Some` for the whole life of a `CompiledFn`.
+    code: Option<Arc<orc::JitCode>>,
     /// This function's own JIT-resolved address — see [`Self::address`].
     addr: usize,
     /// Which ABI that address answers to, carried from the artifact or set by
@@ -501,67 +311,45 @@ pub struct CompiledFn {
 
 impl Drop for CompiledFn {
     fn drop(&mut self) {
-        if let Some(engine) = self.engine.take() {
-            retire_llvm(engine);
+        if let Some(code) = self.code.take() {
+            retire_llvm(code);
         }
     }
 }
 
 impl CompiledFn {
-    /// JIT-compiles `fn_name` out of `module`. `externals` (labels/closures
-    /// Stage 3) is `(name, address)` for every *other* already-`compile`d
-    /// top-level function `fn_name`'s body calls (`call`): each must
-    /// already be forward-declared, with no body, in `module` under that
-    /// same name — see [`crate::eval::interp::Interp::compile_function`]'s
-    /// doc comment for why that declaration has to exist *before* the
-    /// typelisp compiler body ever runs (`compile-call`'s `get-function`
-    /// needs to find *something* by that name). Wiring each one's real
-    /// address via `add_global_mapping` here, before resolving `fn_name`
-    /// itself, makes a call through that declaration jump straight to the
-    /// real, already-running JIT code instead of an unresolved symbol. Empty
-    /// for self-recursion only or no calls at all — the common case, and
-    /// every call before Stage 3. Must be called with [`COMPILE_LOCK`]
-    /// held — which is also what makes this the place to destroy whatever
-    /// [`retire_llvm`] has been handed since the last compile.
+    /// JIT-compiles `module` and resolves `fn_name`, one of the functions it
+    /// defines. `externals` is `(name, address)` for everything else the
+    /// module calls: the `rt_*` shims it declares, and every *other*
+    /// already-`compile`d top-level function `fn_name`'s body calls, each
+    /// forward-declared, with no body, in `module` under that same name — see
+    /// [`crate::eval::interp::Interp::compile_function`]'s doc comment for why
+    /// that declaration has to exist *before* the typelisp compiler body ever
+    /// runs (`compile-call`'s `get-function` needs to find *something* by that
+    /// name). Must be called with [`COMPILE_LOCK`] held — which is also what
+    /// makes this the place to drop whatever [`retire_llvm`] has been handed
+    /// since the last compile.
     ///
-    /// `body_abi` is asked for rather than assumed, the same way
-    /// [`Self::new_multi`] asks. It used to be hardcoded classic, which was
-    /// right only for this function's hand-built callers and silently wrong
-    /// for anything coming out of the island — and [`EMITTED_BODY_ABI`]'s own
-    /// doc comment already claimed to be "the ABI recorded on every
-    /// JIT-compiled function" while this one ignored it.
+    /// `body_abi` is asked for rather than assumed: nothing about the address
+    /// says which ABI it answers to.
     pub fn new(
         module: &Module<'static>,
         fn_name: &str,
         externals: &[(String, usize)],
         body_abi: u8,
     ) -> Result<CompiledFn, String> {
-        destroy_retired_llvm();
-        let engine = jit_engine(module, externals)?;
-        let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-        Ok(CompiledFn { engine: Some(engine), addr, body_abi })
+        Ok(Self::new_multi(module, &[fn_name.to_string()], externals, body_abi)?
+            .pop()
+            .expect("one name asked for, one function back"))
     }
 
-    /// Like [`Self::new`], but resolves every name in `fn_names` out of one
-    /// shared JIT execution engine over `module` — labels/closures Stage 5's
-    /// SCC compile path: a mutually recursive group of top-level functions
-    /// is emitted into one shared module (every member forward-declared
-    /// before any body is translated — see
-    /// [`crate::eval::interp::Interp::compile_scc`]'s doc comment), so they
-    /// must all be JIT'd together out of the same engine rather than one
-    /// throwaway engine per function. A call from one member's body to a
-    /// sibling still-being-compiled member needs no `add_global_mapping`
-    /// entry — LLVM resolves it directly against the sibling's own
-    /// already-emitted definition in this same module, the same way ordinary
-    /// self-recursion always has; `externals` is only ever the set of
-    /// already-`compile`d targets *outside* this group, exactly like
-    /// [`Self::new`]'s own `externals`. `fn_name`s from
-    /// [`inkwell::execution_engine::ExecutionEngine::get_function`] each
-    /// clone their own reference to the shared engine internally (see that
-    /// method's doc comment), so every returned [`CompiledFn`] independently
-    /// keeps it alive — dropping some of them early is safe. Must be called
-    /// with [`COMPILE_LOCK`] held, and drains the retirement list for the
-    /// same reason [`Self::new`] does.
+    /// Like [`Self::new`], for every name in `fn_names` — the SCC compile
+    /// path, where a mutually recursive group of top-level functions is
+    /// emitted into one module (every member forward-declared before any body
+    /// is translated — see [`crate::eval::interp::Interp::compile_scc`]'s doc
+    /// comment) and linked once. A call from one member to another is resolved
+    /// inside the module, the same way self-recursion is; `externals` is only
+    /// ever the set of targets *outside* this group.
     pub fn new_multi(
         module: &Module<'static>,
         fn_names: &[String],
@@ -569,12 +357,12 @@ impl CompiledFn {
         body_abi: u8,
     ) -> Result<Vec<CompiledFn>, String> {
         destroy_retired_llvm();
-        let engine = jit_engine(module, externals)?;
+        let code = Arc::new(jit_engine(module, externals)?);
         fn_names
             .iter()
             .map(|fn_name| {
-                let addr = engine.get_function_address(fn_name).map_err(|e| e.to_string())?;
-                Ok(CompiledFn { engine: Some(engine.clone()), addr, body_abi })
+                let addr = code.address(fn_name)?;
+                Ok(CompiledFn { code: Some(code.clone()), addr, body_abi })
             })
             .collect()
     }
@@ -587,21 +375,19 @@ impl CompiledFn {
         <Self as crate::eval::interp::CompiledBody>::call(self, args)
     }
 
-    /// This function's own JIT-resolved address — used to wire
-    /// `add_global_mapping` when a *later* `compile`d function's body calls
-    /// this one (labels/closures Stage 3, see [`Self::new`]'s `externals`
-    /// parameter).
+    /// This function's own JIT-resolved address — what a *later* `compile`d
+    /// function's body that calls this one is linked against (see
+    /// [`Self::new`]'s `externals` parameter).
     pub fn address(&self) -> usize {
         self.addr
     }
 }
 
 /// The evaluator's view of this: an address it can call through, and an
-/// owner whose `Drop` retires the engine behind it.
+/// owner whose `Drop` retires the code behind it.
 ///
 /// The trait lives in the front end (`eval::interp`) and names only the
-/// address, so nothing there has to mention `ExecutionEngine` — see its doc
-/// comment.
+/// address, so nothing there has to mention the JIT — see its doc comment.
 impl crate::eval::interp::CompiledBody for CompiledFn {
     fn address(&self) -> usize {
         self.addr
@@ -622,9 +408,8 @@ mod tests {
 
     /// Stage 0's JIT-side half of the proof that a `#[no_mangle]` Rust
     /// function from [`crate::compile::runtime`] is callable through the
-    /// exact same `externals`/`add_global_mapping` wiring labels/closures
-    /// Stage 3 already built for calling another JIT-compiled typelisp
-    /// function by name — `rt_ping`'s real address is just another `usize`
+    /// exact same `externals` list that calling another JIT-compiled typelisp
+    /// function by name goes through — `rt_ping`'s real address is just another `usize`
     /// to map, indistinguishable to this machinery from a previously-JIT'd
     /// function's address. See `aot_output_can_call_an_rt_extern_function`
     /// (`aot.rs`) for the AOT-side counterpart.
