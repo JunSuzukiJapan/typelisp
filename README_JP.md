@@ -1,5 +1,7 @@
 # TypeLisp
 
+[English](README.md) | 日本語
+
 TypeLisp は静的型付きの Lisp です。
 文法などは主にCommon Lispを参考にしています。
 
