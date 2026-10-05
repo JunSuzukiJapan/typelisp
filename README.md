@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 4a0d9cb1ab67eff05f99503b9040b7ed6084271f -->
+<!-- translated-from: README_JP.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
 # TypeLisp
 
 English | [日本語](README_JP.md)
