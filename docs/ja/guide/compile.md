@@ -125,8 +125,13 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 ### 3.3 AOT コンパイルできるファイルの形
 
 - 入口のファイルのトップレベルに書けるのは、定義（`defun` `defmethod` `defvar` `defconstant`
-  `defstruct` `defenum` `defffi` `impl`）と `use` `module` だけです。`(println ...)` のような
-  トップレベルの式は、末尾の `(main)` を除いて書けません。処理は `main` の中に書いてください。
+  `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`、`(unsafe (def-c-struct ...))`）と
+  `use` `module` だけです。`(println ...)` のようなトップレベルの式は、末尾の `(main)` を除いて
+  書けません。処理は `main` の中に書いてください。
+- `defmacro` は入口のファイルには書けません。マクロは別のモジュールに `(pub defmacro ...)` で
+  定義し、`use` して使います。
+- `defsignature` を含むファイルは、入口のファイルでも `use` したモジュールでも AOT コンパイル
+  できません。
 - 引数なしの `main` が無いとエラーになります。
 - `use` しているモジュールのファイルも一緒にコンパイルされ、1 つの実行ファイルにまとまります。
 - `defffi` の `:library` で指定したライブラリは自動でリンクされます（[C FFI](ffi.md)）。
@@ -149,7 +154,9 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 $ typl
 typl> (defun sq ((n i32)) i32 (* n n))
 typl> (compile sq)
+true
 typl> (dump "session.typld")
+true
 typl> :quit
 $ typl --image session.typld
 typl> (sq 9)

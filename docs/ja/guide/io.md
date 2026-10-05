@@ -27,7 +27,7 @@
 ```lisp
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #<vector<string> abc>)
+(read-file-lines "copy.txt")       ; => (ok #<vector<string> "abc">)
 ```
 
 ## 3. ストリームで読み書きする
@@ -102,7 +102,7 @@
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => ["var" "log"]
+  (pathname-directory p)   ; => #<vector<string> "var" "log">
   (pathname-name p)        ; => (some "app.tar")
   (pathname-type p))       ; => (some "gz")
 

@@ -119,7 +119,7 @@
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
   (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some a)
+         (get h (point::new 1 2))))          ; => (some "a")
 ```
 
 キーが同じかどうかを決めるのは**キーの型自身**（`sxhash` と、`Hash` のスーパトレイト

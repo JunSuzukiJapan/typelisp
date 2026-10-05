@@ -54,10 +54,10 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `sexpr-str` | `(sexpr-str s)` | `Option<Sexpr>→string` | `Str` の中身。型違いは panic |
 | `sexpr-sym-name` | `(sexpr-sym-name s)` | `Option<Sexpr>→string` | `Sym` の名前。型違いは panic |
 | `eq` `eql` | `(op a b)` | `(Option<Sexpr>,Option<Sexpr>)→bool` | 同一性比較（`Cons`/`Str` はオブジェクトの同一性、それ以外は値） |
-| `equal` | `(equal a b)` | `(Sexpr,Sexpr)→bool` | 構造的等価（`Cons` は再帰、`Str` は内容比較） |
-| `equalp` | `(equalp a b)` | `(Sexpr,Sexpr)→bool` | `equal` に加え大文字小文字無視・数値の型跨ぎ比較 |
-| `sexpr-append` | `(sexpr-append a b)` | `(Sexpr,Sexpr)→Sexpr` | 2つの `Sexpr` リストを連結（非破壊）。`,@` はこれへ展開される |
-| `sexpr-map` | `(sexpr-map f lst)` | `((fn (Sexpr) Sexpr),Sexpr)→Sexpr` | `Sexpr` リストの各要素へ `f` を適用した新しい `Sexpr` リスト（4 章の `map` は `Iter` 用で、`Sexpr` のリストは回せない） |
+| `equal` | `(equal a b)` | `(Option<Sexpr>,Option<Sexpr>)→bool` | 構造的等価（`Cons` は再帰、`Str` は内容比較） |
+| `equalp` | `(equalp a b)` | `(Option<Sexpr>,Option<Sexpr>)→bool` | `equal` に加え大文字小文字無視・数値の型跨ぎ比較 |
+| `sexpr-append` | `(sexpr-append a b)` | `(Option<Sexpr>,Option<Sexpr>)→Option<Sexpr>` | 2つの `Sexpr` リストを連結（非破壊）。`,@` はこれへ展開される |
+| `sexpr-map` | `(sexpr-map f lst)` | `((fn (Option<Sexpr>) Option<Sexpr>),Option<Sexpr>)→Option<Sexpr>` | `Sexpr` リストの各要素へ `f` を適用した新しい `Sexpr` リスト（4 章の `map` は `Iter` 用で、`Sexpr` のリストは回せない） |
 
 数値のアクセサが型ごとに 9 本あるのは、`Sexpr` が「値の型がほかのどこにも書かれていない
 唯一の場所」だから。`Sexpr` に入れた `u8` は `u8` の変種として入り、`(sexpr-u8 s)` でしか
@@ -211,7 +211,7 @@ CL のシーケンス関数が取るキーワード `:key` / `:test` / `:test-no
 | `mismatch` | `:key` `:test` `:test-not` `:from-end` `:start1` `:end1` `:start2` `:end2` |
 
 ```lisp
-(find 2 (iter v) :key (lambda ((x i32)) i32 (abs x)))   ; → (some -2)
+(find 2 (iter v) :key (lambda ((x int)) int (abs x)))   ; → (some -2)
 (remove 2 (iter v) :count 1 :from-end true)             ; 末尾側の 1 個だけ消す
 (position 3 (iter v) :start 1)                          ; 添字は列全体に対するもの
 ```

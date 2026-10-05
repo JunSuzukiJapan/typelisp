@@ -66,9 +66,12 @@ typelisp は関数と変数の名前空間を分けていません。関数名�
 (apply-to twice 5)                        ; #'twice ではなく twice
 ```
 
-- `+` や `1+` などの組み込みの演算子は値として渡せません。`lambda` で包んでください。
+- `+` や `1+` などの組み込みの関数も、引数の型が `(fn (int) int)` のように決まっている位置なら、
+  そのまま値として渡せます。`foldl` や `map` のようなジェネリックな関数に渡すときは、どの型の
+  `+` かが決まらないので `lambda` で包んでください。
 
   ```lisp
+  (apply-to 1+ 5)                                          ; => 6
   (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)
   ```
 
@@ -120,7 +123,7 @@ CL のリストに当たるものは **S 式データ**で、その型は `Optio
 |---|---|
 | `(floor 7 2)` → 3, 1 | `(floor-div 7 2)` → `cons-cell` の `car` が 3、`cdr` が 1 |
 | `(decode-universal-time t)` → 9 値 | `decoded-time` 構造体 |
-| `(read-from-string s)` → 値, 位置 | `(read s)` は `Result` を 1 つ返す |
+| `(read-from-string s)` → 値, 位置 | `(read-from-string s)` は値と位置の `cons-cell` を `Result` に入れて返す。値だけなら `(read s)` |
 
 ## 6. スペシャル変数（動的束縛）が無い
 
@@ -199,7 +202,7 @@ CL のリストに当たるものは **S 式データ**で、その型は `Optio
 ## 10. 読み取り・構文の違い
 
 - 大文字と小文字は区別しません（シンボルは読むときに小文字になります）。CL と同じです。
-- `#'` はありません（3 節）。`#c(...)` の複素数もありません。
+- `#'` はありません（3 節）。複素数のリテラル `#c(...)` は読めません。複素数は `(complex 1.0 2.0)` で作ります。
 - 拡張 `loop` の節はキーワードで書きます：`(loop :for i :from 1 :to 3 :collect i)`。
   キーワードで始まらない `loop` は単純な無限ループで、`(break)` か `(return 値)` で抜けます。
   `return` が抜けるのは直近のループです（関数から抜けるのは `return-from`）。
@@ -218,7 +221,6 @@ CL のリストに当たるものは **S 式データ**で、その型は `Optio
 | CL | typelisp |
 |---|---|
 | `string-upcase` / `string-downcase` | `upcase` / `downcase` |
-| `read-from-string` | `read` |
 | `read`（ストリームから） | `read-sexpr` |
 | `pathname` | `to-pathname` |
 | `floor` などの 2 引数版 | `floor-div` `ceiling-div` `round-div` `truncate-div` |
@@ -235,4 +237,3 @@ CL のリストに当たるものは **S 式データ**で、その型は `Optio
   定義できます）
 - 論理パス名、ワイルドカードパス名
 - `input-stream-p` / `output-stream-p`（ストリームの向きは型で決まります）
-- 複素数

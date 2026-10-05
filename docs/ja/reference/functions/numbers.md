@@ -43,8 +43,8 @@
 **型名は幅と符号そのもの**——`i32` は「32bit を符号付きとして扱う」、`u32` は「32bit を
 符号なしとして扱う」以上の意味を持たない。`(+ (the u8 200) (the u8 100))` は `44`、
 `(+ 2147483647 1)`（`i32`）は `-2147483648`、`(lognot (the u32 0))` は `4294967295`。
-`f32` も同じで、本物の binary32——`(/ (the f32 1.0) (the f32 3.0))` は
-`0.3333333432674408` であって `f64` の `0.3333333333333333` ではない。
+`f32` も同じで、本物の binary32——`(/ (the f32 1.0) (the f32 3.0))` は `0.33333334` と
+印字され、`f64` の `0.3333333333333333` とは別の値になる。
 
 CL の派生カタログ（`abs`/`signum`/`gcd`/`lcm`/`isqrt`/`expt` と 9 章の述語）は
 `int`/`i32`/`f64`/`ratio` にある。他の幅で必要なら `(as int x)` / `(as i32 x)` で移る
@@ -128,7 +128,7 @@ fixnum に入らない値を渡すと実行時エラー（「an integer argument
 | `sqrt` `floor` `ceiling` `round` `truncate` | `(op x)` | `f64→f64` | 単項演算 |
 | `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `f64→f64` | 超越関数。`log` は自然対数 |
 | `log`（2引数） | `(log x base)` | `(f64,f64)→f64` | 底を指定した対数。`(/ (log x) (log base))` へ展開される（8 章） |
-| `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL の2引数版（`(floor 7.0 2.0)`→商2・剰余1）に相当。1 章の同名関数と同じ設計（`car`=商、`cdr`=剰余） |
+| `floor-div` `ceiling-div` `round-div` `truncate-div` | `(op a b)` | `(f64,f64)→cons-cell<f64,f64>` | CL の2引数版（`(floor 7.0 2.0)`→商3・剰余1）に相当。1 章の同名関数と同じ設計（`car`=商、`cdr`=剰余） |
 | `float->int` | `(float->int x)` | `f64→int` | ゼロ方向への切り捨てで `int` へ変換（CL の `truncate`。どんな大きさの有限値でも正確）。無限大・NaN は panic。固定幅が要るなら `(as i32 x)` |
 | `float->ratio` | `(float->ratio x)` | `f64→ratio` | 正確な二進有理数として `ratio` へ変換（CL の `rational`） |
 | `float->f32` `float->f64` | `(op x)` | `f64→f32` / `f64→f64` | 浮動小数点の幅の変換。`float->f32` は最近接へ丸め、`float->f64` は常に正確。`(as f32 x)` の実体 |

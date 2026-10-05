@@ -185,13 +185,22 @@ rm -rf ~/.typelisp
 
 - Rust（cargo）
 - LLVM 22
-- macOS では Xcode Command Line Tools（リンクに使います）
+- macOS では Xcode Command Line Tools、Linux では C コンパイラ（どちらもリンクに使います）
 
-LLVM 22 は Homebrew で入れられます。
+macOS では、LLVM 22 は Homebrew で入れられます。
 
 ```sh
 brew install llvm@22
 ```
+
+Linux では、ディストリビューションのパッケージで LLVM 22 の開発用ファイルを入れます。
+Ubuntu 24.04、Debian 13、Fedora 44 でビルドとテストを確かめています。
+
+- Ubuntu / Debian：[apt.llvm.org](https://apt.llvm.org/) のリポジトリを追加して `llvm-22-dev` と
+  `libpolly-22-dev` を入れます。ほかに `build-essential`、`pkg-config`、`zlib1g-dev`、
+  `libzstd-dev`、`libxml2-dev` が要ります。
+- Fedora：`llvm-devel`、`llvm-static`、`gcc`、`gcc-c++`、`zlib-devel`、`libzstd-devel`、
+  `libxml2-devel`、`libffi-devel` を入れます。
 
 ### 初回の設定
 
@@ -201,7 +210,8 @@ brew install llvm@22
 scripts/setup-cargo-env.sh
 ```
 
-このスクリプトは `brew --prefix llvm@22` で LLVM 22 の場所を調べ、`.cargo/config.toml` を生成します。
+このスクリプトは LLVM 22 の場所を調べ（macOS では `brew --prefix llvm@22`、Linux では
+`llvm-config-22` か、LLVM 22 の `llvm-config`）、`.cargo/config.toml` を生成します。
 このファイルはマシンごとに内容が違うので、Git の管理対象外です。macOS では、ビルドに使う最低 OS
 バージョン（`MACOSX_DEPLOYMENT_TARGET`）も書き込みます。Rust のツールチェーンを更新したときは、
 もう一度実行してください。
