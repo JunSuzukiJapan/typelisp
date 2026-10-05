@@ -722,6 +722,19 @@ fn build_main_wrapper(
     let builder = ctx.create_builder();
     builder.position_at_end(entry_block);
 
+    // The archive's ABI version, checked by the linker: only an archive of
+    // the version this compiler emits for defines `typelisp_abi::ABI_SYMBOL`
+    // (`docs/dev/api_version/`). Volatile, so the reference survives
+    // optimisation; the byte read is never used.
+    let abi_marker = module.add_global(ctx.i8_type(), None, typelisp_abi::ABI_SYMBOL);
+    let abi_read = builder
+        .build_load(ctx.i8_type(), abi_marker.as_pointer_value(), "abi")
+        .map_err(|e| format!("failed to build the ABI marker load: {}", e))?;
+    inkwell::values::BasicValue::as_instruction_value(&abi_read)
+        .expect("a load is an instruction")
+        .set_volatile(true)
+        .map_err(|e| format!("failed to mark the ABI marker load volatile: {:?}", e))?;
+
     let null_args = ctx.ptr_type(AddressSpace::default()).const_null();
     let argc_zero = ctx.i32_type().const_int(0, false);
 
@@ -1218,6 +1231,11 @@ fn module_calls_any(module: &Module<'static>, names: &[&str]) -> bool {
 ///   `<target dir>/debug/` — `CARGO_TARGET_DIR` when that is set. The
 ///   workspace shares one target dir, so this crate's is every member's;
 ///   `build.rs`'s `profile_dir` reads it from `OUT_DIR`.
+/// - A release build made with `TYPELISP_LINK_TREE_RUNTIME` set does what a
+///   debug one does, with `<target dir>/release/`.
+///
+/// Whichever it is, the linker refuses an archive of another ABI version
+/// ([`typelisp_abi::ABI_SYMBOL`], referenced from [`build_main_wrapper`]).
 ///
 /// **In a debug build this artifact is not built by the `cargo` invocation
 /// that runs an AOT test.** `cargo test` builds `typelisp-front`'s *rlib* (the
@@ -1626,6 +1644,20 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
     let status = status?;
 
     if !status.success() {
+        // The linker's own message names only an undefined symbol; say what
+        // it means when the archive is of another ABI version. Read only on
+        // this path, where the cost of reading the archive does not matter.
+        let marker = typelisp_abi::ABI_SYMBOL.as_bytes();
+        if fs::read(&archive).is_ok_and(|bytes| !bytes.windows(marker.len()).any(|w| w == marker)) {
+            return Err(format!(
+                "linker failed with status {}: {} is not of ABI version {} (it does not define {}), so it was built \
+                 for another typl",
+                status,
+                archive.display(),
+                typelisp_abi::ABI_VERSION,
+                typelisp_abi::ABI_SYMBOL
+            ));
+        }
         return Err(format!("linker failed with status {}", status));
     }
     Ok(())

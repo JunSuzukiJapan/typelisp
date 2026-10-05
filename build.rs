@@ -45,8 +45,24 @@ fn profile_dir() {
 // inner cargo is given it even when the outer one was not: this archive is
 // what `typl -c` links, so its objects are the ones that must agree with the
 // executable.
+//
+// `TYPELISP_LINK_TREE_RUNTIME` set to anything non-empty makes a release build
+// do what a debug one does: no inner cargo, and `typl` links the
+// `target/release` archive the outer build makes anyway (the workspace's
+// `default-members`). The inner build compiles every runtime crate a second
+// time in a target directory of its own; this is for working on the tree,
+// where that second build is the wait. A `typl` built this way cannot leave
+// the tree, so it is not something to install.
 fn bundled_runtime(deployment: Option<&str>) {
     if std::env::var("PROFILE").as_deref() != Ok("release") {
+        return;
+    }
+    println!("cargo:rerun-if-env-changed=TYPELISP_LINK_TREE_RUNTIME");
+    if std::env::var_os("TYPELISP_LINK_TREE_RUNTIME").is_some_and(|v| !v.is_empty()) {
+        println!(
+            "cargo:warning=TYPELISP_LINK_TREE_RUNTIME is set: this typl links target/release/libtypelisp_front.a \
+             instead of carrying it, so do not install it"
+        );
         return;
     }
     let manifest_dir = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"));

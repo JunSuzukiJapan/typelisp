@@ -44,6 +44,7 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
     orc::JitCode::new(module, externals)
 }
 
+pub mod abi_signature;
 pub mod aot;
 pub mod bootstrap;
 pub mod core_bridge;

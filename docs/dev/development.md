@@ -144,6 +144,48 @@ libstd が見つからない・オブジェクトの版が 1 つに揃わない�
 LLVMバージョンを指す等でシャドウされていると、素の `cargo` は `LLVMConstShl` 等の未定義
 シンボルでリンクエラーになることがある——その場合は上記スクリプト経由で実行すること。
 
+## ランタイムライブラリと ABI バージョン
+
+`typl -c` が作る実行ファイルは、`typelisp-front` の staticlib（`libtypelisp_front.a`。rt・print・
+read・mem・abi と、`eval` 用のチェッカーとインタプリタを含む）をリンクする。どこのものを
+リンクするかはビルドの仕方で決まる。
+
+- debug ビルド: `target/debug/libtypelisp_front.a`。
+- release ビルド: build.rs が内側の cargo でもう一度ビルドしたものを `typl` に内蔵し、
+  最初のリンクのときに `$TYPELISP_HOME/lib/<ビルドID>/` へ書き出す。
+- `TYPELISP_LINK_TREE_RUNTIME=1` を付けた release ビルド: 内側の cargo を走らせず、
+  `target/release/libtypelisp_front.a` をリンクする。開発中に release ビルドを繰り返すとき、
+  ランタイムを 2 回ビルドする待ちを省くためのもの。こうして作った `typl` はツリーの外では
+  使えないので、インストールしない（ビルド時に cargo が警告を出す）。
+
+```sh
+TYPELISP_LINK_TREE_RUNTIME=1 scripts/with-llvm-env.sh cargo build --release
+```
+
+**ABI バージョン。** 生成コードがアーカイブについて仮定していること（`rt_*` シンボルと型、
+`typelisp-abi`・`typelisp-mem` の定数、well-known シンボルの番号、組み込み型の変種の順序と
+シグネチャ、型ごとの表現、ダンプ形式の版など）を `compile::abi_signature::describe` が
+書き出す。その記述が変わるたびに版を 1 つ上げる。アーカイブは `typelisp_abi_v<N>` を定義し、
+生成コードの `main` がそれを参照するので、版の違うアーカイブはリンクの時点で断られる。
+
+記述は `docs/dev/api_version/` に置く。
+
+- `latest_api_signature.md`: 最新の版。
+- `history/api_<N>.md`: 版ごとの記述。最新の版のものも含む。**削除も編集もしない。**
+
+`abi_version_test` が、記述が最新の版と一致しないとき、履歴が欠けたり書き換えられたり
+しているとき、共有される定数が記述から漏れているときに落ちる。記述が変わったら次を走らせる。
+履歴に次の版を書き、`latest_api_signature.md` をその写しにし、`typelisp-abi` の
+`abi_version!` を書き換える。
+
+```sh
+scripts/regen-abi-version.sh          # 記述が変わったときだけ新しい版を書く
+scripts/regen-abi-version.sh --bump   # 記述に現れない変更のために版を上げる
+```
+
+記述に現れないもの（シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など）を、
+ランタイムと合わせて変えたときは `--bump` を使う。
+
 ## リリースの手順
 
 GitHub のリリース（macOS の配布用実行ファイル）は `.github/workflows/release.yml` が作る。

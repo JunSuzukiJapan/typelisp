@@ -22,6 +22,27 @@
 
 pub mod dribble;
 
+// The ABI version: which `docs/dev/api_version/history/api_<N>.md` describes
+// everything compiled code assumes about the archive it links. A literal in a
+// macro rather than a `const`, because the symbol name below is built from it
+// and `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
+// rewrites it, and only when that description changed.
+macro_rules! abi_version { () => { 1 }; }
+
+/// See the comment on `abi_version!` above.
+pub const ABI_VERSION: u32 = abi_version!();
+
+/// The symbol an archive of ABI version [`ABI_VERSION`] defines, and every
+/// AOT executable refers to (`compile::aot::build_main_wrapper`).
+///
+/// A reference rather than a value read and compared at startup: linking an
+/// archive of another version fails with this name undefined, before there is
+/// an executable to run, and there is no path to the program that skips it.
+pub const ABI_SYMBOL: &str = concat!("typelisp_abi_v", abi_version!());
+
+#[export_name = concat!("typelisp_abi_v", abi_version!())]
+pub static ABI_MARKER: u8 = 0;
+
 use std::cell::Cell;
 
 use typelisp_mem::{Heap, Value};
