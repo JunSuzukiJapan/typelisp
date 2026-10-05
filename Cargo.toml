@@ -98,6 +98,14 @@ name = "typl-bootstrap-prelude"
 path = "src/bin/bootstrap_prelude.rs"
 required-features = ["dev-tools"]
 
+# Writes a new ABI version (docs/dev/api_version/) when what compiled code
+# assumes about the runtime archive has changed. Run via
+# scripts/regen-abi-version.sh; abi_version_test fails until it is re-run.
+[[bin]]
+name = "typl-regen-abi-version"
+path = "src/bin/regen_abi_version.rs"
+required-features = ["dev-tools"]
+
 # Measures what the precompiled prelude is worth: the same workloads against a
 # compiled and an interpreted prelude, in one process. Run via
 # scripts/bench-prelude.sh.
