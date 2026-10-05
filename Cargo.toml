@@ -29,7 +29,7 @@ default-members = [".", "crates/typelisp-abi", "crates/typelisp-front", "crates/
 # One version for every crate here: they are built and released together, and
 # `typl --version` and `(lisp-implementation-version)` report it.
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/JunSuzukiJapan/typelisp"
@@ -38,12 +38,12 @@ repository = "https://github.com/JunSuzukiJapan/typelisp"
 # what crates.io resolves them by once published; `path` is what a build from
 # this tree uses.
 [workspace.dependencies]
-typelisp-abi = { path = "crates/typelisp-abi", version = "0.1.0" }
-typelisp-front = { path = "crates/typelisp-front", version = "0.1.0" }
-typelisp-mem = { path = "crates/typelisp-mem", version = "0.1.0" }
-typelisp-print = { path = "crates/typelisp-print", version = "0.1.0" }
-typelisp-read = { path = "crates/typelisp-read", version = "0.1.0" }
-typelisp-rt = { path = "crates/typelisp-rt", version = "0.1.0" }
+typelisp-abi = { path = "crates/typelisp-abi", version = "0.1.1" }
+typelisp-front = { path = "crates/typelisp-front", version = "0.1.1" }
+typelisp-mem = { path = "crates/typelisp-mem", version = "0.1.1" }
+typelisp-print = { path = "crates/typelisp-print", version = "0.1.1" }
+typelisp-read = { path = "crates/typelisp-read", version = "0.1.1" }
+typelisp-rt = { path = "crates/typelisp-rt", version = "0.1.1" }
 
 [dependencies]
 once_cell = "1.8.0"
