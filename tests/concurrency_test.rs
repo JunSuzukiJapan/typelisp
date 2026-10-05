@@ -600,19 +600,25 @@ fn a_compiled_yield_resumes_where_it_left_off() {
 
 /// `(sleep secs)` stops **the task**, not the OS thread.
 ///
-/// The ordering is the discriminator, and it needs no clock: `a` is spawned
-/// first and waited on first, but sleeps four times as long. If `sleep` held
-/// the thread, `a` would run to its end before `b` ever started and the trail
-/// would be "ab". Both tasks park instead, and the nearer deadline wins.
+/// `a` is spawned first and sleeps, a little at a time, until `b` has marked
+/// the trail. If `sleep` held the thread, `b` would never get to run while `a`
+/// slept, and `a` would give up after its 500 naps (5 s) with "timeout". How
+/// long `b` takes to start does not matter, only that it starts while `a`
+/// sleeps. (It used to be `a` sleeping 200 ms against `b` sleeping 50 ms,
+/// which a loaded CI runner did not keep apart.)
 #[test]
 fn sleep_suspends_only_the_calling_task() {
     assert_eq!(
         text(r#"(defvar (trail string) "")
-                (defun slow ((name string) (sec f64)) ()
-                  (progn (sleep sec)
-                         (when true (setf trail (append trail name)))))
-                (let ((a (task (slow "a" 0.20))) (b (task (slow "b" 0.05))))
-                  (progn (wait a) (wait b) trail))"#),
+                (defun a () ()
+                  (let ((naps 0))
+                    (loop (if (or (equal trail "b") (>= naps 500)) (break) ())
+                          (sleep 0.01)
+                          (setf naps (+ naps 1)))
+                    (when true (setf trail (append trail (if (equal trail "b") "a" "timeout"))))))
+                (defun b () () (when true (setf trail (append trail "b"))))
+                (let ((ta (task (a))) (tb (task (b))))
+                  (progn (wait ta) (wait tb) trail))"#),
         "ba"
     );
 }
