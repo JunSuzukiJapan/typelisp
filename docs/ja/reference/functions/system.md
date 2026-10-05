@@ -111,7 +111,7 @@ determined*）。site 名は POSIX に記録場所が無いので常に `none`�
 | `gc-count` | `int` | この処理系が始めてからの収集回数 |
 | `growable` | `bool` | アリーナがまだ伸びうるか |
 
-欄はすべて `int`。成長の上限（`typl --heap-cells` の説明を参照）は報告しない。読み手が知りたいのは
+欄は `growable` 以外すべて `int`。成長の上限（`typl --heap-cells` の説明を参照）は報告しない。読み手が知りたいのは
 伸びられるかどうか（`growable`）のほうだから。
 
 ### 5.2 `trace` / `step` が見えるもの・見えないもの
