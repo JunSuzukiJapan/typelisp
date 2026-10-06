@@ -15062,20 +15062,7 @@ impl Checker {
         // `check_construct` uses for an ADT's `params`.
         let params: HashSet<String> = sig.type_params.iter().cloned().collect();
         let mut subst: BTreeMap<String, Type> = BTreeMap::new();
-        let mut typed = Vec::new();
-        for (i, (arg, pty)) in args[..fixed].iter().zip(sig.params.iter()).enumerate() {
-            // A C function's function-typed parameter takes a callback: the
-            // argument becomes the address of the entry C calls.
-            if sig.ffi && matches!(pty, Type::Fn(..)) {
-                typed.push(self.check_callback_arg(heap, interp, env, *arg, nth_loc(arg_locs, i), pty, name)?);
-                continue;
-            }
-            let st = subst_apply(pty, &subst);
-            let exp = if type_has_param(&st, &params) { None } else { Some(st) };
-            let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
-            unify(&params, pty, &ta.ty, &mut subst)?;
-            typed.push(ta);
-        }
+        let mut typed = self.check_required_args(heap, interp, env, name, &sig, &params, &args[..fixed], arg_locs, &mut subst)?;
         // A variadic function: every remaining argument is individually
         // checked against the (possibly still-generic) rest element type,
         // then collected into a single `Sexpr` list actual argument — see
@@ -15109,6 +15096,72 @@ impl Checker {
             return Ok(Checked::new(form, ty));
         }
         Ok(Checked::new(form, ty))
+    }
+
+    /// The required arguments of a call to `sig`, checked against its
+    /// parameters, with `subst` accumulating what they say about `params`.
+    /// Returned in argument order.
+    ///
+    /// Not always checked in that order. A type parameter a `where` clause
+    /// pins to another's associated type — `A` in `find`'s
+    /// `(where (Iter I (Item A)))` — is decided by the argument that fixes
+    /// `I`, and an argument typed `A` checked before it has nothing to be
+    /// checked against: `(find 1 (iter w))` over a `Vector<i32>` read the `1`
+    /// as an `int`, and the pin then disagreed with it. So an argument whose
+    /// type mentions a pinned parameter still open waits until the others
+    /// are checked and the pins are applied ([`Self::infer_pinned_assoc_types`]),
+    /// and is then checked as the type they decided. Checking order is not
+    /// evaluation order: the arguments still run as written.
+    #[allow(clippy::too_many_arguments)]
+    fn check_required_args(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        name: &Path,
+        sig: &FnSig,
+        params: &HashSet<String>,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        subst: &mut BTreeMap<String, Type>,
+    ) -> Result<Vec<Checked>, Error> {
+        let pinned: HashSet<String> = params
+            .iter()
+            .filter(|p| {
+                let one: HashSet<String> = std::iter::once((*p).clone()).collect();
+                sig.bounds.values().flatten().any(|tb| tb.assoc.values().any(|t| type_has_param(t, &one)))
+            })
+            .cloned()
+            .collect();
+        let mut slots: Vec<Option<Checked>> = args.iter().map(|_| None).collect();
+        for waiting_pass in [false, true] {
+            if waiting_pass {
+                if slots.iter().all(Option::is_some) {
+                    break;
+                }
+                self.infer_pinned_assoc_types(env, sig, params, subst);
+            }
+            for (i, (arg, pty)) in args.iter().zip(sig.params.iter()).enumerate() {
+                if slots[i].is_some() {
+                    continue;
+                }
+                // A C function's function-typed parameter takes a callback:
+                // the argument becomes the address of the entry C calls.
+                if sig.ffi && matches!(pty, Type::Fn(..)) {
+                    slots[i] = Some(self.check_callback_arg(heap, interp, env, *arg, nth_loc(arg_locs, i), pty, name)?);
+                    continue;
+                }
+                let st = subst_apply(pty, subst);
+                if !waiting_pass && type_has_param(&st, &pinned) {
+                    continue;
+                }
+                let exp = if type_has_param(&st, params) { None } else { Some(st) };
+                let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
+                unify(params, pty, &ta.ty, subst)?;
+                slots[i] = Some(ta);
+            }
+        }
+        Ok(slots.into_iter().map(|s| s.expect("the waiting pass checks every argument left")).collect())
     }
 
     /// [`Self::check_call`]'s `&optional`/`&key` path — routed to whenever
@@ -15162,14 +15215,7 @@ impl Checker {
         let params: HashSet<String> = sig.type_params.iter().cloned().collect();
         let mut subst: BTreeMap<String, Type> = BTreeMap::new();
 
-        let mut typed = Vec::with_capacity(required_n + sig.optionals.len().max(sig.keys.len()));
-        for (i, (arg, pty)) in args[..required_n].iter().zip(sig.params.iter()).enumerate() {
-            let st = subst_apply(pty, &subst);
-            let exp = if type_has_param(&st, &params) { None } else { Some(st) };
-            let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
-            unify(&params, pty, &ta.ty, &mut subst)?;
-            typed.push(ta);
-        }
+        let mut typed = self.check_required_args(heap, interp, env, name, sig, &params, &args[..required_n], arg_locs, &mut subst)?;
         let tail = &args[required_n..];
         let tail_locs = arg_locs.get(required_n..).unwrap_or(&[]);
 
