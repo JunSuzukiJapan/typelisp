@@ -1,7 +1,7 @@
 <!-- translated-from: README_JP.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # TypeLisp
 
-English | [日本語](README_JP.md)
+English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md)
 
 TypeLisp is a statically typed Lisp.
 Its syntax is modeled mainly on Common Lisp.
