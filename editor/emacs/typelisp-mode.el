@@ -541,18 +541,21 @@ server's answer is resolution-driven and strictly better (see
 ;; imported through `use', and it never mistakes a same-named function for a
 ;; type, because a token exists only where the type grammar actually ran.
 ;;
-;; `lsp-mode' consumes that natively (`lsp-semantic-tokens-enable'), so this
-;; code is for `eglot', which does not implement semantic tokens at all --
-;; Emacs 29/30's `eglot.el' contains no code for the request.  Rather than
-;; leave eglot users on the weaker fallback, the mode issues the request itself
-;; over eglot's own JSON-RPC connection and draws the result with overlays.
+;; `lsp-mode' consumes that natively (`lsp-semantic-tokens-enable'), and so
+;; does an `eglot' that has `eglot-semantic-tokens-mode' (Emacs 31 and later).
+;; This code is for an older `eglot', which has no code for the request.
+;; Rather than leave its users on the weaker fallback, the mode issues the
+;; request itself over eglot's own JSON-RPC connection and draws the result
+;; with overlays.  Where eglot has its own client, this one stands aside, so
+;; the buffer is not asked for and painted twice.
 ;; Overlays (not text properties) because they survive font-lock's
 ;; refontification and move with the text on edit.
 
 (defcustom typelisp-semantic-tokens t
   "Whether to colour type names using the language server's semantic tokens.
-Only takes effect in a buffer managed by `eglot'; `lsp-mode' has its own
-implementation and this one stands aside for it."
+Only takes effect in a buffer managed by an `eglot' that has no
+`eglot-semantic-tokens-mode' of its own (before Emacs 31); `lsp-mode' and a
+newer `eglot' have their own implementation and this one stands aside."
   :type 'boolean
   :group 'typelisp)
 
@@ -586,17 +589,21 @@ fallback rules, so the two never paint the same buffer.")
 
 (defun typelisp--server-highlights-types-p ()
   "Whether a language server is colouring type names in this buffer.
-True for `lsp-mode' with semantic tokens enabled, and for this mode's own
-eglot client once it has received an answer."
+True for `lsp-mode' with semantic tokens enabled, for eglot's own
+`eglot-semantic-tokens-mode', and for this mode's eglot client once it has
+received an answer."
   (or typelisp--semantic-active
+      (bound-and-true-p eglot-semantic-tokens-mode)
       (and (bound-and-true-p lsp-mode)
            (bound-and-true-p lsp-semantic-tokens-enable))))
 
 (defun typelisp--eglot-server ()
   "The eglot server managing this buffer, or nil.
-Nil also when `lsp-mode' is in charge, which owns semantic tokens itself."
+Nil also when `lsp-mode' is in charge, or when eglot has a semantic-tokens
+client of its own: either owns semantic tokens itself."
   (and typelisp-semantic-tokens
        (not (bound-and-true-p lsp-mode))
+       (not (fboundp 'eglot-semantic-tokens-mode))
        (fboundp 'eglot-current-server)
        (eglot-current-server)))
 
@@ -736,7 +743,11 @@ Enabled automatically in a `typelisp-mode' buffer that eglot is managing; see
 Hung on `eglot-managed-mode-hook', which runs on both connect and disconnect."
   (when (derived-mode-p 'typelisp-mode)
     (typelisp-semantic-tokens-mode
-     (if (and typelisp-semantic-tokens (bound-and-true-p eglot--managed-mode)) 1 -1))))
+     (if (and typelisp-semantic-tokens
+              (bound-and-true-p eglot--managed-mode)
+              (not (fboundp 'eglot-semantic-tokens-mode)))
+         1
+       -1))))
 
 (add-hook 'eglot-managed-mode-hook #'typelisp--maybe-enable-semantic-tokens)
 
