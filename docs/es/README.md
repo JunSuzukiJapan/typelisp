@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/README.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Documentación de typelisp (español)
 
 typelisp es un Lisp con tipado estático. Para instalarlo y compilarlo, consulta el
@@ -34,7 +34,7 @@ Si es tu primer contacto con typelisp, léelos en este orden.
 ## Integración con editores
 
 Los pasos de configuración están en la [guía de integración con editores](guide/editors.md). Los atajos
-de teclado y los ajustes de cada editor se describen en estos documentos (en japonés):
+de teclado y los ajustes de cada editor se describen en estos documentos:
 
-- [Emacs (typelisp-mode)](../../editor/emacs/README.md)
-- [VS Code](../../editor/vscode/README.md)
+- [Emacs (typelisp-mode)](../../editor/emacs/README_es.md)
+- [VS Code](../../editor/vscode/README_es.md)

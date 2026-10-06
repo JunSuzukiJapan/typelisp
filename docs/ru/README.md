@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/README.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Документация typelisp (русский)
 
 typelisp — это Лисп со статической типизацией. Об установке и сборке см.
@@ -34,7 +34,7 @@ typelisp — это Лисп со статической типизацией. �
 ## Интеграция с редакторами
 
 Порядок настройки описан в [руководстве по интеграции с редакторами](guide/editors.md). Привязки клавиш и
-настройки каждого редактора перечислены в этих документах (на японском):
+настройки каждого редактора перечислены в этих документах:
 
-- [Emacs (typelisp-mode)](../../editor/emacs/README.md)
-- [VS Code](../../editor/vscode/README.md)
+- [Emacs (typelisp-mode)](../../editor/emacs/README_ru.md)
+- [VS Code](../../editor/vscode/README_ru.md)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/editors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/editors.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # 編輯器整合（typl-lsp）
 
 `typl-lsp` 是 typelisp 的語言伺服器。連接到支援 LSP（Language Server Protocol）的編輯器後，可以對正在編輯的檔案使用以下功能：
@@ -43,7 +43,7 @@ npx @vscode/vsce package      # 產生 .vsix
 | `typelisp.languageServer.path` | （空） | `typl-lsp` 的路徑 |
 
 `Ctrl+Alt+R` 儲存正在編輯的檔案並以 `typl` 執行，`Ctrl+Alt+Z` 啟動 REPL。詳情請參閱
-[VS Code 擴充功能的 README](../../../editor/vscode/README.md)（日文）。
+[VS Code 擴充功能的 README](../../../editor/vscode/README_zh-TW.md)。
 
 ## 3. Emacs
 
@@ -75,10 +75,10 @@ npx @vscode/vsce package      # 產生 .vsix
 (add-hook 'typelisp-mode-hook #'lsp)
 ```
 
-eglot 不支援 semantic tokens，所以使用 eglot 時由 `typelisp-mode` 代為替型別名稱著色。使用 `lsp-mode` 時，請把
-`lsp-semantic-tokens-enable` 設為 `t`。
+Emacs 31 以後的 eglot 會自己替型別名稱著色（semantic tokens）。Emacs 30 以前的 eglot 不支援這一點，所以由
+`typelisp-mode` 代為替型別名稱著色。使用 `lsp-mode` 時，請把 `lsp-semantic-tokens-enable` 設為 `t`。
 
-`C-c C-c` 執行正在編輯的檔案，`C-c C-z` 啟動 REPL。詳情請參閱[typelisp-mode 的 README](../../../editor/emacs/README.md)（日文）。
+`C-c C-c` 執行正在編輯的檔案，`C-c C-z` 啟動 REPL。詳情請參閱[typelisp-mode 的 README](../../../editor/emacs/README_zh-TW.md)。
 
 ## 4. 其他編輯器
 

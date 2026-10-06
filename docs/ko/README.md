@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/README.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # typelisp 문서 (한국어)
 
 typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최상위의 [README.md](../../README.md)(영어)를
@@ -34,7 +34,7 @@ typelisp를 처음 접한다면 순서대로 읽는다.
 ## 에디터 연동
 
 설정 순서는 [에디터 연동 가이드](guide/editors.md)에 있다. 각 에디터의 키 바인딩과 설정 항목은 다음 문서에
-정리되어 있다(일본어).
+정리되어 있다.
 
-- [Emacs (typelisp-mode)](../../editor/emacs/README.md)
-- [VS Code](../../editor/vscode/README.md)
+- [Emacs (typelisp-mode)](../../editor/emacs/README_ko.md)
+- [VS Code](../../editor/vscode/README_ko.md)

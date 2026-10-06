@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -112,11 +112,9 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 可以進行 AOT 編譯的檔案形式
 
-- 進入點檔案的頂層只能寫定義（`defun` `defmethod` `defvar` `defconstant` `defstruct` `defenum` `deftype` `deftrait` `impl`
-  `defffi`、`(unsafe (def-c-struct ...))`）以及 `use` `module`。除了最後的 `(main)`，不能寫 `(println ...)` 這樣的頂層運算式。
-  處理請寫在 `main` 中。
-- 進入點檔案中不能寫 `defmacro`。巨集請在其他模組中以 `(pub defmacro ...)` 定義，再 `use` 來使用。
-- 含有 `defsignature` 的檔案，無論是進入點檔案還是被 `use` 的模組，都不能進行 AOT 編譯。
+- 進入點檔案的頂層只能寫定義（`defun` `defmethod` `defvar` `defparameter` `defconstant` `defmacro`
+  `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`、`(unsafe (def-c-struct ...))`）
+  以及 `use` `module`。除了最後的 `(main)`，不能寫 `(println ...)` 這樣的頂層運算式。處理請寫在 `main` 中。
 - 沒有不接受引數的 `main` 時會出錯。
 - 被 `use` 的模組檔案也會一起編譯，合併成一個執行檔。
 - `defffi` 的 `:library` 中指定的函式庫會自動連結（[C FFI](ffi.md)）。

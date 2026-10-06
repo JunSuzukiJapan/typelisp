@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/README.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # typelisp Documentation (English)
 
 typelisp is a statically typed Lisp. For installing and building it, see [README.md](../../README.md)
@@ -34,7 +34,7 @@ If you are new to typelisp, read these in order.
 ## Editor Integration
 
 Setup instructions are in the [Editor Integration guide](guide/editors.md). The key bindings and
-settings of each editor are listed in these documents (written in Japanese):
+settings of each editor are listed in these documents:
 
 - [Emacs (typelisp-mode)](../../editor/emacs/README.md)
 - [VS Code](../../editor/vscode/README.md)

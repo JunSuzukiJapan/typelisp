@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1718,13 +1718,12 @@ y el resto tal cual.
 - Las reglas de panic son las mismas que para `task` (cae el proceso entero). Cuando `main` retorna, el
   proceso termina.
 - Para escribirlo como función, usa `(Thread::spawn (lambda () T body...))` (el `std::thread::spawn` de Rust).
-  El valor de función que se pasa debe estar compilado. Llamado desde un nivel superior que `typl` está
-  interpretando, provoca un panic antes de iniciar el hilo, tratado igual que un `(panic ...)`, tanto si recibe
-  una `lambda` como una función con nombre. Se puede usar desde dentro de funciones compiladas.
-- **En un hilo dedicado solo se ejecuta código compilado.** Cuando `typl` evalúa `(thread (f ...))` mientras
-  interpreta, compila `f` (y lo que llama) en el acto antes de ejecutarla. Una llamada que no se puede compilar
-  (el valor de una `lambda` interpretada, construir una estructura, etc.) es, antes de iniciar el hilo, un panic
-  tratado igual que un `(panic ...)`.
+  También se puede pasar una función con nombre.
+- **En un hilo dedicado solo se ejecuta código compilado.** Cuando `typl` evalúa `(thread (f ...))` o
+  `Thread::spawn` mientras interpreta, compila en el acto la función que se va a ejecutar (y lo que llama) antes
+  de ejecutarla. Lo que no se puede compilar (una `lambda` que hace referencia a variables locales de fuera,
+  construir una estructura, etc.) es, antes de iniciar el hilo, un panic tratado igual que un `(panic ...)`. Una
+  `lambda` que hace referencia a variables locales se puede pasar si se crea dentro de una función compilada.
 
 ### 12.3 `select` — esperar varias operaciones de canal a la vez
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -126,13 +126,9 @@ with the `typl` built together with it. After rebuilding `typl`, copy it again.
 ### 3.3 What an AOT-compiled file may contain
 
 - The top level of the entry file may contain only definitions (`defun` `defmethod` `defvar`
-  `defconstant` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`,
-  `(unsafe (def-c-struct ...))`) and `use` `module`. Top-level expressions such as `(println ...)`
-  are not allowed, except for the final `(main)`. Put the work inside `main`.
-- `defmacro` cannot be written in the entry file. Define macros in another module with
-  `(pub defmacro ...)` and `use` them.
-- A file containing `defsignature` cannot be AOT-compiled, whether it is the entry file or a `use`d
-  module.
+  `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
+  `impl` `defffi`, `(unsafe (def-c-struct ...))`) and `use` `module`. Top-level expressions such as
+  `(println ...)` are not allowed, except for the final `(main)`. Put the work inside `main`.
 - Without a `main` that takes no arguments, compilation fails with an error.
 - The files of `use`d modules are compiled too and combined into a single executable.
 - Libraries named with `:library` in `defffi` are linked automatically ([C FFI](ffi.md)).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -1367,11 +1367,10 @@ typl --image session.typld             # REPL 也一样
 
 - `Thread<T>` 是 `Task<T>` 的对应物。`join` 与 `wait` 一样停下的是**调用它的任务**，值会被缓存。任务结束时线程也结束。
 - panic 的规则与 `task` 相同（整个进程崩溃）。`main` 返回时进程结束。
-- 想以函数形式书写时，用 `(Thread::spawn (lambda () T body...))`（Rust 的 `std::thread::spawn`）。传入的函数值必须是编译过的。
-  从 `typl` 正在解释执行的顶层调用时，无论是 `lambda` 还是具名函数，都会在启动线程之前成为与 `(panic ...)` 同样处理的 panic。在编译
-  过的函数中可以使用。
-- **在专用线程上运行的只有编译过的代码。** `typl` 在解释执行中求值 `(thread (f ...))` 时，会当场编译 `f`（以及从它调用的东西）再运行。
-  不能编译的调用——解释执行的 `lambda` 的值、结构体的构造等——会在启动线程之前成为与 `(panic ...)` 同样处理的 panic。
+- 想以函数形式书写时，用 `(Thread::spawn (lambda () T body...))`（Rust 的 `std::thread::spawn`）。也可以传入具名函数。
+- **在专用线程上运行的只有编译过的代码。** `typl` 在解释执行中求值 `(thread (f ...))` 或 `Thread::spawn` 时，会当场编译要运行的
+  函数（以及从它调用的东西）再运行。不能编译的东西——引用外部局部变量的 `lambda`、结构体的构造等——会在启动线程之前成为与
+  `(panic ...)` 同样处理的 panic。引用局部变量的 `lambda`，只要在编译过的函数中创建，就可以传入。
 
 ### 12.3 `select` — 同时等待多个通道操作
 

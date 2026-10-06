@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/README.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # typelisp 文件（繁體中文）
 
 typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫根目錄的 [README.md](../../README.md)（英文）。
@@ -32,7 +32,7 @@ typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫
 
 ## 編輯器整合
 
-設定步驟見[編輯器整合指南](guide/editors.md)。各編輯器的按鍵與設定一覽見以下文件（日文）：
+設定步驟見[編輯器整合指南](guide/editors.md)。各編輯器的按鍵與設定一覽見以下文件：
 
-- [Emacs（typelisp-mode）](../../editor/emacs/README.md)
-- [VS Code](../../editor/vscode/README.md)
+- [Emacs（typelisp-mode）](../../editor/emacs/README_zh-TW.md)
+- [VS Code](../../editor/vscode/README_zh-TW.md)

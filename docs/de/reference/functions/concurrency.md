@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Tasks und Kanäle
 
 Das Vokabular der Tasks (leichtgewichtigen Threads). `task` und `thread`, die sie starten, und `select`, das
@@ -165,12 +165,11 @@ Gegenstück zu `Task<T>`.
 
 - Der Aufruf einer blockierenden C-Funktion (`defffi`) hält nur diesen Thread an.
 - Ein `task` innerhalb eines `thread` läuft als gewöhnlicher Task auf anderen Threads.
-- Auch in `typl` verwendbar. Beim Interpretieren kompiliert `(thread (f ...))` `f` an Ort und Stelle und führt
-  es dann auf dem eigenen Thread aus.
-- `Thread::spawn` nimmt einen Funktionswert und kompiliert daher nicht an Ort und Stelle. Der Aufruf von einer
-  obersten Ebene aus, die `typl` interpretiert, löst einen Panic aus
-  ([Syntaxreferenz 12.2](../syntax.md#122-thread--einen-task-auf-einem-eigenen-os-thread-starten)). Aus
-  kompilierten Funktionen heraus ist es verwendbar.
+- Auch in `typl` verwendbar. Beim Interpretieren kompilieren `(thread (f ...))` und `Thread::spawn` die
+  auszuführende Funktion an Ort und Stelle und führen sie dann auf dem eigenen Thread aus. Ein `lambda`, das auf
+  lokale Variablen außerhalb verweist, lässt sich nicht für sich allein kompilieren und löst einen Panic aus
+  ([Syntaxreferenz 12.2](../syntax.md#122-thread--einen-task-auf-einem-eigenen-os-thread-starten)). Ein
+  innerhalb einer kompilierten Funktion erzeugtes `lambda` kann übergeben werden.
 
 ## 8. Was es nicht gibt
 

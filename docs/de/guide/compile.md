@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -128,14 +128,11 @@ sie erneut.
 
 ### 3.3 Was eine AOT-kompilierte Datei enthalten darf
 
-- Die oberste Ebene der Einstiegsdatei darf nur Definitionen (`defun` `defmethod` `defvar` `defconstant`
-  `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`, `(unsafe (def-c-struct ...))`) sowie `use`
-  `module` enthalten. Ausdrücke auf oberster Ebene wie `(println ...)` sind nicht erlaubt, abgesehen vom
-  abschließenden `(main)`. Die Arbeit gehört in `main`.
-- `defmacro` darf nicht in der Einstiegsdatei stehen. Makros definiert man in einem anderen Modul mit
-  `(pub defmacro ...)` und holt sie mit `use` herein.
-- Eine Datei, die `defsignature` enthält, lässt sich nicht AOT-kompilieren, gleich ob es die Einstiegsdatei
-  oder ein mit `use` hereingeholtes Modul ist.
+- Die oberste Ebene der Einstiegsdatei darf nur Definitionen (`defun` `defmethod` `defvar`
+  `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
+  `impl` `defffi`, `(unsafe (def-c-struct ...))`) sowie `use` `module` enthalten. Ausdrücke auf oberster
+  Ebene wie `(println ...)` sind nicht erlaubt, abgesehen vom abschließenden `(main)`. Die Arbeit gehört
+  in `main`.
 - Ohne ein `main` ohne Argumente schlägt die Kompilierung mit einem Fehler fehl.
 - Die Dateien der mit `use` hereingeholten Module werden ebenfalls kompiliert und zu einem einzigen Programm
   zusammengefügt.

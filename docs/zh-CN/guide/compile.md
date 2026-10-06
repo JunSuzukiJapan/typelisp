@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -115,11 +115,9 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 可以进行 AOT 编译的文件形式
 
-- 入口文件的顶层只能写定义（`defun` `defmethod` `defvar` `defconstant` `defstruct` `defenum` `deftype`
-  `deftrait` `impl` `defffi`、`(unsafe (def-c-struct ...))`）以及 `use` `module`。除了末尾的 `(main)`，
-  不能写 `(println ...)` 这样的顶层表达式。处理请写在 `main` 中。
-- 入口文件中不能写 `defmacro`。宏请在其他模块中用 `(pub defmacro ...)` 定义，再 `use` 使用。
-- 含有 `defsignature` 的文件，无论是入口文件还是被 `use` 的模块，都不能进行 AOT 编译。
+- 入口文件的顶层只能写定义（`defun` `defmethod` `defvar` `defparameter` `defconstant` `defmacro`
+  `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`、`(unsafe (def-c-struct ...))`）
+  以及 `use` `module`。除了末尾的 `(main)`，不能写 `(println ...)` 这样的顶层表达式。处理请写在 `main` 中。
 - 没有不带参数的 `main` 时会报错。
 - 被 `use` 的模块文件也会一起编译，合并成一个可执行文件。
 - `defffi` 的 `:library` 中指定的库会自动链接（[C FFI](ffi.md)）。

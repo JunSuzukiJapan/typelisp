@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -1331,10 +1331,10 @@ typl --image session.typld             # REPL 也一樣
 
 - `Thread<T>` 是 `Task<T>` 的對應物。`join` 與 `wait` 一樣停下的是**呼叫它的任務**，值會被快取。任務結束時執行緒也結束。
 - panic 的規則與 `task` 相同（整個行程當掉）。`main` 返回時行程結束。
-- 想以函式形式書寫時，用 `(Thread::spawn (lambda () T body...))`（Rust 的 `std::thread::spawn`）。傳入的函式值必須是編譯過的。從 `typl` 正在
-  直譯執行的頂層呼叫時，無論是 `lambda` 還是具名函式，都會在啟動執行緒之前成為與 `(panic ...)` 同樣處理的 panic。在編譯過的函式中可以使用。
-- **在專用執行緒上執行的只有編譯過的程式碼。** `typl` 在直譯執行中對 `(thread (f ...))` 求值時，會當場編譯 `f`（以及從它呼叫的東西）再執行。不能
-  編譯的呼叫——直譯執行的 `lambda` 的值、結構的建立等——會在啟動執行緒之前成為與 `(panic ...)` 同樣處理的 panic。
+- 想以函式形式書寫時，用 `(Thread::spawn (lambda () T body...))`（Rust 的 `std::thread::spawn`）。也可以傳入具名函式。
+- **在專用執行緒上執行的只有編譯過的程式碼。** `typl` 在直譯執行中對 `(thread (f ...))` 或 `Thread::spawn` 求值時，會當場編譯要執行的
+  函式（以及從它呼叫的東西）再執行。不能編譯的東西——參照外部區域變數的 `lambda`、結構的建立等——會在啟動執行緒之前成為與
+  `(panic ...)` 同樣處理的 panic。參照區域變數的 `lambda`，只要在編譯過的函式中建立，就可以傳入。
 
 ### 12.3 `select` — 同時等待多個通道操作
 

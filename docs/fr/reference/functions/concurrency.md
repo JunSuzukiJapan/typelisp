@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Tâches et canaux
 
 Le vocabulaire des tâches (threads légers). `task` et `thread`, qui les lancent, et `select`, qui attend plusieurs
@@ -165,12 +165,11 @@ pendant de `Task<T>`.
 
 - Appeler une fonction C bloquante (`defffi`) n'arrête que ce thread.
 - Un `task` à l'intérieur d'un `thread` s'exécute comme une tâche ordinaire sur d'autres threads.
-- Utilisable aussi dans `typl`. En interprétation, `(thread (f ...))` compile `f` sur place puis l'exécute sur le
-  thread dédié.
-- `Thread::spawn` prend une valeur fonctionnelle et ne compile donc pas sur place. L'appeler depuis un niveau
-  supérieur que `typl` interprète déclenche un panic
-  ([Référence de la syntaxe 12.2](../syntax.md#122-thread--lancer-une-tâche-sur-un-thread-système-dédié)). Il est
-  utilisable depuis des fonctions compilées.
+- Utilisable aussi dans `typl`. En interprétation, `(thread (f ...))` et `Thread::spawn` compilent sur place la
+  fonction à exécuter puis l'exécutent sur le thread dédié. Un `lambda` qui fait référence à des variables locales
+  extérieures ne peut pas être compilé seul et déclenche un panic
+  ([Référence de la syntaxe 12.2](../syntax.md#122-thread--lancer-une-tâche-sur-un-thread-système-dédié)). Un
+  `lambda` créé dans une fonction compilée peut être passé.
 
 ## 8. Ce qui n'existe pas
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1692,13 +1692,13 @@ and the rest can be used as they are.
 - The panic rules are the same as for `task` (the whole process goes down). When `main` returns, the
   process ends.
 - To write it as a function, use `(Thread::spawn (lambda () T body...))` (Rust's `std::thread::spawn`).
-  The function value passed must be compiled. Called from a top level that `typl` is interpreting, it
-  panics before starting the thread, the same as a `(panic ...)`, whether given a `lambda` or a named
-  function. It can be used from inside compiled functions.
-- **Only compiled code runs on a dedicated thread.** When `typl` evaluates `(thread (f ...))` while
-  interpreting, it compiles `f` (and what it calls) on the spot before running it. A call that cannot be
-  compiled (the value of an interpreted `lambda`, constructing a struct and so on) is, before the thread is
-  started, a panic treated the same as a `(panic ...)`.
+  A named function may be passed too.
+- **Only compiled code runs on a dedicated thread.** When `typl` evaluates `(thread (f ...))` or
+  `Thread::spawn` while interpreting, it compiles the function to run (and what it calls) on the spot
+  before running it. What cannot be compiled (a `lambda` that refers to local variables outside it,
+  constructing a struct and so on) is, before the thread is started, a panic treated the same as a
+  `(panic ...)`. A `lambda` that refers to local variables can be passed if it is created inside a
+  compiled function.
 
 ### 12.3 `select` — waiting on several channel operations at once
 

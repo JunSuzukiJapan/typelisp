@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Tasks and Channels
 
 The vocabulary of tasks (lightweight threads). `task` and `thread`, which start them, and `select`,
@@ -164,12 +164,11 @@ counterpart of `Task<T>`.
 
 - Calling a blocking C function (`defffi`) stops only that thread.
 - A `task` inside a `thread` runs as an ordinary task on other threads.
-- It can be used in `typl` too. When interpreting, `(thread (f ...))` compiles `f` on the spot and then
-  runs it on the dedicated thread.
-- `Thread::spawn` takes a function value, so it does not compile on the spot. Calling it from a
-  top level that `typl` is interpreting panics
-  ([Syntax Reference 12.2](../syntax.md#122-thread--starting-a-task-on-a-dedicated-os-thread)). It can
-  be used from inside compiled functions.
+- It can be used in `typl` too. When interpreting, `(thread (f ...))` and `Thread::spawn` compile the
+  function to run on the spot and then run it on the dedicated thread. A `lambda` that refers to local
+  variables outside it cannot be compiled on its own and panics
+  ([Syntax Reference 12.2](../syntax.md#122-thread--starting-a-task-on-a-dedicated-os-thread)). A `lambda` created inside a compiled
+  function can be passed.
 
 ## 8. What is not there
 

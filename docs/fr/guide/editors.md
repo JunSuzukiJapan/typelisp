@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/editors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/editors.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Intégration aux éditeurs (typl-lsp)
 
 `typl-lsp` est le serveur de langage de typelisp. Connecté à un éditeur qui prend en charge LSP (le Language Server
@@ -49,7 +49,7 @@ L'extension cherche `typl-lsp` dans `target/release/typl-lsp` de l'espace de tra
 | `typelisp.languageServer.path` | (vide) | Chemin de `typl-lsp` |
 
 `Ctrl+Alt+R` enregistre le fichier en cours d'édition et l'exécute avec `typl`, et `Ctrl+Alt+Z` lance la REPL.
-Pour en savoir plus, voir le [README de l'extension VS Code](../../../editor/vscode/README.md) (en japonais).
+Pour en savoir plus, voir le [README de l'extension VS Code](../../../editor/vscode/README_fr.md).
 
 ## 3. Emacs
 
@@ -81,11 +81,12 @@ Avec `lsp-mode` :
 (add-hook 'typelisp-mode-hook #'lsp)
 ```
 
-eglot ne prend pas en charge les jetons sémantiques ; avec eglot, `typelisp-mode` colore donc lui-même les noms de
-types. Avec `lsp-mode`, mettez `lsp-semantic-tokens-enable` à `t`.
+L'eglot d'Emacs 31 et suivants colore lui-même les noms de types (jetons sémantiques). L'eglot d'Emacs 30 et
+antérieurs ne les prend pas en charge ; `typelisp-mode` colore donc les noms de types à sa place. Avec
+`lsp-mode`, mettez `lsp-semantic-tokens-enable` à `t`.
 
 `C-c C-c` exécute le fichier en cours d'édition, et `C-c C-z` lance la REPL. Pour en savoir plus, voir le
-[README de typelisp-mode](../../../editor/emacs/README.md) (en japonais).
+[README de typelisp-mode](../../../editor/emacs/README_fr.md).
 
 ## 4. Autres éditeurs
 

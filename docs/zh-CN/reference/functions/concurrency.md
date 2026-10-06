@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # 任务与通道
 
 任务（轻量级线程）的词汇。启动它们的 `task`・`thread` 和多路等待的 `select` 是特殊形式，见
@@ -149,9 +149,9 @@ Go 的 `time.After`。可以直接写在 `select` 的超时分支中（[语法�
 
 - 调用会阻塞的 C 函数（`defffi`）时，停下的只有该线程。
 - `thread` 中的 `task` 作为普通任务在其他线程上运行。
-- 在 `typl` 中也可以使用。解释执行中的 `(thread (f ...))` 会当场编译 `f`，然后在专用线程上运行。
-- `Thread::spawn` 接受函数值，所以不会当场编译。在 `typl` 正在解释执行的顶层调用它会 panic
-  （[语法参考 12.2](../syntax.md#122-thread--在专用-os-线程上启动任务)）。在编译过的函数中可以使用。
+- 在 `typl` 中也可以使用。解释执行中的 `(thread (f ...))` 和 `Thread::spawn` 会当场编译要运行的函数，然后在专用线程上运行。
+  引用外部局部变量的 `lambda` 无法直接编译，会 panic（[语法参考 12.2](../syntax.md#122-thread--在专用-os-线程上启动任务)）。
+  在编译过的函数中创建的 `lambda` 可以传入。
 
 ## 8. 没有的东西
 

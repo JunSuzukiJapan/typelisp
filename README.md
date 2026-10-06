@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: README_JP.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # TypeLisp
 
 English | [日本語](README_JP.md)
@@ -374,8 +374,6 @@ The full list of English documents is in [docs/en/README.md](docs/en/README.md).
 - [Error Messages](docs/en/reference/errors.md)
 
 ### Editor integration
-
-These two documents are written in Japanese.
 
 - [Emacs (typelisp-mode)](editor/emacs/README.md)
 - [VS Code](editor/vscode/README.md)

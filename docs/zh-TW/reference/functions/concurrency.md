@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # 任務與通道
 
 任務（輕量級執行緒）的詞彙。啟動它們的 `task`・`thread` 與多路等待的 `select` 是特殊形式，見[語法參考](../syntax.md#12-並行任務)。本章是
@@ -142,9 +142,9 @@ Go 的 `time.After`。可以直接寫在 `select` 的逾時分支中（[語法�
 
 - 呼叫會阻塞的 C 函式（`defffi`）時，停下的只有該執行緒。
 - `thread` 中的 `task` 作為一般任務在其他執行緒上執行。
-- 在 `typl` 中也可以使用。直譯執行中的 `(thread (f ...))` 會當場編譯 `f`，然後在專用執行緒上執行。
-- `Thread::spawn` 接受函式值，所以不會當場編譯。在 `typl` 正在直譯執行的頂層呼叫它會 panic
-  （[語法參考 12.2](../syntax.md#122-thread--在專用-os-執行緒上啟動任務)）。在編譯過的函式中可以使用。
+- 在 `typl` 中也可以使用。直譯執行中的 `(thread (f ...))` 與 `Thread::spawn` 會當場編譯要執行的函式，然後在專用執行緒上執行。
+  參照外部區域變數的 `lambda` 無法直接編譯，會 panic（[語法參考 12.2](../syntax.md#122-thread--在專用-os-執行緒上啟動任務)）。
+  在編譯過的函式中建立的 `lambda` 可以傳入。
 
 ## 8. 沒有的東西
 

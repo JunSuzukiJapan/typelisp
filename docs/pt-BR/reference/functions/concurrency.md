@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Tarefas e canais
 
 O vocabulário das tarefas (threads leves). `task` e `thread`, que as iniciam, e `select`, que espera várias
@@ -166,12 +166,11 @@ contrapartida de `Task<T>`.
 
 - Chamar uma função C bloqueante (`defffi`) para só aquela thread.
 - Um `task` dentro de uma `thread` é executado como uma tarefa comum em outras threads.
-- Também pode ser usado no `typl`. Ao interpretar, `(thread (f ...))` compila `f` na hora e então a executa na
-  thread dedicada.
-- `Thread::spawn` recebe um valor de função, então não compila na hora. Chamá-lo a partir de um nível
-  superior que o `typl` está interpretando causa panic
+- Também pode ser usado no `typl`. Ao interpretar, `(thread (f ...))` e `Thread::spawn` compilam na hora a
+  função a executar e então a executam na thread dedicada. Uma `lambda` que se refere a variáveis locais de fora
+  não pode ser compilada sozinha e causa panic
   ([Referência de sintaxe 12.2](../syntax.md#122-thread--iniciar-uma-tarefa-em-uma-thread-de-so-dedicada)).
-  Pode ser usado de dentro de funções compiladas.
+  Uma `lambda` criada dentro de uma função compilada pode ser passada.
 
 ## 8. O que não existe
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -119,11 +119,10 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 AOT 컴파일하는 파일에 쓸 수 있는 것
 
-- 시작점 파일의 최상위에 쓸 수 있는 것은 정의(`defun` `defmethod` `defvar` `defconstant` `defstruct` `defenum`
-  `deftype` `deftrait` `impl` `defffi`, `(unsafe (def-c-struct ...))`)와 `use` `module`뿐이다. `(println ...)` 같은
-  최상위 식은 마지막의 `(main)`을 빼고 쓸 수 없다. 처리는 `main` 안에 쓴다.
-- 시작점 파일에는 `defmacro`를 쓸 수 없다. 매크로는 다른 모듈에서 `(pub defmacro ...)`로 정의하고 `use`한다.
-- `defsignature`를 포함한 파일은 시작점 파일이든 `use`되는 모듈이든 AOT 컴파일할 수 없다.
+- 시작점 파일의 최상위에 쓸 수 있는 것은 정의(`defun` `defmethod` `defvar` `defparameter` `defconstant`
+  `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`,
+  `(unsafe (def-c-struct ...))`)와 `use` `module`뿐이다. `(println ...)` 같은 최상위 식은 마지막의
+  `(main)`을 빼고 쓸 수 없다. 처리는 `main` 안에 쓴다.
 - 인수를 받지 않는 `main`이 없으면 컴파일은 오류가 된다.
 - `use`한 모듈의 파일도 컴파일되어 하나의 실행 파일로 합쳐진다.
 - `defffi`의 `:library`로 지정한 라이브러리는 자동으로 링크된다([C FFI](ffi.md)).

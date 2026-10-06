@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Компиляция
 
 Если ничего специально не делать, программы typelisp выполняются интерпретатором. Кроме того, есть два способа
@@ -123,14 +123,10 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 Что может содержать файл для AOT-компиляции
 
-- Верхний уровень входного файла может содержать только определения (`defun` `defmethod` `defvar` `defconstant`
-  `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`, `(unsafe (def-c-struct ...))`), а также `use` и
-  `module`. Выражения верхнего уровня вроде `(println ...)` не допускаются, кроме завершающего `(main)`. Размещайте
-  работу внутри `main`.
-- `defmacro` нельзя писать во входном файле. Определяйте макросы в другом модуле через `(pub defmacro ...)` и
-  подключайте их через `use`.
-- Файл, содержащий `defsignature`, нельзя скомпилировать AOT, будь то входной файл или подключённый через `use`
-  модуль.
+- Верхний уровень входного файла может содержать только определения (`defun` `defmethod` `defvar`
+  `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
+  `impl` `defffi`, `(unsafe (def-c-struct ...))`), а также `use` и `module`. Выражения верхнего уровня
+  вроде `(println ...)` не допускаются, кроме завершающего `(main)`. Размещайте работу внутри `main`.
 - Без `main` без аргументов компиляция завершается ошибкой.
 - Файлы подключённых через `use` модулей тоже компилируются и объединяются в один исполняемый файл.
 - Библиотеки, указанные через `:library` в `defffi`, компонуются автоматически ([FFI для C](ffi.md)).

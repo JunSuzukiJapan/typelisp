@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1737,14 +1737,13 @@ blockierenden C-Funktion (`defffi`) darin nur diesen Thread an, und andere Tasks
 - Die Panic-Regeln sind dieselben wie bei `task` (der ganze Prozess geht unter). Kehrt `main` zurück, endet der
   Prozess.
 - Um es als Funktion zu schreiben, verwendet man `(Thread::spawn (lambda () T body...))` (Rusts
-  `std::thread::spawn`). Der übergebene Funktionswert muss kompiliert sein. Von einer obersten Ebene aus
-  aufgerufen, die `typl` interpretiert, löst es vor dem Start des Threads einen Panic aus, genauso wie ein
-  `(panic ...)`, ob ein `lambda` oder eine benannte Funktion übergeben wird. Aus kompilierten Funktionen heraus
-  ist es verwendbar.
+  `std::thread::spawn`). Auch eine benannte Funktion kann übergeben werden.
 - **Auf einem eigenen Thread läuft nur kompilierter Code.** Wertet `typl` beim Interpretieren `(thread (f ...))`
-  aus, kompiliert es `f` (und was es aufruft) an Ort und Stelle, bevor es ausgeführt wird. Ein Aufruf, der sich
-  nicht kompilieren lässt (der Wert eines interpretierten `lambda`, die Konstruktion einer Struktur usw.), ist vor
-  dem Start des Threads ein Panic, der wie ein `(panic ...)` behandelt wird.
+  oder `Thread::spawn` aus, kompiliert es die auszuführende Funktion (und was sie aufruft) an Ort und Stelle,
+  bevor es sie ausführt. Was sich nicht kompilieren lässt (ein `lambda`, das auf lokale Variablen außerhalb
+  verweist, die Konstruktion einer Struktur usw.), ist vor dem Start des Threads ein Panic, der wie ein
+  `(panic ...)` behandelt wird. Ein `lambda`, das auf lokale Variablen verweist, lässt sich übergeben, wenn es
+  innerhalb einer kompilierten Funktion erzeugt wird.
 
 ### 12.3 `select` — auf mehrere Kanaloperationen gleichzeitig warten
 

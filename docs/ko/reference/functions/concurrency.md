@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # 태스크와 채널
 
 태스크(경량 스레드)의 어휘. 태스크를 시작하는 `task`와 `thread`, 여러 가지를 기다리는 `select`는 특수 형식이며
@@ -154,10 +154,9 @@ Go의 `time.After`. `select`의 타임아웃 갈래에 그대로 쓸 수 있다
 
 - 블로킹하는 C 함수(`defffi`)를 호출해도 멈추는 것은 그 스레드뿐이다.
 - `thread` 안의 `task`는 보통의 태스크로 다른 스레드에서 실행된다.
-- `typl`에서도 쓸 수 있다. 인터프리트 중의 `(thread (f ...))`는 그 자리에서 `f`를 컴파일한 뒤 전용 스레드에서 실행한다.
-- `Thread::spawn`은 함수 값을 받으므로 그 자리에서 컴파일하지 않는다. `typl`이 인터프리트하는 최상위에서 호출하면
-  panic한다([문법 레퍼런스 12.2](../syntax.md#122-thread--전용-os-스레드에서-태스크-시작)). 컴파일된 함수 안에서는 쓸 수
-  있다.
+- `typl`에서도 쓸 수 있다. 인터프리트 중의 `(thread (f ...))`와 `Thread::spawn`은 그 자리에서 실행할 함수를 컴파일한 뒤
+  전용 스레드에서 실행한다. 바깥의 지역 변수를 참조하는 `lambda`는 그대로는 컴파일할 수 없어 panic한다
+  ([문법 레퍼런스 12.2](../syntax.md#122-thread--전용-os-스레드에서-태스크-시작)). 컴파일된 함수 안에서 만든 `lambda`는 넘길 수 있다.
 
 ## 8. 없는 것
 

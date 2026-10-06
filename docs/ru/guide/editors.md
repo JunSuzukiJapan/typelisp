@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/editors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/editors.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Интеграция с редакторами (typl-lsp)
 
 `typl-lsp` — языковой сервер typelisp. Подключённый к редактору, поддерживающему LSP (Language Server Protocol), он
@@ -47,7 +47,7 @@ npx @vscode/vsce package      # создаёт .vsix
 | `typelisp.languageServer.path` | (пусто) | Путь к `typl-lsp` |
 
 `Ctrl+Alt+R` сохраняет редактируемый файл и запускает его через `typl`, а `Ctrl+Alt+Z` запускает REPL. Подробнее см.
-[README расширения VS Code](../../../editor/vscode/README.md) (на японском).
+[README расширения VS Code](../../../editor/vscode/README_ru.md).
 
 ## 3. Emacs
 
@@ -79,11 +79,12 @@ npx @vscode/vsce package      # создаёт .vsix
 (add-hook 'typelisp-mode-hook #'lsp)
 ```
 
-eglot не поддерживает семантические токены, поэтому при использовании eglot `typelisp-mode` сам раскрашивает имена
-типов. С `lsp-mode` установите `lsp-semantic-tokens-enable` в `t`.
+eglot из Emacs 31 и новее сам раскрашивает имена типов (семантические токены). eglot из Emacs 30 и старше их не
+поддерживает, поэтому имена типов вместо него раскрашивает `typelisp-mode`. С `lsp-mode` установите
+`lsp-semantic-tokens-enable` в `t`.
 
 `C-c C-c` запускает редактируемый файл, а `C-c C-z` запускает REPL. Подробнее см.
-[README typelisp-mode](../../../editor/emacs/README.md) (на японском).
+[README typelisp-mode](../../../editor/emacs/README_ru.md).
 
 ## 4. Другие редакторы
 

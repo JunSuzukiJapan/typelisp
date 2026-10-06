@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1697,13 +1697,13 @@ bloquante (`defffi`) à l'intérieur n'arrête donc que ce thread, et les autres
 - Les règles de panic sont les mêmes que pour `task` (tout le processus s'arrête). Quand `main` revient, le processus
   se termine.
 - Pour l'écrire comme une fonction, utilisez `(Thread::spawn (lambda () T body...))` (le `std::thread::spawn` de
-  Rust). La valeur fonctionnelle passée doit être compilée. Appelé depuis un niveau supérieur que `typl` interprète, il
-  déclenche un panic avant de lancer le thread, comme un `(panic ...)`, qu'on lui donne un `lambda` ou une fonction
-  nommée. Il est utilisable depuis des fonctions compilées.
-- **Seul du code compilé s'exécute sur un thread dédié.** Quand `typl` évalue `(thread (f ...))` en interprétation, il
-  compile `f` (et ce qu'elle appelle) sur place avant de l'exécuter. Un appel qui ne peut pas être compilé (la valeur
-  d'un `lambda` interprété, la construction d'une structure, etc.) est, avant le lancement du thread, un panic traité
-  comme un `(panic ...)`.
+  Rust). On peut aussi passer une fonction nommée.
+- **Seul du code compilé s'exécute sur un thread dédié.** Quand `typl` évalue `(thread (f ...))` ou
+  `Thread::spawn` en interprétation, il compile sur place la fonction à exécuter (et ce qu'elle appelle) avant de
+  l'exécuter. Ce qui ne peut pas être compilé (un `lambda` qui fait référence à des variables locales extérieures,
+  la construction d'une structure, etc.) est, avant le lancement du thread, un panic traité comme un
+  `(panic ...)`. Un `lambda` qui fait référence à des variables locales peut être passé s'il est créé dans une
+  fonction compilée.
 
 ### 12.3 `select` — attendre plusieurs opérations de canal à la fois
 

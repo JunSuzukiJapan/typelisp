@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -1478,12 +1478,12 @@ Go의 `go f(x)`와 같은 규칙이며, thunk가 아니라 호출 형식을 받�
 - `Thread<T>`는 `Task<T>`의 짝이다. `join`은 `wait`처럼 **호출한 태스크**를 멈추며 값은 캐시된다. 태스크가 끝나면 스레드도
   끝난다.
 - panic의 규칙은 `task`와 같다(프로세스 전체가 멈춘다). `main`이 반환하면 프로세스가 끝난다.
-- 함수로 쓰려면 `(Thread::spawn (lambda () T body...))`(Rust의 `std::thread::spawn`)를 쓴다. 넘기는 함수 값은 컴파일되어
-  있어야 한다. `typl`이 인터프리트하는 최상위에서 호출하면 `lambda`든 이름 붙은 함수든 스레드를 시작하기 전에 `(panic ...)`과
-  똑같이 다루어지는 panic이 된다. 컴파일된 함수 안에서는 쓸 수 있다.
-- **전용 스레드에서 실행되는 것은 컴파일된 코드뿐이다.** `typl`이 인터프리트 중에 `(thread (f ...))`를 평가하면 그 자리에서
-  `f`(와 그것이 호출하는 것)를 컴파일한 뒤 실행한다. 컴파일할 수 없는 호출 — 인터프리트되는 `lambda`의 값, 구조체의 생성
-  등 — 은 스레드를 시작하기 전에 `(panic ...)`과 똑같이 다루어지는 panic이 된다.
+- 함수로 쓰려면 `(Thread::spawn (lambda () T body...))`(Rust의 `std::thread::spawn`)를 쓴다. 이름 붙은 함수를
+  넘겨도 된다.
+- **전용 스레드에서 실행되는 것은 컴파일된 코드뿐이다.** `typl`이 인터프리트 중에 `(thread (f ...))`나 `Thread::spawn`을
+  평가하면 그 자리에서 실행할 함수(와 그것이 호출하는 것)를 컴파일한 뒤 실행한다. 컴파일할 수 없는 것 — 바깥의 지역 변수를
+  참조하는 `lambda`, 구조체의 생성 등 — 은 스레드를 시작하기 전에 `(panic ...)`과 똑같이 다루어지는 panic이 된다. 지역 변수를
+  참조하는 `lambda`도 컴파일된 함수 안에서 만들면 넘길 수 있다.
 
 ### 12.3 `select` — 여러 채널 연산을 동시에 기다리기
 

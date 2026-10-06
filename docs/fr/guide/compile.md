@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -128,13 +128,10 @@ nouveau.
 ### 3.3 Ce que peut contenir un fichier compilé en AOT
 
 - Le niveau supérieur du fichier d'entrée ne peut contenir que des définitions (`defun` `defmethod` `defvar`
-  `defconstant` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`, `(unsafe (def-c-struct ...))`) ainsi
-  que `use` et `module`. Les expressions de niveau supérieur comme `(println ...)` ne sont pas permises, à
-  l'exception du `(main)` final. Mettez le travail dans `main`.
-- `defmacro` ne peut pas s'écrire dans le fichier d'entrée. Définissez les macros dans un autre module avec
-  `(pub defmacro ...)` et importez-les avec `use`.
-- Un fichier contenant `defsignature` ne peut pas être compilé en AOT, qu'il s'agisse du fichier d'entrée ou d'un
-  module importé avec `use`.
+  `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
+  `impl` `defffi`, `(unsafe (def-c-struct ...))`) ainsi que `use` et `module`. Les expressions de niveau
+  supérieur comme `(println ...)` ne sont pas permises, à l'exception du `(main)` final. Mettez le travail
+  dans `main`.
 - Sans `main` sans argument, la compilation échoue avec une erreur.
 - Les fichiers des modules importés avec `use` sont aussi compilés et réunis dans un seul exécutable.
 - Les bibliothèques nommées avec `:library` dans `defffi` sont liées automatiquement ([FFI C](ffi.md)).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1676,14 +1676,13 @@ ser usados como estão.
 - `Thread<T>` é a contrapartida de `Task<T>`. Como `wait`, `join` para **a tarefa que chama**, e o valor fica em
   cache. Quando a tarefa termina, a thread também termina.
 - As regras de panic são as mesmas de `task` (o processo inteiro cai). Quando `main` retorna, o processo termina.
-- Para escrevê-lo como função, use `(Thread::spawn (lambda () T body...))` (o `std::thread::spawn` do Rust). O valor
-  de função passado precisa estar compilado. Chamado a partir de um nível superior que o `typl` está interpretando,
-  ele causa panic antes de iniciar a thread, tratado do mesmo jeito que um `(panic ...)`, seja recebendo uma
-  `lambda` ou uma função nomeada. Pode ser usado de dentro de funções compiladas.
-- **Em uma thread dedicada só é executado código compilado.** Quando o `typl` avalia `(thread (f ...))` enquanto
-  interpreta, ele compila `f` (e o que ela chama) na hora antes de executá-la. Uma chamada que não pode ser
-  compilada (o valor de uma `lambda` interpretada, construir uma estrutura etc.) é, antes de a thread ser
-  iniciada, um panic tratado do mesmo jeito que um `(panic ...)`.
+- Para escrevê-lo como função, use `(Thread::spawn (lambda () T body...))` (o `std::thread::spawn` do Rust). Também
+  é possível passar uma função nomeada.
+- **Em uma thread dedicada só é executado código compilado.** Quando o `typl` avalia `(thread (f ...))` ou
+  `Thread::spawn` enquanto interpreta, ele compila na hora a função a executar (e o que ela chama) antes de
+  executá-la. O que não pode ser compilado (uma `lambda` que se refere a variáveis locais de fora, construir uma
+  estrutura etc.) é, antes de a thread ser iniciada, um panic tratado do mesmo jeito que um `(panic ...)`. Uma
+  `lambda` que se refere a variáveis locais pode ser passada se for criada dentro de uma função compilada.
 
 ### 12.3 `select` — esperar várias operações de canal ao mesmo tempo
 

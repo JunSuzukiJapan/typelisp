@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/editors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/editors.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # 에디터 연동 (typl-lsp)
 
 `typl-lsp`는 typelisp의 언어 서버이다. LSP(Language Server Protocol)를 지원하는 에디터에 연결하면 편집 중인 파일에
@@ -45,7 +45,7 @@ npx @vscode/vsce package      # .vsix가 만들어진다
 | `typelisp.languageServer.path` | (비어 있음) | `typl-lsp`의 경로 |
 
 `Ctrl+Alt+R`은 편집 중인 파일을 저장하고 `typl`로 실행하며, `Ctrl+Alt+Z`는 REPL을 시작한다. 자세한 내용은
-[VS Code 확장의 README](../../../editor/vscode/README.md)(일본어)를 참고한다.
+[VS Code 확장의 README](../../../editor/vscode/README_ko.md)를 참고한다.
 
 ## 3. Emacs
 
@@ -77,11 +77,11 @@ npx @vscode/vsce package      # .vsix가 만들어진다
 (add-hook 'typelisp-mode-hook #'lsp)
 ```
 
-eglot은 시맨틱 토큰을 지원하지 않으므로 eglot을 쓸 때는 `typelisp-mode`가 대신 타입 이름을 색칠한다. `lsp-mode`에서는
-`lsp-semantic-tokens-enable`을 `t`로 한다.
+Emacs 31 이후의 eglot은 타입 이름 색칠(시맨틱 토큰)을 직접 한다. Emacs 30 이전의 eglot은 이를 지원하지 않으므로
+`typelisp-mode`가 대신 타입 이름을 색칠한다. `lsp-mode`에서는 `lsp-semantic-tokens-enable`을 `t`로 한다.
 
 `C-c C-c`는 편집 중인 파일을 실행하고, `C-c C-z`는 REPL을 시작한다. 자세한 내용은
-[typelisp-mode의 README](../../../editor/emacs/README.md)(일본어)를 참고한다.
+[typelisp-mode의 README](../../../editor/emacs/README_ko.md)를 참고한다.
 
 ## 4. 그 밖의 에디터
 

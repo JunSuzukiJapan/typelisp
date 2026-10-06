@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # Tareas y canales
 
 El vocabulario de las tareas (hilos ligeros). `task` y `thread`, que las inician, y `select`, que espera
@@ -166,12 +166,11 @@ contrapartida de `Task<T>`.
 
 - Llamar a una función de C bloqueante (`defffi`) detiene solo ese hilo.
 - Un `task` dentro de un `thread` se ejecuta como una tarea normal en otros hilos.
-- También se puede usar en `typl`. Al interpretar, `(thread (f ...))` compila `f` en el acto y después la
-  ejecuta en el hilo dedicado.
-- `Thread::spawn` recibe un valor de función, así que no compila en el acto. Llamarlo desde un nivel
-  superior que `typl` está interpretando provoca un panic
-  ([Referencia de sintaxis 12.2](../syntax.md#122-thread--iniciar-una-tarea-en-un-hilo-de-so-dedicado)). Se
-  puede usar desde dentro de funciones compiladas.
+- También se puede usar en `typl`. Al interpretar, `(thread (f ...))` y `Thread::spawn` compilan en el acto la
+  función que se va a ejecutar y después la ejecutan en el hilo dedicado. Una `lambda` que hace referencia a
+  variables locales de fuera no se puede compilar por sí sola y provoca un panic
+  ([Referencia de sintaxis 12.2](../syntax.md#122-thread--iniciar-una-tarea-en-un-hilo-de-so-dedicado)). Una `lambda` creada
+  dentro de una función compilada sí se puede pasar.
 
 ## 8. Lo que no hay
 
