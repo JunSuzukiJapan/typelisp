@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: README_JP.md @ 77847779b0da1ec86dc8bcc6946740495c50f7a4 -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md)
