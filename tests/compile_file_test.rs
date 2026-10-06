@@ -2100,3 +2100,60 @@ fn an_aot_executable_refuses_a_typed_pointer_into_c_memory() {
     assert_eq!(code, 1, "stderr was: {}", err);
     assert!(err.contains("does not point into memory an `unsafe` allocated"), "stderr was: {}", err);
 }
+
+/// Every definition form an entry file may hold, including the three that
+/// leave nothing to emit (`defmacro`, `defsignature`) or carry a trailing
+/// field the startup sequence used to refuse (`defparameter`). A macro has
+/// to be usable by the very next form, as under `typl`.
+#[test]
+fn an_entry_file_may_define_macros_signatures_and_parameters() {
+    let src = r#"
+(defparameter (base int) 40)
+(defmacro twice (x) `(* 2 ,x))
+(defsignature odd2 (int) bool)
+(defun even2 ((n int)) bool (if (= n 0) true (odd2 (- n 1))))
+(defun odd2 ((n int)) bool (if (= n 0) false (even2 (- n 1))))
+(defun main () int
+  (if (even2 10) (+ base (twice 1)) 0))
+(main)
+"#;
+    assert_eq!(compile_and_run("macro_sig_param", src), 42);
+}
+
+/// `(compile-file ...)` evaluated by a running program leaves that program
+/// working: the build's own environment must not replace the caller's
+/// compiled-global table, which the printer reads on the next `format`.
+#[test]
+fn compile_file_from_a_running_program_leaves_it_working() {
+    use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
+    let dir = tmp_dir();
+    let src_path = dir.join("from_session.typl");
+    let out_path = dir.join("from_session");
+    std::fs::write(&src_path, "(defun main () int 7)\n(main)\n").expect("failed to write test source file");
+
+    let mut heap = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut heap, &mut chk, &mut interp);
+    load_compiler(&mut heap, &mut chk, &mut interp);
+    let src = format!(
+        "(compile-file {:?} {:?}) (compile-file {:?} {:?}) (format false \"~a\" 41)",
+        src_path.to_str().unwrap(),
+        out_path.to_str().unwrap(),
+        src_path.to_str().unwrap(),
+        out_path.to_str().unwrap()
+    );
+    let mut last = Value::Empty;
+    for v in Reader::new().read_all(&mut heap, &src).expect("read failed") {
+        let tl = chk.check_form(&mut heap, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut heap, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        Value::Str(id) => assert_eq!(heap.string(id).to_string(), "41"),
+        other => panic!("expected a string, got {:?}", other),
+    }
+    let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
+    assert_eq!(status.code(), Some(7));
+}
