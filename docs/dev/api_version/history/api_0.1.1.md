@@ -1,11 +1,11 @@
-# ABI バージョン 1
+# ABI バージョン 0.1.1
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 1 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.1.1 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `f67816093c3c9446`
+内容ハッシュ (FNV-1a 64): `312e2b147e06402d`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -741,6 +741,8 @@
 | `rt_sexpr_eql` | `i64 (ptr, i32)` |
 | `rt_sexpr_equal` | `i64 (ptr, i32)` |
 | `rt_sexpr_equalp` | `i64 (ptr, i32)` |
+| `rt_sexpr_f32` | `i64 (ptr, i32)` |
+| `rt_sexpr_f64` | `i64 (ptr, i32)` |
 | `rt_sexpr_i16` | `i64 (ptr, i32)` |
 | `rt_sexpr_i32` | `i64 (ptr, i32)` |
 | `rt_sexpr_i8` | `i64 (ptr, i32)` |
@@ -1700,8 +1702,8 @@
 | `sexpr-char` | `rt_sexpr_char` | `(Option<Sexpr>) -> char` |
 | `sexpr-cons` | `rt_cons` | `(Option<Sexpr>, Option<Sexpr>) -> Option<Sexpr>` |
 | `sexpr-consp` | `rt_consp` | `(Option<Sexpr>) -> bool` |
-| `sexpr-f32` | `rt_f32_value` | `(Option<Sexpr>) -> f32` |
-| `sexpr-f64` | `rt_f64_value` | `(Option<Sexpr>) -> f64` |
+| `sexpr-f32` | `rt_sexpr_f32` | `(Option<Sexpr>) -> f32` |
+| `sexpr-f64` | `rt_sexpr_f64` | `(Option<Sexpr>) -> f64` |
 | `sexpr-i16` | `rt_sexpr_i16` | `(Option<Sexpr>) -> i16` |
 | `sexpr-i32` | `rt_sexpr_i32` | `(Option<Sexpr>) -> i32` |
 | `sexpr-i8` | `rt_sexpr_i8` | `(Option<Sexpr>) -> i8` |

@@ -3,10 +3,12 @@
 //! `scripts/regen-abi-version.sh`; `tests/abi_version_test.rs` fails until it
 //! has been.
 //!
-//! When the description differs from the newest document, this writes it as
-//! `history/api_<N+1>.md`, copies that to `latest_api_signature.md`, and raises
-//! the literal in `typelisp-abi`'s `abi_version!`. The history file is written
-//! first and never overwritten: a version's document is kept for good.
+//! When the description differs from the newest document, or the typelisp
+//! version's MAJOR.MINOR is no longer the ABI version's, this writes it as
+//! `history/api_<next>.md` (`AbiVersion::next`), copies that to
+//! `latest_api_signature.md`, and rewrites the numbers in `typelisp-abi`'s
+//! `with_abi_version!`. The history file is written first and never
+//! overwritten: a version's document is kept for good.
 //!
 //! `--bump` writes the next version even when the description is unchanged:
 //! for a change the runtime has to agree with that no table shows (see
@@ -16,14 +18,16 @@
 
 use std::path::Path;
 
-use typelisp::compile::abi_signature::{describe, document, history_file, parse_document, DOC_DIR, LATEST_FILE};
+use typelisp::compile::abi_signature::{
+    describe, document, history_file, parse_document, AbiVersion, DOC_DIR, LATEST_FILE,
+};
 
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let dir = root.join(DOC_DIR);
     let latest_path = dir.join(LATEST_FILE);
     let description = describe();
-    let current = typelisp_abi::ABI_VERSION;
+    let current = AbiVersion::current();
     let bump = match std::env::args().nth(1).as_deref() {
         None => false,
         Some("--bump") => true,
@@ -48,11 +52,11 @@ fn main() {
                 latest,
                 current
             );
-            if body == description && !bump {
+            if body == description && !bump && current.is_of_this_package() {
                 println!("ABI version {} still describes the archive; nothing written", current);
                 return;
             }
-            current + 1
+            current.next()
         }
     };
 
@@ -80,11 +84,13 @@ fn main() {
     println!("wrote ABI version {} ({})", version, history_path.display());
 }
 
-/// Rewrites `abi_version!`'s literal in `lib` from `from` to `to`.
-fn set_source_version(lib: &Path, from: u32, to: u32) {
+/// Rewrites `with_abi_version!`'s numbers in `lib` from `from` to `to`.
+fn set_source_version(lib: &Path, from: AbiVersion, to: AbiVersion) {
     let source = std::fs::read_to_string(lib).unwrap_or_else(|e| panic!("failed to read {}: {}", lib.display(), e));
-    let old = format!("macro_rules! abi_version {{ () => {{ {} }}; }}", from);
-    let new = format!("macro_rules! abi_version {{ () => {{ {} }}; }}", to);
+    let line = |v: AbiVersion| {
+        format!("macro_rules! with_abi_version {{ ($then:ident) => {{ $then!({}, {}, {}) }}; }}", v.major, v.minor, v.patch)
+    };
+    let (old, new) = (line(from), line(to));
     assert_eq!(source.matches(&old).count(), 1, "{} does not contain `{}` exactly once", lib.display(), old);
     std::fs::write(lib, source.replace(&old, &new)).unwrap_or_else(|e| panic!("failed to write {}: {}", lib.display(), e));
 }

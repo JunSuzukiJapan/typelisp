@@ -22,15 +22,26 @@
 
 pub mod dribble;
 
-// The ABI version: which `docs/dev/api_version/history/api_<N>.md` describes
-// everything compiled code assumes about the archive it links. A literal in a
-// macro rather than a `const`, because the symbol name below is built from it
-// and `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
-// rewrites it, and only when that description changed.
-macro_rules! abi_version { () => { 2 }; }
+// The ABI version: which `docs/dev/api_version/history/api_<VERSION>.md`
+// describes everything compiled code assumes about the archive it links.
+// Written `MAJOR, MINOR, PATCH`: MAJOR.MINOR is the typelisp version's, and
+// PATCH counts the descriptions written under it. Literals in a macro rather
+// than a `const`, because the symbol name below is built from them and
+// `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
+// rewrites them, and only when that description changed or the typelisp
+// version's MAJOR.MINOR did.
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 1, 1) }; }
 
-/// See the comment on `abi_version!` above.
-pub const ABI_VERSION: u32 = abi_version!();
+macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
+
+macro_rules! marker_symbol {
+    ($major:literal, $minor:literal, $patch:literal) => {
+        concat!("typelisp_abi_v", $major, "_", $minor, "_", $patch)
+    };
+}
+
+/// See the comment on `with_abi_version!` above. `MAJOR.MINOR.PATCH`.
+pub const ABI_VERSION: &str = with_abi_version!(dotted);
 
 /// The symbol an archive of ABI version [`ABI_VERSION`] defines, and every
 /// AOT executable refers to (`compile::aot::build_main_wrapper`).
@@ -38,9 +49,9 @@ pub const ABI_VERSION: u32 = abi_version!();
 /// A reference rather than a value read and compared at startup: linking an
 /// archive of another version fails with this name undefined, before there is
 /// an executable to run, and there is no path to the program that skips it.
-pub const ABI_SYMBOL: &str = concat!("typelisp_abi_v", abi_version!());
+pub const ABI_SYMBOL: &str = with_abi_version!(marker_symbol);
 
-#[export_name = concat!("typelisp_abi_v", abi_version!())]
+#[export_name = with_abi_version!(marker_symbol)]
 pub static ABI_MARKER: u8 = 0;
 
 use std::cell::Cell;
