@@ -1,7 +1,7 @@
 # typelisp (VS Code)
 
 typelisp ソース（`.typl`）を編集するための VS Code 拡張。
-Emacs 版は [../emacs/](../emacs/README.md)。両者は同じキーワード表・同じインデント規則を
+Emacs 版は [../emacs/](../emacs/README_JP.md)。両者は同じキーワード表・同じインデント規則を
 持ち、そのことは `cargo test --test editor_keyword_sync_test` で機械的に検証されている（後述）。
 
 ## 機能
@@ -81,7 +81,7 @@ cargo build --release --bin typl-lsp
 ```
 
 `use` によるファイルをまたぐ参照はプロジェクトルートの `typelisp.toml` を上方探索して解決される
-（詳細は [docs/ja/reference/syntax.md](../../docs/ja/reference/syntax.md#311-ファイルとモジュールの対応複数ファイルのプロジェクト) の「ファイルとモジュールの対応」節）。
+（詳細は [構文リファレンス 3.11](../../docs/ja/reference/syntax.md#311-ファイルとモジュールの対応複数ファイルのプロジェクト)）。
 
 ## タスクの problem matcher
 
@@ -107,7 +107,7 @@ cargo build --release --bin typl-lsp
 ```sh
 npm run compile   # tsc
 npm run watch     # 監視ビルド
-npm test          # node --test（文法・インデント・シンボル・型参照・マニフェスト、46件）
+npm test          # node --test（文法・インデント・シンボル・型参照・マニフェスト）
 ```
 
 テストは `vscode` モジュールを必要としない部分だけを対象にしている。そのために
@@ -120,17 +120,17 @@ npm test          # node --test（文法・インデント・シンボル・型�
   この差は実エンジンで踏まないと見つからない。
 - `src/test/indent.test.ts` — `examples/` の全 `.typl` ファイルについて、
   **インデントを全部潰してから復元し、コミット済みの内容とバイト単位で一致すること**を要求する。
-  Emacs モードも同じ 22 ファイルで同じ基準を満たしており、これが「2つのエディタが一致する」を
+  Emacs モードも同じファイル群で同じ基準を満たしており、これが「2つのエディタが一致する」を
   検証済みの主張にしている。
   加えて `src/test/fixtures/emacs-indent-reference.txt` は、Emacs の `typelisp-mode` バッファで
-  `indent-region` を実際に走らせて採取した15ケースの参照出力。期待値が TS 実装の追認ではなく
+  `indent-region` を実際に走らせて採取した参照出力。期待値が TS 実装の追認ではなく
   **もう一方のエディタが実際に出す結果**なので、移植の忠実さがそのまま検証される
   （`let*` `do` `doiter` `labels` `impl` `pprint-logical-block` quote 接頭辞などを含む）。
 - `src/test/symbols.test.ts` — Outline の内容と、フォールバックの型参照検出。定義数は行頭の
-  定義形を数える独立した方法と完全一致することを要求する。型参照は `examples/` 全22ファイルで
-  Emacs 版のフォールバックと**同一の97箇所**を返すことを確認済み（両者の境界規則を意図的に
-  揃えてある。VS Code は lookbehind、Emacs は先行文字を1つ消費する形で同じ集合を表現）。
-- サーバ側の解決駆動トークン (`src/check/semantic.rs`) は
+  定義形を数える独立した方法と完全一致することを要求する。型参照の境界規則は Emacs 版の
+  フォールバックと意図的に揃えてある（VS Code は lookbehind、Emacs は先行文字を1つ消費する形で
+  同じ集合を表現）。
+- サーバ側の解決駆動トークン (`crates/typelisp-front/src/check/semantic.rs`) は
   `cargo test --test lsp_semantic_test` と `scripts/lsp-semantic-smoke.py`
   （実プロセスを stdio で駆動）が検証している。Emacs 側クライアントは
   `scripts/emacs-semantic-smoke.el` が実 eglot 接続で検証する。
@@ -141,14 +141,14 @@ npm test          # node --test（文法・インデント・シンボル・型�
 ### エディタ定義のドリフト検出
 
 キーワード表は Emacs 版と VS Code 版で二重管理になる。実装が進んだのにエディタ定義だけ
-古くなる事故（実際に一度起きた）を防ぐため、Rust 側にテストがある:
+古くなる事故を防ぐため、Rust 側にテストがある:
 
 ```sh
 cargo test --test editor_keyword_sync_test
 ```
 
 prelude を実際にロードしてレジストリを走査し、**どちらかのエディタが知らない名前**を報告する。
-特殊形は実行時表現を持たないので、`src/check/checker.rs` の
+特殊形は実行時表現を持たないので、`crates/typelisp-front/src/check/checker.rs` の
 `// SPECIAL-FORM DISPATCH BEGIN` / `END` の間から読み出す（このコメントは消さないこと）。
 失敗したら、報告された名前を**両方**のエディタ定義に追加する。
 

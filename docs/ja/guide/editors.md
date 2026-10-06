@@ -46,7 +46,7 @@ npx @vscode/vsce package      # .vsix ができる
 | `typelisp.languageServer.path` | （空） | `typl-lsp` のパス |
 
 `Ctrl+Alt+R` で編集中のファイルを保存して `typl` で実行し、`Ctrl+Alt+Z` で REPL を起動します。
-詳しくは [VS Code 拡張の README](../../../editor/vscode/README.md) を参照してください。
+詳しくは [VS Code 拡張の README](../../../editor/vscode/README_JP.md) を参照してください。
 
 ## 3. Emacs
 
@@ -78,11 +78,12 @@ npx @vscode/vsce package      # .vsix ができる
 (add-hook 'typelisp-mode-hook #'lsp)
 ```
 
-eglot は semantic tokens に対応していないので、eglot を使うときは `typelisp-mode` が代わりに
-型名を色分けします。`lsp-mode` では `lsp-semantic-tokens-enable` を `t` にしてください。
+Emacs 31 以降の eglot は、型名の色分け（semantic tokens）を自分で行います。Emacs 30 以前の
+eglot はこれに対応していないので、`typelisp-mode` が代わりに型名を色分けします。`lsp-mode` では
+`lsp-semantic-tokens-enable` を `t` にしてください。
 
 `C-c C-c` で編集中のファイルを実行し、`C-c C-z` で REPL を起動します。詳しくは
-[typelisp-mode の README](../../../editor/emacs/README.md) を参照してください。
+[typelisp-mode の README](../../../editor/emacs/README_JP.md) を参照してください。
 
 ## 4. その他のエディタ
 

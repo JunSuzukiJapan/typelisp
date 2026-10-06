@@ -374,8 +374,8 @@ typl --remove-lib  # 書き出したライブラリを削除する（--others / 
 
 ### エディタ連携
 
-- [Emacs（typelisp-mode）](editor/emacs/README.md)
-- [VS Code](editor/vscode/README.md)
+- [Emacs（typelisp-mode）](editor/emacs/README_JP.md)
+- [VS Code](editor/vscode/README_JP.md)
 
 ## ライセンス
 

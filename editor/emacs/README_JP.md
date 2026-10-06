@@ -1,7 +1,7 @@
 # typelisp-mode (Emacs)
 
 typelisp ソース（`.typl`）を編集するための Emacs メジャーモード。
-VS Code 版は [../vscode/](../vscode/README.md)。両者は同じキーワード表・同じインデント規則を
+VS Code 版は [../vscode/](../vscode/README_JP.md)。両者は同じキーワード表・同じインデント規則を
 持ち、そのことは `cargo test --test editor_keyword_sync_test` で機械的に検証されている（末尾参照）。
 
 ## 機能
@@ -91,7 +91,7 @@ cargo build --release --bin typl-lsp
 診断（構文/型エラーと再定義 warning を `textDocument/publishDiagnostics` で通知）・hover・
 定義ジャンプ（goto-definition）・補完（`:` をトリガ文字に登録済み）・semantic tokens に対応。
 `use` によるファイルをまたぐ参照は解決される（プロジェクトルートの `typelisp.toml` を上方探索、
-詳細は `docs/ja/reference/syntax.md` の「ファイルとモジュールの対応」節）。開いているエディタバッファの
+詳細は [構文リファレンス 3.11](../../docs/ja/reference/syntax.md#311-ファイルとモジュールの対応複数ファイルのプロジェクト)）。開いているエディタバッファの
 未保存編集は依存ファイル・依存元双方の診断に即座に反映される。
 
 ### 型名のハイライト（semantic tokens）
@@ -105,19 +105,21 @@ cargo build --release --bin typl-lsp
 
 クライアント側:
 
-- **`eglot`**: eglot 自体は semanticTokens に非対応（Emacs 29.3/30 同梱の `eglot.el` には
-  該当コードが1行も無い）。そこで **`typelisp-mode` が自前でリクエストを投げてオーバレイで
-  描画する**（`typelisp-semantic-tokens-mode`。eglot 接続時に自動で有効化）。
-  `scripts/emacs-semantic-smoke.el` が実際の eglot 接続で検証している
+- **`eglot`（Emacs 31 以降）**: eglot が自前で描画する（`eglot-semantic-tokens-mode`）。
+  `typelisp-mode` 側は手を出さない
+- **`eglot`（Emacs 30 以前）**: この版の eglot は semanticTokens を扱わない。そこで
+  **`typelisp-mode` が自前でリクエストを投げてオーバレイで描画する**
+  （`typelisp-semantic-tokens-mode`。eglot 接続時に自動で有効化）
 - **`lsp-mode`**: native 対応（`lsp-semantic-tokens-enable` を `t` に）。この場合
   `typelisp-mode` 側は手を出さない
 
-いずれのクライアントでもサーバが答えている間はバッファ内解決のフォールバックは退く
+`scripts/emacs-semantic-smoke.el` は実際に eglot で接続し、使っている Emacs で描画を受け持つ
+側を検証する。いずれのクライアントでもサーバが答えている間はバッファ内解決のフォールバックは退く
 （同じバッファを2つの規則が塗らないようにするため）。
 
 | 設定 | 既定 | 内容 |
 |---|---|---|
-| `typelisp-semantic-tokens` | `t` | eglot 利用時にサーバの semantic tokens で着色するか |
+| `typelisp-semantic-tokens` | `t` | Emacs 30 以前の eglot 利用時に、サーバの semantic tokens で着色するか |
 | `typelisp-semantic-tokens-idle-delay` | `0.6` | 編集後に再リクエストするまでのアイドル秒数（`eglot-send-changes-idle-time` より大きくすること） |
 
 ## 備考
@@ -130,22 +132,21 @@ cargo build --release --bin typl-lsp
   他の Lisp バッファのインデントを変えてしまうため。また typelisp の形は Emacs Lisp と
   同名でも形状が違う——`(defun NAME (PARAMS) RETTYPE ...)` はヘッダ要素が3つ、`if` は
   `else` 必須の3要素固定——ので、値も共有できない。
-  `examples/` 配下の 22 ファイルすべてが、`indent-region` で1バイトも変化しないことと、
+  `examples/` 配下のすべての `.typl` ファイルが、`indent-region` で1バイトも変化しないことと、
   インデントを全部潰してから再インデントすると元に戻ることを確認済み（VS Code 版も同じ
-  22 ファイルで同じ基準を満たしている）。
+  ファイル群で同じ基準を満たしている）。
 
 ## エディタ定義のドリフト検出
 
-キーワード表は VS Code 版と二重管理になる。実装が進んだのにエディタ定義だけ古くなる事故
-（実際に一度起きた——`bignum`/`ratio`/`format`/`pprint` 系/組み込みエラー型が数か月抜けていた）
-を防ぐため、Rust 側にテストがある:
+キーワード表は VS Code 版と二重管理になる。実装が進んだのにエディタ定義だけ古くなる事故を
+防ぐため、Rust 側にテストがある:
 
 ```sh
 cargo test --test editor_keyword_sync_test
 ```
 
 prelude を実際にロードしてレジストリを走査し、**どちらかのエディタが知らない名前**を報告する。
-特殊形は実行時表現を持たないので、`src/check/checker.rs` の
+特殊形は実行時表現を持たないので、`crates/typelisp-front/src/check/checker.rs` の
 `// SPECIAL-FORM DISPATCH BEGIN` / `END` の間から読み出す（このコメントは消さないこと）。
 失敗したら、報告された名前を**両方**のエディタ定義に追加する。
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Reports translations that have fallen behind the Japanese documents they
 # were made from. The Japanese text is the original: README_JP.md for
-# README.md, and docs/ja/<path> for docs/<language>/<path> in every other
-# language directory under docs/ (docs/dev/ is not translated).
+# README.md, docs/ja/<path> for docs/<language>/<path> in every other
+# language directory under docs/ (docs/dev/ is not translated), and each
+# editor's editor/<editor>/README_JP.md for its README.md (English) and
+# README_<language>.md (every other language docs/ has).
 #
 # Every translation starts with a line naming its source and the commit it was
 # translated from:
@@ -78,6 +80,34 @@ for dir in docs/*/; do
         source="docs/ja/${translation#docs/$lang/}"
         [ -f "$source" ] || report ORPHAN "$translation"
     done < <(find "docs/$lang" -name '*.md' | sort)
+done
+
+for source in editor/*/README_JP.md; do
+    [ -f "$source" ] || continue
+    editor_dir="$(dirname "$source")"
+    if [ -f "$editor_dir/README.md" ]; then
+        check "$editor_dir/README.md" "$source"
+    else
+        report MISSING "$editor_dir/README.md"
+    fi
+    for dir in docs/*/; do
+        lang="$(basename "$dir")"
+        case "$lang" in ja|dev|en) continue ;; esac
+        translation="$editor_dir/README_$lang.md"
+        if [ -f "$translation" ]; then
+            check "$translation" "$source"
+        else
+            report MISSING "$translation"
+        fi
+    done
+    while IFS= read -r translation; do
+        lang="${translation#"$editor_dir/README_"}"
+        lang="${lang%.md}"
+        case "$lang" in JP) continue ;; esac
+        if [ "$lang" = en ] || [ "$lang" = ja ] || [ "$lang" = dev ] || [ ! -d "docs/$lang" ]; then
+            report ORPHAN "$translation"
+        fi
+    done < <(find "$editor_dir" -maxdepth 1 -name 'README_*.md' | sort)
 done
 
 if [ "$problems" -gt 0 ]; then
