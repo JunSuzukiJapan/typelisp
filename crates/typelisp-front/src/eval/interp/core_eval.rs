@@ -1617,7 +1617,7 @@ pub(super) fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<Super
 }
 
 /// The names a parameter list `((SYM R)...)` binds, in order.
-fn param_names(heap: &Heap, params: Value) -> Result<Vec<SymRef>, EvalError> {
+pub(super) fn param_names(heap: &Heap, params: Value) -> Result<Vec<SymRef>, EvalError> {
     let ps = heap
         .list_to_vec(params)
         .map_err(|e| EvalError::Internal(format!("eval: parameter list: {}", e)))?;

@@ -52,7 +52,7 @@ Rust の `?` のような省略構文はありません。`Result` を返す関�
               ((ok y) (Result::ok (+ x y)))))))
 
 (add-ports "1" "2")       ; => (ok 3)
-(add-ports "1" "x")       ; => (err parse-int: invalid integer literal: "x")
+(add-ports "1" "x")       ; => (err "parse-int: invalid integer literal: \"x\"")
 ```
 
 失敗しないと分かっている場合や、失敗したら止まってよい小さなスクリプトでは、`unwrap` で中身を
@@ -163,7 +163,7 @@ error: main.typl:4:7: panic: index 3 out of range
   なりません。
 
   ```
-  error: ...: type error: catch: `bad-input` carries `int`, but this use carries `string`
+  error: ...: type error: type mismatch: expected `string`, found `int`
   ```
 
 - `throw` の先に同じタグの `catch` が無ければ、エラーになります。

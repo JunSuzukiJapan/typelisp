@@ -31,14 +31,80 @@ pub const DOC_DIR: &str = "docs/dev/api_version";
 /// The newest version's document, in [`DOC_DIR`].
 pub const LATEST_FILE: &str = "latest_api_signature.md";
 
+/// An ABI version: `MAJOR.MINOR.PATCH`, as [`typelisp_abi::ABI_VERSION`]
+/// writes it. MAJOR.MINOR is the typelisp version's; PATCH counts the
+/// descriptions written under that MAJOR.MINOR.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct AbiVersion {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+impl AbiVersion {
+    /// `None` for text other than three dot-separated numbers.
+    pub fn parse(text: &str) -> Option<AbiVersion> {
+        let mut parts = text.split('.').map(|part| part.parse::<u32>().ok());
+        let version = AbiVersion { major: parts.next()??, minor: parts.next()??, patch: parts.next()?? };
+        parts.next().is_none().then_some(version)
+    }
+
+    /// The version `typelisp-abi` names.
+    pub fn current() -> AbiVersion {
+        AbiVersion::parse(typelisp_abi::ABI_VERSION)
+            .unwrap_or_else(|| panic!("typelisp-abi names `{}`, not MAJOR.MINOR.PATCH", typelisp_abi::ABI_VERSION))
+    }
+
+    /// Whether this version belongs to the typelisp version being built:
+    /// whether the two have the same MAJOR.MINOR.
+    pub fn is_of_this_package(self) -> bool {
+        let (major, minor) = package_major_minor();
+        self.major == major && self.minor == minor
+    }
+
+    /// The version a new description written after this one takes: the next
+    /// PATCH under the same MAJOR.MINOR, or PATCH 0 under the typelisp
+    /// version's MAJOR.MINOR once that has moved on.
+    pub fn next(self) -> AbiVersion {
+        let next = if self.is_of_this_package() {
+            AbiVersion { patch: self.patch + 1, ..self }
+        } else {
+            let (major, minor) = package_major_minor();
+            AbiVersion { major, minor, patch: 0 }
+        };
+        assert!(next > self, "the typelisp version {} is older than ABI version {}", env!("CARGO_PKG_VERSION"), self);
+        next
+    }
+}
+
+impl std::fmt::Display for AbiVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}.{}", self.major, self.minor, self.patch)
+    }
+}
+
+/// MAJOR.MINOR of the typelisp version being built.
+fn package_major_minor() -> (u32, u32) {
+    let mut parts = env!("CARGO_PKG_VERSION").split('.').map(|part| part.parse::<u32>().ok());
+    match (parts.next().flatten(), parts.next().flatten()) {
+        (Some(major), Some(minor)) => (major, minor),
+        _ => panic!("the typelisp version `{}` does not start with MAJOR.MINOR", env!("CARGO_PKG_VERSION")),
+    }
+}
+
 /// Version `version`'s document, relative to [`DOC_DIR`].
-pub fn history_file(version: u32) -> String {
+pub fn history_file(version: AbiVersion) -> String {
     format!("history/api_{}.md", version)
+}
+
+/// The version a file in `history/` is the document of, from its name.
+pub fn history_file_version(name: &str) -> Option<AbiVersion> {
+    AbiVersion::parse(name.strip_prefix("api_")?.strip_suffix(".md")?)
 }
 
 /// The document for `version` whose description is `description`: a header
 /// naming the version and the description's hash, then the description.
-pub fn document(version: u32, description: &str) -> String {
+pub fn document(version: AbiVersion, description: &str) -> String {
     format!(
         "# ABI バージョン {}\n\n\
          `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。\n\n\
@@ -54,8 +120,8 @@ pub fn document(version: u32, description: &str) -> String {
 
 /// What [`document`] was given: the version, the hash its header records,
 /// and the description. `None` for text not shaped like one.
-pub fn parse_document(text: &str) -> Option<(u32, u64, &str)> {
-    let version = text.strip_prefix("# ABI バージョン ")?.split('\n').next()?.parse().ok()?;
+pub fn parse_document(text: &str) -> Option<(AbiVersion, u64, &str)> {
+    let version = AbiVersion::parse(text.strip_prefix("# ABI バージョン ")?.split('\n').next()?)?;
     let hash_at = text.find("内容ハッシュ (FNV-1a 64): `")? + "内容ハッシュ (FNV-1a 64): `".len();
     let hash = u64::from_str_radix(text.get(hash_at..hash_at + 16)?, 16).ok()?;
     let body = &text[text.find("\n## ")? + 1..];

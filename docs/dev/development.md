@@ -165,21 +165,24 @@ TYPELISP_LINK_TREE_RUNTIME=1 scripts/with-llvm-env.sh cargo build --release
 **ABI バージョン。** 生成コードがアーカイブについて仮定していること（`rt_*` シンボルと型、
 `typelisp-abi`・`typelisp-mem` の定数、well-known シンボルの番号、組み込み型の変種の順序と
 シグネチャ、型ごとの表現、ダンプ形式の版など）を `compile::abi_signature::describe` が
-書き出す。その記述が変わるたびに版を 1 つ上げる。アーカイブは `typelisp_abi_v<N>` を定義し、
-生成コードの `main` がそれを参照するので、版の違うアーカイブはリンクの時点で断られる。
+書き出す。版は `MAJOR.MINOR.PATCH` で、MAJOR.MINOR は typelisp 本体の版のものを使い、
+PATCH はその下で記述が変わるたびに 1 つ上げる。本体の MAJOR.MINOR が上がったら、記述が
+変わっていなくても、新しい MAJOR.MINOR の PATCH 0 に移る。たとえば本体 0.1.x に対して
+ABI は 0.1.y で、x と y は一致しなくてよい。アーカイブは `typelisp_abi_v<MAJOR>_<MINOR>_<PATCH>`
+を定義し、生成コードの `main` がそれを参照するので、版の違うアーカイブはリンクの時点で断られる。
 
 記述は `docs/dev/api_version/` に置く。
 
 - `latest_api_signature.md`: 最新の版。
-- `history/api_<N>.md`: 版ごとの記述。最新の版のものも含む。**削除も編集もしない。**
+- `history/api_<MAJOR.MINOR.PATCH>.md`: 版ごとの記述。最新の版のものも含む。**削除も編集もしない。**
 
-`abi_version_test` が、記述が最新の版と一致しないとき、履歴が欠けたり書き換えられたり
-しているとき、共有される定数が記述から漏れているときに落ちる。記述が変わったら次を走らせる。
-履歴に次の版を書き、`latest_api_signature.md` をその写しにし、`typelisp-abi` の
-`abi_version!` を書き換える。
+`abi_version_test` が、記述が最新の版と一致しないとき、版の MAJOR.MINOR が本体のものと
+違うとき、履歴が欠けたり書き換えられたりしているとき、共有される定数が記述から漏れているときに
+落ちる。記述か本体の MAJOR.MINOR が変わったら次を走らせる。履歴に次の版を書き、
+`latest_api_signature.md` をその写しにし、`typelisp-abi` の `with_abi_version!` を書き換える。
 
 ```sh
-scripts/regen-abi-version.sh          # 記述が変わったときだけ新しい版を書く
+scripts/regen-abi-version.sh          # 記述か本体の MAJOR.MINOR が変わったときだけ新しい版を書く
 scripts/regen-abi-version.sh --bump   # 記述に現れない変更のために版を上げる
 ```
 

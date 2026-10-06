@@ -423,3 +423,19 @@ fn member_specializes_at_two_element_types_in_one_program() {
                  (if (member 7 (iter vi)) (if (member \"x\" (iter vs)) 1 0) 0))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
+
+/// A literal searched for in a sequence of a fixed width is that width: the
+/// element type comes from the sequence, which is checked first, rather than
+/// the literal deciding on `int` and then disagreeing with it.
+#[test]
+fn a_literal_takes_the_element_type_of_the_sequence() {
+    let src = "(defun make-w () Vector<i32> (Vector::new))
+               (defvar (w Vector<i32>) (make-w))
+               (push w 1) (push w 2)";
+    assert_eq!(eval_string(&format!("{} (format false \"~a\" (find 2 (iter w)))", src)), "(some 2)");
+    assert_eq!(eval_string(&format!("{} (format false \"~a\" (position 2 (iter w)))", src)), "(some 1)");
+    assert_eq!(eval_string(&format!("{} (format false \"~a\" (count 1 (iter w)))", src)), "1");
+    // A literal the element type cannot hold is still refused.
+    let e = check(&format!("{} (find 300 (iter (the Vector<u8> (Vector::new))))", src)).map(|_| ()).unwrap_err();
+    assert!(e.to_string().contains("out of range for u8"), "{}", e);
+}

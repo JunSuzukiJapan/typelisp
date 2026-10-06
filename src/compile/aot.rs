@@ -149,6 +149,13 @@ fn collect_aot_item(
         // variants and a struct's field representations, which
         // `collect_struct_and_enum_types` hands to the compile bridge.
         "defenum" | "defstruct" => None,
+        // Nothing to emit for either. A macro has done all its work by the
+        // time anything is compiled: every use was expanded while its form
+        // was checked. `exec` still registers the expander, so an `eval` in
+        // the executable expands the same way the source did. A
+        // `defsignature` only promised the checker a definition that a
+        // later form supplies.
+        "defmacro" | "defsignature" => None,
         // A thunk to emit, but not through `add_compiled_function` — there is
         // no body to translate. Kept aside for the module-building step,
         // which puts it in before any body is translated (a compiled call
@@ -177,7 +184,7 @@ fn collect_aot_item(
         "expr" if is_entry_call(heap, tl, entry_path) => return Ok(()),
         other => {
             return Err(format!(
-                "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defconstant`/`defstruct`/`defenum`/`defffi`/`use`/`module`/`impl`, found `{}`",
+                "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defparameter`/`defconstant`/`defmacro`/`defsignature`/`defstruct`/`defenum`/`defffi`/`use`/`module`/`impl`, found `{}`",
                 other
             ))
         }
@@ -221,6 +228,35 @@ fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     // arguments past the representation list.
     let is_main = core::path_field(heap, form, 2).is_some_and(|p| &p == entry_path);
     is_main && core::fields(heap, form).map(|f| f.len() == 4).unwrap_or(false)
+}
+
+/// [`compile_file`] for a caller that is itself a running program — the
+/// `(compile-file ...)` builtin, reached from the REPL or from a file under
+/// `typl`.
+///
+/// The build's fresh `Heap`/`Interp` cannot share a thread with the caller's.
+/// Much of the runtime's state is per thread rather than per `Interp`: the
+/// compiled-global and vtable tables (`typelisp_rt::shared`), the registered
+/// heap and interpreter. `Interp::new` clears those tables for the
+/// environment it starts, so building on the caller's thread left the caller
+/// reading the build's tables afterwards — its first read of a compiled
+/// global (the printer's settings, on the next `println`) indexed a
+/// permanent root its own heap does not have. A thread of its own starts the
+/// build from empty tables and leaves the caller's untouched.
+///
+/// The stack is sized for the island's deeply recursive compile pipeline, as
+/// the bootstrappers size theirs; a spawned thread otherwise gets far less
+/// than the main thread `typl -c` runs [`compile_file`] on.
+pub fn compile_file_on_own_thread(source_path: &str, output_path: &str) -> Result<(), String> {
+    let (source_path, output_path) = (source_path.to_string(), output_path.to_string());
+    let build = std::thread::Builder::new()
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || compile_file(&source_path, &output_path))
+        .map_err(|e| format!("failed to start the build thread: {}", e))?;
+    match build.join() {
+        Ok(result) => result,
+        Err(payload) => std::panic::resume_unwind(payload),
+    }
 }
 
 /// Reads `source_path`, compiles every `defun` in it (and every file it
@@ -273,6 +309,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // compiled body or none at all: `defun`/`defmethod` (bodies),
     // `defvar`/`defconstant` (a global plus an initializer),
     // `defstruct`/`defenum` (type definitions with no codegen of their own),
+    // `defmacro`/`defsignature` (nothing left to emit once checked),
     // `use` (a dependency, loaded by `loader` below before the form that
     // names it is checked), or a `module`/`impl` grouping any of those.
     // Collected in declaration order: `items` so later steps know exactly
@@ -306,6 +343,14 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // http`'s flat `src/` is in, and every other AOT source so far.
         loader.load_uses_in(&mut heap, &reader, &mut chk, &mut interp, std::slice::from_ref(&v)).map_err(|e| e.to_string())?;
         let tl = chk.check_form_at(&mut heap, &interp, v, Some(loc)).map_err(|e| e.to_string())?;
+        // A `defmacro` (or a readtable registration) has to be registered
+        // before the next form is checked, or a use of it there finds no
+        // expander. Run now and not collected, the rule `Loader` keeps for a
+        // `use`d file's own forms: it leaves nothing to compile.
+        if typelisp_front::project::needs_immediate_exec(&heap, tl) {
+            interp.exec(&mut heap, tl).map_err(|e| e.to_string())?;
+            continue;
+        }
         // Rooted for the rest of the build, like the read form under it
         // (`next_form_with` roots each one and nothing here pops): `entry_forms`
         // is a Rust `Vec` the collector cannot see, and checking the next

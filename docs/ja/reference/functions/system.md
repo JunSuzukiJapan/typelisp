@@ -111,7 +111,7 @@ determined*）。site 名は POSIX に記録場所が無いので常に `none`�
 | `gc-count` | `int` | この処理系が始めてからの収集回数 |
 | `growable` | `bool` | アリーナがまだ伸びうるか |
 
-欄はすべて `int`。成長の上限（`typl --heap-cells` の説明を参照）は報告しない。読み手が知りたいのは
+欄は `growable` 以外すべて `int`。成長の上限（`typl --heap-cells` の説明を参照）は報告しない。読み手が知りたいのは
 伸びられるかどうか（`growable`）のほうだから。
 
 ### 5.2 `trace` / `step` が見えるもの・見えないもの
@@ -144,10 +144,10 @@ determined*）。site 名は POSIX に記録場所が無いので常に `none`�
 |---|---|---|---|
 | `parse-int` | `(parse-int s &key radix junk-allowed)` | `string→Result<int,ParseIntError>` | CL の `parse-integer`。前後の空白（`trim` と同じ集合）を読み飛ばし、符号 `+`/`-` を 1 つ、続けて `radix` 進（既定 10、2〜36。10 より上の桁は大文字小文字どちらでも）の数字を読む。桁数に上限は無い（`int`）。それ以外の文字が残れば `Err`。`:junk-allowed true` なら最初の非数字で読むのをやめて残りを無視する——ただし数字が 1 つも無ければ `Err`（CL の `nil` に当たる）。CL の第 2 値（読み終わり位置）は返さない。範囲外の `radix` は panic（テキストではなく呼び出し側の誤り） |
 | `parse-float` | `(parse-float s)` | `string→Result<f64,ParseFloatError>` | 浮動小数点数。`inf`/`nan` も受ける |
-| `read` | `(read s)` | `string→Result<Sexpr,ReadError>` | `s` から `Sexpr` を1つ読む（ソースを読むのと同じリーダ）。不完全な括弧・文字列などは `Err`。ストリームから読むのは `read-sexpr`（[ストリーム](streams-files.md#6-ジェネリック関数とファイル操作)） |
+| `read` | `(read s)` | `string→Result<Option<Sexpr>,ReadError>` | `s` から `Sexpr` を1つ読む（ソースを読むのと同じリーダ）。不完全な括弧・文字列などは `Err`。ストリームから読むのは `read-sexpr`（[ストリーム](streams-files.md#6-ジェネリック関数とファイル操作)） |
 | `read-from-string` | `(read-from-string s [start])` | `(string,int)→Result<cons-cell<Option<Sexpr>,int>,ReadError>` | `read` に**読み終わり位置**を添えたもの。`(car r)` が値、`(cdr r)` が次に読む文字位置。`start` 省略時は 0 |
 | `read-from-string-preserving-whitespace` | 同上 | 同上 | 同上だが datum を終わらせた空白を消費しない。違いは返る位置に出る |
-| `eval` | `(eval form)` | `Sexpr→Result<Sexpr,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
+| `eval` | `(eval form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | `form` を実行時に型チェックして評価する。CL の `eval` に準拠 |
 
 CL は `read-from-string` から**2 値**（値と位置）を返すが、この言語に多値は無いので
 `cons-cell` 1 つで返す。位置があると、文字列を 1 データずつ読むのが再スキャンではなく
@@ -184,10 +184,10 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
 (eval (unwrap (read "(sq 9)")))                   ; => (ok 81)  ; 直前の定義が見える
 ```
 
-- **戻り値**: 式なら評価結果を `Sexpr` として、定義なら定義名シンボルを返す（CL と同じ）。
+- **戻り値**: 式なら評価結果を `Option<Sexpr>` として、定義なら定義名シンボルを返す（CL と同じ）。
   結果を使うには `Sexpr` を `match`（`(int n)`/`(str s)`/…）で分解する。
 - **静的型ゆえの違い（重要）**: CL は結果の実値を返すが、この言語では戻り型を一律
-  `Result<Sexpr,EvalError>` にするしかない。また **静的に書いたコードは、実行時に `eval` が定義する
+  `Result<Option<Sexpr>,EvalError>` にするしかない。また **静的に書いたコードは、実行時に `eval` が定義する
   名前を前方参照できない**——ファイル中に直接書いた `(sq 9)` は、`sq` を定義する `eval` が
   走る前に検査され「未定義」になる。ただし **後続の `eval` からは見える**（その `eval` の型チェックは
   実行時、定義後に走るため）。REPL は1行ずつ検査・実行するので、`eval` で定義した名前を次の行から
@@ -258,8 +258,8 @@ CL の `(documentation 'name 'function)` と異なり型引数を取らない代
 |---|---|---|---|
 | `gensym` | `(gensym)` / `(gensym prefix)` | `(&optional string)→symbol` | 新しいシンボル。名前は `" <prefix><n>"` で `n` は `*gensym-counter*`。先頭の空白はソースに書けないので、生成した束縛が書かれた名前と衝突しない |
 | `*gensym-counter*` | 変数 | `int` | `gensym` が次に使う番号。CL 同様、読んでも設定してもよい |
-| `macroexpand-1` | `(macroexpand-1 form)` | `Sexpr→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しを 1 段展開。`none` は「マクロ呼び出しではない」 |
-| `macroexpand` | `(macroexpand form)` | `Sexpr→Result<Sexpr,EvalError>` | マクロでなくなるまで繰り返す |
+| `macroexpand-1` | `(macroexpand-1 form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | マクロ呼び出しを 1 段展開。`none` は「マクロ呼び出しではない」 |
+| `macroexpand` | `(macroexpand form)` | `Option<Sexpr>→Result<Option<Sexpr>,EvalError>` | マクロでなくなるまで繰り返す |
 
 `macroexpand-1` が返すのは `Option`——CL は「展開したか」を第 2 返り値で伝えるが、多値が
 無いので `none` がそれに当たる。**自分自身の呼び出しへ展開するマクロと非マクロを取り違えようが

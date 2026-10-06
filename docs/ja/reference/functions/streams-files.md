@@ -136,7 +136,7 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
 | `read-lines` | `(read-lines s)` | `(S)→Vector<string>` where `CharInput S` | 残り全行 |
 | `read-sexpr` | `(read-sexpr s)` | `(S)→Result<ReadOutcome,ReadError>` where `PeekInput S` | `Sexpr` を1つ読む（CL の `read`）。入力末尾は `Ok(eof)`、読めたときは `Ok(datum d)`、データでなければ `Err`。datum を終わらせた**空白1文字を消費する**（CL と同じ）。`ReadOutcome` が `Option<Sexpr>` でないのは、空リスト `()` を読んだことと入力末尾とを同じ値で表さないため |
 | `read-sexpr-preserving-whitespace` | 同上 | 同上 | 同上だが空白を残す（CL の `read-preserving-whitespace`） |
-| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Sexpr,ReadError>` where `PeekInput S` | `ch` まで読んでリストにする。`ch` は消費。入力が尽きたら `Err` |
+| `read-delimited-list` | `(read-delimited-list ch s)` | `(char,S)→Result<Option<Sexpr>,ReadError>` where `PeekInput S` | `ch` まで読んでリストにする。`ch` は消費。入力が尽きたら `Err` |
 | `write-lines` | `(write-lines s lines)` | `(S,I)→()` where `CharOutput S`,`Iter I (Item string)` | 1行ずつ書く |
 | `read-file-string` | `(read-file-string name)` | `(P)→Result<string,FileError>` where `Pathish P` | 全内容 |
 | `read-file-lines` | `(read-file-lines name)` | `(P)→Result<Vector<string>,FileError>` where `Pathish P` | 全行 |
@@ -196,7 +196,7 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => ["var" "log"]（Vector<string>）
+  (pathname-directory p)   ; => #<vector<string> "var" "log">
   (pathname-name p)        ; => (some "app.tar")   最後のドットで切る
   (pathname-type p)        ; => (some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"
@@ -239,8 +239,8 @@ CL がパス名指定子（文字列かパス名）を受ける場所で、こ�
 
 - **クラス階層ではなくトレイト階層**。`input-stream-p` / `output-stream-p` は無い——方向は型が
   持つので、実行時に尋ねる問いではない。
-- **`read` は文字列版とストリーム版で名前が違う**。`(read "...")`（CL の `read-from-string`）と
-  `(read-sexpr s)`（CL の `read`）。受け手の型が 1 つに決まる呼び出しなので、同名の多重定義が
+- **`read` は文字列版とストリーム版で名前が違う**。`(read "...")`（CL の `read-from-string` の
+  1 つ目の値に当たる。読み終わり位置も要るなら `read-from-string`）と `(read-sexpr s)`（CL の `read`）。受け手の型が 1 つに決まる呼び出しなので、同名の多重定義が
   できない。
 - **押し戻しは別トレイト**（`PeekInput`）。`read-char` しか要らない型に `unread-char` の実装を
   強いないため。

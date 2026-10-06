@@ -46,6 +46,7 @@ export const INDENT_SPECS: ReadonlyMap<string, IndentSpec> = new Map<string, Ind
   ["defenum", "defun"],
   ["deftrait", "defun"],
   ["deftype", "defun"],
+  ["def-c-struct", "defun"],
   ["defvar", "defun"],
   ["defconstant", "defun"],
   ["module", "defun"],

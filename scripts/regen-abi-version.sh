@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Writes a new ABI version when what compiled code assumes about the runtime
-# archive has changed: docs/dev/api_version/history/api_<N>.md,
-# latest_api_signature.md, and typelisp-abi's abi_version! literal. Prints
-# that nothing was written when the description is unchanged. The
+# archive has changed, or the typelisp version's MAJOR.MINOR has:
+# docs/dev/api_version/history/api_<MAJOR.MINOR.PATCH>.md,
+# latest_api_signature.md, and typelisp-abi's with_abi_version! numbers.
+# Prints that nothing was written when neither has. The
 # abi_version_test test fails until this has been run.
 #
 #   scripts/regen-abi-version.sh          # only when the description changed

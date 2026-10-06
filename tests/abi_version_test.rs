@@ -4,8 +4,9 @@
 //!
 //! * [`the_latest_document_describes_this_build`]: what compiled code assumes
 //!   about the runtime archive (`compile::abi_signature::describe`) is what
-//!   the newest document says, under the version `typelisp-abi` names. When
-//!   it is not, `scripts/regen-abi-version.sh` writes the next version.
+//!   the newest document says, under the version `typelisp-abi` names, and
+//!   that version's MAJOR.MINOR is the typelisp version's. When either is
+//!   not so, `scripts/regen-abi-version.sh` writes the next version.
 //! * [`every_version_keeps_its_document`]: no version's document is removed
 //!   or edited once written.
 //! * [`every_shared_constant_is_described`]: a constant added to one of the
@@ -15,7 +16,9 @@
 
 use std::path::{Path, PathBuf};
 
-use typelisp::compile::abi_signature::{describe, fnv1a, history_file, parse_document, DOC_DIR, LATEST_FILE};
+use typelisp::compile::abi_signature::{
+    describe, fnv1a, history_file, history_file_version, parse_document, AbiVersion, DOC_DIR, LATEST_FILE,
+};
 
 const REGEN: &str = "run scripts/regen-abi-version.sh";
 
@@ -33,9 +36,17 @@ fn read(path: &Path) -> String {
 
 #[test]
 fn the_latest_document_describes_this_build() {
+    let current = AbiVersion::current();
+    assert!(
+        current.is_of_this_package(),
+        "ABI version {} is not of typelisp {}: its MAJOR.MINOR must be the typelisp version's — {}",
+        current,
+        env!("CARGO_PKG_VERSION"),
+        REGEN
+    );
     let latest = read(&doc_dir().join(LATEST_FILE));
     let (version, _, body) = parse_document(&latest).unwrap_or_else(|| panic!("{} is malformed — {}", LATEST_FILE, REGEN));
-    assert_eq!(version, typelisp_abi::ABI_VERSION, "{} is version {}, typelisp-abi names {}", LATEST_FILE, version, typelisp_abi::ABI_VERSION);
+    assert_eq!(version, current, "{} is version {}, typelisp-abi names {}", LATEST_FILE, version, current);
     let description = describe();
     if body != description {
         let line = body.lines().zip(description.lines()).position(|(a, b)| a != b).map_or_else(
@@ -49,14 +60,36 @@ fn the_latest_document_describes_this_build() {
 #[test]
 fn every_version_keeps_its_document() {
     let dir = doc_dir();
-    let newest = typelisp_abi::ABI_VERSION;
-    for version in 1..=newest {
+    let newest = AbiVersion::current();
+    let history = dir.join("history");
+    let mut versions = Vec::new();
+    for entry in std::fs::read_dir(&history).unwrap_or_else(|e| panic!("{} unreadable ({})", history.display(), e)) {
+        let name = entry.unwrap().file_name().into_string().unwrap();
+        let version = history_file_version(&name)
+            .unwrap_or_else(|| panic!("{} holds `{}`, which is not a version's document", history.display(), name));
         let path = dir.join(history_file(version));
         let text = read(&path);
         let (named, hash, body) = parse_document(&text).unwrap_or_else(|| panic!("{} is malformed", path.display()));
         assert_eq!(named, version, "{} names version {}", path.display(), named);
         assert_eq!(hash, fnv1a(body), "{} was edited after it was written; a version's document never changes", path.display());
+        versions.push(version);
     }
+    versions.sort();
+    // Nothing newer than the version the source names: a document written
+    // without the source following (or the other way round) is caught here.
+    assert_eq!(versions.last(), Some(&newest), "the newest document in {} is not typelisp-abi's version {}", history.display(), newest);
+    // Under each MAJOR.MINOR the PATCHes run from 0 without a gap, so a
+    // removed document shows as the gap it leaves.
+    for pair in versions.windows(2) {
+        let (before, after) = (pair[0], pair[1]);
+        let follows = if (after.major, after.minor) == (before.major, before.minor) {
+            after.patch == before.patch + 1
+        } else {
+            after.patch == 0
+        };
+        assert!(follows, "{} is followed by {}: a version's document is missing", before, after);
+    }
+    assert_eq!(versions.first().map(|v| v.patch), Some(0), "the oldest document is not a PATCH 0: one is missing");
     assert_eq!(
         read(&dir.join(LATEST_FILE)),
         read(&dir.join(history_file(newest))),
@@ -64,18 +97,6 @@ fn every_version_keeps_its_document() {
         LATEST_FILE,
         history_file(newest)
     );
-    // Nothing newer than the version the source names: a document written
-    // without the source following (or the other way round) is caught here.
-    let history = dir.join("history");
-    for entry in std::fs::read_dir(&history).unwrap_or_else(|e| panic!("{} unreadable ({})", history.display(), e)) {
-        let name = entry.unwrap().file_name().into_string().unwrap();
-        let version: u32 = name
-            .strip_prefix("api_")
-            .and_then(|n| n.strip_suffix(".md"))
-            .and_then(|n| n.parse().ok())
-            .unwrap_or_else(|| panic!("{} holds `{}`, which is not a version's document", history.display(), name));
-        assert!((1..=newest).contains(&version), "{} is newer than typelisp-abi's version {}", name, newest);
-    }
 }
 
 #[test]

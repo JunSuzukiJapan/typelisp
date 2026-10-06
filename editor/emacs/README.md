@@ -1,57 +1,62 @@
+<!-- translated-from: editor/emacs/README_JP.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
 # typelisp-mode (Emacs)
 
-typelisp ソース（`.typl`）を編集するための Emacs メジャーモード。
-VS Code 版は [../vscode/](../vscode/README.md)。両者は同じキーワード表・同じインデント規則を
-持ち、そのことは `cargo test --test editor_keyword_sync_test` で機械的に検証されている（末尾参照）。
+An Emacs major mode for editing typelisp source (`.typl`).
+The VS Code version is in [../vscode/](../vscode/README.md). The two share the same keyword tables
+and the same indentation rules, and `cargo test --test editor_keyword_sync_test` checks that
+mechanically (see the end of this document).
 
-## 機能
+## Features
 
-- シンタックスハイライト
-  - 特殊形 / 制御構文（`defun` `let` `if` `match` `loop` `lambda` `setf` `as` `apply`、
-    `print`/`println`/`format`、`pprint` 系 など）
-  - 定義名の強調（`(defun NAME ...)` の `NAME` を関数名、`(defstruct NAME ...)` を型名、
-    `(defvar (NAME ...))` を変数名として。`(pub defun NAME ...)` の `pub` 付きも同様）
-  - 名前空間・宣言キーワード（`pub` `module` `use` `load` `impl` `where`）と
-    ラムダリスト標識（`&rest` `&optional` `&key`）
-  - 組み込み関数（`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` など）
-  - プリミティブ型（`bignum` / `ratio` を含む）・組み込み型・組み込みエラー型
-    （`ParseIntError` など）・`Capitalized` なユーザ型・trait オブジェクト型 `:dyn Trait`
-  - **ユーザ定義型の使用箇所**（`defstruct`/`defenum`/`deftrait` の名前は通常小文字
-    （`rect` `todo-item` `board`）で `Capitalized` 規則では拾えない）。
-    `typl-lsp` に接続していればサーバの semantic tokens で着色する（`eglot` でも効く。
-    後述）。未接続時はバッファ内の型名を集めるフォールバックに切り替わる
-  - リテラル（`true` `false`、数値リテラル（10進 / `0xff` / `1.5` / `1/3`）、
-    文字リテラル `#\Space`、文字列、キーワード `:name`）
-  - 文字列中の `format` 制御ディレクティブ（`~a` `~5,'0d` `~{...~}` など）
-  - CL 流の earmuff 付きグローバル（`*print-pretty*` など）
-- コメント
-  - 行コメント `;`
-  - **ネスト可能な**ブロックコメント `#| ... |#`
-- S 式ナビゲーションと Lisp 流インデント
-- `imenu` による定義一覧（関数 / メソッド / マクロ / 型 / トレイト / `impl` / 変数 / モジュール）
-- `typl` CLI の呼び出し（下記）
+- Syntax highlighting
+  - Special forms and control constructs (`defun` `let` `if` `match` `loop` `lambda` `setf` `as`
+    `apply`, `print`/`println`/`format`, the `pprint` family, and so on)
+  - Defined names (the `NAME` of `(defun NAME ...)` as a function name, of `(defstruct NAME ...)`
+    as a type name, and of `(defvar (NAME ...))` as a variable name; the same with `pub`, as in
+    `(pub defun NAME ...)`)
+  - Namespace and declaration keywords (`pub` `module` `use` `load` `impl` `where`) and lambda
+    list markers (`&rest` `&optional` `&key`)
+  - Built-in functions (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` and so on)
+  - Primitive types (including `bignum` / `ratio`), built-in types, built-in error types
+    (`ParseIntError` and so on), `Capitalized` user types, and the trait object type `:dyn Trait`
+  - **Uses of user-defined types** (the names of `defstruct`/`defenum`/`deftrait` are usually
+    lowercase (`rect` `todo-item` `board`), so the `Capitalized` rule does not catch them).
+    When connected to `typl-lsp`, they are coloured from the server's semantic tokens (this also
+    works with `eglot`; see below). When not connected, the mode falls back to collecting the type
+    names defined in the buffer
+  - Literals (`true` `false`, number literals (decimal / `0xff` / `1.5` / `1/3`), character
+    literals such as `#\Space`, strings, keywords such as `:name`)
+  - `format` control directives inside strings (`~a` `~5,'0d` `~{...~}` and so on)
+  - CL-style globals with earmuffs (`*print-pretty*` and so on)
+- Comments
+  - Line comments `;`
+  - **Nestable** block comments `#| ... |#`
+- S-expression navigation and Lisp-style indentation
+- A definition index through `imenu` (functions / methods / macros / types / traits / `impl` /
+  variables / modules)
+- Commands that run the `typl` CLI (below)
 
-## キーバインド
+## Key bindings
 
-| キー | コマンド | 内容 |
+| Key | Command | What it does |
 |---|---|---|
-| `C-c C-c` | `typelisp-run-buffer` | 保存して `typl FILE` で実行（`compile` 経由。エラー行へジャンプ可） |
-| `C-c C-z` | `typelisp-repl` | `typl` の REPL を comint バッファで起動 |
+| `C-c C-c` | `typelisp-run-buffer` | Save and run `typl FILE` (through `compile`, so you can jump to error lines) |
+| `C-c C-z` | `typelisp-repl` | Start the `typl` REPL in a comint buffer |
 
-`typl` の場所は `typelisp-program`（既定 `"typl"`）で指定する。
-診断は `error: FILE:LINE:COL: ...` 形式なので `compilation-mode` が解析でき、
-`next-error` / `C-x \`` でそのまま該当箇所へ飛べる。
+Set the location of `typl` with `typelisp-program` (default `"typl"`).
+Diagnostics have the form `error: FILE:LINE:COL: ...`, which `compilation-mode` can parse, so
+`next-error` / `C-x \`` jumps straight to the place.
 
-## インストール
+## Installation
 
 ```elisp
 (add-to-list 'load-path "/path/to/typelisp/editor/emacs")
 (require 'typelisp-mode)
 ```
 
-`.typl` ファイルは自動的に `typelisp-mode` で開かれる（`auto-mode-alist` に登録済み）。
+`.typl` files open in `typelisp-mode` automatically (the mode is registered in `auto-mode-alist`).
 
-`use-package` を使う場合:
+With `use-package`:
 
 ```elisp
 (use-package typelisp-mode
@@ -61,13 +66,13 @@ VS Code 版は [../vscode/](../vscode/README.md)。両者は同じキーワー�
 
 ## Language Server (`typl-lsp`)
 
-`typl-lsp` をビルドすれば `eglot`（Emacs 29+ 標準）や `lsp-mode` から利用できる。
+Once `typl-lsp` is built, it can be used from `eglot` (built into Emacs 29+) or `lsp-mode`.
 
 ```sh
 cargo build --release --bin typl-lsp
 ```
 
-`eglot` の場合:
+With `eglot`:
 
 ```elisp
 (with-eval-after-load 'eglot
@@ -76,7 +81,7 @@ cargo build --release --bin typl-lsp
 (add-hook 'typelisp-mode-hook #'eglot-ensure)
 ```
 
-`lsp-mode` の場合:
+With `lsp-mode`:
 
 ```elisp
 (with-eval-after-load 'lsp-mode
@@ -88,67 +93,73 @@ cargo build --release --bin typl-lsp
 (add-hook 'typelisp-mode-hook #'lsp)
 ```
 
-診断（構文/型エラーと再定義 warning を `textDocument/publishDiagnostics` で通知）・hover・
-定義ジャンプ（goto-definition）・補完（`:` をトリガ文字に登録済み）・semantic tokens に対応。
-`use` によるファイルをまたぐ参照は解決される（プロジェクトルートの `typelisp.toml` を上方探索、
-詳細は `docs/ja/reference/syntax.md` の「ファイルとモジュールの対応」節）。開いているエディタバッファの
-未保存編集は依存ファイル・依存元双方の診断に即座に反映される。
+Supported: diagnostics (syntax/type errors and redefinition warnings, sent through
+`textDocument/publishDiagnostics`), hover, goto-definition, completion (`:` is registered as a
+trigger character), and semantic tokens. References across files through `use` are resolved (the
+server searches upward for the project root's `typelisp.toml`; for details see
+[Syntax Reference 3.11](../../docs/en/reference/syntax.md#311-files-and-modules-multi-file-projects)).
+Unsaved edits in open editor buffers are reflected at once in the diagnostics of both the files
+they depend on and the files that depend on them.
 
-### 型名のハイライト（semantic tokens）
+### Type name highlighting (semantic tokens)
 
-サーバは `textDocument/semanticTokens` で、**チェッカが実際に型名として解決した位置**を
-報告する。テキスト照合ではないので、
+Through `textDocument/semanticTokens`, the server reports **the positions the checker actually
+resolved as type names**. Because this is not text matching:
 
-- `use` 経由で他ファイルから来た型も色が付く（バッファ内解決では原理的に届かない範囲）
-- 型と同名の**関数**の呼び出し箇所は色が付かない（そこはチェッカが関数として解決したので、
-  そもそもトークンが記録されない）
+- Types that come from other files through `use` are coloured too (a range that resolution inside
+  the buffer cannot reach in principle)
+- Calls of a **function** with the same name as a type are not coloured (the checker resolved
+  them as functions, so no token is recorded there in the first place)
 
-クライアント側:
+On the client side:
 
-- **`eglot`**: eglot 自体は semanticTokens に非対応（Emacs 29.3/30 同梱の `eglot.el` には
-  該当コードが1行も無い）。そこで **`typelisp-mode` が自前でリクエストを投げてオーバレイで
-  描画する**（`typelisp-semantic-tokens-mode`。eglot 接続時に自動で有効化）。
-  `scripts/emacs-semantic-smoke.el` が実際の eglot 接続で検証している
-- **`lsp-mode`**: native 対応（`lsp-semantic-tokens-enable` を `t` に）。この場合
-  `typelisp-mode` 側は手を出さない
+- **`eglot` (Emacs 31 and later)**: eglot draws the tokens itself (`eglot-semantic-tokens-mode`).
+  `typelisp-mode` stays out of the way
+- **`eglot` (Emacs 30 and earlier)**: this version of eglot does not handle semanticTokens. So
+  **`typelisp-mode` sends the request itself and draws the result with overlays**
+  (`typelisp-semantic-tokens-mode`, turned on automatically when eglot connects)
+- **`lsp-mode`**: native support (set `lsp-semantic-tokens-enable` to `t`). In that case
+  `typelisp-mode` stays out of the way
 
-いずれのクライアントでもサーバが答えている間はバッファ内解決のフォールバックは退く
-（同じバッファを2つの規則が塗らないようにするため）。
+`scripts/emacs-semantic-smoke.el` connects through eglot for real and checks the side that does the
+drawing in the Emacs being used. With any client, the in-buffer fallback steps back while the
+server is answering (so that two sets of rules do not paint the same buffer).
 
-| 設定 | 既定 | 内容 |
+| Setting | Default | What it does |
 |---|---|---|
-| `typelisp-semantic-tokens` | `t` | eglot 利用時にサーバの semantic tokens で着色するか |
-| `typelisp-semantic-tokens-idle-delay` | `0.6` | 編集後に再リクエストするまでのアイドル秒数（`eglot-send-changes-idle-time` より大きくすること） |
+| `typelisp-semantic-tokens` | `t` | With the eglot of Emacs 30 and earlier, whether to colour from the server's semantic tokens |
+| `typelisp-semantic-tokens-idle-delay` | `0.6` | Idle seconds after an edit before requesting again (keep it larger than `eglot-send-changes-idle-time`) |
 
-## 備考
+## Notes
 
-- typelisp はシンボルを読み取り時に小文字化するが、ハイライトは大文字始まりの型名を
-  区別するためケースセンシティブ。
-- インデントは専用の `typelisp-indent-function` が `typelisp-indent-specs`（連想リスト）
-  を引いて決める。Emacs Lisp と名前を共有する形（`defun` `let` `if` …）も自前で持って
-  いるのは、シンボルプロパティが**グローバル**で、typelisp 用の設定が同じセッションの
-  他の Lisp バッファのインデントを変えてしまうため。また typelisp の形は Emacs Lisp と
-  同名でも形状が違う——`(defun NAME (PARAMS) RETTYPE ...)` はヘッダ要素が3つ、`if` は
-  `else` 必須の3要素固定——ので、値も共有できない。
-  `examples/` 配下の 22 ファイルすべてが、`indent-region` で1バイトも変化しないことと、
-  インデントを全部潰してから再インデントすると元に戻ることを確認済み（VS Code 版も同じ
-  22 ファイルで同じ基準を満たしている）。
+- typelisp lowercases symbols when reading, but highlighting is case-sensitive so that type names
+  starting with an uppercase letter can be told apart.
+- Indentation is decided by the dedicated `typelisp-indent-function`, which looks up
+  `typelisp-indent-specs` (an alist). The mode keeps its own entries even for forms whose names it
+  shares with Emacs Lisp (`defun` `let` `if` ...) because symbol properties are **global**, and
+  typelisp settings there would change the indentation of other Lisp buffers in the same session.
+  And typelisp's forms differ in shape even when they share a name with Emacs Lisp:
+  `(defun NAME (PARAMS) RETTYPE ...)` has three header elements, and `if` is fixed at three
+  elements with a mandatory `else`. So the values cannot be shared either.
+  Every `.typl` file under `examples/` has been checked: `indent-region` changes not a single byte,
+  and flattening all indentation and re-indenting restores the original (the VS Code version meets
+  the same standard on the same files).
 
-## エディタ定義のドリフト検出
+## Detecting drift in the editor definitions
 
-キーワード表は VS Code 版と二重管理になる。実装が進んだのにエディタ定義だけ古くなる事故
-（実際に一度起きた——`bignum`/`ratio`/`format`/`pprint` 系/組み込みエラー型が数か月抜けていた）
-を防ぐため、Rust 側にテストがある:
+The keyword tables are maintained twice, once here and once in the VS Code version. To prevent the
+editor definitions from falling behind while the implementation moves on, there is a test on the
+Rust side:
 
 ```sh
 cargo test --test editor_keyword_sync_test
 ```
 
-prelude を実際にロードしてレジストリを走査し、**どちらかのエディタが知らない名前**を報告する。
-特殊形は実行時表現を持たないので、`src/check/checker.rs` の
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` の間から読み出す（このコメントは消さないこと）。
-失敗したら、報告された名前を**両方**のエディタ定義に追加する。
+It actually loads the prelude, walks the registry, and reports **names that either editor does not
+know**. Special forms have no runtime representation, so they are read from between
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` in `crates/typelisp-front/src/check/checker.rs` (do not
+delete these comments). If it fails, add the reported names to **both** editor definitions.
 
-同じテストが semantic tokens の legend も照合する（`src/bin/lsp.rs` の
-`SEMANTIC_TOKEN_TYPES` と、両エディタが持つ対応表が名前・順序ともに一致すること）。
-ずれても実行時エラーにはならず全トークンの色が入れ替わるだけなので、機械的に固定してある。
+The same test also compares the semantic tokens legend (`SEMANTIC_TOKEN_TYPES` in
+`src/bin/lsp.rs` and the tables both editors hold must agree in names and order). A mismatch causes
+no runtime error; it only swaps the colours of every token, so it is pinned down mechanically.

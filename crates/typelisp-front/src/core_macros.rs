@@ -68,10 +68,13 @@ pub const SOURCE: &str = r##"
 
 ;; `cond`: nested `if`s, one clause peeled off per recursive expansion (same
 ;; self-recursion shape as `and`/`or` above). `else`-detection mirrors `case`'s.
+;; A clause that is not a list is refused by name: taking it apart would fail
+;; with a message about `sexpr-car` that says nothing of which form is wrong.
 (defmacro cond (&rest clauses)
   (if (sexpr-null clauses)
       ()
       (let ((clause (sexpr-car clauses)))
+        (if (sexpr-consp clause) () (panic "cond: each clause is a list, (TEST FORM...)"))
         (if (eq (sexpr-car clause) (quote else))
             `(progn ,@(sexpr-cdr clause))
             `(if ,(sexpr-car clause) (progn ,@(sexpr-cdr clause)) (cond ,@(sexpr-cdr clauses)))))))
@@ -141,6 +144,7 @@ pub const SOURCE: &str = r##"
     (loop
       (if (sexpr-null rest) (break) ())
       (let ((c (sexpr-car rest)))
+        (if (sexpr-consp c) () (panic "case: each clause is a list, (KEYS FORM...)"))
         (setf out (sexpr-append out (list (if (eq (sexpr-car c) (quote else))
                                               c
                                               (sexpr-cons (%internal::case-key-test tmp (sexpr-car c)) (sexpr-cdr c)))))))

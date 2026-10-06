@@ -35,5 +35,5 @@ typelisp は静的型付きの Lisp です。インストールとビルドの�
 設定の手順は [エディタ連携ガイド](guide/editors.md) にあります。各エディタのキー操作と設定の一覧は
 次の文書にあります。
 
-- [Emacs（typelisp-mode）](../../editor/emacs/README.md)
-- [VS Code](../../editor/vscode/README.md)
+- [Emacs（typelisp-mode）](../../editor/emacs/README_JP.md)
+- [VS Code](../../editor/vscode/README_JP.md)

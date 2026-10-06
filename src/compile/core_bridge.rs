@@ -1751,7 +1751,14 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
         return Ok(None);
     }
     let parts = core::fields(heap, form)?;
-    let [_, repr, _, _, value] = parts[..] else { return Err(malformed(heap, form)) };
+    // A `defparameter` carries a sixth field, "assign even if already bound"
+    // (`Checker::defvar_form`). An initializer built here runs exactly once,
+    // when the storage is created, so there is never an earlier binding for
+    // the two to differ over.
+    let (repr, value) = match parts[..] {
+        [_, repr, _, _, value] | [_, repr, _, _, value, Value::Bool(_)] => (repr, value),
+        _ => return Err(malformed(heap, form)),
+    };
     let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
     let cells = names_captured_by_nested(heap, std::slice::from_ref(&value))?;
     let inner = cx.with_cell_names(&cells);

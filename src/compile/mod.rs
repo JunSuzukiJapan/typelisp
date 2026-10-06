@@ -74,7 +74,7 @@ pub fn install_llvm_backend() {
         handle_is_live: |h| llvm_builtins::llvm_handle_get(h).is_some(),
         compile_function: driver::compile_function,
         disassemble_function: driver::disassemble_function,
-        compile_file: aot::compile_file,
+        compile_file: aot::compile_file_on_own_thread,
         dump_image: dump::dump_image,
         define_ffi: ffi::define_ffi,
         callback_entry: ffi::callback_entry,
