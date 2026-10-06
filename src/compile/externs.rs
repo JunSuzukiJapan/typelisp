@@ -60,8 +60,8 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         "sexpr-i32" => "rt_sexpr_i32",
         "sexpr-bool" => "rt_sexpr_bool",
         "sexpr-char" => "rt_sexpr_char",
-        "sexpr-f64" => "rt_f64_value",
-        "sexpr-f32" => "rt_f32_value",
+        "sexpr-f64" => "rt_sexpr_f64",
+        "sexpr-f32" => "rt_sexpr_f32",
         // One shim per narrow width, not one taking the width as an operand:
         // a builtin accessor is called with exactly its own arguments, and
         // the type it reads is in its name.
@@ -553,7 +553,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 321] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 323] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -632,7 +632,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 321] {
         rt_intern_path, rt_intern_symbol, rt_wk_symbol, rt_list_to_path, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_int, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
-        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
+        rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_f32, rt_sexpr_f64, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
         rt_ffi_cstring_new, rt_ffi_cstring_free, rt_ffi_string_from_cstr, rt_ffi_enter_native, rt_ffi_leave_native,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
@@ -746,6 +746,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 321] {
         ("rt_sexpr_u32", rt_sexpr_u32 as *const () as usize),
         ("rt_sexpr_bool", rt_sexpr_bool as *const () as usize),
         ("rt_sexpr_char", rt_sexpr_char as *const () as usize),
+        ("rt_sexpr_f64", rt_sexpr_f64 as *const () as usize),
+        ("rt_sexpr_f32", rt_sexpr_f32 as *const () as usize),
         ("rt_sexpr_str", rt_sexpr_str as *const () as usize),
         ("rt_sym_name", rt_sym_name as *const () as usize),
         ("rt_set_car", rt_set_car as *const () as usize),

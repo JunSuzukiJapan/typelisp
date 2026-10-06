@@ -175,18 +175,19 @@ pub unsafe extern "C" fn rt_cons(args: *const i64, argc: u32) -> i64 {
     }
 }
 
-/// `(car c)` for compiled code. Fatal (not a recoverable error) if `c`
-/// isn't a cons — the checker is responsible for guaranteeing that never
-/// happens, same as the interpreter's own `car` builtin treats it as an
-/// internal-error-class `Panic`.
+/// `(sexpr-car c)` for compiled code. A `c` that is neither a cons nor the
+/// empty list raises the panic the interpreter's `sexpr-car` raises: a
+/// `Sexpr`'s shape is a run-time fact, so a macro body handed a malformed
+/// form gets here, and that is the program's error rather than the
+/// runtime's.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`; a
 /// `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_car(args: *const i64, argc: u32) -> i64 {
-    cons_half(args, argc, "rt_car", Heap::car)
+pub unsafe extern "C-unwind" fn rt_car(args: *const i64, argc: u32) -> i64 {
+    cons_half(args, argc, "sexpr-car", Heap::car)
 }
 
 /// `(cdr c)` for compiled code — see [`rt_car`]'s doc comment.
@@ -195,8 +196,8 @@ pub unsafe extern "C" fn rt_car(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_car`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
-    cons_half(args, argc, "rt_cdr", Heap::cdr)
+pub unsafe extern "C-unwind" fn rt_cdr(args: *const i64, argc: u32) -> i64 {
+    cons_half(args, argc, "sexpr-cdr", Heap::cdr)
 }
 
 /// The body of [`rt_car`] and [`rt_cdr`], which differ only in the half they
@@ -221,7 +222,7 @@ unsafe fn cons_half(
     }
     match half(active_heap(), arg) {
         Ok(v) => encode(v),
-        Err(_) => fatal(&format!("{}: argument is not a cons", who)),
+        Err(_) => raise(format!("{}: not a cons", who)),
     }
 }
 
@@ -338,14 +339,15 @@ pub unsafe extern "C" fn rt_symp(args: *const i64, argc: u32) -> i64 {
 
 /// `(sexpr-int x)`: an `int` node's value — the tagged word itself, a
 /// fixnum or a bignum box, once it has been checked to be one (and
-/// canonical). Fatal on any other shape — the same panic contract the
-/// interpreter's `sexpr-int` has.
+/// canonical). Any other node raises the panic the interpreter's
+/// `sexpr-int` raises; a non-canonical bignum is the runtime's own fault and
+/// stays fatal.
 ///
 /// # Safety
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_int: expected 1 argument");
     }
@@ -358,7 +360,7 @@ pub unsafe extern "C" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64 {
             }
             w
         }
-        _ => fatal("sexpr-int: expected an int Sexpr node"),
+        _ => raise("sexpr-int: expected an int Sexpr node".to_string()),
     }
 }
 
@@ -370,11 +372,11 @@ pub unsafe extern "C" fn rt_sexpr_int(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_i32(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_i32(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_i32: expected 1 argument");
     }
-    narrow_value_of(*args, 32, true, "rt_sexpr_i32")
+    sexpr_narrow_value(*args, 32, true)
 }
 
 /// `(sexpr-bool x)`: the `Bool` node's payload as compiled `0`/`1`.
@@ -383,13 +385,13 @@ pub unsafe extern "C" fn rt_sexpr_i32(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_bool(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_bool(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_bool: expected 1 argument");
     }
     match decode(*args) {
         Value::Bool(b) => i64::from(b),
-        _ => fatal("sexpr-bool: expected a Bool Sexpr node"),
+        _ => raise("sexpr-bool: expected a Bool Sexpr node".to_string()),
     }
 }
 
@@ -400,13 +402,13 @@ pub unsafe extern "C" fn rt_sexpr_bool(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_char(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_char(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_char: expected 1 argument");
     }
     match decode(*args) {
         Value::Char(c) => c as i64,
-        _ => fatal("sexpr-char: expected a Char Sexpr node"),
+        _ => raise("sexpr-char: expected a Char Sexpr node".to_string()),
     }
 }
 
@@ -419,13 +421,13 @@ pub unsafe extern "C" fn rt_sexpr_char(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_str(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_str(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_str: expected 1 argument");
     }
     match decode(*args) {
         Value::Str(_) => *args,
-        _ => fatal("sexpr-str: expected a Str Sexpr node"),
+        _ => raise("sexpr-str: expected a Str Sexpr node".to_string()),
     }
 }
 
@@ -438,7 +440,7 @@ pub unsafe extern "C" fn rt_sexpr_str(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_consp`], plus a registered `Heap` (this allocates).
 #[no_mangle]
-pub unsafe extern "C" fn rt_sym_name(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sym_name(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sym_name: expected 1 argument");
     }
@@ -448,7 +450,7 @@ pub unsafe extern "C" fn rt_sym_name(args: *const i64, argc: u32) -> i64 {
             let name = heap.symbol_name(id).to_string();
             encode(heap.alloc_string(name))
         }
-        _ => fatal("sexpr-sym-name: expected a Sym Sexpr node"),
+        _ => raise("sexpr-sym-name: expected a Sym Sexpr node".to_string()),
     }
 }
 
@@ -552,6 +554,41 @@ pub unsafe extern "C" fn rt_f32_value(args: *const i64, argc: u32) -> i64 {
     }
 }
 
+/// `(sexpr-f64 x)`: [`rt_f64_value`] for a program reading a `Sexpr` it
+/// does not know the shape of. A node that is not an `f64` raises the
+/// interpreter's panic; `rt_f64_value` itself serves typed reads, which the
+/// checker guarantees.
+///
+/// # Safety
+///
+/// Same as [`rt_f64_new`].
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_sexpr_f64(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_f64: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Boxed(id) if active_heap().is_f64(id) => active_heap().f64_value(id).to_bits() as i64,
+        _ => raise("sexpr-f64: expected an f64 Sexpr node".to_string()),
+    }
+}
+
+/// [`rt_sexpr_f64`] for an `f32`, widened as [`rt_f32_value`] widens it.
+///
+/// # Safety
+///
+/// Same as [`rt_f64_new`].
+#[no_mangle]
+pub unsafe extern "C-unwind" fn rt_sexpr_f32(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_sexpr_f32: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Boxed(id) if active_heap().is_f32(id) => f64::from(active_heap().f32_value(id)).to_bits() as i64,
+        _ => raise("sexpr-f32: expected an f32 Sexpr node".to_string()),
+    }
+}
+
 // ---- narrow integers (`i8`/`i16`/`u8`/`u16`/`u32`) ----------------------
 //
 // The integer half of the float split above, and the same argument: a
@@ -603,8 +640,8 @@ pub unsafe extern "C" fn rt_narrow_value(args: *const i64, argc: u32) -> i64 {
     narrow_value_of(*args, width as u8, signed, "rt_narrow_value")
 }
 
-/// The shared body of [`rt_narrow_value`] and the five `rt_sexpr_*`
-/// accessors: decode, insist on this exact type, hand back the word.
+/// [`rt_narrow_value`]'s body: decode, insist on this exact type, hand back
+/// the word. The `sexpr-*` readers use [`sexpr_narrow_value`] instead.
 ///
 /// # Safety
 ///
@@ -619,6 +656,27 @@ unsafe fn narrow_value_of(v: i64, width: u8, signed: bool, who: &str) -> i64 {
     }
 }
 
+/// The six fixed-width `sexpr-*` readers' body: [`narrow_value_of`], except
+/// that a node of another type raises the interpreter's panic instead of
+/// aborting. Which node a `Sexpr` holds is a run-time fact a program can get
+/// wrong; a typed read of a narrow box ([`rt_narrow_value`]) has the checker
+/// behind it and cannot.
+///
+/// # Safety
+///
+/// A `Heap` must already be registered on this thread.
+unsafe fn sexpr_narrow_value(v: i64, width: u8, signed: bool) -> i64 {
+    if let Value::Boxed(id) = decode(v) {
+        if let Some(n) = active_heap().narrow_box(id) {
+            if n.width == width && n.signed == signed {
+                return n.value;
+            }
+        }
+    }
+    let ty = format!("{}{width}", if signed { "i" } else { "u" });
+    raise(format!("sexpr-{ty}: expected a {ty} Sexpr node"))
+}
+
 /// `(sexpr-i8 x)` and its four siblings: the typed payload extractors for
 /// the narrow-integer `Sexpr` variants, alongside `sexpr-i32`/`sexpr-f64`/
 /// `sexpr-f32` above. One shim per type rather than one taking a `wsig`,
@@ -631,11 +689,11 @@ unsafe fn narrow_value_of(v: i64, width: u8, signed: bool, who: &str) -> i64 {
 /// `argc` must be `>= 1` and `args` must point to at least 1 valid `i64`;
 /// a `Heap` must already be registered on this thread.
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_i8(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_i8(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_i8: expected 1 argument");
     }
-    narrow_value_of(*args, 8, true, "rt_sexpr_i8")
+    sexpr_narrow_value(*args, 8, true)
 }
 
 /// [`rt_sexpr_i8`] for `i16`.
@@ -644,11 +702,11 @@ pub unsafe extern "C" fn rt_sexpr_i8(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sexpr_i8`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_i16(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_i16(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_i16: expected 1 argument");
     }
-    narrow_value_of(*args, 16, true, "rt_sexpr_i16")
+    sexpr_narrow_value(*args, 16, true)
 }
 
 /// [`rt_sexpr_i8`] for `u8`.
@@ -657,11 +715,11 @@ pub unsafe extern "C" fn rt_sexpr_i16(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sexpr_i8`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_u8(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_u8(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_u8: expected 1 argument");
     }
-    narrow_value_of(*args, 8, false, "rt_sexpr_u8")
+    sexpr_narrow_value(*args, 8, false)
 }
 
 /// [`rt_sexpr_i8`] for `u16`.
@@ -670,11 +728,11 @@ pub unsafe extern "C" fn rt_sexpr_u8(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sexpr_i8`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_u16(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_u16(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_u16: expected 1 argument");
     }
-    narrow_value_of(*args, 16, false, "rt_sexpr_u16")
+    sexpr_narrow_value(*args, 16, false)
 }
 
 /// [`rt_sexpr_i8`] for `u32`.
@@ -683,11 +741,11 @@ pub unsafe extern "C" fn rt_sexpr_u16(args: *const i64, argc: u32) -> i64 {
 ///
 /// Same as [`rt_sexpr_i8`].
 #[no_mangle]
-pub unsafe extern "C" fn rt_sexpr_u32(args: *const i64, argc: u32) -> i64 {
+pub unsafe extern "C-unwind" fn rt_sexpr_u32(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_sexpr_u32: expected 1 argument");
     }
-    narrow_value_of(*args, 32, false, "rt_sexpr_u32")
+    sexpr_narrow_value(*args, 32, false)
 }
 
 /// Discriminates the numeric boxed `Sexpr` kinds that share `TAG_BOXED`'s

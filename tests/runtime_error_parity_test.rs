@@ -217,6 +217,75 @@ const CASES: &[Case] = &[
         call: "(f -5)",
         message: "random: bound must be positive, got -5",
     },
+    // A `Sexpr`'s shape is known only at run time, so taking one apart is a
+    // failure the program can provoke — a macro body handed a malformed form
+    // is the usual way.
+    Case {
+        what: "sexpr-car of an atom",
+        defs: "(defun f ((x Option<Sexpr>)) Option<Sexpr> (sexpr-car x))",
+        call: "(f 'y)",
+        message: "sexpr-car: not a cons",
+    },
+    Case {
+        what: "sexpr-cdr of an atom",
+        defs: "(defun f ((x Option<Sexpr>)) Option<Sexpr> (sexpr-cdr x))",
+        call: "(f 'y)",
+        message: "sexpr-cdr: not a cons",
+    },
+    Case {
+        what: "sexpr-int of a symbol",
+        defs: "(defun f ((x Option<Sexpr>)) int (sexpr-int x))",
+        call: "(f 'y)",
+        message: "sexpr-int: expected an int Sexpr node",
+    },
+    Case {
+        what: "sexpr-bool of a symbol",
+        defs: "(defun f ((x Option<Sexpr>)) bool (sexpr-bool x))",
+        call: "(f 'y)",
+        message: "sexpr-bool: expected a Bool Sexpr node",
+    },
+    Case {
+        what: "sexpr-char of a symbol",
+        defs: "(defun f ((x Option<Sexpr>)) char (sexpr-char x))",
+        call: "(f 'y)",
+        message: "sexpr-char: expected a Char Sexpr node",
+    },
+    Case {
+        what: "sexpr-str of a symbol",
+        defs: "(defun f ((x Option<Sexpr>)) string (sexpr-str x))",
+        call: "(f 'y)",
+        message: "sexpr-str: expected a Str Sexpr node",
+    },
+    Case {
+        what: "sexpr-sym-name of a string",
+        defs: "(defun f ((x Option<Sexpr>)) string (sexpr-sym-name x))",
+        call: "(f '\"s\")",
+        message: "sexpr-sym-name: expected a Sym Sexpr node",
+    },
+    Case {
+        what: "sexpr-f64 of a symbol",
+        defs: "(defun f ((x Option<Sexpr>)) f64 (sexpr-f64 x))",
+        call: "(f 'y)",
+        message: "sexpr-f64: expected an f64 Sexpr node",
+    },
+    Case {
+        what: "sexpr-f32 of a symbol",
+        defs: "(defun f ((x Option<Sexpr>)) f32 (sexpr-f32 x))",
+        call: "(f 'y)",
+        message: "sexpr-f32: expected an f32 Sexpr node",
+    },
+    Case {
+        what: "sexpr-u8 of a symbol",
+        defs: "(defun f ((x Option<Sexpr>)) u8 (sexpr-u8 x))",
+        call: "(f 'y)",
+        message: "sexpr-u8: expected a u8 Sexpr node",
+    },
+    Case {
+        what: "sexpr-i32 of a symbol",
+        defs: "(defun f ((x Option<Sexpr>)) i32 (sexpr-i32 x))",
+        call: "(f 'y)",
+        message: "sexpr-i32: expected a i32 Sexpr node",
+    },
 ];
 
 /// Interpreted: `f` is never compiled, so the failure is raised by the

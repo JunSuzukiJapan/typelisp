@@ -27,7 +27,7 @@ pub mod dribble;
 // macro rather than a `const`, because the symbol name below is built from it
 // and `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites it, and only when that description changed.
-macro_rules! abi_version { () => { 1 }; }
+macro_rules! abi_version { () => { 2 }; }
 
 /// See the comment on `abi_version!` above.
 pub const ABI_VERSION: u32 = abi_version!();

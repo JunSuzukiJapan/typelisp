@@ -83,6 +83,36 @@ fn ecase_matches_like_case_and_panics_when_nothing_does() {
     }
 }
 
+/// What checking `src` refuses with: the last form's check error.
+fn check_err(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    let r = Reader::new();
+    for v in r.read_all(&mut h, src).expect("read failed") {
+        match chk.check_form(&mut h, &interp, v) {
+            Ok(tl) => {
+                interp.exec(&mut h, tl).expect("exec failed");
+            }
+            Err(e) => return e.to_string(),
+        }
+    }
+    panic!("expected a check error")
+}
+
+/// A clause that is not a list is refused while the form is expanded, by
+/// name, rather than taking the process down from inside the expander.
+#[test]
+fn a_clause_that_is_not_a_list_is_refused() {
+    for src in ["(case 1 (1 2) x)", "(ecase 1 3)", "(case 1 x)"] {
+        let e = check_err(src);
+        assert!(e.contains("case: each clause is a list"), "{}: {}", src, e);
+    }
+    let e = check_err("(cond ((= 1 1) 2) 3)");
+    assert!(e.contains("cond: each clause is a list"), "{}", e);
+}
+
 #[test]
 fn setq_assigns_each_pair_in_order() {
     assert_eq!(
