@@ -241,13 +241,28 @@ fn thread_runs_in_the_interpreter_interpreted_or_compiled() {
     }
 }
 
-/// What a thread's OS thread cannot run is refused before the thread starts,
-/// as a panic the program can catch: an interpreted function value, which
-/// cannot be compiled on its own.
+/// An interpreted function value is compiled on the spot, as a named callee
+/// is: a `lambda` that captures nothing, and a named function passed as a
+/// value to `Thread::spawn`.
 #[test]
-fn thread_of_an_interpreted_lambda_is_refused() {
-    let e = compile_err_at_runtime("(let ((f (lambda () int 1))) (join (thread (f))))");
-    assert!(e.contains("thread: the function value is not compiled code"), "got: {}", e);
+fn thread_of_an_interpreted_function_value_is_compiled() {
+    assert_eq!(int_compiled("(let ((f (lambda () int 1))) (join (thread (f))))"), 1);
+    assert_eq!(int_compiled("(defun work () int (+ 1 2)) (join (Thread::spawn work))"), 3);
+    assert_eq!(int_compiled("(join (Thread::spawn (lambda () int 42)))"), 42);
+    // The same function spawned again reuses what the first spawn compiled.
+    assert_eq!(
+        int_compiled("(defun work () int 5) (+ (join (Thread::spawn work)) (join (Thread::spawn work)))"),
+        10
+    );
+}
+
+/// What a thread's OS thread cannot run is refused before the thread starts,
+/// as a panic the program can catch: a `lambda` reading a local it captured,
+/// which has no value to bring along.
+#[test]
+fn thread_of_a_capturing_lambda_is_refused() {
+    let e = compile_err_at_runtime("(let ((n 5)) (join (Thread::spawn (lambda () int (* n 2)))))");
+    assert!(e.contains("thread: the function value cannot be compiled"), "got: {}", e);
 }
 
 /// The two static functions answer in the interpreter too — neither needs

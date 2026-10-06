@@ -39,8 +39,8 @@ use crate::check::repr::Repr;
 use crate::eval::value::EvalError;
 
 use super::core_eval::{
-    bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, path_field,
-    param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op,
+    bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, param_names,
+    path_field, param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op,
 };
 use super::task_body::{TyplBody, TyplCx};
 use super::{FnDef, Interp};
@@ -1995,7 +1995,7 @@ impl Interp {
                     return Err(not_compilable(format!("`{}`", path), "is a built-in with no body to compile".to_string()));
                 };
                 let target = crate::CompileTarget::Fn(crate::check::resolved::Ref { written, home, resolved: path.clone() });
-                let body = self.compiled_for_thread(heap, &f, &target, &path.to_string())?;
+                let body = self.compiled_for_thread(heap, &f, &target, &format!("`{}`", path))?;
                 let params = compiled_params(&f, &path.to_string())?;
                 (sched::Entry::Body(body), params, argv)
             }
@@ -2008,7 +2008,7 @@ impl Interp {
                     return Err(not_compilable(format!("`{}`", name), "is a built-in with no body to compile".to_string()));
                 };
                 let target = crate::CompileTarget::Method { type_name, method, home };
-                let body = self.compiled_for_thread(heap, &f, &target, &name)?;
+                let body = self.compiled_for_thread(heap, &f, &target, &format!("`{}`", name))?;
                 let params = compiled_params(&f, &name)?;
                 (sched::Entry::Body(body), params, argv)
             }
@@ -2017,21 +2017,30 @@ impl Interp {
                 let callee = it
                     .next()
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) lost its callee".to_string()))?;
-                match callee {
-                    Value::Boxed(id)
-                        if heap.is_compiled_closure(id)
-                            && heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE => {}
+                let entry = match callee {
+                    Value::Boxed(id) if heap.is_compiled_closure(id) => {
+                        if heap.compiled_closure_body_abi(id) != typelisp_abi::BODY_ABI_COROUTINE {
+                            return Err(EvalError::Internal(
+                                "thread: the function value is compiled under the classic ABI, which a task cannot drive"
+                                    .to_string(),
+                            ));
+                        }
+                        sched::Entry::Closure(callee)
+                    }
+                    // A `lambda`, or a named function used as a value: compiled
+                    // here, as a named callee is above.
+                    Value::Boxed(id) if heap.is_closure(id) => sched::Entry::Body(self.compiled_closure_for_thread(heap, id)?),
                     _ => {
                         return Err(not_compilable(
                             "the function value".to_string(),
-                            "is not compiled code (an interpreted `lambda` cannot be compiled on its own)".to_string(),
+                            "is a built-in with no body to compile".to_string(),
                         ))
                     }
-                }
+                };
                 let reprs = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (apply ..) has no argument representations".to_string()))?;
                 let params = repr_list(heap, reprs, "apply")?;
-                (sched::Entry::Closure(callee), params, it.collect())
+                (entry, params, it.collect())
             }
             ArgsKind::Construct | ArgsKind::DynCall => {
                 return Err(not_compilable(
@@ -2064,18 +2073,80 @@ impl Interp {
         Ok(sched::thread_handle(heap, admitted?, key))
     }
 
+    /// The coroutine-ABI entry of the interpreted closure `id`, for a thread
+    /// to run.
+    ///
+    /// The compile driver compiles registered definitions, so the closure's
+    /// body becomes one — under [`crate::INTERNAL_MODULE`], once per body
+    /// ([`Interp::thread_entries`]) — and is compiled like a named callee.
+    /// A body that reads a variable it captured cannot compile on its own:
+    /// the thread has nothing to hand it that variable's value, so the
+    /// driver's refusal is reported as the panic any uncompilable callee is.
+    fn compiled_closure_for_thread(
+        &self,
+        heap: &mut Heap,
+        id: typelisp_mem::BoxId,
+    ) -> Result<typelisp_rt::coroutine::CoroutineFn, EvalError> {
+        let (params, body, _) = heap.closure_parts(id);
+        let forms = heap.list_to_vec(body).map_err(heap_err)?;
+        let key = forms
+            .iter()
+            .map(|f| match f {
+                Value::Cons(_) => Ok(typelisp_rt::encode(*f)),
+                other => Err(EvalError::Internal(format!("thread: a closure body form is not a core form: {:?}", other))),
+            })
+            .collect::<Result<Vec<i64>, EvalError>>()?;
+        let known = self.thread_entries.borrow().get(&key).cloned();
+        let path = match known {
+            Some(path) => path,
+            None => {
+                let names = param_names(heap, params)?.into_iter().map(|s| heap.symbol_name(s).to_string()).collect();
+                let reprs = param_reprs(heap, params)?;
+                let ret = Repr::read(heap, heap.closure_ret(id))
+                    .ok_or_else(|| EvalError::Internal("thread: the closure has no declared return representation".to_string()))?;
+                let path = crate::Path::internal(&format!("thread-entry-{}", self.thread_entries.borrow().len()));
+                heap.push_permanent_root(body);
+                let def = FnDef {
+                    ffi: false,
+                    name: path.to_string(),
+                    params: names,
+                    body: forms,
+                    rest: false,
+                    lambda: None,
+                    sig: Some((reprs, ret)),
+                    public: false,
+                    compiled: std::cell::RefCell::new(None),
+                };
+                self.root
+                    .borrow_mut()
+                    .get_or_create(path.parent())
+                    .fns
+                    .insert(path.last_segment().to_string(), Rc::new(def));
+                self.thread_entries.borrow_mut().insert(key, path.clone());
+                path
+            }
+        };
+        let f = self
+            .root
+            .borrow()
+            .get_fn(&path)
+            .ok_or_else(|| EvalError::Internal(format!("thread: `{}` was registered but is not found", path)))?;
+        let target = crate::CompileTarget::Fn(crate::check::resolved::Ref::synthetic(path));
+        self.compiled_for_thread(heap, &f, &target, "the function value")
+    }
+
     /// The coroutine-ABI entry of `f`, compiling it first — and everything it
-    /// reaches — if it is not compiled yet.
+    /// reaches — if it is not compiled yet. `what` names it in a message.
     fn compiled_for_thread(
         &self,
         heap: &mut Heap,
         f: &Rc<FnDef>,
         target: &crate::CompileTarget,
-        name: &str,
+        what: &str,
     ) -> Result<typelisp_rt::coroutine::CoroutineFn, EvalError> {
         if f.compiled.borrow().is_none() {
             (super::backend_compile_function()?)(self, heap, target).map_err(|e| {
-                EvalError::Panic(format!("thread: `{}` cannot be compiled ({}); a thread runs only compiled code", name, e))
+                EvalError::Panic(format!("thread: {} cannot be compiled ({}); a thread runs only compiled code", what, e))
             })?;
         }
         let compiled = f.compiled.borrow().clone();
@@ -2086,10 +2157,10 @@ impl Interp {
                 Ok(unsafe { std::mem::transmute::<usize, typelisp_rt::coroutine::CoroutineFn>(body.address()) })
             }
             Some(_) => Err(EvalError::Internal(format!(
-                "thread: `{}` is compiled under the classic ABI, which a task cannot drive",
-                name
+                "thread: {} is compiled under the classic ABI, which a task cannot drive",
+                what
             ))),
-            None => Err(EvalError::Internal(format!("thread: compiling `{}` left it without a body", name))),
+            None => Err(EvalError::Internal(format!("thread: compiling {} left it without a body", what))),
         }
     }
 

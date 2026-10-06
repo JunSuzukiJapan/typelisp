@@ -732,6 +732,19 @@ pub struct Interp {
     /// compiles a dynamic dispatch — which is why boxing does not simply
     /// compile its slots unconditionally.
     pub dyn_dispatch_compiled: RefCell<HashSet<Path>>,
+    /// The definitions an interpreted closure was given so that a `thread`
+    /// could run it, keyed by the closure's body forms.
+    ///
+    /// A thread runs only compiled code, and what the compile driver compiles
+    /// is a registered definition. A closure is not one — a named function
+    /// used as a value is reified into a closure over a copy of its body list
+    /// ([`Interp::reify`]) — so each body gets a definition of its own under
+    /// [`crate::INTERNAL_MODULE`], compiled once however often it is spawned.
+    /// The key is the identity of the body's forms, which the same function
+    /// or `lambda` shares between evaluations; the body is rooted
+    /// permanently when its definition is made, so its cells are never
+    /// reused for another form and a key cannot come to name something else.
+    pub thread_entries: RefCell<HashMap<Vec<i64>, Path>>,
 }
 
 /// One outgoing edge of the top-level compile call graph
@@ -911,6 +924,7 @@ impl Interp {
             dyn_upcasts: RefCell::new(HashMap::new()),
             trait_ids: RefCell::new(HashMap::new()),
             dyn_dispatch_compiled: RefCell::new(HashSet::new()),
+            thread_entries: RefCell::new(HashMap::new()),
             printing: RefCell::new(Vec::new()),
             traced: RefCell::new(HashSet::new()),
             trace_armed: Cell::new(false),
