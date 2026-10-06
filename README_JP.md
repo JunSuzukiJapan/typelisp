@@ -1,6 +1,6 @@
 # TypeLisp
 
-[English](README.md) | 日本語
+[English](README.md) | 日本語 | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md)
 
 TypeLisp は静的型付きの Lisp です。
 文法などは主にCommon Lispを参考にしています。
