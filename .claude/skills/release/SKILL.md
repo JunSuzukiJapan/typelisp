@@ -82,7 +82,9 @@ description: typelisp の新しい版(例 0.2.0)をリリースする。版上�
 
 11. **crates.io の案内**: 公開は依存される側から順に、ユーザーが流す。
     typelisp-mem → typelisp-abi → typelisp-print → typelisp-read → typelisp-rt → typelisp-front
-    → typelisp。各クレートの間で crates.io の索引に載るのを待つ。順序と注意はユーザーに渡す。
+    → typelisp。`scripts/publish-crates.sh` がこの順に流す(`--dry-run` は typelisp-mem だけ
+    確かめて止まる。公開済みの版は飛ばすので、途中で止まっても同じコマンドで続けられる)。
+    Claude は流さず、このコマンドをユーザーに渡す。
 
 ## 版の出現箇所(0.1.1 → 0.2.0 のときの全部)
 
