@@ -70,14 +70,15 @@ description: typelisp の新しい版(例 0.2.0)をリリースする。版上�
     - ドキュメントサイトに新しい MAJOR.MINOR が加わった(MINOR が上がったときだけ増える。
       PATCH では同じ版のページが最新パッチで置き換わる)。
       `curl -s https://junsuzukijapan.github.io/typelisp/en/versions.json` に新しい版があること。
-    - **Documentation ジョブが失敗していたら**(v0.2.0 で実際に起きた): アノテーション
-      (`gh api repos/JunSuzukiJapan/typelisp/check-runs/<job id>/annotations`)に
-      `Tag "v..." is not allowed to deploy to github-pages due to environment protection rules`
-      とあれば、`github-pages` 環境のデプロイ許可がブランチ `main` だけでタグを拒んでいる。
-      ステップが 0 件のまま落ちるのでログは出ない。当面の回避は main で手動起動:
-      `gh workflow run docs.yml --ref main`(タグにあるものがそのまま公開される。約 1.5 分)。
-      恒久対策は環境にタグの許可(`v*`)を足すこと。リポジトリ設定の変更なので、ユーザーの
-      了解を取ってから行う。
+    - **Documentation ジョブが失敗していたら**: v0.2.0 では、`github-pages` 環境のデプロイ許可が
+      ブランチ `main` だけでタグを拒み、このジョブが落ちた(ステップが 0 件のまま落ちるのでログは
+      出ない。アノテーションに `Tag "v..." is not allowed to deploy to github-pages due to
+      environment protection rules` と出る:
+      `gh api repos/JunSuzukiJapan/typelisp/check-runs/<job id>/annotations`)。
+      恒久対策として環境にタグの許可 `v*` を足した(2026-10-07)。次の版からは通るはずだが、
+      `gh api repos/JunSuzukiJapan/typelisp/environments/github-pages/deployment-branch-policies`
+      に `v*`(tag)があることは確かめる。それでも落ちたら `gh workflow run docs.yml --ref main`
+      で手動起動する(タグにあるものがそのまま公開される。約 1.5 分)。
     - リリースノートは `--generate-notes` のコミット一覧。書き直すなら `gh release edit v<ver> --notes-file ...`。
 
 11. **crates.io の案内**: 公開は依存される側から順に、ユーザーが流す。
@@ -85,6 +86,9 @@ description: typelisp の新しい版(例 0.2.0)をリリースする。版上�
     → typelisp。`scripts/publish-crates.sh` がこの順に流す(`--dry-run` は typelisp-mem だけ
     確かめて止まる。公開済みの版は飛ばすので、途中で止まっても同じコマンドで続けられる)。
     Claude は流さず、このコマンドをユーザーに渡す。
+    公開後は、読み取りだけで確かめる(`publish-crates.sh` は本番の公開を行うので確認には使わない):
+    7 クレートそれぞれ `curl -s -A "<名前>" https://crates.io/api/v1/crates/<crate>/<ver>` が
+    `"num":"<ver>"` を返し、`"yanked":false` であること。
 
 ## 版の出現箇所(0.1.1 → 0.2.0 のときの全部)
 
