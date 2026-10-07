@@ -1,0 +1,52 @@
+# The documentation site (GitHub Pages): every released MAJOR.MINOR, in every
+# language it has, built by scripts/docs/build-site.py from the release tags.
+# The whole site is rebuilt from the tags each time, so nothing is kept between
+# runs and a version that was missed shows up in the next one.
+#
+# release.yml calls this once a release is published, so a version's
+# documentation appears only after the release passed its tests. Started by
+# hand (workflow_dispatch), it publishes what the tags hold now, for a fix to
+# the site's rules or a tag that was added late.
+#
+# Needs Settings > Pages > Source: "GitHub Actions" once, on the repository.
+name: Docs
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+# One deployment at a time, and the newest one wins.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      # All of the history and every tag: a version is read from its tag.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: scripts/docs/requirements.txt
+      - run: pip install -r scripts/docs/requirements.txt
+      - name: Build the site
+        run: scripts/docs/build-site.py --out target/docs-site
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/docs-site
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4

@@ -10,6 +10,9 @@
 # The tests are split four ways per platform (scripts/test-each.sh --shard):
 # serially, as they have to run, the suite takes hours, and a job gets six.
 # Publishing to crates.io stays a manual step.
+#
+# Once the release is published, the documentation site is rebuilt from the
+# tags (docs.yml), which adds this version's.
 name: Release
 
 on:
@@ -172,6 +175,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+
+  docs:
+    name: Documentation
+    needs: release
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
 
   install:
     name: Install (${{ matrix.arch }})
