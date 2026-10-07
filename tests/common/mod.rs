@@ -39,7 +39,7 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Int
 /// The default heap for a test: large enough for the prelude and the island
 /// with room to run in, which is what all but a handful of the per-file
 /// helpers used.
-pub const DEFAULT_CELLS: usize = 1 << 16;
+const DEFAULT_CELLS: usize = 1 << 16;
 
 /// What a [`Session`] loads before the program under test.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -196,14 +196,6 @@ pub fn eval_string_compiled(src: &str) -> String {
 /// expected to fail with.
 pub fn check_err(src: &str) -> String {
     match Session::new(Load::Prelude).check_all(src) {
-        Err(Error::TypeError(msg)) => msg,
-        other => panic!("expected a TypeError, got {:?}", other),
-    }
-}
-
-/// [`check_err`] with the compiler island loaded too.
-pub fn check_err_compiled(src: &str) -> String {
-    match Session::new(Load::Compiler).check_all(src) {
         Err(Error::TypeError(msg)) => msg,
         other => panic!("expected a TypeError, got {:?}", other),
     }

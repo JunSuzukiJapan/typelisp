@@ -323,7 +323,7 @@ fn concatenate_refuses_what_it_cannot_type() {
     assert!(check_err("(concatenate 'vector)").contains("needs at least one sequence"));
     assert!(check_err("(concatenate \"string\" \"a\")").contains("must be a quoted symbol"));
     // Every operand has to fit the result type.
-    assert!(check_err("(concatenate 'string \"a\" 1)").len() > 0);
+    assert!(!check_err("(concatenate 'string \"a\" 1)").is_empty());
 }
 
 /// `p` = `#<vector<int> 2 3>` and `q` = `#<vector<int> 2>` alongside the

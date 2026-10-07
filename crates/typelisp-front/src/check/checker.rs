@@ -1514,7 +1514,7 @@ impl Checker {
         }
         let call = f.finish("call")?;
         match boundary {
-            Some((_, ret)) if ret == Type::Int => tag_int_form(heap, call),
+            Some((_, Type::Int)) => tag_int_form(heap, call),
             _ => Ok(call),
         }
     }
@@ -1584,7 +1584,7 @@ impl Checker {
         self.request_print_object(ret);
         let assoc = f.finish("assoc")?;
         match boundary {
-            Some((_, ret)) if ret == Type::Int => tag_int_form(heap, assoc),
+            Some((_, Type::Int)) => tag_int_form(heap, assoc),
             _ => Ok(assoc),
         }
     }
@@ -5681,14 +5681,6 @@ impl Checker {
             }
         }
     }
-
-    /// Parse a `defmacro` lambda list into `(required names, optionals,
-    /// &rest name, key specs)`, where each optional/key spec is
-    /// `(name, default-form)` with `default-form` `None` for a bare name and
-    /// `Some(form)` for a `(name form)` pair. Enforces the CL section order
-    /// (`required &optional &rest &key`), each marker at most once, and that
-    /// `&rest` names exactly one parameter. See [`Self::check_defmacro`].
-    #[allow(clippy::type_complexity)]
 
     /// A bare-symbol lambda-list parameter name (`required`/`&rest`).
     fn macro_param_name(heap: &Heap, v: Value, section: &str) -> Result<String, Error> {

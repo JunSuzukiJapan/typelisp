@@ -843,7 +843,6 @@ pub(crate) fn compute_sccs(interp: &Interp, heap: &Heap, name: &str) -> Result<V
 /// target is already compiled is skipped outright (never entered into
 /// `indices` at all), so it never contributes a spurious singleton SCC.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn scc_strongconnect(
     interp: &Interp,
     heap: &Heap,

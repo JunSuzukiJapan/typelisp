@@ -264,11 +264,10 @@ fn walk(
                         walk(heap, items[3], bound, siblings, seen, order)?;
                         walk(heap, items[4], bound, siblings, seen, order)?;
                     }
-                    "else" => {
-                        if items.len() == 2 {
+                    "else"
+                        if items.len() == 2 => {
                             walk(heap, items[1], bound, siblings, seen, order)?;
                         }
-                    }
                     _ => {}
                 }
             }
