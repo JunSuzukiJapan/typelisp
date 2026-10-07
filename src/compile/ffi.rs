@@ -480,8 +480,7 @@ fn word_to_c(
         // `encode_crossing_value` puts in the word, for `f32` too.
         CType::F64 => builder
             .build_bit_cast(word, ctx.f64_type(), "arg_f64")
-            .map_err(|e| format!("ffi: failed to reinterpret an f64 argument: {}", e))?
-            .into(),
+            .map_err(|e| format!("ffi: failed to reinterpret an f64 argument: {}", e))?,
         CType::F32 => {
             let wide = builder
                 .build_bit_cast(word, ctx.f64_type(), "arg_f32_wide")

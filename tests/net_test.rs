@@ -315,7 +315,7 @@ fn several_clients_are_served_at_once() {
         r))))"
     );
     assert_eq!(text(&src), "abc");
-    assert_eq!(text_compiled(&format!("{src}").replace("(task (echo-serve l 3))", "(compile echo-conn) (task (echo-serve l 3))")), "abc");
+    assert_eq!(text_compiled(&src.to_string().replace("(task (echo-serve l 3))", "(compile echo-conn) (task (echo-serve l 3))")), "abc");
 }
 
 // ---- timeouts, names, UDP, TLS ---------------------------------------------

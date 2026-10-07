@@ -3835,45 +3835,25 @@ unsafe fn rt_f64_unary(args: *const i64, argc: u32, name: &str, f: fn(f64) -> f6
     f(f64::from_bits(*args as u64)).to_bits() as i64
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_tan(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_tan", f64::tan)
+macro_rules! rt_f64_unary_exports {
+    ($($export:ident => $method:ident,)*) => {$(
+        #[no_mangle]
+        pub unsafe extern "C" fn $export(args: *const i64, argc: u32) -> i64 {
+            rt_f64_unary(args, argc, stringify!($export), f64::$method)
+        }
+    )*};
 }
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_asin(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_asin", f64::asin)
-}
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_acos(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_acos", f64::acos)
-}
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_atan(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_atan", f64::atan)
-}
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_sinh(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_sinh", f64::sinh)
-}
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_cosh(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_cosh", f64::cosh)
-}
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_tanh(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_tanh", f64::tanh)
-}
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_asinh(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_asinh", f64::asinh)
-}
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_acosh(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_acosh", f64::acosh)
-}
-#[no_mangle]
-pub unsafe extern "C" fn rt_f64_atanh(args: *const i64, argc: u32) -> i64 {
-    rt_f64_unary(args, argc, "rt_f64_atanh", f64::atanh)
+rt_f64_unary_exports! {
+    rt_f64_tan => tan,
+    rt_f64_asin => asin,
+    rt_f64_acos => acos,
+    rt_f64_atan => atan,
+    rt_f64_sinh => sinh,
+    rt_f64_cosh => cosh,
+    rt_f64_tanh => tanh,
+    rt_f64_asinh => asinh,
+    rt_f64_acosh => acosh,
+    rt_f64_atanh => atanh,
 }
 
 /// Interns `args[0..argc]` (each a tagged `Value::Symbol`, one per `::`

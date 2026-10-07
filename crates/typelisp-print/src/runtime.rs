@@ -159,11 +159,8 @@ pub fn read_print_vars(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, Strin
 /// thing CL's stream-type dispatch achieves.
 pub fn read_opts(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, String>) -> Result<Opts, String> {
     let pretty = read_bool(global, "*print-pretty*")?;
-    let margin = match read_limit(heap, global, "*print-right-margin*")? {
-        Some(m) => m,
-        // A margin of 0: nothing is ever too wide, so nothing breaks.
-        None => 0,
-    };
+    // A margin of 0: nothing is ever too wide, so nothing breaks.
+    let margin: usize = read_limit(heap, global, "*print-right-margin*")?.unwrap_or_default();
     Ok(Opts {
         pretty: pretty || session_open(),
         margin,
