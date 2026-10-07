@@ -208,7 +208,9 @@ crates.io への公開は手で行う。
    書き直すなら公開後に `gh release edit` で差し替える。
 5. crates.io に、依存される側から順に公開する: typelisp-mem → typelisp-abi → typelisp-print →
    typelisp-read → typelisp-rt → typelisp-front → typelisp。前のクレートが crates.io の索引に
-   載る前に次を出すと、依存が見つからずに止まる。
+   載る前に次を出すと、依存が見つからずに止まる。`scripts/publish-crates.sh` がこの順に流す
+   （`--dry-run` は typelisp-mem だけ。公開済みの版は飛ばすので、途中で止まっても同じ
+   コマンドで続けられる）。
 
 ## 配布用の実行ファイル（macOS）
 
