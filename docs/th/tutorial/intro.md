@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # เริ่มต้นใช้งาน
 
 บทนี้เริ่มจากการประเมินค่านิพจน์ใน REPL แล้วครอบคลุมฟังก์ชัน ตัวแปร เงื่อนไข ลูป

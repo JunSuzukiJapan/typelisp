@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # 시작하기
 
 REPL에서 식을 평가하는 것부터 시작해 함수, 변수, 조건 분기, 반복, 리스트와 `Vector`를 차례로 다룬다. `typl`을

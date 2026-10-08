@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # 入门
 
 本章从在 REPL 中求值表达式开始，依次介绍函数、变量、条件分支、循环，以及列表和 `Vector`。

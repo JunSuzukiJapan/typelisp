@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # 类型基础
 
 typelisp 是静态类型语言。本章介绍类型检查能为你做什么、常用的类型（`Option`、`Result`、结构体、枚举）以及

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # 入門
 
 本章從在 REPL 中對運算式求值開始，依序介紹函式、變數、條件分支、迴圈，以及串列與 `Vector`。`typl` 的建置方法請參閱

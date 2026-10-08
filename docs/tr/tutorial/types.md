@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # Tür Temelleri
 
 typelisp statik tür denetimli bir dildir. Bu bölüm, tür denetleyicisinin sizin için ne yaptığını, en
