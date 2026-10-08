@@ -158,6 +158,42 @@ fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
 }
 
 #[test]
+fn an_argument_after_one_waiting_on_a_pin_reads_its_type_from_that_argument() {
+    // `foldl`'s `(f (fn (B A) B))` waits for `A`'s pin, and `(init B)` shares
+    // `B` with it, so `init` waits too: checked after the lambda, the bare
+    // `(Option::none)` is read as the `Option<int>` the lambda says `B` is.
+    // Checked first, it had nothing to learn its type argument from.
+    let src = "(defun make-v () Vector<int> (Vector::new))
+               (let ((v (make-v))) (push v 3) (push v 9) (push v 1)
+                 (unwrap-or (foldl (iter v)
+                                   (lambda ((best Option<int>) (x int)) Option<int>
+                                     (match best
+                                       ((some b) (if (< b x) (Option::some x) best))
+                                       ((none) (Option::some x))))
+                                   (Option::none))
+                            -1))";
+    assert_eq!(eval_ok(src), Value::Int(9));
+}
+
+#[test]
+fn an_argument_waiting_with_a_pinned_one_also_reads_a_generic_callers_parameter() {
+    // The same inside a generic function, where `B` is the caller's own
+    // `Option<T>` — the tutorial's `largest`.
+    let src = "(defun largest<T> ((v Vector<T>)) Option<T>
+                 (where (Ord T))
+                 (foldl (iter v)
+                        (lambda ((best Option<T>) (x T)) Option<T>
+                          (match best
+                            ((some b) (if (less b x) (Option::some x) best))
+                            ((none) (Option::some x))))
+                        (Option::none)))
+               (defun make-v () Vector<int> (Vector::new))
+               (let ((v (make-v))) (push v 3) (push v 9) (push v 1)
+                 (unwrap-or (largest v) -1))";
+    assert_eq!(eval_ok(src), Value::Int(9));
+}
+
+#[test]
 fn generic_iter_combinators_work_over_a_hashtable() {
     // The prelude's generic `count-if`/`map`/`foldl`/… take an *iterator*, so
     // a single definition serves any `Iter` type — here `HashTable<K,V>`'s

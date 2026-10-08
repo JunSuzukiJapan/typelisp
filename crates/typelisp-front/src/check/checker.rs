@@ -15126,6 +15126,12 @@ impl Checker {
             .cloned()
             .collect();
         let mut slots: Vec<Option<Checked>> = args.iter().map(|_| None).collect();
+        // The type parameters a waiting argument mentions. A later argument
+        // sharing one waits too, or it would be checked before the argument
+        // written ahead of it that decides the parameter: `foldl`'s `(init B)`
+        // ran before its `(fn (B A) B)`, and `(Option::none)` as `init` had no
+        // `B` to be read as.
+        let mut waiting_on: HashSet<String> = HashSet::new();
         for waiting_pass in [false, true] {
             if waiting_pass {
                 if slots.iter().all(Option::is_some) {
@@ -15144,7 +15150,8 @@ impl Checker {
                     continue;
                 }
                 let st = subst_apply(pty, subst);
-                if !waiting_pass && type_has_param(&st, &pinned) {
+                if !waiting_pass && (type_has_param(&st, &pinned) || type_has_param(&st, &waiting_on)) {
+                    waiting_on.extend(params.iter().filter(|p| type_has_param(&st, &std::iter::once((*p).clone()).collect())).cloned());
                     continue;
                 }
                 let exp = if type_has_param(&st, params) { None } else { Some(st) };
