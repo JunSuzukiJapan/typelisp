@@ -158,9 +158,10 @@ Write `(if condition then-expression else-expression)`. **The else expression ca
 When nothing should happen in the false case, use `when` (and `unless` for the opposite).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

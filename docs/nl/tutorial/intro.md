@@ -163,9 +163,10 @@ weggelaten.**
 Als er in het onware geval niets moet gebeuren, gebruik je `when` (en `unless` voor het omgekeerde).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

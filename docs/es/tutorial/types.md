@@ -99,6 +99,10 @@ Muchas funciones de la biblioteca estándar devuelven `Option`. Por ejemplo, `po
 dentro de `some` si encuentra el elemento, y `none` si no.
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -221,6 +225,10 @@ Una función que sirve para cualquier tipo se define con un **parámetro de tipo
 Al llamarla no se da el tipo. `T` se deduce de los argumentos.
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T es int
 (first-or names "none")    ; T es string
 (first-or ints "none")     ; error de tipos: ints es un Vector<int>, así que T es int

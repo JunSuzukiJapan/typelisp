@@ -92,6 +92,10 @@ none
 标准库中也有很多返回 `Option` 的函数。例如 `position` 找到时用 `some` 返回位置，找不到时返回 `none`。
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -207,6 +211,10 @@ none
 调用时不指定类型，`T` 由参数决定。
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T 是 int
 (first-or names "none")    ; T 是 string
 (first-or ints "none")     ; 类型错误：ints 是 Vector<int>，所以 T 是 int

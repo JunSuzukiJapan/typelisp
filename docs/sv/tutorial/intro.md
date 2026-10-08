@@ -157,9 +157,10 @@ Skriv `(if villkor då-uttryck annars-uttryck)`. **Annars-uttrycket kan inte ute
 När ingenting ska hända i falskt fall används `when` (och `unless` för det motsatta).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

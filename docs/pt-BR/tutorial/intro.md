@@ -158,9 +158,10 @@ omitida.**
 Quando nada deve acontecer no caso falso, use `when` (e `unless` para o contrário).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

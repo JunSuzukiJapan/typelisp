@@ -155,9 +155,10 @@ Hãy viết `(if điều-kiện biểu-thức-then biểu-thức-else)`. **Biể
 Khi không cần làm gì ở trường hợp sai, hãy dùng `when` (và `unless` cho trường hợp ngược lại).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

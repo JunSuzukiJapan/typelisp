@@ -90,6 +90,10 @@ none
 標準函式庫中也有很多回傳 `Option` 的函式。例如 `position` 找到時以 `some` 回傳位置，找不到時回傳 `none`。
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -203,6 +207,10 @@ none
 呼叫時不指定型別，`T` 由引數決定。
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T 是 int
 (first-or names "none")    ; T 是 string
 (first-or ints "none")     ; 型別錯誤：ints 是 Vector<int>，所以 T 是 int

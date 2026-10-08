@@ -96,6 +96,10 @@ none
 `some`으로, 발견되지 않으면 `none`을 반환한다.
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -212,6 +216,10 @@ none
 호출할 때 타입은 주지 않는다. `T`는 인수에서 정해진다.
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T는 int
 (first-or names "none")    ; T는 string
 (first-or ints "none")     ; 타입 오류: ints는 Vector<int>이므로 T는 int

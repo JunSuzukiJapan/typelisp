@@ -158,9 +158,10 @@ Pisze się `(if warunek wyrażenie-then wyrażenie-else)`. **Wyrażenia else nie
 Gdy w przypadku fałszu nic nie ma się dziać, użyj `when` (a `unless` dla przeciwnego przypadku).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

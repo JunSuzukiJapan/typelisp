@@ -98,6 +98,10 @@ none
 位置を `some` で、見つからなければ `none` を返します。
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -216,6 +220,10 @@ none
 呼び出すときは型を指定しません。引数から `T` が決まります。
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T は int
 (first-or names "none")    ; T は string
 (first-or ints "none")     ; 型エラー：ints が Vector<int> なので T は int

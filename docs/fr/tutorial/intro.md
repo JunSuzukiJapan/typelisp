@@ -161,9 +161,10 @@ Les variables globales se définissent avec `defvar`. Ici, on écrit le type.
 Quand rien ne doit se passer dans le cas faux, utilisez `when` (et `unless` pour l'inverse).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

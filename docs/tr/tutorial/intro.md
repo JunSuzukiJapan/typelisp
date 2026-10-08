@@ -157,9 +157,10 @@ Global değişkenler `defvar` ile tanımlanır. Burada türü yazarsınız.
 Yanlış durumda hiçbir şey olmaması gerektiğinde `when` kullanın (tersi için `unless`).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

@@ -99,6 +99,10 @@ none
 `some`, якщо елемент знайдено, і `none`, якщо ні.
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -221,6 +225,10 @@ none
 Під час виклику тип не задають. `T` виводиться з аргументів.
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T is int
 (first-or names "none")    ; T is string
 (first-or ints "none")     ; type error: ints is a Vector<int>, so T is int
