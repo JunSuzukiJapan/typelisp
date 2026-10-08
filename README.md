@@ -171,7 +171,7 @@ The environment variable `TYPELISP_HOME` sets the install location, and `TYPELIS
 version (the latest release if not given).
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_VERSION=0.2.0 sh
+curl -fsSL https://raw.githubusercontent.com/JunSuzukiJapan/typelisp/main/install.sh | TYPELISP_VERSION=0.2.1 sh
 ```
 
 To uninstall, first delete the libraries `typl` has written out, then delete the install directory.
