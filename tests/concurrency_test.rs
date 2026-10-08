@@ -621,6 +621,32 @@ fn a_compiled_yield_resumes_where_it_left_off() {
 /// long `b` takes to start does not matter, only that it starts while `a`
 /// sleeps. (It used to be `a` sleeping 200 ms against `b` sleeping 50 ms,
 /// which a loaded CI runner did not keep apart.)
+/// Sleepers that are all due at once wake earliest deadline first.
+///
+/// The main task makes both sleep, then keeps the thread for 0.3 s without
+/// giving it up, so by the next task switch `a` (0.20 s) and `b` (0.05 s) are
+/// both past their deadlines. Woken in slot order, `a` — spawned first — ran
+/// first and the trail was "ab". A thread that woke late did the same thing,
+/// which is how `a_compiled_sleep_suspends_only_the_calling_task` failed on a
+/// loaded CI runner.
+#[test]
+fn sleepers_due_at_once_wake_earliest_deadline_first() {
+    assert_eq!(
+        text(r#"(defvar (trail string) "")
+                (defun slow ((name string) (sec f64)) ()
+                  (progn (sleep sec)
+                         (when true (setf trail (append trail name)))))
+                (defun busy ((sec f64)) ()
+                  (let ((start (internal-time-seconds (get-internal-real-time))))
+                    (while (< (- (internal-time-seconds (get-internal-real-time)) start) sec) ())))
+                (let ((a (task (slow "a" 0.20))) (b (task (slow "b" 0.05))))
+                  (progn (sleep 0.0)
+                         (busy 0.3)
+                         (wait a) (wait b) trail))"#),
+        "ba"
+    );
+}
+
 #[test]
 fn sleep_suspends_only_the_calling_task() {
     assert_eq!(
@@ -665,9 +691,22 @@ fn a_lone_sleeper_still_waits_and_comes_back() {
 
 /// A compiled `sleep` stops **the task**, not the thread (Phase C3c).
 ///
-/// `sleep_suspends_only_the_calling_task`'s program with `slow` compiled, and
-/// the same discriminator: `a` is spawned first and waited on first but sleeps
-/// four times as long, so a `sleep` that held the thread would give `"ab"`.
+/// Compiled tasks may run on several threads at once, so one sleeper holding
+/// its thread would leave the others free and prove nothing. There are one
+/// more sleepers than threads instead: each sleeps once, for 2 s, then reads
+/// the flag `mark` sets, and `mark` is queued behind all of them. A `sleep`
+/// that held the thread would block every thread with a sleeper, `mark` would
+/// run only after they woke, and they would all have read `false` — run with
+/// C's `sleep(2)` in place of `sleep`, all of them do. The only thing timed is
+/// that `mark` gets to run somewhere in those 2 s. (`TYPELISP_THREADS` set
+/// above the machine's parallelism would leave a thread free, and let a
+/// holding `sleep` pass; it cannot make a working one fail.)
+///
+/// The flag is a `Mutex`: the sleepers and `mark` may be on different threads.
+/// This used to compare a 0.20 s sleeper with a 0.05 s one by the order they
+/// appended to a global string, unsynchronized across threads. It failed when
+/// both came due at once (`sleepers_due_at_once_wake_earliest_deadline_first`),
+/// and could still fail whenever the 0.05 s one started late.
 ///
 /// This is the one of the three that *could* have been left alone — compiled
 /// code has always had a thread-sleeping `rt_sleep`. That was exactly the
@@ -677,16 +716,25 @@ fn a_lone_sleeper_still_waits_and_comes_back() {
 #[test]
 fn a_compiled_sleep_suspends_only_the_calling_task() {
     assert_eq!(
-        text_compiled(
-            r#"(defvar (trail string) "")
-               (defun slow ((name string) (sec f64)) ()
-                 (progn (sleep sec)
-                        (when true (setf trail (append trail name)))))
-               (compile slow)
-               (let ((a (task (slow "a" 0.20))) (b (task (slow "b" 0.05))))
-                 (progn (wait a) (wait b) trail))"#
+        int_compiled(
+            r#"(defun sleeper ((flag Mutex<bool>)) bool
+                 (sleep 2.0)
+                 (with-lock (f flag) f))
+               (defun mark ((flag Mutex<bool>)) ()
+                 (with-lock (f flag) (setf f true)))
+               (compile sleeper)
+               (compile mark)
+               (let ((flag (the Mutex<bool> (Mutex::make false)))
+                     (sleepers (the Vector<Task<bool>> (Vector::new)))
+                     (missed 0))
+                 (dotimes (i (+ (Thread::available-parallelism) 1))
+                   (push sleepers (task (sleeper flag))))
+                 (wait (task (mark flag)))
+                 (doiter (s (iter sleepers))
+                   (unless (wait s) (setf missed (+ missed 1))))
+                 missed)"#
         ),
-        "ba"
+        0
     );
 }
 
