@@ -1,6 +1,8 @@
-# Every push and pull request: the workspace builds, and nothing in it — tests
-# included — has a warning. The test suite itself runs only for a release
-# (release.yml): it takes hours, serially (scripts/test-serial.sh says why).
+# Every push and pull request: the workspace builds, nothing in it — tests
+# included — has a warning, and every translation is up to date with the
+# Japanese document it was made from. The test suite itself runs only for a
+# release (release.yml): it takes hours, serially (scripts/test-serial.sh says
+# why).
 #
 # Tests are checked, not built: linked, the 130-odd test binaries come to more
 # than 15 GB, more than a hosted runner has free.
@@ -21,6 +23,18 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  translations:
+    name: Translations
+    runs-on: ubuntu-24.04
+    steps:
+      # The whole history: each translation names the commit it was made
+      # from, and the check compares its source against that commit.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check
+        run: scripts/check-translations.sh
+
   macos:
     name: macOS (${{ matrix.arch }})
     strategy:
