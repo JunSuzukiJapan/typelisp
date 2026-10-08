@@ -251,9 +251,15 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 ```
 
 تأخذ `map` و`filter` و`sort` و`foldl` وأخواتها `Vector` محوَّلًا إلى **مكرِّر (iterator)** بـ `(iter v)`.
-وتأتي المجموعة أولًا والدالة ثانيًا. و`v` في المثال التالي هو `Vector` المكوّن من `3 1 2` المبني أعلاه.
+وتأتي المجموعة أولًا والدالة ثانيًا. و`v` أعلاه مربوط بـ `let`، فلا يمكن استخدامه خارج ذلك `let`. لذا
+يعرّف المثال التالي `v` أولًا بـ `defvar`.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

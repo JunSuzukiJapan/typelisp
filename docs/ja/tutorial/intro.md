@@ -253,9 +253,15 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 ```
 
 `map`、`filter`、`sort`、`foldl` などは、`Vector` を `(iter v)` で**イテレータ**にして渡します。
-対象が先、関数が後です。次の例の `v` は、上で作った `3 1 2` の `Vector` です。
+対象が先、関数が後です。上の `v` は `let` で束縛したので、その `let` の外では使えません。
+次の例では、まず `defvar` で `v` を定義します。
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

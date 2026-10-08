@@ -248,10 +248,16 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 42
 ```
 
-`map`, `filter`, `sort`, `foldl` 등은 `Vector`를 `(iter v)`로 **이터레이터**로 만든 것을 받는다. 컬렉션이 먼저,
-함수가 나중이다. 다음 예의 `v`는 위에서 만든 `3 1 2`의 `Vector`이다.
+`map`, `filter`, `sort`, `foldl` 등은 `Vector`를 `(iter v)`로 **이터레이터**로 만든 것을 받는다.
+컬렉션이 먼저, 함수가 나중이다. 위의 `v`는 `let`으로 묶었으므로 그 `let` 밖에서는 쓸 수 없다. 다음
+예에서는 먼저 `defvar`로 `v`를 정의한다.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

@@ -266,11 +266,17 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 42
 ```
 
-`map`, `filter`, `sort`, `foldl` en verwanten nemen een `Vector` die met `(iter v)` tot **iterator**
-is gemaakt. De collectie komt eerst en de functie daarna. De `v` in het volgende voorbeeld is de
-hierboven gebouwde `Vector` van `3 1 2`.
+`map`, `filter`, `sort`, `foldl` en verwanten nemen een `Vector` die met `(iter v)` tot
+**iterator** is gemaakt. De collectie komt eerst en de functie daarna. De `v` hierboven is met
+`let` gebonden en is daarom buiten die `let` niet te gebruiken. Het volgende voorbeeld
+definieert `v` eerst met `defvar`.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

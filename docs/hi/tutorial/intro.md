@@ -249,10 +249,16 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 42
 ```
 
-`map`, `filter`, `sort`, `foldl` और उनके साथी `(iter v)` से **इटरेटर** में बदले गए `Vector` को लेते हैं। कलेक्शन पहले आता है और फ़ंक्शन
-दूसरे स्थान पर। अगले उदाहरण का `v` ऊपर बनाया गया `3 1 2` वाला `Vector` है।
+`map`, `filter`, `sort`, `foldl` और उनके साथी `(iter v)` से **इटरेटर** में बदले गए `Vector` को लेते हैं। कलेक्शन
+पहले आता है और फ़ंक्शन दूसरे स्थान पर। ऊपर का `v` `let` से बाँधा गया था, इसलिए उस `let` के बाहर उसका उपयोग नहीं
+किया जा सकता। अगला उदाहरण पहले `defvar` से `v` परिभाषित करता है।
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

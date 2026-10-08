@@ -258,10 +258,15 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 ```
 
 `map`, `filter`, `sort`, `foldl` ve benzerleri, `(iter v)` ile bir **yineleyiciye** çevrilmiş bir
-`Vector` alır. Koleksiyon önce, fonksiyon sonra gelir. Sonraki örnekteki `v`, yukarıda oluşturulan
-`3 1 2` değerli `Vector`'dür.
+`Vector` alır. Koleksiyon önce, fonksiyon sonra gelir. Yukarıdaki `v`, `let` ile bağlandığı için o
+`let`'in dışında kullanılamaz. Sonraki örnek önce `v`'yi `defvar` ile tanımlar.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

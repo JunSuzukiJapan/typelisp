@@ -254,11 +254,16 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 42
 ```
 
-`map`, `filter`, `sort`, `foldl` và các hàm tương tự nhận một `Vector` đã được biến thành **iterator**
-bằng `(iter v)`. Tập hợp đứng trước và hàm đứng sau. `v` trong ví dụ tiếp theo là `Vector` gồm `3 1 2`
-được dựng ở trên.
+`map`, `filter`, `sort`, `foldl` và các hàm tương tự nhận một `Vector` đã được biến thành
+**iterator** bằng `(iter v)`. Tập hợp đứng trước và hàm đứng sau. `v` ở trên được gắn bằng `let` nên
+không dùng được bên ngoài `let` đó. Ví dụ tiếp theo định nghĩa `v` bằng `defvar` trước.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

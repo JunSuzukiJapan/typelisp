@@ -242,10 +242,15 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 42
 ```
 
-`map`、`filter`、`sort`、`foldl` 等接受以 `(iter v)` 變成**迭代器**的 `Vector`。對象在前，函式在後。下例中的 `v` 是上面建立的
-`3 1 2` 的 `Vector`。
+`map`、`filter`、`sort`、`foldl` 等接受以 `(iter v)` 變成**迭代器**的 `Vector`。對象在前，函式在後。
+上面的 `v` 是以 `let` 綁定的，在該 `let` 之外無法使用。下例先以 `defvar` 定義 `v`。
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
