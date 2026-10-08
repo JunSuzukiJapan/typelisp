@@ -621,6 +621,32 @@ fn a_compiled_yield_resumes_where_it_left_off() {
 /// long `b` takes to start does not matter, only that it starts while `a`
 /// sleeps. (It used to be `a` sleeping 200 ms against `b` sleeping 50 ms,
 /// which a loaded CI runner did not keep apart.)
+/// Sleepers that are all due at once wake earliest deadline first.
+///
+/// The main task makes both sleep, then keeps the thread for 0.3 s without
+/// giving it up, so by the next task switch `a` (0.20 s) and `b` (0.05 s) are
+/// both past their deadlines. Woken in slot order, `a` — spawned first — ran
+/// first and the trail was "ab". A thread that woke late did the same thing,
+/// which is how `a_compiled_sleep_suspends_only_the_calling_task` failed on a
+/// loaded CI runner.
+#[test]
+fn sleepers_due_at_once_wake_earliest_deadline_first() {
+    assert_eq!(
+        text(r#"(defvar (trail string) "")
+                (defun slow ((name string) (sec f64)) ()
+                  (progn (sleep sec)
+                         (when true (setf trail (append trail name)))))
+                (defun busy ((sec f64)) ()
+                  (let ((start (internal-time-seconds (get-internal-real-time))))
+                    (while (< (- (internal-time-seconds (get-internal-real-time)) start) sec) ())))
+                (let ((a (task (slow "a" 0.20))) (b (task (slow "b" 0.05))))
+                  (progn (sleep 0.0)
+                         (busy 0.3)
+                         (wait a) (wait b) trail))"#),
+        "ba"
+    );
+}
+
 #[test]
 fn sleep_suspends_only_the_calling_task() {
     assert_eq!(

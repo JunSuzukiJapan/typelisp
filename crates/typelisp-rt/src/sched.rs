@@ -1155,24 +1155,34 @@ impl<B: TaskBody> Scheduler<B> {
         }
     }
 
-    /// Puts every sleeping task whose deadline has passed back on the queue.
+    /// Puts every sleeping task whose deadline has passed back on the queue,
+    /// the earliest deadline first.
     ///
     /// Called before each task switch rather than only when nothing is ready:
     /// a task that asked for 10ms while another runs for a second should be
     /// runnable again after 10ms, not after the second.
+    ///
+    /// Several can be due at once — the thread was busy, or woke late — and
+    /// then the queue order is the run order. Taken in slot order, a task
+    /// that slept 0.2s ran ahead of one spawned after it that slept 0.05s.
     fn wake_due(&mut self, heap: &mut Heap) {
         if self.sleeping == 0 && self.io_waiting == 0 {
             return;
         }
         let now = std::time::Instant::now();
+        let mut due = Vec::new();
         for i in 0..self.slots.len() {
             // A socket wait with a deadline is also a sleep: when the clock
             // runs out first, the answer is `false`.
-            let (answer, was_io) = match &self.slots[i] {
-                Slot::Blocked(_, Waiting::Until(t)) if *t <= now => (Value::Empty, false),
-                Slot::Blocked(_, Waiting::Io { deadline: Some(t), .. }) if *t <= now => (Value::Bool(false), true),
-                _ => continue,
-            };
+            match &self.slots[i] {
+                Slot::Blocked(_, Waiting::Until(t)) if *t <= now => due.push((*t, i, false)),
+                Slot::Blocked(_, Waiting::Io { deadline: Some(t), .. }) if *t <= now => due.push((*t, i, true)),
+                _ => {}
+            }
+        }
+        due.sort();
+        for (_, i, was_io) in due {
+            let answer = if was_io { Value::Bool(false) } else { Value::Empty };
             self.wake(heap, i, Ok(answer));
             if was_io {
                 self.io_waiting -= 1;
