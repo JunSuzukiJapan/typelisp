@@ -27,6 +27,8 @@ description: typelisp の新しい版(例 0.2.0)をリリースする。版上�
 
 1. **事前確認**: `git status` がクリーン、`main` が最新、直近の CI が緑。
    `gh run list --branch main --limit 3` で見る。作業は `release/v<ver>` ブランチで行う。
+   直近の run が走っている途中なら、待たずに先へ進めてよい。手順 7 のマージで `main` の CI が
+   それを含めてもう一度走り、手順 9 でその結果を見るので、赤い `main` にタグは付かない。
 
 2. **版を上げる**(下の「版の出現箇所」を全部)。`grep -rn '<旧版>' -I .` で
    `target/` `graphify-out/` `Cargo.lock` を除いて洗い出し、取りこぼしを探す。
@@ -42,10 +44,20 @@ description: typelisp の新しい版(例 0.2.0)をリリースする。版上�
    `scripts/with-llvm-env.sh cargo test --test abi_version_test --test typl_help_version_test`
 
 5. **翻訳の鮮度**: README_JP.md を変えたので README.md(英)が STALE になる。
-   版上げをコミットし、そのコミットのハッシュを README.md の 1 行目
-   `<!-- translated-from: README_JP.md @ <ハッシュ> -->` に書いて別コミットにする
+   版上げを `chore: 版を <ver> に上げる` でコミットし、そのコミットの完全なハッシュを
+   README.md の 1 行目 `<!-- translated-from: README_JP.md @ <ハッシュ> -->` に書いて
+   `docs: README.md の翻訳元コミットを <ver> の版上げに合わせる` で別コミットにする
    (`scripts/check-translations.sh` が「all N translations are up to date」になること)。
+   ハッシュは版上げのコミットを確定させてから取る。後で amend するとハッシュが変わり、
+   README.md の記録が古いコミットを指したままになる。
    他言語は `docs/ja` 由来なので、README_JP.md の版の記述では STALE にならない。
+   - **README.md 以外に STALE が出たら**、版上げより前の作業で訳の記録の更新が漏れている
+     (CI の Translations ジョブが同じ検査をしているので、`main` が緑なら出ないはず)。
+     STALE の行が示す記録のコミットから、原文を変えたコミットを
+     `git log --format='%h %s' <記録のコミット>..HEAD -- <原文>` で洗い出し、そのコミットで
+     訳の中身も直してあるかを見る。直してあれば 1 行目の記録だけを原文の最新のコミットへ
+     進める。直していなければ、先に訳す。中身を見ずに記録だけ進めると、古い訳が最新に見える。
+     どちらも版上げとは別のコミットにする。
 
 6. **crates.io の事前確認**: `scripts/with-llvm-env.sh cargo publish --dry-run -p typelisp-mem --allow-dirty`。
    通せるのは先頭のクレートだけ(残りは前のクレートが crates.io の索引に載ってからでないと
@@ -90,7 +102,7 @@ description: typelisp の新しい版(例 0.2.0)をリリースする。版上�
     7 クレートそれぞれ `curl -s -A "<名前>" https://crates.io/api/v1/crates/<crate>/<ver>` が
     `"num":"<ver>"` を返し、`"yanked":false` であること。
 
-## 版の出現箇所(0.1.1 → 0.2.0 のときの全部)
+## 版の出現箇所(0.1.1 → 0.2.0 と 0.2.0 → 0.2.1 で同じ)
 
 - ルート `Cargo.toml`: `[workspace.package]` の `version` 1 つと、`[workspace.dependencies]` の
   内部クレート 6 つの `version`(各クレートの Cargo.toml は `version.workspace = true` なので触らない)
@@ -100,8 +112,12 @@ description: typelisp の新しい版(例 0.2.0)をリリースする。版上�
   (0.1.1 の版上げは README_JP.md しか直しておらず、README.md の分が漏れていた)
 - `crates/typelisp-abi/src/lib.rs` と `docs/dev/api_version/` は regen-abi-version.sh が書く
 
-過去の版を説明している文(`docs/dev/docs-versioning.md`、`scripts/docs/build-site.py` の
-コメントの `v0.1.1` など)は旧版の事実なので直さない。
+手順 2 の grep に出ても直さないもの:
+
+- 過去の版を説明している文(`docs/dev/docs-versioning.md`、`scripts/docs/build-site.py` の
+  コメントの `v0.1.1` など、このスキル自身の例)。旧版の事実なので直さない。
+- `.vscode/launch.json` の `"version": "0.2.0"`。VS Code の設定ファイルの書式の版で、
+  本体の版とは関係ない(本体が 0.2.0 のときに一致しただけ)。
 
 ## やらないこと
 
