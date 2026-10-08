@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # शुरुआत करना
 
 REPL में एक्सप्रेशन का मूल्यांकन करने से शुरू करके, यह अध्याय क्रम से फ़ंक्शन, वेरिएबल, कंडीशनल, लूप, और सूचियों तथा `Vector`

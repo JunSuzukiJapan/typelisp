@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # Type Basics
 
 typelisp is a statically typed language. This chapter explains what the type checker does for

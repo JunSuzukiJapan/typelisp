@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
 # 型別基礎
 
 typelisp 是靜態型別語言。本章說明型別檢查能為你做什麼、常用的型別（`Option`、`Result`、結構、列舉）以及泛型。閱讀本章前請先讀
