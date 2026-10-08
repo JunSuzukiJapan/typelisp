@@ -252,10 +252,17 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 42
 ```
 
-`map`, `filter`, `sort`, `foldl` и подобные принимают `Vector`, превращённый в **итератор** через `(iter v)`.
-Коллекция идёт первой, функция — второй. `v` в следующем примере — это `Vector` из `3 1 2`, построенный выше.
+`map`, `filter`, `sort`, `foldl` и подобные принимают `Vector`, превращённый в **итератор**
+через `(iter v)`. Коллекция идёт первой, функция — второй. `v` выше связана через `let`,
+поэтому за пределами этого `let` её использовать нельзя. В следующем примере `v` сначала
+определяется через `defvar`.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

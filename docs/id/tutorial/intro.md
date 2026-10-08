@@ -261,11 +261,17 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 42
 ```
 
-`map`, `filter`, `sort`, `foldl`, dan sejenisnya menerima `Vector` yang diubah menjadi **iterator**
-dengan `(iter v)`. Koleksi didahulukan dan fungsi menyusul. `v` pada contoh berikut adalah `Vector`
-berisi `3 1 2` yang dibuat di atas.
+`map`, `filter`, `sort`, `foldl`, dan sejenisnya menerima `Vector` yang diubah menjadi
+**iterator** dengan `(iter v)`. Koleksi didahulukan dan fungsi menyusul. `v` di atas diikat dengan
+`let`, jadi tidak bisa dipakai di luar `let` tersebut. Contoh berikut terlebih dahulu
+mendefinisikan `v` dengan `defvar`.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

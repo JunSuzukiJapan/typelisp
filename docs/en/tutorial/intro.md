@@ -260,10 +260,15 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 ```
 
 `map`, `filter`, `sort`, `foldl` and friends take a `Vector` turned into an **iterator** with
-`(iter v)`. The collection comes first and the function second. The `v` in the next example is the
-`Vector` of `3 1 2` built above.
+`(iter v)`. The collection comes first and the function second. The `v` above was bound with `let`,
+so it cannot be used outside that `let`. The next example first defines `v` with `defvar`.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

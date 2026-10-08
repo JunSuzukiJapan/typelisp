@@ -261,10 +261,15 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 ```
 
 `map`, `filter`, `sort`, `foldl` i pokrewne przyjmują `Vector` zamieniony na **iterator** za pomocą
-`(iter v)`. Kolekcja jest pierwsza, a funkcja druga. `v` w następnym przykładzie to `Vector` z
-`3 1 2` zbudowany powyżej.
+`(iter v)`. Kolekcja jest pierwsza, a funkcja druga. `v` powyżej zostało związane przez `let`, więc
+nie można go użyć poza tym `let`. Następny przykład najpierw definiuje `v` za pomocą `defvar`.
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>

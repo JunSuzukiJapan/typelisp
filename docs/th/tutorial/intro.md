@@ -259,10 +259,15 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 ```
 
 `map`, `filter`, `sort`, `foldl` และพวกเดียวกันรับ `Vector` ที่แปลงเป็น **ตัววนซ้ำ (iterator)** ด้วย
-`(iter v)` คอลเลกชันมาก่อนและฟังก์ชันมาทีหลัง `v` ในตัวอย่างถัดไปคือ
-`Vector` ของ `3 1 2` ที่สร้างไว้ข้างต้น
+`(iter v)` คอลเลกชันมาก่อนและฟังก์ชันมาทีหลัง `v` ข้างต้นผูกด้วย `let` จึงใช้นอก `let` นั้นไม่ได้
+ตัวอย่างถัดไปจึงนิยาม `v` ด้วย `defvar` ก่อน
 
 ```lisp
+(defvar (v Vector<int>) (Vector::new))
+(push v 3)
+(push v 1)
+(push v 2)
+
 (map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
 (filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
 (sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
