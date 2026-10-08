@@ -100,6 +100,10 @@ Många funktioner i standardbiblioteket returnerar `Option`. Till exempel return
 positionen i `some` om elementet hittas och `none` om det inte gör det.
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -222,6 +226,10 @@ namn.
 Du anger inte typen när du anropar den. `T` räknas ut från argumenten.
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T är int
 (first-or names "none")    ; T är string
 (first-or ints "none")     ; typfel: ints är en Vector<int>, så T är int

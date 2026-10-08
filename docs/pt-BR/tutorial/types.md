@@ -99,6 +99,10 @@ Muitas funções da biblioteca padrão devolvem `Option`. Por exemplo, `position
 `some` se encontrar o elemento, e `none` se não encontrar.
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -219,6 +223,10 @@ Uma função que serve para qualquer tipo é definida com um **parâmetro de tip
 Ao chamá-la, você não informa o tipo. `T` é deduzido dos argumentos.
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T é int
 (first-or names "none")    ; T é string
 (first-or ints "none")     ; erro de tipo: ints é um Vector<int>, então T é int

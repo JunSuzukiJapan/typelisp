@@ -99,6 +99,10 @@ Many standard library functions return `Option`. For example, `position` returns
 `some` if the element is found and `none` if it is not.
 
 ```lisp
+(defvar (fruits Vector<string>) (Vector::new))
+(push fruits "apple")
+(push fruits "banana")
+
 (match (position "banana" (iter fruits))
   ((some i) (println "found at ~a" i))
   ((none) (println "not found")))
@@ -220,6 +224,10 @@ A function that works for any type is defined with a **type parameter** `<T>` af
 You do not give the type when calling it. `T` is worked out from the arguments.
 
 ```lisp
+(defvar (ints Vector<int>) (Vector::new))
+(defvar (names Vector<string>) (Vector::new))
+(push names "Ann")
+
 (first-or ints 7)          ; T is int
 (first-or names "none")    ; T is string
 (first-or ints "none")     ; type error: ints is a Vector<int>, so T is int

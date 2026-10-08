@@ -158,9 +158,10 @@ Jika tidak ada yang perlu dilakukan pada kasus salah, gunakan `when` (dan `unles
 kebalikannya).
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond

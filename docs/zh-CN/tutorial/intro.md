@@ -148,9 +148,10 @@ error: <stdin>:1:22: type error: type mismatch: expected `int`, found `string`
 为假时什么都不做的话，使用 `when`（相反的情况用 `unless`）。
 
 ```lisp
-(when (> n 100)
-  (println "large")
-  (println "really large"))
+(defun report-size ((n int)) ()
+  (when (> n 100)
+    (println "large")
+    (println "really large")))
 ```
 
 ### cond
