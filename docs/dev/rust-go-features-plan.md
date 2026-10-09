@@ -43,7 +43,7 @@ Common Lisp との差はほぼ埋まった（[cl-missing-classes-and-methods.md]
 | `#[test]` を書ける場所 | `tests/` にもソースの同じファイルにも書ける |
 | ガード付きの腕と網羅性 | 網羅したものとして数えない（Rust と同じ）を想定 |
 
-まだ決めていないのは、タプルのパターンと要素の取り出し方（案: パターン `#{a b}`、取り出し `t::0`）。
+タプルのパターンは `#{a b}`、要素の取り出しは `t::0` `t::1`（2026-10-09 決定）。
 
 `Sexpr` の変種番号は `crates/typelisp-front/src/sexpr_variant.rs` の 1 か所にまとめた（2026-10-09）。
 変種を足すときは、そこに末尾で足す。島の `case` は `#%sexpr-名前` で番号を参照する。
@@ -87,7 +87,7 @@ Common Lisp との差はほぼ埋まった（[cl-missing-classes-and-methods.md]
 
 ### Phase 4: タプル（項目 7）
 
-タプルのパターンと取り出し方（§2）を決めてから始める。新しい型（要素数ごとに別の型）を足すので、型 identity
+新しい型（要素数ごとに別の型）を足すので、型 identity
 （`src/type_key.rs`）・単型化・表現（`Repr`）・印字・`Eq`/`Hash`/`print-object` の実装に手が入る。
 タプルが入れば、`lazy::enumerate`/`lazy::zip` の要素を `cons-cell` からタプルに変える。
 
