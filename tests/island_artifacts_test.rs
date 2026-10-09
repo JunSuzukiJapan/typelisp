@@ -36,7 +36,7 @@ fn island_artifacts_are_fresh() {
     let state = read_state(unit.types, "compiler island").unwrap_or_else(|e| panic!("{} — {}", e, REGEN));
     assert_eq!(
         state.source_digest,
-        Some(source_digest(compiler::SOURCE)),
+        Some(source_digest(&compiler::SOURCE)),
         "the island dump is stale relative to compiler.rs's SOURCE — {}",
         REGEN
     );

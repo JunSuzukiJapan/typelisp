@@ -1536,34 +1536,46 @@ fn builtin_error_defs() -> Vec<AdtDef> {
 /// element position has to hold the empty list too, or `'(a () b)` could not
 /// be written (plan §2.1).
 ///
-/// The `nil` variant below is a **placeholder, not a constructor**. Writing
-/// it is refused with a message pointing at `none`; the slot survives only so
-/// that the `SEXPR_*` variant indices (`crate::eval::interp`) — which are
-/// burned into the island's IR and into compiled code — keep their values.
-/// Renumbering them buys nothing and would invalidate every artifact.
+/// The `nil` variant is a **placeholder, not a constructor**. Writing it is
+/// refused with a message pointing at `none`; the slot survives only so that
+/// the variant numbers (`crate::sexpr_variant`) — which are burned into the
+/// island's IR and into compiled code — keep their values. Renumbering them
+/// buys nothing and would invalidate every artifact.
+///
+/// The numbers and names come from `crate::sexpr_variant`; this only says
+/// what each variant holds.
 fn sexpr_def() -> AdtDef {
-    builtin_adt(Path::root("sexpr"), &[], AdtKind::Sum, vec![
-        // Index 0, and never constructible — see this function's doc
-        // comment. `Checker` rejects it by name.
-        Variant { name: "nil".to_string(), fields: vec![] },
-        // Index 1: `int`, the language's integer — a fixnum or a bignum
-        // box, the value's own word, so construction and extraction are
-        // both the identity. This slot was `i32` while that was the
-        // default integer; the number is burned into the island's IR,
-        // the name is what changed, and `i32` went to the end.
-        Variant { name: "int".to_string(), fields: vec![Type::Int] },
-        Variant { name: "f64".to_string(), fields: vec![Type::F64] },
-        Variant { name: "char".to_string(), fields: vec![Type::Char] },
-        Variant { name: "bool".to_string(), fields: vec![Type::Bool] },
-        Variant { name: "sym".to_string(), fields: vec![Type::Symbol] },
-        Variant { name: "str".to_string(), fields: vec![Type::Str] },
-        Variant { name: "cons".to_string(), fields: vec![option_of(sexpr()), option_of(sexpr())] },
-        // Index 8, retired with the `bignum` type: a bignum box is an
-        // `int` (index 1). Never constructible and never matchable —
-        // `Checker` refuses it by name, as it does `nil` — and kept only
-        // so nothing after it renumbers.
-        Variant { name: "bignum".to_string(), fields: vec![Type::Int] },
-        Variant { name: "ratio".to_string(), fields: vec![Type::Ratio] },
+    use crate::sexpr_variant as sv;
+    let variants = (0..sv::COUNT)
+        .map(|v| Variant { name: sv::NAMES[v].to_string(), fields: sexpr_variant_fields(v) })
+        .collect();
+    builtin_adt(Path::root("sexpr"), &[], AdtKind::Sum, variants, sexpr_assoc())
+}
+
+/// The fields of `Sexpr`'s variant number `v`.
+fn sexpr_variant_fields(v: usize) -> Vec<Type> {
+    use crate::sexpr_variant as sv;
+    match v {
+        // Never constructible — see `sexpr_def`'s doc comment. `Checker`
+        // rejects it by name.
+        sv::NIL => vec![],
+        // `int`, the language's integer — a fixnum or a bignum box, the
+        // value's own word, so construction and extraction are both the
+        // identity. This slot was `i32` while that was the default integer;
+        // the number is burned into the island's IR, the name is what
+        // changed, and `i32` went to the end.
+        sv::INT => vec![Type::Int],
+        sv::F64 => vec![Type::F64],
+        sv::CHAR => vec![Type::Char],
+        sv::BOOL => vec![Type::Bool],
+        sv::SYM => vec![Type::Symbol],
+        sv::STR => vec![Type::Str],
+        sv::CONS => vec![option_of(sexpr()), option_of(sexpr())],
+        // Retired with the `bignum` type: a bignum box is an `int`. Never
+        // constructible and never matchable — `Checker` refuses it by name,
+        // as it does `nil` — and kept only so nothing after it renumbers.
+        sv::RETIRED_BIGNUM => vec![Type::Int],
+        sv::RATIO => vec![Type::Ratio],
         // A `::`-qualified path (e.g. `dep::head`), the reader's
         // `Value::Path` (`crate::mem::Value`) made matchable. Its single
         // field is a proper `Sexpr` list of `sym`s (its segments, in
@@ -1579,29 +1591,29 @@ fn sexpr_def() -> AdtDef {
         // `match_sexpr_ctor` arms need to (they only ever read
         // already-heap-resident data) — see that function's own doc
         // comment for the GC-rooting this requires.
-        Variant { name: "path".to_string(), fields: vec![option_of(sexpr())] },
-        // Index 11 onwards: the widths that used to be folded into `i32`
-        // and `f64` above. Appended rather than inserted, because the
-        // variant numbers are burned into the island's IR and into
-        // compiled code, and because `Repr::field_kind` reads off the
-        // same numbering (`Unit` was moved out to 100 to make room).
+        sv::PATH => vec![option_of(sexpr())],
+        // From here on: the widths that used to be folded into `i32` and
+        // `f64` above. Appended rather than inserted, because the variant
+        // numbers are burned into the island's IR and into compiled code,
+        // and because `Repr::field_kind` reads off the same numbering.
         //
-        // Eight numeric variants where there were two. `Sexpr` is the
-        // one place a value's type is not written down anywhere else, so
-        // it is the one place every width has to be its own variant —
-        // folding `u8` and `i32` into one `int` did not merely lose the
-        // name, it let `(the u32 4000000000)` come back out as an `i32`
-        // holding a number no `i32` can hold.
-        Variant { name: "f32".to_string(), fields: vec![Type::F32] },
-        Variant { name: "i8".to_string(), fields: vec![Type::I8] },
-        Variant { name: "i16".to_string(), fields: vec![Type::I16] },
-        Variant { name: "u8".to_string(), fields: vec![Type::U8] },
-        Variant { name: "u16".to_string(), fields: vec![Type::U16] },
-        Variant { name: "u32".to_string(), fields: vec![Type::U32] },
-        // Index 17: `i32`, boxed like the five above it, since `int`
-        // took the bare fixnum word. Appended for the usual reason.
-        Variant { name: "i32".to_string(), fields: vec![Type::I32] },
-    ], sexpr_assoc())
+        // Eight numeric variants where there were two. `Sexpr` is the one
+        // place a value's type is not written down anywhere else, so it is
+        // the one place every width has to be its own variant — folding
+        // `u8` and `i32` into one `int` did not merely lose the name, it let
+        // `(the u32 4000000000)` come back out as an `i32` holding a number
+        // no `i32` can hold.
+        sv::F32 => vec![Type::F32],
+        sv::I8 => vec![Type::I8],
+        sv::I16 => vec![Type::I16],
+        sv::U8 => vec![Type::U8],
+        sv::U16 => vec![Type::U16],
+        sv::U32 => vec![Type::U32],
+        // Boxed like the five above it, since `int` took the bare fixnum
+        // word. Appended for the usual reason.
+        sv::I32 => vec![Type::I32],
+        _ => unreachable!("Sexpr has {} variants, not {}", sv::COUNT, v + 1),
+    }
 }
 
 /// `eq`/`eql`: true CL identity on `Sexpr` — comparing the underlying

@@ -287,7 +287,17 @@
 
 use crate::{Checker, Heap, Interp};
 
-pub const SOURCE: &str = r#"
+/// The island's source as it is read: [`SOURCE_TEMPLATE`] with its `#%name`s
+/// replaced by `Sexpr`'s variant numbers and field kinds
+/// ([`crate::sexpr_variant::expand_island_source`]).
+pub static SOURCE: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| crate::sexpr_variant::expand_island_source(SOURCE_TEMPLATE));
+
+/// The island's source as written. A `case` key must be a literal, so where
+/// the island dispatches on a `Sexpr` variant or a field kind it writes
+/// `#%sexpr-cons`/`#%kind-unit` and [`SOURCE`] puts the number in; the
+/// numbers themselves live only in `crate::sexpr_variant`.
+const SOURCE_TEMPLATE: &str = r#"
 ;; ---------------------------------------------------------------------------
 ;; Forward declarations.
 ;;
@@ -761,92 +771,92 @@ pub const SOURCE: &str = r#"
 ;; word a compiled `u8` sits in is the same bit pattern an `i32` would have,
 ;; which is the whole reason these are separate variants.
 (defun narrow-wsig ((variant int)) int
-  (case variant (12 17) (13 33) (14 16) (15 32) (16 64) (17 65)
+  (case variant (#%sexpr-i8 17) (#%sexpr-i16 33) (#%sexpr-u8 16) (#%sexpr-u16 32) (#%sexpr-u32 64) (#%sexpr-i32 65)
     (else (panic "narrow-wsig: not a narrow-integer Sexpr variant"))))
 
 ;; The kind number a `Sexpr` variant's payload is read and written with.
 ;; `Repr::field_kind` and `sexpr_def`'s numbering are one space, with one
-;; disagreement since `int` took variant 1: as a *field kind*, `1` is a
-;; fixed-width integer (a raw word, tagged as a fixnum on the way in); as a
-;; *Sexpr variant*, `1` is an `int`, already a tagged word — `6`'s
-;; passthrough. The pattern and construction paths map through here before
+;; disagreement since `int` took the number `kind-raw-int` uses: as a
+;; *field kind* that number is a fixed-width integer (a raw word, tagged as
+;; a fixnum on the way in); as a *Sexpr variant* it is an `int`, already a
+;; tagged word — `kind-tagged`'s passthrough. The pattern and construction paths map through here before
 ;; touching a field helper; the field paths never see a variant number.
 (defun sexpr-variant-kind ((variant int)) int
-  (if (eq variant 1) 6 variant))
+  (if (eq variant #%sexpr-int) #%kind-tagged variant))
 
 (defun compile-sexpr-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant int) (idx int)) llvm-value
   (case variant
-    ;; A fixed-width integer field (kind 1, the field-kind space): the signed
-    ;; value sits above the fixnum's one tag bit. (`Sexpr`'s variant 1 is an
-    ;; `int` and never arrives here — `sexpr-variant-kind`.)
-    (1 (untag-fixnum builder v))
-    ;; `f64`(2)/`f32`(11): the payload is inside the box, and which box it is
+    ;; A fixed-width integer field (the field-kind space): the signed value
+    ;; sits above the fixnum's one tag bit. (`Sexpr`'s `int` variant shares
+    ;; the number and never arrives here — `sexpr-variant-kind`.)
+    (#%kind-raw-int (untag-fixnum builder v))
+    ;; `f64`/`f32`: the payload is inside the box, and which box it is
     ;; is what the two numbers say. `rt_f32_value` widens back into the `f64`
     ;; bit pattern a compiled float register holds -- the carrier is wider
     ;; than the type, the same way a `u8` rides in an `i64` word.
-    (2 (let ((args-ptr (alloca-args builder 1)))
+    (#%kind-f64 (let ((args-ptr (alloca-args builder 1)))
          (store-arg builder args-ptr 0 v)
          (build-call builder (get-function m "rt_f64_value") args-ptr 1)))
-    (11 (let ((args-ptr (alloca-args builder 1)))
+    (#%kind-f32 (let ((args-ptr (alloca-args builder 1)))
           (store-arg builder args-ptr 0 v)
           (build-call builder (get-function m "rt_f32_value") args-ptr 1)))
-    ;; `char`(3) is unsigned; `bool`(4) undoes `compile-bool`'s `1`/`2`.
-    (3 (untag-small builder v))
-    (4 (build-sub builder (untag-small builder v) (const-word builder 1)))
-    ;; `sym`(5)/`str`(6)/`bignum`(8)/`ratio`(9): the payload *is* the
-    ;; already-tagged word — `Repr::field_kind`'s `6` passthrough — so there
-    ;; is no bit manipulation and no box to open. (`5` reaches here from
+    ;; `char` is unsigned; `bool` undoes `compile-bool`'s `1`/`2`.
+    (#%kind-char (untag-small builder v))
+    (#%kind-bool (build-sub builder (untag-small builder v) (const-word builder 1)))
+    ;; `sym`/`str`/`bignum`/`ratio`: the payload *is* the
+    ;; already-tagged word — `Repr::field_kind`'s `kind-tagged` passthrough —
+    ;; so there is no bit manipulation and no box to open. (`sym` reaches here from
     ;; `Sexpr` construction rather than from `field_kind`; see that
     ;; function's doc comment on the two producers of these numbers.)
-    ;; A niched `Option`(101) is a tagged word too — its payload's field
+    ;; A niched `Option` is a tagged word too — its payload's field
     ;; word, or the empty-list immediate — and passes through the same way;
     ;; its own number exists for `niche-kind?`, not for here.
-    ((5 6 8 9 101) v)
-    ;; `cons`(7): the only variant with two fields.
-    (7 (let ((args-ptr (alloca-args builder 1)))
+    ((#%sexpr-sym #%kind-tagged #%sexpr-retired-bignum #%sexpr-ratio #%kind-niche) v)
+    ;; `cons`: the only variant with two fields.
+    (#%sexpr-cons (let ((args-ptr (alloca-args builder 1)))
          (store-arg builder args-ptr 0 v)
          (if (eq idx 0)
              (build-call builder (get-function m "rt_car") args-ptr 1)
              (build-call builder (get-function m "rt_cdr") args-ptr 1))))
-    ;; `path`(10): the payload isn't a scalar or an already-tagged value at
+    ;; `path`: the payload isn't a scalar or an already-tagged value at
     ;; all — it's a fresh `Sexpr` list of `sym`s built from the tagged
     ;; `Value::Path`'s interned segments, mirroring `typelisp::eval::interp`'s
     ;; `match_sexpr_ctor` `SEXPR_PATH` arm exactly (`rt_path_to_list` does the
     ;; same rooted `cons`-chain build, just in Rust runtime code instead of
     ;; the self-hosted island).
-    (10 (let ((args-ptr (alloca-args builder 1)))
+    (#%sexpr-path (let ((args-ptr (alloca-args builder 1)))
           (store-arg builder args-ptr 0 v)
           (build-call builder (get-function m "rt_path_to_list") args-ptr 1)))
-    ;; `i8`(12)/`i16`(13)/`u8`(14)/`u16`(15)/`u32`(16)/`i32`(17): the payload
+    ;; `i8`/`i16`/`u8`/`u16`/`u32`/`i32`: the payload
     ;; is inside a `BoxedObj::Narrow`, and the variant says which type that
     ;; box must be. `rt_narrow_value` refuses any other, so a `(u8 x)`
     ;; pattern can never bind a `u16` node's value. What comes back is the
     ;; plain normalized word compiled code carries every integer in.
-    ((12 13 14 15 16 17)
+    ((#%sexpr-i8 #%sexpr-i16 #%sexpr-u8 #%sexpr-u16 #%sexpr-u32 #%sexpr-i32)
      (let ((args-ptr (alloca-args builder 2)))
        (store-arg builder args-ptr 0 v)
        (store-arg builder args-ptr 1 (const-word builder (narrow-wsig variant)))
        (build-call builder (get-function m "rt_narrow_value") args-ptr 2)))
-    ;; `unit`(100): never a real `Sexpr` variant — this number only ever
+    ;; `unit`: never a real `Sexpr` variant — this number only ever
     ;; arrives as a *struct/enum field* kind (`Repr::field_kind`), the decode
-    ;; half of `compile-tag-struct-field`'s constant `6`. The stored word is
-    ;; discarded for the same reason it was ignored on the way in, and the
+    ;; half of `compile-tag-struct-field`'s `kind-unit` arm. The stored word
+    ;; is discarded for the same reason it was ignored on the way in, and the
     ;; result is the plain `0` every other `Unit`-typed value in compiled
-    ;; code already is (`compile-unit`). It sat at `11` until `Sexpr` grew a
-    ;; twelfth variant and wanted that number back.
-    (100 (const-word builder 0))
+    ;; code already is (`compile-unit`). Its number sits clear of the
+    ;; `Sexpr` variants so that adding a variant never collides with it.
+    (#%kind-unit (const-word builder 0))
     (else (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
-;; same `Repr::field_kind`/`Sexpr`-variant numbering (`1`=i32
-;; `2`=f64 `3`=char `4`=bool `6`=str/`Sexpr`/nested-boxed-struct/`Fn`
-;; passthrough — a `defstruct`/`Vector<T>`/`cons-cell<K,V>`/closure-typed
-;; field's value is already a properly tagged `Sexpr`, so it passes through
-;; unchanged exactly like a `Str` — `0`=not representable yet: a
-;; general-ADT/still-generic field) — `compile-construct-boxed-struct-fields`/
+;; same `Repr::field_kind`/`Sexpr`-variant numbering (`kind-raw-int`,
+;; `kind-f64`, `kind-char`, `kind-bool`, `kind-tagged` for str/`Sexpr`/
+;; nested-boxed-struct/`Fn` passthrough — a `defstruct`/`Vector<T>`/
+;; `cons-cell<K,V>`/closure-typed field's value is already a properly
+;; tagged `Sexpr`, so it passes through unchanged exactly like a `Str` —
+;; `kind-not-representable` for a general-ADT/still-generic field) — `compile-construct-boxed-struct-fields`/
 ;; `compile-field-set` both call this to turn an already-compiled field
 ;; value `v` (a scalar kind's own untagged bit pattern, or an already-tagged
-;; `Sexpr` for kind `6`) into the properly tagged `Sexpr` `rt_struct_new`/
+;; `Sexpr` for `kind-tagged`) into the properly tagged `Sexpr` `rt_struct_new`/
 ;; `rt_struct_field_set` require (Stage 3 of the Sexpr/RtValue unification
 ;; plan, `docs/implementation-log.md`). Mirrors `compile-construct-sexpr`'s
 ;; own per-variant `i32`/`f64`/`char`/`bool`/`str` arms bit-for-bit rather
@@ -856,25 +866,25 @@ pub const SOURCE: &str = r#"
 ;; what it is.
 (defun compile-tag-struct-field ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind int)) llvm-value
   (case kind
-    ;; A fixed-width integer field (kind 1): the value moves above the
+    ;; A fixed-width integer field (`kind-raw-int`): the value moves above the
     ;; fixnum's one tag bit.
-    (1 (tag-fixnum builder v))
-    ;; `f64`(2)/`f32`(11): the two kinds that allocate, and they allocate
+    (#%kind-raw-int (tag-fixnum builder v))
+    ;; `f64`/`f32`: the two kinds that allocate, and they allocate
     ;; *different boxes*. Which one is not a detail the value can be asked
     ;; for at run time — the word is the same bit pattern either way — so it
     ;; has to come from the declared type, which is what this number is.
-    (2 (let ((args-ptr (alloca-args builder 1)))
+    (#%kind-f64 (let ((args-ptr (alloca-args builder 1)))
          (store-arg builder args-ptr 0 v)
          (build-call builder (get-function m "rt_f64_new") args-ptr 1)))
-    (11 (let ((args-ptr (alloca-args builder 1)))
+    (#%kind-f32 (let ((args-ptr (alloca-args builder 1)))
           (store-arg builder args-ptr 0 v)
           (build-call builder (get-function m "rt_f32_new") args-ptr 1)))
-    (3 (tag-small builder v 1))
-    (4 (tag-small builder (build-add builder v (const-word builder 1)) 0))
-    ;; `6` is every already-tagged word: both directions leave it alone. So
-    ;; is a niched `Option`(101), which is one by construction.
-    ((6 101) v)
-    ;; `unit`(100): the slot holds a tagged `Value::Empty` -- `NIL_WORD`,
+    (#%kind-char (tag-small builder v 1))
+    (#%kind-bool (tag-small builder (build-add builder v (const-word builder 1)) 0))
+    ;; `kind-tagged` is every already-tagged word: both directions leave it alone. So
+    ;; is a niched `Option`, which is one by construction.
+    ((#%kind-tagged #%kind-niche) v)
+    ;; `unit`: the slot holds a tagged `Value::Empty` -- `NIL_WORD`,
     ;; the constant `7` (`typelisp-mem`'s `tagged.rs`), the same word an
     ;; interpreted writer puts in a `()` field,
     ;; so the two produce identical boxes. `v` (the plain `0` `compile-unit`
@@ -882,7 +892,7 @@ pub const SOURCE: &str = r#"
     ;; slot carries no information and only has to hold a word the GC can
     ;; `decode` safely -- an immediate nil references nothing.
     ;; `compile-sexpr-field` above is the inverse.
-    (100 (nil-word builder))
+    (#%kind-unit (nil-word builder))
     (else (panic "compile-tag-struct-field: field type is not representable in compiled code yet"))))
 
 ;; `names` is now a list of `(name . kind)` pairs (`core_bridge::name_kind_list`
@@ -1840,37 +1850,37 @@ pub const SOURCE: &str = r#"
 
 (defun compile-sexpr-tag-test ((builder llvm-builder) (m llvm-module) (v llvm-value) (variant int)) llvm-value
   (case variant
-    ;; `f64`(2)/`bignum`(8)/`ratio`(9)/`f32`(11) and the five narrow integer
+    ;; `f64`/`bignum`/`ratio`/`f32` and the five narrow integer
     ;; widths(12..16) are heap boxes that share one tag, so what tells them
     ;; apart is the box's own kind, not the tag bits.
-    (2 (compile-box-kind-test builder m v 1))
-    ;; `bignum`(8) is retired: a bignum box is an `int` (1) now.
-    (8 (panic "compile-sexpr-tag-test: Sexpr variant 8 (bignum) is retired — a bignum box is an int"))
-    (9 (compile-box-kind-test builder m v 3))
-    (11 (compile-box-kind-test builder m v 4))
-    (12 (compile-box-kind-test builder m v 5))
-    (13 (compile-box-kind-test builder m v 6))
-    (14 (compile-box-kind-test builder m v 7))
-    (15 (compile-box-kind-test builder m v 8))
-    (16 (compile-box-kind-test builder m v 9))
-    (17 (compile-box-kind-test builder m v 10))
-    ;; `nil`(0) and `bool`(4) share the immediate sub-class and differ only
+    (#%sexpr-f64 (compile-box-kind-test builder m v 1))
+    ;; `bignum` is retired: a bignum box is an `int` now.
+    (#%sexpr-retired-bignum (panic "compile-sexpr-tag-test: the Sexpr variant bignum is retired — a bignum box is an int"))
+    (#%sexpr-ratio (compile-box-kind-test builder m v 3))
+    (#%sexpr-f32 (compile-box-kind-test builder m v 4))
+    (#%sexpr-i8 (compile-box-kind-test builder m v 5))
+    (#%sexpr-i16 (compile-box-kind-test builder m v 6))
+    (#%sexpr-u8 (compile-box-kind-test builder m v 7))
+    (#%sexpr-u16 (compile-box-kind-test builder m v 8))
+    (#%sexpr-u32 (compile-box-kind-test builder m v 9))
+    (#%sexpr-i32 (compile-box-kind-test builder m v 10))
+    ;; `nil` and `bool` share the immediate sub-class and differ only
     ;; in the payload: nil's is zero, a bool's never is. `nil` is the single
     ;; word 7, so its test is one comparison.
-    (0 (build-icmp-eq builder v (nil-word builder)))
-    (4 (build-and builder
+    (#%sexpr-nil (build-icmp-eq builder v (nil-word builder)))
+    (#%sexpr-bool (build-and builder
                   (small-tag-test builder v 0)
                   (build-icmp-ne builder v (nil-word builder))))
-    ;; `int`(1): a fixnum (bit 0 clear) or a bignum box — the only variant
+    ;; `int`: a fixnum (bit 0 clear) or a bignum box — the only variant
     ;; with two shapes, because the value's size picks between them.
-    (1 (build-or builder (fixnum-test builder v) (compile-box-kind-test builder m v 2)))
-    ;; `sym`(5)/`cons`(7): the three-bit pointer classes.
-    (5 (low-tag-test builder v 3))
-    (7 (low-tag-test builder v 1))
-    ;; `char`(3)/`str`(6)/`path`(10): the small class's sub-classes.
-    (3 (small-tag-test builder v 1))
-    (6 (small-tag-test builder v 2))
-    (10 (small-tag-test builder v 3))
+    (#%sexpr-int (build-or builder (fixnum-test builder v) (compile-box-kind-test builder m v 2)))
+    ;; `sym`/`cons`: the three-bit pointer classes.
+    (#%sexpr-sym (low-tag-test builder v 3))
+    (#%sexpr-cons (low-tag-test builder v 1))
+    ;; `char`/`str`/`path`: the small class's sub-classes.
+    (#%sexpr-char (small-tag-test builder v 1))
+    (#%sexpr-str (small-tag-test builder v 2))
+    (#%sexpr-path (small-tag-test builder v 3))
     (else (panic "compile-sexpr-tag-test: unknown Sexpr variant"))))
 
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
@@ -1929,13 +1939,13 @@ pub const SOURCE: &str = r#"
 ;; (`Repr::Niche`, `check/repr.rs`): `some` is the value's own field word
 ;; and `none` the empty-list immediate, with no box. True for every kind
 ;; whose field word is never that immediate — a fixnum, a float box, a
-;; char, a bool, an already-tagged word. False for a unit (100: its field
-;; word *is* the immediate), a niched `Option` (101: its `none` is), and
-;; the unrepresentable (0). The island's twin of `Repr::niches`; a builder
+;; char, a bool, an already-tagged word. False for a unit (its field
+;; word *is* the immediate), a niched `Option` (its `none` is), and
+;; the unrepresentable. The island's twin of `Repr::niches`; a builder
 ;; that has only a kind (`vector-op`'s `pop`) asks this, one that has the
 ;; checker's answer (`some-of`, `pat-some`) does not need to.
 (defun niche-kind? ((kind int)) bool
-  (or (eq kind 1) (eq kind 2) (eq kind 3) (eq kind 4) (eq kind 6) (eq kind 11)))
+  (or (eq kind #%kind-raw-int) (eq kind #%kind-f64) (eq kind #%kind-char) (eq kind #%kind-bool) (eq kind #%kind-tagged) (eq kind #%kind-f32)))
 
 ;; The `(some raw)` an always-succeeding conversion returns: the niche —
 ;; `raw` tagged the way a field of its kind is (`compile-tag-struct-field`),
@@ -2301,7 +2311,7 @@ pub const SOURCE: &str = r#"
 ;; the result is already a fully tagged `Sexpr::Bignum`
 ;; — no further bit manipulation needed at the
 ;; `compile-construct-sexpr`/`compile-sexpr-field`
-;; boundary (both treat variant `8` as passthrough).
+;; boundary (both treat the `bignum` variant as passthrough).
 (defun compile-bignum-literal ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((parts (sexpr-cdr e))
            (n (sexpr-list-length parts))
@@ -2317,7 +2327,7 @@ pub const SOURCE: &str = r#"
 ;; through `compile-bignum-literal` exactly like any
 ;; other bignum), then combined with
 ;; `rt_ratio_from_bignums` — same GC-root discipline as
-;; `compile-construct-sexpr`'s `Cons` (variant `7`)
+;; `compile-construct-sexpr`'s `cons` arm
 ;; case: each already-boxed sub-value is rooted before
 ;; the next is built, in case building it triggers a
 ;; collection.
@@ -2859,7 +2869,7 @@ pub const SOURCE: &str = r#"
                   (build-call builder (get-function m "rt_f64_fits_f32") fits-args 1)
                   (build-fround32 builder a) 11)))
              ("try-float->f64"
-              (build-some-of builder m a 2))
+              (build-some-of builder m a #%kind-f64))
              ("sqrt"
               (build-fsqrt builder m a))
              ("floor"
@@ -3404,7 +3414,7 @@ pub const SOURCE: &str = r#"
            (ignored-tag (if (< tag-at 0) () (tag-suspend-arg builder m args-ptr tag-at tag-kind)))
            (ignored (build-call builder (get-function m nm) args-ptr argc))
            (raw (coroutine-suspend builder m)))
-      (if (eq kind 0) raw (compile-sexpr-field builder m raw kind 0))))
+      (if (eq kind #%kind-not-representable) raw (compile-sexpr-field builder m raw kind 0))))
 
 (defun has-prefix ((s string) (p string)) bool
     (if (< (length s) (length p)) false (equal (substring s 0 (length p)) p)))
@@ -4384,10 +4394,10 @@ pub const SOURCE: &str = r#"
       ;; Matches anything and binds nothing, so there is no guard to emit.
       (pat-wild ())
       ;; `(pat-empty)` -- the empty list. The same word comparison a
-      ;; `pat-ctor` on `Sexpr`'s variant 0 emits, under a node that does not
+      ;; `pat-ctor` on `Sexpr`'s `nil` variant emits, under a node that does not
       ;; name a variant: the empty list outlives `Sexpr`'s `nil`.
       (pat-empty
-       (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v 0) fail-block))
+       (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v #%sexpr-nil) fail-block))
       ;; `(pat-some KIND P)` -- a niched `Option`'s `(some P)`. The niche
       ;; makes the payload the same word, read back through its field kind
       ;; (`compile-sexpr-field`: a fixnum untagged, a float box opened, a
@@ -4396,7 +4406,7 @@ pub const SOURCE: &str = r#"
       ;;
       ;; One comparison: the empty list is a single word (`NIL_WORD`, 7 —
       ;; `typelisp-mem`'s `tagged.rs`), and this is the opposite of the nil
-      ;; test `compile-sexpr-tag-test` emits for variant 0.
+      ;; test `compile-sexpr-tag-test` emits for the `nil` variant.
       (pat-some
        (progn
          (compile-pattern-guard builder cur-fn
@@ -4719,7 +4729,7 @@ pub const SOURCE: &str = r#"
 ;; ADT's general `malloc`'d-box representation
 ;; (`compile-construct-box`) — see those three
 ;; functions' doc comments.
-;; `variant` `5`/`10` (quoted `Sym`/`Path` —
+;; The `quoted-sym`/`quoted-path`/`quoted-wk-sym` markers (quoted `Sym`/`Path` —
 ;; `core_bridge::quoted_form`'s doc comment) are
 ;; peeled off *here*, before delegating to
 ;; `compile-construct-sexpr`, rather than folded into
@@ -4737,9 +4747,9 @@ pub const SOURCE: &str = r#"
            (variant (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
            (arg-forms (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
       (case variant
-        (100 (compile-construct-sym m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup arg-forms))
-        (101 (compile-construct-path m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup arg-forms))
-        (102 (compile-construct-wk-sym m fn-name builder arg-forms))
+        (#%quoted-sym (compile-construct-sym m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup arg-forms))
+        (#%quoted-path (compile-construct-path m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup arg-forms))
+        (#%quoted-wk-sym (compile-construct-wk-sym m fn-name builder arg-forms))
         ;; Every other variant index is a real one, and which of the
         ;; three constructors it names is decided by the node's two
         ;; flags rather than by the index.
@@ -4952,10 +4962,7 @@ pub const SOURCE: &str = r#"
 ;; `Sexpr`'s own variants, encoded directly as the
 ;; tagged `i64` `typelisp-rt`'s `encode` (and this
 ;; file's own `compile-sexpr-field`) already use —
-;; see `registry::sexpr_def`'s variant order (`0`=nil
-;; `1`=i32 `2`=f64 `3`=char `4`=bool `5`=sym `6`=str
-;; `7`=cons `8`=bignum `9`=ratio `10`=path `11`=f32
-;; `12`=i8 `13`=i16 `14`=u8 `15`=u16 `16`=u32), the exact inverse of
+;; see `sexpr_variant.rs` for the variant numbers, the exact inverse of
 ;; `compile-sexpr-tag-test`/`compile-sexpr-field`'s
 ;; own extraction. `str`'s single field is itself a
 ;; `Type::Str`-typed sub-expression, which
@@ -4982,55 +4989,55 @@ pub const SOURCE: &str = r#"
 ;; constructing one still panics clearly.
 (defun compile-construct-sexpr ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (variant int) (arg-forms Option<Sexpr>))llvm-value
     ;; The inverse of `compile-sexpr-field`, variant for variant. Each clause
-    ;; compiles its own argument rather than one being hoisted out: `nil`(0)
+    ;; compiles its own argument rather than one being hoisted out: `nil`
     ;; has no argument at all, and a hoisted `compile-value` would emit that
     ;; argument's IR even for the variants that never use it.
     (case variant
-      (0 (nil-word builder))
-      ;; `int`(1): the argument is already the tagged word an `int` node is.
-      (1 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
-      (2 (let ((args-ptr (alloca-args builder 1)))
+      (#%sexpr-nil (nil-word builder))
+      ;; `int`: the argument is already the tagged word an `int` node is.
+      (#%sexpr-int (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
+      (#%sexpr-f64 (let ((args-ptr (alloca-args builder 1)))
            (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
            (build-call builder (get-function m "rt_f64_new") args-ptr 1)))
-      (3 (tag-small builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)) 1))
-      (4 (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
+      (#%sexpr-char (tag-small builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)) 1))
+      (#%sexpr-bool (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
            (tag-small builder (build-add builder b (const-word builder 1)) 0)))
-      ;; `sym`(5)/`str`(6)/`ratio`(9): the compiled argument is already the
+      ;; `sym`/`str`/`ratio`: the compiled argument is already the
       ;; fully tagged word this variant carries — a `Symbol` immediate, a
       ;; `Value::Str`, or `compile-ratio-literal`'s `TAG_BOXED` result — so
       ;; construction is the identity, the same passthrough
-      ;; `compile-sexpr-field` reads back. `bignum`(8) is retired (a bignum
+      ;; `compile-sexpr-field` reads back. `bignum` is retired (a bignum
       ;; box is an `int`), and the checker refuses it before it gets here.
-      ((5 6 9) (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
-      ;; `cons`(7): the only variant with two fields, and so the only one
+      ((#%sexpr-sym #%sexpr-str #%sexpr-ratio) (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
+      ;; `cons`: the only variant with two fields, and so the only one
       ;; that has to root the first while the second is built.
-      (7 (let* ((args-ptr (frame-slots builder m 2 2))
+      (#%sexpr-cons (let* ((args-ptr (frame-slots builder m 2 2))
                 (car-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
            (store-arg builder args-ptr 0 car-v)
            (let ((cdr-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr arg-forms)))))
              (store-arg builder args-ptr 1 cdr-v)
              (let ((result (build-call builder (get-function m "rt_cons") args-ptr 2)))
                result))))
-      ;; `path`(10): the argument compiles to an already-tagged `Sexpr` list
+      ;; `path`: the argument compiles to an already-tagged `Sexpr` list
       ;; of `sym`s (the shape `compile-sexpr-field`'s own `path` extraction
       ;; produces) — `rt_list_to_path` walks it at runtime and interns the
       ;; result, the construct-side mirror of `rt_path_to_list`.
-      ;; `f32`(11): the same shape as `f64`(2) with the other box. The two
+      ;; `f32`: the same shape as `f64` with the other box. The two
       ;; are separate variants precisely so this choice is made from the
       ;; declared type rather than guessed from a bit pattern that is
       ;; identical either way.
-      (11 (let ((args-ptr (alloca-args builder 1)))
+      (#%sexpr-f32 (let ((args-ptr (alloca-args builder 1)))
             (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
             (build-call builder (get-function m "rt_f32_new") args-ptr 1)))
-      (10 (let ((args-ptr (alloca-args builder 1)))
+      (#%sexpr-path (let ((args-ptr (alloca-args builder 1)))
             (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
             (build-call builder (get-function m "rt_list_to_path") args-ptr 1)))
-      ;; `i8`(12)/`i16`(13)/`u8`(14)/`u16`(15)/`u32`(16)/`i32`(17): the
+      ;; `i8`/`i16`/`u8`/`u16`/`u32`/`i32`: the
       ;; compiled argument is the plain normalized word, which says nothing
       ;; about which of the six types it is -- so the box is told, from the
       ;; variant, exactly the way `f32`/`f64` above are. (`i32` joined the
       ;; boxed widths when `int` took the bare fixnum word.)
-      ((12 13 14 15 16 17)
+      ((#%sexpr-i8 #%sexpr-i16 #%sexpr-u8 #%sexpr-u16 #%sexpr-u32 #%sexpr-i32)
        (let ((args-ptr (alloca-args builder 2)))
          (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
          (store-arg builder args-ptr 1 (const-word builder (narrow-wsig variant)))
@@ -5524,7 +5531,7 @@ pub const SOURCE: &str = r#"
         ;; body only `break`s both land here. Storing the
         ;; raw word keeps the block well-formed;
         ;; `compile-sexpr-field` would panic on it.
-        (if (eq kind 0)
+        (if (eq kind #%kind-not-representable)
             (store-arg builder slot 0 thrown)
             (store-arg builder slot 0 (compile-sexpr-field builder m thrown kind 0)))
         (build-br builder merge))
@@ -5551,7 +5558,7 @@ pub const SOURCE: &str = r#"
            (value-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
            (tag-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup tag-form)))
            (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup value-form))
-           (tagged (if (eq kind 0) v (compile-tag-struct-field builder m v kind)))
+           (tagged (if (eq kind #%kind-not-representable) v (compile-tag-struct-field builder m v kind)))
            (args-ptr (alloca-args builder 2)))
       (store-arg builder args-ptr 0 (load-raw builder tag-slot 0))
       (store-arg builder args-ptr 1 tagged)
@@ -5933,7 +5940,7 @@ pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     let unit = units.first().unwrap_or_else(|| panic!("compiler: the committed dump holds no units"));
     let state = crate::compile::dump::read_types(unit, "compiler island")
         .unwrap_or_else(|e| panic!("compiler: {}", e));
-    typelisp_front::dump::verify_digest(&state, SOURCE, REGEN_SCRIPT).unwrap_or_else(|e| panic!("{}", e));
+    typelisp_front::dump::verify_digest(&state, &SOURCE, REGEN_SCRIPT).unwrap_or_else(|e| panic!("{}", e));
     crate::compile::dump::load_unit(heap, chk, interp, state, unit.bitcode)
         .unwrap_or_else(|e| panic!("compiler: {}", e));
     interp.push_dump_source(std::borrow::Cow::Borrowed(ISLAND_DUMP));

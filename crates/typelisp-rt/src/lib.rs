@@ -3926,7 +3926,7 @@ pub unsafe extern "C" fn rt_path_to_list(args: *const i64, argc: u32) -> i64 {
 /// The inverse of [`rt_path_to_list`]: walks a tagged `Sexpr` list of
 /// `Value::Symbol`s and interns it as a `Value::Path` — the compiled-code
 /// half of the `Sexpr` `path` variant's construction (`compiler.rs`'s
-/// `compile-construct-sexpr` variant `10`). Unlike [`rt_intern_path`] (whose
+/// `compile-construct-sexpr`'s `path` arm). Unlike [`rt_intern_path`] (whose
 /// segments are a compile-time-known-arity variadic argument list, for a
 /// literal quoted path), this one's segment count is only known at runtime —
 /// the list itself is a single already-compiled value, not `N` separate

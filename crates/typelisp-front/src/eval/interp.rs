@@ -3117,40 +3117,14 @@ fn sexpr_list_to_symbols(heap: &Heap, mut v: Value) -> Result<Vec<SymRef>, EvalE
     }
 }
 
-/// Variant indices of `Sexpr`'s constructors (see `check::registry::sexpr_def`).
-const SEXPR_NIL: usize = 0;
-/// `int` — a fixnum or a bignum box, the value's own word. This slot was
-/// `i32` (the fixnum word) until `int` became the language's integer; the
-/// number stays because it is burned into the island's IR.
-const SEXPR_INT: usize = 1;
-const SEXPR_F64: usize = 2;
-const SEXPR_CHAR: usize = 3;
-const SEXPR_BOOL: usize = 4;
-const SEXPR_SYM: usize = 5;
-const SEXPR_STR: usize = 6;
-const SEXPR_CONS: usize = 7;
-/// Retired with the `bignum` type: a bignum box is an `int` (variant 1)
-/// now. Kept as a number so nothing after it renumbers; never constructed
-/// and never matched (`match_sexpr_core`/`construct_sexpr_core` refuse it).
-const SEXPR_RETIRED_BIGNUM: usize = 8;
-const SEXPR_RATIO: usize = 9;
-const SEXPR_PATH: usize = 10;
-/// Appended after `path`, so the numbers above keep the values burned into
-/// the island's IR and into compiled code. See `registry::sexpr_def`.
-const SEXPR_F32: usize = 11;
-/// The five integer widths that are not `i32`. A `Sexpr` is the one place a
-/// value's type is written nowhere else, so each width is its own variant
-/// carrying its own [`typelisp_mem::NarrowInt`] box; `i32` alone keeps the
-/// bare tagged word, which is the width that word already means.
-const SEXPR_I8: usize = 12;
-const SEXPR_I16: usize = 13;
-const SEXPR_U8: usize = 14;
-const SEXPR_U16: usize = 15;
-const SEXPR_U32: usize = 16;
-/// `i32` joined the narrow widths when `int` took the fixnum word: inside a
-/// `Sexpr` it is a `NarrowInt` box like the other five, because the word
-/// alone can no longer say "this is an `i32` and not an `int`".
-const SEXPR_I32: usize = 17;
+/// Variant indices of `Sexpr`'s constructors, under the names this module
+/// and `core_eval` match on. The numbers are `crate::sexpr_variant`'s.
+use crate::sexpr_variant::{
+    BOOL as SEXPR_BOOL, CHAR as SEXPR_CHAR, CONS as SEXPR_CONS, F32 as SEXPR_F32, F64 as SEXPR_F64, I16 as SEXPR_I16,
+    I32 as SEXPR_I32, I8 as SEXPR_I8, INT as SEXPR_INT, NIL as SEXPR_NIL, PATH as SEXPR_PATH, RATIO as SEXPR_RATIO,
+    RETIRED_BIGNUM as SEXPR_RETIRED_BIGNUM, STR as SEXPR_STR, SYM as SEXPR_SYM, U16 as SEXPR_U16, U32 as SEXPR_U32,
+    U8 as SEXPR_U8,
+};
 
 /// The `(width, signed)` pair each narrow-integer `Sexpr` variant names, or
 /// `None` for every other variant — the one table mapping between the two,

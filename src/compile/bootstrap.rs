@@ -82,7 +82,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
 
     let reader = Reader::new();
     let forms = reader
-        .read_all(&mut heap, crate::compiler::SOURCE)
+        .read_all(&mut heap, &crate::compiler::SOURCE)
         .map_err(|e| format!("island read failed: {}", e))?;
     let forms_digest = hash_read_forms(&heap, &forms)?;
     let mut items: Vec<CompiledItem> = Vec::new();
@@ -197,7 +197,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         &heap,
         delta,
         "compiler island",
-        Some(typelisp_front::dump::source_digest(crate::compiler::SOURCE)),
+        Some(typelisp_front::dump::source_digest(&crate::compiler::SOURCE)),
         Some(forms_digest),
         &checked,
         items.iter().map(crate::compile::prelude_bootstrap::unit_item).collect(),

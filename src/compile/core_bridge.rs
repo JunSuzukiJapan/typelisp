@@ -1775,33 +1775,22 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
 /// `sexpr`'s own variant numbers, which a quoted datum is built out of.
 ///
 /// Not a scheme of this module's: these are the variants of the built-in type
-/// (`registry::sexpr_def`), so `compile-construct-sexpr` builds each one the
-/// same way it would from written source.
-const SEXPR_NIL: i64 = 0;
-/// `int` — a fixnum or a bignum box, passed through as the tagged word it is.
-const SEXPR_INT: i64 = 1;
-const SEXPR_F64: i64 = 2;
-/// Appended past `path`, so the numbers above keep the values burned into the
-/// island's IR — see `registry::sexpr_def`.
-const SEXPR_F32: i64 = 11;
-const SEXPR_CHAR: i64 = 3;
-const SEXPR_BOOL: i64 = 4;
-const SEXPR_STR: i64 = 6;
-const SEXPR_CONS: i64 = 7;
-const SEXPR_RATIO: i64 = 9;
-/// Past the variant numbering: a symbol and a path are not `sexpr` variants
-/// with a stored payload but names to be *interned* at run time, so
-/// `compile-construct-sym`/`compile-construct-path` recognize them by a marker
-/// the ordinary variants can never collide with.
-const SEXPR_SYM: i64 = 100;
-/// A quoted symbol from the system module, named by its [`BUILTIN_SYMBOLS`]
-/// index rather than by its name — see [`sym_form`].
-const SEXPR_SYM_WK: i64 = 102;
-const SEXPR_PATH: i64 = 101;
+/// (`crate::sexpr_variant`), so `compile-construct-sexpr` builds each one the
+/// same way it would from written source. A symbol and a path are not built
+/// from a stored payload but *interned* at run time, so they travel under
+/// `sexpr_variant::quoted`'s markers, which `compile-construct-sym`/
+/// `compile-construct-path` recognize and no ordinary variant can collide with.
+/// A symbol from the system module is named by its [`BUILTIN_SYMBOLS`] index
+/// rather than by its name — see [`sym_form`].
+use crate::sexpr_variant::{
+    quoted::{PATH as SEXPR_PATH, SYM as SEXPR_SYM, WK_SYM as SEXPR_SYM_WK},
+    BOOL as SEXPR_BOOL, CHAR as SEXPR_CHAR, CONS as SEXPR_CONS, F32 as SEXPR_F32, F64 as SEXPR_F64, INT as SEXPR_INT,
+    NIL as SEXPR_NIL, RATIO as SEXPR_RATIO, STR as SEXPR_STR,
+};
 
 /// `(construct true false () variant field...)` — one `sexpr` value.
-fn sexpr_construct(heap: &mut Heap, variant: i64, fields: &[Value]) -> Result<Value, Error> {
-    let mut items = vec![Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(variant)];
+fn sexpr_construct(heap: &mut Heap, variant: usize, fields: &[Value]) -> Result<Value, Error> {
+    let mut items = vec![Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(variant as i64)];
     items.extend_from_slice(fields);
     core::tagged(heap, "construct", &items)
 }
@@ -1809,7 +1798,7 @@ fn sexpr_construct(heap: &mut Heap, variant: i64, fields: &[Value]) -> Result<Va
 /// The same with one field, built by `leaf` while it stays rooted.
 fn sexpr_leaf(
     heap: &mut Heap,
-    variant: i64,
+    variant: usize,
     leaf: impl FnOnce(&mut Heap) -> Result<Value, Error>,
 ) -> Result<Value, Error> {
     let mut f = Items::new(heap);
@@ -1865,7 +1854,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         Value::Empty => sexpr_construct(heap, SEXPR_NIL, &[]),
         // An `int` node's payload is the *tagged* word: the `(int HI LO)`
         // literal (a fixnum, `compile-int-literal`), never the raw
-        // `int-any-width` one — variant 1 passes its argument through.
+        // `int-any-width` one — the `int` variant passes its argument through.
         Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, "int", &[half((n as u64) >> 32), half(n as u64)])),
         Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, "bool", &[Value::Bool(b)])),
         Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, "char", &[Value::Char(c)])),
@@ -3427,7 +3416,10 @@ mod tests {
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
-        assert_eq!(bridged_with(&DEFS, "(construct sexpr \"sexpr\" 7 false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"), "(construct true false () 7 (int-any-width 0 1) (int-any-width 0 2))");
+        assert_eq!(
+            bridged_with(&DEFS, &format!("(construct sexpr \"sexpr\" {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
+            format!("(construct true false () {SEXPR_CONS} (int-any-width 0 1) (int-any-width 0 2))")
+        );
     }
 
     /// A construct needs no definition on hand at all: the `MUTABLE` flag says
