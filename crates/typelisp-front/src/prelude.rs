@@ -6067,6 +6067,13 @@ user-visible capacity."
   (data Vector<T>)
   (pub fill-pointer Option<int>))
 
+;; The array a `#nA(..)` literal in source evaluates to
+;; (`Checker::check_array_literal`): its dimensions and its row-major elements
+;; already built, no fill pointer. Not `Array::make`, which needs an element
+;; to fill with — a literal with a zero dimension has none.
+(module %internal (pub defun array-from-row-major<T> ((dims Vector<int>) (data Vector<T>)) Array<T>
+  (Array::new dims data (Option::none))))
+
 ;; CL's `make-array`. `dims` is copied, so a later `push` to the caller's own
 ;; vector cannot change the array's shape behind its back.
 (pub defmethod make (Array<T> (dims Vector<int>) (init T) &key (fill-pointer int)) Array<T>

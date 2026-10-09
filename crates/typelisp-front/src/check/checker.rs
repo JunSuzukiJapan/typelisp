@@ -695,6 +695,72 @@ const SPECIALIZATION_BUDGET: usize = 512;
 /// produce it, and the checker interns it directly.
 const MATCH_SCRUT: &str = "$match-scrut";
 
+/// The variable a vector literal is built in (`Checker::check_vector_literal`).
+/// Spelled with a leading `$` for the reason [`MATCH_SCRUT`] is: no reader
+/// produces it, so it cannot capture a name the program wrote — and a
+/// literal's elements are constants, so they never refer to it either.
+const VECTOR_LITERAL_VAR: &str = "$vector-literal";
+
+/// The element type the context of a `#(..)`/`#nA(..)` literal fixes:
+/// `T` of an expected `Vector<T>`/`Array<T>` (`collection` names which), or
+/// `Option<Sexpr>` when the literal is expected as S-expression data. `None`
+/// when the context says nothing, and the first element decides.
+fn literal_element_type(expected: Option<&Type>, collection: &str) -> Option<Type> {
+    match expected {
+        Some(Type::Named(p, args)) if crate::types::path_is_builtin(p, collection) && args.len() == 1 => {
+            Some(args[0].clone())
+        }
+        Some(t) if is_sexpr_expectation(t) => Some(option_of_sexpr()),
+        _ => None,
+    }
+}
+
+/// One element of a literal collection, as the form that evaluates to it. A
+/// literal's contents are never evaluated, so a symbol, a path or a list is
+/// quoted; numbers, strings, characters, booleans and nested literals
+/// evaluate to themselves already. In a data vector (`data`) every element
+/// is quoted, so that each one is S-expression data.
+fn literal_element_form(heap: &mut Heap, e: Value, data: bool) -> Result<Value, Error> {
+    if data || matches!(e, Value::Symbol(_) | Value::Path(_) | Value::Cons(_)) {
+        let quote = heap.intern_symbol("quote");
+        forms::list_from_vec_locs(heap, &[(quote, None), (e, None)])
+    } else {
+        Ok(e)
+    }
+}
+
+/// `(let (($vector-literal (the Vector<T> (Vector::new))))
+///    (push $vector-literal E)... $vector-literal)` for the elements `elems`.
+fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Result<Value, Error> {
+    let data = is_option_of_sexpr(elem_ty);
+    let mut s = RootScope::new(heap);
+    let var = s.intern_symbol(VECTOR_LITERAL_VAR);
+    let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::root("vector"), vec![elem_ty.clone()]))?;
+    s.push_root(vec_ty);
+    let new = forms::path_form(&mut s, &Path::root("vector").child("new"));
+    let new_call = forms::list_from_vec_locs(&mut s, &[(new, None)])?;
+    s.push_root(new_call);
+    let the = s.intern_symbol("the");
+    let init = forms::list_from_vec_locs(&mut s, &[(the, None), (vec_ty, None), (new_call, None)])?;
+    s.push_root(init);
+    let binding = forms::list_from_vec_locs(&mut s, &[(var, None), (init, None)])?;
+    s.push_root(binding);
+    let bindings = forms::list_from_vec_locs(&mut s, &[(binding, None)])?;
+    s.push_root(bindings);
+    let let_sym = s.intern_symbol("let");
+    let push = s.intern_symbol("push");
+    let mut items: Vec<(Value, Option<Loc>)> = vec![(let_sym, None), (bindings, None)];
+    for &e in elems {
+        let ef = literal_element_form(&mut s, e, data)?;
+        s.push_root(ef);
+        let call = forms::list_from_vec_locs(&mut s, &[(push, None), (var, None), (ef, None)])?;
+        s.push_root(call);
+        items.push((call, None));
+    }
+    items.push((var, None));
+    forms::list_from_vec_locs(&mut s, &items)
+}
+
 /// `Option`'s variant indices (`check::registry::option_def`). Written down
 /// once because three places already depend on the order — `()`'s inference
 /// rule, the niche pattern shapes, and `check_construct`'s `None` shortcut.
@@ -9903,6 +9969,97 @@ impl Checker {
     /// Because checking recurses into sub-expressions, the *deepest* failing
     /// sub-expression tags its error first and, since [`Error::at`] keeps the
     /// innermost location, that precise spot is what the message reports.
+    /// `#(a b c)` in source: a fresh `Vector<T>` each time it is evaluated
+    /// (a literal that every evaluation shared would let one caller's `push`
+    /// show up in the next caller's value).
+    ///
+    /// `T` is the expected type's element type, or the first element's own
+    /// type when nothing is expected. An expected `Sexpr`/`Option<Sexpr>`
+    /// makes it a data vector — `Vector<Option<Sexpr>>`, the `Sexpr`
+    /// `vector` variant — whose elements are all data. As in CL the contents
+    /// are literals, never evaluated: a symbol or a list in them is quoted.
+    ///
+    /// Lowered by rewriting into `(let (($vector-literal (the Vector<T>
+    /// (Vector::new)))) (push $vector-literal E)... $vector-literal)` and
+    /// checking that, so the elements get exactly the checking (and the
+    /// compiled code) any other `push` does.
+    fn check_vector_literal(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        id: crate::mem::BoxId,
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
+        let elem_ty = match literal_element_type(expected, "vector") {
+            Some(t) => t,
+            None => self.first_element_type(heap, interp, env, &elems, "#(..)", "Vector<T>")?,
+        };
+        let form = vector_literal_form(heap, &elem_ty, &elems)?;
+        let mut s = RootScope::new(heap);
+        s.push_root(form);
+        self.check_inner(&mut s, interp, env, form, expected)
+    }
+
+    /// `#2A((1 2) (3 4))` in source: a fresh `Array<T>`, typed as
+    /// [`Self::check_vector_literal`] types a vector. Built from a vector of
+    /// the dimensions and a vector of the elements in row-major order, so a
+    /// literal with a zero dimension — which has no element to fill an
+    /// `Array::make` with — is built the same way.
+    fn check_array_literal(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        id: crate::mem::BoxId,
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let parts: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
+        let (Value::Boxed(dims_id), Value::Boxed(data_id)) = (parts[0], parts[1]) else {
+            return Err(Error::TypeError("an array literal's dimensions and elements are not vectors".into()));
+        };
+        let dims: Vec<Value> = (0..heap.struct_field_count(dims_id)).map(|i| heap.struct_field(dims_id, i)).collect();
+        let data: Vec<Value> = (0..heap.struct_field_count(data_id)).map(|i| heap.struct_field(data_id, i)).collect();
+        let elem_ty = match literal_element_type(expected, "array") {
+            Some(t) => t,
+            None => self.first_element_type(heap, interp, env, &data, "#nA(..)", "Array<T>")?,
+        };
+        let mut s = RootScope::new(heap);
+        let dims_form = vector_literal_form(&mut s, &Type::Int, &dims)?;
+        s.push_root(dims_form);
+        let data_form = vector_literal_form(&mut s, &elem_ty, &data)?;
+        s.push_root(data_form);
+        let make = forms::path_form(&mut s, &Path::internal("array-from-row-major"));
+        let form = forms::list_from_vec_locs(&mut s, &[(make, None), (dims_form, None), (data_form, None)])?;
+        s.push_root(form);
+        self.check_inner(&mut s, interp, env, form, expected)
+    }
+
+    /// The type a literal collection's first element has on its own — what
+    /// `T` is when nothing around the literal says. An empty literal has
+    /// none, and is refused with the spelling that supplies one.
+    fn first_element_type(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        elems: &[Value],
+        written: &str,
+        annotated: &str,
+    ) -> Result<Type, Error> {
+        let Some(&first) = elems.first() else {
+            return Err(Error::TypeError(format!(
+                "`{}` with no elements has no element type to infer: say it with `(the {} ...)`",
+                written, annotated
+            )));
+        };
+        let form = literal_element_form(heap, first, false)?;
+        let mut s = RootScope::new(heap);
+        s.push_root(form);
+        Ok(self.check_inner(&mut s, interp, env, form, None)?.ty)
+    }
+
     fn check_at(
         &self,
         heap: &mut Heap,
@@ -10099,6 +10256,14 @@ impl Checker {
                     Value::Boxed(id)
                 };
                 Checked::new(core::tagged(heap, "float-any-width", &[boxed])?, ty)
+            }
+            // `#(..)` and `#nA(..)` written in source: a fresh collection
+            // whose element type comes from the context.
+            Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_VECTOR) => {
+                self.check_vector_literal(heap, interp, env, id, expected)?
+            }
+            Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
+                self.check_array_literal(heap, interp, env, id, expected)?
             }
             // Any other box is an object no reader ever produced — a struct,
             // an enum value, a `Vector`, a closure — that reached a form
