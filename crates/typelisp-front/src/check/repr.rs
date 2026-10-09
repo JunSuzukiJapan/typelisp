@@ -554,25 +554,20 @@ impl Repr {
     /// crosses a `BoxedObj::Struct` field boundary — `compiler.rs`'s
     /// `compile-tag-struct-field` (encode) and `compile-sexpr-field` (decode).
     ///
-    /// Derived from [`Repr::class`]. The numbers are `Sexpr`'s own variant
-    /// numbering (`registry::sexpr_def`: `1`=int `2`=f64 `3`=char `4`=bool
-    /// `6`=str `11`=f32 `12`..`16`=i8/i16/u8/u16/u32 `17`=i32) rather than a parallel
-    /// scheme, so those two island functions
+    /// Derived from [`Repr::class`]. The numbers are
+    /// `crate::sexpr_variant::field_kind`'s, which reuse `Sexpr`'s own variant
+    /// numbers rather than a parallel scheme, so those two island functions
     /// reuse the same per-variant bit manipulation instead of duplicating it.
-    /// `Unit` is not a `Sexpr` variant and so has no number to borrow; it sits
-    /// at `100`, deliberately clear of the `Sexpr` numbering so that adding a
-    /// variant never collides with it. (It used to be `11`, "the first number
-    /// past" — which stopped being past anything the moment `Sexpr` grew a
-    /// twelfth variant.) `0` is taken by the "not representable" case.
+    /// The kinds that are not a variant's encoding (`UNIT`, `NICHE`,
+    /// `NOT_REPRESENTABLE`) sit outside the variant range.
     ///
     /// **This numbering space has a second producer.** `compile-sexpr-field`
-    /// also decodes `5` (sym), `7` (cons), `9` (ratio), `10` (path) and
-    /// `12`..`17` (the narrow integer widths), which come from `Sexpr`
-    /// *construction* (`compile-construct-sexpr` / `match_sexpr_ctor`'s
-    /// `SEXPR_*`), not from here — this function folds sym/int/ratio into the
-    /// `6` passthrough. (`8`, the retired `bignum` variant, is decoded by
-    /// neither: an `int`'s bignum box is variant `1`.)
-    /// Anything renumbering these must account for both producers.
+    /// also decodes the `sym`, `cons`, `ratio`, `path` and narrow-integer
+    /// variants, which come from `Sexpr` *construction*
+    /// (`compile-construct-sexpr` / `match_sexpr_ctor`), not from here — this
+    /// function folds sym/int/ratio into the `TAGGED` passthrough. (The
+    /// retired `bignum` variant is decoded by neither: an `int`'s bignum box
+    /// is the `int` variant.)
     ///
     /// The narrow integers are the clearest case of the two producers meaning
     /// different things by the same *kind of* value. A `u8` **field of a
@@ -587,29 +582,30 @@ impl Repr {
     /// share a class (they compute alike) but not a kind (they box
     /// differently), and it is the boxing this number drives.
     pub fn field_kind(&self) -> i64 {
+        use crate::sexpr_variant::field_kind as k;
         if matches!(self, Repr::F32) {
-            return 11;
+            return k::F32 as i64;
         }
-        // A niche is a tagged word both ways, like `6` — but the island has
+        // A niche is a tagged word both ways, like `TAGGED` — but the island has
         // to tell the two apart where it *builds* an `Option` around a
         // value of this kind (`build-some-of`, `vector-op`'s `pop`): an
-        // `Option<Option<T>>` must be boxed, and `6` would say "niche it".
+        // `Option<Option<T>>` must be boxed, and `TAGGED` would say "niche it".
         // Its own number, clear of the `Sexpr` variants like `Unit`'s.
         if matches!(self, Repr::Niche(_)) {
-            return 101;
+            return k::NICHE as i64;
         }
-        match self.class() {
-            Class::Int => 1,
-            Class::Float => 2,
-            Class::Char => 3,
-            Class::Bool => 4,
+        (match self.class() {
+            Class::Int => k::RAW_INT,
+            Class::Float => k::F64,
+            Class::Char => k::CHAR,
+            Class::Bool => k::BOOL,
             // Both directions leave the word alone.
-            Class::Tagged { .. } => 6,
+            Class::Tagged { .. } => k::TAGGED,
             // Both directions ignore the word they are handed and emit a
             // constant; the slot only has to hold something the GC can decode
             // safely.
-            Class::Unit => 100,
-            // A raw word has no encoding here on purpose. `1` (a plain word)
+            Class::Unit => k::UNIT,
+            // A raw word has no encoding here on purpose. `RAW_INT` (a plain word)
             // is what it looks like it should be and is exactly wrong: a
             // struct field is *tagged* on the way in, and shifting a pointer
             // left by one drops its top bit. That is the bug that
@@ -617,13 +613,13 @@ impl Repr {
             // and giving this a number would write it again. `Checker` refuses
             // the declarations that would reach here, so this is the second
             // line rather than the first.
-            Class::RawWord => 0,
+            Class::RawWord => k::NOT_REPRESENTABLE,
             // The one type that genuinely reaches this is a still-generic type
             // variable ([`Repr::None`]). The island's `compile-sexpr-field`
             // panics on it with "field type is not representable in compiled
             // code yet", which is now true of everything that produces it.
-            Class::NotRepresentable => 0,
-        }
+            Class::NotRepresentable => k::NOT_REPRESENTABLE,
+        }) as i64
     }
 }
 
@@ -657,6 +653,7 @@ enum Class {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sexpr_variant::field_kind as k;
 
     fn sets() -> (HashSet<Path>, HashSet<Path>) {
         let mut structs = HashSet::new();
@@ -806,7 +803,7 @@ mod tests {
             Repr::Fn,
         ];
         for r in &reclaimable {
-            assert_eq!(r.field_kind(), 6, "{:?} should be the passthrough field kind", r);
+            assert_eq!(r.field_kind(), k::TAGGED as i64, "{:?} should be the passthrough field kind", r);
             assert_eq!(r.binding_kind(), 2, "{:?} should be rooted at a binding boundary", r);
         }
     }
@@ -819,7 +816,7 @@ mod tests {
     /// table deciding it again.
     #[test]
     fn a_symbol_is_passthrough_but_needs_no_root() {
-        assert_eq!(Repr::Sym.field_kind(), 6);
+        assert_eq!(Repr::Sym.field_kind(), k::TAGGED as i64);
         assert_eq!(Repr::Sym.binding_kind(), 0);
     }
 
@@ -831,11 +828,11 @@ mod tests {
     fn a_niche_is_tagged_and_rooted_by_its_payload() {
         let niche = |r: Repr| Repr::Niche(Box::new(r));
         for r in [Repr::Narrow, Repr::Handle, Repr::Char, Repr::Bool, Repr::Sym] {
-            assert_eq!(niche(r.clone()).field_kind(), 101, "{:?}", r);
+            assert_eq!(niche(r.clone()).field_kind(), k::NICHE as i64, "{:?}", r);
             assert_eq!(niche(r.clone()).binding_kind(), 0, "{:?} points at nothing reclaimable", r);
         }
         for r in [Repr::F64, Repr::F32, Repr::Str, Repr::Struct, Repr::Sexpr, Repr::Enum, Repr::Fn] {
-            assert_eq!(niche(r.clone()).field_kind(), 101, "{:?}", r);
+            assert_eq!(niche(r.clone()).field_kind(), k::NICHE as i64, "{:?}", r);
             assert_eq!(niche(r.clone()).binding_kind(), 2, "{:?} is reclaimable through the niche", r);
         }
         // A niche never niches: `Option<Option<T>>` boxes.
@@ -856,9 +853,9 @@ mod tests {
     fn only_a_generic_type_variable_is_not_representable() {
         for r in [Repr::Narrow, Repr::Handle, Repr::F64, Repr::F32, Repr::Char, Repr::Bool, Repr::Unit] {
             assert_eq!(r.binding_kind(), 0, "{:?} is a scalar and needs no root", r);
-            assert_ne!(r.field_kind(), 0, "{:?} is representable in a field", r);
+            assert_ne!(r.field_kind(), k::NOT_REPRESENTABLE as i64, "{:?} is representable in a field", r);
         }
-        assert_eq!(Repr::None.field_kind(), 0);
+        assert_eq!(Repr::None.field_kind(), k::NOT_REPRESENTABLE as i64);
         assert_eq!(Repr::None.binding_kind(), 0);
     }
 }

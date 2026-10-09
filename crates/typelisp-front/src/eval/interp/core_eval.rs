@@ -2320,6 +2320,7 @@ fn macro_lambda(heap: &Heap, form: Value, i: usize) -> Result<MacroLambda, EvalE
 mod tests {
     use super::*;
     use crate::Reader;
+    use crate::sexpr_variant::{CONS, INT, NIL, PATH, STR};
 
     /// A heap in stress mode: every `cons` collects first, so a value the
     /// evaluator holds without rooting dies at the very next allocation rather
@@ -2768,10 +2769,10 @@ mod tests {
     #[test]
     fn constructing_a_sexpr_datum() {
         let mut h = stress_heap();
-        assert_eq!(eval_ok(&mut h, "(construct sexpr \"sexpr\" 0 false ())"), Value::Empty);
-        assert_eq!(eval_ok(&mut h, "(construct sexpr \"sexpr\" 1 false (int-any-width) (int-any-width 3))"), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, &format!("(construct sexpr \"sexpr\" {NIL} false ())")), Value::Empty);
+        assert_eq!(eval_ok(&mut h, &format!("(construct sexpr \"sexpr\" {INT} false (int-any-width) (int-any-width 3))")), Value::Int(3));
 
-        let v = eval_ok(&mut h, "(construct sexpr \"sexpr\" 7 false (sexpr sexpr) (int-any-width 1) (int-any-width 2))");
+        let v = eval_ok(&mut h, &format!("(construct sexpr \"sexpr\" {CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"));
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
@@ -2779,7 +2780,7 @@ mod tests {
         // datum is `eq` to the string it was built from.
         let v = eval_ok(
             &mut h,
-            r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var s) (construct sexpr "sexpr" 6 false (str) (var s))))"#,
+            &format!(r#"(let ((s sexpr (str "hi"))) (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var s) (construct sexpr "sexpr" {STR} false (str) (var s))))"#),
         );
         assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
     }
@@ -2881,14 +2882,14 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)) sexpr
-                   ((pat-ctor sexpr \"sexpr\" 0 false ()) (int-any-width 100))
-                   ((pat-ctor sexpr \"sexpr\" 7 false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))",
+                &format!("(match (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)) sexpr
+                   ((pat-ctor sexpr \"sexpr\" {NIL} false ()) (int-any-width 100))
+                   ((pat-ctor sexpr \"sexpr\" {CONS} false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))"),
             ),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, "(match (unit) unit ((pat-ctor sexpr \"sexpr\" 0 false ()) (int-any-width 100)) ((pat-wild) (int-any-width 0)))"),
+            eval_ok(&mut h, &format!("(match (unit) unit ((pat-ctor sexpr \"sexpr\" {NIL} false ()) (int-any-width 100)) ((pat-wild) (int-any-width 0)))")),
             Value::Int(100)
         );
     }
@@ -2924,8 +2925,8 @@ mod tests {
 
         let form = read1(
             &mut h,
-            "(match (var p) sexpr ((pat-ctor sexpr \"sexpr\" 10 false (sexpr) (pat-bind segs))
-               (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 0) (var segs))))",
+            &format!("(match (var p) sexpr ((pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind segs))
+               (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 0) (var segs))))"),
         );
         h.push_root(form);
 
@@ -2968,11 +2969,11 @@ mod tests {
 
         let form = read1(
             &mut h,
-            "(match (var v) sexpr
-               ((pat-ctor sexpr \"sexpr\" 7 false (sexpr sexpr)
-                  (pat-ctor sexpr \"sexpr\" 10 false (sexpr) (pat-bind l))
-                  (pat-ctor sexpr \"sexpr\" 10 false (sexpr) (pat-bind r)))
-                 (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var l) (var r))))",
+            &format!("(match (var v) sexpr
+               ((pat-ctor sexpr \"sexpr\" {CONS} false (sexpr sexpr)
+                  (pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind l))
+                  (pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind r)))
+                 (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (var l) (var r))))"),
         );
         h.push_root(form);
 

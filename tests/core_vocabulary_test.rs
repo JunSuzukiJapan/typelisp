@@ -568,7 +568,7 @@ fn zz_the_vocabulary_is_closed() {
 /// take a tag is cheap while the tree is green and expensive once it is not.
 #[test]
 fn every_shared_tag_is_one_the_island_dispatches_on() {
-    let source = typelisp::compiler::SOURCE;
+    let source: &str = &typelisp::compiler::SOURCE;
     let head = "(defun compile-value ";
     let start = source.find(head).expect("`compile-value` not found in the island SOURCE") + head.len();
     let rest = &source[start..];

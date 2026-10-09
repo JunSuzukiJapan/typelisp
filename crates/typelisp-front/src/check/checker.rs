@@ -703,12 +703,10 @@ const OPTION_NONE: usize = 1;
 
 /// `Sexpr`'s variant 0 — the old `nil`.
 ///
-/// The variant is still *in* `sexpr_def`, and deliberately so: three places
-/// have its numbering baked in (`eval::interp`'s `SEXPR_*`,
-/// `compile::core_bridge`'s copy, and `Repr::field_kind`, which borrows the
-/// same numbers), and `bignum`/`ratio` were appended rather than inserted
-/// precisely so those constants would stay valid. Removing the entry would
-/// renumber all sixteen.
+/// The variant is still *in* `sexpr_def`, and deliberately so: its number is
+/// burned into the island's IR and into compiled code (`crate::sexpr_variant`
+/// says why numbers are only ever appended). Removing the entry would
+/// renumber every variant after it.
 ///
 /// What is gone is its *surface*: `(nil)` can no longer be written as a
 /// constructor or a pattern, because a writable empty-list `Sexpr` would
@@ -716,12 +714,12 @@ const OPTION_NONE: usize = 1;
 /// `(Option::none)` would be the same word. The empty list is reached as
 /// `Option<Sexpr>`'s `none`, and the core IR still spells it `(construct
 /// sexpr 0 ..)`, which the checker emits itself.
-const SEXPR_RESERVED_VARIANT: usize = 0;
+const SEXPR_RESERVED_VARIANT: usize = crate::sexpr_variant::NIL;
 
-/// `Sexpr`'s variant 8 — the old `bignum`, retired with the type: a bignum
-/// box is an `int` (variant 1) now. Same treatment as [`SEXPR_RESERVED_VARIANT`]:
+/// `Sexpr`'s old `bignum` variant, retired with the type: a bignum box is an
+/// `int` now. Same treatment as [`SEXPR_RESERVED_VARIANT`]:
 /// the slot stays so nothing renumbers, and its surface is refused.
-const SEXPR_RETIRED_BIGNUM: usize = 8;
+const SEXPR_RETIRED_BIGNUM: usize = crate::sexpr_variant::RETIRED_BIGNUM;
 
 /// Message for a `(bignum ..)` constructor or pattern.
 const BIGNUM_IS_GONE: &str = "`bignum` is no longer a `Sexpr` constructor: the `bignum` type was folded \
@@ -5179,7 +5177,7 @@ impl Checker {
         if let Some(repr) = self.repr(ty).niche_payload() {
             return match payload {
                 Some(form) => forms::some_of_form(heap, repr, form),
-                None => self.construct_form(heap, &Path::root("sexpr"), &[], 0, false, &[], &[]),
+                None => self.construct_form(heap, &Path::root("sexpr"), &[], SEXPR_RESERVED_VARIANT, false, &[], &[]),
             };
         }
         match payload {

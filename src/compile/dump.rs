@@ -449,7 +449,7 @@ pub fn load_image(
             )?,
             "compiler island" => typelisp_front::dump::verify_digest(
                 &state,
-                crate::compiler::SOURCE,
+                &crate::compiler::SOURCE,
                 crate::compiler::REGEN_SCRIPT,
             )?,
             _ => {}

@@ -1141,7 +1141,7 @@ mod native_method_list_tests {
     /// way the reader does. `!island.is_empty()` at the call site is the
     /// backstop for the whole scan going stale again.
     fn island_methods(name: &str) -> Vec<String> {
-        let src = crate::compiler::SOURCE;
+        let src: &str = &crate::compiler::SOURCE;
         let head = format!("(defun {}-native-method? ", name);
         let start = src.find(&head).unwrap_or_else(|| panic!("`{}` not found in the island SOURCE", head));
         let rest = &src[start + head.len()..];
