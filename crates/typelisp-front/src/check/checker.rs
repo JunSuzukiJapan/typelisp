@@ -16290,27 +16290,8 @@ impl Checker {
                     return self.check_type_test_pattern(heap, interp, env, &parts, &parts_locs);
                 }
             }
-            const BUILTIN_SEXPR_CTORS: &[u32] = &[
-                wk::NIL,
-                wk::I8,
-                wk::I16,
-                wk::I32,
-                wk::U8,
-                wk::U16,
-                wk::U32,
-                wk::F64,
-                wk::F32,
-                wk::CHAR,
-                wk::BOOL,
-                wk::SYM,
-                wk::STR,
-                wk::CONS,
-                wk::BIGNUM,
-                wk::RATIO,
-                wk::PATH,
-            ];
-            let is_builtin_head =
-                matches!(parts[0], Value::Symbol(id) if BUILTIN_SEXPR_CTORS.contains(&id.well_known()));
+            let is_builtin_head = matches!(parts[0], Value::Symbol(id)
+                if crate::sexpr_variant::is_ctor_name(&heap.symbol_name(id)));
             if !is_builtin_head {
                 if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0], parts_locs[0].1.as_ref())? {
                     return self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, true);
@@ -16339,11 +16320,7 @@ impl Checker {
         // already rejects the empty-list immediate, so re-checking the
         // pattern against `Sexpr` produces the right code as it stands.
         if is_option_of_sexpr(expected) {
-            const BUILTIN_SEXPR_CTORS: &[&str] = &[
-                "nil", "int", "i8", "i16", "i32", "u8", "u16", "u32", "f64", "f32", "char", "bool", "sym",
-                "str", "cons", "bignum", "ratio", "path",
-            ];
-            if BUILTIN_SEXPR_CTORS.contains(&ctor.as_str()) {
+            if crate::sexpr_variant::is_ctor_name(&ctor) {
                 return self.check_ctor_pattern(heap, interp, env, &sexpr_ty(), v);
             }
         }

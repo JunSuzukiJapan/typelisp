@@ -194,6 +194,8 @@ pub const BUILTIN_TYPE_KEYS: &[&str] = &[
     "internal-time",
     "heap-info",
     "neterror",
+    "vector<option<sexpr>>",
+    "array<option<sexpr>>",
 ];
 
 impl TypeKeyId {
@@ -216,6 +218,12 @@ impl TypeKeyId {
     /// `NetError` — what every `net-*` builtin fails with. Appended after
     /// the rest so no existing id moved.
     pub const NET_ERROR: TypeKeyId = TypeKeyId(14);
+    /// The box a `Sexpr`'s `vector` variant is: what `#(..)` reads as. The
+    /// reader builds it without a checker, and compiled code tests for it,
+    /// so the identity is fixed here rather than derived.
+    pub const SEXPR_VECTOR: TypeKeyId = TypeKeyId(15);
+    /// The box a `Sexpr`'s `array` variant is: what `#nA(..)` reads as.
+    pub const SEXPR_ARRAY: TypeKeyId = TypeKeyId(16);
 
     pub fn as_u32(&self) -> u32 {
         self.0

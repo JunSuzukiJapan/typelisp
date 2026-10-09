@@ -1612,6 +1612,10 @@ fn sexpr_variant_fields(v: usize) -> Vec<Type> {
         // Boxed like the five above it, since `int` took the bare fixnum
         // word. Appended for the usual reason.
         sv::I32 => vec![Type::I32],
+        // `#(..)` and `#nA(..)`. The payload is the collection box itself,
+        // so construction and extraction are both the identity, like `str`.
+        sv::VECTOR => vec![Type::Named(Path::root("vector"), vec![option_of(sexpr())])],
+        sv::ARRAY => vec![Type::Named(Path::root("array"), vec![option_of(sexpr())])],
         _ => unreachable!("Sexpr has {} variants, not {}", sv::COUNT, v + 1),
     }
 }

@@ -1783,7 +1783,10 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
 /// A symbol from the system module is named by its [`BUILTIN_SYMBOLS`] index
 /// rather than by its name — see [`sym_form`].
 use crate::sexpr_variant::{
-    quoted::{PATH as SEXPR_PATH, SYM as SEXPR_SYM, WK_SYM as SEXPR_SYM_WK},
+    quoted::{
+        ARRAY as SEXPR_QUOTED_ARRAY, PATH as SEXPR_PATH, SYM as SEXPR_SYM, VECTOR as SEXPR_QUOTED_VECTOR,
+        WK_SYM as SEXPR_SYM_WK,
+    },
     BOOL as SEXPR_BOOL, CHAR as SEXPR_CHAR, CONS as SEXPR_CONS, F32 as SEXPR_F32, F64 as SEXPR_F64, INT as SEXPR_INT,
     NIL as SEXPR_NIL, RATIO as SEXPR_RATIO, STR as SEXPR_STR,
 };
@@ -1908,6 +1911,33 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
                 f.finish("ratio")
             })
         }
+        // `#(..)` and `#nA(..)`. Taken apart into lists like any other quoted
+        // datum and rebuilt into boxes at run time (`rt_list_to_sexpr_vector`,
+        // `rt_lists_to_sexpr_array`) — CL's `compile-file` externalizes a
+        // literal vector the same way, by its contents.
+        Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_VECTOR) => {
+            let elems = struct_fields(heap, id);
+            let list = quoted_list_form(heap, &elems)?;
+            let mut f = Items::new(heap);
+            f.push(list);
+            let fields = f.as_slice().to_vec();
+            sexpr_construct(f.heap(), SEXPR_QUOTED_VECTOR, &fields)
+        }
+        Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
+            let parts = struct_fields(heap, id);
+            let (Value::Boxed(dims_id), Value::Boxed(data_id)) = (parts[0], parts[1]) else {
+                return Err(Error::TypeError("compile: a quoted array's dims/data are not boxes".to_string()));
+            };
+            let dims = struct_fields(heap, dims_id);
+            let data = struct_fields(heap, data_id);
+            let mut f = Items::new(heap);
+            let dims_v = quoted_list_form(f.heap(), &dims)?;
+            f.push(dims_v);
+            let data_v = quoted_list_form(f.heap(), &data)?;
+            f.push(data_v);
+            let fields = f.as_slice().to_vec();
+            sexpr_construct(f.heap(), SEXPR_QUOTED_ARRAY, &fields)
+        }
         Value::Cons(_) => {
             let (car, cdr) = (heap.car(datum)?, heap.cdr(datum)?);
             let mut f = Items::new(heap);
@@ -1940,6 +1970,26 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             )))
         }
     }
+}
+
+/// The fields of struct box `id`, in order.
+fn struct_fields(heap: &Heap, id: crate::mem::BoxId) -> Vec<Value> {
+    (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect()
+}
+
+/// The nodes that rebuild a proper list of `elems` (each a quoted datum) at
+/// run time — the `cons` chain [`quoted_form`] would build for a list datum.
+fn quoted_list_form(heap: &mut Heap, elems: &[Value]) -> Result<Value, Error> {
+    let mut f = Items::new(heap);
+    let mut acc = sexpr_construct(f.heap(), SEXPR_NIL, &[])?;
+    f.push(acc);
+    for &e in elems.iter().rev() {
+        let car = quoted_form(f.heap(), e)?;
+        f.push(car);
+        acc = sexpr_construct(f.heap(), SEXPR_CONS, &[car, acc])?;
+        f.push(acc);
+    }
+    Ok(acc)
 }
 
 /// A trait-object node's `(kind . form)` operand.

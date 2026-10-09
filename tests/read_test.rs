@@ -639,3 +639,23 @@ fn a_stray_closing_bracket_or_brace_is_a_read_error() {
         assert!(e.to_string().contains("nothing open for it to close"), "{}: {}", src, e);
     }
 }
+
+// ---- `#(..)` and `#nA(..)` ----------------------------------------------
+
+/// The input ending inside `#(` is an error, not a short vector.
+#[test]
+fn a_vector_cut_off_by_the_end_of_input_is_a_read_error() {
+    let mut h = Heap::with_capacity(4096);
+    let e = Reader::new().read(&mut h, "#(1 2").expect_err("unterminated `#(`");
+    assert!(e.to_string().contains("end of input inside `#(`"), "{}", e);
+}
+
+/// Above the last level, `#nA`'s contents must be lists.
+#[test]
+fn an_array_level_that_is_not_a_list_is_a_read_error() {
+    let mut h = Heap::with_capacity(4096);
+    for src in ["#2A((1 2) 3)", "#1A x"] {
+        let e = Reader::new().read(&mut h, src).expect_err(src);
+        assert!(e.to_string().contains("must be a proper list"), "{}: {}", src, e);
+    }
+}

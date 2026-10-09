@@ -1368,7 +1368,7 @@ fn match_sexpr_core(
     subs: &[Value],
     v: Value,
 ) -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
-    use super::{narrow_variant, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM};
+    use super::{narrow_variant, SEXPR_ARRAY, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM, SEXPR_VECTOR};
 
     if variant == SEXPR_RETIRED_BIGNUM {
         return Err(EvalError::Internal("eval: Sexpr variant 8 (bignum) is retired — a bignum box is an `int`".to_string()));
@@ -1413,6 +1413,15 @@ fn match_sexpr_core(
         (SEXPR_F64, Value::Boxed(id)) if heap.is_f64(id) => one(heap, v),
         (SEXPR_F32, Value::Boxed(id)) if heap.is_f32(id) => one(heap, v),
         (SEXPR_RATIO, Value::Boxed(id)) if heap.is_ratio(id) => one(heap, v),
+        // `#(..)`/`#nA(..)`: the collection box is the datum. Only the
+        // `Option<Sexpr>`-element instantiation is one — a `Vector<int>` that
+        // reached a `Sexpr` is a downcast's business, not this variant's.
+        (SEXPR_VECTOR, Value::Boxed(id)) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_VECTOR) => {
+            one(heap, v)
+        }
+        (SEXPR_ARRAY, Value::Boxed(id)) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
+            one(heap, v)
+        }
         (SEXPR_CONS, Value::Cons(_)) => {
             let car = heap.car(v).map_err(heap_err)?;
             let cdr = heap.cdr(v).map_err(heap_err)?;
@@ -1460,7 +1469,7 @@ fn match_sexpr_core(
 
 /// `(construct sexpr N E...)` — build a `Sexpr` datum from evaluated fields.
 pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Result<Value, EvalError> {
-    use super::{narrow_variant, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM};
+    use super::{narrow_variant, SEXPR_ARRAY, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM, SEXPR_VECTOR};
 
     if variant == SEXPR_RETIRED_BIGNUM {
         return Err(EvalError::Internal("eval: Sexpr variant 8 (bignum) is retired — a bignum box is an `int`".to_string()));
@@ -1525,6 +1534,9 @@ pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Valu
             let ids = super::sexpr_list_to_symbols(heap, arg(0)?)?;
             Ok(heap.intern_path(&ids))
         }
+        // The box passes through, like `str`: the checker typed the argument
+        // as `Vector<Option<Sexpr>>`/`Array<Option<Sexpr>>`, so it is one.
+        SEXPR_VECTOR | SEXPR_ARRAY => arg(0),
         _ => Err(EvalError::Internal(format!("eval: (construct sexpr {} ..): unknown variant", variant))),
     }
 }

@@ -336,6 +336,34 @@ fn the_runtime_result_keys_match_the_registry() {
     );
 }
 
+/// The boxes `#(..)` and `#nA(..)` read as are the `Sexpr` `vector`/`array`
+/// variants' payloads, so their pre-interned keys must be what
+/// `type_key_of_type` spells for the payload types the registry gives those
+/// variants — otherwise a `(the Vector<Option<Sexpr>> x)` downcast of a read
+/// vector would not match it. The array's dimensions box is spelled by the
+/// reader too.
+#[test]
+fn the_read_vector_and_array_keys_are_the_sexpr_variants_payloads() {
+    use typelisp::check::Registry;
+    use typelisp::sexpr_variant;
+    use typelisp::types::Path;
+    use typelisp::{TypeKeyId, BUILTIN_TYPE_KEYS};
+
+    let reg = Registry::with_builtins();
+    let sexpr = reg.type_def(&Path::root("sexpr")).expect("sexpr is registered");
+    let payload_key = |variant: usize| -> String {
+        let fields = &sexpr.variants[variant].fields;
+        assert_eq!(fields.len(), 1, "`{}` should carry one payload", sexpr_variant::NAMES[variant]);
+        typelisp::type_key::type_key_of_type(&fields[0])
+    };
+    assert_eq!(BUILTIN_TYPE_KEYS[TypeKeyId::SEXPR_VECTOR.as_u32() as usize], payload_key(sexpr_variant::VECTOR));
+    assert_eq!(BUILTIN_TYPE_KEYS[TypeKeyId::SEXPR_ARRAY.as_u32() as usize], payload_key(sexpr_variant::ARRAY));
+    assert_eq!(
+        typelisp_read::ARRAY_DIMS_KEY,
+        typelisp::type_key::type_key_of_type(&typelisp::Type::Named(Path::root("vector"), vec![typelisp::Type::Int]))
+    );
+}
+
 /// The `TypeKeyId` constants must be the indices `Heap::with_capacity` interns
 /// [`BUILTIN_TYPE_KEYS`] at — the whole reason those constants can exist.
 ///

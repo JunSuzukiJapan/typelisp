@@ -803,7 +803,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; `char` is unsigned; `bool` undoes `compile-bool`'s `1`/`2`.
     (#%kind-char (untag-small builder v))
     (#%kind-bool (build-sub builder (untag-small builder v) (const-word builder 1)))
-    ;; `sym`/`str`/`bignum`/`ratio`: the payload *is* the
+    ;; `sym`/`str`/`bignum`/`ratio`/`vector`/`array`: the payload *is* the
     ;; already-tagged word — `Repr::field_kind`'s `kind-tagged` passthrough —
     ;; so there is no bit manipulation and no box to open. (`sym` reaches here from
     ;; `Sexpr` construction rather than from `field_kind`; see that
@@ -811,7 +811,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; A niched `Option` is a tagged word too — its payload's field
     ;; word, or the empty-list immediate — and passes through the same way;
     ;; its own number exists for `niche-kind?`, not for here.
-    ((#%sexpr-sym #%kind-tagged #%sexpr-retired-bignum #%sexpr-ratio #%kind-niche) v)
+    ((#%sexpr-sym #%kind-tagged #%sexpr-retired-bignum #%sexpr-ratio #%kind-niche #%sexpr-vector #%sexpr-array) v)
     ;; `cons`: the only variant with two fields.
     (#%sexpr-cons (let ((args-ptr (alloca-args builder 1)))
          (store-arg builder args-ptr 0 v)
@@ -1838,9 +1838,9 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `small-tag-test` (six) above.
 
 ;; Whether `v` is a heap box of kind `kind` (`rt_box_kind`'s numbering:
-;; 1 = f64, 2 = bignum, 3 = ratio, 4 = f32, 5/6/7/8/9 = i8/i16/u8/u16/u32) —
-;; the nine `Sexpr` variants that a tag test cannot tell apart, since they
-;; all carry `TAG_BOXED`.
+;; 1 = f64, 2 = bignum, 3 = ratio, 4 = f32, 5/6/7/8/9/10 = i8/i16/u8/u16/
+;; u32/i32, 11/12 = the vector/array box) — the `Sexpr` variants that a tag
+;; test cannot tell apart, since they all carry `TAG_BOXED`.
 (defun compile-box-kind-test ((builder llvm-builder) (m llvm-module) (v llvm-value) (kind int)) llvm-value
   (let ((args-ptr (alloca-args builder 1)))
     (store-arg builder args-ptr 0 v)
@@ -1864,6 +1864,8 @@ const SOURCE_TEMPLATE: &str = r#"
     (#%sexpr-u16 (compile-box-kind-test builder m v 8))
     (#%sexpr-u32 (compile-box-kind-test builder m v 9))
     (#%sexpr-i32 (compile-box-kind-test builder m v 10))
+    (#%sexpr-vector (compile-box-kind-test builder m v 11))
+    (#%sexpr-array (compile-box-kind-test builder m v 12))
     ;; `nil` and `bool` share the immediate sub-class and differ only
     ;; in the payload: nil's is zero, a bool's never is. `nil` is the single
     ;; word 7, so its test is one comparison.
@@ -4750,6 +4752,21 @@ const SOURCE_TEMPLATE: &str = r#"
         (#%quoted-sym (compile-construct-sym m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup arg-forms))
         (#%quoted-path (compile-construct-path m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup arg-forms))
         (#%quoted-wk-sym (compile-construct-wk-sym m fn-name builder arg-forms))
+        ;; A quoted `#(..)`: the elements arrive as one quoted list, which
+        ;; `rt_list_to_sexpr_vector` turns into the vector box.
+        (#%quoted-vector
+         (let ((args-ptr (alloca-args builder 1)))
+           (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
+           (build-call builder (get-function m "rt_list_to_sexpr_vector") args-ptr 1)))
+        ;; A quoted `#nA(..)`: a list of the dimensions and a list of the
+        ;; elements. The first is rooted in a frame slot while the second is
+        ;; built, as `cons`'s car is.
+        (#%quoted-array
+         (let* ((args-ptr (frame-slots builder m 2 2))
+                (dims-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
+           (store-arg builder args-ptr 0 dims-v)
+           (store-arg builder args-ptr 1 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr arg-forms))))
+           (build-call builder (get-function m "rt_lists_to_sexpr_array") args-ptr 2)))
         ;; Every other variant index is a real one, and which of the
         ;; three constructors it names is decided by the node's two
         ;; flags rather than by the index.
@@ -5002,13 +5019,14 @@ const SOURCE_TEMPLATE: &str = r#"
       (#%sexpr-char (tag-small builder (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)) 1))
       (#%sexpr-bool (let ((b (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms))))
            (tag-small builder (build-add builder b (const-word builder 1)) 0)))
-      ;; `sym`/`str`/`ratio`: the compiled argument is already the
-      ;; fully tagged word this variant carries — a `Symbol` immediate, a
-      ;; `Value::Str`, or `compile-ratio-literal`'s `TAG_BOXED` result — so
+      ;; `sym`/`str`/`ratio`/`vector`/`array`: the compiled argument is
+      ;; already the fully tagged word this variant carries — a `Symbol`
+      ;; immediate, a `Value::Str`, `compile-ratio-literal`'s `TAG_BOXED`
+      ;; result, or the collection box itself — so
       ;; construction is the identity, the same passthrough
       ;; `compile-sexpr-field` reads back. `bignum` is retired (a bignum
       ;; box is an `int`), and the checker refuses it before it gets here.
-      ((#%sexpr-sym #%sexpr-str #%sexpr-ratio) (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
+      ((#%sexpr-sym #%sexpr-str #%sexpr-ratio #%sexpr-vector #%sexpr-array) (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
       ;; `cons`: the only variant with two fields, and so the only one
       ;; that has to root the first while the second is built.
       (#%sexpr-cons (let* ((args-ptr (frame-slots builder m 2 2))

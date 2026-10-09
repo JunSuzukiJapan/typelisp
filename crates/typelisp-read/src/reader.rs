@@ -24,7 +24,7 @@ use num_bigint::BigInt;
 use num_rational::BigRational;
 
 use crate::name_lexer::{NameLexer, NameTok};
-use typelisp_mem::{symbols, wk, Error, Heap, Loc, NsId, SymRef, Value};
+use typelisp_mem::{symbols, wk, Error, Heap, Loc, NsId, SymRef, TypeKeyId, Value};
 
 /// The feature set consulted by `#+`/`#-` reader conditionals (CLHS 24.1.2 —
 /// the closest an s-expression reader has to a preprocessor). A feature is
@@ -1026,6 +1026,8 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
             cur.next(); // '\\'
             read_char(cur)
         }
+        // `#(a b c)` — a vector, as in CL.
+        Some('(') => read_vector(cur, heap, ctx),
         // `#.` — read the next datum, run it, and read the value in its
         // place. The one place the reader is not a function of its text
         // alone, and the reason `ReadEval` exists.
@@ -1074,9 +1076,17 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
             }
             match cur.peek() {
                 Some('r') | Some('R') => cur.next(),
+                // `#2A((1 2) (3 4))` — an array of that many dimensions.
+                Some('a') | Some('A') => {
+                    cur.next();
+                    let rank: usize = digits
+                        .parse()
+                        .map_err(|_| Error::ReadError(format!("#{}A: rank does not fit", digits)))?;
+                    return read_array(cur, heap, ctx, rank);
+                }
                 other => {
                     return Err(Error::ReadError(format!(
-                        "#{} must be followed by `r` (the radix macro `#NNrDIGITS`), not {:?}",
+                        "#{} must be followed by `r` (the radix macro `#NNrDIGITS`) or `A` (an array), not {:?}",
                         digits, other
                     )))
                 }
@@ -1094,6 +1104,153 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
         }
         other => Err(Error::ReadError(format!("unsupported # syntax: #{:?}", other))),
     }
+}
+
+/// The `Vector<int>` box an array's dimensions are kept in. Spelled here
+/// because the reader cannot derive a type key; `tests/type_identity_guard_test.rs`
+/// checks it against the one `type_key_of_type` produces.
+pub const ARRAY_DIMS_KEY: &str = "vector<int>";
+
+/// `#(a b c)`: the elements, read as data, in a `Vector<Option<Sexpr>>` box —
+/// the `Sexpr` `vector` variant. The cursor is on the `(`.
+fn read_vector(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
+    cur.next(); // '('
+    let mark = heap.root_count();
+    let mut elems: Vec<Value> = Vec::new();
+    loop {
+        if let Err(e) = skip_ws_comments(cur, heap, ctx) {
+            restore_roots(heap, mark);
+            return Err(e);
+        }
+        match cur.peek() {
+            None => {
+                restore_roots(heap, mark);
+                return Err(Error::ReadError("end of input inside `#(`".to_string()));
+            }
+            Some(')') => {
+                cur.next();
+                break;
+            }
+            Some(_) => match read_datum(cur, heap, ctx) {
+                Ok(e) => {
+                    heap.push_root(e); // alive while the rest is read
+                    elems.push(e);
+                }
+                Err(e) => {
+                    restore_roots(heap, mark);
+                    return Err(e);
+                }
+            },
+        }
+    }
+    let v = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, elems);
+    restore_roots(heap, mark);
+    Ok(v)
+}
+
+/// `#NA datum`: an `Array<Option<Sexpr>>` box — the `Sexpr` `array` variant.
+/// As in CL, `datum` is one object whose first `rank` levels of list nesting
+/// are the dimensions (`#2A((1 2) (3 4))` is 2 by 2), and `#0A x` is the
+/// zero-dimensional array holding `x`. A level whose lists differ in length
+/// is an error: an array is rectangular. The cursor is just past the `A`.
+///
+/// The box has the fields of the prelude's `defstruct Array` in its order —
+/// `dims`, `data` (row-major), `fill-pointer` (`none`).
+fn read_array(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, rank: usize) -> Result<Value, Error> {
+    let mark = heap.root_count();
+    let datum = read_datum(cur, heap, ctx)?;
+    heap.push_root(datum);
+    let mut dims: Vec<usize> = Vec::with_capacity(rank);
+    let mut data: Vec<Value> = Vec::new();
+    if let Err(e) = array_level(heap, datum, rank, 0, &mut dims, &mut data) {
+        restore_roots(heap, mark);
+        return Err(e);
+    }
+    // Every element is reachable from `datum`, which stays rooted until the
+    // array exists.
+    let dims: Vec<Value> = dims.iter().map(|&d| Value::Int(d as i64)).collect();
+    let array = alloc_sexpr_array(heap, dims, data);
+    restore_roots(heap, mark);
+    Ok(array)
+}
+
+/// The `Sexpr` `array` variant's box: an `Array<Option<Sexpr>>` with the
+/// prelude's `defstruct Array` fields in its order — `dims` (a `Vector<int>`
+/// of `Value::Int`s), `data` (row-major), `fill-pointer` (`none`). The one
+/// place that layout is written outside the prelude; the reader and compiled
+/// code's quoted arrays both build through here.
+///
+/// The caller keeps every element of `data` rooted across the call.
+pub fn alloc_sexpr_array(heap: &mut Heap, dims: Vec<Value>, data: Vec<Value>) -> Value {
+    let mark = heap.root_count();
+    let data_box = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, data);
+    heap.push_root(data_box);
+    let dims_key = heap.intern_type_key(ARRAY_DIMS_KEY);
+    let dims_box = heap.alloc_struct(dims_key, dims);
+    heap.push_root(dims_box);
+    let array = heap.alloc_struct(TypeKeyId::SEXPR_ARRAY, vec![dims_box, data_box, Value::Empty]);
+    restore_roots(heap, mark);
+    array
+}
+
+/// Walk one level of `#NA`'s nested lists: at `depth == rank` the value is an
+/// element; above it, a proper list whose length is this level's dimension —
+/// set by the first list met at this depth and required of every other.
+fn array_level(
+    heap: &Heap,
+    v: Value,
+    rank: usize,
+    depth: usize,
+    dims: &mut Vec<usize>,
+    data: &mut Vec<Value>,
+) -> Result<(), Error> {
+    if depth == rank {
+        data.push(v);
+        return Ok(());
+    }
+    let mut items = Vec::new();
+    let mut cur = v;
+    loop {
+        match cur {
+            Value::Empty => break,
+            Value::Cons(_) => {
+                items.push(heap.car(cur)?);
+                cur = heap.cdr(cur)?;
+            }
+            _ => {
+                return Err(Error::ReadError(format!(
+                    "#{}A: level {} of the contents must be a proper list",
+                    rank,
+                    depth + 1
+                )))
+            }
+        }
+    }
+    match dims.get(depth) {
+        None => dims.push(items.len()),
+        Some(&d) if d == items.len() => {}
+        Some(&d) => {
+            return Err(Error::ReadError(format!(
+                "#{}A: the contents are not rectangular — dimension {} is {} in one place and {} in another",
+                rank,
+                depth + 1,
+                d,
+                items.len()
+            )))
+        }
+    }
+    if items.is_empty() {
+        // An empty level has no element to take the deeper dimensions from;
+        // they are 0, which is also what makes the array hold nothing.
+        while dims.len() < rank {
+            dims.push(0);
+        }
+        return Ok(());
+    }
+    for item in items {
+        array_level(heap, item, rank, depth + 1, dims, data)?;
+    }
+    Ok(())
 }
 
 /// An integer literal as an `int`: a fixnum when it fits 63 bits, a bignum

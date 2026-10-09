@@ -151,6 +151,14 @@ pub fn heap_type_is_key(heap: &Heap, id: BoxId, key: &str) -> bool {
     }
 }
 
+/// Whether heap value `id` has the pre-interned identity `key` — one of the
+/// `TypeKeyId` constants, for a type the runtime builds without a checker
+/// (`#(..)`'s box, say). The id is already the identity, so there is no name
+/// to look up.
+pub fn heap_type_is_id(heap: &Heap, id: BoxId, key: TypeKeyId) -> bool {
+    stored_key(heap, id) == Some(key)
+}
+
 /// A key split into the type's path and its type arguments, as written:
 /// `gen<i32>` -> `("gen", Some("i32"))`, `point` -> `("point", None)`.
 ///

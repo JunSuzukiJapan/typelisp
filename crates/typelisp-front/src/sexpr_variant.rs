@@ -39,15 +39,27 @@ pub const U16: usize = 15;
 pub const U32: usize = 16;
 /// Boxed like the other widths, since [`INT`] took the bare fixnum word.
 pub const I32: usize = 17;
+/// `#(..)`: a `Vector<Option<Sexpr>>`, the box itself.
+pub const VECTOR: usize = 18;
+/// `#nA(..)`: an `Array<Option<Sexpr>>`, the box itself.
+pub const ARRAY: usize = 19;
 
 /// How many variants `sexpr_def` has.
-pub const COUNT: usize = 18;
+pub const COUNT: usize = 20;
 
 /// Each variant's constructor name, indexed by its number.
 pub const NAMES: [&str; COUNT] = [
     "nil", "int", "f64", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path", "f32", "i8", "i16", "u8",
-    "u16", "u32", "i32",
+    "u16", "u32", "i32", "vector", "array",
 ];
+
+/// Whether `name` is one of `Sexpr`'s constructor names — what a pattern head
+/// against a `Sexpr` (or `Option<Sexpr>`) scrutinee is resolved as before any
+/// downcast is considered. That order matters for `vector` and `array`, which
+/// are also type names.
+pub fn is_ctor_name(name: &str) -> bool {
+    NAMES.contains(&name)
+}
 
 /// Markers `core_bridge` puts in a `construct` node's variant slot for a
 /// quoted datum that is not built from a stored payload but interned at run
@@ -61,6 +73,11 @@ pub mod quoted {
     pub const PATH: usize = 101;
     /// A symbol of the fixed vocabulary, named by its `BUILTIN_SYMBOLS` index.
     pub const WK_SYM: usize = 102;
+    /// `#(..)`, carried as a list of its elements.
+    pub const VECTOR: usize = 103;
+    /// `#nA(..)`, carried as a list of its dimensions and a list of its
+    /// elements in row-major order.
+    pub const ARRAY: usize = 104;
 }
 
 /// How a value is tagged and untagged at a struct/enum field boundary
@@ -113,9 +130,13 @@ const ISLAND_NAMES: &[(&str, usize)] = &[
     ("sexpr-u16", U16),
     ("sexpr-u32", U32),
     ("sexpr-i32", I32),
+    ("sexpr-vector", VECTOR),
+    ("sexpr-array", ARRAY),
     ("quoted-sym", quoted::SYM),
     ("quoted-path", quoted::PATH),
     ("quoted-wk-sym", quoted::WK_SYM),
+    ("quoted-vector", quoted::VECTOR),
+    ("quoted-array", quoted::ARRAY),
     ("kind-not-representable", field_kind::NOT_REPRESENTABLE),
     ("kind-raw-int", field_kind::RAW_INT),
     ("kind-f64", field_kind::F64),
@@ -165,9 +186,9 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "#%sexpr-vector")]
+    #[should_panic(expected = "#%sexpr-hashtable")]
     fn an_unknown_island_name_is_refused() {
-        expand_island_source("(#%sexpr-vector)");
+        expand_island_source("(#%sexpr-hashtable)");
     }
 
     #[test]

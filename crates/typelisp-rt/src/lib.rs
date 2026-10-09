@@ -750,8 +750,8 @@ pub unsafe extern "C-unwind" fn rt_sexpr_u32(args: *const i64, argc: u32) -> i64
 
 /// Discriminates the numeric boxed `Sexpr` kinds that share `TAG_BOXED`'s
 /// one tag: `1` for a boxed `f64`, `4` for a boxed `f32`, `2` for a bignum,
-/// `3` for a ratio, `5`/`6`/`7`/`8`/`9` for a boxed `i8`/`i16`/`u8`/`u16`/
-/// `u32`, `0` for everything else — *including* non-boxed values, so it's total over
+/// `3` for a ratio, `5`/`6`/`7`/`8`/`9`/`10` for a boxed `i8`/`i16`/`u8`/`u16`/
+/// `u32`/`i32`, `11`/`12` for a `Sexpr` vector/array box, `0` for everything else — *including* non-boxed values, so it's total over
 /// every tagged word and `compile-sexpr-tag-test` can call it without a
 /// prior tag check (a `kind == 1` result already implies `TAG_BOXED`).
 /// `args[0]` is a tagged `Sexpr` value, like [`rt_f64_value`]'s.
@@ -789,6 +789,13 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
                     (32, true) => 10,
                     (w, s) => fatal(&format!("rt_box_kind: a narrow box of an unknown width {}{}", if s { "i" } else { "u" }, w)),
                 }
+            } else if heap.is_struct(id) && heap.struct_type_key(id) == TypeKeyId::SEXPR_VECTOR {
+                // `#(..)`'s box and `#nA(..)`'s: the `Sexpr` `vector`/`array`
+                // variants. Told apart by identity, since a struct box of any
+                // other type is not a `Sexpr` variant at all.
+                11
+            } else if heap.is_struct(id) && heap.struct_type_key(id) == TypeKeyId::SEXPR_ARRAY {
+                12
             } else {
                 0
             }
@@ -3965,6 +3972,81 @@ pub unsafe extern "C" fn rt_list_to_path(args: *const i64, argc: u32) -> i64 {
         fatal("rt_list_to_path: path must have at least one segment");
     }
     encode(heap.intern_path(&segs))
+}
+
+/// The elements of a proper `Sexpr` list, in order. `who` names the caller
+/// in the fatal message an improper list gets.
+fn proper_list_elements(heap: &Heap, list: Value, who: &str) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut cur = list;
+    loop {
+        match cur {
+            Value::Empty => return out,
+            Value::Cons(_) => {
+                match heap.car(cur) {
+                    Ok(v) => out.push(v),
+                    Err(_) => fatal(&format!("{}: argument is not a proper list", who)),
+                }
+                cur = match heap.cdr(cur) {
+                    Ok(v) => v,
+                    Err(_) => fatal(&format!("{}: argument is not a proper list", who)),
+                };
+            }
+            _ => fatal(&format!("{}: argument is not a proper list", who)),
+        }
+    }
+}
+
+/// A quoted `#(..)` in compiled code: `args[0]` is a `Sexpr` list of the
+/// elements (`core_bridge::quoted_form` takes the vector apart into one,
+/// since compiled code cannot refer to the compiling heap's box), and the
+/// result is the `Sexpr` `vector` variant's box holding them — what the
+/// reader builds from the same text.
+///
+/// # Safety
+///
+/// `argc` must be `>= 1` and `args` must point to a valid tagged word; a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_list_to_sexpr_vector(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_list_to_sexpr_vector: expected 1 argument");
+    }
+    let heap = active_heap();
+    let list = decode(*args);
+    let elems = proper_list_elements(heap, list, "rt_list_to_sexpr_vector");
+    // The elements are reachable only through `list`, which nothing else
+    // roots while the box is allocated.
+    heap.push_root(list);
+    let v = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, elems);
+    heap.pop_root();
+    encode(v)
+}
+
+/// A quoted `#nA(..)` in compiled code: `args[0]` is a list of the
+/// dimensions as `int`s, `args[1]` a list of the elements in row-major order
+/// (`core_bridge::quoted_form` again). The result is the `Sexpr` `array`
+/// variant's box, built by the reader's own `alloc_sexpr_array`.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to two valid tagged words; a
+/// `Heap` must already be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_lists_to_sexpr_array(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_lists_to_sexpr_array: expected 2 arguments");
+    }
+    let heap = active_heap();
+    let dims_list = decode(*args);
+    let data_list = decode(*args.add(1));
+    let dims = proper_list_elements(heap, dims_list, "rt_lists_to_sexpr_array");
+    let data = proper_list_elements(heap, data_list, "rt_lists_to_sexpr_array");
+    // The elements are reachable only through `data_list`.
+    heap.push_root(data_list);
+    let array = typelisp_read::alloc_sexpr_array(heap, dims, data);
+    heap.pop_root();
+    encode(array)
 }
 
 /// `str::length` for compiled code — the character count (not byte length)

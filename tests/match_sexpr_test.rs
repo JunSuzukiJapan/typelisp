@@ -181,12 +181,13 @@ fn match_dispatches_a_runtime_chosen_variant() {
             ((none) 0) ((int _) 1) ((f64 _) 2) ((char _) 3) ((bool _) 4)
             ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((ratio _) 9)
             ((path _) 10) ((f32 _) 11)
-            ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)))
+            ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)
+            ((vector _) 18) ((array _) 19)))
         (+ (+ (tag (int 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons () ()))))
     "#;
-    // 1 + 60 + 700: int=1, str=6, cons=7 — and the seventeen-armed match
-    // above is exhaustive without a wildcard, exercising full variant
-    // coverage: the sixteen `Sexpr` variants plus `none`, written in one flat
+    // 1 + 60 + 700: int=1, str=6, cons=7 — and the match above is
+    // exhaustive without a wildcard, exercising full variant coverage: every
+    // writable `Sexpr` variant plus `none`, written in one flat
     // arm list (the `Option<Sexpr>` match sugar) rather than nested two deep.
     // Seven of those arms are integers: `int` (the language's, a fixnum or a
     // bignum) and the six fixed widths, which is what a `Sexpr` costs in a

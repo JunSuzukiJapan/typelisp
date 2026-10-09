@@ -3123,7 +3123,7 @@ use crate::sexpr_variant::{
     BOOL as SEXPR_BOOL, CHAR as SEXPR_CHAR, CONS as SEXPR_CONS, F32 as SEXPR_F32, F64 as SEXPR_F64, I16 as SEXPR_I16,
     I32 as SEXPR_I32, I8 as SEXPR_I8, INT as SEXPR_INT, NIL as SEXPR_NIL, PATH as SEXPR_PATH, RATIO as SEXPR_RATIO,
     RETIRED_BIGNUM as SEXPR_RETIRED_BIGNUM, STR as SEXPR_STR, SYM as SEXPR_SYM, U16 as SEXPR_U16, U32 as SEXPR_U32,
-    U8 as SEXPR_U8,
+    U8 as SEXPR_U8, VECTOR as SEXPR_VECTOR, ARRAY as SEXPR_ARRAY,
 };
 
 /// The `(width, signed)` pair each narrow-integer `Sexpr` variant names, or
