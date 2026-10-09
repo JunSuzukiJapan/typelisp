@@ -79,7 +79,7 @@ fn an_arrays_elements_are_in_row_major_order() {
         r##"(match (rd "#2A((1 2) (3 4))")
              ((array a) (format false "~a ~a" (aref a 1 0) (dimensions a)))
              (_ "no"))"##,
-        "3 #<vector<int> 2 2>",
+        "3 #(2 2)",
     );
 }
 

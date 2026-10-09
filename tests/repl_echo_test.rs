@@ -2,7 +2,7 @@
 //!
 //! The echo once had a renderer of its own, which drifted from the one
 //! `format` uses: it dropped a generic type's arguments (`#<vector 1>` where
-//! `println` said `#<vector<int> 1>`) and never consulted a `print-object`
+//! `println` said `#(1)`) and never consulted a `print-object`
 //! method. Each test here pairs a value's echo with `(println "~s" ...)` of
 //! the same expression, so a second renderer cannot come back unnoticed.
 
@@ -43,9 +43,9 @@ fn a_vector_echo_names_its_element_type() {
     assert_echo(
         "",
         "(loop :for i :from 1 :to 3 :collect (* i i))",
-        "#<vector<int> 1 4 9>",
+        "#(1 4 9)",
     );
-    assert_echo("", "(the Vector<string> (Vector::new))", "#<vector<string>>");
+    assert_echo("", "(the Vector<string> (Vector::new))", "#()");
 }
 
 #[test]

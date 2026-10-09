@@ -127,6 +127,10 @@ pub struct PrintVars {
     /// for a user type whose `print-object` may print anything, so that half
     /// is deliberately absent — see `docs/ja/reference/functions/printing.md` §6.2.
     pub readably: bool,
+    /// `*print-array*`: show a vector's elements, as `#(1 2 3)`. When false
+    /// a vector prints as `#<vector<int> 3>` — its type and length, not its
+    /// contents. (`Array<T>`'s own `print-object` reads the same variable.)
+    pub array: bool,
 }
 
 impl Default for PrintVars {
@@ -139,6 +143,7 @@ impl Default for PrintVars {
             radix: false,
             case: PrintCase::Downcase,
             readably: false,
+            array: true,
         }
     }
 }
@@ -2612,6 +2617,82 @@ impl Renderer {
     /// niched `Option` can sit with nothing static to say what it is, so
     /// this is the only place the question is asked.
     #[allow(clippy::too_many_arguments)]
+    /// A `Sexpr` `array` datum (`#nA(..)`): `#(..)` at rank 1, `#nA(..)` at
+    /// any other rank — what `Array<T>`'s prelude `print-object` writes — or
+    /// just the shape, `#<array 2x3>`, with `*print-array*` off.
+    fn render_data_array(
+        &mut self,
+        heap: &mut Heap,
+        ctx: RenderCtx<'_>,
+        id: typelisp_mem::BoxId,
+        standard: bool,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), String> {
+        let (Value::Boxed(dims_id), Value::Boxed(data_id)) = (heap.struct_field(id, 0), heap.struct_field(id, 1)) else {
+            return Err("internal error: an array datum's dims/data are not boxes".to_string());
+        };
+        let dims: Vec<usize> = (0..heap.struct_field_count(dims_id))
+            .map(|i| match heap.struct_field(dims_id, i) {
+                Value::Int(n) => Ok(n as usize),
+                other => Err(format!("internal error: an array dimension is {:?}", other)),
+            })
+            .collect::<Result<_, _>>()?;
+        if !ctx.print_vars.array {
+            let shape: Vec<String> = dims.iter().map(|d| d.to_string()).collect();
+            out.push_str(&if shape.is_empty() { "#<array>".to_string() } else { format!("#<array {}>", shape.join("x")) });
+            return Ok(());
+        }
+        if dims.len() == 1 {
+            out.push('#');
+        } else {
+            out.push_str(&format!("#{}A", dims.len()));
+        }
+        let data_key = crate::stored_type_key(heap, data_id).expect("a struct box has a type name").to_string();
+        let mut next = 0usize;
+        self.render_array_level(heap, ctx, data_id, &data_key, &dims, 0, &mut next, standard, depth, out)
+    }
+
+    /// One level of [`Self::render_data_array`]'s nesting: the element at
+    /// `*next` (row-major) at the last level, a parenthesized row above it.
+    #[allow(clippy::too_many_arguments)]
+    fn render_array_level(
+        &mut self,
+        heap: &mut Heap,
+        ctx: RenderCtx<'_>,
+        data_id: typelisp_mem::BoxId,
+        data_key: &str,
+        dims: &[usize],
+        level: usize,
+        next: &mut usize,
+        standard: bool,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), String> {
+        if level == dims.len() {
+            let i = *next;
+            *next += 1;
+            let f = heap.struct_field(data_id, i);
+            return self.render_field(heap, ctx, data_key, None, i, f, standard, depth + 1, out);
+        }
+        out.push('(');
+        let stride: usize = dims[level + 1..].iter().product();
+        for i in 0..dims[level] {
+            if Self::length_reached(ctx, i) {
+                out.push_str(if i == 0 { "..." } else { " ..." });
+                // The cells this row did not print are still behind `next`.
+                *next += (dims[level] - i) * stride;
+                break;
+            }
+            if i > 0 {
+                out.push(' ');
+            }
+            self.render_array_level(heap, ctx, data_id, data_key, dims, level + 1, next, standard, depth, out)?;
+        }
+        out.push(')');
+        Ok(())
+    }
+
     fn render_field(
         &mut self,
         heap: &mut Heap,
@@ -2746,6 +2827,38 @@ impl Renderer {
                 let key = crate::stored_type_key(heap, id)
                     .expect("a struct box has a type name")
                     .to_string();
+                // A `Vector<T>` prints in CL's vector syntax, which reads
+                // back as `#(..)` — or, with `*print-array*` off, as its type
+                // and length alone.
+                if typelisp_mem::base_type_key(&key) == "vector" {
+                    let n = heap.struct_field_count(id);
+                    if !ctx.print_vars.array {
+                        out.push_str(&format!("#<{} {}>", key, n));
+                        return Ok(());
+                    }
+                    out.push_str("#(");
+                    for i in 0..n {
+                        if Self::length_reached(ctx, i) {
+                            out.push_str(if i == 0 { "..." } else { " ..." });
+                            break;
+                        }
+                        if i > 0 {
+                            out.push(' ');
+                        }
+                        let f = heap.struct_field(id, i);
+                        self.render_field(heap, ctx, &key, None, i, f, standard, depth + 1, out)?;
+                    }
+                    out.push(')');
+                    return Ok(());
+                }
+                // The `Sexpr` `array` variant — `#nA(..)` read as data. A typed
+                // `Array<T>` prints through its prelude `print-object`, but this
+                // instantiation appears in no program's types, so no method was
+                // made for it; it is S-expression data, and data prints here,
+                // in the same syntax that method writes.
+                if key == typelisp_mem::BUILTIN_TYPE_KEYS[typelisp_mem::TypeKeyId::SEXPR_ARRAY.as_u32() as usize] {
+                    return self.render_data_array(heap, ctx, id, standard, depth, out);
+                }
                 out.push_str(&format!("#<{}", key));
                 for i in 0..heap.struct_field_count(id) {
                     if Self::length_reached(ctx, i) {

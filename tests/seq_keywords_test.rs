@@ -30,8 +30,8 @@ fn show(expr: &str) -> String {
     }
 }
 
-/// `expr` with `a` = `#<vector<int> 1 2 2 3>`, `b` = `#<vector<int> 2 3 4>`,
-/// `neg` = `#<vector<int> -1 -2 -3>` and `al` = an alist of `1->"one"`, `2->"two"`.
+/// `expr` with `a` = `#(1 2 2 3)`, `b` = `#(2 3 4)`,
+/// `neg` = `#(-1 -2 -3)` and `al` = an alist of `1->"one"`, `2->"two"`.
 fn with_fixtures(expr: &str) -> String {
     show(&format!(
         "(let ((a (the Vector<int> (Vector::new)))
@@ -93,14 +93,14 @@ fn sort_and_merge_compare_the_projections() {
             "(sort (iter neg) (lambda ((p int) (q int)) bool (< p q)) :key {})",
             ABS
         )),
-        "#<vector<int> -1 -2 -3>"
+        "#(-1 -2 -3)"
     );
     assert_eq!(
         with_fixtures(&format!(
             "(merge (iter neg) (iter a) (lambda ((p int) (q int)) bool (< p q)) :key {})",
             ABS
         )),
-        "#<vector<int> -1 1 -2 2 2 -3 3>"
+        "#(-1 1 -2 2 2 -3 3)"
     );
 }
 
@@ -127,7 +127,7 @@ fn test_not_is_the_negation_of_test() {
     );
     assert_eq!(
         with_fixtures("(remove 2 (iter a) :test-not (lambda ((p int) (q int)) bool (= p q)))"),
-        "#<vector<int> 2 2>"
+        "#(2 2)"
     );
 }
 
@@ -137,16 +137,16 @@ fn the_set_operations_project_both_sides() {
     // both are sequence elements, unlike the item searches.
     assert_eq!(
         with_fixtures(&format!("(intersection (iter neg) (iter a) :key {})", ABS)),
-        "#<vector<int> -1 -2 -3>"
+        "#(-1 -2 -3)"
     );
     assert_eq!(
         with_fixtures(&format!("(set-difference (iter neg) (iter b) :key {})", ABS)),
-        "#<vector<int> -1>"
+        "#(-1)"
     );
     assert_eq!(with_fixtures(&format!("(subsetp (iter neg) (iter a) :key {})", ABS)), "true");
     assert_eq!(
         with_fixtures(&format!("(adjoin -2 (iter a) :key {})", ABS)),
-        "#<vector<int> 1 2 2 3>"
+        "#(1 2 2 3)"
     );
 }
 
@@ -170,8 +170,8 @@ fn a_position_is_an_index_into_the_whole_sequence_not_the_window() {
 fn an_element_outside_the_window_is_kept_rather_than_examined() {
     // The modify family's rule, and the reason this is not a filter over the
     // window: `remove` still returns everything the window did not reach.
-    assert_eq!(with_fixtures("(remove 2 (iter a) :start 2)"), "#<vector<int> 1 2 3>");
-    assert_eq!(with_fixtures("(substitute 9 2 (iter a) :end 2)"), "#<vector<int> 1 9 2 3>");
+    assert_eq!(with_fixtures("(remove 2 (iter a) :start 2)"), "#(1 2 3)");
+    assert_eq!(with_fixtures("(substitute 9 2 (iter a) :end 2)"), "#(1 9 2 3)");
 }
 
 // --------------------------------------------------------------- `:from-end`
@@ -186,12 +186,12 @@ fn from_end_makes_a_search_answer_with_the_last_match() {
 
 #[test]
 fn count_limits_how_many_matches_are_affected_and_from_end_picks_which() {
-    assert_eq!(with_fixtures("(remove 2 (iter a) :count 1)"), "#<vector<int> 1 2 3>");
-    assert_eq!(with_fixtures("(substitute 9 2 (iter a) :count 1)"), "#<vector<int> 1 9 2 3>");
+    assert_eq!(with_fixtures("(remove 2 (iter a) :count 1)"), "#(1 2 3)");
+    assert_eq!(with_fixtures("(substitute 9 2 (iter a) :count 1)"), "#(1 9 2 3)");
     // The same limit, taken from the other end.
     assert_eq!(
         with_fixtures("(substitute 9 2 (iter a) :count 1 :from-end true)"),
-        "#<vector<int> 1 2 9 3>"
+        "#(1 2 9 3)"
     );
 }
 
@@ -202,14 +202,14 @@ fn remove_duplicates_keeps_the_last_of_each_group_as_cl_does() {
     // This is a *behaviour change*: before Phase 3e this function
     // unconditionally kept the first occurrence. CL keeps the last unless
     // `:from-end` says otherwise.
-    assert_eq!(with_fixtures("(remove-duplicates (iter a))"), "#<vector<int> 1 2 3>");
-    assert_eq!(with_fixtures("(remove-duplicates (iter b))"), "#<vector<int> 2 3 4>");
+    assert_eq!(with_fixtures("(remove-duplicates (iter a))"), "#(1 2 3)");
+    assert_eq!(with_fixtures("(remove-duplicates (iter b))"), "#(2 3 4)");
     let mixed = "(let ((v (the Vector<int> (Vector::new))))
                    (progn (push v 1) (push v 2) (push v 1) (push v 3) {}))";
-    assert_eq!(show(&mixed.replace("{}", "(remove-duplicates (iter v))")), "#<vector<int> 2 1 3>");
+    assert_eq!(show(&mixed.replace("{}", "(remove-duplicates (iter v))")), "#(2 1 3)");
     assert_eq!(
         show(&mixed.replace("{}", "(remove-duplicates (iter v) :from-end true)")),
-        "#<vector<int> 1 2 3>"
+        "#(1 2 3)"
     );
 }
 
@@ -224,13 +224,13 @@ fn every_function_still_answers_with_no_keywords_at_all() {
     assert_eq!(with_fixtures("(position 2 (iter a))"), "(some 1)");
     assert_eq!(with_fixtures("(count 2 (iter a))"), "2");
     assert_eq!(with_fixtures("(member 4 (iter a))"), "false");
-    assert_eq!(with_fixtures("(remove 2 (iter a))"), "#<vector<int> 1 3>");
-    assert_eq!(with_fixtures("(substitute 9 2 (iter a))"), "#<vector<int> 1 9 9 3>");
-    assert_eq!(with_fixtures("(union (iter a) (iter b))"), "#<vector<int> 1 2 3 4>");
+    assert_eq!(with_fixtures("(remove 2 (iter a))"), "#(1 3)");
+    assert_eq!(with_fixtures("(substitute 9 2 (iter a))"), "#(1 9 9 3)");
+    assert_eq!(with_fixtures("(union (iter a) (iter b))"), "#(1 2 3 4)");
     assert_eq!(with_fixtures("(assoc 2 (iter al))"), "(some #<cons-cell<int,string> car: 2 cdr: two>)");
     assert_eq!(
         with_fixtures("(sort (iter b) (lambda ((p int) (q int)) bool (> p q)))"),
-        "#<vector<int> 4 3 2>"
+        "#(4 3 2)"
     );
 }
 
@@ -258,7 +258,7 @@ fn position_if_not_exists_now_completing_the_if_pairs() {
 // tests are therefore against the *pairs* — a destructive call must answer
 // what its non-destructive twin answers, and mutate the receiver to match.
 
-/// A fresh `#<vector<int> 1 2 2 3>` per expression, since these mutate it.
+/// A fresh `#(1 2 2 3)` per expression, since these mutate it.
 fn with_vec(expr: &str) -> String {
     show(&format!(
         "(let ((v (the Vector<int> (Vector::new))))
@@ -269,18 +269,18 @@ fn with_vec(expr: &str) -> String {
 
 #[test]
 fn delete_takes_removes_whole_keyword_set() {
-    assert_eq!(with_vec("(delete v 2)"), "#<vector<int> 1 3>");
-    assert_eq!(with_vec("(delete v 2 :count 1)"), "#<vector<int> 1 2 3>");
-    assert_eq!(with_vec("(delete v 2 :count 1 :from-end true)"), "#<vector<int> 1 2 3>");
-    assert_eq!(with_vec("(delete v 2 :start 2)"), "#<vector<int> 1 2 3>");
-    assert_eq!(with_vec("(delete v 2 :end 2)"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_vec("(delete v 2)"), "#(1 3)");
+    assert_eq!(with_vec("(delete v 2 :count 1)"), "#(1 2 3)");
+    assert_eq!(with_vec("(delete v 2 :count 1 :from-end true)"), "#(1 2 3)");
+    assert_eq!(with_vec("(delete v 2 :start 2)"), "#(1 2 3)");
+    assert_eq!(with_vec("(delete v 2 :end 2)"), "#(1 2 3)");
     assert_eq!(
         with_vec("(delete v 2 :test (lambda ((p int) (q int)) bool (/= p q)))"),
-        "#<vector<int> 2 2>"
+        "#(2 2)"
     );
     assert_eq!(
         with_vec("(delete v 4 :key (lambda ((x int)) int (* x 2)))"),
-        "#<vector<int> 1 3>"
+        "#(1 3)"
     );
 }
 
@@ -290,31 +290,31 @@ fn delete_takes_removes_whole_keyword_set() {
 fn a_destructive_call_leaves_the_answer_in_the_receiver() {
     assert_eq!(
         with_vec("(progn (delete v 2 :count 1) (format false \"~a\" v))"),
-        "#<vector<int> 1 2 3>"
+        "#(1 2 3)"
     );
     assert_eq!(
         with_vec("(progn (fill v 7 :start 1 :end 3) (format false \"~a\" v))"),
-        "#<vector<int> 1 7 7 3>"
+        "#(1 7 7 3)"
     );
 }
 
 #[test]
 fn the_predicate_and_substitute_forms_take_theirs() {
     let gt1 = "(lambda ((x int)) bool (> x 1))";
-    assert_eq!(with_vec(&format!("(delete-if v {})", gt1)), "#<vector<int> 1>");
-    assert_eq!(with_vec(&format!("(delete-if v {} :count 1)", gt1)), "#<vector<int> 1 2 3>");
-    assert_eq!(with_vec(&format!("(delete-if-not v {})", gt1)), "#<vector<int> 2 2 3>");
-    assert_eq!(with_vec(&format!("(delete-if-not v {} :count 1)", gt1)), "#<vector<int> 2 2 3>");
-    assert_eq!(with_vec("(nsubstitute v 9 2)"), "#<vector<int> 1 9 9 3>");
-    assert_eq!(with_vec("(nsubstitute v 9 2 :count 1)"), "#<vector<int> 1 9 2 3>");
+    assert_eq!(with_vec(&format!("(delete-if v {})", gt1)), "#(1)");
+    assert_eq!(with_vec(&format!("(delete-if v {} :count 1)", gt1)), "#(1 2 3)");
+    assert_eq!(with_vec(&format!("(delete-if-not v {})", gt1)), "#(2 2 3)");
+    assert_eq!(with_vec(&format!("(delete-if-not v {} :count 1)", gt1)), "#(2 2 3)");
+    assert_eq!(with_vec("(nsubstitute v 9 2)"), "#(1 9 9 3)");
+    assert_eq!(with_vec("(nsubstitute v 9 2 :count 1)"), "#(1 9 2 3)");
     assert_eq!(
         with_vec("(nsubstitute v 9 2 :count 1 :from-end true)"),
-        "#<vector<int> 1 2 9 3>"
+        "#(1 2 9 3)"
     );
-    assert_eq!(with_vec(&format!("(nsubstitute-if v 0 {})", gt1)), "#<vector<int> 1 0 0 0>");
+    assert_eq!(with_vec(&format!("(nsubstitute-if v 0 {})", gt1)), "#(1 0 0 0)");
     assert_eq!(
         with_vec(&format!("(nsubstitute-if v 0 {} :start 2)", gt1)),
-        "#<vector<int> 1 2 0 0>"
+        "#(1 2 0 0)"
     );
 }
 
@@ -322,15 +322,15 @@ fn the_predicate_and_substitute_forms_take_theirs() {
 /// `:from-end` keeps the first, exactly as `remove-duplicates` does.
 #[test]
 fn delete_duplicates_follows_remove_duplicates() {
-    assert_eq!(with_vec("(delete-duplicates v)"), "#<vector<int> 1 2 3>");
-    assert_eq!(with_vec("(delete-duplicates v :from-end true)"), "#<vector<int> 1 2 3>");
+    assert_eq!(with_vec("(delete-duplicates v)"), "#(1 2 3)");
+    assert_eq!(with_vec("(delete-duplicates v :from-end true)"), "#(1 2 3)");
     assert_eq!(
         with_vec("(delete-duplicates v :key (lambda ((x int)) int (mod x 2)))"),
-        "#<vector<int> 2 3>"
+        "#(2 3)"
     );
     assert_eq!(
         with_vec("(delete-duplicates v :key (lambda ((x int)) int (mod x 2)) :from-end true)"),
-        "#<vector<int> 1 2>"
+        "#(1 2)"
     );
 }
 
@@ -341,19 +341,19 @@ fn replace_takes_cls_four_windows() {
     let src = "(let ((s (the Vector<int> (Vector::new)))) (progn (push s 8) (push s 9) (push s 10) s))";
     assert_eq!(
         with_vec(&format!("(replace v {})", src)),
-        "#<vector<int> 8 9 10 3>"
+        "#(8 9 10 3)"
     );
     assert_eq!(
         with_vec(&format!("(replace v {} :start1 2 :start2 1)", src)),
-        "#<vector<int> 1 2 9 10>"
+        "#(1 2 9 10)"
     );
     assert_eq!(
         with_vec(&format!("(replace v {} :end1 1)", src)),
-        "#<vector<int> 8 2 2 3>"
+        "#(8 2 2 3)"
     );
     assert_eq!(
         with_vec(&format!("(replace v {} :start2 2 :end2 3)", src)),
-        "#<vector<int> 10 2 2 3>"
+        "#(10 2 2 3)"
     );
 }
 

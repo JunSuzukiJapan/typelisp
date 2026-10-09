@@ -45,5 +45,5 @@ fn after_the_script_name_they_belong_to_the_script() {
 
     let out = typl(&[src.to_str().unwrap(), "--help", "--version"]);
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-    assert!(String::from_utf8_lossy(&out.stdout).trim_end().ends_with("--help --version>"));
+    assert!(String::from_utf8_lossy(&out.stdout).trim_end().ends_with("--help --version)"));
 }

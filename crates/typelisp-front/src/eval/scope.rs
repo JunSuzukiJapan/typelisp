@@ -58,7 +58,7 @@ pub(crate) enum TypeEntry {
     ///
     /// `names` are the fields' names, which the printer writes before each
     /// value (`#<point x: 1 y: 2>`). Empty for a type whose fields are its
-    /// elements, which print positionally (`#<vector<int> 1 2 3>`).
+    /// elements, which print positionally (`#(1 2 3)`).
     Struct { reprs: Vec<crate::check::repr::Repr>, templates: FieldTemplates, names: Vec<String> },
     /// A `defenum` — carries the same per-variant field-type data
     /// `enum_defs` used to.

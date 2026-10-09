@@ -277,7 +277,7 @@ fn a_niched_option_still_prints_as_some_and_none() {
     assert_eq!(both(DEFS, NAMES, "(mk-gen)"), "#<gen<option<int>> v: (some 3)>");
     assert_eq!(both(DEFS, NAMES, "(mk-gen-none)"), "#<gen<option<int>> v: none>");
     assert_eq!(both(DEFS, NAMES, "(mk-shape)"), "(circle (some 1.5))");
-    assert_eq!(both(DEFS, NAMES, "(mk-vec)"), "#<vector<option<int>> (some 1) none>");
+    assert_eq!(both(DEFS, NAMES, "(mk-vec)"), "#((some 1) none)");
     assert_eq!(both(DEFS, NAMES, "(mk-nested)"), "(some none)");
     assert_eq!(both(DEFS, NAMES, "(mk-ok)"), "(ok (some 4))");
     // In a list, the element's own expectation is `Option<Sexpr>`, so a bare

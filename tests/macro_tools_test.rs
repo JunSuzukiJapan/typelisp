@@ -137,7 +137,7 @@ fn complement_answers_the_opposite_of_its_predicate() {
         show("(let ((v (the Vector<int> (Vector::new))))
                 (progn (push v 1) (push v 2) (push v 3)
                   (filter (iter v) (complement (lambda ((n int)) bool (> n 1))))))"),
-        "#<vector<int> 1>"
+        "#(1)"
     );
 }
 

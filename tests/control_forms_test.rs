@@ -148,7 +148,7 @@ fn pushnew_adds_only_what_is_not_already_there() {
             "(let ((v (the Vector<int> (Vector::new))))
                (push v 1) (push v 2) (pushnew v 2) (pushnew v 3) v)"
         ),
-        "#<vector<int> 1 2 3>"
+        "#(1 2 3)"
     );
 }
 

@@ -80,7 +80,7 @@ const NO_PROGRAM_FOR_METHODS: &str = "printing needs a program to look up `print
 /// Every printer control variable the renderer reads, as the prelude names
 /// them: what [`read_print_vars`] and [`read_opts`] ask for between them, and
 /// what an AOT executable's startup registers (`typelisp_print::aot`).
-pub const PRINTER_GLOBALS: [&str; 11] = [
+pub const PRINTER_GLOBALS: [&str; 12] = [
     "*print-circle*",
     "*print-level*",
     "*print-length*",
@@ -88,6 +88,7 @@ pub const PRINTER_GLOBALS: [&str; 11] = [
     "*print-radix*",
     "*print-case*",
     "*print-readably*",
+    "*print-array*",
     "*print-pretty*",
     "*print-right-margin*",
     "*print-miser-width*",
@@ -150,6 +151,7 @@ pub fn read_print_vars(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, Strin
         radix: read_bool(global, "*print-radix*")?,
         case,
         readably: read_bool(global, "*print-readably*")?,
+        array: read_bool(global, "*print-array*")?,
     })
 }
 

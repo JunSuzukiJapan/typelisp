@@ -335,7 +335,7 @@ fn directory_lists_truenames() {
     let canon = |p: std::path::PathBuf| std::fs::canonicalize(p).expect("canonicalize").to_string_lossy().into_owned();
     let mut want = [canon(listed.join("plain.txt")), canon(elsewhere.join("target.txt"))];
     want.sort();
-    assert_eq!(got, format!("#<vector<string> {}>", want.join(" ")));
+    assert_eq!(got, format!("#({})", want.join(" ")));
     let _ = std::fs::remove_dir_all(&base);
 }
 

@@ -328,7 +328,7 @@ fn a_struct_prints_its_field_names() {
         "#<tag name: \"a\"> #<tag name: b>"
     );
     // A `Vector<T>`'s fields are its elements, which have no names.
-    assert_eq!(fmt(r#"(format false "~s" (loop :for i :from 1 :to 2 :collect i))"#), "#<vector<int> 1 2>");
+    assert_eq!(fmt(r#"(format false "~s" (loop :for i :from 1 :to 2 :collect i))"#), "#(1 2)");
 }
 
 #[test]

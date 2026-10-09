@@ -142,6 +142,7 @@ pub const SOURCE: &str = r##"
 (pub defvar (*print-case* symbol) :downcase)
 (pub defvar (*print-readably* bool) false)
 (pub defvar (*print-lines* int) 0)
+(pub defvar (*print-array* bool) true)
 
 ;; Loop/branch primitive reduction (LLVMコンパイラ作業に先立つ整理): `loop`/
 ;; `break`/`return` (looping) and `if`/`match` (branching) are the only forms
@@ -3565,20 +3566,20 @@ user-visible capacity."
 ;; `*print-right-margin*`, so it only bites while `*print-pretty*` is on; 0 is
 ;; CL's `nil` (no limit), and a negative value is a printing error.
 
-;; `*print-array*` chooses whether an `Array<T>` shows its contents. True
-;; (CL's default) prints CL's own array syntax -- `#(1 2 3)` for a rank-1
-;; array, `#2A((1 2) (3 4))` for any other rank; false prints just the shape,
-;; `#<array 2x3>`, which is what CL's "in a way that does not reveal the
-;; contents" comes to here. Read by `Array<T>`'s own `print-object` method
-;; rather than by the built-in printer, because the array is a prelude type
-;; and its rendering is written in typelisp like any other.
+;; `*print-array*` (defined with the other printer variables at the top)
+;; chooses whether a `Vector<T>` or an `Array<T>` shows its contents. True
+;; (CL's default) prints CL's own array syntax -- `#(1 2 3)` for a vector or a
+;; rank-1 array, `#2A((1 2) (3 4))` for any other rank; false prints just the
+;; type and shape, `#<vector<int> 3>` and `#<array 2x3>`, which is what CL's
+;; "in a way that does not reveal the contents" comes to here. A vector is
+;; printed by the built-in printer, an array by `Array<T>`'s own
+;; `print-object` method below, because the array is a prelude type and its
+;; rendering is written in typelisp like any other.
 ;;
-;; It governs `Array<T>` and nothing else. CL counts a bit vector as an array
-;; and lets this variable suppress that too, but `BitVector` here has no
-;; `print-object` of its own to suppress -- it prints the built-in
-;; `#<bitvector ...>` way, and giving it CL's `#*1011` syntax is a separate
-;; piece of work this one does not need.
-(pub defvar (*print-array* bool) true)
+;; CL counts a bit vector as an array and lets this variable suppress that
+;; too, but `BitVector` here has no `print-object` of its own to suppress --
+;; it prints the built-in `#<bitvector ...>` way, and giving it CL's `#*1011`
+;; syntax is a separate piece of work this one does not need.
 
 ;; `*print-escape*` is the default `prin1`-vs-`princ` choice, and the one
 ;; thing `write`/`write-to-string` consult that the other printers do not.
