@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 入门
 
 本章从在 REPL 中求值表达式开始，依次介绍函数、变量、条件分支、循环，以及列表和 `Vector`。
@@ -215,7 +215,7 @@ typl> (sum-to 100)
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. 列表与 Vector
@@ -230,7 +230,7 @@ typl> (loop :for i :from 1 :to 5 :collect (* i i))
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; 显示 #<vector<int> 3 1 2>
+;; 显示 #(3 1 2)
 ```
 
 - 只写 `(Vector::new)` 无法确定元素类型，所以用 `(the Vector<int> ...)` 指定类型。
@@ -255,9 +255,9 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

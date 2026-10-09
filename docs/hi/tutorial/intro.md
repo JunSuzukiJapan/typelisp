@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # शुरुआत करना
 
 REPL में एक्सप्रेशन का मूल्यांकन करने से शुरू करके, यह अध्याय क्रम से फ़ंक्शन, वेरिएबल, कंडीशनल, लूप, और सूचियों तथा `Vector`
@@ -219,7 +219,7 @@ typl> (sum-to 100)
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. सूचियाँ और Vector
@@ -234,7 +234,7 @@ typl> (loop :for i :from 1 :to 5 :collect (* i i))
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; यह #<vector<int> 3 1 2> प्रिंट करता है
+;; यह #(3 1 2) प्रिंट करता है
 ```
 
 - अकेला `(Vector::new)` तत्वों का टाइप तय नहीं करता, इसलिए `(the Vector<int> ...)` से टाइप दें।
@@ -260,9 +260,9 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

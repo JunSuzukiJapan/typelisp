@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # स्ट्रीम और फ़ाइलें
 
 स्ट्रीम trait और मेथड, ठोस स्ट्रीम टाइप, फ़ाइल ऑपरेशन और पाथनेम। नेटवर्क सॉकेट भी स्ट्रीम हैं, और [नेटवर्किंग](network.md) में कवर हैं।
@@ -176,7 +176,7 @@ CL तत्व टाइप **कॉल में** तय करता है,
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")   अंतिम बिंदु पर बाँटा गया
   (pathname-type p)        ; => (some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"

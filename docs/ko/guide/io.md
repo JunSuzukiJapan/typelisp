@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 파일 입출력, 스트림, 네트워크
 
 이 가이드에서는 파일 읽기와 쓰기, 경로명, 소켓 통신의 기본을 보인다. 함수 목록은
@@ -27,7 +27,7 @@ panic한다.
 ```lisp
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #<vector<string> "abc">)
+(read-file-lines "copy.txt")       ; => (ok #("abc"))
 ```
 
 ## 3. 스트림으로 읽고 쓰기
@@ -100,7 +100,7 @@ panic한다.
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")
   (pathname-type p))       ; => (some "gz")
 

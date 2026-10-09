@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -43,6 +43,9 @@ and for reading error messages, [errors.md](errors.md).
   case-insensitive.
 - **Strings**: `"..."`. The escapes are `\n` `\t` `\r` `\0` `\\` `\"` (any other `\x` is just `x`).
 - **Symbols**: any token containing letters, digits and symbols (`+` `<=` `my-func` and so on).
+  `]` and `}` end a token, so they cannot appear inside a symbol, and one at the start of a datum is
+  a read error. `[` and `{` can appear inside a symbol: as in CL, they are left free for programmers
+  to use in [reader macros](#11-reader-macros-readtable).
 - **Keywords**: symbols starting with a colon, such as `:name` (as in CL). They are self-evaluating:
   they look up no binding and their value is themselves, with static type `symbol`. Keywords with the
   same name are always the same object (`(eq :foo :FOO)` is true; like other symbols they are
@@ -53,6 +56,19 @@ and for reading error messages, [errors.md](errors.md).
   Note that `:dyn` is a reserved keyword for type positions only; writing it anywhere else is an error
   (see [chapter 2](#2-writing-types)).
 - **Lists**: `(a b c)`. Dotted pairs `(a . b)` can be read too.
+- **Vectors**: `#(1 2 3)` (as in CL). The contents are all literals and are not evaluated: the `a`
+  in `#(a b)` is a symbol, not a variable. The element type comes from the context
+  (`(the Vector<i32> #(1 2))`), or from the first element when there is no context (`#(1 2 3)` is a
+  `Vector<int>`). The elements must all have the same type: `#(1 "a")` is a type error, and so is
+  `#()` with neither elements nor context. Each evaluation makes a new vector. Where S-expression
+  data is expected (`(the Option<Sexpr> #(1 x))`, `'#(..)`, what `read` returns), it is a
+  `Vector<Option<Sexpr>>` whose elements are all data: the `vector` variant of `Sexpr`.
+- **Arrays**: `#2A((1 2) (3 4))` (as in CL). The number between `#` and `A` is the rank, and the
+  first that many levels of list nesting in the contents are the dimensions. `#0A x` is a
+  zero-dimensional array holding one element. Lists at the same level that differ in length are a
+  read error. The type is decided as for vectors and is an `Array<T>` (with no elements, the context
+  has to give it, as in `(the Array<f64> #2A(()))`). As S-expression data it is an
+  `Array<Option<Sexpr>>`: the `array` variant of `Sexpr`.
 - **The empty list `()`**: depending on context, the value of the `Unit` type or the `none` of
   `Option<Sexpr>`. **`Sexpr` has no empty-list variant**: `Sexpr` means "a non-empty S-expression",
   and the type of S-expression data is `Option<Sexpr>` (see "Patterns for `Option<Sexpr>`" in
@@ -1115,7 +1131,7 @@ by enumeration, so `_` (or a binding pattern acting as a wildcard) is required:
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Against an `Sexpr` scrutinee, besides the 16 built-in variant patterns above, **downcast patterns**
+Against an `Sexpr` scrutinee, besides the 18 built-in variant patterns above, **downcast patterns**
 (taking out instances of user-defined ADTs) can be written: syntax for getting back, with `match`, an
 instance of a `defstruct`/`defenum` (chapter 3) that was implicitly converted to `Sexpr`, as in
 `(list p 42)`:
@@ -1136,7 +1152,7 @@ instance of a `defstruct`/`defenum` (chapter 3) that was implicitly converted to
 
 **Patterns for `Option<Sexpr>`**: the type of S-expression data is not `Sexpr` but `Option<Sexpr>`, and the
 empty list is not a variant of `Sexpr` but the `none` of `Option`. So when matching an `Option<Sexpr>`,
-the 16 variants of `Sexpr` and `none` can be written **flat in the same list of arms** (no outer `match`
+the 18 variants of `Sexpr` and `none` can be written **flat in the same list of arms** (no outer `match`
 to peel off the `Option` is needed):
 
 ```lisp
@@ -1149,7 +1165,7 @@ to peel off the `Option` is needed):
     (_          9)))
 ```
 
-Exhaustiveness is checked in the same flat universe: the 16 variants of `Sexpr` plus `none`, 17 in all.
+Exhaustiveness is checked in the same flat universe: the 18 variants of `Sexpr` plus `none`, 19 in all.
 Forgetting `(none)` is an error unless there is a `_`. `(some x)` can also be written and binds "something
 non-empty".
 
@@ -1264,9 +1280,9 @@ apart from a simple loop. The exception is `=`, which separates a variable from 
 unambiguous, so it is read either bare or as a keyword (`:=`).
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

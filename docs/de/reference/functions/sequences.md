@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Paare, S-Ausdrücke und Sequenzen
 
 Das generische Paar `cons-cell`, S-Ausdrucksdaten `Sexpr`, Symbole, die auf `Iter` aufgebauten
@@ -25,8 +25,12 @@ zurück.
 
 ## 2. S-Ausdrucksdaten `Sexpr`
 
-Der von `read` zurückgegebene Datentyp `Sexpr` hat 16 Varianten:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path`.
+Der von `read` zurückgegebene Datentyp `Sexpr` hat 18 Varianten:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+`vector` und `array` sind mit `#(..)` und `#nA(..)` geschriebene Daten
+([Syntaxreferenz](../syntax.md#1-lexikalische-elemente)) und enthalten einen `Vector<Option<Sexpr>>`
+bzw. ein `Array<Option<Sexpr>>`: `len`, `get` usw. funktionieren direkt auf dem `v`, das
+`(vector v)` bindet.
 S-Ausdruckszellen werden nicht mit dem allgemeinen `cons`/`car`/`cdr` aus Kapitel 1 behandelt, sondern mit den
 Funktionen `sexpr-*`. Sie werden hauptsächlich in `defmacro`-Rümpfen verwendet, um Formen aufzubauen und zu
 zerlegen.
@@ -39,7 +43,7 @@ die Funktionen `sexpr-*` `Option<Sexpr>`.
 - `Sexpr` wird implizit erweitert, wo ein `Option<Sexpr>` erwartet wird (ohne Umwandlung zur Laufzeit). Die
   umgekehrte Richtung, ein `Option<Sexpr>` als `Sexpr` zu verwenden, behauptet „das ist nicht die leere
   Liste“ und muss daher ausdrücklich mit `match` oder `unwrap` angegeben werden
-- In `match` lassen sich die 16 Varianten von `Sexpr` und `none` **flach in derselben Liste von Zweigen**
+- In `match` lassen sich die 18 Varianten von `Sexpr` und `none` **flach in derselben Liste von Zweigen**
   schreiben ([Syntaxreferenz](../syntax.md#43-match--mustervergleich))
 
 | Name | Form | Typ | Beschreibung |

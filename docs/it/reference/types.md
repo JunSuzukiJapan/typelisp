@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Tipi
 
 I tipi che typelisp possiede e i trait standard che ciascun tipo implementa. Come si scrivono i tipi è
@@ -44,7 +44,7 @@ I tipi funzione si scrivono `(fn (tipi-degli-argomenti...) tipo-di-ritorno)`, e 
 
 | Tipo | Contenuto | Dettagli |
 |---|---|---|
-| `Sexpr` | Una S-expression non vuota. 16 varianti: `int`, da `i8` a `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [Dati S-expression](functions/sequences.md#2-dati-s-expression-sexpr) |
+| `Sexpr` | Una S-expression non vuota. 18 varianti: `int`, da `i8` a `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Dati S-expression](functions/sequences.md#2-dati-s-expression-sexpr) |
 | `Option<Sexpr>` | I dati S-expression in generale. La lista vuota `()` è `none` | Come sopra |
 
 ## 4. Tipi della libreria standard

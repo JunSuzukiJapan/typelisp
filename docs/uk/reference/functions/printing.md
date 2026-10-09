@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Друк
 
 `print`/`println`/`format`, друкарі з одним аргументом, pretty printer, `print-object` і змінні, що
@@ -227,7 +227,7 @@ SBCL. Коли REPL показує результат, він використо
 
 | Тип | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | Те саме (елементи через `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Те саме |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (число — внутрішній порядковий номер) | Те саме |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -335,7 +335,7 @@ CL використовує `nil` для «без обмеження», але �
 | `*print-readably*` | `bool` | `false` | Якщо істинна, друкує у формі, яку можна прочитати назад. Вона примушує екранування й вимикає обрізання через `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Кількість рядків, які може використати pretty printer. Надлишок обрізається, з `..` наприкінці, як у CL. 0 означає без обмеження. Від'ємне значення — помилка друку |
 | `*print-escape*` | `bool` | `true` | Чи роблять `write`/`write-to-string` `prin1` або `princ`. **Лише ці два її читають** |
-| `*print-array*` | `bool` | `true` | Чи показує `Array<T>` свій вміст. Якщо істинна, синтаксис масивів CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); якщо хибна, лише форму, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Чи показують `Vector<T>` і `Array<T>` свій вміст. Якщо істина — синтаксис масивів CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); якщо хиба — лише тип і форма, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

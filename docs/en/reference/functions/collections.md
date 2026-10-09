@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Strings, Characters and Collections
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` and `BitVector`.
@@ -65,6 +65,9 @@ not by the language).
 ## 3. `Vector<T>`
 
 A growable array.
+A value can be written `#(1 2 3)` ([Syntax Reference](../syntax.md#1-lexical-elements); the element
+type comes from the context or the first element, and each evaluation makes a new vector). It also
+prints as `#(1 2 3)`.
 
 | Name | Form | Type | Description |
 |---|---|---|---|
@@ -137,6 +140,7 @@ the same hash). Colliding keys are told apart by `equals`.
 
 A `defstruct` in the standard library. It is not a built-in type, so everything you can do with a
 `defstruct` can be done with it.
+A value can be written `#2A((1 2) (3 4))` ([Syntax Reference](../syntax.md#1-lexical-elements)).
 
 | Name | Form | Type | Description |
 |---|---|---|---|

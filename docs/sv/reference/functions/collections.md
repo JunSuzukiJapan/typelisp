@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Strängar, tecken och samlingar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` och `BitVector`.
@@ -66,6 +66,9 @@ av språket).
 ## 3. `Vector<T>`
 
 En växande array.
+Ett värde kan skrivas `#(1 2 3)` (se [syntaxreferensen](../syntax.md#1-lexikaliska-element);
+elementtypen kommer från sammanhanget eller det första elementet, och varje evaluering skapar en ny
+vektor). Det skrivs också ut som `#(1 2 3)`.
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
@@ -138,6 +141,8 @@ måste ha samma hash). Nycklar som kolliderar skiljs åt med `equals`.
 
 En `defstruct` i standardbiblioteket. Den är inte en inbyggd typ, så allt du kan göra med en `defstruct`
 kan göras med den.
+Ett värde kan skrivas `#2A((1 2) (3 4))` (se
+[syntaxreferensen](../syntax.md#1-lexikaliska-element)).
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|

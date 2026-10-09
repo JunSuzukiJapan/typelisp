@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Cadenas, caracteres y colecciones
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` y `BitVector`.
@@ -66,6 +66,9 @@ lenguaje).
 ## 3. `Vector<T>`
 
 Un arreglo que puede crecer.
+Un valor se puede escribir `#(1 2 3)` ([referencia de sintaxis](../syntax.md#1-elementos-léxicos);
+el tipo de los elementos viene del contexto o del primer elemento, y cada evaluación crea un vector
+nuevo). También se imprime como `#(1 2 3)`.
 
 | Nombre | Forma | Tipo | Descripción |
 |---|---|---|---|
@@ -138,6 +141,8 @@ deben tener el mismo hash). Las claves que colisionan se distinguen con `equals`
 
 Un `defstruct` de la biblioteca estándar. No es un tipo incorporado, así que con él se puede hacer todo lo
 que se puede hacer con un `defstruct`.
+Un valor se puede escribir `#2A((1 2) (3 4))` ([referencia de
+sintaxis](../syntax.md#1-elementos-léxicos)).
 
 | Nombre | Forma | Tipo | Descripción |
 |---|---|---|---|

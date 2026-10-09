@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -44,7 +44,7 @@ Kiểu hàm được viết `(fn (các-kiểu-đối-số...) kiểu-trả-về)
 
 | Kiểu | Nội dung | Chi tiết |
 |---|---|---|
-| `Sexpr` | Một S-expression không rỗng. 16 variant: `int`, `i8` đến `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [Dữ liệu S-expression](functions/sequences.md#2-dữ-liệu-s-expression-sexpr) |
+| `Sexpr` | Một S-expression không rỗng. 18 variant: `int`, `i8` đến `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Dữ liệu S-expression](functions/sequences.md#2-dữ-liệu-s-expression-sexpr) |
 | `Option<Sexpr>` | Dữ liệu S-expression nói chung. Danh sách rỗng `()` là `none` | Như trên |
 
 ## 4. Các kiểu trong thư viện chuẩn

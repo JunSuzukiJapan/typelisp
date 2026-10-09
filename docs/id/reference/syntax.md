@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -47,6 +47,10 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
 - **String**: `"..."`. Escape-nya adalah `\n` `\t` `\r` `\0` `\\` `\"` (`\x` lain hanyalah `x`).
 - **Simbol**: token apa pun yang mengandung huruf, angka, dan tanda (`+` `<=` `my-func` dan
   sebagainya).
+  `]` dan `}` mengakhiri token, sehingga tidak dapat muncul di dalam simbol, dan menjumpainya di
+  awal sebuah datum adalah galat pembacaan. `[` dan `{` boleh muncul di dalam simbol: seperti di CL,
+  keduanya dibiarkan bebas agar pemrogram dapat memakainya dalam [makro
+  pembaca](#11-reader-macro-readtable).
 - **Keyword**: simbol yang diawali titik dua, seperti `:name` (seperti di CL). Keyword mengevaluasi
   dirinya sendiri: tidak mencari pengikatan dan nilainya adalah dirinya sendiri, dengan tipe statis
   `symbol`. Keyword bernama sama selalu objek yang sama (`(eq :foo :FOO)` benar; seperti simbol lain
@@ -57,6 +61,19 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   melainkan path absolut (di bawah). Perhatikan bahwa `:dyn` adalah keyword tercadang khusus untuk
   posisi tipe; menulisnya di tempat lain adalah kesalahan (lihat [bab 2](#2-menulis-tipe)).
 - **Daftar**: `(a b c)`. Pasangan bertitik `(a . b)` juga dapat dibaca.
+- **Vektor**: `#(1 2 3)` (seperti di CL). Isinya hanya literal dan tidak dievaluasi: `a` dalam
+  `#(a b)` adalah simbol, bukan variabel. Tipe elemen ditentukan oleh konteks
+  (`(the Vector<i32> #(1 2))`), atau oleh elemen pertama bila tidak ada konteks (`#(1 2 3)` adalah
+  `Vector<int>`). Semua elemen harus bertipe sama: `#(1 "a")` adalah galat tipe, begitu pula `#()`
+  tanpa elemen dan tanpa konteks. Setiap evaluasi membuat vektor baru. Di tempat yang mengharapkan
+  data S-expression (`(the Option<Sexpr> #(1 x))`, `'#(..)`, hasil `read`), ia menjadi
+  `Vector<Option<Sexpr>>` yang semua elemennya data: varian `vector` dari `Sexpr`.
+- **Array**: `#2A((1 2) (3 4))` (seperti di CL). Angka di antara `#` dan `A` adalah rank, dan
+  sejumlah itu tingkat pertama sarang list dalam isinya menjadi dimensi-dimensinya. `#0A x` adalah
+  array berdimensi nol yang memuat satu elemen. List pada tingkat yang sama dengan panjang berbeda
+  adalah galat pembacaan. Tipenya ditentukan seperti vektor dan berupa `Array<T>` (tanpa elemen,
+  konteks harus memberikannya, seperti `(the Array<f64> #2A(()))`). Sebagai data S-expression ia
+  adalah `Array<Option<Sexpr>>`: varian `array` dari `Sexpr`.
 - **Daftar kosong `()`**: tergantung konteks, nilai tipe `Unit` atau `none` pada `Option<Sexpr>`.
   **`Sexpr` tidak memiliki varian daftar kosong**: `Sexpr` berarti "S-expression tak kosong", dan
   tipe data S-expression adalah `Option<Sexpr>` (lihat "Pola untuk `Option<Sexpr>`" pada
@@ -1173,7 +1190,7 @@ enumerasi, sehingga `_` (atau pola pengikatan yang bertindak sebagai wildcard) d
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Terhadap scrutinee `Sexpr`, selain 16 pola varian bawaan di atas, **pola downcast** (mengambil
+Terhadap scrutinee `Sexpr`, selain 18 pola varian bawaan di atas, **pola downcast** (mengambil
 instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, dengan `match`, instans
 `defstruct`/`defenum` (bab 3) yang dikonversi secara implisit menjadi `Sexpr`, seperti pada
 `(list p 42)`:
@@ -1195,7 +1212,7 @@ instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, d
 
 **Pola untuk `Option<Sexpr>`**: tipe data S-expression bukan `Sexpr` melainkan `Option<Sexpr>`, dan
 daftar kosong bukan varian `Sexpr` melainkan `none` pada `Option`. Jadi ketika mencocokkan
-`Option<Sexpr>`, 16 varian `Sexpr` dan `none` dapat ditulis **rata dalam daftar cabang yang sama**
+`Option<Sexpr>`, 18 varian `Sexpr` dan `none` dapat ditulis **rata dalam daftar cabang yang sama**
 (tidak perlu `match` luar untuk mengupas `Option`):
 
 ```lisp
@@ -1208,7 +1225,7 @@ daftar kosong bukan varian `Sexpr` melainkan `none` pada `Option`. Jadi ketika m
     (_          9)))
 ```
 
-Kelengkapan diperiksa dalam semesta rata yang sama: 16 varian `Sexpr` ditambah `none`, 17 seluruhnya.
+Kelengkapan diperiksa dalam semesta rata yang sama: 18 varian `Sexpr` ditambah `none`, 19 seluruhnya.
 Melupakan `(none)` adalah kesalahan kecuali ada `_`. `(some x)` juga dapat ditulis dan mengikat
 "sesuatu yang tak kosong".
 
@@ -1326,9 +1343,9 @@ membedakannya dari loop sederhana. Pengecualiannya adalah `=`, yang memisahkan v
 posisinya tidak ambigu, sehingga ia dibaca polos atau sebagai keyword (`:=`).
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

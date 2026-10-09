@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Pary, S-wyrażenia i sekwencje
 
 Generyczna para `cons-cell`, dane w postaci S-wyrażeń `Sexpr`, symbole, funkcje na sekwencjach napisane
@@ -23,8 +23,12 @@ wartość i pozycja z `read-from-string` i tak dalej) zwracają w tym języku `c
 
 ## 2. Dane w postaci S-wyrażeń `Sexpr`
 
-Typ danych `Sexpr` zwracany przez `read` ma 16 wariantów:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path`.
+Typ danych `Sexpr` zwracany przez `read` ma 18 wariantów:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+`vector` i `array` to dane zapisane jako `#(..)` i `#nA(..)` (zob. [referencję
+składni](../syntax.md#1-elementy-leksykalne)), zawierające odpowiednio `Vector<Option<Sexpr>>` i
+`Array<Option<Sexpr>>`: `len`, `get` i pozostałe działają bezpośrednio na `v` związanym przez
+`(vector v)`.
 Komórkami S-wyrażeń nie zajmują się ogólne `cons`/`car`/`cdr` z rozdziału 1, lecz
 funkcje `sexpr-*`. Używa się ich głównie w ciałach `defmacro` do budowania i rozbierania form.
 
@@ -37,7 +41,7 @@ przyjmują i zwracają `Option<Sexpr>`.
 - `Sexpr` jest niejawnie rozszerzane tam, gdzie oczekiwany jest `Option<Sexpr>` (bez konwersji w czasie działania).
   Przeciwny kierunek, użycie `Option<Sexpr>` jako `Sexpr`, twierdzi, że „to nie jest pusta lista",
   więc trzeba to jawnie stwierdzić za pomocą `match` lub `unwrap`
-- W `match` 16 wariantów `Sexpr` i `none` można zapisać **płasko w tej samej liście ramion**
+- W `match` 18 wariantów `Sexpr` i `none` można zapisać **płasko w tej samej liście ramion**
   ([Referencja składni](../syntax.md#43-match--dopasowywanie-wzorców))
 
 | Nazwa | Forma | Typ | Opis |

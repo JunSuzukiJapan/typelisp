@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # الطباعة
 
 `print`/`println`/`format` وطابعات الوسيط الواحد والطابعة المنسَّقة (pretty printer) و`print-object` والمتغيرات
@@ -219,7 +219,7 @@
 
 | النوع | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | المثل (العناصر بـ `~a`) |
+| `Vector<T>` | `#(1 2 3)`، `#("a" "b")` | `#(1 2 3)`، `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | المثل |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (الرقم رقم تسلسلي داخلي) | المثل |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -319,7 +319,7 @@
 | `*print-readably*` | `bool` | `false` | إذا كان صحيحًا يطبع بصورة يمكن قراءتها من جديد. فيفرض الهروب (escaping) ويعطّل حدود `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | عدد الأسطر التي يجوز للطابعة المنسَّقة استخدامها. والزائد يُقطع، مع `..` في النهاية كما في CL. و0 تعني بلا حد. والقيمة السالبة خطأ طباعة |
 | `*print-escape*` | `bool` | `true` | هل تنفّذ `write`/`write-to-string` الدالة `prin1` أو `princ`. **وهاتان وحدهما تقرآنه** |
-| `*print-array*` | `bool` | `true` | هل تُظهر `Array<T>` محتواها. إذا كان صحيحًا فصياغة المصفوفات في CL (`#(1 2 3)` / `#2A((1 2) (3 4))`)؛ وإذا كان خاطئًا فالشكل فقط، `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | هل يُظهر `Vector<T>` و`Array<T>` محتواهما. إن كان صحيحًا فصياغة المصفوفات في CL (`#(1 2 3)` / `#2A((1 2) (3 4))`)، وإن كان خاطئًا فالنوع والشكل فقط، `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

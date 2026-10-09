@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Komma igång
 
 Kapitlet utgår från att utvärdera uttryck i REPL och går sedan igenom funktioner, variabler, villkor,
@@ -227,7 +227,7 @@ Det finns också `while`, `do` och den utökade `loop` från Common Lisp. Nyckel
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. Listor och Vector
@@ -242,7 +242,7 @@ För att hålla en följd av värden av samma typ används `Vector<T>`. `T` är 
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; skriver ut #<vector<int> 3 1 2>
+;; skriver ut #(3 1 2)
 ```
 
 - Enbart `(Vector::new)` avgör inte elementtypen, så ange typen med
@@ -269,9 +269,9 @@ inte användas utanför den `let`. Nästa exempel definierar först `v` med `def
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

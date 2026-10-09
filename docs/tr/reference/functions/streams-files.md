@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Akışlar ve Dosyalar
 
 Akış trait'leri ve metotları, somut akış türleri, dosya işlemleri ve yol adları. Ağ soketleri de
@@ -202,7 +202,7 @@ başlayıp başlamadığını tutar.
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")   split at the last dot
   (pathname-type p)        ; => (some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"

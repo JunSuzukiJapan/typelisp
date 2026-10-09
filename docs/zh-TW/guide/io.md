@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 檔案 I/O、串流與網路
 
 本指南說明檔案讀寫、路徑名稱以及 socket 通訊的基本寫法。函式一覽見[串流與檔案](../reference/functions/streams-files.md)與
@@ -25,7 +25,7 @@
 ```lisp
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #<vector<string> "abc">)
+(read-file-lines "copy.txt")       ; => (ok #("abc"))
 ```
 
 ## 3. 用串流讀寫
@@ -93,7 +93,7 @@
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")
   (pathname-type p))       ; => (some "gz")
 

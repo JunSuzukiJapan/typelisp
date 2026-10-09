@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -75,7 +75,7 @@ AOT 编译生成的可执行文件会链接静态库 `libtypelisp_front.a`。发
 $ typl -c hello.typl            # 生成 hello
 $ typl -c hello.typl -o fib     # 把可执行文件命名为 fib
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 
@@ -89,7 +89,7 @@ $ typl
 typl> (compile-file "hello.typl" "hello")
 typl> :quit
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -45,6 +45,10 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   harf duyarsızdır.
 - **String'ler**: `"..."`. Kaçışlar `\n` `\t` `\r` `\0` `\\` `\"`'dır (diğer her `\x` yalnızca `x`'tir).
 - **Semboller**: harf, rakam ve simge içeren herhangi bir belirteç (`+` `<=` `my-func` vb.).
+  `]` ve `}` bir belirteci sonlandırır; bu yüzden bir sembolün içinde yer alamazlar ve bir verinin
+  başında görülmeleri okuma hatasıdır. `[` ve `{` ise sembolün içinde yer alabilir: CL'de olduğu
+  gibi, programcının [okuyucu makrolarında](#11-okuyucu-makroları-readtable) kullanabilmesi için boş
+  bırakılmıştır.
 - **Anahtar sözcükler**: `:name` gibi iki nokta üst üsteyle başlayan semboller (CL'deki gibi). Kendi
   kendilerini değerlendirirler: hiçbir bağlamaya bakmazlar ve değerleri kendileridir; statik türleri
   `symbol`'dür. Aynı adlı anahtar sözcükler her zaman aynı nesnedir (`(eq :foo :FOO)` doğrudur; diğer
@@ -55,6 +59,19 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   `:dyn`'in yalnızca tür konumları için ayrılmış bir anahtar sözcük olduğunu, başka bir yere yazmanın
   hata olduğunu unutmayın ([2. bölüm](#2-türlerin-yazımı)'e bakın).
 - **Listeler**: `(a b c)`. Noktalı çiftler `(a . b)` de okunabilir.
+- **Vektörler**: `#(1 2 3)` (CL'deki gibi). İçerik yalnızca literallerden oluşur ve
+  değerlendirilmez: `#(a b)` içindeki `a` bir değişken değil, bir semboldür. Eleman türü bağlamdan
+  (`(the Vector<i32> #(1 2))`), bağlam yoksa ilk elemandan gelir (`#(1 2 3)` bir `Vector<int>`'tir).
+  Tüm elemanlar aynı türde olmalıdır: `#(1 "a")` bir tür hatasıdır; eleman ve bağlam olmadan `#()`
+  da öyledir. Her değerlendirme yeni bir vektör oluşturur. S-ifade verisi beklenen yerlerde
+  (`(the Option<Sexpr> #(1 x))`, `'#(..)`, `read`'in döndürdüğü), tüm elemanları veri olan bir
+  `Vector<Option<Sexpr>>`'dir: `Sexpr`'in `vector` varyantı.
+- **Diziler**: `#2A((1 2) (3 4))` (CL'deki gibi). `#` ile `A` arasındaki sayı derecedir (rank) ve
+  içerikteki liste iç içeliğinin o kadar ilk düzeyi boyutları verir. `#0A x`, tek eleman tutan sıfır
+  boyutlu bir dizidir. Aynı düzeyde uzunlukları farklı listeler okuma hatasıdır. Tür, vektörlerdeki
+  gibi belirlenir ve bir `Array<T>`'dir (eleman yoksa bağlam vermelidir, örneğin
+  `(the Array<f64> #2A(()))`). S-ifade verisi olarak bir `Array<Option<Sexpr>>`'dir: `Sexpr`'in
+  `array` varyantı.
 - **Boş liste `()`**: bağlama göre `Unit` türünün değeri ya da `Option<Sexpr>`'in `none`'ı.
   **`Sexpr`'in boş liste varyantı yoktur**: `Sexpr`, "boş olmayan bir S-ifade" demektir ve S-ifade
   verisinin türü `Option<Sexpr>`'dir ([4.3 match](#43-match--örüntü-eşleme) içindeki "`Option<Sexpr>`
@@ -1121,7 +1138,7 @@ sayımla kapsanamaz; bu yüzden `_` (ya da joker olarak davranan bir bağlama ö
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Bir `Sexpr` denetlenen değerine karşı, yukarıdaki 16 yerleşik varyant örüntüsünün yanı sıra **aşağı
+Bir `Sexpr` denetlenen değerine karşı, yukarıdaki 18 yerleşik varyant örüntüsünün yanı sıra **aşağı
 dönüşüm örüntüleri** (kullanıcı tanımlı ADT'lerin örneklerini çıkarma) yazılabilir:
 `(list p 42)` gibi bir `Sexpr`'e örtük olarak dönüştürülmüş bir `defstruct`/`defenum` (3. bölüm)
 örneğini `match` ile geri almak için sözdizimi:
@@ -1142,7 +1159,7 @@ dönüşüm örüntüleri** (kullanıcı tanımlı ADT'lerin örneklerini çıka
 
 **`Option<Sexpr>` için örüntüler**: S-ifade verisinin türü `Sexpr` değil, `Option<Sexpr>`'dir ve boş
 liste `Sexpr`'in bir varyantı değil, `Option`'ın `none`'dır. Bu yüzden bir `Option<Sexpr>`'i eşleştirirken
-`Sexpr`'in 16 varyantı ve `none` **aynı kol listesinde düz olarak** yazılabilir (`Option`'ı soyacak dış
+`Sexpr`'in 18 varyantı ve `none` **aynı kol listesinde düz olarak** yazılabilir (`Option`'ı soyacak dış
 bir `match` gerekmez):
 
 ```lisp
@@ -1155,7 +1172,7 @@ bir `match` gerekmez):
     (_          9)))
 ```
 
-Kapsamlılık aynı düz evrende denetlenir: `Sexpr`'in 16 varyantı artı `none`, toplam 17. `_` yoksa
+Kapsamlılık aynı düz evrende denetlenir: `Sexpr`'in 18 varyantı artı `none`, toplam 19. `_` yoksa
 `(none)`'ı unutmak hatadır. `(some x)` de yazılabilir ve "boş olmayan bir şeyi" bağlar.
 
 Bu şeker **tam olarak** yalnızca `Option<Sexpr>`'e uygulanır. `Option<Option<Sexpr>>` için `(int n)`'in
@@ -1270,9 +1287,9 @@ sözcük olmak, onu basit bir döngüden ayıran şeydir. İstisna, bir değişk
 konumu belirsiz değildir; bu yüzden çıplak ya da bir anahtar sözcük (`:=`) olarak okunur.
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

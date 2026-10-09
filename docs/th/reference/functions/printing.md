@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # การพิมพ์
 
 `print`/`println`/`format`, ตัวพิมพ์แบบหนึ่งอาร์กิวเมนต์, pretty printer, `print-object` และ
@@ -227,7 +227,7 @@ generic function `print-object` ของ CL (CLHS 22.1.4)
 
 | ชนิด | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | เหมือนกัน (สมาชิกด้วย `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | เหมือนกัน |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (ตัวเลขคือหมายเลขลำดับภายใน) | เหมือนกัน |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -336,7 +336,7 @@ CL ใช้ `nil` สำหรับ "ไม่จำกัด" แต่ภา
 | `*print-readably*` | `bool` | `false` | หากเป็นจริง พิมพ์ในรูปแบบที่อ่านกลับได้ บังคับ escape และปิดการตัดของ `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | จำนวนบรรทัดที่ pretty printer ใช้ได้ ส่วนเกินถูกตัด โดยมี `..` ที่ท้ายเหมือนใน CL 0 หมายถึงไม่จำกัด ค่าติดลบเป็นข้อผิดพลาดของการพิมพ์ |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` ทำ `prin1` หรือ `princ` **มีเพียงสองตัวนั้นที่อ่านมัน** |
-| `*print-array*` | `bool` | `true` | `Array<T>` แสดงเนื้อหาหรือไม่ หากเป็นจริง ใช้ไวยากรณ์อาร์เรย์ของ CL (`#(1 2 3)` / `#2A((1 2) (3 4))`) หากเป็นเท็จ เพียงรูปร่าง `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` และ `Array<T>` แสดงเนื้อหาหรือไม่ ถ้าจริงใช้ไวยากรณ์อาร์เรย์ของ CL (`#(1 2 3)` / `#2A((1 2) (3 4))`) ถ้าเท็จแสดงเพียงชนิดและรูปร่าง `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Компиляция
 
 Если ничего специально не делать, программы typelisp выполняются интерпретатором. Кроме того, есть два способа
@@ -81,7 +81,7 @@
 $ typl -c hello.typl            # создаёт hello
 $ typl -c hello.typl -o fib     # называет исполняемый файл fib
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 
@@ -96,7 +96,7 @@ $ typl
 typl> (compile-file "hello.typl" "hello")
 typl> :quit
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 

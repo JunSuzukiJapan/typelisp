@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Yazdırma
 
 `print`/`println`/`format`, tek bağımsız değişkenli yazıcılar, pretty printer, `print-object` ve
@@ -228,7 +228,7 @@ yazdırılır. REPL bir sonuç gösterdiğinde `~s` ile aynı gösterimi kullan�
 
 | Tür | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | Aynısı (elemanlar `~a` ile) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Aynısı |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (sayı bir iç seri numarasıdır) | Aynısı |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -336,7 +336,7 @@ kodun çıktısını değiştirmez.
 | `*print-readably*` | `bool` | `false` | True ise geri okunabilen bir biçimde yazdırır. Kaçışı zorlar ve `*print-level*`/`*print-length*` kesmelerini devre dışı bırakır |
 | `*print-lines*` | `int` | `0` | Pretty printer'ın kullanabileceği satır sayısı. Fazlası kesilir ve CL'deki gibi sonda `..` olur. 0 sınırsız demektir. Negatif bir değer yazdırma hatasıdır |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string`'in `prin1` mi `princ` mi yapacağı. **Yalnızca bu ikisi onu okur** |
-| `*print-array*` | `bool` | `true` | `Array<T>`'nin içeriğini gösterip göstermeyeceği. True ise CL'nin dizi sözdizimi (`#(1 2 3)` / `#2A((1 2) (3 4))`); false ise yalnızca biçim, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` ve `Array<T>`'nin içeriğini gösterip göstermediği. Doğruysa CL'nin dizi sözdizimi (`#(1 2 3)` / `#2A((1 2) (3 4))`); yanlışsa yalnızca tür ve şekil, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

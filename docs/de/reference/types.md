@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Typen
 
 Die Typen, die typelisp hat, und die Standard-Traits, die jeder Typ implementiert. Wie man Typen schreibt,
@@ -44,7 +44,7 @@ Funktionstypen schreibt man `(fn (Argumenttypen...) Rückgabetyp)`, Trait-Objekt
 
 | Typ | Inhalt | Details |
 |---|---|---|
-| `Sexpr` | Ein nicht leerer S-Ausdruck. 16 Varianten: `int`, `i8` bis `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [S-Ausdrucksdaten](functions/sequences.md#2-s-ausdrucksdaten-sexpr) |
+| `Sexpr` | Ein nicht leerer S-Ausdruck. 18 Varianten: `int`, `i8` bis `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-Ausdrucksdaten](functions/sequences.md#2-s-ausdrucksdaten-sexpr) |
 | `Option<Sexpr>` | S-Ausdrucksdaten im Allgemeinen. Die leere Liste `()` ist `none` | Wie oben |
 
 ## 4. Typen der Standardbibliothek

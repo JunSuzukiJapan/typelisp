@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Strings, tekens en collecties
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` en `BitVector`.
@@ -66,6 +66,9 @@ Unicode bepaald, niet door de taal).
 ## 3. `Vector<T>`
 
 Een groeibare array.
+Een waarde kan als `#(1 2 3)` worden geschreven
+([syntaxreferentie](../syntax.md#1-lexicale-elementen); het elementtype volgt uit de context of het
+eerste element, en elke evaluatie maakt een nieuwe vector). Ze wordt ook als `#(1 2 3)` afgedrukt.
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
@@ -138,6 +141,8 @@ moeten dezelfde hash hebben). Botsende sleutels worden met `equals` uit elkaar g
 
 Een `defstruct` in de standaardbibliotheek. Het is geen ingebouwd type, dus alles wat met een
 `defstruct` kan, kan ermee.
+Een waarde kan als `#2A((1 2) (3 4))` worden geschreven
+([syntaxreferentie](../syntax.md#1-lexicale-elementen)).
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|

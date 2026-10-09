@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -68,7 +68,7 @@ macOS पर लिंकिंग Xcode Command Line Tools का उपयो�
 $ typl -c hello.typl            # hello बनाता है
 $ typl -c hello.typl -o fib     # एक्ज़ीक्यूटेबल का नाम fib रखता है
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 
@@ -81,7 +81,7 @@ $ typl
 typl> (compile-file "hello.typl" "hello")
 typl> :quit
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 

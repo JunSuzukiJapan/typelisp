@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
@@ -225,7 +225,7 @@ SBCL. Khi REPL hiển thị một kết quả, nó dùng cùng biểu diễn nh�
 
 | Kiểu | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | Giống vậy (phần tử với `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Giống vậy |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (con số là một số thứ tự nội bộ) | Giống vậy |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -332,7 +332,7 @@ của mã hằng ngày.
 | `*print-readably*` | `bool` | `false` | Nếu true, in ở dạng có thể đọc ngược lại. Nó ép escape và tắt các giới hạn cắt của `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Số dòng mà pretty printer được dùng. Phần thừa bị cắt, với `..` ở cuối như trong CL. 0 nghĩa là không giới hạn. Giá trị âm là lỗi in |
 | `*print-escape*` | `bool` | `true` | Việc `write`/`write-to-string` làm `prin1` hay `princ`. **Chỉ hai hàm đó đọc nó** |
-| `*print-array*` | `bool` | `true` | Việc `Array<T>` có hiển thị nội dung hay không. Nếu true, cú pháp mảng của CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); nếu false, chỉ hình dạng, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` và `Array<T>` có hiển thị nội dung hay không. Nếu đúng, dùng cú pháp mảng của CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); nếu sai, chỉ kiểu và hình dạng, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

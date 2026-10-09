@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Common Lisp Programcıları İçin
 
 typelisp, Common Lisp'in (CL) sözdizimini ve fonksiyon adlarının çoğunu devralır, ancak statik tür
@@ -108,14 +108,19 @@ CL listesine karşılık gelen şey, türü `Option<Sexpr>` olan **S-ifade veris
 `car` / `cdr`, `cons` ile yapılan `cons-cell<A,B>` çiftinin erişimcileridir. S-ifade listelerinde
 kullanılamazlar.
 
-Bir `Vector` yapma:
+Bir `Vector`, CL'deki bir vektör gibi `#(..)` ile yazılır ve `#(..)` olarak yazdırılır:
 
 ```lisp
-(let ((v (the Vector<int> (Vector::new))))
-  (push v 1)
-  (push v 2)
-  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #<vector<int> 10 20>
+(let ((v #(1 2)))
+  (push v 3)
+  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #(10 20 30)
 ```
+
+CL'den üç farkı vardır. Tüm elemanlar aynı türde olmalıdır (`#(1 "a")` bir tür hatasıdır). Her
+değerlendirme yeni bir vektör oluşturur, bu yüzden onu değiştirmek bir sonraki değerlendirmeyi
+etkilemez (CL'de bir literali değiştirmenin sonucu tanımsızdır). Boş bir `#()`,
+`(the Vector<int> #())` gibi türüyle yazılmalıdır. Çok boyutlu bir dizi, CL'deki gibi
+`#2A((1 2) (3 4))` olarak yazılır.
 
 `map`, `filter`, `sort` ve `find` gibi dizi fonksiyonları, `Iter` trait'ini gerçekleştiren değerler
 üzerinde çalışır. Bir `Vector`'ü `(iter v)` ile yineleyiciye çevirdikten sonra geçirin.

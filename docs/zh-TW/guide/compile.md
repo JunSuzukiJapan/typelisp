@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -74,7 +74,7 @@ AOT 編譯產生的執行檔會連結靜態函式庫 `libtypelisp_front.a`。發
 $ typl -c hello.typl            # 產生 hello
 $ typl -c hello.typl -o fib     # 把執行檔命名為 fib
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 
@@ -88,7 +88,7 @@ $ typl
 typl> (compile-file "hello.typl" "hello")
 typl> :quit
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 

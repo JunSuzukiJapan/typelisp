@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # फ़ाइल I/O, स्ट्रीम और नेटवर्किंग
 
 यह गाइड फ़ाइलें पढ़ने-लिखने, पाथनेम और सॉकेट संचार की बुनियादी बातें दिखाती है। फ़ंक्शनों की सूचियाँ [स्ट्रीम और फ़ाइलें](../reference/functions/streams-files.md) और [नेटवर्किंग](../reference/functions/network.md) में हैं।
@@ -24,7 +24,7 @@
 ```lisp
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #<vector<string> "abc">)
+(read-file-lines "copy.txt")       ; => (ok #("abc"))
 ```
 
 ## 3. स्ट्रीम से पढ़ना और लिखना
@@ -91,7 +91,7 @@
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")
   (pathname-type p))       ; => (some "gz")
 

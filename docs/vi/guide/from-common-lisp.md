@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Dành cho lập trình viên Common Lisp
 
 typelisp kế thừa cú pháp của Common Lisp (CL) và nhiều tên hàm của nó, nhưng là một ngôn ngữ có kiểu
@@ -107,14 +107,18 @@ việc với; với một vùng chứa dữ liệu thông thường, hãy dùng 
 `car` / `cdr` là các hàm truy cập của cặp `cons-cell<A,B>` tạo bằng `cons`. Chúng không thể dùng trên
 danh sách S-expression.
 
-Tạo một `Vector`:
+`Vector` được viết bằng `#(..)` như vector trong CL, và cũng được in ra là `#(..)`:
 
 ```lisp
-(let ((v (the Vector<int> (Vector::new))))
-  (push v 1)
-  (push v 2)
-  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #<vector<int> 10 20>
+(let ((v #(1 2)))
+  (push v 3)
+  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #(10 20 30)
 ```
+
+Có ba khác biệt so với CL. Mọi phần tử phải cùng kiểu (`#(1 "a")` là lỗi kiểu). Mỗi lần đánh giá tạo
+ra một vector mới, nên thay đổi nó không ảnh hưởng đến lần đánh giá sau (trong CL, kết quả của việc
+thay đổi một literal là không xác định). `#()` rỗng cần có kiểu, như `(the Vector<int> #())`. Mảng
+nhiều chiều được viết là `#2A((1 2) (3 4))`, giống CL.
 
 Các hàm trên dãy như `map`, `filter`, `sort` và `find` hoạt động trên các giá trị triển khai trait
 `Iter`. Hãy truyền một `Vector` sau khi biến nó thành iterator bằng `(iter v)`.

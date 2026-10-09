@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Pencetakan
 
 `print`/`println`/`format`, pencetak satu argumen, pretty printer, `print-object`, dan variabel yang
@@ -232,7 +232,7 @@ Ketika REPL menampilkan hasil, ia memakai representasi yang sama seperti `~s`.
 
 | Tipe | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | Sama (elemen dengan `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Sama |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (angkanya nomor seri internal) | Sama |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -343,7 +343,7 @@ tidak mengubah keluaran kode sehari-hari.
 | `*print-readably*` | `bool` | `false` | Jika benar, mencetak dalam bentuk yang dapat dibaca kembali. Ia memaksa escaping dan menonaktifkan pemotongan `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Jumlah baris yang boleh dipakai pretty printer. Kelebihannya dipotong, dengan `..` di akhir seperti di CL. 0 berarti tak terbatas. Nilai negatif adalah kesalahan cetak |
 | `*print-escape*` | `bool` | `true` | Apakah `write`/`write-to-string` melakukan `prin1` atau `princ`. **Hanya keduanya yang membacanya** |
-| `*print-array*` | `bool` | `true` | Apakah `Array<T>` menampilkan isinya. Jika benar, sintaks larik CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); jika salah, hanya bentuknya, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Apakah `Vector<T>` dan `Array<T>` menampilkan isinya. Jika benar, sintaks array CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); jika salah, hanya tipe dan bentuknya, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

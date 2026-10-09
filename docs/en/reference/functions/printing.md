@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Printing
 
 `print`/`println`/`format`, the one-argument printers, the pretty printer, `print-object`, and the
@@ -227,7 +227,7 @@ same way as in SBCL. When the REPL shows a result, it uses the same representati
 
 | Type | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | The same (elements with `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | The same |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (the number is an internal serial number) | The same |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -336,7 +336,7 @@ output of everyday code.
 | `*print-readably*` | `bool` | `false` | If true, prints in a form that can be read back. It forces escaping and disables the cut-offs of `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | The number of lines the pretty printer may use. The excess is cut, with `..` at the end as in CL. 0 means unlimited. A negative value is a print error |
 | `*print-escape*` | `bool` | `true` | Whether `write`/`write-to-string` do `prin1` or `princ`. **Only those two read it** |
-| `*print-array*` | `bool` | `true` | Whether `Array<T>` shows its contents. If true, CL's array syntax (`#(1 2 3)` / `#2A((1 2) (3 4))`); if false, just the shape, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Whether `Vector<T>` and `Array<T>` show their contents. If true, CL's array syntax (`#(1 2 3)` / `#2A((1 2) (3 4))`); if false, just the type and shape, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

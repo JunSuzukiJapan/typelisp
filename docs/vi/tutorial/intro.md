@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Bắt đầu
 
 Bắt đầu từ việc đánh giá biểu thức trong REPL, chương này lần lượt trình bày hàm, biến, rẽ nhánh,
@@ -223,7 +223,7 @@ dưới dạng keyword (`:for`, `:collect`, v.v.).
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. Danh sách và Vector
@@ -238,7 +238,7 @@ typl> (loop :for i :from 1 :to 5 :collect (* i i))
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; in ra #<vector<int> 3 1 2>
+;; in ra #(3 1 2)
 ```
 
 - Riêng `(Vector::new)` không xác định được kiểu phần tử, nên hãy đưa kiểu bằng
@@ -265,9 +265,9 @@ không dùng được bên ngoài `let` đó. Ví dụ tiếp theo định nghĩ
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

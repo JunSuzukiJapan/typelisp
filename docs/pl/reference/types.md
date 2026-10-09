@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Typy
 
 Typy, które ma typelisp, oraz standardowe traity implementowane przez każdy typ. Sposób zapisu typów opisano w
@@ -44,7 +44,7 @@ Typy funkcyjne zapisuje się `(fn (typy-argumentów...) typ-zwracany)`, a obiekt
 
 | Typ | Zawartość | Szczegóły |
 |---|---|---|
-| `Sexpr` | Niepuste S-wyrażenie. 16 wariantów: `int`, od `i8` do `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [Dane w postaci S-wyrażeń](functions/sequences.md#2-dane-w-postaci-s-wyrażeń-sexpr) |
+| `Sexpr` | Niepuste S-wyrażenie. 18 wariantów: `int`, od `i8` do `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Dane w postaci S-wyrażeń](functions/sequences.md#2-dane-w-postaci-s-wyrażeń-sexpr) |
 | `Option<Sexpr>` | Dane w postaci S-wyrażeń w ogólności. Pusta lista `()` to `none` | Jak wyżej |
 
 ## 4. Typy w bibliotece standardowej

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Afdrukken
 
 `print`/`println`/`format`, de printers met één argument, de pretty printer, `print-object` en de
@@ -233,7 +233,7 @@ weergave als `~s`.
 
 | Type | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | Hetzelfde (elementen met `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Hetzelfde |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (het getal is een intern volgnummer) | Hetzelfde |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -345,7 +345,7 @@ verandert de uitvoer van alledaagse code niet.
 | `*print-readably*` | `bool` | `false` | Indien waar wordt afgedrukt in een vorm die weer kan worden ingelezen. Het dwingt escaping af en schakelt de afkappingen van `*print-level*`/`*print-length*` uit |
 | `*print-lines*` | `int` | `0` | Het aantal regels dat de pretty printer mag gebruiken. Het teveel wordt afgekapt, met `..` aan het einde zoals in CL. 0 betekent onbeperkt. Een negatieve waarde is een afdrukfout |
 | `*print-escape*` | `bool` | `true` | Of `write`/`write-to-string` `prin1` of `princ` doen. **Alleen die twee lezen hem** |
-| `*print-array*` | `bool` | `true` | Of `Array<T>` zijn inhoud toont. Indien waar de arraysyntaxis van CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); indien onwaar alleen de vorm, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Of `Vector<T>` en `Array<T>` hun inhoud tonen. Indien waar, de arraysyntaxis van CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); indien onwaar, alleen type en vorm, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

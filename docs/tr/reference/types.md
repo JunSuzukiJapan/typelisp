@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Türler
 
 typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart trait'ler. Türlerin nasıl yazılacağı
@@ -44,7 +44,7 @@ Fonksiyon türleri `(fn (bağımsız-değişken-türleri...) dönüş-türü)` o
 
 | Tür | İçerik | Ayrıntılar |
 |---|---|---|
-| `Sexpr` | Boş olmayan bir S-ifade. 16 varyant: `int`, `i8`'den `u32`'ye, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [S-ifade verisi](functions/sequences.md#2-s-ifade-verisi-sexpr) |
+| `Sexpr` | Boş olmayan bir S-ifade. 18 varyant: `int`, `i8`'den `u32`'ye, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-ifade verisi](functions/sequences.md#2-s-ifade-verisi-sexpr) |
 | `Option<Sexpr>` | Genel olarak S-ifade verisi. Boş liste `()`, `none`'dır | Yukarıdakiyle aynı |
 
 ## 4. Standart kütüphanedeki türler

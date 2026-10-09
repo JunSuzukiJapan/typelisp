@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Tipos
 
 Os tipos que o typelisp tem e os traits padrão que cada tipo implementa. Como escrever tipos está no
@@ -44,7 +44,7 @@ Os tipos de função são escritos `(fn (tipos-dos-argumentos...) tipo-de-retorn
 
 | Tipo | Conteúdo | Detalhes |
 |---|---|---|
-| `Sexpr` | Uma expressão S não vazia. 16 variantes: `int`, `i8` a `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [Dados de expressões S](functions/sequences.md#2-dados-de-expressões-s-sexpr) |
+| `Sexpr` | Uma expressão S não vazia. 18 variantes: `int`, `i8` a `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Dados de expressões S](functions/sequences.md#2-dados-de-expressões-s-sexpr) |
 | `Option<Sexpr>` | Os dados de expressões S em geral. A lista vazia `()` é `none` | Igual ao acima |
 
 ## 4. Tipos da biblioteca padrão

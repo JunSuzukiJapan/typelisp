@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Primi passi
 
 Partendo dalla valutazione di espressioni nel REPL, questo capitolo tratta nell'ordine funzioni,
@@ -231,7 +231,7 @@ si scrivono come parole chiave (`:for`, `:collect` e così via).
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. Liste e Vector
@@ -246,7 +246,7 @@ Per contenere una sequenza di valori dello stesso tipo, usa `Vector<T>`. `T` è 
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; prints #<vector<int> 3 1 2>
+;; prints #(3 1 2)
 ```
 
 - `(Vector::new)` da solo non determina il tipo degli elementi, quindi indica il tipo con
@@ -274,9 +274,9 @@ quindi non si può usare fuori da quel `let`. L'esempio seguente definisce prima
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

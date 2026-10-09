@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Types
 
 The types typelisp has, and the standard traits each type implements. How to write types is in
@@ -44,7 +44,7 @@ Function types are written `(fn (argument-types...) return-type)`, and trait obj
 
 | Type | Contents | Details |
 |---|---|---|
-| `Sexpr` | A non-empty S-expression. 16 variants: `int`, `i8` to `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [S-expression data](functions/sequences.md#2-s-expression-data-sexpr) |
+| `Sexpr` | A non-empty S-expression. 18 variants: `int`, `i8` to `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-expression data](functions/sequences.md#2-s-expression-data-sexpr) |
 | `Option<Sexpr>` | S-expression data in general. The empty list `()` is `none` | Same as above |
 
 ## 4. Types in the standard library

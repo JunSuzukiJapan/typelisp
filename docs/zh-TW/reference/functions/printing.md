@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 列印
 
 `print`/`println`/`format`、單引數列印函式、pretty printer、`print-object`，以及控制列印的變數。格式指令一覽見 [format.md](format.md)。
@@ -195,7 +195,7 @@ CLHS 22.1.3 的列印函式。不做格式展開，直接列印一個值。串�
 
 | 型別 | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | 同左（元素用 `~a`） |
+| `Vector<T>` | `#(1 2 3)`、`#("a" "b")` | `#(1 2 3)`、`#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | 同左 |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>`（數字是實作內部的編號） | 同左 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -286,7 +286,7 @@ CL 以 `nil` 表示「無限制」，但這個語言沒有 `nil`，所以與 `*p
 | `*print-readably*` | `bool` | `false` | 為真時以可讀回的形式列印。強制跳脫，並使 `*print-level*`/`*print-length*` 的截斷失效 |
 | `*print-lines*` | `int` | `0` | pretty printer 可以使用的行數。超出部分截去，最後加上與 CL 相同的 `..`。0 表示無限制。負值是列印錯誤 |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` 做 `prin1` 還是 `princ`。**只有這兩個會讀取它** |
-| `*print-array*` | `bool` | `true` | `Array<T>` 是否顯示內容。為真時以 CL 的陣列語法（`#(1 2 3)` / `#2A((1 2) (3 4))`），為假時只顯示形狀 `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` 和 `Array<T>` 是否顯示內容。為真時使用 CL 的陣列語法（`#(1 2 3)` / `#2A((1 2) (3 4))`），為假時只顯示型別和形狀 `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

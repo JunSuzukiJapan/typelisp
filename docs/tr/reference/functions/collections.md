@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # String'ler, Karakterler ve Koleksiyonlar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` ve `BitVector`.
@@ -64,6 +64,9 @@ Bir `char`, bir Unicode skaler değeridir. Büyük/küçük harf dönüşümü v
 ## 3. `Vector<T>`
 
 Büyüyebilen bir dizi.
+Bir değer `#(1 2 3)` olarak yazılabilir ([Sözdizimi Başvurusu](../syntax.md#1-sözcüksel-öğeler);
+eleman türü bağlamdan ya da ilk elemandan gelir ve her değerlendirme yeni bir vektör oluşturur).
+Yazdırıldığında da `#(1 2 3)` olur.
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
@@ -136,6 +139,8 @@ aynı olmalıdır). Çakışan anahtarlar `equals` ile ayırt edilir.
 
 Standart kütüphanedeki bir `defstruct`. Yerleşik bir tür değildir; bu yüzden bir `defstruct` ile
 yapabileceğiniz her şey onunla da yapılabilir.
+Bir değer `#2A((1 2) (3 4))` olarak yazılabilir ([Sözdizimi
+Başvurusu](../syntax.md#1-sözcüksel-öğeler)).
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|

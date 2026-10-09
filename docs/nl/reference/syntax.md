@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -45,6 +45,10 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   `#\Tab` `#\Return` `#\Page` `#\Nul` (ook `#\Null`) `#\Backspace`. Namen zijn niet hoofdlettergevoelig.
 - **Strings**: `"..."`. De escapes zijn `\n` `\t` `\r` `\0` `\\` `\"` (elke andere `\x` is gewoon `x`).
 - **Symbolen**: elk token dat letters, cijfers en symbolen bevat (`+` `<=` `my-func` enzovoort).
+  `]` en `}` beëindigen een token en kunnen dus niet in een symbool staan; staat er een aan het
+  begin van een datum, dan is dat een leesfout. `[` en `{` kunnen wel in een symbool staan: net als
+  in CL blijven ze vrij, zodat programmeurs ze in [leesmacro's](#11-readermacros-readtable) kunnen
+  gebruiken.
 - **Keywords**: symbolen die met een dubbele punt beginnen, zoals `:name` (zoals in CL). Ze evalueren naar
   zichzelf: ze zoeken geen binding op en hun waarde is zijzelf, met statisch type `symbol`. Keywords met
   dezelfde naam zijn altijd hetzelfde object (`(eq :foo :FOO)` is waar; net als andere symbolen worden ze
@@ -55,6 +59,20 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   Merk op dat `:dyn` een gereserveerd keyword is, alleen voor typeposities; het ergens anders schrijven is
   een fout (zie [hoofdstuk 2](#2-types-schrijven)).
 - **Lijsten**: `(a b c)`. Gestippelde paren `(a . b)` kunnen ook worden gelezen.
+- **Vectoren**: `#(1 2 3)` (zoals in CL). De inhoud bestaat alleen uit literals en wordt niet
+  geëvalueerd: de `a` in `#(a b)` is een symbool, geen variabele. Het elementtype volgt uit de
+  context (`(the Vector<i32> #(1 2))`), of zonder context uit het eerste element (`#(1 2 3)` is een
+  `Vector<int>`). Alle elementen moeten hetzelfde type hebben: `#(1 "a")` is een typefout, net als
+  `#()` zonder elementen en zonder context. Elke evaluatie maakt een nieuwe vector. Waar
+  S-expressiedata worden verwacht (`(the Option<Sexpr> #(1 x))`, `'#(..)`, wat `read` teruggeeft),
+  is het een `Vector<Option<Sexpr>>` waarvan alle elementen data zijn: de variant `vector` van
+  `Sexpr`.
+- **Arrays**: `#2A((1 2) (3 4))` (zoals in CL). Het getal tussen `#` en `A` is de rang, en evenveel
+  eerste niveaus van lijstnesting in de inhoud zijn de dimensies. `#0A x` is een nuldimensionale
+  array met één element. Lijsten op hetzelfde niveau met verschillende lengtes zijn een leesfout.
+  Het type wordt bepaald zoals bij vectoren en is een `Array<T>` (zonder elementen moet de context
+  het geven, zoals in `(the Array<f64> #2A(()))`). Als S-expressiedata is het een
+  `Array<Option<Sexpr>>`: de variant `array` van `Sexpr`.
 - **De lege lijst `()`**: afhankelijk van de context de waarde van het type `Unit` of de `none` van
   `Option<Sexpr>`. **`Sexpr` heeft geen variant voor de lege lijst**: `Sexpr` betekent "een niet-lege
   S-expressie", en het type van S-expressiedata is `Option<Sexpr>` (zie "Patronen voor
@@ -1169,7 +1187,7 @@ worden gedekt, dus `_` (of een bindingspatroon dat als jokerteken fungeert) is v
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Tegen een `Sexpr`-scrutinee kunnen, naast de bovenstaande 16 ingebouwde variantpatronen,
+Tegen een `Sexpr`-scrutinee kunnen, naast de bovenstaande 18 ingebouwde variantpatronen,
 **downcast-patronen** (het uitnemen van instanties van door de gebruiker gedefinieerde ADT's) worden
 geschreven: syntaxis om met `match` een instantie van een `defstruct`/`defenum` (hoofdstuk 3) terug te
 krijgen die impliciet naar `Sexpr` is geconverteerd, zoals in `(list p 42)`:
@@ -1190,7 +1208,7 @@ krijgen die impliciet naar `Sexpr` is geconverteerd, zoals in `(list p 42)`:
 
 **Patronen voor `Option<Sexpr>`**: het type van S-expressiedata is niet `Sexpr` maar `Option<Sexpr>`, en
 de lege lijst is geen variant van `Sexpr` maar de `none` van `Option`. Wanneer je dus een `Option<Sexpr>`
-matcht, kunnen de 16 varianten van `Sexpr` en `none` **plat in dezelfde lijst takken** worden geschreven
+matcht, kunnen de 18 varianten van `Sexpr` en `none` **plat in dezelfde lijst takken** worden geschreven
 (er is geen buitenste `match` nodig om de `Option` af te pellen):
 
 ```lisp
@@ -1203,8 +1221,8 @@ matcht, kunnen de 16 varianten van `Sexpr` en `none` **plat in dezelfde lijst ta
     (_          9)))
 ```
 
-Volledigheid wordt in hetzelfde platte universum gecontroleerd: de 16 varianten van `Sexpr` plus `none`,
-17 in totaal. `(none)` vergeten is een fout tenzij er een `_` is. `(some x)` kan ook worden geschreven en
+Volledigheid wordt in hetzelfde platte universum gecontroleerd: de 18 varianten van `Sexpr` plus `none`,
+19 in totaal. `(none)` vergeten is een fout tenzij er een `_` is. `(some x)` kan ook worden geschreven en
 bindt "iets niet-leegs".
 
 Deze suiker is **precies** alleen van toepassing op `Option<Sexpr>`. Bij `Option<Option<Sexpr>>` zou
@@ -1321,9 +1339,9 @@ ook wat het van een eenvoudige lus onderscheidt. De uitzondering is `=`, dat een
 scheidt: zijn positie is ondubbelzinnig, dus het wordt kaal of als keyword (`:=`) gelezen.
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

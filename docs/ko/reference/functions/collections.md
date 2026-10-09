@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 문자열, 문자, 컬렉션
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`.
@@ -64,6 +64,8 @@
 ## 3. `Vector<T>`
 
 늘어나는 배열.
+값은 `#(1 2 3)`으로 쓸 수 있다([문법 레퍼런스](../syntax.md#1-어휘-요소). 요소의 타입은 문맥이나 첫 요소에서 정해지고, 평가할 때마다 새 벡터가
+만들어진다). 출력도 `#(1 2 3)`이다.
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
@@ -132,6 +134,7 @@
 ## 5. `Array<T>`(다차원 배열)
 
 표준 라이브러리의 `defstruct`이다. 내장 타입이 아니므로 `defstruct`로 할 수 있는 일은 모두 할 수 있다.
+값은 `#2A((1 2) (3 4))`로 쓸 수 있다([문법 레퍼런스](../syntax.md#1-어휘-요소)).
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|

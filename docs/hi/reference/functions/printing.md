@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # प्रिंटिंग
 
 `print`/`println`/`format`, एक-आर्ग्युमेंट प्रिंटर, सुंदर प्रिंटर, `print-object`, और प्रिंटिंग को नियंत्रित करने वाले वेरिएबल। फ़ॉर्मैट निर्देशों की सूची [format.md](format.md) में है। स्ट्रीम से पढ़ना और लिखना [स्ट्रीम और फ़ाइलें](streams-files.md) में है।
@@ -175,7 +175,7 @@ CL में, `pprint-exit-if-list-exhausted` `pprint-logical-block` से न�
 
 | टाइप | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | वही (तत्व `~a` से) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | वही |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (संख्या आंतरिक क्रमांक है) | वही |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -256,7 +256,7 @@ CL "असीमित" के लिए `nil` उपयोग करता ह�
 | `*print-readably*` | `bool` | `false` | यदि सत्य है, तो वापस पढ़े जा सकने वाले रूप में प्रिंट करता है। यह एस्केपिंग को बाध्य करता है और `*print-level*`/`*print-length*` की कटौतियों को निष्क्रिय करता है |
 | `*print-lines*` | `int` | `0` | सुंदर प्रिंटर कितनी पंक्तियाँ उपयोग कर सकता है। अधिकता काट दी जाती है, CL की तरह अंत में `..` के साथ। 0 का अर्थ असीमित। ऋणात्मक मान प्रिंट त्रुटि है |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` `prin1` करते हैं या `princ`। **केवल वही दोनों इसे पढ़ते हैं** |
-| `*print-array*` | `bool` | `true` | क्या `Array<T>` अपनी सामग्री दिखाता है। यदि सत्य है, CL का ऐरे सिंटैक्स (`#(1 2 3)` / `#2A((1 2) (3 4))`); यदि असत्य, केवल आकार, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` और `Array<T>` अपनी सामग्री दिखाते हैं या नहीं। सत्य हो तो CL का ऐरे सिंटैक्स (`#(1 2 3)` / `#2A((1 2) (3 4))`); असत्य हो तो केवल टाइप और आकार, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

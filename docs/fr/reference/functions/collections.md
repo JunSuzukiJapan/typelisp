@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Chaînes, caractères et collections
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` et `BitVector`.
@@ -66,6 +66,9 @@ Unicode, pas par le langage).
 ## 3. `Vector<T>`
 
 Un tableau extensible.
+Une valeur s'écrit `#(1 2 3)` ([référence de la syntaxe](../syntax.md#1-éléments-lexicaux) ; le type
+des éléments vient du contexte ou du premier élément, et chaque évaluation crée un nouveau vecteur).
+Elle s'imprime aussi `#(1 2 3)`.
 
 | Nom | Forme | Type | Description |
 |---|---|---|---|
@@ -138,6 +141,7 @@ doivent avoir le même hachage). Les clés en collision sont distinguées par `e
 
 Un `defstruct` de la bibliothèque standard. Ce n'est pas un type intégré ; tout ce qu'on peut faire avec un
 `defstruct` peut donc se faire avec lui.
+Une valeur s'écrit `#2A((1 2) (3 4))` ([référence de la syntaxe](../syntax.md#1-éléments-lexicaux)).
 
 | Nom | Forme | Type | Description |
 |---|---|---|---|

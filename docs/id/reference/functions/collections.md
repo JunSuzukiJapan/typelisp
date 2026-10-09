@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # String, Karakter, dan Koleksi
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, dan `BitVector`.
@@ -66,6 +66,9 @@ Unicode, bukan oleh bahasa).
 ## 3. `Vector<T>`
 
 Larik yang dapat membesar.
+Nilainya dapat ditulis `#(1 2 3)` ([Referensi Sintaks](../syntax.md#1-unsur-leksikal); tipe elemen
+ditentukan oleh konteks atau elemen pertama, dan setiap evaluasi membuat vektor baru). Ia juga
+dicetak sebagai `#(1 2 3)`.
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
@@ -138,6 +141,7 @@ harus memiliki hash yang sama). Kunci yang bertabrakan dibedakan oleh `equals`.
 
 `defstruct` pada pustaka standar. Ia bukan tipe bawaan, sehingga semua yang dapat dilakukan dengan
 `defstruct` dapat dilakukan dengannya.
+Nilainya dapat ditulis `#2A((1 2) (3 4))` ([Referensi Sintaks](../syntax.md#1-unsur-leksikal)).
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|

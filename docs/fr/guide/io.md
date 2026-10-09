@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # E/S de fichiers, flux et réseau
 
 Ce guide présente les bases de la lecture et de l'écriture de fichiers, des noms de chemin et de la communication
@@ -29,7 +29,7 @@ Les fonctions les plus simples traitent le fichier entier d'un coup.
 ```lisp
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #<vector<string> "abc">)
+(read-file-lines "copy.txt")       ; => (ok #("abc"))
 ```
 
 ## 3. Lire et écrire avec des flux
@@ -104,7 +104,7 @@ découper un chemin en parties ou pour en construire un.
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")
   (pathname-type p))       ; => (some "gz")
 

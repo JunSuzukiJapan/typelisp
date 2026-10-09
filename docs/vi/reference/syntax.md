@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -41,6 +41,9 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   `#\Return` `#\Page` `#\Nul` (cũng là `#\Null`) `#\Backspace`. Tên không phân biệt hoa thường.
 - **Chuỗi**: `"..."`. Các escape là `\n` `\t` `\r` `\0` `\\` `\"` (mọi `\x` khác chỉ là `x`).
 - **Symbol**: mọi token chứa chữ cái, chữ số và ký hiệu (`+` `<=` `my-func`, v.v.).
+  `]` và `}` kết thúc một token, nên không thể xuất hiện bên trong ký hiệu, và gặp một trong hai ở
+  đầu một datum là lỗi đọc. `[` và `{` thì có thể xuất hiện trong ký hiệu: giống CL, chúng được để
+  trống để lập trình viên dùng trong [macro đọc](#11-reader-macro-readtable).
 - **Keyword**: các symbol bắt đầu bằng dấu hai chấm, như `:name` (như trong CL). Chúng tự đánh giá: chúng
   không tra ràng buộc nào và giá trị của chúng là chính chúng, với kiểu tĩnh `symbol`. Các keyword cùng tên
   luôn là cùng một đối tượng (`(eq :foo :FOO)` là true; như các symbol khác chúng được chuyển thành chữ
@@ -51,6 +54,18 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   Lưu ý rằng `:dyn` là một keyword dành riêng chỉ cho vị trí kiểu; viết nó ở bất kỳ chỗ nào khác là lỗi
   (xem [chương 2](#2-cách-viết-kiểu)).
 - **Danh sách**: `(a b c)`. Cặp có dấu chấm `(a . b)` cũng đọc được.
+- **Vector**: `#(1 2 3)` (giống CL). Nội dung chỉ gồm literal và không được đánh giá: `a` trong
+  `#(a b)` là ký hiệu, không phải biến. Kiểu phần tử lấy từ ngữ cảnh (`(the Vector<i32> #(1 2))`),
+  hoặc từ phần tử đầu tiên khi không có ngữ cảnh (`#(1 2 3)` là `Vector<int>`). Mọi phần tử phải
+  cùng kiểu: `#(1 "a")` là lỗi kiểu, `#()` không có phần tử lẫn ngữ cảnh cũng vậy. Mỗi lần đánh giá
+  tạo ra một vector mới. Ở chỗ mong đợi dữ liệu S-expression (`(the Option<Sexpr> #(1 x))`,
+  `'#(..)`, thứ `read` trả về), nó là `Vector<Option<Sexpr>>` mà mọi phần tử đều là dữ liệu: variant
+  `vector` của `Sexpr`.
+- **Mảng**: `#2A((1 2) (3 4))` (giống CL). Số giữa `#` và `A` là hạng, và chừng ấy tầng lồng nhau
+  đầu tiên của các danh sách trong nội dung là các chiều. `#0A x` là mảng không chiều chứa một phần
+  tử. Các danh sách cùng tầng có độ dài khác nhau là lỗi đọc. Kiểu được quyết định như với vector và
+  là `Array<T>` (khi không có phần tử, ngữ cảnh phải cho kiểu, như `(the Array<f64> #2A(()))`). Dưới
+  dạng dữ liệu S-expression nó là `Array<Option<Sexpr>>`: variant `array` của `Sexpr`.
 - **Danh sách rỗng `()`**: tùy ngữ cảnh, là giá trị của kiểu `Unit` hoặc là `none` của `Option<Sexpr>`.
   **`Sexpr` không có variant danh sách rỗng**: `Sexpr` nghĩa là "một S-expression không rỗng", và kiểu của dữ
   liệu S-expression là `Option<Sexpr>` (xem "Mẫu cho `Option<Sexpr>`" ở
@@ -1084,7 +1099,7 @@ không thể được bao phủ bằng liệt kê, nên cần `_` (hoặc một 
     (_     0)))          ; một kiểu không có variant cần `_`
 ```
 
-Với một đối tượng `Sexpr`, ngoài 16 mẫu variant dựng sẵn ở trên, có thể viết **các mẫu downcast** (lấy ra các
+Với một đối tượng `Sexpr`, ngoài 18 mẫu variant dựng sẵn ở trên, có thể viết **các mẫu downcast** (lấy ra các
 thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy lại, bằng `match`, một thể hiện của
 `defstruct`/`defenum` (chương 3) đã được chuyển đổi ngầm thành `Sexpr`, như trong `(list p 42)`:
 
@@ -1104,7 +1119,7 @@ thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy 
 
 **Các mẫu cho `Option<Sexpr>`**: kiểu của dữ liệu S-expression không phải `Sexpr` mà là `Option<Sexpr>`, và
 danh sách rỗng không phải một variant của `Sexpr` mà là `none` của `Option`. Vì vậy khi so khớp một
-`Option<Sexpr>`, 16 variant của `Sexpr` và `none` có thể được viết **phẳng trong cùng một danh sách nhánh**
+`Option<Sexpr>`, 18 variant của `Sexpr` và `none` có thể được viết **phẳng trong cùng một danh sách nhánh**
 (không cần một `match` ngoài để bóc `Option`):
 
 ```lisp
@@ -1117,7 +1132,7 @@ danh sách rỗng không phải một variant của `Sexpr` mà là `none` của
     (_          9)))
 ```
 
-Tính đầy đủ được kiểm tra trong cùng vũ trụ phẳng đó: 16 variant của `Sexpr` cộng `none`, tổng cộng 17. Quên
+Tính đầy đủ được kiểm tra trong cùng vũ trụ phẳng đó: 18 variant của `Sexpr` cộng `none`, tổng cộng 19. Quên
 `(none)` là lỗi trừ khi có một `_`. `(some x)` cũng có thể viết và gán "một thứ không rỗng".
 
 Đường cú pháp này áp dụng **chính xác** chỉ cho `Option<Sexpr>`. Với `Option<Option<Sexpr>>`, sẽ không rõ
@@ -1227,9 +1242,9 @@ lặp đơn giản. Ngoại lệ là `=`, vốn phân tách một biến với m
 đọc hoặc trần hoặc dưới dạng keyword (`:=`).
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

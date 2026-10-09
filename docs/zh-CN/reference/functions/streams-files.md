@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 流与文件
 
 流的 trait 与方法、具体流类型、文件操作、路径名。网络套接字也是流的一员，见[网络](network.md)。
@@ -187,7 +187,7 @@ trait 解析（第 9 章）。
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")   在最后一个点处切分
   (pathname-type p)        ; => (some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"

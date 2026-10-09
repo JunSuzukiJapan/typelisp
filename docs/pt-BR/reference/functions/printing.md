@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Impressão
 
 `print`/`println`/`format`, as impressoras de um argumento, o pretty printer, `print-object` e as variáveis que
@@ -227,7 +227,7 @@ mesmo jeito que no SBCL. Quando o REPL mostra um resultado, usa a mesma represen
 
 | Tipo | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | Igual (elementos com `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Igual |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (o número é um número de série interno) | Igual |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -336,7 +336,7 @@ saída do código do dia a dia.
 | `*print-readably*` | `bool` | `false` | Se verdadeiro, imprime em uma forma que pode ser lida de volta. Força o escape e desativa os cortes de `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | O número de linhas que o pretty printer pode usar. O excesso é cortado, com `..` no final como no CL. 0 significa ilimitado. Um valor negativo é um erro de impressão |
 | `*print-escape*` | `bool` | `true` | Se `write`/`write-to-string` fazem `prin1` ou `princ`. **Só esses dois o leem** |
-| `*print-array*` | `bool` | `true` | Se `Array<T>` mostra seu conteúdo. Se verdadeiro, a sintaxe de arrays do CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); se falso, só a forma, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Se `Vector<T>` e `Array<T>` mostram o conteúdo. Se verdadeiro, a sintaxe de arrays de CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); se falso, só o tipo e a forma, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

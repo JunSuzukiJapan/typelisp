@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -44,6 +44,10 @@ messages d'erreur, [errors.md](errors.md).
   `#\Tab` `#\Return` `#\Page` `#\Nul` (aussi `#\Null`) `#\Backspace`. Les noms sont insensibles à la casse.
 - **Chaînes** : `"..."`. Les échappements sont `\n` `\t` `\r` `\0` `\\` `\"` (tout autre `\x` est simplement `x`).
 - **Symboles** : tout lexème contenant lettres, chiffres et symboles (`+` `<=` `my-func`, etc.).
+  `]` et `}` terminent un jeton : ils ne peuvent donc pas figurer dans un symbole, et en rencontrer
+  un au début d'une donnée est une erreur de lecture. `[` et `{` peuvent figurer dans un symbole :
+  comme en CL, ils sont laissés libres pour que le programmeur s'en serve dans des [macros de
+  lecture](#11-macros-de-lecture-readtable).
 - **Mots-clés** : les symboles qui commencent par un deux-points, comme `:name` (comme en CL). Ils s'évaluent en
   eux-mêmes : ils ne cherchent aucune liaison et leur valeur est eux-mêmes, de type statique `symbol`. Les mots-clés
   de même nom sont toujours le même objet (`(eq :foo :FOO)` est vrai ; comme les autres symboles, ils passent en
@@ -54,6 +58,20 @@ messages d'erreur, [errors.md](errors.md).
   Notez que `:dyn` est un mot-clé réservé aux positions de type ; l'écrire ailleurs est une erreur (voir le
   [chapitre 2](#2-écrire-les-types)).
 - **Listes** : `(a b c)`. Les paires pointées `(a . b)` peuvent aussi se lire.
+- **Vecteurs** : `#(1 2 3)` (comme en CL). Le contenu n'est fait que de littéraux et n'est pas
+  évalué : le `a` de `#(a b)` est un symbole, pas une variable. Le type des éléments vient du
+  contexte (`(the Vector<i32> #(1 2))`), ou du premier élément en l'absence de contexte (`#(1 2 3)`
+  est un `Vector<int>`). Tous les éléments doivent avoir le même type : `#(1 "a")` est une erreur de
+  type, de même que `#()` sans éléments ni contexte. Chaque évaluation crée un nouveau vecteur. Là
+  où des données S-expression sont attendues (`(the Option<Sexpr> #(1 x))`, `'#(..)`, ce que renvoie
+  `read`), c'est un `Vector<Option<Sexpr>>` dont les éléments sont tous des données : la variante
+  `vector` de `Sexpr`.
+- **Tableaux** : `#2A((1 2) (3 4))` (comme en CL). Le nombre entre `#` et `A` est le rang, et autant
+  de premiers niveaux d'imbrication des listes du contenu sont les dimensions. `#0A x` est un
+  tableau de dimension zéro contenant un élément. Des listes d'un même niveau de longueurs
+  différentes sont une erreur de lecture. Le type se décide comme pour les vecteurs et est un
+  `Array<T>` (sans éléments, le contexte doit le fournir, comme dans `(the Array<f64> #2A(()))`). En
+  tant que donnée S-expression, c'est un `Array<Option<Sexpr>>` : la variante `array` de `Sexpr`.
 - **La liste vide `()`** : selon le contexte, la valeur du type `Unit` ou le `none` de `Option<Sexpr>`. **`Sexpr` n'a
   pas de variante liste vide** : `Sexpr` signifie « une S-expression non vide », et le type des données S-expression
   est `Option<Sexpr>` (voir « Motifs pour `Option<Sexpr>` » dans [4.3 match](#43-match--filtrage-par-motifs)).
@@ -1121,7 +1139,7 @@ couvert par énumération ; `_` (ou un motif de liaison qui fait office de joker
     (_     0)))          ; un type sans variantes a besoin de `_`
 ```
 
-Face à une valeur examinée `Sexpr`, en plus des 16 motifs de variantes intégrés ci-dessus, on peut écrire des
+Face à une valeur examinée `Sexpr`, en plus des 18 motifs de variantes intégrés ci-dessus, on peut écrire des
 **motifs de transtypage descendant** (extraction d'instances d'ADT définis par l'utilisateur) : une syntaxe pour
 récupérer avec `match` une instance d'un `defstruct`/`defenum` (chapitre 3) convertie implicitement en `Sexpr`, comme
 dans `(list p 42)` :
@@ -1141,7 +1159,7 @@ dans `(list p 42)` :
   d'origine dans la liste.
 
 **Motifs pour `Option<Sexpr>`** : le type des données S-expression n'est pas `Sexpr` mais `Option<Sexpr>`, et la liste
-vide n'est pas une variante de `Sexpr` mais le `none` d'`Option`. Quand on filtre une `Option<Sexpr>`, les 16
+vide n'est pas une variante de `Sexpr` mais le `none` d'`Option`. Quand on filtre une `Option<Sexpr>`, les 18
 variantes de `Sexpr` et `none` peuvent donc s'écrire **à plat dans la même liste de branches** (pas besoin d'un
 `match` extérieur pour retirer l'`Option`) :
 
@@ -1155,7 +1173,7 @@ variantes de `Sexpr` et `none` peuvent donc s'écrire **à plat dans la même li
     (_          9)))
 ```
 
-L'exhaustivité est vérifiée dans le même univers plat : les 16 variantes de `Sexpr` plus `none`, 17 en tout. Oublier
+L'exhaustivité est vérifiée dans le même univers plat : les 18 variantes de `Sexpr` plus `none`, 19 en tout. Oublier
 `(none)` est une erreur à moins qu'il y ait un `_`. `(some x)` peut aussi s'écrire et lie « quelque chose de non
 vide ».
 
@@ -1271,9 +1289,9 @@ d'une boucle simple. L'exception est `=`, qui sépare une variable d'une valeur 
 lit donc nu ou comme mot-clé (`:=`).
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

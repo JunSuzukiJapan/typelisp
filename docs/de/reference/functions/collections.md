@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Zeichenketten, Zeichen und Sammlungen
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` und `BitVector`.
@@ -66,6 +66,10 @@ nicht die Sprache).
 ## 3. `Vector<T>`
 
 Ein wachsendes Array.
+Ein Wert lässt sich als `#(1 2 3)` schreiben
+([Syntaxreferenz](../syntax.md#1-lexikalische-elemente); der Elementtyp ergibt sich aus dem Kontext
+oder dem ersten Element, und jede Auswertung erzeugt einen neuen Vektor). Ausgegeben wird er
+ebenfalls als `#(1 2 3)`.
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
@@ -138,6 +142,8 @@ müssen denselben Hash haben). Kollidierende Schlüssel werden durch `equals` un
 
 Ein `defstruct` der Standardbibliothek. Es ist kein eingebauter Typ, daher geht mit ihm alles, was mit einem
 `defstruct` geht.
+Ein Wert lässt sich als `#2A((1 2) (3 4))` schreiben
+([Syntaxreferenz](../syntax.md#1-lexikalische-elemente)).
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|

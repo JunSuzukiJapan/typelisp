@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Типы
 
 Типы typelisp и стандартные трейты, которые реализует каждый тип. Как записывать типы, описано в
@@ -44,7 +44,7 @@
 
 | Тип | Содержимое | Подробности |
 |---|---|---|
-| `Sexpr` | Непустое S-выражение. 16 вариантов: `int`, `i8`–`u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [S-выражения](functions/sequences.md#2-s-выражения-sexpr) |
+| `Sexpr` | Непустое S-выражение. 18 вариантов: `int`, `i8`–`u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-выражения](functions/sequences.md#2-s-выражения-sexpr) |
 | `Option<Sexpr>` | Данные S-выражений в целом. Пустой список `()` — это `none` | То же |
 
 ## 4. Типы стандартной библиотеки

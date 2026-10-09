@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -33,6 +33,8 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   된다) `#\Backspace`. 이름은 대소문자를 구별하지 않는다.
 - **문자열**: `"..."`. 이스케이프는 `\n` `\t` `\r` `\0` `\\` `\"`(그 밖의 `\x`는 그냥 `x`).
 - **심볼**: 영숫자와 기호를 포함하는 아무 토큰(`+` `<=` `my-func` 등).
+  `]`와 `}`는 토큰을 끝내므로 심볼 안에 쓸 수 없고, 데이터의 시작에 나오면 읽기 오류다. `[`와 `{`는 심볼 안에 쓸 수 있다. CL과 마찬가지로 프로그래머가 [리더
+  매크로](#11-리더-매크로readtable)에 쓸 수 있도록 비워 두었다.
 - **키워드**: `:name`처럼 콜론으로 시작하는 심볼(CL과 같다). 자기 평가된다. 바인딩을 찾지 않고 값은 자기 자신이며 정적
   타입은 `symbol`이다. 같은 이름의 키워드는 항상 같은 객체이다(`(eq :foo :FOO)`는 참. 다른 심볼처럼 소문자가 된다). 콜론
   자체가 이름의 일부이므로 `(symbol->string :foo)`는 `":foo"`이다(typelisp에는 패키지 체계가 없으므로 CL의 `symbol-name`과
@@ -40,6 +42,15 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   키워드가 아니라 절대 경로이다(아래).
   또한 `:dyn`은 타입 위치 전용의 예약 키워드이며, 다른 곳에 쓰면 오류이다([2장](#2-타입-표기) 참고).
 - **리스트**: `(a b c)`. 점 쌍 `(a . b)`도 읽을 수 있다.
+- **벡터**: `#(1 2 3)`(CL과 같다). 내용은 모두 리터럴이며 평가하지 않는다. `#(a b)`의 `a`는 변수가 아니라 심볼이다. 요소의 타입은 문맥에서
+  정해지고(`(the Vector<i32> #(1 2))`), 문맥이 없으면 첫 요소의 타입이 된다(`#(1 2 3)`은 `Vector<int>`). 요소의 타입은 모두 같아야
+  하며 `#(1 "a")`는 타입 오류다. 요소도 문맥도 없는 `#()`도 타입 오류다. 평가할 때마다 새 벡터가 만들어진다. S 식 데이터가 기대되는
+  곳(`(the Option<Sexpr> #(1 x))`, `'#(..)`, `read`로 읽은 것)에서는 요소가 모두 데이터인 `Vector<Option<Sexpr>>`, 곧
+  `Sexpr`의 `vector` 변형이 된다.
+- **배열**: `#2A((1 2) (3 4))`(CL과 같다). `#`와 `A` 사이의 수가 차원 수이고, 내용 리스트의 중첩 중 처음 그 수만큼의 단이 각 차원이 된다.
+  `#0A x`는 요소 하나를 가진 0차원 배열이다. 같은 단의 리스트 길이가 다르면 읽기 오류다. 타입은 벡터와 같은 방식으로 정해져 `Array<T>`가 된다(요소가 없으면
+  `(the Array<f64> #2A(()))`처럼 문맥이 필요하다). S 식 데이터로서는 `Array<Option<Sexpr>>`, 곧 `Sexpr`의 `array` 변형이
+  된다.
 - **빈 리스트 `()`**: 문맥에 따라 `Unit` 타입의 값이거나 `Option<Sexpr>`의 `none`이다. **`Sexpr`에는 빈 리스트 변형이
   없다.** `Sexpr`는 "비어 있지 않은 S 식"을 뜻하며, S 식 데이터의 타입은 `Option<Sexpr>`이다([4.3 match](#43-match--패턴-매칭)의
   "`Option<Sexpr>`의 패턴" 참고).
@@ -965,7 +976,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
     (_     0)))          ; 변형이 없는 타입이므로 `_`가 필요하다
 ```
 
-`Sexpr` 검사 대상에 대해서는 위의 내장 16개 변형 패턴에 더해 **다운캐스트 패턴**(사용자 정의 ADT의 인스턴스를 꺼낸다)을 쓸
+`Sexpr` 검사 대상에 대해서는 위의 내장 18개 변형 패턴에 더해 **다운캐스트 패턴**(사용자 정의 ADT의 인스턴스를 꺼낸다)을 쓸
 수 있다. `(list p 42)`처럼 `Sexpr`로 암묵 변환된 `defstruct`/`defenum`(3장)의 인스턴스를 `match`로 되찾는 구문이다.
 
 - `(TypeName sub-pattern...)` — **타입 이름**을 앞에 둔 필드 분해(구조체 전용. `defstruct`는 항상 변형이 하나이므로 변형
@@ -979,7 +990,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   하다(둘 다 필드 분해 형식이 없다). 예: `(the point p)` 뒤에 `(setf p::x 9)`는 리스트 안의 원래 인스턴스에도 반영된다.
 
 **`Option<Sexpr>`의 패턴**: S 식 데이터의 타입은 `Sexpr`가 아니라 `Option<Sexpr>`이며, 빈 리스트는 `Sexpr`의 변형이 아니라
-`Option`의 `none`이다. 그래서 `Option<Sexpr>`를 `match`할 때는 `Sexpr`의 16개 변형과 `none`을 **같은 갈래 목록에 평평하게**
+`Option`의 `none`이다. 그래서 `Option<Sexpr>`를 `match`할 때는 `Sexpr`의 18개 변형과 `none`을 **같은 갈래 목록에 평평하게**
 쓸 수 있다(`Option`을 벗기는 바깥 `match`가 필요 없다).
 
 ```lisp
@@ -992,7 +1003,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
     (_          9)))
 ```
 
-망라성도 같은 평평한 전체 집합 — `Sexpr`의 16개 변형에 `none`을 더한 17개 — 에서 검사된다. `(none)`을 잊으면 `_`가 없는 한
+망라성도 같은 평평한 전체 집합 — `Sexpr`의 18개 변형에 `none`을 더한 19개 — 에서 검사된다. `(none)`을 잊으면 `_`가 없는 한
 오류이다. `(some x)`도 쓸 수 있으며 "비어 있지 않은 무언가"를 묶는다.
 
 이 편의 표기는 **정확히** `Option<Sexpr>`에만 적용된다. `Option<Option<Sexpr>>`에서는 `(int n)`이 어느 층을 벗겼는지 정할 수
@@ -1095,9 +1106,9 @@ CL은 절 단어를 맨 심볼로 쓰지만(`(loop for i from 1 to 3 collect i)`
 키워드(`:=`) 어느 쪽으로든 읽는다.
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

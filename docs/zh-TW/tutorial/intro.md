@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 入門
 
 本章從在 REPL 中對運算式求值開始，依序介紹函式、變數、條件分支、迴圈，以及串列與 `Vector`。`typl` 的建置方法請參閱
@@ -212,7 +212,7 @@ typl> (sum-to 100)
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. 串列與 Vector
@@ -227,7 +227,7 @@ typl> (loop :for i :from 1 :to 5 :collect (* i i))
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; 顯示 #<vector<int> 3 1 2>
+;; 顯示 #(3 1 2)
 ```
 
 - 只寫 `(Vector::new)` 無法決定元素型別，所以用 `(the Vector<int> ...)` 指定型別。
@@ -252,9 +252,9 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

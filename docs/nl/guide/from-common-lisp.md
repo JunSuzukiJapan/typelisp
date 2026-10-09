@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Voor Common Lisp-programmeurs
 
 typelisp erft de syntaxis van Common Lisp (CL) en veel van zijn functienamen, maar is een statisch
@@ -109,14 +109,19 @@ en `read` werken; gebruik voor een gewone gegevenscontainer **`Vector<T>`**.
 `car` / `cdr` zijn de accessors van het paar `cons-cell<A,B>` dat met `cons` is gemaakt. Ze kunnen
 niet op S-expressielijsten worden gebruikt.
 
-Een `Vector` maken:
+Een `Vector` schrijf je met `#(..)`, zoals een vector in CL, en hij wordt ook als `#(..)` afgedrukt:
 
 ```lisp
-(let ((v (the Vector<int> (Vector::new))))
-  (push v 1)
-  (push v 2)
-  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #<vector<int> 10 20>
+(let ((v #(1 2)))
+  (push v 3)
+  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #(10 20 30)
 ```
+
+Er zijn drie verschillen met CL. Alle elementen moeten hetzelfde type hebben (`#(1 "a")` is een
+typefout). Elke evaluatie maakt een nieuwe vector, dus wijzigen heeft geen invloed op de volgende
+evaluatie (in CL is het resultaat van het wijzigen van een literal ongedefinieerd). Een lege `#()`
+heeft zijn type nodig, zoals in `(the Vector<int> #())`. Een meerdimensionale array schrijf je als
+`#2A((1 2) (3 4))`, zoals in CL.
 
 Sequentiefuncties zoals `map`, `filter`, `sort` en `find` werken op waarden die de trait `Iter`
 implementeren. Geef een `Vector` door nadat je hem met `(iter v)` tot iterator hebt gemaakt.

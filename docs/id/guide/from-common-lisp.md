@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Untuk Pemrogram Common Lisp
 
 typelisp mewarisi sintaks Common Lisp (CL) dan banyak nama fungsinya, tetapi ia adalah bahasa dengan
@@ -110,14 +110,18 @@ dikerjakan makro dan `read`; untuk wadah data biasa, gunakan **`Vector<T>`**.
 `car` / `cdr` adalah pengakses pasangan `cons-cell<A,B>` yang dibuat dengan `cons`. Keduanya tidak
 dapat dipakai pada daftar S-expression.
 
-Membuat `Vector`:
+`Vector` ditulis dengan `#(..)`, seperti vektor di CL, dan juga dicetak sebagai `#(..)`:
 
 ```lisp
-(let ((v (the Vector<int> (Vector::new))))
-  (push v 1)
-  (push v 2)
-  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #<vector<int> 10 20>
+(let ((v #(1 2)))
+  (push v 3)
+  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #(10 20 30)
 ```
+
+Ada tiga perbedaan dari CL. Semua elemen harus bertipe sama (`#(1 "a")` adalah galat tipe). Setiap
+evaluasi membuat vektor baru, jadi mengubahnya tidak memengaruhi evaluasi berikutnya (di CL, hasil
+mengubah literal tidak terdefinisi). `#()` yang kosong perlu diberi tipe, seperti
+`(the Vector<int> #())`. Array multidimensi ditulis `#2A((1 2) (3 4))`, seperti di CL.
 
 Fungsi sekuens seperti `map`, `filter`, `sort`, dan `find` bekerja pada nilai yang mengimplementasikan
 trait `Iter`. Serahkan `Vector` setelah mengubahnya menjadi iterator dengan `(iter v)`.

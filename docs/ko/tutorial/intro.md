@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 시작하기
 
 REPL에서 식을 평가하는 것부터 시작해 함수, 변수, 조건 분기, 반복, 리스트와 `Vector`를 차례로 다룬다. `typl`을
@@ -218,7 +218,7 @@ typl> (sum-to 100)
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. 리스트와 Vector
@@ -233,7 +233,7 @@ typl> (loop :for i :from 1 :to 5 :collect (* i i))
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; #<vector<int> 3 1 2> 가 출력된다
+;; #(3 1 2) 가 출력된다
 ```
 
 - `(Vector::new)`만으로는 요소의 타입이 정해지지 않으므로 `(the Vector<int> ...)`로 타입을 준다.
@@ -259,9 +259,9 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

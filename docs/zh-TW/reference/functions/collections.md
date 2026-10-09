@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 字串、字元與集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`。
@@ -64,6 +64,7 @@
 ## 3. `Vector<T>`
 
 可變長度陣列。
+值可以寫成 `#(1 2 3)`（[語法參考](../syntax.md#1-詞法元素)。元素型別由上下文或第一個元素決定，每次求值都會建立新的向量）。印出來也是 `#(1 2 3)`。
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
@@ -129,6 +130,7 @@
 ## 5. `Array<T>`（多維陣列）
 
 標準函式庫中的 `defstruct`。不是內建型別，所以 `defstruct` 能做的事全都可以做。
+值可以寫成 `#2A((1 2) (3 4))`（[語法參考](../syntax.md#1-詞法元素)）。
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Stringhe, caratteri e collezioni
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` e `BitVector`.
@@ -66,6 +66,9 @@ Unicode, non dal linguaggio).
 ## 3. `Vector<T>`
 
 Un array espandibile.
+Un valore si può scrivere `#(1 2 3)` ([riferimento della
+sintassi](../syntax.md#1-elementi-lessicali); il tipo degli elementi viene dal contesto o dal primo
+elemento, e ogni valutazione crea un nuovo vettore). Si stampa anche come `#(1 2 3)`.
 
 | Nome | Forma | Tipo | Descrizione |
 |---|---|---|---|
@@ -138,6 +141,8 @@ devono avere lo stesso hash). Le chiavi in collisione vengono distinte tramite `
 
 Una `defstruct` della libreria standard. Non è un tipo predefinito, quindi tutto ciò che si può fare con
 una `defstruct` si può fare con essa.
+Un valore si può scrivere `#2A((1 2) (3 4))` ([riferimento della
+sintassi](../syntax.md#1-elementi-lessicali)).
 
 | Nome | Forma | Tipo | Descrizione |
 |---|---|---|---|

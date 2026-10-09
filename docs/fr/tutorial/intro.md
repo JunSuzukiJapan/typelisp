@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Premiers pas
 
 En partant de l'évaluation d'expressions dans la REPL, ce chapitre aborde dans l'ordre les fonctions, les
@@ -231,7 +231,7 @@ comme des mots-clés (`:for`, `:collect`, etc.).
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. Listes et Vector
@@ -246,7 +246,7 @@ Pour conserver une suite de valeurs d'un même type, utilisez `Vector<T>`. `T` e
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; affiche #<vector<int> 3 1 2>
+;; affiche #(3 1 2)
 ```
 
 - `(Vector::new)` seul ne détermine pas le type des éléments ; on le donne avec `(the Vector<int> ...)`.
@@ -274,9 +274,9 @@ d'abord `v` avec `defvar`.
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

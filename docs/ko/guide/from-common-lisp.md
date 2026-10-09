@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Common Lisp 사용자를 위해
 
 typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지만 정적 타입 언어이다. 그래서 CL 코드가 쓴 그대로
@@ -98,14 +98,17 @@ CL의 리스트에 해당하는 것은 **S 식 데이터**이며 그 타입은 `
 
 `car` / `cdr`는 `cons`로 만든 쌍 `cons-cell<A,B>`의 접근자이다. S 식 리스트에는 쓸 수 없다.
 
-`Vector` 만들기:
+`Vector`는 CL의 벡터처럼 `#(..)`로 쓸 수 있고, 출력도 `#(..)`이다:
 
 ```lisp
-(let ((v (the Vector<int> (Vector::new))))
-  (push v 1)
-  (push v 2)
-  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #<vector<int> 10 20>
+(let ((v #(1 2)))
+  (push v 3)
+  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #(10 20 30)
 ```
+
+CL과 다른 점은 세 가지다. 요소의 타입이 모두 같아야 한다(`#(1 "a")`는 타입 오류). 평가할 때마다 새 벡터가 만들어지므로, 바꾸어도 다음 평가에는 영향이
+없다(CL에서는 리터럴을 바꾼 결과가 정의되지 않는다). 요소가 없는 `#()`에는 `(the Vector<int> #())`처럼 타입을 붙인다. 다차원 배열
+`#2A((1 2) (3 4))`도 CL과 같은 표기다.
 
 `map`, `filter`, `sort`, `find` 같은 시퀀스 함수는 `Iter` 트레이트를 구현한 값에 동작한다. `Vector`는 `(iter v)`로
 이터레이터로 만든 뒤에 넘긴다.

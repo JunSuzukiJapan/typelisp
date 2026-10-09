@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Chuỗi, ký tự và tập hợp
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` và `BitVector`.
@@ -65,6 +65,9 @@ ngôn ngữ).
 ## 3. `Vector<T>`
 
 Một mảng có thể tăng trưởng.
+Giá trị có thể viết là `#(1 2 3)` ([Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-vựng); kiểu phần
+tử lấy từ ngữ cảnh hoặc phần tử đầu tiên, và mỗi lần đánh giá tạo ra một vector mới). Nó cũng được
+in ra là `#(1 2 3)`.
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
@@ -137,6 +140,7 @@ cùng giá trị băm). Các khóa va chạm được phân biệt bằng `equal
 
 Một `defstruct` trong thư viện chuẩn. Nó không phải kiểu dựng sẵn, nên mọi thứ bạn làm được với một
 `defstruct` đều làm được với nó.
+Giá trị có thể viết là `#2A((1 2) (3 4))` ([Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-vựng)).
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|

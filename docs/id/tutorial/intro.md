@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Memulai
 
 Dimulai dari mengevaluasi ekspresi di REPL, bab ini membahas fungsi, variabel, percabangan,
@@ -228,7 +228,7 @@ diperluas ditulis sebagai keyword (`:for`, `:collect`, dan sebagainya).
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. Daftar dan Vector
@@ -243,7 +243,7 @@ Untuk menyimpan urutan nilai bertipe sama, gunakan `Vector<T>`. `T` adalah tipe 
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; prints #<vector<int> 3 1 2>
+;; prints #(3 1 2)
 ```
 
 - `(Vector::new)` saja tidak menentukan tipe elemen, jadi berikan tipenya dengan
@@ -273,9 +273,9 @@ mendefinisikan `v` dengan `defvar`.
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

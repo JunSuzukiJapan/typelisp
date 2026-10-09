@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # E/S de archivos, streams y red
 
 Esta guía muestra lo básico de leer y escribir archivos, los nombres de ruta y la comunicación por sockets.
@@ -29,7 +29,7 @@ Las funciones más sencillas tratan el archivo entero de una vez.
 ```lisp
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #<vector<string> "abc">)
+(read-file-lines "copy.txt")       ; => (ok #("abc"))
 ```
 
 ## 3. Leer y escribir con streams
@@ -104,7 +104,7 @@ Las funciones que reciben un nombre de archivo aceptan tanto una cadena como un 
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")
   (pathname-type p))       ; => (some "gz")
 

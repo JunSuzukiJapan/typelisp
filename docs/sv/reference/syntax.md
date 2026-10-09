@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -44,6 +44,9 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
 - **Strängar**: `"..."`. Escape-sekvenserna är `\n` `\t` `\r` `\0` `\\` `\"` (varje annat `\x` är bara `x`).
 - **Symboler**: vilken token som helst som innehåller bokstäver, siffror och symboler (`+` `<=` `my-func`
   och så vidare).
+  `]` och `}` avslutar en token och kan därför inte stå i en symbol; står en sådan i början av ett
+  datum är det ett läsfel. `[` och `{` kan stå i en symbol: precis som i CL lämnas de fria så att
+  programmeraren kan använda dem i [läsmakron](#11-läsarmakron-readtable).
 - **Keywords**: symboler som börjar med ett kolon, som `:name` (som i CL). De utvärderas till sig själva:
   de slår inte upp någon bindning och deras värde är de själva, med statisk typ `symbol`. Keywords med
   samma namn är alltid samma objekt (`(eq :foo :FOO)` är sant; liksom andra symboler görs de till
@@ -54,6 +57,19 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
   Notera att `:dyn` är ett reserverat keyword bara för typpositioner; att skriva det någon annanstans är
   ett fel (se [kapitel 2](#2-hur-typer-skrivs)).
 - **Listor**: `(a b c)`. Punktpar `(a . b)` kan också läsas.
+- **Vektorer**: `#(1 2 3)` (som i CL). Innehållet består bara av literaler och evalueras inte: `a` i
+  `#(a b)` är en symbol, inte en variabel. Elementtypen kommer från sammanhanget
+  (`(the Vector<i32> #(1 2))`), eller från det första elementet när sammanhang saknas (`#(1 2 3)` är
+  en `Vector<int>`). Alla element måste ha samma typ: `#(1 "a")` är ett typfel, liksom `#()` utan
+  element och utan sammanhang. Varje evaluering skapar en ny vektor. Där S-uttrycksdata förväntas
+  (`(the Option<Sexpr> #(1 x))`, `'#(..)`, det `read` returnerar) är det en `Vector<Option<Sexpr>>`
+  vars element alla är data: varianten `vector` av `Sexpr`.
+- **Arrayer**: `#2A((1 2) (3 4))` (som i CL). Talet mellan `#` och `A` är rangen, och lika många
+  första nivåer av listnästling i innehållet är dimensionerna. `#0A x` är en nolldimensionell array
+  med ett element. Listor på samma nivå med olika längd är ett läsfel. Typen bestäms som för
+  vektorer och är en `Array<T>` (utan element måste sammanhanget ange den, som i
+  `(the Array<f64> #2A(()))`). Som S-uttrycksdata är det en `Array<Option<Sexpr>>`: varianten
+  `array` av `Sexpr`.
 - **Den tomma listan `()`**: beroende på sammanhang värdet av typen `Unit` eller `none` i
   `Option<Sexpr>`. **`Sexpr` har ingen variant för den tomma listan**: `Sexpr` betyder "ett icke-tomt
   S-uttryck", och typen för S-uttrycksdata är `Option<Sexpr>` (se "Mönster för `Option<Sexpr>`" i
@@ -1117,7 +1133,7 @@ så `_` (eller ett bindningsmönster som fungerar som jokertecken) krävs:
     (_     0)))          ; en typ utan varianter behöver `_`
 ```
 
-Mot en `Sexpr`-scrutinee kan man, förutom de 16 inbyggda variantmönstren ovan, skriva
+Mot en `Sexpr`-scrutinee kan man, förutom de 18 inbyggda variantmönstren ovan, skriva
 **nedkastningsmönster** (för att ta ut instanser av användardefinierade ADT:er): syntax för att få tillbaka,
 med `match`, en instans av en `defstruct`/`defenum` (kapitel 3) som implicit konverterats till `Sexpr`,
 som i `(list p 42)`:
@@ -1138,7 +1154,7 @@ som i `(list p 42)`:
 
 **Mönster för `Option<Sexpr>`**: typen för S-uttrycksdata är inte `Sexpr` utan `Option<Sexpr>`, och den
 tomma listan är inte en variant av `Sexpr` utan `none` i `Option`. Så när man matchar en `Option<Sexpr>`
-kan de 16 varianterna av `Sexpr` och `none` skrivas **platt i samma lista av grenar** (ingen yttre `match`
+kan de 18 varianterna av `Sexpr` och `none` skrivas **platt i samma lista av grenar** (ingen yttre `match`
 för att skala bort `Option` behövs):
 
 ```lisp
@@ -1151,7 +1167,7 @@ för att skala bort `Option` behövs):
     (_          9)))
 ```
 
-Uttömmande täckning kontrolleras i samma platta universum: de 16 varianterna av `Sexpr` plus `none`, 17 i
+Uttömmande täckning kontrolleras i samma platta universum: de 18 varianterna av `Sexpr` plus `none`, 19 i
 allt. Att glömma `(none)` är ett fel om det inte finns en `_`. `(some x)` kan också skrivas och binder
 "något icke-tomt".
 
@@ -1266,9 +1282,9 @@ det från en enkel slinga. Undantaget är `=`, som skiljer en variabel från ett
 entydig, så det läses antingen bart eller som ett keyword (`:=`).
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

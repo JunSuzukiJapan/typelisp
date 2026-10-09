@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Streams and Files
 
 Stream traits and methods, concrete stream types, file operations and pathnames. Network sockets are
@@ -202,7 +202,7 @@ A file name split into parts. It holds the `/`-separated directory components, t
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")   split at the last dot
   (pathname-type p)        ; => (some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"

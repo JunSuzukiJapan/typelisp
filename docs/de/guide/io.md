@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Datei-E/A, Streams und Netzwerk
 
 Dieser Leitfaden zeigt die Grundlagen des Lesens und Schreibens von Dateien, der Pfadnamen und der
@@ -29,7 +29,7 @@ Die einfachsten Funktionen behandeln die ganze Datei auf einmal.
 ```lisp
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #<vector<string> "abc">)
+(read-file-lines "copy.txt")       ; => (ok #("abc"))
 ```
 
 ## 3. Mit Streams lesen und schreiben
@@ -105,7 +105,7 @@ einen Pfad in Teile zu zerlegen oder einen zu bauen, verwendet man einen `pathna
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")
   (pathname-type p))       ; => (some "gz")
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 写给 Common Lisp 用户
 
 typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名，但它是静态类型语言。因此，CL 的写法并不总能直接通过。
@@ -95,14 +95,15 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 
 `car` / `cdr` 是用 `cons` 创建的序对 `cons-cell<A,B>` 的访问器，不能用于 S 表达式列表。
 
-创建 `Vector`：
+`Vector` 和 CL 的向量一样可以用 `#(..)` 书写，打印出来也是 `#(..)`：
 
 ```lisp
-(let ((v (the Vector<int> (Vector::new))))
-  (push v 1)
-  (push v 2)
-  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #<vector<int> 10 20>
+(let ((v #(1 2)))
+  (push v 3)
+  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #(10 20 30)
 ```
+
+与 CL 的不同有三点。元素类型必须一致（`#(1 "a")` 是类型错误）。每次求值都会创建新的向量，所以修改它不会影响下一次求值（在 CL 中修改字面量的结果是未定义的）。没有元素的 `#()` 要像 `(the Vector<int> #())` 这样加上类型。多维数组 `#2A((1 2) (3 4))` 的写法也与 CL 相同。
 
 `map`、`filter`、`sort`、`find` 等序列函数作用于实现了 `Iter` trait 的值。`Vector` 要用 `(iter v)` 变成迭代器再传入。
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Pasangan, S-Expression, dan Sekuens
 
 Pasangan generik `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens yang ditulis di atas
@@ -25,8 +25,12 @@ mengembalikan `cons-cell` di bahasa ini.
 
 ## 2. Data S-expression `Sexpr`
 
-Tipe data `Sexpr` yang dikembalikan `read` memiliki 16 varian:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path`.
+Tipe data `Sexpr` yang dikembalikan `read` memiliki 18 varian:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+`vector` dan `array` adalah data yang ditulis sebagai `#(..)` dan `#nA(..)` ([Referensi
+Sintaks](../syntax.md#1-unsur-leksikal)), yang masing-masing memuat `Vector<Option<Sexpr>>` dan
+`Array<Option<Sexpr>>`: `len`, `get`, dan lainnya langsung berlaku pada `v` yang diikat oleh
+`(vector v)`.
 Sel S-expression ditangani bukan oleh `cons`/`car`/`cdr` umum pada bab 1 melainkan oleh fungsi
 `sexpr-*`. Fungsi-fungsi ini dipakai terutama di badan `defmacro` untuk menyusun dan membongkar
 bentuk.
@@ -40,7 +44,7 @@ menerima dan mengembalikan `Option<Sexpr>`.
 - `Sexpr` melebar secara implisit di tempat `Option<Sexpr>` diharapkan (tanpa konversi saat
   dijalankan). Arah sebaliknya, memakai `Option<Sexpr>` sebagai `Sexpr`, mengklaim "ini bukan daftar
   kosong", sehingga harus dinyatakan secara eksplisit dengan `match` atau `unwrap`
-- Pada `match`, 16 varian `Sexpr` dan `none` dapat ditulis **rata dalam daftar cabang yang sama**
+- Pada `match`, 18 varian `Sexpr` dan `none` dapat ditulis **rata dalam daftar cabang yang sama**
   ([Referensi Sintaks](../syntax.md#43-match--pencocokan-pola))
 
 | Nama | Bentuk | Tipe | Deskripsi |

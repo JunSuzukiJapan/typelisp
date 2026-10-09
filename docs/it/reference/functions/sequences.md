@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Coppie, S-expression e sequenze
 
 La coppia generica `cons-cell`, i dati S-expression `Sexpr`, i simboli, le funzioni sulle sequenze
@@ -24,8 +24,12 @@ questo linguaggio restituiscono una `cons-cell`.
 
 ## 2. Dati S-expression `Sexpr`
 
-Il tipo di dati `Sexpr` restituito da `read` ha 16 varianti:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path`.
+Il tipo di dati `Sexpr` restituito da `read` ha 18 varianti:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+`vector` e `array` sono dati scritti come `#(..)` e `#nA(..)` ([riferimento della
+sintassi](../syntax.md#1-elementi-lessicali)), che contengono rispettivamente un
+`Vector<Option<Sexpr>>` e un `Array<Option<Sexpr>>`: `len`, `get` e il resto funzionano direttamente
+sulla `v` legata da `(vector v)`.
 Le celle S-expression non vengono trattate dai generali `cons`/`car`/`cdr` del capitolo 1 ma dalle
 funzioni `sexpr-*`. Si usano soprattutto nei corpi di `defmacro` per costruire e scomporre le forme.
 
@@ -37,7 +41,7 @@ funzioni `sexpr-*`. Si usano soprattutto nei corpi di `defmacro` per costruire e
 - `Sexpr` si allarga implicitamente dove è atteso un `Option<Sexpr>` (senza conversione a runtime). La
   direzione opposta, usare un `Option<Sexpr>` come `Sexpr`, afferma "questa non è la lista vuota",
   quindi va dichiarata esplicitamente con `match` o `unwrap`
-- In `match`, le 16 varianti di `Sexpr` e `none` si possono scrivere **piatte nella stessa lista di
+- In `match`, le 18 varianti di `Sexpr` e `none` si possono scrivere **piatte nella stessa lista di
   rami** ([Riferimento della sintassi](../syntax.md#43-match--pattern-matching))
 
 | Nome | Forma | Tipo | Descrizione |

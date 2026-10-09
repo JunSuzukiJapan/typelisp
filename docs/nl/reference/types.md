@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Types
 
 De types die typelisp heeft en de standaardtraits die elk type implementeert. Hoe je types schrijft
@@ -45,7 +45,7 @@ Functietypes worden geschreven als `(fn (argumenttypes...) returntype)`, en trai
 
 | Type | Inhoud | Details |
 |---|---|---|
-| `Sexpr` | Een niet-lege S-expressie. 16 varianten: `int`, `i8` tot en met `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [S-expressiedata](functions/sequences.md#2-s-expressiedata-sexpr) |
+| `Sexpr` | Een niet-lege S-expressie. 18 varianten: `int`, `i8` tot en met `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-expressiedata](functions/sequences.md#2-s-expressiedata-sexpr) |
 | `Option<Sexpr>` | S-expressiedata in het algemeen. De lege lijst `()` is `none` | Idem |
 
 ## 4. Types in de standaardbibliotheek

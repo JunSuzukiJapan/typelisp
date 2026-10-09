@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Łańcuchy znaków, znaki i kolekcje
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` i `BitVector`.
@@ -65,6 +65,9 @@ a nie przez język).
 ## 3. `Vector<T>`
 
 Rosnąca tablica.
+Wartość można zapisać jako `#(1 2 3)` (zob. [referencję
+składni](../syntax.md#1-elementy-leksykalne); typ elementów wynika z kontekstu lub z pierwszego
+elementu, a każde obliczenie tworzy nowy wektor). Jest też drukowana jako `#(1 2 3)`.
 
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
@@ -137,6 +140,8 @@ ten sam hasz). Kolidujące klucze są rozróżniane za pomocą `equals`.
 
 `defstruct` w bibliotece standardowej. Nie jest to typ wbudowany, więc wszystko, co można zrobić z
 `defstruct`, można zrobić także z nim.
+Wartość można zapisać jako `#2A((1 2) (3 4))` (zob. [referencję
+składni](../syntax.md#1-elementy-leksykalne)).
 
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|

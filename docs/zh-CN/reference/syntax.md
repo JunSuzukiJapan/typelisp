@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -30,12 +30,15 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
   `#\Null`）`#\Backspace`。名称不区分大小写。
 - **字符串**：`"..."`。转义有 `\n` `\t` `\r` `\0` `\\` `\"`（其他的 `\x` 就是 `x`）。
 - **符号**：包含字母、数字和符号的任意记号（`+` `<=` `my-func` 等）。
+  `]` 和 `}` 会结束一个记号，所以不能写在符号中；在数据的开头遇到它们是读取错误。`[` 和 `{` 可以写在符号中：与 CL 一样，它们留给程序员在[读取宏](#11-读取宏readtable)中使用。
 - **关键字**：像 `:name` 这样以冒号开头的符号（遵循 CL）。它是自求值的——不查找绑定，值就是它自身，静态类型为 `symbol`。同名的
   关键字总是同一个对象（`(eq :foo :FOO)` 为真。与其他符号一样会被转为小写）。冒号本身是名字的一部分，`(symbol->string :foo)`
   是 `":foo"`（typelisp 没有包机制，所以与 CL 的 `symbol-name` 不同）。单独的 `:` 或像 `:a:b` 这样包含额外冒号的是读取错误。
   判断用 `keywordp`。以 `::` 开头的不是关键字，而是绝对路径（见下文）。
   另外，`:dyn` 是只用于类型位置的保留关键字，写在其他位置是错误（见[第 2 章](#2-类型的写法)）。
 - **列表**：`(a b c)`。点对 `(a . b)` 也可以读取。
+- **向量**：`#(1 2 3)`（与 CL 相同）。内容全部是字面量，不会求值——`#(a b)` 中的 `a` 是符号而不是变量。元素类型由上下文决定（`(the Vector<i32> #(1 2))`），没有上下文时取第一个元素的类型（`#(1 2 3)` 是 `Vector<int>`）。元素类型必须一致，`#(1 "a")` 是类型错误。既没有元素也没有上下文的 `#()` 也是类型错误。每次求值都会创建新的向量。在期望 S 表达式数据的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 读到的数据），它是元素全部为数据的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `vector` 变体。
+- **数组**：`#2A((1 2) (3 4))`（与 CL 相同）。`#` 与 `A` 之间的数是维数，内容中列表嵌套的前这么多层就是各个维度。`#0A x` 是只有一个元素的零维数组。同一层的列表长度不一致是读取错误。类型的确定方式与向量相同，结果是 `Array<T>`（没有元素时需要上下文，例如 `(the Array<f64> #2A(()))`）。作为 S 表达式数据，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `array` 变体。
 - **空列表 `()`**：根据上下文，是 `Unit` 类型的值，或者是 `Option<Sexpr>` 的 `none`。**`Sexpr` 没有空列表的变体**——`Sexpr`
   表示"非空的 S 表达式"，S 表达式数据的类型是 `Option<Sexpr>`（见 [4.3 match](#43-match--模式匹配) 的"`Option<Sexpr>` 的模式"）。
 - **quote/quasiquote/unquote**：
@@ -892,7 +895,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
     (_     0)))          ; 没有变体的类型，所以需要 `_`
 ```
 
-对 `Sexpr` 被匹配值，除了上面的内置 16 种变体模式，还可以写**向下转换模式**（取出用户定义 ADT 的实例）——用 `match` 取回像
+对 `Sexpr` 被匹配值，除了上面的内置 18 种变体模式，还可以写**向下转换模式**（取出用户定义 ADT 的实例）——用 `match` 取回像
 `(list p 42)` 这样隐式转换为 `Sexpr` 的 `defstruct`/`defenum`（第 3 章）实例的语法：
 
 - `(TypeName sub-pattern...)` —— 把**类型名**放在开头的字段拆解（只用于 struct，`defstruct` 总是只有一个变体，所以用类型名而不是
@@ -905,7 +908,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
   `(the point p)` 之后 `(setf p::x 9)`，也会反映到列表中的原实例。
 
 **`Option<Sexpr>` 的模式**：S 表达式数据的类型不是 `Sexpr` 而是 `Option<Sexpr>`，空列表不是 `Sexpr` 的变体，而是 `Option` 的
-`none`。因此 `match` `Option<Sexpr>` 时，`Sexpr` 的 16 种变体和 `none` 可以**平铺在同一组分支中**（不需要剥去 `Option` 的外层
+`none`。因此 `match` `Option<Sexpr>` 时，`Sexpr` 的 18 种变体和 `none` 可以**平铺在同一组分支中**（不需要剥去 `Option` 的外层
 `match`）：
 
 ```lisp
@@ -918,7 +921,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
     (_          9)))
 ```
 
-穷尽性也在同一个平铺的全集——`Sexpr` 的 16 种变体加上 `none` 共 17 个——中检查。忘写 `(none)` 时，只要没有 `_` 就是错误。也可以写
+穷尽性也在同一个平铺的全集——`Sexpr` 的 18 种变体加上 `none` 共 19 个——中检查。忘写 `(none)` 时，只要没有 `_` 就是错误。也可以写
 `(some x)`，绑定"非空的某物"。
 
 这个语法糖**恰好**只适用于 `Option<Sexpr>`。对 `Option<Option<Sexpr>>`，无法确定 `(int n)` 剥去的是哪一层，所以照常写两层 `match`。
@@ -1014,9 +1017,9 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 关键字也正是与简单循环的分界。例外是分隔变量和值的 `=`，它的位置是唯一的，所以裸写和关键字（`:=`）都能读取。
 
 ```lisp
-(loop :for i :from 1 :to 3 :collect i)              ; #<vector<int> 1 2 3>
+(loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #<vector<int> 1 2 4 8>
+(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 

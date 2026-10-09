@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Çiftler, S-İfadeler ve Diziler
 
 Jenerik çift `cons-cell`, S-ifade verisi `Sexpr`, semboller, `Iter` üzerine yazılmış dizi fonksiyonları ve
@@ -24,8 +24,12 @@ döndürür.
 
 ## 2. S-ifade verisi `Sexpr`
 
-`read`'in döndürdüğü `Sexpr` veri türünün 16 varyantı vardır:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path`.
+`read`'in döndürdüğü `Sexpr` veri türünün 18 varyantı vardır:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+`vector` ve `array`, `#(..)` ve `#nA(..)` olarak yazılmış verilerdir ([Sözdizimi
+Başvurusu](../syntax.md#1-sözcüksel-öğeler)); sırasıyla bir `Vector<Option<Sexpr>>` ve bir
+`Array<Option<Sexpr>>` tutarlar: `(vector v)`'nin bağladığı `v` üzerinde `len`, `get` ve diğerleri
+doğrudan çalışır.
 S-ifade hücreleri, 1. bölümün genel `cons`/`car`/`cdr`'siyle değil, `sexpr-*` fonksiyonlarıyla ele alınır.
 Esas olarak `defmacro` gövdelerinde formları oluşturmak ve ayrıştırmak için kullanılırlar.
 
@@ -37,7 +41,7 @@ Esas olarak `defmacro` gövdelerinde formları oluşturmak ve ayrıştırmak iç
 - `Sexpr`, bir `Option<Sexpr>` beklenen yerde örtük olarak genişler (çalışma zamanı dönüşümü olmadan).
   Ters yön, yani bir `Option<Sexpr>`'i `Sexpr` olarak kullanmak, "bu boş liste değildir" iddiasında
   bulunur; bu yüzden `match` ya da `unwrap` ile açıkça belirtilmelidir
-- `match` içinde `Sexpr`'in 16 varyantı ve `none` **aynı kol listesinde düz olarak** yazılabilir
+- `match` içinde `Sexpr`'in 18 varyantı ve `none` **aynı kol listesinde düz olarak** yazılabilir
   ([Sözdizimi Başvurusu](../syntax.md#43-match--örüntü-eşleme))
 
 | Ad | Biçim | Tür | Açıklama |

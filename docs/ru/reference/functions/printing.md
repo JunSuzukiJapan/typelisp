@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Печать
 
 `print`/`println`/`format`, функции печати с одним аргументом, красивая печать, `print-object` и переменные,
@@ -224,7 +224,7 @@ REPL показывает результат, она использует то �
 
 | Тип | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | То же (элементы через `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | То же |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (число — внутренний порядковый номер) | То же |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -330,7 +330,7 @@ CL использует `nil` для «без ограничения», но в 
 | `*print-readably*` | `bool` | `false` | Если истинно, печатает в форме, которую можно прочитать обратно. Принудительно включает экранирование и отключает усечения `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Число строк, которое может занять красивая печать. Излишек отрезается, с `..` в конце, как в CL. 0 означает без ограничения. Отрицательное значение — ошибка печати |
 | `*print-escape*` | `bool` | `true` | Выполняют ли `write`/`write-to-string` `prin1` или `princ`. **Читают её только эти две** |
-| `*print-array*` | `bool` | `true` | Показывает ли `Array<T>` своё содержимое. Если истинно — синтаксис массивов CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); если ложно — только форма `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Показывают ли `Vector<T>` и `Array<T>` своё содержимое. Если истина — синтаксис массивов CL (`#(1 2 3)` / `#2A((1 2) (3 4))`); если ложь — только тип и форма, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

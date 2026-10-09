@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Utskrift
 
 `print`/`println`/`format`, utskriftsfunktionerna med ett argument, den snygga skrivaren (pretty printer),
@@ -227,7 +227,7 @@ SBCL. När REPL visar ett resultat använder den samma representation som `~s`.
 
 | Typ | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | Samma (element med `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Samma |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (numret är ett internt serienummer) | Samma |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -335,7 +335,7 @@ utdata för vardaglig kod.
 | `*print-readably*` | `bool` | `false` | Om sant skrivs det ut i en form som kan läsas tillbaka. Det tvingar fram escape-tecken och stänger av avskärningarna i `*print-level*`/`*print-length*` |
 | `*print-lines*` | `int` | `0` | Antalet rader den snygga skrivaren får använda. Överskottet kapas, med `..` på slutet som i CL. 0 betyder obegränsat. Ett negativt värde är ett utskriftsfel |
 | `*print-escape*` | `bool` | `true` | Om `write`/`write-to-string` gör `prin1` eller `princ`. **Bara de två läser den** |
-| `*print-array*` | `bool` | `true` | Om `Array<T>` visar sitt innehåll. Om sant CL:s arraysyntax (`#(1 2 3)` / `#2A((1 2) (3 4))`); om falskt bara formen, `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | Om `Vector<T>` och `Array<T>` visar sitt innehåll. Om sant, CL:s arraysyntax (`#(1 2 3)` / `#2A((1 2) (3 4))`); om falskt, bara typ och form, `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

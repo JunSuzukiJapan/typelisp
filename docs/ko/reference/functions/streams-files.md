@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 스트림과 파일
 
 스트림의 트레이트와 메서드, 구체 스트림 타입, 파일 조작, 경로명. 네트워크 소켓도 스트림이며 [네트워크](network.md)에서
@@ -191,7 +191,7 @@ CL은 `(open name :element-type '(unsigned-byte 8))`처럼 **호출**에서 요�
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")   마지막 점에서 나눈다
   (pathname-type p)        ; => (some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"

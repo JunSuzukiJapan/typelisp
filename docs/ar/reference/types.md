@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # الأنواع
 
 الأنواع الموجودة في typelisp، والسمات القياسية التي ينفّذها كل نوع. وطريقة كتابة الأنواع في
@@ -44,7 +44,7 @@
 
 | النوع | المحتوى | التفاصيل |
 |---|---|---|
-| `Sexpr` | تعبير رمزي غير فارغ. 16 متغايرًا: `int` و`i8` إلى `u32` و`f32` و`f64` و`char` و`bool` و`sym` و`str` و`cons` و`ratio` و`path` | [بيانات التعبيرات الرمزية](functions/sequences.md#2-بيانات-التعبيرات-الرمزية-sexpr) |
+| `Sexpr` | تعبير رمزي غير فارغ. 18 متغايرًا: `int` و`i8` إلى `u32` و`f32` و`f64` و`char` و`bool` و`sym` و`str` و`cons` و`ratio` و`path` و`vector` و`array` | [بيانات التعبيرات الرمزية](functions/sequences.md#2-بيانات-التعبيرات-الرمزية-sexpr) |
 | `Option<Sexpr>` | بيانات تعبيرات رمزية عمومًا. والقائمة الفارغة `()` هي `none` | مثل ما سبق |
 
 ## 4. الأنواع في المكتبة القياسية

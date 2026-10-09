@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -83,7 +83,7 @@ Från kommandoraden används `typl -c` (`typl --compile` är detsamma).
 $ typl -c hello.typl            # gör hello
 $ typl -c hello.typl -o fib     # döper den körbara filen till fib
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 
@@ -98,7 +98,7 @@ $ typl
 typl> (compile-file "hello.typl" "hello")
 typl> :quit
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 

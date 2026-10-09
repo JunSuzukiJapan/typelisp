@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # I/O su file, stream e rete
 
 Questa guida mostra le basi della lettura e scrittura di file, dei pathname e della comunicazione
@@ -29,7 +29,7 @@ Le funzioni più semplici trattano l'intero file in un colpo solo.
 ```lisp
 (unwrap (write-file-string "copy.txt" "abc\n"))
 (read-file-string "copy.txt")      ; => (ok "abc\n")
-(read-file-lines "copy.txt")       ; => (ok #<vector<string> "abc">)
+(read-file-lines "copy.txt")       ; => (ok #("abc"))
 ```
 
 ## 3. Leggere e scrivere con gli stream
@@ -105,7 +105,7 @@ Le funzioni che accettano un nome di file accettano una stringa oppure un `pathn
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")
   (pathname-type p))       ; => (some "gz")
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 字符串、字符与集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`。
@@ -64,6 +64,7 @@
 ## 3. `Vector<T>`
 
 可变长数组。
+值可以写成 `#(1 2 3)`（[语法参考](../syntax.md#1-词法元素)。元素类型由上下文或第一个元素决定，每次求值都会创建新的向量）。打印出来也是 `#(1 2 3)`。
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
@@ -130,6 +131,7 @@
 ## 5. `Array<T>`（多维数组）
 
 标准库中的 `defstruct`。不是内置类型，所以 `defstruct` 能做的事全都可以做。
+值可以写成 `#2A((1 2) (3 4))`（[语法参考](../syntax.md#1-词法元素)）。
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|

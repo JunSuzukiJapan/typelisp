@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 출력
 
 `print`/`println`/`format`, 인수 하나의 출력 함수, 프리티 프린터, `print-object`, 출력을 제어하는 변수. 서식 지시자 목록은
@@ -207,7 +207,7 @@ CL에서 `pprint-exit-if-list-exhausted`는 `pprint-logical-block`에서의 비�
 
 | 타입 | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | 같다(요소는 `~a`) |
+| `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | 같다 |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>`(수는 내부 일련번호) | 같다 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -305,7 +305,7 @@ CL은 "무제한"에 `nil`을 쓰지만 이 언어에는 `nil`이 없으므로 `
 | `*print-readably*` | `bool` | `false` | 참이면 다시 읽을 수 있는 형태로 출력한다. 이스케이프를 강제하고 `*print-level*`/`*print-length*`의 생략을 끈다 |
 | `*print-lines*` | `int` | `0` | 프리티 프린터가 쓸 수 있는 줄 수. 넘는 부분은 잘리고 CL처럼 끝에 `..`가 붙는다. 0은 무제한. 음수는 출력 오류 |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string`이 `prin1`을 할지 `princ`를 할지. **이 둘만 읽는다** |
-| `*print-array*` | `bool` | `true` | `Array<T>`가 내용을 보일지. 참이면 CL의 배열 구문(`#(1 2 3)` / `#2A((1 2) (3 4))`), 거짓이면 모양만 `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>`와 `Array<T>`가 내용을 보여 줄지. 참이면 CL의 배열 구문(`#(1 2 3)` / `#2A((1 2) (3 4))`), 거짓이면 타입과 모양만 `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

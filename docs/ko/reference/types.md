@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # 타입 목록
 
 typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타입 쓰는 법은
@@ -43,7 +43,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 타입 | 내용 | 자세히 |
 |---|---|---|
-| `Sexpr` | 비어 있지 않은 S 식. 16개 변형: `int`, `i8`~`u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path` | [S 식 데이터](functions/sequences.md#2-s-식-데이터-sexpr) |
+| `Sexpr` | 비어 있지 않은 S 식. 18개 변형: `int`, `i8`~`u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S 식 데이터](functions/sequences.md#2-s-식-데이터-sexpr) |
 | `Option<Sexpr>` | S 식 데이터 전반. 빈 리스트 `()`는 `none` | 위와 같음 |
 
 ## 4. 표준 라이브러리의 타입

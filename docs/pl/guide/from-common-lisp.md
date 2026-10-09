@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
 # Dla programistów Common Lisp
 
 typelisp dziedziczy składnię Common Lisp (CL) i wiele jego nazw funkcji, ale jest językiem
@@ -108,14 +108,18 @@ to `none`). `(list 1 2 3)` i `'(a b c)` mają ten typ. Dane w postaci S-wyraże�
 `car` / `cdr` to akcesory pary `cons-cell<A,B>` tworzonej za pomocą `cons`. Nie można ich używać na
 listach S-wyrażeń.
 
-Tworzenie `Vector`:
+`Vector` zapisuje się za pomocą `#(..)`, tak jak wektor w CL, i jest też drukowany jako `#(..)`:
 
 ```lisp
-(let ((v (the Vector<int> (Vector::new))))
-  (push v 1)
-  (push v 2)
-  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #<vector<int> 10 20>
+(let ((v #(1 2)))
+  (push v 3)
+  (map (iter v) (lambda ((x int)) int (* x 10))))   ; => #(10 20 30)
 ```
+
+Są trzy różnice względem CL. Wszystkie elementy muszą mieć ten sam typ (`#(1 "a")` jest błędem
+typu). Każde obliczenie tworzy nowy wektor, więc jego zmiana nie wpływa na następne obliczenie (w CL
+wynik modyfikacji literału jest niezdefiniowany). Pusty `#()` wymaga podania typu, jak w
+`(the Vector<int> #())`. Tablicę wielowymiarową zapisuje się jako `#2A((1 2) (3 4))`, tak jak w CL.
 
 Funkcje na sekwencjach, takie jak `map`, `filter`, `sort` i `find`, działają na wartościach implementujących
 trait `Iter`. Przekaż `Vector` po zamianie go na iterator za pomocą `(iter v)`.
