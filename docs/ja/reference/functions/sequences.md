@@ -21,8 +21,11 @@
 
 ## 2. S 式データ `Sexpr`
 
-`read` が返すデータ型 `Sexpr` は 16 の変種を持つ:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path`。
+`read` が返すデータ型 `Sexpr` は 18 の変種を持つ:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`。
+`vector` と `array` は `#(..)` と `#nA(..)` で書いたデータ（[構文リファレンス](../syntax.md#1-字句要素)）で、
+中身はそれぞれ `Vector<Option<Sexpr>>` と `Array<Option<Sexpr>>`——`(vector v)` で束縛した `v` には
+`len` や `get` がそのまま使える。
 S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `sexpr-*` 関数である。主に
 `defmacro` の本体でフォームを組み立て・分解するときに使う。
 
@@ -34,7 +37,7 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 - `Sexpr` は `Option<Sexpr>` が期待される位置へ暗黙に広がる（実行時の変換は無い）。
   逆向き——`Option<Sexpr>` を `Sexpr` として使う——は「空リストではない」の主張なので、
   `match` か `unwrap` で明示的に示す必要がある
-- `match` では `Sexpr` の 16 変種と `none` を**同じ腕の並びに平らに**書ける
+- `match` では `Sexpr` の 18 変種と `none` を**同じ腕の並びに平らに**書ける
   （[構文リファレンス](../syntax.md#43-match--パターンマッチ)）
 
 | 名前 | 形式 | 型 | 説明 |

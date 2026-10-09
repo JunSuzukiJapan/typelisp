@@ -220,7 +220,7 @@ pretty printer とも合成される（4 章）。`*print-pretty*` が真なら�
 
 | 型 | `~s` | `~a` |
 |---|---|---|
-| `Vector<T>` | `#<vector<int> 1 2 3>` | 同左（要素は `~a` で） |
+| `Vector<T>` | `#(1 2 3)`、`#("a" "b")` | `#(1 2 3)`、`#(a b)` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | 同左 |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>`（数字は処理系内の番号） | 同左 |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
@@ -324,7 +324,7 @@ CL は「無制限」を `nil` で表すが、この言語に `nil` は無いの
 | `*print-readably*` | `bool` | `false` | 真なら読み戻せる形で印字する。エスケープを強制し、`*print-level*`/`*print-length*` の打ち切りを無効化する |
 | `*print-lines*` | `int` | `0` | pretty printer が使ってよい行数。超えた分は切り、末尾に CL と同じ `..` を付ける。0 は無制限。負の値は印字エラー |
 | `*print-escape*` | `bool` | `true` | `write`/`write-to-string` が `prin1` と `princ` のどちらをするか。**これを読むのはその 2 つだけ** |
-| `*print-array*` | `bool` | `true` | `Array<T>` が中身を見せるか。真なら CL の配列構文（`#(1 2 3)` / `#2A((1 2) (3 4))`）、偽なら形だけの `#<array 2x3>` |
+| `*print-array*` | `bool` | `true` | `Vector<T>` と `Array<T>` が中身を見せるか。真なら CL の配列構文（`#(1 2 3)` / `#2A((1 2) (3 4))`）、偽なら型と形だけの `#<vector<int> 3>` / `#<array 2x3>` |
 
 ```lisp
 (dlet ((*print-base* 16)) (format false "~a" 255))                    ; => "ff"

@@ -196,7 +196,7 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
 
 ```lisp
 (let ((p (parse-namestring "/var/log/app.tar.gz")))
-  (pathname-directory p)   ; => #<vector<string> "var" "log">
+  (pathname-directory p)   ; => #("var" "log")
   (pathname-name p)        ; => (some "app.tar")   最後のドットで切る
   (pathname-type p)        ; => (some "gz")
   (namestring p))          ; => "/var/log/app.tar.gz"

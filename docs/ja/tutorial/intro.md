@@ -222,7 +222,7 @@ typl> (sum-to 100)
 
 ```
 typl> (loop :for i :from 1 :to 5 :collect (* i i))
-#<vector<int> 1 4 9 16 25>
+#(1 4 9 16 25)
 ```
 
 ## 7. リストと Vector
@@ -237,7 +237,7 @@ typl> (loop :for i :from 1 :to 5 :collect (* i i))
   (push v 1)
   (push v 2)
   (println "~a" v))
-;; #<vector<int> 3 1 2> と表示される
+;; #(3 1 2) と表示される
 ```
 
 - `(Vector::new)` だけでは要素の型が決まらないので、`(the Vector<int> ...)` で型を指定します。
@@ -263,9 +263,9 @@ typl> ((lambda ((x int)) int (* x 2)) 21)
 (push v 1)
 (push v 2)
 
-(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #<vector<int> 30 10 20>
-(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #<vector<int> 3 2>
-(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #<vector<int> 1 2 3>
+(map (iter v) (lambda ((x int)) int (* x 10)))                 ; => #(30 10 20)
+(filter (iter v) (lambda ((x int)) bool (> x 1)))              ; => #(3 2)
+(sort (iter v) (lambda ((a int) (b int)) bool (< a b)))        ; => #(1 2 3)
 (foldl (iter v) (lambda ((acc int) (x int)) int (+ acc x)) 0)  ; => 6
 ```
 

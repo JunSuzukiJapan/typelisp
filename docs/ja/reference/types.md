@@ -42,7 +42,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 
 | 型 | 内容 | 詳細 |
 |---|---|---|
-| `Sexpr` | 空でない S 式。`int`・`i8`〜`u32`・`f32`・`f64`・`char`・`bool`・`sym`・`str`・`cons`・`ratio`・`path` の 16 変種 | [S 式データ](functions/sequences.md#2-s-式データ-sexpr) |
+| `Sexpr` | 空でない S 式。`int`・`i8`〜`u32`・`f32`・`f64`・`char`・`bool`・`sym`・`str`・`cons`・`ratio`・`path`・`vector`・`array` の 18 変種 | [S 式データ](functions/sequences.md#2-s-式データ-sexpr) |
 | `Option<Sexpr>` | S 式データ一般。空リスト `()` は `none` | 同上 |
 
 ## 4. 標準ライブラリの型

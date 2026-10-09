@@ -82,7 +82,7 @@ macOS ではリンクに Xcode Command Line Tools を使います。
 $ typl -c hello.typl            # hello ができる
 $ typl -c hello.typl -o fib     # 実行ファイルの名前を fib にする
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 
@@ -97,7 +97,7 @@ $ typl
 typl> (compile-file "hello.typl" "hello")
 typl> :quit
 $ ./hello a b
-args: #<vector<string> ./hello a b>
+args: #(./hello a b)
 fib(25) = 75025
 ```
 
