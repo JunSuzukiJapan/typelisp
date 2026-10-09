@@ -501,8 +501,12 @@ fn is_ws(c: char) -> bool {
 /// usable mid-token. `read_datum`'s dispatch on the *first* character of a
 /// fresh datum already recognizes a datum-initial `,` as unquote regardless
 /// of whether it's a delimiter; nothing relies on it being one.
-fn is_delimiter(c: char) -> bool {
-    is_ws(c) || matches!(c, '(' | ')' | '"' | '\'' | '`' | ';')
+///
+/// `]` and `}` end a token so that `#[test]` and `#{a b}` close where they
+/// look like they close. `[` and `{` do not: on their own they are left to
+/// the programmer's readtable, as CL leaves them.
+pub fn is_delimiter(c: char) -> bool {
+    is_ws(c) || matches!(c, '(' | ')' | ']' | '}' | '"' | '\'' | '`' | ';')
 }
 
 fn is_delim_or_eof(c: Option<char>) -> bool {
@@ -694,6 +698,9 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
         None => Err(Error::ReadError("unexpected end of input".to_string())),
         Some('(') => read_list(cur, heap, ctx),
         Some(')') => Err(Error::UnmatchedParen),
+        // Nothing the reader knows opens with these, so meeting one where a
+        // datum starts means its opener is missing (or it is a typo for `)`).
+        Some(c @ (']' | '}')) => Err(Error::ReadError(format!("unexpected `{}`: nothing open for it to close", c))),
         Some('\'') => read_wrapped(cur, heap, ctx, "quote"),
         Some('`') => read_wrapped(cur, heap, ctx, "quasiquote"),
         Some(',') => {
@@ -1255,7 +1262,7 @@ fn extend_angle_token(cur: &mut Cursor, tok: &mut String, mut depth: i32) {
                 cur.next();
                 cur.next();
             }
-            None | Some('\n') | Some('\r') | Some('(') | Some(')') | Some('"') | Some('\'') | Some('`') | Some(';') => {
+            None | Some('\n') | Some('\r') | Some('(') | Some(')') | Some(']') | Some('}') | Some('"') | Some('\'') | Some('`') | Some(';') => {
                 cur.reset(mark);
                 tok.truncate(base_len);
                 return;

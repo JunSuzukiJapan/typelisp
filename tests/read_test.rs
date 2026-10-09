@@ -603,3 +603,39 @@ fn non_keyword_feature_expression_is_a_read_error() {
     let r = Reader::new();
     assert!(r.read_all(&mut h, "#+not-a-keyword (form)").is_err());
 }
+
+// ---- `]` and `}` ---------------------------------------------------------
+
+/// `]` and `}` end a token, so `#[test]` and `#{a b}` close where they look
+/// like they close. Before, `test]` read as one symbol.
+#[test]
+fn a_closing_bracket_or_brace_ends_a_token() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    let (v, end) = r.read_from(&mut h, "abc]def", 0, true).expect("read failed");
+    assert_eq!(show(&h, v), "abc");
+    assert_eq!(end, 3, "the `]` is left for whoever opened it");
+    let (v, end) = r.read_from(&mut h, "abc}def", 0, true).expect("read failed");
+    assert_eq!(show(&h, v), "abc");
+    assert_eq!(end, 3);
+}
+
+/// The openers stay ordinary characters: CL leaves `[` and `{` to the
+/// programmer's readtable, and so does this reader.
+#[test]
+fn an_opening_bracket_or_brace_stays_part_of_a_symbol() {
+    roundtrip("a[b", "a[b");
+    roundtrip("a{b", "a{b");
+}
+
+/// Nothing the reader knows opens with `]`/`}`, so one where a datum starts
+/// is a read error rather than a symbol.
+#[test]
+fn a_stray_closing_bracket_or_brace_is_a_read_error() {
+    let mut h = Heap::with_capacity(4096);
+    let r = Reader::new();
+    for src in ["]", "}", "(a ])", "(a })"] {
+        let e = r.read(&mut h, src).expect_err(src);
+        assert!(e.to_string().contains("nothing open for it to close"), "{}: {}", src, e);
+    }
+}

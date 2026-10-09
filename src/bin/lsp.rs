@@ -720,15 +720,14 @@ fn char_offset(chars: &[char], pos: Position) -> usize {
     offset.min(chars.len())
 }
 
-/// Same character class `read::reader::is_delimiter` uses (whitespace, list
-/// parens, string/quote/quasiquote markers, `;`), just inverted and scanning
-/// backward: the start of the identifier ending at `offset`, i.e. the first
-/// index such that every char in `chars[start..offset]` is a non-delimiter.
+/// The reader's own `is_delimiter`, scanning backward: the start of the
+/// identifier ending at `offset`, i.e. the first index such that every char
+/// in `chars[start..offset]` is a non-delimiter.
 fn prefix_start(chars: &[char], offset: usize) -> usize {
     let mut i = offset;
     while i > 0 {
         let c = chars[i - 1];
-        if c.is_whitespace() || matches!(c, '(' | ')' | '"' | '\'' | '`' | ';') {
+        if typelisp_read::is_delimiter(c) {
             break;
         }
         i -= 1;
