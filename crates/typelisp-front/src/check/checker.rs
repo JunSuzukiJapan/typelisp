@@ -701,7 +701,7 @@ const MATCH_SCRUT: &str = "$match-scrut";
 const OPTION_SOME: usize = 0;
 const OPTION_NONE: usize = 1;
 
-/// `Sexpr`'s variant 0 — the old `nil`.
+/// `Sexpr`'s `nil` variant — the old empty list.
 ///
 /// The variant is still *in* `sexpr_def`, and deliberately so: its number is
 /// burned into the island's IR and into compiled code (`crate::sexpr_variant`
@@ -1847,11 +1847,11 @@ impl Checker {
                 s.push_root(inner);
                 core::tagged(&mut s, "pat-some", &[repr, inner])?
             }
-            // The empty list is its own pattern node, not `Sexpr`'s variant 0.
+            // The empty list is its own pattern node, not `Sexpr`'s `nil` variant.
             // Today the two are the same test; they stop being the same when
             // `nil` leaves `Sexpr` and the empty list becomes `Option<Sexpr>`'s
             // `none` (docs/dev/null-elimination-plan.md §3.2.1) — at which
-            // point there is no variant 0 to name, but there is still an empty
+            // point there is no `nil` variant to name, but there is still an empty
             // list to test for. Splitting the node now is what lets that
             // change touch only the checker's choice of node, not the two
             // consumers that compile one.
@@ -5161,7 +5161,7 @@ impl Checker {
     /// `Option<T>` itself; `payload` is `some`'s already-checked field form,
     /// or `None` for `none`. A niched instantiation (`Repr::Niche`) gets
     /// `(some-of REPR FORM)` — the field word, no box — or the empty-list
-    /// construct (`sexpr`'s variant 0, which the core IR still spells that
+    /// construct (`sexpr`'s `nil` variant, which the core IR still spells that
     /// way; see the null-elimination plan's "変種番号は詰めない"); a boxed one
     /// gets the ordinary `construct`. Every site that builds an `Option`
     /// (`(some x)`, an omitted `&optional`/`&key`, `try-as`, `(as :dyn ..)`'s
@@ -14407,7 +14407,7 @@ impl Checker {
         let sexpr_ty = option_of_sexpr();
         let (adt, cons_idx) = self.sexpr_cons_ctor();
         let cons_tys = self.variant_field_tys(&adt, cons_idx, &[]);
-        // The empty list, built straight from `Sexpr`'s reserved variant 0:
+        // The empty list, built straight from `Sexpr`'s reserved `nil` variant:
         // `resolve_ctor("nil")` cannot answer any more (`nil` is gone from
         // the surface — see `SEXPR_RESERVED_VARIANT`), and the checker is
         // exactly the caller that is still allowed to name it.
@@ -15657,7 +15657,7 @@ impl Checker {
         // language rather than a second one just for `:dyn`. Correctly
         // non-exhaustive, too: the set of implementing types is open, so a
         // catch-all arm is required — which falls out of `Sexpr`'s own
-        // sixteen-variant exhaustiveness rule with nothing added.
+        // `Sexpr`-variant exhaustiveness rule with nothing added.
         if let Type::Dyn(..) = scrut.ty {
             let form = forms::dyn_value_form(heap, scrut.form)?;
             scrut = Checked::new(forms::rooted(heap, form), sexpr_ty());
@@ -15676,31 +15676,30 @@ impl Checker {
         // navigated only through the `sexpr-*` accessor island), but that
         // stance was reversed in preparation for a user-facing `(read)`:
         // read data's type is only known at runtime, and `match` — with type
-        // refinement and exhaustiveness over the sixteen `Sexpr` variants — is
+        // refinement and exhaustiveness over the `Sexpr` variants — is
         // the language's natural eliminator for it. The runtime machinery
         // (`match_sexpr_ctor` in the interpreter, `compile-sexpr-tag-test`/
         // `compile-sexpr-field` in `compiler.rs`) predates the fence and
         // serves both eras unchanged. `Value::Path` (an `a::b` token) has its
-        // own `path` variant (added 2026-07-19, `registry::sexpr_def`'s
-        // eleventh) — `(path s)` binds `s : Sexpr`, a fresh proper list of
+        // own `path` variant (added 2026-07-19) — `(path s)` binds `s : Sexpr`, a fresh proper list of
         // the segments as `sym`s (the only `match_sexpr_ctor` arm that
         // allocates — see its doc comment for the GC-rooting that needs).
         // Both `sym`'s and `path`'s payloads compile too (`compile-sexpr-
-        // field`/`compile-construct-sexpr` variants `5`/`10` in
+        // field`/`compile-construct-sexpr`'s `sym`/`path` arms in
         // `compiler.rs`, plus the new `rt_path_to_list`/`rt_list_to_path`
         // runtime shims for `path`'s list building).
-        // `Sexpr`'s reserved variant 0 is not writable, so it cannot be
+        // `Sexpr`'s reserved `nil` variant is not writable, so it cannot be
         // covered and must not be demanded — see `SEXPR_RESERVED_VARIANT`.
         // A `match` whose scrutinee is `Option<Sexpr>` writes the `Sexpr`
         // shapes and `none` in one flat arm list (the niche's match sugar,
         // `check_ctor_pattern`), so its coverage universe is neither
-        // `option`'s two variants nor `sexpr`'s sixteen but their union.
+        // `option`'s two variants nor `sexpr`'s own but their union.
         //
-        // The two index without colliding because `Sexpr`'s variant 0 is the
-        // slot the empty list vacated (`SEXPR_RESERVED_VARIANT`) and `none`
-        // is precisely what moved out of it: `none` takes 0, the sixteen writable
-        // shapes keep 1..=16, and the count is `sexpr`'s own `variants.len()`
-        // with nothing subtracted.
+        // The two index without colliding because `Sexpr`'s `nil` variant is
+        // the slot the empty list vacated (`SEXPR_RESERVED_VARIANT`) and `none`
+        // is precisely what moved out of it: `none` takes that index, every
+        // other `Sexpr` variant keeps its own, and the count is `sexpr`'s own
+        // `variants.len()` with nothing subtracted.
         let sexpr_sugar = is_option_of_sexpr(&scrut.ty);
         let sexpr_variants =
             || self.reg.type_def(&Path::root("sexpr")).expect("sexpr is always registered").variants.len();

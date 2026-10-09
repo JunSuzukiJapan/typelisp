@@ -1854,7 +1854,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         Value::Empty => sexpr_construct(heap, SEXPR_NIL, &[]),
         // An `int` node's payload is the *tagged* word: the `(int HI LO)`
         // literal (a fixnum, `compile-int-literal`), never the raw
-        // `int-any-width` one — variant 1 passes its argument through.
+        // `int-any-width` one — the `int` variant passes its argument through.
         Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, "int", &[half((n as u64) >> 32), half(n as u64)])),
         Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, "bool", &[Value::Bool(b)])),
         Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, "char", &[Value::Char(c)])),

@@ -573,7 +573,7 @@ impl Repr {
     /// different things by the same *kind of* value. A `u8` **field of a
     /// struct** is `1`, a raw word, because the `defstruct` already wrote the
     /// width down and nothing has to be carried alongside the value. A `u8`
-    /// **inside a `Sexpr`** is variant `14`, a `BoxedObj::Narrow`, because
+    /// **inside a `Sexpr`** is the `u8` variant, a `BoxedObj::Narrow`, because
     /// there the width is written down nowhere else. Same type, same machine
     /// word, two encodings — decided by where the value is going, which is
     /// what this number says.
