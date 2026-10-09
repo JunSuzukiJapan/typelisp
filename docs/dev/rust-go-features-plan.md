@@ -54,6 +54,20 @@ Common Lisp との差はほぼ埋まった（[cl-missing-classes-and-methods.md]
 
 ### Phase 1: リーダーの土台と `Sexpr` の vector 変種（項目 8）
 
+**2026-10-10 完了**（ブランチ `feat/vector-literals`）。計画から変わった点・計画に無かった点:
+
+- 印字は `*print-array*` に従う。真なら `#(1 2 3)`、偽なら `#<vector<int> 3>`。印字器が読む
+  ようになったので、その `defvar` を prelude の先頭（ほかの `*print-*` と同じ場所）へ移した。
+- `read` で読んだ配列（`Array<Option<Sexpr>>`）は、どのプログラムの型にも現れないので prelude の
+  `print-object` が作られない。Sexpr のデータとして組み込みの印字器が同じ書式で印字する。
+- 配列の箱の組み立て（prelude の `defstruct Array` のフィールド順）はリーダーの
+  `alloc_sexpr_array` の 1 か所。ソースのリテラルは `%internal::array-from-row-major` で作るので、
+  要素 0 個の配列も文脈の型で作れる。
+- コンパイル済みコードが quote されたベクタ・配列を組み立て直すランタイム関数を 2 つ足したので、
+  ABI 版は 0.2.1 になった。
+- Sexpr を `_` 無しで網羅する `match` は、`vector`/`array` の腕を足す必要がある（利用者に見える
+  変化。リリースノートに書く）。
+
 1. `]` と `}` を区切り文字にする（`crates/typelisp-read/src/reader.rs` の `is_delimiter`）。
 2. `#(..)` と `#nA(..)` を読む（`read_hash`）。利用者が登録した `#(` は今までどおり組み込みより優先される。
 3. `Sexpr` に vector と配列の変種を、`sexpr_variant.rs` の**末尾に**足す。既存の番号は動かさない。
