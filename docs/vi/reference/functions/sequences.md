@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # Cặp, S-expression và dãy
 
 Cặp generic `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, các hàm trên dãy được viết dựa trên `Iter`,
@@ -111,6 +111,7 @@ Các hàm nhận một vị từ (tương ứng với họ `-if` của CL):
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Có phần tử nào thỏa vị từ không (tương ứng với `some` của CL; một cái tên không trùng với hàm khởi tạo `Some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Gấp trái |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Gấp phải |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Gom tất cả các phần tử còn lại. Dùng để biến kết quả của một hàm `lazy` bên dưới thành `Vector` |
 
 Đánh chỉ số, độ dài và cắt lát:
 
@@ -141,6 +142,49 @@ Các hàm yêu cầu ràng buộc `Eq` / `Ord` (chúng so sánh qua một trait 
 
 Các hàm này và nhiều hàm của chương 5 cũng nhận các đối số keyword của CL `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (chương 6).
+
+### Iterator lười (module `lazy`)
+
+Các hàm của module `lazy` không tạo `Vector` mà **trả về một iterator**. Một phần tử chỉ được tính
+khi phần tử kế tiếp được yêu cầu, nên cả iterator không có điểm kết thúc (`iterate`, `repeat`) cũng
+dùng được, miễn là có `take` hoặc `take-while` ở phía sau dừng nó lại. Mọi kết quả đều cài đặt
+`Iter`, nên các hàm `lazy` lồng vào nhau được, và các hàm trong các bảng ở trên nhận chúng nguyên
+như vậy. `collect` biến nó thành một `Vector`.
+
+| Tên | Dạng | Kiểu | Mô tả |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | Áp dụng `f` lên từng phần tử |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Chỉ các phần tử thỏa điều kiện |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | `n` phần tử đầu |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Cho đến ngay trước phần tử đầu tiên không thỏa điều kiện |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | Bỏ qua `n` phần tử đầu |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | Cặp gồm vị trí, đếm từ 0, và phần tử |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | Cặp lấy mỗi bên một phần tử. Kết thúc theo bên ngắn hơn |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | Các phần tử của `a`, rồi đến của `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | Biến từng phần tử thành một iterator bằng `f` rồi nối chúng theo thứ tự |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... không có điểm kết thúc |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | Lặp lại `x` không có điểm kết thúc |
+
+`Iter<U>` và những thứ tương tự trong bảng thực ra là các kiểu struct được đặt tên theo hàm với
+`-iter` thêm vào cuối (với `lazy::map` là `lazy::map-iter<I,A,U>`, trong đó `I` là kiểu của iterator
+nguồn). Chỉ cần viết kiểu ở những chỗ không có gì khác xác định được nó, như kiểu trả về của lambda
+truyền cho `lazy::flat-map`.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a và 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` là macro lần lượt truyền một giá trị làm đối số đầu tiên cho từng dạng tiếp theo ([Option và
+Result](option-result.md)).
 
 ## 5. Phần còn lại của các hàm trên dãy của CL
 

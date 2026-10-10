@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # Pares, expresiones S y secuencias
 
 El par genérico `cons-cell`, los datos de expresiones S `Sexpr`, los símbolos, las funciones de secuencia
@@ -113,6 +113,7 @@ Funciones que reciben un predicado (corresponden a la familia `-if` de CL):
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Si algún elemento cumple el predicado (corresponde al `some` de CL; un nombre que no choca con el constructor `Some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Plegado por la izquierda |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Plegado por la derecha |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Reúne todos los elementos restantes. Sirve para convertir en `Vector` el resultado de una función `lazy` de abajo |
 
 Índices, longitud y recortes:
 
@@ -143,6 +144,49 @@ Funciones que exigen una restricción `Eq` / `Ord` (comparan mediante un trait e
 
 Estas y muchas de las funciones del capítulo 5 también reciben los argumentos de palabra clave de CL `:key`
 / `:test` / `:test-not` / `:start` / `:end` / `:from-end` / `:count` (capítulo 6).
+
+### Iteradores perezosos (el módulo `lazy`)
+
+Las funciones del módulo `lazy` no construyen un `Vector`: **devuelven un iterador**. Cada elemento
+se calcula solo cuando se pide el siguiente, así que un iterador sin fin (`iterate`, `repeat`) se
+puede usar siempre que un `take` o `take-while` posterior lo detenga. Todos los resultados
+implementan `Iter`, de modo que las funciones `lazy` se anidan y las funciones de las tablas de
+arriba los aceptan tal cual. `collect` lo convierte en un `Vector`.
+
+| Nombre | Forma | Tipo | Descripción |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | Aplica `f` a cada elemento |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Solo los elementos que cumplen la condición |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | Los primeros `n` |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Hasta justo antes del primer elemento que no cumple la condición |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | Se salta los primeros `n` |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | Pares de la posición, contada desde 0, y el elemento |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | Pares tomando uno de cada lado. Termina con el más corto |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | Los elementos de `a` y después los de `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | Convierte cada elemento en un iterador con `f` y los une en orden |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... sin fin |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | Repite `x` sin fin |
+
+`Iter<U>` y similares en la tabla son en realidad tipos struct cuyo nombre es el de la función con
+`-iter` añadido (para `lazy::map`, `lazy::map-iter<I,A,U>`, donde `I` es el tipo del iterador de
+origen). El tipo solo se escribe donde nada más lo determina, como el tipo de retorno de la lambda
+que se pasa a `lazy::flat-map`.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a y 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` es la macro que pasa un valor como primer argumento de cada forma siguiente, por orden ([Option
+y Result](option-result.md)).
 
 ## 5. El resto de las funciones de secuencia de CL
 

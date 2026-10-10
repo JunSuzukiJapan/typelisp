@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # Pary, S-wyrażenia i sekwencje
 
 Generyczna para `cons-cell`, dane w postaci S-wyrażeń `Sexpr`, symbole, funkcje na sekwencjach napisane
@@ -112,6 +112,7 @@ Funkcje przyjmujące predykat (odpowiadające rodzinie `-if` z CL):
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Czy jakikolwiek element spełnia predykat (odpowiada `some` z CL; nazwa, która nie koliduje z konstruktorem `Some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Lewostronne złożenie |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Prawostronne złożenie |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Zbiera wszystkie pozostałe elementy. Służy do zamiany wyniku funkcji `lazy` poniżej na `Vector` |
 
 Indeksowanie, długość i wycinanie:
 
@@ -142,6 +143,49 @@ Funkcje wymagające ograniczenia `Eq` / `Ord` (porównują za pomocą traitu zam
 
 Te funkcje i wiele funkcji z rozdziału 5 przyjmują także argumenty kluczowe z CL: `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (rozdział 6).
+
+### Leniwe iteratory (moduł `lazy`)
+
+Funkcje modułu `lazy` nie budują `Vector`, **zwracają iterator**. Element jest obliczany dopiero
+wtedy, gdy zażąda się następnego, więc nawet iterator bez końca (`iterate`, `repeat`) da się użyć, o
+ile dalej zatrzyma go `take` lub `take-while`. Każdy wynik implementuje `Iter`, więc funkcje `lazy`
+można zagnieżdżać, a funkcje z tabel powyżej przyjmują je bez zmian. `collect` zamienia go na
+`Vector`.
+
+| Nazwa | Forma | Typ | Opis |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | Stosuje `f` do każdego elementu |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Tylko elementy spełniające warunek |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | Pierwsze `n` |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Aż do elementu tuż przed pierwszym, który nie spełnia warunku |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | Pomija pierwsze `n` |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | Pary pozycji liczonej od 0 i elementu |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | Pary złożone z elementu z każdej strony. Kończy się wraz z krótszą |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | Elementy `a`, a potem `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | Zamienia każdy element w iterator za pomocą `f` i łączy je po kolei |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... bez końca |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | Powtarza `x` bez końca |
+
+`Iter<U>` i podobne w tabeli to w rzeczywistości typy struktur nazwane jak funkcja z dopisanym
+`-iter` (dla `lazy::map` jest to `lazy::map-iter<I,A,U>`, gdzie `I` to typ iteratora źródłowego).
+Typ pisze się tylko tam, gdzie nic innego go nie ustala, np. jako typ zwracany lambdy przekazywanej
+do `lazy::flat-map`.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a i 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` to makro, które przekazuje wartość kolejno jako pierwszy argument każdej następnej formy
+([Option i Result](option-result.md)).
 
 ## 5. Pozostałe funkcje na sekwencjach z CL
 

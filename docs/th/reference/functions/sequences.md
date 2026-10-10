@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # คู่ S-expression และลำดับ
 
 คู่ generic `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับที่เขียนบน
@@ -108,6 +108,7 @@
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | มีสมาชิกใดตรงตาม predicate หรือไม่ (สอดคล้องกับ `some` ของ CL; ชื่อที่ไม่ชนกับตัวสร้าง `Some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | การพับซ้าย |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | การพับขวา |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | รวบรวมสมาชิกที่เหลือทั้งหมด ใช้เปลี่ยนผลของฟังก์ชัน `lazy` ข้างล่างให้เป็น `Vector` |
 
 การทำดัชนี ความยาว และการตัดส่วน:
 
@@ -138,6 +139,41 @@
 
 ฟังก์ชันเหล่านี้และหลายตัวในบทที่ 5 รับอาร์กิวเมนต์คีย์เวิร์ดของ CL `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` ด้วย (บทที่ 6)
+
+### อิเทอเรเตอร์แบบขี้เกียจ (มอดูล `lazy`)
+
+ฟังก์ชันของมอดูล `lazy` ไม่สร้าง `Vector` แต่**คืนอิเทอเรเตอร์** สมาชิกจะถูกคำนวณก็ต่อเมื่อมีการขอสมาชิกตัวถัดไป ดังนั้นอิเทอเรเตอร์ที่ไม่มีที่สิ้นสุด (`iterate`, `repeat`) ก็ใช้ได้ ตราบใดที่มี `take` หรือ `take-while` ถัดไปหยุดมันไว้ ผลลัพธ์ทุกตัว implement `Iter` จึงซ้อนฟังก์ชัน `lazy` เข้าด้วยกันได้ และส่งให้ฟังก์ชันในตารางข้างบนได้ตามที่เป็นอยู่ ถ้าต้องการ `Vector` ให้ใช้ `collect`
+
+| ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | ใช้ `f` กับสมาชิกแต่ละตัว |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | เฉพาะสมาชิกที่ตรงเงื่อนไข |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | `n` ตัวแรก |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | จนถึงก่อนสมาชิกตัวแรกที่ไม่ตรงเงื่อนไข |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | ข้าม `n` ตัวแรก |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | คู่ของตำแหน่งที่นับจาก 0 กับสมาชิก |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | คู่ที่หยิบจากแต่ละฝั่งฝั่งละตัว จบเมื่อฝั่งที่สั้นกว่าหมด |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | สมาชิกของ `a` แล้วตามด้วยของ `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | ใช้ `f` เปลี่ยนสมาชิกแต่ละตัวเป็นอิเทอเรเตอร์ แล้วต่อเข้าด้วยกันตามลำดับ |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... ไปเรื่อยๆ ไม่มีที่สิ้นสุด |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | ทำซ้ำ `x` ไปเรื่อยๆ ไม่มีที่สิ้นสุด |
+
+`Iter<U>` และอื่นๆ ในตาราง แท้จริงคือชนิด struct ที่ตั้งชื่อตามฟังก์ชันแล้วต่อท้ายด้วย `-iter` (สำหรับ `lazy::map` คือ `lazy::map-iter<I,A,U>` โดย `I` เป็นชนิดของอิเทอเรเตอร์ต้นทาง) เขียนชนิดเฉพาะในที่ที่ไม่มีอย่างอื่นกำหนดให้ เช่นชนิดค่าคืนของ lambda ที่ส่งให้ `lazy::flat-map`
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a และ 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` คือแมโครที่ส่งค่าเป็นอาร์กิวเมนต์ตัวแรกให้แต่ละฟอร์มถัดไปตามลำดับ ([Option และ Result](option-result.md))
 
 ## 5. ฟังก์ชันของลำดับที่เหลือของ CL
 

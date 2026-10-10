@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # الأزواج والتعبيرات الرمزية والتسلسلات
 
 الزوج العام `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات المكتوبة فوق `Iter`
@@ -104,6 +104,7 @@
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | هل يحقق أي عنصر المحمول (تقابل `some` في CL؛ اسم لا يتعارض مع المُنشِئ `Some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | طي من اليسار |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | طي من اليمين |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | تجمع كل العناصر المتبقية. تُستعمل لتحويل نتيجة إحدى دوال `lazy` أدناه إلى `Vector` |
 
 الفهرسة والطول والتقطيع:
 
@@ -134,6 +135,47 @@
 
 وهذه وكثير من دوال الفصل 5 تأخذ أيضًا وسائط CL بالكلمات المفتاحية `:key` / `:test` / `:test-not` /
 `:start` / `:end` / `:from-end` / `:count` (الفصل 6).
+
+### المكرِّرات الكسولة (الوحدة `lazy`)
+
+دوال الوحدة `lazy` لا تبني `Vector`، بل **تُرجع مكرِّرًا**. لا يُحسب العنصر إلا حين يُطلب العنصر
+التالي، لذا يمكن استعمال مكرِّر بلا نهاية (`iterate`، `repeat`) ما دام `take` أو `take-while` لاحقًا
+يوقفه. كل نتيجة تنفّذ `Iter`، فتتداخل دوال `lazy` بعضها في بعض، وتقبلها دوال الجداول أعلاه كما هي.
+لتحويلها إلى `Vector` استعمل `collect`.
+
+| الاسم | الصيغة | النوع | الوصف |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | تطبّق `f` على كل عنصر |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | العناصر التي تحقق الشرط فقط |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | أول `n` عنصرًا |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | حتى ما قبل أول عنصر لا يحقق الشرط |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | تتخطى أول `n` عنصرًا |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | أزواج من الموضع، محسوبًا من 0، والعنصر |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | أزواج تأخذ عنصرًا من كل جهة. تنتهي بانتهاء الأقصر |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | عناصر `a` ثم عناصر `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | تحوّل كل عنصر إلى مكرِّر بـ `f` وتصل بينها بالترتيب |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`، `(f x)`، `(f (f x))`، ... بلا نهاية |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | تكرر `x` بلا نهاية |
+
+`Iter<U>` وأمثالها في الجدول هي في الحقيقة أنواع struct مسماة باسم الدالة مضافًا إليه `-iter` (لـ
+`lazy::map` هو `lazy::map-iter<I,A,U>`، حيث `I` نوع المكرِّر المصدر). لا يُكتب النوع إلا حيث لا
+يحدده شيء آخر، مثل نوع القيمة المُرجعة من الدالة المجهولة (lambda) المُمرَّرة إلى `lazy::flat-map`.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a و 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` هو الماكرو الذي يمرّر قيمة بالترتيب بوصفها الوسيط الأول لكل صيغة تالية ([Option
+وResult](option-result.md)).
 
 ## 5. بقية دوال التسلسلات في CL
 

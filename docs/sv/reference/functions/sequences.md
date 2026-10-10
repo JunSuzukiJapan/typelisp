@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # Par, S-uttryck och sekvenser
 
 Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktionerna som skrivs ovanpå
@@ -112,6 +112,7 @@ Funktioner som tar ett predikat (motsvarar CL:s `-if`-familj):
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Om något element uppfyller predikatet (motsvarar CL:s `some`; ett namn som inte krockar med konstruktorn `Some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Vänstervikning |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Högervikning |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Samlar alla återstående element. Används för att göra en `Vector` av resultatet från en `lazy`-funktion nedan |
 
 Indexering, längd och delning:
 
@@ -142,6 +143,48 @@ Funktioner som kräver en gräns `Eq` / `Ord` (de jämför genom ett trait i st�
 
 Dessa och många av funktionerna i kapitel 5 tar också CL:s nyckelordsargument `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (kapitel 6).
+
+### Lata iteratorer (modulen `lazy`)
+
+Funktionerna i modulen `lazy` bygger ingen `Vector`, **de returnerar en iterator**. Ett element
+beräknas först när nästa efterfrågas, så även en iterator utan slut (`iterate`, `repeat`) går att
+använda så länge en `take` eller `take-while` längre fram stoppar den. Varje resultat implementerar
+`Iter`, så `lazy`-funktioner kan nästlas och funktionerna i tabellerna ovan tar emot dem som de är.
+`collect` gör en `Vector` av den.
+
+| Namn | Form | Typ | Beskrivning |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | Tillämpar `f` på varje element |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Bara de element som uppfyller villkoret |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | De första `n` |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Fram till strax före det första element som inte uppfyller villkoret |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | Hoppar över de första `n` |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | Par av positionen, räknad från 0, och elementet |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | Par med ett element från vardera sidan. Slutar med den kortare |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | Elementen i `a`, sedan de i `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | Gör varje element till en iterator med `f` och sätter ihop dem i ordning |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... utan slut |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | Upprepar `x` utan slut |
+
+`Iter<U>` och liknande i tabellen är egentligen structtyper som heter som funktionen med `-iter`
+tillagt (för `lazy::map` är det `lazy::map-iter<I,A,U>`, där `I` är källiteratorns typ). Typen
+skriver man bara där inget annat bestämmer den, som returtypen för lambdan man ger `lazy::flat-map`.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a och 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` är makrot som skickar ett värde som första argument till varje följande form i tur och ordning
+([Option och Result](option-result.md)).
 
 ## 5. Resten av CL:s sekvensfunktioner
 

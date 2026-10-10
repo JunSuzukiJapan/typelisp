@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # 序對、S 運算式與序列
 
 泛型序對 `cons-cell`、S 運算式資料 `Sexpr`、符號、建構在 `Iter` 之上的序列函式，以及高階函式。
@@ -93,6 +93,7 @@
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 是否有元素符合條件（相當於 CL 的 `some`。是不與 `Some` 建構函式衝突的名稱） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左摺疊 |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 右摺疊 |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 收集剩下的全部元素。用來把下面 `lazy` 函式的結果變成 `Vector` |
 
 索引、長度與切片：
 
@@ -121,6 +122,41 @@
 | `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | 第一個 `car` 與 `k` 相等的序對。值以 `(cdr p)` 取出 |
 
 這些函式以及第 5 章的許多函式也接受 CL 的關鍵字引數 `:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` / `:count`（第 6 章）。
+
+### 惰性迭代器（`lazy` 模組）
+
+`lazy` 模組的函式不建立 `Vector`，而是**傳回迭代器**。元素在下一個元素被要求時才計算，因此沒有盡頭的迭代器（`iterate`、`repeat`）只要在下游用 `take` 或 `take-while` 停下就能使用。傳回值都實作了 `Iter`，所以 `lazy` 的函式可以層層巢狀，也可以直接傳給上面表中的函式。要變成 `Vector` 就用 `collect`。
+
+| 名稱 | 形式 | 型別 | 說明 |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | 對每個元素套用 `f` |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | 只保留滿足條件的元素 |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | 前 `n` 個 |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | 直到第一個不滿足條件的元素之前 |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | 跳過前 `n` 個 |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | 從 0 開始計數的位置與元素的組 |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | 從兩邊各取一個組成的組。隨較短的一方結束 |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | 先是 `a` 的元素，然後是 `b` 的元素 |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | 用 `f` 把每個元素變成迭代器，再依序連接起來 |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`、`(f x)`、`(f (f x))`……無盡地繼續 |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | 無盡地重複 `x` |
+
+表中的 `Iter<U>` 等實際上是在函式名稱後加上 `-iter` 的結構型別（`lazy::map` 的是 `lazy::map-iter<I,A,U>`，`I` 是來源迭代器的型別）。只有在不寫就無法確定的地方才需要寫出型別，例如傳給 `lazy::flat-map` 的 lambda 的傳回值。
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a 和 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` 是把值依序作為後續各個運算式的第 1 個引數傳入的巨集（[Option 與 Result](option-result.md)）。
 
 ## 5. CL 其餘的序列函式
 

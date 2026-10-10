@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # जोड़ियाँ, S-एक्सप्रेशन और अनुक्रम
 
 जेनेरिक जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, `Iter` के ऊपर लिखे अनुक्रम फ़ंक्शन, और उच्च-क्रम फ़ंक्शन।
@@ -85,6 +85,7 @@
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | क्या कोई तत्व प्रेडिकेट को संतुष्ट करता है (CL के `some` के अनुरूप; ऐसा नाम जो `Some` कंस्ट्रक्टर से नहीं टकराता) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | बायाँ फ़ोल्ड |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | दायाँ फ़ोल्ड |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | बचे हुए सभी तत्व इकट्ठा करता है। नीचे के किसी `lazy` फ़ंक्शन के परिणाम को `Vector` बनाने के लिए |
 
 इंडेक्सिंग, लंबाई और स्लाइसिंग:
 
@@ -113,6 +114,41 @@
 | `assoc` | `(assoc k it)` | `(K,Iter<cons-cell<K,V>>)→Option<cons-cell<K,V>>` where `Eq K` | पहली जोड़ी जिसका `car` `k` के बराबर है। मान `(cdr p)` से निकालें |
 
 ये और अध्याय 5 के कई फ़ंक्शन CL के कीवर्ड आर्ग्युमेंट `:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` / `:count` भी लेते हैं (अध्याय 6)।
+
+### आलसी इटरेटर (`lazy` मॉड्यूल)
+
+`lazy` मॉड्यूल के फ़ंक्शन `Vector` नहीं बनाते, **वे एक इटरेटर लौटाते हैं**। कोई तत्व तभी गणना किया जाता है जब अगला माँगा जाए, इसलिए बिना अंत वाला इटरेटर (`iterate`, `repeat`) भी तब तक इस्तेमाल हो सकता है जब तक आगे कोई `take` या `take-while` उसे रोक दे। हर परिणाम `Iter` लागू करता है, इसलिए `lazy` फ़ंक्शन एक-दूसरे में रखे जा सकते हैं, और ऊपर की तालिकाओं के फ़ंक्शन उन्हें जैसे के तैसे लेते हैं। `Vector` बनाने के लिए `collect` का उपयोग करें।
+
+| नाम | फ़ॉर्म | टाइप | विवरण |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | हर तत्व पर `f` लागू करता है |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | केवल शर्त पूरी करने वाले तत्व |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | पहले `n` |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | शर्त पूरी न करने वाले पहले तत्व से ठीक पहले तक |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | पहले `n` छोड़ देता है |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | 0 से गिनी गई स्थिति और तत्व की जोड़ी |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | दोनों ओर से एक-एक लेकर बनी जोड़ियाँ। छोटे वाले के साथ खत्म होता है |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | `a` के तत्व, फिर `b` के |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | हर तत्व को `f` से इटरेटर बनाता है और उन्हें क्रम से जोड़ता है |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... बिना अंत |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | `x` को बिना अंत दोहराता है |
+
+तालिका के `Iter<U>` आदि असल में फ़ंक्शन के नाम के अंत में `-iter` जोड़कर बने struct टाइप हैं (`lazy::map` के लिए `lazy::map-iter<I,A,U>`, जहाँ `I` स्रोत इटरेटर का टाइप है)। टाइप केवल वहीं लिखना होता है जहाँ और कुछ उसे तय न करे, जैसे `lazy::flat-map` को दिए गए lambda का रिटर्न टाइप।
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a और 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` वह मैक्रो है जो किसी मान को क्रम से हर अगले फ़ॉर्म के पहले आर्ग्युमेंट के रूप में देता है ([Option और Result](option-result.md))।
 
 ## 5. CL के शेष अनुक्रम फ़ंक्शन
 

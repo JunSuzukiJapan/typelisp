@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # 쌍, S 식, 시퀀스
 
 제네릭 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, `Iter` 위에 쓰인 시퀀스 함수, 고차 함수.
@@ -101,6 +101,7 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | 술어를 만족하는 요소가 있는지(CL의 `some`에 해당. `Some` 생성자와 겹치지 않는 이름) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 왼쪽 접기 |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 오른쪽 접기 |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 남은 요소를 모두 모은다. 아래 `lazy` 함수의 결과를 `Vector`로 만들 때 쓴다 |
 
 인덱스, 길이, 잘라 내기:
 
@@ -130,6 +131,44 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 
 이것들과 5장의 함수 상당수는 CL의 키워드 인수 `:key` / `:test` / `:test-not` / `:start` / `:end` / `:from-end` / `:count`도
 받는다(6장).
+
+### 지연 이터레이터(`lazy` 모듈)
+
+`lazy` 모듈의 함수는 `Vector`를 만들지 않고 **이터레이터를 돌려준다**. 요소는 다음 요소를 요구받았을 때 비로소 계산되므로, 끝이 없는
+이터레이터(`iterate`, `repeat`)도 뒤쪽의 `take`나 `take-while`로 멈추면 쓸 수 있다. 반환값은 모두 `Iter`를 구현하므로 `lazy` 함수끼리
+겹쳐 쓸 수 있고, 위 표의 함수에도 그대로 넘길 수 있다. `Vector`로 만들려면 `collect`를 쓴다.
+
+| 이름 | 형식 | 타입 | 설명 |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | 각 요소에 `f`를 적용한다 |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | 조건을 만족하는 요소만 |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | 앞의 `n`개 |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | 조건을 만족하지 않는 요소의 바로 앞까지 |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | 앞의 `n`개를 건너뛴다 |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | 0부터 센 위치와 요소의 쌍 |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | 양쪽에서 하나씩 꺼낸 쌍. 짧은 쪽에서 끝난다 |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | `a`의 요소 뒤에 `b`의 요소 |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | 각 요소를 `f`로 이터레이터로 만들고 그것들을 차례로 잇는다 |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, …로 끝없이 이어진다 |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | `x`를 끝없이 되풀이한다 |
+
+표의 `Iter<U>` 등은 실제로는 함수 이름에 `-iter`를 붙인 구조체 타입이다(`lazy::map`이면 `lazy::map-iter<I,A,U>`, `I`는 원래
+이터레이터의 타입). 타입은 `lazy::flat-map`에 넘기는 람다의 반환값처럼, 쓰지 않으면 정해지지 않는 곳에만 쓰면 된다.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a 와 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->`는 값을 다음 식들의 첫 번째 인수로 차례로 넘기는 매크로다([Option과 Result](option-result.md)).
 
 ## 5. CL 시퀀스 함수의 나머지
 

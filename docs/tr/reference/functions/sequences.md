@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # Çiftler, S-İfadeler ve Diziler
 
 Jenerik çift `cons-cell`, S-ifade verisi `Sexpr`, semboller, `Iter` üzerine yazılmış dizi fonksiyonları ve
@@ -112,6 +112,7 @@ Bir yüklem alan fonksiyonlar (CL'nin `-if` ailesine karşılık gelir):
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Herhangi bir elemanın yüklemi sağlayıp sağlamadığı (CL'nin `some`'una karşılık gelir; `Some` yapıcısıyla çakışmayan bir ad) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Soldan katlama |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Sağdan katlama |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Kalan tüm öğeleri toplar. Aşağıdaki bir `lazy` fonksiyonunun sonucunu `Vector`'a çevirmek için kullanılır |
 
 İndeksleme, uzunluk ve dilimleme:
 
@@ -142,6 +143,49 @@ Bir yüklem alan fonksiyonlar (CL'nin `-if` ailesine karşılık gelir):
 
 Bunlar ve 5. bölümdeki fonksiyonların çoğu, CL'nin `:key` / `:test` / `:test-not` / `:start` / `:end` /
 `:from-end` / `:count` anahtar sözcüklü bağımsız değişkenlerini de alır (6. bölüm).
+
+### Tembel yineleyiciler (`lazy` modülü)
+
+`lazy` modülünün fonksiyonları `Vector` oluşturmaz, **bir yineleyici döndürür**. Bir öğe ancak bir
+sonraki istendiğinde hesaplanır; bu yüzden sonu olmayan bir yineleyici (`iterate`, `repeat`) bile,
+ileride bir `take` ya da `take-while` onu durdurduğu sürece kullanılabilir. Her sonuç `Iter`'i
+uygular; böylece `lazy` fonksiyonları iç içe geçer ve yukarıdaki tablolardaki fonksiyonlar onları
+olduğu gibi alır. `collect` onu bir `Vector`'a çevirir.
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | Her öğeye `f` uygular |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Yalnızca koşulu sağlayan öğeler |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | İlk `n` tanesi |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Koşulu sağlamayan ilk öğenin hemen öncesine kadar |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | İlk `n` tanesini atlar |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | 0'dan sayılan konum ile öğenin ikilisi |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | Her iki taraftan birer öğe alan ikililer. Kısa olanla biter |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | `a`'nın öğeleri, ardından `b`'ninkiler |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | Her öğeyi `f` ile bir yineleyiciye çevirir ve bunları sırayla birleştirir |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... sonsuza dek |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | `x`'i sonsuza dek tekrarlar |
+
+Tablodaki `Iter<U>` ve benzerleri aslında fonksiyon adının sonuna `-iter` eklenmiş yapı türleridir
+(`lazy::map` için `lazy::map-iter<I,A,U>`; `I` kaynak yineleyicinin türüdür). Türü yalnızca başka
+hiçbir şeyin belirlemediği yerde yazarsınız; örneğin `lazy::flat-map`'e verilen lambdanın dönüş
+türü.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a ve 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->`, bir değeri sırayla izleyen her formun ilk argümanı olarak geçiren makrodur ([Option ve
+Result](option-result.md)).
 
 ## 5. CL'nin dizi fonksiyonlarının geri kalanı
 

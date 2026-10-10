@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # Пари, S-вирази та послідовності
 
 Узагальнена пара `cons-cell`, дані у вигляді S-виразів `Sexpr`, символи, функції над послідовностями,
@@ -111,6 +111,7 @@
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Чи будь-який елемент задовольняє предикат (відповідає `some` з CL; назва, що не конфліктує з конструктором `Some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Лівий згортальний вираз |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Правий згортальний вираз |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Збирає всі решту елементів. Нею результат функції `lazy` нижче перетворюють на `Vector` |
 
 Індексація, довжина та зрізи:
 
@@ -141,6 +142,49 @@
 
 Ці та багато функцій з розділу 5 також приймають іменовані аргументи CL `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (розділ 6).
+
+### Ліниві ітератори (модуль `lazy`)
+
+Функції модуля `lazy` не будують `Vector`, **вони повертають ітератор**. Елемент обчислюється лише
+тоді, коли запитано наступний, тож навіть нескінченний ітератор (`iterate`, `repeat`) можна
+використовувати, якщо далі його зупинить `take` або `take-while`. Кожен результат реалізує `Iter`,
+тому функції `lazy` вкладаються одна в одну, а функції з таблиць вище приймають їх як є. `collect`
+перетворює ітератор на `Vector`.
+
+| Назва | Форма | Тип | Опис |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | Застосовує `f` до кожного елемента |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Лише елементи, що задовольняють умову |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | Перші `n` |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | До першого елемента, що не задовольняє умову, не включно |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | Пропускає перші `n` |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | Пари з позиції, рахуючи від 0, та елемента |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | Пари з елементів обох сторін. Закінчується разом із коротшою |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | Елементи `a`, потім елементи `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | Перетворює кожен елемент на ітератор за допомогою `f` і з'єднує їх по черзі |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... без кінця |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | Повторює `x` без кінця |
+
+`Iter<U>` та подібні в таблиці насправді є типами структур, названими за функцією з доданим `-iter`
+(для `lazy::map` це `lazy::map-iter<I,A,U>`, де `I` — тип вихідного ітератора). Тип пишуть лише там,
+де його більше ніщо не визначає, наприклад у типі результату лямбди, яку передають у
+`lazy::flat-map`.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a та 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` — макрос, що по черзі передає значення першим аргументом кожній наступній формі ([Option і
+Result](option-result.md)).
 
 ## 5. Решта функцій над послідовностями з CL
 

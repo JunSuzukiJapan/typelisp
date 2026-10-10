@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # Pasangan, S-Expression, dan Sekuens
 
 Pasangan generik `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens yang ditulis di atas
@@ -116,6 +116,7 @@ Fungsi yang menerima predikat (sepadan dengan keluarga `-if` pada CL):
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Apakah ada elemen yang memenuhi predikat (sepadan dengan `some` pada CL; nama yang tidak bentrok dengan konstruktor `Some`) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Lipatan kiri |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Lipatan kanan |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Mengumpulkan semua elemen yang tersisa. Dipakai untuk mengubah hasil fungsi `lazy` di bawah menjadi `Vector` |
 
 Pengindeksan, panjang, dan pengirisan:
 
@@ -146,6 +147,49 @@ Fungsi yang memerlukan batas `Eq` / `Ord` (membandingkan melalui trait, bukan pr
 
 Fungsi-fungsi ini dan banyak fungsi pada bab 5 juga menerima argumen keyword CL `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (bab 6).
+
+### Iterator malas (modul `lazy`)
+
+Fungsi-fungsi modul `lazy` tidak membangun `Vector`, **melainkan mengembalikan iterator**. Sebuah
+elemen baru dihitung ketika elemen berikutnya diminta, sehingga iterator tanpa akhir (`iterate`,
+`repeat`) pun dapat dipakai selama `take` atau `take-while` di hilir menghentikannya. Setiap hasil
+mengimplementasikan `Iter`, jadi fungsi `lazy` dapat disusun bertingkat, dan fungsi-fungsi pada
+tabel di atas menerimanya apa adanya. `collect` mengubahnya menjadi `Vector`.
+
+| Nama | Bentuk | Tipe | Deskripsi |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | Menerapkan `f` pada setiap elemen |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Hanya elemen yang memenuhi syarat |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | `n` elemen pertama |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Sampai tepat sebelum elemen pertama yang tidak memenuhi syarat |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | Melewati `n` elemen pertama |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | Pasangan posisi, dihitung dari 0, dan elemen |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | Pasangan yang mengambil satu dari tiap sisi. Berakhir bersama yang lebih pendek |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | Elemen `a`, lalu elemen `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | Mengubah setiap elemen menjadi iterator dengan `f` dan menyambungkannya berurutan |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... tanpa akhir |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | Mengulang `x` tanpa akhir |
+
+`Iter<U>` dan sejenisnya dalam tabel sebenarnya adalah tipe struct yang dinamai seperti fungsinya
+dengan tambahan `-iter` (untuk `lazy::map`, `lazy::map-iter<I,A,U>`, dengan `I` tipe iterator
+sumber). Tipenya hanya ditulis di tempat yang tidak ditentukan oleh hal lain, misalnya tipe
+kembalian lambda yang diberikan ke `lazy::flat-map`.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a dan 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` adalah makro yang meneruskan sebuah nilai sebagai argumen pertama setiap bentuk berikutnya
+secara berurutan ([Option dan Result](option-result.md)).
 
 ## 5. Sisa fungsi sekuens CL
 

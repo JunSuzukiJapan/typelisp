@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
 # Pairs, S-Expressions and Sequences
 
 The generic pair `cons-cell`, S-expression data `Sexpr`, symbols, the sequence functions written on
@@ -112,6 +112,7 @@ Functions taking a predicate (corresponding to CL's `-if` family):
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | Whether any element satisfies the predicate (corresponds to CL's `some`; a name that does not clash with the `Some` constructor) |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | Left fold |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | Right fold |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | Gathers all the remaining elements. Used to turn the result of a `lazy` function below into a `Vector` |
 
 Indexing, length and slicing:
 
@@ -142,6 +143,49 @@ Functions requiring an `Eq` / `Ord` bound (they compare through a trait instead 
 
 These and many of the functions of chapter 5 also take CL's keyword arguments `:key` / `:test` /
 `:test-not` / `:start` / `:end` / `:from-end` / `:count` (chapter 6).
+
+### Lazy iterators (the `lazy` module)
+
+The functions of the `lazy` module build no `Vector`; **they return an iterator**. An element is
+computed only when the next one is asked for, so an iterator with no end (`iterate`, `repeat`) is
+usable as long as a `take` or `take-while` downstream stops it. Every result implements `Iter`, so
+`lazy` functions nest, and the functions in the tables above take them as they are. `collect` turns
+one into a `Vector`.
+
+| Name | Form | Type | Description |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | Applies `f` to each element |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Only the elements that satisfy the condition |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | The first `n` |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | Up to just before the first element that fails the condition |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | Skips the first `n` |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | Pairs of the position, counted from 0, and the element |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | Pairs taking one from each. Ends with the shorter one |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | The elements of `a`, then those of `b` |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | Makes each element an iterator with `f` and joins them in order |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`, `(f x)`, `(f (f x))`, ... with no end |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | Repeats `x` with no end |
+
+`Iter<U>` and the like in the table are really struct types named after the function with `-iter`
+appended (for `lazy::map`, `lazy::map-iter<I,A,U>`, where `I` is the source iterator's type). You
+only write the type where nothing else would settle it, such as the return type of the lambda passed
+to `lazy::flat-map`.
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a and 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` is the macro that passes a value as the first argument of each following form in turn ([Option
+and Result](option-result.md)).
 
 ## 5. The rest of CL's sequence functions
 
