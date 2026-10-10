@@ -236,7 +236,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "length" "append" "nth" "elt" "take" "subseq" "last" "butlast"
     "member" "every" "any" "sort" "assoc" "map" "filter" "foldl" "foldr"
     "reverse" "find" "position" "count" "find-if" "position-if" "count-if"
-    "remove-if"
+    "remove-if" "collect"
+    ;; the `lazy' module's adapters (written `lazy::map' and so on)
+    "skip" "take-while" "enumerate" "zip" "chain" "flat-map" "iterate" "repeat"
     ;; Option / Result methods (§7)
     "unwrap" "unwrap-or" "is-some" "is-none" "is-ok" "is-err"
     "and-then" "or-else" "map-err" "ok-or" "unwrap-or-else" "expect"
@@ -398,6 +400,10 @@ with no implicit conversion to or from the fixed-width numerics
     "ParseIntError" "ParseFloatError" "ReadError" "ReadOutcome" "EvalError"
     ;; builtin generic pair & iterator types (lowercase)
     "cons-cell" "vector-iter" "hashtable-iter" "array-iter"
+    ;; the `lazy' module's adapter types
+    "map-iter" "filter-iter" "take-iter" "take-while-iter" "skip-iter"
+    "enumerate-iter" "zip-iter" "chain-iter" "flat-map-iter" "iterate-iter"
+    "repeat-iter"
     ;; complex numbers (Phase 1d) -- a prelude `defstruct', not a builtin
     "complex"
     ;; the multi-dimensional array and the bit vector (Phase 6b/6c) -- prelude

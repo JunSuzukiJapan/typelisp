@@ -353,7 +353,19 @@ fn hash_form(
                 10u8.hash(hasher);
                 heap.ratio_value(id).hash(hasher);
             }
-            // Float/bignum/ratio are the only boxes a *reader* can produce.
+            // The literal data `#(..)`, `#{..}` and `#NA`: a struct box whose
+            // key says which (an array's dimensions are a `Vector<int>` box of
+            // its own), walked field by field like a list's elements.
+            Value::Boxed(id) if is_read_literal_box(heap, id) => {
+                11u8.hash(hasher);
+                heap.struct_type_name(id).hash(hasher);
+                let n = heap.struct_field_count(id);
+                n.hash(hasher);
+                for i in (0..n).rev() {
+                    stack.push(heap.struct_field(id, i));
+                }
+            }
+            // The boxes above are the only ones a *reader* can produce.
             // Anything else means the reader gained a representation this hash
             // would silently ignore — which is exactly the failure this
             // function exists to prevent, so it is an error, not a default.
@@ -363,6 +375,19 @@ fn hash_form(
         }
     }
     Ok(())
+}
+
+/// Whether `id` is a box the reader builds for literal data: a `Sexpr`
+/// vector, array or tuple, or an array's dimensions vector.
+fn is_read_literal_box(heap: &Heap, id: typelisp_mem::BoxId) -> bool {
+    if !heap.is_struct(id) {
+        return false;
+    }
+    let key = heap.struct_type_key(id);
+    key == typelisp_mem::TypeKeyId::SEXPR_VECTOR
+        || key == typelisp_mem::TypeKeyId::SEXPR_ARRAY
+        || heap.sexpr_tuple_arity(id).is_some()
+        || &*heap.type_key_name(key) == typelisp_read::ARRAY_DIMS_KEY
 }
 
 /// The last segment of a `(defun PATH ...)` form's name, or `None` for anything
@@ -491,6 +516,19 @@ mod tests {
     #[test]
     fn a_changed_form_changes_the_island_hash() {
         assert_ne!(hash("(defun f () i64 (+ 1 1))"), hash("(defun f () i64 (+ 1 2))"));
+    }
+
+    /// `#(..)`, `#{..}` and `#NA` read as boxes; each is hashed by what it
+    /// holds, so changing an element — or the kind of literal — changes the
+    /// hash.
+    #[test]
+    fn literal_data_is_hashed_by_its_contents() {
+        assert_ne!(hash("(f #(1 2))"), hash("(f #(1 3))"));
+        assert_ne!(hash("(f #{int a})"), hash("(f #{int b})"));
+        assert_ne!(hash("(f #2A((1 2) (3 4)))"), hash("(f #2A((1 2) (3 5)))"));
+        assert_ne!(hash("(f #2A((1 2) (3 4)))"), hash("(f #1A(1 2 3 4))"));
+        assert_ne!(hash("(f #(1 2))"), hash("(f #{1 2})"));
+        assert_ne!(hash("(f #(1 2))"), hash("(f (1 2))"));
     }
 
     /// A string is not a comment, however it reads.

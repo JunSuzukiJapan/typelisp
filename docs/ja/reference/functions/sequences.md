@@ -106,6 +106,7 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 | `any` | `(any it pred)` | `(Iter<A>,(fn (A) bool))→bool` | いずれかが条件を満たすか（CL の `some` に当たる。`Some` 構成子と衝突しない名前） |
 | `foldl` | `(foldl it f init)` | `(Iter<A>,(fn (B A) B),B)→B` | 左畳み込み |
 | `foldr` | `(foldr it f init)` | `(Iter<A>,(fn (A B) B),B)→B` | 右畳み込み |
+| `collect` | `(collect it)` | `Iter<A>→Vector<A>` | 残りの要素をすべて集める。下の `lazy` の関数の結果を `Vector` にするのに使う |
 
 添字・長さ・スライス:
 
@@ -135,6 +136,46 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 
 これらと 5 章の関数の多くは、CL のキーワード引数 `:key` / `:test` / `:test-not` /
 `:start` / `:end` / `:from-end` / `:count` も取る（6 章）。
+
+### 遅延イテレータ（`lazy` モジュール）
+
+`lazy` モジュールの関数は `Vector` を作らず、**イテレータを返す**。要素は次の要素を求められたときに
+初めて計算されるので、終わりの無いイテレータ（`iterate`、`repeat`）も、下流の `take` や
+`take-while` で止めれば使える。戻り値はどれも `Iter` を実装するので、`lazy` の関数どうしを重ねられ、
+上の表の関数にもそのまま渡せる。`Vector` にするには `collect` を使う。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `lazy::map` | `(lazy::map it f)` | `(Iter<A>,(fn (A) U))→Iter<U>` | 各要素に `f` を適用する |
+| `lazy::filter` | `(lazy::filter it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | 条件を満たす要素だけ |
+| `lazy::take` | `(lazy::take it n)` | `(Iter<A>,int)→Iter<A>` | 先頭 `n` 個 |
+| `lazy::take-while` | `(lazy::take-while it pred)` | `(Iter<A>,(fn (A) bool))→Iter<A>` | 条件を満たさない要素の手前まで |
+| `lazy::skip` | `(lazy::skip it n)` | `(Iter<A>,int)→Iter<A>` | 先頭 `n` 個を飛ばす |
+| `lazy::enumerate` | `(lazy::enumerate it)` | `Iter<A>→Iter<#{int A}>` | 0 から数えた位置と要素の組 |
+| `lazy::zip` | `(lazy::zip a b)` | `(Iter<A>,Iter<B>)→Iter<#{A B}>` | 両方から 1 つずつ取った組。短い方で終わる |
+| `lazy::chain` | `(lazy::chain a b)` | `(Iter<A>,Iter<A>)→Iter<A>` | `a` の要素の後に `b` の要素 |
+| `lazy::flat-map` | `(lazy::flat-map it f)` | `(Iter<A>,(fn (A) Iter<B>))→Iter<B>` | 各要素を `f` でイテレータにし、それらを順につなぐ |
+| `lazy::iterate` | `(lazy::iterate x f)` | `(A,(fn (A) A))→Iter<A>` | `x`、`(f x)`、`(f (f x))`、…と終わり無く続く |
+| `lazy::repeat` | `(lazy::repeat x)` | `A→Iter<A>` | `x` を終わり無く繰り返す |
+
+表の `Iter<U>` などは、実際には関数名に `-iter` を付けた構造体型（`lazy::map` なら
+`lazy::map-iter<I,A,U>`、`I` は元のイテレータの型）。型を書くのは、`lazy::flat-map` に渡すラムダの
+戻り値のように、書かないと決まらない場所だけでよい。
+
+```lisp
+(collect (lazy::take (lazy::filter (lazy::iterate 1 (lambda ((n int)) int (+ n 1)))
+                                   (lambda ((n int)) bool (= 0 (mod n 3))))
+                     4))                                  ; => #(3 6 9 12)
+
+(doiter (#{i s} (lazy::enumerate (iter (the Vector<string> #("a" "b")))))
+  (println "~a: ~a" i s))                                 ; 0: a と 1: b
+
+(-> (lazy::iterate 1 (lambda ((n int)) int (* n 2)))
+    (lazy::take-while (lambda ((n int)) bool (< n 100)))
+    collect)                                              ; => #(1 2 4 8 16 32 64)
+```
+
+`->` は値を次の式の第 1 引数として順に渡すマクロ（[Option と Result](option-result.md)）。
 
 ## 5. CL のシーケンス関数の残り
 

@@ -6744,7 +6744,7 @@ impl Checker {
         heap.push_root(new_ret);
         let ret_loc = if new_ret == elems[2] { elems_locs[2].1.clone() } else { None };
         let own_where = match elems.get(3) {
-            Some(f) if is_where_clause(heap, *f)? => Some(Self::subst_value(heap, *f, subst)?),
+            Some(f) if is_where_clause(heap, *f)? => Some(Self::subst_where_clause(heap, *f, subst)?),
             _ => None,
         };
         if let Some(w) = own_where {
@@ -6832,7 +6832,7 @@ impl Checker {
                 items.push((elems[0].0, elems[0].1.clone()));
             }
             for (b, l) in &elems[1..] {
-                let bound = Self::subst_value(heap, *b, subst)?;
+                let bound = Self::subst_where_bound(heap, *b, subst)?;
                 heap.push_root(bound);
                 items.push((bound, l.clone()));
             }
@@ -6847,6 +6847,59 @@ impl Checker {
             push_bounds(w, heap, &HashMap::new())?;
         }
         Ok(Some(forms::list_from_vec_locs(heap, &items)?))
+    }
+
+    /// A whole `(where ...)` clause through `subst`, bound by bound — see
+    /// [`Self::subst_where_bound`].
+    fn subst_where_clause(heap: &mut Heap, w: Value, subst: &HashMap<String, Value>) -> Result<Value, Error> {
+        let mut heap = RootScope::new(heap);
+        let heap = &mut *heap;
+        let elems = heap.list_to_vec_locs(w)?;
+        let mut items: Vec<(Value, Option<Loc>)> = vec![(elems[0].0, elems[0].1.clone())];
+        for (b, l) in &elems[1..] {
+            let bound = Self::subst_where_bound(heap, *b, subst)?;
+            heap.push_root(bound);
+            items.push((bound, l.clone()));
+        }
+        forms::list_from_vec_locs(heap, &items)
+    }
+
+    /// One `where` bound `(Trait T (Assoc Type)...)` through `subst`, type
+    /// positions only: the bounded type and each pin's type. An `impl`'s
+    /// `subst` maps its associated type names as well as `Self`, and a pin's
+    /// name is one of those names — rewritten, `(Iter I (Item A))` inside an
+    /// `impl` that declares `(type Item A)` would become `(Iter I (A A))`, a
+    /// bound that no longer says what `I`'s `Item` is. A part that is not a
+    /// list where one belongs is left as written, for `parse_where_clause`
+    /// to report.
+    fn subst_where_bound(heap: &mut Heap, b: Value, subst: &HashMap<String, Value>) -> Result<Value, Error> {
+        if !matches!(b, Value::Cons(_)) {
+            return Ok(b);
+        }
+        let mut heap = RootScope::new(heap);
+        let heap = &mut *heap;
+        let parts = heap.list_to_vec_locs(b)?;
+        let mut out: Vec<(Value, Option<Loc>)> = Vec::new();
+        for (k, (p, l)) in parts.iter().enumerate() {
+            let v = match k {
+                0 => *p,
+                1 => Self::subst_value(heap, *p, subst)?,
+                _ if !matches!(p, Value::Cons(_)) => *p,
+                _ => {
+                    let pin = heap.list_to_vec_locs(*p)?;
+                    let mut new_pin: Vec<(Value, Option<Loc>)> = Vec::new();
+                    for (j, (q, ql)) in pin.iter().enumerate() {
+                        let q2 = if j == 0 { *q } else { Self::subst_value(heap, *q, subst)? };
+                        heap.push_root(q2);
+                        new_pin.push((q2, ql.clone()));
+                    }
+                    forms::list_from_vec_locs(heap, &new_pin)?
+                }
+            };
+            heap.push_root(v);
+            out.push((v, l.clone()));
+        }
+        forms::list_from_vec_locs(heap, &out)
     }
 
     /// Verify that an `impl` actually implements its trait: every method
