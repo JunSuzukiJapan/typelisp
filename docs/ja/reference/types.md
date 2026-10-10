@@ -98,12 +98,12 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 
 | トレイト | 実装している型 | 詳細 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | 同上 |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` 組み込みのエラー型すべて | [print-object](functions/printing.md#5-print-object型ごとの印字表現) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` 組み込みのエラー型すべて | [print-object](functions/printing.md#5-print-object型ごとの印字表現) |
 
-`cons-cell<A,B>` の `Eq`/`Ord` は、要素の型が `Eq`/`Ord` を実装しているときに使える。
+`cons-cell<A,B>` とタプル `#{..}` のトレイト、コレクションの `print-object` は、要素の型がそのトレイトを実装しているときに使える。
 
 ### 6.2 算術
 
@@ -118,7 +118,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 
 | トレイト | 実装している型 |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` モジュールの型（`lazy::map-iter<I,A,U>` など） |
 
 ### 6.4 ストリーム
 
