@@ -415,6 +415,11 @@ fn pattern_bindings(heap: &Heap, pat: Value, out: &mut HashSet<SymRef>) -> Resul
         wk::PAT_GUARD => {
             out.insert(sym(heap, pat, 0)?);
         }
+        wk::PAT_WHEN => {
+            if let Some(inner) = core::field(heap, pat, 0) {
+                pattern_bindings(heap, inner, out)?;
+            }
+        }
         _ => {}
     }
     Ok(())
@@ -433,13 +438,25 @@ fn pattern_guard_tests(
                 f(test)?;
             }
         }
+        // A `match` guard reads the arm's bindings, which the caller's
+        // `bound` already holds.
+        wk::PAT_WHEN => {
+            if let Some(inner) = core::field(heap, pat, 0) {
+                pattern_guard_tests(heap, inner, f)?;
+            }
+            if let Some(test) = core::field(heap, pat, 1) {
+                f(test)?;
+            }
+        }
         wk::PAT_CTOR => {
             for p in core::fields(heap, pat)?.iter().skip(4) {
                 pattern_guard_tests(heap, *p, f)?;
             }
         }
+        // `(pat-typetest PATH KEY SUB)`: the sub-pattern is field 2, field 1
+        // being the type's key string.
         wk::PAT_TYPETEST => {
-            if let Some(inner) = core::field(heap, pat, 1) {
+            if let Some(inner) = core::field(heap, pat, 2) {
                 pattern_guard_tests(heap, inner, f)?;
             }
         }

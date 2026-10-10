@@ -460,6 +460,13 @@ well_known_symbols! {
      module read its own `&body`, so the library's did not match one written
      in a user's file."
     AMP_BODY => "&body"
+
+    "Appended for `match` guards (2026-10-10). `(pat-when PAT TEST)` matches
+     `PAT`, then evaluates `TEST` with `PAT`'s bindings in scope and fails
+     over to the next arm when it is false. A pattern node rather than a
+     field of the arm, so that every tier tests it where it already tests a
+     pattern, and failing it is failing the pattern."
+    PAT_WHEN => "pat-when"
 }
 
 

@@ -4462,6 +4462,16 @@ const SOURCE_TEMPLATE: &str = r#"
          (compile-pattern-guard builder cur-fn
            (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup test)
            fail-block)))
+      ;; `(pat-when P TEST)` -- a guarded `match` arm: test `P`, which binds
+      ;; its names into this arm's frame as it succeeds, then compile TEST
+      ;; with those names in scope and branch on the `bool` it produces.
+      ;; Failing either is failing the arm, so both branch to `fail-block`.
+      (pat-when
+       (progn
+         (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v (sexpr-car (sexpr-cdr pat)) fail-block)
+         (compile-pattern-guard builder cur-fn
+           (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr pat))))
+           fail-block)))
       ;; `(pat-ctor VARIANT (SUB...) SCRUT-KIND (FIELD-KIND...) DOWNCAST
       ;; TYPE-NAME)`.
       (pat-ctor (compile-ctor-pattern m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v pat fail-block))

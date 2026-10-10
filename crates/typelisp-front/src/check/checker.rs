@@ -1909,6 +1909,13 @@ impl Checker {
                 let sym = heap.intern_symbol(name);
                 core::tagged(heap, "pat-guard", &[sym, *form])?
             }
+            // The test is rooted where `check_at` built it, as a guard's is.
+            Pattern::When { pat, test } => {
+                let mut s = RootScope::new(heap);
+                let inner = self.pattern_form(&mut s, pat)?;
+                s.push_root(inner);
+                core::tagged(&mut s, "pat-when", &[inner, *test])?
+            }
             // A niched `Option<T>`'s two shapes (`check_ctor_pattern_fields`).
             // `none` is the empty-list word; `(some P)` is any other word,
             // with `P` applied to the payload read back through `T`'s
@@ -16028,15 +16035,54 @@ impl Checker {
             if parts.is_empty() {
                 recover_arm!(Err(Error::TypeError("match: arm must be (pattern body...)".into())));
             }
+            // `(pat :when test body...)`: the guard sits between the pattern
+            // and the body.
+            let guard = if parts.len() >= 2 && is_keyword(heap, parts[1], "when") {
+                if parts.len() < 3 {
+                    recover_arm!(Err(Error::TypeError("match: `:when` needs a condition: (pattern :when test body...)".into())));
+                }
+                Some((parts[2], parts_locs[2].1.clone()))
+            } else {
+                None
+            };
+            let body_start = if guard.is_some() { 3 } else { 1 };
+            // `(:or p1 p2 ...)`, anywhere in the pattern, is one arm per
+            // alternative, all with this arm's guard and body. The
+            // alternatives have to bind the same names at the same types,
+            // since one body reads them.
+            let alternatives = recover_arm!(expand_or_patterns(heap, parts[0]));
+            let mut first_binds: Option<PatternBindings> = None;
+            for alt in alternatives {
             let (pat, binds) = recover_arm!(self.check_pattern(
                 heap,
                 interp,
                 env,
                 &scrut.ty,
-                parts[0],
+                alt,
                 parts_locs[0].1.clone()
             ));
+            match &first_binds {
+                None => first_binds = Some(binds.clone()),
+                Some(first) => recover_arm!(same_or_bindings(first, &binds)),
+            }
+            let arm_env = env.extended_with_locs(binds.clone())?;
+            let pat = match &guard {
+                None => pat,
+                Some((test, test_loc)) => {
+                    let checked = recover_arm!(self.check_at(heap, interp, &arm_env, *test, Some(&Type::Bool), test_loc.clone()));
+                    if checked.ty != Type::Bool && checked.ty != Type::Never {
+                        recover_arm!(Err(Error::TypeError(format!(
+                            "match: the `:when` condition is `{}`, not a bool",
+                            checked.ty
+                        ))));
+                    }
+                    Pattern::When { pat: Box::new(pat), test: checked.form }
+                }
+            };
             match &pat {
+                // A guarded arm covers nothing: whether it matches depends on
+                // its condition, which no amount of checking can decide.
+                Pattern::When { .. } => {}
                 // ---- the `Option<Sexpr>` sugar's flat coverage (see
                 // `sexpr_sugar` above). Placed ahead of the general arms
                 // because under the sugar both of them would answer, and
@@ -16093,11 +16139,10 @@ impl Checker {
                 Pattern::Wildcard | Pattern::Bind(..) => catchall = true,
                 _ => {}
             }
-            let arm_env = env.extended_with_locs(binds.clone())?;
             // Diverging arms don't constrain the result type; concrete arms must
             // all agree (Never joins with anything).
             let arm_expected = result_ty.as_ref().and_then(non_never);
-            let body_locs: Vec<Option<Loc>> = parts_locs[1..].iter().map(|(_, l)| l.clone()).collect();
+            let body_locs: Vec<Option<Loc>> = parts_locs[body_start..].iter().map(|(_, l)| l.clone()).collect();
             // Probe boundary (B4): with no result type agreed yet there is no
             // expectation to hand this body, and a body that needs one —
             // `(result::ok v)`, whose `E` only the sibling `(err e)` arm
@@ -16112,7 +16157,7 @@ impl Checker {
             let mark = self.check_mark();
             let holes = self.probe_holes.get();
             let outer_probe = self.infer_probe.replace(probing);
-            let checked = self.check_seq(heap, interp, &arm_env, &parts[1..], &body_locs, arm_expected);
+            let checked = self.check_seq(heap, interp, &arm_env, &parts[body_start..], &body_locs, arm_expected);
             self.infer_probe.set(outer_probe);
             let settled = checked.is_ok()
                 && self.probe_holes.get() == holes
@@ -16130,9 +16175,9 @@ impl Checker {
                     slot: arms.len(),
                     pat,
                     binds,
-                    body: parts[1..].to_vec(),
+                    body: parts[body_start..].to_vec(),
                     body_locs,
-                    arm_loc,
+                    arm_loc: arm_loc.clone(),
                 });
                 arms.push(None);
                 continue;
@@ -16159,6 +16204,7 @@ impl Checker {
                 });
             }
             arms.push(Some((pat, body)));
+            }
         }
 
         // Second pass, for the arms the probe held back (B4). By now the arms
@@ -16889,6 +16935,94 @@ fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
 /// there is no spelling to get wrong.
 fn is_symbol(v: Value, konst: u32) -> bool {
     matches!(v, Value::Symbol(id) if id.is(konst))
+}
+
+/// Whether `v` is the keyword `:name`. Keywords are read as symbols whose
+/// name keeps the colon.
+fn is_keyword(heap: &Heap, v: Value, name: &str) -> bool {
+    matches!(v, Value::Symbol(id) if heap.symbol_name(id).strip_prefix(':') == Some(name))
+}
+
+/// A `match` arm's pattern with every `(:or p1 p2 ...)` in it multiplied
+/// out: one pattern per combination of alternatives, in the order the arms
+/// they stand for are tried (left to right, the outer alternative varying
+/// slowest). A pattern with no `:or` comes back as itself, so it keeps the
+/// source positions its cells carry.
+///
+/// `(= expr)` and `'datum` hold an expression and a datum, not patterns, so
+/// nothing inside them is an alternative. The lists built here are rooted
+/// on the heap's stack, which the enclosing top-level check releases.
+fn expand_or_patterns(heap: &mut Heap, v: Value) -> Result<Vec<Value>, Error> {
+    let Value::Cons(_) = v else { return Ok(vec![v]) };
+    let items = heap.list_to_vec(v)?;
+    let Some(&head) = items.first() else { return Ok(vec![v]) };
+    if is_keyword(heap, head, "or") {
+        if items.len() < 2 {
+            return Err(Error::TypeError("pattern: `(:or)` needs at least one alternative".into()));
+        }
+        let mut out = Vec::new();
+        for alt in &items[1..] {
+            out.extend(expand_or_patterns(heap, *alt)?);
+        }
+        return Ok(out);
+    }
+    if is_symbol(head, wk::EQUALS) || is_symbol(head, wk::QUOTE) {
+        return Ok(vec![v]);
+    }
+    let mut per_item: Vec<Vec<Value>> = vec![vec![head]];
+    for item in &items[1..] {
+        per_item.push(expand_or_patterns(heap, *item)?);
+    }
+    if per_item.iter().all(|alts| alts.len() == 1) {
+        return Ok(vec![v]);
+    }
+    let mut combos: Vec<Vec<Value>> = vec![Vec::new()];
+    for alts in &per_item {
+        combos = combos
+            .into_iter()
+            .flat_map(|prefix| {
+                alts.iter().map(move |a| {
+                    let mut c = prefix.clone();
+                    c.push(*a);
+                    c
+                })
+            })
+            .collect();
+    }
+    let mut out = Vec::with_capacity(combos.len());
+    for c in combos {
+        let list = core::list(heap, &c)?;
+        heap.push_root(list);
+        out.push(list);
+    }
+    Ok(out)
+}
+
+/// Whether two alternatives of one `(:or ...)` bind the same names at the
+/// same types — what the shared arm body needs of them.
+fn same_or_bindings(first: &PatternBindings, other: &PatternBindings) -> Result<(), Error> {
+    let key = |b: &PatternBindings| {
+        let mut v: Vec<(String, Type)> = b.iter().map(|(n, t, _)| (n.clone(), t.clone())).collect();
+        v.sort_by(|a, b| a.0.cmp(&b.0));
+        v
+    };
+    let (a, b) = (key(first), key(other));
+    if a == b {
+        return Ok(());
+    }
+    let show = |v: &[(String, Type)]| {
+        if v.is_empty() {
+            "nothing".to_string()
+        } else {
+            v.iter().map(|(n, t)| format!("`{}: {}`", n, t)).collect::<Vec<_>>().join(", ")
+        }
+    };
+    Err(Error::TypeError(format!(
+        "pattern: the alternatives of `(:or ...)` must bind the same variables at the same types, \
+         but one binds {} and another {}",
+        show(&a),
+        show(&b)
+    )))
 }
 
 /// `Checker::check_as`'s conversion table: `(from, to)` -> `(panic_method,

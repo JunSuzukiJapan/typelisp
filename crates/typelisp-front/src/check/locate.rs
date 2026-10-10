@@ -419,6 +419,12 @@ fn pattern_bind_names(heap: &Heap, pat: Value, scope: &mut Vec<String>) {
                 pattern_bind_names(heap, sub, scope);
             }
         }
+        // `(pat-when SUB TEST)` — a guarded arm binds what `SUB` binds.
+        Some(wk::PAT_WHEN) => {
+            if let Some(sub) = core::field(heap, pat, 0) {
+                pattern_bind_names(heap, sub, scope);
+            }
+        }
         _ => {}
     }
 }

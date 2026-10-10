@@ -114,6 +114,14 @@ pub enum Pattern {
         name: String,
         form: Value,
     },
+    /// A guarded arm, `(pat :when test body...)`: `pat` must match, and then
+    /// `test` — an already-checked `bool` expression that sees `pat`'s
+    /// bindings — must be true; otherwise the next arm is tried. Only ever
+    /// the whole of an arm's pattern, never nested inside one.
+    When {
+        pat: Box<Pattern>,
+        test: Value,
+    },
     /// A constructor pattern, e.g. `(Some v)` / `(Cons a d)`.
     Ctor {
         type_name: Path,

@@ -2737,6 +2737,11 @@ fn pattern_bindings(
         // that test runs, and at the same representation as the value under
         // test — the arm body cannot name it.
         "pat-guard" => out.push((symbol_field_sym(heap, pat, 0)?, value.clone())),
+        // A guarded arm binds what its pattern binds; the test binds nothing.
+        "pat-when" => {
+            let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            pattern_bindings(heap, sub, value, cx, out)?;
+        }
         // The niche: `(some P)` over a niched `Option<T>` applies `P` to the
         // payload read back at `T`'s representation — which the node carries.
         "pat-some" => {
@@ -2865,6 +2870,34 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             f.push(test);
             f.push(Value::Int(value.binding_kind()));
             f.finish("pat-guard")
+        }
+        // `(pat-when P TEST)` -> `(pat-when P' TEST')`. `cx` is the arm's,
+        // so `P`'s bindings are already in it for `TEST` to read. A binding
+        // a closure captures is read through a cell, and the body gets its
+        // cells from a `let` that `translate_match` wraps it in; the test
+        // runs before the body, so it is wrapped in the same `let` of its own.
+        "pat-when" => {
+            let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
+            let test = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
+            let mut s = RootScope::new(heap);
+            let sub_t = translate_pattern(&mut s, sub, value, cx)?;
+            s.push_root(sub_t);
+            let mut binds = Vec::new();
+            pattern_bindings(&s, sub, value, cx, &mut binds)?;
+            let cells: Vec<(SymRef, Repr)> = binds.into_iter().filter(|(n, _)| cx.is_cell(*n)).collect();
+            let test_t = if cells.is_empty() {
+                to_island(&mut s, test, cx)?
+            } else {
+                let bindings = cell_bindings(&mut s, &cells, cx)?;
+                s.push_root(bindings);
+                let mut b = Items::new(&mut s);
+                b.push(bindings);
+                let t = to_island(b.heap(), test, cx)?;
+                b.push(t);
+                b.finish("let")?
+            };
+            s.push_root(test_t);
+            core::tagged(&mut s, "pat-when", &[sub_t, test_t])
         }
         // Its sub-patterns bind at the per-field representations the node
         // carries, so the enclosing value's is not passed on.

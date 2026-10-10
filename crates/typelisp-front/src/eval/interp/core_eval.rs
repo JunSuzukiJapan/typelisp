@@ -1240,6 +1240,28 @@ pub(super) fn match_core_pattern(
                 ))),
             }
         }
+        // `(pat-when P TEST)` — a guarded arm: `P` must match, and then
+        // `TEST`, evaluated with `P`'s bindings in scope, must be true. The
+        // bindings `P` made stay rooted past this scope (see this function's
+        // doc comment), so they are still good to return.
+        "pat-when" => {
+            let inner = core::field(heap, pat, 0)
+                .ok_or_else(|| EvalError::Internal("eval: (pat-when ..) has no pattern".to_string()))?;
+            let test = core::field(heap, pat, 1)
+                .ok_or_else(|| EvalError::Internal("eval: (pat-when ..) has no test".to_string()))?;
+            let Some(binds) = match_core_pattern(it, heap, env, inner, v)? else { return Ok(None) };
+            let mut s = RootScope::new(heap);
+            let test_env = extend_env(&mut s, &binds, env)?;
+            s.push_root(test_env);
+            match it.eval_core(&mut s, test, test_env)? {
+                Value::Bool(true) => Ok(Some(binds)),
+                Value::Bool(false) => Ok(None),
+                other => Err(EvalError::Internal(format!(
+                    "eval: (pat-when ..) test produced {:?}, not a bool",
+                    other
+                ))),
+            }
+        }
         // `(pat-empty)` — the empty list. Its own node rather than
         // `(pat-ctor sexpr 0 ..)` because the empty list outlives `Sexpr`'s
         // `nil` variant; see `Checker::pattern_form`.
