@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Типи
 
 Типи, які є в typelisp, і стандартні трейти, що їх реалізує кожен тип. Як записувати типи, описано в
@@ -66,6 +66,7 @@
 | `lazy::map-iter<I,A,U>` тощо | Ітератори, які повертають функції модуля `lazy` | [Ліниві ітератори](functions/sequences.md#ліниві-ітератори-модуль-lazy) |
 | `WaitGroup` | Очікування завершення N речей | [WaitGroup](functions/concurrency.md#4-waitgroup--очікування-n-завершень) |
 | `Mutex<T>` | Взаємне виключення для спільних даних | [Mutex](functions/concurrency.md#6-mutext--взаємне-виключення-для-спільних-даних) |
+| `Context` | Кооперативне скасування | [Context](functions/concurrency.md#8-context--кооперативне-скасування) |
 | `pathname` | Ім'я файлу, розбите на частини | [Шляхи](functions/streams-files.md#9-шляхи-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Потоки | [Потоки](functions/streams-files.md#3-конкретні-типи-потоків) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Складені потоки | [Складені потоки](functions/streams-files.md#4-складені-потоки) |
@@ -104,7 +105,7 @@
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-порівняння) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Те саме |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` і всі вбудовані типи помилок | [print-object](functions/printing.md#5-print-object-представлення-для-друку-для-кожного-типу) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` і всі вбудовані типи помилок | [print-object](functions/printing.md#5-print-object-представлення-для-друку-для-кожного-типу) |
 
 Трейти `cons-cell<A,B>` і кортежів `#{..}`, а також `print-object` колекцій доступні, коли типи
 елементів реалізують цей трейт.

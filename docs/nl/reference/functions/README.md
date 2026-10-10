@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Ingebouwde functies
 
 De lijst met ingebouwde functies, methoden en de standaardbibliotheek. Voor syntaxis (speciale vormen
@@ -39,6 +39,6 @@ geschreven als `(argumenttype,...)→returntype`.
 | [printing.md](printing.md) | `print`/`println`/`format`, de pretty printer, `print-object`, besturingsvariabelen van de printer |
 | [format.md](format.md) | Formatdirectieven |
 | [streams-files.md](streams-files.md) | Streams, bestandsbewerkingen, padnamen, readtable |
-| [concurrency.md](concurrency.md) | Taken, kanalen, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Taken, kanalen, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix-domainsockets, UDP |
 | [system.md](system.md) | Tijd, de runtime-omgeving, implementatiehulpmiddelen, `read`/`eval`, docstrings, macrogerelateerde functies |

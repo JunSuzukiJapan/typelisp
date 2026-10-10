@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Taken en kanalen
 
 De woordenschat van taken (lichtgewicht threads). `task` en `thread`, die ze starten, en `select`, dat
@@ -180,7 +180,49 @@ tegenhanger van `Task<T>`.
   ([Syntaxreferentie 12.2](../syntax.md#122-thread--een-taak-starten-op-een-eigen-os-thread)). Een
   `lambda` die binnen een gecompileerde functie is gemaakt kan worden doorgegeven.
 
-## 8. Wat er niet is
+## 8. `Context` — coöperatief annuleren
+
+Gos `context.Context`. Je geeft hem mee aan werk dat je van buitenaf wilt kunnen stoppen. Stoppen is
+**coöperatief**: `cancel` onderbreekt niets; een taak of thread merkt het door zelf `is-cancelled`
+te controleren of door op `done` te ontvangen.
+
+| Naam | Gebruik | Type | Betekenis |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | Een nieuwe context als wortel |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | Maakt een kind van `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | Maakt een kind van `parent` dat zichzelf na `sec` seconden annuleert |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | Annuleert. Mag willekeurig vaak worden aangeroepen |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | Een kanaal dat wordt gesloten als de context wordt geannuleerd |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Of hij geannuleerd is |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, daarna stopped
+  (sleep 0.1))
+```
+
+- **Annuleren bereikt de kinderen.** Een context die met `with-cancel`/`with-timeout` is gemaakt,
+  wordt samen met zijn ouder geannuleerd. Andersom (van kind naar ouder) gaat het niet.
+- Een kind van een context die al geannuleerd is, is vanaf het begin geannuleerd.
+- `done` wordt alleen gesloten; er wordt geen waarde verstuurd. Ontvangen geeft `none`.
+- Elke aanroep van `(Context::background)` maakt een aparte wortel. Gos `Background()` is er maar
+  één en kan niet worden geannuleerd; hier kan ook een wortel worden geannuleerd, en dat raakt
+  alleen wat eruit is gemaakt.
+- Een context kan worden doorgegeven tussen taken en tussen threads.
+
+## 9. Wat er niet is
 
 - **`Atomic`**. `Mutex` volstaat.
 - **Taaklokale variabelen** (Go heeft ze ook niet).

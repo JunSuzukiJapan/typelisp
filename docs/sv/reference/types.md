@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -66,6 +66,7 @@ sätt som typer du skriver själv, och allt du kan göra med en `defstruct` kan 
 | `lazy::map-iter<I,A,U>` m.fl. | Iteratorerna som funktionerna i modulen `lazy` returnerar | [Lata iteratorer](functions/sequences.md#lata-iteratorer-modulen-lazy) |
 | `WaitGroup` | Att vänta på att N saker blir klara | [WaitGroup](functions/concurrency.md#4-waitgroup--vänta-på-n-färdigställanden) |
 | `Mutex<T>` | Ömsesidig uteslutning för delad data | [Mutex](functions/concurrency.md#6-mutext--ömsesidig-uteslutning-för-delad-data) |
+| `Context` | Kooperativ avbrytning | [Context](functions/concurrency.md#8-context--kooperativ-avbrytning) |
 | `pathname` | Ett filnamn uppdelat i delar | [Pathnames](functions/streams-files.md#9-pathnames-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Strömmar | [Strömmar](functions/streams-files.md#3-konkreta-strömtyper) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Sammansatta strömmar | [Sammansatta strömmar](functions/streams-files.md#4-sammansatta-strömmar) |
@@ -104,7 +105,7 @@ Vilka typer som implementerar vilka traits. Metoderna för varje trait finns i
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-jämförelse) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Som ovan |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` och alla inbyggda feltyper | [print-object](functions/printing.md#5-print-object-utskriftsform-per-typ) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` och alla inbyggda feltyper | [print-object](functions/printing.md#5-print-object-utskriftsform-per-typ) |
 
 Traitsen för `cons-cell<A,B>` och för tupler `#{..}`, och samlingarnas `print-object`, kan användas
 när elementtyperna implementerar den traiten.

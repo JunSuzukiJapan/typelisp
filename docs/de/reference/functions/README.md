@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Eingebaute Funktionen
 
 Die Liste der eingebauten Funktionen, der Methoden und der Standardbibliothek. Zur Syntax (Spezialformen und
@@ -37,6 +37,6 @@ Die Tabellen in jedem Kapitel haben die Spalten „Name, Form, Typ, Beschreibung
 | [printing.md](printing.md) | `print`/`println`/`format`, der Pretty Printer, `print-object`, Steuervariablen der Ausgabe |
 | [format.md](format.md) | Formatdirektiven |
 | [streams-files.md](streams-files.md) | Streams, Dateioperationen, Pfadnamen, readtable |
-| [concurrency.md](concurrency.md) | Tasks, Kanäle, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Tasks, Kanäle, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix-Domain-Sockets, UDP |
 | [system.md](system.md) | Zeit, Laufzeitumgebung, Werkzeuge der Implementierung, `read`/`eval`, Docstrings, makrobezogene Funktionen |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Вбудовані функції
 
 Перелік вбудованих функцій, методів і стандартної бібліотеки. Про синтаксис (спеціальні форми та способи
@@ -36,6 +36,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, змінні керування друком |
 | [format.md](format.md) | Директиви формату |
 | [streams-files.md](streams-files.md) | Потоки, файлові операції, шляхи, readtable |
-| [concurrency.md](concurrency.md) | Задачі, канали, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Задачі, канали, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, доменні сокети Unix, UDP |
 | [system.md](system.md) | Час, середовище виконання, засоби реалізації, `read`/`eval`, рядки документації, функції, пов'язані з макросами |

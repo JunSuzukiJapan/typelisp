@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Fonctions intégrées
 
 La liste des fonctions intégrées, des méthodes et de la bibliothèque standard. Pour la syntaxe (formes spéciales et
@@ -37,6 +37,6 @@ Les tableaux de chaque chapitre ont les colonnes « nom, forme, type, descriptio
 | [printing.md](printing.md) | `print`/`println`/`format`, le pretty printer, `print-object`, les variables de contrôle de l'affichage |
 | [format.md](format.md) | Directives de format |
 | [streams-files.md](streams-files.md) | Flux, opérations sur les fichiers, noms de chemin, readtable |
-| [concurrency.md](concurrency.md) | Tâches, canaux, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Tâches, canaux, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, sockets du domaine Unix, UDP |
 | [system.md](system.md) | Temps, environnement d'exécution, outils de l'implémentation, `read`/`eval`, docstrings, fonctions liées aux macros |

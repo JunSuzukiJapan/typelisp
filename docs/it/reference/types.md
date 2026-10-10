@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Tipi
 
 I tipi che typelisp possiede e i trait standard che ciascun tipo implementa. Come si scrivono i tipi è
@@ -67,6 +67,7 @@ essi.
 | `lazy::map-iter<I,A,U>` ecc. | Gli iteratori restituiti dalle funzioni del modulo `lazy` | [Iteratori pigri](functions/sequences.md#iteratori-pigri-il-modulo-lazy) |
 | `WaitGroup` | Attendere il completamento di N cose | [WaitGroup](functions/concurrency.md#4-waitgroup--attendere-n-completamenti) |
 | `Mutex<T>` | Mutua esclusione per dati condivisi | [Mutex](functions/concurrency.md#6-mutext--mutua-esclusione-per-dati-condivisi) |
+| `Context` | Annullamento cooperativo | [Context](functions/concurrency.md#8-context--annullamento-cooperativo) |
 | `pathname` | Un nome di file diviso in parti | [Pathname](functions/streams-files.md#9-pathname-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Stream | [Stream](functions/streams-files.md#3-tipi-di-stream-concreti) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Stream compositi | [Stream compositi](functions/streams-files.md#4-stream-compositi) |
@@ -105,7 +106,7 @@ Quali tipi implementano quali trait. I metodi di ciascun trait si trovano in
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-confronto) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Come sopra |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` e tutti i tipi di errore predefiniti | [print-object](functions/printing.md#5-print-object-rappresentazione-stampata-per-tipo) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` e tutti i tipi di errore predefiniti | [print-object](functions/printing.md#5-print-object-rappresentazione-stampata-per-tipo) |
 
 I trait di `cons-cell<A,B>` e delle tuple `#{..}`, e il `print-object` delle collezioni, sono
 utilizzabili quando i tipi degli elementi implementano quel trait.

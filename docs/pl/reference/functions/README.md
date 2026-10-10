@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Funkcje wbudowane
 
 Lista funkcji wbudowanych, metod i biblioteki standardowej. Składnię (formy specjalne i sposoby
@@ -37,6 +37,6 @@ zapisana jako `(typ-argumentu,...)→typ-zwracany`.
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, zmienne sterujące drukarką |
 | [format.md](format.md) | Dyrektywy formatu |
 | [streams-files.md](streams-files.md) | Strumienie, operacje na plikach, nazwy ścieżek, readtable |
-| [concurrency.md](concurrency.md) | Zadania, kanały, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Zadania, kanały, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, gniazda domeny Unix, UDP |
 | [system.md](system.md) | Czas, środowisko uruchomieniowe, narzędzia implementacji, `read`/`eval`, docstringi, funkcje związane z makrami |

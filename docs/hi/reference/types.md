@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -62,6 +62,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | `lazy::map-iter<I,A,U>` आदि | `lazy` मॉड्यूल के फ़ंक्शन जो इटरेटर लौटाते हैं | [आलसी इटरेटर](functions/sequences.md#आलसी-इटरेटर-lazy-मॉड्यूल) |
 | `WaitGroup` | N चीज़ों के समाप्त होने की प्रतीक्षा | [WaitGroup](functions/concurrency.md#4-waitgroup--n-के-पूर्ण-होने-की-प्रतीक्षा) |
 | `Mutex<T>` | साझा डेटा के लिए पारस्परिक अपवर्जन | [Mutex](functions/concurrency.md#6-mutext--साझा-डेटा-के-लिए-पारस्परिक-अपवर्जन) |
+| `Context` | सहयोगी रद्दीकरण | [Context](functions/concurrency.md#8-context--सहयोगी-रद्दीकरण) |
 | `pathname` | हिस्सों में बँटा फ़ाइल का नाम | [पाथनेम](functions/streams-files.md#9-पाथनेम-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | स्ट्रीम | [स्ट्रीम](functions/streams-files.md#3-ठोस-स्ट्रीम-टाइप) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | संयुक्त स्ट्रीम | [संयुक्त स्ट्रीम](functions/streams-files.md#4-संयुक्त-स्ट्रीम) |
@@ -98,7 +99,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-तुलना) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | ऊपर जैसा |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` और सभी बिल्ट-इन त्रुटि टाइप | [print-object](functions/printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` और सभी बिल्ट-इन त्रुटि टाइप | [print-object](functions/printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व) |
 
 `cons-cell<A,B>` और टपल `#{..}` के trait, और संग्रहों का `print-object`, तब उपलब्ध हैं जब तत्वों के टाइप वह trait लागू करते हों।
 

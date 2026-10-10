@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Türler
 
 typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart trait'ler. Türlerin nasıl yazılacağı
@@ -66,6 +66,7 @@ aynı şekilde ele alınırlar ve bir `defstruct` ile yapabileceğiniz her şey 
 | `lazy::map-iter<I,A,U>` vb. | `lazy` modülünün fonksiyonlarının döndürdüğü yineleyiciler | [Tembel yineleyiciler](functions/sequences.md#tembel-yineleyiciler-lazy-modülü) |
 | `WaitGroup` | N şeyin bitmesini bekleme | [WaitGroup](functions/concurrency.md#4-waitgroup--n-işin-bitmesini-bekleme) |
 | `Mutex<T>` | Paylaşılan veri için karşılıklı dışlama | [Mutex](functions/concurrency.md#6-mutext--paylaşılan-veri-için-karşılıklı-dışlama) |
+| `Context` | İş birliğine dayalı iptal | [Context](functions/concurrency.md#8-context--iş-birliğine-dayalı-iptal) |
 | `pathname` | Parçalara ayrılmış bir dosya adı | [Yol adları](functions/streams-files.md#9-yol-adları-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Akışlar | [Akışlar](functions/streams-files.md#3-somut-akış-türleri) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Bileşik akışlar | [Bileşik akışlar](functions/streams-files.md#4-bileşik-akışlar) |
@@ -105,7 +106,7 @@ Hangi türlerin hangi trait'leri gerçekleştirdiği. Her trait'in metotları
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-karşılaştırma) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Yukarıdakiyle aynı |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` ve tüm yerleşik hata türleri | [print-object](functions/printing.md#5-print-object-türe-göre-yazdırılan-gösterim) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` ve tüm yerleşik hata türleri | [print-object](functions/printing.md#5-print-object-türe-göre-yazdırılan-gösterim) |
 
 `cons-cell<A,B>` ve demetler `#{..}` için trait'ler ile koleksiyonların `print-object`'i, öğe
 türleri o trait'i uyguladığında kullanılabilir.

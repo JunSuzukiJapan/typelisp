@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # ฟังก์ชันที่มีให้ในตัว
 
 รายการฟังก์ชันที่มีให้ในตัว เมทอด และไลบรารีมาตรฐาน สำหรับไวยากรณ์ (ฟอร์มพิเศษและวิธีนิยามสิ่งต่าง ๆ)
@@ -37,6 +37,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, ตัวแปรควบคุมการพิมพ์ |
 | [format.md](format.md) | คำสั่งรูปแบบ |
 | [streams-files.md](streams-files.md) | สตรีม การดำเนินการกับไฟล์ pathname readtable |
-| [concurrency.md](concurrency.md) | Task, channel, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Task, channel, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix domain socket, UDP |
 | [system.md](system.md) | เวลา สภาพแวดล้อมขณะรัน เครื่องมือของการ implement `read`/`eval` docstring ฟังก์ชันที่เกี่ยวกับแมโคร |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # ชนิด
 
 ชนิดที่ typelisp มี และ trait มาตรฐานที่แต่ละชนิด implement วิธีเขียนชนิดอยู่ใน
@@ -66,6 +66,7 @@
 | `lazy::map-iter<I,A,U>` เป็นต้น | อิเทอเรเตอร์ที่ฟังก์ชันของมอดูล `lazy` คืนให้ | [อิเทอเรเตอร์แบบขี้เกียจ](functions/sequences.md#อิเทอเรเตอร์แบบขี้เกียจ-มอดูล-lazy) |
 | `WaitGroup` | การรอให้ N สิ่งจบ | [WaitGroup](functions/concurrency.md#4-waitgroup--การรอให้-n-สิ่งเสร็จ) |
 | `Mutex<T>` | การกีดกันซึ่งกันและกันสำหรับข้อมูลที่ใช้ร่วมกัน | [Mutex](functions/concurrency.md#6-mutext--การกีดกันซึ่งกันและกันสำหรับข้อมูลที่ใช้ร่วมกัน) |
+| `Context` | การยกเลิกแบบร่วมมือ | [Context](functions/concurrency.md#8-context--การยกเลิกแบบร่วมมือ) |
 | `pathname` | ชื่อไฟล์ที่แยกเป็นส่วน ๆ | [Pathname](functions/streams-files.md#9-pathname-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | สตรีม | [สตรีม](functions/streams-files.md#3-ชนิดสตรีมที่เป็นรูปธรรม) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | สตรีมแบบประกอบ | [สตรีมแบบประกอบ](functions/streams-files.md#4-สตรีมแบบประกอบ) |
@@ -104,7 +105,7 @@
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-การเปรียบเทียบ) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | เหมือนข้างบน |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` และชนิดข้อผิดพลาดที่มีให้ในตัวทั้งหมด | [print-object](functions/printing.md#5-print-object-การแสดงผลของแต่ละชนิด) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` และชนิดข้อผิดพลาดที่มีให้ในตัวทั้งหมด | [print-object](functions/printing.md#5-print-object-การแสดงผลของแต่ละชนิด) |
 
 trait ของ `cons-cell<A,B>` และทูเพิล `#{..}` รวมทั้ง `print-object` ของคอลเลกชัน ใช้ได้เมื่อชนิดของสมาชิก implement trait นั้น
 

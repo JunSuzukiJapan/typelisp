@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Task'ler ve Kanallar
 
 Task'lerin (hafif thread'lerin) sözcük dağarcığı. Onları başlatan `task` ve `thread` ile birkaç şeyi
@@ -171,7 +171,48 @@ Kapasitesi 1'dir; bu yüzden kimse almasa bile gönderen task bitebilir.
   ([Sözdizimi Başvurusu 12.2](../syntax.md#122-thread--ayrılmış-bir-os-threadinde-task-başlatma)).
   Derlenmiş bir fonksiyonun içinde oluşturulan bir `lambda` geçirilebilir.
 
-## 8. Bulunmayanlar
+## 8. `Context` — iş birliğine dayalı iptal
+
+Go'nun `context.Context`'i. Dışarıdan durdurabilmek istediğiniz işe verilir. Durdurma **iş birliğine
+dayalıdır**: `cancel` hiçbir şeyi kesmez; bir görev ya da iş parçacığı bunu kendisi `is-cancelled`'ı
+denetleyerek ya da `done`'dan alarak fark eder.
+
+| Ad | Kullanım | Tür | Anlamı |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | Kök olacak yeni bir bağlam |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | `parent`'ın bir çocuğunu oluşturur |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | `sec` saniye sonra kendini iptal eden bir `parent` çocuğu oluşturur |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | İptal eder. İstenildiği kadar çağrılabilir |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | Bağlam iptal edildiğinde kapanan bir kanal |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | İptal edilip edilmediği |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, ardından stopped
+  (sleep 0.1))
+```
+
+- **İptal çocuklara ulaşır.** `with-cancel`/`with-timeout` ile oluşturulan bir bağlam, ebeveyniyle
+  birlikte iptal edilir. Ters yönde (çocuktan ebeveyne) gitmez.
+- Zaten iptal edilmiş bir bağlamdan oluşturulan çocuk baştan iptal edilmiş olur.
+- `done` yalnızca kapatılır; değer gönderilmez. Alma işlemi `none` döndürür.
+- Her `(Context::background)` çağrısı ayrı bir kök oluşturur. Go'nun `Background()`'ı tektir ve
+  iptal edilemez; burada bir kök de iptal edilebilir ve bu yalnızca ondan oluşturulanları etkiler.
+- Bir bağlam görevler arasında ve iş parçacıkları arasında aktarılabilir.
+
+## 9. Bulunmayanlar
 
 - **`Atomic`**. `Mutex` yeterlidir.
 - **Task'e yerel değişkenler** (Go'da da yoktur).

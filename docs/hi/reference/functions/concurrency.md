@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # टास्क और चैनल
 
 टास्क (हल्के थ्रेड) की शब्दावली। उन्हें शुरू करने वाले `task` और `thread`, और कई चीज़ों की प्रतीक्षा करने वाला `select`, विशेष फ़ॉर्म हैं और [सिंटैक्स संदर्भ](../syntax.md#12-कंकरेंसी-टास्क) में हैं। यह अध्याय बाकी को कवर करता है: टाइप, मेथड और फ़ंक्शन।
@@ -136,7 +136,44 @@ Go का `time.After`। इसे `select` की टाइमआउट शा
 - `thread` के भीतर का `task` दूसरे थ्रेड पर सामान्य टास्क के रूप में चलता है।
 - इसे `typl` में भी उपयोग किया जा सकता है। इंटरप्रेट करते समय, `(thread (f ...))` और `Thread::spawn` चलाए जाने वाले फ़ंक्शन को वहीं कंपाइल करते हैं और फिर उसे समर्पित थ्रेड पर चलाते हैं। जो `lambda` अपने बाहर के लोकल वेरिएबल का संदर्भ लेता है वह अपने आप कंपाइल नहीं हो सकता और panic करता है ([सिंटैक्स संदर्भ 12.2](../syntax.md#122-thread--समर्पित-os-थ्रेड-पर-टास्क-शुरू-करना))। कंपाइल किए फ़ंक्शन के भीतर बनाया गया `lambda` पास किया जा सकता है।
 
-## 8. जो नहीं है
+## 8. `Context` — सहयोगी रद्दीकरण
+
+Go का `context.Context`। उस काम को दिया जाता है जिसे बाहर से रोक सकना चाहते हैं। रोकना **सहयोगी** है: `cancel` कुछ भी बाधित नहीं करता; टास्क या थ्रेड खुद `is-cancelled` देखकर या `done` से प्राप्त करके जान लेता है।
+
+| नाम | उपयोग | टाइप | अर्थ |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | जड़ बनने वाला नया कॉन्टेक्स्ट |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | `parent` का बच्चा बनाता है |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | `parent` का बच्चा बनाता है जो `sec` सेकंड बाद खुद रद्द हो जाता है |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | रद्द करता है। कितनी भी बार बुलाया जा सकता है |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | कॉन्टेक्स्ट रद्द होने पर बंद होने वाला चैनल |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | रद्द हो चुका है या नहीं |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, फिर stopped
+  (sleep 0.1))
+```
+
+- **रद्दीकरण बच्चों तक पहुँचता है।** `with-cancel`/`with-timeout` से बना कॉन्टेक्स्ट अपने माता-पिता के साथ रद्द होता है। उलटी दिशा में (बच्चे से माता-पिता तक) नहीं जाता।
+- पहले से रद्द कॉन्टेक्स्ट से बना बच्चा शुरू से ही रद्द होता है।
+- `done` केवल बंद होता है; कोई मान नहीं भेजा जाता। प्राप्त करने पर `none` मिलता है।
+- `(Context::background)` की हर कॉल एक अलग जड़ बनाती है। Go का `Background()` एक ही है और रद्द नहीं हो सकता; यहाँ जड़ भी रद्द हो सकती है, और उसका असर केवल उससे बनी चीज़ों पर होता है।
+- कॉन्टेक्स्ट टास्कों के बीच और थ्रेडों के बीच दिया जा सकता है।
+
+## 9. जो नहीं है
 
 - **`Atomic`**। `Mutex` पर्याप्त है।
 - **टास्क-लोकल वेरिएबल** (Go में भी नहीं हैं)।

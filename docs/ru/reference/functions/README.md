@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Встроенные функции
 
 Список встроенных функций, методов и стандартной библиотеки. О синтаксисе (специальных формах и способах
@@ -36,6 +36,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format`, красивая печать, `print-object`, управляющие переменные печати |
 | [format.md](format.md) | Директивы формата |
 | [streams-files.md](streams-files.md) | Потоки, операции с файлами, пути, readtable |
-| [concurrency.md](concurrency.md) | Задачи, каналы, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Задачи, каналы, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix-сокеты, UDP |
 | [system.md](system.md) | Время, среда выполнения, инструменты реализации, `read`/`eval`, строки документации, функции для макросов |

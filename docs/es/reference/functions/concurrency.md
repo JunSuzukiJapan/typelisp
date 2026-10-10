@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Tareas y canales
 
 El vocabulario de las tareas (hilos ligeros). `task` y `thread`, que las inician, y `select`, que espera
@@ -172,7 +172,49 @@ contrapartida de `Task<T>`.
   ([Referencia de sintaxis 12.2](../syntax.md#122-thread--iniciar-una-tarea-en-un-hilo-de-so-dedicado)). Una `lambda` creada
   dentro de una función compilada sí se puede pasar.
 
-## 8. Lo que no hay
+## 8. `Context` — cancelación cooperativa
+
+El `context.Context` de Go. Se pasa a un trabajo que se quiere poder detener desde fuera. Detenerlo
+es **cooperativo**: `cancel` no interrumpe nada; una tarea o un hilo se entera comprobando por sí
+mismo `is-cancelled` o recibiendo de `done`.
+
+| Nombre | Uso | Tipo | Significado |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | Un contexto nuevo que sirve de raíz |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | Crea un hijo de `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | Crea un hijo de `parent` que se cancela solo al cabo de `sec` segundos |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | Cancela. Se puede llamar cuantas veces se quiera |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | Un canal que se cierra cuando se cancela el contexto |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Si se ha cancelado |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2 y luego stopped
+  (sleep 0.1))
+```
+
+- **La cancelación llega a los hijos.** Un contexto creado con `with-cancel`/`with-timeout` se
+  cancela junto con su padre. En sentido contrario (de hijo a padre) no se propaga.
+- Un hijo creado a partir de un contexto ya cancelado nace cancelado.
+- `done` solo se cierra; no se envía ningún valor. Recibir devuelve `none`.
+- Cada llamada a `(Context::background)` crea una raíz distinta. El `Background()` de Go es uno solo
+  y no se puede cancelar; aquí también una raíz se puede cancelar, y eso solo afecta a lo creado a
+  partir de ella.
+- Un contexto se puede pasar entre tareas y entre hilos.
+
+## 9. Lo que no hay
 
 - **`Atomic`**. `Mutex` basta.
 - **Variables locales de tarea** (Go tampoco las tiene).

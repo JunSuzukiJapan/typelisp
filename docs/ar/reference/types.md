@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # الأنواع
 
 الأنواع الموجودة في typelisp، والسمات القياسية التي ينفّذها كل نوع. وطريقة كتابة الأنواع في
@@ -66,6 +66,7 @@
 | `lazy::map-iter<I,A,U>` وغيرها | المكرِّرات التي تُرجعها دوال الوحدة `lazy` | [المكرِّرات الكسولة](functions/sequences.md#المكرِّرات-الكسولة-الوحدة-lazy) |
 | `WaitGroup` | انتظار اكتمال N عملية | [WaitGroup](functions/concurrency.md#4-waitgroup--انتظار-اكتمال-n-عملية) |
 | `Mutex<T>` | استبعاد متبادل للبيانات المشتركة | [Mutex](functions/concurrency.md#6-mutext--الاستبعاد-المتبادل-للبيانات-المشتركة) |
+| `Context` | الإلغاء التعاوني | [Context](functions/concurrency.md#8-context--الإلغاء-التعاوني) |
 | `pathname` | اسم ملف مقسَّم إلى أجزاء | [المسارات](functions/streams-files.md#9-المسارات-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | تدفقات | [التدفقات](functions/streams-files.md#3-أنواع-التدفقات-الملموسة) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | تدفقات مركّبة | [التدفقات المركّبة](functions/streams-files.md#4-التدفقات-المركبة) |
@@ -103,7 +104,7 @@
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-المقارنة) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | مثل ما سبق |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` وكل أنواع الأخطاء المضمنة | [print-object](functions/printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` وكل أنواع الأخطاء المضمنة | [print-object](functions/printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع) |
 
 سمات `cons-cell<A,B>` والصفوف `#{..}`، و`print-object` الخاص بالمجموعات، متاحة حين تنفّذ أنواع
 العناصر تلك السمة.

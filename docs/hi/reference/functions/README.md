@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # बिल्ट-इन फ़ंक्शन
 
 बिल्ट-इन फ़ंक्शन, मेथड और स्टैंडर्ड लाइब्रेरी की सूची। सिंटैक्स (विशेष फ़ॉर्म और चीज़ें कैसे परिभाषित करें) के लिए [सिंटैक्स संदर्भ](../syntax.md) देखें; टाइप की सूची के लिए [टाइप](../types.md) देखें।
@@ -34,6 +34,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format`, सुंदर प्रिंटर, `print-object`, प्रिंटर नियंत्रण वेरिएबल |
 | [format.md](format.md) | फ़ॉर्मैट निर्देश |
 | [streams-files.md](streams-files.md) | स्ट्रीम, फ़ाइल ऑपरेशन, पाथनेम, readtable |
-| [concurrency.md](concurrency.md) | टास्क, चैनल, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | टास्क, चैनल, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix डोमेन सॉकेट, UDP |
 | [system.md](system.md) | समय, रनटाइम पर्यावरण, इम्प्लीमेंटेशन उपकरण, `read`/`eval`, डॉकस्ट्रिंग, macro-संबंधित फ़ंक्शन |

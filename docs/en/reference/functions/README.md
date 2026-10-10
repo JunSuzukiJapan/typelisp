@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Built-in Functions
 
 The list of built-in functions, methods and the standard library. For syntax (special forms and how
@@ -37,6 +37,6 @@ written as `(argument-type,...)→return-type`.
 | [printing.md](printing.md) | `print`/`println`/`format`, the pretty printer, `print-object`, printer control variables |
 | [format.md](format.md) | Format directives |
 | [streams-files.md](streams-files.md) | Streams, file operations, pathnames, readtable |
-| [concurrency.md](concurrency.md) | Tasks, channels, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Tasks, channels, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix domain sockets, UDP |
 | [system.md](system.md) | Time, the runtime environment, implementation tools, `read`/`eval`, docstrings, macro-related functions |

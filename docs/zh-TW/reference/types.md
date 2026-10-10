@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # 型別一覽
 
 typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的寫法見[語法參考第 2 章](syntax.md#2-型別的寫法)，各型別的函式與方法見
@@ -63,6 +63,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 | `lazy::map-iter<I,A,U>` 等 | `lazy` 模組的函式傳回的迭代器 | [惰性迭代器](functions/sequences.md#惰性迭代器lazy-模組) |
 | `WaitGroup` | 等待 N 個完成 | [WaitGroup](functions/concurrency.md#4-waitgroup--等待-n-個完成) |
 | `Mutex<T>` | 共享資料的互斥 | [Mutex](functions/concurrency.md#6-mutext--共享資料的互斥) |
+| `Context` | 協作式取消 | [Context](functions/concurrency.md#8-context--協作式取消) |
 | `pathname` | 拆解後的檔名 | [路徑名稱](functions/streams-files.md#9-路徑名稱-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | 串流 | [串流](functions/streams-files.md#3-具體串流型別) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | 組合串流 | [組合串流](functions/streams-files.md#4-組合串流) |
@@ -99,7 +100,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` 以及所有內建錯誤型別 | [print-object](functions/printing.md#5-print-object依型別的列印表示) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 以及所有內建錯誤型別 | [print-object](functions/printing.md#5-print-object依型別的列印表示) |
 
 `cons-cell<A,B>` 與元組 `#{..}` 的 trait，以及集合的 `print-object`，在元素型別實作了該 trait 時可用。
 

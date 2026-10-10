@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Funções embutidas
 
 A lista de funções embutidas, métodos e da biblioteca padrão. Para a sintaxe (formas especiais e como
@@ -37,6 +37,6 @@ As tabelas de cada capítulo têm as colunas "nome, forma, tipo, descrição". A
 | [printing.md](printing.md) | `print`/`println`/`format`, o pretty printer, `print-object`, variáveis de controle da impressora |
 | [format.md](format.md) | Diretivas de formato |
 | [streams-files.md](streams-files.md) | Streams, operações com arquivos, nomes de caminho, readtable |
-| [concurrency.md](concurrency.md) | Tarefas, canais, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Tarefas, canais, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, sockets de domínio Unix, UDP |
 | [system.md](system.md) | Tempo, o ambiente de execução, ferramentas da implementação, `read`/`eval`, docstrings, funções relacionadas a macros |

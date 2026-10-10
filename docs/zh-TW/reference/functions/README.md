@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # 內建函式
 
 內建函式、方法與標準函式庫的一覽。語法（特殊形式、定義方式）見[語法參考](../syntax.md)，型別一覽見[型別一覽](../types.md)。
@@ -34,6 +34,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、列印控制變數 |
 | [format.md](format.md) | 格式指令 |
 | [streams-files.md](streams-files.md) | 串流、檔案操作、路徑名稱、readtable |
-| [concurrency.md](concurrency.md) | 任務、通道、`WaitGroup`、`Mutex`、`Thread` |
+| [concurrency.md](concurrency.md) | 任務、通道、`WaitGroup`、`Mutex`、`Thread`、`Context` |
 | [network.md](network.md) | TCP、TLS、Unix 網域 socket、UDP |
 | [system.md](system.md) | 時間、執行環境、實作工具、`read`/`eval`、文件字串、巨集相關 |

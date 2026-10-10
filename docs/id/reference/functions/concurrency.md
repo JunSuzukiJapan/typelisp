@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Task dan Kanal
 
 Kosakata task (thread ringan). `task` dan `thread`, yang memulainya, dan `select`, yang menunggu
@@ -177,7 +177,49 @@ Handle yang dikembalikan oleh `(thread (f args...))`
   ([Referensi Sintaks 12.2](../syntax.md#122-thread--memulai-task-pada-thread-os-khusus)). `lambda`
   yang dibuat di dalam fungsi terkompilasi dapat diserahkan.
 
-## 8. Yang tidak ada
+## 8. `Context` — pembatalan kooperatif
+
+`context.Context` milik Go. Diberikan kepada pekerjaan yang ingin bisa dihentikan dari luar.
+Penghentiannya **kooperatif**: `cancel` tidak menyela apa pun; task atau thread mengetahuinya dengan
+memeriksa `is-cancelled` sendiri atau dengan menerima dari `done`.
+
+| Nama | Penggunaan | Tipe | Arti |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | Context baru sebagai akar |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | Membuat anak dari `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | Membuat anak dari `parent` yang membatalkan dirinya sendiri setelah `sec` detik |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | Membatalkan. Boleh dipanggil berapa kali pun |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | Channel yang ditutup saat context dibatalkan |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Apakah sudah dibatalkan |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, lalu stopped
+  (sleep 0.1))
+```
+
+- **Pembatalan sampai ke anak-anaknya.** Context yang dibuat dengan `with-cancel`/`with-timeout`
+  ikut dibatalkan bersama induknya. Arah sebaliknya (dari anak ke induk) tidak.
+- Anak yang dibuat dari context yang sudah dibatalkan sudah dibatalkan sejak awal.
+- `done` hanya ditutup; tidak ada nilai yang dikirim. Penerimaan mengembalikan `none`.
+- Setiap panggilan `(Context::background)` membuat akar tersendiri. `Background()` milik Go hanya
+  satu dan tidak bisa dibatalkan; di sini akar pun bisa dibatalkan, dan itu hanya memengaruhi apa
+  yang dibuat darinya.
+- Context dapat diteruskan antar task dan antar thread.
+
+## 9. Yang tidak ada
 
 - **`Atomic`**. `Mutex` sudah cukup.
 - **Variabel lokal task** (Go juga tidak memilikinya).

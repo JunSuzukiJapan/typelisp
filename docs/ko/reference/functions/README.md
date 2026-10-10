@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # 내장 함수
 
 내장 함수, 메서드, 표준 라이브러리의 목록. 문법(특수 형식과 정의 방법)은 [문법 레퍼런스](../syntax.md), 타입 목록은
@@ -35,6 +35,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format`, 프리티 프린터, `print-object`, 프린터 제어 변수 |
 | [format.md](format.md) | 서식 지시자 |
 | [streams-files.md](streams-files.md) | 스트림, 파일 조작, 경로명, readtable |
-| [concurrency.md](concurrency.md) | 태스크, 채널, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | 태스크, 채널, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix 도메인 소켓, UDP |
 | [system.md](system.md) | 시간, 실행 환경, 구현 도구, `read`/`eval`, 문서 문자열, 매크로 관련 함수 |

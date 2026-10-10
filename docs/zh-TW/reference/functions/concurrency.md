@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # 任務與通道
 
 任務（輕量級執行緒）的詞彙。啟動它們的 `task`・`thread` 與多路等待的 `select` 是特殊形式，見[語法參考](../syntax.md#12-並行任務)。本章是
@@ -146,7 +146,44 @@ Go 的 `time.After`。可以直接寫在 `select` 的逾時分支中（[語法�
   參照外部區域變數的 `lambda` 無法直接編譯，會 panic（[語法參考 12.2](../syntax.md#122-thread--在專用-os-執行緒上啟動任務)）。
   在編譯過的函式中建立的 `lambda` 可以傳入。
 
-## 8. 沒有的東西
+## 8. `Context` — 協作式取消
+
+Go 的 `context.Context`。傳給想要能從外部停止的工作。停止是**協作式**的：`cancel` 不中斷任何東西——任務或執行緒自己查看 `is-cancelled` 或接收 `done` 來察覺。
+
+| 名稱 | 用法 | 型別 | 意義 |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | 作為根的新上下文 |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | 建立 `parent` 的子上下文 |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | 建立 `parent` 的子上下文，`sec` 秒後自行取消 |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | 取消。呼叫多少次都可以 |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | 上下文被取消時關閉的通道 |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | 是否已被取消 |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1、job 2 之後 stopped
+  (sleep 0.1))
+```
+
+- **取消會傳給子上下文**。用 `with-cancel`/`with-timeout` 建立的上下文會隨父上下文一起被取消。反方向（從子到父）不會傳遞。
+- 從已取消的上下文建立的子上下文，一開始就是已取消的。
+- `done` 只會被關閉，不傳送值。接收時傳回 `none`。
+- `(Context::background)` 每次呼叫都建立一個不同的根。Go 的 `Background()` 只有一個且不能取消；這裡根也可以取消，影響只及於從它建立的東西。
+- 可以在任務之間、執行緒之間傳遞。
+
+## 9. 沒有的東西
 
 - **`Atomic`**。`Mutex` 就夠了。
 - **任務區域變數**（Go 也沒有）。

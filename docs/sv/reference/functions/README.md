@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Inbyggda funktioner
 
 Listan över inbyggda funktioner, metoder och standardbiblioteket. För syntax (specialformer och hur man
@@ -37,6 +37,6 @@ Tabellerna i varje kapitel har kolumnerna "namn, form, typ, beskrivning". Typkol
 | [printing.md](printing.md) | `print`/`println`/`format`, den snygga skrivaren (pretty printer), `print-object`, kontrollvariabler för utskrift |
 | [format.md](format.md) | Formatdirektiv |
 | [streams-files.md](streams-files.md) | Strömmar, filoperationer, pathnames, readtable |
-| [concurrency.md](concurrency.md) | Tasks, kanaler, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Tasks, kanaler, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix-domänsocketar, UDP |
 | [system.md](system.md) | Tid, körmiljön, implementationsverktyg, `read`/`eval`, dokumentationssträngar, makrorelaterade funktioner |

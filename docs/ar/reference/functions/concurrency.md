@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # المهام والقنوات
 
 مفردات المهام (الخيوط الخفيفة). أما `task` و`thread` اللتان تبدآنها، و`select` التي تنتظر على عدة أشياء،
@@ -163,7 +163,47 @@
   ([مرجع الصياغة 12.2](../syntax.md#122-thread--بدء-مهمة-على-خيط-os-مخصص)). ويمكن تمرير `lambda` أُنشئت
   داخل دالة مترجمة.
 
-## 8. ما ليس موجودًا
+## 8. `Context` — الإلغاء التعاوني
+
+`context.Context` في Go. يُمرَّر إلى عمل تريد أن تتمكن من إيقافه من الخارج. الإيقاف **تعاوني**:
+`cancel` لا يقاطع شيئًا؛ تلاحظه المهمة أو الخيط بفحص `is-cancelled` بنفسه أو بالاستقبال من `done`.
+
+| الاسم | الاستخدام | النوع | المعنى |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | سياق جديد ليكون جذرًا |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | تنشئ ابنًا لـ `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | تنشئ ابنًا لـ `parent` يلغي نفسه بعد `sec` ثانية |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | تُلغي. يجوز استدعاؤها أي عدد من المرات |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | قناة تُغلق حين يُلغى السياق |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | هل أُلغي |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1 ثم job 2 ثم stopped
+  (sleep 0.1))
+```
+
+- **الإلغاء يصل إلى الأبناء.** السياق المُنشأ بـ `with-cancel`/`with-timeout` يُلغى مع أبيه. ولا
+  يسري في الاتجاه المعاكس (من الابن إلى الأب).
+- الابن المُنشأ من سياق أُلغي من قبل يكون ملغًى منذ البداية.
+- `done` تُغلق فقط ولا تُرسل قيمة. يُرجع الاستقبال `none`.
+- كل استدعاء لـ `(Context::background)` ينشئ جذرًا مستقلًا. `Background()` في Go واحد ولا يمكن
+  إلغاؤه؛ أما هنا فيمكن إلغاء الجذر أيضًا، ولا يمس ذلك إلا ما أُنشئ منه.
+- يمكن تمرير السياق بين المهام وبين الخيوط.
+
+## 9. ما ليس موجودًا
 
 - **`Atomic`**. يكفي `Mutex`.
 - **المتغيرات المحلية للمهمة** (وGo ليس فيها أيضًا).

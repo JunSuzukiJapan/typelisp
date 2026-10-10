@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Typy
 
 Typy, które ma typelisp, oraz standardowe traity implementowane przez każdy typ. Sposób zapisu typów opisano w
@@ -66,6 +66,7 @@ samo jak typy, które piszesz sam, i wszystko, co można zrobić z `defstruct`, 
 | `lazy::map-iter<I,A,U>` itd. | Iteratory zwracane przez funkcje modułu `lazy` | [Leniwe iteratory](functions/sequences.md#leniwe-iteratory-moduł-lazy) |
 | `WaitGroup` | Oczekiwanie na zakończenie N rzeczy | [WaitGroup](functions/concurrency.md#4-waitgroup--oczekiwanie-na-n-zakończeń) |
 | `Mutex<T>` | Wzajemne wykluczanie dla współdzielonych danych | [Mutex](functions/concurrency.md#6-mutext--wzajemne-wykluczanie-dla-współdzielonych-danych) |
+| `Context` | Kooperacyjne anulowanie | [Context](functions/concurrency.md#8-context--kooperacyjne-anulowanie) |
 | `pathname` | Nazwa pliku podzielona na części | [Nazwy ścieżek](functions/streams-files.md#9-nazwy-ścieżek-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Strumienie | [Strumienie](functions/streams-files.md#3-konkretne-typy-strumieni) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Strumienie złożone | [Strumienie złożone](functions/streams-files.md#4-strumienie-złożone) |
@@ -104,7 +105,7 @@ Które typy implementują które traity. Metody każdego traitu znajdują się w
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-porównywanie) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Jak wyżej |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` oraz wszystkie wbudowane typy błędów | [print-object](functions/printing.md#5-print-object-reprezentacja-wypisywana-według-typu) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` oraz wszystkie wbudowane typy błędów | [print-object](functions/printing.md#5-print-object-reprezentacja-wypisywana-według-typu) |
 
 Traity `cons-cell<A,B>` i krotek `#{..}` oraz `print-object` kolekcji są dostępne, gdy typy
 elementów implementują dany trait.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Funciones incorporadas
 
 La lista de funciones incorporadas, métodos y la biblioteca estándar. Para la sintaxis (formas especiales y
@@ -38,6 +38,6 @@ escribe como `(tipo-de-argumento,...)→tipo-de-retorno`.
 | [printing.md](printing.md) | `print`/`println`/`format`, el pretty printer, `print-object`, variables de control de la impresora |
 | [format.md](format.md) | Directivas de formato |
 | [streams-files.md](streams-files.md) | Streams, operaciones con archivos, nombres de ruta, readtable |
-| [concurrency.md](concurrency.md) | Tareas, canales, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Tareas, canales, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, sockets de dominio Unix, UDP |
 | [system.md](system.md) | Tiempo, el entorno de ejecución, herramientas de la implementación, `read`/`eval`, docstrings, funciones relacionadas con macros |

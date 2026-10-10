@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Hàm dựng sẵn
 
 Danh sách các hàm dựng sẵn, phương thức và thư viện chuẩn. Về cú pháp (các dạng đặc biệt và cách định
@@ -36,6 +36,6 @@ Các bảng trong mỗi chương có các cột "tên, dạng, kiểu, mô tả"
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, các biến điều khiển bộ in |
 | [format.md](format.md) | Các chỉ thị định dạng |
 | [streams-files.md](streams-files.md) | Stream, thao tác tệp, pathname, readtable |
-| [concurrency.md](concurrency.md) | Task, kênh, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Task, kênh, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix domain socket, UDP |
 | [system.md](system.md) | Thời gian, môi trường chạy, công cụ triển khai, `read`/`eval`, docstring, các hàm liên quan đến macro |

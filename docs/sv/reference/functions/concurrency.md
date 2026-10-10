@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Tasks och kanaler
 
 Vokabulären för tasks (lättviktstrådar). `task` och `thread`, som startar dem, och `select`, som väntar
@@ -170,7 +170,48 @@ Motsvarigheten till `Task<T>`.
   ([Syntaxreferens 12.2](../syntax.md#122-thread--starta-en-task-på-en-dedikerad-os-tråd)). En
   `lambda` som skapas inuti en kompilerad funktion kan skickas.
 
-## 8. Vad som inte finns
+## 8. `Context` — kooperativ avbrytning
+
+Gos `context.Context`. Man ger den till arbete som man vill kunna stoppa utifrån. Stoppet är
+**kooperativt**: `cancel` avbryter ingenting; en uppgift eller tråd märker det genom att själv
+kontrollera `is-cancelled` eller ta emot på `done`.
+
+| Namn | Användning | Typ | Betydelse |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | En ny kontext som rot |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | Skapar ett barn till `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | Skapar ett barn till `parent` som avbryter sig självt efter `sec` sekunder |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | Avbryter. Får anropas hur många gånger som helst |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | En kanal som stängs när kontexten avbryts |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Om den har avbrutits |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, sedan stopped
+  (sleep 0.1))
+```
+
+- **Avbrytningen når barnen.** En kontext som skapats med `with-cancel`/`with-timeout` avbryts
+  tillsammans med sin förälder. Åt andra hållet (från barn till förälder) går det inte.
+- Ett barn till en kontext som redan avbrutits är avbrutet från början.
+- `done` stängs bara; inget värde skickas. En mottagning ger `none`.
+- Varje anrop av `(Context::background)` skapar en egen rot. Gos `Background()` finns bara en av och
+  kan inte avbrytas; här kan även en rot avbrytas, och det påverkar bara det som skapats ur den.
+- En kontext kan skickas mellan uppgifter och mellan trådar.
+
+## 9. Vad som inte finns
 
 - **`Atomic`**. `Mutex` räcker.
 - **Task-lokala variabler** (inte heller Go har dem).

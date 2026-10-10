@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Tipe
 
 Tipe yang dimiliki typelisp, dan trait standar yang diimplementasikan setiap tipe. Cara menulis tipe
@@ -68,6 +68,7 @@ diperlakukan sama seperti tipe yang Anda tulis sendiri, dan semua yang dapat dil
 | `lazy::map-iter<I,A,U>` dan lain-lain | Iterator yang dikembalikan fungsi-fungsi modul `lazy` | [Iterator malas](functions/sequences.md#iterator-malas-modul-lazy) |
 | `WaitGroup` | Menunggu N hal selesai | [WaitGroup](functions/concurrency.md#4-waitgroup--menunggu-n-penyelesaian) |
 | `Mutex<T>` | Eksklusi mutual untuk data bersama | [Mutex](functions/concurrency.md#6-mutext--eksklusi-mutual-untuk-data-bersama) |
+| `Context` | Pembatalan kooperatif | [Context](functions/concurrency.md#8-context--pembatalan-kooperatif) |
 | `pathname` | Nama berkas yang dipecah menjadi bagian-bagian | [Pathname](functions/streams-files.md#9-pathname-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Stream | [Stream](functions/streams-files.md#3-tipe-stream-konkret) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Stream komposit | [Stream komposit](functions/streams-files.md#4-stream-komposit) |
@@ -106,7 +107,7 @@ Tipe mana yang mengimplementasikan trait mana. Metode tiap trait ada di
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-perbandingan) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Sama seperti di atas |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` dan semua tipe kesalahan bawaan | [print-object](functions/printing.md#5-print-object-representasi-cetak-per-tipe) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` dan semua tipe kesalahan bawaan | [print-object](functions/printing.md#5-print-object-representasi-cetak-per-tipe) |
 
 Trait milik `cons-cell<A,B>` dan tuple `#{..}`, serta `print-object` milik koleksi, dapat dipakai
 bila tipe elemennya mengimplementasikan trait tersebut.

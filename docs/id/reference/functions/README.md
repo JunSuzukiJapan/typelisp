@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Fungsi Bawaan
 
 Daftar fungsi bawaan, metode, dan pustaka standar. Untuk sintaks (bentuk khusus dan cara
@@ -38,6 +38,6 @@ Tabel di setiap bab memiliki kolom "nama, bentuk, tipe, deskripsi". Kolom tipe d
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, variabel kendali pencetak |
 | [format.md](format.md) | Direktif format |
 | [streams-files.md](streams-files.md) | Stream, operasi berkas, pathname, readtable |
-| [concurrency.md](concurrency.md) | Task, kanal, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Task, kanal, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, socket domain Unix, UDP |
 | [system.md](system.md) | Waktu, lingkungan runtime, alat implementasi, `read`/`eval`, docstring, fungsi terkait makro |

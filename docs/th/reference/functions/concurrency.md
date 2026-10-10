@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Task และ channel
 
 คำศัพท์ของ task (เธรดน้ำหนักเบา) `task` และ `thread` ที่ใช้เริ่ม task และ `select`
@@ -170,7 +170,44 @@ handle ที่ `(thread (f args...))` คืน
   ([เอกสารอ้างอิงไวยากรณ์ 12.2](../syntax.md#122-thread--การเริ่ม-task-บนเธรด-os-เฉพาะ)) `lambda` ที่สร้างภายใน
   ฟังก์ชันที่คอมไพล์แล้วส่งได้
 
-## 8. สิ่งที่ไม่มี
+## 8. `Context` — การยกเลิกแบบร่วมมือ
+
+`context.Context` ของ Go ใช้ส่งให้งานที่อยากหยุดได้จากภายนอก การหยุดเป็นแบบ**ร่วมมือ** `cancel` ไม่ขัดจังหวะอะไรเลย ทาสก์หรือเธรดจะรู้เองด้วยการตรวจ `is-cancelled` หรือรับจาก `done`
+
+| ชื่อ | การใช้ | ชนิด | ความหมาย |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | คอนเท็กซ์ใหม่ที่เป็นราก |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | สร้างลูกของ `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | สร้างลูกของ `parent` ที่ยกเลิกตัวเองหลังผ่านไป `sec` วินาที |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | ยกเลิก เรียกกี่ครั้งก็ได้ |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | แชนเนลที่ถูกปิดเมื่อคอนเท็กซ์ถูกยกเลิก |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | ถูกยกเลิกแล้วหรือไม่ |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2 แล้วตามด้วย stopped
+  (sleep 0.1))
+```
+
+- **การยกเลิกส่งต่อไปยังลูก** คอนเท็กซ์ที่สร้างด้วย `with-cancel`/`with-timeout` จะถูกยกเลิกไปพร้อมกับพ่อแม่ ในทางกลับกัน (จากลูกไปพ่อแม่) จะไม่ส่งต่อ
+- ลูกที่สร้างจากคอนเท็กซ์ที่ถูกยกเลิกไปแล้วจะถูกยกเลิกตั้งแต่แรก
+- `done` ถูกปิดเท่านั้น ไม่มีการส่งค่า การรับจะได้ `none`
+- การเรียก `(Context::background)` แต่ละครั้งสร้างรากแยกกัน `Background()` ของ Go มีอันเดียวและยกเลิกไม่ได้ แต่ที่นี่รากก็ยกเลิกได้ และส่งผลเฉพาะสิ่งที่สร้างจากรากนั้น
+- ส่งต่อระหว่างทาสก์และระหว่างเธรดได้
+
+## 9. สิ่งที่ไม่มี
 
 - **`Atomic`** `Mutex` ก็เพียงพอ
 - **ตัวแปรท้องถิ่นของ task** (Go ก็ไม่มี)

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # 任务与通道
 
 任务（轻量级线程）的词汇。启动它们的 `task`・`thread` 和多路等待的 `select` 是特殊形式，见
@@ -153,7 +153,44 @@ Go 的 `time.After`。可以直接写在 `select` 的超时分支中（[语法�
   引用外部局部变量的 `lambda` 无法直接编译，会 panic（[语法参考 12.2](../syntax.md#122-thread--在专用-os-线程上启动任务)）。
   在编译过的函数中创建的 `lambda` 可以传入。
 
-## 8. 没有的东西
+## 8. `Context` — 协作式取消
+
+Go 的 `context.Context`。传给想要能从外部停止的工作。停止是**协作式**的：`cancel` 不中断任何东西——任务或线程自己查看 `is-cancelled` 或接收 `done` 来察觉。
+
+| 名称 | 用法 | 类型 | 含义 |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | 作为根的新上下文 |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | 创建 `parent` 的子上下文 |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | 创建 `parent` 的子上下文，`sec` 秒后自行取消 |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | 取消。调用多少次都可以 |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | 上下文被取消时关闭的通道 |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | 是否已被取消 |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1、job 2 之后 stopped
+  (sleep 0.1))
+```
+
+- **取消会传给子上下文**。用 `with-cancel`/`with-timeout` 创建的上下文会随父上下文一起被取消。反方向（从子到父）不会传递。
+- 从已取消的上下文创建的子上下文，一开始就是已取消的。
+- `done` 只会被关闭，不发送值。接收时返回 `none`。
+- `(Context::background)` 每次调用都创建一个不同的根。Go 的 `Background()` 只有一个且不能取消；这里根也可以取消，影响只及于从它创建的东西。
+- 可以在任务之间、线程之间传递。
+
+## 9. 没有的东西
 
 - **`Atomic`**。`Mutex` 就够了。
 - **任务局部变量**（Go 也没有）。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # 内置函数
 
 内置函数、方法和标准库的一览。语法（特殊形式、定义方法）见[语法参考](../syntax.md)，类型一览见[类型一览](../types.md)。
@@ -34,6 +34,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、打印控制变量 |
 | [format.md](format.md) | 格式指令 |
 | [streams-files.md](streams-files.md) | 流、文件操作、路径名、readtable |
-| [concurrency.md](concurrency.md) | 任务、通道、`WaitGroup`、`Mutex`、`Thread` |
+| [concurrency.md](concurrency.md) | 任务、通道、`WaitGroup`、`Mutex`、`Thread`、`Context` |
 | [network.md](network.md) | TCP、TLS、Unix 域套接字、UDP |
 | [system.md](system.md) | 时间、运行环境、实现工具、`read`/`eval`、文档字符串、宏相关 |

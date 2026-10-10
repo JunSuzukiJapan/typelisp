@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Yerleşik Fonksiyonlar
 
 Yerleşik fonksiyonların, metotların ve standart kütüphanenin listesi. Sözdizimi (özel formlar ve
@@ -37,6 +37,6 @@ Her bölümdeki tabloların "ad, biçim, tür, açıklama" sütunları vardır. 
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, yazıcı denetim değişkenleri |
 | [format.md](format.md) | Biçim yönergeleri |
 | [streams-files.md](streams-files.md) | Akışlar, dosya işlemleri, yol adları, readtable |
-| [concurrency.md](concurrency.md) | Task'ler, kanallar, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Task'ler, kanallar, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, Unix domain soketleri, UDP |
 | [system.md](system.md) | Zaman, çalışma zamanı ortamı, gerçekleştirim araçları, `read`/`eval`, docstring'ler, makroyla ilgili fonksiyonlar |

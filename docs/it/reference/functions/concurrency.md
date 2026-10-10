@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Task e canali
 
 Il vocabolario dei task (thread leggeri). `task` e `thread`, che li avviano, e `select`, che attende su
@@ -173,7 +173,49 @@ controparte di `Task<T>`.
   ([Riferimento della sintassi 12.2](../syntax.md#122-thread--avvio-di-un-task-su-un-thread-os-dedicato)). Una `lambda` creata dentro una
   funzione compilata può essere passata.
 
-## 8. Che cosa non c'è
+## 8. `Context` — annullamento cooperativo
+
+Il `context.Context` di Go. Lo si passa a un lavoro che si vuole poter fermare dall'esterno.
+Fermarlo è **cooperativo**: `cancel` non interrompe nulla; un task o un thread se ne accorge
+controllando da sé `is-cancelled` o ricevendo da `done`.
+
+| Nome | Uso | Tipo | Significato |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | Un nuovo contesto che fa da radice |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | Crea un figlio di `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | Crea un figlio di `parent` che si annulla da solo dopo `sec` secondi |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | Annulla. Si può chiamare quante volte si vuole |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | Un canale che viene chiuso quando il contesto è annullato |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Se è stato annullato |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, poi stopped
+  (sleep 0.1))
+```
+
+- **L'annullamento raggiunge i figli.** Un contesto creato con `with-cancel`/`with-timeout` viene
+  annullato insieme al genitore. Nella direzione opposta (dal figlio al genitore) non si propaga.
+- Un figlio creato da un contesto già annullato nasce annullato.
+- `done` viene solo chiuso; non si invia alcun valore. Una ricezione restituisce `none`.
+- Ogni chiamata a `(Context::background)` crea una radice distinta. Il `Background()` di Go è uno
+  solo e non si può annullare; qui anche una radice si può annullare, e ciò riguarda solo quanto
+  creato a partire da essa.
+- Un contesto si può passare tra task e tra thread.
+
+## 9. Che cosa non c'è
 
 - **`Atomic`**. `Mutex` basta.
 - **Variabili locali ai task** (nemmeno Go le ha).

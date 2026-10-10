@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Tasks und Kanäle
 
 Das Vokabular der Tasks (leichtgewichtigen Threads). `task` und `thread`, die sie starten, und `select`, das
@@ -171,7 +171,50 @@ Gegenstück zu `Task<T>`.
   ([Syntaxreferenz 12.2](../syntax.md#122-thread--einen-task-auf-einem-eigenen-os-thread-starten)). Ein
   innerhalb einer kompilierten Funktion erzeugtes `lambda` kann übergeben werden.
 
-## 8. Was es nicht gibt
+## 8. `Context` — kooperativer Abbruch
+
+Gos `context.Context`. Man gibt ihn Arbeit mit, die man von außen anhalten können will. Das Anhalten
+ist **kooperativ**: `cancel` unterbricht nichts; eine Task oder ein Thread merkt es, indem sie
+selbst `is-cancelled` prüft oder auf `done` empfängt.
+
+| Name | Verwendung | Typ | Bedeutung |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | Ein neuer Kontext als Wurzel |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | Erzeugt ein Kind von `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | Erzeugt ein Kind von `parent`, das sich nach `sec` Sekunden selbst abbricht |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | Bricht ab. Darf beliebig oft aufgerufen werden |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | Ein Kanal, der beim Abbruch geschlossen wird |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Ob abgebrochen wurde |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, dann stopped
+  (sleep 0.1))
+```
+
+- **Der Abbruch erreicht die Kinder.** Ein mit `with-cancel`/`with-timeout` erzeugter Kontext wird
+  zusammen mit seinem Elternkontext abgebrochen. In die andere Richtung (vom Kind zum Elternteil)
+  geht es nicht.
+- Ein Kind eines bereits abgebrochenen Kontexts ist von Anfang an abgebrochen.
+- `done` wird nur geschlossen; es wird kein Wert gesendet. Ein Empfang liefert `none`.
+- Jeder Aufruf von `(Context::background)` erzeugt eine eigene Wurzel. Gos `Background()` gibt es
+  nur einmal und es ist nicht abbrechbar; hier lässt sich auch eine Wurzel abbrechen, und das
+  betrifft nur, was aus ihr erzeugt wurde.
+- Ein Kontext kann zwischen Tasks und zwischen Threads weitergegeben werden.
+
+## 9. Was es nicht gibt
 
 - **`Atomic`**. `Mutex` genügt.
 - **Task-lokale Variablen** (Go hat sie auch nicht).

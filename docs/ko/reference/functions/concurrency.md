@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # 태스크와 채널
 
 태스크(경량 스레드)의 어휘. 태스크를 시작하는 `task`와 `thread`, 여러 가지를 기다리는 `select`는 특수 형식이며
@@ -158,7 +158,47 @@ Go의 `time.After`. `select`의 타임아웃 갈래에 그대로 쓸 수 있다
   전용 스레드에서 실행한다. 바깥의 지역 변수를 참조하는 `lambda`는 그대로는 컴파일할 수 없어 panic한다
   ([문법 레퍼런스 12.2](../syntax.md#122-thread--전용-os-스레드에서-태스크-시작)). 컴파일된 함수 안에서 만든 `lambda`는 넘길 수 있다.
 
-## 8. 없는 것
+## 8. `Context` — 협조적인 취소
+
+Go의 `context.Context`. 밖에서 멈추고 싶은 작업에 넘긴다. 멈추는 것은 **협조적**이어서 `cancel`은 아무것도 중단하지 않는다. 태스크나 스레드가 스스로
+`is-cancelled`를 보거나 `done`을 수신해서 알아차린다.
+
+| 이름 | 쓰는 법 | 타입 | 의미 |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | 루트가 될 새 컨텍스트 |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | `parent`의 자식을 만든다 |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | `parent`의 자식을 만들고, `sec`초 뒤 스스로 취소한다 |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | 취소한다. 몇 번 불러도 된다 |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | 취소되면 닫히는 채널 |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | 취소되었는지 |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2 다음에 stopped
+  (sleep 0.1))
+```
+
+- **취소는 자식에게 전해진다.** `with-cancel`/`with-timeout`으로 만든 컨텍스트는 부모가 취소되면 함께 취소된다. 반대 방향(자식에서 부모로)으로는
+  전해지지 않는다.
+- 이미 취소된 컨텍스트에서 만든 자식은 처음부터 취소되어 있다.
+- `done`은 닫힐 뿐 값은 보내지 않는다. 수신하면 `none`이 돌아온다.
+- `(Context::background)`는 부를 때마다 별개의 루트를 만든다. Go의 `Background()`는 하나뿐이고 취소할 수 없지만, 여기서는 루트도 취소할 수
+  있으며 그 영향은 거기서 만든 것에만 미친다.
+- 태스크 사이에서도 스레드 사이에서도 넘길 수 있다.
+
+## 9. 없는 것
 
 - **`Atomic`**. `Mutex`로 충분하다.
 - **태스크 지역 변수**(Go에도 없다).

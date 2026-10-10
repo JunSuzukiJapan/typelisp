@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # الدوال المضمنة
 
 قائمة الدوال المضمنة والتوابع (methods) والمكتبة القياسية. وللصياغة (الصيغ الخاصة وطريقة التعريف) انظر
@@ -36,6 +36,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format` والطابعة المنسَّقة (pretty printer) و`print-object` ومتغيرات التحكم بالطباعة |
 | [format.md](format.md) | موجِّهات التنسيق |
 | [streams-files.md](streams-files.md) | التدفقات وعمليات الملفات والمسارات وreadtable |
-| [concurrency.md](concurrency.md) | المهام والقنوات و`WaitGroup` و`Mutex` و`Thread` |
+| [concurrency.md](concurrency.md) | المهام والقنوات و`WaitGroup` و`Mutex` و`Thread` و`Context` |
 | [network.md](network.md) | TCP وTLS ومقابس نطاق Unix وUDP |
 | [system.md](system.md) | الزمن وبيئة التشغيل وأدوات التنفيذ و`read`/`eval` والسلاسل التوثيقية والدوال المتعلقة بالماكرو |

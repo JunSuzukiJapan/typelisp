@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -66,6 +66,7 @@ như các kiểu bạn tự viết, và mọi thứ bạn làm được với m�
 | `lazy::map-iter<I,A,U>` v.v. | Các iterator mà hàm của module `lazy` trả về | [Iterator lười](functions/sequences.md#iterator-lười-module-lazy) |
 | `WaitGroup` | Chờ N việc kết thúc | [WaitGroup](functions/concurrency.md#4-waitgroup--chờ-n-lần-hoàn-tất) |
 | `Mutex<T>` | Loại trừ tương hỗ cho dữ liệu dùng chung | [Mutex](functions/concurrency.md#6-mutext--loại-trừ-tương-hỗ-cho-dữ-liệu-dùng-chung) |
+| `Context` | Hủy theo kiểu hợp tác | [Context](functions/concurrency.md#8-context--hủy-theo-kiểu-hợp-tác) |
 | `pathname` | Một tên tệp được tách thành các phần | [Pathname](functions/streams-files.md#9-pathname-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | Các stream | [Stream](functions/streams-files.md#3-các-kiểu-stream-cụ-thể) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | Các stream tổ hợp | [Stream tổ hợp](functions/streams-files.md#4-các-stream-tổ-hợp) |
@@ -104,7 +105,7 @@ và ở các chương được liệt kê trong cột ngoài cùng bên phải.
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-so-sánh) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Như trên |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` và mọi kiểu lỗi dựng sẵn | [print-object](functions/printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` và mọi kiểu lỗi dựng sẵn | [print-object](functions/printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu) |
 
 Các trait của `cons-cell<A,B>` và của tuple `#{..}`, cùng `print-object` của các collection, dùng
 được khi kiểu phần tử cài đặt trait đó.

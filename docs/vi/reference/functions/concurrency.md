@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Task và kênh
 
 Từ vựng về task (thread nhẹ). `task` và `thread`, vốn khởi động chúng, và `select`, vốn chờ nhiều thứ, là
@@ -169,7 +169,48 @@ của `Task<T>`.
   ([Tham chiếu cú pháp 12.2](../syntax.md#122-thread--khởi-động-một-task-trên-một-thread-hđh-riêng)). Một
   `lambda` được tạo bên trong một hàm đã biên dịch thì có thể được truyền.
 
-## 8. Những gì không có
+## 8. `Context` — hủy theo kiểu hợp tác
+
+`context.Context` của Go. Truyền cho một công việc mà ta muốn có thể dừng từ bên ngoài. Việc dừng là
+**hợp tác**: `cancel` không ngắt gì cả; task hoặc thread tự nhận ra bằng cách tự kiểm tra
+`is-cancelled` hoặc nhận từ `done`.
+
+| Tên | Cách dùng | Kiểu | Ý nghĩa |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | Một context mới làm gốc |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | Tạo một con của `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | Tạo một con của `parent` tự hủy sau `sec` giây |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | Hủy. Gọi bao nhiêu lần cũng được |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | Kênh được đóng khi context bị hủy |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Đã bị hủy hay chưa |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, rồi stopped
+  (sleep 0.1))
+```
+
+- **Việc hủy lan tới các con.** Context tạo bằng `with-cancel`/`with-timeout` bị hủy cùng với cha
+  của nó. Chiều ngược lại (từ con lên cha) thì không.
+- Con được tạo từ một context đã bị hủy thì bị hủy ngay từ đầu.
+- `done` chỉ được đóng; không có giá trị nào được gửi. Nhận sẽ trả về `none`.
+- Mỗi lần gọi `(Context::background)` tạo một gốc riêng. `Background()` của Go chỉ có một và không
+  hủy được; ở đây gốc cũng hủy được, và việc đó chỉ ảnh hưởng tới những gì tạo ra từ nó.
+- Context có thể truyền giữa các task và giữa các thread.
+
+## 9. Những gì không có
 
 - **`Atomic`**. `Mutex` là đủ.
 - **Biến cục bộ theo task** (Go cũng không có).

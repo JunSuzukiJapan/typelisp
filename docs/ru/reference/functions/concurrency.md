@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Задачи и каналы
 
 Словарь задач (лёгких потоков). `task` и `thread`, которые их запускают, и `select`, который ждёт нескольких
@@ -166,7 +166,48 @@
   ([Справочник по синтаксису 12.2](../syntax.md#122-thread--запуск-задачи-в-отдельном-потоке-ос)). `lambda`, созданную
   внутри скомпилированной функции, передать можно.
 
-## 8. Чего нет
+## 8. `Context` — кооперативная отмена
+
+`context.Context` из Go. Его передают работе, которую хотят иметь возможность остановить снаружи.
+Остановка **кооперативная**: `cancel` ничего не прерывает; задача или поток замечают её, сами
+проверяя `is-cancelled` или принимая из `done`.
+
+| Имя | Использование | Тип | Смысл |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | Новый контекст-корень |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | Создаёт дочерний контекст `parent` |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | Создаёт дочерний контекст `parent`, который сам отменяется через `sec` секунд |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | Отменяет. Можно вызывать сколько угодно раз |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | Канал, который закрывается при отмене контекста |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | Отменён ли |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1, job 2, затем stopped
+  (sleep 0.1))
+```
+
+- **Отмена доходит до дочерних.** Контекст, созданный через `with-cancel`/`with-timeout`, отменяется
+  вместе с родителем. В обратную сторону (от дочернего к родителю) она не идёт.
+- Дочерний контекст, созданный от уже отменённого, отменён с самого начала.
+- `done` только закрывается; значения не отправляются. Приём возвращает `none`.
+- Каждый вызов `(Context::background)` создаёт отдельный корень. `Background()` в Go один и не
+  отменяется; здесь корень тоже можно отменить, и это затронет только созданное от него.
+- Контекст можно передавать между задачами и между потоками.
+
+## 9. Чего нет
 
 - **`Atomic`**. Хватает `Mutex`.
 - **Локальных для задачи переменных** (в Go их тоже нет).

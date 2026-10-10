@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
 # Funzioni predefinite
 
 L'elenco delle funzioni predefinite, dei metodi e della libreria standard. Per la sintassi (forme
@@ -37,6 +37,6 @@ scrive come `(tipo-dell-argomento,...)→tipo-di-ritorno`.
 | [printing.md](printing.md) | `print`/`println`/`format`, il pretty printer, `print-object`, le variabili di controllo della stampa |
 | [format.md](format.md) | Direttive di formato |
 | [streams-files.md](streams-files.md) | Stream, operazioni sui file, pathname, readtable |
-| [concurrency.md](concurrency.md) | Task, canali, `WaitGroup`, `Mutex`, `Thread` |
+| [concurrency.md](concurrency.md) | Task, canali, `WaitGroup`, `Mutex`, `Thread`, `Context` |
 | [network.md](network.md) | TCP, TLS, socket di dominio Unix, UDP |
 | [system.md](system.md) | Tempo, ambiente di esecuzione, strumenti di implementazione, `read`/`eval`, docstring, funzioni legate alle macro |
