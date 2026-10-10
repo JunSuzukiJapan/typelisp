@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option、Result 與錯誤型別
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -14,11 +14,37 @@
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | 是否為 `None` |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | 是否為 `Ok` |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | 是否為 `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 取出值。遇到 `None`/`Err` 時以 `msg` panic |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 值，或 `f` 的結果。`f` 只在 `None`/`Err` 時呼叫 |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | 對 `Some`/`Ok` 的內容套用 `f` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | 對 `Err` 的內容套用 `f` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | 遇到 `Some`/`Ok` 時把內容交給 `f`，傳回其結果 |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | 遇到 `None`/`Err` 時傳回 `f` 的結果 |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | 把 `Some(v)` 變成 `Ok(v)`，把 `None` 變成 `Err(e)` |
 
 建構函式是 `Option::some`/`Option::none`/`Result::ok`/`Result::err`（或者在 `(use option)`/`(use result)` 之後使用裸名稱
 `some`/`none`/`ok`/`err`）。
 
-分支以 `match` 明確寫出。沒有相當於 Rust 的 `?` 的語法。
+分支用 `match` 明確寫出，或用上面的 `map`/`and-then` 等串起來。沒有相當於 Rust 的 `?` 的語法。
+
+`Option`/`Result` 的 `map` 是方法，與[序列](sequences.md)的 `map` 是不同的東西。第 1 個引數的型別是 `Option`/`Result` 時呼叫的是這一個。
+
+`->` 巨集把值依序作為後續各個運算式的第 1 個引數傳入（與 Clojure 的 `->` 相同）。`(-> x (f a) (g b))` 變成 `(g (f x a) b)`。不帶括號的名稱 `h` 視為 `(h x)`。方法的第 1 個引數是接收者，所以組合子可以直接串起來：
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. `Option<T>` 的執行期表示
 

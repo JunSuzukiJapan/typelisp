@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result і типи помилок
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,41 @@
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | Чи це `None` |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Чи це `Ok` |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Чи це `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Видобуває значення. При `None`/`Err` — panic з `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Значення або результат `f`. `f` викликається лише при `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Застосовує `f` до вмісту `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Застосовує `f` до вмісту `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | При `Some`/`Ok` передає вміст у `f` і повертає її результат |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | При `None`/`Err` повертає результат `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Перетворює `Some(v)` на `Ok(v)`, а `None` — на `Err(e)` |
 
 Конструктори — це `Option::some`/`Option::none`/`Result::ok`/`Result::err` (або, після
 `(use option)`/`(use result)`, голі назви `some`/`none`/`ok`/`err`).
 
-Розгалуження записується явно через `match`. Синтаксису, що відповідав би `?` з Rust, немає.
+Розгалуження записується явно через `match` або ланцюжком через `map`/`and-then` та інші методи
+вище. Синтаксису, що відповідає `?` у Rust, немає.
+
+`map` у `Option`/`Result` — це метод, окремий від `map` для [послідовностей](sequences.md). Він
+викликається, коли тип першого аргументу — `Option`/`Result`.
+
+Макрос `->` по черзі передає значення першим аргументом кожній наступній формі (як `->` у Clojure).
+`(-> x (f a) (g b))` стає `(g (f x a) b)`. Ім'я без дужок, `h`, вважається `(h x)`. Перший аргумент
+методу — його отримувач, тож комбінатори з'єднуються в ланцюжок як є:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. Представлення `Option<T>` під час виконання
 

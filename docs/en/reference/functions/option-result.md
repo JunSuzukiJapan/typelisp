@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result and Error Types
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,41 @@ fit there just the same (chapter 3).
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | Whether it is `None` |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Whether it is `Ok` |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Whether it is `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Takes out the value. Panics with `msg` on `None`/`Err` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | The value, or the result of `f`. `f` is called only on `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Applies `f` to the contents of `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Applies `f` to the contents of `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | On `Some`/`Ok`, passes the contents to `f` and returns its result |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | On `None`/`Err`, returns the result of `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Turns `Some(v)` into `Ok(v)` and `None` into `Err(e)` |
 
 The constructors are `Option::some`/`Option::none`/`Result::ok`/`Result::err` (or, after
 `(use option)`/`(use result)`, the bare names `some`/`none`/`ok`/`err`).
 
-Branching is written explicitly with `match`. There is no syntax corresponding to Rust's `?`.
+Branching is written explicitly with `match`, or chained with `map`/`and-then` and the others above.
+There is no syntax corresponding to Rust's `?`.
+
+The `map` of `Option`/`Result` is a method, separate from the `map` of [sequences](sequences.md). It
+is the one called when the first argument's type is `Option`/`Result`.
+
+The `->` macro passes a value as the first argument of each following form in turn (the same as
+Clojure's `->`). `(-> x (f a) (g b))` becomes `(g (f x a) b)`. A name without parentheses, `h`, is
+treated as `(h x)`. A method's first argument is its receiver, so the combinators chain as they are:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. The run-time representation of `Option<T>`
 

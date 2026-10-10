@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result ve Hata Türleri
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,41 @@ türler oraya aynı şekilde uyar (3. bölüm).
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | `None` olup olmadığı |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `Ok` olup olmadığı |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `Err` olup olmadığı |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Değeri çıkarır. `None`/`Err` ise `msg` ile panic olur |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Değer ya da `f`'nin sonucu. `f` yalnızca `None`/`Err` iken çağrılır |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok` içeriğine `f` uygular |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err` içeriğine `f` uygular |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok` ise içeriği `f`'ye verir ve onun sonucunu döndürür |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err` ise `f`'nin sonucunu döndürür |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `Some(v)`'yi `Ok(v)`'ye, `None`'ı `Err(e)`'ye çevirir |
 
 Yapıcılar `Option::some`/`Option::none`/`Result::ok`/`Result::err`'dır (ya da
 `(use option)`/`(use result)`'tan sonra çıplak `some`/`none`/`ok`/`err` adları).
 
-Dallanma `match` ile açıkça yazılır. Rust'ın `?`'sine karşılık gelen bir sözdizimi yoktur.
+Dallanma `match` ile açıkça yazılır ya da yukarıdaki `map`/`and-then` ve diğerleriyle zincirlenir.
+Rust'taki `?`'ye karşılık gelen bir sözdizimi yoktur.
+
+`Option`/`Result`'un `map`'i bir metottur; [diziler](sequences.md) için olan `map`'ten ayrıdır. İlk
+argümanın türü `Option`/`Result` olduğunda çağrılan budur.
+
+`->` makrosu bir değeri sırayla izleyen her formun ilk argümanı olarak geçirir (Clojure'un `->`'si
+gibi). `(-> x (f a) (g b))`, `(g (f x a) b)` olur. Parantezsiz bir ad, `h`, `(h x)` olarak ele
+alınır. Bir metodun ilk argümanı alıcısıdır; bu yüzden birleştiriciler olduğu gibi zincirlenir:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. `Option<T>`'nin çalışma zamanı gösterimi
 

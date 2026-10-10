@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option وResult وأنواع الأخطاء
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,41 @@
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | هل هي `None` |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | هل هي `Ok` |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | هل هي `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | تُخرج القيمة. عند `None`/`Err` تُطلق panic بالرسالة `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | القيمة، أو نتيجة `f`. لا تُستدعى `f` إلا عند `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | تطبّق `f` على محتوى `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | تطبّق `f` على محتوى `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | عند `Some`/`Ok` تمرّر المحتوى إلى `f` وتُرجع نتيجتها |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | عند `None`/`Err` تُرجع نتيجة `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | تحوّل `Some(v)` إلى `Ok(v)` و`None` إلى `Err(e)` |
 
 المُنشِئات هي `Option::some`/`Option::none`/`Result::ok`/`Result::err` (أو الأسماء المجردة
 `some`/`none`/`ok`/`err` بعد `(use option)`/`(use result)`).
 
-يُكتب التفرع صراحة بـ `match`. ولا توجد صياغة تقابل `?` في Rust.
+يُكتب التفرع صراحة بـ `match`، أو يُسلسَل بـ `map`/`and-then` وغيرهما مما سبق. ولا توجد صياغة تقابل
+`?` في Rust.
+
+`map` الخاصة بـ `Option`/`Result` تابع (method)، وهي غير `map` الخاصة بـ[التسلسلات](sequences.md).
+وهي التي تُستدعى حين يكون نوع الوسيط الأول `Option`/`Result`.
+
+الماكرو `->` يمرّر قيمة بالترتيب بوصفها الوسيط الأول لكل صيغة تالية (مثل `->` في Clojure).
+`(-> x (f a) (g b))` تصبح `(g (f x a) b)`. والاسم بلا أقواس، `h`، يُعامَل على أنه `(h x)`. الوسيط
+الأول للتابع هو مستقبِله، لذا تتسلسل المُركِّبات كما هي:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. التمثيل وقت التشغيل لنوع `Option<T>`
 

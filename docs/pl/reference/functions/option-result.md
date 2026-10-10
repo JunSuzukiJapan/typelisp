@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result i typy błędów
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,42 @@ pasują tam tak samo (rozdział 3).
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | Czy jest to `None` |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Czy jest to `Ok` |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Czy jest to `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Wyjmuje wartość. Przy `None`/`Err` panic z `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Wartość albo wynik `f`. `f` jest wywoływana tylko przy `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Stosuje `f` do zawartości `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Stosuje `f` do zawartości `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Przy `Some`/`Ok` przekazuje zawartość do `f` i zwraca jej wynik |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Przy `None`/`Err` zwraca wynik `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Zamienia `Some(v)` na `Ok(v)`, a `None` na `Err(e)` |
 
 Konstruktorami są `Option::some`/`Option::none`/`Result::ok`/`Result::err` (lub, po
 `(use option)`/`(use result)`, same nazwy `some`/`none`/`ok`/`err`).
 
-Rozgałęzianie zapisuje się jawnie za pomocą `match`. Nie ma składni odpowiadającej `?` z Rust.
+Rozgałęzienie zapisuje się jawnie przez `match` albo łączy w łańcuch przez `map`/`and-then` i
+pozostałe powyżej. Nie ma składni odpowiadającej `?` z Rusta.
+
+`map` dla `Option`/`Result` to metoda, odrębna od `map` dla [sekwencji](sequences.md). To ona jest
+wywoływana, gdy typ pierwszego argumentu to `Option`/`Result`.
+
+Makro `->` przekazuje wartość kolejno jako pierwszy argument każdej następnej formy (tak jak `->` w
+Clojure). `(-> x (f a) (g b))` staje się `(g (f x a) b)`. Nazwa bez nawiasów, `h`, jest traktowana
+jak `(h x)`. Pierwszym argumentem metody jest jej odbiorca, więc kombinatory łączą się w łańcuch bez
+zmian:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. Reprezentacja `Option<T>` w czasie działania
 

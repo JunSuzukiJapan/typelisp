@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result och feltyper
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,41 @@ vilken typ som helst: de inbyggda konkreta feltyperna, och typer du skriver sjä
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | Om det är `None` |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Om det är `Ok` |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Om det är `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Tar ut värdet. Vid `None`/`Err` blir det panic med `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Värdet, eller resultatet av `f`. `f` anropas bara vid `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Tillämpar `f` på innehållet i `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Tillämpar `f` på innehållet i `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Vid `Some`/`Ok` skickas innehållet till `f` och dess resultat returneras |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Vid `None`/`Err` returneras resultatet av `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Gör om `Some(v)` till `Ok(v)` och `None` till `Err(e)` |
 
 Konstruktorerna är `Option::some`/`Option::none`/`Result::ok`/`Result::err` (eller, efter
 `(use option)`/`(use result)`, de bara namnen `some`/`none`/`ok`/`err`).
 
-Förgrening skrivs explicit med `match`. Det finns ingen syntax som motsvarar Rusts `?`.
+Förgreningar skrivs uttryckligen med `match`, eller kedjas med `map`/`and-then` och de andra ovan.
+Det finns ingen syntax som motsvarar Rusts `?`.
+
+`map` för `Option`/`Result` är en metod, skild från `map` för [sekvenser](sequences.md). Den anropas
+när det första argumentets typ är `Option`/`Result`.
+
+Makrot `->` skickar ett värde som första argument till varje följande form i tur och ordning (som
+Clojures `->`). `(-> x (f a) (g b))` blir `(g (f x a) b)`. Ett namn utan parenteser, `h`, behandlas
+som `(h x)`. En metods första argument är dess mottagare, så kombinatorerna kedjas som de är:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. Körtidsrepresentationen av `Option<T>`
 

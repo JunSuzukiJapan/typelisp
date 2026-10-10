@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result en foutentypes
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,42 @@ schrijft, passen er net zo goed (hoofdstuk 3).
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | Of het `None` is |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Of het `Ok` is |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Of het `Err` is |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Haalt de waarde eruit. Bij `None`/`Err` een panic met `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | De waarde, of het resultaat van `f`. `f` wordt alleen bij `None`/`Err` aangeroepen |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Past `f` toe op de inhoud van `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Past `f` toe op de inhoud van `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Geeft bij `Some`/`Ok` de inhoud aan `f` en levert het resultaat daarvan op |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Levert bij `None`/`Err` het resultaat van `f` op |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Maakt van `Some(v)` een `Ok(v)` en van `None` een `Err(e)` |
 
 De constructors zijn `Option::some`/`Option::none`/`Result::ok`/`Result::err` (of, na
 `(use option)`/`(use result)`, de kale namen `some`/`none`/`ok`/`err`).
 
-Vertakken schrijf je expliciet met `match`. Er is geen syntaxis die met `?` van Rust overeenkomt.
+Vertakken schrijf je expliciet met `match`, of je ketent met `map`/`and-then` en de andere
+hierboven. Er is geen syntaxis die overeenkomt met Rusts `?`.
+
+De `map` van `Option`/`Result` is een methode, los van de `map` van [sequenties](sequences.md). Die
+wordt aangeroepen wanneer het type van het eerste argument `Option`/`Result` is.
+
+De macro `->` geeft een waarde achtereenvolgens als eerste argument door aan elke volgende vorm (net
+als Clojures `->`). `(-> x (f a) (g b))` wordt `(g (f x a) b)`. Een naam zonder haakjes, `h`, wordt
+behandeld als `(h x)`. Het eerste argument van een methode is de ontvanger, dus de combinators
+ketenen zoals ze zijn:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. De runtime-representatie van `Option<T>`
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result, 오류 타입
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -14,11 +14,39 @@
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | `None`인지 |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `Ok`인지 |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `Err`인지 |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 값을 꺼낸다. `None`/`Err`이면 `msg`로 panic |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 값, 또는 `f`의 결과. `f`는 `None`/`Err`일 때만 호출된다 |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok`의 내용에 `f`를 적용한다 |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err`의 내용에 `f`를 적용한다 |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok`이면 내용을 `f`에 넘기고 그 결과를 돌려준다 |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err`이면 `f`의 결과를 돌려준다 |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `Some(v)`를 `Ok(v)`로, `None`을 `Err(e)`로 바꾼다 |
 
 생성자는 `Option::some`/`Option::none`/`Result::ok`/`Result::err`이다(`(use option)`/`(use result)` 뒤에는 맨 이름
 `some`/`none`/`ok`/`err`).
 
-분기는 `match`로 명시적으로 쓴다. Rust의 `?`에 해당하는 구문은 없다.
+분기는 `match`로 명시하거나, 위의 `map`/`and-then` 등으로 잇는다. Rust의 `?`에 해당하는 구문은 없다.
+
+`Option`/`Result`의 `map`은 메서드이며, [시퀀스](sequences.md)의 `map`과는 별개다. 첫 번째 인수의 타입이 `Option`/`Result`이면
+이쪽이 호출된다.
+
+`->` 매크로는 값을 다음 식들의 첫 번째 인수로 차례로 넘긴다(Clojure의 `->`와 같다). `(-> x (f a) (g b))`는 `(g (f x a) b)`가 된다.
+괄호 없는 이름 `h`는 `(h x)`로 취급한다. 메서드는 첫 번째 인수가 수신자이므로 컴비네이터를 그대로 이을 수 있다:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. `Option<T>`의 실행 시 표현
 

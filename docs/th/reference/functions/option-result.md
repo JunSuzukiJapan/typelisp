@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result และชนิดข้อผิดพลาด
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,37 @@
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | เป็น `None` หรือไม่ |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | เป็น `Ok` หรือไม่ |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | เป็น `Err` หรือไม่ |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | ดึงค่าออกมา ถ้าเป็น `None`/`Err` จะ panic ด้วย `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | ค่านั้น หรือผลของ `f` โดยจะเรียก `f` เฉพาะเมื่อเป็น `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | ใช้ `f` กับเนื้อในของ `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | ใช้ `f` กับเนื้อในของ `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | ถ้าเป็น `Some`/`Ok` จะส่งเนื้อในให้ `f` แล้วคืนผลของมัน |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | ถ้าเป็น `None`/`Err` จะคืนผลของ `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | เปลี่ยน `Some(v)` เป็น `Ok(v)` และ `None` เป็น `Err(e)` |
 
 ตัวสร้างคือ `Option::some`/`Option::none`/`Result::ok`/`Result::err` (หรือหลัง
 `(use option)`/`(use result)` ใช้ชื่อเปล่า `some`/`none`/`ok`/`err`)
 
-การแตกกิ่งเขียนอย่างชัดเจนด้วย `match` ไม่มีไวยากรณ์ที่ตรงกับ `?` ของ Rust
+การแตกแขนงเขียนอย่างชัดแจ้งด้วย `match` หรือต่อกันเป็นสายด้วย `map`/`and-then` และเมธอดอื่นข้างบน ไม่มีไวยากรณ์ที่ตรงกับ `?` ของ Rust
+
+`map` ของ `Option`/`Result` เป็นเมธอด แยกจาก `map` ของ[ลำดับ](sequences.md) เมื่อชนิดของอาร์กิวเมนต์ตัวแรกเป็น `Option`/`Result` ตัวนี้จะถูกเรียก
+
+แมโคร `->` ส่งค่าเป็นอาร์กิวเมนต์ตัวแรกให้แต่ละฟอร์มถัดไปตามลำดับ (เหมือน `->` ของ Clojure) `(-> x (f a) (g b))` จะกลายเป็น `(g (f x a) b)` ชื่อที่ไม่มีวงเล็บ `h` ถือเป็น `(h x)` อาร์กิวเมนต์ตัวแรกของเมธอดคือตัวรับ จึงต่อคอมบิเนเตอร์เป็นสายได้ตามที่เป็นอยู่:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. การแสดงผลขณะรันของ `Option<T>`
 

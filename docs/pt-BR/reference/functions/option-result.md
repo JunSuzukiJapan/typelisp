@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result e tipos de erro
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,11 +15,42 @@ ali igualmente (capítulo 3).
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | Se é `None` |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Se é `Ok` |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Se é `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Extrai o valor. Com `None`/`Err`, entra em panic com `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | O valor, ou o resultado de `f`. `f` só é chamada com `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Aplica `f` ao conteúdo de `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Aplica `f` ao conteúdo de `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Com `Some`/`Ok`, passa o conteúdo a `f` e devolve o resultado dela |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Com `None`/`Err`, devolve o resultado de `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Transforma `Some(v)` em `Ok(v)` e `None` em `Err(e)` |
 
 Os construtores são `Option::some`/`Option::none`/`Result::ok`/`Result::err` (ou, depois de
 `(use option)`/`(use result)`, os nomes simples `some`/`none`/`ok`/`err`).
 
-As ramificações são escritas explicitamente com `match`. Não há sintaxe correspondente ao `?` do Rust.
+A ramificação é escrita explicitamente com `match`, ou encadeada com `map`/`and-then` e os demais
+acima. Não há sintaxe correspondente ao `?` do Rust.
+
+O `map` de `Option`/`Result` é um método, diferente do `map` das [sequências](sequences.md). É ele
+que é chamado quando o tipo do primeiro argumento é `Option`/`Result`.
+
+A macro `->` passa um valor como primeiro argumento de cada forma seguinte, em ordem (como o `->` do
+Clojure). `(-> x (f a) (g b))` vira `(g (f x a) b)`. Um nome sem parênteses, `h`, é tratado como
+`(h x)`. O primeiro argumento de um método é o seu receptor, então os combinadores se encadeiam como
+estão:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. A representação em tempo de execução de `Option<T>`
 

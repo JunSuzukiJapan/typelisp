@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result और त्रुटि टाइप
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -13,10 +13,36 @@
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | क्या यह `None` है |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | क्या यह `Ok` है |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | क्या यह `Err` है |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | मान निकालता है। `None`/`Err` पर `msg` के साथ panic |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | मान, या `f` का परिणाम। `f` केवल `None`/`Err` पर बुलाया जाता है |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok` की सामग्री पर `f` लागू करता है |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err` की सामग्री पर `f` लागू करता है |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok` पर सामग्री `f` को देता है और उसका परिणाम लौटाता है |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err` पर `f` का परिणाम लौटाता है |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `Some(v)` को `Ok(v)` में और `None` को `Err(e)` में बदलता है |
 
 कंस्ट्रक्टर `Option::some`/`Option::none`/`Result::ok`/`Result::err` हैं (या `(use option)`/`(use result)` के बाद, नंगे नाम `some`/`none`/`ok`/`err`)।
 
-शाखाएँ `match` से स्पष्ट रूप से लिखी जाती हैं। Rust के `?` के अनुरूप कोई सिंटैक्स नहीं है।
+शाखा `match` से स्पष्ट रूप से लिखी जाती है, या ऊपर के `map`/`and-then` आदि से जोड़ी जाती है। Rust के `?` के समकक्ष कोई सिंटैक्स नहीं है।
+
+`Option`/`Result` का `map` एक मेथड है, जो [अनुक्रमों](sequences.md) के `map` से अलग है। पहले आर्ग्युमेंट का टाइप `Option`/`Result` होने पर यही बुलाया जाता है।
+
+`->` मैक्रो किसी मान को क्रम से हर अगले फ़ॉर्म के पहले आर्ग्युमेंट के रूप में देता है (Clojure के `->` जैसा)। `(-> x (f a) (g b))` बन जाता है `(g (f x a) b)`। बिना कोष्ठक का नाम `h`, `(h x)` माना जाता है। मेथड का पहला आर्ग्युमेंट उसका रिसीवर होता है, इसलिए कॉम्बिनेटर जैसे के तैसे जुड़ जाते हैं:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. `Option<T>` का रन-टाइम प्रतिनिधित्व
 

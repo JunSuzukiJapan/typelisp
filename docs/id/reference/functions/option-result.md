@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
 # Option, Result, dan Tipe Kesalahan
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -15,12 +15,42 @@ dengan `defstruct`/`defenum`, cocok di sana sama saja (bab 3).
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | Apakah `None` |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | Apakah `Ok` |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | Apakah `Err` |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | Mengambil nilainya. Pada `None`/`Err` panic dengan `msg` |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | Nilainya, atau hasil `f`. `f` hanya dipanggil pada `None`/`Err` |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | Menerapkan `f` pada isi `Some`/`Ok` |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | Menerapkan `f` pada isi `Err` |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | Pada `Some`/`Ok`, meneruskan isinya ke `f` dan mengembalikan hasilnya |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | Pada `None`/`Err`, mengembalikan hasil `f` |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | Mengubah `Some(v)` menjadi `Ok(v)` dan `None` menjadi `Err(e)` |
 
 Konstruktornya adalah `Option::some`/`Option::none`/`Result::ok`/`Result::err` (atau, setelah
 `(use option)`/`(use result)`, nama polos `some`/`none`/`ok`/`err`).
 
-Percabangan ditulis secara eksplisit dengan `match`. Tidak ada sintaks yang sepadan dengan `?` pada
-Rust.
+Percabangan ditulis secara eksplisit dengan `match`, atau dirangkai dengan `map`/`and-then` dan yang
+lain di atas. Tidak ada sintaks yang setara dengan `?` milik Rust.
+
+`map` milik `Option`/`Result` adalah metode, terpisah dari `map` untuk [sekuens](sequences.md).
+Metode inilah yang dipanggil ketika tipe argumen pertama adalah `Option`/`Result`.
+
+Makro `->` meneruskan sebuah nilai sebagai argumen pertama setiap bentuk berikutnya secara berurutan
+(sama seperti `->` di Clojure). `(-> x (f a) (g b))` menjadi `(g (f x a) b)`. Nama tanpa tanda
+kurung, `h`, diperlakukan sebagai `(h x)`. Argumen pertama metode adalah penerimanya, jadi
+kombinator dapat dirangkai apa adanya:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. Representasi `Option<T>` saat dijalankan
 
