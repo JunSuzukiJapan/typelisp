@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # 内置函数
 
 内置函数、方法和标准库的一览。语法（特殊形式、定义方法）见[语法参考](../syntax.md)，类型一览见[类型一览](../types.md)。
@@ -27,8 +27,8 @@
 | 文件 | 内容 |
 |---|---|
 | [numbers.md](numbers.md) | 整数、浮点数、有理数、复数、布尔值、位运算、随机数 |
-| [sequences.md](sequences.md) | 序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、序列函数、高阶函数 |
-| [collections.md](collections.md) | 字符串、字符、`Vector`、`HashTable`、`Array`、`BitVector` |
+| [sequences.md](sequences.md) | 序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、序列函数、惰性迭代器 `lazy`、高阶函数 |
+| [collections.md](collections.md) | 字符串、字符、`Vector`、`HashTable`、`Array`、`BitVector`、`HashSet`、`SortedTable`、`Deque` |
 | [option-result.md](option-result.md) | `Option`、`Result`、错误类型与 `Error` trait |
 | [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算术 trait |
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、打印控制变量 |

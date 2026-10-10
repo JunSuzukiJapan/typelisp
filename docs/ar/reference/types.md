@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # الأنواع
 
 الأنواع الموجودة في typelisp، والسمات القياسية التي ينفّذها كل نوع. وطريقة كتابة الأنواع في
@@ -59,7 +59,11 @@
 | `complex` | عدد مركب (مكوناته `f64`) | [الفصل 6 من الأعداد](functions/numbers.md#6-الأعداد-المركبة-complex) |
 | `Array<T>` | مصفوفة متعددة الأبعاد | [Array](functions/collections.md#5-arrayt-المصفوفات-متعددة-الأبعاد) |
 | `BitVector` | تسلسل ثابت الطول من البتات | [BitVector](functions/collections.md#6-bitvector-متجهات-البتات) |
+| `HashSet<T>` | مجموعة عناصر بلا تكرار | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | جدول مرتّب بحسب المفتاح | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | تسلسل يُضاف إليه ويُؤخذ منه من الطرفين | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | المكرِّرات التي تعيدها `iter` لكل مجموعة | [Iter](functions/traits.md#1-السمة-iter-والتكرار) |
+| `lazy::map-iter<I,A,U>` وغيرها | المكرِّرات التي تُرجعها دوال الوحدة `lazy` | [المكرِّرات الكسولة](functions/sequences.md#المكرِّرات-الكسولة-الوحدة-lazy) |
 | `WaitGroup` | انتظار اكتمال N عملية | [WaitGroup](functions/concurrency.md#4-waitgroup--انتظار-اكتمال-n-عملية) |
 | `Mutex<T>` | استبعاد متبادل للبيانات المشتركة | [Mutex](functions/concurrency.md#6-mutext--الاستبعاد-المتبادل-للبيانات-المشتركة) |
 | `pathname` | اسم ملف مقسَّم إلى أجزاء | [المسارات](functions/streams-files.md#9-المسارات-pathname) |
@@ -96,12 +100,13 @@
 
 | السمة | الأنواع المنفِّذة | التفاصيل |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-المقارنة) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | مثل ما سبق |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` وكل أنواع الأخطاء المضمنة | [print-object](functions/printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-المقارنة) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | مثل ما سبق |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` وكل أنواع الأخطاء المضمنة | [print-object](functions/printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع) |
 
-يمكن استخدام `Eq`/`Ord` لـ `cons-cell<A,B>` عندما تنفّذ أنواع العناصر `Eq`/`Ord`.
+سمات `cons-cell<A,B>` والصفوف `#{..}`، و`print-object` الخاص بالمجموعات، متاحة حين تنفّذ أنواع
+العناصر تلك السمة.
 
 ### 6.2 الحساب
 
@@ -116,7 +121,7 @@
 
 | السمة | الأنواع المنفِّذة |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` أنواع الوحدة `lazy` (`lazy::map-iter<I,A,U>` وغيرها) |
 
 ### 6.4 التدفقات
 

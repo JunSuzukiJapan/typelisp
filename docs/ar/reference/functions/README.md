@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # الدوال المضمنة
 
 قائمة الدوال المضمنة والتوابع (methods) والمكتبة القياسية. وللصياغة (الصيغ الخاصة وطريقة التعريف) انظر
@@ -29,8 +29,8 @@
 | الملف | المحتويات |
 |---|---|
 | [numbers.md](numbers.md) | الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية وعمليات البتات والأعداد العشوائية |
-| [sequences.md](sequences.md) | الزوج `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات والدوال عالية الرتبة |
-| [collections.md](collections.md) | السلاسل النصية والمحارف و`Vector` و`HashTable` و`Array` و`BitVector` |
+| [sequences.md](sequences.md) | الزوج `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات والمكرِّرات الكسولة `lazy` والدوال عالية الرتبة |
+| [collections.md](collections.md) | السلاسل النصية والمحارف و`Vector` و`HashTable` و`Array` و`BitVector` و`HashSet` و`SortedTable` و`Deque` |
 | [option-result.md](option-result.md) | `Option` و`Result` وأنواع الأخطاء والسمة `Error` |
 | [traits.md](traits.md) | `Iter` و`Eq`/`Ord` وسمات الحساب |
 | [printing.md](printing.md) | `print`/`println`/`format` والطابعة المنسَّقة (pretty printer) و`print-object` ومتغيرات التحكم بالطباعة |

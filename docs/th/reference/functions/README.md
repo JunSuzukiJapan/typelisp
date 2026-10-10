@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # ฟังก์ชันที่มีให้ในตัว
 
 รายการฟังก์ชันที่มีให้ในตัว เมทอด และไลบรารีมาตรฐาน สำหรับไวยากรณ์ (ฟอร์มพิเศษและวิธีนิยามสิ่งต่าง ๆ)
@@ -30,8 +30,8 @@
 | ไฟล์ | เนื้อหา |
 |---|---|
 | [numbers.md](numbers.md) | จำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน บูลีน การดำเนินการระดับบิต จำนวนสุ่ม |
-| [sequences.md](sequences.md) | คู่ `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับ ฟังก์ชันอันดับสูง |
-| [collections.md](collections.md) | สตริง อักขระ `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | คู่ `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับ อิเทอเรเตอร์แบบขี้เกียจ `lazy` ฟังก์ชันอันดับสูง |
+| [collections.md](collections.md) | สตริง อักขระ `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, ชนิดข้อผิดพลาด และ trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, trait การคำนวณ |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, ตัวแปรควบคุมการพิมพ์ |

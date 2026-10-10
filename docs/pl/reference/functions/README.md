@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Funkcje wbudowane
 
 Lista funkcji wbudowanych, metod i biblioteki standardowej. Składnię (formy specjalne i sposoby
@@ -30,8 +30,8 @@ zapisana jako `(typ-argumentu,...)→typ-zwracany`.
 | Plik | Zawartość |
 |---|---|
 | [numbers.md](numbers.md) | Liczby całkowite, zmiennoprzecinkowe, wymierne, zespolone, wartości logiczne, operacje bitowe, liczby losowe |
-| [sequences.md](sequences.md) | Para `cons-cell`, dane w postaci S-wyrażeń `Sexpr`, symbole, funkcje na sekwencjach, funkcje wyższego rzędu |
-| [collections.md](collections.md) | Łańcuchy znaków, znaki, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | Para `cons-cell`, dane w postaci S-wyrażeń `Sexpr`, symbole, funkcje na sekwencjach, leniwe iteratory `lazy`, funkcje wyższego rzędu |
+| [collections.md](collections.md) | Łańcuchy znaków, znaki, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, typy błędów i trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traity arytmetyczne |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, zmienne sterujące drukarką |

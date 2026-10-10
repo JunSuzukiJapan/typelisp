@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Types
 
 The types typelisp has, and the standard traits each type implements. How to write types is in
@@ -59,7 +59,11 @@ same as types you write yourself, and everything you can do with a `defstruct` c
 | `complex` | A complex number (`f64` components) | [Numbers chapter 6](functions/numbers.md#6-complex-numbers-complex) |
 | `Array<T>` | A multidimensional array | [Array](functions/collections.md#5-arrayt-multidimensional-arrays) |
 | `BitVector` | A fixed-length sequence of bits | [BitVector](functions/collections.md#6-bitvector-bit-vectors) |
+| `HashSet<T>` | A collection of elements without duplicates | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | A table kept in key order | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | A sequence you can add to and take from at both ends | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | The iterators returned by `iter` of each collection | [Iter](functions/traits.md#1-the-iter-trait-and-iteration) |
+| `lazy::map-iter<I,A,U>` and so on | The iterators the functions of the `lazy` module return | [Lazy iterators](functions/sequences.md#lazy-iterators-the-lazy-module) |
 | `WaitGroup` | Waiting for N things to finish | [WaitGroup](functions/concurrency.md#4-waitgroup--waiting-for-n-completions) |
 | `Mutex<T>` | Mutual exclusion for shared data | [Mutex](functions/concurrency.md#6-mutext--mutual-exclusion-for-shared-data) |
 | `pathname` | A file name split into parts | [Pathnames](functions/streams-files.md#9-pathnames-pathname) |
@@ -97,12 +101,13 @@ Which types implement which traits. The methods of each trait are in
 
 | Trait | Implementing types | Details |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-comparison) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | Same as above |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` and all the built-in error types | [print-object](functions/printing.md#5-print-object-per-type-printed-representation) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparison) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Same as above |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` and all the built-in error types | [print-object](functions/printing.md#5-print-object-per-type-printed-representation) |
 
-`Eq`/`Ord` of `cons-cell<A,B>` can be used when the element types implement `Eq`/`Ord`.
+The traits of `cons-cell<A,B>` and of tuples `#{..}`, and the collections' `print-object`, are
+available when the element types implement that trait.
 
 ### 6.2 Arithmetic
 
@@ -117,7 +122,7 @@ Details are in [Arithmetic traits](functions/traits.md#3-arithmetic-traits-add--
 
 | Trait | Implementing types |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` the types of the `lazy` module (`lazy::map-iter<I,A,U>` and so on) |
 
 ### 6.4 Streams
 

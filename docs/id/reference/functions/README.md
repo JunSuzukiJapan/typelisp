@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Fungsi Bawaan
 
 Daftar fungsi bawaan, metode, dan pustaka standar. Untuk sintaks (bentuk khusus dan cara
@@ -31,8 +31,8 @@ Tabel di setiap bab memiliki kolom "nama, bentuk, tipe, deskripsi". Kolom tipe d
 | Berkas | Isi |
 |---|---|
 | [numbers.md](numbers.md) | Bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, boolean, operasi bit, bilangan acak |
-| [sequences.md](sequences.md) | Pasangan `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens, fungsi tingkat tinggi |
-| [collections.md](collections.md) | String, karakter, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | Pasangan `cons-cell`, data S-expression `Sexpr`, simbol, fungsi sekuens, iterator malas `lazy`, fungsi tingkat tinggi |
+| [collections.md](collections.md) | String, karakter, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, tipe kesalahan, dan trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, trait aritmetika |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, variabel kendali pencetak |

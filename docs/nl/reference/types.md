@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Types
 
 De types die typelisp heeft en de standaardtraits die elk type implementeert. Hoe je types schrijft
@@ -61,7 +61,11 @@ hen.
 | `complex` | Een complex getal (componenten van `f64`) | [Getallen hoofdstuk 6](functions/numbers.md#6-complexe-getallen-complex) |
 | `Array<T>` | Een meerdimensionale array | [Array](functions/collections.md#5-arrayt-meerdimensionale-arrays) |
 | `BitVector` | Een bitreeks met vaste lengte | [BitVector](functions/collections.md#6-bitvector-bitvectoren) |
+| `HashSet<T>` | Een verzameling elementen zonder dubbelen | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | Een tabel op volgorde van sleutel | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | Een reeks waaraan je aan beide kanten toevoegt en uithaalt | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | De iterators die `iter` van elke collectie teruggeeft | [Iter](functions/traits.md#1-de-trait-iter-en-iteratie) |
+| `lazy::map-iter<I,A,U>` enz. | De iterators die de functies van de module `lazy` teruggeven | [Luie iterators](functions/sequences.md#luie-iterators-de-module-lazy) |
 | `WaitGroup` | Wachten tot N dingen klaar zijn | [WaitGroup](functions/concurrency.md#4-waitgroup--wachten-op-n-voltooiingen) |
 | `Mutex<T>` | Wederzijdse uitsluiting voor gedeelde gegevens | [Mutex](functions/concurrency.md#6-mutext--wederzijdse-uitsluiting-voor-gedeelde-gegevens) |
 | `pathname` | Een in delen gesplitste bestandsnaam | [Padnamen](functions/streams-files.md#9-padnamen-pathname) |
@@ -100,13 +104,13 @@ genoemd.
 
 | Trait | Implementerende types | Details |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-vergelijking) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | Idem |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` en alle ingebouwde foutentypes | [print-object](functions/printing.md#5-print-object-afgedrukte-weergave-per-type) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-vergelijking) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Idem |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` en alle ingebouwde foutentypes | [print-object](functions/printing.md#5-print-object-afgedrukte-weergave-per-type) |
 
-`Eq`/`Ord` van `cons-cell<A,B>` kunnen worden gebruikt wanneer de elementtypes `Eq`/`Ord`
-implementeren.
+De traits van `cons-cell<A,B>` en van tupels `#{..}`, en de `print-object` van de verzamelingen,
+zijn bruikbaar als de elementtypen die trait implementeren.
 
 ### 6.2 Rekenkunde
 
@@ -121,7 +125,7 @@ Details staan in [Rekenkundige traits](functions/traits.md#3-rekenkundige-traits
 
 | Trait | Implementerende types |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` de typen van de module `lazy` (`lazy::map-iter<I,A,U>` enz.) |
 
 ### 6.4 Streams
 

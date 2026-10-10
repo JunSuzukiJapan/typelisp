@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # String, Karakter, dan Koleksi
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, dan `BitVector`.
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, dan `Deque<T>`.
 
 ## 1. String `string`
 
@@ -189,3 +189,81 @@ Urutan bit berpanjang tetap. `defstruct` pada pustaka standar.
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | Komplemen |
 
 Tidak ada `bit-vector-p` (tipe statis menjawabnya).
+
+## 7. `HashSet<T>`
+
+Kumpulan elemen tanpa duplikat (`HashSet` milik Rust). Sebuah `defstruct` pustaka standar yang
+isinya `HashTable<T,()>`. Tipe elemen harus mengimplementasikan `Hash`, sama seperti kunci
+`HashTable`.
+
+| Nama | Bentuk | Tipe | Deskripsi |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | Membuat himpunan kosong. Argumen tipe diambil dari tipe yang diharapkan |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Menambahkan `x`. `true` bila belum ada, `false` bila sudah ada |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Apakah `x` ada |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Mengeluarkan `x`. `true` bila tadinya ada |
+| `count` | `(count s)` | `HashSet<T>→int` | Jumlah elemen |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | Menghapus semuanya |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Iterator atas elemen. Urutannya tidak ditentukan |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+Berlaku sama untuk ketiga tipe di bab 7 sampai 9:
+
+- Buat dengan `make`. `new` adalah konstruktor urutan field yang dihasilkan `defstruct`, bukan untuk
+  membuatnya (sama seperti `Array::make`).
+- `iter` menelusuri salinan yang diambil saat dipanggil. Mengubah koleksi yang sama di dalam
+  `doiter` tidak terlihat oleh perulangan itu.
+- Bila tipe elemen mengimplementasikan `print-object`, elemennya dicetak dalam bentuk
+  `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>`.
+
+## 8. `SortedTable<K,V>`
+
+Tabel yang terurut menaik menurut kunci (`BTreeMap` milik Rust). Tipe kunci harus
+mengimplementasikan `Ord`. Kunci dan nilai disimpan dalam dua `Vector` menurut urutan kunci, dan
+pencarian dilakukan secara biner. `set` untuk kunci baru dan `remove` menggeser elemen setelah
+posisinya.
+
+| Nama | Bentuk | Tipe | Deskripsi |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Membuat tabel kosong |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Pencarian |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Menyisipkan atau menimpa |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Menghapus, mengembalikan nilai lama bila ada |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | Jumlah elemen |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | Menghapus semuanya |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | Kunci-kunci, dari yang terkecil |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | Nilai-nilai, menurut urutan kunci |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Tuple `#{kunci nilai}` menurut urutan kunci |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 dan pear 3
+```
+
+## 9. `Deque<T>`
+
+Barisan yang bisa ditambah dan diambil dari kedua ujungnya (`VecDeque` milik Rust).
+
+| Nama | Bentuk | Tipe | Deskripsi |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | Membuat barisan kosong |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Menambah di depan / belakang |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Mengambil elemen depan / belakang dan mengembalikannya. `none` bila kosong |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Melihat elemen depan / belakang (tanpa mengambilnya) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Elemen ke-`i` dari depan. `none` bila di luar jangkauan |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Menimpa elemen ke-`i`. Panic bila di luar jangkauan |
+| `count` | `(count d)` | `Deque<T>→int` | Jumlah elemen |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | Menghapus semuanya |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Dari depan, berurutan |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

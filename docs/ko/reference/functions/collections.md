@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # 문자열, 문자, 컬렉션
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`.
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`.
 
 ## 1. 문자열 `string`
 
@@ -179,3 +179,76 @@
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | 보수 |
 
 `bit-vector-p`는 없다(정적 타입이 답한다).
+
+## 7. `HashSet<T>`
+
+중복 없는 요소의 모임(Rust의 `HashSet`). 표준 라이브러리의 `defstruct`이며 내용은 `HashTable<T,()>`이다. 요소 타입은 `HashTable`의
+키와 마찬가지로 `Hash`를 구현해야 한다.
+
+| 이름 | 형식 | 타입 | 설명 |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | 빈 집합을 만든다. 타입 인수는 기대 타입에서 정해진다 |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x`를 추가한다. 새로 들어가면 `true`, 이미 있으면 `false` |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x`가 있는지 |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x`를 뺀다. 있었으면 `true` |
+| `count` | `(count s)` | `HashSet<T>→int` | 요소 수 |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | 모두 지운다 |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 요소의 이터레이터. 순서는 정해져 있지 않다 |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+7~9장의 세 타입에 공통되는 점:
+
+- 만들 때는 `make`를 쓴다. `new`는 `defstruct`가 생성하는 필드 순서의 생성자이며 만들 때 쓰는 것이 아니다(`Array::make`와 같다).
+- `iter`는 호출한 시점의 사본을 순회한다. `doiter` 안에서 같은 컬렉션을 바꿔도 그 루프에는 보이지 않는다.
+- 요소 타입이 `print-object`를 구현하면 `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>` 형태로 요소를
+  출력한다.
+
+## 8. `SortedTable<K,V>`
+
+키의 오름차순으로 정렬된 표(Rust의 `BTreeMap`). 키 타입은 `Ord`를 구현해야 한다. 키와 값을 키 순서로 늘어놓은 두 개의 `Vector`로 가지며, 검색은 이진
+탐색이다. 새 키의 `set`과 `remove`는 그 위치보다 뒤의 요소를 민다.
+
+| 이름 | 형식 | 타입 | 설명 |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | 빈 표를 만든다 |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | 검색 |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | 삽입 또는 덮어쓰기 |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | 삭제하고, 있었으면 이전 값을 돌려준다 |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | 요소 수 |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | 모두 지운다 |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | 키를 작은 순서로 |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | 값을 키 순서로 |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | 키 순서의 `#{키 값}` 튜플 |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 와 pear 3
+```
+
+## 9. `Deque<T>`
+
+양쪽 끝에서 넣고 뺄 수 있는 열(Rust의 `VecDeque`).
+
+| 이름 | 형식 | 타입 | 설명 |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | 빈 열을 만든다 |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 앞 / 뒤에 추가한다 |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 꺼내 돌려준다. 비어 있으면 `none` |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 본다(꺼내지 않는다) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 앞에서부터 `i`번째. 범위 밖이면 `none` |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`번째를 덮어쓴다. 범위 밖이면 panic |
+| `count` | `(count d)` | `Deque<T>→int` | 요소 수 |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | 모두 지운다 |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | 앞에서부터 차례로 |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

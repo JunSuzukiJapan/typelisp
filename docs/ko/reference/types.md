@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # 타입 목록
 
 typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타입 쓰는 법은
@@ -58,7 +58,11 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 | `complex` | 복소수(`f64` 성분) | [수 6장](functions/numbers.md#6-복소수-complex) |
 | `Array<T>` | 다차원 배열 | [Array](functions/collections.md#5-arrayt다차원-배열) |
 | `BitVector` | 고정 길이의 비트 열 | [BitVector](functions/collections.md#6-bitvector비트-벡터) |
+| `HashSet<T>` | 중복 없는 요소의 모임 | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | 키 순서로 정렬된 표 | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | 양쪽 끝에서 넣고 뺄 수 있는 열 | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | 각 컬렉션의 `iter`가 반환하는 이터레이터 | [Iter](functions/traits.md#1-iter-트레이트와-반복) |
+| `lazy::map-iter<I,A,U>` 등 | `lazy` 모듈의 함수가 돌려주는 이터레이터 | [지연 이터레이터](functions/sequences.md#지연-이터레이터lazy-모듈) |
 | `WaitGroup` | N개가 끝나기를 기다린다 | [WaitGroup](functions/concurrency.md#4-waitgroup--n개의-완료-기다리기) |
 | `Mutex<T>` | 공유 데이터의 상호 배제 | [Mutex](functions/concurrency.md#6-mutext--공유-데이터의-상호-배제) |
 | `pathname` | 부분으로 나눈 파일 이름 | [경로명](functions/streams-files.md#9-경로명-pathname) |
@@ -95,12 +99,12 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 트레이트 | 구현하는 타입 | 자세히 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord비교) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | 위와 같음 |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time`와 모든 내장 오류 타입 | [print-object](functions/printing.md#5-print-object타입별-출력-표현) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord비교) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 위와 같음 |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time`와 모든 내장 오류 타입 | [print-object](functions/printing.md#5-print-object타입별-출력-표현) |
 
-`cons-cell<A,B>`의 `Eq`/`Ord`는 요소 타입이 `Eq`/`Ord`를 구현할 때 쓸 수 있다.
+`cons-cell<A,B>`와 튜플 `#{..}`의 트레이트, 컬렉션의 `print-object`는 요소 타입이 그 트레이트를 구현할 때 쓸 수 있다.
 
 ### 6.2 산술
 
@@ -115,7 +119,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 트레이트 | 구현하는 타입 |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` 모듈의 타입(`lazy::map-iter<I,A,U>` 등) |
 
 ### 6.4 스트림
 

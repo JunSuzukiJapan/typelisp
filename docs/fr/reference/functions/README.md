@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Fonctions intégrées
 
 La liste des fonctions intégrées, des méthodes et de la bibliothèque standard. Pour la syntaxe (formes spéciales et
@@ -30,8 +30,8 @@ Les tableaux de chaque chapitre ont les colonnes « nom, forme, type, descriptio
 | Fichier | Contenu |
 |---|---|
 | [numbers.md](numbers.md) | Entiers, nombres à virgule flottante, rationnels, nombres complexes, booléens, opérations sur les bits, nombres aléatoires |
-| [sequences.md](sequences.md) | La paire `cons-cell`, les données S-expression `Sexpr`, les symboles, les fonctions de séquence, les fonctions d'ordre supérieur |
-| [collections.md](collections.md) | Chaînes, caractères, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | La paire `cons-cell`, les données S-expression `Sexpr`, les symboles, les fonctions de séquence, itérateurs paresseux `lazy`, les fonctions d'ordre supérieur |
+| [collections.md](collections.md) | Chaînes, caractères, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, les types d'erreur et le trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, les traits arithmétiques |
 | [printing.md](printing.md) | `print`/`println`/`format`, le pretty printer, `print-object`, les variables de contrôle de l'affichage |

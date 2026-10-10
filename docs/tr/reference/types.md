@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Türler
 
 typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart trait'ler. Türlerin nasıl yazılacağı
@@ -59,7 +59,11 @@ aynı şekilde ele alınırlar ve bir `defstruct` ile yapabileceğiniz her şey 
 | `complex` | Bir karmaşık sayı (`f64` bileşenli) | [Sayılar 6. bölüm](functions/numbers.md#6-karmaşık-sayılar-complex) |
 | `Array<T>` | Çok boyutlu bir dizi | [Array](functions/collections.md#5-arrayt-çok-boyutlu-diziler) |
 | `BitVector` | Sabit uzunluklu bir bit dizisi | [BitVector](functions/collections.md#6-bitvector-bit-vektörleri) |
+| `HashSet<T>` | Tekrarsız öğeler topluluğu | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | Anahtar sırasında tutulan tablo | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | İki ucundan da ekleme ve çıkarma yapılan dizi | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | Her koleksiyonun `iter`'inin döndürdüğü yineleyiciler | [Iter](functions/traits.md#1-iter-traiti-ve-yineleme) |
+| `lazy::map-iter<I,A,U>` vb. | `lazy` modülünün fonksiyonlarının döndürdüğü yineleyiciler | [Tembel yineleyiciler](functions/sequences.md#tembel-yineleyiciler-lazy-modülü) |
 | `WaitGroup` | N şeyin bitmesini bekleme | [WaitGroup](functions/concurrency.md#4-waitgroup--n-işin-bitmesini-bekleme) |
 | `Mutex<T>` | Paylaşılan veri için karşılıklı dışlama | [Mutex](functions/concurrency.md#6-mutext--paylaşılan-veri-için-karşılıklı-dışlama) |
 | `pathname` | Parçalara ayrılmış bir dosya adı | [Yol adları](functions/streams-files.md#9-yol-adları-pathname) |
@@ -98,12 +102,13 @@ Hangi türlerin hangi trait'leri gerçekleştirdiği. Her trait'in metotları
 
 | Trait | Gerçekleştiren türler | Ayrıntılar |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-karşılaştırma) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | Yukarıdakiyle aynı |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` ve tüm yerleşik hata türleri | [print-object](functions/printing.md#5-print-object-türe-göre-yazdırılan-gösterim) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-karşılaştırma) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Yukarıdakiyle aynı |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` ve tüm yerleşik hata türleri | [print-object](functions/printing.md#5-print-object-türe-göre-yazdırılan-gösterim) |
 
-`cons-cell<A,B>`'nin `Eq`/`Ord`'u, eleman türleri `Eq`/`Ord`'u gerçekleştirdiğinde kullanılabilir.
+`cons-cell<A,B>` ve demetler `#{..}` için trait'ler ile koleksiyonların `print-object`'i, öğe
+türleri o trait'i uyguladığında kullanılabilir.
 
 ### 6.2 Aritmetik
 
@@ -119,7 +124,7 @@ bölümündedir.
 
 | Trait | Gerçekleştiren türler |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` modülünün türleri (`lazy::map-iter<I,A,U>` vb.) |
 
 ### 6.4 Akışlar
 

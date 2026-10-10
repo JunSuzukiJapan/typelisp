@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # 类型一览
 
 typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的写法见[语法参考第 2 章](syntax.md#2-类型的写法)，各类型的
@@ -56,7 +56,11 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 | `complex` | 复数（分量为 `f64`） | [数值第 6 章](functions/numbers.md#6-复数-complex) |
 | `Array<T>` | 多维数组 | [Array](functions/collections.md#5-arrayt多维数组) |
 | `BitVector` | 固定长度的位序列 | [BitVector](functions/collections.md#6-bitvector位向量) |
+| `HashSet<T>` | 没有重复元素的集合 | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | 按键的顺序排列的表 | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | 可以从两端放入和取出的序列 | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | 各集合的 `iter` 返回的迭代器 | [Iter](functions/traits.md#1-iter-trait-与迭代) |
+| `lazy::map-iter<I,A,U>` 等 | `lazy` 模块的函数返回的迭代器 | [惰性迭代器](functions/sequences.md#惰性迭代器lazy-模块) |
 | `WaitGroup` | 等待 N 个完成 | [WaitGroup](functions/concurrency.md#4-waitgroup--等待-n-个完成) |
 | `Mutex<T>` | 共享数据的互斥 | [Mutex](functions/concurrency.md#6-mutext--共享数据的互斥) |
 | `pathname` | 拆分后的文件名 | [路径名](functions/streams-files.md#9-路径名-pathname) |
@@ -92,12 +96,12 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 | trait | 实现的类型 | 详情 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord比较) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | 同上 |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` 以及所有内置错误类型 | [print-object](functions/printing.md#5-print-object按类型的打印表示) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比较) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` 以及所有内置错误类型 | [print-object](functions/printing.md#5-print-object按类型的打印表示) |
 
-`cons-cell<A,B>` 的 `Eq`/`Ord` 在元素类型实现了 `Eq`/`Ord` 时可用。
+`cons-cell<A,B>` 与元组 `#{..}` 的 trait，以及集合的 `print-object`，在元素类型实现了该 trait 时可用。
 
 ### 6.2 算术
 
@@ -112,7 +116,7 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 | trait | 实现的类型 |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` 模块的类型（`lazy::map-iter<I,A,U>` 等） |
 
 ### 6.4 流
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -55,7 +55,11 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | `complex` | एक कॉम्प्लेक्स संख्या (`f64` घटक) | [संख्याएँ अध्याय 6](functions/numbers.md#6-कॉम्प्लेक्स-संख्याएँ-complex) |
 | `Array<T>` | बहुआयामी ऐरे | [Array](functions/collections.md#5-arrayt-बहुआयामी-ऐरे) |
 | `BitVector` | बिट का निश्चित लंबाई वाला अनुक्रम | [BitVector](functions/collections.md#6-bitvector-बिट-वेक्टर) |
+| `HashSet<T>` | बिना दोहराव वाले तत्वों का संग्रह | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | कुंजी के क्रम में रखी तालिका | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | दोनों सिरों से डालने और निकालने वाला अनुक्रम | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | हर कलेक्शन के `iter` द्वारा लौटाए जाने वाले इटरेटर | [Iter](functions/traits.md#1-iter-trait-और-इटरेशन) |
+| `lazy::map-iter<I,A,U>` आदि | `lazy` मॉड्यूल के फ़ंक्शन जो इटरेटर लौटाते हैं | [आलसी इटरेटर](functions/sequences.md#आलसी-इटरेटर-lazy-मॉड्यूल) |
 | `WaitGroup` | N चीज़ों के समाप्त होने की प्रतीक्षा | [WaitGroup](functions/concurrency.md#4-waitgroup--n-के-पूर्ण-होने-की-प्रतीक्षा) |
 | `Mutex<T>` | साझा डेटा के लिए पारस्परिक अपवर्जन | [Mutex](functions/concurrency.md#6-mutext--साझा-डेटा-के-लिए-पारस्परिक-अपवर्जन) |
 | `pathname` | हिस्सों में बँटा फ़ाइल का नाम | [पाथनेम](functions/streams-files.md#9-पाथनेम-pathname) |
@@ -91,12 +95,12 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 | Trait | लागू करने वाले टाइप | विवरण |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-तुलना) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | ऊपर जैसा |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` और सभी बिल्ट-इन त्रुटि टाइप | [print-object](functions/printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-तुलना) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | ऊपर जैसा |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` और सभी बिल्ट-इन त्रुटि टाइप | [print-object](functions/printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व) |
 
-`cons-cell<A,B>` के `Eq`/`Ord` का उपयोग तब किया जा सकता है जब तत्वों के टाइप `Eq`/`Ord` को लागू करते हों।
+`cons-cell<A,B>` और टपल `#{..}` के trait, और संग्रहों का `print-object`, तब उपलब्ध हैं जब तत्वों के टाइप वह trait लागू करते हों।
 
 ### 6.2 अंकगणित
 
@@ -111,7 +115,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 | Trait | लागू करने वाले टाइप |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` `lazy` मॉड्यूल के टाइप (`lazy::map-iter<I,A,U>` आदि) |
 
 ### 6.4 स्ट्रीम
 

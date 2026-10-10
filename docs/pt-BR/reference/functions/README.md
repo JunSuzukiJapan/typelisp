@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Funções embutidas
 
 A lista de funções embutidas, métodos e da biblioteca padrão. Para a sintaxe (formas especiais e como
@@ -30,8 +30,8 @@ As tabelas de cada capítulo têm as colunas "nome, forma, tipo, descrição". A
 | Arquivo | Conteúdo |
 |---|---|
 | [numbers.md](numbers.md) | Inteiros, números de ponto flutuante, racionais, números complexos, booleanos, operações de bits, números aleatórios |
-| [sequences.md](sequences.md) | O par `cons-cell`, os dados de expressões S `Sexpr`, símbolos, funções de sequência, funções de ordem superior |
-| [collections.md](collections.md) | Strings, caracteres, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | O par `cons-cell`, os dados de expressões S `Sexpr`, símbolos, funções de sequência, iteradores preguiçosos `lazy`, funções de ordem superior |
+| [collections.md](collections.md) | Strings, caracteres, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, tipos de erro e o trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traits aritméticos |
 | [printing.md](printing.md) | `print`/`println`/`format`, o pretty printer, `print-object`, variáveis de controle da impressora |

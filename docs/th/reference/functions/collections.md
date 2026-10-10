@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # สตริง อักขระ และคอลเลกชัน
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` และ `BitVector`
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` และ `Deque<T>`
 
 ## 1. สตริง (`string`)
 
@@ -185,3 +185,73 @@
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | ส่วนเติมเต็ม |
 
 ไม่มี `bit-vector-p` (ชนิดสถิตตอบให้)
+
+## 7. `HashSet<T>`
+
+กลุ่มของสมาชิกที่ไม่ซ้ำกัน (`HashSet` ของ Rust) เป็น `defstruct` ของไลบรารีมาตรฐาน ข้างในคือ `HashTable<T,()>` ชนิดของสมาชิกต้อง implement `Hash` เช่นเดียวกับคีย์ของ `HashTable`
+
+| ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | สร้างเซตว่าง อาร์กิวเมนต์ชนิดได้จากชนิดที่คาดหวัง |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | เพิ่ม `x` คืน `true` ถ้าเพิ่งใส่เข้าไป `false` ถ้ามีอยู่แล้ว |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | มี `x` อยู่หรือไม่ |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | เอา `x` ออก คืน `true` ถ้ามีอยู่ |
+| `count` | `(count s)` | `HashSet<T>→int` | จำนวนสมาชิก |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | ลบทั้งหมด |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | อิเทอเรเตอร์ของสมาชิก ลำดับไม่กำหนด |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+สิ่งที่ทั้งสามชนิดในบทที่ 7 ถึง 9 มีร่วมกัน:
+
+- สร้างด้วย `make` ส่วน `new` คือคอนสตรักเตอร์ตามลำดับฟิลด์ที่ `defstruct` สร้างให้ ไม่ใช่ตัวที่ใช้สร้าง (เหมือน `Array::make`)
+- `iter` ไล่ดูสำเนาที่ถ่ายไว้ตอนเรียก ถ้าแก้คอลเลกชันเดียวกันในระหว่าง `doiter` ลูปนั้นจะไม่เห็น
+- ถ้าชนิดของสมาชิก implement `print-object` จะพิมพ์สมาชิกในรูป `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>`
+
+## 8. `SortedTable<K,V>`
+
+ตารางที่เรียงตามคีย์จากน้อยไปมาก (`BTreeMap` ของ Rust) ชนิดของคีย์ต้อง implement `Ord` เก็บคีย์และค่าไว้ใน `Vector` สองตัวตามลำดับคีย์ และค้นหาแบบไบนารี `set` คีย์ใหม่และ `remove` จะเลื่อนสมาชิกที่อยู่หลังตำแหน่งนั้น
+
+| ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | สร้างตารางว่าง |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | ค้นหา |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | แทรกหรือเขียนทับ |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | ลบ และคืนค่าเก่าถ้ามี |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | จำนวนสมาชิก |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | ลบทั้งหมด |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | คีย์ เรียงจากน้อยไปมาก |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | ค่า เรียงตามคีย์ |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | ทูเพิล `#{คีย์ ค่า}` เรียงตามคีย์ |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 และ pear 3
+```
+
+## 9. `Deque<T>`
+
+ลำดับที่ใส่และเอาออกได้ทั้งสองปลาย (`VecDeque` ของ Rust)
+
+| ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | สร้างลำดับว่าง |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | เพิ่มที่หัว / ท้าย |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | เอาสมาชิกที่หัว / ท้ายออกแล้วคืนให้ ถ้าว่างคืน `none` |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | ดูสมาชิกที่หัว / ท้าย (ไม่เอาออก) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | ตัวที่ `i` นับจากหัว ถ้าเกินช่วงคืน `none` |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | เขียนทับตัวที่ `i` ถ้าเกินช่วงจะ panic |
+| `count` | `(count d)` | `Deque<T>→int` | จำนวนสมาชิก |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | ลบทั้งหมด |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | จากหัวไปตามลำดับ |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Встроенные функции
 
 Список встроенных функций, методов и стандартной библиотеки. О синтаксисе (специальных формах и способах
@@ -29,8 +29,8 @@
 | Файл | Содержание |
 |---|---|
 | [numbers.md](numbers.md) | Целые, числа с плавающей точкой, рациональные, комплексные, логические значения, битовые операции, случайные числа |
-| [sequences.md](sequences.md) | Пара `cons-cell`, данные S-выражений `Sexpr`, символы, функции последовательностей, функции высшего порядка |
-| [collections.md](collections.md) | Строки, символы, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | Пара `cons-cell`, данные S-выражений `Sexpr`, символы, функции последовательностей, ленивые итераторы `lazy`, функции высшего порядка |
+| [collections.md](collections.md) | Строки, символы, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, типы ошибок и трейт `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, арифметические трейты |
 | [printing.md](printing.md) | `print`/`println`/`format`, красивая печать, `print-object`, управляющие переменные печати |

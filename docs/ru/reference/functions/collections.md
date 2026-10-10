@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Строки, символы и коллекции
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` и `BitVector`.
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` и `Deque<T>`.
 
 ## 1. Строки `string`
 
@@ -186,3 +186,80 @@
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | Дополнение |
 
 `bit-vector-p` нет (на это отвечает статический тип).
+
+## 7. `HashSet<T>`
+
+Набор элементов без повторов (`HashSet` из Rust). `defstruct` стандартной библиотеки, содержимое
+которого — `HashTable<T,()>`. Тип элемента должен реализовывать `Hash`, как ключ `HashTable`.
+
+| Имя | Форма | Тип | Описание |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | Создаёт пустое множество. Аргумент типа берётся из ожидаемого типа |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Добавляет `x`. `true`, если его не было, `false`, если уже был |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Есть ли `x` |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Удаляет `x`. `true`, если он был |
+| `count` | `(count s)` | `HashSet<T>→int` | Число элементов |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | Удаляет всё |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Итератор по элементам. Порядок не определён |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+Общее для трёх типов глав 7–9:
+
+- Создаются через `make`. `new` — это конструктор в порядке полей, который генерирует `defstruct`, и
+  создавать им не нужно (как и с `Array::make`).
+- `iter` обходит копию, снятую в момент вызова. Изменение той же коллекции внутри `doiter` этот цикл
+  не видит.
+- Если типы элементов реализуют `print-object`, элементы печатаются в виде `#<hashset "a" "b">`
+  `#<sortedtable 1 "a">` `#<deque 1 2>`.
+
+## 8. `SortedTable<K,V>`
+
+Таблица в порядке возрастания ключей (`BTreeMap` из Rust). Тип ключа должен реализовывать `Ord`.
+Ключи и значения хранятся в двух `Vector` в порядке ключей, поиск двоичный. `set` нового ключа и
+`remove` сдвигают элементы после его позиции.
+
+| Имя | Форма | Тип | Описание |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Создаёт пустую таблицу |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Поиск |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Вставка или перезапись |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Удаляет и возвращает старое значение, если оно было |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | Число элементов |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | Удаляет всё |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | Ключи по возрастанию |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | Значения в порядке ключей |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Кортежи `#{ключ значение}` в порядке ключей |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 и pear 3
+```
+
+## 9. `Deque<T>`
+
+Последовательность, в которую можно добавлять и из которой можно брать с обоих концов (`VecDeque` из
+Rust).
+
+| Имя | Форма | Тип | Описание |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | Создаёт пустую последовательность |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Добавляет в начало / конец |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Извлекает элемент из начала / конца и возвращает его. `none`, если пусто |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Смотрит на элемент в начале / конце (не извлекая) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | `i`-й от начала. `none` вне диапазона |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Перезаписывает `i`-й. Panic вне диапазона |
+| `count` | `(count d)` | `Deque<T>→int` | Число элементов |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | Удаляет всё |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | С начала, по порядку |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

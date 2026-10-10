@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Hàm dựng sẵn
 
 Danh sách các hàm dựng sẵn, phương thức và thư viện chuẩn. Về cú pháp (các dạng đặc biệt và cách định
@@ -29,8 +29,8 @@ Các bảng trong mỗi chương có các cột "tên, dạng, kiểu, mô tả"
 | Tệp | Nội dung |
 |---|---|
 | [numbers.md](numbers.md) | Số nguyên, số dấu phẩy động, số hữu tỉ, số phức, boolean, phép toán bit, số ngẫu nhiên |
-| [sequences.md](sequences.md) | Cặp `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, hàm trên dãy, hàm bậc cao |
-| [collections.md](collections.md) | Chuỗi, ký tự, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | Cặp `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, hàm trên dãy, iterator lười `lazy`, hàm bậc cao |
+| [collections.md](collections.md) | Chuỗi, ký tự, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, các kiểu lỗi và trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, các trait số học |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, các biến điều khiển bộ in |

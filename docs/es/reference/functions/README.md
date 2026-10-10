@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Funciones incorporadas
 
 La lista de funciones incorporadas, métodos y la biblioteca estándar. Para la sintaxis (formas especiales y
@@ -31,8 +31,8 @@ escribe como `(tipo-de-argumento,...)→tipo-de-retorno`.
 | Archivo | Contenido |
 |---|---|
 | [numbers.md](numbers.md) | Enteros, números de coma flotante, racionales, números complejos, booleanos, operaciones de bits, números aleatorios |
-| [sequences.md](sequences.md) | El par `cons-cell`, los datos de expresiones S `Sexpr`, símbolos, funciones de secuencia, funciones de orden superior |
-| [collections.md](collections.md) | Cadenas, caracteres, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | El par `cons-cell`, los datos de expresiones S `Sexpr`, símbolos, funciones de secuencia, iteradores perezosos `lazy`, funciones de orden superior |
+| [collections.md](collections.md) | Cadenas, caracteres, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, tipos de error y el trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, traits aritméticos |
 | [printing.md](printing.md) | `print`/`println`/`format`, el pretty printer, `print-object`, variables de control de la impresora |

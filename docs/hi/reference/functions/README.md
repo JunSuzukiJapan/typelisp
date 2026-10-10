@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # बिल्ट-इन फ़ंक्शन
 
 बिल्ट-इन फ़ंक्शन, मेथड और स्टैंडर्ड लाइब्रेरी की सूची। सिंटैक्स (विशेष फ़ॉर्म और चीज़ें कैसे परिभाषित करें) के लिए [सिंटैक्स संदर्भ](../syntax.md) देखें; टाइप की सूची के लिए [टाइप](../types.md) देखें।
@@ -27,8 +27,8 @@
 | फ़ाइल | सामग्री |
 |---|---|
 | [numbers.md](numbers.md) | पूर्णांक, फ़्लोटिंग-पॉइंट संख्याएँ, परिमेय संख्याएँ, कॉम्प्लेक्स संख्याएँ, बूलियन, बिट ऑपरेशन, यादृच्छिक संख्याएँ |
-| [sequences.md](sequences.md) | जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, अनुक्रम फ़ंक्शन, उच्च-क्रम फ़ंक्शन |
-| [collections.md](collections.md) | स्ट्रिंग, कैरेक्टर, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, अनुक्रम फ़ंक्शन, आलसी इटरेटर `lazy`, उच्च-क्रम फ़ंक्शन |
+| [collections.md](collections.md) | स्ट्रिंग, कैरेक्टर, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, त्रुटि टाइप और `Error` trait |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, अंकगणितीय trait |
 | [printing.md](printing.md) | `print`/`println`/`format`, सुंदर प्रिंटर, `print-object`, प्रिंटर नियंत्रण वेरिएबल |

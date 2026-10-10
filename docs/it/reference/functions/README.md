@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Funzioni predefinite
 
 L'elenco delle funzioni predefinite, dei metodi e della libreria standard. Per la sintassi (forme
@@ -30,8 +30,8 @@ scrive come `(tipo-dell-argomento,...)→tipo-di-ritorno`.
 | File | Contenuto |
 |---|---|
 | [numbers.md](numbers.md) | Interi, numeri in virgola mobile, razionali, numeri complessi, booleani, operazioni sui bit, numeri casuali |
-| [sequences.md](sequences.md) | La coppia `cons-cell`, i dati S-expression `Sexpr`, i simboli, le funzioni sulle sequenze, le funzioni di ordine superiore |
-| [collections.md](collections.md) | Stringhe, caratteri, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | La coppia `cons-cell`, i dati S-expression `Sexpr`, i simboli, le funzioni sulle sequenze, iteratori pigri `lazy`, le funzioni di ordine superiore |
+| [collections.md](collections.md) | Stringhe, caratteri, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, i tipi di errore e il trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, i trait aritmetici |
 | [printing.md](printing.md) | `print`/`println`/`format`, il pretty printer, `print-object`, le variabili di controllo della stampa |

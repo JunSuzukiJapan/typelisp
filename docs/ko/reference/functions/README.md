@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # 내장 함수
 
 내장 함수, 메서드, 표준 라이브러리의 목록. 문법(특수 형식과 정의 방법)은 [문법 레퍼런스](../syntax.md), 타입 목록은
@@ -28,8 +28,8 @@
 | 파일 | 내용 |
 |---|---|
 | [numbers.md](numbers.md) | 정수, 부동소수점 수, 유리수, 복소수, 진리값, 비트 연산, 난수 |
-| [sequences.md](sequences.md) | 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, 시퀀스 함수, 고차 함수 |
-| [collections.md](collections.md) | 문자열, 문자, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, 시퀀스 함수, 지연 이터레이터 `lazy`, 고차 함수 |
+| [collections.md](collections.md) | 문자열, 문자, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, 오류 타입과 `Error` 트레이트 |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, 산술 트레이트 |
 | [printing.md](printing.md) | `print`/`println`/`format`, 프리티 프린터, `print-object`, 프린터 제어 변수 |

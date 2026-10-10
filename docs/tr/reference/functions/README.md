@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Yerleşik Fonksiyonlar
 
 Yerleşik fonksiyonların, metotların ve standart kütüphanenin listesi. Sözdizimi (özel formlar ve
@@ -30,8 +30,8 @@ Her bölümdeki tabloların "ad, biçim, tür, açıklama" sütunları vardır. 
 | Dosya | İçerik |
 |---|---|
 | [numbers.md](numbers.md) | Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar, mantıksal değerler, bit işlemleri, rastgele sayılar |
-| [sequences.md](sequences.md) | `cons-cell` çifti, S-ifade verisi `Sexpr`, semboller, dizi fonksiyonları, yüksek dereceli fonksiyonlar |
-| [collections.md](collections.md) | String'ler, karakterler, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | `cons-cell` çifti, S-ifade verisi `Sexpr`, semboller, dizi fonksiyonları, tembel yineleyiciler `lazy`, yüksek dereceli fonksiyonlar |
+| [collections.md](collections.md) | String'ler, karakterler, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, hata türleri ve `Error` trait'i |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, aritmetik trait'ler |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, yazıcı denetim değişkenleri |

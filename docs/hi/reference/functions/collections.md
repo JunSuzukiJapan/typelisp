@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` और `BitVector`।
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
 
 ## 1. स्ट्रिंग `string`
 
@@ -168,3 +168,73 @@
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | पूरक |
 
 `bit-vector-p` नहीं है (स्टैटिक टाइप उसका उत्तर देता है)।
+
+## 7. `HashSet<T>`
+
+बिना दोहराव वाले तत्वों का संग्रह (Rust का `HashSet`)। मानक लाइब्रेरी का `defstruct`, जिसकी सामग्री `HashTable<T,()>` है। तत्व के टाइप को, `HashTable` की कुंजी की तरह, `Hash` लागू करना होगा।
+
+| नाम | फ़ॉर्म | टाइप | विवरण |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | खाली सेट बनाता है। टाइप आर्ग्युमेंट अपेक्षित टाइप से तय होता है |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x` जोड़ता है। नया हो तो `true`, पहले से हो तो `false` |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` मौजूद है या नहीं |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x` निकालता है। मौजूद था तो `true` |
+| `count` | `(count s)` | `HashSet<T>→int` | तत्वों की संख्या |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | सब हटा देता है |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | तत्वों का इटरेटर। क्रम तय नहीं है |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+अध्याय 7 से 9 के तीनों टाइपों में समान बातें:
+
+- इन्हें `make` से बनाएँ। `new` वह फ़ील्ड-क्रम कंस्ट्रक्टर है जो `defstruct` बनाता है, बनाने के लिए नहीं (`Array::make` की तरह)।
+- `iter` बुलाने के समय की प्रति पर चलता है। `doiter` के भीतर उसी संग्रह को बदलें तो वह लूप उसे नहीं देखता।
+- यदि तत्वों के टाइप `print-object` लागू करते हैं, तो तत्व `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>` के रूप में छपते हैं।
+
+## 8. `SortedTable<K,V>`
+
+कुंजी के आरोही क्रम में रखी तालिका (Rust का `BTreeMap`)। कुंजी के टाइप को `Ord` लागू करना होगा। कुंजियाँ और मान कुंजी के क्रम में दो `Vector` में रखे जाते हैं, और खोज द्विआधारी होती है। नई कुंजी का `set` और `remove` उस स्थान के बाद के तत्वों को खिसकाते हैं।
+
+| नाम | फ़ॉर्म | टाइप | विवरण |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | खाली तालिका बनाता है |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | खोज |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | डालना या ऊपर लिखना |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | हटाता है, हो तो पुराना मान लौटाता है |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | तत्वों की संख्या |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | सब हटा देता है |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | कुंजियाँ, सबसे छोटी से |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | मान, कुंजी के क्रम में |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | कुंजी के क्रम में `#{कुंजी मान}` टपल |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 और pear 3
+```
+
+## 9. `Deque<T>`
+
+दोनों सिरों से डालने और निकालने वाला अनुक्रम (Rust का `VecDeque`)।
+
+| नाम | फ़ॉर्म | टाइप | विवरण |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | खाली अनुक्रम बनाता है |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | आगे / पीछे जोड़ता है |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व निकालकर लौटाता है। खाली हो तो `none` |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व देखता है (निकाले बिना) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | आगे से `i`-वाँ। सीमा के बाहर `none` |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`-वें पर ऊपर लिखता है। सीमा के बाहर panic |
+| `count` | `(count d)` | `Deque<T>→int` | तत्वों की संख्या |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | सब हटा देता है |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | आगे से क्रम में |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

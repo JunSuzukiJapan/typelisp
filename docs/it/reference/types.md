@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Tipi
 
 I tipi che typelisp possiede e i trait standard che ciascun tipo implementa. Come si scrivono i tipi è
@@ -60,7 +60,11 @@ essi.
 | `complex` | Un numero complesso (componenti `f64`) | [Numeri, capitolo 6](functions/numbers.md#6-numeri-complessi-complex) |
 | `Array<T>` | Un array multidimensionale | [Array](functions/collections.md#5-arrayt-array-multidimensionali) |
 | `BitVector` | Una sequenza di bit a lunghezza fissa | [BitVector](functions/collections.md#6-bitvector-vettori-di-bit) |
+| `HashSet<T>` | Una collezione di elementi senza duplicati | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | Una tabella ordinata per chiave | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | Una sequenza in cui si inserisce e si estrae da entrambi i capi | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | Gli iteratori restituiti da `iter` di ciascuna collezione | [Iter](functions/traits.md#1-il-trait-iter-e-literazione) |
+| `lazy::map-iter<I,A,U>` ecc. | Gli iteratori restituiti dalle funzioni del modulo `lazy` | [Iteratori pigri](functions/sequences.md#iteratori-pigri-il-modulo-lazy) |
 | `WaitGroup` | Attendere il completamento di N cose | [WaitGroup](functions/concurrency.md#4-waitgroup--attendere-n-completamenti) |
 | `Mutex<T>` | Mutua esclusione per dati condivisi | [Mutex](functions/concurrency.md#6-mutext--mutua-esclusione-per-dati-condivisi) |
 | `pathname` | Un nome di file diviso in parti | [Pathname](functions/streams-files.md#9-pathname-pathname) |
@@ -98,12 +102,13 @@ Quali tipi implementano quali trait. I metodi di ciascun trait si trovano in
 
 | Trait | Tipi che lo implementano | Dettagli |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-confronto) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | Come sopra |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` e tutti i tipi di errore predefiniti | [print-object](functions/printing.md#5-print-object-rappresentazione-stampata-per-tipo) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-confronto) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Come sopra |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` e tutti i tipi di errore predefiniti | [print-object](functions/printing.md#5-print-object-rappresentazione-stampata-per-tipo) |
 
-`Eq`/`Ord` di `cons-cell<A,B>` si possono usare quando i tipi degli elementi implementano `Eq`/`Ord`.
+I trait di `cons-cell<A,B>` e delle tuple `#{..}`, e il `print-object` delle collezioni, sono
+utilizzabili quando i tipi degli elementi implementano quel trait.
 
 ### 6.2 Aritmetica
 
@@ -118,7 +123,7 @@ I dettagli sono in [Trait aritmetici](functions/traits.md#3-trait-aritmetici-add
 
 | Trait | Tipi che lo implementano |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` i tipi del modulo `lazy` (`lazy::map-iter<I,A,U>` ecc.) |
 
 ### 6.4 Stream
 

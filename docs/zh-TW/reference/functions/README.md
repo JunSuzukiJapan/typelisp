@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # 內建函式
 
 內建函式、方法與標準函式庫的一覽。語法（特殊形式、定義方式）見[語法參考](../syntax.md)，型別一覽見[型別一覽](../types.md)。
@@ -27,8 +27,8 @@
 | 檔案 | 內容 |
 |---|---|
 | [numbers.md](numbers.md) | 整數、浮點數、有理數、複數、布林值、位元運算、亂數 |
-| [sequences.md](sequences.md) | 序對 `cons-cell`、S 運算式資料 `Sexpr`、符號、序列函式、高階函式 |
-| [collections.md](collections.md) | 字串、字元、`Vector`、`HashTable`、`Array`、`BitVector` |
+| [sequences.md](sequences.md) | 序對 `cons-cell`、S 運算式資料 `Sexpr`、符號、序列函式、惰性迭代器 `lazy`、高階函式 |
+| [collections.md](collections.md) | 字串、字元、`Vector`、`HashTable`、`Array`、`BitVector`、`HashSet`、`SortedTable`、`Deque` |
 | [option-result.md](option-result.md) | `Option`、`Result`、錯誤型別與 `Error` trait |
 | [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算術 trait |
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、列印控制變數 |

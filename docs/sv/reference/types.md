@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -59,7 +59,11 @@ sätt som typer du skriver själv, och allt du kan göra med en `defstruct` kan 
 | `complex` | Ett komplext tal (komponenter av typen `f64`) | [Tal kapitel 6](functions/numbers.md#6-komplexa-tal-complex) |
 | `Array<T>` | En flerdimensionell array | [Array](functions/collections.md#5-arrayt-flerdimensionella-arrayer) |
 | `BitVector` | En följd av bitar med fast längd | [BitVector](functions/collections.md#6-bitvector-bitvektorer) |
+| `HashSet<T>` | En samling element utan dubbletter | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | En tabell i nyckelordning | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | En följd man lägger till i och tar ut ur i båda ändar | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | De iteratorer som `iter` för varje samling returnerar | [Iter](functions/traits.md#1-traitet-iter-och-iteration) |
+| `lazy::map-iter<I,A,U>` m.fl. | Iteratorerna som funktionerna i modulen `lazy` returnerar | [Lata iteratorer](functions/sequences.md#lata-iteratorer-modulen-lazy) |
 | `WaitGroup` | Att vänta på att N saker blir klara | [WaitGroup](functions/concurrency.md#4-waitgroup--vänta-på-n-färdigställanden) |
 | `Mutex<T>` | Ömsesidig uteslutning för delad data | [Mutex](functions/concurrency.md#6-mutext--ömsesidig-uteslutning-för-delad-data) |
 | `pathname` | Ett filnamn uppdelat i delar | [Pathnames](functions/streams-files.md#9-pathnames-pathname) |
@@ -97,12 +101,13 @@ Vilka typer som implementerar vilka traits. Metoderna för varje trait finns i
 
 | Trait | Implementerande typer | Detaljer |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-jämförelse) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | Som ovan |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` och alla inbyggda feltyper | [print-object](functions/printing.md#5-print-object-utskriftsform-per-typ) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-jämförelse) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Som ovan |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` och alla inbyggda feltyper | [print-object](functions/printing.md#5-print-object-utskriftsform-per-typ) |
 
-`Eq`/`Ord` för `cons-cell<A,B>` kan användas när elementtyperna implementerar `Eq`/`Ord`.
+Traitsen för `cons-cell<A,B>` och för tupler `#{..}`, och samlingarnas `print-object`, kan användas
+när elementtyperna implementerar den traiten.
 
 ### 6.2 Aritmetik
 
@@ -117,7 +122,7 @@ Detaljer finns i [Aritmetiska traits](functions/traits.md#3-aritmetiska-traits-a
 
 | Trait | Implementerande typer |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` typerna i modulen `lazy` (`lazy::map-iter<I,A,U>` m.fl.) |
 
 ### 6.4 Strömmar
 

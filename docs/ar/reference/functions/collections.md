@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # السلاسل النصية والمحارف والمجموعات
 
-`string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector`.
+`string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector` و`HashSet<T>` و`SortedTable<K,V>` و`Deque<T>`.
 
 ## 1. السلاسل النصية `string`
 
@@ -183,3 +183,78 @@
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | المتمم |
 
 لا يوجد `bit-vector-p` (فالنوع الساكن يجيب عنه).
+
+## 7. `HashSet<T>`
+
+مجموعة عناصر بلا تكرار (`HashSet` في Rust). وهي `defstruct` من المكتبة القياسية محتواه
+`HashTable<T,()>`. يجب أن ينفّذ نوع العنصر `Hash`، كما يجب لمفتاح `HashTable`.
+
+| الاسم | الصيغة | النوع | الوصف |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | تنشئ مجموعة فارغة. يُؤخذ وسيط النوع من النوع المتوقع |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | تضيف `x`. `true` إن لم يكن موجودًا، و`false` إن كان موجودًا |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | هل `x` موجود |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | تُخرج `x`. `true` إن كان موجودًا |
+| `count` | `(count s)` | `HashSet<T>→int` | عدد العناصر |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | تحذف كل شيء |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | مكرِّر على العناصر. الترتيب غير محدد |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+ما تشترك فيه الأنواع الثلاثة في الفصول 7 إلى 9:
+
+- تُنشأ بـ `make`. أما `new` فهو المُنشِئ بترتيب الحقول الذي يولّده `defstruct`، وليس للإنشاء (كما
+  في `Array::make`).
+- يمرّ `iter` على نسخة مأخوذة لحظة استدعائه. تغيير المجموعة نفسها داخل `doiter` لا تراه تلك الحلقة.
+- إذا نفّذت أنواع العناصر `print-object` طُبعت العناصر على الشكل `#<hashset "a" "b">`
+  `#<sortedtable 1 "a">` `#<deque 1 2>`.
+
+## 8. `SortedTable<K,V>`
+
+جدول مرتّب تصاعديًا بحسب المفتاح (`BTreeMap` في Rust). يجب أن ينفّذ نوع المفتاح `Ord`. تُحفظ
+المفاتيح والقيم في متجهين `Vector` بترتيب المفاتيح، والبحث ثنائي. `set` لمفتاح جديد و`remove` يزيحان
+العناصر التي بعد موضعه.
+
+| الاسم | الصيغة | النوع | الوصف |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | تنشئ جدولًا فارغًا |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | بحث |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | إدراج أو كتابة فوق القديم |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | تحذف وتُرجع القيمة القديمة إن وُجدت |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | عدد العناصر |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | تحذف كل شيء |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | المفاتيح من الأصغر |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | القيم بترتيب المفاتيح |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | صفوف `#{مفتاح قيمة}` بترتيب المفاتيح |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 و pear 3
+```
+
+## 9. `Deque<T>`
+
+تسلسل يمكن الإضافة إليه والأخذ منه من الطرفين (`VecDeque` في Rust).
+
+| الاسم | الصيغة | النوع | الوصف |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | تنشئ تسلسلًا فارغًا |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | تضيف في المقدمة / المؤخرة |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | تُخرج عنصر المقدمة / المؤخرة وتُرجعه. `none` إن كان فارغًا |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | تنظر إلى عنصر المقدمة / المؤخرة (دون إخراجه) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | العنصر رقم `i` من المقدمة. `none` خارج النطاق |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | تكتب فوق العنصر رقم `i`. panic خارج النطاق |
+| `count` | `(count d)` | `Deque<T>→int` | عدد العناصر |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | تحذف كل شيء |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | من المقدمة بالترتيب |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Вбудовані функції
 
 Перелік вбудованих функцій, методів і стандартної бібліотеки. Про синтаксис (спеціальні форми та способи
@@ -29,8 +29,8 @@
 | Файл | Зміст |
 |---|---|
 | [numbers.md](numbers.md) | Цілі числа, числа з рухомою комою, раціональні числа, комплексні числа, булеві значення, бітові операції, випадкові числа |
-| [sequences.md](sequences.md) | Пара `cons-cell`, S-вирази `Sexpr`, символи, функції над послідовностями, функції вищого порядку |
-| [collections.md](collections.md) | Рядки, знаки, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | Пара `cons-cell`, S-вирази `Sexpr`, символи, функції над послідовностями, ліниві ітератори `lazy`, функції вищого порядку |
+| [collections.md](collections.md) | Рядки, знаки, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, типи помилок і трейт `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, арифметичні трейти |
 | [printing.md](printing.md) | `print`/`println`/`format`, pretty printer, `print-object`, змінні керування друком |

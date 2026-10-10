@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # String'ler, Karakterler ve Koleksiyonlar
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` ve `BitVector`.
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` ve `Deque<T>`.
 
 ## 1. String'ler `string`
 
@@ -187,3 +187,79 @@ Sabit uzunluklu bir bit dizisi. Standart kütüphanedeki bir `defstruct`.
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | Tümleyen |
 
 `bit-vector-p` yoktur (statik tür bunu yanıtlar).
+
+## 7. `HashSet<T>`
+
+Tekrarsız öğeler topluluğu (Rust'ın `HashSet`'i). İçeriği bir `HashTable<T,()>` olan bir standart
+kütüphane `defstruct`'ı. Öğe türü, bir `HashTable` anahtarı gibi `Hash`'i uygulamalıdır.
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | Boş bir küme oluşturur. Tür argümanı beklenen türden gelir |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x`'i ekler. Yoksa `true`, zaten varsa `false` |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x`'in olup olmadığı |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x`'i çıkarır. Varsa `true` |
+| `count` | `(count s)` | `HashSet<T>→int` | Öğe sayısı |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | Her şeyi siler |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Öğeler üzerinde bir yineleyici. Sıra belirsizdir |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+7–9. bölümlerdeki üç türün ortak noktaları:
+
+- `make` ile oluşturulur. `new`, `defstruct`'ın ürettiği alan sırasındaki yapıcıdır; oluşturmak için
+  kullanılmaz (`Array::make`'teki gibi).
+- `iter`, çağrıldığı andaki bir kopyayı dolaşır. Bir `doiter` içinde aynı koleksiyonu değiştirmek o
+  döngüde görünmez.
+- Öğe türleri `print-object`'i uyguluyorsa öğeler `#<hashset "a" "b">` `#<sortedtable 1 "a">`
+  `#<deque 1 2>` biçiminde yazdırılır.
+
+## 8. `SortedTable<K,V>`
+
+Artan anahtar sırasında tutulan tablo (Rust'ın `BTreeMap`'i). Anahtar türü `Ord`'u uygulamalıdır.
+Anahtarlar ve değerler anahtar sırasındaki iki `Vector`'da tutulur, arama ikili aramadır. Yeni bir
+anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Boş bir tablo oluşturur |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Arama |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Ekler ya da üzerine yazar |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Siler, varsa eski değeri döndürür |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | Öğe sayısı |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | Her şeyi siler |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | Anahtarlar, en küçükten başlayarak |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | Değerler, anahtar sırasında |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Anahtar sırasında `#{anahtar değer}` demetleri |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 ve pear 3
+```
+
+## 9. `Deque<T>`
+
+İki ucundan da ekleme ve çıkarma yapılabilen dizi (Rust'ın `VecDeque`'i).
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | Boş bir dizi oluşturur |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Başa / sona ekler |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeyi çıkarıp döndürür. Boşsa `none` |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeye bakar (çıkarmadan) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Baştan `i`'nci öğe. Aralık dışındaysa `none` |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i`'nci öğenin üzerine yazar. Aralık dışındaysa panic |
+| `count` | `(count d)` | `Deque<T>→int` | Öğe sayısı |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | Her şeyi siler |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Baştan sırayla |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

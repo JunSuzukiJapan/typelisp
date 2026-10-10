@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -59,7 +59,11 @@ như các kiểu bạn tự viết, và mọi thứ bạn làm được với m�
 | `complex` | Một số phức (các thành phần `f64`) | [Số chương 6](functions/numbers.md#6-số-phức-complex) |
 | `Array<T>` | Một mảng nhiều chiều | [Array](functions/collections.md#5-arrayt-mảng-nhiều-chiều) |
 | `BitVector` | Một dãy bit có độ dài cố định | [BitVector](functions/collections.md#6-bitvector-vector-bit) |
+| `HashSet<T>` | Tập hợp các phần tử không trùng lặp | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | Bảng giữ theo thứ tự khóa | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | Dãy có thể thêm vào và lấy ra ở cả hai đầu | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | Các iterator được `iter` của từng tập hợp trả về | [Iter](functions/traits.md#1-trait-iter-và-việc-lặp) |
+| `lazy::map-iter<I,A,U>` v.v. | Các iterator mà hàm của module `lazy` trả về | [Iterator lười](functions/sequences.md#iterator-lười-module-lazy) |
 | `WaitGroup` | Chờ N việc kết thúc | [WaitGroup](functions/concurrency.md#4-waitgroup--chờ-n-lần-hoàn-tất) |
 | `Mutex<T>` | Loại trừ tương hỗ cho dữ liệu dùng chung | [Mutex](functions/concurrency.md#6-mutext--loại-trừ-tương-hỗ-cho-dữ-liệu-dùng-chung) |
 | `pathname` | Một tên tệp được tách thành các phần | [Pathname](functions/streams-files.md#9-pathname-pathname) |
@@ -97,12 +101,13 @@ và ở các chương được liệt kê trong cột ngoài cùng bên phải.
 
 | Trait | Các kiểu triển khai | Chi tiết |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-so-sánh) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | Như trên |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` và mọi kiểu lỗi dựng sẵn | [print-object](functions/printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-so-sánh) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Như trên |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` và mọi kiểu lỗi dựng sẵn | [print-object](functions/printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu) |
 
-`Eq`/`Ord` của `cons-cell<A,B>` dùng được khi các kiểu phần tử triển khai `Eq`/`Ord`.
+Các trait của `cons-cell<A,B>` và của tuple `#{..}`, cùng `print-object` của các collection, dùng
+được khi kiểu phần tử cài đặt trait đó.
 
 ### 6.2 Số học
 
@@ -117,7 +122,7 @@ Chi tiết nằm ở [Các trait số học](functions/traits.md#3-các-trait-s�
 
 | Trait | Các kiểu triển khai |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` các kiểu của module `lazy` (`lazy::map-iter<I,A,U>`, v.v.) |
 
 ### 6.4 Stream
 

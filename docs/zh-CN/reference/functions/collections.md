@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # 字符串、字符与集合
 
-`string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`。
+`string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
 
 ## 1. 字符串 `string`
 
@@ -175,3 +175,73 @@
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | 补集 |
 
 没有 `bit-vector-p`（静态类型已经回答了）。
+
+## 7. `HashSet<T>`
+
+没有重复元素的集合（Rust 的 `HashSet`）。标准库的 `defstruct`，内容是 `HashTable<T,()>`。元素类型与 `HashTable` 的键一样，必须实现 `Hash`。
+
+| 名称 | 形式 | 类型 | 说明 |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | 创建空集合。类型参数由期望类型决定 |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 加入 `x`。新加入时为 `true`，已存在时为 `false` |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | 是否含有 `x` |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 去掉 `x`。原本存在时为 `true` |
+| `count` | `(count s)` | `HashSet<T>→int` | 元素个数 |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | 全部删除 |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 元素的迭代器。顺序不确定 |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+第 7～9 章的三个类型的共同点：
+
+- 用 `make` 创建。`new` 是 `defstruct` 生成的按字段顺序的构造函数，不是用来创建的（与 `Array::make` 相同）。
+- `iter` 遍历调用时刻的副本。在 `doiter` 中修改同一个集合，该循环看不到。
+- 元素类型实现了 `print-object` 时，以 `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>` 的形式打印元素。
+
+## 8. `SortedTable<K,V>`
+
+按键的升序排列的表（Rust 的 `BTreeMap`）。键类型必须实现 `Ord`。键和值按键的顺序放在两个 `Vector` 中，查找用二分查找。新键的 `set` 和 `remove` 会移动该位置之后的元素。
+
+| 名称 | 形式 | 类型 | 说明 |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | 创建空表 |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | 查找 |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | 插入或覆盖 |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | 删除，若有则返回旧值 |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | 元素个数 |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | 全部删除 |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | 按从小到大的顺序返回键 |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | 按键的顺序返回值 |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | 按键的顺序返回 `#{键 值}` 元组 |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 和 pear 3
+```
+
+## 9. `Deque<T>`
+
+可以从两端放入和取出的序列（Rust 的 `VecDeque`）。
+
+| 名称 | 形式 | 类型 | 说明 |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | 创建空序列 |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 加到开头／末尾 |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 取出开头／末尾的元素并返回。为空时为 `none` |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 查看开头／末尾的元素（不取出） |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 从开头数第 `i` 个。越界时为 `none` |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | 覆盖第 `i` 个。越界时 panic |
+| `count` | `(count d)` | `Deque<T>→int` | 元素个数 |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | 全部删除 |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | 从开头依次 |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

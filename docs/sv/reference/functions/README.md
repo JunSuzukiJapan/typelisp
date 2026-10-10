@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Inbyggda funktioner
 
 Listan över inbyggda funktioner, metoder och standardbiblioteket. För syntax (specialformer och hur man
@@ -30,8 +30,8 @@ Tabellerna i varje kapitel har kolumnerna "namn, form, typ, beskrivning". Typkol
 | Fil | Innehåll |
 |---|---|
 | [numbers.md](numbers.md) | Heltal, flyttal, kvoter, komplexa tal, booleska värden, bitoperationer, slumptal |
-| [sequences.md](sequences.md) | Paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktioner, högre ordningens funktioner |
-| [collections.md](collections.md) | Strängar, tecken, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | Paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktioner, lata iteratorer `lazy`, högre ordningens funktioner |
+| [collections.md](collections.md) | Strängar, tecken, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, feltyper och traitet `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, aritmetiska traits |
 | [printing.md](printing.md) | `print`/`println`/`format`, den snygga skrivaren (pretty printer), `print-object`, kontrollvariabler för utskrift |

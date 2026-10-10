@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Типы
 
 Типы typelisp и стандартные трейты, которые реализует каждый тип. Как записывать типы, описано в
@@ -59,7 +59,11 @@
 | `complex` | Комплексное число (компоненты `f64`) | [Числа, глава 6](functions/numbers.md#6-комплексные-числа-complex) |
 | `Array<T>` | Многомерный массив | [Array](functions/collections.md#5-arrayt-многомерные-массивы) |
 | `BitVector` | Последовательность битов фиксированной длины | [BitVector](functions/collections.md#6-bitvector-битовые-векторы) |
+| `HashSet<T>` | Набор элементов без повторов | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | Таблица в порядке ключей | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | Последовательность, в которую добавляют и из которой берут с обоих концов | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | Итераторы, возвращаемые `iter` каждой коллекции | [Iter](functions/traits.md#1-трейт-iter-и-итерация) |
+| `lazy::map-iter<I,A,U>` и др. | Итераторы, которые возвращают функции модуля `lazy` | [Ленивые итераторы](functions/sequences.md#ленивые-итераторы-модуль-lazy) |
 | `WaitGroup` | Ожидание завершения N действий | [WaitGroup](functions/concurrency.md#4-waitgroup--ожидание-n-завершений) |
 | `Mutex<T>` | Взаимное исключение для общих данных | [Mutex](functions/concurrency.md#6-mutext--взаимное-исключение-для-общих-данных) |
 | `pathname` | Имя файла, разбитое на части | [Пути](functions/streams-files.md#9-пути-pathname) |
@@ -97,12 +101,13 @@
 
 | Трейт | Реализующие типы | Подробности |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-сравнение) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | То же |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` и все встроенные типы ошибок | [print-object](functions/printing.md#5-print-object-печатное-представление-по-типу) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-сравнение) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | То же |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` и все встроенные типы ошибок | [print-object](functions/printing.md#5-print-object-печатное-представление-по-типу) |
 
-`Eq`/`Ord` для `cons-cell<A,B>` можно использовать, когда типы элементов реализуют `Eq`/`Ord`.
+Трейты `cons-cell<A,B>` и кортежей `#{..}`, а также `print-object` коллекций доступны, когда типы
+элементов реализуют этот трейт.
 
 ### 6.2 Арифметика
 
@@ -117,7 +122,7 @@
 
 | Трейт | Реализующие типы |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` типы модуля `lazy` (`lazy::map-iter<I,A,U>` и др.) |
 
 ### 6.4 Потоки
 

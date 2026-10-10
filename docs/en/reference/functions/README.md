@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Built-in Functions
 
 The list of built-in functions, methods and the standard library. For syntax (special forms and how
@@ -30,8 +30,8 @@ written as `(argument-type,...)→return-type`.
 | File | Contents |
 |---|---|
 | [numbers.md](numbers.md) | Integers, floating-point numbers, rationals, complex numbers, booleans, bit operations, random numbers |
-| [sequences.md](sequences.md) | The pair `cons-cell`, S-expression data `Sexpr`, symbols, sequence functions, higher-order functions |
-| [collections.md](collections.md) | Strings, characters, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | The pair `cons-cell`, S-expression data `Sexpr`, symbols, sequence functions, lazy iterators `lazy`, higher-order functions |
+| [collections.md](collections.md) | Strings, characters, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, error types and the `Error` trait |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, arithmetic traits |
 | [printing.md](printing.md) | `print`/`println`/`format`, the pretty printer, `print-object`, printer control variables |

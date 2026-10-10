@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Chuỗi, ký tự và tập hợp
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` và `BitVector`.
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` và `Deque<T>`.
 
 ## 1. Chuỗi `string`
 
@@ -187,3 +187,79 @@ Một dãy bit có độ dài cố định. Một `defstruct` trong thư viện 
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | Phần bù |
 
 Không có `bit-vector-p` (kiểu tĩnh đã trả lời).
+
+## 7. `HashSet<T>`
+
+Tập hợp các phần tử không trùng lặp (`HashSet` của Rust). Một `defstruct` của thư viện chuẩn có nội
+dung là `HashTable<T,()>`. Kiểu phần tử phải cài đặt `Hash`, giống như khóa của `HashTable`.
+
+| Tên | Dạng | Kiểu | Mô tả |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | Tạo một tập rỗng. Đối số kiểu lấy từ kiểu mong đợi |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Thêm `x`. `true` nếu chưa có, `false` nếu đã có |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` có trong tập hay không |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Bỏ `x` ra. `true` nếu đã có |
+| `count` | `(count s)` | `HashSet<T>→int` | Số phần tử |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | Xóa hết |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Iterator qua các phần tử. Thứ tự không xác định |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+Điểm chung của ba kiểu ở chương 7 đến 9:
+
+- Tạo bằng `make`. `new` là constructor theo thứ tự trường do `defstruct` sinh ra, không dùng để tạo
+  (giống `Array::make`).
+- `iter` duyệt một bản sao lấy tại lúc gọi. Thay đổi chính collection đó bên trong `doiter` thì vòng
+  lặp ấy không thấy.
+- Nếu kiểu phần tử cài đặt `print-object`, các phần tử được in ra theo dạng `#<hashset "a" "b">`
+  `#<sortedtable 1 "a">` `#<deque 1 2>`.
+
+## 8. `SortedTable<K,V>`
+
+Bảng giữ theo thứ tự khóa tăng dần (`BTreeMap` của Rust). Kiểu khóa phải cài đặt `Ord`. Khóa và giá
+trị được giữ trong hai `Vector` theo thứ tự khóa, và tìm kiếm là tìm kiếm nhị phân. `set` một khóa
+mới và `remove` dời các phần tử sau vị trí của nó.
+
+| Tên | Dạng | Kiểu | Mô tả |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Tạo một bảng rỗng |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Tra cứu |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Chèn hoặc ghi đè |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Xóa, trả về giá trị cũ nếu có |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | Số phần tử |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | Xóa hết |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | Các khóa, từ nhỏ nhất |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | Các giá trị, theo thứ tự khóa |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Các tuple `#{khóa giá-trị}` theo thứ tự khóa |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 và pear 3
+```
+
+## 9. `Deque<T>`
+
+Dãy có thể thêm vào và lấy ra ở cả hai đầu (`VecDeque` của Rust).
+
+| Tên | Dạng | Kiểu | Mô tả |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | Tạo một dãy rỗng |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Thêm vào đầu / cuối |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Lấy phần tử ở đầu / cuối ra và trả về. `none` nếu rỗng |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Xem phần tử ở đầu / cuối (không lấy ra) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Phần tử thứ `i` tính từ đầu. `none` nếu ngoài phạm vi |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Ghi đè phần tử thứ `i`. Panic nếu ngoài phạm vi |
+| `count` | `(count d)` | `Deque<T>→int` | Số phần tử |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | Xóa hết |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Từ đầu, theo thứ tự |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

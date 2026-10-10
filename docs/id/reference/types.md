@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Tipe
 
 Tipe yang dimiliki typelisp, dan trait standar yang diimplementasikan setiap tipe. Cara menulis tipe
@@ -61,7 +61,11 @@ diperlakukan sama seperti tipe yang Anda tulis sendiri, dan semua yang dapat dil
 | `complex` | Bilangan kompleks (komponen `f64`) | [Bilangan bab 6](functions/numbers.md#6-bilangan-kompleks-complex) |
 | `Array<T>` | Larik multidimensi | [Array](functions/collections.md#5-arrayt-larik-multidimensi) |
 | `BitVector` | Urutan bit berpanjang tetap | [BitVector](functions/collections.md#6-bitvector-vektor-bit) |
+| `HashSet<T>` | Kumpulan elemen tanpa duplikat | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | Tabel yang terurut menurut kunci | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | Barisan yang bisa ditambah dan diambil dari kedua ujung | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | Iterator yang dikembalikan oleh `iter` pada tiap koleksi | [Iter](functions/traits.md#1-trait-iter-dan-iterasi) |
+| `lazy::map-iter<I,A,U>` dan lain-lain | Iterator yang dikembalikan fungsi-fungsi modul `lazy` | [Iterator malas](functions/sequences.md#iterator-malas-modul-lazy) |
 | `WaitGroup` | Menunggu N hal selesai | [WaitGroup](functions/concurrency.md#4-waitgroup--menunggu-n-penyelesaian) |
 | `Mutex<T>` | Eksklusi mutual untuk data bersama | [Mutex](functions/concurrency.md#6-mutext--eksklusi-mutual-untuk-data-bersama) |
 | `pathname` | Nama berkas yang dipecah menjadi bagian-bagian | [Pathname](functions/streams-files.md#9-pathname-pathname) |
@@ -99,13 +103,13 @@ Tipe mana yang mengimplementasikan trait mana. Metode tiap trait ada di
 
 | Trait | Tipe yang mengimplementasikan | Rincian |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-perbandingan) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | Sama seperti di atas |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` dan semua tipe kesalahan bawaan | [print-object](functions/printing.md#5-print-object-representasi-cetak-per-tipe) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-perbandingan) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Sama seperti di atas |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` dan semua tipe kesalahan bawaan | [print-object](functions/printing.md#5-print-object-representasi-cetak-per-tipe) |
 
-`Eq`/`Ord` pada `cons-cell<A,B>` dapat dipakai ketika tipe elemennya mengimplementasikan
-`Eq`/`Ord`.
+Trait milik `cons-cell<A,B>` dan tuple `#{..}`, serta `print-object` milik koleksi, dapat dipakai
+bila tipe elemennya mengimplementasikan trait tersebut.
 
 ### 6.2 Aritmetika
 
@@ -120,7 +124,7 @@ Rinciannya ada di [Trait aritmetika](functions/traits.md#3-trait-aritmetika-add-
 
 | Trait | Tipe yang mengimplementasikan |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` tipe-tipe modul `lazy` (`lazy::map-iter<I,A,U>` dan lain-lain) |
 
 ### 6.4 Stream
 

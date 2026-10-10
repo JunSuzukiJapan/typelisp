@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Strings, Characters and Collections
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` and `BitVector`.
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` and `Deque<T>`.
 
 ## 1. Strings `string`
 
@@ -187,3 +187,79 @@ A fixed-length sequence of bits. A `defstruct` in the standard library.
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | Complement |
 
 There is no `bit-vector-p` (the static type answers it).
+
+## 7. `HashSet<T>`
+
+A collection of elements without duplicates (Rust's `HashSet`). A standard library `defstruct` whose
+content is a `HashTable<T,()>`. The element type must implement `Hash`, as a `HashTable` key must.
+
+| Name | Form | Type | Description |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | Makes an empty set. The type argument comes from the expected type |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Adds `x`. `true` if it was not there yet, `false` if it already was |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Whether `x` is there |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Takes `x` out. `true` if it was there |
+| `count` | `(count s)` | `HashSet<T>→int` | The number of elements |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | Removes everything |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | An iterator over the elements. Their order is unspecified |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+Common to the three types of chapters 7 to 9:
+
+- Create them with `make`. `new` is the field-order constructor `defstruct` generates, not the one
+  to create them with (as with `Array::make`).
+- `iter` walks a copy taken when it is called. Changing the same collection inside a `doiter` is not
+  seen by that loop.
+- When the element types implement `print-object`, the elements are printed, in the forms
+  `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>`.
+
+## 8. `SortedTable<K,V>`
+
+A table kept in ascending key order (Rust's `BTreeMap`). The key type must implement `Ord`. Keys and
+values are held in two `Vector`s in key order, and a lookup is a binary search. `set` of a new key
+and `remove` shift the elements after its position.
+
+| Name | Form | Type | Description |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Makes an empty table |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Lookup |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Insert or overwrite |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Removes, returning the old value if there was one |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | The number of elements |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | Removes everything |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | The keys, smallest first |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | The values, in key order |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | `#{key value}` tuples in key order |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 and pear 3
+```
+
+## 9. `Deque<T>`
+
+A sequence you can add to and take from at both ends (Rust's `VecDeque`).
+
+| Name | Form | Type | Description |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | Makes an empty sequence |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Adds at the front / back |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Takes the front / back element out and returns it. `none` if empty |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Looks at the front / back element (without taking it out) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | The `i`th from the front. `none` if out of range |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Overwrites the `i`th. Panics if out of range |
+| `count` | `(count d)` | `Deque<T>→int` | The number of elements |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | Removes everything |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | From the front, in order |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

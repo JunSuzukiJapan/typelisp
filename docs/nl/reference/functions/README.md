@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Ingebouwde functies
 
 De lijst met ingebouwde functies, methoden en de standaardbibliotheek. Voor syntaxis (speciale vormen
@@ -32,8 +32,8 @@ geschreven als `(argumenttype,...)→returntype`.
 | Bestand | Inhoud |
 |---|---|
 | [numbers.md](numbers.md) | Gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen, booleans, bitbewerkingen, willekeurige getallen |
-| [sequences.md](sequences.md) | Het paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, sequentiefuncties, functies van hogere orde |
-| [collections.md](collections.md) | Strings, tekens, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | Het paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, sequentiefuncties, luie iterators `lazy`, functies van hogere orde |
+| [collections.md](collections.md) | Strings, tekens, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, foutentypes en de trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, rekenkundige traits |
 | [printing.md](printing.md) | `print`/`println`/`format`, de pretty printer, `print-object`, besturingsvariabelen van de printer |

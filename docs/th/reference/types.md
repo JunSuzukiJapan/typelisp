@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/types.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # ชนิด
 
 ชนิดที่ typelisp มี และ trait มาตรฐานที่แต่ละชนิด implement วิธีเขียนชนิดอยู่ใน
@@ -59,7 +59,11 @@
 | `complex` | จำนวนเชิงซ้อน (ส่วนประกอบเป็น `f64`) | [ตัวเลข บทที่ 6](functions/numbers.md#6-จำนวนเชิงซ้อน-complex) |
 | `Array<T>` | อาร์เรย์หลายมิติ | [Array](functions/collections.md#5-arrayt-อาร์เรย์หลายมิติ) |
 | `BitVector` | ลำดับบิตความยาวคงที่ | [BitVector](functions/collections.md#6-bitvector-เวกเตอร์ของบิต) |
+| `HashSet<T>` | กลุ่มของสมาชิกที่ไม่ซ้ำกัน | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | ตารางที่เรียงตามคีย์ | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | ลำดับที่ใส่และเอาออกได้ทั้งสองปลาย | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | ตัววนซ้ำที่ `iter` ของแต่ละคอลเลกชันคืน | [Iter](functions/traits.md#1-trait-iter-และการวนซ้ำ) |
+| `lazy::map-iter<I,A,U>` เป็นต้น | อิเทอเรเตอร์ที่ฟังก์ชันของมอดูล `lazy` คืนให้ | [อิเทอเรเตอร์แบบขี้เกียจ](functions/sequences.md#อิเทอเรเตอร์แบบขี้เกียจ-มอดูล-lazy) |
 | `WaitGroup` | การรอให้ N สิ่งจบ | [WaitGroup](functions/concurrency.md#4-waitgroup--การรอให้-n-สิ่งเสร็จ) |
 | `Mutex<T>` | การกีดกันซึ่งกันและกันสำหรับข้อมูลที่ใช้ร่วมกัน | [Mutex](functions/concurrency.md#6-mutext--การกีดกันซึ่งกันและกันสำหรับข้อมูลที่ใช้ร่วมกัน) |
 | `pathname` | ชื่อไฟล์ที่แยกเป็นส่วน ๆ | [Pathname](functions/streams-files.md#9-pathname-pathname) |
@@ -97,12 +101,12 @@
 
 | Trait | ชนิดที่ implement | รายละเอียด |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` | [Eq / Ord](functions/traits.md#2-eq--ord-การเปรียบเทียบ) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` | เหมือนข้างบน |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Array<T>` `pathname` `universal-time` `internal-time` และชนิดข้อผิดพลาดที่มีให้ในตัวทั้งหมด | [print-object](functions/printing.md#5-print-object-การแสดงผลของแต่ละชนิด) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-การเปรียบเทียบ) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | เหมือนข้างบน |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` และชนิดข้อผิดพลาดที่มีให้ในตัวทั้งหมด | [print-object](functions/printing.md#5-print-object-การแสดงผลของแต่ละชนิด) |
 
-`Eq`/`Ord` ของ `cons-cell<A,B>` ใช้ได้เมื่อชนิดของสมาชิก implement `Eq`/`Ord`
+trait ของ `cons-cell<A,B>` และทูเพิล `#{..}` รวมทั้ง `print-object` ของคอลเลกชัน ใช้ได้เมื่อชนิดของสมาชิก implement trait นั้น
 
 ### 6.2 การคำนวณ
 
@@ -117,7 +121,7 @@
 
 | Trait | ชนิดที่ implement |
 |---|---|
-| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` |
+| `Iter` | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` `Chan<T>` ชนิดของมอดูล `lazy` (`lazy::map-iter<I,A,U>` เป็นต้น) |
 
 ### 6.4 สตรีม
 

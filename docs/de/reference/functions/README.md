@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/README.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/README.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Eingebaute Funktionen
 
 Die Liste der eingebauten Funktionen, der Methoden und der Standardbibliothek. Zur Syntax (Spezialformen und
@@ -30,8 +30,8 @@ Die Tabellen in jedem Kapitel haben die Spalten „Name, Form, Typ, Beschreibung
 | Datei | Inhalt |
 |---|---|
 | [numbers.md](numbers.md) | Ganzzahlen, Gleitkommazahlen, rationale Zahlen, komplexe Zahlen, Wahrheitswerte, Bitoperationen, Zufallszahlen |
-| [sequences.md](sequences.md) | Das Paar `cons-cell`, S-Ausdrucksdaten `Sexpr`, Symbole, Sequenzfunktionen, Funktionen höherer Ordnung |
-| [collections.md](collections.md) | Zeichenketten, Zeichen, `Vector`, `HashTable`, `Array`, `BitVector` |
+| [sequences.md](sequences.md) | Das Paar `cons-cell`, S-Ausdrucksdaten `Sexpr`, Symbole, Sequenzfunktionen, lazy Iteratoren `lazy`, Funktionen höherer Ordnung |
+| [collections.md](collections.md) | Zeichenketten, Zeichen, `Vector`, `HashTable`, `Array`, `BitVector`, `HashSet`, `SortedTable`, `Deque` |
 | [option-result.md](option-result.md) | `Option`, `Result`, Fehlertypen und der Trait `Error` |
 | [traits.md](traits.md) | `Iter`, `Eq`/`Ord`, arithmetische Traits |
 | [printing.md](printing.md) | `print`/`println`/`format`, der Pretty Printer, `print-object`, Steuervariablen der Ausgabe |

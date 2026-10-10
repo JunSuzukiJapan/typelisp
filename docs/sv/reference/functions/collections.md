@@ -1,7 +1,7 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
 # Strängar, tecken och samlingar
 
-`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>` och `BitVector`.
+`string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` och `Deque<T>`.
 
 ## 1. Strängar `string`
 
@@ -189,3 +189,80 @@ En följd av bitar med fast längd. En `defstruct` i standardbiblioteket.
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | Komplement |
 
 Det finns ingen `bit-vector-p` (den statiska typen besvarar det).
+
+## 7. `HashSet<T>`
+
+En samling element utan dubbletter (Rusts `HashSet`). En `defstruct` i standardbiblioteket vars
+innehåll är en `HashTable<T,()>`. Elementtypen måste implementera `Hash`, liksom en nyckel i en
+`HashTable`.
+
+| Namn | Form | Typ | Beskrivning |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | Skapar en tom mängd. Typargumentet kommer från den förväntade typen |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Lägger till `x`. `true` om det inte fanns, `false` om det redan fanns |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Om `x` finns |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Tar bort `x`. `true` om det fanns |
+| `count` | `(count s)` | `HashSet<T>→int` | Antalet element |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | Tar bort allt |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | En iterator över elementen. Ordningen är inte bestämd |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+Gemensamt för de tre typerna i kapitel 7 till 9:
+
+- Skapa dem med `make`. `new` är konstruktorn i fältordning som `defstruct` genererar, inte den man
+  skapar dem med (som med `Array::make`).
+- `iter` går igenom en kopia tagen vid anropet. Ändrar man samma samling inuti en `doiter` ser den
+  loopen det inte.
+- Om elementtyperna implementerar `print-object` skrivs elementen ut, i formen `#<hashset "a" "b">`
+  `#<sortedtable 1 "a">` `#<deque 1 2>`.
+
+## 8. `SortedTable<K,V>`
+
+En tabell i stigande nyckelordning (Rusts `BTreeMap`). Nyckeltypen måste implementera `Ord`. Nycklar
+och värden hålls i två `Vector` i nyckelordning, och sökning sker binärt. `set` av en ny nyckel och
+`remove` flyttar elementen efter dess position.
+
+| Namn | Form | Typ | Beskrivning |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Skapar en tom tabell |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Uppslag |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Infogar eller skriver över |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Tar bort och returnerar det gamla värdet om det fanns |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | Antalet element |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | Tar bort allt |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | Nycklarna, minsta först |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | Värdena i nyckelordning |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | `#{nyckel värde}`-tupler i nyckelordning |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 och pear 3
+```
+
+## 9. `Deque<T>`
+
+En följd som man kan lägga till i och ta ut ur i båda ändar (Rusts `VecDeque`).
+
+| Namn | Form | Typ | Beskrivning |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | Skapar en tom följd |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Lägger till först / sist |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Tar ut det första / sista elementet och returnerar det. `none` om tom |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Tittar på det första / sista elementet (utan att ta ut det) |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | Det `i`:te från början. `none` utanför intervallet |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | Skriver över det `i`:te. Panic utanför intervallet |
+| `count` | `(count d)` | `Deque<T>→int` | Antalet element |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | Tar bort allt |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Från början, i ordning |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```
