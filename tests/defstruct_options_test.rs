@@ -260,12 +260,6 @@ fn an_unknown_option_names_the_known_ones() {
     assert!(msg.contains(":constructor, :copier, :include"), "unexpected message: {}", msg);
 }
 
-#[test]
-fn a_slot_default_without_a_constructor_is_refused() {
-    let msg = check_err("(defstruct point (x int 0))");
-    assert!(msg.contains("nothing would use it"), "unexpected message: {}", msg);
-}
-
 // ---- the compile path --------------------------------------------------------------
 
 #[test]

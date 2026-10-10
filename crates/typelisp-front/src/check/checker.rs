@@ -918,6 +918,10 @@ pub struct NsContext {
 
 /// The type checker, holding the data-type and function registries plus the
 /// current namespace (module) path.
+/// The name a `defstruct`'s one constructor is registered under — what
+/// `make-instance` calls.
+const STRUCT_CTOR: &str = "new";
+
 pub struct Checker {
     reg: Registry,
     ns: Vec<String>,
@@ -9222,18 +9226,6 @@ impl Checker {
                 return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", n)));
             }
         }
-        // A slot default is only ever read by a generated constructor. With
-        // none declared it would be dead configuration, so say so here rather
-        // than let it sit unused.
-        if options.constructors.is_empty() {
-            if let Some(f) = fields.iter().find(|f| f.default.is_some()) {
-                return Err(Error::TypeError(format!(
-                    "defstruct {}: slot `{}` has a default, but nothing would use it — a default is read by the constructors this `defstruct` generates, so declare one with `(:constructor name)` (or drop the default; `new` always takes every slot)",
-                    name, f.name
-                )));
-            }
-        }
-
         let recv_targs: Vec<Type> = type_params.iter().map(|p| Type::Named(Path::root(p), Vec::new())).collect();
         let recv_ty = Type::Named(type_fq.clone(), recv_targs);
 
@@ -10960,6 +10952,7 @@ impl Checker {
             "match" => return self.check_match(heap, interp, env, args, arg_locs, expected),
             "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
             "the" => return self.check_the(heap, interp, env, args, arg_locs),
+            "make-instance" => return self.check_make_instance(heap, interp, env, args, expected),
             "task" => return self.check_spawn(heap, interp, env, args, arg_locs, SpawnKind::Task),
             "thread" => return self.check_spawn(heap, interp, env, args, arg_locs, SpawnKind::Thread),
             "select" => return self.check_select(heap, interp, env, args, arg_locs, expected),
@@ -13668,6 +13661,129 @@ impl Checker {
     /// integer literal `1`; `Self::place_dedup` guarantees a call-form
     /// place's subexpressions are evaluated exactly once even though the
     /// expansion below reads `place` and then writes it.
+    /// `(make-instance 'Type :slot value...)`: CLOS's `make-instance`, the
+    /// one way to build a `defstruct` value. A slot not given takes its
+    /// default (`(x i32 0)`) and is an error without one; outside the type's
+    /// module only `pub` slots may be given. Generic type arguments come from
+    /// the values and `expected`, as for any constructor call.
+    ///
+    /// Rewritten into `(let* ((t value)...) (ctor slot...))`: the values are
+    /// bound in the order written, then passed in slot order with the
+    /// defaults filled in, so the constructor's own checking does the typing.
+    fn check_make_instance(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        args: &[Value],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let shape = "make-instance: (make-instance 'Type :slot value...)";
+        let written = match args.first() {
+            Some(q @ Value::Cons(_)) => {
+                let parts = heap.list_to_vec(*q)?;
+                match parts.as_slice() {
+                    [Value::Symbol(head), name] if head.well_known() == wk::QUOTE => *name,
+                    _ => return Err(Error::TypeError(shape.into())),
+                }
+            }
+            _ => return Err(Error::TypeError(shape.into())),
+        };
+        let ty = self.parse_type_here_at(heap, written, None)?;
+        let (type_fq, explicit_args) = match &ty {
+            Type::Named(n, targs) => (n.clone(), !targs.is_empty()),
+            _ => return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", ty))),
+        };
+        let def = match self.reg.type_def(&type_fq) {
+            Some(d) if d.kind == AdtKind::Struct && !d.builtin => d,
+            _ => return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", ty))),
+        };
+        let field_names = def.field_names.clone();
+        let tname = type_fq.to_string();
+        let mut given: Vec<Option<Value>> = vec![None; field_names.len()];
+        let mut bindings: Vec<(Value, Value)> = Vec::new();
+        let rest = &args[1..];
+        let mut k = 0;
+        while k < rest.len() {
+            let slot = match rest[k] {
+                Value::Symbol(id) if heap.symbol_name(id).starts_with(':') => heap.symbol_name(id)[1..].to_string(),
+                _ => {
+                    return Err(Error::TypeError(format!(
+                        "make-instance {}: the arguments after the type are pairs of a slot keyword and a value, such as `:{} v`",
+                        tname,
+                        field_names.first().map(String::as_str).unwrap_or("slot"),
+                    )))
+                }
+            };
+            let value = match rest.get(k + 1) {
+                Some(v) => *v,
+                None => return Err(Error::TypeError(format!("make-instance {}: `:{}` has no value", tname, slot))),
+            };
+            let i = match field_names.iter().position(|f| *f == slot) {
+                Some(i) => i,
+                None => {
+                    return Err(Error::TypeError(format!(
+                        "make-instance {}: no slot `{}` (its slots are {})",
+                        tname,
+                        slot,
+                        field_names.iter().map(|f| format!("`{}`", f)).collect::<Vec<_>>().join(", ")
+                    )))
+                }
+            };
+            if given[i].is_some() {
+                return Err(Error::TypeError(format!("make-instance {}: slot `{}` is given twice", tname, slot)));
+            }
+            let visible = def.assoc.get(&slot).map(|af| self.assoc_visible(&type_fq, af)).unwrap_or(false);
+            if !visible {
+                return Err(Error::TypeError(format!(
+                    "make-instance {}: slot `{}` is not `pub`, so it can be given only inside module `{}`",
+                    tname,
+                    slot,
+                    type_fq.parent().join("::")
+                )));
+            }
+            let tmp = heap.intern_symbol(&self.gensym_place());
+            bindings.push((tmp, value));
+            given[i] = Some(tmp);
+            k += 2;
+        }
+        let defaults = self.reg.struct_defaults.get(&type_fq).cloned();
+        let mut s = RootScope::new(heap);
+        let ctor = forms::path_form(&mut s, &type_fq.child(STRUCT_CTOR));
+        s.push_root(ctor);
+        let mut call: Vec<(Value, Option<Loc>)> = vec![(ctor, None)];
+        for (i, f) in field_names.iter().enumerate() {
+            let arg = match given[i] {
+                Some(t) => t,
+                None => match defaults.as_ref().and_then(|d| d.get(i).cloned().flatten()) {
+                    Some(d) => {
+                        let v = crate::owned_form::owned_to_value(&mut s, &d)?;
+                        s.push_root(v);
+                        v
+                    }
+                    None => {
+                        return Err(Error::TypeError(format!(
+                            "make-instance {}: slot `{}` is not given and has no default",
+                            tname, f
+                        )))
+                    }
+                },
+            };
+            call.push((arg, None));
+        }
+        let mut body = forms::list_from_vec_locs(&mut s, &call)?;
+        s.push_root(body);
+        if explicit_args {
+            // `'Box<int>` names the instantiation outright.
+            let the = s.intern_symbol("the");
+            body = forms::list_from_vec_locs(&mut s, &[(the, None), (written, None), (body, None)])?;
+            s.push_root(body);
+        }
+        let expansion = forms::wrap_let_star(&mut s, bindings, body)?;
+        s.push_root(expansion);
+        self.check(&mut s, interp, env, expansion, expected)
+    }
+
     fn check_incf_decf(
         &self,
         heap: &mut Heap,
