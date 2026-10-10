@@ -252,6 +252,11 @@ pub struct AdtDef {
     pub public: bool,
     /// See [`FnSig::builtin`].
     pub builtin: bool,
+    /// Defined by the standard library — built in, or by the prelude (see
+    /// [`crate::Checker::set_stdlib`]). The standard library is one crate and
+    /// the user's program another: only the crate that defines a type may
+    /// write an inherent `impl` for it.
+    pub stdlib: bool,
     /// See [`AdtKind`]. `defstruct` produces `Struct`, as do the built-in
     /// `vector`, `task`, `thread` and `chan`; every other built-in is `Sum`.
     pub kind: AdtKind,
@@ -1055,6 +1060,7 @@ fn builtin_adt(
         assoc,
         public: true,
         builtin: true,
+        stdlib: true,
         kind,
         field_names: Vec::new(),
         impls: Vec::new(),

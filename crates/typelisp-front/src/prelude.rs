@@ -7324,6 +7324,7 @@ pub fn load_interpreted_with(
     // It is a separate layer rather than the top of this file because the
     // compiler island needs the same macros without taking the prelude with
     // them — see `crate::core_macros`'s module comment.
+    chk.set_stdlib(true);
     crate::core_macros::load_with(heap, chk, interp, on_checked);
 
     let r = Reader::new();
@@ -7337,4 +7338,5 @@ pub fn load_interpreted_with(
         on_checked(heap, tl);
         interp.exec(heap, tl).expect("prelude: eval failed");
     }
+    chk.set_stdlib(false);
 }

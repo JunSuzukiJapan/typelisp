@@ -921,6 +921,9 @@ pub struct NsContext {
 pub struct Checker {
     reg: Registry,
     ns: Vec<String>,
+    /// Whether the forms being checked are the standard library's (the core
+    /// macro layer and the prelude) — see [`Self::set_stdlib`].
+    stdlib: bool,
     /// Stack of enclosing *files'* own module paths, innermost last — set by
     /// [`Self::enter_file_module`]/[`Self::exit_file_module`] (`project.rs`'s
     /// file-level wrapping only, never [`Self::enter_module`]'s nested
@@ -1193,10 +1196,21 @@ const TOPLEVEL_FORM_HEADS: &[&str] = &[
 ];
 
 impl Checker {
+    /// Mark the forms checked from now on as the standard library's (`true`)
+    /// or the user's (`false`, the default). A type defined while this is on
+    /// is a standard library type ([`AdtDef::stdlib`]); an inherent `impl`
+    /// for one may only be written while it is on. The prelude loader turns
+    /// it on for the prelude's own forms; the prelude dump carries the flag on
+    /// each type it restores.
+    pub fn set_stdlib(&mut self, on: bool) {
+        self.stdlib = on;
+    }
+
     pub fn new() -> Checker {
         Checker {
             reg: Registry::with_builtins(),
             ns: Vec::new(),
+            stdlib: false,
             file_ns: Vec::new(),
             ns_base: Vec::new(),
             loop_stack: RefCell::new(Vec::new()),
@@ -6502,8 +6516,118 @@ impl Checker {
     /// (`box<T>` in `(impl print-object box<T> ...)`) in scope — see
     /// [`Self::check_defmethod_in`].
     fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
+        // `(impl Trait Type item...)` names two things before its items;
+        // an inherent `(impl Type item...)` names one, so what follows the
+        // first is an item, a `(where ...)`, or nothing.
+        if matches!(parts.get(1), None | Some(Value::Cons(_))) {
+            let vars = parts.first().map(|t| self.written_type_vars(heap, *t)).unwrap_or_default();
+            return self.with_type_names(vars, |c| c.check_impl_inherent(heap, interp, parts, parts_locs));
+        }
         let vars = parts.get(1).map(|t| self.written_type_vars(heap, *t)).unwrap_or_default();
         self.with_type_names(vars, |c| c.check_impl_form(heap, interp, parts, parts_locs))
+    }
+
+    /// `(impl Type (where ...)? item...)`: Rust's inherent `impl`. Each item
+    /// is `(pub? name<U...>? (params...) Ret (where ...)? body...)`; one whose
+    /// first parameter is `self` (bare, or `(self Self)`) is an instance
+    /// method, any other a static method, called `(Type::name args...)`.
+    /// `Self` in a parameter or return type is the target type.
+    ///
+    /// Each item is rewritten into the method form [`Self::check_defmethod_in`]
+    /// checks — the receiver typed as the target, or for a static method the
+    /// target type itself in the receiver position — with the impl-level
+    /// `where` merged into its own, as a trait `impl` does.
+    ///
+    /// Only the crate that defines a type may write one: the standard library
+    /// for its own types ([`AdtDef::stdlib`]), the user's program for its own.
+    fn check_impl_inherent(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
+        let target_ty = self.parse_type_here_at(heap, parts[0], parts_locs.first().and_then(|l| l.as_ref()))?;
+        let (target_fq, stdlib) = match &target_ty {
+            Type::Named(n, _) => match self.reg.type_def(n) {
+                Some(d) => (n.clone(), d.stdlib),
+                None => return Err(Error::TypeError(format!("impl: `{}` is not a type with methods", target_ty))),
+            },
+            other => match prim_type_path(other) {
+                Some(p) => (p, true),
+                None => return Err(Error::TypeError(format!("impl: `{}` is not a type with methods", target_ty))),
+            },
+        };
+        if stdlib && !self.stdlib {
+            return Err(Error::TypeError(format!(
+                "impl: `{}` is a standard library type; methods can be added to a type only where it is defined. \
+                 Define a trait and `(impl Trait {} ...)` to give it new behavior",
+                target_ty, target_ty
+            )));
+        }
+        let mut subst: HashMap<String, Value> = HashMap::new();
+        subst.insert("self".to_string(), parts[0]);
+        let mut item_start = 1;
+        let mut impl_where: Option<Value> = None;
+        if let Some(form) = parts.get(1) {
+            if is_where_clause(heap, *form)? {
+                impl_where = Some(*form);
+                item_start = 2;
+            }
+        }
+        let mut body = Vec::new();
+        for item in &parts[item_start..] {
+            let method_loc = heap.cons_loc(*item);
+            let (public, normalized, is_static) = self.normalize_inherent_item(heap, *item)?;
+            let (mut new_elems, new_elems_locs) = self.subst_method_item(heap, normalized, &subst, impl_where, true)?;
+            // Unrooted on return, and the `cons` below allocates.
+            for e in &new_elems {
+                forms::rooted(heap, *e);
+            }
+            if is_static {
+                // `(name (params...) ...)` -> `(name (Type params...) ...)`,
+                // the static method form.
+                let recv = heap.cons(parts[0], new_elems[1])?;
+                new_elems[1] = forms::rooted(heap, recv);
+            }
+            let tl = self.check_defmethod_in(heap, interp, &new_elems, &new_elems_locs, public, method_loc, None)?;
+            // Rooted as it lands, for the reason `check_impl_form` gives.
+            body.push(forms::rooted(heap, tl));
+        }
+        forms::module_form(heap, &target_fq, &body)
+    }
+
+    /// One inherent `impl` item, with `pub` taken off and a bare `self`
+    /// parameter written out as `(self Self)`: `(public, item, is_static)`.
+    /// Values built here are rooted for the rest of the top-level form.
+    fn normalize_inherent_item(&mut self, heap: &mut Heap, item: Value) -> Result<(bool, Value, bool), Error> {
+        let shape = "impl: an item is (pub? name (params...) ReturnType body...)";
+        let mut elems = heap.list_to_vec_locs(item).map_err(|_| Error::TypeError(shape.into()))?;
+        let public = matches!(elems.first(), Some((Value::Symbol(id), _)) if heap.symbol_name(*id) == "pub");
+        if public {
+            elems.remove(0);
+        }
+        if elems.len() < 3 || !matches!(elems[0].0, Value::Symbol(_)) {
+            return Err(Error::TypeError(shape.into()));
+        }
+        let params = match elems[1].0 {
+            Value::Empty => Vec::new(),
+            v @ Value::Cons(_) => heap.list_to_vec_locs(v)?,
+            _ => return Err(Error::TypeError(shape.into())),
+        };
+        let is_self = |heap: &Heap, v: Value| matches!(v, Value::Symbol(id) if heap.symbol_name(id) == "self");
+        let first_is_self = match params.first() {
+            Some((v @ Value::Symbol(_), _)) => is_self(heap, *v),
+            Some((v @ Value::Cons(_), _)) => heap.car(*v).map(|h| is_self(heap, h)).unwrap_or(false),
+            _ => false,
+        };
+        let mut params = params;
+        if let Some((v @ Value::Symbol(_), l)) = params.first().cloned() {
+            if is_self(heap, v) {
+                // `self` names both the parameter and, as a type, the
+                // target (the `Self` key of the substitution).
+                let pair = forms::list_from_vec_locs(heap, &[(v, l.clone()), (v, l.clone())])?;
+                params[0] = (forms::rooted(heap, pair), l);
+            }
+        }
+        let param_list = forms::list_from_vec_locs(heap, &params)?;
+        elems[1].0 = forms::rooted(heap, param_list);
+        let rebuilt = forms::list_from_vec_locs(heap, &elems)?;
+        Ok((public, forms::rooted(heap, rebuilt), !first_is_self))
     }
 
     fn check_impl_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
@@ -6627,7 +6751,7 @@ impl Checker {
         let mut body = Vec::new();
         for (mi, m) in method_forms.iter().enumerate() {
             let method_loc = heap.cons_loc(*m);
-            let (new_elems, new_elems_locs) = self.subst_method_item(heap, *m, &subst, impl_where)?;
+            let (new_elems, new_elems_locs) = self.subst_method_item(heap, *m, &subst, impl_where, false)?;
             let tl = self.check_defmethod_in(
                 heap,
                 interp,
@@ -6676,12 +6800,17 @@ impl Checker {
     /// Shared by [`Self::check_impl`], where `subst` maps `Self` to the
     /// concrete target type, and [`Self::precheck_blanket_impl`], where it
     /// maps `Self` to the target *variable*.
+    ///
+    /// `inherent` is for an inherent `impl`'s method, which is an ordinary
+    /// method: its parameter list may carry `&optional`/`&key`/`&rest` and
+    /// `(name Type default)` items, which a trait method's may not.
     fn subst_method_item(
         &self,
         heap: &mut Heap,
         m: Value,
         subst: &HashMap<String, Value>,
         impl_where: Option<Value>,
+        inherent: bool,
     ) -> Result<(Vec<Value>, Vec<Option<Loc>>), Error> {
         // `list_to_vec_locs` so the body forms (`elems[3..]`, left untouched
         // — see this method's doc comment) keep their original source
@@ -6710,6 +6839,10 @@ impl Checker {
             // later `impl` adopts as the trait's.
             if let Value::Symbol(id) = pair {
                 let name = heap.symbol_name(*id).to_string();
+                if inherent && name.starts_with('&') {
+                    new_recv_pairs.push((*pair, pair_loc.clone()));
+                    continue;
+                }
                 if name.starts_with('&') {
                     return Err(Error::TypeError(format!(
                         "impl: method `{}` may not declare {} — a trait method's arity is fixed by \
@@ -6724,7 +6857,7 @@ impl Checker {
             }
             let p_locs = heap.list_to_vec_locs(*pair)?;
             let p: Vec<Value> = p_locs.iter().map(|(v, _)| *v).collect();
-            if p.len() != 2 {
+            if p.len() != 2 && !(inherent && p.len() == 3) {
                 return Err(Error::TypeError("impl: receiver/parameter must be (name type)".into()));
             }
             let new_ty = Self::subst_value(heap, p[1], subst)?;
@@ -6734,7 +6867,12 @@ impl Checker {
             // so the rebuilt signature still records/locates like the
             // written one; a substituted `Self` has no span of its own.
             let ty_loc = if new_ty == p[1] { p_locs[1].1.clone() } else { None };
-            let pair_form = forms::list_from_vec_locs(heap, &[(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)])?;
+            let mut items = vec![(p[0], p_locs[0].1.clone()), (new_ty, ty_loc)];
+            // A default value is an expression, left as written.
+            if let Some(d) = p_locs.get(2) {
+                items.push(d.clone());
+            }
+            let pair_form = forms::list_from_vec_locs(heap, &items)?;
             heap.push_root(pair_form);
             new_recv_pairs.push((pair_form, pair_loc.clone()));
         }
@@ -7497,7 +7635,7 @@ impl Checker {
         }
         let self_bound = TraitBound { trait_path: trait_fq.clone(), assoc: pins };
         for m in methods {
-            let (elems, locs) = self.subst_method_item(heap, *m, &subst, impl_where)?;
+            let (elems, locs) = self.subst_method_item(heap, *m, &subst, impl_where, false)?;
             let sig = self.parse_defmethod_sig_inner(heap, &elems, &locs, true)?;
             let MethodSig {
                 method, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
@@ -9050,6 +9188,7 @@ impl Checker {
             assoc: BTreeMap::new(),
             public,
             builtin: false,
+            stdlib: self.stdlib,
             kind: AdtKind::Struct,
             field_names: Vec::new(),
             impls: Vec::new(),
@@ -9208,6 +9347,7 @@ impl Checker {
             assoc,
             public,
             builtin: false,
+            stdlib: self.stdlib,
             kind: AdtKind::Struct,
             field_names,
             impls: Vec::new(),
@@ -9719,6 +9859,7 @@ impl Checker {
             assoc: BTreeMap::new(),
             public,
             builtin: false,
+            stdlib: self.stdlib,
             kind: AdtKind::Sum,
             field_names: Vec::new(),
             impls: Vec::new(),
@@ -9770,6 +9911,7 @@ impl Checker {
             assoc: BTreeMap::new(),
             public,
             builtin: false,
+            stdlib: self.stdlib,
             kind: AdtKind::Sum,
             field_names: Vec::new(),
             impls: Vec::new(),
