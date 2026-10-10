@@ -64,6 +64,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `lazy::map-iter<I,A,U>` など | `lazy` モジュールの関数が返すイテレータ | [遅延イテレータ](functions/sequences.md#遅延イテレータlazy-モジュール) |
 | `WaitGroup` | N 個の完了待ち | [WaitGroup](functions/concurrency.md#4-waitgroup--n-個の完了待ち) |
 | `Mutex<T>` | 共有データの排他 | [Mutex](functions/concurrency.md#6-mutext--共有データの排他) |
+| `Context` | 協調的なキャンセル | [Context](functions/concurrency.md#8-context--協調的なキャンセル) |
 | `pathname` | 分解したファイル名 | [パス名](functions/streams-files.md#9-パス名-pathname) |
 | `file-stream` `binary-file-stream` `string-input-stream` `string-output-stream` `standard-stream` | ストリーム | [ストリーム](functions/streams-files.md#3-具象ストリーム型) |
 | `broadcast-stream` `two-way-stream` `echo-stream` `concatenated-stream` `peek-stream` | 合成ストリーム | [合成ストリーム](functions/streams-files.md#4-合成ストリーム) |
@@ -101,7 +102,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
 | `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
 | `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `pathname` `universal-time` `internal-time` 組み込みのエラー型すべて | [print-object](functions/printing.md#5-print-object型ごとの印字表現) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 組み込みのエラー型すべて | [print-object](functions/printing.md#5-print-object型ごとの印字表現) |
 
 `cons-cell<A,B>` とタプル `#{..}` のトレイト、コレクションの `print-object` は、要素の型がそのトレイトを実装しているときに使える。
 

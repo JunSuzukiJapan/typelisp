@@ -7214,6 +7214,67 @@ user-visible capacity."
          (unlock ,g)))))
 
 
+;; ---------------------------------------------------------------------------
+;; `Context`: Go's `context.Context`, for cancelling work cooperatively. A
+;; context is cancelled once, by `cancel` or by its timeout; its `done`
+;; channel is then closed, so a receive on it — in a `select` arm, typically —
+;; returns. Cancelling a context cancels everything made from it with
+;; `with-cancel`/`with-timeout`, and the cancelled child drops out of its
+;; parent's list. Nothing is interrupted: a task or thread notices by asking
+;; `is-cancelled` or by receiving on `done`.
+;;
+;; `cancelled` guards `children` as well as itself. Locks are never nested
+;; except parent then child, when a cancelled child has its parent sweep out
+;; every cancelled child (structs have no identity to look one up by), and
+;; `cancel` releases its own lock before taking any other.
+;;
+;; Each `(Context::background)` is a fresh root, so cancelling one reaches
+;; only what was made from it — Go's single shared background, which cannot
+;; be cancelled, has no counterpart.
+(pub defstruct Context (done-ch Chan<()>) (cancelled Mutex<bool>) (children Vector<Context>) (parent Option<Context>))
+(module %internal (pub defun context-child ((parent Option<Context>)) Context
+  (Context::new (the Chan<()> (Chan::new 0)) (Mutex::make false) (the Vector<Context> (Vector::new)) parent)))
+(pub defmethod background (Context) Context (%internal::context-child (Option::none)))
+(pub defmethod done ((self Context)) Chan<()> self::done-ch)
+(pub defmethod is-cancelled ((self Context)) bool
+  (with-lock (c self::cancelled) c))
+(pub defmethod cancel ((self Context)) ()
+  (let ((kids (the Vector<Context> (Vector::new))) (first false))
+    (with-lock (c self::cancelled)
+      (unless c
+        (setf c true)
+        (setf first true)
+        (close self::done-ch)
+        (doiter (k (iter self::children)) (push kids k))
+        (while (> (len self::children) 0) (pop self::children))))
+    (when first
+      (doiter (k (iter kids)) (cancel k))
+      (match self::parent
+        ((some p) (with-lock (pc p::cancelled)
+                    (let ((rest (the Vector<Context> (Vector::new))))
+                      (doiter (k (iter p::children)) (unless (is-cancelled k) (push rest k)))
+                      (while (> (len p::children) 0) (pop p::children))
+                      (doiter (k (iter rest)) (push p::children k)))))
+        ((none) ())))))
+(pub defmethod with-cancel (Context (parent Context)) Context
+  (let ((child (%internal::context-child (Option::some parent))) (dead false))
+    (with-lock (c parent::cancelled)
+      (if c (setf dead true) (progn (push parent::children child) false)))
+    (when dead (cancel child))
+    child))
+(module %internal (pub defun cancel-after ((ctx Context) (sec f64)) ()
+  (select
+    ((v (recv (done ctx))) ())
+    ((v (recv (after sec))) (cancel ctx)))))
+(pub defmethod with-timeout (Context (parent Context) (sec f64)) Context
+  (let ((child (Context::with-cancel parent)))
+    (task (%internal::cancel-after child sec))
+    child))
+(impl print-object Context
+  (print-object ((self Self) (escape bool)) string
+    (if (is-cancelled self) "#<context cancelled>" "#<context>")))
+
+
 "##;
 
 /// Read, check, and `exec` [`SOURCE`] against `heap`/`chk`/`interp`,

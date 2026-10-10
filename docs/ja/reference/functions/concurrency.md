@@ -165,7 +165,47 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
   そのままではコンパイルできず panic する（[構文リファレンス 12.2](../syntax.md#122-thread--専用の-os-スレッドでタスクを起動する)）。
   コンパイル済みの関数の中で作った `lambda` なら渡せる。
 
-## 8. 無いもの
+## 8. `Context` — 協調的なキャンセル
+
+Go の `context.Context`。仕事を外から止めたいときに渡す。止めるのは**協調的**で、`cancel` は
+何も中断しない——タスクやスレッドが自分で `is-cancelled` を見るか、`done` を受信して気づく。
+
+| 名前 | 使い方 | 型 | 意味 |
+|---|---|---|---|
+| `Context::background` | `(Context::background)` | `()→Context` | 根になる新しいコンテキスト |
+| `Context::with-cancel` | `(Context::with-cancel parent)` | `(Context)→Context` | `parent` の子を作る |
+| `Context::with-timeout` | `(Context::with-timeout parent sec)` | `(Context,f64)→Context` | `parent` の子を作り、`sec` 秒後に自分でキャンセルする |
+| `cancel` | `(cancel ctx)` | `(Context)→()` | キャンセルする。何度呼んでもよい |
+| `done` | `(done ctx)` | `(Context)→Chan<()>` | キャンセルされると閉じるチャネル |
+| `is-cancelled` | `(is-cancelled ctx)` | `(Context)→bool` | キャンセルされたか |
+
+```lisp
+(defun worker ((ctx Context) (jobs Chan<int>)) ()
+  (loop
+    (select
+      ((v (recv (done ctx))) (println "stopped") (break))
+      ((j (recv jobs)) (match j
+                         ((some n) (println "job ~a" n))
+                         ((none) (break)))))))
+
+(let* ((ctx (Context::with-timeout (Context::background) 1.0))
+       (jobs (the Chan<int> (Chan::new 0))))
+  (task (worker ctx jobs))
+  (send jobs 1)
+  (send jobs 2)
+  (cancel ctx)                          ; job 1、job 2 のあと stopped
+  (sleep 0.1))
+```
+
+- **キャンセルは子へ伝わる**。`with-cancel`/`with-timeout` で作ったコンテキストは、親が
+  キャンセルされると一緒にキャンセルされる。逆向き（子から親）には伝わらない。
+- キャンセル済みのコンテキストから作った子は、最初からキャンセルされている。
+- `done` は閉じるだけで値は送られない。受信すると `none` が返る。
+- `(Context::background)` は呼ぶたびに別の根を作る。Go の `Background()` は 1 つしかなく
+  キャンセルできないが、ここでは根もキャンセルでき、その影響はそこから作ったものにだけ及ぶ。
+- タスク間でもスレッド間でも渡せる。
+
+## 9. 無いもの
 
 - **`Atomic`**。`Mutex` で足りる。
 - **タスクローカル変数**（Go にも無い）。

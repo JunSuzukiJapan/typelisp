@@ -158,6 +158,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; the `sync' layer: a wait group's three, and a mutex's two plus the
     ;; macro that pairs them (`add'/`make' are shared with other types)
     "done" "lock" "unlock" "with-lock"
+    ;; Context
+    "background" "with-cancel" "with-timeout" "cancel" "is-cancelled"
     ;; the readtable (docs/ja/reference/syntax.md §11)
     "get-dispatch-macro-character" "get-macro-character"
     "set-dispatch-macro-character" "set-macro-character"
@@ -398,7 +400,7 @@ with no implicit conversion to or from the fixed-width numerics
     "HashSet" "SortedTable" "Deque"
     ;; the handles `task' and `thread' hand back, the channel tasks talk over,
     ;; and the two `sync' types built on channels
-    "Task" "Thread" "Chan" "WaitGroup" "Mutex"
+    "Task" "Thread" "Chan" "WaitGroup" "Mutex" "Context"
     ;; builtin concrete error types, one per fallible builtin (§7.1).  `Error'
     ;; itself is *not* a type -- it is the prelude trait these implement, used
     ;; as `:dyn Error'.

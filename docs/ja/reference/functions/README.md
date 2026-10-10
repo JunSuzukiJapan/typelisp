@@ -34,6 +34,6 @@
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、印字の制御変数 |
 | [format.md](format.md) | 書式ディレクティブ |
 | [streams-files.md](streams-files.md) | ストリーム、ファイル操作、パス名、readtable |
-| [concurrency.md](concurrency.md) | タスク、チャネル、`WaitGroup`、`Mutex`、`Thread` |
+| [concurrency.md](concurrency.md) | タスク、チャネル、`WaitGroup`、`Mutex`、`Thread`、`Context` |
 | [network.md](network.md) | TCP、TLS、Unix ドメインソケット、UDP |
 | [system.md](system.md) | 時間、実行環境、処理系の道具、`read`/`eval`、docstring、マクロまわり |
