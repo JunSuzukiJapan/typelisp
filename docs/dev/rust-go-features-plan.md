@@ -131,6 +131,27 @@ Common Lisp との差はほぼ埋まった（[cl-missing-classes-and-methods.md]
 （`src/type_key.rs`）・単型化・表現（`Repr`）・印字・`Eq`/`Hash`/`print-object` の実装に手が入る。
 タプルが入れば、`lazy::enumerate`/`lazy::zip` の要素を `cons-cell` からタプルに変える。
 
+**2026-10-10 完了**（ブランチ `feat/tuples`）。決めたこと・計画から変わった点:
+
+- 計算した値からは `(tuple a b)` で作る（`#{..}` の中身はリテラルのまま）。要素は
+  `(setf t::0 v)` で書き換えられる。要素数は 1〜12（2026-10-10 ユーザー決定）。
+- 新しい型の種類は作らず、要素数ごとの prelude の構造体 `%internal::tupleN<T0,...>` にした。
+  単型化・表現・`setf`・トレイト実装は構造体の仕組みがそのまま使える。12 個ぶんの定義と
+  `Eq`/`Ord`/`Hash`/`print-object` の実装、`tuple` マクロは `prelude::tuple_source` が生成し、
+  `SOURCE_TEMPLATE` の `#%tuples` の行に入る（`SOURCE` は `LazyLock<String>` になった）。
+  フィールド名は `%0` `%1`…（`0` はリーダーが整数として読むため）で、`t::0` をそこへ読み替える。
+- `read` で読む `#{..}` は、要素がすべて `Option<Sexpr>` のタプルの箱。キーの綴りは
+  `typelisp_mem::tuple` にあり、`type_key_of_type` と一致することをガードテストで確かめる。
+  `Sexpr` の `tuple` 変種（20）の中身は要素数によらず 1 つの型が要るので、要素を写した新しい
+  `Vector<Option<Sexpr>>`（`path` 変種と同じやり方）。
+- 型引数の字句解析を作り直した（2026-10-10 ユーザー指摘「空白で区切るだけの解析は許せない」）。
+  名前の直後の `<` に型の書き始めが続けば、対応する `>` までを型の文法で読む。閉じない・文法に
+  合わないものは読み取りエラーにし、別の読み方へ巻き戻さない（`extend_angle_token` を削除）。
+  `Vector<#{int string}>` が書けるようになり、`(a<b c)` は読み取りエラーになった。
+- ランタイム関数を 3 つ足したので ABI 版は 0.2.4。Sexpr を `_` 無しで網羅する `match` は
+  `tuple` の腕が要る（利用者に見える変化）。
+- `lazy::enumerate`/`lazy::zip` は Phase 5 で最初からタプルで書く。
+
 ### Phase 5: prelude で書けるもの（項目 1・2・5・6）
 
 typelisp で書けるものは typelisp で書く（Rust 組み込みは Rust でしか書けないものだけ）。
