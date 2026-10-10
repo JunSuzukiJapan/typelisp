@@ -239,6 +239,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "remove-if"
     ;; Option / Result methods (§7)
     "unwrap" "unwrap-or" "is-some" "is-none" "is-ok" "is-err"
+    "and-then" "or-else" "map-err" "ok-or" "unwrap-or-else" "expect"
     ;; `Error' trait methods and the concrete->trait-object widener (§7.1)
     "message" "source" "as-dyn-error"
     ;; Vector / HashTable methods

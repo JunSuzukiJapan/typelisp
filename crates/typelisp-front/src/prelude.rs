@@ -437,6 +437,48 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (defmethod is-err ((self Result<T,E>)) bool
   (not (is-ok self)))
 
+;; Rust's combinators on `Option`/`Result`. Methods for the same reason as
+;; `unwrap` above: `map`/`and-then`/`or-else`/`unwrap-or-else`/`expect` are
+;; one name on both types. A method named `map` does not shadow the `Iter`
+;; combinator `map`: a call reaches the method only when its first argument's
+;; type has one. The receiver comes first, so they chain with `->`.
+(defmethod map<U> ((self Option<T>) (f (fn (T) U))) Option<U>
+  (match self ((some x) (Option::some (f x))) ((none) (Option::none))))
+(defmethod and-then<U> ((self Option<T>) (f (fn (T) Option<U>))) Option<U>
+  (match self ((some x) (f x)) ((none) (Option::none))))
+(defmethod or-else ((self Option<T>) (f (fn () Option<T>))) Option<T>
+  (match self ((some _) self) ((none) (f))))
+(defmethod ok-or<E> ((self Option<T>) (e E)) Result<T,E>
+  (match self ((some x) (Result::ok x)) ((none) (Result::err e))))
+(defmethod unwrap-or-else ((self Option<T>) (f (fn () T))) T
+  (match self ((some x) x) ((none) (f))))
+(defmethod expect ((self Option<T>) (msg string)) T
+  (match self ((some x) x) ((none) (panic msg))))
+
+(defmethod map<U> ((self Result<T,E>) (f (fn (T) U))) Result<U,E>
+  (match self ((ok x) (Result::ok (f x))) ((err e) (Result::err e))))
+(defmethod map-err<E2> ((self Result<T,E>) (f (fn (E) E2))) Result<T,E2>
+  (match self ((ok x) (Result::ok x)) ((err e) (Result::err (f e)))))
+(defmethod and-then<U> ((self Result<T,E>) (f (fn (T) Result<U,E>))) Result<U,E>
+  (match self ((ok x) (f x)) ((err e) (Result::err e))))
+(defmethod or-else<E2> ((self Result<T,E>) (f (fn (E) Result<T,E2>))) Result<T,E2>
+  (match self ((ok x) (Result::ok x)) ((err e) (f e))))
+(defmethod unwrap-or-else ((self Result<T,E>) (f (fn (E) T))) T
+  (match self ((ok x) x) ((err e) (f e))))
+(defmethod expect ((self Result<T,E>) (msg string)) T
+  (match self ((ok x) x) ((err _) (panic msg))))
+
+;; Clojure's `->`: each step gets the value so far as its first argument.
+;; A bare symbol `g` is the step `(g)`.
+(defmacro -> (x &rest forms)
+  (if (sexpr-null forms)
+      x
+      (let ((step (sexpr-car forms)))
+        `(-> ,(if (sexpr-consp step)
+                  `(,(sexpr-car step) ,x ,@(sexpr-cdr step))
+                  `(,step ,x))
+             ,@(sexpr-cdr forms)))))
+
 ;; Higher-order helpers (roadmap step 7c) — the motivating use case for
 ;; `defun`'s generic type parameters (`Checker::check_call`'s `unify`/
 ;; `subst_apply` integration): each is plain `defun`, not `defmethod`, since

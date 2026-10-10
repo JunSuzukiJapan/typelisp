@@ -14,11 +14,40 @@
 | `is-none` | `(is-none self)` | `Option<T>→bool` | — | `None` か |
 | `is-ok` | `(is-ok self)` | — | `Result<T,E>→bool` | `Ok` か |
 | `is-err` | `(is-err self)` | — | `Result<T,E>→bool` | `Err` か |
+| `expect` | `(expect self msg)` | `(Option<T>,string)→T` | `(Result<T,E>,string)→T` | 値を取り出す。`None`/`Err` なら `msg` で panic |
+| `unwrap-or-else` | `(unwrap-or-else self f)` | `(Option<T>,fn()→T)→T` | `(Result<T,E>,fn(E)→T)→T` | 値、または `f` の結果。`f` は `None`/`Err` のときだけ呼ばれる |
+| `map` | `(map self f)` | `(Option<T>,fn(T)→U)→Option<U>` | `(Result<T,E>,fn(T)→U)→Result<U,E>` | `Some`/`Ok` の中身に `f` を適用する |
+| `map-err` | `(map-err self f)` | — | `(Result<T,E>,fn(E)→F)→Result<T,F>` | `Err` の中身に `f` を適用する |
+| `and-then` | `(and-then self f)` | `(Option<T>,fn(T)→Option<U>)→Option<U>` | `(Result<T,E>,fn(T)→Result<U,E>)→Result<U,E>` | `Some`/`Ok` なら中身を `f` に渡し、その結果を返す |
+| `or-else` | `(or-else self f)` | `(Option<T>,fn()→Option<T>)→Option<T>` | `(Result<T,E>,fn(E)→Result<T,F>)→Result<T,F>` | `None`/`Err` なら `f` の結果を返す |
+| `ok-or` | `(ok-or self e)` | `(Option<T>,E)→Result<T,E>` | — | `Some(v)` を `Ok(v)` に、`None` を `Err(e)` にする |
 
 構成子は `Option::some`/`Option::none`/`Result::ok`/`Result::err`（または `(use option)`/
 `(use result)` で裸名 `some`/`none`/`ok`/`err` も使える）。
 
-分岐は `match` で明示する。Rust の `?` に当たる構文は無い。
+分岐は `match` で明示するか、上の `map`/`and-then` などでつなぐ。Rust の `?` に当たる構文は無い。
+
+`Option`/`Result` の `map` はメソッドで、シーケンスの `map`（[シーケンス](sequences.md)）とは別のもの。
+第 1 引数の型が `Option`/`Result` ならこちらが呼ばれる。
+
+`->` マクロは、値を次の式の第 1 引数として順に渡す（Clojure の `->` と同じ）。
+`(-> x (f a) (g b))` は `(g (f x a) b)` になる。括弧の無い名前 `h` は `(h x)` として扱う。
+メソッドは第 1 引数が受け手なので、コンビネータをそのままつなげる:
+
+```lisp
+(defun half ((n int)) Option<int>
+  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+
+(-> (option::some 8)
+    (and-then half)                          ; (some 4)
+    (and-then half)                          ; (some 2)
+    (map (lambda ((x int)) int (* x 10)))    ; (some 20)
+    (unwrap-or 0))                           ; => 20
+
+(-> (parse-int "x")
+    (map-err (lambda ((e ParseIntError)) string (message e)))
+    (unwrap-or-else (lambda ((m string)) int (length m))))
+```
 
 ## 2. `Option<T>` の実行時表現
 
