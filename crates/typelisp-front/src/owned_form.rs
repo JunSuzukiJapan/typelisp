@@ -21,7 +21,7 @@ use num_rational::BigRational;
 
 use typelisp_mem::TypeKeyId;
 
-use crate::{Error, Heap, Loc, Value};
+use crate::{type_key, Error, Heap, Loc, Value};
 
 /// An owned, GC-heap-independent mirror of a *read form* (`Value`) — the
 /// serializable carrier for generic-template `parts`. The same idea as
@@ -212,11 +212,11 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Boxed(id) if heap.is_f64(id) => OwnedForm::F64(heap.f64_value(id)),
         Value::Boxed(id) if heap.is_bignum(id) => OwnedForm::Bignum(heap.bignum_value(id).clone()),
         Value::Boxed(id) if heap.is_ratio(id) => OwnedForm::Ratio(heap.ratio_value(id).clone()),
-        Value::Boxed(id) if heap.is_struct(id) && heap.struct_type_key(id) == TypeKeyId::SEXPR_VECTOR => {
+        Value::Boxed(id) if type_key::heap_type_is_id(heap, id, TypeKeyId::SEXPR_VECTOR) => {
             OwnedForm::Vector(struct_fields_to_owned(heap, id)?)
         }
         Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => OwnedForm::Tuple(struct_fields_to_owned(heap, id)?),
-        Value::Boxed(id) if heap.is_struct(id) && heap.struct_type_key(id) == TypeKeyId::SEXPR_ARRAY => {
+        Value::Boxed(id) if type_key::heap_type_is_id(heap, id, TypeKeyId::SEXPR_ARRAY) => {
             // The fields of `typelisp_read::alloc_sexpr_array`'s box: `dims`
             // (a box of `Value::Int`s), `data`, `fill-pointer` (always `none`).
             let dims = match heap.struct_field(id, 0) {
@@ -290,16 +290,13 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         OwnedForm::Ratio(r) => heap.alloc_ratio(r.clone()),
         OwnedForm::Vector(elems) => {
             let roots_base = heap.root_count();
-            let built = owned_elems_rooted(heap, elems).map(|vals| heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, vals));
+            let built = owned_elems_rooted(heap, elems).map(|vals| type_key::alloc_sexpr_vector(heap, vals));
             heap.truncate_roots(roots_base);
             built?
         }
         OwnedForm::Tuple(elems) => {
             let roots_base = heap.root_count();
-            let built = owned_elems_rooted(heap, elems).map(|vals| {
-                let key = heap.intern_type_key(&typelisp_mem::sexpr_tuple_key(vals.len()));
-                heap.alloc_struct(key, vals)
-            });
+            let built = owned_elems_rooted(heap, elems).map(|vals| type_key::alloc_sexpr_tuple(heap, vals));
             heap.truncate_roots(roots_base);
             built?
         }

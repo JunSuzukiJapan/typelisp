@@ -358,7 +358,10 @@ fn hash_form(
             // its own), walked field by field like a list's elements.
             Value::Boxed(id) if is_read_literal_box(heap, id) => {
                 11u8.hash(hasher);
-                heap.struct_type_name(id).hash(hasher);
+                match typelisp_front::type_key::heap_type_key(heap, id) {
+                    Some(key) => key.hash(hasher),
+                    None => unreachable!("is_read_literal_box admits only structs, which carry a key"),
+                }
                 let n = heap.struct_field_count(id);
                 n.hash(hasher);
                 for i in (0..n).rev() {
@@ -380,14 +383,11 @@ fn hash_form(
 /// Whether `id` is a box the reader builds for literal data: a `Sexpr`
 /// vector, array or tuple, or an array's dimensions vector.
 fn is_read_literal_box(heap: &Heap, id: typelisp_mem::BoxId) -> bool {
-    if !heap.is_struct(id) {
-        return false;
-    }
-    let key = heap.struct_type_key(id);
-    key == typelisp_mem::TypeKeyId::SEXPR_VECTOR
-        || key == typelisp_mem::TypeKeyId::SEXPR_ARRAY
+    use typelisp_front::type_key::{heap_type_is_id, heap_type_is_key};
+    heap_type_is_id(heap, id, typelisp_mem::TypeKeyId::SEXPR_VECTOR)
+        || heap_type_is_id(heap, id, typelisp_mem::TypeKeyId::SEXPR_ARRAY)
         || heap.sexpr_tuple_arity(id).is_some()
-        || &*heap.type_key_name(key) == typelisp_read::ARRAY_DIMS_KEY
+        || heap_type_is_key(heap, id, typelisp_read::ARRAY_DIMS_KEY)
 }
 
 /// The last segment of a `(defun PATH ...)` form's name, or `None` for anything
