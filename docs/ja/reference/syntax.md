@@ -557,6 +557,24 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 同じ規則で docstring を置ける（`where` 節の直後、本体の先頭、後ろに本体フォームが続く場合のみ）。
 `impl` 内のメソッドも同様——`(documentation Type::method)` で取り出す。
 
+メソッド自身の型パラメータは、`defun` と同じく名前に `<...>` で書く。受け手の型の型パラメータ
+（下の例の `T`）は受け手から決まり、メソッド自身の型パラメータ（`U`）は呼び出しの引数から推論される。
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- メソッド自身の型パラメータには、受け手の型が宣言した型パラメータ（`(defstruct Box<T> ...)` の
+  `T`）とも、受け手に書いた名前とも違う名前を付ける。
+- 受け手の型がジェネリックなら、受け手にはその型パラメータを全部変数で書く（`Box<T>`）か、
+  全部具体的な型で書く（`Box<int>`）。
+- `impl` の中のメソッドには型パラメータを足せない。シグネチャはトレイトが宣言したものに従う。
+
 ### 3.6 defstruct — 構造体（ユーザ定義型）
 
 ```lisp
@@ -584,9 +602,10 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   名前は、`defun` の引数型でも `the` でも同じく `unknown type` のエラーになる。したがって互いを
   参照し合う 2 つの型は書けない。
 - **型変数は宣言部に書いたものだけ**。`defun`/`defstruct`/`defenum`/`deftype` は名前の `<T>`、
-  `defmethod` は受け手の型（`(self box<T>)`、静的メソッドなら `box<T>`）、`impl` は対象の型と
-  `impl<T>`、`deftrait` は `Self` と `(type Item)` の関連型。それ以外の場所——引数・戻り値・本体の
-  `the`/`lambda`——に初めて現れる名前は型変数にはならず、`unknown type` になる。
+  `defmethod` は受け手の型（`(self box<T>)`、静的メソッドなら `box<T>`）と名前の `<U>`、
+  `impl` は対象の型と `impl<T>`、`deftrait` は `Self` と `(type Item)` の関連型。それ以外の
+  場所——引数・戻り値・本体の `the`/`lambda`——に初めて現れる名前は型変数にはならず、
+  `unknown type` になる。
 - **docstring**: 名前の直後、フィールド列の前に文字列リテラルを置くと docstring になる
   （`(defstruct Name "doc" (field Type)...)` — CL の `defstruct` と同じ位置）。フィールドは常に
   `(name Type ...)` の形で裸の文字列にはなり得ないため曖昧性は無い。`(documentation Name)` で
