@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # 타입 목록
 
 typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타입 쓰는 법은
@@ -32,6 +32,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 | `Result<T,E>` | 성공 또는 실패. `ok` / `err` | 위와 같음 |
 | `Vector<T>` | 늘어나는 배열 | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | 해시 테이블. 키 타입은 `Hash`를 구현해야 한다 | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | 튜플(요소 1~12개). 요소는 `t::0`로 읽는다 | [구문 2장](syntax.md#2-타입-표기) |
 | `Task<T>` | 태스크 핸들 | [태스크](functions/concurrency.md#1-taskt--태스크-핸들) |
 | `Thread<T>` | 전용 OS 스레드에서 실행되는 태스크의 핸들 | [Thread](functions/concurrency.md#7-threadt--전용-os-스레드) |
 | `Chan<T>` | 채널 | [채널](functions/concurrency.md#2-chant--채널) |
@@ -43,7 +44,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 타입 | 내용 | 자세히 |
 |---|---|---|
-| `Sexpr` | 비어 있지 않은 S 식. 18개 변형: `int`, `i8`~`u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S 식 데이터](functions/sequences.md#2-s-식-데이터-sexpr) |
+| `Sexpr` | 비어 있지 않은 S 식. 19개 변형: `int`, `i8`~`u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S 식 데이터](functions/sequences.md#2-s-식-데이터-sexpr) |
 | `Option<Sexpr>` | S 식 데이터 전반. 빈 리스트 `()`는 `none` | 위와 같음 |
 
 ## 4. 표준 라이브러리의 타입

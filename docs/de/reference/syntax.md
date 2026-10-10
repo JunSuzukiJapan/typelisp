@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -73,6 +73,13 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
   ein Lesefehler. Der Typ wird wie bei Vektoren bestimmt und ist ein `Array<T>` (ohne Elemente muss
   der Kontext ihn liefern, etwa `(the Array<f64> #2A(()))`). Als S-Ausdrucksdaten ist es ein
   `Array<Option<Sexpr>>`: die Variante `array` von `Sexpr`.
+- **Tupel**: `#{"foo" 123 45.6}`. Der Inhalt besteht ausschließlich aus Literalen und wird nicht
+  ausgewertet (das `a` von `#{a b}` ist ein Symbol). Der Typ jedes Elements wird Position für
+  Position vom Kontext bestimmt (`(the #{i32 f64} #{1 2.0})`), ohne Kontext ist es der eigene Typ
+  des Elements (`#{"foo" 123}` ist `#{string int}`). Ein Tupel hat 1 bis 12 Elemente. Jede
+  Auswertung erzeugt ein neues Tupel. Um eines aus berechneten Werten zu bauen, verwendet man
+  `(tuple a b)`. Wo S-Ausdrucksdaten erwartet werden, ist es ein Tupel, dessen Elemente alle Daten
+  sind: die Variante `tuple` von `Sexpr`.
 - **Die leere Liste `()`**: je nach Kontext der Wert des Typs `Unit` oder das `none` von `Option<Sexpr>`.
   **`Sexpr` hat keine Variante für die leere Liste**: `Sexpr` bedeutet „ein nicht leerer S-Ausdruck“, und der
   Typ von S-Ausdrucksdaten ist `Option<Sexpr>` (siehe „Muster für `Option<Sexpr>`“ in
@@ -109,19 +116,27 @@ Im Quelltext werden Typen als gewöhnliche Symbole oder Listen geschrieben.
   nie zurückkehrt. Er passt zu jedem erwarteten Typ)
 - **Funktionstypen**: `(fn (Argumenttypen...) Rückgabetyp)`. Der Typ einer Funktion mit variadischen Argumenten
   ist `(fn (Argumenttypen... &rest Elementtyp) Rückgabetyp)`.
-- **Generische Typen**: `Name<T1,T2,...>` (als einzelnes Token ohne Leerzeichen gelesen).
-  Zum Beispiel `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  Auch der Unit-Typ `()` lässt sich als Typargument schreiben (`Result<(), FileError>`). `(`/`)` sind
-  normalerweise Trennzeichen, die ein Token beenden, aber solange eine spitze Klammer offen ist, wird dieses
-  eine Zeichenpaar durchgelassen. `()` lässt sich auch als Feld- oder Argumenttyp verwenden.
-- **Die Anwendungsform generischer Typen**: `(Name T1 T2 ...)`, eine Listenschreibweise, die denselben Typ
-  benennt wie `Name<T1,T2,...>`. Zum Beispiel ist `(vector char)` dasselbe wie `Vector<char>`.
-  Die Namensform ist die übliche Schreibweise; diese Form **existiert für den Fall, dass sich ein Typargument
-  nicht innerhalb eines Namens schreiben lässt**: Ein Typargument ist selbst ein Typausdruck, aber innerhalb
-  eines Namens aus einem einzelnen Token lassen sich nur Namen, `()` und `:dyn` schreiben, keine Funktionstypen
-  (eine Schreibweise wie `Vector<(fn (i32) i32)>` gibt es nicht). In dieser Form kann ein Typ auch erscheinen,
-  wenn die Implementierung ihn anzeigt, etwa als Ergebnis des Einsetzens des assoziierten Typs eines Traits in
-  eine Signatur.
+- **Generische Typen**: `Name<T1,T2,...>`. Zum Beispiel `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. Folgt auf ein `<` direkt nach einem Namen ein Typ, liest der
+  Leser bis zum passenden `>` Typargumente. Darin dürfen Leerzeichen und Zeilenumbrüche trennen
+  (`HashTable<string, int>`), und der Unit-Typ `()` (`Result<(), FileError>`), `:dyn Trait` und
+  Tupeltypen lassen sich schreiben. Folgt auf das `<` kein Typ, gehört dieses `<` zum Namen (`<=`,
+  `string<`). Typargumente, die nicht mit `>` geschlossen sind oder nicht wie Typen aussehen, sind
+  ein Lesefehler (auch `(a<b c)` ist ein Fehler, in den Typargumenten `b c`). `()` lässt sich auch
+  als Feld- oder Argumenttyp verwenden.
+- **Die Anwendungsform generischer Typen**: `(Name T1 T2 ...)`, eine Listenschreibweise, die
+  denselben Typ benennt wie `Name<T1,T2,...>`. Zum Beispiel ist `(vector char)` dasselbe wie
+  `Vector<char>`. Die Namensform ist die übliche Schreibweise; diese Form **existiert für den Fall,
+  dass sich ein Typargument nicht innerhalb eines Namens schreiben lässt**: Ein Typargument ist
+  selbst ein Typausdruck, aber innerhalb von `<..>` lassen sich nur Namen, `()`, `:dyn` und
+  Tupeltypen schreiben, keine Funktionstypen (`Vector<(fn (i32) i32)>` ist ein Lesefehler; gibt man
+  dem Funktionstyp mit `deftype` einen Namen, lässt sich `Vector<F>` schreiben). In dieser Form kann
+  ein Typ auch erscheinen, wenn die Implementierung ihn anzeigt, etwa als Ergebnis des Einsetzens
+  des assoziierten Typs eines Traits in eine Signatur.
+- **Tupeltypen**: `#{int string}` (dieselbe Form wie die Werte). Ein Tupel hat 1 bis 12 Elemente,
+  und ein Tupeltyp kann auch Typargument sein (`Vector<#{int string}>`). Elemente liest man mit
+  `t::0` `t::1` und ändert sie mit `(setf t::0 v)`. `Eq`, `Ord` (Vergleich ab dem ersten Element),
+  `Hash` und `print-object` stehen zur Verfügung, wenn alle Elementtypen sie implementieren.
 - **Qualifizierte Typnamen**: lassen sich mit `::` qualifizieren, wie in `module::Type`.
 - **Trait-Objekttypen**: `:dyn Trait` (zwei durch Leerzeichen getrennte Wörter, die einen Typ bilden). Stellt
   einen Wert dar, dessen konkreter Typ zur Laufzeit feststeht; Aufrufe von Trait-Methoden gehen über eine
@@ -1159,6 +1174,8 @@ Arten von Mustern:
   eine benutzerdefinierte `Eq`-Implementierung wird unverändert zur Vergleichsregel. `expr` kann sich auf alles
   beziehen, was von der Position des Zweigs aus sichtbar ist (Argumente, äußere Bindungen, globale Variablen)
 - `(Ctor sub-pattern...)` — Konstruktormuster (`Some x` `None` `Cons a d` `Ok v` usw.)
+- `#{p0 p1 ...}` — ein Tupelmuster. Jedes Element wird mit seinem eigenen Teilmuster abgeglichen.
+  Gegen ein `Sexpr` passt es nur auf `#{..}`-Daten mit derselben Anzahl an Elementen
 - `(:or p1 p2 ...)` — ein Oder-Muster: Es passt, wenn eine der Alternativen passt. Es gibt nur einen
   Rumpf, daher muss jede Alternative dieselben Variablen mit denselben Typen binden. Es kann auch
   innerhalb eines Konstruktormusters stehen (`(some (:or (circle r) (rect r _)))`)
@@ -1212,7 +1229,7 @@ durch Aufzählung abdecken, daher ist `_` (oder ein als Platzhalter wirkendes Bi
     (_     0)))          ; ein Typ ohne Varianten braucht `_`
 ```
 
-Gegen einen `Sexpr` als untersuchten Wert lassen sich neben den 18 eingebauten Variantenmustern oben
+Gegen einen `Sexpr` als untersuchten Wert lassen sich neben den 19 eingebauten Variantenmustern oben
 **Downcast-Muster** schreiben (Herausholen von Instanzen benutzerdefinierter ADTs): Syntax, um mit `match` eine
 Instanz eines `defstruct`/`defenum` (Kapitel 3) zurückzubekommen, die implizit in `Sexpr` umgewandelt wurde, wie
 in `(list p 42)`:
@@ -1233,7 +1250,7 @@ in `(list p 42)`:
 
 **Muster für `Option<Sexpr>`**: Der Typ von S-Ausdrucksdaten ist nicht `Sexpr`, sondern `Option<Sexpr>`, und die
 leere Liste ist keine Variante von `Sexpr`, sondern das `none` von `Option`. Vergleicht man daher ein
-`Option<Sexpr>`, lassen sich die 18 Varianten von `Sexpr` und `none` **flach in derselben Liste von Zweigen**
+`Option<Sexpr>`, lassen sich die 19 Varianten von `Sexpr` und `none` **flach in derselben Liste von Zweigen**
 schreiben (es braucht kein äußeres `match`, um das `Option` abzuschälen):
 
 ```lisp
@@ -1246,8 +1263,8 @@ schreiben (es braucht kein äußeres `match`, um das `Option` abzuschälen):
     (_          9)))
 ```
 
-Die Vollständigkeit wird im selben flachen Universum geprüft: die 18 Varianten von `Sexpr` plus `none`,
-insgesamt 19. `(none)` zu vergessen, ist ein Fehler, sofern es kein `_` gibt. Auch `(some x)` lässt sich
+Die Vollständigkeit wird im selben flachen Universum geprüft: die 19 Varianten von `Sexpr` plus `none`,
+insgesamt 20. `(none)` zu vergessen, ist ein Fehler, sofern es kein `_` gibt. Auch `(some x)` lässt sich
 schreiben und bindet „etwas nicht Leeres“.
 
 Dieser Zucker gilt **genau** nur für `Option<Sexpr>`. Bei `Option<Option<Sexpr>>` wäre unklar, welche Schicht

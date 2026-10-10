@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # الطباعة
 
 `print`/`println`/`format` وطابعات الوسيط الواحد والطابعة المنسَّقة (pretty printer) و`print-object` والمتغيرات
@@ -220,6 +220,7 @@
 | النوع | `~s` | `~a` |
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`، `#("a" "b")` | `#(1 2 3)`، `#(a b)` |
+| صف `#{..}` | `#{1 "a"}` | `#{1 a}` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | المثل |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (الرقم رقم تسلسلي داخلي) | المثل |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

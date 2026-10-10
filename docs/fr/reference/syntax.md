@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -72,6 +72,13 @@ messages d'erreur, [errors.md](errors.md).
   différentes sont une erreur de lecture. Le type se décide comme pour les vecteurs et est un
   `Array<T>` (sans éléments, le contexte doit le fournir, comme dans `(the Array<f64> #2A(()))`). En
   tant que donnée S-expression, c'est un `Array<Option<Sexpr>>` : la variante `array` de `Sexpr`.
+- **Tuples** : `#{"foo" 123 45.6}`. Le contenu n'est fait que de littéraux et n'est pas évalué (le
+  `a` de `#{a b}` est un symbole). Le type de chaque élément est décidé par le contexte, position
+  par position (`(the #{i32 f64} #{1 2.0})`), et sans contexte c'est le type propre de l'élément
+  (`#{"foo" 123}` est `#{string int}`). Un tuple a de 1 à 12 éléments. Chaque évaluation crée un
+  nouveau tuple. Pour en construire un à partir de valeurs calculées, on utilise `(tuple a b)`. Là
+  où des données S-expression sont attendues, c'est un tuple dont tous les éléments sont des données
+  : la variante `tuple` de `Sexpr`.
 - **La liste vide `()`** : selon le contexte, la valeur du type `Unit` ou le `none` de `Option<Sexpr>`. **`Sexpr` n'a
   pas de variante liste vide** : `Sexpr` signifie « une S-expression non vide », et le type des données S-expression
   est `Option<Sexpr>` (voir « Motifs pour `Option<Sexpr>` » dans [4.3 match](#43-match--filtrage-par-motifs)).
@@ -107,18 +114,28 @@ Dans le source, les types s'écrivent comme des symboles ou des listes ordinaire
   revient jamais. Il convient à tout type attendu)
 - **Types de fonctions** : `(fn (types-des-arguments...) type-de-retour)`. Le type d'une fonction à arguments
   variadiques est `(fn (types-des-arguments... &rest type-d'élément) type-de-retour)`.
-- **Types génériques** : `Name<T1,T2,...>` (lu comme un seul lexème, sans espaces).
-  Par exemple `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  Le type unit `()` peut aussi s'écrire comme argument de type (`Result<(), FileError>`). `(`/`)` sont normalement
-  des délimiteurs qui terminent un lexème, mais tant qu'un chevron est ouvert, cette seule paire de caractères est
-  admise. `()` peut aussi servir de type de champ ou d'argument.
-- **La forme d'application des types génériques** : `(Name T1 T2 ...)`, une écriture en liste qui désigne le même
-  type que `Name<T1,T2,...>`. Par exemple `(vector char)` est identique à `Vector<char>`.
-  La forme nom est l'écriture habituelle ; cette forme **existe pour quand un argument de type ne peut pas s'écrire à
-  l'intérieur d'un nom** : un argument de type est lui-même une expression de type, mais à l'intérieur d'un nom d'un
-  seul lexème, on ne peut écrire que des noms, `()` et `:dyn`, pas des types de fonctions (il n'existe pas
-  d'écriture comme `Vector<(fn (i32) i32)>`). Elle peut aussi apparaître sous cette forme quand l'implémentation
-  affiche un type, comme le résultat de la substitution du type associé d'un trait dans une signature.
+- **Types génériques** : `Name<T1,T2,...>`. Par exemple `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. Quand un type suit un `<` placé juste après un nom, le
+  lecteur lit jusqu'au `>` correspondant comme des arguments de type. À l'intérieur, espaces et
+  retours à la ligne peuvent séparer les éléments (`HashTable<string, int>`), et l'on peut écrire le
+  type unit `()` (`Result<(), FileError>`), `:dyn Trait` et des types tuple. Si aucun type ne suit
+  le `<`, ce `<` fait partie du nom (`<=`, `string<`). Des arguments de type non fermés par `>`, ou
+  qui n'ont pas la forme de types, sont une erreur de lecture (`(a<b c)` aussi est une erreur, dans
+  les arguments de type `b c`). `()` peut aussi servir de type de champ ou d'argument.
+- **La forme d'application des types génériques** : `(Name T1 T2 ...)`, une écriture sous forme de
+  liste qui désigne le même type que `Name<T1,T2,...>`. Par exemple `(vector char)` est identique à
+  `Vector<char>`. La forme nom est l'écriture habituelle ; cette forme **existe pour le cas où un
+  argument de type ne peut pas s'écrire dans un nom** : un argument de type est lui-même une
+  expression de type, mais dans `<..>` seuls des noms, `()`, `:dyn` et des types tuple peuvent
+  s'écrire, pas des types fonction (`Vector<(fn (i32) i32)>` est une erreur de lecture ; en nommant
+  le type fonction avec `deftype`, on peut écrire `Vector<F>`). Un type peut aussi apparaître sous
+  cette forme quand l'implémentation l'affiche, par exemple comme résultat de la substitution du
+  type associé d'un trait dans une signature.
+- **Types tuple** : `#{int string}` (la même forme que les valeurs). Un tuple a de 1 à 12 éléments,
+  et un type tuple peut aussi être un argument de type (`Vector<#{int string}>`). Les éléments se
+  lisent avec `t::0` `t::1` et se modifient avec `(setf t::0 v)`. `Eq`, `Ord` (comparaison à partir
+  du premier élément), `Hash` et `print-object` sont disponibles quand tous les types d'élément les
+  implémentent.
 - **Noms de types qualifiés** : peuvent être qualifiés avec `::`, comme `module::Type`.
 - **Types d'objet trait** : `:dyn Trait` (deux mots séparés par un espace formant un seul type). Représente une
   valeur dont le type concret est décidé à l'exécution ; les appels de méthodes de trait passent par une vtable
@@ -1129,6 +1146,9 @@ Sortes de motifs :
   par l'utilisateur devient telle quelle la règle de comparaison. `expr` peut faire référence à tout ce qui est
   visible depuis la position de la branche (arguments, liaisons extérieures, globales)
 - `(Ctor sub-pattern...)` — motifs de constructeur (`Some x` `None` `Cons a d` `Ok v`, etc.)
+- `#{p0 p1 ...}` — un motif de tuple. Chaque élément est mis en correspondance avec son propre
+  sous-motif. Face à un `Sexpr`, il ne correspond qu'à des données `#{..}` ayant le même nombre
+  d'éléments
 - `(:or p1 p2 ...)` — un motif « ou » : il correspond dès qu'une des alternatives correspond. Il n'y
   a qu'un corps, donc chaque alternative doit lier les mêmes variables avec les mêmes types. Il peut
   aussi s'écrire à l'intérieur d'un motif de constructeur (`(some (:or (circle r) (rect r _)))`)
@@ -1182,7 +1202,7 @@ couvert par énumération ; `_` (ou un motif de liaison qui fait office de joker
     (_     0)))          ; un type sans variantes a besoin de `_`
 ```
 
-Face à une valeur examinée `Sexpr`, en plus des 18 motifs de variantes intégrés ci-dessus, on peut écrire des
+Face à une valeur examinée `Sexpr`, en plus des 19 motifs de variantes intégrés ci-dessus, on peut écrire des
 **motifs de transtypage descendant** (extraction d'instances d'ADT définis par l'utilisateur) : une syntaxe pour
 récupérer avec `match` une instance d'un `defstruct`/`defenum` (chapitre 3) convertie implicitement en `Sexpr`, comme
 dans `(list p 42)` :
@@ -1202,7 +1222,7 @@ dans `(list p 42)` :
   d'origine dans la liste.
 
 **Motifs pour `Option<Sexpr>`** : le type des données S-expression n'est pas `Sexpr` mais `Option<Sexpr>`, et la liste
-vide n'est pas une variante de `Sexpr` mais le `none` d'`Option`. Quand on filtre une `Option<Sexpr>`, les 18
+vide n'est pas une variante de `Sexpr` mais le `none` d'`Option`. Quand on filtre une `Option<Sexpr>`, les 19
 variantes de `Sexpr` et `none` peuvent donc s'écrire **à plat dans la même liste de branches** (pas besoin d'un
 `match` extérieur pour retirer l'`Option`) :
 
@@ -1216,7 +1236,7 @@ variantes de `Sexpr` et `none` peuvent donc s'écrire **à plat dans la même li
     (_          9)))
 ```
 
-L'exhaustivité est vérifiée dans le même univers plat : les 18 variantes de `Sexpr` plus `none`, 19 en tout. Oublier
+L'exhaustivité est vérifiée dans le même univers plat : les 19 variantes de `Sexpr` plus `none`, 20 en tout. Oublier
 `(none)` est une erreur à moins qu'il y ait un `_`. `(some x)` peut aussi s'écrire et lie « quelque chose de non
 vide ».
 

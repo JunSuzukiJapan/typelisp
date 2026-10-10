@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Types
 
 The types typelisp has, and the standard traits each type implements. How to write types is in
@@ -33,6 +33,7 @@ There is no 64-bit integer type. For integers whose width does not matter, use `
 | `Result<T,E>` | Success or failure. `ok` / `err` | Same as above |
 | `Vector<T>` | A growable array | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | A hash table. The key type must implement `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Tuple (1 to 12 elements). Elements are read with `t::0` | [Syntax chapter 2](syntax.md#2-writing-types) |
 | `Task<T>` | A handle to a task | [Tasks](functions/concurrency.md#1-taskt--handles-to-tasks) |
 | `Thread<T>` | A handle to a task running on a dedicated OS thread | [Thread](functions/concurrency.md#7-threadt--dedicated-os-threads) |
 | `Chan<T>` | A channel | [Channels](functions/concurrency.md#2-chant--channels) |
@@ -44,7 +45,7 @@ Function types are written `(fn (argument-types...) return-type)`, and trait obj
 
 | Type | Contents | Details |
 |---|---|---|
-| `Sexpr` | A non-empty S-expression. 18 variants: `int`, `i8` to `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-expression data](functions/sequences.md#2-s-expression-data-sexpr) |
+| `Sexpr` | A non-empty S-expression. 19 variants: `int`, `i8` to `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-expression data](functions/sequences.md#2-s-expression-data-sexpr) |
 | `Option<Sexpr>` | S-expression data in general. The empty list `()` is `none` | Same as above |
 
 ## 4. Types in the standard library

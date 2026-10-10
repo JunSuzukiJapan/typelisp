@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Tipos
 
 Os tipos que o typelisp tem e os traits padrão que cada tipo implementa. Como escrever tipos está no
@@ -33,6 +33,7 @@ Não há tipo inteiro de 64 bits. Para inteiros cuja largura não importa, use `
 | `Result<T,E>` | Sucesso ou falha. `ok` / `err` | Igual ao acima |
 | `Vector<T>` | Um array que pode crescer | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Uma tabela hash. O tipo da chave deve implementar `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Tupla (de 1 a 12 elementos). Os elementos são lidos com `t::0` | [Sintaxe, capítulo 2](syntax.md#2-escrita-de-tipos) |
 | `Task<T>` | Um handle de uma tarefa | [Tarefas](functions/concurrency.md#1-taskt--handles-de-tarefas) |
 | `Thread<T>` | Um handle de uma tarefa executada em uma thread de SO dedicada | [Thread](functions/concurrency.md#7-threadt--threads-de-so-dedicadas) |
 | `Chan<T>` | Um canal | [Canais](functions/concurrency.md#2-chant--canais) |
@@ -44,7 +45,7 @@ Os tipos de função são escritos `(fn (tipos-dos-argumentos...) tipo-de-retorn
 
 | Tipo | Conteúdo | Detalhes |
 |---|---|---|
-| `Sexpr` | Uma expressão S não vazia. 18 variantes: `int`, `i8` a `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Dados de expressões S](functions/sequences.md#2-dados-de-expressões-s-sexpr) |
+| `Sexpr` | Uma expressão S não vazia. 19 variantes: `int`, `i8` a `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Dados de expressões S](functions/sequences.md#2-dados-de-expressões-s-sexpr) |
 | `Option<Sexpr>` | Os dados de expressões S em geral. A lista vazia `()` é `none` | Igual ao acima |
 
 ## 4. Tipos da biblioteca padrão

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -69,6 +69,12 @@ and for reading error messages, [errors.md](errors.md).
   read error. The type is decided as for vectors and is an `Array<T>` (with no elements, the context
   has to give it, as in `(the Array<f64> #2A(()))`). As S-expression data it is an
   `Array<Option<Sexpr>>`: the `array` variant of `Sexpr`.
+- **Tuples**: `#{"foo" 123 45.6}`. The contents are all literals and are not evaluated (the `a` of
+  `#{a b}` is a symbol). Each element's type is decided by the context, position by position
+  (`(the #{i32 f64} #{1 2.0})`), and with no context it is the element's own type (`#{"foo" 123}` is
+  `#{string int}`). A tuple has 1 to 12 elements. Each evaluation makes a new tuple. To build one
+  from computed values, use `(tuple a b)`. Where S-expression data is expected, it is a tuple whose
+  elements are all data: the `tuple` variant of `Sexpr`.
 - **The empty list `()`**: depending on context, the value of the `Unit` type or the `none` of
   `Option<Sexpr>`. **`Sexpr` has no empty-list variant**: `Sexpr` means "a non-empty S-expression",
   and the type of S-expression data is `Option<Sexpr>` (see "Patterns for `Option<Sexpr>`" in
@@ -105,18 +111,26 @@ In source, types are written as ordinary symbols or lists.
   that never returns. It fits any expected type)
 - **Function types**: `(fn (argument-types...) return-type)`. The type of a function with variadic
   arguments is `(fn (argument-types... &rest element-type) return-type)`.
-- **Generic types**: `Name<T1,T2,...>` (read as a single token without spaces).
-  For example `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  The unit type `()` can also be written as a type argument (`Result<(), FileError>`). `(`/`)` are
-  normally delimiters that end a token, but while an angle bracket is open, this one pair of characters
-  is allowed through. `()` can also be used as a field type or an argument type.
-- **The application form of generic types**: `(Name T1 T2 ...)`, a list spelling that names the same type
-  as `Name<T1,T2,...>`. For example `(vector char)` is the same as `Vector<char>`.
-  The name form is the usual way to write it; this form **exists for when a type argument cannot be
-  spelled inside a name**: a type argument is itself a type expression, but inside a single-token name
-  only names, `()` and `:dyn` can be written, not function types (there is no such spelling as
-  `Vector<(fn (i32) i32)>`). It may also appear in this form when the implementation shows a type, such
-  as the result of substituting a trait's associated type into a signature.
+- **Generic types**: `Name<T1,T2,...>`. For example `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. When a type follows a `<` right after a name, the reader
+  reads up to the matching `>` as type arguments. Inside them, spaces and newlines may separate the
+  parts (`HashTable<string, int>`), and the unit type `()` (`Result<(), FileError>`), `:dyn Trait`
+  and tuple types can be written. If no type follows the `<`, that `<` is part of the name (`<=`,
+  `string<`). Type arguments that are not closed with `>`, or that are not shaped like types, are a
+  read error (`(a<b c)` too is an error, in the type arguments `b c`). `()` can also be used as a
+  field type or an argument type.
+- **The application form of generic types**: `(Name T1 T2 ...)`, a list spelling that names the same
+  type as `Name<T1,T2,...>`. For example `(vector char)` is the same as `Vector<char>`. The name
+  form is the usual way to write it; this form **exists for when a type argument cannot be spelled
+  inside a name**: a type argument is itself a type expression, but inside `<..>` only names, `()`,
+  `:dyn` and tuple types can be written, not function types (`Vector<(fn (i32) i32)>` is a read
+  error; give the function type a name with `deftype` and `Vector<F>` can be written). It may also
+  appear in this form when the implementation shows a type, such as the result of substituting a
+  trait's associated type into a signature.
+- **Tuple types**: `#{int string}` (the same shape as the values). A tuple has 1 to 12 elements, and
+  a tuple type can also be a type argument (`Vector<#{int string}>`). Elements are read with `t::0`
+  `t::1` and changed with `(setf t::0 v)`. `Eq`, `Ord` (comparing from the first element on), `Hash`
+  and `print-object` are available when every element type implements them.
 - **Qualified type names**: can be qualified with `::`, as in `module::Type`.
 - **Trait object types**: `:dyn Trait` (two space-separated words forming one type). Represents a value
   whose concrete type is decided at run time; trait method calls go through a vtable (dynamic dispatch).
@@ -1123,6 +1137,8 @@ Kinds of patterns:
   implementation becomes the comparison rule as it is. `expr` can refer to anything visible from the
   arm's position (arguments, outer bindings, globals)
 - `(Ctor sub-pattern...)` — constructor patterns (`Some x` `None` `Cons a d` `Ok v` and so on)
+- `#{p0 p1 ...}` — a tuple pattern. Each element is matched by its own sub-pattern. Against a
+  `Sexpr` it matches only `#{..}` data with the same number of elements
 - `(:or p1 p2 ...)` — an or-pattern: it matches when any one alternative matches. There is one body,
   so every alternative must bind the same variables at the same types. It can also be written inside
   a constructor pattern (`(some (:or (circle r) (rect r _)))`)
@@ -1174,7 +1190,7 @@ by enumeration, so `_` (or a binding pattern acting as a wildcard) is required:
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Against an `Sexpr` scrutinee, besides the 18 built-in variant patterns above, **downcast patterns**
+Against an `Sexpr` scrutinee, besides the 19 built-in variant patterns above, **downcast patterns**
 (taking out instances of user-defined ADTs) can be written: syntax for getting back, with `match`, an
 instance of a `defstruct`/`defenum` (chapter 3) that was implicitly converted to `Sexpr`, as in
 `(list p 42)`:
@@ -1195,7 +1211,7 @@ instance of a `defstruct`/`defenum` (chapter 3) that was implicitly converted to
 
 **Patterns for `Option<Sexpr>`**: the type of S-expression data is not `Sexpr` but `Option<Sexpr>`, and the
 empty list is not a variant of `Sexpr` but the `none` of `Option`. So when matching an `Option<Sexpr>`,
-the 18 variants of `Sexpr` and `none` can be written **flat in the same list of arms** (no outer `match`
+the 19 variants of `Sexpr` and `none` can be written **flat in the same list of arms** (no outer `match`
 to peel off the `Option` is needed):
 
 ```lisp
@@ -1208,7 +1224,7 @@ to peel off the `Option` is needed):
     (_          9)))
 ```
 
-Exhaustiveness is checked in the same flat universe: the 18 variants of `Sexpr` plus `none`, 19 in all.
+Exhaustiveness is checked in the same flat universe: the 19 variants of `Sexpr` plus `none`, 20 in all.
 Forgetting `(none)` is an error unless there is a `_`. `(some x)` can also be written and binds "something
 non-empty".
 

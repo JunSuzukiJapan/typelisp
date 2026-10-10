@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # คู่ S-expression และลำดับ
 
 คู่ generic `cons-cell` ข้อมูล S-expression `Sexpr` สัญลักษณ์ ฟังก์ชันของลำดับที่เขียนบน
@@ -23,9 +23,10 @@
 
 ## 2. ข้อมูล S-expression (`Sexpr`)
 
-ชนิดข้อมูล `Sexpr` ที่ `read` คืนมี 18 variant:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`
+ชนิดข้อมูล `Sexpr` ที่ `read` คืนมี 19 variant:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`
 `vector` และ `array` คือข้อมูลที่เขียนเป็น `#(..)` และ `#nA(..)` ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#1-องค์ประกอบทางศัพท์)) ซึ่งถือ `Vector<Option<Sexpr>>` และ `Array<Option<Sexpr>>` ตามลำดับ `len`, `get` และอื่น ๆ ใช้กับ `v` ที่ `(vector v)` ผูกไว้ได้โดยตรง
+`tuple` คือข้อมูลที่เขียนด้วย `#{..}` และ `v` ที่ `(tuple v)` ผูกไว้คือ `Vector<Option<Sexpr>>` ใหม่ที่เรียงสมาชิก (เพื่อรับทูเพิลทุกความยาวด้วยชนิดเดียว)
 เซลล์ S-expression ถูกจัดการด้วยฟังก์ชัน `sexpr-*` ไม่ใช่ด้วย `cons`/`car`/`cdr` ทั่วไปของบทที่ 1
 ใช้หลัก ๆ ในตัวเนื้อหาของ `defmacro` เพื่อสร้างและแยกฟอร์ม
 
@@ -38,7 +39,7 @@
 - `Sexpr` ขยายโดยปริยายในที่ที่คาดหวัง `Option<Sexpr>` (ไม่มีการแปลงตอนรัน) ทิศตรงข้าม
   คือการใช้ `Option<Sexpr>` เป็น `Sexpr` อ้างว่า "นี่ไม่ใช่ลิสต์ว่าง"
   จึงต้องระบุอย่างชัดเจนด้วย `match` หรือ `unwrap`
-- ใน `match` เขียน 18 variant ของ `Sexpr` และ `none` **แบบแบนในรายการกิ่งเดียวกัน** ได้
+- ใน `match` เขียน 19 variant ของ `Sexpr` และ `none` **แบบแบนในรายการกิ่งเดียวกัน** ได้
   ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#43-match--การจับคู่รูปแบบ))
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |

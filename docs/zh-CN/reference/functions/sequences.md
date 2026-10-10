@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # 序对、S 表达式与序列
 
 泛型序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、构建在 `Iter` 之上的序列函数，以及高阶函数。
@@ -20,9 +20,10 @@
 
 ## 2. S 表达式数据 `Sexpr`
 
-`read` 返回的数据类型 `Sexpr` 有 18 种变体：
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`。
+`read` 返回的数据类型 `Sexpr` 有 19 种变体：
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`。
 `vector` 和 `array` 是用 `#(..)` 和 `#nA(..)` 写的数据（[语法参考](../syntax.md#1-词法元素)），内容分别是 `Vector<Option<Sexpr>>` 和 `Array<Option<Sexpr>>`——对 `(vector v)` 绑定的 `v` 可以直接使用 `len`、`get` 等。
+`tuple` 是用 `#{..}` 写的数据，`(tuple v)` 绑定的 `v` 是按顺序排列元素的新 `Vector<Option<Sexpr>>`（为了用同一个类型接收任意长度的元组）。
 处理 S 表达式单元的不是第 1 章通用的 `cons`/`car`/`cdr`，而是 `sexpr-*` 函数。主要在 `defmacro` 的函数体中用于组装
 和拆解形式。
 
@@ -32,7 +33,7 @@
 - 在期望 `Option<Sexpr>` 的位置，`()` 是空列表（也可以写成 `(Option::none)`）
 - 在期望 `Option<Sexpr>` 的位置，`Sexpr` 会隐式扩展（没有运行时转换）。反方向——把 `Option<Sexpr>` 当作 `Sexpr`
   使用——是在声称"不是空列表"，需要用 `match` 或 `unwrap` 明确表示
-- 在 `match` 中，`Sexpr` 的 18 种变体和 `none` 可以**平铺在同一组分支中**
+- 在 `match` 中，`Sexpr` 的 19 种变体和 `none` 可以**平铺在同一组分支中**
   （[语法参考](../syntax.md#43-match--模式匹配)）
 
 | 名称 | 形式 | 类型 | 说明 |

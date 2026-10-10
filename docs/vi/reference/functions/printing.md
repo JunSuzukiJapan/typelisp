@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
@@ -226,6 +226,7 @@ SBCL. Khi REPL hiển thị một kết quả, nó dùng cùng biểu diễn nh�
 | Kiểu | `~s` | `~a` |
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
+| Tuple `#{..}` | `#{1 "a"}` | `#{1 a}` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Giống vậy |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (con số là một số thứ tự nội bộ) | Giống vậy |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

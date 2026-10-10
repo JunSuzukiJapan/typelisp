@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # 쌍, S 식, 시퀀스
 
 제네릭 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, `Iter` 위에 쓰인 시퀀스 함수, 고차 함수.
@@ -20,10 +20,12 @@
 
 ## 2. S 식 데이터 `Sexpr`
 
-`read`가 반환하는 데이터 타입 `Sexpr`에는 18개의 변형이 있다:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+`read`가 반환하는 데이터 타입 `Sexpr`에는 19개의 변형이 있다:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
 `vector`와 `array`는 `#(..)`와 `#nA(..)`로 쓴 데이터이며([문법 레퍼런스](../syntax.md#1-어휘-요소)), 각각
 `Vector<Option<Sexpr>>`와 `Array<Option<Sexpr>>`를 담는다. `(vector v)`로 묶은 `v`에는 `len`이나 `get`을 그대로 쓸 수
+`tuple`은 `#{..}`로 쓴 데이터이며, `(tuple v)`로 묶은 `v`는 요소를 늘어놓은 새 `Vector<Option<Sexpr>>`가 된다(요소 수가 몇 개든 같은
+타입으로 받기 위해서다).
 있다.
 S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` 함수로 다룬다. 주로 `defmacro`의 본체에서 형식을 만들고
 분해하는 데 쓴다.
@@ -34,7 +36,7 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 - `Option<Sexpr>`가 기대되는 곳의 `()`는 빈 리스트이다(`(Option::none)`으로도 쓸 수 있다)
 - `Sexpr`는 `Option<Sexpr>`가 기대되는 곳에서 암묵적으로 넓어진다(실행 시 변환 없음). 반대 방향, 즉 `Option<Sexpr>`를
   `Sexpr`로 쓰는 것은 "이것은 빈 리스트가 아니다"라고 주장하는 것이므로 `match`나 `unwrap`으로 명시해야 한다
-- `match`에서는 `Sexpr`의 18개 변형과 `none`을 **같은 갈래 목록에 평평하게** 쓸 수 있다
+- `match`에서는 `Sexpr`의 19개 변형과 `none`을 **같은 갈래 목록에 평평하게** 쓸 수 있다
   ([문법 레퍼런스](../syntax.md#43-match--패턴-매칭))
 
 | 이름 | 형식 | 타입 | 설명 |

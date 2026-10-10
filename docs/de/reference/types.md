@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Typen
 
 Die Typen, die typelisp hat, und die Standard-Traits, die jeder Typ implementiert. Wie man Typen schreibt,
@@ -33,6 +33,7 @@ Einen 64-Bit-Ganzzahltyp gibt es nicht. Für Ganzzahlen, deren Breite keine Roll
 | `Result<T,E>` | Erfolg oder Fehlschlag. `ok` / `err` | Wie oben |
 | `Vector<T>` | Ein wachsendes Array | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Eine Hashtabelle. Der Schlüsseltyp muss `Hash` implementieren | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Tupel (1 bis 12 Elemente). Elemente liest man mit `t::0` | [Syntax Kapitel 2](syntax.md#2-typen-schreiben) |
 | `Task<T>` | Ein Handle auf einen Task | [Tasks](functions/concurrency.md#1-taskt--handles-auf-tasks) |
 | `Thread<T>` | Ein Handle auf einen Task, der auf einem eigenen OS-Thread läuft | [Thread](functions/concurrency.md#7-threadt--eigene-os-threads) |
 | `Chan<T>` | Ein Kanal | [Kanäle](functions/concurrency.md#2-chant--kanäle) |
@@ -44,7 +45,7 @@ Funktionstypen schreibt man `(fn (Argumenttypen...) Rückgabetyp)`, Trait-Objekt
 
 | Typ | Inhalt | Details |
 |---|---|---|
-| `Sexpr` | Ein nicht leerer S-Ausdruck. 18 Varianten: `int`, `i8` bis `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-Ausdrucksdaten](functions/sequences.md#2-s-ausdrucksdaten-sexpr) |
+| `Sexpr` | Ein nicht leerer S-Ausdruck. 19 Varianten: `int`, `i8` bis `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-Ausdrucksdaten](functions/sequences.md#2-s-ausdrucksdaten-sexpr) |
 | `Option<Sexpr>` | S-Ausdrucksdaten im Allgemeinen. Die leere Liste `()` ist `none` | Wie oben |
 
 ## 4. Typen der Standardbibliothek

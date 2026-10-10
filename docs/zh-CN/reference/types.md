@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # 类型一览
 
 typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的写法见[语法参考第 2 章](syntax.md#2-类型的写法)，各类型的
@@ -32,6 +32,7 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 | `Result<T,E>` | 成功或失败。`ok` / `err` | 同上 |
 | `Vector<T>` | 可变长数组 | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | 哈希表。键的类型须实现 `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | 元组（元素 1～12 个）。元素用 `t::0` 读取 | [语法第 2 章](syntax.md#2-类型的写法) |
 | `Task<T>` | 任务的句柄 | [任务](functions/concurrency.md#1-taskt--任务句柄) |
 | `Thread<T>` | 在专用 OS 线程上运行的任务的句柄 | [Thread](functions/concurrency.md#7-threadt--专用-os-线程) |
 | `Chan<T>` | 通道 | [通道](functions/concurrency.md#2-chant--通道) |
@@ -42,7 +43,7 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 | 类型 | 内容 | 详情 |
 |---|---|---|
-| `Sexpr` | 非空的 S 表达式。`int`、`i8` 至 `u32`、`f32`、`f64`、`char`、`bool`、`sym`、`str`、`cons`、`ratio`、`path`、`vector`、`array` 共 18 种变体 | [S 表达式数据](functions/sequences.md#2-s-表达式数据-sexpr) |
+| `Sexpr` | 非空的 S 表达式。`int`、`i8` 至 `u32`、`f32`、`f64`、`char`、`bool`、`sym`、`str`、`cons`、`ratio`、`path`、`vector`、`array`、`tuple` 共 19 种变体 | [S 表达式数据](functions/sequences.md#2-s-表达式数据-sexpr) |
 | `Option<Sexpr>` | 一般的 S 表达式数据。空列表 `()` 是 `none` | 同上 |
 
 ## 4. 标准库中的类型

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Pares, expressões S e sequências
 
 O par genérico `cons-cell`, os dados de expressões S `Sexpr`, os símbolos, as funções de sequência escritas
@@ -24,11 +24,13 @@ linguagem.
 
 ## 2. Dados de expressões S `Sexpr`
 
-O tipo de dados `Sexpr` devolvido por `read` tem 18 variantes:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+O tipo de dados `Sexpr` devolvido por `read` tem 19 variantes:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
 `vector` e `array` são dados escritos como `#(..)` e `#nA(..)` ([referência de
 sintaxe](../syntax.md#1-elementos-léxicos)), que contêm respectivamente um `Vector<Option<Sexpr>>` e
 um `Array<Option<Sexpr>>`: `len`, `get` e o resto funcionam diretamente sobre o `v` que `(vector v)`
+`tuple` são dados escritos com `#{..}`, e o `v` que `(tuple v)` vincula é um `Vector<Option<Sexpr>>`
+novo com os elementos (para receber com um único tipo uma tupla de qualquer tamanho).
 vincula.
 As células de expressões S não são tratadas pelos `cons`/`car`/`cdr` gerais do capítulo 1, mas pelas funções
 `sexpr-*`. Elas são usadas principalmente nos corpos de `defmacro` para construir e desmontar formas.
@@ -41,7 +43,7 @@ devolvem `Option<Sexpr>`.
 - `Sexpr` é ampliado implicitamente onde se espera um `Option<Sexpr>` (sem conversão em tempo de execução). A
   direção oposta, usar um `Option<Sexpr>` como `Sexpr`, afirma "isto não é a lista vazia", então precisa ser
   declarada explicitamente com `match` ou `unwrap`
-- No `match`, as 18 variantes de `Sexpr` e `none` podem ser escritas **planas na mesma lista de ramos**
+- No `match`, as 19 variantes de `Sexpr` e `none` podem ser escritas **planas na mesma lista de ramos**
   ([Referência de sintaxe](../syntax.md#43-match--casamento-de-padrões))
 
 | Nome | Forma | Tipo | Descrição |

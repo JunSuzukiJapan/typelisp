@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -74,6 +74,12 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   adalah galat pembacaan. Tipenya ditentukan seperti vektor dan berupa `Array<T>` (tanpa elemen,
   konteks harus memberikannya, seperti `(the Array<f64> #2A(()))`). Sebagai data S-expression ia
   adalah `Array<Option<Sexpr>>`: varian `array` dari `Sexpr`.
+- **Tuple**: `#{"foo" 123 45.6}`. Isinya semuanya literal dan tidak dievaluasi (`a` pada `#{a b}`
+  adalah simbol). Tipe setiap elemen ditentukan oleh konteks, posisi demi posisi
+  (`(the #{i32 f64} #{1 2.0})`), dan tanpa konteks adalah tipe elemen itu sendiri (`#{"foo" 123}`
+  adalah `#{string int}`). Tuple memiliki 1 sampai 12 elemen. Setiap evaluasi membuat tuple baru.
+  Untuk membangunnya dari nilai yang dihitung, gunakan `(tuple a b)`. Di tempat yang mengharapkan
+  data S-ekspresi, ia menjadi tuple yang semua elemennya data: varian `tuple` dari `Sexpr`.
 - **Daftar kosong `()`**: tergantung konteks, nilai tipe `Unit` atau `none` pada `Option<Sexpr>`.
   **`Sexpr` tidak memiliki varian daftar kosong**: `Sexpr` berarti "S-expression tak kosong", dan
   tipe data S-expression adalah `Option<Sexpr>` (lihat "Pola untuk `Option<Sexpr>`" pada
@@ -111,18 +117,27 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
   perulangan yang tidak pernah kembali. Ia cocok dengan tipe apa pun yang diharapkan)
 - **Tipe fungsi**: `(fn (tipe-argumen...) tipe-kembalian)`. Tipe fungsi dengan argumen variadik
   adalah `(fn (tipe-argumen... &rest tipe-elemen) tipe-kembalian)`.
-- **Tipe generik**: `Name<T1,T2,...>` (dibaca sebagai satu token tanpa spasi). Misalnya
-  `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`. Tipe unit `()`
-  juga dapat ditulis sebagai argumen tipe (`Result<(), FileError>`). `(`/`)` biasanya adalah
-  pembatas yang mengakhiri token, tetapi selama kurung sudut terbuka, sepasang karakter ini
-  diloloskan. `()` juga dapat dipakai sebagai tipe field atau tipe argumen.
-- **Bentuk penerapan tipe generik**: `(Name T1 T2 ...)`, ejaan daftar yang menamai tipe yang sama
-  dengan `Name<T1,T2,...>`. Misalnya `(vector char)` sama dengan `Vector<char>`. Bentuk nama adalah
-  cara penulisan yang biasa; bentuk ini **ada untuk ketika argumen tipe tidak dapat dieja di dalam
-  nama**: argumen tipe sendiri adalah ekspresi tipe, tetapi di dalam nama satu token hanya nama,
-  `()`, dan `:dyn` yang dapat ditulis, bukan tipe fungsi (tidak ada ejaan seperti
-  `Vector<(fn (i32) i32)>`). Ia juga dapat muncul dalam bentuk ini ketika implementasi menampilkan
-  tipe, seperti hasil mensubstitusi tipe terkait sebuah trait ke dalam signature.
+- **Tipe generik**: `Name<T1,T2,...>`. Contohnya `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. Bila sebuah tipe mengikuti `<` tepat setelah nama, pembaca
+  membaca sampai `>` yang berpasangan sebagai argumen tipe. Di dalamnya, spasi dan baris baru boleh
+  memisahkan bagian-bagiannya (`HashTable<string, int>`), dan tipe unit `()`
+  (`Result<(), FileError>`), `:dyn Trait`, serta tipe tuple dapat ditulis. Bila tidak ada tipe
+  setelah `<`, maka `<` itu bagian dari nama (`<=`, `string<`). Argumen tipe yang tidak ditutup
+  dengan `>`, atau tidak berbentuk tipe, adalah kesalahan baca (`(a<b c)` juga kesalahan, pada
+  argumen tipe `b c`). `()` juga dapat dipakai sebagai tipe field atau tipe argumen.
+- **Bentuk penerapan tipe generik**: `(Name T1 T2 ...)`, penulisan berbentuk list yang menamai tipe
+  yang sama dengan `Name<T1,T2,...>`. Contohnya `(vector char)` sama dengan `Vector<char>`. Bentuk
+  nama adalah penulisan yang biasa; bentuk ini **ada untuk saat argumen tipe tidak dapat ditulis di
+  dalam nama**: argumen tipe sendiri adalah ekspresi tipe, tetapi di dalam `<..>` hanya nama, `()`,
+  `:dyn`, dan tipe tuple yang dapat ditulis, bukan tipe fungsi (`Vector<(fn (i32) i32)>` adalah
+  kesalahan baca; bila tipe fungsi diberi nama dengan `deftype`, `Vector<F>` dapat ditulis). Tipe
+  juga bisa muncul dalam bentuk ini ketika implementasi menampilkannya, misalnya sebagai hasil
+  menyubstitusikan tipe terkait sebuah trait ke dalam signature.
+- **Tipe tuple**: `#{int string}` (bentuk yang sama dengan nilainya). Tuple memiliki 1 sampai 12
+  elemen, dan tipe tuple juga dapat menjadi argumen tipe (`Vector<#{int string}>`). Elemen dibaca
+  dengan `t::0` `t::1` dan diubah dengan `(setf t::0 v)`. `Eq`, `Ord` (membandingkan mulai dari
+  elemen pertama), `Hash`, dan `print-object` tersedia bila semua tipe elemen
+  mengimplementasikannya.
 - **Nama tipe terkualifikasi**: dapat dikualifikasi dengan `::`, seperti `module::Type`.
 - **Tipe objek trait**: `:dyn Trait` (dua kata yang dipisahkan spasi membentuk satu tipe).
   Mewakili nilai yang tipe konkretnya ditentukan saat dijalankan; pemanggilan metode trait melalui
@@ -1178,6 +1193,8 @@ Jenis pola:
   komputasi), dan implementasi `Eq` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
   dapat merujuk apa pun yang terlihat dari posisi cabang (argumen, pengikatan luar, variabel global)
 - `(Ctor sub-pattern...)` — pola konstruktor (`Some x` `None` `Cons a d` `Ok v` dan sebagainya)
+- `#{p0 p1 ...}` — pola tuple. Setiap elemen dicocokkan dengan subpolanya sendiri. Terhadap `Sexpr`,
+  ia hanya cocok dengan data `#{..}` yang jumlah elemennya sama
 - `(:or p1 p2 ...)` — pola atau: cocok bila salah satu alternatif cocok. Badannya hanya satu, jadi
   setiap alternatif harus mengikat variabel yang sama dengan tipe yang sama. Dapat juga ditulis di
   dalam pola konstruktor (`(some (:or (circle r) (rect r _)))`)
@@ -1231,7 +1248,7 @@ enumerasi, sehingga `_` (atau pola pengikatan yang bertindak sebagai wildcard) d
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Terhadap scrutinee `Sexpr`, selain 18 pola varian bawaan di atas, **pola downcast** (mengambil
+Terhadap scrutinee `Sexpr`, selain 19 pola varian bawaan di atas, **pola downcast** (mengambil
 instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, dengan `match`, instans
 `defstruct`/`defenum` (bab 3) yang dikonversi secara implisit menjadi `Sexpr`, seperti pada
 `(list p 42)`:
@@ -1253,7 +1270,7 @@ instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, d
 
 **Pola untuk `Option<Sexpr>`**: tipe data S-expression bukan `Sexpr` melainkan `Option<Sexpr>`, dan
 daftar kosong bukan varian `Sexpr` melainkan `none` pada `Option`. Jadi ketika mencocokkan
-`Option<Sexpr>`, 18 varian `Sexpr` dan `none` dapat ditulis **rata dalam daftar cabang yang sama**
+`Option<Sexpr>`, 19 varian `Sexpr` dan `none` dapat ditulis **rata dalam daftar cabang yang sama**
 (tidak perlu `match` luar untuk mengupas `Option`):
 
 ```lisp
@@ -1266,7 +1283,7 @@ daftar kosong bukan varian `Sexpr` melainkan `none` pada `Option`. Jadi ketika m
     (_          9)))
 ```
 
-Kelengkapan diperiksa dalam semesta rata yang sama: 18 varian `Sexpr` ditambah `none`, 19 seluruhnya.
+Kelengkapan diperiksa dalam semesta rata yang sama: 19 varian `Sexpr` ditambah `none`, 20 seluruhnya.
 Melupakan `(none)` adalah kesalahan kecuali ada `_`. `(some x)` juga dapat ditulis dan mengikat
 "sesuatu yang tak kosong".
 

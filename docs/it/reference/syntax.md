@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -76,6 +76,12 @@ metodi predefiniti, si veda [Funzioni predefinite](functions/README.md); per l'e
   errore di lettura. Il tipo si decide come per i vettori ed è un `Array<T>` (senza elementi deve
   darlo il contesto, come in `(the Array<f64> #2A(()))`). Come dato S-expression è un
   `Array<Option<Sexpr>>`: la variante `array` di `Sexpr`.
+- **Tuple**: `#{"foo" 123 45.6}`. Il contenuto è fatto solo di letterali e non viene valutato (la
+  `a` di `#{a b}` è un simbolo). Il tipo di ogni elemento è deciso dal contesto, posizione per
+  posizione (`(the #{i32 f64} #{1 2.0})`), e senza contesto è il tipo proprio dell'elemento
+  (`#{"foo" 123}` è `#{string int}`). Una tupla ha da 1 a 12 elementi. Ogni valutazione crea una
+  nuova tupla. Per costruirne una da valori calcolati si usa `(tuple a b)`. Dove sono attesi dati
+  S-espressione, è una tupla i cui elementi sono tutti dati: la variante `tuple` di `Sexpr`.
 - **La lista vuota `()`**: a seconda del contesto, il valore del tipo `Unit` o il `none` di
   `Option<Sexpr>`. **`Sexpr` non ha una variante lista vuota**: `Sexpr` significa "una S-expression non
   vuota", e il tipo dei dati S-expression è `Option<Sexpr>` (si veda "Pattern per `Option<Sexpr>`" in
@@ -113,19 +119,27 @@ Nel sorgente, i tipi si scrivono come normali simboli o liste.
   che non ritorna mai. Si adatta a qualsiasi tipo atteso)
 - **Tipi funzione**: `(fn (tipi-degli-argomenti...) tipo-di-ritorno)`. Il tipo di una funzione con
   argomenti variadici è `(fn (tipi-degli-argomenti... &rest tipo-dell-elemento) tipo-di-ritorno)`.
-- **Tipi generici**: `Name<T1,T2,...>` (letto come un unico token senza spazi).
-  Per esempio `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  Il tipo unit `()` si può scrivere anche come argomento di tipo (`Result<(), FileError>`). `(`/`)` sono
-  normalmente delimitatori che terminano un token, ma finché una parentesi angolare è aperta, questa
-  coppia di caratteri viene lasciata passare. `()` si può usare anche come tipo di campo o di argomento.
-- **La forma applicativa dei tipi generici**: `(Name T1 T2 ...)`, una grafia a lista che nomina lo stesso
-  tipo di `Name<T1,T2,...>`. Per esempio `(vector char)` equivale a `Vector<char>`.
-  La forma con nome è il modo usuale di scriverlo; questa forma **esiste per quando un argomento di tipo
-  non si può scrivere dentro un nome**: un argomento di tipo è esso stesso un'espressione di tipo, ma
-  dentro un nome a token singolo si possono scrivere solo nomi, `()` e `:dyn`, non tipi funzione (non
-  esiste una grafia come `Vector<(fn (i32) i32)>`). Può anche comparire in questa forma quando
-  l'implementazione mostra un tipo, come il risultato della sostituzione di un tipo associato di un
-  trait in una firma.
+- **Tipi generici**: `Name<T1,T2,...>`. Per esempio `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. Quando un tipo segue un `<` subito dopo un nome, il lettore
+  legge fino al `>` corrispondente come argomenti di tipo. Al loro interno spazi e a capo possono
+  separare le parti (`HashTable<string, int>`), e si possono scrivere il tipo unit `()`
+  (`Result<(), FileError>`), `:dyn Trait` e tipi tupla. Se al `<` non segue alcun tipo, quel `<` fa
+  parte del nome (`<=`, `string<`). Argomenti di tipo non chiusi da `>`, o che non hanno la forma di
+  tipi, sono un errore di lettura (anche `(a<b c)` è un errore, negli argomenti di tipo `b c`). `()`
+  si può usare anche come tipo di campo o di argomento.
+- **La forma applicativa dei tipi generici**: `(Name T1 T2 ...)`, una scrittura a lista che indica
+  lo stesso tipo di `Name<T1,T2,...>`. Per esempio `(vector char)` è uguale a `Vector<char>`. La
+  forma a nome è la scrittura abituale; questa forma **esiste per quando un argomento di tipo non si
+  può scrivere dentro un nome**: un argomento di tipo è esso stesso un'espressione di tipo, ma
+  dentro `<..>` si possono scrivere solo nomi, `()`, `:dyn` e tipi tupla, non tipi funzione
+  (`Vector<(fn (i32) i32)>` è un errore di lettura; dando un nome al tipo funzione con `deftype` si
+  può scrivere `Vector<F>`). Un tipo può comparire in questa forma anche quando l'implementazione lo
+  mostra, per esempio come risultato della sostituzione del tipo associato di un trait in una firma.
+- **Tipi tupla**: `#{int string}` (la stessa forma dei valori). Una tupla ha da 1 a 12 elementi, e
+  un tipo tupla può anche essere un argomento di tipo (`Vector<#{int string}>`). Gli elementi si
+  leggono con `t::0` `t::1` e si modificano con `(setf t::0 v)`. `Eq`, `Ord` (confronto a partire
+  dal primo elemento), `Hash` e `print-object` sono disponibili quando tutti i tipi degli elementi
+  li implementano.
 - **Nomi di tipo qualificati**: possono essere qualificati con `::`, come in `module::Type`.
 - **Tipi oggetto-trait**: `:dyn Trait` (due parole separate da spazio che formano un unico tipo).
   Rappresenta un valore il cui tipo concreto è deciso a runtime; le chiamate ai metodi del trait passano
@@ -1179,6 +1193,8 @@ Tipi di pattern:
   fare riferimento a qualsiasi cosa visibile dalla posizione del ramo (argomenti, binding esterni,
   globali)
 - `(Ctor sub-pattern...)` — pattern di costruttore (`Some x` `None` `Cons a d` `Ok v` e così via)
+- `#{p0 p1 ...}` — un pattern di tupla. Ogni elemento è confrontato con il proprio sottopattern.
+  Contro un `Sexpr` corrisponde solo a dati `#{..}` con lo stesso numero di elementi
 - `(:or p1 p2 ...)` — un pattern « or »: corrisponde quando corrisponde una qualsiasi delle
   alternative. Il corpo è uno solo, quindi ogni alternativa deve legare le stesse variabili con gli
   stessi tipi. Si può scrivere anche dentro un pattern costruttore
@@ -1234,7 +1250,7 @@ carattere jolly):
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Contro uno scrutinee `Sexpr`, oltre ai 18 pattern di variante predefiniti sopra, si possono scrivere
+Contro uno scrutinee `Sexpr`, oltre ai 19 pattern di variante predefiniti sopra, si possono scrivere
 **pattern di downcast** (estrazione di istanze di ADT definiti dall'utente): sintassi per riottenere,
 con `match`, un'istanza di una `defstruct`/`defenum` (capitolo 3) che è stata convertita implicitamente
 in `Sexpr`, come in `(list p 42)`:
@@ -1256,7 +1272,7 @@ in `Sexpr`, come in `(list p 42)`:
 
 **Pattern per `Option<Sexpr>`**: il tipo dei dati S-expression non è `Sexpr` ma `Option<Sexpr>`, e la
 lista vuota non è una variante di `Sexpr` ma il `none` di `Option`. Quindi quando si confronta un
-`Option<Sexpr>`, le 18 varianti di `Sexpr` e `none` si possono scrivere **piatte nella stessa lista di
+`Option<Sexpr>`, le 19 varianti di `Sexpr` e `none` si possono scrivere **piatte nella stessa lista di
 rami** (non serve un `match` esterno per togliere l'`Option`):
 
 ```lisp
@@ -1269,7 +1285,7 @@ rami** (non serve un `match` esterno per togliere l'`Option`):
     (_          9)))
 ```
 
-L'esaustività viene controllata nello stesso universo piatto: le 18 varianti di `Sexpr` più `none`, 19 in
+L'esaustività viene controllata nello stesso universo piatto: le 19 varianti di `Sexpr` più `none`, 20 in
 tutto. Dimenticare `(none)` è un errore a meno che non ci sia un `_`. Si può scrivere anche `(some x)`,
 che associa "qualcosa di non vuoto".
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -70,6 +70,12 @@ a informacje o czytaniu komunikatów o błędach w [errors.md](errors.md).
   się tak jak dla wektorów i jest to `Array<T>` (bez elementów musi go podać kontekst, jak w
   `(the Array<f64> #2A(()))`). Jako dane w postaci S-wyrażeń jest to `Array<Option<Sexpr>>`: wariant
   `array` typu `Sexpr`.
+- **Krotki**: `#{"foo" 123 45.6}`. Zawartość to same literały i nie jest obliczana (`a` w `#{a b}`
+  to symbol). Typ każdego elementu ustala kontekst, pozycja po pozycji
+  (`(the #{i32 f64} #{1 2.0})`), a bez kontekstu jest to własny typ elementu (`#{"foo" 123}` to
+  `#{string int}`). Krotka ma od 1 do 12 elementów. Każde obliczenie tworzy nową krotkę. Aby
+  zbudować ją z obliczonych wartości, używa się `(tuple a b)`. Tam, gdzie oczekiwane są dane
+  S-wyrażeń, jest to krotka, której wszystkie elementy są danymi: wariant `tuple` typu `Sexpr`.
 - **Pusta lista `()`**: zależnie od kontekstu wartość typu `Unit` lub `none` z
   `Option<Sexpr>`. **`Sexpr` nie ma wariantu pustej listy**: `Sexpr` oznacza „niepuste S-wyrażenie",
   a typem danych w postaci S-wyrażeń jest `Option<Sexpr>` (zobacz „Wzorce dla `Option<Sexpr>`" w
@@ -106,18 +112,26 @@ W kodzie źródłowym typy zapisuje się jako zwykłe symbole lub listy.
   która nigdy nie wraca. Pasuje do każdego oczekiwanego typu)
 - **Typy funkcyjne**: `(fn (typy-argumentów...) typ-zwracany)`. Typ funkcji o zmiennej liczbie
   argumentów to `(fn (typy-argumentów... &rest typ-elementu) typ-zwracany)`.
-- **Typy generyczne**: `Name<T1,T2,...>` (czytane jako pojedynczy token bez spacji).
-  Na przykład `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  Typ jednostkowy `()` można też zapisać jako argument typu (`Result<(), FileError>`). `(`/`)` to
-  zwykle ograniczniki kończące token, ale gdy nawias ostrokątny jest otwarty, ta jedna para znaków
-  jest przepuszczana. `()` można też użyć jako typu pola lub typu argumentu.
-- **Forma aplikacji typów generycznych**: `(Name T1 T2 ...)`, zapis listowy nazywający ten sam typ co
-  `Name<T1,T2,...>`. Na przykład `(vector char)` to to samo co `Vector<char>`.
-  Forma z nazwą jest zwykłym sposobem zapisu; ta forma **istnieje na wypadek, gdy argumentu typu nie da się
-  zapisać wewnątrz nazwy**: argument typu sam jest wyrażeniem typu, ale wewnątrz jednotokenowej nazwy
-  można zapisać tylko nazwy, `()` i `:dyn`, a nie typy funkcyjne (nie ma takiego zapisu jak
-  `Vector<(fn (i32) i32)>`). Może też pojawić się w tej formie, gdy implementacja pokazuje typ, na przykład
-  wynik podstawienia typu powiązanego traitu do sygnatury.
+- **Typy generyczne**: `Name<T1,T2,...>`. Na przykład `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. Gdy po `<` stojącym tuż za nazwą następuje typ, czytnik czyta
+  do odpowiadającego `>` jako argumenty typu. W ich wnętrzu części mogą oddzielać spacje i znaki
+  nowego wiersza (`HashTable<string, int>`), można też zapisać typ unit `()`
+  (`Result<(), FileError>`), `:dyn Trait` i typy krotek. Jeśli po `<` nie następuje typ, to `<` jest
+  częścią nazwy (`<=`, `string<`). Argumenty typu niezamknięte przez `>` albo niemające postaci
+  typów są błędem odczytu (także `(a<b c)` jest błędem, w argumentach typu `b c`). `()` można też
+  używać jako typu pola lub argumentu.
+- **Forma aplikacji typów generycznych**: `(Name T1 T2 ...)`, zapis w postaci listy oznaczający ten
+  sam typ co `Name<T1,T2,...>`. Na przykład `(vector char)` to to samo co `Vector<char>`. Forma
+  nazwy jest zwykłym zapisem; ta forma **istnieje na wypadek, gdy argumentu typu nie da się zapisać
+  w nazwie**: argument typu sam jest wyrażeniem typu, ale wewnątrz `<..>` można zapisać tylko nazwy,
+  `()`, `:dyn` i typy krotek, a nie typy funkcji (`Vector<(fn (i32) i32)>` jest błędem odczytu; po
+  nazwaniu typu funkcji przez `deftype` można zapisać `Vector<F>`). W tej postaci typ może też
+  pojawić się, gdy implementacja go pokazuje, na przykład jako wynik podstawienia typu powiązanego
+  traitu do sygnatury.
+- **Typy krotek**: `#{int string}` (ta sama postać co wartości). Krotka ma od 1 do 12 elementów, a
+  typ krotki może też być argumentem typu (`Vector<#{int string}>`). Elementy czyta się przez `t::0`
+  `t::1`, a zmienia przez `(setf t::0 v)`. `Eq`, `Ord` (porównanie od pierwszego elementu), `Hash` i
+  `print-object` są dostępne, gdy implementują je wszystkie typy elementów.
 - **Kwalifikowane nazwy typów**: można je kwalifikować za pomocą `::`, jak w `module::Type`.
 - **Typy obiektów traitów**: `:dyn Trait` (dwa słowa rozdzielone spacją tworzące jeden typ). Reprezentuje wartość,
   której konkretny typ jest ustalany w czasie działania; wywołania metod traitu idą przez vtable (dyspozycja dynamiczna).
@@ -1122,6 +1136,8 @@ Rodzaje wzorców:
   implementacja `Eq` staje się regułą porównania bez zmian. `expr` może odwoływać się do wszystkiego, co jest widoczne z
   pozycji ramienia (argumenty, zewnętrzne wiązania, zmienne globalne)
 - `(Ctor sub-pattern...)` — wzorce konstruktorów (`Some x` `None` `Cons a d` `Ok v` i tak dalej)
+- `#{p0 p1 ...}` — wzorzec krotki. Każdy element jest dopasowywany własnym podwzorcem. Wobec `Sexpr`
+  pasuje tylko do danych `#{..}` o tej samej liczbie elementów
 - `(:or p1 p2 ...)` — wzorzec „lub”: pasuje, gdy pasuje dowolna z alternatyw. Ciało jest jedno, więc
   każda alternatywa musi wiązać te same zmienne z tymi samymi typami. Można go też zapisać wewnątrz
   wzorca konstruktora (`(some (:or (circle r) (rect r _)))`)
@@ -1173,7 +1189,7 @@ wyliczeniem, więc wymagane jest `_` (lub wzorzec wiążący pełniący rolę wi
     (_     0)))          ; typ bez wariantów potrzebuje `_`
 ```
 
-Względem badanej wartości `Sexpr`, poza 18 wbudowanymi wzorcami wariantów powyżej, można zapisać **wzorce rzutowania w dół**
+Względem badanej wartości `Sexpr`, poza 19 wbudowanymi wzorcami wariantów powyżej, można zapisać **wzorce rzutowania w dół**
 (wyjmowanie instancji zdefiniowanych przez użytkownika ADT): składnię do odzyskiwania za pomocą `match`
 instancji `defstruct`/`defenum` (rozdział 3), która została niejawnie skonwertowana do `Sexpr`, jak w
 `(list p 42)`:
@@ -1194,7 +1210,7 @@ instancji `defstruct`/`defenum` (rozdział 3), która została niejawnie skonwer
 
 **Wzorce dla `Option<Sexpr>`**: typem danych w postaci S-wyrażeń nie jest `Sexpr`, lecz `Option<Sexpr>`, a
 pusta lista nie jest wariantem `Sexpr`, lecz `none` z `Option`. Zatem przy dopasowywaniu `Option<Sexpr>`
-18 wariantów `Sexpr` i `none` można zapisać **płasko w tej samej liście ramion** (nie jest potrzebny zewnętrzny
+19 wariantów `Sexpr` i `none` można zapisać **płasko w tej samej liście ramion** (nie jest potrzebny zewnętrzny
 `match` zdejmujący `Option`):
 
 ```lisp
@@ -1207,7 +1223,7 @@ pusta lista nie jest wariantem `Sexpr`, lecz `none` z `Option`. Zatem przy dopas
     (_          9)))
 ```
 
-Wyczerpywalność jest sprawdzana w tym samym płaskim uniwersum: 18 wariantów `Sexpr` plus `none`, razem 19.
+Wyczerpywalność jest sprawdzana w tym samym płaskim uniwersum: 19 wariantów `Sexpr` plus `none`, razem 20.
 Zapomnienie `(none)` jest błędem, chyba że jest `_`. Można też zapisać `(some x)`, które wiąże „coś
 niepustego".
 

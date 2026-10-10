@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # การพิมพ์
 
 `print`/`println`/`format`, ตัวพิมพ์แบบหนึ่งอาร์กิวเมนต์, pretty printer, `print-object` และ
@@ -228,6 +228,7 @@ generic function `print-object` ของ CL (CLHS 22.1.4)
 | ชนิด | `~s` | `~a` |
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
+| ทูเพิล `#{..}` | `#{1 "a"}` | `#{1 a}` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | เหมือนกัน |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (ตัวเลขคือหมายเลขลำดับภายใน) | เหมือนกัน |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

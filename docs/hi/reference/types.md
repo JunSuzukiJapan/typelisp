@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -31,6 +31,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | `Result<T,E>` | सफलता या विफलता। `ok` / `err` | ऊपर जैसा |
 | `Vector<T>` | बढ़ने योग्य ऐरे | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | हैश टेबल। कुंजी टाइप को `Hash` लागू करना चाहिए | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | टपल (1 से 12 तत्व)। तत्व `t::0` से पढ़े जाते हैं | [सिंटैक्स अध्याय 2](syntax.md#2-टाइप-लिखना) |
 | `Task<T>` | टास्क का हैंडल | [टास्क](functions/concurrency.md#1-taskt--टास्क-के-हैंडल) |
 | `Thread<T>` | समर्पित OS थ्रेड पर चल रहे टास्क का हैंडल | [Thread](functions/concurrency.md#7-threadt--समर्पित-os-थ्रेड) |
 | `Chan<T>` | चैनल | [चैनल](functions/concurrency.md#2-chant--चैनल) |
@@ -41,7 +42,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 | टाइप | सामग्री | विवरण |
 |---|---|---|
-| `Sexpr` | एक गैर-खाली S-एक्सप्रेशन। 18 variant: `int`, `i8` से `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-एक्सप्रेशन डेटा](functions/sequences.md#2-s-एक्सप्रेशन-डेटा-sexpr) |
+| `Sexpr` | एक गैर-खाली S-एक्सप्रेशन। 19 variant: `int`, `i8` से `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-एक्सप्रेशन डेटा](functions/sequences.md#2-s-एक्सप्रेशन-डेटा-sexpr) |
 | `Option<Sexpr>` | सामान्य रूप से S-एक्सप्रेशन डेटा। खाली सूची `()` `none` है | ऊपर जैसा |
 
 ## 4. स्टैंडर्ड लाइब्रेरी के टाइप

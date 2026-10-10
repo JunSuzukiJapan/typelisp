@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Stampa
 
 `print`/`println`/`format`, i printer a un argomento, il pretty printer, `print-object` e le variabili che
@@ -233,6 +233,7 @@ stampati allo stesso modo di SBCL. Quando il REPL mostra un risultato, usa la st
 | Tipo | `~s` | `~a` |
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
+| Tupla `#{..}` | `#{1 "a"}` | `#{1 a}` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Lo stesso |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (il numero è un numero seriale interno) | Lo stesso |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -33,6 +33,7 @@ Không có kiểu số nguyên 64 bit. Với các số nguyên mà độ rộng 
 | `Result<T,E>` | Thành công hoặc thất bại. `ok` / `err` | Như trên |
 | `Vector<T>` | Một mảng có thể tăng trưởng | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Một bảng băm. Kiểu khóa phải triển khai `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Tuple (1 đến 12 phần tử). Phần tử được đọc bằng `t::0` | [Cú pháp chương 2](syntax.md#2-cách-viết-kiểu) |
 | `Task<T>` | Một handle tới một task | [Task](functions/concurrency.md#1-taskt--handle-tới-các-task) |
 | `Thread<T>` | Một handle tới một task chạy trên thread HĐH riêng | [Thread](functions/concurrency.md#7-threadt--các-thread-hđh-riêng) |
 | `Chan<T>` | Một kênh | [Kênh](functions/concurrency.md#2-chant--kênh) |
@@ -44,7 +45,7 @@ Kiểu hàm được viết `(fn (các-kiểu-đối-số...) kiểu-trả-về)
 
 | Kiểu | Nội dung | Chi tiết |
 |---|---|---|
-| `Sexpr` | Một S-expression không rỗng. 18 variant: `int`, `i8` đến `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Dữ liệu S-expression](functions/sequences.md#2-dữ-liệu-s-expression-sexpr) |
+| `Sexpr` | Một S-expression không rỗng. 19 variant: `int`, `i8` đến `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Dữ liệu S-expression](functions/sequences.md#2-dữ-liệu-s-expression-sexpr) |
 | `Option<Sexpr>` | Dữ liệu S-expression nói chung. Danh sách rỗng `()` là `none` | Như trên |
 
 ## 4. Các kiểu trong thư viện chuẩn

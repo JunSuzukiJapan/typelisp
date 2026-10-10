@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # 型別一覽
 
 typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的寫法見[語法參考第 2 章](syntax.md#2-型別的寫法)，各型別的函式與方法見
@@ -32,6 +32,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 | `Result<T,E>` | 成功或失敗。`ok` / `err` | 同上 |
 | `Vector<T>` | 可變長度陣列 | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | 雜湊表。鍵的型別須實作 `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | 元組（元素 1～12 個）。元素用 `t::0` 讀取 | [語法第 2 章](syntax.md#2-型別的寫法) |
 | `Task<T>` | 任務的控制代碼 | [任務](functions/concurrency.md#1-taskt--任務控制代碼) |
 | `Thread<T>` | 在專用 OS 執行緒上執行的任務的控制代碼 | [Thread](functions/concurrency.md#7-threadt--專用-os-執行緒) |
 | `Chan<T>` | 通道 | [通道](functions/concurrency.md#2-chant--通道) |
@@ -42,7 +43,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 
 | 型別 | 內容 | 詳情 |
 |---|---|---|
-| `Sexpr` | 非空的 S 運算式。`int`、`i8` 至 `u32`、`f32`、`f64`、`char`、`bool`、`sym`、`str`、`cons`、`ratio`、`path`、`vector`、`array` 共 18 種變體 | [S 運算式資料](functions/sequences.md#2-s-運算式資料-sexpr) |
+| `Sexpr` | 非空的 S 運算式。`int`、`i8` 至 `u32`、`f32`、`f64`、`char`、`bool`、`sym`、`str`、`cons`、`ratio`、`path`、`vector`、`array`、`tuple` 共 19 種變體 | [S 運算式資料](functions/sequences.md#2-s-運算式資料-sexpr) |
 | `Option<Sexpr>` | 一般的 S 運算式資料。空串列 `()` 是 `none` | 同上 |
 
 ## 4. 標準函式庫中的型別

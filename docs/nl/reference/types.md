@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Types
 
 De types die typelisp heeft en de standaardtraits die elk type implementeert. Hoe je types schrijft
@@ -34,6 +34,7 @@ Er is geen 64-bits geheel type. Gebruik voor gehele getallen waarvan de breedte 
 | `Result<T,E>` | Succes of mislukking. `ok` / `err` | Idem |
 | `Vector<T>` | Een groeibare array | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Een hashtabel. Het sleuteltype moet `Hash` implementeren | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Tuple (1 tot 12 elementen). Elementen lees je met `t::0` | [Syntaxis hoofdstuk 2](syntax.md#2-types-schrijven) |
 | `Task<T>` | Een handle naar een taak | [Taken](functions/concurrency.md#1-taskt--handles-voor-taken) |
 | `Thread<T>` | Een handle naar een taak die op een eigen OS-thread draait | [Thread](functions/concurrency.md#7-threadt--eigen-os-threads) |
 | `Chan<T>` | Een kanaal | [Kanalen](functions/concurrency.md#2-chant--kanalen) |
@@ -45,7 +46,7 @@ Functietypes worden geschreven als `(fn (argumenttypes...) returntype)`, en trai
 
 | Type | Inhoud | Details |
 |---|---|---|
-| `Sexpr` | Een niet-lege S-expressie. 18 varianten: `int`, `i8` tot en met `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-expressiedata](functions/sequences.md#2-s-expressiedata-sexpr) |
+| `Sexpr` | Een niet-lege S-expressie. 19 varianten: `int`, `i8` tot en met `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-expressiedata](functions/sequences.md#2-s-expressiedata-sexpr) |
 | `Option<Sexpr>` | S-expressiedata in het algemeen. De lege lijst `()` is `none` | Idem |
 
 ## 4. Types in de standaardbibliotheek

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Cặp, S-expression và dãy
 
 Cặp generic `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, các hàm trên dãy được viết dựa trên `Iter`,
@@ -23,11 +23,13 @@ hoặc bằng `(car variable)`/`(cdr variable)`. Để thay đổi chúng, hãy 
 
 ## 2. Dữ liệu S-expression `Sexpr`
 
-Kiểu dữ liệu `Sexpr` do `read` trả về có 18 variant:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+Kiểu dữ liệu `Sexpr` do `read` trả về có 19 variant:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
 `vector` và `array` là dữ liệu viết dưới dạng `#(..)` và `#nA(..)` ([Tham chiếu cú
 pháp](../syntax.md#1-cú-pháp-từ-vựng)), lần lượt chứa một `Vector<Option<Sexpr>>` và một
 `Array<Option<Sexpr>>`: `len`, `get` và các hàm khác dùng trực tiếp được trên `v` mà `(vector v)`
+`tuple` là dữ liệu viết bằng `#{..}`, và `v` mà `(tuple v)` gắn là một `Vector<Option<Sexpr>>` mới
+gồm các phần tử (để nhận tuple ở mọi độ dài bằng một kiểu).
 gắn.
 Các ô S-expression được xử lý không phải bằng `cons`/`car`/`cdr` tổng quát của chương 1 mà bằng các hàm
 `sexpr-*`. Chúng được dùng chủ yếu trong thân `defmacro` để dựng và tách các dạng.
@@ -40,7 +42,7 @@ nhận và trả về `Option<Sexpr>`.
 - `Sexpr` được mở rộng ngầm ở chỗ mong đợi một `Option<Sexpr>` (không có chuyển đổi lúc chạy). Chiều ngược
   lại, dùng một `Option<Sexpr>` như một `Sexpr`, khẳng định "đây không phải danh sách rỗng", nên phải nêu
   tường minh bằng `match` hoặc `unwrap`
-- Trong `match`, 18 variant của `Sexpr` và `none` có thể được viết **phẳng trong cùng một danh sách nhánh**
+- Trong `match`, 19 variant của `Sexpr` và `none` có thể được viết **phẳng trong cùng một danh sách nhánh**
   ([Tham chiếu cú pháp](../syntax.md#43-match--so-khớp-mẫu))
 
 | Tên | Dạng | Kiểu | Mô tả |

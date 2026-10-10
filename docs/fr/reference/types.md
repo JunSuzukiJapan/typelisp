@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Types
 
 Les types de typelisp et les traits standard que chaque type implémente. La façon d'écrire les types se trouve au
@@ -33,6 +33,7 @@ Il n'existe pas de type entier sur 64 bits. Pour les entiers dont la largeur imp
 | `Result<T,E>` | Succès ou échec. `ok` / `err` | Idem |
 | `Vector<T>` | Un tableau extensible | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Une table de hachage. Le type des clés doit implémenter `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Tuple (1 à 12 éléments). Les éléments se lisent avec `t::0` | [Syntaxe, chapitre 2](syntax.md#2-écrire-les-types) |
 | `Task<T>` | Une poignée de tâche | [Tâches](functions/concurrency.md#1-taskt--poignées-de-tâches) |
 | `Thread<T>` | Une poignée de tâche qui s'exécute sur un thread système dédié | [Thread](functions/concurrency.md#7-threadt--threads-système-dédiés) |
 | `Chan<T>` | Un canal | [Canaux](functions/concurrency.md#2-chant--canaux) |
@@ -44,7 +45,7 @@ Les types de fonctions s'écrivent `(fn (types-des-arguments...) type-de-retour)
 
 | Type | Contenu | Détails |
 |---|---|---|
-| `Sexpr` | Une S-expression non vide. 18 variantes : `int`, `i8` à `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Données S-expression](functions/sequences.md#2-données-s-expression-sexpr) |
+| `Sexpr` | Une S-expression non vide. 19 variantes : `int`, `i8` à `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Données S-expression](functions/sequences.md#2-données-s-expression-sexpr) |
 | `Option<Sexpr>` | Les données S-expression en général. La liste vide `()` est `none` | Idem |
 
 ## 4. Types de la bibliothèque standard

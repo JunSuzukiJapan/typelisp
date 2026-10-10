@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Typy
 
 Typy, które ma typelisp, oraz standardowe traity implementowane przez każdy typ. Sposób zapisu typów opisano w
@@ -33,6 +33,7 @@ Nie ma 64-bitowego typu całkowitego. Dla liczb całkowitych, których szerokoś
 | `Result<T,E>` | Sukces lub porażka. `ok` / `err` | Jak wyżej |
 | `Vector<T>` | Rosnąca tablica | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Tablica mieszająca. Typ klucza musi implementować `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Krotka (od 1 do 12 elementów). Elementy czyta się przez `t::0` | [Składnia, rozdział 2](syntax.md#2-zapis-typów) |
 | `Task<T>` | Uchwyt zadania | [Zadania](functions/concurrency.md#1-taskt--uchwyty-zadań) |
 | `Thread<T>` | Uchwyt zadania uruchomionego na dedykowanym wątku systemu operacyjnego | [Thread](functions/concurrency.md#7-threadt--dedykowane-wątki-systemu-operacyjnego) |
 | `Chan<T>` | Kanał | [Kanały](functions/concurrency.md#2-chant--kanały) |
@@ -44,7 +45,7 @@ Typy funkcyjne zapisuje się `(fn (typy-argumentów...) typ-zwracany)`, a obiekt
 
 | Typ | Zawartość | Szczegóły |
 |---|---|---|
-| `Sexpr` | Niepuste S-wyrażenie. 18 wariantów: `int`, od `i8` do `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Dane w postaci S-wyrażeń](functions/sequences.md#2-dane-w-postaci-s-wyrażeń-sexpr) |
+| `Sexpr` | Niepuste S-wyrażenie. 19 wariantów: `int`, od `i8` do `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Dane w postaci S-wyrażeń](functions/sequences.md#2-dane-w-postaci-s-wyrażeń-sexpr) |
 | `Option<Sexpr>` | Dane w postaci S-wyrażeń w ogólności. Pusta lista `()` to `none` | Jak wyżej |
 
 ## 4. Typy w bibliotece standardowej

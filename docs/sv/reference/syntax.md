@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -70,6 +70,12 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
   vektorer och är en `Array<T>` (utan element måste sammanhanget ange den, som i
   `(the Array<f64> #2A(()))`). Som S-uttrycksdata är det en `Array<Option<Sexpr>>`: varianten
   `array` av `Sexpr`.
+- **Tupler**: `#{"foo" 123 45.6}`. Innehållet består bara av literaler och evalueras inte (`a` i
+  `#{a b}` är en symbol). Varje elements typ bestäms av sammanhanget, position för position
+  (`(the #{i32 f64} #{1 2.0})`), och utan sammanhang är den elementets egen typ (`#{"foo" 123}` är
+  `#{string int}`). En tupel har 1 till 12 element. Varje evaluering skapar en ny tupel. För att
+  bygga en av beräknade värden använder man `(tuple a b)`. Där S-uttrycksdata förväntas är det en
+  tupel vars element alla är data: varianten `tuple` av `Sexpr`.
 - **Den tomma listan `()`**: beroende på sammanhang värdet av typen `Unit` eller `none` i
   `Option<Sexpr>`. **`Sexpr` har ingen variant för den tomma listan**: `Sexpr` betyder "ett icke-tomt
   S-uttryck", och typen för S-uttrycksdata är `Option<Sexpr>` (se "Mönster för `Option<Sexpr>`" i
@@ -106,18 +112,26 @@ I källkod skrivs typer som vanliga symboler eller listor.
   returnerar. Den passar vilken förväntad typ som helst)
 - **Funktionstyper**: `(fn (argumenttyper...) returtyp)`. Typen på en funktion med variadiska argument är
   `(fn (argumenttyper... &rest elementtyp) returtyp)`.
-- **Generiska typer**: `Name<T1,T2,...>` (läses som en enda token utan mellanslag).
-  Till exempel `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  Enhetstypen `()` kan också skrivas som typargument (`Result<(), FileError>`). `(`/`)` är normalt
-  avgränsare som avslutar en token, men medan en vinkelparentes är öppen släpps just det här teckenparet
-  igenom. `()` kan också användas som fälttyp eller argumenttyp.
-- **Tillämpningsformen för generiska typer**: `(Name T1 T2 ...)`, en listskrivning som namnger samma typ som
-  `Name<T1,T2,...>`. Till exempel är `(vector char)` samma som `Vector<char>`.
-  Namnformen är det vanliga sättet att skriva; den här formen **finns för när ett typargument inte kan
-  stavas inuti ett namn**: ett typargument är självt ett typuttryck, men inuti ett namn med en enda token
-  kan bara namn, `()` och `:dyn` skrivas, inte funktionstyper (det finns ingen stavning som
-  `Vector<(fn (i32) i32)>`). Den kan också förekomma i den här formen när implementationen visar en typ,
-  som resultatet av att sätta in ett traits associerade typ i en signatur.
+- **Generiska typer**: `Name<T1,T2,...>`. Till exempel `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. När en typ följer ett `<` direkt efter ett namn läser läsaren
+  fram till motsvarande `>` som typargument. Inuti dem får mellanslag och radbrytningar skilja
+  delarna åt (`HashTable<string, int>`), och unit-typen `()` (`Result<(), FileError>`), `:dyn Trait`
+  och tupeltyper kan skrivas. Följer ingen typ efter `<` är det `<` en del av namnet (`<=`,
+  `string<`). Typargument som inte stängs med `>`, eller som inte har formen av typer, är ett läsfel
+  (även `(a<b c)` är ett fel, i typargumenten `b c`). `()` kan också användas som fälttyp eller
+  argumenttyp.
+- **Tillämpningsformen för generiska typer**: `(Name T1 T2 ...)`, en listskrivning som anger samma
+  typ som `Name<T1,T2,...>`. Till exempel är `(vector char)` detsamma som `Vector<char>`. Namnformen
+  är det vanliga skrivsättet; den här formen **finns för när ett typargument inte kan skrivas inuti
+  ett namn**: ett typargument är självt ett typuttryck, men inuti `<..>` kan bara namn, `()`, `:dyn`
+  och tupeltyper skrivas, inte funktionstyper (`Vector<(fn (i32) i32)>` är ett läsfel; ger man
+  funktionstypen ett namn med `deftype` kan man skriva `Vector<F>`). En typ kan också dyka upp i den
+  här formen när implementationen visar den, till exempel som resultatet av att sätta in ett traits
+  associerade typ i en signatur.
+- **Tupeltyper**: `#{int string}` (samma form som värdena). En tupel har 1 till 12 element, och en
+  tupeltyp kan också vara ett typargument (`Vector<#{int string}>`). Element läses med `t::0` `t::1`
+  och ändras med `(setf t::0 v)`. `Eq`, `Ord` (jämförelse från första elementet), `Hash` och
+  `print-object` finns när alla elementtyper implementerar dem.
 - **Kvalificerade typnamn**: kan kvalificeras med `::`, som i `module::Type`.
 - **Trait-objekttyper**: `:dyn Trait` (två ord åtskilda av mellanslag som bildar en typ). Representerar ett
   värde vars konkreta typ avgörs vid körning; trait-metodanrop går genom en vtable (dynamisk dispatch).
@@ -1124,6 +1138,8 @@ Slag av mönster:
   användardefinierad `Eq`-implementation blir jämförelseregeln som den är. `expr` kan referera till allt
   som syns från grenens position (argument, yttre bindningar, globaler)
 - `(Ctor sub-pattern...)` — konstruktormönster (`Some x` `None` `Cons a d` `Ok v` och så vidare)
+- `#{p0 p1 ...}` — ett tupelmönster. Varje element matchas mot sitt eget delmönster. Mot en `Sexpr`
+  matchar det bara `#{..}`-data med samma antal element
 - `(:or p1 p2 ...)` — ett eller-mönster: det matchar när något av alternativen matchar. Det finns en
   enda kropp, så varje alternativ måste binda samma variabler med samma typer. Det kan också skrivas
   inuti ett konstruktormönster (`(some (:or (circle r) (rect r _)))`)
@@ -1175,7 +1191,7 @@ så `_` (eller ett bindningsmönster som fungerar som jokertecken) krävs:
     (_     0)))          ; en typ utan varianter behöver `_`
 ```
 
-Mot en `Sexpr`-scrutinee kan man, förutom de 18 inbyggda variantmönstren ovan, skriva
+Mot en `Sexpr`-scrutinee kan man, förutom de 19 inbyggda variantmönstren ovan, skriva
 **nedkastningsmönster** (för att ta ut instanser av användardefinierade ADT:er): syntax för att få tillbaka,
 med `match`, en instans av en `defstruct`/`defenum` (kapitel 3) som implicit konverterats till `Sexpr`,
 som i `(list p 42)`:
@@ -1196,7 +1212,7 @@ som i `(list p 42)`:
 
 **Mönster för `Option<Sexpr>`**: typen för S-uttrycksdata är inte `Sexpr` utan `Option<Sexpr>`, och den
 tomma listan är inte en variant av `Sexpr` utan `none` i `Option`. Så när man matchar en `Option<Sexpr>`
-kan de 18 varianterna av `Sexpr` och `none` skrivas **platt i samma lista av grenar** (ingen yttre `match`
+kan de 19 varianterna av `Sexpr` och `none` skrivas **platt i samma lista av grenar** (ingen yttre `match`
 för att skala bort `Option` behövs):
 
 ```lisp
@@ -1209,7 +1225,7 @@ för att skala bort `Option` behövs):
     (_          9)))
 ```
 
-Uttömmande täckning kontrolleras i samma platta universum: de 18 varianterna av `Sexpr` plus `none`, 19 i
+Uttömmande täckning kontrolleras i samma platta universum: de 19 varianterna av `Sexpr` plus `none`, 20 i
 allt. Att glömma `(none)` är ett fel om det inte finns en `_`. `(some x)` kan också skrivas och binder
 "något icke-tomt".
 

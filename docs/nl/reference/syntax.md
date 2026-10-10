@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -73,6 +73,13 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   Het type wordt bepaald zoals bij vectoren en is een `Array<T>` (zonder elementen moet de context
   het geven, zoals in `(the Array<f64> #2A(()))`). Als S-expressiedata is het een
   `Array<Option<Sexpr>>`: de variant `array` van `Sexpr`.
+- **Tuples**: `#{"foo" 123 45.6}`. De inhoud bestaat geheel uit literals en wordt niet geëvalueerd
+  (de `a` van `#{a b}` is een symbool). Het type van elk element wordt per positie door de context
+  bepaald (`(the #{i32 f64} #{1 2.0})`), en zonder context is het het eigen type van het element
+  (`#{"foo" 123}` is `#{string int}`). Een tuple heeft 1 tot 12 elementen. Elke evaluatie maakt een
+  nieuwe tuple. Om er een te bouwen uit berekende waarden gebruik je `(tuple a b)`. Waar
+  S-expressiedata worden verwacht, is het een tuple waarvan alle elementen data zijn: de variant
+  `tuple` van `Sexpr`.
 - **De lege lijst `()`**: afhankelijk van de context de waarde van het type `Unit` of de `none` van
   `Option<Sexpr>`. **`Sexpr` heeft geen variant voor de lege lijst**: `Sexpr` betekent "een niet-lege
   S-expressie", en het type van S-expressiedata is `Option<Sexpr>` (zie "Patronen voor
@@ -110,19 +117,27 @@ In de broncode worden types als gewone symbolen of lijsten geschreven.
   die nooit terugkeert. Het past bij elk verwacht type)
 - **Functietypes**: `(fn (argumenttypes...) returntype)`. Het type van een functie met variadische
   argumenten is `(fn (argumenttypes... &rest elementtype) returntype)`.
-- **Generieke types**: `Name<T1,T2,...>` (gelezen als één token zonder spaties).
-  Bijvoorbeeld `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  Het eenheidstype `()` kan ook als typeargument worden geschreven (`Result<(), FileError>`). `(`/`)` zijn
-  normaal scheidingstekens die een token beëindigen, maar zolang een punthaak open is, wordt dit ene paar
-  tekens doorgelaten. `()` kan ook als veldtype of argumenttype worden gebruikt.
-- **De toepassingsvorm van generieke types**: `(Name T1 T2 ...)`, een lijstschrijfwijze die hetzelfde type
-  noemt als `Name<T1,T2,...>`. Bijvoorbeeld `(vector char)` is hetzelfde als `Vector<char>`.
-  De naamvorm is de gebruikelijke manier om het te schrijven; deze vorm **bestaat voor wanneer een
-  typeargument niet binnen een naam kan worden gespeld**: een typeargument is zelf een type-expressie,
-  maar binnen een naam van één token kunnen alleen namen, `()` en `:dyn` worden geschreven, geen
-  functietypes (er is geen schrijfwijze als `Vector<(fn (i32) i32)>`). Het kan ook in deze vorm
-  verschijnen wanneer de implementatie een type toont, zoals het resultaat van het substitueren van een
-  geassocieerd type van een trait in een signatuur.
+- **Generieke types**: `Name<T1,T2,...>`. Bijvoorbeeld `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. Volgt er een type op een `<` direct na een naam, dan leest de
+  lezer tot de bijbehorende `>` als typeargumenten. Daarbinnen mogen spaties en regeleinden de delen
+  scheiden (`HashTable<string, int>`), en kun je het unittype `()` (`Result<(), FileError>`),
+  `:dyn Trait` en tupletypen schrijven. Volgt er geen type op de `<`, dan hoort die `<` bij de naam
+  (`<=`, `string<`). Typeargumenten die niet met `>` gesloten zijn, of niet de vorm van typen
+  hebben, zijn een leesfout (ook `(a<b c)` is een fout, in de typeargumenten `b c`). `()` kan ook
+  als veld- of argumenttype worden gebruikt.
+- **De toepassingsvorm van generieke types**: `(Name T1 T2 ...)`, een lijstschrijfwijze die
+  hetzelfde type aanduidt als `Name<T1,T2,...>`. Bijvoorbeeld `(vector char)` is hetzelfde als
+  `Vector<char>`. De naamvorm is de gebruikelijke schrijfwijze; deze vorm **bestaat voor wanneer een
+  typeargument niet binnen een naam te schrijven is**: een typeargument is zelf een type-expressie,
+  maar binnen `<..>` kun je alleen namen, `()`, `:dyn` en tupletypen schrijven, geen functietypen
+  (`Vector<(fn (i32) i32)>` is een leesfout; geef je het functietype met `deftype` een naam, dan kun
+  je `Vector<F>` schrijven). Een type kan ook in deze vorm verschijnen wanneer de implementatie het
+  toont, bijvoorbeeld als resultaat van het invullen van het geassocieerde type van een trait in een
+  signatuur.
+- **Tupletypen**: `#{int string}` (dezelfde vorm als de waarden). Een tuple heeft 1 tot 12
+  elementen, en een tupletype kan ook een typeargument zijn (`Vector<#{int string}>`). Elementen
+  lees je met `t::0` `t::1` en wijzig je met `(setf t::0 v)`. `Eq`, `Ord` (vergelijkend vanaf het
+  eerste element), `Hash` en `print-object` zijn beschikbaar als alle elementtypen ze implementeren.
 - **Gekwalificeerde typenamen**: kunnen met `::` worden gekwalificeerd, zoals in `module::Type`.
 - **Trait-objecttypes**: `:dyn Trait` (twee door een spatie gescheiden woorden die één type vormen).
   Stelt een waarde voor waarvan het concrete type tijdens runtime wordt bepaald; aanroepen van
@@ -1177,6 +1192,8 @@ Soorten patronen:
   vergelijkingsregel. `expr` kan naar alles verwijzen wat zichtbaar is vanaf de positie van de tak
   (argumenten, buitenste bindingen, globale variabelen)
 - `(Ctor sub-pattern...)` — constructorpatronen (`Some x` `None` `Cons a d` `Ok v` enzovoort)
+- `#{p0 p1 ...}` — een tuplepatroon. Elk element wordt met zijn eigen deelpatroon vergeleken. Tegen
+  een `Sexpr` past het alleen op `#{..}`-data met hetzelfde aantal elementen
 - `(:or p1 p2 ...)` — een of-patroon: het past zodra een van de alternatieven past. Er is één body,
   dus elk alternatief moet dezelfde variabelen met dezelfde typen binden. Het kan ook binnen een
   constructorpatroon staan (`(some (:or (circle r) (rect r _)))`)
@@ -1229,7 +1246,7 @@ worden gedekt, dus `_` (of een bindingspatroon dat als jokerteken fungeert) is v
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Tegen een `Sexpr`-scrutinee kunnen, naast de bovenstaande 18 ingebouwde variantpatronen,
+Tegen een `Sexpr`-scrutinee kunnen, naast de bovenstaande 19 ingebouwde variantpatronen,
 **downcast-patronen** (het uitnemen van instanties van door de gebruiker gedefinieerde ADT's) worden
 geschreven: syntaxis om met `match` een instantie van een `defstruct`/`defenum` (hoofdstuk 3) terug te
 krijgen die impliciet naar `Sexpr` is geconverteerd, zoals in `(list p 42)`:
@@ -1250,7 +1267,7 @@ krijgen die impliciet naar `Sexpr` is geconverteerd, zoals in `(list p 42)`:
 
 **Patronen voor `Option<Sexpr>`**: het type van S-expressiedata is niet `Sexpr` maar `Option<Sexpr>`, en
 de lege lijst is geen variant van `Sexpr` maar de `none` van `Option`. Wanneer je dus een `Option<Sexpr>`
-matcht, kunnen de 18 varianten van `Sexpr` en `none` **plat in dezelfde lijst takken** worden geschreven
+matcht, kunnen de 19 varianten van `Sexpr` en `none` **plat in dezelfde lijst takken** worden geschreven
 (er is geen buitenste `match` nodig om de `Option` af te pellen):
 
 ```lisp
@@ -1263,8 +1280,8 @@ matcht, kunnen de 18 varianten van `Sexpr` en `none` **plat in dezelfde lijst ta
     (_          9)))
 ```
 
-Volledigheid wordt in hetzelfde platte universum gecontroleerd: de 18 varianten van `Sexpr` plus `none`,
-19 in totaal. `(none)` vergeten is een fout tenzij er een `_` is. `(some x)` kan ook worden geschreven en
+Volledigheid wordt in hetzelfde platte universum gecontroleerd: de 19 varianten van `Sexpr` plus `none`,
+20 in totaal. `(none)` vergeten is een fout tenzij er een `_` is. `(some x)` kan ook worden geschreven en
 bindt "iets niet-leegs".
 
 Deze suiker is **precies** alleen van toepassing op `Option<Sexpr>`. Bij `Option<Option<Sexpr>>` zou

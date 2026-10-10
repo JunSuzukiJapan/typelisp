@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Par, S-uttryck och sekvenser
 
 Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunktionerna som skrivs ovanpå
@@ -24,12 +24,14 @@ Det generiska paret `cons-cell`, S-uttrycksdata `Sexpr`, symboler, sekvensfunkti
 
 ## 2. S-uttrycksdata `Sexpr`
 
-Datatypen `Sexpr` som `read` returnerar har 18 varianter:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+Datatypen `Sexpr` som `read` returnerar har 19 varianter:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
 `vector` och `array` är data skrivna som `#(..)` och `#nA(..)` (se
 [syntaxreferensen](../syntax.md#1-lexikaliska-element)) som innehåller en `Vector<Option<Sexpr>>`
 respektive en `Array<Option<Sexpr>>`: `len`, `get` och resten fungerar direkt på den `v` som
 `(vector v)` binder.
+`tuple` är data skrivna med `#{..}`, och `v` som `(tuple v)` binder är en ny `Vector<Option<Sexpr>>`
+av elementen (så att en tupel av vilken längd som helst tas emot med en typ).
 S-uttrycksceller hanteras inte med de allmänna `cons`/`car`/`cdr` i kapitel 1 utan med
 `sexpr-*`-funktionerna. De används främst i `defmacro`-kroppar för att bygga och plocka isär former.
 
@@ -42,7 +44,7 @@ och returnerar `Option<Sexpr>`.
 - `Sexpr` vidgas implicit där en `Option<Sexpr>` förväntas (utan konvertering vid körning). Den motsatta
   riktningen, att använda en `Option<Sexpr>` som en `Sexpr`, påstår "det här är inte den tomma listan",
   så det måste anges explicit med `match` eller `unwrap`
-- I `match` kan de 18 varianterna av `Sexpr` och `none` skrivas **platt i samma lista av grenar**
+- I `match` kan de 19 varianterna av `Sexpr` och `none` skrivas **platt i samma lista av grenar**
   ([Syntaxreferens](../syntax.md#43-match--mönstermatchning))
 
 | Namn | Form | Typ | Beskrivning |

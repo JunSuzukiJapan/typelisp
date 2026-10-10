@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -66,6 +66,12 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   tử. Các danh sách cùng tầng có độ dài khác nhau là lỗi đọc. Kiểu được quyết định như với vector và
   là `Array<T>` (khi không có phần tử, ngữ cảnh phải cho kiểu, như `(the Array<f64> #2A(()))`). Dưới
   dạng dữ liệu S-expression nó là `Array<Option<Sexpr>>`: variant `array` của `Sexpr`.
+- **Tuple**: `#{"foo" 123 45.6}`. Nội dung toàn là literal và không được đánh giá (`a` của `#{a b}`
+  là một ký hiệu). Kiểu của mỗi phần tử do ngữ cảnh quyết định theo từng vị trí
+  (`(the #{i32 f64} #{1 2.0})`), và khi không có ngữ cảnh thì là kiểu của chính phần tử
+  (`#{"foo" 123}` là `#{string int}`). Một tuple có từ 1 đến 12 phần tử. Mỗi lần đánh giá tạo ra một
+  tuple mới. Để dựng từ các giá trị đã tính, dùng `(tuple a b)`. Ở nơi mong đợi dữ liệu
+  S-expression, nó là tuple mà mọi phần tử đều là dữ liệu: variant `tuple` của `Sexpr`.
 - **Danh sách rỗng `()`**: tùy ngữ cảnh, là giá trị của kiểu `Unit` hoặc là `none` của `Option<Sexpr>`.
   **`Sexpr` không có variant danh sách rỗng**: `Sexpr` nghĩa là "một S-expression không rỗng", và kiểu của dữ
   liệu S-expression là `Option<Sexpr>` (xem "Mẫu cho `Option<Sexpr>`" ở
@@ -102,18 +108,25 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
   không bao giờ trả về. Nó vừa với mọi kiểu mong đợi)
 - **Kiểu hàm**: `(fn (các-kiểu-đối-số...) kiểu-trả-về)`. Kiểu của một hàm có đối số biến đổi là
   `(fn (các-kiểu-đối-số... &rest kiểu-phần-tử) kiểu-trả-về)`.
-- **Kiểu generic**: `Name<T1,T2,...>` (được đọc như một token đơn không có dấu cách).
-  Ví dụ `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  Kiểu unit `()` cũng có thể được viết làm đối số kiểu (`Result<(), FileError>`). `(`/`)` thường là các dấu
-  phân cách kết thúc một token, nhưng khi một ngoặc nhọn đang mở, cặp ký tự này được cho qua. `()` cũng có
-  thể dùng làm kiểu trường hoặc kiểu đối số.
-- **Dạng áp dụng của kiểu generic**: `(Name T1 T2 ...)`, một cách viết danh sách đặt tên cùng kiểu với
-  `Name<T1,T2,...>`. Ví dụ `(vector char)` giống `Vector<char>`.
-  Dạng tên là cách viết thông thường; dạng này **tồn tại cho khi một đối số kiểu không thể được viết bên
-  trong một tên**: một đối số kiểu tự nó là một biểu thức kiểu, nhưng bên trong một tên token đơn chỉ viết
-  được các tên, `()` và `:dyn`, không viết được kiểu hàm (không có cách viết như
-  `Vector<(fn (i32) i32)>`). Nó cũng có thể xuất hiện ở dạng này khi triển khai hiển thị một kiểu, như kết
-  quả của việc thay kiểu liên kết của một trait vào một chữ ký.
+- **Kiểu generic**: `Name<T1,T2,...>`. Ví dụ `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. Khi một kiểu theo sau dấu `<` đứng ngay sau một tên, bộ đọc
+  đọc đến `>` tương ứng như các đối số kiểu. Bên trong chúng, khoảng trắng và xuống dòng có thể ngăn
+  cách các phần (`HashTable<string, int>`), và có thể viết kiểu unit `()` (`Result<(), FileError>`),
+  `:dyn Trait` và các kiểu tuple. Nếu sau `<` không có kiểu nào, dấu `<` đó là một phần của tên
+  (`<=`, `string<`). Đối số kiểu không được đóng bằng `>`, hoặc không có dạng kiểu, là lỗi đọc
+  (`(a<b c)` cũng là lỗi, ở các đối số kiểu `b c`). `()` cũng có thể dùng làm kiểu trường hoặc kiểu
+  đối số.
+- **Dạng áp dụng của kiểu generic**: `(Name T1 T2 ...)`, cách viết dạng danh sách chỉ cùng kiểu với
+  `Name<T1,T2,...>`. Ví dụ `(vector char)` giống `Vector<char>`. Dạng tên là cách viết thông thường;
+  dạng này **có cho trường hợp đối số kiểu không thể viết bên trong tên**: đối số kiểu tự nó là biểu
+  thức kiểu, nhưng bên trong `<..>` chỉ viết được tên, `()`, `:dyn` và các kiểu tuple, không viết
+  được kiểu hàm (`Vector<(fn (i32) i32)>` là lỗi đọc; đặt tên cho kiểu hàm bằng `deftype` thì viết
+  được `Vector<F>`). Kiểu cũng có thể xuất hiện ở dạng này khi phần cài đặt hiển thị nó, chẳng hạn
+  kết quả của việc thay kiểu liên kết của một trait vào chữ ký.
+- **Kiểu tuple**: `#{int string}` (cùng dạng với giá trị). Một tuple có từ 1 đến 12 phần tử, và kiểu
+  tuple cũng có thể là đối số kiểu (`Vector<#{int string}>`). Phần tử được đọc bằng `t::0` `t::1` và
+  đổi bằng `(setf t::0 v)`. `Eq`, `Ord` (so sánh từ phần tử đầu tiên), `Hash` và `print-object` dùng
+  được khi mọi kiểu phần tử đều triển khai chúng.
 - **Tên kiểu có tiền tố**: có thể được qualify bằng `::`, như `module::Type`.
 - **Kiểu trait object**: `:dyn Trait` (hai từ cách nhau bằng dấu cách tạo thành một kiểu). Biểu diễn một giá
   trị có kiểu cụ thể được quyết định lúc chạy; các lời gọi phương thức của trait đi qua một vtable (dispatch
@@ -1091,6 +1104,8 @@ Các loại mẫu:
   do người dùng định nghĩa trở thành quy tắc so sánh nguyên trạng. `expr` có thể tham chiếu mọi thứ nhìn thấy
   được từ vị trí của nhánh (đối số, ràng buộc bên ngoài, biến toàn cục)
 - `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`Some x` `None` `Cons a d` `Ok v`, v.v.)
+- `#{p0 p1 ...}` — mẫu tuple. Mỗi phần tử được khớp bằng mẫu con của riêng nó. Đối với `Sexpr`, nó
+  chỉ khớp với dữ liệu `#{..}` có cùng số phần tử
 - `(:or p1 p2 ...)` — mẫu hoặc: khớp khi bất kỳ lựa chọn nào khớp. Chỉ có một thân, nên mọi lựa chọn
   phải gắn cùng các biến với cùng kiểu. Cũng có thể viết bên trong một mẫu hàm khởi tạo
   (`(some (:or (circle r) (rect r _)))`)
@@ -1140,7 +1155,7 @@ không thể được bao phủ bằng liệt kê, nên cần `_` (hoặc một 
     (_     0)))          ; một kiểu không có variant cần `_`
 ```
 
-Với một đối tượng `Sexpr`, ngoài 18 mẫu variant dựng sẵn ở trên, có thể viết **các mẫu downcast** (lấy ra các
+Với một đối tượng `Sexpr`, ngoài 19 mẫu variant dựng sẵn ở trên, có thể viết **các mẫu downcast** (lấy ra các
 thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy lại, bằng `match`, một thể hiện của
 `defstruct`/`defenum` (chương 3) đã được chuyển đổi ngầm thành `Sexpr`, như trong `(list p 42)`:
 
@@ -1160,7 +1175,7 @@ thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy 
 
 **Các mẫu cho `Option<Sexpr>`**: kiểu của dữ liệu S-expression không phải `Sexpr` mà là `Option<Sexpr>`, và
 danh sách rỗng không phải một variant của `Sexpr` mà là `none` của `Option`. Vì vậy khi so khớp một
-`Option<Sexpr>`, 18 variant của `Sexpr` và `none` có thể được viết **phẳng trong cùng một danh sách nhánh**
+`Option<Sexpr>`, 19 variant của `Sexpr` và `none` có thể được viết **phẳng trong cùng một danh sách nhánh**
 (không cần một `match` ngoài để bóc `Option`):
 
 ```lisp
@@ -1173,7 +1188,7 @@ danh sách rỗng không phải một variant của `Sexpr` mà là `none` của
     (_          9)))
 ```
 
-Tính đầy đủ được kiểm tra trong cùng vũ trụ phẳng đó: 18 variant của `Sexpr` cộng `none`, tổng cộng 19. Quên
+Tính đầy đủ được kiểm tra trong cùng vũ trụ phẳng đó: 19 variant của `Sexpr` cộng `none`, tổng cộng 20. Quên
 `(none)` là lỗi trừ khi có một `_`. `(some x)` cũng có thể viết và gán "một thứ không rỗng".
 
 Đường cú pháp này áp dụng **chính xác** chỉ cho `Option<Sexpr>`. Với `Option<Option<Sexpr>>`, sẽ không rõ

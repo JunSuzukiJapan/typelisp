@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Tipe
 
 Tipe yang dimiliki typelisp, dan trait standar yang diimplementasikan setiap tipe. Cara menulis tipe
@@ -34,6 +34,7 @@ Tidak ada tipe bilangan bulat 64 bit. Untuk bilangan bulat yang lebarnya tidak p
 | `Result<T,E>` | Berhasil atau gagal. `ok` / `err` | Sama seperti di atas |
 | `Vector<T>` | Larik yang dapat membesar | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Tabel hash. Tipe kunci harus mengimplementasikan `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Tuple (1 sampai 12 elemen). Elemen dibaca dengan `t::0` | [Sintaks bab 2](syntax.md#2-menulis-tipe) |
 | `Task<T>` | Handle ke sebuah task | [Task](functions/concurrency.md#1-taskt--handle-ke-task) |
 | `Thread<T>` | Handle ke task yang berjalan di thread OS khusus | [Thread](functions/concurrency.md#7-threadt--thread-os-khusus) |
 | `Chan<T>` | Kanal | [Kanal](functions/concurrency.md#2-chant--kanal) |
@@ -45,7 +46,7 @@ Tipe fungsi ditulis `(fn (tipe-argumen...) tipe-kembalian)`, dan objek trait `:d
 
 | Tipe | Isi | Rincian |
 |---|---|---|
-| `Sexpr` | S-expression tak kosong. 18 varian: `int`, `i8` sampai `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Data S-expression](functions/sequences.md#2-data-s-expression-sexpr) |
+| `Sexpr` | S-expression tak kosong. 19 varian: `int`, `i8` sampai `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Data S-expression](functions/sequences.md#2-data-s-expression-sexpr) |
 | `Option<Sexpr>` | Data S-expression secara umum. Daftar kosong `()` adalah `none` | Sama seperti di atas |
 
 ## 4. Tipe pada pustaka standar

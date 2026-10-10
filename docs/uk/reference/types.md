@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Типи
 
 Типи, які є в typelisp, і стандартні трейти, що їх реалізує кожен тип. Як записувати типи, описано в
@@ -33,6 +33,7 @@
 | `Result<T,E>` | Успіх або невдача. `ok` / `err` | Те саме |
 | `Vector<T>` | Масив, що росте | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Хеш-таблиця. Тип ключа має реалізовувати `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Кортеж (від 1 до 12 елементів). Елементи читаються як `t::0` | [Синтаксис, розділ 2](syntax.md#2-запис-типів) |
 | `Task<T>` | Дескриптор задачі | [Задачі](functions/concurrency.md#1-taskt--дескриптори-задач) |
 | `Thread<T>` | Дескриптор задачі, що виконується в окремому потоці ОС | [Thread](functions/concurrency.md#7-threadt--окремі-потоки-ос) |
 | `Chan<T>` | Канал | [Канали](functions/concurrency.md#2-chant--канали) |
@@ -44,7 +45,7 @@
 
 | Тип | Зміст | Подробиці |
 |---|---|---|
-| `Sexpr` | Непорожній S-вираз. 18 варіантів: `int`, від `i8` до `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [Дані у вигляді S-виразів](functions/sequences.md#2-дані-у-вигляді-s-виразів-sexpr) |
+| `Sexpr` | Непорожній S-вираз. 19 варіантів: `int`, від `i8` до `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [Дані у вигляді S-виразів](functions/sequences.md#2-дані-у-вигляді-s-виразів-sexpr) |
 | `Option<Sexpr>` | Дані у вигляді S-виразів загалом. Порожній список `()` — це `none` | Те саме |
 
 ## 4. Типи у стандартній бібліотеці

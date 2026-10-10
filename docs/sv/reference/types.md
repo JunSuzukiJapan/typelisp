@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -33,6 +33,7 @@ Det finns ingen 64-bitars heltalstyp. För heltal där bredden inte spelar någo
 | `Result<T,E>` | Lyckat eller misslyckat. `ok` / `err` | Som ovan |
 | `Vector<T>` | En växande array | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | En hashtabell. Nyckeltypen måste implementera `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Tupel (1 till 12 element). Element läses med `t::0` | [Syntax kapitel 2](syntax.md#2-hur-typer-skrivs) |
 | `Task<T>` | Ett handtag till en task | [Tasks](functions/concurrency.md#1-taskt--handtag-till-tasks) |
 | `Thread<T>` | Ett handtag till en task som körs på en dedikerad OS-tråd | [Thread](functions/concurrency.md#7-threadt--dedikerade-os-trådar) |
 | `Chan<T>` | En kanal | [Kanaler](functions/concurrency.md#2-chant--kanaler) |
@@ -44,7 +45,7 @@ Funktionstyper skrivs `(fn (argumenttyper...) returtyp)`, och trait-objekt `:dyn
 
 | Typ | Innehåll | Detaljer |
 |---|---|---|
-| `Sexpr` | Ett icke-tomt S-uttryck. 18 varianter: `int`, `i8` till `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-uttrycksdata](functions/sequences.md#2-s-uttrycksdata-sexpr) |
+| `Sexpr` | Ett icke-tomt S-uttryck. 19 varianter: `int`, `i8` till `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-uttrycksdata](functions/sequences.md#2-s-uttrycksdata-sexpr) |
 | `Option<Sexpr>` | S-uttrycksdata i allmänhet. Den tomma listan `()` är `none` | Som ovan |
 
 ## 4. Typer i standardbiblioteket

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Друк
 
 `print`/`println`/`format`, друкарі з одним аргументом, pretty printer, `print-object` і змінні, що
@@ -228,6 +228,7 @@ SBCL. Коли REPL показує результат, він використо
 | Тип | `~s` | `~a` |
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
+| Кортеж `#{..}` | `#{1 "a"}` | `#{1 a}` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Те саме |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (число — внутрішній порядковий номер) | Те саме |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |

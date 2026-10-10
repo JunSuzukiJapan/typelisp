@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # ชนิด
 
 ชนิดที่ typelisp มี และ trait มาตรฐานที่แต่ละชนิด implement วิธีเขียนชนิดอยู่ใน
@@ -33,6 +33,7 @@
 | `Result<T,E>` | สำเร็จหรือล้มเหลว `ok` / `err` | เหมือนข้างบน |
 | `Vector<T>` | อาร์เรย์ที่ขยายได้ | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | ตารางแฮช ชนิดของคีย์ต้อง implement `Hash` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | ทูเพิล (สมาชิก 1 ถึง 12 ตัว) อ่านสมาชิกด้วย `t::0` | [ไวยากรณ์ บทที่ 2](syntax.md#2-การเขียนชนิด) |
 | `Task<T>` | handle ของ task | [Task](functions/concurrency.md#1-taskt--handle-ของ-task) |
 | `Thread<T>` | handle ของ task ที่รันบนเธรด OS เฉพาะ | [Thread](functions/concurrency.md#7-threadt--เธรด-os-เฉพาะ) |
 | `Chan<T>` | channel | [Channel](functions/concurrency.md#2-chant--channel) |
@@ -44,7 +45,7 @@
 
 | ชนิด | เนื้อหา | รายละเอียด |
 |---|---|---|
-| `Sexpr` | S-expression ที่ไม่ว่าง มี 18 variant: `int`, `i8` ถึง `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [ข้อมูล S-expression](functions/sequences.md#2-ข้อมูล-s-expression-sexpr) |
+| `Sexpr` | S-expression ที่ไม่ว่าง มี 19 variant: `int`, `i8` ถึง `u32`, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [ข้อมูล S-expression](functions/sequences.md#2-ข้อมูล-s-expression-sexpr) |
 | `Option<Sexpr>` | ข้อมูล S-expression โดยทั่วไป ลิสต์ว่าง `()` คือ `none` | เหมือนข้างบน |
 
 ## 4. ชนิดในไลบรารีมาตรฐาน

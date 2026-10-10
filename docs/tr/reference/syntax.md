@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -72,6 +72,12 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   gibi belirlenir ve bir `Array<T>`'dir (eleman yoksa bağlam vermelidir, örneğin
   `(the Array<f64> #2A(()))`). S-ifade verisi olarak bir `Array<Option<Sexpr>>`'dir: `Sexpr`'in
   `array` varyantı.
+- **Demetler**: `#{"foo" 123 45.6}`. İçeriğin tümü sabittir ve değerlendirilmez (`#{a b}` içindeki
+  `a` bir semboldür). Her öğenin türü bağlam tarafından konum konum belirlenir
+  (`(the #{i32 f64} #{1 2.0})`), bağlam yoksa öğenin kendi türüdür (`#{"foo" 123}`, `#{string int}`
+  olur). Bir demetin 1 ile 12 arasında öğesi vardır. Her değerlendirme yeni bir demet oluşturur.
+  Hesaplanmış değerlerden bir demet kurmak için `(tuple a b)` kullanılır. S-ifadesi verisi beklenen
+  yerlerde, tüm öğeleri veri olan bir demettir: `Sexpr`'in `tuple` varyantı.
 - **Boş liste `()`**: bağlama göre `Unit` türünün değeri ya da `Option<Sexpr>`'in `none`'ı.
   **`Sexpr`'in boş liste varyantı yoktur**: `Sexpr`, "boş olmayan bir S-ifade" demektir ve S-ifade
   verisinin türü `Option<Sexpr>`'dir ([4.3 match](#43-match--örüntü-eşleme) içindeki "`Option<Sexpr>`
@@ -108,18 +114,26 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
   türü. Her beklenen türe uyar)
 - **Fonksiyon türleri**: `(fn (bağımsız-değişken-türleri...) dönüş-türü)`. Değişken sayılı bağımsız
   değişkenli bir fonksiyonun türü `(fn (bağımsız-değişken-türleri... &rest eleman-türü) dönüş-türü)`'dür.
-- **Jenerik türler**: `Name<T1,T2,...>` (boşluksuz tek bir belirteç olarak okunur).
-  Örneğin `Option<i32>` `Result<i32,ParseIntError>` `HashTable<string,i32>` `Vector<T>`.
-  Unit türü `()` de bir tür bağımsız değişkeni olarak yazılabilir (`Result<(), FileError>`). `(`/`)`
-  normalde bir belirteci bitiren ayırıcılardır, ancak bir açılı parantez açıkken bu tek çift karaktere izin
-  verilir. `()` bir alan türü ya da bir bağımsız değişken türü olarak da kullanılabilir.
-- **Jenerik türlerin uygulama biçimi**: `(Name T1 T2 ...)`, `Name<T1,T2,...>` ile aynı türü adlandıran
-  bir liste yazımı. Örneğin `(vector char)`, `Vector<char>` ile aynıdır.
-  Ad biçimi olağan yazım yoludur; bu biçim **bir tür bağımsız değişkeninin bir ad içinde
-  yazılamadığı durumlar için vardır**: bir tür bağımsız değişkeni kendi başına bir tür ifadesidir, ancak
-  tek belirteçli bir ad içinde yalnızca adlar, `()` ve `:dyn` yazılabilir; fonksiyon türleri yazılamaz
-  (`Vector<(fn (i32) i32)>` diye bir yazım yoktur). Gerçekleştirim bir türü gösterdiğinde de bu biçimde
-  görünebilir; örneğin bir trait'in ilişkili türünü bir imzaya yerleştirmenin sonucu.
+- **Jenerik türler**: `Name<T1,T2,...>`. Örneğin `Option<i32>` `Result<i32,ParseIntError>`
+  `HashTable<string,i32>` `Vector<T>`. Bir adın hemen ardından gelen `<`'nin ardında bir tür varsa,
+  okuyucu eşleşen `>`'ye kadar olanı tür argümanları olarak okur. Bunların içinde parçaları
+  boşluklar ve satır sonları ayırabilir (`HashTable<string, int>`), ve unit türü `()`
+  (`Result<(), FileError>`), `:dyn Trait` ve demet türleri yazılabilir. `<`'nin ardında tür yoksa o
+  `<` adın parçasıdır (`<=`, `string<`). `>` ile kapanmayan ya da tür biçiminde olmayan tür
+  argümanları okuma hatasıdır (`(a<b c)` de `b c` tür argümanlarındaki bir hatadır). `()` alan türü
+  ya da argüman türü olarak da kullanılabilir.
+- **Jenerik türlerin uygulama biçimi**: `(Name T1 T2 ...)` — `Name<T1,T2,...>` ile aynı türü
+  adlandıran liste biçimli yazım. Örneğin `(vector char)`, `Vector<char>` ile aynıdır. Olağan yazım
+  ad biçimidir; bu biçim **bir tür argümanı bir adın içine yazılamadığında kullanılmak için
+  vardır**: tür argümanı kendisi bir tür ifadesidir, ama `<..>` içine yalnızca adlar, `()`, `:dyn`
+  ve demet türleri yazılabilir, işlev türleri yazılamaz (`Vector<(fn (i32) i32)>` bir okuma
+  hatasıdır; işlev türüne `deftype` ile bir ad verilirse `Vector<F>` yazılabilir). Gerçekleştirme
+  bir türü gösterirken de, örneğin bir trait'in ilişkili türünü bir imzaya yerleştirmenin sonucu
+  olarak, tür bu biçimde görünebilir.
+- **Demet türleri**: `#{int string}` (değerlerle aynı biçim). Bir demetin 1 ile 12 arasında öğesi
+  vardır ve demet türü tür argümanı da olabilir (`Vector<#{int string}>`). Öğeler `t::0` `t::1` ile
+  okunur ve `(setf t::0 v)` ile değiştirilir. `Eq`, `Ord` (ilk öğeden başlayarak karşılaştırır),
+  `Hash` ve `print-object`, tüm öğe türleri bunları gerçekleştiriyorsa kullanılabilir.
 - **Nitelikli tür adları**: `module::Type` gibi `::` ile nitelenebilir.
 - **Trait nesnesi türleri**: `:dyn Trait` (tek bir tür oluşturan boşlukla ayrılmış iki sözcük). Somut
   türü çalışma zamanında belirlenen bir değeri temsil eder; trait metot çağrıları bir vtable üzerinden
@@ -1128,6 +1142,8 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   kullanıcı tanımlı bir `Eq` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
   konumundan görünen her şeye (bağımsız değişkenler, dış bağlamalar, globaller) başvurabilir
 - `(Ctor sub-pattern...)` — yapıcı örüntüleri (`Some x` `None` `Cons a d` `Ok v` vb.)
+- `#{p0 p1 ...}` — bir demet örüntüsü. Her öğe kendi alt örüntüsüyle eşleştirilir. Bir `Sexpr`'e
+  karşı yalnızca aynı sayıda öğeli `#{..}` verisiyle eşleşir
 - `(:or p1 p2 ...)` — bir veya-örüntüsü: seçeneklerden herhangi biri eşleşince eşleşir. Gövde
   tektir, bu yüzden her seçenek aynı değişkenleri aynı türlerle bağlamalıdır. Bir yapıcı örüntüsünün
   içine de yazılabilir (`(some (:or (circle r) (rect r _)))`)
@@ -1179,7 +1195,7 @@ sayımla kapsanamaz; bu yüzden `_` (ya da joker olarak davranan bir bağlama ö
     (_     0)))          ; a type without variants needs `_`
 ```
 
-Bir `Sexpr` denetlenen değerine karşı, yukarıdaki 18 yerleşik varyant örüntüsünün yanı sıra **aşağı
+Bir `Sexpr` denetlenen değerine karşı, yukarıdaki 19 yerleşik varyant örüntüsünün yanı sıra **aşağı
 dönüşüm örüntüleri** (kullanıcı tanımlı ADT'lerin örneklerini çıkarma) yazılabilir:
 `(list p 42)` gibi bir `Sexpr`'e örtük olarak dönüştürülmüş bir `defstruct`/`defenum` (3. bölüm)
 örneğini `match` ile geri almak için sözdizimi:
@@ -1200,7 +1216,7 @@ dönüşüm örüntüleri** (kullanıcı tanımlı ADT'lerin örneklerini çıka
 
 **`Option<Sexpr>` için örüntüler**: S-ifade verisinin türü `Sexpr` değil, `Option<Sexpr>`'dir ve boş
 liste `Sexpr`'in bir varyantı değil, `Option`'ın `none`'dır. Bu yüzden bir `Option<Sexpr>`'i eşleştirirken
-`Sexpr`'in 18 varyantı ve `none` **aynı kol listesinde düz olarak** yazılabilir (`Option`'ı soyacak dış
+`Sexpr`'in 19 varyantı ve `none` **aynı kol listesinde düz olarak** yazılabilir (`Option`'ı soyacak dış
 bir `match` gerekmez):
 
 ```lisp
@@ -1213,7 +1229,7 @@ bir `match` gerekmez):
     (_          9)))
 ```
 
-Kapsamlılık aynı düz evrende denetlenir: `Sexpr`'in 18 varyantı artı `none`, toplam 19. `_` yoksa
+Kapsamlılık aynı düz evrende denetlenir: `Sexpr`'in 19 varyantı artı `none`, toplam 20. `_` yoksa
 `(none)`'ı unutmak hatadır. `(some x)` de yazılabilir ve "boş olmayan bir şeyi" bağlar.
 
 Bu şeker **tam olarak** yalnızca `Option<Sexpr>`'e uygulanır. `Option<Option<Sexpr>>` için `(int n)`'in

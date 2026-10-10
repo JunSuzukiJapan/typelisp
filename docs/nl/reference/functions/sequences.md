@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Paren, S-expressies en sequenties
 
 Het generieke paar `cons-cell`, S-expressiedata `Sexpr`, symbolen, de sequentiefuncties die bovenop
@@ -25,12 +25,15 @@ deze taal een `cons-cell` terug.
 
 ## 2. S-expressiedata `Sexpr`
 
-Het gegevenstype `Sexpr` dat `read` teruggeeft heeft 18 varianten:
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+Het gegevenstype `Sexpr` dat `read` teruggeeft heeft 19 varianten:
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
 `vector` en `array` zijn data die als `#(..)` en `#nA(..)` geschreven zijn
 ([syntaxreferentie](../syntax.md#1-lexicale-elementen)) en een `Vector<Option<Sexpr>>`
 respectievelijk een `Array<Option<Sexpr>>` bevatten: `len`, `get` enzovoort werken direct op de `v`
 die `(vector v)` bindt.
+`tuple` zijn data geschreven met `#{..}`, en de `v` die `(tuple v)` bindt is een nieuwe
+`Vector<Option<Sexpr>>` van de elementen (zodat een tuple van elke lengte met één type wordt
+ontvangen).
 S-expressiecellen worden niet met de algemene `cons`/`car`/`cdr` van hoofdstuk 1 behandeld maar met de
 `sexpr-*`-functies. Ze worden vooral in `defmacro`-bodies gebruikt om vormen te bouwen en uit elkaar
 te halen.
@@ -44,7 +47,7 @@ nemen en geven dus `Option<Sexpr>`.
 - `Sexpr` verbreedt impliciet waar een `Option<Sexpr>` wordt verwacht (zonder runtimeconversie). De
   omgekeerde richting, een `Option<Sexpr>` als `Sexpr` gebruiken, beweert "dit is niet de lege lijst",
   dus dat moet expliciet met `match` of `unwrap` worden gesteld
-- In `match` kunnen de 18 varianten van `Sexpr` en `none` **plat in dezelfde lijst takken** worden
+- In `match` kunnen de 19 varianten van `Sexpr` en `none` **plat in dezelfde lijst takken** worden
   geschreven ([Syntaxreferentie](../syntax.md#43-match--patroonherkenning))
 
 | Naam | Vorm | Type | Beschrijving |

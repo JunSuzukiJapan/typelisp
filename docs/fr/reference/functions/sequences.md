@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Paires, S-expressions et séquences
 
 La paire générique `cons-cell`, les données S-expression `Sexpr`, les symboles, les fonctions de séquence écrites
@@ -23,12 +23,15 @@ le reste de `floor`, la valeur et la position de `read-from-string`, etc.) renvo
 
 ## 2. Données S-expression `Sexpr`
 
-Le type de données `Sexpr` renvoyé par `read` a 18 variantes :
-`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array`.
+Le type de données `Sexpr` renvoyé par `read` a 19 variantes :
+`int | i8 | i16 | i32 | u8 | u16 | u32 | f32 | f64 | char | bool | sym | str | cons | ratio | path | vector | array | tuple`.
 `vector` et `array` sont des données écrites `#(..)` et `#nA(..)` ([référence de la
 syntaxe](../syntax.md#1-éléments-lexicaux)), qui contiennent respectivement un
 `Vector<Option<Sexpr>>` et un `Array<Option<Sexpr>>` : `len`, `get`, etc. s'appliquent directement
 au `v` que lie `(vector v)`.
+`tuple` est une donnée écrite avec `#{..}`, et le `v` que lie `(tuple v)` est un nouveau
+`Vector<Option<Sexpr>>` des éléments (pour recevoir avec un seul type un tuple de n'importe quelle
+longueur).
 Les cellules S-expression ne se manipulent pas avec les `cons`/`car`/`cdr` généraux du chapitre 1 mais avec les
 fonctions `sexpr-*`. Elles servent surtout dans les corps de `defmacro` pour construire et décomposer des formes.
 
@@ -40,7 +43,7 @@ renvoient donc des `Option<Sexpr>`.
 - `Sexpr` s'élargit implicitement là où une `Option<Sexpr>` est attendue (sans conversion à l'exécution). Le sens
   inverse, utiliser une `Option<Sexpr>` comme `Sexpr`, affirme « ce n'est pas la liste vide » et doit donc être
   indiqué explicitement avec `match` ou `unwrap`
-- Dans `match`, les 18 variantes de `Sexpr` et `none` peuvent s'écrire **à plat dans la même liste de branches**
+- Dans `match`, les 19 variantes de `Sexpr` et `none` peuvent s'écrire **à plat dans la même liste de branches**
   ([Référence de la syntaxe](../syntax.md#43-match--filtrage-par-motifs))
 
 | Nom | Forme | Type | Description |

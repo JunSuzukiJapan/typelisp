@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/types.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Türler
 
 typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart trait'ler. Türlerin nasıl yazılacağı
@@ -33,6 +33,7 @@ typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart tr
 | `Result<T,E>` | Başarı ya da başarısızlık. `ok` / `err` | Yukarıdakiyle aynı |
 | `Vector<T>` | Büyüyebilen bir dizi | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | Bir karma tablo. Anahtar türü `Hash`'i gerçekleştirmelidir | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | Demet (1 ile 12 arası öğe). Öğeler `t::0` ile okunur | [Sözdizimi 2. bölüm](syntax.md#2-türlerin-yazımı) |
 | `Task<T>` | Bir task'in tanıtıcısı | [Task'ler](functions/concurrency.md#1-taskt--task-tanıtıcıları) |
 | `Thread<T>` | Ayrılmış bir OS thread'inde çalışan bir task'in tanıtıcısı | [Thread](functions/concurrency.md#7-threadt--ayrılmış-os-threadleri) |
 | `Chan<T>` | Bir kanal | [Kanallar](functions/concurrency.md#2-chant--kanallar) |
@@ -44,7 +45,7 @@ Fonksiyon türleri `(fn (bağımsız-değişken-türleri...) dönüş-türü)` o
 
 | Tür | İçerik | Ayrıntılar |
 |---|---|---|
-| `Sexpr` | Boş olmayan bir S-ifade. 18 varyant: `int`, `i8`'den `u32`'ye, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array` | [S-ifade verisi](functions/sequences.md#2-s-ifade-verisi-sexpr) |
+| `Sexpr` | Boş olmayan bir S-ifade. 19 varyant: `int`, `i8`'den `u32`'ye, `f32`, `f64`, `char`, `bool`, `sym`, `str`, `cons`, `ratio`, `path`, `vector`, `array`, `tuple` | [S-ifade verisi](functions/sequences.md#2-s-ifade-verisi-sexpr) |
 | `Option<Sexpr>` | Genel olarak S-ifade verisi. Boş liste `()`, `none`'dır | Yukarıdakiyle aynı |
 
 ## 4. Standart kütüphanedeki türler

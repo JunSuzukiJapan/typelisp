@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
 # Utskrift
 
 `print`/`println`/`format`, utskriftsfunktionerna med ett argument, den snygga skrivaren (pretty printer),
@@ -228,6 +228,7 @@ SBCL. När REPL visar ett resultat använder den samma representation som `~s`.
 | Typ | `~s` | `~a` |
 |---|---|---|
 | `Vector<T>` | `#(1 2 3)`, `#("a" "b")` | `#(1 2 3)`, `#(a b)` |
+| Tupel `#{..}` | `#{1 "a"}` | `#{1 a}` |
 | `HashTable<K,V>` | `#<hashtable<string,int> count=1>` | Samma |
 | `Chan<T>` / `Task<T>` / `Thread<T>` | `#<chan<int> 0>` (numret är ett internt serienummer) | Samma |
 | `pathname` | `#P"/tmp/a.txt"` | `/tmp/a.txt` |
