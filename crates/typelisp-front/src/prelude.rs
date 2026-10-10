@@ -3773,6 +3773,148 @@ user-visible capacity."
     (next ((self Self)) Option<A> (Option::some self::elem)))
   (pub defun repeat<A> ((x A)) repeat-iter<A> (repeat-iter::new x)))
 
+;; ---------------------------------------------------------------------------
+;; `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`: Rust's `HashSet`, `BTreeMap`
+;; and `VecDeque`. Created with `make`, as `Array<T>` is: `new` is the
+;; field-order constructor `defstruct` generates, and these fields are the
+;; representation. The method names follow `HashTable` (`get` `set` `remove`
+;; `count` `clear`); a set's add is `insert`, since `add` is the `Add` trait's.
+;; `iter` walks a snapshot, as `HashTable`'s does, so changing the collection
+;; inside a `doiter` over it is not seen by that loop.
+
+;; A set is a table whose values are `()`.
+(pub defstruct HashSet<T> (table HashTable<T,()>))
+(pub defmethod make (HashSet<T>) HashSet<T> (HashSet::new (the HashTable<T,()> (HashTable::new))))
+(pub defmethod insert ((self HashSet<T>) (x T)) bool (where (Hash T))
+  (if (is-some (get self::table x)) false (progn (set self::table x ()) true)))
+(pub defmethod contains ((self HashSet<T>) (x T)) bool (where (Hash T))
+  (is-some (get self::table x)))
+(pub defmethod remove ((self HashSet<T>) (x T)) bool (where (Hash T))
+  (is-some (remove self::table x)))
+(pub defmethod count ((self HashSet<T>)) int (count self::table))
+(pub defmethod clear ((self HashSet<T>)) () (clear self::table))
+(pub defmethod iter ((self HashSet<T>)) vector-iter<T> (iter (keys self::table)))
+(impl print-object HashSet<T> (where (print-object T))
+  (print-object ((self Self) (escape bool)) string
+    (let ((out "#<hashset"))
+      (doiter (x (iter self))
+        (setf out (append (append out " ") (print-object x escape))))
+      (append out ">"))))
+
+
+;; Sorted parallel vectors of keys and values, found by binary search on
+;; `less`. Lookup is a binary search; `set` of a new key and `remove` shift the
+;; elements after it. Iterating gives `#{key value}` tuples in key order.
+(module %internal (pub defun sorted-position<K> ((ks Vector<K>) (k K)) int (where (Ord K))
+  (let ((lo 0) (hi (len ks)))
+    (while (< lo hi)
+      (let ((mid (/ (+ lo hi) 2)))
+        (if (less (get ks mid) k) (setf lo (+ mid 1)) (setf hi mid))))
+    lo)))
+(module %internal (pub defun vector-insert-at<T> ((v Vector<T>) (i int) (x T)) ()
+  (push v x)
+  (let ((j (- (len v) 1)))
+    (while (> j i)
+      (set v j (get v (- j 1)))
+      (setf j (- j 1)))
+    (set v i x))))
+(module %internal (pub defun vector-remove-at<T> ((v Vector<T>) (i int)) T
+  (let ((x (get v i)) (j i) (n (- (len v) 1)))
+    (while (< j n)
+      (set v j (get v (+ j 1)))
+      (setf j (+ j 1)))
+    (pop v)
+    x)))
+(pub defstruct SortedTable<K,V> (ks Vector<K>) (vs Vector<V>))
+(pub defmethod make (SortedTable<K,V>) SortedTable<K,V>
+  (SortedTable::new (the Vector<K> (Vector::new)) (the Vector<V> (Vector::new))))
+(pub defmethod get ((self SortedTable<K,V>) (k K)) Option<V> (where (Ord K))
+  (let ((i (%internal::sorted-position self::ks k)))
+    (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+        (Option::some (get self::vs i))
+        (Option::none))))
+(pub defmethod set ((self SortedTable<K,V>) (k K) (v V)) () (where (Ord K))
+  (let ((i (%internal::sorted-position self::ks k)))
+    (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+        (set self::vs i v)
+        (progn (%internal::vector-insert-at self::ks i k)
+               (%internal::vector-insert-at self::vs i v)))))
+(pub defmethod remove ((self SortedTable<K,V>) (k K)) Option<V> (where (Ord K))
+  (let ((i (%internal::sorted-position self::ks k)))
+    (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+        (progn (%internal::vector-remove-at self::ks i)
+               (Option::some (%internal::vector-remove-at self::vs i)))
+        (Option::none))))
+(pub defmethod count ((self SortedTable<K,V>)) int (len self::ks))
+(pub defmethod clear ((self SortedTable<K,V>)) ()
+  (while (> (len self::ks) 0) (pop self::ks) (pop self::vs)))
+(pub defmethod keys ((self SortedTable<K,V>)) Vector<K> (collect (iter self::ks)))
+(pub defmethod values ((self SortedTable<K,V>)) Vector<V> (collect (iter self::vs)))
+(pub defmethod iter ((self SortedTable<K,V>)) vector-iter<#{K V}>
+  (let ((out (the Vector<#{K V}> (Vector::new))) (i 0))
+    (while (< i (len self::ks))
+      (push out (tuple (get self::ks i) (get self::vs i)))
+      (setf i (+ i 1)))
+    (iter out)))
+(impl print-object SortedTable<K,V> (where (print-object K) (print-object V))
+  (print-object ((self Self) (escape bool)) string
+    (let ((out "#<sortedtable"))
+      (doiter (#{k v} (iter self))
+        (setf out (append (append (append (append out " ") (print-object k escape)) " ") (print-object v escape))))
+      (append out ">"))))
+
+
+;; Two stacks back to back: `before` holds the front half reversed (its top
+;; is the first element), `after` the back half in order. A pop from an empty
+;; side moves half of the other side across, so a run of pops from one end
+;; costs a constant amount per element.
+(pub defstruct Deque<T> (before Vector<T>) (after Vector<T>))
+(pub defmethod make (Deque<T>) Deque<T>
+  (Deque::new (the Vector<T> (Vector::new)) (the Vector<T> (Vector::new))))
+(pub defmethod count ((self Deque<T>)) int (+ (len self::before) (len self::after)))
+(pub defmethod push-front ((self Deque<T>) (x T)) () (push self::before x))
+(pub defmethod push-back ((self Deque<T>) (x T)) () (push self::after x))
+(module %internal (pub defun deque-refill<T> ((into Vector<T>) (from Vector<T>)) ()
+  (let ((n (len from)) (h (/ (+ (len from) 1) 2)) (rest (the Vector<T> (Vector::new))))
+    (let ((i (- h 1)))
+      (while (>= i 0) (push into (get from i)) (setf i (- i 1))))
+    (let ((i h)) (while (< i n) (push rest (get from i)) (setf i (+ i 1))))
+    (while (> (len from) 0) (pop from))
+    (doiter (x (iter rest)) (push from x)))))
+(pub defmethod pop-front ((self Deque<T>)) Option<T>
+  (when (= 0 (len self::before)) (%internal::deque-refill self::before self::after))
+  (pop self::before))
+(pub defmethod pop-back ((self Deque<T>)) Option<T>
+  (when (= 0 (len self::after)) (%internal::deque-refill self::after self::before))
+  (pop self::after))
+(pub defmethod get ((self Deque<T>) (i int)) Option<T>
+  (let ((nf (len self::before)))
+    (cond ((or (< i 0) (>= i (count self))) (Option::none))
+          ((< i nf) (Option::some (get self::before (- nf 1 i))))
+          (true (Option::some (get self::after (- i nf)))))))
+(pub defmethod set ((self Deque<T>) (i int) (x T)) ()
+  (let ((nf (len self::before)))
+    (cond ((or (< i 0) (>= i (count self)))
+           (panic (format false "Deque::set: index ~a is out of range for count ~a" i (count self))))
+          ((< i nf) (set self::before (- nf 1 i) x))
+          (true (set self::after (- i nf) x)))))
+(pub defmethod front ((self Deque<T>)) Option<T> (get self 0))
+(pub defmethod back ((self Deque<T>)) Option<T> (get self (- (count self) 1)))
+(pub defmethod clear ((self Deque<T>)) ()
+  (while (> (len self::before) 0) (pop self::before))
+  (while (> (len self::after) 0) (pop self::after)))
+(pub defmethod iter ((self Deque<T>)) vector-iter<T>
+  (let ((out (the Vector<T> (Vector::new))) (i (- (len self::before) 1)))
+    (while (>= i 0) (push out (get self::before i)) (setf i (- i 1)))
+    (doiter (x (iter self::after)) (push out x))
+    (iter out)))
+(impl print-object Deque<T> (where (print-object T))
+  (print-object ((self Self) (escape bool)) string
+    (let ((out "#<deque"))
+      (doiter (x (iter self))
+        (setf out (append (append out " ") (print-object x escape))))
+      (append out ">"))))
+
 ;; `pprint-exit-if-list-exhausted` (CLHS): leave the enclosing
 ;; `pprint-logical-block` when its list is used up. CL implements this as a
 ;; non-local exit from the block; typelisp has no general escape, so it exits

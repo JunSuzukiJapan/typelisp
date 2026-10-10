@@ -19,6 +19,8 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
+use typelisp_mem::TypeKeyId;
+
 use crate::{Error, Heap, Loc, Value};
 
 /// An owned, GC-heap-independent mirror of a *read form* (`Value`) — the
@@ -74,6 +76,13 @@ pub enum OwnedForm {
     /// Both walks iterate the spine for the same reason one level down: a
     /// pair-at-a-time recursion spends one Rust stack frame per list element.
     Cons { cells: Vec<OwnedCell>, tail: Box<OwnedForm> },
+    /// `#(..)`: the `Sexpr` vector variant's box, by its elements.
+    Vector(Vec<OwnedForm>),
+    /// `#{..}`: a tuple box, by its elements (the arity names the box's type).
+    Tuple(Vec<OwnedForm>),
+    /// `#NA(..)`: the `Sexpr` array variant's box, by its dimensions and its
+    /// elements in row-major order.
+    Array { dims: Vec<i64>, data: Vec<OwnedForm> },
 }
 
 /// One cell of a flattened cons spine ([`OwnedForm::Cons`]): the element in the
@@ -165,10 +174,10 @@ mod loc_serde {
 ///
 /// Handles exactly the shapes the reader produces (which is all a generic
 /// template's `parts` can contain — they are raw, unchecked read forms):
-/// atoms, interned symbols/paths, strings, cons cells, and the three boxed
-/// numeric literals. Any other boxed object (a struct, closure, hashtable —
-/// never reader output) is an internal error, reported rather than silently
-/// mis-serialized.
+/// atoms, interned symbols/paths, strings, cons cells, the boxed numeric
+/// literals, and the literal data `#(..)`/`#{..}`/`#NA`. Any other boxed
+/// object (a struct, closure, hashtable — never reader output) is an internal
+/// error, reported rather than silently mis-serialized.
 pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
     Ok(match v {
         Value::Empty => OwnedForm::Empty,
@@ -203,6 +212,28 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Boxed(id) if heap.is_f64(id) => OwnedForm::F64(heap.f64_value(id)),
         Value::Boxed(id) if heap.is_bignum(id) => OwnedForm::Bignum(heap.bignum_value(id).clone()),
         Value::Boxed(id) if heap.is_ratio(id) => OwnedForm::Ratio(heap.ratio_value(id).clone()),
+        Value::Boxed(id) if heap.is_struct(id) && heap.struct_type_key(id) == TypeKeyId::SEXPR_VECTOR => {
+            OwnedForm::Vector(struct_fields_to_owned(heap, id)?)
+        }
+        Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => OwnedForm::Tuple(struct_fields_to_owned(heap, id)?),
+        Value::Boxed(id) if heap.is_struct(id) && heap.struct_type_key(id) == TypeKeyId::SEXPR_ARRAY => {
+            // The fields of `typelisp_read::alloc_sexpr_array`'s box: `dims`
+            // (a box of `Value::Int`s), `data`, `fill-pointer` (always `none`).
+            let dims = match heap.struct_field(id, 0) {
+                Value::Boxed(d) => (0..heap.struct_field_count(d))
+                    .map(|i| match heap.struct_field(d, i) {
+                        Value::Int(n) => Ok(n),
+                        other => Err(Error::TypeError(format!("fasl: an array dimension is {:?}, not an int", other))),
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?,
+                other => return Err(Error::TypeError(format!("fasl: an array's dimensions are {:?}", other))),
+            };
+            let data = match heap.struct_field(id, 1) {
+                Value::Boxed(d) => struct_fields_to_owned(heap, d)?,
+                other => return Err(Error::TypeError(format!("fasl: an array's data is {:?}", other))),
+            };
+            OwnedForm::Array { dims, data }
+        }
         Value::Boxed(_) => {
             return Err(Error::TypeError(
                 "fasl: a non-reader boxed value (struct/closure/hashtable) cannot be serialized".into(),
@@ -257,6 +288,29 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
             _ => heap.int_from_bigint(n.clone()),
         },
         OwnedForm::Ratio(r) => heap.alloc_ratio(r.clone()),
+        OwnedForm::Vector(elems) => {
+            let roots_base = heap.root_count();
+            let built = owned_elems_rooted(heap, elems).map(|vals| heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, vals));
+            heap.truncate_roots(roots_base);
+            built?
+        }
+        OwnedForm::Tuple(elems) => {
+            let roots_base = heap.root_count();
+            let built = owned_elems_rooted(heap, elems).map(|vals| {
+                let key = heap.intern_type_key(&typelisp_mem::sexpr_tuple_key(vals.len()));
+                heap.alloc_struct(key, vals)
+            });
+            heap.truncate_roots(roots_base);
+            built?
+        }
+        OwnedForm::Array { dims, data } => {
+            let roots_base = heap.root_count();
+            let built = owned_elems_rooted(heap, data).map(|vals| {
+                typelisp_read::alloc_sexpr_array(heap, dims.iter().map(|&d| Value::Int(d)).collect(), vals)
+            });
+            heap.truncate_roots(roots_base);
+            built?
+        }
         OwnedForm::Cons { cells, tail } => {
             // Back to front, so each `cons` already has its cdr in hand — which
             // is also what keeps the rooting to one intermediate: the growing
@@ -296,4 +350,21 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
             built?
         }
     })
+}
+
+/// A literal-data box's fields as owned forms, in order.
+fn struct_fields_to_owned(heap: &Heap, id: typelisp_mem::BoxId) -> Result<Vec<OwnedForm>, Error> {
+    (0..heap.struct_field_count(id)).map(|i| value_to_owned(heap, heap.struct_field(id, i))).collect()
+}
+
+/// Rebuilds each element, rooting it as it is built so the next one's
+/// allocations cannot collect it. The roots are the caller's to release.
+fn owned_elems_rooted(heap: &mut Heap, elems: &[OwnedForm]) -> Result<Vec<Value>, Error> {
+    let mut vals = Vec::with_capacity(elems.len());
+    for e in elems {
+        let v = owned_to_value(heap, e)?;
+        heap.push_root(v);
+        vals.push(v);
+    }
+    Ok(vals)
 }

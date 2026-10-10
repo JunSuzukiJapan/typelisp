@@ -57,7 +57,11 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `complex` | 複素数（成分は `f64`） | [数値 6 章](functions/numbers.md#6-複素数-complex) |
 | `Array<T>` | 多次元配列 | [Array](functions/collections.md#5-arrayt多次元配列) |
 | `BitVector` | 固定長のビット列 | [BitVector](functions/collections.md#6-bitvectorビットベクタ) |
+| `HashSet<T>` | 重複の無い要素の集まり | [HashSet](functions/collections.md#7-hashsett) |
+| `SortedTable<K,V>` | キーの順に並んだ表 | [SortedTable](functions/collections.md#8-sortedtablekv) |
+| `Deque<T>` | 両端から出し入れできる列 | [Deque](functions/collections.md#9-dequet) |
 | `vector-iter<T>` `hashtable-iter<K,V>` `array-iter<T>` | 各コレクションの `iter` が返すイテレータ | [Iter](functions/traits.md#1-iter-トレイトと反復) |
+| `lazy::map-iter<I,A,U>` など | `lazy` モジュールの関数が返すイテレータ | [遅延イテレータ](functions/sequences.md#遅延イテレータlazy-モジュール) |
 | `WaitGroup` | N 個の完了待ち | [WaitGroup](functions/concurrency.md#4-waitgroup--n-個の完了待ち) |
 | `Mutex<T>` | 共有データの排他 | [Mutex](functions/concurrency.md#6-mutext--共有データの排他) |
 | `pathname` | 分解したファイル名 | [パス名](functions/streams-files.md#9-パス名-pathname) |

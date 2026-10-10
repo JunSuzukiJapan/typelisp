@@ -247,6 +247,9 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; Vector / HashTable methods
     "new" "push" "get" "set" "len" "iter" "pop" "clear" "keys" "values"
     "entries" "remove"
+    ;; HashSet / Deque methods
+    "insert" "contains" "push-front" "push-back" "pop-front" "pop-back"
+    "front" "back"
     ;; the `Iter' trait's own method -- `iter' gets the cursor, `next' advances
     ;; it (§12)
     "next"
@@ -391,6 +394,8 @@ with no implicit conversion to or from the fixed-width numerics
     "datagram" "NetError"
     ;; builtin generic/abstract types
     "Option" "Result" "Sexpr" "HashTable" "Vector" "Self"
+    ;; collections the prelude builds on `HashTable' and `Vector'
+    "HashSet" "SortedTable" "Deque"
     ;; the handles `task' and `thread' hand back, the channel tasks talk over,
     ;; and the two `sync' types built on channels
     "Task" "Thread" "Chan" "WaitGroup" "Mutex"

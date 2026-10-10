@@ -1,6 +1,6 @@
 # 文字列・文字・コレクション
 
-`string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`。
+`string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
 
 ## 1. 文字列 `string`
 
@@ -180,3 +180,78 @@
 | `bit-not` | `(bit-not v)` | `BitVector→BitVector` | 補集合 |
 
 `bit-vector-p` は無い（静的型が答えている）。
+
+## 7. `HashSet<T>`
+
+重複の無い要素の集まり（Rust の `HashSet`）。標準ライブラリの `defstruct` で、中身は
+`HashTable<T,()>`。要素の型は `HashTable` のキーと同じく `Hash` を実装していること。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `make` | `(HashSet::make)` | `()→HashSet<T>` | 空の集合を作る。型引数は期待型から決まる |
+| `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 追加する。新しく入れば `true`、既にあれば `false` |
+| `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` があるか |
+| `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 取り除く。あれば `true` |
+| `count` | `(count s)` | `HashSet<T>→int` | 要素数 |
+| `clear` | `(clear s)` | `HashSet<T>→Unit` | 全削除 |
+| `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 要素のイテレータ。順序は決まっていない |
+
+```lisp
+(let ((seen (the HashSet<string> (HashSet::make))))
+  (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
+    (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
+```
+
+7〜9 章の 3 つの型に共通すること:
+
+- 作るときは `make` を使う。`new` は `defstruct` が生成するフィールド順のコンストラクタで、
+  作るときに使うものではない（`Array::make` と同じ）。
+- `iter` は呼んだ時点の写しを回す。`doiter` の中で同じコレクションを変えても、そのループには見えない。
+- 要素の型が `print-object` を実装していれば、`#<hashset "a" "b">` `#<sortedtable 1 "a">`
+  `#<deque 1 2>` の形で要素を印字する。
+
+## 8. `SortedTable<K,V>`
+
+キーの小さい順に並んだ表（Rust の `BTreeMap`）。キーの型は `Ord` を実装していること。
+キーと値をキーの順に並べた 2 本の `Vector` で持ち、検索は二分探索で行う。新しいキーの `set` と
+`remove` は、その位置より後ろの要素をずらす。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | 空の表を作る |
+| `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | 検索 |
+| `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | 挿入・上書き |
+| `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | 削除し、あれば旧値を返す |
+| `count` | `(count t)` | `SortedTable<K,V>→int` | 要素数 |
+| `clear` | `(clear t)` | `SortedTable<K,V>→Unit` | 全削除 |
+| `keys` | `(keys t)` | `SortedTable<K,V>→Vector<K>` | キーを小さい順に |
+| `values` | `(values t)` | `SortedTable<K,V>→Vector<V>` | 値をキーの順に |
+| `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | キーの順に `#{キー 値}` のタプルを返す |
+
+```lisp
+(let ((t (the SortedTable<string,int> (SortedTable::make))))
+  (set t "pear" 3) (set t "apple" 5)
+  (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 と pear 3
+```
+
+## 9. `Deque<T>`
+
+両端から出し入れできる列（Rust の `VecDeque`）。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `make` | `(Deque::make)` | `()→Deque<T>` | 空の列を作る |
+| `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 先頭／末尾に追加 |
+| `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 先頭／末尾を取り除いて返す。空なら `none` |
+| `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 先頭／末尾を見る（取り除かない） |
+| `get` | `(get d i)` | `(Deque<T>,int)→Option<T>` | 先頭から数えて `i` 番目。範囲外は `none` |
+| `set` | `(set d i x)` | `(Deque<T>,int,T)→Unit` | `i` 番目を書き換える。範囲外は panic |
+| `count` | `(count d)` | `Deque<T>→int` | 要素数 |
+| `clear` | `(clear d)` | `Deque<T>→Unit` | 全削除 |
+| `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | 先頭から順に |
+
+```lisp
+(let ((q (the Deque<int> (Deque::make))))
+  (push-back q 1) (push-back q 2) (push-front q 0)
+  (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
+```

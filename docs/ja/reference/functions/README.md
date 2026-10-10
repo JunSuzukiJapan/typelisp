@@ -27,8 +27,8 @@
 | ファイル | 内容 |
 |---|---|
 | [numbers.md](numbers.md) | 整数・浮動小数点数・有理数・複素数・真偽値、ビット演算、乱数 |
-| [sequences.md](sequences.md) | ペア `cons-cell`、S 式データ `Sexpr`、シンボル、シーケンス関数、高階関数 |
-| [collections.md](collections.md) | 文字列、文字、`Vector`、`HashTable`、`Array`、`BitVector` |
+| [sequences.md](sequences.md) | ペア `cons-cell`、S 式データ `Sexpr`、シンボル、シーケンス関数、遅延イテレータ `lazy`、高階関数 |
+| [collections.md](collections.md) | 文字列、文字、`Vector`、`HashTable`、`Array`、`BitVector`、`HashSet`、`SortedTable`、`Deque` |
 | [option-result.md](option-result.md) | `Option`、`Result`、エラー型と `Error` トレイト |
 | [traits.md](traits.md) | `Iter`、`Eq`/`Ord`、算術トレイト |
 | [printing.md](printing.md) | `print`/`println`/`format`、pretty printer、`print-object`、印字の制御変数 |

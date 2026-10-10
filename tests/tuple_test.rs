@@ -125,6 +125,33 @@ fn a_quoted_tuple() {
     both(r##"(format false "~s" '(#{1 q} x))"##, "(#{1 q} x)");
 }
 
+/// A generic function's body is kept as written and checked again for each
+/// set of type arguments, so the literal data in it has to survive being
+/// kept: `#{..}` as a pattern, and `#(..)`/`#2A(..)` as values.
+#[test]
+fn a_generic_body_can_hold_literal_data() {
+    eval_and_compare(
+        r##"(defun firsts<A> ((xs Vector<#{A int}>)) string
+              (let ((n 0))
+                (doiter (#{_ k} (iter xs)) (setf n (+ n k)))
+                (format false "~a ~s ~s" n #(1 2) #2A((1 2) (3 4)))))
+            (format false "~a" (firsts (the Vector<#{string int}> #(#{"a" 1} #{"b" 2}))))"##,
+        "3 #(1 2) #2A((1 2) (3 4))",
+    );
+}
+
+/// [`eval_string`] and, compiled, the same program with its last form as
+/// `go`'s body.
+fn eval_and_compare(src: &str, expected: &str) {
+    assert_eq!(eval_string(src), expected, "interpreted");
+    let (defs, last) = src.rsplit_once("\n").expect("two forms");
+    let compiled = eval_string_compiled(&format!(
+        "{}\n(defun go () string {})\n(compile go)\n(go)",
+        defs, last
+    ));
+    assert_eq!(compiled, expected, "compiled");
+}
+
 #[test]
 fn an_index_past_the_end_is_a_type_error() {
     let msg = check_err("(defun f () int (let ((t (tuple 1 2))) t::2))");
