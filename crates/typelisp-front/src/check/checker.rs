@@ -543,11 +543,12 @@ struct CheckMark {
     spec_memo: HashSet<(Path, Option<String>)>,
 }
 
-/// A generic *type*'s associated method, retained for per-instantiation
+/// A generic associated method, retained for per-instantiation
 /// re-generation — the method-side counterpart of [`FnTemplate`]. A method
 /// is generic through its *owner* (`Option<T>`'s `unwrap`, a generic
-/// `defstruct`'s accessors), never through parameters of its own, so the
-/// instantiation arguments are always the owner's type arguments.
+/// `defstruct`'s accessors), through type parameters of its own (`map<U>`),
+/// or both. The instantiation arguments are the owner's type arguments
+/// followed by the method's own.
 #[derive(Clone)]
 enum MethodTemplate {
     /// A written `defmethod` whose receiver names the owner's type
@@ -556,8 +557,13 @@ enum MethodTemplate {
     /// the receiver spelled them* (`(self Option<U>)` -> `["u"]`), zipped
     /// positionally with the owner's concrete type arguments at
     /// specialization time — they need not match the `AdtDef::params`
-    /// names the call site's substitution is keyed by.
-    Form { parts: Vec<Value>, ns: Vec<String>, written_vars: Vec<String> },
+    /// names the call site's substitution is keyed by. Empty when the
+    /// receiver names no variables (the owner is not generic, or the method
+    /// is written for one instantiation of it).
+    ///
+    /// `own_vars` are the method's own type parameters, bound to the
+    /// instantiation arguments after the owner's.
+    Form { parts: Vec<Value>, ns: Vec<String>, written_vars: Vec<String>, own_vars: Vec<String> },
     /// A generic `defstruct` field getter — there is no raw form to
     /// re-check (`check_defstruct` synthesizes accessor ASTs directly), so
     /// specialization re-synthesizes the `FieldGet` with the field type
@@ -571,6 +577,10 @@ enum MethodTemplate {
 /// header, shared between definition checking and template specialization.
 struct MethodSig {
     method: String,
+    /// The method's own type parameters, from its name (`map<U>` -> `["u"]`)
+    /// — the ones its receiver does not supply, inferred at each call from
+    /// the arguments the way a generic `defun`'s are.
+    own_params: Vec<String>,
     instance: bool,
     self_name: Option<String>,
     /// The receiver name's own source position (`(self Type)`'s `self`), for
@@ -1325,8 +1335,8 @@ impl Checker {
         }
         for (key, t) in delta.method_templates {
             let restored = match t {
-                crate::dump::WireMethodTemplate::Form { parts, ns, written_vars } => {
-                    MethodTemplate::Form { parts: rebuild(&parts, heap)?, ns, written_vars }
+                crate::dump::WireMethodTemplate::Form { parts, ns, written_vars, own_vars } => {
+                    MethodTemplate::Form { parts: rebuild(&parts, heap)?, ns, written_vars, own_vars }
                 }
                 crate::dump::WireMethodTemplate::Getter { index } => MethodTemplate::Getter { index },
                 crate::dump::WireMethodTemplate::Setter { index } => MethodTemplate::Setter { index },
@@ -1380,10 +1390,11 @@ impl Checker {
         methods.sort_by_key(|(k, _)| (k.0.to_string(), k.1.clone()));
         for (key, t) in methods {
             let w = match t {
-                MethodTemplate::Form { parts, ns, written_vars } => crate::dump::WireMethodTemplate::Form {
+                MethodTemplate::Form { parts, ns, written_vars, own_vars } => crate::dump::WireMethodTemplate::Form {
                     parts: owned(parts)?,
                     ns: ns.clone(),
                     written_vars: written_vars.clone(),
+                    own_vars: own_vars.clone(),
                 },
                 MethodTemplate::Getter { index } => crate::dump::WireMethodTemplate::Getter { index: *index },
                 MethodTemplate::Setter { index } => crate::dump::WireMethodTemplate::Setter { index: *index },
@@ -3881,10 +3892,10 @@ impl Checker {
     /// no receiver expression to dispatch on, so the receiver type is read
     /// off `expected`'s first parameter instead.
     ///
-    /// A generic-*owner* method with a retained [`MethodTemplate`] resolves
-    /// the owner's type arguments from `expected` (its first parameter is
-    /// the receiver's concrete type) and is rewritten to the specialization,
-    /// mirroring [`Self::fn_ref_node`]. A generic method *without* a
+    /// A generic method with a retained [`MethodTemplate`] resolves the
+    /// owner's type arguments, and its own (`map<U>`), from `expected` (its
+    /// first parameter is the receiver's concrete type) and is rewritten to
+    /// the specialization, mirroring [`Self::fn_ref_node`]. A generic method *without* a
     /// template (a Rust builtin like `HashTable::get`) still can't be
     /// reified and fails to match, as before.
     fn method_value(&self, heap: &mut Heap, name: &str, expected: Option<&Type>) -> Option<Result<Checked, Error>> {
@@ -3899,13 +3910,14 @@ impl Checker {
             return None;
         }
         let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
-        if !def.params.is_empty() {
-            let tparams: HashSet<String> = def.params.iter().cloned().collect();
+        if !def.params.is_empty() || !af.sig.type_params.is_empty() {
+            let all: Vec<&String> = def.params.iter().chain(&af.sig.type_params).collect();
+            let tparams: HashSet<String> = all.iter().map(|p| (*p).clone()).collect();
             let mut subst: BTreeMap<String, Type> = BTreeMap::new();
             if unify(&tparams, &ty, expected.unwrap(), &mut subst).is_ok()
-                && def.params.iter().all(|p| subst.contains_key(p))
+                && all.iter().all(|p| subst.contains_key(*p))
             {
-                let targs: Vec<Type> = def.params.iter().map(|p| subst[p.as_str()].clone()).collect();
+                let targs: Vec<Type> = all.iter().map(|p| subst[p.as_str()].clone()).collect();
                 if !targs.iter().any(|t| self.type_is_open(t))
                     && self.generic_method_templates.contains_key(&(type_fq.clone(), name.to_string()))
                 {
@@ -5017,9 +5029,13 @@ impl Checker {
             .expect("a method specialization is only ever requested for a retained template")
             .clone();
         match tmpl {
-            MethodTemplate::Form { parts, ns, written_vars } => {
-                let bindings: BTreeMap<String, Type> =
-                    written_vars.into_iter().zip(args.iter().cloned()).collect();
+            MethodTemplate::Form { parts, ns, written_vars, own_vars } => {
+                let owner_n = args.len() - own_vars.len();
+                let bindings: BTreeMap<String, Type> = written_vars
+                    .into_iter()
+                    .zip(args[..owner_n].iter().cloned())
+                    .chain(own_vars.into_iter().zip(args[owner_n..].iter().cloned()))
+                    .collect();
                 let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(ns, bindings);
                 let result = self.specialize_method_form(heap, interp, &parts, mangled, public);
                 self.exit_specialization(saved_ns, saved_loops, saved_bindings);
@@ -8435,11 +8451,11 @@ impl Checker {
     }
 
     /// [`Self::check_defmethod_in_form`] with the method's type variables in
-    /// scope for [`Self::reject_unknown_type_name`]. A method has no `<...>`
-    /// of its own: its type variables are the unresolved names its *receiver*
-    /// writes (`(self Vector<T>)`, or `Vector<T>` for a static method) — the
-    /// declaration part. A name that turns up anywhere else and is neither a
-    /// type nor one of those is unknown.
+    /// scope for [`Self::reject_unknown_type_name`]. They are declared in two
+    /// places: the unresolved names its *receiver* writes (`(self Vector<T>)`,
+    /// or `Vector<T>` for a static method), and the `<...>` of the method's
+    /// own name (`map<U>`). A name that turns up anywhere else and is neither
+    /// a type nor one of those is unknown.
     #[allow(clippy::too_many_arguments)]
     fn check_defmethod_in(
         &mut self,
@@ -8456,7 +8472,8 @@ impl Checker {
             Some(v @ Value::Cons(_)) => heap.list_to_vec(v).ok().and_then(|xs| xs.get(1).copied()),
             other => other,
         };
-        let vars = recv_ty.map(|t| self.written_type_vars(heap, t)).unwrap_or_default();
+        let mut vars = recv_ty.map(|t| self.written_type_vars(heap, t)).unwrap_or_default();
+        vars.extend(Self::header_type_vars(heap, parts.first()));
         self.with_type_names(vars, |c| {
             c.check_defmethod_in_form(heap, interp, parts, parts_locs, public, def_loc, body_ns)
         })
@@ -8484,6 +8501,7 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         let MethodSig {
             method,
+            own_params,
             instance,
             self_name,
             self_name_loc,
@@ -8525,7 +8543,7 @@ impl Checker {
             _ => Vec::new(),
         };
         let owner_params = self.reg.type_def(&type_fq).map(|d| d.params.len()).unwrap_or(0);
-        let is_generic_template = !written_vars.is_empty()
+        let generic_owner = !written_vars.is_empty()
             && written_vars.len() == owner_params
             && matches!(&recv_ty, Type::Named(_, targs) if targs.len() == written_vars.len())
             && {
@@ -8534,13 +8552,62 @@ impl Checker {
                 distinct.dedup();
                 distinct.len() == written_vars.len()
             };
+        // The method's own type parameters (`map<U>`) sit beside the owner's
+        // in one substitution at every call, so the names must be distinct
+        // from both spellings of the owner's: the receiver's (`Option<T>`)
+        // and the declaration's, which the registered signature is renamed
+        // into below.
+        if !own_params.is_empty() {
+            let declared: Vec<String> = self.reg.type_def(&type_fq).map(|d| d.params.clone()).unwrap_or_default();
+            for (i, p) in own_params.iter().enumerate() {
+                if own_params[..i].contains(p) {
+                    return Err(Error::TypeError(format!(
+                        "defmethod {}::{}: type parameter `{}` is declared twice",
+                        type_fq, method, p
+                    )));
+                }
+                if written_vars.contains(p) || declared.contains(p) {
+                    return Err(Error::TypeError(format!(
+                        "defmethod {}::{}: the method's own type parameter `{}` has the name of a type \
+                         parameter of `{}` (declared as `{}<{}>`); give it another name",
+                        type_fq,
+                        method,
+                        p,
+                        type_fq,
+                        type_fq,
+                        declared.join(",")
+                    )));
+                }
+            }
+            // Specialization binds the receiver's variables by position
+            // against the owner's arguments, so they have to be all of them
+            // or none. `(self Pair<T,int>)` names one, and nothing would bind
+            // it.
+            if !generic_owner && !written_vars.is_empty() {
+                return Err(Error::TypeError(format!(
+                    "defmethod {}::{}: a method with type parameters of its own needs a receiver \
+                     that names every type parameter of `{}` as a variable, or none of them",
+                    type_fq, method, type_fq
+                )));
+            }
+        }
+        // Generic through its owner, through its own parameters, or both:
+        // either way the body is only checked for real once the variables are
+        // known, at each instantiation.
+        let is_generic_template = generic_owner || !own_params.is_empty();
+        let template_vars: Vec<String> = if generic_owner { written_vars.clone() } else { Vec::new() };
         if is_generic_template {
             for &p in parts {
                 heap.push_permanent_root(p);
             }
             self.generic_method_templates.insert(
                 (type_fq.clone(), method.clone()),
-                MethodTemplate::Form { parts: parts.to_vec(), ns: self.ns.clone(), written_vars: written_vars.clone() },
+                MethodTemplate::Form {
+                    parts: parts.to_vec(),
+                    ns: self.ns.clone(),
+                    written_vars: template_vars.clone(),
+                    own_vars: own_params.clone(),
+                },
             );
         }
 
@@ -8558,7 +8625,7 @@ impl Checker {
         // one name in play past this point; the *body* is deliberately left
         // in the written names below, since that is what its text says, and
         // `MethodTemplate::Form` keeps `written_vars` for the same reason.
-        let owner_rename: BTreeMap<String, Type> = if is_generic_template {
+        let owner_rename: BTreeMap<String, Type> = if generic_owner {
             self.reg
                 .type_def(&type_fq)
                 .map(|d| {
@@ -8595,11 +8662,12 @@ impl Checker {
         // instantiation's concrete one. A defaultless parameter is
         // unrestricted — its omitted value is an `Option::none` built fresh
         // at the call's own resolved type.
-        let owner_param_set: HashSet<String> = self
+        let mut owner_param_set: HashSet<String> = self
             .reg
             .type_def(&type_fq)
             .map(|d| d.params.iter().cloned().collect())
             .unwrap_or_default();
+        owner_param_set.extend(own_params.iter().cloned());
         let mut sig_optionals = Vec::with_capacity(optionals_raw.len());
         for (pname, decl_ty, _loc, default_raw) in &optionals_raw {
             let decl_ty = rename(decl_ty);
@@ -8609,7 +8677,8 @@ impl Checker {
             if default_raw.is_some() && type_has_param(&decl_ty, &owner_param_set) {
                 return Err(Error::TypeError(format!(
                     "defmethod {}::{}: &optional parameter `{}` may not default when its type \
-                     mentions the owner's type parameter — declare it with no default instead",
+                     mentions a type parameter (the owner's or the method's own) — declare it with \
+                     no default instead",
                     type_fq, method, pname
                 )));
             }
@@ -8622,7 +8691,8 @@ impl Checker {
             if default_raw.is_some() && type_has_param(&decl_ty, &owner_param_set) {
                 return Err(Error::TypeError(format!(
                     "defmethod {}::{}: &key parameter `{}` may not default when its type \
-                     mentions the owner's type parameter — declare it with no default instead",
+                     mentions a type parameter (the owner's or the method's own) — declare it with \
+                     no default instead",
                     type_fq, method, pname
                 )));
             }
@@ -8651,7 +8721,7 @@ impl Checker {
             .collect();
         let sig = FnSig {
             ffi: false,
-            type_params: vec![],
+            type_params: own_params.clone(),
             params: sig_params,
             ret: rename(&ret),
             public,
@@ -8699,7 +8769,11 @@ impl Checker {
             self.exit_specialization(sn, sl, sb);
         }
         let body = checked?;
-        let type_params = if is_generic_template { written_vars } else { Vec::new() };
+        let type_params: Vec<String> = if is_generic_template {
+            template_vars.into_iter().chain(own_params).collect()
+        } else {
+            Vec::new()
+        };
         let mut all: Vec<(String, Type)> = Vec::new();
         if let Some(s) = &self_name {
             all.push((s.clone(), recv_ty));
@@ -8738,8 +8812,8 @@ impl Checker {
                 "defmethod: (defmethod name (receiver params...) ret body...)".into(),
             ));
         }
-        let method = match parts[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+        let (method, own_params) = match parts[0] {
+            Value::Symbol(id) => parse_generic_name_header(heap.symbol_name(id))?,
             _ => return Err(Error::TypeError("defmethod: name must be a symbol".into())),
         };
         let sig_list_locs = heap.list_to_vec_locs(parts[1])?;
@@ -8802,6 +8876,7 @@ impl Checker {
         let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
         Ok(MethodSig {
             method,
+            own_params,
             instance,
             self_name,
             self_name_loc,
@@ -11645,7 +11720,10 @@ impl Checker {
         if let Some(r) = receiver {
             typed.push(r);
         }
-        let owner_params: HashSet<String> = def.params.iter().cloned().collect();
+        // What the arguments may decide: the owner's parameters (a static
+        // call has no receiver to fix them) and the method's own (`map<U>`),
+        // which only the arguments can.
+        let tparams: HashSet<String> = def.params.iter().chain(&af.sig.type_params).cloned().collect();
         if af.sig.optionals.is_empty() && af.sig.keys.is_empty() && af.sig.rest.is_none() {
             let declared = &af.sig.params[offset..];
             if args.len() != declared.len() {
@@ -11667,16 +11745,24 @@ impl Checker {
             // was already known.
             for (i, (arg, pty)) in args.iter().zip(declared.iter()).enumerate() {
                 let st = subst_apply(pty, &subst);
-                let exp = if type_has_param(&st, &owner_params) { None } else { Some(st) };
+                let exp = if type_has_param(&st, &tparams) { None } else { Some(st) };
                 let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
-                unify(&owner_params, pty, &ta.ty, &mut subst)?;
+                unify(&tparams, pty, &ta.ty, &mut subst)?;
                 typed.push(ta);
             }
         } else {
             let who = format!("{}::{}", type_fq, method);
             self.push_assoc_opt_key_args(
-                heap, interp, env, &who, &af.sig, offset, &owner_params, &mut subst, args, arg_locs, &mut typed,
+                heap, interp, env, &who, &af.sig, offset, &tparams, &mut subst, args, arg_locs, &mut typed,
             )?;
+        }
+        for p in &af.sig.type_params {
+            if !subst.contains_key(p) {
+                return Err(Error::TypeError(format!(
+                    "cannot infer type parameter `{}` for `{}::{}`",
+                    p, type_fq, method
+                )));
+            }
         }
         for p in &def.params {
             if subst.contains_key(p) {
@@ -11720,10 +11806,11 @@ impl Checker {
         // are Rust implementations dispatched by their plain name, and stay
         // untouched.
         let mut method_name = method.to_string();
-        if !def.params.is_empty()
+        if (!def.params.is_empty() || !af.sig.type_params.is_empty())
             && self.generic_method_templates.contains_key(&(type_fq.clone(), method.to_string()))
         {
-            let targs: Vec<Type> = def.params.iter().map(|p| subst[p.as_str()].clone()).collect();
+            let targs: Vec<Type> =
+                def.params.iter().chain(&af.sig.type_params).map(|p| subst[p.as_str()].clone()).collect();
             if !targs.iter().any(|t| self.type_is_open(t)) {
                 method_name = self.request_method_specialization(type_fq, method, targs);
             }
@@ -11748,14 +11835,12 @@ impl Checker {
     /// parameter, in `MethodSig::params` order, so nothing downstream ever
     /// learns that this method's lambda list had regions in it.
     ///
-    /// Simpler than the free-function version in one respect: a method
-    /// signature has no type parameters of its own (`FnSig::type_params` is
-    /// always empty for an `AssocFn`), so there is no inference pass here.
-    /// The only substitution in play is `subst`, already resolved from the
-    /// receiver's — or the expected type's — own type arguments by the
-    /// caller, which is also why a defaulted parameter may not mention the
-    /// owner's type parameters (`Self::check_defmethod_in` rejects that at
-    /// the definition).
+    /// `tparams` are the variables the arguments may still decide — the
+    /// owner's and the method's own — and `subst` arrives holding whatever the
+    /// receiver (or the expected type) already fixed. A defaulted parameter
+    /// may not mention any of them (`Self::check_defmethod_in` rejects that
+    /// at the definition), since an omitted argument has no value to decide
+    /// them by.
     #[allow(clippy::too_many_arguments)]
     fn push_assoc_opt_key_args(
         &self,
@@ -11765,7 +11850,7 @@ impl Checker {
         who: &str,
         sig: &FnSig,
         offset: usize,
-        owner_params: &HashSet<String>,
+        tparams: &HashSet<String>,
         subst: &mut BTreeMap<String, Type>,
         args: &[Value],
         arg_locs: &[Option<Loc>],
@@ -11782,9 +11867,9 @@ impl Checker {
         }
         for (i, (arg, pty)) in args[..required.len()].iter().zip(required.iter()).enumerate() {
             let st = subst_apply(pty, subst);
-            let exp = if type_has_param(&st, owner_params) { None } else { Some(st) };
+            let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
             let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
-            unify(owner_params, pty, &ta.ty, subst)?;
+            unify(tparams, pty, &ta.ty, subst)?;
             typed.push(ta);
         }
         let tail = &args[required.len()..];
@@ -11817,9 +11902,9 @@ impl Checker {
                     return Err(Error::TypeError(format!("{}: duplicate keyword argument :{}", who, kw)));
                 }
                 let st = subst_apply(&key.decl_ty, subst);
-                let exp = if type_has_param(&st, owner_params) { None } else { Some(st) };
+                let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
                 let checked = self.check_at(heap, interp, env, tail[i + 1], exp.as_ref(), nth_loc(tail_locs, i + 1))?;
-                unify(owner_params, &key.decl_ty, &checked.ty, subst)?;
+                unify(tparams, &key.decl_ty, &checked.ty, subst)?;
                 supplied.insert(kw, checked);
                 i += 2;
             }
@@ -11848,9 +11933,9 @@ impl Checker {
         let mut supplied: Vec<Checked> = Vec::with_capacity(supplied_n);
         for (i, opt) in sig.optionals.iter().enumerate().take(supplied_n) {
             let st = subst_apply(&opt.decl_ty, subst);
-            let exp = if type_has_param(&st, owner_params) { None } else { Some(st) };
+            let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
             let checked = self.check_at(heap, interp, env, tail[i], exp.as_ref(), nth_loc(tail_locs, i))?;
-            unify(owner_params, &opt.decl_ty, &checked.ty, subst)?;
+            unify(tparams, &opt.decl_ty, &checked.ty, subst)?;
             supplied.push(checked);
         }
         let after = &tail[supplied_n..];
@@ -11860,9 +11945,9 @@ impl Checker {
             Some(elem_ty) => {
                 for (i, arg) in after.iter().enumerate() {
                     let st = subst_apply(elem_ty, subst);
-                    let exp = if type_has_param(&st, owner_params) { None } else { Some(st) };
+                    let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
                     let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(after_locs, i))?;
-                    unify(owner_params, elem_ty, &ta.ty, subst)?;
+                    unify(tparams, elem_ty, &ta.ty, subst)?;
                     rest_typed.push(ta);
                 }
             }

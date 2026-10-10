@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 15;
+pub const FORMAT_VERSION: u32 = 16;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -270,7 +270,7 @@ pub struct WireFnTemplate {
 /// them from the owner's `AdtDef`.
 #[derive(Serialize, Deserialize)]
 pub enum WireMethodTemplate {
-    Form { parts: Vec<OwnedForm>, ns: Vec<String>, written_vars: Vec<String> },
+    Form { parts: Vec<OwnedForm>, ns: Vec<String>, written_vars: Vec<String>, own_vars: Vec<String> },
     Getter { index: usize },
     Setter { index: usize },
 }
