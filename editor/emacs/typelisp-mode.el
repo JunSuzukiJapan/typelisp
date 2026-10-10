@@ -104,7 +104,7 @@ session has changed.")
     "macrolet" "symbol-macrolet"
     ;; other special forms (§7)
     "setf" "incf" "decf" "rotatef" "shiftf"
-    "list" "quote" "quasiquote" "unquote" "unquote-splicing"
+    "list" "tuple" "quote" "quasiquote" "unquote" "unquote-splicing"
     "panic" "unreachable" "todo" "as" "try-as" "compile" "documentation"
     ;; the REPL tool layer (CLHS 25.2).  Special forms because each takes the
     ;; *name* of a definition rather than a value — `step' is the exception,
