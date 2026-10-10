@@ -31,6 +31,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `Result<T,E>` | 成功か失敗か。`ok` / `err` | 同上 |
 | `Vector<T>` | 可変長配列 | [Vector](functions/collections.md#3-vectort) |
 | `HashTable<K,V>` | ハッシュ表。キーの型は `Hash` を実装していること | [HashTable](functions/collections.md#4-hashtablekv) |
+| `#{T0 T1 ...}` | タプル（要素 1〜12 個）。要素は `t::0` で読む | [構文 2 章](syntax.md#2-型の書き方) |
 | `Task<T>` | タスクのハンドル | [タスク](functions/concurrency.md#1-taskt--タスクのハンドル) |
 | `Thread<T>` | 専用 OS スレッドで走るタスクのハンドル | [Thread](functions/concurrency.md#7-threadt--専用の-os-スレッド) |
 | `Chan<T>` | チャネル | [チャネル](functions/concurrency.md#2-chant--チャネル) |
@@ -42,7 +43,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 
 | 型 | 内容 | 詳細 |
 |---|---|---|
-| `Sexpr` | 空でない S 式。`int`・`i8`〜`u32`・`f32`・`f64`・`char`・`bool`・`sym`・`str`・`cons`・`ratio`・`path`・`vector`・`array` の 18 変種 | [S 式データ](functions/sequences.md#2-s-式データ-sexpr) |
+| `Sexpr` | 空でない S 式。`int`・`i8`〜`u32`・`f32`・`f64`・`char`・`bool`・`sym`・`str`・`cons`・`ratio`・`path`・`vector`・`array`・`tuple` の 19 変種 | [S 式データ](functions/sequences.md#2-s-式データ-sexpr) |
 | `Option<Sexpr>` | S 式データ一般。空リスト `()` は `none` | 同上 |
 
 ## 4. 標準ライブラリの型
