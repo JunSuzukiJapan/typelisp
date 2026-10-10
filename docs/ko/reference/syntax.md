@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -513,6 +513,22 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 문자열을 둘 수 있다(`where` 절 바로 뒤, 본체 맨 앞, 뒤에 본체 형식이 있을 때만). `impl` 안의 메서드도 같으며
 `(documentation Type::method)`로 꺼낸다.
 
+메서드 자신의 타입 매개변수는 `defun`과 같이 이름에 `<...>`로 쓴다. 받는 쪽 타입의 타입 매개변수(아래 예의 `T`)는 받는 쪽로부터 정해지고, 메서드 자신의 타입
+매개변수(`U`)는 호출의 인수로부터 추론된다.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- 메서드 자신의 타입 매개변수에는 받는 쪽 타입이 선언한 타입 매개변수(`(defstruct Box<T> ...)`의 `T`)와도, 받는 쪽에 쓴 이름과도 다른 이름을 붙인다.
+- 받는 쪽 타입이 제네릭이면 받는 쪽에는 그 타입 매개변수를 모두 변수로 쓰거나(`Box<T>`) 모두 구체적인 타입으로 쓴다(`Box<int>`).
+- `impl` 안의 메서드에는 타입 매개변수를 추가할 수 없다. 시그니처는 트레이트가 선언한 것을 따른다.
+
 ### 3.6 defstruct — 구조체(사용자 정의 타입)
 
 ```lisp
@@ -538,8 +554,9 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
   타입은 쓸 수 없다. 타입에는 `defsignature`에 해당하는 전방 선언이 없다. 아직 정의되지 않은 이름은 `defun`의 인수 타입이나
   `the`에서도 같은 `unknown type` 오류가 된다. 그래서 서로를 참조하는 두 타입은 쓸 수 없다.
 - **타입 변수는 선언 위치에 쓴 것뿐이다.** `defun`/`defstruct`/`defenum`/`deftype`은 이름의 `<T>`, `defmethod`는 받는 쪽의
-  타입(`(self box<T>)`, 정적 메서드는 `box<T>`), `impl`은 대상 타입과 `impl<T>`, `deftrait`는 `Self`와 `(type Item)`의 연관
-  타입이다. 그 밖의 곳(인수, 반환값, 본체의 `the`/`lambda`)에서 처음 나오는 이름은 타입 변수가 되지 않고 `unknown type`이 된다.
+  타입(`(self box<T>)`, 정적 메서드는 `box<T>`)와 이름의 `<U>`, `impl`은 대상 타입과 `impl<T>`, `deftrait`는 `Self`와
+  `(type Item)`의 연관 타입이다. 그 밖의 곳(인수, 반환값, 본체의 `the`/`lambda`)에서 처음 나오는 이름은 타입 변수가 되지 않고
+  `unknown type`이 된다.
 - **문서 문자열**: 이름 바로 뒤, 필드 앞의 문자열 리터럴은 문서 문자열이 된다(`(defstruct Name "doc" (field Type)...)`. CL의
   `defstruct`와 같은 위치). 필드는 항상 `(name Type ...)` 형태이며 맨 문자열일 수 없으므로 모호함이 없다.
   `(documentation Name)`으로 꺼낸다.

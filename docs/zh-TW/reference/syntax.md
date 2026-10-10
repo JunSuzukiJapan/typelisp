@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -456,6 +456,21 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 呼叫端依 `obj` 的靜態型別解析方法（單一、靜態分派）。可以在與 `defun` 相同的位置、依相同的規則放置文件字串（`where` 子句之後、本體開頭，僅當
 其後還有本體形式時）。`impl` 中的方法也一樣——以 `(documentation Type::method)` 取出。
 
+方法自身的型別參數與 `defun` 一樣，用 `<...>` 寫在名稱裡。接收者型別的型別參數（下例中的 `T`）由接收者決定，方法自身的型別參數（`U`）從每次呼叫的引數推斷。
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- 方法自身的型別參數的名稱，既要與接收者型別宣告的型別參數（`(defstruct Box<T> ...)` 的 `T`）不同，也要與接收者中寫的名稱不同。
+- 接收者型別是泛型時，接收者中要嘛把它的型別參數全部寫成變數（`Box<T>`），要嘛全部寫成具體型別（`Box<int>`）。
+- `impl` 中的方法不能新增型別參數，其簽名遵循 trait 宣告的簽名。
+
 ### 3.6 defstruct — 結構（使用者定義型別）
 
 ```lisp
@@ -480,7 +495,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 - **型別要在被指名之前定義。** 欄位的型別可以寫自己（`(next Option<node>)`），但不能寫之後定義的型別——型別沒有相當於 `defsignature` 的前置
   宣告。尚未定義的名稱，在 `defun` 的引數型別與 `the` 中同樣會得到 `unknown type` 錯誤。因此互相參照的兩個型別無法寫出。
 - **型別變數只有寫在宣告部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名稱的 `<T>`，`defmethod` 是接收者的型別（`(self box<T>)`，
-  靜態方法是 `box<T>`），`impl` 是對象型別與 `impl<T>`，`deftrait` 是 `Self` 以及 `(type Item)` 的關聯型別。在其他地方——引數、回傳值、本體中
+  靜態方法是 `box<T>`）以及名稱中的 `<U>`，`impl` 是對象型別與 `impl<T>`，`deftrait` 是 `Self` 以及 `(type Item)` 的關聯型別。在其他地方——引數、回傳值、本體中
   的 `the`/`lambda`——第一次出現的名稱不會成為型別變數，而是 `unknown type`。
 - **文件字串**：在名稱之後、欄位清單之前放置字串字面值，它就成為文件字串（`(defstruct Name "doc" (field Type)...)`——與 CL 的 `defstruct`
   位置相同）。欄位一律是 `(name Type ...)` 的形式，不可能是裸字串，所以沒有歧義。以 `(documentation Name)` 取出。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -626,6 +626,27 @@ Docstring kann an derselben Position und nach denselben Regeln wie bei `defun` s
 `where`-Klausel, am Anfang des Rumpfes, nur wenn Rumpfformen folgen). Dasselbe gilt für Methoden innerhalb von
 `impl`; abgerufen werden sie mit `(documentation Type::method)`.
 
+Eigene Typparameter einer Methode stehen wie bei `defun` mit `<...>` im Namen. Die Typparameter des
+Empfängertyps (unten `T`) legt der Empfänger fest; die eigenen der Methode (`U`) werden aus den
+Argumenten jedes Aufrufs abgeleitet.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- Die eigenen Typparameter einer Methode brauchen andere Namen als die Typparameter, die der
+  Empfängertyp deklariert (das `T` von `(defstruct Box<T> ...)`), und als die im Empfänger
+  geschriebenen Namen.
+- Ist der Empfängertyp generisch, schreibt man im Empfänger entweder alle seine Typparameter als
+  Variablen (`Box<T>`) oder alle als konkrete Typen (`Box<int>`).
+- Eine Methode in `impl` kann keine Typparameter hinzufügen: Ihre Signatur folgt der, die das Trait
+  deklariert.
+
 ### 3.6 defstruct — Strukturen (benutzerdefinierte Typen)
 
 ```lisp
@@ -653,9 +674,10 @@ Docstring kann an derselben Position und nach denselben Regeln wie bei `defun` s
   `defsignature` entspräche. Ein noch nicht definierter Name ergibt in einem `defun`-Argumenttyp oder in `the`
   denselben Fehler `unknown type`. Zwei Typen, die sich gegenseitig verweisen, lassen sich daher nicht
   schreiben.
-- **Typvariablen sind nur die an deklarierenden Stellen geschriebenen.** Bei `defun`/`defstruct`/`defenum`/
-  `deftype` das `<T>` des Namens; bei `defmethod` der Typ des Empfängers (`(self box<T>)` oder `box<T>` bei
-  einer statischen Methode); bei `impl` der Zieltyp und `impl<T>`; bei `deftrait` `Self` und die assoziierten
+- **Typvariablen sind nur die an deklarierenden Stellen geschriebenen.** Bei
+  `defun`/`defstruct`/`defenum`/`deftype` das `<T>` des Namens; bei `defmethod` der Typ des
+  Empfängers (`(self box<T>)` oder `box<T>` bei einer statischen Methode) und das `<U>` des
+  Methodennamens; bei `impl` der Zieltyp und `impl<T>`; bei `deftrait` `Self` und die assoziierten
   Typen aus `(type Item)`. Ein Name, der anderswo zum ersten Mal vorkommt (Argumente, Rückgabewert,
   `the`/`lambda` im Rumpf), wird keine Typvariable; er ist `unknown type`.
 - **Docstrings**: Ein Zeichenkettenliteral direkt nach dem Namen, vor den Feldern, wird zum Docstring

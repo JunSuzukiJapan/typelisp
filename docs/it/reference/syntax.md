@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -634,6 +634,27 @@ docstring si può collocare nella stessa posizione e con le stesse regole di `de
 clausola `where`, all'inizio del corpo, solo quando seguono forme del corpo). Lo stesso vale per i metodi
 dentro `impl`; si recuperano con `(documentation Type::method)`.
 
+I parametri di tipo propri di un metodo si scrivono nel suo nome con `<...>`, come per `defun`. I
+parametri di tipo del tipo del ricevitore (`T` sotto) sono fissati dal ricevitore; quelli propri del
+metodo (`U`) sono dedotti dagli argomenti di ogni chiamata.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- I parametri di tipo propri del metodo devono avere nomi diversi sia dai parametri di tipo
+  dichiarati dal tipo del ricevitore (la `T` di `(defstruct Box<T> ...)`) sia dai nomi scritti nel
+  ricevitore.
+- Se il tipo del ricevitore è generico, nel ricevitore si scrivono tutti i suoi parametri di tipo
+  come variabili (`Box<T>`) oppure tutti come tipi concreti (`Box<int>`).
+- Un metodo dentro `impl` non può aggiungere parametri di tipo: la sua firma segue quella dichiarata
+  dal trait.
+
 ### 3.6 defstruct — strutture (tipi definiti dall'utente)
 
 ```lisp
@@ -662,11 +683,11 @@ dentro `impl`; si recuperano con `(documentation Type::method)`.
   tipo di un argomento di `defun` o in `the`. Quindi due tipi che si riferiscono l'uno all'altro non si
   possono scrivere.
 - **Le variabili di tipo sono solo quelle scritte in posizioni di dichiarazione.** Per
-  `defun`/`defstruct`/`defenum`/`deftype`, il `<T>` del nome; per `defmethod`, il tipo del ricevitore
-  (`(self box<T>)`, oppure `box<T>` per un metodo statico); per `impl`, il tipo bersaglio e `impl<T>`;
-  per `deftrait`, `Self` e i tipi associati di `(type Item)`. Un nome che compare per la prima volta in
-  qualsiasi altro punto (argomenti, valore di ritorno, `the`/`lambda` nel corpo) non diventa una
-  variabile di tipo; è `unknown type`.
+  `defun`/`defstruct`/`defenum`/`deftype`, il `<T>` del nome; per `defmethod`, il tipo del
+  ricevitore (`(self box<T>)`, oppure `box<T>` per un metodo statico) e il `<U>` del nome del
+  metodo; per `impl`, il tipo bersaglio e `impl<T>`; per `deftrait`, `Self` e i tipi associati di
+  `(type Item)`. Un nome che compare per la prima volta in qualsiasi altro punto (argomenti, valore
+  di ritorno, `the`/`lambda` nel corpo) non diventa una variabile di tipo; è `unknown type`.
 - **Docstring**: un letterale stringa subito dopo il nome, prima dei campi, diventa la docstring
   (`(defstruct Name "doc" (field Type)...)`, la stessa posizione del `defstruct` di CL). Un campo ha
   sempre la forma `(name Type ...)` e non può mai essere una stringa semplice, quindi non c'è ambiguità.

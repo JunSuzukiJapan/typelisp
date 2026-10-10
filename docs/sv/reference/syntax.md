@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -606,6 +606,26 @@ dokumentationssträng kan placeras på samma position och under samma regler som
 `where`-satsen, i början av kroppen, bara när kroppsformer följer). Detsamma gäller metoder inuti `impl`;
 de hämtas med `(documentation Type::method)`.
 
+En metods egna typparametrar skrivs i namnet med `<...>`, som för `defun`. Mottagartypens
+typparametrar (`T` nedan) bestäms av mottagaren; metodens egna (`U`) härleds från argumenten i varje
+anrop.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- Metodens egna typparametrar ska ha andra namn än både typparametrarna som mottagartypen deklarerar
+  (`T` i `(defstruct Box<T> ...)`) och namnen som står i mottagaren.
+- Om mottagartypen är generisk skriver man i mottagaren antingen alla dess typparametrar som
+  variabler (`Box<T>`) eller alla som konkreta typer (`Box<int>`).
+- En metod i `impl` kan inte lägga till typparametrar: dess signatur följer den som traitet
+  deklarerar.
+
 ### 3.6 defstruct — structs (användardefinierade typer)
 
 ```lisp
@@ -632,11 +652,12 @@ de hämtas med `(documentation Type::method)`.
   men inte en typ som definieras senare: typer har ingen framåtdeklaration som motsvarar `defsignature`.
   Ett namn som ännu inte är definierat ger samma `unknown type`-fel i en `defun`-argumenttyp eller i
   `the`. Så två typer som refererar till varandra kan inte skrivas.
-- **Typvariabler är bara de som skrivs på deklarerande positioner.** För `defun`/`defstruct`/`defenum`/
-  `deftype` är det `<T>` i namnet; för `defmethod` mottagarens typ (`(self box<T>)`, eller `box<T>` för en
-  statisk metod); för `impl` måltypen och `impl<T>`; för `deftrait` `Self` och de associerade typerna i
-  `(type Item)`. Ett namn som förekommer för första gången någon annanstans (argument, returvärdet,
-  `the`/`lambda` i kroppen) blir inte en typvariabel; det är `unknown type`.
+- **Typvariabler är bara de som skrivs på deklarerande positioner.** För
+  `defun`/`defstruct`/`defenum`/`deftype` är det `<T>` i namnet; för `defmethod` mottagarens typ
+  (`(self box<T>)`, eller `box<T>` för en statisk metod) och `<U>` i metodens namn; för `impl`
+  måltypen och `impl<T>`; för `deftrait` `Self` och de associerade typerna i `(type Item)`. Ett namn
+  som förekommer för första gången någon annanstans (argument, returvärdet, `the`/`lambda` i
+  kroppen) blir inte en typvariabel; det är `unknown type`.
 - **Dokumentationssträngar**: en strängliteral direkt efter namnet, före fälten, blir dokumentationssträngen
   (`(defstruct Name "doc" (field Type)...)`, samma position som CL:s `defstruct`). Ett fält har alltid
   formen `(name Type ...)` och kan aldrig vara en bar sträng, så det finns ingen tvetydighet. Hämta den med

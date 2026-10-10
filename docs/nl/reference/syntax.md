@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -637,6 +637,27 @@ docstring kan op dezelfde positie en onder dezelfde regels als bij `defun` worde
 `where`-clausule, aan het begin van de body, alleen wanneer er bodyvormen op volgen). Hetzelfde geldt voor
 methoden binnen `impl`; ze worden opgehaald met `(documentation Type::method)`.
 
+Eigen typeparameters van een methode schrijf je net als bij `defun` met `<...>` in de naam. De
+typeparameters van het ontvangertype (`T` hieronder) liggen vast door de ontvanger; die van de
+methode zelf (`U`) worden afgeleid uit de argumenten van elke aanroep.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- Geef de eigen typeparameters van de methode andere namen dan de typeparameters die het
+  ontvangertype declareert (de `T` van `(defstruct Box<T> ...)`) en dan de namen die in de ontvanger
+  staan.
+- Is het ontvangertype generiek, schrijf dan in de ontvanger al zijn typeparameters als variabelen
+  (`Box<T>`) of allemaal als concrete typen (`Box<int>`).
+- Een methode binnen `impl` kan geen typeparameters toevoegen: de signatuur volgt die welke het
+  trait declareert.
+
 ### 3.6 defstruct — structs (door de gebruiker gedefinieerde types)
 
 ```lisp
@@ -665,11 +686,11 @@ methoden binnen `impl`; ze worden opgehaald met `(documentation Type::method)`.
   in het argumenttype van een `defun` of in `the`. Twee types die naar elkaar verwijzen kunnen dus niet
   worden geschreven.
 - **Typevariabelen zijn alleen die welke op declarerende posities zijn geschreven.** Bij
-  `defun`/`defstruct`/`defenum`/`deftype` de `<T>` van de naam; bij `defmethod` het type van de ontvanger
-  (`(self box<T>)`, of `box<T>` voor een statische methode); bij `impl` het doeltype en `impl<T>`; bij
-  `deftrait` `Self` en de geassocieerde types van `(type Item)`. Een naam die elders (argumenten, de
-  returnwaarde, `the`/`lambda` in de body) voor het eerst verschijnt wordt geen typevariabele; het is
-  `unknown type`.
+  `defun`/`defstruct`/`defenum`/`deftype` de `<T>` van de naam; bij `defmethod` het type van de
+  ontvanger (`(self box<T>)`, of `box<T>` voor een statische methode) en de `<U>` van de
+  methodenaam; bij `impl` het doeltype en `impl<T>`; bij `deftrait` `Self` en de geassocieerde types
+  van `(type Item)`. Een naam die elders (argumenten, de returnwaarde, `the`/`lambda` in de body)
+  voor het eerst verschijnt wordt geen typevariabele; het is `unknown type`.
 - **Docstrings**: een stringliteral direct na de naam, vóór de velden, wordt de docstring
   (`(defstruct Name "doc" (field Type)...)`, dezelfde positie als `defstruct` van CL). Een veld heeft altijd
   de vorm `(name Type ...)` en kan nooit een kale string zijn, dus er is geen dubbelzinnigheid. Haal hem op

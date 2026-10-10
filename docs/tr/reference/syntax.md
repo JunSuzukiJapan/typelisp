@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -611,6 +611,25 @@ aynı konumda ve aynı kurallarla konabilir (`where` yan tümcesinden hemen sonr
 yalnızca gövde formları izlediğinde). Aynısı `impl` içindeki metotlar için de geçerlidir;
 `(documentation Type::method)` ile alınırlar.
 
+Bir metodun kendi tür parametreleri, `defun`'da olduğu gibi adında `<...>` ile yazılır. Alıcı
+türünün tür parametreleri (aşağıda `T`) alıcı tarafından belirlenir; metodun kendi parametreleri
+(`U`) her çağrının argümanlarından çıkarılır.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- Metodun kendi tür parametrelerine, alıcı türünün bildirdiği tür parametrelerinden
+  (`(defstruct Box<T> ...)` içindeki `T`) ve alıcıda yazılan adlardan farklı adlar verin.
+- Alıcı türü genelse, alıcıda onun tüm tür parametrelerini ya değişken olarak (`Box<T>`) ya da
+  hepsini somut tür olarak (`Box<int>`) yazın.
+- `impl` içindeki bir metoda tür parametresi eklenemez: imzası, trait'in bildirdiği imzayı izler.
+
 ### 3.6 defstruct — struct'lar (kullanıcı tanımlı türler)
 
 ```lisp
@@ -637,11 +656,12 @@ yalnızca gövde formları izlediğinde). Aynısı `impl` içindeki metotlar iç
   (`(next Option<node>)`), ancak sonradan tanımlanan bir tür olamaz: türlerin `defsignature`'a karşılık
   gelen bir ileri bildirimi yoktur. Henüz tanımlanmamış bir ad, bir `defun` bağımsız değişken türünde ya da
   `the` içinde aynı `unknown type` hatasını verir. Bu yüzden birbirine başvuran iki tür yazılamaz.
-- **Tür değişkenleri yalnızca bildirim konumlarında yazılanlardır.** `defun`/`defstruct`/`defenum`/
-  `deftype` için adın `<T>`'si; `defmethod` için alıcının türü (`(self box<T>)` ya da statik bir metot için
-  `box<T>`); `impl` için hedef tür ve `impl<T>`; `deftrait` için `Self` ve `(type Item)`'ın ilişkili
-  türleri. Başka herhangi bir yerde (bağımsız değişkenler, dönüş değeri, gövdedeki `the`/`lambda`) ilk
-  kez görünen bir ad tür değişkeni olmaz; `unknown type`'tır.
+- **Tür değişkenleri yalnızca bildirim konumlarında yazılanlardır.**
+  `defun`/`defstruct`/`defenum`/`deftype` için adın `<T>`'si; `defmethod` için alıcının türü
+  (`(self box<T>)` ya da statik bir metot için `box<T>`) ve metot adındaki `<U>`; `impl` için hedef
+  tür ve `impl<T>`; `deftrait` için `Self` ve `(type Item)`'ın ilişkili türleri. Başka herhangi bir
+  yerde (bağımsız değişkenler, dönüş değeri, gövdedeki `the`/`lambda`) ilk kez görünen bir ad tür
+  değişkeni olmaz; `unknown type`'tır.
 - **Docstring'ler**: adın hemen ardından, alanlardan önce gelen bir string sabiti docstring olur
   (`(defstruct Name "doc" (field Type)...)`, CL'nin `defstruct`'ıyla aynı konum). Bir alan her zaman
   `(name Type ...)` biçimindedir ve asla çıplak bir string olamaz; bu yüzden belirsizlik yoktur.

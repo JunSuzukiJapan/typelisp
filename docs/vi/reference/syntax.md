@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -587,6 +587,26 @@ trí và theo cùng quy tắc như với `defun` (ngay sau mệnh đề `where`,
 theo sau). Điều tương tự áp dụng cho các phương thức bên trong `impl`; chúng được lấy bằng
 `(documentation Type::method)`.
 
+Tham số kiểu riêng của một phương thức được viết trong tên của nó bằng `<...>`, giống như `defun`.
+Tham số kiểu của kiểu bên nhận (`T` bên dưới) do bên nhận quyết định; tham số riêng của phương thức
+(`U`) được suy ra từ các đối số của mỗi lần gọi.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- Đặt cho tham số kiểu riêng của phương thức những tên khác với các tham số kiểu mà kiểu bên nhận
+  khai báo (`T` của `(defstruct Box<T> ...)`) và khác với các tên viết trong bên nhận.
+- Nếu kiểu bên nhận là generic, trong bên nhận hãy viết tất cả tham số kiểu của nó dưới dạng biến
+  (`Box<T>`) hoặc tất cả dưới dạng kiểu cụ thể (`Box<int>`).
+- Phương thức bên trong `impl` không thể thêm tham số kiểu: chữ ký của nó theo chữ ký mà trait khai
+  báo.
+
 ### 3.6 defstruct — struct (kiểu do người dùng định nghĩa)
 
 ```lisp
@@ -613,11 +633,12 @@ theo sau). Điều tương tự áp dụng cho các phương thức bên trong `
   (`(next Option<node>)`), nhưng không thể là một kiểu được định nghĩa sau: kiểu không có khai báo trước tương
   ứng với `defsignature`. Một tên chưa được định nghĩa cho cùng lỗi `unknown type` trong một kiểu đối số của
   `defun` hoặc trong `the`. Vì vậy hai kiểu tham chiếu lẫn nhau không thể viết được.
-- **Biến kiểu chỉ là những biến được viết ở các vị trí khai báo.** Với `defun`/`defstruct`/`defenum`/
-  `deftype`, là `<T>` của tên; với `defmethod`, là kiểu của bên nhận (`(self box<T>)`, hoặc `box<T>` với một
-  hàm tĩnh); với `impl`, là kiểu đích và `impl<T>`; với `deftrait`, là `Self` và các kiểu liên kết của
-  `(type Item)`. Một tên xuất hiện lần đầu ở bất kỳ nơi nào khác (đối số, giá trị trả về, `the`/`lambda` trong
-  thân) không trở thành biến kiểu; nó là `unknown type`.
+- **Biến kiểu chỉ là những biến được viết ở các vị trí khai báo.** Với
+  `defun`/`defstruct`/`defenum`/`deftype`, là `<T>` của tên; với `defmethod`, là kiểu của bên nhận
+  (`(self box<T>)`, hoặc `box<T>` với một hàm tĩnh) và `<U>` của tên phương thức; với `impl`, là
+  kiểu đích và `impl<T>`; với `deftrait`, là `Self` và các kiểu liên kết của `(type Item)`. Một tên
+  xuất hiện lần đầu ở bất kỳ nơi nào khác (đối số, giá trị trả về, `the`/`lambda` trong thân) không
+  trở thành biến kiểu; nó là `unknown type`.
 - **Docstring**: một literal chuỗi ngay sau tên, trước các trường, trở thành docstring
   (`(defstruct Name "doc" (field Type)...)`, cùng vị trí như `defstruct` của CL). Một trường luôn có dạng
   `(name Type ...)` và không bao giờ có thể là một chuỗi trần, nên không có sự mơ hồ. Lấy nó bằng

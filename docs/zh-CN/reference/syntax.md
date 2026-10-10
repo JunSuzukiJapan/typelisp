@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -466,6 +466,21 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 调用方按 `obj` 的静态类型解析方法（单一、静态分派）。可以在与 `defun` 相同的位置、按相同的规则放置文档字符串（`where` 子句之后、
 函数体开头，仅当其后还有函数体形式时）。`impl` 中的方法也一样——用 `(documentation Type::method)` 取出。
 
+方法自身的类型参数与 `defun` 一样，用 `<...>` 写在名字里。接收者类型的类型参数（下例中的 `T`）由接收者决定，方法自身的类型参数（`U`）从每次调用的参数推断。
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- 方法自身的类型参数的名字，既要与接收者类型声明的类型参数（`(defstruct Box<T> ...)` 的 `T`）不同，也要与接收者中写的名字不同。
+- 接收者类型是泛型时，接收者中要么把它的类型参数全部写成变量（`Box<T>`），要么全部写成具体类型（`Box<int>`）。
+- `impl` 中的方法不能添加类型参数，其签名遵循 trait 声明的签名。
+
 ### 3.6 defstruct — 结构体（用户定义类型）
 
 ```lisp
@@ -491,7 +506,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   `defsignature` 的前向声明。尚未定义的名字，在 `defun` 的参数类型和 `the` 中同样会得到 `unknown type` 错误。因此互相引用的两个
   类型无法写出。
 - **类型变量只有写在声明部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名字的 `<T>`，`defmethod` 是接收者的类型
-  （`(self box<T>)`，静态方法是 `box<T>`），`impl` 是对象类型和 `impl<T>`，`deftrait` 是 `Self` 以及 `(type Item)` 的关联类型。
+  （`(self box<T>)`，静态方法是 `box<T>`）以及名字中的 `<U>`，`impl` 是对象类型和 `impl<T>`，`deftrait` 是 `Self` 以及 `(type Item)` 的关联类型。
   在其他地方——参数、返回值、函数体中的 `the`/`lambda`——首次出现的名字不会成为类型变量，而是 `unknown type`。
 - **文档字符串**：在名字之后、字段列表之前放置字符串字面量，它就成为文档字符串（`(defstruct Name "doc" (field Type)...)`——与
   CL 的 `defstruct` 位置相同）。字段总是 `(name Type ...)` 的形式，不可能是裸字符串，所以没有歧义。用 `(documentation Name)` 取出。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -604,6 +604,27 @@ be placed in the same position and under the same rules as for `defun` (right af
 at the start of the body, only when body forms follow). The same goes for methods inside `impl`; they
 are retrieved with `(documentation Type::method)`.
 
+A method's own type parameters are written in its name with `<...>`, as for `defun`. The receiver
+type's type parameters (`T` below) are fixed by the receiver; the method's own (`U`) are inferred
+from the arguments of each call.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- Give the method's own type parameters names that differ both from the type parameters the
+  receiver's type declares (the `T` of `(defstruct Box<T> ...)`) and from the names written in the
+  receiver.
+- If the receiver's type is generic, write all of its type parameters in the receiver as variables
+  (`Box<T>`), or all of them as concrete types (`Box<int>`).
+- A method inside `impl` cannot add type parameters: its signature follows the one the trait
+  declares.
+
 ### 3.6 defstruct — structs (user-defined types)
 
 ```lisp
@@ -630,11 +651,12 @@ are retrieved with `(documentation Type::method)`.
   but not a type defined later: types have no forward declaration corresponding to `defsignature`. A
   name not yet defined gives the same `unknown type` error in a `defun` argument type or in `the`. So two
   types that refer to each other cannot be written.
-- **Type variables are only those written in declaring positions.** For `defun`/`defstruct`/`defenum`/
-  `deftype`, the `<T>` of the name; for `defmethod`, the receiver's type (`(self box<T>)`, or `box<T>`
-  for a static method); for `impl`, the target type and `impl<T>`; for `deftrait`, `Self` and the
-  associated types of `(type Item)`. A name appearing for the first time anywhere else (arguments, the
-  return value, `the`/`lambda` in the body) does not become a type variable; it is `unknown type`.
+- **Type variables are only those written in declaring positions.** For
+  `defun`/`defstruct`/`defenum`/`deftype`, the `<T>` of the name; for `defmethod`, the receiver's
+  type (`(self box<T>)`, or `box<T>` for a static method) and the `<U>` of the method's name; for
+  `impl`, the target type and `impl<T>`; for `deftrait`, `Self` and the associated types of
+  `(type Item)`. A name appearing for the first time anywhere else (arguments, the return value,
+  `the`/`lambda` in the body) does not become a type variable; it is `unknown type`.
 - **Docstrings**: a string literal right after the name, before the fields, becomes the docstring
   (`(defstruct Name "doc" (field Type)...)`, the same position as CL's `defstruct`). A field is always of
   the form `(name Type ...)` and can never be a bare string, so there is no ambiguity. Retrieve it with

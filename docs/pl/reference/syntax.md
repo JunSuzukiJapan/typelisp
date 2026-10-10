@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -605,6 +605,26 @@ umieścić w tej samej pozycji i według tych samych reguł co dla `defun` (zara
 na początku ciała, tylko gdy następują formy ciała). To samo dotyczy metod wewnątrz `impl`; są
 pobierane za pomocą `(documentation Type::method)`.
 
+Własne parametry typu metody zapisuje się w jej nazwie za pomocą `<...>`, tak jak w `defun`.
+Parametry typu typu odbiorcy (`T` poniżej) ustala odbiorca; własne parametry metody (`U`) są
+wywnioskowywane z argumentów każdego wywołania.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- Własne parametry typu metody muszą mieć nazwy inne niż parametry typu zadeklarowane przez typ
+  odbiorcy (`T` z `(defstruct Box<T> ...)`) i inne niż nazwy zapisane w odbiorcy.
+- Jeśli typ odbiorcy jest generyczny, w odbiorcy zapisuje się wszystkie jego parametry typu jako
+  zmienne (`Box<T>`) albo wszystkie jako konkretne typy (`Box<int>`).
+- Metoda wewnątrz `impl` nie może dodać parametrów typu: jej sygnatura odpowiada tej, którą
+  deklaruje trait.
+
 ### 3.6 defstruct — struktury (typy definiowane przez użytkownika)
 
 ```lisp
@@ -631,11 +651,12 @@ pobierane za pomocą `(documentation Type::method)`.
   ale nie typ zdefiniowany później: typy nie mają deklaracji wyprzedzającej odpowiadającej `defsignature`. Nazwa
   jeszcze niezdefiniowana daje ten sam błąd `unknown type` w typie argumentu `defun` lub w `the`. Zatem dwa
   typy odwołujące się do siebie nawzajem nie mogą być zapisane.
-- **Zmiennymi typowymi są tylko te zapisane w pozycjach deklarujących.** Dla `defun`/`defstruct`/`defenum`/
-  `deftype` jest to `<T>` w nazwie; dla `defmethod` typ odbiorcy (`(self box<T>)` lub `box<T>`
-  dla metody statycznej); dla `impl` typ docelowy i `impl<T>`; dla `deftrait` `Self` i typy
-  powiązane z `(type Item)`. Nazwa pojawiająca się po raz pierwszy gdziekolwiek indziej (argumenty, wartość
-  zwracana, `the`/`lambda` w ciele) nie staje się zmienną typową; jest `unknown type`.
+- **Zmiennymi typowymi są tylko te zapisane w pozycjach deklarujących.** Dla
+  `defun`/`defstruct`/`defenum`/`deftype` jest to `<T>` w nazwie; dla `defmethod` typ odbiorcy
+  (`(self box<T>)` lub `box<T>` dla metody statycznej) oraz `<U>` z nazwy metody; dla `impl` typ
+  docelowy i `impl<T>`; dla `deftrait` `Self` i typy powiązane z `(type Item)`. Nazwa pojawiająca
+  się po raz pierwszy gdziekolwiek indziej (argumenty, wartość zwracana, `the`/`lambda` w ciele) nie
+  staje się zmienną typową; jest `unknown type`.
 - **Docstringi**: literał łańcuchowy zaraz po nazwie, przed polami, staje się docstringiem
   (`(defstruct Name "doc" (field Type)...)`, ta sama pozycja co w `defstruct` z CL). Pole ma zawsze
   postać `(name Type ...)` i nigdy nie może być gołym łańcuchem, więc nie ma niejednoznaczności. Pobierz go za pomocą

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -634,6 +634,26 @@ ditaruh pada posisi yang sama dan dengan aturan yang sama seperti pada `defun` (
 `where`, di awal badan, hanya ketika bentuk badan menyusul). Hal yang sama berlaku untuk metode di
 dalam `impl`; docstring diambil dengan `(documentation Type::method)`.
 
+Parameter tipe milik metode sendiri ditulis di namanya dengan `<...>`, sama seperti `defun`.
+Parameter tipe dari tipe penerima (`T` di bawah) ditentukan oleh penerima; parameter milik metode
+(`U`) disimpulkan dari argumen setiap pemanggilan.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
+  (Box::new (f self::v)))
+
+(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+```
+
+- Beri parameter tipe milik metode nama yang berbeda dari parameter tipe yang dideklarasikan tipe
+  penerima (`T` pada `(defstruct Box<T> ...)`) maupun dari nama yang ditulis di penerima.
+- Jika tipe penerima generik, tulis di penerima semua parameter tipenya sebagai variabel (`Box<T>`)
+  atau semuanya sebagai tipe konkret (`Box<int>`).
+- Metode di dalam `impl` tidak dapat menambah parameter tipe: signaturnya mengikuti yang
+  dideklarasikan trait.
+
 ### 3.6 defstruct — struct (tipe buatan pengguna)
 
 ```lisp
@@ -664,10 +684,10 @@ dalam `impl`; docstring diambil dengan `(documentation Type::method)`.
   saling merujuk tidak dapat ditulis.
 - **Variabel tipe hanyalah yang ditulis pada posisi pendeklarasian.** Untuk
   `defun`/`defstruct`/`defenum`/`deftype`, `<T>` pada nama; untuk `defmethod`, tipe penerima
-  (`(self box<T>)`, atau `box<T>` untuk metode statis); untuk `impl`, tipe sasaran dan `impl<T>`;
-  untuk `deftrait`, `Self` dan tipe terkait pada `(type Item)`. Nama yang pertama kali muncul di
-  tempat lain mana pun (argumen, nilai kembalian, `the`/`lambda` di badan) tidak menjadi variabel
-  tipe; ia adalah `unknown type`.
+  (`(self box<T>)`, atau `box<T>` untuk metode statis) dan `<U>` pada nama metode; untuk `impl`,
+  tipe sasaran dan `impl<T>`; untuk `deftrait`, `Self` dan tipe terkait pada `(type Item)`. Nama
+  yang pertama kali muncul di tempat lain mana pun (argumen, nilai kembalian, `the`/`lambda` di
+  badan) tidak menjadi variabel tipe; ia adalah `unknown type`.
 - **Docstring**: literal string tepat setelah nama, sebelum field, menjadi docstring
   (`(defstruct Name "doc" (field Type)...)`, posisi yang sama seperti `defstruct` pada CL). Sebuah
   field selalu berbentuk `(name Type ...)` dan tidak pernah dapat berupa string polos, sehingga tidak
