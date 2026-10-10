@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -1179,10 +1179,32 @@ Tipi di pattern:
   fare riferimento a qualsiasi cosa visibile dalla posizione del ramo (argomenti, binding esterni,
   globali)
 - `(Ctor sub-pattern...)` — pattern di costruttore (`Some x` `None` `Cons a d` `Ok v` e così via)
+- `(:or p1 p2 ...)` — un pattern « or »: corrisponde quando corrisponde una qualsiasi delle
+  alternative. Il corpo è uno solo, quindi ogni alternativa deve legare le stesse variabili con gli
+  stessi tipi. Si può scrivere anche dentro un pattern costruttore
+  (`(some (:or (circle r) (rect r _)))`)
 
 Confrontare un tipo che non implementa `Eq` con un letterale di valore / `(= expr)` è un errore di tipo
 (questo linguaggio sceglie di dire "questi non si possono confrontare" anziché lasciare un ramo che in
 silenzio non corrisponde mai).
+
+**Guardie**: scrivere `:when condizione` dopo il pattern sceglie il ramo solo quando il pattern
+corrisponde e in più la condizione è vera. Se la condizione è falsa si prova il ramo successivo. La
+condizione può leggere le variabili legate dal pattern.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Un ramo con guardia non conta per l'esaustività (come in Rust). La sua condizione può essere
+  falsa, quindi le varianti che coprirebbe richiedono anche un ramo senza guardia o un `_`.
+- Pattern « or » e guardie si combinano. La guardia viene valutata qualunque sia l'alternativa che
+  ha corrisposto (`((:or 1 2 3) :when on "small")`).
 
 **Letterali di valore contro uno scrutinee `Sexpr`**: l'`Eq` di `sexpr` è `eq` (l'identità di CL), quindi
 gli immediati (`'foo` (internato) / interi / caratteri / `true`/`false`) si possono scrivere così come

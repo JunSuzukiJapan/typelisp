@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1123,9 +1123,30 @@ Kinds of patterns:
   implementation becomes the comparison rule as it is. `expr` can refer to anything visible from the
   arm's position (arguments, outer bindings, globals)
 - `(Ctor sub-pattern...)` — constructor patterns (`Some x` `None` `Cons a d` `Ok v` and so on)
+- `(:or p1 p2 ...)` — an or-pattern: it matches when any one alternative matches. There is one body,
+  so every alternative must bind the same variables at the same types. It can also be written inside
+  a constructor pattern (`(some (:or (circle r) (rect r _)))`)
 
 Comparing a type that does not implement `Eq` with a value literal / `(= expr)` is a type error (this
 language chooses to say "these cannot be compared" rather than leave an arm that silently never matches).
+
+**Guards**: writing `:when condition` after the pattern selects the arm only when the pattern
+matches and the condition is true as well. When the condition is false, the next arm is tried. The
+condition can read the variables the pattern bound.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- A guarded arm does not count for exhaustiveness (as in Rust). Its condition can be false, so the
+  variants it would cover need an unguarded arm or a `_` as well.
+- Or-patterns and guards combine. The guard is evaluated whichever alternative matched
+  (`((:or 1 2 3) :when on "small")`).
 
 **Value literals against an `Sexpr` scrutinee**: the `Eq` of `sexpr` is `eq` (CL's identity), so
 immediates (`'foo` (interned) / integers / characters / `true`/`false`) can be written as they are and

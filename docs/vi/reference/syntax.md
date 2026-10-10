@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1091,9 +1091,29 @@ Các loại mẫu:
   do người dùng định nghĩa trở thành quy tắc so sánh nguyên trạng. `expr` có thể tham chiếu mọi thứ nhìn thấy
   được từ vị trí của nhánh (đối số, ràng buộc bên ngoài, biến toàn cục)
 - `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`Some x` `None` `Cons a d` `Ok v`, v.v.)
+- `(:or p1 p2 ...)` — mẫu hoặc: khớp khi bất kỳ lựa chọn nào khớp. Chỉ có một thân, nên mọi lựa chọn
+  phải gắn cùng các biến với cùng kiểu. Cũng có thể viết bên trong một mẫu hàm khởi tạo
+  (`(some (:or (circle r) (rect r _)))`)
 
 So sánh một kiểu không triển khai `Eq` với một literal giá trị / `(= expr)` là lỗi kiểu (ngôn ngữ này chọn nói
 "những thứ này không thể so sánh" thay vì để lại một nhánh âm thầm không bao giờ khớp).
+
+**Điều kiện canh**: viết `:when điều-kiện` sau mẫu sẽ chọn nhánh chỉ khi mẫu khớp và điều kiện cũng
+đúng. Nếu điều kiện sai, nhánh tiếp theo được thử. Điều kiện có thể đọc các biến mà mẫu đã gắn.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Nhánh có điều kiện canh không được tính cho tính đầy đủ (giống Rust). Điều kiện của nó có thể sai,
+  nên các variant nó sẽ bao phủ còn cần một nhánh không có điều kiện canh hoặc một `_`.
+- Mẫu hoặc và điều kiện canh kết hợp được. Điều kiện canh được đánh giá dù lựa chọn nào đã khớp
+  (`((:or 1 2 3) :when on "small")`).
 
 **Literal giá trị với đối tượng `Sexpr`**: `Eq` của `sexpr` là `eq` (đồng nhất của CL), nên các giá trị tức
 thời (`'foo` (đã intern) / số nguyên / ký tự / `true`/`false`) có thể được viết nguyên trạng và khớp theo nội

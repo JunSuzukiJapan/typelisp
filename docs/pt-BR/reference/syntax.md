@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1114,9 +1114,30 @@ Tipos de padrão:
   definida pelo usuário vira a regra de comparação como está. `expr` pode se referir a qualquer coisa visível da
   posição do ramo (argumentos, vínculos externos, globais)
 - `(Ctor sub-pattern...)` — padrões de construtor (`Some x` `None` `Cons a d` `Ok v` etc.)
+- `(:or p1 p2 ...)` — um padrão ou: casa quando qualquer uma das alternativas casa. Há um único
+  corpo, então toda alternativa precisa vincular as mesmas variáveis com os mesmos tipos. Também
+  pode ser escrito dentro de um padrão de construtor (`(some (:or (circle r) (rect r _)))`)
 
 Comparar um tipo que não implementa `Eq` com um literal de valor / `(= expr)` é um erro de tipo (esta linguagem
 prefere dizer "não podem ser comparados" a deixar um ramo que silenciosamente nunca casa).
+
+**Guardas**: escrever `:when condição` depois do padrão escolhe o ramo só quando o padrão casa e,
+além disso, a condição é verdadeira. Se a condição for falsa, o próximo ramo é tentado. A condição
+pode ler as variáveis que o padrão vinculou.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Um ramo com guarda não conta para a exaustividade (como em Rust). A condição dele pode ser falsa,
+  então as variantes que ele cobriria precisam também de um ramo sem guarda ou de um `_`.
+- Padrões ou e guardas se combinam. A guarda é avaliada qualquer que seja a alternativa que casou
+  (`((:or 1 2 3) :when on "small")`).
 
 **Literais de valor contra um valor examinado `Sexpr`**: o `Eq` de `sexpr` é `eq` (a identidade do CL), então os
 imediatos (`'foo` (internado) / inteiros / caracteres / `true`/`false`) podem ser escritos como estão e casam pelo

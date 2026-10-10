@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1124,9 +1124,30 @@ Slag av mönster:
   användardefinierad `Eq`-implementation blir jämförelseregeln som den är. `expr` kan referera till allt
   som syns från grenens position (argument, yttre bindningar, globaler)
 - `(Ctor sub-pattern...)` — konstruktormönster (`Some x` `None` `Cons a d` `Ok v` och så vidare)
+- `(:or p1 p2 ...)` — ett eller-mönster: det matchar när något av alternativen matchar. Det finns en
+  enda kropp, så varje alternativ måste binda samma variabler med samma typer. Det kan också skrivas
+  inuti ett konstruktormönster (`(some (:or (circle r) (rect r _)))`)
 
 Att jämföra en typ som inte implementerar `Eq` med en värdeliteral / `(= expr)` är ett typfel (det här
 språket väljer att säga "dessa kan inte jämföras" i stället för att lämna en gren som tyst aldrig matchar).
+
+**Vakter**: `:when villkor` efter mönstret väljer grenen bara när mönstret matchar och villkoret
+dessutom är sant. Är villkoret falskt prövas nästa gren. Villkoret kan läsa variablerna som mönstret
+band.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- En gren med vakt räknas inte för uttömmande täckning (som i Rust). Dess villkor kan vara falskt,
+  så varianterna den skulle täcka behöver dessutom en gren utan vakt eller ett `_`.
+- Eller-mönster och vakter går att kombinera. Vakten utvärderas vilket alternativ som än matchade
+  (`((:or 1 2 3) :when on "small")`).
 
 **Värdeliteraler mot en `Sexpr`-scrutinee**: `Eq` för `sexpr` är `eq` (CL:s identitet), så omedelbara
 värden (`'foo` (internerad) / heltal / tecken / `true`/`false`) kan skrivas som de är och matchar efter

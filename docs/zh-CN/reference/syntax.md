@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -885,8 +885,23 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 - `(= expr)` —— 求值任意式子，用 `Eq::equals` 比较。是比较没有字面量语法的类型（`defstruct` 实例、全局变量、计算结果）的唯一写法，
   用户定义的 `Eq` 实现直接成为比较规则。`expr` 可以引用从该分支位置可见的任何东西（参数、外层绑定、全局变量）
 - `(Ctor sub-pattern...)` —— 构造函数模式（`Some x` `None` `Cons a d` `Ok v` 等）
+- `(:or p1 p2 ...)` —— or 模式。任意一个选项匹配即匹配。分支体只有一个，所以每个选项都必须以相同的类型绑定相同名字的变量。也可以写在构造函数模式内部（`(some (:or (circle r) (rect r _)))`）
 
 用值字面量／`(= expr)` 比较没有实现 `Eq` 的类型是类型错误（比起留下悄悄不匹配的分支，选择说明无法比较）。
+
+**守卫**：在模式后面写 `:when 条件`，则只有当模式匹配且条件也为真时才选择该分支。条件为假时尝试下一个分支。条件可以读取模式绑定的变量。
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- 带守卫的分支不计入穷尽性检查（与 Rust 相同）。其条件可能为假，所以它本应覆盖的变体还需要一个不带守卫的分支或 `_`。
+- or 模式与守卫可以组合。无论匹配的是哪个选项，都会求值守卫（`((:or 1 2 3) :when on "small")`）。
 
 **对 `Sexpr` 被匹配值的值字面量**：`sexpr` 的 `Eq` 是 `eq`（CL 的同一性），所以立即值——`'foo`（已 intern）/ 整数 / 字符 /
 `true`/`false`——可以直接写，按内容匹配：

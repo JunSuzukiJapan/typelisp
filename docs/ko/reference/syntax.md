@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -966,9 +966,26 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   결과)을 비교하는 유일한 방법이며, 사용자 정의 `Eq` 구현이 그대로 비교 규칙이 된다. `expr`은 그 갈래 위치에서 보이는
   모든 것(인수, 바깥 바인딩, 전역 변수)을 참조할 수 있다
 - `(Ctor sub-pattern...)` — 생성자 패턴(`Some x` `None` `Cons a d` `Ok v` 등)
+- `(:or p1 p2 ...)` — or 패턴. 선택지 중 하나라도 맞으면 맞는다. 본체가 하나뿐이므로 모든 선택지가 같은 이름의 변수를 같은 타입으로 묶어야 한다. 생성자
+  패턴 안에도 쓸 수 있다(`(some (:or (circle r) (rect r _)))`)
 
 `Eq`를 구현하지 않은 타입을 값 리터럴 / `(= expr)`로 비교하면 타입 오류이다(조용히 맞지 않는 갈래를 남기는 대신 비교할 수
 없다고 말하는 쪽을 택한다).
+
+**가드**: 패턴 뒤에 `:when 조건`을 쓰면 패턴이 맞고 조건도 참일 때만 그 갈래를 고른다. 조건이 거짓이면 다음 갈래를 시도한다. 조건은 패턴이 묶은 변수를 읽을 수
+있다.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- 가드가 붙은 갈래는 망라성 검사에서 세지 않는다(Rust와 같다). 조건이 거짓일 수 있으므로, 그 갈래가 덮을 변형에는 가드 없는 갈래나 `_`가 따로 필요하다.
+- or 패턴과 가드는 함께 쓸 수 있다. 가드는 어느 선택지로 맞았든 평가된다(`((:or 1 2 3) :when on "small")`).
 
 **`Sexpr` 검사 대상에 대한 값 리터럴**: `sexpr`의 `Eq`는 `eq`(CL의 동일성)이므로 즉시값 — `'foo`(인턴됨) / 정수 / 문자 /
 `true`/`false` — 은 그대로 쓸 수 있고 내용으로 맞는다.

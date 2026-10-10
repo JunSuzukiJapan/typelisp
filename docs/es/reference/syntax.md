@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1141,9 +1141,30 @@ Clases de patrones:
   `Eq` definida por el usuario se convierte tal cual en la regla de comparación. `expr` se puede referir a
   cualquier cosa visible desde la posición de la rama (argumentos, enlaces exteriores, globales)
 - `(Ctor sub-pattern...)` — patrones de constructor (`Some x` `None` `Cons a d` `Ok v`, etc.)
+- `(:or p1 p2 ...)` — un patrón o: coincide cuando coincide cualquiera de las alternativas. Hay un
+  solo cuerpo, así que cada alternativa debe enlazar las mismas variables con los mismos tipos.
+  También puede escribirse dentro de un patrón de constructor (`(some (:or (circle r) (rect r _)))`)
 
 Comparar un tipo que no implementa `Eq` con un literal de valor / `(= expr)` es un error de tipos (este lenguaje
 prefiere decir "no se pueden comparar" a dejar una rama que en silencio nunca coincide).
+
+**Guardas**: escribir `:when condición` tras el patrón elige la rama solo cuando el patrón coincide
+y además la condición es verdadera. Si la condición es falsa, se prueba la rama siguiente. La
+condición puede leer las variables que enlazó el patrón.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Una rama con guarda no cuenta para la exhaustividad (como en Rust). Su condición puede ser falsa,
+  así que las variantes que cubriría necesitan además una rama sin guarda o un `_`.
+- Los patrones o y las guardas se combinan. La guarda se evalúa sea cual sea la alternativa que
+  coincidió (`((:or 1 2 3) :when on "small")`).
 
 **Literales de valor contra un valor examinado `Sexpr`**: el `Eq` de `sexpr` es `eq` (la identidad de CL), así
 que los inmediatos (`'foo` (internado) / enteros / caracteres / `true`/`false`) se pueden escribir tal cual y

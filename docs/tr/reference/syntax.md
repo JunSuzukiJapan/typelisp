@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1128,9 +1128,30 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   kullanıcı tanımlı bir `Eq` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
   konumundan görünen her şeye (bağımsız değişkenler, dış bağlamalar, globaller) başvurabilir
 - `(Ctor sub-pattern...)` — yapıcı örüntüleri (`Some x` `None` `Cons a d` `Ok v` vb.)
+- `(:or p1 p2 ...)` — bir veya-örüntüsü: seçeneklerden herhangi biri eşleşince eşleşir. Gövde
+  tektir, bu yüzden her seçenek aynı değişkenleri aynı türlerle bağlamalıdır. Bir yapıcı örüntüsünün
+  içine de yazılabilir (`(some (:or (circle r) (rect r _)))`)
 
 `Eq`'i gerçekleştirmeyen bir türü bir değer sabitiyle / `(= expr)` ile karşılaştırmak tür hatasıdır (bu
 dil, sessizce asla eşleşmeyen bir kolu bırakmak yerine "bunlar karşılaştırılamaz" demeyi seçer).
+
+**Korumalar**: örüntünün ardından `:when koşul` yazmak, kolu yalnızca örüntü eşleştiğinde ve ayrıca
+koşul doğru olduğunda seçer. Koşul yanlışsa sonraki kol denenir. Koşul, örüntünün bağladığı
+değişkenleri okuyabilir.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Korumalı bir kol kapsamlılık için sayılmaz (Rust'taki gibi). Koşulu yanlış olabileceğinden,
+  kapsayacağı varyantlar için ayrıca korumasız bir kol ya da `_` gerekir.
+- Veya-örüntüleri ve korumalar birlikte kullanılabilir. Koruma, hangi seçenek eşleşmiş olursa olsun
+  değerlendirilir (`((:or 1 2 3) :when on "small")`).
 
 **Bir `Sexpr` denetlenen değerine karşı değer sabitleri**: `sexpr`'in `Eq`'i `eq`'tir (CL'nin kimliği);
 bu yüzden anlık değerler (`'foo` (intern edilmiş) / tamsayılar / karakterler / `true`/`false`) olduğu

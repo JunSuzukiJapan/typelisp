@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1177,10 +1177,31 @@ Soorten patronen:
   vergelijkingsregel. `expr` kan naar alles verwijzen wat zichtbaar is vanaf de positie van de tak
   (argumenten, buitenste bindingen, globale variabelen)
 - `(Ctor sub-pattern...)` — constructorpatronen (`Some x` `None` `Cons a d` `Ok v` enzovoort)
+- `(:or p1 p2 ...)` — een of-patroon: het past zodra een van de alternatieven past. Er is één body,
+  dus elk alternatief moet dezelfde variabelen met dezelfde typen binden. Het kan ook binnen een
+  constructorpatroon staan (`(some (:or (circle r) (rect r _)))`)
 
 Een type dat `Eq` niet implementeert vergelijken met een waardeliteral / `(= expr)` is een typefout (deze
 taal kiest ervoor te zeggen "deze kunnen niet worden vergeleken" in plaats van een tak achter te laten die
 stilzwijgend nooit overeenkomt).
+
+**Guards**: `:when voorwaarde` na het patroon kiest de tak alleen als het patroon past en de
+voorwaarde bovendien waar is. Is de voorwaarde onwaar, dan wordt de volgende tak geprobeerd. De
+voorwaarde kan de variabelen lezen die het patroon heeft gebonden.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Een tak met een guard telt niet mee voor volledigheid (zoals in Rust). Zijn voorwaarde kan onwaar
+  zijn, dus de varianten die hij zou dekken hebben daarnaast een tak zonder guard of een `_` nodig.
+- Of-patronen en guards zijn te combineren. De guard wordt geëvalueerd welk alternatief er ook paste
+  (`((:or 1 2 3) :when on "small")`).
 
 **Waardeliterals tegen een `Sexpr`-scrutinee**: de `Eq` van `sexpr` is `eq` (identiteit van CL), dus
 directe waarden (`'foo` (geïnterneerd) / gehele getallen / tekens / `true`/`false`) kunnen zoals ze zijn

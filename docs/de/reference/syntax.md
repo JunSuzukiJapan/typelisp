@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1159,10 +1159,32 @@ Arten von Mustern:
   eine benutzerdefinierte `Eq`-Implementierung wird unverändert zur Vergleichsregel. `expr` kann sich auf alles
   beziehen, was von der Position des Zweigs aus sichtbar ist (Argumente, äußere Bindungen, globale Variablen)
 - `(Ctor sub-pattern...)` — Konstruktormuster (`Some x` `None` `Cons a d` `Ok v` usw.)
+- `(:or p1 p2 ...)` — ein Oder-Muster: Es passt, wenn eine der Alternativen passt. Es gibt nur einen
+  Rumpf, daher muss jede Alternative dieselben Variablen mit denselben Typen binden. Es kann auch
+  innerhalb eines Konstruktormusters stehen (`(some (:or (circle r) (rect r _)))`)
 
 Einen Typ, der `Eq` nicht implementiert, mit einem Wertliteral / `(= expr)` zu vergleichen, ist ein Typfehler
 (diese Sprache sagt lieber „diese lassen sich nicht vergleichen“, als einen Zweig stehen zu lassen, der
 stillschweigend nie passt).
+
+**Guards**: Steht `:when Bedingung` hinter dem Muster, wird der Zweig nur gewählt, wenn das Muster
+passt und zusätzlich die Bedingung wahr ist. Ist die Bedingung falsch, wird der nächste Zweig
+versucht. Die Bedingung kann die Variablen lesen, die das Muster gebunden hat.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Ein Zweig mit Guard zählt nicht für die Vollständigkeit (wie in Rust). Seine Bedingung kann falsch
+  sein, daher brauchen die Varianten, die er abdecken würde, zusätzlich einen Zweig ohne Guard oder
+  ein `_`.
+- Oder-Muster und Guards lassen sich kombinieren. Der Guard wird ausgewertet, egal welche
+  Alternative gepasst hat (`((:or 1 2 3) :when on "small")`).
 
 **Wertliterale gegen einen `Sexpr` als untersuchten Wert**: Das `Eq` von `sexpr` ist `eq` (CLs Identität), daher
 lassen sich direkte Werte (`'foo` (interniert) / Ganzzahlen / Zeichen / `true`/`false`) unverändert schreiben und

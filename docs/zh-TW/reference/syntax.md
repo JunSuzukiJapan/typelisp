@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -861,8 +861,23 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 - `(= expr)` —— 對任意式子求值，以 `Eq::equals` 比較。是比較沒有字面值語法的型別（`defstruct` 實例、全域變數、計算結果）的唯一寫法，使用者定義的
   `Eq` 實作直接成為比較規則。`expr` 可以參照從該分支位置可見的任何東西（引數、外層繫結、全域變數）
 - `(Ctor sub-pattern...)` —— 建構函式模式（`Some x` `None` `Cons a d` `Ok v` 等）
+- `(:or p1 p2 ...)` —— or 模式。任一個選項符合即符合。分支本體只有一個，所以每個選項都必須以相同的型別繫結相同名稱的變數。也可以寫在建構函式模式內部（`(some (:or (circle r) (rect r _)))`）
 
 以值字面值／`(= expr)` 比較沒有實作 `Eq` 的型別是型別錯誤（比起留下默默不符合的分支，選擇說明無法比較）。
+
+**守衛**：在模式後面寫 `:when 條件`，則只有當模式符合且條件也為真時才選擇該分支。條件為假時嘗試下一個分支。條件可以讀取模式繫結的變數。
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- 帶守衛的分支不計入窮盡性檢查（與 Rust 相同）。其條件可能為假，所以它本應涵蓋的變體還需要一個不帶守衛的分支或 `_`。
+- or 模式與守衛可以組合。無論符合的是哪個選項，都會求值守衛（`((:or 1 2 3) :when on "small")`）。
 
 **對 `Sexpr` 被比對值的值字面值**：`sexpr` 的 `Eq` 是 `eq`（CL 的同一性），所以立即值——`'foo`（已 intern）/ 整數 / 字元 / `true`/`false`——可以
 直接寫，依內容符合：

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1129,10 +1129,32 @@ Sortes de motifs :
   par l'utilisateur devient telle quelle la règle de comparaison. `expr` peut faire référence à tout ce qui est
   visible depuis la position de la branche (arguments, liaisons extérieures, globales)
 - `(Ctor sub-pattern...)` — motifs de constructeur (`Some x` `None` `Cons a d` `Ok v`, etc.)
+- `(:or p1 p2 ...)` — un motif « ou » : il correspond dès qu'une des alternatives correspond. Il n'y
+  a qu'un corps, donc chaque alternative doit lier les mêmes variables avec les mêmes types. Il peut
+  aussi s'écrire à l'intérieur d'un motif de constructeur (`(some (:or (circle r) (rect r _)))`)
 
 Comparer un type qui n'implémente pas `Eq` avec un littéral de valeur / `(= expr)` est une erreur de type (ce langage
 choisit de dire « on ne peut pas les comparer » plutôt que de laisser une branche qui ne correspond silencieusement
 jamais).
+
+**Gardes** : écrire `:when condition` après le motif ne choisit la branche que si le motif
+correspond et que la condition est vraie en plus. Si la condition est fausse, la branche suivante
+est essayée. La condition peut lire les variables que le motif a liées.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Une branche gardée ne compte pas pour l'exhaustivité (comme en Rust). Sa condition peut être
+  fausse, donc les variantes qu'elle couvrirait ont besoin en plus d'une branche sans garde ou d'un
+  `_`.
+- Les motifs « ou » et les gardes se combinent. La garde est évaluée quelle que soit l'alternative
+  qui a correspondu (`((:or 1 2 3) :when on "small")`).
 
 **Littéraux de valeur face à une valeur examinée `Sexpr`** : l'`Eq` de `sexpr` est `eq` (l'identité de CL) ; les
 immédiats (`'foo` (interné) / entiers / caractères / `true`/`false`) peuvent donc s'écrire tels quels et correspondent

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1178,10 +1178,31 @@ Jenis pola:
   komputasi), dan implementasi `Eq` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
   dapat merujuk apa pun yang terlihat dari posisi cabang (argumen, pengikatan luar, variabel global)
 - `(Ctor sub-pattern...)` — pola konstruktor (`Some x` `None` `Cons a d` `Ok v` dan sebagainya)
+- `(:or p1 p2 ...)` — pola atau: cocok bila salah satu alternatif cocok. Badannya hanya satu, jadi
+  setiap alternatif harus mengikat variabel yang sama dengan tipe yang sama. Dapat juga ditulis di
+  dalam pola konstruktor (`(some (:or (circle r) (rect r _)))`)
 
 Membandingkan tipe yang tidak mengimplementasikan `Eq` dengan literal nilai / `(= expr)` adalah
 kesalahan tipe (bahasa ini memilih untuk mengatakan "ini tidak dapat dibandingkan" daripada
 membiarkan cabang yang diam-diam tidak pernah cocok).
+
+**Penjaga**: menulis `:when kondisi` setelah pola memilih cabang hanya bila pola cocok dan
+kondisinya juga benar. Bila kondisinya salah, cabang berikutnya dicoba. Kondisi dapat membaca
+variabel yang diikat pola.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Cabang berpenjaga tidak dihitung untuk kelengkapan (seperti di Rust). Kondisinya bisa salah, jadi
+  varian yang akan dicakupnya juga memerlukan cabang tanpa penjaga atau `_`.
+- Pola atau dan penjaga dapat digabung. Penjaga dievaluasi alternatif mana pun yang cocok
+  (`((:or 1 2 3) :when on "small")`).
 
 **Literal nilai terhadap scrutinee `Sexpr`**: `Eq` pada `sexpr` adalah `eq` (identitas pada CL),
 sehingga literal langsung (`'foo` (di-intern) / bilangan bulat / karakter / `true`/`false`) dapat

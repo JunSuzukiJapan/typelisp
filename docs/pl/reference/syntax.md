@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 37af68009626057caa98d1dc23e3879b42e983c7 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 276c33b026879c1ec189713e9f4318c70de2242a -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1122,9 +1122,30 @@ Rodzaje wzorców:
   implementacja `Eq` staje się regułą porównania bez zmian. `expr` może odwoływać się do wszystkiego, co jest widoczne z
   pozycji ramienia (argumenty, zewnętrzne wiązania, zmienne globalne)
 - `(Ctor sub-pattern...)` — wzorce konstruktorów (`Some x` `None` `Cons a d` `Ok v` i tak dalej)
+- `(:or p1 p2 ...)` — wzorzec „lub”: pasuje, gdy pasuje dowolna z alternatyw. Ciało jest jedno, więc
+  każda alternatywa musi wiązać te same zmienne z tymi samymi typami. Można go też zapisać wewnątrz
+  wzorca konstruktora (`(some (:or (circle r) (rect r _)))`)
 
 Porównanie typu, który nie implementuje `Eq`, z literałem wartościowym / `(= expr)` jest błędem typu (ten
 język woli powiedzieć „tych nie da się porównać", niż zostawić ramię, które po cichu nigdy nie pasuje).
+
+**Strażniki**: `:when warunek` za wzorcem sprawia, że ramię jest wybierane tylko wtedy, gdy wzorzec
+pasuje i dodatkowo warunek jest prawdziwy. Gdy warunek jest fałszywy, próbowane jest następne ramię.
+Warunek może czytać zmienne związane przez wzorzec.
+
+```lisp
+(defun classify ((n int)) string
+  (match n
+    (0 "zero")
+    (k :when (< k 0) "negative")
+    (k :when (evenp k) "even")
+    (_ "odd")))
+```
+
+- Ramię ze strażnikiem nie liczy się do wyczerpywalności (jak w Rust). Jego warunek może być
+  fałszywy, więc warianty, które by pokrywało, potrzebują dodatkowo ramienia bez strażnika albo `_`.
+- Wzorce „lub” i strażniki można łączyć. Strażnik jest obliczany niezależnie od tego, która
+  alternatywa pasowała (`((:or 1 2 3) :when on "small")`).
 
 **Literały wartościowe względem badanej wartości `Sexpr`**: `Eq` dla `sexpr` to `eq` (tożsamość z CL), więc
 wartości natychmiastowe (`'foo` (internowane) / liczby całkowite / znaki / `true`/`false`) można zapisać bez zmian i
