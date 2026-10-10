@@ -13667,9 +13667,13 @@ impl Checker {
     /// module only `pub` slots may be given. Generic type arguments come from
     /// the values and `expected`, as for any constructor call.
     ///
-    /// Rewritten into `(let* ((t value)...) (ctor slot...))`: the values are
-    /// bound in the order written, then passed in slot order with the
-    /// defaults filled in, so the constructor's own checking does the typing.
+    /// Rewritten into a call of the struct's constructor with the slots in
+    /// order and the defaults filled in, so the constructor's own checking
+    /// does the typing — each value is checked against its slot's type. When
+    /// the values are written out of slot order they are first bound in the
+    /// order written (`(let* ((t value)...) (ctor ...))`), each as
+    /// `(the SlotType value)` where the slot type does not mention the
+    /// struct's own type parameters, so the slot still types the value.
     fn check_make_instance(
         &self,
         heap: &mut Heap,
@@ -13699,9 +13703,15 @@ impl Checker {
             _ => return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", ty))),
         };
         let field_names = def.field_names.clone();
+        let field_types: Vec<Type> = def.variants.first().map(|v| v.fields.clone()).unwrap_or_default();
+        let generic_param = {
+            let blank: BTreeMap<String, Type> = def.params.iter().map(|p| (p.clone(), Type::Unit)).collect();
+            move |t: &Type| subst_apply(t, &blank) != *t
+        };
         let tname = type_fq.to_string();
         let mut given: Vec<Option<Value>> = vec![None; field_names.len()];
         let mut bindings: Vec<(Value, Value)> = Vec::new();
+        let mut written_order: Vec<usize> = Vec::new();
         let rest = &args[1..];
         let mut k = 0;
         while k < rest.len() {
@@ -13742,13 +13752,31 @@ impl Checker {
                     type_fq.parent().join("::")
                 )));
             }
-            let tmp = heap.intern_symbol(&self.gensym_place());
-            bindings.push((tmp, value));
-            given[i] = Some(tmp);
+            written_order.push(i);
+            given[i] = Some(value);
             k += 2;
         }
-        let defaults = self.reg.struct_defaults.get(&type_fq).cloned();
+        let in_slot_order = written_order.windows(2).all(|w| w[0] < w[1]);
         let mut s = RootScope::new(heap);
+        if !in_slot_order {
+            for &i in &written_order {
+                let value = given[i].expect("given above");
+                let bound = if generic_param(&field_types[i]) {
+                    value
+                } else {
+                    let the = s.intern_symbol("the");
+                    let ty = self.type_source(&mut s, &field_types[i])?;
+                    s.push_root(ty);
+                    let v = forms::list_from_vec_locs(&mut s, &[(the, None), (ty, None), (value, None)])?;
+                    s.push_root(v);
+                    v
+                };
+                let tmp = s.intern_symbol(&self.gensym_place());
+                bindings.push((tmp, bound));
+                given[i] = Some(tmp);
+            }
+        }
+        let defaults = self.reg.struct_defaults.get(&type_fq).cloned();
         let ctor = forms::path_form(&mut s, &type_fq.child(STRUCT_CTOR));
         s.push_root(ctor);
         let mut call: Vec<(Value, Option<Loc>)> = vec![(ctor, None)];

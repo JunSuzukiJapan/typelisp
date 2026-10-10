@@ -8,6 +8,7 @@ const DEFS: &str = r##"
 (defstruct Point (pub x f64) (pub y f64 0.5))
 (defstruct Box<T> (v T))
 (defstruct (Point3 (:include Point)) (pub z f64 9.0))
+(defstruct Holder (pub o Option<int>) (pub n int))
 "##;
 
 /// `body` (a `string`-valued expression) after [`DEFS`], interpreted and
@@ -61,6 +62,18 @@ fn values_are_evaluated_in_the_order_written() {
                                    :x (progn (setf log (format false "~ax" log)) 2.0))
              log)"##,
         "yx",
+    );
+}
+
+/// A value is typed by its slot, written in slot order or not: a bare
+/// `(option::none)` needs the slot's type to know what it holds.
+#[test]
+fn a_value_is_typed_by_its_slot() {
+    both(
+        r##"(let ((a (make-instance 'Holder :o (option::none) :n 1))
+                  (b (make-instance 'Holder :n 2 :o (option::none))))
+             (format false "~s ~s" a::o b::n))"##,
+        "none 2",
     );
 }
 
