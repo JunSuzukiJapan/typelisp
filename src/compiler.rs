@@ -827,6 +827,11 @@ const SOURCE_TEMPLATE: &str = r#"
     (#%sexpr-path (let ((args-ptr (alloca-args builder 1)))
           (store-arg builder args-ptr 0 v)
           (build-call builder (get-function m "rt_path_to_list") args-ptr 1)))
+    ;; `tuple`: like `path`, a fresh payload -- a vector of the elements,
+    ;; since one payload type serves every arity.
+    (#%sexpr-tuple (let ((args-ptr (alloca-args builder 1)))
+          (store-arg builder args-ptr 0 v)
+          (build-call builder (get-function m "rt_sexpr_tuple_items") args-ptr 1)))
     ;; `i8`/`i16`/`u8`/`u16`/`u32`/`i32`: the payload
     ;; is inside a `BoxedObj::Narrow`, and the variant says which type that
     ;; box must be. `rt_narrow_value` refuses any other, so a `(u8 x)`
@@ -1866,6 +1871,7 @@ const SOURCE_TEMPLATE: &str = r#"
     (#%sexpr-i32 (compile-box-kind-test builder m v 10))
     (#%sexpr-vector (compile-box-kind-test builder m v 11))
     (#%sexpr-array (compile-box-kind-test builder m v 12))
+    (#%sexpr-tuple (compile-box-kind-test builder m v 13))
     ;; `nil` and `bool` share the immediate sub-class and differ only
     ;; in the payload: nil's is zero, a bool's never is. `nil` is the single
     ;; word 7, so its test is one comparison.
@@ -4768,6 +4774,11 @@ const SOURCE_TEMPLATE: &str = r#"
          (let ((args-ptr (alloca-args builder 1)))
            (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
            (build-call builder (get-function m "rt_list_to_sexpr_vector") args-ptr 1)))
+        ;; A quoted `#{..}`: its elements as one quoted list, as for `#(..)`.
+        (#%quoted-tuple
+         (let ((args-ptr (alloca-args builder 1)))
+           (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
+           (build-call builder (get-function m "rt_list_to_sexpr_tuple") args-ptr 1)))
         ;; A quoted `#nA(..)`: a list of the dimensions and a list of the
         ;; elements. The first is rooted in a frame slot while the second is
         ;; built, as `cons`'s car is.
@@ -5037,6 +5048,10 @@ const SOURCE_TEMPLATE: &str = r#"
       ;; `compile-sexpr-field` reads back. `bignum` is retired (a bignum
       ;; box is an `int`), and the checker refuses it before it gets here.
       ((#%sexpr-sym #%sexpr-str #%sexpr-ratio #%sexpr-vector #%sexpr-array) (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
+      ;; `tuple`: built from the vector of its elements.
+      (#%sexpr-tuple (let ((args-ptr (alloca-args builder 1)))
+           (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
+           (build-call builder (get-function m "rt_vector_to_sexpr_tuple") args-ptr 1)))
       ;; `cons`: the only variant with two fields, and so the only one
       ;; that has to root the first while the second is built.
       (#%sexpr-cons (let* ((args-ptr (frame-slots builder m 2 2))

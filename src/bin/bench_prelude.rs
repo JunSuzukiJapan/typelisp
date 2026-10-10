@@ -114,7 +114,7 @@ fn startup_breakdown() {
 
     println!("startup breakdown (one process, fresh 1<<18-cell heap per measurement):");
 
-    for (label, source) in [("prelude", typelisp::prelude::SOURCE), ("island", &*typelisp::compiler::SOURCE)] {
+    for (label, source) in [("prelude", typelisp::prelude::SOURCE.as_str()), ("island", &*typelisp::compiler::SOURCE)] {
         let mut heap = Heap::with_capacity(1 << 18);
         let mut chk = Checker::new();
         let mut interp = Interp::new();

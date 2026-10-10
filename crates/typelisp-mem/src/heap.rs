@@ -1649,6 +1649,15 @@ impl Heap {
     /// value) can tell a nested struct apart from a boxed float *or* a
     /// `HashTable` without risking [`f64_value`](Self::f64_value)'s or
     /// [`struct_field`](Self::struct_field)'s "wrong kind" panic.
+    /// The arity of the `#{..}` datum `id` is, or `None` when it is no such
+    /// box (see [`crate::tuple`]).
+    pub fn sexpr_tuple_arity(&self, id: BoxId) -> Option<usize> {
+        if !self.is_struct(id) {
+            return None;
+        }
+        crate::tuple::sexpr_tuple_arity(&self.type_key_name(self.struct_type_key(id)))
+    }
+
     pub fn is_struct(&self, id: BoxId) -> bool {
         matches!(self.shared.boxes.read_recursive().slots[id.0 as usize], Some(BoxedObj::Struct { payload: StructPayload::Fields(_), .. }))
     }

@@ -1616,6 +1616,9 @@ fn sexpr_variant_fields(v: usize) -> Vec<Type> {
         // so construction and extraction are both the identity, like `str`.
         sv::VECTOR => vec![Type::Named(Path::root("vector"), vec![option_of(sexpr())])],
         sv::ARRAY => vec![Type::Named(Path::root("array"), vec![option_of(sexpr())])],
+        // `#{..}`. A tuple's type depends on its arity, so the payload is a
+        // fresh vector of the elements rather than the box itself.
+        sv::TUPLE => vec![Type::Named(Path::root("vector"), vec![option_of(sexpr())])],
         _ => unreachable!("Sexpr has {} variants, not {}", sv::COUNT, v + 1),
     }
 }

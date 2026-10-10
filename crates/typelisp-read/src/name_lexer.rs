@@ -23,17 +23,22 @@ pub enum NameTok<'a> {
     /// The unit type spelled `()`, e.g. the first argument of
     /// `result<(), file-error>`. Only ever appears inside a `<...>` argument
     /// list: `(`/`)` are reader delimiters, so the sole way they end up inside
-    /// a token at all is `read::reader::extend_angle_token` letting the pair
-    /// through while the angle brackets are still open. Recognized here — and
-    /// only as the exact two-character pair — so the type parser sees a unit
-    /// type rather than an `Ident("()")` that would become a path segment.
+    /// a token at all is the reader's type-argument grammar
+    /// (`read::reader::read_type_in_args`) taking the pair as a type.
+    /// Recognized here — and only as the exact two-character pair — so the
+    /// type parser sees a unit type rather than an `Ident("()")` that would
+    /// become a path segment.
     Unit,
-    /// A run of spaces/tabs. Only a token the reader deliberately extended
-    /// across whitespace can contain one (`read::reader::extend_angle_token`,
-    /// e.g. `vector<:dyn drawable>`); every other token is whitespace-free
-    /// because whitespace terminates it. Emitting it as its own token — rather
-    /// than letting `Ident` swallow it — is what lets the type parser see
-    /// `:dyn` and the trait name that follows as two separate idents.
+    /// `#{`, opening a tuple type such as `#{int string}` inside `<..>`.
+    TupleOpen,
+    /// `}`, closing it.
+    TupleClose,
+    /// A run of spaces/tabs. Only the reader's type arguments contain one
+    /// (`read::reader::read_type_args`, e.g. `vector<:dyn drawable>`); every
+    /// other token is whitespace-free because whitespace terminates it.
+    /// Emitting it as its own token — rather than letting `Ident` swallow it
+    /// — is what lets the type parser see `:dyn` and the trait name that
+    /// follows as two separate idents, and a tuple type's elements apart.
     Space,
 }
 
@@ -85,6 +90,14 @@ impl<'a> Iterator for NameLexer<'a> {
                 self.pos += 2;
                 Some(NameTok::Unit)
             }
+            b'#' if bytes.get(self.pos + 1) == Some(&b'{') => {
+                self.pos += 2;
+                Some(NameTok::TupleOpen)
+            }
+            b'}' => {
+                self.pos += 1;
+                Some(NameTok::TupleClose)
+            }
             b' ' | b'\t' => {
                 while self.pos < bytes.len() && matches!(bytes[self.pos], b' ' | b'\t') {
                     self.pos += 1;
@@ -110,12 +123,13 @@ impl<'a> Iterator for NameLexer<'a> {
 fn ends_ident(bytes: &[u8], pos: usize) -> bool {
     match bytes.get(pos) {
         None => true,
-        Some(b'<' | b'>' | b',' | b' ' | b'\t') => true,
+        Some(b'<' | b'>' | b',' | b' ' | b'\t' | b'}') => true,
         // The two-character classes end an ident only as a complete pair; a
         // lone `:`/`(` is an ordinary ident character (`:dyn`, and a `(`
         // that only a reader-extended token could contain at all).
         Some(b':') => bytes.get(pos + 1) == Some(&b':'),
         Some(b'(') => bytes.get(pos + 1) == Some(&b')'),
+        Some(b'#') => bytes.get(pos + 1) == Some(&b'{'),
         _ => false,
     }
 }

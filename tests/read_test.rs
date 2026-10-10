@@ -429,12 +429,11 @@ fn unquote_splicing_spans_both_prefix_chars() {
     assert_eq!(elem_spans(&h, splice), vec![(1, 3, 1, 5), (1, 5, 1, 7)]);
 }
 
-// ---- angle-bracket token extension (`:dyn` inside a generic argument) ----
+// ---- type arguments --------------------------------------------------------
 
-/// A generic argument may itself be a two-word `:dyn Trait` type, so
-/// `read_atom` keeps reading past whitespace while `<>` are unbalanced. The
-/// scan is speculative: anything that doesn't close on the same line, or that
-/// runs into a hard delimiter, rewinds to the ordinary short token.
+/// A name followed directly by `<` and a type is a generic type, and the
+/// reader lexes its arguments by the type grammar up to the matching `>`:
+/// whitespace, `()`, `:dyn T` and tuple types included.
 #[test]
 fn a_generic_type_token_may_contain_a_spaced_dyn_argument() {
     roundtrip("vector<:dyn drawable>", "vector<:dyn drawable>");
@@ -444,46 +443,60 @@ fn a_generic_type_token_may_contain_a_spaced_dyn_argument() {
 
 #[test]
 fn a_leading_angle_bracket_is_still_the_comparison_operator() {
-    // `<` starts the token, so it never opens a bracket — otherwise `(< a b)`
-    // would swallow the rest of the form.
+    // `<` starts the token, so it never opens type arguments — otherwise
+    // `(< a b)` would swallow the rest of the form.
     roundtrip("(< a b)", "(< a b)");
     roundtrip("(<= a b)", "(<= a b)");
     roundtrip("(> a b)", "(> a b)");
 }
 
+/// No type follows the `<` of `string<`/`string<=`, so it is an ordinary
+/// character of the name.
 #[test]
-fn an_operator_name_ending_in_an_angle_bracket_still_reads_as_three_data() {
-    // `string<` opens a bracket that never closes; hitting `)` rewinds the
-    // speculative scan, leaving today's exact tokenization.
+fn an_operator_name_ending_in_an_angle_bracket_is_an_ordinary_name() {
     roundtrip("(string< a b)", "(string< a b)");
     roundtrip("(string<= a b)", "(string<= a b)");
-    roundtrip("(a<b c)", "(a<b c)");
+    roundtrip("(f vector<\n int>)", "(f vector< int>)");
 }
 
+/// Once a type follows the `<`, the arguments have to be well formed: the
+/// text is a type, and is not read some other way when it fails to be one.
 #[test]
-fn an_unbalanced_angle_bracket_rewinds_rather_than_swallowing_the_input() {
-    // No closing `>` before end of input / a newline: the token ends at the
-    // whitespace, exactly as before.
-    roundtrip("(f vector<a)", "(f vector<a)");
-    roundtrip("(f vector<\n int>)", "(f vector< int>)");
+fn malformed_type_arguments_are_a_read_error() {
+    let mut h = Heap::with_capacity(256);
+    let r = Reader::new();
+    for (src, says) in [
+        ("(a<b c)", "expected `,` or `>`, found `c`"),
+        ("(f a<b)", "expected `,` or `>`, found `)`"),
+        ("(f vector<a", "end of input before the closing `>`"),
+        ("vector<(fn (int) int)>", "give a function type a name with `deftype`"),
+        ("vector<#{int string>", "expected a type"),
+    ] {
+        let err = r.read_all(&mut h, src).unwrap_err().to_string();
+        assert!(err.contains(says), "reading {:?}: {}", src, err);
+    }
+}
+
+/// Inside `<..>` whitespace — newlines too — separates tokens and is
+/// written back as one space after a `,` and none elsewhere.
+#[test]
+fn type_arguments_may_span_lines() {
+    roundtrip("hashtable<string,\n    int>", "hashtable<string, int>");
+    roundtrip("hashtable<string ,int >", "hashtable<string,int>");
 }
 
 #[test]
 fn a_generic_type_token_may_contain_a_unit_argument() {
-    // `()` — the unit type as a generic argument. The pair is the only paren
-    // spelling the extension admits, so `result<(), string>` is one token.
     roundtrip("result<(), string>", "result<(), string>");
     roundtrip("(defun f () result<(), string> 1)", "(defun f () result<(), string> 1)");
     roundtrip("option<result<(),()>>", "option<result<(),()>>");
 }
 
+/// A tuple type is a type argument like any other.
 #[test]
-fn a_lone_paren_inside_an_angle_bracket_still_rewinds() {
-    // Only the adjacent `()` pair is let through; a single paren ends the
-    // speculation and the ordinary short token stands. Both of these keep
-    // reading exactly as they did before unit arguments were admitted.
-    roundtrip("(f a<b (g c))", "(f a<b (g c))");
-    roundtrip("(f a<b)", "(f a<b)");
+fn a_generic_type_token_may_contain_a_tuple_type() {
+    roundtrip("vector<#{int string}>", "vector<#{int string}>");
+    roundtrip("hashtable<#{int   vector<#{a b}>},int>", "hashtable<#{int vector<#{a b}>},int>");
 }
 
 // ---- `:dyn Trait` joins into one datum ----------------------------------

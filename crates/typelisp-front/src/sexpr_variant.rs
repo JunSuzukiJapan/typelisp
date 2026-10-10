@@ -43,14 +43,18 @@ pub const I32: usize = 17;
 pub const VECTOR: usize = 18;
 /// `#nA(..)`: an `Array<Option<Sexpr>>`, the box itself.
 pub const ARRAY: usize = 19;
+/// `#{..}`: a tuple of `Option<Sexpr>` elements. The payload a pattern binds
+/// is a fresh `Vector<Option<Sexpr>>` of the elements, since one payload type
+/// has to serve every arity — the way `path`'s is a fresh list.
+pub const TUPLE: usize = 20;
 
 /// How many variants `sexpr_def` has.
-pub const COUNT: usize = 20;
+pub const COUNT: usize = 21;
 
 /// Each variant's constructor name, indexed by its number.
 pub const NAMES: [&str; COUNT] = [
     "nil", "int", "f64", "char", "bool", "sym", "str", "cons", "bignum", "ratio", "path", "f32", "i8", "i16", "u8",
-    "u16", "u32", "i32", "vector", "array",
+    "u16", "u32", "i32", "vector", "array", "tuple",
 ];
 
 /// Whether `name` is one of `Sexpr`'s constructor names — what a pattern head
@@ -78,6 +82,8 @@ pub mod quoted {
     /// `#nA(..)`, carried as a list of its dimensions and a list of its
     /// elements in row-major order.
     pub const ARRAY: usize = 104;
+    /// `#{..}`, carried as a list of its elements.
+    pub const TUPLE: usize = 105;
 }
 
 /// How a value is tagged and untagged at a struct/enum field boundary
@@ -132,11 +138,13 @@ const ISLAND_NAMES: &[(&str, usize)] = &[
     ("sexpr-i32", I32),
     ("sexpr-vector", VECTOR),
     ("sexpr-array", ARRAY),
+    ("sexpr-tuple", TUPLE),
     ("quoted-sym", quoted::SYM),
     ("quoted-path", quoted::PATH),
     ("quoted-wk-sym", quoted::WK_SYM),
     ("quoted-vector", quoted::VECTOR),
     ("quoted-array", quoted::ARRAY),
+    ("quoted-tuple", quoted::TUPLE),
     ("kind-not-representable", field_kind::NOT_REPRESENTABLE),
     ("kind-raw-int", field_kind::RAW_INT),
     ("kind-f64", field_kind::F64),

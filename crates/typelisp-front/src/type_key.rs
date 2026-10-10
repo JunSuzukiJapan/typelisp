@@ -100,6 +100,19 @@ pub fn alloc_struct_keyed(heap: &mut Heap, key: &str, fields: Vec<crate::Value>)
     heap.alloc_struct(key, fields)
 }
 
+/// A fresh `Vector<Option<Sexpr>>` of `elems` — the `Sexpr` `vector`
+/// variant's box, and the payload of its `tuple` variant.
+pub fn alloc_sexpr_vector(heap: &mut Heap, elems: Vec<crate::Value>) -> crate::Value {
+    heap.alloc_struct(crate::TypeKeyId::SEXPR_VECTOR, elems)
+}
+
+/// The tuple of `Option<Sexpr>` elements `elems` — what `#{..}` reads as.
+/// Its key is `typelisp_mem::sexpr_tuple_key`'s, which
+/// `tests/type_identity_guard_test.rs` holds equal to [`type_key_of_type`]'s.
+pub fn alloc_sexpr_tuple(heap: &mut Heap, elems: Vec<crate::Value>) -> crate::Value {
+    alloc_struct_keyed(heap, &crate::sexpr_tuple_key(elems.len()), elems)
+}
+
 /// A fresh `HashTable<K,V>` under the identity `key` spells — the map-payload
 /// counterpart of [`alloc_struct_keyed`], here for the same reason: writing a
 /// type identity is this module's job.

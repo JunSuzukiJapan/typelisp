@@ -182,7 +182,7 @@ fn match_dispatches_a_runtime_chosen_variant() {
             ((sym _) 5) ((str _) 6) ((cons _ _) 7) ((ratio _) 9)
             ((path _) 10) ((f32 _) 11)
             ((i8 _) 12) ((i16 _) 13) ((u8 _) 14) ((u16 _) 15) ((u32 _) 16) ((i32 _) 17)
-            ((vector _) 18) ((array _) 19)))
+            ((vector _) 18) ((array _) 19) ((tuple _) 20)))
         (+ (+ (tag (int 1)) (* 10 (tag (Str "s")))) (* 100 (tag (sexpr-cons () ()))))
     "#;
     // 1 + 60 + 700: int=1, str=6, cons=7 — and the match above is

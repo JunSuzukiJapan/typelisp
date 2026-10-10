@@ -1390,7 +1390,7 @@ fn match_sexpr_core(
     subs: &[Value],
     v: Value,
 ) -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
-    use super::{narrow_variant, SEXPR_ARRAY, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM, SEXPR_VECTOR};
+    use super::{narrow_variant, SEXPR_ARRAY, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM, SEXPR_TUPLE, SEXPR_VECTOR};
 
     if variant == SEXPR_RETIRED_BIGNUM {
         return Err(EvalError::Internal("eval: Sexpr variant 8 (bignum) is retired — a bignum box is an `int`".to_string()));
@@ -1444,6 +1444,14 @@ fn match_sexpr_core(
         (SEXPR_ARRAY, Value::Boxed(id)) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
             one(heap, v)
         }
+        // `#{..}`: the payload is a fresh vector of the elements, rooted
+        // while the sub-pattern takes it.
+        (SEXPR_TUPLE, Value::Boxed(id)) if heap.sexpr_tuple_arity(id).is_some() => {
+            let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
+            let items = crate::type_key::alloc_sexpr_vector(heap, elems);
+            heap.push_root(items);
+            one(heap, items)
+        }
         (SEXPR_CONS, Value::Cons(_)) => {
             let car = heap.car(v).map_err(heap_err)?;
             let cdr = heap.cdr(v).map_err(heap_err)?;
@@ -1491,7 +1499,7 @@ fn match_sexpr_core(
 
 /// `(construct sexpr N E...)` — build a `Sexpr` datum from evaluated fields.
 pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Value]) -> Result<Value, EvalError> {
-    use super::{narrow_variant, SEXPR_ARRAY, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM, SEXPR_VECTOR};
+    use super::{narrow_variant, SEXPR_ARRAY, SEXPR_BOOL, SEXPR_CHAR, SEXPR_CONS, SEXPR_F32, SEXPR_F64, SEXPR_INT, SEXPR_NIL, SEXPR_PATH, SEXPR_RATIO, SEXPR_RETIRED_BIGNUM, SEXPR_STR, SEXPR_SYM, SEXPR_TUPLE, SEXPR_VECTOR};
 
     if variant == SEXPR_RETIRED_BIGNUM {
         return Err(EvalError::Internal("eval: Sexpr variant 8 (bignum) is retired — a bignum box is an `int`".to_string()));
@@ -1559,6 +1567,22 @@ pub(super) fn construct_sexpr_core(heap: &mut Heap, variant: usize, argv: &[Valu
         // The box passes through, like `str`: the checker typed the argument
         // as `Vector<Option<Sexpr>>`/`Array<Option<Sexpr>>`, so it is one.
         SEXPR_VECTOR | SEXPR_ARRAY => arg(0),
+        // A tuple of the vector's elements, of the arity the vector's length
+        // gives.
+        SEXPR_TUPLE => {
+            let Value::Boxed(id) = arg(0)? else {
+                return Err(EvalError::Internal("eval: (construct sexpr tuple ..) of a non-vector".to_string()));
+            };
+            let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
+            if !(1..=crate::TUPLE_MAX_ARITY).contains(&elems.len()) {
+                return Err(EvalError::Panic(format!(
+                    "a tuple has 1 to {} elements, not {}",
+                    crate::TUPLE_MAX_ARITY,
+                    elems.len()
+                )));
+            }
+            Ok(crate::type_key::alloc_sexpr_tuple(heap, elems))
+        }
         _ => Err(EvalError::Internal(format!("eval: (construct sexpr {} ..): unknown variant", variant))),
     }
 }

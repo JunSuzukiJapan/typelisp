@@ -472,17 +472,6 @@ impl Cursor {
     fn loc(&self) -> Loc {
         Loc::new(Arc::clone(&self.file), self.line, self.col)
     }
-    /// Snapshot the full cursor state, for a speculative scan that may need to
-    /// be undone ([`read_atom`]'s angle-bracket extension). Line/column are
-    /// part of it so a rewind restores exact `Loc` reporting too.
-    fn mark(&self) -> (usize, u32, u32) {
-        (self.pos, self.line, self.col)
-    }
-    fn reset(&mut self, m: (usize, u32, u32)) {
-        self.pos = m.0;
-        self.line = m.1;
-        self.col = m.2;
-    }
 }
 
 // ----------------------------------------------------------------------
@@ -725,8 +714,8 @@ fn read_datum(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
             // ...)` types) can then keep its "a type is one `Value`"
             // assumption unchanged; `types::parse_type` recognizes the
             // resulting list. Inside a generic argument the same spelling is
-            // handled a level down, by `extend_angle_token` + the type
-            // parser, since there is no datum boundary there at all.
+            // handled a level down, by `read_type_args` + the type parser,
+            // since there is no datum boundary there at all.
             if matches!(v, Value::Symbol(id) if id.is(wk::DYN)) {
                 skip_ws_comments(cur, heap, ctx)?;
                 if matches!(cur.peek(), None | Some(')')) {
@@ -1028,6 +1017,8 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
         }
         // `#(a b c)` — a vector, as in CL.
         Some('(') => read_vector(cur, heap, ctx),
+        // `#{a b c}` — a tuple.
+        Some('{') => read_tuple(cur, heap, ctx),
         // `#.` — read the next datum, run it, and read the value in its
         // place. The one place the reader is not a function of its text
         // alone, and the reason `ReadEval` exists.
@@ -1116,6 +1107,39 @@ pub const ARRAY_DIMS_KEY: &str = "vector<int>";
 fn read_vector(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
     cur.next(); // '('
     let mark = heap.root_count();
+    let elems = read_elements(cur, heap, ctx, ')', "#(")?;
+    let v = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, elems);
+    restore_roots(heap, mark);
+    Ok(v)
+}
+
+/// `#{a b c}`: the elements, read as data, in a tuple box whose elements are
+/// all `Option<Sexpr>` — the `Sexpr` `tuple` variant. The cursor is on the
+/// `{`.
+fn read_tuple(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
+    cur.next(); // '{'
+    let mark = heap.root_count();
+    let elems = read_elements(cur, heap, ctx, '}', "#{")?;
+    if !(1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&elems.len()) {
+        restore_roots(heap, mark);
+        return Err(Error::ReadError(format!(
+            "`#{{..}}`: a tuple has 1 to {} elements, not {}",
+            typelisp_mem::TUPLE_MAX_ARITY,
+            elems.len()
+        )));
+    }
+    let key = heap.intern_type_key(&typelisp_mem::sexpr_tuple_key(elems.len()));
+    let v = heap.alloc_struct(key, elems);
+    restore_roots(heap, mark);
+    Ok(v)
+}
+
+/// The data up to `close`, each rooted as it is read so that reading the next
+/// cannot collect it. The roots stay pushed for the caller to release once it
+/// has put the elements somewhere; on an error they are already released.
+/// `opener` names the syntax for the end-of-input message.
+fn read_elements(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, close: char, opener: &str) -> Result<Vec<Value>, Error> {
+    let mark = heap.root_count();
     let mut elems: Vec<Value> = Vec::new();
     loop {
         if let Err(e) = skip_ws_comments(cur, heap, ctx) {
@@ -1125,15 +1149,15 @@ fn read_vector(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value,
         match cur.peek() {
             None => {
                 restore_roots(heap, mark);
-                return Err(Error::ReadError("end of input inside `#(`".to_string()));
+                return Err(Error::ReadError(format!("end of input inside `{}`", opener)));
             }
-            Some(')') => {
+            Some(c) if c == close => {
                 cur.next();
-                break;
+                return Ok(elems);
             }
             Some(_) => match read_datum(cur, heap, ctx) {
                 Ok(e) => {
-                    heap.push_root(e); // alive while the rest is read
+                    heap.push_root(e);
                     elems.push(e);
                 }
                 Err(e) => {
@@ -1143,9 +1167,6 @@ fn read_vector(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value,
             },
         }
     }
-    let v = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, elems);
-    restore_roots(heap, mark);
-    Ok(v)
 }
 
 /// `#NA datum`: an `Array<Option<Sexpr>>` box — the `Sexpr` `array` variant.
@@ -1332,26 +1353,23 @@ fn read_char(cur: &mut Cursor) -> Result<Value, Error> {
 
 fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error> {
     let mut tok = String::new();
-    // `<>` nesting, so an unterminated generic type token can be extended past
-    // the whitespace that would otherwise end it (see `extend_angle_token`).
-    // A `<` at the *start* of a token never opens a bracket: that's the
-    // comparison operator `<`/`<=`, not a generic argument list. A `>` at
-    // depth 0 likewise stays an ordinary character (`->`, `string>`).
-    let mut depth: i32 = 0;
     while let Some(c) = cur.peek() {
         if is_delimiter(c) {
             break;
         }
-        if c == '<' && !tok.is_empty() {
-            depth += 1;
-        } else if c == '>' && depth > 0 {
-            depth -= 1;
+        // A name followed directly by `<` and a type is a generic type, and
+        // what follows is lexed as type arguments (`read_type_args`) up to
+        // the matching `>` — whitespace, `#{..}` and `()` included. Anything
+        // else after the `<` leaves it an ordinary character, which is what
+        // `<`, `<=`, `string<` and `(string< a b)` need.
+        if c == '<' && !tok.is_empty() && cur.peek2().is_some_and(starts_type) {
+            cur.next();
+            tok.push('<');
+            read_type_args(cur, &mut tok)?;
+            continue;
         }
         tok.push(c);
         cur.next();
-    }
-    if depth > 0 {
-        extend_angle_token(cur, &mut tok, depth);
     }
     // tok is non-empty: read_datum only dispatches here on a non-delimiter.
     validate_keyword(&tok)?;
@@ -1388,53 +1406,128 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error
     }
 }
 
-/// Continue a token whose `<...>` are still unbalanced, letting whitespace
-/// through so a multi-word type argument reads as the single symbol the type
-/// parser expects — `vector<:dyn drawable>` is one token, not the three
-/// (`vector<:dyn`, `drawable>`) plain whitespace-delimited tokenizing would
-/// give. `types::parse_qualified_generic` then re-splits it on the `NameTok::
-/// Space` its lexer now emits.
+/// Whether `c` can begin a type: a name, `#{` (a tuple type), `()` (the
+/// unit type), `:dyn`, or `!`.
+fn starts_type(c: char) -> bool {
+    c.is_alphabetic() || matches!(c, '_' | '%' | '*' | '#' | '(' | ':' | '!')
+}
+
+/// The type arguments of a generic type, lexed by the type grammar: the
+/// cursor is just past the `<`, and on success just past the matching `>`.
+/// Each type is appended to `tok` with its whitespace normalized — one space
+/// where the source had any after a `,`, between a tuple's elements and after
+/// `:dyn`, and none anywhere else — so the token reads back as written and
+/// `types::parse_type_name` meets one spelling of it.
 ///
-/// **Speculative, with full rewind.** If the brackets don't close before a
-/// newline or a hard delimiter (paren / string / quote / comment), both the
-/// cursor and the token are restored and the caller keeps the ordinary short
-/// token. That rewind is what keeps every pre-existing spelling reading
-/// exactly as before, without needing to enumerate the tokens that legally
-/// contain a `<`: `(string< a b)` starts an extension after `string<`, hits
-/// the `)`, and rewinds; so does `(a<b c)`. Only a genuine generic type
-/// token — balanced, on one line, with no parens inside — survives.
-fn extend_angle_token(cur: &mut Cursor, tok: &mut String, mut depth: i32) {
-    let mark = cur.mark();
-    let base_len = tok.len();
-    while depth > 0 {
+/// A malformed argument list is a read error, not a reason to read the text
+/// some other way: once a name is followed by `<` and a type, it is a type.
+fn read_type_args(cur: &mut Cursor, tok: &mut String) -> Result<(), Error> {
+    loop {
+        skip_type_ws(cur);
+        read_type_in_args(cur, tok)?;
+        skip_type_ws(cur);
         match cur.peek() {
-            // `()` — the unit type as a generic argument, as in
-            // `result<(), file-error>`. The only paren spelling admitted
-            // here, and only as the adjacent pair: a lone paren still ends
-            // the speculation (and rewinds), which is what keeps `(a<b c)`
-            // and friends reading as before. `NameTok::Unit` picks the pair
-            // back out on the type-parser side.
-            Some('(') if cur.peek2() == Some(')') => {
-                tok.push_str("()");
+            Some(',') => {
                 cur.next();
+                tok.push(',');
+                if skip_type_ws(cur) {
+                    tok.push(' ');
+                }
+            }
+            Some('>') => {
                 cur.next();
+                tok.push('>');
+                return Ok(());
             }
-            None | Some('\n') | Some('\r') | Some('(') | Some(')') | Some(']') | Some('}') | Some('"') | Some('\'') | Some('`') | Some(';') => {
-                cur.reset(mark);
-                tok.truncate(base_len);
-                return;
+            Some(c) => return Err(type_args_error(tok, &format!("expected `,` or `>`, found `{}`", c))),
+            None => return Err(type_args_error(tok, "end of input before the closing `>`")),
+        }
+    }
+}
+
+/// One type inside `<..>`: `()`, `#{T ...}`, `:dyn T`, or a name with its own
+/// optional `<..>`.
+fn read_type_in_args(cur: &mut Cursor, tok: &mut String) -> Result<(), Error> {
+    match cur.peek() {
+        Some('(') => {
+            if cur.peek2() != Some(')') {
+                return Err(type_args_error(
+                    tok,
+                    "the only type written in parentheses inside `<..>` is `()`; give a function type a name with `deftype`",
+                ));
             }
-            Some(c) => {
-                if c == '<' {
-                    depth += 1;
-                } else if c == '>' {
-                    depth -= 1;
+            cur.next();
+            cur.next();
+            tok.push_str("()");
+            Ok(())
+        }
+        Some('#') if cur.peek2() == Some('{') => {
+            cur.next();
+            cur.next();
+            tok.push_str("#{");
+            let mut first = true;
+            loop {
+                skip_type_ws(cur);
+                match cur.peek() {
+                    Some('}') => {
+                        cur.next();
+                        tok.push('}');
+                        return Ok(());
+                    }
+                    Some(_) => {
+                        if !first {
+                            tok.push(' ');
+                        }
+                        first = false;
+                        read_type_in_args(cur, tok)?;
+                    }
+                    None => return Err(type_args_error(tok, "end of input before the closing `}` of a tuple type")),
+                }
+            }
+        }
+        Some(_) => {
+            let start = tok.len();
+            while let Some(c) = cur.peek() {
+                if is_delimiter(c) || matches!(c, '<' | '>' | ',' | '{') {
+                    break;
                 }
                 tok.push(c);
                 cur.next();
             }
+            if tok.len() == start {
+                return Err(type_args_error(tok, "expected a type"));
+            }
+            if &tok[start..] == ":dyn" {
+                if !skip_type_ws(cur) {
+                    return Err(type_args_error(tok, "`:dyn` needs a space before its trait"));
+                }
+                tok.push(' ');
+                return read_type_in_args(cur, tok);
+            }
+            if cur.peek() == Some('<') {
+                cur.next();
+                tok.push('<');
+                read_type_args(cur, tok)?;
+            }
+            Ok(())
         }
+        None => Err(type_args_error(tok, "end of input where a type was expected")),
     }
+}
+
+/// Skip whitespace inside type arguments, newlines included; whether there
+/// was any.
+fn skip_type_ws(cur: &mut Cursor) -> bool {
+    let mut any = false;
+    while cur.peek().is_some_and(is_ws) {
+        cur.next();
+        any = true;
+    }
+    any
+}
+
+fn type_args_error(tok: &str, what: &str) -> Error {
+    Error::ReadError(format!("in the type arguments of `{}`: {}", tok, what))
 }
 
 /// Reject malformed keyword tokens. A keyword is a token starting with a

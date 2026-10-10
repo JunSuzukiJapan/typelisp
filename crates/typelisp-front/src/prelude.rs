@@ -88,9 +88,92 @@ pub const REGEN_SCRIPT: &str = "scripts/regen-prelude-bitcode.sh";
 /// otherwise come up with no `cond`/`case`. Staleness is judged against both
 /// ([`crate::dump::verify_sources_digest`]) — hashing only `SOURCE` would let
 /// an edit to the core layer ship against a dump that no longer matches it.
-pub const DUMPED_SOURCES: &[&str] = &[crate::core_macros::SOURCE, SOURCE];
+pub fn dumped_sources() -> [&'static str; 2] {
+    [crate::core_macros::SOURCE, SOURCE.as_str()]
+}
 
-pub const SOURCE: &str = r##"
+/// The prelude: [`SOURCE_TEMPLATE`] with its `#%tuples` line replaced by
+/// [`tuple_source`]'s definitions.
+pub static SOURCE: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    const MARK: &str = "#%tuples\n";
+    assert_eq!(SOURCE_TEMPLATE.matches(MARK).count(), 1, "the prelude has one `#%tuples` line");
+    SOURCE_TEMPLATE.replacen(MARK, &tuple_source(), 1)
+});
+
+/// The tuple types `#{T0 T1 ...}`, one `defstruct` per arity from 1 to
+/// [`TUPLE_MAX_ARITY`](crate::TUPLE_MAX_ARITY), each with `Eq`, `Ord`
+/// (lexicographic), `Hash` and `print-object` — and the `tuple` macro that
+/// builds one from evaluated arguments. Generated because the twelve copies
+/// differ only in their arity.
+fn tuple_source() -> String {
+    use crate::types::{tuple_field, tuple_path};
+    use crate::TUPLE_MAX_ARITY;
+    use std::fmt::Write;
+    let mut out = String::new();
+    for n in 1..=TUPLE_MAX_ARITY {
+        let path = tuple_path(n).to_string();
+        let params: Vec<String> = (0..n).map(|i| format!("T{}", i)).collect();
+        let generic = format!("{}<{}>", path, params.join(","));
+        let fields: Vec<String> = (0..n).map(tuple_field).collect();
+        let bound = |tr: &str| params.iter().map(|p| format!("({} {})", tr, p)).collect::<Vec<_>>().join(" ");
+        let name = format!("tuple{}<{}>", n, params.join(","));
+        let slots: Vec<String> = params.iter().zip(&fields).map(|(p, f)| format!("(pub {} {})", f, p)).collect();
+        writeln!(out, "(module %internal (pub defstruct {} {}))", name, slots.join(" ")).unwrap();
+        // `equals`: every element, left to right.
+        let eqs: Vec<String> = fields.iter().map(|f| format!("(equals self::{f} other::{f})")).collect();
+        let eq_body = if n == 1 { eqs[0].clone() } else { format!("(and {})", eqs.join(" ")) };
+        writeln!(
+            out,
+            "(impl Eq {} (where {}) (equals ((self Self) (other Self)) bool {}))",
+            generic,
+            bound("Eq"),
+            eq_body
+        )
+        .unwrap();
+        // `less`: the first element that differs decides.
+        let mut less = format!("(less self::{f} other::{f})", f = fields[n - 1]);
+        for f in fields[..n - 1].iter().rev() {
+            less = format!("(if (less self::{f} other::{f}) true (if (less other::{f} self::{f}) false {less}))");
+        }
+        writeln!(out, "(impl Ord {} (where {}) (less ((self Self) (other Self)) bool {}))", generic, bound("Ord"), less)
+            .unwrap();
+        // `sxhash`: the elements' hashes folded as `h * 31 + x`, kept in range
+        // at every step.
+        let mut hash = format!("(sxhash self::{})", fields[0]);
+        for f in &fields[1..] {
+            hash = format!("(logand (+ (* 31 {hash}) (sxhash self::{f})) *sxhash-mask*)");
+        }
+        writeln!(out, "(impl Hash {} (where {}) (sxhash ((self Self)) int {}))", generic, bound("Hash"), hash).unwrap();
+        // `#{a b}`, each element printed with the same `escape`.
+        let directives = vec!["~a"; n].join(" ");
+        let shown: Vec<String> = fields.iter().map(|f| format!("(print-object self::{f} escape)")).collect();
+        writeln!(
+            out,
+            "(impl print-object {} (where {}) (print-object ((self Self) (escape bool)) string (format false \"#{{{}}}\" {})))",
+            generic,
+            bound("print-object"),
+            directives,
+            shown.join(" ")
+        )
+        .unwrap();
+    }
+    // `(tuple a b ...)`: the constructor of the arity the call has.
+    let mut arms = String::new();
+    for n in 1..=TUPLE_MAX_ARITY {
+        write!(arms, " ({} `({}::new ,@xs))", n, tuple_path(n)).unwrap();
+    }
+    writeln!(
+        out,
+        "(pub defmacro tuple (&rest xs) \"Builds the tuple `#{{a b ...}}` of the evaluated arguments.\" \
+         (labels ((count ((l Option<Sexpr>)) int (if (sexpr-consp l) (+ 1 (count (sexpr-cdr l))) 0))) \
+         (case (count xs){} (else (panic (format false \"tuple: takes 1 to {} elements, got ~a\" (count xs)))))))",
+        arms, TUPLE_MAX_ARITY
+    )
+    .unwrap();
+    out
+}
+
+pub const SOURCE_TEMPLATE: &str = r##"
 ;; `not`: moved here from a Rust builtin (it has no dependency on the GC
 ;; heap or anything else Rust-only — a plain `if`/`bool` round trip) so it
 ;; compiles through the ordinary `core_bridge`/`compiler.rs` pipeline like any
@@ -1383,10 +1466,10 @@ pub const SOURCE: &str = r##"
 ;; own `search`/`mismatch`, which come before this section).
 ;;
 ;; **Why the cores take a `hit` closure rather than the keywords themselves.**
-;; `Option<(fn (A) A)>` is not writable as a declared type — the reader ends a
-;; generic token at the first paren (`read::reader::extend_angle_token`), by
-;; design, so that `(a<b c)` keeps reading as a call. A `&key` parameter gets
-;; that type without anyone spelling it. So the keyword unpacking has to stay
+;; `Option<(fn (A) A)>` is not writable as a declared type — inside `<..>`
+;; the reader's type grammar takes no parenthesized type but `()`
+;; (`read::reader::read_type_in_args`). A `&key` parameter gets that type
+;; without anyone spelling it. So the keyword unpacking has to stay
 ;; in the function that declared the keywords, and what crosses into a core is
 ;; an ordinary `(fn (i32 A) bool)` closed over them.
 
@@ -3498,6 +3581,9 @@ user-visible capacity."
   (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "readerror")))
 (impl print-object EvalError
   (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "evalerror")))
+
+;; The tuple types and the `tuple` macro, generated by `tuple_source`.
+#%tuples
 
 ;; `pprint-exit-if-list-exhausted` (CLHS): leave the enclosing
 ;; `pprint-logical-block` when its list is used up. CL implements this as a
@@ -6850,7 +6936,7 @@ pub fn load_interpreted_with(
     crate::core_macros::load_with(heap, chk, interp, on_checked);
 
     let r = Reader::new();
-    let mut forms = r.forms_in(crate::LIBRARY_FILE, SOURCE);
+    let mut forms = r.forms_in(crate::LIBRARY_FILE, &SOURCE);
     while let Some((v, _)) = forms.next_form(heap).expect("prelude: read failed") {
         on_read(heap, v);
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");

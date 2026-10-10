@@ -31,7 +31,7 @@ fn prelude_artifacts_are_fresh() {
     let state = read_state(unit.types, "prelude").unwrap_or_else(|e| panic!("{} — {}", e, REGEN));
     assert_eq!(
         state.source_digest,
-        Some(sources_digest(typelisp::prelude::DUMPED_SOURCES)),
+        Some(sources_digest(&typelisp::prelude::dumped_sources())),
         "the prelude dump is stale relative to prelude.rs's SOURCE — {}",
         REGEN
     );

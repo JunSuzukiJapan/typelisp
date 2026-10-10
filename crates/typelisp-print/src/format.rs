@@ -2851,6 +2851,26 @@ impl Renderer {
                     out.push(')');
                     return Ok(());
                 }
+                // A tuple prints as `#{..}`, which reads back as one: a datum
+                // read from `#{..}` has no `print-object` made for it, and a
+                // typed one whose elements have none would otherwise fall to
+                // the `#<..>` below.
+                if typelisp_mem::is_tuple_base_key(typelisp_mem::base_type_key(&key)) {
+                    out.push_str("#{");
+                    for i in 0..heap.struct_field_count(id) {
+                        if Self::length_reached(ctx, i) {
+                            out.push_str(if i == 0 { "..." } else { " ..." });
+                            break;
+                        }
+                        if i > 0 {
+                            out.push(' ');
+                        }
+                        let f = heap.struct_field(id, i);
+                        self.render_field(heap, ctx, &key, None, i, f, standard, depth + 1, out)?;
+                    }
+                    out.push('}');
+                    return Ok(());
+                }
                 // The `Sexpr` `array` variant — `#nA(..)` read as data. A typed
                 // `Array<T>` prints through its prelude `print-object`, but this
                 // instantiation appears in no program's types, so no method was

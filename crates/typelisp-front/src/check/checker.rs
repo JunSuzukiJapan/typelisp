@@ -4001,6 +4001,11 @@ impl Checker {
             return self.c_field_get(heap, interp, recv, method);
         }
         let Type::Named(type_fq, _) = &recv.ty else { return None };
+        let method = &match tuple_element_field(&recv.ty, method) {
+            Ok(Some(field)) => field,
+            Ok(None) => method.clone(),
+            Err(e) => return Some(Err(e)),
+        };
         let af = self.reg.type_def(type_fq)?.assoc.get(method)?;
         if !af.instance || !self.assoc_visible(type_fq, af) {
             return None;
@@ -10084,6 +10089,45 @@ impl Checker {
         self.check_inner(&mut s, interp, env, form, expected)
     }
 
+    /// `#{"foo" 123}` in source: a fresh tuple, built by the tuple type's own
+    /// constructor so that each element is typed by its position in the
+    /// expected tuple type, or by itself when nothing is expected. The
+    /// elements are literals, as in `#(..)`: a symbol is the symbol.
+    ///
+    /// Where S-expression data is expected, every element is data, so the
+    /// tuple is built with `Option<Sexpr>` elements — the same box a `#{..}`
+    /// read as data is — and then seen as the datum it is.
+    fn check_tuple_literal(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        id: crate::mem::BoxId,
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
+        let path = crate::types::tuple_path(elems.len());
+        let data = expected.filter(|t| is_sexpr_expectation(t));
+        let mut s = RootScope::new(heap);
+        let new = forms::path_form(&mut s, &path.child("new"));
+        let mut items: Vec<(Value, Option<Loc>)> = vec![(new, None)];
+        for &e in &elems {
+            let ef = literal_element_form(&mut s, e, data.is_some())?;
+            s.push_root(ef);
+            items.push((ef, None));
+        }
+        let form = forms::list_from_vec_locs(&mut s, &items)?;
+        s.push_root(form);
+        match data {
+            Some(want) => {
+                let data_ty = Type::Named(path, vec![option_of_sexpr(); elems.len()]);
+                let built = self.check_inner(&mut s, interp, env, form, Some(&data_ty))?;
+                Ok(Checked::new(built.form, want.clone()))
+            }
+            None => self.check_inner(&mut s, interp, env, form, expected),
+        }
+    }
+
     /// `#2A((1 2) (3 4))` in source: a fresh `Array<T>`, typed as
     /// [`Self::check_vector_literal`] types a vector. Built from a vector of
     /// the dimensions and a vector of the elements in row-major order, so a
@@ -10346,6 +10390,10 @@ impl Checker {
             }
             Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
                 self.check_array_literal(heap, interp, env, id, expected)?
+            }
+            // `#{..}` written in source: a fresh tuple of the literal elements.
+            Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => {
+                self.check_tuple_literal(heap, interp, env, id, expected)?
             }
             // Any other box is an object no reader ever produced — a struct,
             // an enum value, a `Vector`, a closure — that reached a form
@@ -13253,6 +13301,7 @@ impl Checker {
         let Type::Named(type_fq, _) = &recv.ty else {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv_name, field)));
         };
+        let field = tuple_element_field(&recv.ty, field)?.unwrap_or_else(|| field.clone());
         let setter = format!("set-{}", field);
         let is_field_setter = self
             .reg
@@ -14233,8 +14282,8 @@ impl Checker {
     /// The written form is [`mangle_type`]'s, which is the surface syntax,
     /// and the round trip through [`Self::parse_type_here_at`] is *checked*
     /// rather than assumed: not every type has surface syntax — a function
-    /// type's parentheses cannot survive inside `<>`
-    /// (`read::reader::extend_angle_token`) — and refusing to write one says
+    /// type's parentheses cannot be written inside `<>`
+    /// (`read::reader::read_type_in_args`) — and refusing to write one says
     /// so here instead of emitting a form that fails somewhere less legible.
     fn the_form(&self, heap: &mut Heap, outer: &str, elem: &Type, ctor: &str) -> Result<Value, Error> {
         let text = format!("{}<{}>", outer, mangle_type(elem));
@@ -16391,6 +16440,8 @@ impl Checker {
             // literals (`'foo`, an integer, a `char`, a `bool`) have no
             // such gap and are left alone; so is an explicit `(= expr)`,
             // where the author asked for `equals` in as many words.
+            // `#{a b}`: a tuple's elements, each matched by its own pattern.
+            Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => self.check_tuple_pattern(heap, interp, env, expected, id),
             Value::Str(_) | Value::Boxed(_) if is_sexpr_expectation(expected) => {
                 Err(Error::TypeError(format!(
                     "pattern: `{}` against a `Sexpr` scrutinee would compare by identity — \
@@ -16405,6 +16456,40 @@ impl Checker {
             Value::Cons(_) => self.check_ctor_pattern(heap, interp, env, expected, v),
             other => Err(Error::TypeError(format!("pattern does not match `{}`: `{}`", expected, core::print(heap, other)))),
         }
+    }
+
+    /// `#{p0 p1 ...}` against `expected`: the tuple struct's one variant, its
+    /// fields matched by the element patterns. Against a `Sexpr` it is a
+    /// downcast to the tuple of `Option<Sexpr>` elements a `#{..}` datum is,
+    /// so it matches a datum of that arity and nothing else.
+    fn check_tuple_pattern(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        expected: &Type,
+        id: crate::mem::BoxId,
+    ) -> Result<(Pattern, PatternBindings), Error> {
+        let n = heap.struct_field_count(id);
+        let path = crate::types::tuple_path(n);
+        let (targs, downcast) = match expected {
+            Type::Named(p, args) if *p == path => (args.clone(), false),
+            t if is_sexpr_expectation(t) => (vec![option_of_sexpr(); n], true),
+            _ => {
+                return Err(Error::TypeError(format!(
+                    "pattern: `{}` is a tuple of {} element(s), which does not match `{}`",
+                    core::print(heap, Value::Boxed(id)),
+                    n,
+                    expected
+                )))
+            }
+        };
+        // `check_ctor_pattern_fields` takes the written form's parts, head
+        // first; a tuple pattern has no head to write, and the head is not read.
+        let mut parts = vec![Value::Empty];
+        parts.extend((0..n).map(|i| heap.struct_field(id, i)));
+        let parts_locs: Vec<(Value, Option<Loc>)> = parts.iter().map(|v| (*v, None)).collect();
+        self.check_ctor_pattern_fields(heap, interp, env, path, targs, 0, &parts, &parts_locs, downcast)
     }
 
     /// A bare symbol pattern that names a constructor of `expected`, or
@@ -16935,6 +17020,27 @@ fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
 /// there is no spelling to get wrong.
 fn is_symbol(v: Value, konst: u32) -> bool {
     matches!(v, Value::Symbol(id) if id.is(konst))
+}
+
+/// `t::0` on a tuple: the field that holds element `0`, or an error naming
+/// the tuple's arity when there is no such element. `None` when `ty` is not
+/// a tuple or `name` is not an index, so the name is looked up as written.
+fn tuple_element_field(ty: &Type, name: &str) -> Result<Option<String>, Error> {
+    let Type::Named(path, _) = ty else { return Ok(None) };
+    let Some(arity) = crate::types::tuple_arity(path) else { return Ok(None) };
+    if name.is_empty() || !name.bytes().all(|b| b.is_ascii_digit()) {
+        return Ok(None);
+    }
+    match name.parse::<usize>() {
+        Ok(i) if i < arity => Ok(Some(crate::types::tuple_field(i))),
+        _ => Err(Error::TypeError(format!(
+            "`{}` has {} element(s), numbered 0 to {}; there is no element `{}`",
+            ty,
+            arity,
+            arity - 1,
+            name
+        ))),
+    }
 }
 
 /// Whether `v` is the keyword `:name`. Keywords are read as symbols whose

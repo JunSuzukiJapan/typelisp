@@ -330,6 +330,17 @@ impl fmt::Display for Type {
             write!(f, ">")
         }
         match self {
+            // A tuple is written the way its values are, `#{int string}`.
+            Type::Named(p, ts) if tuple_arity(p).is_some() => {
+                write!(f, "#{{")?;
+                for (i, t) in ts.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", t)?;
+                }
+                write!(f, "}}")
+            }
             Type::Named(p, ts) => {
                 let written = if p.is_simple() { builtin_spelling(p.last_segment()) } else { None };
                 match written {
@@ -365,6 +376,35 @@ impl fmt::Display for Type {
 
 /// The documented spelling of a built-in type whose name the reader has
 /// lowercased, or `None` for every other name.
+/// The type behind the tuple type `#{T0 T1 ...}` of `arity` elements (at most
+/// [`typelisp_mem::TUPLE_MAX_ARITY`]): the
+/// prelude's `%internal::tupleN<T0,...>`, a `defstruct` whose fields are
+/// [`tuple_field`]`(0)`, `(1)`, .... Built on a struct so that everything a
+/// generic struct already has — monomorphization, representations, `setf`,
+/// trait impls — is a tuple's too.
+pub fn tuple_path(arity: usize) -> Path {
+    debug_assert!((1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&arity), "no tuple type of arity {}", arity);
+    Path::from_segments(vec!["%internal".to_string(), format!("tuple{}", arity)])
+}
+
+/// The arity of the tuple type `path` names, or `None` when it names some
+/// other type.
+pub fn tuple_arity(path: &Path) -> Option<usize> {
+    let [module, name] = path.segments() else { return None };
+    if module != "%internal" {
+        return None;
+    }
+    let n: usize = name.strip_prefix("tuple")?.parse().ok()?;
+    (1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&n).then_some(n)
+}
+
+/// The struct field holding a tuple's element `index`, which a program
+/// reaches as `t::0`. The field cannot be named `0` itself: the reader reads
+/// that as an integer.
+pub fn tuple_field(index: usize) -> String {
+    format!("%{}", index)
+}
+
 fn builtin_spelling(name: &str) -> Option<&'static str> {
     Some(match name {
         "option" => "Option",
@@ -597,6 +637,16 @@ pub fn parse_type_spanned(
         Value::Cons(_) if is_fn_form(heap, v) => parse_fn_type(heap, v, out),
         Value::Cons(_) if is_ptr_form(heap, v) => parse_ptr_type(heap, v, out),
         Value::Cons(_) => parse_applied_type(heap, v, out),
+        // `#{int string}` — the tuple type, written the way its values are.
+        // The reader hands the elements over as a `#{..}` datum, whose
+        // elements carry no source positions of their own.
+        Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => {
+            let n = heap.struct_field_count(id);
+            let args = (0..n)
+                .map(|i| parse_type_spanned(heap, heap.struct_field(id, i), None, out))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Type::Named(tuple_path(n), args))
+        }
         other => Err(Error::TypeError(format!("not a type expression: {:?}", other))),
     }
 }
@@ -786,18 +836,21 @@ struct SpanRec<'a> {
 
 impl SpanRec<'_> {
     /// Record `segs` (a written path) whose final segment occupies bytes
-    /// `b0..b1` of the token. A token never spans lines
-    /// (`read::reader::extend_angle_token` refuses newlines), so the span
-    /// stays on `base`'s line and only the columns shift.
+    /// `b0..b1` of the token. The span stays on `base`'s line and only the
+    /// columns shift.
     ///
-    /// `name` is the *interned* token, which `Heap::intern_symbol` has
-    /// case-folded; the offsets computed from it only name the right source
-    /// columns if folding preserved the character count. That holds for every
-    /// ASCII identifier, but not universally (`İ` lowercases to two
-    /// characters), so the two lengths are compared and a token where they
-    /// disagree records nothing rather than painting the wrong range.
+    /// That holds only while the token's text is the source's, character for
+    /// character, and it is not always. `name` is the *interned* token, which
+    /// `Heap::intern_symbol` has case-folded (`İ` lowercases to two
+    /// characters), and the reader writes type arguments with their
+    /// whitespace normalized (`read::reader::read_type_args`) — a run of
+    /// spaces made one, a newline inside `<..>` made none. So a token that
+    /// spans lines, or whose length differs from its source's, records
+    /// nothing rather than painting the wrong range.
     fn record(&mut self, segs: &[String], dyn_head: bool, b0: usize, b1: usize) {
-        if self.name.chars().count() as u32 != self.base.end_col.saturating_sub(self.base.col) {
+        if self.base.end_line != self.base.line
+            || self.name.chars().count() as u32 != self.base.end_col.saturating_sub(self.base.col)
+        {
             return;
         }
         let start = self.base.col + self.name[..b0].chars().count() as u32;
@@ -895,9 +948,9 @@ fn parse_qualified_generic<'a>(
         }
     }
     // Nothing name-shaped where a name was required. Reachable from ordinary
-    // source — `Result<` (an unterminated generic whose speculative extension
-    // the reader rewound) leaves an empty argument here — so it has to be a
-    // reported error, not the `Path::from_segments` assertion it used to trip.
+    // source — `Result<` reads as a plain symbol (no type follows its `<`),
+    // and leaves an empty argument here — so it has to be a reported error,
+    // not the `Path::from_segments` assertion it used to trip.
     if segs.is_empty() {
         return Err(Error::TypeError(format!("malformed type name: `{}`", toks.src)));
     }
@@ -922,7 +975,13 @@ fn parse_qualified_generic<'a>(
                 skip_space(toks);
                 match toks.next() {
                     Some((NameTok::Comma, _, _)) => continue,
-                    _ => break, // '>' (or a malformed, premature end) closes the list
+                    Some((NameTok::Gt, _, _)) => break,
+                    _ => {
+                        return Err(Error::TypeError(format!(
+                            "malformed type name: `{}` (expected `,` or `>` after a type argument)",
+                            toks.src
+                        )))
+                    }
                 }
             }
         }
@@ -952,6 +1011,31 @@ fn parse_type_arg<'a>(toks: &mut Toks<'a>, rec: &mut Option<SpanRec<'_>>) -> Res
     if matches!(toks.peek(), Some(NameTok::Unit)) {
         toks.next();
         return Ok(Type::Unit);
+    }
+    // `#{T0 T1 ...}`, a tuple type, its elements separated by spaces.
+    if matches!(toks.peek(), Some(NameTok::TupleOpen)) {
+        toks.next();
+        let mut elems = Vec::new();
+        loop {
+            skip_space(toks);
+            if matches!(toks.peek(), Some(NameTok::TupleClose)) {
+                toks.next();
+                break;
+            }
+            if toks.peek().is_none() {
+                return Err(Error::TypeError(format!("malformed type name: `{}` (a tuple type is not closed)", toks.src)));
+            }
+            elems.push(parse_type_arg(toks, rec)?);
+        }
+        if !(1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&elems.len()) {
+            return Err(Error::TypeError(format!(
+                "`{}`: a tuple has 1 to {} elements, not {}",
+                toks.src,
+                typelisp_mem::TUPLE_MAX_ARITY,
+                elems.len()
+            )));
+        }
+        return Ok(Type::Named(tuple_path(elems.len()), elems));
     }
     if matches!(toks.peek(), Some(NameTok::Ident(s)) if *s == ":dyn") {
         toks.next(); // `:dyn`

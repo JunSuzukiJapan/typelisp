@@ -36,10 +36,9 @@ fn unit_type() {
 #[test]
 fn unit_as_a_generic_argument() {
     // `(`/`)` are reader delimiters, so getting `()` *inside* a type token
-    // takes both halves of the fix: `extend_angle_token` letting the pair
-    // through while the angle brackets are open, and `NameTok::Unit` picking
-    // it back out. Before that this spelling tripped an assertion in
-    // `Path::from_segments`.
+    // takes two halves: the reader's type-argument grammar taking the pair as
+    // a type, and `NameTok::Unit` picking it back out. Before that this
+    // spelling tripped an assertion in `Path::from_segments`.
     let unit_string = vec![Type::Unit, Type::Str];
     assert_eq!(parse("Result<(), String>"), Type::Named(Path::root("result"), unit_string.clone()));
     // Without the space, and with the unit in trailing position too.
@@ -380,7 +379,10 @@ fn an_applied_generic_carries_an_argument_no_name_can_spell() {
             vec![Type::Fn(vec![Type::Int], None, Box::new(Type::Int))]
         )
     );
-    assert!(parse_result("Vector<(fn (int) int)>").is_err());
+    // The reader's type grammar has no parenthesized type but `()`, so this
+    // spelling does not even read.
+    let mut h = Heap::with_capacity(256);
+    assert!(Reader::new().read(&mut h, "Vector<(fn (int) int)>").is_err());
 }
 
 #[test]

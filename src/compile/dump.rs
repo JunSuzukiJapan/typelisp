@@ -147,7 +147,7 @@ pub fn capture_program_dump(
     let prelude = typelisp_front::dump::parse(typelisp_front::prelude::DUMP, "prelude")?;
     let prelude_unit = prelude.first().ok_or_else(|| "prelude: the committed dump holds no units".to_string())?;
     let prelude_state = typelisp_front::dump::read_state(prelude_unit.types, "prelude")?;
-    typelisp_front::dump::verify_sources_digest(&prelude_state, typelisp_front::prelude::DUMPED_SOURCES, typelisp_front::prelude::REGEN_SCRIPT)?;
+    typelisp_front::dump::verify_sources_digest(&prelude_state, &typelisp_front::prelude::dumped_sources(), typelisp_front::prelude::REGEN_SCRIPT)?;
 
     let mut chk = Checker::new();
     let mut interp = Interp::new();
@@ -444,7 +444,7 @@ pub fn load_image(
         match state.label.as_str() {
             "prelude" => typelisp_front::dump::verify_sources_digest(
                 &state,
-                typelisp_front::prelude::DUMPED_SOURCES,
+                &typelisp_front::prelude::dumped_sources(),
                 typelisp_front::prelude::REGEN_SCRIPT,
             )?,
             "compiler island" => typelisp_front::dump::verify_digest(

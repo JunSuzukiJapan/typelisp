@@ -1784,7 +1784,7 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
 /// rather than by its name — see [`sym_form`].
 use crate::sexpr_variant::{
     quoted::{
-        ARRAY as SEXPR_QUOTED_ARRAY, PATH as SEXPR_PATH, SYM as SEXPR_SYM, VECTOR as SEXPR_QUOTED_VECTOR,
+        ARRAY as SEXPR_QUOTED_ARRAY, PATH as SEXPR_PATH, SYM as SEXPR_SYM, VECTOR as SEXPR_QUOTED_VECTOR, TUPLE as SEXPR_QUOTED_TUPLE,
         WK_SYM as SEXPR_SYM_WK,
     },
     BOOL as SEXPR_BOOL, CHAR as SEXPR_CHAR, CONS as SEXPR_CONS, F32 as SEXPR_F32, F64 as SEXPR_F64, INT as SEXPR_INT,
@@ -1922,6 +1922,15 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             f.push(list);
             let fields = f.as_slice().to_vec();
             sexpr_construct(f.heap(), SEXPR_QUOTED_VECTOR, &fields)
+        }
+        // `#{..}`, the same way as `#(..)` (`rt_list_to_sexpr_tuple`).
+        Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => {
+            let elems = struct_fields(heap, id);
+            let list = quoted_list_form(heap, &elems)?;
+            let mut f = Items::new(heap);
+            f.push(list);
+            let fields = f.as_slice().to_vec();
+            sexpr_construct(f.heap(), SEXPR_QUOTED_TUPLE, &fields)
         }
         Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
             let parts = struct_fields(heap, id);

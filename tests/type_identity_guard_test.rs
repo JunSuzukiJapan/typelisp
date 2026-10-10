@@ -364,6 +364,22 @@ fn the_read_vector_and_array_keys_are_the_sexpr_variants_payloads() {
     );
 }
 
+/// A `#{..}` datum is a tuple of `Option<Sexpr>` elements, whose key the
+/// reader and the runtime spell (`typelisp_mem::sexpr_tuple_key`) with no
+/// checker in hand. It has to be the key the checker gives that tuple type,
+/// or a tuple built in a program would not be the datum `read` builds from
+/// the same text, and the `tuple` variant would match only one of them.
+#[test]
+fn the_read_tuple_key_is_the_checkers_tuple_of_data() {
+    use typelisp::types::{tuple_path, Path};
+    use typelisp::Type;
+    let data = Type::Named(Path::root("option"), vec![Type::Named(Path::root("sexpr"), vec![])]);
+    for n in 1..=typelisp::TUPLE_MAX_ARITY {
+        let ty = Type::Named(tuple_path(n), vec![data.clone(); n]);
+        assert_eq!(typelisp::sexpr_tuple_key(n), typelisp::type_key::type_key_of_type(&ty), "arity {}", n);
+    }
+}
+
 /// The `TypeKeyId` constants must be the indices `Heap::with_capacity` interns
 /// [`BUILTIN_TYPE_KEYS`] at — the whole reason those constants can exist.
 ///
