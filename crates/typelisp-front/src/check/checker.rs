@@ -6585,6 +6585,8 @@ impl Checker {
             if is_static {
                 // `(name (params...) ...)` -> `(name (Type params...) ...)`,
                 // the static method form.
+                // core-build-ok: `parts[0]` is in the rooted top-level form
+                // and `new_elems` were rooted just above.
                 let recv = heap.cons(parts[0], new_elems[1])?;
                 new_elems[1] = forms::rooted(heap, recv);
             }
