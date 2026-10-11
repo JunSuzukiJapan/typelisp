@@ -219,12 +219,13 @@ fn a_bounded_generic_can_delegate_with_a_structured_associated_type_pin() {
 fn a_generic_defmethod_may_name_the_receivers_type_parameter_freely() {
     assert_eq!(
         eval_ok_with_prelude(
-            "(impl Vector<A>
-  (keepif (self (pred (fn (A) bool))) Vector<A>
-                 (filter (iter self) pred)))
+            "(defstruct bag<T> (items Vector<T>))
+             (impl bag<A>
+               (keepif (self (pred (fn (A) bool))) Vector<A>
+                 (filter (iter self::items) pred)))
              (let ((v (the Vector<int> (Vector::new))))
                (push v 1) (push v 5)
-               (len (keepif v (lambda ((x int)) bool (> x 2)))))"
+               (len (keepif (make-instance 'bag :items v) (lambda ((x int)) bool (> x 2)))))"
         ),
         Value::Int(1)
     );

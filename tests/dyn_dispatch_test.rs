@@ -505,7 +505,7 @@ fn an_upcast_box_is_still_a_trait_object_for_match() {
     let src = format!(
         "{DIAMOND}
          (defun name-of ((c :dyn C)) int
-           (match c ((cell _) 10) ((pair _) 20) (_ 0)))
+           (match c ((cell) 10) ((pair) 20) (_ 0)))
          (defun via ((d :dyn D)) int (name-of d))
          (+ (via (make-instance 'cell :n 0)) (via (make-instance 'pair :n 0)))"
     );

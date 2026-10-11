@@ -274,7 +274,7 @@ fn source_returns_the_wrapped_error() {
           (source ((self Self)) Option<:dyn Error> (option::some self::cause)))
         (defun root-message ((e :dyn Error)) string
           (match (source e) ((some inner) (message inner)) ((none) (message e))))
-        (root-message (make-instance 'HighErr :cause (LowErr::new "disk offline")))
+        (root-message (make-instance 'HighErr :cause (make-instance 'LowErr :detail "disk offline")))
     "#;
     assert_eq!(run_str(src), "disk offline");
 }

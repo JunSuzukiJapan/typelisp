@@ -166,7 +166,7 @@ fn a_method_on_a_generic_owner_can_carry_a_where_clause() {
             (impl pair<A>
               (count-both (self) int (where (Counted A))
                 (+ (count self::x) (count self::y))))
-            (count-both (make-instance 'pair :x (box::new 20) :y (box::new 22)))",
+            (count-both (make-instance 'pair :x (make-instance 'box :n 20) :y (make-instance 'box :n 22)))",
         COUNTER_PRELUDE
     );
     assert_eq!(eval_ok(&src), Value::Int(42));
@@ -184,8 +184,8 @@ fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
         (impl Eq2 pr<A,B>
           (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
-        (if (same (make-instance 'pr :a (pr::new 1 2) :b 3) (make-instance 'pr :a (pr::new 1 2) :b 3))
-            (if (same (make-instance 'pr :a (pr::new 1 2) :b 3) (make-instance 'pr :a (pr::new 1 9) :b 3)) 0 1)
+        (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3))
+            (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 9) :b 3)) 0 1)
             0)";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -204,7 +204,7 @@ fn bounded_method_call_rejects_an_owner_argument_lacking_the_impl() {
         (impl Eq2 pr<A,B>
           (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
-        (same (make-instance 'pr :a (no-eq::new 1) :b 2) (make-instance 'pr :a (no-eq::new 1) :b 2))";
+        (same (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2) (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2))";
     let err = check(src).expect_err("must fail to check");
     let msg = format!("{:?}", err);
     assert!(
@@ -575,7 +575,7 @@ fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
           (same ((self Self) (other Self)) bool)
           (differs ((self Self) (other Self)) bool (if (same self other) false true)))
         (module m
-          (pub defstruct point (x int))
+          (pub defstruct point (pub x int))
           (impl Eq3 point (same ((self Self) (other Self)) bool (= self::x other::x))))
         (differs (make-instance 'm::point :x 1) (make-instance 'm::point :x 2))";
     assert_eq!(eval_ok(src), Value::Bool(true));
@@ -587,7 +587,7 @@ fn a_trait_method_is_callable_from_outside_the_implementing_module() {
         (deftrait Named ()
           (label ((self Self)) string))
         (module m
-          (pub defstruct tag (n int))
+          (pub defstruct tag (pub n int))
           (impl Named tag (label ((self Self)) string \"tag\")))
         (label (make-instance 'm::tag :n 1))";
     assert_eq!(eval_string(src), "tag");

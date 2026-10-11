@@ -116,7 +116,7 @@ fn print_level_applies_to_struct_and_enum_values() {
         (defstruct pt (x int) (y int))
         (defstruct pair (a pt) (b pt))
         (setf *print-level* 1)
-        (format false "~a" (make-instance 'pair :a (pt::new 1 2) :b (pt::new 3 4)))
+        (format false "~a" (make-instance 'pair :a (make-instance 'pt :x 1 :y 2) :b (make-instance 'pt :x 3 :y 4)))
     "#;
     assert_eq!(fmt(src), "#<pair a: # b: #>");
 }

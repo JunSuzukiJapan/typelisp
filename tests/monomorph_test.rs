@@ -280,10 +280,11 @@ fn a_generic_method_call_evaluates_through_its_specialization() {
 #[test]
 fn a_generic_method_with_a_match_body_specializes() {
     let src = r#"
-        (impl Option<T>
-  (unwrap2 (self) T
-            (match self ((some x) x) ((none) (panic "none")))))
-        (unwrap2 (option::some 9))
+        (defstruct cell<T> (o Option<T>))
+        (impl cell<T>
+          (unwrap2 (self) T
+            (match self::o ((some x) x) ((none) (panic "none")))))
+        (unwrap2 (make-instance 'cell :o (option::some 9)))
     "#;
     assert_eq!(eval_ok(src), Value::Int(9));
 }

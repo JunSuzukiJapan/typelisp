@@ -434,8 +434,7 @@ fn top_level() {
     all_round_trip(&[
         "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width true (assoc int + true () int-any-width (int-any-width int-any-width) (var a) (var b)))",
         "(defun m::nothing () unit false (unit))",
-        "(impl rea
-  (point () false ((self struct)) int-any-width true (field-get (var self) 0 int-any-width)))",
+        "(defmethod point area false ((self struct)) int-any-width true (field-get (var self) 0 int-any-width))",
         // params, then whether it takes `&rest`, then the `&optional`/`&key`
         // structure, then `pub`, then the body.
         "(defmacro m::when (c body) true (1 () ()) false (quote ()))",

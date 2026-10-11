@@ -3302,7 +3302,7 @@ fn compile_dispatches_a_function_that_constructs_a_nested_defstruct_to_native_co
         r#"
         (defstruct inner (v int))
         (defstruct outer (child inner))
-        (defun make-outer ((n int)) outer (make-instance 'outer :child (inner::new n)))
+        (defun make-outer ((n int)) outer (make-instance 'outer :child (make-instance 'inner :v n)))
         (compile make-outer)
         (compile inner::v)
         (compile outer::child)
@@ -3328,7 +3328,7 @@ fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
         r#"
         (defstruct inner (v int))
         (defstruct outer (child inner))
-        (defun make-outer ((n int)) outer (make-instance 'outer :child (inner::new n)))
+        (defun make-outer ((n int)) outer (make-instance 'outer :child (make-instance 'inner :v n)))
         (compile make-outer)
         (compile inner::v)
         (compile outer::child)
@@ -5639,7 +5639,7 @@ fn compile_and_interpret_agree_on_a_trait_object_match() {
         (impl Drawable square (draw ((self Self)) int 2))
         (defun area ((d :dyn Drawable)) int
           (match d
-            ((circle r) (* 100 r))
+            ((circle :r) (* 100 r))
             ((the square s) s::side)
             (_ 0)))
         (defun rec () int (+ (area (make-instance 'circle :r 3)) (area (make-instance 'square :side 4))))
@@ -5943,7 +5943,7 @@ fn a_module_type_named_vector_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (pub defstruct vector (a int))
+          (pub defstruct vector (pub a int))
           (impl vector (pub len (self) int (* 100 self::a)))
           (pub defun call-len ((v vector)) int (len v)))
         (compile m::call-len)
@@ -5961,7 +5961,7 @@ fn a_module_type_named_hashtable_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (pub defstruct hashtable (a int) (b int))
+          (pub defstruct hashtable (pub a int) (pub b int))
           (impl hashtable (pub count (self) int (+ self::a self::b)))
           (pub defun call-count ((h hashtable)) int (count h)))
         (compile m::call-count)

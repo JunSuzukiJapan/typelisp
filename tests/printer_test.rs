@@ -349,8 +349,8 @@ fn each_instantiation_reaches_its_own_print_object() {
              (where (print-object T))
              (print-object ((self Self) (escape bool)) string
                (append "gen-of-" (print-object (v self) escape))))
-           (and (equal (format false "~a" (make-instance 'gen :v (wi::new 1))) "gen-of-INT")
-                (equal (format false "~a" (make-instance 'gen :v (ws::new "x"))) "gen-of-STR"))"#,
+           (and (equal (format false "~a" (make-instance 'gen :v (make-instance 'wi :n 1))) "gen-of-INT")
+                (equal (format false "~a" (make-instance 'gen :v (make-instance 'ws :s "x"))) "gen-of-STR"))"#,
     );
 }
 

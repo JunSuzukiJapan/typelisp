@@ -50,8 +50,8 @@ fn matching_a_trait_object_recovers_the_concrete_type_by_name() {
         "{SHAPES}
          (defun area ((d :dyn Drawable)) int
            (match d
-             ((circle r) (* 3 (* r r)))
-             ((square s) (* s s))
+             ((circle :r) (* 3 (* r r)))
+             ((square :side s) (* s s))
              (_ 0)))
          (+ (area (make-instance 'circle :r 2)) (area (make-instance 'square :side 5)))"
     );
@@ -78,7 +78,7 @@ fn an_unmatched_concrete_type_falls_through_to_the_catchall() {
     let src = format!(
         "{SHAPES}
          (defun area ((d :dyn Drawable)) int
-           (match d ((circle r) r) (_ -1)))
+           (match d ((circle :r) r) (_ -1)))
          (area (make-instance 'square :side 5))"
     );
     assert_eq!(eval_ok(&src), Value::Int(-1));
@@ -91,7 +91,7 @@ fn a_trait_object_match_still_dispatches_dynamically_in_the_same_function() {
         "{SHAPES}
          (defun describe ((d :dyn Drawable)) string
            (match d
-             ((circle r) (append (draw d) \"!\"))
+             ((circle :r) (append (draw d) \"!\"))
              (_ (draw d))))
          (append (describe (make-instance 'circle :r 1)) (describe (make-instance 'square :side 1)))"
     );
@@ -151,7 +151,7 @@ fn a_trait_object_can_be_stored_in_a_sexpr_list() {
         "{SHAPES}
          (defun box-it ((d :dyn Drawable)) Option<Sexpr> (list d))
          (defun first-draw ((xs Option<Sexpr>)) string
-           (match (sexpr-car xs) ((circle r) \"circle\") (_ \"other\")))
+           (match (sexpr-car xs) ((circle :r) \"circle\") (_ \"other\")))
          (first-draw (box-it (make-instance 'circle :r 3)))"
     );
     assert_eq!(eval_string(&src), "circle");

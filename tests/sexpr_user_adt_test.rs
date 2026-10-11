@@ -181,7 +181,7 @@ fn match_destructures_a_struct_downcast_pattern() {
     let v = eval_ok(
         "(defstruct point (x int) (y int))
          (match (sexpr-car (list (make-instance 'point :x 1 :y 2)))
-           ((point a b) (+ a b))
+           ((point :x a :y b) (+ a b))
            (_ 0))",
     );
     assert_eq!(v, Value::Int(3));
@@ -244,7 +244,7 @@ fn a_struct_downcast_pattern_does_not_false_match_nil() {
     let v = eval_ok(
         "(defstruct point (x int) (y int))
          (match (sexpr-car (list ()))
-           ((point a b) (+ a b))
+           ((point :x a :y b) (+ a b))
            (_ -1))",
     );
     assert_eq!(v, Value::Int(-1));
@@ -259,7 +259,7 @@ fn a_struct_downcast_pattern_does_not_false_match_a_different_same_shape_struct(
         "(defstruct point (x int) (y int))
          (defstruct pair (a int) (b int))
          (match (sexpr-car (list (make-instance 'pair :a 9 :b 9)))
-           ((point x y) (+ x y))
+           ((point :x :y) (+ x y))
            (_ -1))",
     );
     assert_eq!(v, Value::Int(-1));
@@ -319,7 +319,7 @@ fn equalp_distinguishes_structs_by_type_name_inside_sexpr_data() {
 fn a_generic_downcast_pattern_head_is_a_type_error() {
     let src = "(defstruct box<T> (v T))
          (defun f ((s sexpr)) int
-           (match s ((box v) 0) (_ 1)))";
+           (match s ((box :v) 0) (_ 1)))";
     let err = check(src).unwrap_err();
     let msg = format!("{:?}", err);
     assert!(msg.contains("generic"), "expected a generic-downcast error, got {}", msg);

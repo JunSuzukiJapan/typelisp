@@ -365,7 +365,7 @@ fn a_scalar_scrutinee_matches_by_literal() {
 fn two_value_patterns_in_one_pattern_do_not_read_each_others_value() {
     both(
         r#"(defstruct pair (a string) (b string))
-           (defun f ((p pair)) int (match p ((new "x" "y") 1) ((new "x" _) 2) (_ 0)))"#,
+           (defun f ((p pair)) int (match p ((pair :a "x" :b "y") 1) ((pair :a "x") 2) (_ 0)))"#,
         r#"(+ (* 100 (f (make-instance 'pair :a "x" :b "y"))) (+ (* 10 (f (make-instance 'pair :a "x" :b "z"))) (f (make-instance 'pair :a "q" :b "y"))))"#,
         digits(1, 2, 0),
     );
