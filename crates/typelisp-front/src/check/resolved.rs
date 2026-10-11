@@ -27,7 +27,9 @@ use crate::{Path, Type};
 /// name: a function `b` of module `a` and a method `b` of type `a` are two
 /// different values of this type, where their names as text would be easy to
 /// confuse.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+///
+/// Also what a dump records for each body its bitcode carries.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CompileTarget {
     Fn(Path),
     Method(Path, String),

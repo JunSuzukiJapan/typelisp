@@ -2572,8 +2572,8 @@ fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many
 /// `(compile name)` only ever compiled a top-level `defun` (`self.fns`),
 /// never an instance method (`self.methods`). See the
 /// `compile_dispatches_a_defstruct_field_accessor_method_to_native_code`/
-/// `..._setter_method_to_native_code` tests below (`Interp::resolve_fn_def`/
-/// `method_key` — `(compile type::method)`) for the follow-up that closes
+/// `..._setter_method_to_native_code` tests below (`(compile type::method)`)
+/// for the follow-up that closes
 /// this specific gap: compiling the accessor/setter *method itself* (whose
 /// body is the bare `Expr::FieldGet`/`FieldSet`, no `Expr::Assoc` involved)
 /// and wiring `Expr::Assoc`'s own dispatch to use it once compiled, the same
@@ -2601,9 +2601,8 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
     }
 }
 
-/// `(compile point::x)`: `Interp::method_key`/`resolve_fn_def` resolve a
-/// `"type::method"` name against `self.methods` instead of `self.fns`,
-/// compiling `point`'s auto-generated `x` accessor (body: bare
+/// `(compile point::x)` names the method `x` of `point` rather than a
+/// function, compiling `point`'s auto-generated `x` accessor (body: bare
 /// `Expr::FieldGet`, no `Expr::Assoc`) on its own — closing the gap the
 /// `..._constructs_a_defstruct_instance..._` test above's doc comment
 /// describes. `make-point`'s own *construction* stays exactly as before
@@ -2891,8 +2890,7 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
 /// same-named accessors as external `Expr::Assoc` targets from within one
 /// compiled function. Before this fix, a method's mangled LLVM symbol
 /// (`user_method_symbol_name`) and every internal SCC bookkeeping key
-/// derived from it (`Interp::method_key`, `CallEdge::Method`'s node name)
-/// were built from the receiver type's *local* name only (`tl_box::n` for
+/// derived from it were built from the receiver type's *local* name only (`tl_box::n` for
 /// *both* structs) — so `compiler.rs`'s `get-function "tl_box::n"` inside
 /// `sum-both`'s own module would resolve to the *same* declared value for
 /// both calls, and whichever real address `Interp::compile_scc` supplied last
@@ -5680,11 +5678,12 @@ fn a_macro_expander_can_be_compiled() {
     };
 
     run(&mut h, &mut chk, &interp, "(defmacro twice (x) `(+ ,x ,x))");
-    assert!(!interp.is_compiled("twice"), "a freshly defined macro has no compiled body yet");
+    let twice = typelisp::CompileTarget::Fn(typelisp::Path::root("twice"));
+    assert!(!interp.is_compiled(&twice), "a freshly defined macro has no compiled body yet");
     assert_eq!(run(&mut h, &mut chk, &interp, "(twice 21)"), Value::Int(42));
 
     run(&mut h, &mut chk, &interp, "(compile twice)");
-    assert!(interp.is_compiled("twice"), "`(compile twice)` should have installed a native expander");
+    assert!(interp.is_compiled(&twice), "`(compile twice)` should have installed a native expander");
     assert_eq!(
         run(&mut h, &mut chk, &interp, "(twice 21)"),
         Value::Int(42),

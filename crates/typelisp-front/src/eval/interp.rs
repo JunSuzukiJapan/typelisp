@@ -64,9 +64,7 @@ pub use core_eval::read_ffi_decl;
 /// rather than in a flat program-wide table; see that module's doc comment.
 pub struct FnDef {
     /// This definition's link name: a free function's fully-qualified path
-    /// (`m::inc`), or a method's `type::method` — the exact spelling
-    /// [`Interp::method_key`] parses back and `compile::driver`'s
-    /// `method_link_name` builds, so the three cannot drift.
+    /// (`m::inc`), or a method's [`method_link_name`].
     ///
     /// The scope tree keys these by their *last* segment inside a namespace,
     /// which is enough to find one but not enough to *name* one: `enter` has
@@ -112,9 +110,8 @@ pub struct FnDef {
     /// AOT pass) has ever produced one — the direct replacement for the old
     /// standalone `Interp::compiled`/`compiled_methods` side tables (`Path`-
     /// keyed, "must never drift" from `fns`/`methods` by discipline alone).
-    /// Living on the same node `scope::ModuleScope::resolve_fn`/
-    /// `resolve_method` already found eliminates that duplication
-    /// structurally: the compiled-fast-path check in `Call`/`Assoc` eval is
+    /// Living on the node `scope::ModuleScope::get_fn`/`get_method` finds
+    /// eliminates that duplication structurally: the compiled-fast-path check in `Call`/`Assoc` eval is
     /// just "does the `FnDef` I already have in hand carry one?". Purely a
     /// machine-code-linkage implementation detail — never consulted by this
     /// module's own visibility/resolution logic.
@@ -739,19 +736,7 @@ pub struct Interp {
     pub thread_entries: RefCell<HashMap<Vec<i64>, Path>>,
 }
 
-/// One outgoing edge of the top-level compile call graph
-/// [`Interp::compute_sccs`] walks: either a plain `call` target (a
-/// `defun`) or an `assoc` target (a `defmethod`, keyed the same way
-/// [`Interp::method_key`] keys the scope tree's `methods`/`compiled`).
-/// Carries the full typed key (not just its string name) so
-/// [`Interp::compile_scc`] can reuse it directly to declare/wire the target
-/// without re-deriving it from the name.
-pub enum CallEdge {
-    Fn(Path),
-    Method(Path, String),
-}
-
-/// Why [`Interp::precheck_compilable`] says no.
+/// Why `compile::driver::precheck_compilable` says no.
 ///
 /// The split is between a cause worth *recording* and one worth *fixing*: a
 /// missing target names a specific gap in what the compile path lowers, stays
@@ -765,56 +750,6 @@ pub enum Uncompilable {
     MissingTarget(String),
     /// Anything else the compile path rejected.
     Other(EvalError),
-}
-
-impl CallEdge {
-    /// The node identity [`Interp::compute_sccs`]'s graph traversal keys on
-    /// — a bare `defun` name, or `"type-path::method"` (the type's full
-    /// `::`-joined path, never just its local segment — see
-    /// [`Interp::method_key`]'s doc comment for why) for a `defmethod`,
-    /// exactly the string shape [`Interp::compiled_fn_body`]/
-    /// [`Interp::method_key`] already resolve back.
-    pub fn node_name(&self) -> String {
-        match self {
-            CallEdge::Fn(p) => p.to_string(),
-            CallEdge::Method(p, m) => method_link_name(p, m),
-        }
-    }
-}
-
-/// Parse a [`CallEdge::Fn`] node name back to its `Path` — `"m::inc"` ->
-/// `Path[m, inc]`, `"inc"` -> `Path::root("inc")`. Only ever applied to a name
-/// [`Interp::method_key`] has already ruled out as a `type::method`, so a
-/// `"::"` here is unambiguously a module separator.
-pub fn fn_path_from_node_name(name: &str) -> Path {
-    let cut = own_name_end(name);
-    if name[..cut].contains("::") {
-        let mut segs: Vec<String> = name[..cut].split("::").map(|s| s.to_string()).collect();
-        // The mangled type arguments belong to the *last* segment, whole:
-        // they are part of that one name, not further path structure.
-        let last = segs.len() - 1;
-        segs[last].push_str(&name[cut..]);
-        Path::from_segments(segs)
-    } else {
-        Path::root(name)
-    }
-}
-
-/// Where a name's own `::`-separated path ends and its mangled type
-/// arguments begin.
-///
-/// A specialization's name embeds the types it was instantiated at —
-/// `array::make <m::point>` — and a type argument can be module-qualified.
-/// So the `::` that separates a name from its owner is the last one *before*
-/// the mangler's ` <`, never simply the last one in the string: splitting on
-/// that one reads `array::make <m::point>` as the method `point>` on the
-/// type `array::make <m`, which resolves to nothing. The failure surfaces as
-/// "no such function", far from the split, and only for a type argument that
-/// is module-qualified — which is why a program written at the top level
-/// never sees it. Same family as the type-identity qualification bugs of
-/// 2026-08-04.
-fn own_name_end(name: &str) -> usize {
-    name.find(" <").unwrap_or(name.len())
 }
 
 impl Interp {
@@ -1676,76 +1611,21 @@ impl Interp {
         self.encode_crossing_value(&s, &v, &ret)
     }
 
-    /// Finds the registered `(Path, String)` key for a `"type-path::method"`
-    /// name — `None` for a plain name (no `"::"`) or a method that isn't
-    /// registered. The method is `name`'s last `"::"`-separated segment
-    /// *before* any mangled type-argument list ([`own_name_end`]);
-    /// everything ahead of it is the type's own full `::`-joined path
-    /// (`rsplit_once`, not `split_once` — a module-qualified type has more
-    /// than one segment of its own before the method). Resolved by
-    /// direct descent ([`scope::ModuleScope::get_method`]) against that
-    /// full path, not a whole-tree scan by local type name alone — two
-    /// different types in different modules sharing both a local name and
-    /// a method name must never collide on one key (this is also why
-    /// `core_bridge.rs`'s `assoc`/`methodref` translation and
-    /// `user_method_symbol_name`'s mangled LLVM symbol both embed the type's
-    /// full path too, not just its local segment). Shared by
-    /// [`Self::resolve_fn_def`] (the lookup) and [`Self::compile_function`]
-    /// (which `(compile name)` for a method) — both need the exact same
-    /// `(Path, String)` key.
-    pub fn method_key(&self, name: &str) -> Option<(Path, String)> {
-        let cut = own_name_end(name);
-        let (type_part, base) = name[..cut].rsplit_once("::")?;
-        let method = format!("{}{}", base, &name[cut..]);
-        let type_path = Path::from_segments(type_part.split("::").map(|s| s.to_string()).collect());
-        self.root.borrow().get_method(&type_path, &method)?;
-        Some((type_path, method))
-    }
-
-    /// Resolves a `(compile name)` argument against either the scope tree's
-    /// free functions (a plain name, a top-level `defun`) or its methods (a
-    /// `"type::method"` name, an instance/static `defmethod` — including a `defstruct`'s
-    /// auto-generated field accessor/setter, whose body is the `field-get`/
-    /// `FieldSet` `compile-field-get`/`compile-field-set` exist to compile in
-    /// the first place). See [`Self::method_key`] for how `name` decides
-    /// which of the two this is.
-    pub(crate) fn resolve_fn_def(&self, name: &str) -> Result<Rc<FnDef>, EvalError> {
-        // A `"::"` name is a `type::method` (a `defmethod`) *or* a
-        // module-qualified `defun` (`m::inc`) — both share the separator.
-        // `method_key` matches only a genuinely registered method, so try it
-        // first; a miss falls through to a direct-descent lookup by the full
-        // parsed path (interp-closure removal: module-qualified closure
-        // targets).
-        if name.contains("::") {
-            if let Some((type_path, method)) = self.method_key(name) {
-                return self.root.borrow().get_method(&type_path, &method).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()));
-            }
-            return self
-                .root
-                .borrow()
-                .get_fn(&fn_path_from_node_name(name))
-                .ok_or_else(|| EvalError::NoSuchFunction(name.to_string()));
-        }
-        self.root.borrow().get_fn(&Path::root(name)).ok_or_else(|| EvalError::NoSuchFunction(name.to_string()))
-    }
-
-    /// Whether `name` — a `defun` name, or `type-path::method` — currently has
-    /// a compiled body installed, so calls to it run native rather than being
-    /// tree-walked.
+    /// Whether `target` currently has a compiled body installed, so calls to it
+    /// run native rather than being tree-walked.
     ///
     /// Public because "did the precompiled prelude actually take effect?" is
     /// otherwise unanswerable from outside the crate: every observable of a
     /// compiled call is identical to the interpreted one *except* how fast it
-    /// is, which is exactly the wrong thing to assert on. `false` for a name
-    /// that resolves to nothing, since an absent definition has no compiled
-    /// body either.
-    pub fn is_compiled(&self, name: &str) -> bool {
-        self.resolve_fn_def(name).is_ok_and(|f| f.compiled.borrow().is_some())
+    /// is, which is exactly the wrong thing to assert on. `false` for a target
+    /// with no definition, since an absent definition has no compiled body
+    /// either.
+    pub fn is_compiled(&self, target: &crate::CompileTarget) -> bool {
+        self.target_def(target).is_some_and(|f| f.compiled.borrow().is_some())
     }
 
-    /// Looks up `name`'s registered `defun`/`defmethod` body (see
-    /// [`Self::resolve_fn_def`]), enforcing the one constraint every entry
-    /// point into the compiler shares: a real type signature (so an LLVM
+    /// Looks up `target`'s registered body, enforcing the one constraint every
+    /// entry point into the compiler shares: a real type signature (so an LLVM
     /// function type can be built — never set for a `defmacro`). A multi-
     /// expression body is collapsed to one form via
     /// [`crate::compile::symbols::single_body_expr`] (labels/closures
@@ -1759,22 +1639,21 @@ impl Interp {
     /// [`Self::compile_function`]/[`Self::call_graph_edges`] (which need the
     /// body slightly earlier — to collect `call` targets — before
     /// `add_compiled_function` ever runs).
-    /// Whether `name` is a `(defffi ...)` declaration.
+    /// Whether `target` is a `(defffi ...)` declaration.
     ///
     /// For the tools, which otherwise cannot tell its empty body from an
     /// ordinary one: [`Self::compiled_fn_body`] answers `(params, [])` for
     /// both, and building a module out of no forms produces a function that
     /// is not the one the name reaches.
-    pub fn fn_is_ffi(&self, name: &str) -> bool {
-        self.resolve_fn_def(name).map(|f| f.ffi).unwrap_or(false)
+    pub fn fn_is_ffi(&self, target: &crate::CompileTarget) -> bool {
+        self.target_def(target).is_some_and(|f| f.ffi)
     }
 
-    pub fn compiled_fn_body(&self, name: &str) -> Result<FnBody, EvalError> {
-        let f = self.resolve_fn_def(name)?;
-        let sig = f
-            .sig
-            .as_ref()
-            .ok_or_else(|| EvalError::Panic(format!("compile: \"{}\" has no signature (is it a defmacro?)", name)))?;
+    pub fn compiled_fn_body(&self, target: &crate::CompileTarget) -> Result<FnBody, EvalError> {
+        let f = self.target_def(target).ok_or_else(|| EvalError::NoSuchFunction(target.link_name()))?;
+        let sig = f.sig.as_ref().ok_or_else(|| {
+            EvalError::Panic(format!("compile: \"{}\" has no signature (is it a defmacro?)", target.link_name()))
+        })?;
         let params = f.params.iter().cloned().zip(sig.0.iter().cloned()).collect();
         // The body's forms, not one spliced expression: `core_bridge` takes a
         // sequence, so there is nothing for `single_body_expr`'s old
@@ -4377,23 +4256,27 @@ fn eval_llvm_builtin_method(
     }
 }
 
-/// The single canonical `"type-path::method"` string for a method — `Path`'s
-/// own `Display` for `type_name` (its full `::`-joined path, never just its
-/// local segment — see [`Interp::method_key`]'s doc comment for why), `"::"`,
-/// then `method`. This is the LLVM-visible name a method's own compiled
-/// function is declared/looked-up under — exactly the literal string a
-/// standalone `(compile "type-path::method")` call uses as its
-/// `internal_name` ([`Interp::compile_function`]'s own
-/// `crate::compile::driver::add_compiled_function(&self, heap, module.clone(), name, name)` call,
-/// where `name` is that literal user-typed string) — but also every other
-/// place this crate needs the same "which method" identity as plain text: a
-/// `NoSuchFunction` error, [`CallEdge::Method`]'s own SCC graph node name.
-/// One shared helper keeps all of them in lockstep rather than each
-/// re-deriving the same format independently. Also relied on by
-/// `compiler.rs`'s `compile-assoc` (looking the same name back up via
-/// `get-function` — see that function's doc comment).
+/// The single canonical string for a method — `Path`'s own `Display` for
+/// `type_name` (its full `::`-joined path, never just its local segment: two
+/// types in different modules may share both a local name and a method
+/// name), `"::"`, then `method`. What a message names the method by, and the
+/// LLVM symbol's spelling past its prefix (`symbols::user_method_symbol_name`,
+/// and `compiler.rs`'s `compile-assoc`, which builds the same string to look
+/// the function up with `get-function`).
 pub fn method_link_name(type_name: &Path, method: &str) -> String {
     format!("{}::{}", type_name, method)
+}
+
+impl crate::CompileTarget {
+    /// The definition's name as one string: its path for a function,
+    /// [`method_link_name`] for a method. For messages; nothing reads a
+    /// definition back out of it.
+    pub fn link_name(&self) -> String {
+        match self {
+            crate::CompileTarget::Fn(path) => path.to_string(),
+            crate::CompileTarget::Method(type_name, method) => method_link_name(type_name, method),
+        }
+    }
 }
 
 

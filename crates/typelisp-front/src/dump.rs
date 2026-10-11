@@ -597,19 +597,6 @@ pub fn parse_path(name: &str) -> Path {
     Path::from_segments(name.split("::").map(str::to_string).collect())
 }
 
-/// One definition whose native body a unit's bitcode carries.
-///
-/// The backend's own `CompiledItem` in wire form. Duplicated rather than
-/// shared because the type info is the front end's to write down and the
-/// bitcode is the backend's to install, and the front end must not depend on
-/// the backend (that separation is what keeps `typelisp-front` out of an AOT
-/// executable that never calls `eval`).
-#[derive(Clone, Serialize, Deserialize)]
-pub enum UnitItem {
-    Fn(Path),
-    Method(Path, String),
-}
-
 /// One compilation's output: what it added to the checker, and what its
 /// bitcode holds bodies for.
 ///
@@ -643,7 +630,7 @@ pub struct UnitState {
     /// function/type/macro tables.
     pub forms: Vec<OwnedForm>,
     /// Every definition the bitcode section carries a body for.
-    pub items: Vec<UnitItem>,
+    pub items: Vec<crate::CompileTarget>,
     /// Which ABI the bodies in this unit's bitcode were emitted under
     /// (`typelisp_abi::BODY_ABI_CLASSIC` or `BODY_ABI_COROUTINE`).
     ///
@@ -739,7 +726,7 @@ pub fn capture_types_with_abi(
     source_digest: Option<u64>,
     forms_digest: Option<u64>,
     forms: &[crate::Value],
-    items: Vec<UnitItem>,
+    items: Vec<crate::CompileTarget>,
     globals: Vec<(String, usize)>,
     body_abi: u8,
     emits_abi: u8,

@@ -225,8 +225,8 @@ fn tracing_survives_redefinition() {
     );
 }
 
-/// A name inside a module is traced under its qualified name — the spelling
-/// `Interp::method_key` parses back and the compile driver's link names use.
+/// A name inside a module is traced under its qualified name — the
+/// definition's link name, the one the compile driver uses too.
 ///
 /// Written inside `(module m ...)` on purpose: a type or function whose path
 /// has one segment cannot show a qualification bug, and this codebase has

@@ -12606,21 +12606,16 @@ impl Checker {
     /// incompatible ways for no benefit.
     ///
     /// Builds a [`CompileTarget`] directly from the resolution this already
-    /// has to do anyway ([`Self::resolve_name`])
-    /// instead of discarding the resolved `Path` and handing `Interp` a bare
-    /// name string to re-resolve with an unqualified, module-blind search —
-    /// the same `written`+`home` independent re-resolution every other
-    /// reference (`Call`/`Global`/`FnRef`) gets, not a special case.
+    /// has to do anyway ([`Self::resolve_name`]); nothing after checking
+    /// resolves the name again.
     ///
     /// A name this can't resolve is a check-time error, like every other
     /// unresolvable reference in the language. There is nothing left to look
-    /// up at runtime — the resolution above is the answer — so deferring the
-    /// failure to `Interp::resolve_fn_ref` would only move a diagnosis the
-    /// checker already made past the point where it can name a source
-    /// position. "Genuinely private from here" fails the same way:
-    /// [`Self::resolve_name`] folds "exists but not visible" into
-    /// "doesn't resolve", so `(compile other-modules-private)` is rejected
-    /// with the rest, exactly as an ordinary call to it would be.
+    /// up at runtime — the resolution above is the answer. "Genuinely private
+    /// from here" fails the same way: [`Self::resolve_name`] folds "exists
+    /// but not visible" into "doesn't resolve", so `(compile
+    /// other-modules-private)` is rejected with the rest, exactly as an
+    /// ordinary call to it would be.
     ///
     /// Three distinguishable failures, three messages: an unresolvable bare
     /// name, a `Type::method` whose type resolved but has no such member, and

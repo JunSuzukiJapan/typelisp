@@ -393,8 +393,8 @@ fn disassemble_leaves_the_definition_interpreted() {
     );
 }
 
-/// A method is disassembled under its `type::method` link name, the same one
-/// the compile driver and `Interp::method_key` use.
+/// A method is disassembled under its link name, the same one the compile
+/// driver uses.
 #[test]
 fn a_method_can_be_disassembled() {
     let out = stdout_of(

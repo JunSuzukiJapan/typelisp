@@ -1266,8 +1266,7 @@ fn an_evaluated_task_runs_while_the_program_waits() {
 //
 // `compile-file` used to reject `use` outright and mangle a `defun` inside a
 // `(module ...)` to its bare last segment (`m::f` compiled to a symbol
-// `resolve_fn_def` could only find by looking up `f` at the root — "no such
-// function: f"). It now reads through the same `Loader` `typl file.typl`
+// nothing could find under its full path — "no such function: f"). It now reads through the same `Loader` `typl file.typl`
 // does for its dependencies (the entry file's own items stay at the root
 // namespace, unlike `typl`'s), so a module-qualified name compiles to its
 // full path and a `use`d file is pulled in and compiled alongside.
