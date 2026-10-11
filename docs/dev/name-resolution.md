@@ -80,6 +80,16 @@
 （型とトレイトの `check_type_trait_clash` と同じ扱い）。同じ種類の再定義は今までどおり
 `RedefPolicy` に従う。
 
+### 3.4 メソッドの名前の綴り（2026-10-11、ユーザー決定）
+
+モジュールの中の名前と型の中の名前は別の名前にする。モジュール `a` の関数 `b` は `a::b`、
+型 `a` のメソッド `b` は `a''b`。
+
+それまではどちらも `a::b`（シンボルは `tl_a::b`）だった。両方を呼ぶ関数を `compile` すると、
+コンパイルドライバがメソッドを関数と取り違えてパニックした。区切りに `'` を使うのは、
+リーダーの区切り文字なのでソースに書いた名前には入らないから（`#` は名前に入るので `##` では
+根の関数 `a##b` と衝突する）。
+
 ## 4. 実装の順序
 
 各 Phase の終わりに全テストを通す。
@@ -98,10 +108,16 @@
 
 ### Phase 3: 実行時の探し直しをやめる
 
-- `Interp::resolve_fn_ref` / `resolve_fn_named` は `resolved` だけを使う。
-  `ModuleScope::resolve_fn` / `resolve_global` の祖先探索を消す。
-- `Interp::resolve_fn_def` / `method_key` の文字列からの探し直しを、チェッカーの
-  `CompileTarget` を使う形にする。
+- 中間表現の `call`・`fnref`・`global`・`set-global` から `(WRITTEN...)` と `(HOME...)` を、
+  `assoc`・`methodref` と `compile-fn` 系の対象から `(HOME...)` を消す。実行時はチェッカーが
+  解決したパスで直接引く（`ModuleScope::get_fn` / `get_global` / `get_method`）。
+- `ModuleScope::resolve_fn` / `resolve_global` / `resolve_method` と、それだけが読んでいた
+  定義の `pub` の印（`FnDef::public`、`GlobalDef::public`、定義のノードの PUB 欄）を消す。
+  `Ref` は解決済みのパスだけになるので `Path` に置き換える。
+- コンパイルドライバの関数とメソッドの名前を、文字列ではなく型付きの値（関数のパスか、
+  型のパスとメソッド名の組）で持つ。`CompileTarget`・`CallEdge`・`CompiledItem` は同じ形なので
+  1 つにする。`Interp::resolve_fn_def` / `method_key` の文字列の分解は消す。
+- メソッドの名前（LLVM のシンボルとコンパイラ内部の名前）は `型''メソッド` と綴る（§3.4）。
 
 ### Phase 4: `~/name/` を作り直す（§5）
 
