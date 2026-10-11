@@ -908,6 +908,45 @@ fn defmethod_is_gone() -> Error {
 
 /// The type checker, holding the data-type and function registries plus the
 /// current namespace (module) path.
+/// What a module-level name holds: a function or a global variable. A name
+/// has one value whichever kind it is, so it is never both
+/// (`Checker::check_fn_var_clash`).
+enum ModuleValue {
+    Fn(Path),
+    Var(Path, VarInfo),
+}
+
+/// [`ModuleValue`] before its path is known, as one module's tables answer
+/// it, with whether it is `pub`.
+enum ModuleValueKind {
+    Fn { public: bool },
+    Var(VarInfo),
+}
+
+impl ModuleValueKind {
+    fn public(&self) -> bool {
+        match self {
+            ModuleValueKind::Fn { public } => *public,
+            ModuleValueKind::Var(vi) => vi.public,
+        }
+    }
+
+    fn at(self, path: Path) -> ModuleValue {
+        match self {
+            ModuleValueKind::Fn { .. } => ModuleValue::Fn(path),
+            ModuleValueKind::Var(vi) => ModuleValue::Var(path, vi),
+        }
+    }
+}
+
+/// What module `m` holds under `name`, if anything.
+fn module_value_in(m: &Namespace, name: &str) -> Option<ModuleValueKind> {
+    match m.fns.get(name) {
+        Some(sig) => Some(ModuleValueKind::Fn { public: sig.public }),
+        None => m.vars.get(name).map(|vi| ModuleValueKind::Var(vi.clone())),
+    }
+}
+
 /// The name a `defstruct`'s one constructor is registered under — what
 /// `make-instance` calls. It holds `(`, which the reader never puts in a
 /// symbol, so no source can name it: `Name::new` is the type's own static
@@ -2505,6 +2544,29 @@ impl Checker {
         }
     }
 
+    /// Functions and global variables share one name space per module: a
+    /// name has one value, whether that value is a function or not, so a
+    /// `defun` and a `defvar` in the same module may not carry the same name,
+    /// in either definition order. They live in separate tables
+    /// (`Namespace::fns` / `Namespace::vars`), so this is where the rule is
+    /// enforced.
+    ///
+    /// `kind` is what is being defined now (`"function"` or `"variable"`).
+    fn check_fn_var_clash(&self, kind: &str, name: &str) -> Result<(), Error> {
+        let (clashes, other) = match kind {
+            "variable" => (self.cur_ns().fns.contains_key(name), "function"),
+            _ => (self.cur_ns().vars.contains_key(name), "variable"),
+        };
+        if clashes {
+            return Err(Error::TypeError(format!(
+                "cannot define {} `{}`: a {} of that name already exists here — a name has one value, \
+                 whether a function or a variable",
+                kind, name, other
+            )));
+        }
+        Ok(())
+    }
+
     /// Types and traits share one name space per module, as in Rust: a
     /// `defstruct`/`defenum` and a `deftrait` in the same namespace may not
     /// carry the same name, in either definition order. They live in
@@ -2757,6 +2819,7 @@ impl Checker {
         // check would otherwise report about a name that is plainly defined.
         // The redefinition path still runs for the built-in case, which has
         // its own message.
+        self.check_fn_var_clash("function", &name)?;
         if let Some(existing) = self.cur_ns().fns.get(&name) {
             if existing.builtin {
                 self.check_redef("function", &name, Some(existing))?;
@@ -2919,6 +2982,7 @@ impl Checker {
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let library = Self::parse_defffi_options(heap, &parts[3..])?;
 
+        self.check_fn_var_clash("function", &name)?;
         if let Some(existing) = self.cur_ns().fns.get(&name) {
             if existing.builtin {
                 self.check_redef("function", &name, Some(existing))?;
@@ -3369,20 +3433,43 @@ impl Checker {
         self.reg.root.aliases.get(name).cloned()
     }
 
-    /// Resolve a bare free-function name to its absolute [`Path`], walking
-    /// the current namespace's ancestor chain (see [`Self::ns_ancestors`]) —
-    /// a name found anywhere on that chain is in scope without needing
-    /// `pub`, exactly like a same-module reference.
-    fn resolve_fn(&self, name: &str) -> Option<Path> {
+    /// What a bare module-level name holds — a function or a global
+    /// variable, never both ([`Self::check_fn_var_clash`]) — walking the
+    /// current namespace's ancestor chain (see [`Self::ns_ancestors`]),
+    /// nearest module first. A name found anywhere on that chain is in scope
+    /// without needing `pub`, exactly like a same-module reference.
+    ///
+    /// The one walk both kinds share: a variable in a nearer module hides a
+    /// function of the same name further out, and the other way round,
+    /// because a name has one value whichever kind it is.
+    fn resolve_module_value(&self, name: &str) -> Option<ModuleValue> {
         if let Some(path) = self.lookup_alias(name) {
-            return self.resolve_fn_path(&path);
+            return self.resolve_module_value_path(&path);
         }
-        self.find_on_chain(|prefix, m| m.fns.contains_key(name).then(|| item_path(prefix, name)))
+        self.find_on_chain(|prefix, m| module_value_in(m, name).map(|kind| kind.at(item_path(prefix, name))))
     }
 
-    /// Resolve a qualified `module::...::fn` path to its absolute [`Path`].
+    /// [`Self::resolve_module_value`] for a qualified `module::...::name`.
+    fn resolve_module_value_path(&self, segs: &[String]) -> Option<ModuleValue> {
+        self.find_in_module(segs, |m, n| module_value_in(m, n).map(|kind| (kind.public(), kind)))
+            .map(|(path, kind)| kind.at(path))
+    }
+
+    /// The function a bare name holds, if what it holds is a function — see
+    /// [`Self::resolve_module_value`].
+    fn resolve_fn(&self, name: &str) -> Option<Path> {
+        match self.resolve_module_value(name)? {
+            ModuleValue::Fn(path) => Some(path),
+            ModuleValue::Var(..) => None,
+        }
+    }
+
+    /// [`Self::resolve_fn`] for a qualified `module::...::fn` path.
     fn resolve_fn_path(&self, segs: &[String]) -> Option<Path> {
-        self.find_in_module(segs, |m, n| m.fns.get(n).map(|sig| (sig.public, ()))).map(|(path, ())| path)
+        match self.resolve_module_value_path(segs)? {
+            ModuleValue::Fn(path) => Some(path),
+            ModuleValue::Var(..) => None,
+        }
     }
 
     /// Resolve a bare macro name to its absolute [`Path`] and the call-site
@@ -3762,18 +3849,21 @@ impl Checker {
         self.resolve_type_path(path.segments()).unwrap_or_else(|| path.clone())
     }
 
-    /// Resolve a bare global variable/constant name to its `(path, info)`,
-    /// walking the ancestor chain like [`Self::resolve_fn`].
+    /// The global a bare name holds, if what it holds is a variable — see
+    /// [`Self::resolve_module_value`].
     fn resolve_global(&self, name: &str) -> Option<(Path, VarInfo)> {
-        if let Some(p) = self.lookup_alias(name) {
-            return self.resolve_global_path(&p);
+        match self.resolve_module_value(name)? {
+            ModuleValue::Var(path, vi) => Some((path, vi)),
+            ModuleValue::Fn(_) => None,
         }
-        self.find_on_chain(|prefix, m| m.vars.get(name).map(|vi| (item_path(prefix, name), vi.clone())))
     }
 
-    /// Resolve a qualified `module::...::global` path to its `(path, info)`.
+    /// [`Self::resolve_global`] for a qualified `module::...::global` path.
     fn resolve_global_path(&self, segs: &[String]) -> Option<(Path, VarInfo)> {
-        self.find_in_module(segs, |m, n| m.vars.get(n).map(|vi| (vi.public, vi.clone())))
+        match self.resolve_module_value_path(segs)? {
+            ModuleValue::Var(path, vi) => Some((path, vi)),
+            ModuleValue::Fn(_) => None,
+        }
     }
 
     /// Reify a bare free-function name as a function value (`FnRef`), if it names
@@ -4483,6 +4573,7 @@ impl Checker {
         // reports through `check_redef` as before. The declared signature is
         // kept to compare against below: a declaration nobody checks is a
         // declaration nobody can trust.
+        self.check_fn_var_clash("function", &name)?;
         let declared = if self.claim_predeclared(&fq_name.to_string()) {
             self.cur_ns().fns.get(&name).cloned()
         } else {
@@ -4608,6 +4699,7 @@ impl Checker {
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
 
+        self.check_fn_var_clash("function", &name)?;
         self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
 
         // A generic `&optional`/`&key` defun additionally retains its raw
@@ -14268,6 +14360,7 @@ impl Checker {
         // visible via the registry.
         let value = self.check(heap, interp, &Env::new(), parts[1], Some(&ann))?;
         let ty = ann;
+        self.check_fn_var_clash("variable", &name)?;
         self.check_redef("variable", &name, self.cur_ns().vars.get(&name))?;
         self.reg
             .root
