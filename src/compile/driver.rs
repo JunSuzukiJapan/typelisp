@@ -30,7 +30,7 @@ use inkwell::AddressSpace;
 use typelisp_mem::{Heap, RootScope, Value};
 
 use crate::check::repr::Repr;
-use crate::eval::interp::{intern_names, intern_params, method_link_name, str_rt, EvalError, Interp, Uncompilable};
+use crate::eval::interp::{intern_names, intern_params, str_rt, EvalError, Interp, Uncompilable};
 use crate::compile::externs::{
     is_native_lowered_primitive_method, is_rt_builtin, rt_extern_functions,
 };
@@ -748,7 +748,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
         if !interp.root.borrow().has_method(type_name, method) {
             return Err(EvalError::Uncompilable {
                 caller: node.link_name(),
-                target: method_link_name(type_name, method),
+                target: crate::types::method_link_name(type_name, method),
             });
         }
     }

@@ -64,7 +64,7 @@ pub use core_eval::read_ffi_decl;
 /// rather than in a flat program-wide table; see that module's doc comment.
 pub struct FnDef {
     /// This definition's link name: a free function's fully-qualified path
-    /// (`m::inc`), or a method's [`method_link_name`].
+    /// (`m::inc`), or a method's [`crate::types::method_link_name`].
     ///
     /// The scope tree keys these by their *last* segment inside a namespace,
     /// which is enough to find one but not enough to *name* one: `enter` has
@@ -4250,31 +4250,20 @@ fn eval_llvm_builtin_method(
     method: &str,
     args: &[Value],
 ) -> Option<Result<Value, EvalError>> {
-    match backend(&format!("`{}::{}`", type_name, method)) {
+    match backend(&format!("`{}`", crate::types::method_link_name(type_name, method))) {
         Ok(b) => (b.llvm_builtin)(heap, type_name, method, args),
         Err(e) => Some(Err(e)),
     }
 }
 
-/// The single canonical string for a method — `Path`'s own `Display` for
-/// `type_name` (its full `::`-joined path, never just its local segment: two
-/// types in different modules may share both a local name and a method
-/// name), `"::"`, then `method`. What a message names the method by, and the
-/// LLVM symbol's spelling past its prefix (`symbols::user_method_symbol_name`,
-/// and `compiler.rs`'s `compile-assoc`, which builds the same string to look
-/// the function up with `get-function`).
-pub fn method_link_name(type_name: &Path, method: &str) -> String {
-    format!("{}::{}", type_name, method)
-}
-
 impl crate::CompileTarget {
     /// The definition's name as one string: its path for a function,
-    /// [`method_link_name`] for a method. For messages; nothing reads a
+    /// [`crate::types::method_link_name`] for a method. For messages; nothing reads a
     /// definition back out of it.
     pub fn link_name(&self) -> String {
         match self {
             crate::CompileTarget::Fn(path) => path.to_string(),
-            crate::CompileTarget::Method(type_name, method) => method_link_name(type_name, method),
+            crate::CompileTarget::Method(type_name, method) => crate::types::method_link_name(type_name, method),
         }
     }
 }

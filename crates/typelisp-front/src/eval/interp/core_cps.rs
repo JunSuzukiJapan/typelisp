@@ -253,11 +253,11 @@ fn call_kind(heap: &Heap, call: Value) -> Result<ArgsKind, EvalError> {
 /// with no second `Enter` state.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ArgsKind {
-    /// `(call WRITTEN HOME PATH (R...) ARG...)`
+    /// `(call PATH (R...) ARG...)`
     Call,
     /// `(construct PATH KEY VARIANT MUTABLE (R...) ARG...)`
     Construct,
-    /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (R...) ARG...)`
+    /// `(assoc PATH SYM INSTANCE RET-REPR (R...) RET-KEY ARG...)`
     Assoc,
     /// `(dyn-call PATH SYM SLOT VTABLE (R...) ARG...)`
     DynCall,
@@ -377,7 +377,7 @@ enum Frame {
     FieldSetObj { form: Value, env: Value },
     /// `(field-set OBJ IDX R VALUE)` — waiting on the value, object in hand.
     FieldSetVal { obj: Value, idx: usize },
-    /// `(set-global (WRITTEN...) (HOME...) PATH R VALUE)` — waiting on the value.
+    /// `(set-global PATH R VALUE)` — waiting on the value.
     SetGlobal { form: Value },
     /// `(loop BODY...)` — running the body round and round. `rest` is what
     /// is left of this pass; when it runs out the frame starts over from
@@ -2000,7 +2000,7 @@ impl Interp {
             ArgsKind::Assoc => {
                 let type_name = path_field(heap, form, 0, "assoc")?;
                 let method = sym_field(heap, form, 1, "assoc")?;
-                let name = format!("{}::{}", type_name, method);
+                let name = crate::types::method_link_name(&type_name, &method);
                 let Some(f) = self.root.borrow().get_method(&type_name, &method) else {
                     return Err(not_compilable(format!("`{}`", name), "is a built-in with no body to compile".to_string()));
                 };
@@ -2445,7 +2445,7 @@ impl Interp {
                         match super::eval_builtin_method(heap, &type_name, &name, &argv, &ret_key) {
                             Some(r) => r?,
                             None => {
-                                return Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, name)))
+                                return Err(EvalError::NoSuchFunction(crate::types::method_link_name(&type_name, &name)))
                             }
                         }
                     }
@@ -2588,7 +2588,7 @@ impl Interp {
             Some(f) => self.enter_fn(heap, form, &f, argv),
             None => match super::eval_builtin_method(heap, &type_name, &method, &argv, &ret_key) {
                 Some(result) => Ok((State::Apply(result?), None)),
-                None => Err(EvalError::NoSuchFunction(format!("{}::{}", type_name, method))),
+                None => Err(EvalError::NoSuchFunction(crate::types::method_link_name(&type_name, &method))),
             },
         }
     }
@@ -2631,7 +2631,7 @@ impl Interp {
         let f = self.root.borrow().get_method(&target_type, &target_method);
         match f {
             Some(f) => self.enter_fn(heap, form, &f, argv),
-            None => Err(EvalError::NoSuchFunction(format!("{}::{}", target_type, target_method))),
+            None => Err(EvalError::NoSuchFunction(crate::types::method_link_name(&target_type, &target_method))),
         }
     }
 
@@ -3303,7 +3303,7 @@ mod tests {
         let mut h = stress_heap();
         let v = agrees(
             &mut h,
-            "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
+            "(call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
@@ -3316,7 +3316,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(call (%internal make-random-state-fresh) () %internal::make-random-state-fresh ())",
+            "(call %internal::make-random-state-fresh ())",
         );
         assert!(matches!(v, Value::Boxed(_)), "expected a random-state box, got {:?}", v);
     }
@@ -3326,9 +3326,9 @@ mod tests {
     #[test]
     fn an_argument_that_is_itself_a_call_suspends_the_outer_one() {
         let mut h = stress_heap();
-        let src = "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) \
+        let src = "(call sexpr-cons (sexpr sexpr) \
                      (str \"first\") \
-                     (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
+                     (call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
         let v = agrees(&mut h, src);
         match h.car(v).unwrap() {
             Value::Str(id) => assert_eq!(&*h.string(id), "first"),
@@ -3345,7 +3345,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..30).rev() {
             src = format!(
-                "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
+                "(call sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
                 i, src
             );
         }
@@ -3442,7 +3442,7 @@ mod tests {
     #[test]
     fn a_builtin_can_be_applied_as_a_value() {
         let mut h = stress_heap();
-        let src = "(apply (fnref (sexpr-cons) () sexpr-cons) sexpr (sexpr sexpr) \
+        let src = "(apply (fnref sexpr-cons (sexpr sexpr)) sexpr (sexpr sexpr) \
                      (int-any-width 1) (int-any-width 2))";
         let v = agrees(&mut h, src);
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
@@ -3470,12 +3470,12 @@ mod tests {
         let mut h = Heap::with_capacity(1 << 20);
 
         let src = "(labels ((build ((n int-any-width)) sexpr
-                        (if (call (sexpr-null) () sexpr-null (sexpr) (var n))
+                        (if (call sexpr-null (sexpr) (var n))
                             (unit)
-                            (call (sexpr-cons) () sexpr-cons (sexpr sexpr)
+                            (call sexpr-cons (sexpr sexpr)
                               (int-any-width 1)
                               (apply (var build) sexpr (sexpr)
-                                (call (sexpr-cdr) () sexpr-cdr (sexpr) (var n)))))))
+                                (call sexpr-cdr (sexpr) (var n)))))))
                (apply (var build) sexpr (sexpr) (var xs)))".to_string();
 
         // `xs` is a list of DEPTH elements, built on the Rust side so the
@@ -3615,7 +3615,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..n).rev() {
             src = format!(
-                "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
+                "(call sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
                 i, src
             );
         }
@@ -3628,9 +3628,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
-                     (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
+                     (if (call sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call sexpr-car (sexpr) (var lst)))
+                     (set lst (call sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(5)
         );
@@ -3660,9 +3660,9 @@ mod tests {
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
                      (loop unit (break))
-                     (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
-                     (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
+                     (if (call sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call sexpr-car (sexpr) (var lst)))
+                     (set lst (call sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(3)
         );
@@ -3677,9 +3677,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call (sexpr-null) () sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call (sexpr-car) () sexpr-car (sexpr) (var lst)))
-                     (set lst (call (sexpr-cdr) () sexpr-cdr (sexpr) (var lst))))
+                     (if (call sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call sexpr-car (sexpr) (var lst)))
+                     (set lst (call sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(300)
         );
@@ -3805,8 +3805,8 @@ mod tests {
                          (unwind-protect
                            (unwind-protect
                              (throw (quote done) (int-any-width 0))
-                             (set trail (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (str "i") (var trail))))
-                           (set trail (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
+                             (set trail (call sexpr-cons (sexpr sexpr) (str "i") (var trail))))
+                           (set trail (call sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
                        (var trail))"#;
         let v = eval_ok(&mut h, src);
         let head = h.car(v).unwrap();
@@ -3923,8 +3923,8 @@ mod tests {
         let mut h = stress_heap();
         let build = |tag: i64| {
             format!(
-                "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width {}) \
-                   (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
+                "(call sexpr-cons (sexpr sexpr) (int-any-width {}) \
+                   (call sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
                 tag,
                 tag + 1
             )
@@ -3964,8 +3964,8 @@ mod tests {
             &mut h,
             &[
                 "(throw (quote escaped) \
-                   (call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
-                "(call (sexpr-cons) () sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
+                   (call sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
+                "(call sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
             ],
         );
         // Allocating now would collect an unrooted carried value.

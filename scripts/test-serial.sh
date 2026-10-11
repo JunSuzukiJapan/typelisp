@@ -125,8 +125,13 @@ failed=()
 timedout=()
 for t in "${targets[@]}"; do
     if [ "$t" = "--lib" ]; then
+        # `--lib` is one test binary per workspace member, and cargo stops at
+        # the first that fails: without `--no-fail-fast` a failure in the root
+        # crate's unit tests hides every later crate's, which do not run and
+        # are not reported. That is how 27 broken `typelisp-front` unit tests
+        # went unseen behind one root-crate failure.
         echo "=== cargo test --lib ==="
-        sel=(--lib)
+        sel=(--lib --no-fail-fast)
     else
         echo "=== cargo test --test $t ==="
         sel=(--test "$t")

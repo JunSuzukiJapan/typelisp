@@ -1380,11 +1380,7 @@ impl Checker {
             if cat == crate::dump::cat::FN_TEMPLATE {
                 fn_templates.push((crate::dump::parse_path(&key), bincode_read(&bytes)?));
             } else {
-                let (path, name) = key
-                    .split_once('|')
-                    .ok_or_else(|| format!("dump: `{}` is not a method key", key))?;
-                method_templates
-                    .push(((crate::dump::parse_path(path), name.to_string()), bincode_read(&bytes)?));
+                method_templates.push((crate::dump::parse_method_key(&key)?, bincode_read(&bytes)?));
             }
             Ok(())
         })?;
@@ -1492,7 +1488,7 @@ impl Checker {
                 MethodTemplate::Setter { index } => crate::dump::WireMethodTemplate::Setter { index: *index },
             };
             let (bytes, hash) = crate::dump::wire(&w)?;
-            visit(crate::dump::cat::METHOD_TEMPLATE, format!("{}|{}", key.0, key.1), bytes, hash)?;
+            visit(crate::dump::cat::METHOD_TEMPLATE, crate::types::method_link_name(&key.0, &key.1), bytes, hash)?;
         }
         Ok(())
     }
@@ -12814,21 +12810,12 @@ impl Checker {
 
     /// `(documentation name)` / `(documentation Type::method)`: like
     /// `(compile ...)`, `name` is program structure, not runtime data, so it
-    /// reads as an unevaluated symbol or `::`-path — see `Self::check_compile`'s
-    /// doc comment, whose `name.rsplit_once("::")` dispatch this mirrors.
-    /// Resolved entirely at check time, since the checker always knows where
-    /// a name resolves (there's nothing left to look up at runtime): a bare
-    /// name is tried, in order, as a variable, a function, a type, a trait,
-    /// then a macro (first hit wins — the same var-before-fn-before-method
-    /// priority a bare identifier gets when checked as an ordinary
-    /// expression, `Self::check`'s `Value::Symbol` arm), and the result — a
-    /// docstring if the resolved definition has one, `none` if it doesn't —
-    /// is baked in directly as an `Option<Str>` constant. Resolving to
-    /// *nothing at all* is a check-time error, same as any other unbound
-    /// reference; unlike `(compile ...)`, there's no runtime fallback to
-    /// defer to, since this never produces a runtime lookup in the first
-    /// place. Module-qualified free names (`mod::name`, as opposed to
-    /// `Type::method`) are out of scope for now.
+    /// reads as an unevaluated symbol or `::`-path. Which definition it names
+    /// is [`Self::resolve_definition`]'s answer, settled here at check time,
+    /// and the result — a docstring if that definition has one, `none` if it
+    /// doesn't — is baked in directly as an `Option<Str>` constant. A name
+    /// that resolves to nothing is a check-time error, like any other unbound
+    /// reference.
     fn check_documentation(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
         if args.len() != 1 {
             return Err(Error::TypeError("documentation: (documentation name) — expected exactly 1 argument".into()));

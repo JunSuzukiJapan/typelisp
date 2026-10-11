@@ -2916,6 +2916,27 @@ fn compile_a_same_named_method_in_two_sibling_modules_does_not_alias_the_others_
     assert_eq!(v, Value::Int(300));
 }
 
+/// Module `a`'s function `b` and type `a`'s method `b` are different names
+/// once compiled: the function's symbol is `tl_a::b`, the method's
+/// `tl_a''b`. While both were `tl_a::b`, `use-both`'s two calls reached one
+/// body, and the call that passed an `int` where the method's receiver was
+/// expected failed with `rt_struct_field_get: first argument is not a boxed
+/// Sexpr`.
+#[test]
+fn compile_a_modules_function_and_a_same_named_types_method_are_different_symbols() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (module a (pub defun b ((x int)) int (+ x 100)))
+        (defstruct a (v int))
+        (impl a (pub b (self) int (+ self::v 1)))
+        (defun use-both () int (+ (a::b 1) (b (make-instance 'a :v 5))))
+        (compile use-both)
+        (use-both)
+        "#,
+    );
+    assert_eq!(v, Value::Int(107));
+}
+
 /// `(compile "name")`/`(compile "type::method")` — a string literal, not an
 /// unevaluated symbol or `::`-path — is a type error caught at check time,
 /// before the compiler ever runs (see `Checker::check_compile`'s doc

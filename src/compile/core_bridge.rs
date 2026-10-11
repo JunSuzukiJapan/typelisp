@@ -1074,7 +1074,7 @@ fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
     f.finish("tag")
 }
 
-/// `(call WRITTEN HOME PATH (R...) E...)` -> `(call "name" (kind . form)...)`.
+/// `(call PATH (R...) E...)` -> `(call "name" (kind . form)...)`.
 ///
 /// The island looks the callee up by the name written here and nothing else:
 /// the mangled name `Interp::compile_scc`/`compile::aot` declare an ordinary
@@ -2394,7 +2394,7 @@ fn translate_immediate_lambda_call(
     translate_labels(&mut s, block, cx)
 }
 
-/// `(fnref WRITTEN HOME PATH (R...))` -> a non-capturing `lambda` that
+/// `(fnref PATH (R...))` -> a non-capturing `lambda` that
 /// forwards every argument to the named function.
 ///
 /// A top-level function used as a value reaches the very same closure
@@ -3977,7 +3977,7 @@ mod tests {
         let (name, params, body) =
             top_level(&[], "(defmethod m::point area false ((self struct)) int-any-width (field-get (var self) 0 int-any-width))")
                 .expect("a defmethod is compiled");
-        assert_eq!(name, "tl_m::point::area");
+        assert_eq!(name, "tl_m::point''area");
         assert_eq!(params, "((self . 2))");
         assert_eq!(body, r#"(field-get () 1 (var "self" false))"#);
     }

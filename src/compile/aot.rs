@@ -540,9 +540,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             .filter_map(|f| {
                 let symbol = f.get_name().to_str().ok()?.to_string();
                 let node = symbol.strip_prefix(crate::compile::USER_SYMBOL_PREFIX)?;
-                let (type_name, rest) = node.rsplit_once("::print-object")?;
-                let type_path = Path::from_segments(type_name.split("::").map(str::to_string).collect());
-                Some((print_object_key(&type_path, &format!("print-object{}", rest))?, symbol))
+                let (type_path, method) = crate::types::split_method_link_name(node)?;
+                Some((print_object_key(&type_path, method)?, symbol))
             })
             .filter(|(key, _)| !print_objects.iter().any(|(k, _)| k == key))
             .collect();

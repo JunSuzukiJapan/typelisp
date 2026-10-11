@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 18;
+pub const FORMAT_VERSION: u32 = 19;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -352,8 +352,8 @@ fn walk(
     doc_table!(cat::DOC_VAR, docs.vars, |p: &Path| p.to_string());
     doc_table!(cat::DOC_TRAIT, docs.traits, |p: &Path| p.to_string());
     doc_table!(cat::DOC_MACRO, docs.macros, |p: &Path| p.to_string());
-    doc_table!(cat::DOC_METHOD, docs.methods, |k: &(Path, String)| format!("{}|{}", k.0, k.1));
-    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods, |k: &(Path, String)| format!("{}|{}", k.0, k.1));
+    doc_table!(cat::DOC_METHOD, docs.methods, |k: &(Path, String)| crate::types::method_link_name(&k.0, &k.1));
+    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods, |k: &(Path, String)| crate::types::method_link_name(&k.0, &k.1));
 
     for (tag, ty) in throw_tags {
         let (bytes, hash) = wire(ty)?;
@@ -584,9 +584,11 @@ fn doc_text(payload: &[u8]) -> Result<String, String> {
     bincode::deserialize(payload).map_err(|e| format!("dump: reading a docstring: {}", e))
 }
 
-fn parse_method_key(key: &str) -> Result<(Path, String), String> {
-    match key.split_once('|') {
-        Some((path, method)) => Ok((parse_path(path), method.to_string())),
+/// A method entry's name back into the registry's key — the inverse of the
+/// [`crate::types::method_link_name`] the walk wrote it with.
+pub fn parse_method_key(key: &str) -> Result<(Path, String), String> {
+    match crate::types::split_method_link_name(key) {
+        Some((path, method)) => Ok((path, method.to_string())),
         None => Err(format!("dump: `{}` is not a method key", key)),
     }
 }

@@ -402,7 +402,7 @@ fn a_method_can_be_disassembled() {
          (impl pt (total (self) int (+ self::x self::y)))\n\
          (disassemble pt::total true)",
     );
-    assert!(out.contains("pt::total"), "the method's link name is missing: {:?}", out);
+    assert!(out.contains("pt''total"), "the method's link name is missing: {:?}", out);
 }
 
 /// A generic definition has no single body to show — the same refusal

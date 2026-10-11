@@ -141,7 +141,7 @@ fn values_are_printed_the_way_the_program_prints_them() {
          (trace pt::total)\n\
          (total (make-instance 'pt :x 3 :y 4))",
     );
-    assert_eq!(out, "  0: (pt::total #<pt x: 3 y: 4>)\n  0: pt::total returned 7\n");
+    assert_eq!(out, "  0: (pt''total #<pt x: 3 y: 4>)\n  0: pt''total returned 7\n");
 }
 
 /// A `throw` past a traced frame is reported rather than silently leaving a
@@ -416,8 +416,8 @@ fn a_print_object_method_is_reported_when_the_printer_calls_it() {
          (trace pt::print-object)\n\
          (format false \"~a\" (make-instance 'pt :n 7))",
     );
-    assert!(out.contains("(pt::print-object"), "the printer's call was not reported: {:?}", out);
-    assert!(out.contains("pt::print-object returned"), "the return was not reported: {:?}", out);
+    assert!(out.contains("(pt''print-object"), "the printer's call was not reported: {:?}", out);
+    assert!(out.contains("pt''print-object returned"), "the return was not reported: {:?}", out);
 }
 
 /// The same for `format`'s `~/name/`, which reaches its method the same way.
@@ -430,7 +430,7 @@ fn a_call_directives_method_is_reported() {
          (trace money::jp)\n\
          (format false \"~/jp/\" (make-instance 'money :yen 300))",
     );
-    assert!(out.contains("(money::jp"), "the directive's call was not reported: {:?}", out);
+    assert!(out.contains("(money''jp"), "the directive's call was not reported: {:?}", out);
 }
 
 /// **A compiled `print-object` body is the one the printer runs.**
@@ -443,7 +443,7 @@ fn a_call_directives_method_is_reported() {
 ///
 /// **The assertion is on the call line, not on the name.** `(trace f)` on a
 /// definition that has a compiled body writes a note naming it, so a bare
-/// `contains("pt::print-object")` passed with the fix reverted — a test that
+/// `contains("pt''print-object")` passed with the fix reverted — a test that
 /// could not fail.
 #[test]
 fn a_compiled_print_object_method_is_still_reported() {
@@ -455,5 +455,5 @@ fn a_compiled_print_object_method_is_still_reported() {
          (trace pt::print-object)\n\
          (format false \"~a\" (make-instance 'pt :n 7))",
     );
-    assert!(out.contains("(pt::print-object"), "the printer's call was not reported: {:?}", out);
+    assert!(out.contains("(pt''print-object"), "the printer's call was not reported: {:?}", out);
 }
