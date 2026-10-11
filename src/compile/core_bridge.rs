@@ -661,7 +661,7 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         }
         "set-global" => {
             let (id, kind) = global_id_and_kind(heap, form, cx)?;
-            let value = core::field(heap, form, 4).ok_or_else(|| malformed(heap, form))?;
+            let value = core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
             f.push(Value::Int(id));
             f.push(Value::Int(kind));
@@ -902,10 +902,10 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// about these nodes is decided by their own translations.
 fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
     match tag {
-        // `(call WRITTEN HOME PATH (R...) ARG...)`
-        "call" => Some((4, 3)),
-        // `(assoc PATH SYM INSTANCE HOME RET-R (R...) RET-KEY ARG...)`
-        "assoc" => Some((7, 5)),
+        // `(call PATH (R...) ARG...)`
+        "call" => Some((2, 1)),
+        // `(assoc PATH SYM INSTANCE RET-R (R...) RET-KEY ARG...)`
+        "assoc" => Some((6, 4)),
         // `(dyn-call PATH SYM SLOT VTABLE (R...) ARG...)`
         "dyn-call" => Some((5, 4)),
         // `(apply CALLEE RET-R (R...) ARG...)`
@@ -1085,12 +1085,12 @@ fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// longer re-derives the second one.
 fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
-    if parts.len() < 4 {
+    if parts.len() < 2 {
         return Err(malformed(heap, form));
     }
-    let path = as_path(heap, parts[2]).ok_or_else(|| malformed(heap, form))?;
-    let reprs = repr_list(heap, parts[3])?;
-    let args = parts[4..].to_vec();
+    let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let reprs = repr_list(heap, parts[1])?;
+    let args = parts[2..].to_vec();
 
     let name = callee_symbol_name(&path);
     // A builtin that **puts the task down** is not a call, and the island must
@@ -1195,20 +1195,20 @@ fn suspend_node(
 /// are building.
 fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
-    if parts.len() < 7 {
+    if parts.len() < 6 {
         return Err(malformed(heap, form));
     }
     let type_name = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
     let method = symbol_field(heap, form, 1)?;
     let Value::Bool(instance) = parts[2] else { return Err(malformed(heap, form)) };
-    let ret = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
-    let reprs = repr_list(heap, parts[5])?;
+    let ret = Repr::read(heap, parts[3]).ok_or_else(|| malformed(heap, form))?;
+    let reprs = repr_list(heap, parts[4])?;
     // The result's runtime identity — see `Checker::assoc_form`. A container
     // op that builds a box hands this to the shim that builds it; everything
     // else ignores it.
-    let Value::Str(ret_key_id) = parts[6] else { return Err(malformed(heap, form)) };
+    let Value::Str(ret_key_id) = parts[5] else { return Err(malformed(heap, form)) };
     let ret_key = heap.string(ret_key_id).to_string();
-    let args = parts[7..].to_vec();
+    let args = parts[6..].to_vec();
     // The receiver is `args[0]` by the same convention the checker builds an
     // instance call with, so its representation is the first of the list.
     let self_repr = if instance { reprs.first().unwrap_or(&ret) } else { &ret }.clone();
@@ -1432,10 +1432,10 @@ fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// `field_kind`: reading one back into a plain `int` needs the untagging a
 /// struct field read already does, and writing one needs the same tagging.
 fn global_id_and_kind(heap: &Heap, form: Value, cx: Ctx) -> Result<(i64, i64), Error> {
-    let path = core::field(heap, form, 2)
+    let path = core::field(heap, form, 0)
         .and_then(|v| as_path(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
-    let repr = core::field(heap, form, 3)
+    let repr = core::field(heap, form, 1)
         .and_then(|v| Repr::read(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
     let id = cx.globals.get(&path).copied().ok_or_else(|| {
@@ -1543,11 +1543,11 @@ fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> 
         // this is the only place a cons can be something other than a node —
         // and a quoted `(call ...)` datum is data, not a dependency.
         "quote" => return Ok(()),
-        // `(call (WRITTEN...) (HOME...) PATH (REPR...) ARG...)`, and `fnref`'s
-        // first three fields are the same triple — the bridge turns a `fnref`
-        // into a forwarding call, so its target needs the same treatment.
+        // `(call PATH (REPR...) ARG...)`, and `fnref`'s first field is the
+        // same path — the bridge turns a `fnref` into a forwarding call, so
+        // its target needs the same treatment.
         "call" | "fnref" => {
-            if let Some(p) = core::path_field(heap, form, 2) {
+            if let Some(p) = core::path_field(heap, form, 0) {
                 push_unique(&mut t.calls, p);
             }
         }
@@ -1557,10 +1557,9 @@ fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> 
                 push_unique(&mut t.methods, (p, m));
             }
         }
-        // `(global (WRITTEN...) (HOME...) PATH REPR)` and `set-global`'s same
-        // leading triple.
+        // `(global PATH REPR)` and `set-global`'s same leading path.
         "global" | "set-global" => {
-            if let Some(p) = core::path_field(heap, form, 2) {
+            if let Some(p) = core::path_field(heap, form, 0) {
                 push_unique(&mut t.globals, p);
             }
         }
@@ -1675,22 +1674,22 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
     };
     let parts = core::fields(heap, form)?;
     let (name, params, body) = match tag.as_str() {
-        // `(defun PATH ((SYM R)...) RET-R PUBLIC E...)`
+        // `(defun PATH ((SYM R)...) RET-R E...)`
         "defun" => {
-            if parts.len() < 4 {
+            if parts.len() < 3 {
                 return Err(malformed(heap, form));
             }
             let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
-            (callee_symbol_name(&path), params_of(heap, parts[1])?, parts[4..].to_vec())
+            (callee_symbol_name(&path), params_of(heap, parts[1])?, parts[3..].to_vec())
         }
-        // `(defmethod PATH SYM INSTANCE ((SYM R)...) RET-R PUBLIC E...)`
+        // `(defmethod PATH SYM INSTANCE ((SYM R)...) RET-R E...)`
         "defmethod" => {
-            if parts.len() < 6 {
+            if parts.len() < 5 {
                 return Err(malformed(heap, form));
             }
             let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
             let method = symbol_field(heap, form, 1)?;
-            (user_method_symbol_name(&path, &method), params_of(heap, parts[3])?, parts[6..].to_vec())
+            (user_method_symbol_name(&path, &method), params_of(heap, parts[3])?, parts[5..].to_vec())
         }
         _ => return Ok(None),
     };
@@ -1738,7 +1737,7 @@ pub fn function_parts(
     Ok((param_list, body_v))
 }
 
-/// `(defvar PATH R MUTABLE PUBLIC E)` -> `(global-init kind value)`, the node
+/// `(defvar PATH R MUTABLE E)` -> `(global-init kind value)`, the node
 /// the ahead-of-time compiler's synthesized initializer sequence runs.
 ///
 /// There is no id to look up for the global being defined — the runtime
@@ -1751,12 +1750,12 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
         return Ok(None);
     }
     let parts = core::fields(heap, form)?;
-    // A `defparameter` carries a sixth field, "assign even if already bound"
+    // A `defparameter` carries a fifth field, "assign even if already bound"
     // (`Checker::defvar_form`). An initializer built here runs exactly once,
     // when the storage is created, so there is never an earlier binding for
     // the two to differ over.
     let (repr, value) = match parts[..] {
-        [_, repr, _, _, value] | [_, repr, _, _, value, Value::Bool(_)] => (repr, value),
+        [_, repr, _, value] | [_, repr, _, value, Value::Bool(_)] => (repr, value),
         _ => return Err(malformed(heap, form)),
     };
     let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
@@ -2405,10 +2404,10 @@ fn translate_immediate_lambda_call(
 /// representations: there is no call site here to read them from. A `&rest`
 /// parameter is simply the last one.
 fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
-    let path = core::field(heap, form, 2)
+    let path = core::field(heap, form, 0)
         .and_then(|v| as_path(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
-    let reprs = repr_list(heap, core::field(heap, form, 3).ok_or_else(|| malformed(heap, form))?)?;
+    let reprs = repr_list(heap, core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?)?;
     let target = callee_symbol_name(&path);
     forwarding_lambda(heap, "fnref", &reprs, cx, |heap, forwarded| {
         let name_v = heap.alloc_string(target);
@@ -2419,7 +2418,7 @@ fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     })
 }
 
-/// `(methodref PATH SYM HOME (R...))` -> the same forwarding wrapper, onto an
+/// `(methodref PATH SYM (R...) RET-KEY)` -> the same forwarding wrapper, onto an
 /// instance method instead. Its receiver is simply the first parameter, the
 /// same convention an ordinary method call uses.
 fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
@@ -2427,7 +2426,7 @@ fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
         .and_then(|v| as_path(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
     let method = symbol_field(heap, form, 1)?;
-    let reprs = repr_list(heap, core::field(heap, form, 3).ok_or_else(|| malformed(heap, form))?)?;
+    let reprs = repr_list(heap, core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?)?;
     forwarding_lambda(heap, "method", &reprs, cx, move |heap, forwarded| {
         let type_v = heap.alloc_string(path.to_string());
         let mut f = Items::new(heap);
@@ -3386,25 +3385,25 @@ mod tests {
     #[test]
     fn a_call_tags_every_argument_with_its_kind() {
         assert_eq!(
-            bridged("(call (f) () f (int-any-width sexpr) (int-any-width 1) (int-any-width 2))"),
+            bridged("(call f (int-any-width sexpr) (int-any-width 1) (int-any-width 2))"),
             r#"(call "tl_f" (0 int-any-width 0 1) (2 int-any-width 0 2))"#
         );
-        assert_eq!(bridged("(call (f) () f ())"), r#"(call "tl_f")"#);
+        assert_eq!(bridged("(call f ())"), r#"(call "tl_f")"#);
         // A module-qualified callee mangles by its full path, so `m::inc` and
         // a root `inc` cannot collide on one symbol.
-        assert_eq!(bridged("(call (inc) (m) m::inc ())"), r#"(call "tl_m::inc")"#);
+        assert_eq!(bridged("(call m::inc ())"), r#"(call "tl_m::inc")"#);
         // A free builtin with no typelisp body is named for the runtime shim
         // that *is* its implementation, not mangled — and the naming happens
         // here, so the island has nothing to re-derive
         // (`interp::rt_builtin_symbol`).
         assert_eq!(
-            bridged("(call (sexpr-car) () sexpr-car (sexpr) (var xs))"),
+            bridged("(call sexpr-car (sexpr) (var xs))"),
             r#"(call "rt_car" (2 var "xs" false))"#
         );
         // (`sym`'s kind is `0`: an interned symbol is a tagged word the
         // collector never reclaims, so it needs no root — `Repr::class`.)
         assert_eq!(
-            bridged("(call (symbol->string) () symbol->string (sym) (var s))"),
+            bridged("(call symbol->string (sym) (var s))"),
             r#"(call "rt_sym_name" (0 var "s" false))"#
         );
     }
@@ -3412,11 +3411,11 @@ mod tests {
     #[test]
     fn an_ordinary_method_call_keeps_its_qualified_type_name() {
         assert_eq!(
-            bridged("(assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))"),
+            bridged("(assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))"),
             r#"(assoc "i32" "+" true (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
-            bridged("(assoc m::point area true () int-any-width (struct) \"i32\" (var p))"),
+            bridged("(assoc m::point area true int-any-width (struct) \"i32\" (var p))"),
             r#"(assoc "m::point" "area" true (2 var "p" false))"#
         );
     }
@@ -3426,18 +3425,18 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc vector get true () int-any-width ((vector int-any-width) int-any-width) \"i32\" (var v) (int-any-width 0))"),
+            bridged("(assoc vector get true int-any-width ((vector int-any-width) int-any-width) \"i32\" (var v) (int-any-width 0))"),
             r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
-            bridged("(assoc vector push true () unit ((vector sexpr) sexpr) \"()\" (var v) (var x))"),
+            bridged("(assoc vector push true unit ((vector sexpr) sexpr) \"()\" (var v) (var x))"),
             r#"(vector-op "push" 6 (var "v" false) (var "x" false))"#
         );
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc vector new false () (vector int-any-width) () \"vector<i32>\")"),
+            bridged("(assoc vector new false (vector int-any-width) () \"vector<i32>\")"),
             r#"(vector-op "new" 0 (str (int-any-width 0 118) (int-any-width 0 101) (int-any-width 0 99) (int-any-width 0 116) (int-any-width 0 111) (int-any-width 0 114) (int-any-width 0 60) (int-any-width 0 105) (int-any-width 0 51) (int-any-width 0 50) (int-any-width 0 62)))"#
         );
     }
@@ -3449,13 +3448,13 @@ mod tests {
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc hashtable bucket-put true () unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) \"()\" (var h) (var n) (var i) (var k) (var x))"),
+            bridged("(assoc hashtable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) \"()\" (var h) (var n) (var i) (var k) (var x))"),
             r#"(hashtable-op "bucket-put" 6 1 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
         );
         // A bucket read builds no box, so the name slot stays empty; the
         // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc hashtable bucket-value true () int-any-width ((hashtable str int-any-width) int-any-width int-any-width) \"i32\" (var h) (var n) (var i))"),
+            bridged("(assoc hashtable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) \"i32\" (var h) (var n) (var i))"),
             r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
@@ -3465,7 +3464,7 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc llvm-builder const-word true () handle (handle int-any-width) \"llvm-value\" (var b) (int-any-width 42))");
+        let printed = bridged("(assoc llvm-builder const-word true handle (handle int-any-width) \"llvm-value\" (var b) (int-any-width 42))");
         assert_eq!(
             printed,
             format!(
@@ -3481,10 +3480,10 @@ mod tests {
     /// `Repr::Scope` carries one.
     #[test]
     fn a_scope_routes_on_what_it_holds() {
-        let printed = bridged("(assoc scope get true () enum ((scope handle) str) \"option<llvm-value>\" (var e) (var n))");
+        let printed = bridged("(assoc scope get true enum ((scope handle) str) \"option<llvm-value>\" (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc scope get true () enum ((scope int-any-width) str) \"option<i32>\" (var e) (var n))"),
+            bridged("(assoc scope get true enum ((scope int-any-width) str) \"option<i32>\" (var e) (var n))"),
             r#"(assoc "scope" "get" true (2 var "e" false) (2 var "n" false))"#
         );
     }
@@ -3641,7 +3640,7 @@ mod tests {
     fn a_value_pattern_crosses_as_a_name_and_a_test() {
         let printed = bridged_with(
             &DEFS,
-            r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) "bool" (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
+            r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true bool (str str) "bool" (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
         );
         assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true"#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
@@ -3729,10 +3728,10 @@ mod tests {
     /// time, and a kind that says how to untag the stored value.
     #[test]
     fn a_global_becomes_its_promoted_id_and_kind() {
-        assert_eq!(bridged("(global (counter) () counter int-any-width)"), "(global 3 1)");
-        assert_eq!(bridged("(global (total) (m) m::total sexpr)"), "(global 7 6)");
+        assert_eq!(bridged("(global counter int-any-width)"), "(global 3 1)");
+        assert_eq!(bridged("(global m::total sexpr)"), "(global 7 6)");
         assert_eq!(
-            bridged("(set-global (counter) () counter int-any-width (int-any-width 5))"),
+            bridged("(set-global counter int-any-width (int-any-width 5))"),
             "(set-global 3 1 (int-any-width 0 5))"
         );
     }
@@ -3741,7 +3740,7 @@ mod tests {
     /// and this walk have gone out of step.
     #[test]
     fn an_unpromoted_global_is_refused() {
-        let e = refused("(global (missing) () missing int-any-width)");
+        let e = refused("(global missing int-any-width)");
         assert!(e.contains("was not promoted before translation"), "{}", e);
     }
 
@@ -3841,7 +3840,7 @@ mod tests {
     /// a second runtime representation.
     #[test]
     fn a_function_reference_becomes_a_forwarding_closure() {
-        let printed = bridged("(fnref (f) () f (int-any-width int-any-width))");
+        let printed = bridged("(fnref f (int-any-width int-any-width))");
         assert!(
             printed.ends_with(
                 r#" () ((arg0 . 0) (arg1 . 0)) (call "tl_f" (0 var "arg0" false) (0 var "arg1" false)))"#
@@ -3853,7 +3852,7 @@ mod tests {
 
     #[test]
     fn a_method_reference_forwards_onto_the_method() {
-        let printed = bridged("(methodref point area () (struct) \"i32\")");
+        let printed = bridged("(methodref point area (struct) \"i32\")");
         assert!(
             printed.ends_with(r#" () ((arg0 . 2)) (assoc "point" "area" true (2 var "arg0" false)))"#),
             "{}",
@@ -3935,7 +3934,7 @@ mod tests {
     /// heap and scope tree, which the compiled program does not have.
     #[test]
     fn compiling_a_compile_form_is_refused() {
-        let e = refused("(compile-fn (fn (f) () f))");
+        let e = refused("(compile-fn (fn f))");
         assert!(e.contains("interpreter-only"), "{}", e);
     }
 
@@ -3962,13 +3961,13 @@ mod tests {
     #[test]
     fn a_defun_becomes_the_boundary_triple() {
         let (name, params, body) =
-            top_level(&[], "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width true (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b)))")
+            top_level(&[], "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b)))")
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
         assert_eq!(body, r#"(assoc "i32" "+" true (0 var "a" false) (0 var "b" false))"#);
         // The same mangling a call to it produces.
-        assert!(bridged("(call (add) (m) m::add ())").contains(r#""tl_m::add""#));
+        assert!(bridged("(call m::add ())").contains(r#""tl_m::add""#));
     }
 
     /// A method mangles through the type path, so two same-named types in
@@ -3976,7 +3975,7 @@ mod tests {
     #[test]
     fn a_defmethod_mangles_through_its_type() {
         let (name, params, body) =
-            top_level(&[], "(defmethod m::point area false ((self struct)) int-any-width true (field-get (var self) 0 int-any-width))")
+            top_level(&[], "(defmethod m::point area false ((self struct)) int-any-width (field-get (var self) 0 int-any-width))")
                 .expect("a defmethod is compiled");
         assert_eq!(name, "tl_m::point::area");
         assert_eq!(params, "((self . 2))");
@@ -3986,7 +3985,7 @@ mod tests {
     /// A multi-form body collapses to a `progn`, the same as everywhere else.
     #[test]
     fn a_multi_form_body_collapses() {
-        let (_, _, body) = top_level(&[], "(defun f () unit false (int-any-width 1) (unit))").expect("compiled");
+        let (_, _, body) = top_level(&[], "(defun f () unit (int-any-width 1) (unit))").expect("compiled");
         assert_eq!(body, "(let () (int-any-width 0 1) (unit))");
     }
 
@@ -3996,7 +3995,7 @@ mod tests {
     #[test]
     fn a_parameter_a_closure_captures_is_a_cell_without_being_told() {
         let (_, params, body) =
-            top_level(&[], "(defun f ((n int-any-width)) fn true (lambda () int-any-width (var n)))").expect("compiled");
+            top_level(&[], "(defun f ((n int-any-width)) fn (lambda () int-any-width (var n)))").expect("compiled");
         assert_eq!(params, "((n . 11))", "the parameter should be bound as a cell");
         assert!(body.contains(r#"(cellvar "n" 1)"#), "{}", body);
     }
@@ -4010,7 +4009,7 @@ mod tests {
         for src in [
             "(defstruct point (int-any-width int-any-width))",
             "(defenum m::color (red green blue) (() () ()))",
-            "(defmacro m::when (c body) true (1 () ()) false (quote ()))",
+            "(defmacro m::when (c body) true (1 () ()) (quote ()))",
             "(use m::helper other::helper)",
             r#"(load "lib.typl")"#,
             "(expr (int-any-width 0 42))",
@@ -4030,12 +4029,12 @@ mod tests {
         let definitions = Definitions::new();
         let globals = globals();
         let cx = Ctx::new(&definitions, &globals);
-        let form = r.read_all(&mut h, "(defvar m::total sexpr true true (quote ()))").expect("read failed")[0];
+        let form = r.read_all(&mut h, "(defvar m::total sexpr true (quote ()))").expect("read failed")[0];
         h.push_root(form);
         let node = global_init(&mut h, form, cx).expect("translation failed").expect("a defvar has one");
         assert_eq!(core::print(&h, node), "(global-init 6 (construct true false () 0))");
         // Nothing else is one.
-        let other = r.read_all(&mut h, "(defun f () unit false (unit))").expect("read failed")[0];
+        let other = r.read_all(&mut h, "(defun f () unit (unit))").expect("read failed")[0];
         assert!(global_init(&mut h, other, cx).expect("translation failed").is_none());
     }
 
@@ -4062,8 +4061,8 @@ mod tests {
     /// misread. The count of these is the progress measure.
     #[test]
     fn an_untranslated_tag_names_itself() {
-        assert!(refused("(defun m::f () unit true (unit))").contains("`defun`"));
-        assert!(refused("(defvar m::x int-any-width true true (int-any-width 0))").contains("`defvar`"));
+        assert!(refused("(defun m::f () unit (unit))").contains("`defun`"));
+        assert!(refused("(defvar m::x int-any-width true (int-any-width 0))").contains("`defvar`"));
         assert!(refused("(module m (expr (int-any-width 1)))").contains("`module`"));
     }
 
@@ -4072,7 +4071,7 @@ mod tests {
     /// argument.
     #[test]
     fn an_argument_list_that_disagrees_with_its_representations_is_refused() {
-        let e = refused("(call (f) () f (int-any-width) (int-any-width 1) (int-any-width 2))");
+        let e = refused("(call f (int-any-width) (int-any-width 1) (int-any-width 2))");
         assert!(e.contains("1 argument representations for 2 arguments"), "{}", e);
     }
 }

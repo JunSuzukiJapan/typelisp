@@ -532,26 +532,14 @@ pub fn add_compiled_global_init(
 /// (`f64`/`char` builtins — still out of scope) panics clearly right
 /// here rather than deep inside `compile-assoc`'s own `get-function`.
 pub fn compile_function(interp: &Interp, heap: &mut Heap, target: &CompileTarget) -> Result<Value, EvalError> {
-    let (name, already_compiled) = match target {
-        CompileTarget::Fn(r) => {
-            interp.resolve_fn_ref(r).ok_or_else(|| {
-                EvalError::Internal(format!(
-                    "compile: `{}` resolved at check time but not here",
-                    r.written.join("::")
-                ))
-            })?;
-            (r.resolved.to_string(), interp.root.borrow().fn_compiled(&r.resolved))
-        }
-        CompileTarget::Method { type_name, method, home } => {
-            interp.root.borrow().resolve_method(home, type_name, method).ok_or_else(|| {
-                EvalError::Internal(format!(
-                    "compile: `{}` resolved at check time but not here",
-                    method_link_name(type_name, method)
-                ))
-            })?;
-            (method_link_name(type_name, method), interp.root.borrow().method_compiled(type_name, method))
-        }
+    let name = match target {
+        CompileTarget::Fn(path) => path.to_string(),
+        CompileTarget::Method(type_name, method) => method_link_name(type_name, method),
     };
+    let def = interp
+        .target_def(target)
+        .ok_or_else(|| EvalError::Internal(format!("compile: `{}` resolved at check time but not here", name)))?;
+    let already_compiled = def.compiled.borrow().is_some();
     if already_compiled {
         return Ok(Value::Bool(true));
     }
@@ -589,25 +577,12 @@ pub fn disassemble_function(
     llvm_ir: bool,
 ) -> Result<String, EvalError> {
     let name = match target {
-        CompileTarget::Fn(r) => {
-            interp.resolve_fn_ref(r).ok_or_else(|| {
-                EvalError::Internal(format!(
-                    "disassemble: `{}` resolved at check time but not here",
-                    r.written.join("::")
-                ))
-            })?;
-            r.resolved.to_string()
-        }
-        CompileTarget::Method { type_name, method, home } => {
-            interp.root.borrow().resolve_method(home, type_name, method).ok_or_else(|| {
-                EvalError::Internal(format!(
-                    "disassemble: `{}` resolved at check time but not here",
-                    method_link_name(type_name, method)
-                ))
-            })?;
-            method_link_name(type_name, method)
-        }
+        CompileTarget::Fn(path) => path.to_string(),
+        CompileTarget::Method(type_name, method) => method_link_name(type_name, method),
     };
+    interp
+        .target_def(target)
+        .ok_or_else(|| EvalError::Internal(format!("disassemble: `{}` resolved at check time but not here", name)))?;
     // An FFI declaration has no forms to translate, so the module built below
     // would hold a function with an empty body — not the thunk the name
     // actually reaches, and disassembling it would be a confident wrong

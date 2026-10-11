@@ -30,7 +30,7 @@ use typelisp_mem::RootScope;
 
 use crate::check::core;
 use crate::check::repr::Repr;
-use crate::{wk, BoxId, Heap, MacroExpander, MacroLambda, Path, Ref, SymRef, Value};
+use crate::{wk, BoxId, Heap, MacroExpander, MacroLambda, Path, SymRef, Value};
 
 use super::scope;
 pub use super::value::EvalError;
@@ -108,14 +108,6 @@ pub struct FnDef {
     /// `docs/dev/` and the crossing rule: whether a word is raw or tagged is
     /// in the declaration only.
     pub sig: Option<(Vec<Repr>, Repr)>,
-    /// Whether this definition is `pub` — the runtime twin of
-    /// `FnSig`/`VarInfo`/`AssocFn.sig`'s own `public` bit
-    /// (`check::registry`), baked onto the `TopLevel` node by the checker
-    /// (which computed it once already) so `scope::ModuleScope`'s qualified-
-    /// path resolution can enforce `Checker::resolve_fn_path`'s
-    /// `public || in_scope` gate without needing the checker's `Registry` at
-    /// runtime.
-    pub public: bool,
     /// This definition's JIT/AOT-compiled form, if `(compile name)` (or an
     /// AOT pass) has ever produced one — the direct replacement for the old
     /// standalone `Interp::compiled`/`compiled_methods` side tables (`Path`-
@@ -1263,24 +1255,6 @@ impl Interp {
 
 
 
-
-    /// Resolves a `Call`/`FnRef` [`Ref`]: tries the independent
-    /// re-derivation first ([`scope::ModuleScope::resolve_fn`]), falling
-    /// back to direct descent via `r.resolved` only when that search comes
-    /// up empty. The one legitimate reason that happens: `r.written` named a
-    /// `use` alias (a bare-name import, or a module alias like `use
-    /// geo::point` making `point::f` resolve to `geo::point::f`) —
-    /// `Checker::lookup_alias`/`find_module`'s alias branches are check-time
-    /// -only machinery (the alias table itself is never mirrored into this
-    /// tree, see `eval::scope`'s module doc comment), so the literal
-    /// written text has no ancestor-chain-searchable meaning at runtime.
-    /// Falling back to `resolved` — a well-typed program's checker-verified
-    /// answer — is still a direct tree descent, not a flat-table trust
-    /// fallback: only the *search strategy* differs from the ordinary case,
-    /// not the mechanism.
-    pub fn resolve_fn_ref(&self, r: &Ref) -> Option<Rc<FnDef>> {
-        self.root.borrow().resolve_fn(&r.home, &r.written).or_else(|| self.root.borrow().get_fn(&r.resolved))
-    }
 
     /// Runs already-evaluated `argv` (`param_tys`-typed, `ret_ty`-returning)
     /// through `compiled` instead of tree-walking — shared by `call`

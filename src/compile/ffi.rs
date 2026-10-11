@@ -903,7 +903,7 @@ pub fn callback_entry(
     let path = typelisp_front::dump::parse_path(&sig.path);
     let compiled = |interp: &Interp| interp.root.borrow().get_fn(&path).and_then(|f| f.compiled.borrow().clone());
     if compiled(interp).is_none() {
-        let target = crate::CompileTarget::Fn(typelisp_front::check::resolved::Ref::synthetic(path.clone()));
+        let target = crate::CompileTarget::Fn(path.clone());
         crate::compile::driver::compile_function(interp, heap, &target)
             .map_err(|e| format!("ffi: `{}` is passed to C as a callback and cannot be compiled: {}", path, e))?;
     }

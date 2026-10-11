@@ -225,6 +225,23 @@ fn the_order_of_the_two_does_not_change_who_wins() {
     assert_eq!(v, Some(Value::Int(1021)));
 }
 
+/// A type follows the same rule as a function: the one defined here wins over
+/// an import of the same name, as the warning says.
+#[test]
+fn an_imported_type_loses_to_one_defined_here() {
+    let files = vec![
+        ("one.typl", "(pub defstruct box (pub v string))\n"),
+        (
+            "main.typl",
+            "(defstruct box (n int))\n(use one::box)\n(defun get ((b box)) int b::n)\n(get (make-instance 'box :n 7))\n",
+        ),
+    ];
+    let (v, warnings) = run("clash_type", &files, "main.typl").expect("load failed");
+    assert_eq!(v, Some(Value::Int(7)));
+    assert_eq!(warnings.len(), 1, "expected one warning, got {:?}", warnings);
+    assert!(warnings[0].contains("the type of that name defined here wins"), "unexpected warning: {}", warnings[0]);
+}
+
 #[test]
 fn shadowing_import_says_the_collision_is_meant() {
     let mut files = TWO_HELPERS.to_vec();

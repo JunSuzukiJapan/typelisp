@@ -2799,8 +2799,7 @@ fn a_seeded_stream_agrees_across_the_compile_boundary() {
 ///
 /// Nothing is left to look up at runtime — the checker's resolution is the
 /// answer — so there is no reason to carry the failure to the `(compile ...)`
-/// call the way this used to (an `EvalError::NoSuchFunction` out of
-/// `Interp::resolve_fn_ref`). See `Checker::check_compile`'s doc comment.
+/// call. See `Checker::check_compile`'s doc comment.
 #[test]
 fn compile_of_an_unresolvable_name_is_a_check_time_error() {
     // A bare name that names nothing.
@@ -2866,12 +2865,9 @@ fn compile_resolves_a_bare_name_against_its_own_module_not_just_root() {
 /// The module-scoped counterpart of `compile_resolves_a_bare_name_against_its_own_module_not_just_root`:
 /// two sibling modules each define their own `tag`, and `(compile tag)`
 /// written inside `a` must resolve — and actually dispatch — to `a`'s own
-/// `tag`, never `b`'s same-named one, even though nothing here is `pub`. The
-/// old module-blind runtime resolution (`Interp::method_key`'s "search the
-/// whole tree by local name" fallback) had no way to prefer the caller's own
-/// module in a case like this; the new `written`+`home` resolution does, by
-/// construction (`ModuleScope::resolve_fn`'s ancestor-chain walk starting
-/// from `a` never even reaches `b`).
+/// `tag`, never `b`'s same-named one, even though nothing here is `pub`: the
+/// checker resolves the name from `a`, whose ancestor chain never reaches `b`,
+/// and the runtime uses that answer as is.
 #[test]
 fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() {
     let v = eval_ok_with_compiler(
@@ -6172,7 +6168,7 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
 /// node, which is a later stage. Only the *body* is bridged here.
 #[test]
 fn the_island_compiles_a_body_the_new_bridge_produced() {
-    let body = bridge_to_island_text("(assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))");
+    let body = bridge_to_island_text("(assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))");
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
@@ -6198,9 +6194,9 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
 #[test]
 fn the_island_compiles_a_bridged_let_and_if() {
     let body = bridge_to_island_text(
-        "(let ((d int-any-width (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))))
-           (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var d) (int-any-width 0))
-               (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 0) (var d))
+        "(let ((d int-any-width (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))))
+           (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var d) (int-any-width 0))
+               (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 0) (var d))
                (var d)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&format!(
@@ -6283,11 +6279,11 @@ fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
         "(let ((acc int-any-width (int-any-width 0)) (i int-any-width (int-any-width 0)))
            (loop unit
-             (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var i) (var b))
+             (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var i) (var b))
                  (unit)
                  (break))
-             (set acc (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var a)))
-             (set i (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var i) (int-any-width 1))))
+             (set acc (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var a)))
+             (set i (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var i) (int-any-width 1))))
            (var acc))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
@@ -6320,11 +6316,11 @@ fn the_island_runs_a_bridged_loop() {
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
         "(labels ((rec ((n int-any-width) (acc int-any-width)) int-any-width
-                    (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var n) (int-any-width 1))
+                    (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var n) (int-any-width 1))
                         (var acc)
                         (apply (var rec) int-any-width (int-any-width int-any-width)
-                          (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (var n) (int-any-width 1))
-                          (assoc i32 * true () int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
+                          (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (var n) (int-any-width 1))
+                          (assoc i32 * true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
            (apply (var rec) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
@@ -6356,7 +6352,7 @@ fn the_island_runs_a_bridged_labels_block() {
 fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
         "(let ((n int-any-width (var a)))
-           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var x) (var n)))))
+           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var x) (var n)))))
              (apply (var f) int-any-width (int-any-width) (int-any-width 1))))",
     );
     // The capture really is a cell on both sides of the boundary.
@@ -6420,10 +6416,10 @@ fn the_island_runs_a_whole_bridged_defun() {
     let form = r
         .read_all(
             &mut h,
-            "(defun m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width true
-               (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var x) (var lo))
+            "(defun m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width
+               (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var x) (var lo))
                    (var lo)
-                   (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var hi) (var x))
+                   (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var hi) (var x))
                        (var hi)
                        (var x))))",
         )

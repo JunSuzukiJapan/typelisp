@@ -49,7 +49,7 @@
 //! The old bridge read all of these off the `Type` hanging on each AST node.
 //! Nothing downstream of the checker has a `Type` any more, so each one is
 //! written into the form instead — as a repr list beside the argument list
-//! (`(call (f) () f (int-any-width int-any-width) (int-any-width 1)
+//! (`(call f (int-any-width int-any-width) (int-any-width 1)
 //! (int-any-width 2))`), the same parallel-list idiom
 //! `defstruct`/`defenum` already use, rather than as a wrapper around every
 //! argument.
@@ -98,8 +98,8 @@ static SEEN_TAGS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 /// nothing else.
 ///
 /// Deliberately not a walk over every nested head. A core form contains plenty
-/// of lists that are *data*, not nodes — a `home` path, a parameter list, a
-/// `let` binding group, anything under `quote` — and their heads are not tags.
+/// of lists that are *data*, not nodes — a parameter list, a `let` binding
+/// group, anything under `quote` — and their heads are not tags.
 /// Telling them apart needs the grammar, which is the very thing this file is
 /// trying to pin down, so instead every tag gets its own standalone example and
 /// this stays exact.
@@ -156,12 +156,11 @@ fn variables_and_globals() {
     all_round_trip(&[
         "(var x)",
         "(set x (int-any-width 1))",
-        // Written `counter`, in module `m`, resolved to `m::counter`, an int.
-        "(global (counter) (m) m::counter int-any-width)",
-        // A root-module global: `home` is the empty list, because the root has
-        // zero segments and so cannot be spelled as a `Path`.
-        "(global (n) () n sexpr)",
-        "(set-global (counter) (m) m::counter int-any-width (int-any-width 5))",
+        // Resolved to `m::counter`, an int.
+        "(global m::counter int-any-width)",
+        // A root-module global.
+        "(global n sexpr)",
+        "(set-global m::counter int-any-width (int-any-width 5))",
     ]);
 }
 
@@ -199,11 +198,10 @@ fn binding_and_control() {
 
 // ---- calls --------------------------------------------------------------
 
-/// A call carries the same written/home/path triple a global does, and for the
-/// same reason: diagnostics need the name as written, visibility needs the
-/// module it was written in, and dispatch needs the resolved path. Then the
-/// argument representations, then the arguments — one list per argument, in
-/// the same order.
+/// A call carries the path its name resolved to at check time, as a global
+/// does — nothing after checking resolves a name again. Then the argument
+/// representations, then the arguments — one list per argument, in the same
+/// order.
 ///
 /// `assoc` carries one more: its own *result* representation, ahead of the
 /// argument list. That is what tells the bridge which of the island's builtin
@@ -220,35 +218,35 @@ fn binding_and_control() {
 #[test]
 fn calls() {
     all_round_trip(&[
-        "(call (f) () f (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
-        "(call (helper) (m) m::helper ())",
+        "(call f (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
+        "(call m::helper ())",
         // An instance method on `int`, `true` meaning it takes a receiver,
         // returning an int, over two int arguments.
-        "(assoc int + true () int-any-width (int-any-width int-any-width) (var a) (var b))",
+        "(assoc int + true int-any-width (int-any-width int-any-width) (var a) (var b))",
         // A static associated function: no receiver.
-        "(assoc point new false () struct (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
+        "(assoc point new false struct (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))",
         // A builtin whose result is what identifies it: an empty vector of
         // ints, which the bridge lowers to a `vector-op` rather than a method
         // call, because there is no compiled body to call.
-        "(assoc vector new false () (vector int-any-width) ())",
-        "(fnref (f) () f (int-any-width int-any-width))",
-        "(methodref point new () (int-any-width int-any-width))",
+        "(assoc vector new false (vector int-any-width) ())",
+        "(fnref f (int-any-width int-any-width))",
+        "(methodref point new (int-any-width int-any-width))",
         // The callee is a value, so the *return* representation rides on the
         // node — a compiled closure's result has no name to look a signature
         // up by. Then the argument representations, then the arguments.
         "(apply (var g) int-any-width (int-any-width) (int-any-width 1))",
-        "(compile-fn (fn (f) () f))",
-        "(compile-fn (method point new ()))",
+        "(compile-fn (fn f))",
+        "(compile-fn (method point new))",
         // `(task CALL)` — the call is made in a task rather than here. It wraps
         // a whole call node, so its own shape is the thinnest in the
         // vocabulary; the bridge is what takes the wrapped node apart.
-        "(task (call (f) () f (int-any-width) (int-any-width 1)))",
+        "(task (call f (int-any-width) (int-any-width 1)))",
         // The callee can be a value, in which case the wrapped node is an
         // `apply` and its callee is a form like any argument.
         "(task (apply (var g) int-any-width (int-any-width) (int-any-width 1)))",
         // `(thread CALL)` — `task`'s shape, for a task on an OS thread of its
         // own.
-        "(thread (call (f) () f (int-any-width) (int-any-width 1)))",
+        "(thread (call f (int-any-width) (int-any-width 1)))",
         // `(select ARM...)`. Each arm is a plain list rather than a node —
         // `("recv" VAR KEY CHAN BODY)`, `("send" KIND CHAN VALUE BODY)`,
         // `("else" BODY)` — because the fields are metadata (a tag, a bound
@@ -260,7 +258,7 @@ fn calls() {
     ]);
     // `compile-fn`'s two payload shapes, standalone for the same reason the
     // pattern tags are.
-    all_round_trip(&["(fn (f) () f)", "(method point new ())"]);
+    all_round_trip(&["(fn f)", "(method point new)"]);
 }
 
 /// The REPL tool forms that name a definition: `(trace ...)` and
@@ -278,19 +276,19 @@ fn calls() {
 #[test]
 fn repl_tools() {
     all_round_trip(&[
-        "(trace (fn (f) () f))",
-        "(trace (fn (f) () f) (method point new ()))",
+        "(trace (fn f))",
+        "(trace (fn f) (method point new))",
         "(trace)",
-        "(untrace (fn (f) () f))",
+        "(untrace (fn f))",
         "(untrace)",
         // `step` is the odd one: it names no definition, it wraps a *form*.
         // The form keeps its own type, so the node carries nothing else.
-        "(step (call (f) () f ()))",
+        "(step (call f ()))",
         // `disassemble-fn` carries the same payload plus one flag: `true`
         // asks for LLVM IR rather than host assembly. A literal, because the
         // answer decides what to emit.
-        "(disassemble-fn (fn (f) () f) false)",
-        "(disassemble-fn (method point new ()) true)",
+        "(disassemble-fn (fn f) false)",
+        "(disassemble-fn (method point new) true)",
     ]);
 }
 
@@ -363,7 +361,7 @@ fn patterns() {
         // A value pattern: the test is an ordinary expression — here the
         // `equals` call a `"a"` literal pattern lowers to — and the symbol is
         // the name that expression reads the value under test through.
-        r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true () bool (str str) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
+        r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true bool (str str) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
         "(match (var v) enum ((pat-ctor option 0 false ()) (int-any-width 0)) ((pat-ctor option 1 false (int-any-width) (pat-bind x)) (var x)))",
         // A downcast arm, for matching a trait object against a concrete type.
         "(match (var d) sexpr ((pat-ctor point 0 true (int-any-width int-any-width) (pat-bind p)) (var p)))",
@@ -393,7 +391,7 @@ fn functions() {
     all_round_trip(&[
         "(lambda ((x int-any-width)) int-any-width (var x))",
         "(lambda () unit (unit))",
-        "(labels ((rec ((i int-any-width)) int-any-width (var i))) (call (rec) () rec (int-any-width) (int-any-width 1)))",
+        "(labels ((rec ((i int-any-width)) int-any-width (var i))) (call rec (int-any-width) (int-any-width 1)))",
     ]);
 }
 
@@ -432,25 +430,25 @@ fn trait_objects() {
 #[test]
 fn top_level() {
     all_round_trip(&[
-        "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width true (assoc int + true () int-any-width (int-any-width int-any-width) (var a) (var b)))",
-        "(defun m::nothing () unit false (unit))",
-        "(defmethod point area false ((self struct)) int-any-width true (field-get (var self) 0 int-any-width))",
+        "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc int + true int-any-width (int-any-width int-any-width) (var a) (var b)))",
+        "(defun m::nothing () unit (unit))",
+        "(defmethod point area false ((self struct)) int-any-width (field-get (var self) 0 int-any-width))",
         // params, then whether it takes `&rest`, then the `&optional`/`&key`
-        // structure, then `pub`, then the body.
-        "(defmacro m::when (c body) true (1 () ()) false (quote ()))",
-        "(defvar m::counter int-any-width true true (int-any-width 0))",
+        // structure, then the body.
+        "(defmacro m::when (c body) true (1 () ()) (quote ()))",
+        "(defvar m::counter int-any-width true (int-any-width 0))",
         // A struct publishes its fields' representations, which is where the
         // bridge reads a pattern's field kinds from.
         "(defstruct point (int-any-width int-any-width))",
         "(defenum m::color (red green blue) (() () ()))",
         "(defenum option (none some) (() (sexpr)))",
-        "(module m (defvar m::x int-any-width false false (int-any-width 1)))",
-        // A C function, declared. Fields 3-5 are `defun`'s own; field 2 is the
+        "(module m (defvar m::x int-any-width false (int-any-width 1)))",
+        // A C function, declared. Fields 3-4 are `defun`'s own; field 2 is the
         // library to look the symbol up in (`()` for "the running process"),
         // and the last two spell the C types, which the `REPR`s beside them
         // cannot — `int-any-width` is all six widths at once.
-        r#"(defffi m::c-abs "abs" () ((a0 int-any-width)) int-any-width true (i32) i32)"#,
-        r#"(defffi c-sqrt "sqrt" "m" ((a0 f64)) f64 true (f64) f64)"#,
+        r#"(defffi m::c-abs "abs" () ((a0 int-any-width)) int-any-width (i32) i32)"#,
+        r#"(defffi c-sqrt "sqrt" "m" ((a0 f64)) f64 (f64) f64)"#,
         "(use m::helper other::helper)",
         r#"(load "lib.typl")"#,
         "(expr (int-any-width 42))",

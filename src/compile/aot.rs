@@ -224,10 +224,10 @@ fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     if core::op(heap, form) != Some("call") {
         return false;
     }
-    // `(call WRITTEN HOME PATH (R...) ARG...)`: the resolved path, and no
-    // arguments past the representation list.
-    let is_main = core::path_field(heap, form, 2).is_some_and(|p| &p == entry_path);
-    is_main && core::fields(heap, form).map(|f| f.len() == 4).unwrap_or(false)
+    // `(call PATH (R...) ARG...)`: the resolved path, and no arguments past
+    // the representation list.
+    let is_main = core::path_field(heap, form, 0).is_some_and(|p| &p == entry_path);
+    is_main && core::fields(heap, form).map(|f| f.len() == 2).unwrap_or(false)
 }
 
 /// [`compile_file`] for a caller that is itself a running program — the

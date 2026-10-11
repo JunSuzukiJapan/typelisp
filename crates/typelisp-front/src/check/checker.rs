@@ -15,7 +15,7 @@ use super::loop_dsl;
 use typelisp_read::name_lexer::{NameLexer, NameTok};
 use super::semantic::{TypeKind, TypeUse};
 
-use super::resolved::{CompileTarget, Pattern, Ref};
+use super::resolved::{CompileTarget, Pattern};
 use super::core::{self, Checked, Items};
 use super::fold;
 use super::forms;
@@ -1584,23 +1584,15 @@ impl Checker {
 
 
 
-    /// `(global (WRITTEN...) (HOME...) PATH REPR)`.
-    ///
-    /// Three names, because a global reference is three separate facts: what
-    /// was written at the reference site, the module it was written in, and the
-    /// absolute path the checker resolved it to. The evaluator re-derives the
-    /// target from the first two (see [`Ref`]); the compile pipeline, which has
-    /// no way to redo resolution, reads the third.
+    /// `(global PATH REPR)` — `PATH` is the global the checker resolved the
+    /// name to, and every consumer reads it as is: nothing after checking
+    /// resolves a name again.
     ///
     /// **Returns a rooted form**, for the same reason [`Self::var_form`] does —
     /// see there.
-    fn global_form(&self, heap: &mut Heap, r: &Ref, ty: &Type) -> Result<Value, Error> {
+    fn global_form(&self, heap: &mut Heap, r: &Path, ty: &Type) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let written = forms::sym_list(f.heap(), &r.written)?;
-        f.push(written);
-        let home = forms::sym_list(f.heap(), &r.home)?;
-        f.push(home);
-        let path = forms::path_form(f.heap(), &r.resolved);
+        let path = forms::path_form(f.heap(), r);
         f.push(path);
         let repr = self.repr_form(f.heap(), ty)?;
         f.push(repr);
@@ -1608,15 +1600,10 @@ impl Checker {
         Ok(forms::rooted(heap, form))
     }
 
-    /// `(set-global (WRITTEN...) (HOME...) PATH REPR FORM)` — see
-    /// [`Self::global_form`] for the name triple.
-    fn set_global_form(&self, heap: &mut Heap, r: &Ref, ty: &Type, value: Value) -> Result<Value, Error> {
+    /// `(set-global PATH REPR FORM)` — see [`Self::global_form`] for `PATH`.
+    fn set_global_form(&self, heap: &mut Heap, r: &Path, ty: &Type, value: Value) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let written = forms::sym_list(f.heap(), &r.written)?;
-        f.push(written);
-        let home = forms::sym_list(f.heap(), &r.home)?;
-        f.push(home);
-        let path = forms::path_form(f.heap(), &r.resolved);
+        let path = forms::path_form(f.heap(), r);
         f.push(path);
         let repr = self.repr_form(f.heap(), ty)?;
         f.push(repr);
@@ -1645,26 +1632,22 @@ impl Checker {
     }
 
 
-    /// `(call (WRITTEN...) (HOME...) PATH (REPR...) ARG...)` — a call to a free
-    /// function.
+    /// `(call PATH (REPR...) ARG...)` — a call to a free function, `PATH` the
+    /// one the checker resolved the name to.
     ///
     /// The representations are the *arguments'* own, one per argument in the
     /// same order: the island reads them to decide the GC-root bookkeeping
     /// around each argument as it crosses into a compiled frame.
-    fn call_form(&self, heap: &mut Heap, r: &Ref, args: &[Checked]) -> Result<Value, Error> {
+    fn call_form(&self, heap: &mut Heap, r: &Path, args: &[Checked]) -> Result<Value, Error> {
         // A Rust-implemented builtin's `int`-typed parameters cross the
         // compiled boundary as raw machine words — see `int_boundary_raw`.
         let boundary = self
             .reg
-            .fn_sig(&r.resolved)
-            .filter(|sig| sig.builtin && !sig.ffi && !int_boundary_native_fn(r.resolved.last_segment()))
+            .fn_sig(r)
+            .filter(|sig| sig.builtin && !sig.ffi && !int_boundary_native_fn(r.last_segment()))
             .map(|sig| (sig.params.clone(), sig.ret.clone()));
         let mut f = Items::new(heap);
-        let written = forms::sym_list(f.heap(), &r.written)?;
-        f.push(written);
-        let home = forms::sym_list(f.heap(), &r.home)?;
-        f.push(home);
-        let path = forms::path_form(f.heap(), &r.resolved);
+        let path = forms::path_form(f.heap(), r);
         f.push(path);
         // An untagged argument is a raw word from here on, and its
         // representation has to say so: a rooted slot holding a raw word
@@ -1686,7 +1669,7 @@ impl Checker {
         }
     }
 
-    /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (REPR...) ARG...)` — an
+    /// `(assoc PATH SYM INSTANCE RET-REPR (REPR...) RET-KEY ARG...)` — an
     /// instance method (`args[0]` is the receiver) or a static associated
     /// function.
     ///
@@ -1699,7 +1682,6 @@ impl Checker {
         type_name: &Path,
         method: &str,
         instance: bool,
-        home: &[String],
         ret: &Type,
         args: &[Checked],
     ) -> Result<Value, Error> {
@@ -1709,8 +1691,6 @@ impl Checker {
         let m = f.heap().intern_symbol(method);
         f.push(m);
         f.push(Value::Bool(instance));
-        let home = forms::sym_list(f.heap(), home)?;
-        f.push(home);
         let ret_repr = self.repr_form(f.heap(), ret)?;
         f.push(ret_repr);
         // A Rust-implemented builtin's `int`-typed parameters and result cross
@@ -1756,27 +1736,23 @@ impl Checker {
         }
     }
 
-    /// `(fnref (WRITTEN...) (HOME...) PATH (PARAM-REPR...))` — a named free
-    /// function reified as a value.
+    /// `(fnref PATH (PARAM-REPR...))` — a named free function reified as a
+    /// value.
     ///
     /// The parameter representations are carried because the bridge turns this
     /// into a closure construction, and there is no call site here to read them
     /// from. A `&rest` parameter is simply the last entry (always `sexpr`), so
     /// it needs no flag of its own.
-    fn fnref_form(&self, heap: &mut Heap, r: &Ref, params: &[Type]) -> Result<Value, Error> {
+    fn fnref_form(&self, heap: &mut Heap, r: &Path, params: &[Type]) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let written = forms::sym_list(f.heap(), &r.written)?;
-        f.push(written);
-        let home = forms::sym_list(f.heap(), &r.home)?;
-        f.push(home);
-        let path = forms::path_form(f.heap(), &r.resolved);
+        let path = forms::path_form(f.heap(), r);
         f.push(path);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
         f.finish("fnref")
     }
 
-    /// `(methodref PATH SYM (HOME...) (PARAM-REPR...) RET-KEY)` — see
+    /// `(methodref PATH SYM (PARAM-REPR...) RET-KEY)` — see
     /// [`Self::fnref_form`] for the representation list.
     ///
     /// `RET-KEY` is the runtime identity of what the method returns, for the
@@ -1789,7 +1765,6 @@ impl Checker {
         heap: &mut Heap,
         type_name: &Path,
         method: &str,
-        home: &[String],
         params: &[Type],
         ret: &Type,
     ) -> Result<Value, Error> {
@@ -1798,8 +1773,6 @@ impl Checker {
         f.push(ty_path);
         let m = f.heap().intern_symbol(method);
         f.push(m);
-        let home = forms::sym_list(f.heap(), home)?;
-        f.push(home);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
         let key = crate::type_key::type_key_of_type(ret);
@@ -2227,17 +2200,16 @@ impl Checker {
 
     // ---- top-level form builders --------------------------------------
 
-    /// `(defun PATH ((SYM REPR)...) RET-REPR PUBLIC BODY...)`.
+    /// `(defun PATH ((SYM REPR)...) RET-REPR BODY...)`.
     ///
-    /// `public` is baked in so `eval::scope`'s qualified-path resolution can
-    /// enforce visibility without the checker's `Registry` at runtime.
+    /// No `pub`: visibility was settled where each reference was checked, and
+    /// nothing after checking resolves a name.
     fn defun_form(
         &self,
         heap: &mut Heap,
         name: &Path,
         params: &[(String, Type)],
         ret: &Type,
-        public: bool,
         body: &[Value],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
@@ -2247,14 +2219,13 @@ impl Checker {
         f.push(ps);
         let r = self.repr_form(f.heap(), ret)?;
         f.push(r);
-        f.push(Value::Bool(public));
         f.extend(body.iter().copied());
         f.finish("defun")
     }
 
-    /// `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR PUBLIC (CTYPE...) RET-CTYPE)`.
+    /// `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR (CTYPE...) RET-CTYPE)`.
     ///
-    /// Fields 3-5 are `defun`'s own, so `Interp::exec` reads them back with
+    /// Fields 3-4 are `defun`'s own, so `Interp::exec` reads them back with
     /// the readers it already has: what it registers is an ordinary [`FnDef`]
     /// with an empty body, which is what makes the thunk reachable through the
     /// same `enter` every other call goes through. Parameter names are
@@ -2278,7 +2249,6 @@ impl Checker {
         library: Option<&str>,
         params: &[Type],
         ret: &Type,
-        public: bool,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let path = forms::path_form(f.heap(), name);
@@ -2303,7 +2273,6 @@ impl Checker {
         f.push(ps);
         let r = self.repr_form(f.heap(), ret)?;
         f.push(r);
-        f.push(Value::Bool(public));
         let mut cs = Items::new(f.heap());
         for t in params {
             let k = cs.heap().intern_symbol(&crate::type_key::type_key_of_type(t));
@@ -2336,13 +2305,12 @@ impl Checker {
         type_params: &[String],
         params: &[(String, Type)],
         ret: &Type,
-        public: bool,
         body: &[Value],
     ) -> Result<Value, Error> {
         if !type_params.is_empty() {
             return forms::module_form(heap, name, &[]);
         }
-        self.defun_form(heap, name, params, ret, public, body)
+        self.defun_form(heap, name, params, ret, body)
     }
 
     /// [`Self::defmethod_form`]'s counterpart of [`Self::definition_form`] —
@@ -2357,16 +2325,15 @@ impl Checker {
         type_params: &[String],
         params: &[(String, Type)],
         ret: &Type,
-        public: bool,
         body: &[Value],
     ) -> Result<Value, Error> {
         if !type_params.is_empty() {
             return forms::module_form(heap, type_name, &[]);
         }
-        self.defmethod_form(heap, type_name, method, instance, params, ret, public, body)
+        self.defmethod_form(heap, type_name, method, instance, params, ret, body)
     }
 
-    /// `(defmethod PATH SYM INSTANCE ((SYM REPR)...) RET-REPR PUBLIC BODY...)`.
+    /// `(defmethod PATH SYM INSTANCE ((SYM REPR)...) RET-REPR BODY...)`.
     ///
     /// The receiver is the first parameter for an instance method, not a field
     /// of its own the way `TopLevel::Defmethod::self_name` was: `params` is
@@ -2380,7 +2347,6 @@ impl Checker {
         instance: bool,
         params: &[(String, Type)],
         ret: &Type,
-        public: bool,
         body: &[Value],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
@@ -2393,18 +2359,15 @@ impl Checker {
         f.push(ps);
         let r = self.repr_form(f.heap(), ret)?;
         f.push(r);
-        f.push(Value::Bool(public));
         f.extend(body.iter().copied());
         f.finish("defmethod")
     }
 
 
-    /// `(defvar PATH REPR MUTABLE PUBLIC FORM)` — a global variable
-    /// (`mutable`) or constant.
-    /// `(defvar PATH REPR MUTABLE PUBLIC INIT)`, plus a sixth field for
-    /// `defparameter`.
+    /// `(defvar PATH REPR MUTABLE INIT)` — a global variable (`mutable`) or
+    /// constant — plus a fifth field for `defparameter`.
     ///
-    /// That sixth field says **assign even if the global is already bound** —
+    /// That fifth field says **assign even if the global is already bound** —
     /// the difference between CL's `defparameter` and its `defvar`, which is a
     /// run-time question and so cannot be settled here. It is a trailing field
     /// rather than a tag of its own because every other consumer of a `defvar`
@@ -2419,7 +2382,6 @@ impl Checker {
         name: &Path,
         ty: &Type,
         mutable: bool,
-        public: bool,
         value: Value,
         reassign: bool,
     ) -> Result<Value, Error> {
@@ -2429,7 +2391,6 @@ impl Checker {
         let r = self.repr_form(f.heap(), ty)?;
         f.push(r);
         f.push(Value::Bool(mutable));
-        f.push(Value::Bool(public));
         f.push(value);
         if reassign {
             f.push(Value::Bool(true));
@@ -3049,7 +3010,7 @@ impl Checker {
             keys: Vec::new(),
         };
         self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
-        self.defffi_form(heap, &self.fq(&name), &c_symbol, library.as_deref(), &params, &ret, public)
+        self.defffi_form(heap, &self.fq(&name), &c_symbol, library.as_deref(), &params, &ret)
     }
 
     /// A `defffi`'s name: either a bare symbol, used for both sides, or
@@ -3385,18 +3346,6 @@ impl Checker {
         self.ns.len() >= item_ns.len() && self.ns[..item_ns.len()] == *item_ns
     }
 
-    /// Build a [`Ref`] for a `Call`/`Global`/`FnRef`/`SetGlobal` node: pairs
-    /// the name exactly as written at the reference site with the current
-    /// namespace (the walk's starting point for `Interp`'s own independent
-    /// re-resolution, see `eval::scope`'s module doc comment) and the
-    /// already-resolved target (for compile-time-only consumers). Ordinary
-    /// call sites use this; a synthesized reference with no real "as
-    /// written" form (a mangled specialization, a compiler-internal
-    /// rewrite) uses [`Ref::synthetic`] instead.
-    fn mk_ref(&self, written: Vec<String>, resolved: Path) -> Ref {
-        Ref { written, home: self.ns.clone(), resolved }
-    }
-
     /// Whether an associated function/method `af` of `type_fq` is reachable
     /// from the current namespace: public, or in scope (declared in the
     /// same module or an ancestor of it) — mirrors `resolve_module_value_path`'s
@@ -3550,7 +3499,14 @@ impl Checker {
     /// The one walk both kinds share: a variable in a nearer module hides a
     /// function of the same name further out, and the other way round,
     /// because a name has one value whichever kind it is.
+    ///
+    /// A `use` import comes after this module's own definition of the name and
+    /// before everything further out: an import never beats a definition made
+    /// here, which is why `check_use` warns that such an import does nothing.
     fn resolve_module_value(&self, name: &str) -> Option<ModuleValue> {
+        if let Some(kind) = module_value_in(self.cur_ns(), name) {
+            return Some(kind.at(item_path(&self.ns, name)));
+        }
         if let Some(path) = self.lookup_alias(name) {
             return self.resolve_module_value_path(&path);
         }
@@ -3815,7 +3771,7 @@ impl Checker {
         // builder now — Symbol/Sexpr redesign Phase 4b): a `&rest` list is a
         // `Sexpr`, built through the island cons layer.
         let cons_path = Path::root("sexpr-cons");
-        let r = Ref::synthetic(cons_path);
+        let r = cons_path;
         let nil = forms::quote_nil(heap)?;
         let mut acc = Checked::new(nil, option_of_sexpr());
         for item in items.into_iter().rev() {
@@ -3829,8 +3785,10 @@ impl Checker {
         Ok(Checked::new(forms::rooted(heap, acc.form), acc.ty))
     }
 
-    /// Resolve a bare (unqualified) type name: a `use` alias first, then the
-    /// ancestor chain (see [`Self::ns_ancestors`]). Every place a bare type
+    /// Resolve a bare (unqualified) type name: this module's own type of that
+    /// name, then a `use` alias, then the rest of the ancestor chain (see
+    /// [`Self::ns_ancestors`]) — the order [`Self::resolve_module_value`]
+    /// gives a function or a global. Every place a bare type
     /// name is written goes through here — a type annotation
     /// ([`Self::resolve_type_name`]), the `Type` of `Type::member`
     /// ([`Self::resolve_type_path`] with no module qualifier), a pattern head,
@@ -3840,6 +3798,9 @@ impl Checker {
     /// An alias that names something other than a type (`(use m::f)`) does
     /// not answer the question, and the chain is searched as for any name.
     fn resolve_bare_type(&self, name: &str) -> Option<Path> {
+        if let Some(def) = self.cur_ns().types.get(name) {
+            return Some(def.name.clone());
+        }
         if let Some(target) = self.lookup_alias(name) {
             // A one-segment target is a root-level name; resolving it through
             // `resolve_type_path` would come back here and consult the same
@@ -3882,6 +3843,9 @@ impl Checker {
     fn resolve_type_alias(&self, path: &Path) -> Option<TypeAlias> {
         if path.is_simple() {
             let name = path.last_segment();
+            if let Some(a) = self.cur_ns().type_aliases.get(name) {
+                return Some(a.clone());
+            }
             if let Some(target) = self.lookup_alias(name) {
                 if let Some(a) = self.resolve_type_alias_path(&target) {
                     return Some(a);
@@ -3969,7 +3933,7 @@ impl Checker {
     /// like a direct call's. With no expectation to resolve from this is a
     /// check-time error (previously it produced a type-variable-ridden
     /// `FnRef` that could never be applied anyway).
-    fn fn_ref_node(&self, heap: &mut Heap, written: Vec<String>, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
+    fn fn_ref_node(&self, heap: &mut Heap, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
         // An FFI declaration cannot be reified, in an `unsafe` or out of one.
         //
@@ -3991,7 +3955,6 @@ impl Checker {
             )));
         }
         let tmpl_ty = fn_value_type(&sig);
-        let home = self.ns.clone();
         // The referenced function's own parameter types, which the bridge
         // needs to build a closure with no call site to read them from —
         // every one the runtime function really takes, in declared order.
@@ -4009,8 +3972,7 @@ impl Checker {
             ps
         };
         if sig.type_params.is_empty() {
-            let r = Ref { written, home, resolved: fq };
-            let form = self.fnref_form(heap, &r, &ref_params(&sig))?;
+            let form = self.fnref_form(heap, &fq, &ref_params(&sig))?;
             return Ok(Checked::new(form, tmpl_ty));
         }
         if let Some(exp) = expected {
@@ -4022,15 +3984,10 @@ impl Checker {
                 let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
                 let resolved_ty = subst_apply(&tmpl_ty, &subst);
                 if !targs.iter().any(|t| self.type_is_open(t)) && self.generic_fn_templates.contains_key(&fq) {
-                    let mangled = self.request_fn_specialization(&fq, targs);
-                    // A monomorphized specialization has no "as written"
-                    // source form of its own — `Ref::synthetic` resolves it
-                    // by its own mangled identity directly, exactly where
-                    // `Interp::exec` registers it, rather than re-searching
-                    // for the (unspecialized) generic template by the
-                    // original bare name.
-                    let r = Ref::synthetic(mangled);
-                    let params = match self.reg.fn_sig(&r.resolved) {
+                    // The specialization's own mangled path, which is where
+                    // `Interp::exec` registers it.
+                    let r = self.request_fn_specialization(&fq, targs);
+                    let params = match self.reg.fn_sig(&r) {
                         Some(sig) => ref_params(sig),
                         // The specialization is generated at the end of this
                         // form, so its signature may not be registered yet;
@@ -4053,14 +4010,12 @@ impl Checker {
                 // function's diagnostics-only body check — the node is never
                 // executed, and that function's own specialization will
                 // re-check this reference with the types concrete.
-                let r = Ref { written, home, resolved: fq };
-                let form = self.fnref_form(heap, &r, &ref_params(&sig))?;
+                let form = self.fnref_form(heap, &fq, &ref_params(&sig))?;
                 return Ok(Checked::new(form, resolved_ty));
             }
             // Shape mismatch: hand back the generic node so `check`'s
             // ordinary expected-vs-actual reconciliation reports it.
-            let r = Ref { written, home, resolved: fq };
-            let form = self.fnref_form(heap, &r, &ref_params(&sig))?;
+            let form = self.fnref_form(heap, &fq, &ref_params(&sig))?;
             return Ok(Checked::new(form, tmpl_ty));
         }
         Err(Error::TypeError(format!(
@@ -4085,11 +4040,10 @@ impl Checker {
         let def = self.reg.type_def(type_fq).expect("the resolution found the method on this type");
         let af = def.assoc.get(name).expect("the resolution found the method on this type");
         let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
-        let home = self.ns.clone();
         if def.params.is_empty() && af.sig.type_params.is_empty() {
             let params = af.sig.params.clone();
             let ret = af.sig.ret.clone();
-            let form = self.methodref_form(heap, type_fq, name, &home, &params, &ret)?;
+            let form = self.methodref_form(heap, type_fq, name, &params, &ret)?;
             return Ok(Checked::new(form, ty));
         }
         let not_here = || {
@@ -4117,7 +4071,7 @@ impl Checker {
             Type::Fn(ps, _, r) => (ps.clone(), (**r).clone()),
             _ => unreachable!("a method's type is a function type"),
         };
-        let form = self.methodref_form(heap, type_fq, &mangled, &home, &params, &ret)?;
+        let form = self.methodref_form(heap, type_fq, &mangled, &params, &ret)?;
         Ok(Checked::new(form, resolved_ty))
     }
 
@@ -4159,7 +4113,7 @@ impl Checker {
         } else {
             let (path, vi) = self.resolve_global(recv_name)?;
             let ty = vi.ty;
-            let r = self.mk_ref(vec![recv_name.clone()], path);
+            let r = path;
             match self.global_form(heap, &r, &ty) {
                 Ok(form) => Checked::new(form, ty),
                 Err(e) => return Some(Err(e)),
@@ -4713,7 +4667,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
             self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
-        self.definition_form(heap, &fq_name, &type_params, &params, &ret, public, &body)
+        self.definition_form(heap, &fq_name, &type_params, &params, &ret, &body)
     }
 
     /// The `&optional`/`&key` `defun` path — `Self::check_defun` routes here
@@ -4864,7 +4818,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
             self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
-        self.definition_form(heap, &fq_name, &type_params, &params, &ret, public, &body)
+        self.definition_form(heap, &fq_name, &type_params, &params, &ret, &body)
     }
 
     /// Checks one `&optional`/`&key` default-value form (or none) for
@@ -5115,13 +5069,10 @@ impl Checker {
             .get(base)
             .expect("a specialization is only ever requested for a retained template")
             .clone();
-        // A specialization's own `public` mirrors the unspecialized
-        // template's — see `Self::specialize_method`'s identical treatment.
-        let public = self.reg.fn_sig(base).map(|s| s.public).unwrap_or(true);
         let bindings: BTreeMap<String, Type> =
             tmpl.type_params.iter().cloned().zip(args.iter().cloned()).collect();
         let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(tmpl.ns.clone(), bindings);
-        let result = self.specialize_defun_body(heap, interp, &tmpl, mangled, public);
+        let result = self.specialize_defun_body(heap, interp, &tmpl, mangled);
         self.exit_specialization(saved_ns, saved_loops, saved_bindings);
         result
     }
@@ -5196,16 +5147,6 @@ impl Checker {
         let SpecRequest::Method { type_fq, base, args, mangled } = req else {
             unreachable!("drain routes Method requests here")
         };
-        // A specialization's own `public` mirrors the unspecialized template
-        // method's — `Interp`'s scope tree gates visibility on this bit (see
-        // `assoc`'s doc comment), so a generated specialization must
-        // carry the same one its template declared, not a default.
-        let public = self
-            .reg
-            .type_def(type_fq)
-            .and_then(|d| d.assoc.get(base))
-            .map(|af| af.sig.public)
-            .unwrap_or(true);
         let tmpl = self
             .generic_method_templates
             .get(&(type_fq.clone(), base.clone()))
@@ -5220,12 +5161,12 @@ impl Checker {
                     .chain(own_vars.into_iter().zip(args[owner_n..].iter().cloned()))
                     .collect();
                 let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(ns, bindings);
-                let result = self.specialize_method_form(heap, interp, &parts, mangled, public);
+                let result = self.specialize_method_form(heap, interp, &parts, mangled);
                 self.exit_specialization(saved_ns, saved_loops, saved_bindings);
                 result
             }
-            MethodTemplate::Getter { index } => self.synthesize_accessor(heap, type_fq, args, index, mangled, true, public),
-            MethodTemplate::Setter { index } => self.synthesize_accessor(heap, type_fq, args, index, mangled, false, public),
+            MethodTemplate::Getter { index } => self.synthesize_accessor(heap, type_fq, args, index, mangled, true),
+            MethodTemplate::Setter { index } => self.synthesize_accessor(heap, type_fq, args, index, mangled, false),
         }
     }
 
@@ -5235,7 +5176,6 @@ impl Checker {
         interp: &dyn MacroExpander,
         parts: &[Value],
         mangled: &str,
-        public: bool,
     ) -> Result<TopLevelForm, Error> {
         let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
             self.parse_defmethod_sig(heap, parts, &[])?;
@@ -5254,7 +5194,7 @@ impl Checker {
         // The *written* name, not the mangled one: the body's own
         // `(return-from NAME ...)` was written against the name in the source.
         let body = self.check_definition_body(heap, interp, &env, &parts[body_start..], &[], &method, &ret)?;
-        self.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, public, &body)
+        self.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, &body)
     }
 
     /// Builds a concrete accessor `TopLevel::Defmethod` for a generic
@@ -5269,7 +5209,6 @@ impl Checker {
         index: usize,
         mangled: &str,
         getter: bool,
-        public: bool,
     ) -> Result<TopLevelForm, Error> {
         let def = self.reg.type_def(type_fq).expect("an accessor template implies the type exists");
         let subst: BTreeMap<String, Type> =
@@ -5290,7 +5229,7 @@ impl Checker {
             s.push_root(self_var);
             let get = self.field_get_form(&mut s, self_var, index, &field_ty)?;
             s.push_root(get);
-            self.defmethod_form(&mut s, type_fq, mangled, true, &[self_param], &field_ty, public, &[get])
+            self.defmethod_form(&mut s, type_fq, mangled, true, &[self_param], &field_ty, &[get])
         } else {
             let self_var = forms::var_form(heap, "self")?;
             let mut s = RootScope::new(heap);
@@ -5300,7 +5239,7 @@ impl Checker {
             let set = self.field_set_form(&mut s, self_var, index, &field_ty, value_var)?;
             s.push_root(set);
             let params = [self_param, ("value".to_string(), field_ty)];
-            self.defmethod_form(&mut s, type_fq, mangled, true, &params, &Type::Unit, public, &[set])
+            self.defmethod_form(&mut s, type_fq, mangled, true, &params, &Type::Unit, &[set])
         }
     }
 
@@ -5310,10 +5249,9 @@ impl Checker {
         interp: &dyn MacroExpander,
         tmpl: &FnTemplate,
         mangled: &Path,
-        public: bool,
     ) -> Result<TopLevelForm, Error> {
         if params_declare_opt_key(heap, tmpl.parts[1])? {
-            return self.specialize_defun_body_opt_key(heap, interp, tmpl, mangled, public);
+            return self.specialize_defun_body_opt_key(heap, interp, tmpl, mangled);
         }
         // `bounds` deliberately dropped: the type variables are concrete
         // here, so method calls on them resolve directly against the real
@@ -5332,7 +5270,7 @@ impl Checker {
         let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
-        self.defun_form(heap, mangled, &params, &ret, public, &body)
+        self.defun_form(heap, mangled, &params, &ret, &body)
     }
 
     /// [`Self::specialize_defun_body`]'s `&optional`/`&key` counterpart —
@@ -5364,7 +5302,6 @@ impl Checker {
         interp: &dyn MacroExpander,
         tmpl: &FnTemplate,
         mangled: &Path,
-        public: bool,
     ) -> Result<TopLevelForm, Error> {
         let (required, _required_locs, optionals_raw, rest, keys_raw) =
             self.parse_defun_params_full(heap, tmpl.parts[1])?;
@@ -5404,7 +5341,7 @@ impl Checker {
         let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
-        self.defun_form(heap, mangled, &params, &ret, public, &body)
+        self.defun_form(heap, mangled, &params, &ret, &body)
     }
 
     /// Whether a declared type's *runtime representation* is a heap value —
@@ -5858,7 +5795,7 @@ impl Checker {
             self.reg.docs.macros.insert(fq_name.clone(), doc);
         }
         self.defmacro_body(
-            heap, interp, parts, parts_locs, &fq_name, public, body_start,
+            heap, interp, parts, parts_locs, &fq_name, body_start,
             &required_names, &optionals, &rest_name, &key_specs, &params,
         )
     }
@@ -5879,7 +5816,6 @@ impl Checker {
         parts: &[Value],
         parts_locs: &[Option<Loc>],
         fq_name: &Path,
-        public: bool,
         body_start: usize,
         required_names: &[String],
         optionals: &[(String, Option<Value>)],
@@ -5920,7 +5856,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&sexpr_ty))?;
         let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
-        forms::defmacro_form(heap, fq_name, params, rest, &lambda, public, &body)
+        forms::defmacro_form(heap, fq_name, params, rest, &lambda, &body)
     }
 
     /// Check one `&optional`/`&key` default-value form (or none) against
@@ -7358,8 +7294,7 @@ impl Checker {
             typed.push(self.check_at(heap, interp, env, *a, Some(&expect), nth_loc(arg_locs, i))?);
         }
         let ty = subst_apply(&sig.ret, &subst);
-        let home = self.ns.clone();
-        let form = self.assoc_form(heap, type_fq, method, true, &home, &ty, &typed)?;
+        let form = self.assoc_form(heap, type_fq, method, true, &ty, &typed)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -9086,7 +9021,7 @@ impl Checker {
             all.push((s.clone(), recv_ty));
         }
         all.extend(params);
-        self.method_definition_form(heap, &type_fq, &method, instance, &type_params, &all, &ret, public, &body)
+        self.method_definition_form(heap, &type_fq, &method, instance, &type_params, &all, &ret, &body)
     }
 
     /// Parses a `defmethod` form's name, receiver, parameters, and return
@@ -9370,7 +9305,6 @@ impl Checker {
                     &type_params,
                     &[("self".to_string(), recv_ty.clone())],
                     field_ty,
-                    field_public,
                     &[get],
                 )?
             };
@@ -9408,7 +9342,6 @@ impl Checker {
                     &type_params,
                     &[("self".to_string(), recv_ty.clone()), ("value".to_string(), field_ty.clone())],
                     &Type::Unit,
-                    field_public,
                     &[set],
                 )?
             };
@@ -10612,11 +10545,11 @@ impl Checker {
                     match self.resolve_name(env, Written::Bare(name), &mut receiver) {
                         Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
                             let ty = vi.ty;
-                            let r = self.mk_ref(vec![name.to_string()], path);
+                            let r = path;
                             Checked::new(self.global_form(heap, &r, &ty)?, ty)
                         }
                         Some(Resolved::Value(ModuleValue::Fn(fq))) => {
-                            self.fn_ref_node(heap, vec![name.to_string()], fq, expected)?
+                            self.fn_ref_node(heap, fq, expected)?
                         }
                         Some(Resolved::Method(MethodTarget::Assoc(type_fq))) => {
                             self.method_value(heap, &type_fq, name, expected)?
@@ -10661,10 +10594,10 @@ impl Checker {
                     match self.resolve_name(env, Written::Path(&segs), &mut || None) {
                         Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
                             let ty = vi.ty;
-                            let r = self.mk_ref(segs.clone(), path);
+                            let r = path;
                             Checked::new(self.global_form(heap, &r, &ty)?, ty)
                         }
-                        Some(Resolved::Value(ModuleValue::Fn(fq))) => self.fn_ref_node(heap, segs.clone(), fq, expected)?,
+                        Some(Resolved::Value(ModuleValue::Fn(fq))) => self.fn_ref_node(heap, fq, expected)?,
                         Some(Resolved::Macro(..)) => {
                             return Err(Error::TypeError(format!("`{}` is a macro, which has no value", segs.join("::"))))
                         }
@@ -11028,10 +10961,10 @@ impl Checker {
                 self.check_method_call(heap, interp, env, target, recv, &head, &args[1..], &arg_locs[1..])
             }
             Some(Resolved::Value(ModuleValue::Fn(fq))) => {
-                self.check_call(heap, interp, env, std::slice::from_ref(&head), &fq, args, arg_locs)
+                self.check_call(heap, interp, env, &fq, args, arg_locs)
             }
             Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
-                let r = self.mk_ref(vec![head.clone()], path);
+                let r = path;
                 let form = self.global_form(heap, &r, &vi.ty)?;
                 let callee = Checked::new(form, vi.ty);
                 self.check_apply(heap, interp, env, callee, args, arg_locs)
@@ -11214,7 +11147,7 @@ impl Checker {
             let doc = take_leading_docstring(heap, &parts, 2);
             let body_start = if doc.is_some() { 3 } else { 2 };
             let form = self.defmacro_body(
-                heap, interp, &parts, &locs, &path, false, body_start,
+                heap, interp, &parts, &locs, &path, body_start,
                 &required_names, &optionals, &rest_name, &key_specs, &params,
             )?;
             heap.push_root(form);
@@ -11565,9 +11498,9 @@ impl Checker {
                 heap.pop_root();
                 result
             }
-            Some(Resolved::Value(ModuleValue::Fn(fq))) => self.check_call(heap, interp, env, segs, &fq, args, arg_locs),
+            Some(Resolved::Value(ModuleValue::Fn(fq))) => self.check_call(heap, interp, env, &fq, args, arg_locs),
             Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
-                let r = self.mk_ref(segs.to_vec(), path);
+                let r = path;
                 let form = self.global_form(heap, &r, &vi.ty)?;
                 let callee = Checked::new(form, vi.ty);
                 self.check_apply(heap, interp, env, callee, args, arg_locs)
@@ -12042,8 +11975,7 @@ impl Checker {
                 return Ok(Checked::new(folded, ty));
             }
         }
-        let home = self.ns.clone();
-        let form = self.assoc_form(heap, type_fq, &method_name, instance, &home, &ty, &typed)?;
+        let form = self.assoc_form(heap, type_fq, &method_name, instance, &ty, &typed)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -12731,11 +12663,11 @@ impl Checker {
             ))
         };
         // A function or a macro: the same generic check for both.
-        let fn_target = |written: Vec<String>, resolved: Path| -> Result<CompileTarget, Error> {
+        let fn_target = |resolved: Path| -> Result<CompileTarget, Error> {
             if self.generic_fn_templates.contains_key(&resolved) {
                 return Err(generic_err());
             }
-            Ok(CompileTarget::Fn(self.mk_ref(written, resolved)))
+            Ok(CompileTarget::Fn(resolved))
         };
         // The one resolution rule, with no receiver: a bare name is a macro or
         // a module-level value, a path also a type's member. A macro's body is
@@ -12745,12 +12677,12 @@ impl Checker {
         let segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
         let written = if segs.len() == 1 { Written::Bare(name) } else { Written::Path(&segs) };
         match self.resolve_name(&Env::new(), written, &mut || None) {
-            Some(Resolved::Value(ModuleValue::Fn(path))) | Some(Resolved::Macro(path, _)) => fn_target(segs.clone(), path),
+            Some(Resolved::Value(ModuleValue::Fn(path))) | Some(Resolved::Macro(path, _)) => fn_target(path),
             Some(Resolved::Member(type_fq, method)) => {
                 if self.generic_method_templates.contains_key(&(type_fq.clone(), method.clone())) {
                     return Err(generic_err());
                 }
-                Ok(CompileTarget::Method { type_name: type_fq, method, home: self.ns.clone() })
+                Ok(CompileTarget::Method(type_fq, method))
             }
             Some(Resolved::Value(ModuleValue::Var(..))) => {
                 Err(Error::TypeError(format!("{}: `{}` is a variable, not a function", who, name)))
@@ -13040,7 +12972,7 @@ impl Checker {
             .ok_or_else(|| Error::TypeError("ed: the `ed-open` builtin is not registered".into()))?;
         let file = Checked::new(forms::str_lit_form(heap, &file)?, Type::Str);
         let line = Checked::new(core::tagged(heap, "int", &[Value::Int(line)])?, Type::Int);
-        let r = Ref::synthetic(Path::internal("ed-open"));
+        let r = Path::internal("ed-open");
         let node = self.call_form(heap, &r, &[file, line])?;
         Ok(Checked::new(node, ret))
     }
@@ -13192,7 +13124,7 @@ impl Checker {
                                         .into(),
                                 )
                             })?;
-                            let r = self.mk_ref(vec!["sexpr-append".to_string()], append_fq);
+                            let r = append_fq;
                             let form = self.call_form(heap, &r, &[spliced, rest])?;
                             // Rooted like every other node handed back from
                             // here (see `forms::rooted`). Without this, a
@@ -13399,7 +13331,7 @@ impl Checker {
                 return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
             }
             let value = self.check_at(heap, interp, env, args[1], Some(&vi.ty), value_loc)?;
-            let r = self.mk_ref(vec![name.clone()], path);
+            let r = path;
             let form = self.set_global_form(heap, &r, &vi.ty, value.form)?;
             return Ok(Checked::new(form, vi.ty));
         }
@@ -13430,7 +13362,7 @@ impl Checker {
             let form = forms::var_form(heap, recv_name)?;
             Checked::new(form, ty)
         } else if let Some((path, vi)) = self.resolve_global(recv_name) {
-            let r = self.mk_ref(vec![recv_name.clone()], path);
+            let r = path;
             let form = self.global_form(heap, &r, &vi.ty)?;
             Checked::new(form, vi.ty)
         } else {
@@ -14259,7 +14191,7 @@ impl Checker {
         let fq = self
             .resolve_fn(name)
             .ok_or_else(|| Error::TypeError(format!("{}: the prelude's `{}` is not loaded", name, name)))?;
-        self.check_call(heap, interp, env, &[name.to_string()], &fq, args, arg_locs)
+        self.check_call(heap, interp, env, &fq, args, arg_locs)
     }
 
     /// CL's 2-argument `(log number base)`: the change-of-base identity
@@ -14378,7 +14310,7 @@ impl Checker {
         if let Some(doc) = doc {
             self.reg.docs.vars.insert(fq_name.clone(), doc);
         }
-        self.defvar_form(heap, &fq_name, &ty, mutable, public, value.form, reassign)
+        self.defvar_form(heap, &fq_name, &ty, mutable, value.form, reassign)
     }
 
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
@@ -14966,7 +14898,7 @@ impl Checker {
     /// value whose type has no `Sexpr` encoding is the same clear `TypeError`
     /// a bad `&rest` element gets), then `sexpr-cons`-ed together back-to-front.
     fn cons_hetero_sexpr(&self, heap: &mut Heap, items: Vec<Checked>) -> Result<Checked, Error> {
-        let r = Ref::synthetic(Path::root("sexpr-cons"));
+        let r = Path::root("sexpr-cons");
         let nil = forms::quote_nil(heap)?;
         let mut acc = Checked::new(nil, option_of_sexpr());
         for item in items.into_iter().rev() {
@@ -15135,7 +15067,7 @@ impl Checker {
         self.check_directive_arguments(&control_text, &items)?;
         self.note_format_calls(&control_text, "format", &items)?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        let r = Ref::synthetic(Path::root("format-rt"));
+        let r = Path::root("format-rt");
         let form = self.call_form(heap, &r, &[dest, control, list])?;
         Ok(Checked::new(form, Type::Str))
     }
@@ -15240,7 +15172,7 @@ impl Checker {
         self.check_directive_arguments(&control_text, &items)?;
         self.note_format_calls(&control_text, what, &items)?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        let r = Ref::synthetic(Path::root(builtin));
+        let r = Path::root(builtin);
         let form = self.call_form(heap, &r, &[control, list])?;
         Ok(Checked::new(form, ret))
     }
@@ -15285,7 +15217,7 @@ impl Checker {
             None => Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(16)])?, Type::I32),
         };
         let which = Checked::new(forms::str_lit_form(heap, form)?, Type::Str);
-        let r = Ref::synthetic(Path::root("pprint-rt"));
+        let r = Path::root("pprint-rt");
         let node = self.call_form(heap, &r, &[which, value, colinc])?;
         Ok(Checked::new(node, Type::Unit))
     }
@@ -15365,7 +15297,7 @@ impl Checker {
         // is run for its printing effect.
         let flag = Checked::new(core::tagged(&mut s, "bool", &[Value::Bool(per_line)])?, Type::Bool);
         s.push_root(flag.form);
-        let start_r = Ref::synthetic(Path::root("pprint-block-start-rt"));
+        let start_r = Path::root("pprint-block-start-rt");
         let start = self.call_form(&mut s, &start_r, &[obj, prefix, flag, suffix])?;
         s.push_root(start);
         let mut seq = vec![start];
@@ -15373,7 +15305,7 @@ impl Checker {
             let e = self.check_at(&mut s, interp, env, form, None, nth_loc(arg_locs, 1 + i))?;
             seq.push(e.form);
         }
-        let end_r = Ref::synthetic(Path::root("pprint-block-end-rt"));
+        let end_r = Path::root("pprint-block-end-rt");
         let end = self.call_form(&mut s, &end_r, &[])?;
         s.push_root(end);
         seq.push(end);
@@ -15445,7 +15377,7 @@ impl Checker {
         sig: &FnSig,
         params: &HashSet<String>,
         subst: &mut BTreeMap<String, Type>,
-    ) -> Result<(Path, bool), Error> {
+    ) -> Result<Path, Error> {
         self.infer_pinned_assoc_types(env, sig, params, subst);
         for p in &sig.type_params {
             if !subst.contains_key(p) {
@@ -15454,16 +15386,13 @@ impl Checker {
         }
         self.validate_where_bounds(&name.to_string(), &sig.bounds, subst, &env.bounds)?;
 
-        let mut call_path = name.clone();
-        let mut specialized = false;
         if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
             let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
             if !targs.iter().any(|t| self.type_is_open(t)) {
-                call_path = self.request_fn_specialization(name, targs);
-                specialized = true;
+                return Ok(self.request_fn_specialization(name, targs));
             }
         }
-        Ok((call_path, specialized))
+        Ok(name.clone())
     }
 
     fn infer_pinned_assoc_types(
@@ -15536,7 +15465,6 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        written: &[String],
         name: &Path,
         args: &[Value],
         arg_locs: &[Option<Loc>],
@@ -15556,7 +15484,7 @@ impl Checker {
             )));
         }
         if !sig.optionals.is_empty() || !sig.keys.is_empty() {
-            return self.check_call_opt_key(heap, interp, env, written, name, &sig, args, arg_locs);
+            return self.check_call_opt_key(heap, interp, env, name, &sig, args, arg_locs);
         }
         let fixed = sig.params.len();
         match &sig.rest {
@@ -15604,12 +15532,7 @@ impl Checker {
             let resolved = subst_apply(elem_ty, &subst);
             typed.push(self.cons_rest_list(heap, &resolved, rest_typed)?);
         }
-        let (call_path, specialized) = self.resolve_call_target(env, name, &sig, &params, &mut subst)?;
-        let r = if specialized {
-            Ref::synthetic(call_path)
-        } else {
-            self.mk_ref(written.to_vec(), call_path)
-        };
+        let r = self.resolve_call_target(env, name, &sig, &params, &mut subst)?;
         let ty = subst_apply(&sig.ret, &subst);
         let form = self.call_form(heap, &r, &typed)?;
         // A typed pointer a C function returned has to point into memory an
@@ -15728,7 +15651,6 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        written: &[String],
         name: &Path,
         sig: &FnSig,
         args: &[Value],
@@ -15837,7 +15759,7 @@ impl Checker {
             }
         }
 
-        let (call_path, specialized) = self.resolve_call_target(env, name, sig, &params, &mut subst)?;
+        let r = self.resolve_call_target(env, name, sig, &params, &mut subst)?;
 
         // Pass 2: fill in whatever pass 1 left out, now that `subst` is
         // final — a default expression's `.ty` is already concrete (`Self::
@@ -15888,11 +15810,6 @@ impl Checker {
             }
         }
 
-        let r = if specialized {
-            Ref::synthetic(call_path)
-        } else {
-            self.mk_ref(written.to_vec(), call_path)
-        };
         let ty = subst_apply(&sig.ret, &subst);
         let form = self.call_form(heap, &r, &typed)?;
         Ok(Checked::new(form, ty))

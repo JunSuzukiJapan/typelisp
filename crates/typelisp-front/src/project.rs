@@ -766,14 +766,14 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
 /// Whether `form` is a call to one of the two builtins that install a reader
 /// macro.
 ///
-/// By callee, because it is an ordinary call and not a definition: field 2 of
-/// a `call` node is the resolved path (`core_eval::call_core`). Only a call
+/// By callee, because it is an ordinary call and not a definition: field 0 of
+/// a `call` node is the resolved path. Only a call
 /// *directly* at top level counts — one buried in a `progn` or a `let` would
 /// have to be evaluated to be found, which is the thing being decided.
 fn is_readtable_registration(heap: &Heap, form: Value) -> bool {
     core::op_sym(heap, form).map(|s| s.well_known()) == Some(wk::CALL)
         && matches!(
-            core::path_field(heap, form, 2).as_ref().map(|p| p.to_string()).as_deref(),
+            core::path_field(heap, form, 0).as_ref().map(|p| p.to_string()).as_deref(),
             Some("set-macro-character") | Some("set-dispatch-macro-character")
         )
 }

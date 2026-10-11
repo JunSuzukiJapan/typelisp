@@ -453,11 +453,7 @@ impl Interp {
         if has_native_dispatcher {
             for (type_name, method) in &slots {
                 if !self.root.borrow().method_compiled(type_name, method) {
-                    let target = crate::CompileTarget::Method {
-                        type_name: type_name.clone(),
-                        method: method.clone(),
-                        home: type_name.parent().to_vec(),
-                    };
+                    let target = crate::CompileTarget::Method(type_name.clone(), method.clone());
                     (crate::eval::interp::backend_compile_function()?)(self, &mut s, &target)?;
                 }
             }
@@ -568,7 +564,7 @@ impl Interp {
         }
     }
 
-    /// `(global (WRITTEN...) (HOME...) PATH REPR)` — read a `defvar`.
+    /// `(global PATH REPR)` — read a `defvar`.
     ///
     /// A global some compiled function reads or writes lives in a permanent GC
     /// root instead of an ordinary cell (`Interp::promote_global`), and must be
@@ -576,9 +572,7 @@ impl Interp {
     /// see a stale value a compiled write already updated, even though both
     /// sides name the same `defvar`.
     fn global_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
-        let written = self.name_list(heap, form, 0, "global")?;
-        let home = self.name_list(heap, form, 1, "global")?;
-        let path = path_field(heap, form, 2, "global")?;
+        let path = path_field(heap, form, 0, "global")?;
         if let Some(&id) = self.compiled_globals.borrow().get(&path) {
             // `id` is *not* the permanent-root position — see
             // `typelisp_rt::global_new`'s doc comment (an `Option`/`Result`
@@ -591,23 +585,21 @@ impl Interp {
             // value (see `eval_builtin_method`'s doc comment).
             return Ok(heap.permanent_root(perm_idx));
         }
-        self.resolve_global_named(&home, &written, &path)
-            .map(|slot| slot.get(heap))
+        let slot = self.root.borrow().get_global(&path);
+        slot.map(|slot| slot.get(heap))
             .ok_or_else(|| EvalError::Unbound(path.to_string()))
     }
 
-    /// `(fnref (WRITTEN...) (HOME...) PATH (PARAM-REPR...))` — a named free
-    /// function as a value.
+    /// `(fnref PATH (PARAM-REPR...))` — a named free function as a value.
     ///
     /// A user function becomes an ordinary interpreted closure over its own
     /// parameters and body with an *empty* captured environment: a top-level
     /// `defun` has nothing to capture. A built-in becomes a `BoxedObj::Builtin`
     /// naming it, which `apply_core` dispatches by name.
     fn fnref_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
-        let written = self.name_list(heap, form, 0, "fnref")?;
-        let home = self.name_list(heap, form, 1, "fnref")?;
-        let path = path_field(heap, form, 2, "fnref")?;
-        match self.resolve_fn_named(&home, &written, &path) {
+        let path = path_field(heap, form, 0, "fnref")?;
+        let f = self.root.borrow().get_fn(&path);
+        match f {
             Some(f) => self.reify(heap, &f),
             // A free built-in's own result key is not carried: the ones that
             // build a box (`parse-float`'s `Result`) spell it from their own
@@ -618,25 +610,24 @@ impl Interp {
         }
     }
 
-    /// `(methodref PATH SYM (HOME...) (PARAM-REPR...))` — [`Self::fnref_core`]
+    /// `(methodref PATH SYM (PARAM-REPR...) RET-KEY)` — [`Self::fnref_core`]
     /// for a method.
     fn methodref_core(&self, heap: &mut Heap, form: Value) -> Result<Value, EvalError> {
         let type_name = path_field(heap, form, 0, "methodref")?;
         let method = sym_field(heap, form, 1, "methodref")?;
-        let home = self.name_list(heap, form, 2, "methodref")?;
-        let f = self.root.borrow().resolve_method(&home, &type_name, &method);
+        let f = self.root.borrow().get_method(&type_name, &method);
         match f {
             Some(f) => self.reify(heap, &f),
             None => {
                 let recv = crate::types::intern_path_id(heap, &type_name);
-                let ret_key = str_field(heap, form, 4, "methodref")?;
+                let ret_key = str_field(heap, form, 3, "methodref")?;
                 Ok(heap.alloc_builtin_fn(Some(recv), &method, &ret_key))
             }
         }
     }
 
-    /// `(compile-fn (fn (WRITTEN...) (HOME...) PATH))` or
-    /// `(compile-fn (method PATH SYM (HOME...)))` — the `(compile name)` form.
+    /// `(compile-fn (fn PATH))` or `(compile-fn (method PATH SYM))` — the
+    /// `(compile name)` form.
     ///
     /// The nested `(fn ..)`/`(method ..)` payload is read back into the
     /// `CompileTarget` the compile driver takes. That type is a *resolution*,
@@ -654,17 +645,11 @@ impl Interp {
     /// payload shape is shared too.
     fn compile_target(&self, heap: &mut Heap, payload: Value, who: &str) -> Result<crate::CompileTarget, EvalError> {
         Ok(match core::op_sym(heap, payload).map(|s| s.well_known()) {
-            Some(wk::FN) => {
-                let written = self.name_list(heap, payload, 0, who)?;
-                let home = self.name_list(heap, payload, 1, who)?;
-                let resolved = path_field(heap, payload, 2, who)?;
-                crate::CompileTarget::Fn(crate::check::Ref { written, home, resolved })
-            }
+            Some(wk::FN) => crate::CompileTarget::Fn(path_field(heap, payload, 0, who)?),
             Some(wk::METHOD) => {
                 let type_name = path_field(heap, payload, 0, who)?;
                 let method = sym_field(heap, payload, 1, who)?;
-                let home = self.name_list(heap, payload, 2, who)?;
-                crate::CompileTarget::Method { type_name, method, home }
+                crate::CompileTarget::Method(type_name, method)
             }
             other => {
                 return Err(EvalError::Internal(format!(
@@ -676,19 +661,10 @@ impl Interp {
     }
 
     /// The definition a resolved [`crate::CompileTarget`] names.
-    ///
-    /// Goes through the *same* two lookups `compile::driver::compile_function`
-    /// does, and for the same reason: a `Fn` target's `written`+`home` walk
-    /// can land on a different definition than its `resolved` path names, so
-    /// the answer has to be the thing actually found rather than the name
-    /// written down. Which is also why `trace` reads its key off the
-    /// [`FnDef`] instead of rebuilding one from the target.
-    fn target_def(&self, target: &crate::CompileTarget) -> Option<Rc<FnDef>> {
+    pub fn target_def(&self, target: &crate::CompileTarget) -> Option<Rc<FnDef>> {
         match target {
-            crate::CompileTarget::Fn(r) => self.resolve_fn_ref(r),
-            crate::CompileTarget::Method { type_name, method, home } => {
-                self.root.borrow().resolve_method(home, type_name, method)
-            }
+            crate::CompileTarget::Fn(path) => self.root.borrow().get_fn(path),
+            crate::CompileTarget::Method(type_name, method) => self.root.borrow().get_method(type_name, method),
         }
     }
 
@@ -1089,39 +1065,6 @@ impl Interp {
         let body = core::list(&mut s, &f.body).map_err(heap_err)?;
         s.push_root(body);
         Ok(s.alloc_closure(params, ret, body, Value::Empty))
-    }
-
-    /// [`Interp::resolve_fn_ref`] from a core form's own three name fields.
-    ///
-    /// The `written`/`home` ancestor walk first, `resolved` only as the
-    /// fallback — see `resolve_fn_ref`'s doc comment for why both exist.
-    pub(super) fn resolve_fn_named(&self, home: &[String], written: &[String], resolved: &crate::Path) -> Option<Rc<FnDef>> {
-        self.root.borrow().resolve_fn(home, written).or_else(|| self.root.borrow().get_fn(resolved))
-    }
-
-    /// [`Self::resolve_fn_named`]'s twin for `global`/`set-global`.
-    pub(super) fn resolve_global_named(
-        &self,
-        home: &[String],
-        written: &[String],
-        resolved: &crate::Path,
-    ) -> Option<crate::eval::value::Slot> {
-        self.root.borrow().resolve_global(home, written).or_else(|| self.root.borrow().get_global(resolved))
-    }
-
-    /// A field holding a list of symbols (`written`, `home`), as strings.
-    pub(super) fn name_list(&self, heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<String>, EvalError> {
-        let field = core::field(heap, form, i)
-            .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) has no field {}", what, i)))?;
-        let segs = heap
-            .list_to_vec(field)
-            .map_err(|e| EvalError::Internal(format!("eval: ({} ..) field {}: {}", what, i, e)))?;
-        segs.iter()
-            .map(|v| match v {
-                Value::Symbol(id) => Ok(heap.symbol_name(*id).to_string()),
-                other => Err(EvalError::Internal(format!("eval: ({} ..) field {} holds {:?}", what, i, other))),
-            })
-            .collect()
     }
 }
 
@@ -1819,17 +1762,16 @@ impl Interp {
             }
         };
         match tag.as_str() {
-            // `(defun PATH ((SYM REPR)...) RET-REPR PUBLIC BODY...)`
+            // `(defun PATH ((SYM REPR)...) RET-REPR BODY...)`
             "defun" => {
                 let name = path_field(heap, tl, 0, "defun")?;
                 let (params, param_reprs) = param_list(heap, tl, 1, "defun")?;
                 let ret = repr_field(heap, tl, 2, "defun")?;
-                let public = bool_field(heap, tl, 3, "defun")?;
-                let body = body_forms(heap, tl, 4, "defun")?;
-                self.register_fn(heap, tl, name, params, param_reprs, ret, public, body, false, None);
+                let body = body_forms(heap, tl, 3, "defun")?;
+                self.register_fn(heap, tl, name, params, param_reprs, ret, body, false, None);
                 Ok(None)
             }
-            // `(defmethod PATH SYM INSTANCE ((SYM REPR)...) RET-REPR PUBLIC BODY...)`
+            // `(defmethod PATH SYM INSTANCE ((SYM REPR)...) RET-REPR BODY...)`
             //
             // The receiver is simply the first parameter, so there is no
             // `self_name` to splice in ahead of the rest the way the old node's
@@ -1840,8 +1782,7 @@ impl Interp {
                 let _instance = bool_field(heap, tl, 2, "defmethod")?;
                 let (params, param_reprs) = param_list(heap, tl, 3, "defmethod")?;
                 let ret = repr_field(heap, tl, 4, "defmethod")?;
-                let public = bool_field(heap, tl, 5, "defmethod")?;
-                let body = body_forms(heap, tl, 6, "defmethod")?;
+                let body = body_forms(heap, tl, 5, "defmethod")?;
                 heap.push_permanent_root(tl);
                 let def = FnDef { ffi: false,
                     name: format!("{}::{}", type_name, method),
@@ -1850,7 +1791,6 @@ impl Interp {
                     rest: false,
                     lambda: None,
                     sig: Some((param_reprs, ret)),
-                    public,
                     compiled: RefCell::new(None),
                 };
                 self.root
@@ -1861,7 +1801,7 @@ impl Interp {
                 self.printer_tables_changed();
                 Ok(None)
             }
-            // `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) PUBLIC BODY...)`
+            // `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) BODY...)`
             //
             // A macro's body is callable exactly like a `defun`'s — expanding
             // it is calling it — so it goes in the very same `fns` table; no
@@ -1871,8 +1811,7 @@ impl Interp {
                 let params = sym_list_field(heap, tl, 1, "defmacro")?;
                 let rest = bool_field(heap, tl, 2, "defmacro")?;
                 let lambda = macro_lambda(heap, tl, 3)?;
-                let public = bool_field(heap, tl, 4, "defmacro")?;
-                let body = body_forms(heap, tl, 5, "defmacro")?;
+                let body = body_forms(heap, tl, 4, "defmacro")?;
                 heap.push_permanent_root(tl);
                 // Every parameter — and the result — is `Sexpr`. The checker
                 // already checks a macro body under exactly those types
@@ -1895,7 +1834,6 @@ impl Interp {
                     rest,
                     lambda: Some(lambda),
                     sig: Some(sig),
-                    public,
                     compiled: RefCell::new(None),
                 };
                 self.root
@@ -1905,14 +1843,14 @@ impl Interp {
                     .insert(name.last_segment().to_string(), Rc::new(def));
                 Ok(None)
             }
-            // `(defvar PATH REPR MUTABLE PUBLIC FORM)`
+            // `(defvar PATH REPR MUTABLE FORM)`
             //
             // The representation is not read: it used to pick the global's slot
             // kind, which no longer varies. `mutable` is the checker's business
             // (it rejects a write to a constant), not the runtime's.
-            // `(defvar PATH REPR MUTABLE PUBLIC INIT [REASSIGN])`.
+            // `(defvar PATH REPR MUTABLE INIT [REASSIGN])`.
             //
-            // A sixth field means the source form was `defparameter`, which
+            // A fifth field means the source form was `defparameter`, which
             // assigns whether or not the global is already bound. Plain
             // `defvar` initializes **only if unbound**, as CL's does: the
             // initializer is not evaluated at all the second time, so
@@ -1921,12 +1859,11 @@ impl Interp {
             // `defvar` — see `Checker::defvar_form`.
             "defvar" => {
                 let name = path_field(heap, tl, 0, "defvar")?;
-                let public = bool_field(heap, tl, 3, "defvar")?;
-                let reassign = matches!(core::field(heap, tl, 5), Some(Value::Bool(true)));
+                let reassign = matches!(core::field(heap, tl, 4), Some(Value::Bool(true)));
                 if !reassign && self.global_is_bound(&name) {
                     return Ok(None);
                 }
-                let value = core::field(heap, tl, 4)
+                let value = core::field(heap, tl, 3)
                     .ok_or_else(|| EvalError::Internal("exec: (defvar ..) has no initializer".to_string()))?;
                 let v = self.eval_core(heap, value, Value::Empty)?;
                 let mut s = RootScope::new(heap);
@@ -1936,7 +1873,7 @@ impl Interp {
                     .borrow_mut()
                     .get_or_create(name.parent())
                     .globals
-                    .insert(name.last_segment().to_string(), scope::GlobalDef { slot, public });
+                    .insert(name.last_segment().to_string(), slot);
                 drop(s);
                 self.printer_tables_changed();
                 Ok(None)
@@ -2041,7 +1978,7 @@ impl Interp {
             // A forward declaration produced no code — its whole effect
             // happened in the checker (`Checker::check_defsignature`).
             "defsignature" => Ok(None),
-            // `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR PUBLIC (CTYPE...) RET-CTYPE)`
+            // `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR (CTYPE...) RET-CTYPE)`
             //
             // The opposite of `defsignature` above: its effect is *here*. The
             // checker only wrote the signature down; what makes the name
@@ -2058,7 +1995,6 @@ impl Interp {
                 let name = decl.path.clone();
                 let (params, param_reprs) = param_list(heap, tl, 3, "defffi")?;
                 let ret = repr_field(heap, tl, 4, "defffi")?;
-                let public = bool_field(heap, tl, 5, "defffi")?;
                 // Before registering, so a declaration that cannot be
                 // resolved leaves no name behind.
                 let thunk = (crate::eval::interp::backend_define_ffi()?)(self, &decl)
@@ -2071,7 +2007,6 @@ impl Interp {
                     rest: false,
                     lambda: None,
                     sig: Some((param_reprs, ret)),
-                    public,
                     compiled: RefCell::new(Some(thunk)),
                 };
                 self.root
@@ -2178,14 +2113,13 @@ impl Interp {
         params: Vec<String>,
         param_reprs: Vec<Repr>,
         ret: Repr,
-        public: bool,
         body: Vec<Value>,
         rest: bool,
         lambda: Option<MacroLambda>,
     ) {
         heap.push_permanent_root(tl);
         let def =
-            FnDef { ffi: false, name: name.to_string(), params, body, rest, lambda, sig: Some((param_reprs, ret)), public, compiled: RefCell::new(None) };
+            FnDef { ffi: false, name: name.to_string(), params, body, rest, lambda, sig: Some((param_reprs, ret)), compiled: RefCell::new(None) };
         self.root
             .borrow_mut()
             .get_or_create(name.parent())
@@ -2294,8 +2228,8 @@ pub fn read_ffi_decl(heap: &Heap, tl: Value) -> Result<crate::eval::interp::FfiD
                 )))
             }
         },
-        params: sym_list_field(heap, tl, 6, "defffi")?,
-        ret: sym_field(heap, tl, 7, "defffi")?,
+        params: sym_list_field(heap, tl, 5, "defffi")?,
+        ret: sym_field(heap, tl, 6, "defffi")?,
     })
 }
 

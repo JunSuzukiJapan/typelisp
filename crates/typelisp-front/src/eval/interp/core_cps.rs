@@ -270,9 +270,9 @@ impl ArgsKind {
     /// How many leading fields are not arguments.
     fn skip(self) -> usize {
         match self {
-            ArgsKind::Call => 4,
+            ArgsKind::Call => 2,
             ArgsKind::Construct => 5,
-            ArgsKind::Assoc => 7,
+            ArgsKind::Assoc => 6,
             ArgsKind::DynCall => 5,
             ArgsKind::Apply => 3,
         }
@@ -1731,7 +1731,7 @@ impl Interp {
             }
 
             Op::SetGlobal => {
-                let value = core::field(heap, form, 4)
+                let value = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (set-global ..) has no value form".to_string()))?;
                 stack.push(heap, Frame::SetGlobal { form }, loc.clone());
                 Ok(State::Eval(value, env))
@@ -1988,13 +1988,11 @@ impl Interp {
         };
         let (entry, params, args) = match kind {
             ArgsKind::Call => {
-                let written = self.name_list(heap, form, 0, "call")?;
-                let home = self.name_list(heap, form, 1, "call")?;
-                let path = path_field(heap, form, 2, "call")?;
-                let Some(f) = self.resolve_fn_named(&home, &written, &path) else {
+                let path = path_field(heap, form, 0, "call")?;
+                let Some(f) = self.root.borrow().get_fn(&path) else {
                     return Err(not_compilable(format!("`{}`", path), "is a built-in with no body to compile".to_string()));
                 };
-                let target = crate::CompileTarget::Fn(crate::check::resolved::Ref { written, home, resolved: path.clone() });
+                let target = crate::CompileTarget::Fn(path.clone());
                 let body = self.compiled_for_thread(heap, &f, &target, &format!("`{}`", path))?;
                 let params = compiled_params(&f, &path.to_string())?;
                 (sched::Entry::Body(body), params, argv)
@@ -2002,12 +2000,11 @@ impl Interp {
             ArgsKind::Assoc => {
                 let type_name = path_field(heap, form, 0, "assoc")?;
                 let method = sym_field(heap, form, 1, "assoc")?;
-                let home = self.name_list(heap, form, 3, "assoc")?;
                 let name = format!("{}::{}", type_name, method);
-                let Some(f) = self.root.borrow().resolve_method(&home, &type_name, &method) else {
+                let Some(f) = self.root.borrow().get_method(&type_name, &method) else {
                     return Err(not_compilable(format!("`{}`", name), "is a built-in with no body to compile".to_string()));
                 };
-                let target = crate::CompileTarget::Method { type_name, method, home };
+                let target = crate::CompileTarget::Method(type_name, method);
                 let body = self.compiled_for_thread(heap, &f, &target, &format!("`{}`", name))?;
                 let params = compiled_params(&f, &name)?;
                 (sched::Entry::Body(body), params, argv)
@@ -2114,7 +2111,6 @@ impl Interp {
                     rest: false,
                     lambda: None,
                     sig: Some((reprs, ret)),
-                    public: false,
                     compiled: std::cell::RefCell::new(None),
                 };
                 self.root
@@ -2131,7 +2127,7 @@ impl Interp {
             .borrow()
             .get_fn(&path)
             .ok_or_else(|| EvalError::Internal(format!("thread: `{}` was registered but is not found", path)))?;
-        let target = crate::CompileTarget::Fn(crate::check::resolved::Ref::synthetic(path));
+        let target = crate::CompileTarget::Fn(path);
         self.compiled_for_thread(heap, &f, &target, "the function value")
     }
 
@@ -2305,9 +2301,7 @@ impl Interp {
     }
 
     fn finish_call(&self, heap: &mut Heap, form: Value, argv: Vec<Value>) -> Result<(State, Option<Frame>), EvalError> {
-        let written = self.name_list(heap, form, 0, "call")?;
-        let home = self.name_list(heap, form, 1, "call")?;
-        let path = path_field(heap, form, 2, "call")?;
+        let path = path_field(heap, form, 0, "call")?;
 
         // `(yield)` gives up the rest of this turn — not a builtin, for the
         // same reason `wait` is not: a builtin answers with a value, and this
@@ -2350,7 +2344,8 @@ impl Interp {
                 return Ok((State::Apply(result?), None));
             }
         }
-        if let Some(f) = self.resolve_fn_named(&home, &written, &path) {
+        let f = self.root.borrow().get_fn(&path);
+        if let Some(f) = f {
             return self.enter_fn(heap, form, &f, argv);
         }
         // Otherwise a built-in operator, which lives at the root or in the
@@ -2504,7 +2499,7 @@ impl Interp {
         Ok((State::Apply(v), None))
     }
 
-    /// `(assoc PATH SYM INSTANCE (HOME...) RET-REPR (R...) ARG...)` — a method
+    /// `(assoc PATH SYM INSTANCE RET-REPR (R...) RET-KEY ARG...)` — a method
     /// call. The receiver, when there is one, is `argv[0]`.
     fn finish_assoc(
         &self,
@@ -2514,10 +2509,9 @@ impl Interp {
     ) -> Result<(State, Option<Frame>), EvalError> {
         let type_name = path_field(heap, form, 0, "assoc")?;
         let method = sym_field(heap, form, 1, "assoc")?;
-        let home = self.name_list(heap, form, 3, "assoc")?;
         // The result's runtime identity, for the built-in methods that build a
         // box: `Vector::new` has no field to read an instantiation off.
-        let ret_key = str_field(heap, form, 6, "assoc")?;
+        let ret_key = str_field(heap, form, 5, "assoc")?;
 
         // `Task<T>::wait` cannot go through `eval_builtin_method`: it may have to
         // *suspend*, and a builtin answers with a value or an error, with no way
@@ -2565,12 +2559,12 @@ impl Interp {
                 // the assoc node's result identity, the same slot
                 // `Vector<T>::pop` reads.
                 "recv" => ChanOp::Recv(chan_id_of(heap, argv.first().copied())?, ret_key.clone()),
-                _ => return self.finish_assoc_resolved(heap, form, argv, type_name, method, home, ret_key),
+                _ => return self.finish_assoc_resolved(heap, form, argv, type_name, method, ret_key),
             };
             return Ok((State::Blocked(Waiting::Chan(op)), None));
         }
 
-        self.finish_assoc_resolved(heap, form, argv, type_name, method, home, ret_key)
+        self.finish_assoc_resolved(heap, form, argv, type_name, method, ret_key)
     }
 
     /// [`Self::finish_assoc`] past the interceptions: an ordinary method, a
@@ -2587,10 +2581,9 @@ impl Interp {
         argv: Vec<Value>,
         type_name: crate::Path,
         method: String,
-        home: Vec<String>,
         ret_key: String,
     ) -> Result<(State, Option<Frame>), EvalError> {
-        let f = self.root.borrow().resolve_method(&home, &type_name, &method);
+        let f = self.root.borrow().get_method(&type_name, &method);
         match f {
             Some(f) => self.enter_fn(heap, form, &f, argv),
             None => match super::eval_builtin_method(heap, &type_name, &method, &argv, &ret_key) {
@@ -2906,9 +2899,7 @@ impl Interp {
             // written through that same storage — otherwise an interpreted
             // read could see a stale value a compiled write already updated.
             Frame::SetGlobal { form } => {
-                let written = self.name_list(heap, form, 0, "set-global")?;
-                let home = self.name_list(heap, form, 1, "set-global")?;
-                let path = path_field(heap, form, 2, "set-global")?;
+                let path = path_field(heap, form, 0, "set-global")?;
                 if let Some(&id) = self.compiled_globals.borrow().get(&path) {
                     let perm_idx = typelisp_rt::global_perm_idx(id).ok_or_else(|| {
                         EvalError::Internal(format!("global \"{}\": unknown compiled id {}", path, id))
@@ -2916,7 +2907,8 @@ impl Interp {
                     heap.set_permanent_root(perm_idx, v);
                     return Ok((State::Apply(Value::Empty), None));
                 }
-                match self.resolve_global_named(&home, &written, &path) {
+                let slot = self.root.borrow().get_global(&path);
+                match slot {
                     Some(slot) => {
                         slot.set(heap, v);
                         Ok((State::Apply(Value::Empty), None))

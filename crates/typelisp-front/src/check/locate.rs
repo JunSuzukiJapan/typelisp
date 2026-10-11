@@ -151,22 +151,27 @@ fn visit(heap: &Heap, form: Value, file: &str, cursor: (u32, u32), depth: usize,
 /// through to `None`, same as any node this pass doesn't recognize.
 pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option<Loc> {
     match core::op_sym(heap, node)?.well_known() {
-        // `(global (WRITTEN...) (HOME...) PATH REPR)` and `set-global`'s same
-        // leading triple.
-        wk::GLOBAL | wk::SET_GLOBAL => def_locs.vars.get(&core::path_field(heap, node, 2)?).cloned(),
-        // `(call (WRITTEN...) (HOME...) PATH ...)`, `fnref`'s same triple.
-        wk::CALL | wk::FNREF => def_locs.fns.get(&core::path_field(heap, node, 2)?).cloned(),
+        // `(global PATH REPR)`, `(set-global PATH ...)`.
+        wk::GLOBAL | wk::SET_GLOBAL => def_locs.vars.get(&core::path_field(heap, node, 0)?).cloned(),
+        // `(call PATH ...)`, `(fnref PATH ...)`.
+        wk::CALL | wk::FNREF => def_locs.fns.get(&core::path_field(heap, node, 0)?).cloned(),
         // `(assoc PATH SYM ...)`, `(methodref PATH SYM ...)`.
         wk::ASSOC | wk::METHODREF => {
             def_locs.methods.get(&(core::path_field(heap, node, 0)?, core::sym_name_field(heap, node, 1)?)).cloned()
         }
         wk::CONSTRUCT => def_locs.types.get(&core::path_field(heap, node, 0)?).cloned(),
-        // `(compile-fn ...)` names either a function or a method; which one is
-        // told by whether a method name follows the path.
-        wk::COMPILE_FN => match core::sym_name_field(heap, node, 1) {
-            Some(m) => def_locs.methods.get(&(core::path_field(heap, node, 0)?, m)).cloned(),
-            None => def_locs.fns.get(&core::path_field(heap, node, 0)?).cloned(),
-        },
+        // `(compile-fn (fn PATH))` or `(compile-fn (method PATH SYM))`.
+        wk::COMPILE_FN => {
+            let target = core::field(heap, node, 0)?;
+            match core::op_sym(heap, target)?.well_known() {
+                wk::FN => def_locs.fns.get(&core::path_field(heap, target, 0)?).cloned(),
+                wk::METHOD => def_locs
+                    .methods
+                    .get(&(core::path_field(heap, target, 0)?, core::sym_name_field(heap, target, 1)?))
+                    .cloned(),
+                _ => None,
+            }
+        }
         wk::VAR => {
             let l = heap.cons_loc(node)?;
             def_locs.local_refs.get(&(l.line, l.col)).cloned()
@@ -181,14 +186,18 @@ pub fn definition_target(heap: &Heap, node: Value, def_locs: &DefLocs) -> Option
 /// unlike `definition_target` there's no `local_refs` analog to fall back to).
 pub fn doc_for<'a>(heap: &Heap, node: Value, docs: &'a Docs) -> Option<&'a str> {
     let found = match core::op_sym(heap, node)?.well_known() {
-        wk::GLOBAL | wk::SET_GLOBAL => docs.vars.get(&core::path_field(heap, node, 2)?),
-        wk::CALL | wk::FNREF => docs.fns.get(&core::path_field(heap, node, 2)?),
+        wk::GLOBAL | wk::SET_GLOBAL => docs.vars.get(&core::path_field(heap, node, 0)?),
+        wk::CALL | wk::FNREF => docs.fns.get(&core::path_field(heap, node, 0)?),
         wk::ASSOC | wk::METHODREF => docs.methods.get(&(core::path_field(heap, node, 0)?, core::sym_name_field(heap, node, 1)?)),
         wk::CONSTRUCT => docs.types.get(&core::path_field(heap, node, 0)?),
-        wk::COMPILE_FN => match core::sym_name_field(heap, node, 1) {
-            Some(m) => docs.methods.get(&(core::path_field(heap, node, 0)?, m)),
-            None => docs.fns.get(&core::path_field(heap, node, 0)?),
-        },
+        wk::COMPILE_FN => {
+            let target = core::field(heap, node, 0)?;
+            match core::op_sym(heap, target)?.well_known() {
+                wk::FN => docs.fns.get(&core::path_field(heap, target, 0)?),
+                wk::METHOD => docs.methods.get(&(core::path_field(heap, target, 0)?, core::sym_name_field(heap, target, 1)?)),
+                _ => None,
+            }
+        }
         _ => None,
     };
     found.map(|s| s.as_str())
@@ -265,18 +274,18 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
     }
     let mark = scope.len();
     let found = match tag.well_known() {
-        // `(defun PATH ((SYM R)...) RET-R PUBLIC E...)` — the parameters are in
+        // `(defun PATH ((SYM R)...) RET-R E...)` — the parameters are in
         // scope throughout the body. A `defmethod`'s receiver is simply its
         // first parameter, so it needs no case of its own.
         wk::DEFUN => {
             scope.extend(param_names(heap, form, 1));
-            fields_from(heap, form, 4).into_iter().any(|f| scope_walk(heap, f, target, scope))
+            fields_from(heap, form, 3).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
         wk::DEFMETHOD => {
             scope.extend(param_names(heap, form, 3));
-            fields_from(heap, form, 6).into_iter().any(|f| scope_walk(heap, f, target, scope))
+            fields_from(heap, form, 5).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
-        // `(defmacro PATH (SYM...) REST LAMBDA PUBLIC E...)` — the parameters
+        // `(defmacro PATH (SYM...) REST LAMBDA E...)` — the parameters
         // are bare symbols (a macro's are all `sexpr`). The `&optional`/`&key`
         // default forms are checked expressions too, so a cursor can land in
         // one.
@@ -286,7 +295,7 @@ fn scope_walk(heap: &Heap, form: Value, target: Value, scope: &mut Vec<String>) 
             let in_defaults = lambda
                 .map(|l| scope_walk(heap, l, target, scope))
                 .unwrap_or(false);
-            in_defaults || fields_from(heap, form, 5).into_iter().any(|f| scope_walk(heap, f, target, scope))
+            in_defaults || fields_from(heap, form, 4).into_iter().any(|f| scope_walk(heap, f, target, scope))
         }
         // `(let ((SYM R E)...) E...)`. Each binding's value is checked in the
         // *outer* scope, so this must not see the names being bound here.

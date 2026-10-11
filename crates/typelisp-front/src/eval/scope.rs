@@ -3,32 +3,13 @@
 //! tables [`Interp`](super::interp::Interp) used to hold for every top-level
 //! `defun`/`defmethod`/`defvar`/`defstruct`/`defenum`. Each definition is
 //! registered at the tree node for its own defining module, under its own
-//! unqualified name — so no single table spans the whole program. Resolving
-//! a reference re-walks this tree from the reference's own lexical module
-//! (`check::resolved::Ref::home`), independently reproducing
-//! `Checker::resolve_fn`/`resolve_fn_path`/`resolve_global`/`resolve_global_path`
-//! (`check/checker.rs`) rather than trusting the checker's already-resolved
-//! `Path` as a lookup key — the point of this module existing at all.
+//! unqualified name — so no single table spans the whole program.
 //!
-//! Two access patterns only, matching the checker's own two resolution
-//! shapes:
-//! - **Direct qualified descent** ([`ModuleScope::find`]/[`get_or_create`]):
-//!   walk straight down by an absolute `Path`'s segments. Used for
-//!   registration (a `TopLevel` node's own `Path` is never a visibility
-//!   decision — the checker already placed it uniquely) and for anything
-//!   whose target module is already known outright rather than searched —
-//!   an instance/static method's receiver type, a `defstruct`/`defenum`'s own
-//!   type identity, or a macro-expansion lookup driven by the checker's own
-//!   already-resolved macro path.
-//! - **Ancestor-chain resolution** ([`ModuleScope::resolve_fn`]/
-//!   [`resolve_global`]): given a lexical `home` module and the name as
-//!   actually written at the reference site, walk from `home` up to the
-//!   root (mirroring `Checker::ns_ancestors`, checker.rs:958-966) for a bare
-//!   name, or descend to an explicitly qualified module and apply the same
-//!   `pub`-or-`in_scope` gate `Checker::resolve_fn_path` does
-//!   (checker.rs:1078-1093). Used by `call`/`Global`/`FnRef`/
-//!   `SetGlobal` eval, and by `(compile name)` (see `Interp::method_key`'s
-//!   replacement).
+//! Nothing here resolves a name. A reference arrives already resolved — the
+//! checker wrote the absolute `Path` it found into the node — and is looked
+//! up by walking straight down by that path's segments
+//! ([`ModuleScope::get_fn`]/[`get_global`]/[`get_method`]). Visibility was the
+//! checker's question too, so there is no `pub` check either.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -44,9 +25,7 @@ use super::value::Slot;
 /// flat `HashSet<Path>`/`HashMap<Path, EnumDef>`. Membership here is a
 /// structural fact about the type's own representation, not a visibility
 /// gate (the checker already validated that any reference to the type
-/// itself was in scope when it type-checked the reference) — so lookup
-/// never needs a `pub`/`in_scope` check the way [`ModuleScope::resolve_fn`]
-/// does.
+/// itself was in scope when it type-checked the reference).
 pub(crate) enum TypeEntry {
     /// A `defstruct`, with its fields' representations — what
     /// `(defstruct PATH (REPR...) (TEMPLATE...))` publishes, and what the
@@ -83,17 +62,6 @@ impl FieldTemplates {
     }
 }
 
-/// A registered `defvar`/`defconstant`'s slot plus its own `pub` bit — the
-/// runtime twin of `check::registry::VarInfo::public`, needed so a
-/// qualified-path `Global`/`SetGlobal` reference can enforce
-/// `Checker::resolve_global_path`'s `public || in_scope` gate without the
-/// checker's `Registry` at runtime, exactly like [`super::interp::FnDef::public`]
-/// does for a qualified function reference.
-pub(crate) struct GlobalDef {
-    pub(crate) slot: Slot,
-    pub(crate) public: bool,
-}
-
 /// One node of the runtime module tree, rooted at `Interp`'s own `root`.
 #[derive(Default)]
 pub struct ModuleScope {
@@ -107,19 +75,11 @@ pub struct ModuleScope {
     /// is itself part of the type's own definition).
     pub(crate) methods: HashMap<(String, String), Rc<FnDef>>,
     /// `defvar`/`defconstant`, by unqualified name.
-    pub(crate) globals: HashMap<String, GlobalDef>,
+    pub(crate) globals: HashMap<String, Slot>,
     /// `defstruct`/`defenum`, by unqualified name.
     pub(crate) types: HashMap<String, TypeEntry>,
     /// Child modules, by unqualified name.
     pub(crate) children: HashMap<String, ModuleScope>,
-}
-
-/// Whether `home` (a reference's lexical module) is `owner` (a definition's
-/// module) or nested inside it — the runtime twin of `Checker::in_scope`
-/// (checker.rs:974-976): Rust-style module privacy, where a private item is
-/// visible to its own module and every descendant module.
-fn in_scope(home: &[String], owner: &[String]) -> bool {
-    home.len() >= owner.len() && home[..owner.len()] == *owner
 }
 
 impl ModuleScope {
@@ -238,64 +198,6 @@ impl ModuleScope {
         }
     }
 
-    /// Resolve a `Call`/`FnRef` reference's `written` name segments from its
-    /// lexical `home` module — the runtime re-derivation of
-    /// `Checker::resolve_fn`/`resolve_fn_path`.
-    ///
-    /// A single-segment (bare) name walks `home`'s ancestor chain, nearest
-    /// module first, ending at root — exactly `Checker::ns_ancestors` — with
-    /// **no `pub` check**: anything found on that chain is in scope without
-    /// qualification, matching `resolve_fn`'s own behavior.
-    ///
-    /// A multi-segment (explicitly qualified) name descends straight to the
-    /// named module, then requires `public || in_scope(home, that module)`
-    /// — `resolve_fn_path`'s cross-module gate.
-    pub(crate) fn resolve_fn(&self, home: &[String], written: &[String]) -> Option<Rc<FnDef>> {
-        self.resolve(home, written, |ns, name| ns.fns.get(name).map(|f| (f.public, f.clone())))
-    }
-
-    /// [`Self::resolve_fn`] for `Global`/`SetGlobal`, over `globals` instead
-    /// of `fns`, mirroring `Checker::resolve_global`/`resolve_global_path`.
-    pub(crate) fn resolve_global(&self, home: &[String], written: &[String]) -> Option<Slot> {
-        self.resolve(home, written, |ns, name| ns.globals.get(name).map(|g| (g.public, g.slot.clone())))
-    }
-
-    /// The walk [`Self::resolve_fn`] describes, over whichever table
-    /// `lookup` reads; `lookup` answers the entry's visibility and value.
-    fn resolve<T>(
-        &self,
-        home: &[String],
-        written: &[String],
-        lookup: impl Fn(&ModuleScope, &str) -> Option<(bool, T)>,
-    ) -> Option<T> {
-        if written.len() <= 1 {
-            let name = written.first()?;
-            (0..=home.len()).rev().find_map(|k| lookup(self.find(&home[..k])?, name).map(|(_, v)| v))
-        } else {
-            let (mods, last) = written.split_at(written.len() - 1);
-            let (public, v) = lookup(self.find(mods)?, &last[0])?;
-            if !public && !in_scope(home, mods) {
-                return None;
-            }
-            Some(v)
-        }
-    }
-
-    /// An instance/static method lookup: `type_name` is already a fully
-    /// resolved type identity (from static type inference, never searched),
-    /// so this is always direct descent to `type_name.parent()` followed by
-    /// a `(type_name.last_segment(), method)` lookup and a `pub`-or-`in_scope`
-    /// check against `home` — the runtime twin of `Checker::assoc_visible`
-    /// (checker.rs:989-991).
-    pub fn resolve_method(&self, home: &[String], type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
-        let ns = self.find(type_name.parent())?;
-        let f = ns.methods.get(&(type_name.last_segment().to_string(), method.to_string()))?;
-        if !f.public && !in_scope(home, type_name.parent()) {
-            return None;
-        }
-        Some(f.clone())
-    }
-
     /// A free function/macro's own `FnDef`, found by direct descent to its
     /// already-fully-qualified `Path` — no ancestor-chain search, no
     /// visibility check (registration is never a visibility decision, see
@@ -313,7 +215,7 @@ impl ModuleScope {
     /// result, i.e. an already-resolved absolute path, never a bare name to
     /// search for).
     pub(crate) fn get_global(&self, path: &Path) -> Option<Slot> {
-        self.find(path.parent())?.globals.get(path.last_segment()).map(|g| g.slot.clone())
+        self.find(path.parent())?.globals.get(path.last_segment()).cloned()
     }
 
     /// [`Self::get_fn`]'s twin for a `(type, method)` pair.

@@ -1080,13 +1080,12 @@ mod scc_tests {
         // `(defun a () i64 (b))` / `(defun b () i64 (a))` — never checked,
         // built directly as core forms, so the checker's forward-reference
         // restriction never comes into play. Each body is a single
-        // `(call () () NAME ())`: no written/home segments (the callee is
-        // already fully resolved) and no arguments, hence no argument reprs.
+        // `(call NAME ())`: no arguments, hence no argument reprs.
         for (name, callee) in [("a", "b"), ("b", "a")] {
             let path = heap.intern_symbol(callee);
             heap.push_root(path);
-            let call = core::tagged(&mut heap, "call", &[Value::Empty, Value::Empty, path, Value::Empty])
-                .expect("building a 4-field node cannot exhaust a 1<<16 heap");
+            let call = core::tagged(&mut heap, "call", &[path, Value::Empty])
+                .expect("building a 2-field node cannot exhaust a 1<<16 heap");
             // Registered `FnDef` bodies are reachable only through
             // `Interp::fns`, which the collector does not scan — the same
             // permanent root `Interp::exec` takes for a checked definition.
@@ -1101,13 +1100,12 @@ mod scc_tests {
                     rest: false,
                     lambda: None,
                     sig: Some((vec![], Repr::Narrow)),
-                    public: true,
                     compiled: RefCell::new(None),
                 }),
             );
         }
 
-        crate::compile::driver::compile_function(&interp, &mut heap, &crate::CompileTarget::Fn(crate::check::resolved::Ref::synthetic(Path::root("a"))))
+        crate::compile::driver::compile_function(&interp, &mut heap, &crate::CompileTarget::Fn(Path::root("a")))
             .expect("mutual recursion across separate top-level functions should now compile");
         assert!(interp.root.borrow().fn_compiled(&Path::root("a")), "\"a\" should have ended up compiled");
         assert!(interp.root.borrow().fn_compiled(&Path::root("b")), "\"b\", pulled in transitively as part of the same SCC, should have ended up compiled too");

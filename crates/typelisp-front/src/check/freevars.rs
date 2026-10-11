@@ -116,7 +116,7 @@ fn walk(
             note(sym(heap, form, 0)?, bound, siblings, seen, order);
             walk_all(&[core::field(heap, form, 1).unwrap_or(Value::Empty)], seen, order)
         }
-        wk::SET_GLOBAL => walk_all(&[core::field(heap, form, 4).unwrap_or(Value::Empty)], seen, order),
+        wk::SET_GLOBAL => walk_all(&[core::field(heap, form, 2).unwrap_or(Value::Empty)], seen, order),
 
         // The `else` link is iterated rather than recursed: a dispatch chain
         // the size of the island's own is deep enough to overflow the stack,
@@ -291,10 +291,11 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
     let parts = core::fields(heap, form)?;
     let from = |n: usize| -> Vec<Value> { parts.iter().skip(n).copied().collect() };
     Ok(match tag.well_known() {
-        // written, home, path, representations, then the arguments.
-        wk::CALL => from(4),
-        // type, method, instance, home, result, representations, then the rest.
-        wk::ASSOC => from(7),
+        // path, representations, then the arguments.
+        wk::CALL => from(2),
+        // type, method, instance, result, representations, result key, then
+        // the arguments.
+        wk::ASSOC => from(6),
         // The callee, then (past the return representation and the argument
         // representations) the arguments.
         wk::APPLY => {
@@ -573,7 +574,7 @@ fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Result<()
             Ok(())
         }
         wk::SET_GLOBAL => {
-            if let Some(v) = core::field(heap, form, 4) {
+            if let Some(v) = core::field(heap, form, 2) {
                 walk_nested(heap, v, out)?;
             }
             Ok(())
