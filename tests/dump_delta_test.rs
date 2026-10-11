@@ -103,7 +103,7 @@ fn a_prelude_macro_survives_the_round_trip() {
     let mut interp = Interp::new();
     dump::apply_types(&mut heap, &mut chk, &mut interp, unit).expect("applying the prelude unit");
 
-    let src = r#"(length (with-output-to-string (s) (write-string "hello" s)))"#;
+    let src = r#"(length (with-output-to-string (s) (write-string s "hello")))"#;
     let r = typelisp::Reader::new();
     let read = r.read_all(&mut heap, src).expect("read");
     let mut last = None;

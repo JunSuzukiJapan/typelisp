@@ -51,7 +51,7 @@ fn a_nearer_function_hides_a_variable_further_out() {
         "(defvar (f int) 5)
          (module m
            (defun f () int 1)
-           (defun g () int (+ f 1)))",
+           (defun g () int f))",
     );
     assert!(msg.contains("expected `int`, found `(fn () int)`"), "{}", msg);
 }

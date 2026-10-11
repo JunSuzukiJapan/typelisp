@@ -279,7 +279,7 @@ struct Env {
     /// function body (a nested `let`/`lambda` never introduces new type
     /// parameters), so `extended` just carries the same `Rc` forward instead
     /// of letting it vary per-binding the way `vars` does. Consulted only by
-    /// `Checker::check_instance_method`'s type-variable-receiver branch — see
+    /// `Checker::receiver_method`'s bounded-type-variable step — see
     /// its doc comment. The same bounds are also stored on the registered
     /// `FnSig` (`Checker::check_defun`), for `Checker::check_call`'s
     /// call-site validation — this copy exists only because body-checking
@@ -945,6 +945,49 @@ fn module_value_in(m: &Namespace, name: &str) -> Option<ModuleValueKind> {
         Some(sig) => Some(ModuleValueKind::Fn { public: sig.public }),
         None => m.vars.get(name).map(|vi| ModuleValueKind::Var(vi.clone())),
     }
+}
+
+/// A name as written at a use site: bare, or a `::` path.
+#[derive(Clone, Copy)]
+enum Written<'a> {
+    Bare(&'a str),
+    Path(&'a [String]),
+}
+
+/// What a written name resolves to — the one rule of
+/// `docs/dev/name-resolution.md` §3 ([`Checker::resolve_name`]).
+enum Resolved {
+    /// A local binding: a `let`, a parameter, a `labels` function, a
+    /// `symbol-macrolet` name.
+    Local,
+    Macro(Path, MacroShape),
+    /// An enum variant: brought in by `use`, or written `Type::variant`.
+    Ctor(Path, usize),
+    /// A type's associated function: a static method brought in by `use`, or
+    /// any member written `Type::name`.
+    Member(Path, String),
+    /// A method of the receiver's type.
+    Method(MethodTarget),
+    /// A module-level value: a function or a global variable.
+    Value(ModuleValue),
+}
+
+/// The method a receiver answers a name with ([`Checker::receiver_method`]).
+enum MethodTarget {
+    /// One of a trait object's trait's methods, through its vtable.
+    Dyn { trait_path: Path, pins: Vec<Type> },
+    /// `Sexpr`'s catalog, which a trait object answers to as the heap value
+    /// it wraps.
+    DynSexpr,
+    /// A method in the type's own table: an `impl` item, a built-in type's
+    /// own, a struct's accessor.
+    Assoc(Path),
+    /// A method a blanket impl of `trait_path` supplies.
+    Blanket { type_fq: Path, trait_path: Path },
+    /// A trait method of a `where`-bounded type variable. `method` is the
+    /// trait's name for it, which for an operator (`+`) is the trait method
+    /// it stands for (`add`).
+    Bound { bound: TraitBound, method: String },
 }
 
 /// The name a `defstruct`'s one constructor is registered under — what
@@ -3356,11 +3399,11 @@ impl Checker {
 
     /// Whether an associated function/method `af` of `type_fq` is reachable
     /// from the current namespace: public, or in scope (declared in the
-    /// same module or an ancestor of it) — mirrors `resolve_fn_path`'s
+    /// same module or an ancestor of it) — mirrors `resolve_module_value_path`'s
     /// cross-module `public` check. Used at every call site that looks up
     /// `def.assoc` directly (`try_field_access`, `check_field_set`,
-    /// `check_path_call`'s static-member branch, `try_instance_method`,
-    /// `check_instance_method`) so a private member — including a
+    /// `resolve_name`'s type-member step, `receiver_method`,
+    /// `receiver_method`) so a private member — including a
     /// `defstruct` field whose accessor wasn't declared `pub` — is treated
     /// as absent rather than merely forbidden, matching how a private free
     /// function or constructor "doesn't resolve" instead of erroring with a
@@ -3433,6 +3476,71 @@ impl Checker {
         self.reg.root.aliases.get(name).cloned()
     }
 
+    /// What `written` names at this use site — the one rule of
+    /// `docs/dev/name-resolution.md` §3. Every place that resolves the name of
+    /// a function, a method or a global asks this, so a name means the same
+    /// thing in a call, as a value, to `compile`/`trace`, and anywhere else.
+    ///
+    /// A bare name: a local, a macro, a constructor or static method brought
+    /// in by `use`, a method of the receiver's type, then the module-level
+    /// value (a function or a global). `receiver` gives the receiver's type —
+    /// a call's first argument, the first parameter of the `(fn ...)` a value
+    /// is expected to be — and is asked only when the earlier steps come up
+    /// empty, since learning it can mean checking an argument.
+    ///
+    /// A path: a macro, a module-level value, then a variant or member of a
+    /// type.
+    fn resolve_name(
+        &self,
+        env: &Env,
+        written: Written<'_>,
+        receiver: &mut dyn FnMut() -> Option<Type>,
+    ) -> Option<Resolved> {
+        match written {
+            Written::Bare(name) => {
+                if env.get(name).is_some() {
+                    return Some(Resolved::Local);
+                }
+                if let Some((path, shape)) = self.resolve_macro(name) {
+                    return Some(Resolved::Macro(path, shape));
+                }
+                if let Some((adt, idx)) = self.resolve_ctor(name) {
+                    return Some(Resolved::Ctor(adt, idx));
+                }
+                if let Some((type_fq, member)) = self.resolve_static_use(name) {
+                    return Some(Resolved::Member(type_fq, member));
+                }
+                if let Some(ty) = receiver() {
+                    if let Some(target) = self.receiver_method(env, &ty, name) {
+                        return Some(Resolved::Method(target));
+                    }
+                }
+                self.resolve_module_value(name).map(Resolved::Value)
+            }
+            Written::Path(segs) => {
+                if let Some((path, shape)) = self.resolve_macro_path(segs) {
+                    return Some(Resolved::Macro(path, shape));
+                }
+                if let Some(v) = self.resolve_module_value_path(segs) {
+                    return Some(Resolved::Value(v));
+                }
+                let (member, type_segs) = segs.split_last()?;
+                if type_segs.is_empty() {
+                    return None;
+                }
+                let type_fq = self.resolve_type_path(type_segs)?;
+                let def = self.reg.type_def(&type_fq)?;
+                if let Some(idx) = def.variants.iter().position(|v| &v.name == member) {
+                    return Some(Resolved::Ctor(type_fq, idx));
+                }
+                match def.assoc.get(member) {
+                    Some(af) if self.assoc_visible(&type_fq, af) => Some(Resolved::Member(type_fq, member.clone())),
+                    _ => None,
+                }
+            }
+        }
+    }
+
     /// What a bare module-level name holds — a function or a global
     /// variable, never both ([`Self::check_fn_var_clash`]) — walking the
     /// current namespace's ancestor chain (see [`Self::ns_ancestors`]),
@@ -3464,14 +3572,6 @@ impl Checker {
         }
     }
 
-    /// [`Self::resolve_fn`] for a qualified `module::...::fn` path.
-    fn resolve_fn_path(&self, segs: &[String]) -> Option<Path> {
-        match self.resolve_module_value_path(segs)? {
-            ModuleValue::Fn(path) => Some(path),
-            ModuleValue::Var(..) => None,
-        }
-    }
-
     /// Resolve a bare macro name to its absolute [`Path`] and the call-site
     /// arity shape ([`MacroShape`]) — walks the ancestor chain like
     /// [`Self::resolve_fn`] (without `use`-alias support, which `defmacro`
@@ -3491,7 +3591,7 @@ impl Checker {
     /// Resolve a module-qualified macro name (`mod::macro-name`) to its
     /// absolute [`Path`] and call-site arity shape ([`MacroShape`]) — the
     /// path-qualified counterpart of [`Self::resolve_macro`], mirroring
-    /// [`Self::resolve_fn_path`]'s module lookup and visibility rule (public
+    /// [`Self::resolve_module_value_path`]'s module lookup and visibility rule (public
     /// unless the caller is in scope of the defining module).
     fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, MacroShape)> {
         self.find_in_module(segs, |m, n| m.macros.get(n).map(|def| (def.public, MacroShape::of(def))))
@@ -3858,28 +3958,6 @@ impl Checker {
         }
     }
 
-    /// [`Self::resolve_global`] for a qualified `module::...::global` path.
-    fn resolve_global_path(&self, segs: &[String]) -> Option<(Path, VarInfo)> {
-        match self.resolve_module_value_path(segs)? {
-            ModuleValue::Var(path, vi) => Some((path, vi)),
-            ModuleValue::Fn(_) => None,
-        }
-    }
-
-    /// Reify a bare free-function name as a function value (`FnRef`), if it names
-    /// one. `Some(Err(..))` when the name resolves but is a generic function
-    /// that can't be instantiated here — see [`Self::fn_ref_node`].
-    fn fn_value(&self, heap: &mut Heap, name: &str, expected: Option<&Type>) -> Option<Result<Checked, Error>> {
-        let fq = self.resolve_fn(name)?;
-        Some(self.fn_ref_node(heap, vec![name.to_string()], fq, expected))
-    }
-
-    /// Reify a qualified free-function path as a function value (`FnRef`).
-    fn fn_path_value(&self, heap: &mut Heap, segs: &[String], expected: Option<&Type>) -> Option<Result<Checked, Error>> {
-        let fq = self.resolve_fn_path(segs)?;
-        Some(self.fn_ref_node(heap, segs.to_vec(), fq, expected))
-    }
-
     /// Build an `FnRef` node carrying the function's `(fn ...)` type.
     ///
     /// A *generic* function has no single value to reference — post-
@@ -3992,64 +4070,55 @@ impl Checker {
         )))
     }
 
-    /// Reify a bare name as an *instance method* value (`MethodRef`), e.g.
-    /// `+` where a `(fn (i32 i32) i32)` is expected (see
-    /// [`builtin_as_value`](../../../tests/eval_test.rs)-style usage of
-    /// `registry::int_assoc`'s arithmetic). Unlike a real call site, there is
-    /// no receiver expression to dispatch on, so the receiver type is read
-    /// off `expected`'s first parameter instead.
+    /// The method `name` of `type_fq` taken as a value (`MethodRef`) — what a
+    /// bare name resolves to as a value when the expected function's first
+    /// parameter is a receiver with that method ([`Self::resolve_name`]),
+    /// e.g. `+` where a `(fn (i32 i32) i32)` is expected.
     ///
     /// A generic method with a retained [`MethodTemplate`] resolves the
     /// owner's type arguments, and its own (`map<U>`), from `expected` (its
     /// first parameter is the receiver's concrete type) and is rewritten to
-    /// the specialization, mirroring [`Self::fn_ref_node`]. A generic method *without* a
-    /// template (a Rust builtin like `HashTable::get`) still can't be
-    /// reified and fails to match, as before.
-    fn method_value(&self, heap: &mut Heap, name: &str, expected: Option<&Type>) -> Option<Result<Checked, Error>> {
-        let Type::Fn(params, _, _) = expected? else { return None };
-        let type_fq = match params.first()? {
-            Type::Named(n, _) => n.clone(),
-            other => prim_type_path(other)?,
-        };
-        let def = self.reg.type_def(&type_fq)?;
-        let af = def.assoc.get(name)?;
-        if !af.instance {
-            return None;
-        }
+    /// the specialization, mirroring [`Self::fn_ref_node`]. A non-generic
+    /// method keeps its own type, so a mismatch with `expected` is reported by
+    /// `check`'s ordinary reconciliation.
+    fn method_value(&self, heap: &mut Heap, type_fq: &Path, name: &str, expected: Option<&Type>) -> Result<Checked, Error> {
+        let def = self.reg.type_def(type_fq).expect("the resolution found the method on this type");
+        let af = def.assoc.get(name).expect("the resolution found the method on this type");
         let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
-        if !def.params.is_empty() || !af.sig.type_params.is_empty() {
-            let all: Vec<&String> = def.params.iter().chain(&af.sig.type_params).collect();
-            let tparams: HashSet<String> = all.iter().map(|p| (*p).clone()).collect();
-            let mut subst: BTreeMap<String, Type> = BTreeMap::new();
-            if unify(&tparams, &ty, expected.unwrap(), &mut subst).is_ok()
-                && all.iter().all(|p| subst.contains_key(*p))
-            {
-                let targs: Vec<Type> = all.iter().map(|p| subst[p.as_str()].clone()).collect();
-                if !targs.iter().any(|t| self.type_is_open(t))
-                    && self.generic_method_templates.contains_key(&(type_fq.clone(), name.to_string()))
-                {
-                    let mangled = self.request_method_specialization(&type_fq, name, targs);
-                    let resolved_ty = subst_apply(&ty, &subst);
-                    let (params, ret) = match &resolved_ty {
-                        Type::Fn(ps, _, r) => (ps.clone(), (**r).clone()),
-                        _ => (Vec::new(), Type::Unit),
-                    };
-                    let home = self.ns.clone();
-                    return Some(
-                        self.methodref_form(heap, &type_fq, &mangled, &home, &params, &ret)
-                            .map(|form| Checked::new(form, resolved_ty)),
-                    );
-                }
-            }
-            return None;
-        }
-        if &ty != expected.unwrap() {
-            return None;
-        }
-        let params = af.sig.params.clone();
-        let ret = af.sig.ret.clone();
         let home = self.ns.clone();
-        Some(self.methodref_form(heap, &type_fq, name, &home, &params, &ret).map(|form| Checked::new(form, ty)))
+        if def.params.is_empty() && af.sig.type_params.is_empty() {
+            let params = af.sig.params.clone();
+            let ret = af.sig.ret.clone();
+            let form = self.methodref_form(heap, type_fq, name, &home, &params, &ret)?;
+            return Ok(Checked::new(form, ty));
+        }
+        let not_here = || {
+            Error::TypeError(format!(
+                "generic method `{}` of `{}` used as a value needs a concrete function type to fill its type parameters from",
+                name, type_fq
+            ))
+        };
+        let expected = expected.ok_or_else(not_here)?;
+        let all: Vec<&String> = def.params.iter().chain(&af.sig.type_params).collect();
+        let tparams: HashSet<String> = all.iter().map(|p| (*p).clone()).collect();
+        let mut subst: BTreeMap<String, Type> = BTreeMap::new();
+        if unify(&tparams, &ty, expected, &mut subst).is_err() || !all.iter().all(|p| subst.contains_key(*p)) {
+            return Err(not_here());
+        }
+        let targs: Vec<Type> = all.iter().map(|p| subst[p.as_str()].clone()).collect();
+        if targs.iter().any(|t| self.type_is_open(t))
+            || !self.generic_method_templates.contains_key(&(type_fq.clone(), name.to_string()))
+        {
+            return Err(not_here());
+        }
+        let mangled = self.request_method_specialization(type_fq, name, targs);
+        let resolved_ty = subst_apply(&ty, &subst);
+        let (params, ret) = match &resolved_ty {
+            Type::Fn(ps, _, r) => (ps.clone(), (**r).clone()),
+            _ => unreachable!("a method's type is a function type"),
+        };
+        let form = self.methodref_form(heap, type_fq, &mangled, &home, &params, &ret)?;
+        Ok(Checked::new(form, resolved_ty))
     }
 
     /// `var::field`: if `segs` is `[recv, method]` and `recv` names a bound
@@ -5248,7 +5317,7 @@ impl Checker {
         }
         // `bounds` deliberately dropped: the type variables are concrete
         // here, so method calls on them resolve directly against the real
-        // receiver type (`check_instance_method`'s ordinary branch, never
+        // receiver type (`receiver_method`'s own-table step, never
         // the bounds branch), and the bounds' own validity was already
         // verified at the call site that requested this instantiation
         // (`check_call`'s where-clause validation).
@@ -5458,7 +5527,7 @@ impl Checker {
     /// types to a concrete type — see `TraitBound`'s doc comment for how
     /// pins are used. Trait names are resolved as bare root-module paths
     /// (`Path::root`, not `Checker::resolve_trait_name`), mirroring
-    /// `Checker::check_instance_method`'s existing assumption that every
+    /// `Checker::receiver_method`'s existing assumption that every
     /// trait lives at the root module — a pre-existing limitation, not new
     /// here.
     fn parse_where_clause(&self, heap: &Heap, v: Value) -> Result<BTreeMap<String, Vec<TraitBound>>, Error> {
@@ -6543,7 +6612,7 @@ impl Checker {
     /// it's checked as a perfectly ordinary `defmethod`, just like any other.
     ///
     /// `TargetType`'s own `AdtDef.impls` gets `TraitName`'s path appended —
-    /// the one piece of metadata `Checker::check_instance_method`'s
+    /// the one piece of metadata `Checker::receiver_method`'s
     /// type-variable branch needs later, since by then the method itself is
     /// just one more entry in `TargetType`'s ordinary `assoc` table.
     ///
@@ -7642,7 +7711,7 @@ impl Checker {
     /// The bodies are checked exactly the way a generic `defun`'s body is:
     /// the target variable parses to an unresolved [`Type::Named`], and a
     /// method call on it resolves through `Env::bounds` to a diagnostics-only
-    /// the unreachable-`panic` node ([`Self::check_instance_method`]'s bounds branch).
+    /// the unreachable-`panic` node ([`Self::check_method_call`]'s `Bound` arm).
     /// Two bound sets are in scope, matching what every materialization will
     /// have: the impl's own `(where ...)` — already merged into each method's
     /// clause by [`Self::subst_method_item`] — and the trait being
@@ -8988,7 +9057,7 @@ impl Checker {
         // `with_bounds` mirrors `check_defun`'s body env: inside the body a
         // method call on a `where`-bounded type variable (e.g. `(equals
         // self::car other::car)` with `self::car : A` under `(where (Eq A))`)
-        // resolves through `check_instance_method`'s bounds branch to a
+        // resolves through `check_method_call`'s `Bound` arm to a
         // diagnostics-only unreachable `panic`, exactly as in generic `defun`
         // bodies.
         let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
@@ -10004,8 +10073,12 @@ impl Checker {
         let bare = segs.last().cloned().unwrap();
         let path_loc = parts_locs.first().and_then(|l| l.as_ref());
 
-        // Try: free function.
-        if let Some(target) = self.resolve_fn_path(&segs) {
+        // Try: a module-level value — a function or a global, one or the
+        // other, since a name has one value.
+        if let Some(value) = self.resolve_module_value_path(&segs) {
+            let target = match value {
+                ModuleValue::Fn(path) | ModuleValue::Var(path, _) => path,
+            };
             self.report_import_collision(&bare, &segs, shadowing)?;
             self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
             let alias = self.fq(&bare);
@@ -10528,16 +10601,44 @@ impl Checker {
                     }
                     let t = t.clone();
                     Checked::new(forms::var_form(heap, name)?, t)
-                } else if let Some((path, vi)) = self.resolve_global(name) {
-                    let ty = vi.ty;
-                    let r = self.mk_ref(vec![name.to_string()], path);
-                    Checked::new(self.global_form(heap, &r, &ty)?, ty)
-                } else if let Some(t) = self.fn_value(heap, name, expected) {
-                    t?
-                } else if let Some(t) = self.method_value(heap, name, expected) {
-                    t?
                 } else {
-                    return Err(Error::TypeError(format!("unbound variable: {}", name)));
+                    // The one resolution rule (`Self::resolve_name`). A value's
+                    // receiver is the first parameter of the function it is
+                    // expected to be.
+                    let mut receiver = || match expected {
+                        Some(Type::Fn(params, _, _)) => params.first().cloned(),
+                        _ => None,
+                    };
+                    match self.resolve_name(env, Written::Bare(name), &mut receiver) {
+                        Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
+                            let ty = vi.ty;
+                            let r = self.mk_ref(vec![name.to_string()], path);
+                            Checked::new(self.global_form(heap, &r, &ty)?, ty)
+                        }
+                        Some(Resolved::Value(ModuleValue::Fn(fq))) => {
+                            self.fn_ref_node(heap, vec![name.to_string()], fq, expected)?
+                        }
+                        Some(Resolved::Method(MethodTarget::Assoc(type_fq))) => {
+                            self.method_value(heap, &type_fq, name, expected)?
+                        }
+                        Some(Resolved::Method(_)) => {
+                            return Err(Error::TypeError(format!(
+                                "`{}` is here a trait method of the receiver, which cannot be taken as a value",
+                                name
+                            )))
+                        }
+                        Some(Resolved::Macro(..)) => {
+                            return Err(Error::TypeError(format!("`{}` is a macro, which has no value", name)))
+                        }
+                        Some(Resolved::Ctor(..)) | Some(Resolved::Member(..)) => {
+                            return Err(Error::TypeError(format!(
+                                "`{}` is a constructor or a static method, which is called rather than taken as a value",
+                                name
+                            )))
+                        }
+                        Some(Resolved::Local) => unreachable!("a local is handled by the `env` branch above"),
+                        None => return Err(Error::TypeError(format!("unbound variable: {}", name))),
+                    }
                 }
             }
             Value::Cons(_) => self.check_list(heap, interp, env, v, expected)?,
@@ -10551,20 +10652,33 @@ impl Checker {
                     .collect();
                 // `var::field` — sugar for `(field var)`, a field accessor's
                 // ordinary instance-method call (`Checker::check_defstruct`
-                // synthesizes one getter `defmethod` per field). Tried first:
+                // synthesizes one getter method per field). Tried first:
                 // `segs[0]` here names a *value* (a bound local/global), not
-                // a module/type segment the way `resolve_global_path`/
-                // `fn_path_value` below expect.
+                // a module/type segment the way `resolve_name` below expects.
                 if let Some(result) = self.try_field_access(heap, interp, env, &segs) {
                     result?
-                } else if let Some((path, vi)) = self.resolve_global_path(&segs) {
-                    let ty = vi.ty;
-                    let r = self.mk_ref(segs.clone(), path);
-                    Checked::new(self.global_form(heap, &r, &ty)?, ty)
-                } else if let Some(t) = self.fn_path_value(heap, &segs, expected) {
-                    t?
                 } else {
-                    return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::"))));
+                    match self.resolve_name(env, Written::Path(&segs), &mut || None) {
+                        Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
+                            let ty = vi.ty;
+                            let r = self.mk_ref(segs.clone(), path);
+                            Checked::new(self.global_form(heap, &r, &ty)?, ty)
+                        }
+                        Some(Resolved::Value(ModuleValue::Fn(fq))) => self.fn_ref_node(heap, segs.clone(), fq, expected)?,
+                        Some(Resolved::Macro(..)) => {
+                            return Err(Error::TypeError(format!("`{}` is a macro, which has no value", segs.join("::"))))
+                        }
+                        Some(Resolved::Ctor(..)) | Some(Resolved::Member(..)) => {
+                            return Err(Error::TypeError(format!(
+                                "`{}` is a constructor or a type's function, which is called rather than taken as a value",
+                                segs.join("::")
+                            )))
+                        }
+                        Some(Resolved::Local) | Some(Resolved::Method(_)) => {
+                            unreachable!("a path resolves to neither a local nor a receiver's method")
+                        }
+                        None => return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::")))),
+                    }
                 }
             }
         };
@@ -10847,69 +10961,116 @@ impl Checker {
             _ => {}
         }
         // SPECIAL-FORM DISPATCH END
-        // A local variable holding a function value is applied directly (locals
-        // shadow free functions). Goes through `check_at` (not a hand-built
-        // node) so this callee reference gets its own position — the same
-        // treatment the non-symbol-head branch above already gives its
-        // callee — which is what lets e.g. a `labels`-bound function called
-        // by name resolve goto-definition back to its own binding.
-        if env.get(&head).is_some() {
-            let callee = self.check_at(heap, interp, env, elems[0], None, nth_loc(&elem_locs, 0))?;
-            return self.check_apply(heap, interp, env, callee, args, arg_locs);
+        // Sugar keyed on a name and an argument count — `(+ a b c)`, `(aref
+        // a i j)`, two-argument `log`/`atan` and the like. Syntax rather than a
+        // name to resolve, so it is tried before the resolution below; a local
+        // binding of the same name still wins, as it does over every name.
+        if env.get(&head).is_none() {
+            if let Some(result) = self.check_call_sugar(heap, interp, env, &head, args, arg_locs, expected) {
+                return result;
+            }
         }
-        // A macro call: expand (against the *unevaluated* argument forms,
-        // exactly as written — see `MacroExpander`) and recursively check the
-        // expansion in place, in the use site's lexical `env`. This is what
-        // makes macros unhygienic/CL-style. Checked after special forms and
-        // local-variable-as-callee (matching how a constructor/free-function
-        // call is resolved below), since a macro is a purely compile-time
-        // name with no runtime value to shadow or be shadowed by.
-        if let Some((macro_path, shape)) = self.resolve_macro(&head) {
-            Self::check_macro_arity(&head, shape, args.len())?;
-            let expanded = interp
-                .expand_macro(heap, &macro_path, args.to_vec())
-                .map_err(|e| Error::TypeError(format!("macro `{}`: {}", head, e)))?;
-            heap.push_root(expanded);
-            let result = self.check(heap, interp, env, expanded, expected);
-            heap.pop_root();
-            return result;
-        }
-        // Constructor, then a receiver-typed instance method on the first
-        // argument's type, then the free function, then a global function
-        // value, then instance-method dispatch again (for the error message
-        // when nothing at all matches). The instance method is tried *before*
-        // the free function — CLOS precedent: a type-specific method takes
-        // precedence over a same-named ordinary function, which only serves
-        // as the generic function's implicit default when no type-specific
-        // method matches the call's argument type (see `try_instance_method`'s
-        // doc comment). This lets e.g. `HashTable<K,V>`'s `remove`/`count` and
-        // the `Sexpr`-list prelude's free-function `remove`/`count` share a
-        // name without either having to be renamed.
-        if let Some((adt, idx)) = self.resolve_ctor(&head) {
-            self.check_construct(heap, interp, env, (&adt, idx), args, arg_locs, expected)
-        } else if let Some((type_fq, method)) = self.resolve_static_use(&head) {
-            self.check_assoc_call(
+        // Everything else is the one resolution rule (`Self::resolve_name`).
+        // The receiver is the first argument, checked with nothing expected of
+        // it purely to learn its type. A method call reuses that check;
+        // anything else checks the argument again against what it is passed
+        // to, so a literal still takes the width of the parameter it lands in.
+        // A first argument that fails to check gives no receiver; the call is
+        // then resolved without one, and whatever it resolves to checks the
+        // argument again and reports the real error.
+        let mut peeked: Option<Checked> = None;
+        let resolved = {
+            let mut receiver = || {
+                let first = *args.first()?;
+                let c = self.check_at(heap, interp, env, first, None, nth_loc(arg_locs, 0)).ok()?;
+                let ty = c.ty.clone();
+                peeked = Some(c);
+                Some(ty)
+            };
+            self.resolve_name(env, Written::Bare(&head), &mut receiver)
+        };
+        match resolved {
+            // A local variable holding a function value is applied directly.
+            // Goes through `check_at` (not a hand-built node) so this callee
+            // reference gets its own position — the same treatment the
+            // non-symbol-head branch above already gives its callee — which is
+            // what lets e.g. a `labels`-bound function called by name resolve
+            // goto-definition back to its own binding.
+            Some(Resolved::Local) => {
+                let callee = self.check_at(heap, interp, env, elems[0], None, nth_loc(&elem_locs, 0))?;
+                self.check_apply(heap, interp, env, callee, args, arg_locs)
+            }
+            // A macro call: expand (against the *unevaluated* argument forms,
+            // exactly as written — see `MacroExpander`) and check the
+            // expansion in place, in the use site's lexical `env`. This is
+            // what makes macros unhygienic/CL-style.
+            Some(Resolved::Macro(macro_path, shape)) => {
+                Self::check_macro_arity(&head, shape, args.len())?;
+                let expanded = interp
+                    .expand_macro(heap, &macro_path, args.to_vec())
+                    .map_err(|e| Error::TypeError(format!("macro `{}`: {}", head, e)))?;
+                heap.push_root(expanded);
+                let result = self.check(heap, interp, env, expanded, expected);
+                heap.pop_root();
+                result
+            }
+            Some(Resolved::Ctor(adt, idx)) => self.check_construct(heap, interp, env, (&adt, idx), args, arg_locs, expected),
+            Some(Resolved::Member(type_fq, method)) => self.check_assoc_call(
                 heap,
                 interp,
                 env,
                 AssocCall { type_fq: &type_fq, method: &method, receiver: None, expected },
                 args,
                 arg_locs,
-            )
-        } else if args.len() <= 1
+            ),
+            Some(Resolved::Method(target)) => {
+                let recv = peeked.expect("a method is found only through the receiver's type, which checked the receiver");
+                self.check_method_call(heap, interp, env, target, recv, &head, &args[1..], &arg_locs[1..])
+            }
+            Some(Resolved::Value(ModuleValue::Fn(fq))) => {
+                self.check_call(heap, interp, env, std::slice::from_ref(&head), &fq, args, arg_locs)
+            }
+            Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
+                let r = self.mk_ref(vec![head.clone()], path);
+                let form = self.global_form(heap, &r, &vi.ty)?;
+                let callee = Checked::new(form, vi.ty);
+                self.check_apply(heap, interp, env, callee, args, arg_locs)
+            }
+            None => self.report_unresolved_call(heap, interp, env, &head, args, arg_locs),
+        }
+    }
+
+    /// The call sugar [`Self::check_list`] tries before resolving a name:
+    /// forms keyed on the name *and* the argument count, which no single
+    /// definition could express — CL's variadic arithmetic and comparison,
+    /// n-ary `append`, `concatenate`'s result-type argument, `aref`'s
+    /// subscripts, two-argument `log` and `atan`. `None` when `head` with
+    /// this many arguments is none of them.
+    #[allow(clippy::too_many_arguments)]
+    fn check_call_sugar(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        head: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Option<Result<Checked, Error>> {
+        Some(if args.len() <= 1
             && matches!(
-                head.as_str(),
+                head,
                 "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "gcd" | "lcm" | "<" | "<=" | ">" | ">=" | "=" | "/="
             )
         {
-            self.check_nullary_or_unary_numeric_op(heap, interp, env, &head, args, expected)
-        } else if args.len() > 2 && matches!(head.as_str(), "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "gcd" | "lcm") {
-            self.check_variadic_arith(heap, interp, env, &head, args, expected)
-        } else if args.len() > 2 && matches!(head.as_str(), "<" | "<=" | ">" | ">=" | "=" | "/=") {
-            self.check_variadic_cmp(heap, interp, env, &head, args)
+            self.check_nullary_or_unary_numeric_op(heap, interp, env, head, args, expected)
+        } else if args.len() > 2 && matches!(head, "+" | "-" | "*" | "/" | "max" | "min" | "logand" | "logior" | "logxor" | "gcd" | "lcm") {
+            self.check_variadic_arith(heap, interp, env, head, args, expected)
+        } else if args.len() > 2 && matches!(head, "<" | "<=" | ">" | ">=" | "=" | "/=") {
+            self.check_variadic_cmp(heap, interp, env, head, args)
         } else if head == "append" && args.len() > 2 {
             self.check_variadic_append(heap, interp, env, args, expected)
-        } else if head == "concatenate" && self.resolve_fn(&head).is_none() {
+        } else if head == "concatenate" && self.resolve_fn(head).is_none() {
             self.check_concatenate(heap, interp, env, args, expected)
         } else if head == "aref" && !args.is_empty() {
             self.check_aref(heap, interp, env, args[0], &args[1..], None, expected)
@@ -10917,24 +11078,13 @@ impl Checker {
             self.check_log_with_base(heap, interp, env, args, expected)
         } else if head == "atan" && args.len() == 2 {
             // CL's two-argument `(atan y x)`: the prelude's `atan2`. Sugar
-            // here for the same reason two-argument `log` is — `defmethod`
+            // here for the same reason two-argument `log` is — a method
             // overloads on receiver type, never on arity, and one-argument
             // `atan` is already `f64`'s built-in method.
             self.check_renamed_call(heap, interp, env, "atan2", args, arg_locs)
-        } else if let Some(result) = self.try_instance_method(heap, interp, env, &head, args, arg_locs) {
-            result
-        } else if let Some(result) = self.try_instance_method_swapped(heap, interp, env, &head, args, arg_locs) {
-            result
-        } else if let Some(fq) = self.resolve_fn(&head) {
-            self.check_call(heap, interp, env, std::slice::from_ref(&head), &fq, args, arg_locs)
-        } else if let Some((path, vi)) = self.resolve_global(&head) {
-            let r = self.mk_ref(vec![head.clone()], path);
-            let form = self.global_form(heap, &r, &vi.ty)?;
-            let callee = Checked::new(form, vi.ty);
-            self.check_apply(heap, interp, env, callee, args, arg_locs)
         } else {
-            self.check_instance_method(heap, interp, env, &head, args, arg_locs)
-        }
+            return None;
+        })
     }
 
     /// Type-check a `lambda`: `(lambda (params) ret body...)`. The body sees the
@@ -11383,8 +11533,9 @@ impl Checker {
         Ok(Checked::new(form, ret))
     }
 
-    /// A `::`-qualified call: a module-qualified macro, free function, or
-    /// `Type::method` static associated function.
+    /// A `::`-qualified call, resolved by [`Self::resolve_name`]: a
+    /// module-qualified macro, function or global, a `Type::variant`, or a
+    /// `Type::name` static associated function.
     // Cohesive checker entry point: `heap`/`interp`/`env`/`arg_locs`/`expected`
     // are the invariant type-checking context threaded through every such
     // method. Bundling them into a struct would have to carry `&mut Heap`
@@ -11402,148 +11553,78 @@ impl Checker {
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
-        // A module-qualified macro call, e.g. `mod::my-macro` — checked
-        // first, mirroring the bare-name case in `check_list` (a macro is a
-        // purely compile-time name, resolved before any runtime call shape;
-        // `resolve_macro_path` is the `::`-qualified counterpart of the
-        // bare-name `resolve_macro` that branch uses).
-        if let Some((macro_path, shape)) = self.resolve_macro_path(segs) {
-            let display = segs.join("::");
-            Self::check_macro_arity(&display, shape, args.len())?;
-            let expanded = interp
-                .expand_macro(heap, &macro_path, args.to_vec())
-                .map_err(|e| Error::TypeError(format!("macro `{}`: {}", display, e)))?;
-            heap.push_root(expanded);
-            let result = self.check(heap, interp, env, expanded, expected);
-            heap.pop_root();
-            return result;
-        }
-        // A module-qualified free function, e.g. `math::id`.
-        if let Some(fq) = self.resolve_fn_path(segs) {
-            return self.check_call(heap, interp, env, segs, &fq, args, arg_locs);
-        }
-        // Otherwise `Type::member`: split the last segment as the member and
-        // resolve the prefix as a type. The member is a constructor or a static
-        // associated function of that type.
-        if segs.len() >= 2 {
-            let (type_segs, member) = segs.split_at(segs.len() - 1);
-            let member = &member[0];
-            if let Some(type_fq) = self.resolve_type_path(type_segs) {
-                // The head token names this type in its second-to-last
-                // segment (`rect::new`, `mod::color::red`) — record that
-                // segment's span for semantic highlighting.
+        let display = segs.join("::");
+        match self.resolve_name(env, Written::Path(segs), &mut || None) {
+            Some(Resolved::Macro(macro_path, shape)) => {
+                Self::check_macro_arity(&display, shape, args.len())?;
+                let expanded = interp
+                    .expand_macro(heap, &macro_path, args.to_vec())
+                    .map_err(|e| Error::TypeError(format!("macro `{}`: {}", display, e)))?;
+                heap.push_root(expanded);
+                let result = self.check(heap, interp, env, expanded, expected);
+                heap.pop_root();
+                result
+            }
+            Some(Resolved::Value(ModuleValue::Fn(fq))) => self.check_call(heap, interp, env, segs, &fq, args, arg_locs),
+            Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
+                let r = self.mk_ref(segs.to_vec(), path);
+                let form = self.global_form(heap, &r, &vi.ty)?;
+                let callee = Checked::new(form, vi.ty);
+                self.check_apply(heap, interp, env, callee, args, arg_locs)
+            }
+            Some(Resolved::Ctor(type_fq, variant)) => {
+                // The head token names the type in its second-to-last segment
+                // (`mod::color::red`) — record that segment's span for
+                // semantic highlighting.
                 self.record_path_type_use(segs, &type_fq, head_loc);
-                let def = self.reg.type_def(&type_fq).expect("resolved type exists");
-                if let Some(variant) = def.variants.iter().position(|v| &v.name == member) {
-                    return self.check_construct(heap, interp, env, (&type_fq, variant), args, arg_locs, expected);
-                }
-                if let Some(af) = def.assoc.get(member) {
-                    if self.assoc_visible(&type_fq, af) {
-                        if af.instance {
-                            return Err(Error::TypeError(format!(
-                                "`{}::{}` is an instance method; call it as ({} obj ...)",
-                                type_fq, member, member
-                            )));
-                        }
-                        return self.check_assoc_call(
-                            heap,
-                            interp,
-                            env,
-                            AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected },
-                            args,
-                            arg_locs,
-                        );
-                    }
-                }
-                if def.kind == AdtKind::Struct && !def.builtin {
+                self.check_construct(heap, interp, env, (&type_fq, variant), args, arg_locs, expected)
+            }
+            Some(Resolved::Member(type_fq, member)) => {
+                self.record_path_type_use(segs, &type_fq, head_loc);
+                let instance = self.reg.type_def(&type_fq).and_then(|d| d.assoc.get(&member)).is_some_and(|af| af.instance);
+                if instance {
                     return Err(Error::TypeError(format!(
-                        "`{}` has no static method `{}`; a struct's methods are written in its `impl`, \
-                         e.g. (impl {} (pub {} (...) {} (make-instance '{} :slot value...)))",
-                        type_fq, member, type_fq, member, type_fq, type_fq
+                        "`{}::{}` is an instance method; call it as ({} obj ...)",
+                        type_fq, member, member
                     )));
                 }
+                self.check_assoc_call(
+                    heap,
+                    interp,
+                    env,
+                    AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected },
+                    args,
+                    arg_locs,
+                )
+            }
+            Some(Resolved::Local) | Some(Resolved::Method(_)) => {
+                unreachable!("a path resolves to neither a local nor a receiver's method")
+            }
+            None => {
+                // `Type::name` whose type resolved but has no such member.
+                if let Some((member, type_segs)) = segs.split_last().filter(|(_, t)| !t.is_empty()) {
+                    if let Some(type_fq) = self.resolve_type_path(type_segs) {
+                        self.record_path_type_use(segs, &type_fq, head_loc);
+                        let def = self.reg.type_def(&type_fq).expect("resolved type exists");
+                        if def.kind == AdtKind::Struct && !def.builtin {
+                            return Err(Error::TypeError(format!(
+                                "`{}` has no static method `{}`; a struct's methods are written in its `impl`, \
+                                 e.g. (impl {} (pub {} (...) {} (make-instance '{} :slot value...)))",
+                                type_fq, member, type_fq, member, type_fq, type_fq
+                            )));
+                        }
+                    }
+                }
+                Err(Error::TypeError(format!("unresolved path: {}", display)))
             }
         }
-        Err(Error::TypeError(format!("unresolved path: {}", segs.join("::"))))
     }
 
-    /// Dispatch a bare call `(m recv args...)` as an instance method on the
-    /// static type of its first argument.
-    /// Try resolving `(method args...)` as a call to an instance method on
-    /// the first argument's type. Returns `None` — not an error — when no
-    /// such method exists for that type, so `check_list` can fall back to a
-    /// free function of the same name: this mirrors CLOS, where a
-    /// type-specific method takes precedence over an ordinary function of
-    /// the same name, and that ordinary function only acts as the generic
-    /// function's default when no type-specific method matches the call's
-    /// argument type (an existing `defun` becomes the default method when a
-    /// same-named `defgeneric`/`defmethod` is introduced later).
-    ///
-    /// The first argument is checked once here with `expected: None`, purely
-    /// to learn its type — if that doesn't resolve to a method, `check_list`'s
-    /// free-function fallback re-checks it against the free function's real
-    /// parameter type, so e.g. an integer literal still gets that parameter's
-    /// exact width rather than the throwaway default this `check` would have
-    /// given it. Any error checking the first argument (e.g. an unbound
-    /// variable) also yields `None`: it isn't a real "no such method"
-    /// failure, but the free-function fallback (or, if none exists either,
-    /// the final `check_instance_method` call in `check_list`) re-checks the
-    /// same argument and surfaces the real error there instead.
-    fn try_instance_method(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        method: &str,
-        args: &[Value],
-        arg_locs: &[Option<Loc>],
-    ) -> Option<Result<Checked, Error>> {
-        let mut recv = self.check_at(heap, interp, env, *args.first()?, None, nth_loc(arg_locs, 0)).ok()?;
-        // A trait-object receiver dispatches its trait's own methods through
-        // the vtable, and everything else through the built-in `Sexpr`
-        // catalog — see `check_instance_method`'s fuller comment.
-        if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
-            if self.reg.trait_def(&trait_path).is_some_and(|t| t.methods.contains_key(method)) {
-                return Some(self.check_dyn_call(
-                    heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
-                ));
-            }
-            if !self.sexpr_has_instance_method(method) {
-                return None;
-            }
-            let form = match forms::dyn_value_form(heap, recv.form) {
-                Ok(f) => f,
-                Err(e) => return Some(Err(e)),
-            };
-            recv = Checked::new(form, sexpr_ty());
-        }
-        let type_fq = self.assoc_receiver_path(&recv.ty, method)?;
-        let def = self.reg.type_def(&type_fq)?;
-        match def.assoc.get(method) {
-            Some(af) if af.instance && self.assoc_visible(&type_fq, af) => {}
-            _ => return None,
-        }
-        Some(self.check_assoc_call(
-            heap,
-            interp,
-            env,
-            AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
-            &args[1..],
-            &arg_locs[1..],
-        ))
-    }
-
-    /// The final fallback when nothing else matched `(method args...)` in
-    /// `check_list`: re-derives the same instance-method lookup
-    /// `try_instance_method` does, but — since there's no free function left
-    /// to defer to — propagates a real error from checking the first
-    /// argument instead of swallowing it, and reports `NoSuchFunction` if no
-    /// matching method exists either.
     /// Does `Sexpr`'s own assoc table carry `method`?
     ///
     /// The test that lets an `Option<Sexpr>` receiver reach that table
     /// without shadowing `Option`'s own methods — see the receiver match in
-    /// [`Self::check_instance_method`].
+    /// [`Self::receiver_method`].
     fn sexpr_has_method(&self, method: &str) -> bool {
         self.reg
             .type_def(&Path::root("sexpr"))
@@ -11575,7 +11656,162 @@ impl Checker {
         }
     }
 
-    fn check_instance_method(
+    /// The method a receiver of type `ty` answers `name` with, if any — the
+    /// receiver step of [`Self::resolve_name`]. Only a lookup; the call is
+    /// checked by [`Self::check_method_call`].
+    ///
+    /// In order: a trait object's trait method (or, failing that, `Sexpr`'s
+    /// catalog, which a trait object answers to as the value it wraps); a
+    /// method in the type's own table; a method a blanket impl supplies; a
+    /// trait method of a `where`-bounded type variable.
+    fn receiver_method(&self, env: &Env, ty: &Type, name: &str) -> Option<MethodTarget> {
+        if let Type::Dyn(trait_path, pins) = ty {
+            if self.reg.trait_def(trait_path).is_some_and(|t| t.vtable_order.iter().any(|m| m == name)) {
+                return Some(MethodTarget::Dyn { trait_path: trait_path.clone(), pins: pins.clone() });
+            }
+            return self.sexpr_has_instance_method(name).then_some(MethodTarget::DynSexpr);
+        }
+        let type_fq = self.assoc_receiver_path(ty, name)?;
+        if let Some(def) = self.reg.type_def(&type_fq) {
+            if def.assoc.get(name).is_some_and(|af| af.instance && self.assoc_visible(&type_fq, af)) {
+                return Some(MethodTarget::Assoc(type_fq));
+            }
+        }
+        // A method no `impl` put on the type, but a blanket impl provides.
+        if let Some(trait_path) = self.blanket_method_owner(ty, &type_fq, name) {
+            return Some(MethodTarget::Blanket { type_fq, trait_path });
+        }
+        self.bound_method(env, &type_fq, name).map(|(bound, method)| MethodTarget::Bound { bound, method })
+    }
+
+    /// The `where` bound of the type variable `type_var` (keyed in
+    /// `Env::bounds` by its lowercase name, which is what `last_segment()` of
+    /// a bare type variable is) whose trait has `name`, and the trait's name
+    /// for it.
+    ///
+    /// An operator on a bounded type variable means its trait's method:
+    /// `(+ a b)` under `(where (Add T))` is `(add a b)`. The trait cannot
+    /// declare the operator itself — an `impl` naming a method `+` is refused,
+    /// because `+` belongs to the primitive types' built-in tables — so the
+    /// two spellings meet here. A bound that declares the written name itself
+    /// always wins: this is a fallback for a name no bound has, never a rename.
+    /// Inherited methods count: bounding `T` by `Ord` makes `Eq`'s `equals`
+    /// callable on it, since `Ord` obliges every implementor to implement `Eq`.
+    fn bound_method(&self, env: &Env, type_var: &Path, name: &str) -> Option<(TraitBound, String)> {
+        let bounds = env.bounds.get(type_var.last_segment())?;
+        let declares = |m: &str| {
+            bounds.iter().any(|tb| self.reg.trait_def(&tb.trait_path).is_some_and(|t| self.reg.trait_method(t, m).is_some()))
+        };
+        let method = match trait_operator_method(name) {
+            Some(alias) if !declares(name) => alias,
+            _ => name,
+        };
+        bounds
+            .iter()
+            .find(|tb| self.reg.trait_def(&tb.trait_path).is_some_and(|t| self.reg.trait_method(t, method).is_some()))
+            .map(|tb| (tb.clone(), method.to_string()))
+    }
+
+    /// Check `(method recv args...)` against the method `target` that
+    /// [`Self::receiver_method`] found for the receiver's type. `recv` is the
+    /// receiver, already checked; `args` are the arguments after it.
+    #[allow(clippy::too_many_arguments)]
+    fn check_method_call(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        target: MethodTarget,
+        recv: Checked,
+        method: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Checked, Error> {
+        match target {
+            MethodTarget::Dyn { trait_path, pins } => {
+                self.check_dyn_call(heap, interp, env, recv, &trait_path, &pins, method, args, arg_locs)
+            }
+            MethodTarget::DynSexpr => {
+                let form = forms::dyn_value_form(heap, recv.form)?;
+                let recv = Checked::new(form, sexpr_ty());
+                let type_fq = Path::root("sexpr");
+                self.check_assoc_call(
+                    heap,
+                    interp,
+                    env,
+                    AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
+                    args,
+                    arg_locs,
+                )
+            }
+            MethodTarget::Assoc(type_fq) => self.check_assoc_call(
+                heap,
+                interp,
+                env,
+                AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
+                args,
+                arg_locs,
+            ),
+            // The signature comes from the `TraitDef` template with `Self`
+            // bound to the receiver — the definition itself is generated by
+            // the queued materialization, which `check_form_at` drains ahead
+            // of this form.
+            MethodTarget::Blanket { type_fq, trait_path } => {
+                self.check_blanket_method_call(heap, interp, env, recv, &type_fq, &trait_path, method, args, arg_locs)
+            }
+            // See `Checker::trait_call_panic_form` for why the implementing
+            // type is resolved at runtime instead of here.
+            MethodTarget::Bound { bound, method } => {
+                let tdef = self
+                    .reg
+                    .trait_def(&bound.trait_path)
+                    .ok_or_else(|| Error::TypeError(format!("unknown trait `{}`", bound.trait_path)))?;
+                let (decl, sig) = self.reg.trait_method(tdef, &method).ok_or_else(|| {
+                    Error::TypeError(format!("`{}` is not a method of `{}`", method, bound.trait_path))
+                })?;
+                let decl_path = decl.name.clone();
+                let want = sig.params.len() - 1;
+                if args.len() != want {
+                    return Err(Error::TypeError(format!(
+                        "{}: expected {} argument(s), got {}",
+                        method,
+                        want,
+                        args.len()
+                    )));
+                }
+                // Checked for their own diagnostics only — the node they used
+                // to fill is never executed, so the lowered forms are dropped.
+                for (i, a) in args.iter().enumerate() {
+                    self.check_at(heap, interp, env, *a, None, nth_loc(arg_locs, i))?;
+                }
+                // The bound's associated-type pins (`(Item i32)`) resolve the
+                // trait method template's otherwise-opaque associated-type
+                // variables (`Option<Item>`) — composed down the supertrait
+                // chain when the method is an inherited one, since its
+                // template is written in the declaring trait's associated
+                // types. A no-op when the bound pins nothing.
+                let Some(mut assoc) = self.trait_assoc_subst_for(tdef, &bound.assoc, &decl_path) else {
+                    return Err(Error::TypeError(format!(
+                        "{}: `{}` declares `{}`, but is not in `{}`'s supertrait chain",
+                        method, decl_path, method, bound.trait_path
+                    )));
+                };
+                // `Self` in the template *is* this bounded type variable, so a
+                // trait method declared to return `Self` — `(add ((self Self)
+                // (other Self)) Self)` — returns the receiver's type.
+                assoc.insert("self".to_string(), recv.ty.clone());
+                let ret_ty = subst_apply(&sig.ret, &assoc);
+                let form = forms::erased_generic_form(heap, &method)?;
+                Ok(Checked::new(form, ret_ty))
+            }
+        }
+    }
+
+    /// The error for `(method args...)` when [`Self::resolve_name`] found
+    /// nothing. The first argument is checked again, this time letting its
+    /// own error through: resolution only peeked at its type, and an
+    /// argument that fails to check is the real problem.
+    fn report_unresolved_call(
         &self,
         heap: &mut Heap,
         interp: &dyn MacroExpander,
@@ -11584,186 +11820,41 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
-        // The receiver's type, once checked — what the final report names
-        // when no method matched.
-        let mut recv_ty: Option<Type> = None;
-        if !args.is_empty() {
-            let mut recv = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
-            recv_ty = Some(recv.ty.clone());
-            // Trait-object receiver: one of the trait's own methods dispatches
-            // through the vtable; anything else is the built-in `Sexpr`
-            // catalog (`eq`/`equal`/`print`/...), which applies to a trait
-            // object exactly as to the heap value it wraps — the same
-            // transparency printing and comparison have. Unlike
-            // `try_instance_method`'s peek this is the reporting path, so a
-            // name that is neither gets `check_dyn_call`'s message naming
-            // the trait rather than a bare "no such function".
-            if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
-                if self
-                    .reg
-                    .trait_def(&trait_path)
-                    .is_some_and(|t| t.vtable_order.iter().any(|m| m == method))
-                {
-                    return self.check_dyn_call(
-                        heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
-                    );
-                }
-                if !self.sexpr_has_instance_method(method) {
-                    return self.check_dyn_call(
-                        heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..],
-                    );
-                }
-                let form = forms::dyn_value_form(heap, recv.form)?;
-                recv = Checked::new(form, sexpr_ty());
-            }
-            let type_fq = self.assoc_receiver_path(&recv.ty, method);
-            if let Some(type_fq) = &type_fq {
-                if let Some(def) = self.reg.type_def(type_fq) {
-                    let visible = def
-                        .assoc
-                        .get(method)
-                        .is_some_and(|af| af.instance && self.assoc_visible(type_fq, af));
-                    if visible {
-                        return self.check_assoc_call(
-                            heap,
-                            interp,
-                            env,
-                            AssocCall { type_fq, method, receiver: Some(recv), expected: None },
-                            &args[1..],
-                            &arg_locs[1..],
-                        );
-                    }
-                }
-                // A method no `impl` put on the type, but a blanket impl
-                // provides. The signature comes from the `TraitDef` template
-                // with `Self` bound to the receiver — the definition itself
-                // is generated by the queued materialization, which
-                // `check_form_at` drains ahead of this form.
-                if let Some(t) =
-                    self.blanket_method_owner(&recv.ty, type_fq, method)
-                {
-                    return self.check_blanket_method_call(
-                        heap, interp, env, recv, type_fq, &t, method, &args[1..], &arg_locs[1..],
-                    );
-                }
-                // No concrete `AdtDef` named `type_fq` — it may be one of
-                // this function's own `where`-bounded type parameters
-                // (`Env::bounds`, keyed by the lowercase type-variable name,
-                // exactly what `type_fq.last_segment()` is for a bare `Type::Named`
-                // type variable like `t`). Search every trait it's bound to
-                // for a matching method; see `Checker::trait_call_panic_form`
-                // for why the implementing type is resolved at runtime
-                // instead of here.
-                if let Some(bound_traits) = env.bounds.get(type_fq.last_segment()) {
-                    // An operator on a bounded type variable means its trait's
-                    // method: `(+ a b)` under `(where (Add T))` is `(add a b)`.
-                    // The trait cannot declare the operator itself — an `impl`
-                    // naming a method `+` is refused, because `+` belongs to
-                    // the primitive types' built-in tables — so the two
-                    // spellings meet here, in the one place a receiver is known
-                    // to be a type variable rather than a type. A bound that
-                    // declares the written name itself always wins: this is a
-                    // fallback for a name no bound has, never a rename.
-                    let method = match trait_operator_method(method) {
-                        Some(alias)
-                            if !bound_traits.iter().any(|tb| {
-                                self.reg
-                                    .trait_def(&tb.trait_path)
-                                    .is_some_and(|t| self.reg.trait_method(t, method).is_some())
-                            }) =>
-                        {
-                            alias
-                        }
-                        _ => method,
-                    };
-                    for tb in bound_traits {
-                        let Some(tdef) = self.reg.trait_def(&tb.trait_path) else { continue };
-                        // Inherited methods included: bounding `T` by `Ord`
-                        // makes `Eq`'s `equals` callable on it, since `Ord`
-                        // obliges every implementor to implement `Eq` too.
-                        let Some((decl, sig)) = self.reg.trait_method(tdef, method) else { continue };
-                        let decl_path = decl.name.clone();
-                        let want = sig.params.len() - 1;
-                        if args.len() - 1 != want {
-                            return Err(Error::TypeError(format!(
-                                "{}: expected {} argument(s), got {}",
-                                method,
-                                want,
-                                args.len() - 1
-                            )));
-                        }
-                        // Checked for their own diagnostics only — the node
-                        // they used to fill is never executed, so the lowered
-                        // forms are dropped here.
-                        for (i, a) in args[1..].iter().enumerate() {
-                            self.check_at(heap, interp, env, *a, None, nth_loc(&arg_locs[1..], i))?;
-                        }
-                        // This bound's `where`-clause associated-type pins
-                        // (e.g. `(Item i32)`) resolve the trait method
-                        // template's otherwise-opaque associated-type
-                        // variables (e.g. `Option<Item>`) wherever pinned —
-                        // a no-op (returns `sig.ret` unchanged) when
-                        // `tb.assoc` is empty, exactly matching pre-pin
-                        // behavior.
-                        // ...and composed down the supertrait chain when the
-                        // method is an inherited one, since its template is
-                        // written in the declaring trait's associated types.
-                        let Some(mut assoc) = self.trait_assoc_subst_for(tdef, &tb.assoc, &decl_path)
-                        else {
-                            return Err(Error::TypeError(format!(
-                                "{}: `{}` declares `{}`, but is not in `{}`'s supertrait chain",
-                                method, decl_path, method, tb.trait_path
-                            )));
-                        };
-                        // `Self` in the template *is* this bounded type
-                        // variable. Without this binding a trait method
-                        // declared to return `Self` — `(add ((self Self)
-                        // (other Self)) Self)` — hands the literal `self`
-                        // type variable back to a call justified by `(where
-                        // (Add T))`, and the enclosing generic's `T` return
-                        // position rejects it ("expected t, found self").
-                        // Same `"self"` key that `subst_method_sig` and
-                        // `check_trait_call` bind for a concrete receiver;
-                        // no prelude trait method returned `Self` (they all
-                        // return `bool` or an associated type), which is why
-                        // the gap survived until the `Number` trait layer
-                        // needed it.
-                        assoc.insert("self".to_string(), recv.ty.clone());
-                        let ret_ty = subst_apply(&sig.ret, &assoc);
-                        let form = forms::erased_generic_form(heap, method)?;
-                        return Ok(Checked::new(form, ret_ty));
-                    }
-                }
-            }
+        let Some(&first) = args.first() else {
+            return Err(Error::NoSuchFunction(method.to_string()));
+        };
+        let recv = self.check_at(heap, interp, env, first, None, nth_loc(arg_locs, 0))?;
+        // A trait object: `check_dyn_call`'s message names the trait.
+        if let Type::Dyn(trait_path, pins) = recv.ty.clone() {
+            return self.check_dyn_call(heap, interp, env, recv, &trait_path, &pins, method, &args[1..], &arg_locs[1..]);
         }
+        let recv_ty = recv.ty;
         // A name that is a method of *other* types is not a missing function:
         // the call picked its method by the first argument's type, and that
         // type has none by this name. Saying "no such function" there sends
         // the reader looking for a typo in a name that exists.
-        if let Some(recv_ty) = recv_ty {
-            let owners = self.types_with_instance_method(method);
-            if !owners.is_empty() {
-                // A type variable (a generic body's `T`) has exactly the methods its
-                // `where` bounds give it, so that is what to say — which concrete
-                // types happen to have the name is beside the point.
-                if let Type::Named(p, args) = &recv_ty {
-                    if args.is_empty() && p.is_simple() && self.reg.type_def(p).is_none() {
-                        return Err(Error::TypeError(format!(
-                            "no method `{}` for type variable `{}`: none of the traits in its `where` bounds provides `{}`",
-                            method, recv_ty, method
-                        )));
-                    }
+        let owners = self.types_with_instance_method(method);
+        if !owners.is_empty() {
+            // A type variable (a generic body's `T`) has exactly the methods its
+            // `where` bounds give it, so that is what to say — which concrete
+            // types happen to have the name is beside the point.
+            if let Type::Named(p, targs) = &recv_ty {
+                if targs.is_empty() && p.is_simple() && self.reg.type_def(p).is_none() {
+                    return Err(Error::TypeError(format!(
+                        "no method `{}` for type variable `{}`: none of the traits in its `where` bounds provides `{}`",
+                        method, recv_ty, method
+                    )));
                 }
-                const SHOWN: usize = 8;
-                let mut list = owners.iter().take(SHOWN).map(|t| format!("`{}`", t)).collect::<Vec<_>>().join(", ");
-                if owners.len() > SHOWN {
-                    list.push_str(&format!(" and {} more", owners.len() - SHOWN));
-                }
-                return Err(Error::TypeError(format!(
-                    "no method `{}` for type `{}` (the type of the first argument, which selects the method); `{}` is a method of {}",
-                    method, recv_ty, method, list
-                )));
             }
+            const SHOWN: usize = 8;
+            let mut list = owners.iter().take(SHOWN).map(|t| format!("`{}`", t)).collect::<Vec<_>>().join(", ");
+            if owners.len() > SHOWN {
+                list.push_str(&format!(" and {} more", owners.len() - SHOWN));
+            }
+            return Err(Error::TypeError(format!(
+                "no method `{}` for type `{}` (the type of the first argument, which selects the method); `{}` is a method of {}",
+                method, recv_ty, method, list
+            )));
         }
         Err(Error::NoSuchFunction(method.to_string()))
     }
@@ -12582,9 +12673,8 @@ impl Checker {
     /// "name")`) is a type error: it would let the same name be spelled two
     /// incompatible ways for no benefit.
     ///
-    /// Builds a [`CompileTarget`] directly from whichever resolution this
-    /// already has to do anyway (`resolve_fn`/`resolve_fn_path` for a free
-    /// function, `resolve_bare_type`/`resolve_type_path` for a `type::method`)
+    /// Builds a [`CompileTarget`] directly from the resolution this already
+    /// has to do anyway ([`Self::resolve_name`])
     /// instead of discarding the resolved `Path` and handing `Interp` a bare
     /// name string to re-resolve with an unqualified, module-blind search —
     /// the same `written`+`home` independent re-resolution every other
@@ -12595,8 +12685,8 @@ impl Checker {
     /// up at runtime — the resolution above is the answer — so deferring the
     /// failure to `Interp::resolve_fn_ref` would only move a diagnosis the
     /// checker already made past the point where it can name a source
-    /// position. "Genuinely private from here" fails the same way: both
-    /// `resolve_fn` and `resolve_fn_path` fold "exists but not visible" into
+    /// position. "Genuinely private from here" fails the same way:
+    /// [`Self::resolve_name`] folds "exists but not visible" into
     /// "doesn't resolve", so `(compile other-modules-private)` is rejected
     /// with the rest, exactly as an ordinary call to it would be.
     ///
@@ -12640,72 +12730,51 @@ impl Checker {
                 who, name
             ))
         };
-        // Shared by both places that build a `CompileTarget::Fn`: a bare name
-        // (`resolve_fn`) and a module-qualified one that turned out not to
-        // name a `type::method` (`resolve_fn_path`) — same generic check,
-        // same "no resolution -> check-time error".
-        let fn_target = |written: Vec<String>, resolved: Option<Path>| -> Result<CompileTarget, Error> {
-            let resolved = resolved.ok_or_else(|| {
-                Error::TypeError(format!("{}: no function `{}` is visible from here", who, name))
-            })?;
+        // A function or a macro: the same generic check for both.
+        let fn_target = |written: Vec<String>, resolved: Path| -> Result<CompileTarget, Error> {
             if self.generic_fn_templates.contains_key(&resolved) {
                 return Err(generic_err());
             }
             Ok(CompileTarget::Fn(self.mk_ref(written, resolved)))
         };
-        // A macro resolves too. Its body is an ordinary `Sexpr -> Sexpr`
-        // function — the *interpreter* keeps it in the same `fns` table a
-        // `defun` goes in, so a `CompileTarget::Fn` reaches it — but the
-        // *checker* keeps functions and macros in separate maps, so
-        // `resolve_fn` alone comes up empty and `(compile <macro>)` used to be
-        // rejected as "no function ... is visible from here". Functions first:
-        // that is the existing resolution, and this only widens what a name
-        // that resolved to nothing can still mean.
-        let fn_or_macro = |name: &str| self.resolve_fn(name).or_else(|| self.resolve_macro(name).map(|(p, _)| p));
-        match name.rsplit_once("::") {
-            None => fn_target(vec![name.to_string()], fn_or_macro(name)),
-            Some((type_part, method)) => {
-                let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
-                // Kept separate from `type_fq` below: whether the *type* half
-                // resolved is what tells "this type has no such method" apart
-                // from "this names nothing at all", and both are reachable
-                // only after `resolve_fn_path` has also come up empty.
-                let type_path = if type_segs.len() == 1 {
-                    self.resolve_bare_type(&type_segs[0])
-                } else {
-                    self.resolve_type_path(&type_segs)
-                };
-                let type_fq = type_path
-                    .clone()
-                    .filter(|tp| self.reg.type_def(tp).is_some_and(|def| def.assoc.contains_key(method)));
-                match type_fq {
-                    // A genuine `type::method` — the type exists and has
-                    // this associated function/method.
-                    Some(type_fq) => {
-                        if self.generic_method_templates.contains_key(&(type_fq.clone(), method.to_string())) {
-                            return Err(generic_err());
-                        }
-                        Ok(CompileTarget::Method { type_name: type_fq, method: method.to_string(), home: self.ns.clone() })
-                    }
-                    // Not a type::method — a module-qualified free function
-                    // instead (e.g. `(compile m::inc)`), or genuinely nothing
-                    // at all (`(compile bogus::x)`, `(compile point::bogus)`).
-                    None => {
-                        let full_segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
-                        match self.resolve_fn_path(&full_segs) {
-                            Some(resolved) => fn_target(full_segs, Some(resolved)),
-                            None => Err(Error::TypeError(match &type_path {
-                                Some(tp) => {
-                                    format!("{}: type `{}` has no associated function or method `{}`", who, tp, method)
-                                }
-                                None => format!(
-                                    "{}: `{}` names neither a type's method nor a function visible from here",
-                                    who, name
-                                ),
-                            })),
-                        }
-                    }
+        // The one resolution rule, with no receiver: a bare name is a macro or
+        // a module-level value, a path also a type's member. A macro's body is
+        // an ordinary `Sexpr -> Sexpr` function — the interpreter keeps it in
+        // the same `fns` table a `defun` goes in — so a `CompileTarget::Fn`
+        // reaches it.
+        let segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
+        let written = if segs.len() == 1 { Written::Bare(name) } else { Written::Path(&segs) };
+        match self.resolve_name(&Env::new(), written, &mut || None) {
+            Some(Resolved::Value(ModuleValue::Fn(path))) | Some(Resolved::Macro(path, _)) => fn_target(segs.clone(), path),
+            Some(Resolved::Member(type_fq, method)) => {
+                if self.generic_method_templates.contains_key(&(type_fq.clone(), method.clone())) {
+                    return Err(generic_err());
                 }
+                Ok(CompileTarget::Method { type_name: type_fq, method, home: self.ns.clone() })
+            }
+            Some(Resolved::Value(ModuleValue::Var(..))) => {
+                Err(Error::TypeError(format!("{}: `{}` is a variable, not a function", who, name)))
+            }
+            Some(Resolved::Ctor(..)) => {
+                Err(Error::TypeError(format!("{}: `{}` is a constructor, not a function", who, name)))
+            }
+            Some(Resolved::Local) | Some(Resolved::Method(_)) => {
+                unreachable!("with no locals and no receiver, nothing resolves to a local or a receiver's method")
+            }
+            None => {
+                // Whether the *type* half resolved is what tells "this type has
+                // no such method" apart from "this names nothing at all".
+                let type_path = match segs.split_last() {
+                    Some((_, type_segs)) if !type_segs.is_empty() => self.resolve_type_path(type_segs),
+                    _ => None,
+                };
+                Err(Error::TypeError(match (&type_path, segs.last()) {
+                    (Some(tp), Some(method)) => {
+                        format!("{}: type `{}` has no associated function or method `{}`", who, tp, method)
+                    }
+                    _ if segs.len() == 1 => format!("{}: no function `{}` is visible from here", who, name),
+                    _ => format!("{}: `{}` names neither a type's method nor a function visible from here", who, name),
+                }))
             }
         }
     }
@@ -12856,54 +12925,56 @@ impl Checker {
         self.doc_option(heap, doc)
     }
 
-    /// Which definition a bare name or a `Type::method` path names — the
-    /// resolution `documentation` and `ed` share.
+    /// Which definition a name or a `::` path names — the resolution
+    /// `documentation` and `ed` share.
     ///
     /// The two want different *columns* of the same pair of tables
     /// (`Registry::docs` and `Registry::def_locs`, which are keyed
     /// identically and populated at the same registration points), so what
     /// they can share is exactly this: the ladder that decides which column
-    /// to read. A bare name is tried as a variable, a function, a type (or a
-    /// `deftype` alias), a trait, then a macro — first hit wins, the same var-before-fn priority
-    /// a bare identifier gets as an ordinary expression.
+    /// to read. A function, a global, a macro or a type's member is what
+    /// [`Self::resolve_name`] says the name is; a bare name that is none of
+    /// them is tried as a type (or a `deftype` alias), then a trait.
     ///
     /// Resolving to nothing is a check-time error, like any other unbound
     /// reference: the checker always knows where a name resolves, so there is
     /// nothing left for the runtime to look up.
     fn resolve_definition(&self, name: &str, who: &str) -> Result<DefRef, Error> {
-        match name.rsplit_once("::") {
-            None => {
-                if let Some((path, _)) = self.resolve_global(name) {
-                    Ok(DefRef::Var(path))
-                } else if let Some(path) = self.resolve_fn(name) {
-                    Ok(DefRef::Fn(path))
-                } else if let Some(path) = self.resolve_bare_type(name) {
-                    Ok(DefRef::Type(path))
-                } else if let Some(alias) = self.resolve_type_alias(&Path::of(&[name])) {
-                    // A `deftype` alias keeps its docstring and location in the
-                    // type columns, under its own fully-qualified name.
-                    Ok(DefRef::Type(alias.name))
-                } else if let Ok(path) = self.resolve_trait_name(name) {
-                    Ok(DefRef::Trait(path))
-                } else if let Some((path, _)) = self.resolve_macro(name) {
-                    Ok(DefRef::Macro(path))
-                } else {
-                    Err(Error::TypeError(format!("{}: no definition named `{}`", who, name)))
-                }
+        // A function, a global, a macro or a type's member: the one resolution
+        // rule (`Self::resolve_name`), with no receiver.
+        let segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
+        let written = if segs.len() == 1 { Written::Bare(name) } else { Written::Path(&segs) };
+        match self.resolve_name(&Env::new(), written, &mut || None) {
+            Some(Resolved::Value(ModuleValue::Var(path, _))) => return Ok(DefRef::Var(path)),
+            Some(Resolved::Value(ModuleValue::Fn(path))) => return Ok(DefRef::Fn(path)),
+            Some(Resolved::Macro(path, _)) => return Ok(DefRef::Macro(path)),
+            Some(Resolved::Member(type_fq, member)) => return Ok(DefRef::Method(type_fq, member)),
+            Some(Resolved::Ctor(..)) => {
+                return Err(Error::TypeError(format!(
+                    "{}: `{}` is a constructor, which has no definition of its own — name its type",
+                    who, name
+                )))
             }
-            Some((type_part, method)) => {
-                let type_segs: Vec<String> = type_part.split("::").map(|s| s.to_string()).collect();
-                let type_fq = if type_segs.len() == 1 { self.resolve_bare_type(&type_segs[0]) } else { self.resolve_type_path(&type_segs) }
-                    .filter(|tp| self.reg.type_def(tp).is_some_and(|def| def.assoc.contains_key(method)));
-                match type_fq {
-                    Some(type_fq) => Ok(DefRef::Method(type_fq, method.to_string())),
-                    None => Err(Error::TypeError(format!(
-                        "{}: `{}` is not a known `Type::method` — module-qualified free names/types/traits/macros are not supported here",
-                        who, name
-                    ))),
-                }
+            Some(Resolved::Local) | Some(Resolved::Method(_)) => {
+                unreachable!("with no locals and no receiver, nothing resolves to a local or a receiver's method")
+            }
+            None => {}
+        }
+        // Types and traits are a name space of their own.
+        if segs.len() == 1 {
+            if let Some(path) = self.resolve_bare_type(name) {
+                return Ok(DefRef::Type(path));
+            }
+            if let Some(alias) = self.resolve_type_alias(&Path::of(&[name])) {
+                // A `deftype` alias keeps its docstring and location in the
+                // type columns, under its own fully-qualified name.
+                return Ok(DefRef::Type(alias.name));
+            }
+            if let Ok(path) = self.resolve_trait_name(name) {
+                return Ok(DefRef::Trait(path));
             }
         }
+        Err(Error::TypeError(format!("{}: no definition named `{}`", who, name)))
     }
 
     /// `(ed)` / `(ed name)` / `(ed "path")` (CLHS 25.2): open the user's
@@ -13909,7 +13980,7 @@ impl Checker {
     /// unlike `Self::check_variadic_cmp` no let-bound temporaries are needed
     /// to guard against double-evaluating an impure operand. Called only for
     /// `args.len() > 2`; the plain 2-argument case goes through the existing
-    /// `Self::try_instance_method` builtin-method path unchanged.
+    /// `Self::resolve_name` builtin-method path unchanged.
     fn check_variadic_arith(
         &self,
         heap: &mut Heap,
@@ -14217,73 +14288,6 @@ impl Checker {
         let result = self.check(heap, interp, env, expansion, expected);
         heap.pop_root();
         result
-    }
-
-    /// Whether a `where` bound on `ty` already supplies `method` — the
-    /// lookup [`Self::check_instance_method`]'s bounds branch performs, asked
-    /// on its own by [`Self::try_instance_method_swapped`] so that a
-    /// bound-served call is never re-read with its arguments the other way
-    /// round.
-    ///
-    /// `false` for anything that is not a bare type variable: a receiver with
-    /// a real `AdtDef` was already offered to `Self::try_instance_method`,
-    /// which answers for it.
-    fn bound_supplies_method(&self, env: &Env, ty: &Type, method: &str) -> bool {
-        let Some(type_fq) = self.assoc_receiver_path(ty, method) else { return false };
-        if self.reg.type_def(&type_fq).is_some() {
-            return false;
-        }
-        let Some(bounds) = env.bounds.get(type_fq.last_segment()) else { return false };
-        // The operator alias too, since the bounds branch accepts `(+ a b)`
-        // as the `Add` bound's `add` — a swap must not get in front of that
-        // either.
-        let names = [Some(method), trait_operator_method(method)];
-        bounds.iter().any(|tb| {
-            self.reg.trait_def(&tb.trait_path).is_some_and(|t| {
-                names.iter().flatten().any(|m| self.reg.trait_method(t, m).is_some())
-            })
-        })
-    }
-
-    /// A same-named 2-argument instance method may be defined with the
-    /// receiver in *either* position — e.g. this project's own `Vector<T>`
-    /// method `push` takes the vector first (`(push vec item)`, the
-    /// "receiver first" convention every instance-method call in this
-    /// language otherwise uses — see `Self::try_instance_method`'s doc
-    /// comment), while `push` is also CL's place macro, item first
-    /// (`(push item place)`). Tried only after the receiver-first order has
-    /// already failed to resolve, so it never shadows the primary
-    /// convention when both would apply.
-    fn try_instance_method_swapped(
-        &self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        env: &Env,
-        method: &str,
-        args: &[Value],
-        arg_locs: &[Option<Loc>],
-    ) -> Option<Result<Checked, Error>> {
-        if args.len() != 2 {
-            return None;
-        }
-        // Receiver-first failing is not enough to conclude the call was
-        // written the other way round: `Self::try_instance_method`'s peek
-        // stops at `reg.type_def`, so a receiver that is one of the enclosing
-        // function's own `where`-bounded type variables *always* fails it —
-        // that resolution lives in `Self::check_instance_method`, further
-        // down `check_list`'s chain. Swapping first would hand the call to
-        // whatever type the second argument happens to be, and its diagnostic
-        // then describes a call nobody wrote: `(print-object x true)` under
-        // `(where (print-object T))` became `bool`'s method with `x` in the
-        // `escape` position ("expected Bool, found t"), the moment `bool`
-        // gained an impl.
-        let recv_ty = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0)).ok().map(|c| c.ty);
-        if recv_ty.is_some_and(|t| self.bound_supplies_method(env, &t, method)) {
-            return None;
-        }
-        let swapped_args = [args[1], args[0]];
-        let swapped_locs = [nth_loc(arg_locs, 1), nth_loc(arg_locs, 0)];
-        self.try_instance_method(heap, interp, env, method, &swapped_args, &swapped_locs)
     }
 
     /// [`Self::check_defvar_form`] with its type variables (a global binds none) in scope for
@@ -16802,7 +16806,7 @@ impl Checker {
     }
 
     /// Whether `ty` can be compared with `equals` — the same two lookups
-    /// [`Self::try_instance_method`] and its bounded-type-variable fallback
+    /// [`Self::resolve_name`] and its bounded-type-variable fallback
     /// would do for the call [`Self::value_pattern`] is about to build,
     /// asked first so that "this type cannot be compared" is the error
     /// rather than "no such method `equals`", which names the mechanism

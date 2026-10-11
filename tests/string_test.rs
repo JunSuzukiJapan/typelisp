@@ -1,7 +1,7 @@
 //! Tests for the built-in `String`/`char` instance methods
 //! ([cl-equivalence-catalog.md](../docs/dev/cl-equivalence-catalog.md) §2.2 d),
 //! reusing the primitive-type `defmethod` receiver support from step 1
-//! (`check_instance_method`'s `prim_type_path` dispatch) — these are
+//! (`receiver_method`'s `prim_type_path` dispatch) — these are
 //! metadata-only `AssocFn`s (`registry::string_assoc`/`char_assoc`) with no
 //! `defmethod` body, falling back to `eval_builtin_method` at runtime, the
 //! same pattern as `HashTable`.
@@ -271,7 +271,7 @@ fn char_only_method_on_a_string_is_a_type_error() {
 #[test]
 fn eq_dispatches_separately_per_receiver_type() {
     // `string`'s and `char`'s comparison methods live in separate per-type
-    // `assoc` tables (see `check_instance_method`'s dispatch on the
+    // `assoc` tables (see `receiver_method`'s dispatch on the
     // receiver's static type) — calling both in the same program is a
     // regression check that they don't collide. Uses `equal` for the
     // string half (`eq` on `Str` is identity, not content — see

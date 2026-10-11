@@ -756,7 +756,7 @@ fn an_impl_omitting_an_associated_type_is_rejected() {
 /// variable, must come back as *that variable* — not the literal `Self` type
 /// variable the trait's template is written in.
 ///
-/// The bounds branch of `Checker::check_instance_method` used to substitute
+/// The bounds branch of `Checker::receiver_method` used to substitute
 /// only the trait's associated types into the method's return type, so
 /// `(add a b)` under `(where (Add T))` yielded `self` and the enclosing
 /// generic's `T` return position rejected it. Nothing in the prelude caught

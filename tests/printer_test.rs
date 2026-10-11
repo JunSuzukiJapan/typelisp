@@ -501,11 +501,10 @@ fn the_scalar_impls_render_what_the_printer_renders() {
 }
 
 /// A `where`-bounded receiver keeps its method even when some *other* type
-/// implements the same trait with a matching argument in the second position.
-/// `(print-object x true)` under `(where (print-object T))` used to be re-read
-/// with its arguments swapped — `try_instance_method`'s peek stops before the
-/// bounds, and the swapped order then resolved against `bool`'s impl, so the
-/// error named a call nobody wrote ("expected Bool, found t").
+/// implements the same trait with a matching argument in the second position:
+/// the method comes from the first argument's type only, so
+/// `(print-object x true)` under `(where (print-object T))` never resolves
+/// against `bool`'s impl.
 #[test]
 fn a_bound_method_is_not_re_read_with_swapped_arguments() {
     is_true(

@@ -425,7 +425,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; and `Result<T,E>`, which only an instance method's per-receiver-type assoc
 ;; table allows (a free function has exactly one signature for its name —
 ;; see registry::int_assoc's step-6 comment for the same constraint on `+`).
-;; `(unwrap opt)` resolves via `Checker::check_instance_method`: it checks
+;; `(unwrap opt)` resolves via `Checker::receiver_method`: it checks
 ;; `opt` first, then looks up `unwrap` in *its* type's assoc table, so the
 ;; same call syntax reaches `Option`'s or `Result`'s method independently.
 ;; The receiver's type parameter (`T`/`E` here) is resolved per call site
@@ -1210,7 +1210,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; binding type from the scrutinee's own type (`next`'s return, `Option<Item>`)
 ;; the same way it already does for every other `match`, so this needs no
 ;; checker-level special form — `(next tmp)` resolves through the ordinary
-;; instance-method/trait-bound call machinery (`Checker::check_instance_method`),
+;; instance-method/trait-bound call machinery (`Checker::receiver_method`),
 ;; concrete or `where`-bounded type variable alike.
 (defmacro doiter (spec &rest body)
   (let ((var (sexpr-car spec))

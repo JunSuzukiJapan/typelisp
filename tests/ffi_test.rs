@@ -710,9 +710,9 @@ fn a_redefined_callback_runs_its_new_body() {
         "{}(defun cmp ((a ptr) (b ptr)) i32 (unsafe (c-strncmp a b 1)))
          (defun sort4 ((s string)) string
            (unsafe (let ((buf (c-strdup s))) (c-qsort buf 4 1 cmp) (let ((r (text-of buf \"\"))) (c-free buf) r))))
-         (defvar (first string) (sort4 \"cadb\"))
+         (defvar (ascending string) (sort4 \"cadb\"))
          (defun cmp ((a ptr) (b ptr)) i32 (unsafe (c-strncmp b a 1)))
-         (append first (sort4 \"cadb\"))",
+         (append ascending (sort4 \"cadb\"))",
         QSORT
     );
     assert_eq!(text(&src), "abcddcba");

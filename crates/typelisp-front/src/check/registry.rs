@@ -269,7 +269,7 @@ pub struct AdtDef {
     /// Traits this type has an `impl` for (`Checker::check_impl`), by the
     /// trait's [`Path`]. Each `impl`ed method is inserted into `assoc` like
     /// an ordinary `defmethod` — so an instance call on a *concrete* receiver
-    /// type resolves through the same `assoc` lookup `check_instance_method`
+    /// type resolves through the same `assoc` lookup `receiver_method`
     /// already does, untouched. Also consulted by `Checker::check_call` to
     /// validate a where-bounded call site's actual argument types against
     /// the callee's declared bounds.
@@ -295,7 +295,7 @@ pub struct AdtDef {
 /// substituted for the `impl`'s concrete target type — see that function's
 /// doc comment. A `TraitDef` itself is consulted only when a method is
 /// called on a still-generic type-variable receiver (no concrete `AdtDef` to
-/// look the method up on yet) — `Checker::check_instance_method`'s
+/// look the method up on yet) — `Checker::receiver_method`'s
 /// type-variable branch.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TraitDef {
@@ -675,7 +675,7 @@ impl Registry {
         root.add_type(llvm_value_def());
         // Primitive value types (i8..usize/f32/f64/bool/char/string) get a
         // method table too, so `defmethod` can target them (see
-        // `check_defmethod`/`check_instance_method`, which map a primitive
+        // `check_defmethod`/`receiver_method`, which map a primitive
         // `Type` to its registry `Path` via `prim_type_path`). `string`/`char`/
         // The integer widths and `f64` additionally get a built-in method set (no
         // `defmethod` body to check; the runtime implementation lives in
@@ -685,7 +685,7 @@ impl Registry {
         // operators are *instance* methods (not free functions) precisely so
         // the same symbol (`+`, `<`, ...) can be overloaded per receiver
         // type — every integer width shares one `+` symbol, and `f64` another,
-        // resolved by `check_instance_method` on the first argument's static
+        // resolved by `receiver_method` on the first argument's static
         // type exactly like `(get h k)` resolves to `HashTable`'s `get`.
         for ty in crate::types::primitive_types() {
             let name = crate::types::prim_type_path(&ty).expect("primitive_types() are all prim_type_path-mappable");

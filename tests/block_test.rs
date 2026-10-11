@@ -136,7 +136,7 @@ fn the_innermost_block_of_a_name_wins() {
 
 #[test]
 fn return_from_can_leave_an_outer_block_from_inside_an_inner_one() {
-    assert_eq!(int("(block outer (+ (block inner (return-from outer 7)) 10))"), 7);
+    assert_eq!(int("(block outer (+ 10 (block inner (return-from outer 7))))"), 7);
 }
 
 // ------------------------------------------------- the implicit block
@@ -317,7 +317,7 @@ fn a_compiled_defun_returns_from_itself() {
 }
 
 const NESTED_BLOCKS: &str = r#"
-    (defun pick () int (block outer (+ (block inner (return-from outer 7)) 10)))
+    (defun pick () int (block outer (+ 10 (block inner (return-from outer 7)))))
     "#;
 
 #[test]

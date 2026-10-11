@@ -257,7 +257,7 @@ fn compiles_and_runs_arithmetic_in_main() {
     // see this module's doc comment) always defaults to `int` (the
     // checker resolves `+`/`-`/`*`'s receiver type from its *first*
     // argument checked with `expected: None`, by design — see
-    // `Checker::try_instance_method`'s doc comment — so the outer
+    // `Checker::resolve_name`'s doc comment — so the outer
     // expectation from `main`'s declared return type never reaches it).
     // That's a type-checking-time distinction, not a codegen one: the core
     // IR's literal node is `int-any-width` and the island's
@@ -1504,7 +1504,7 @@ fn an_aot_executable_expands_a_prelude_macro_from_a_snapshot() {
             "aot_eval_prelude_macro",
             r#"
             (defun main () int
-              (match (eval (quote (length (with-output-to-string (s) (write-string "hello" s)))))
+              (match (eval (quote (length (with-output-to-string (s) (write-string s "hello")))))
                 ((ok v) (as int (sexpr-int v)))
                 ((err _) -1)))
             "#
