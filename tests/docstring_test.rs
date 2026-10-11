@@ -196,9 +196,10 @@ fn defmethod_docstring_via_impl_is_returned_by_documentation() {
 fn defmethod_docstring_direct_is_returned_by_documentation() {
     let src = r#"
         (defstruct point (x int) (y int))
-        (defmethod magnitude (point) int
-          "Returns a magnitude-ish value."
-          0)
+        (impl point
+  (magnitude () int
+            "Returns a magnitude-ish value."
+            0))
         (unwrap-or (documentation point::magnitude) "none")
     "#;
     assert_eq!(eval_string(src), "Returns a magnitude-ish value.");

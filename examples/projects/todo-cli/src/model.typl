@@ -13,4 +13,4 @@
 ;; 呼ぶより、コンストラクタをこの定義モジュール自身でラップして公開する方が
 ;; 素直に動く(型エイリアス越しの `型::静的メンバ` 呼び出しは現状サポート外)。
 (pub defun make-todo ((id int) (text string) (done bool)) todo-item
-  (todo-item::new id text done))
+  (make-instance 'todo-item :id id :text text :done done))

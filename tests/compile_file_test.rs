@@ -59,10 +59,11 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
         compile_and_run(
             "format_call",
             r#"(defstruct money (yen int))
-               (defmethod jp ((self money) (colon bool) (at bool)) string
-                 (format false "~a yen" (yen self)))
+               (impl money
+  (jp (self (colon bool) (at bool)) string
+                   (format false "~a yen" (yen self))))
                (defun main () int
-                 (if (equal (format false "~/jp/" (money::new 300)) "300 yen") 0 1))"#,
+                 (if (equal (format false "~/jp/" (make-instance 'money :yen 300)) "300 yen") 0 1))"#,
         ),
         0
     );
@@ -163,8 +164,8 @@ fn the_entry_files_types_print_with_its_module_as_under_typl() {
         &src_path,
         r#"(defstruct point (x int) (y int))
            (defun main () ()
-             (println "~s" (point::new 1 2))
-             (match (eval (quote (point::new 3 4)))
+             (println "~s" (make-instance 'point :x 1 :y 2))
+             (match (eval (quote (make-instance 'point :x 3 :y 4)))
                ((ok v) (println "~s" v))
                ((err e) (println "~a" (message e)))))
            (main)"#,
@@ -837,8 +838,9 @@ fn compiles_a_defstruct_with_a_method() {
             "struct_method",
             r#"
             (defstruct point (x int) (y int))
-            (defmethod norm ((self point)) int (+ (* self::x self::x) (* self::y self::y)))
-            (defun main () int (as int (norm (point::new 3 4))))
+            (impl point
+  (norm (self) int (+ (* self::x self::x) (* self::y self::y))))
+            (defun main () int (as int (norm (make-instance 'point :x 3 :y 4))))
             "#
         ),
         25
@@ -856,7 +858,7 @@ fn compiles_an_impl_block() {
             (deftrait Counted () (count ((self Self)) int))
             (defstruct box-a (n int))
             (impl Counted box-a (count ((self Self)) int self::n))
-            (defun main () int (as int (count (box-a::new 9))))
+            (defun main () int (as int (count (make-instance 'box-a :n 9))))
             "#
         ),
         9
@@ -882,7 +884,7 @@ fn compiles_and_runs_dynamic_dispatch_through_a_trait_object() {
             (impl Drawable square (draw ((self Self)) int 2))
             (defun render ((d :dyn Drawable)) int (draw d))
             (defun main () int
-              (as int (+ (* 10 (render (circle::new 3))) (render (square::new 4)))))
+              (as int (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4)))))
             "#
         ),
         12
@@ -912,7 +914,7 @@ fn compiles_and_runs_an_upcast_to_a_non_first_supertrait() {
             (impl D pair (d-tag ((self Self)) int 6))
             (defun only-c ((c :dyn C)) int (c-tag c))
             (defun via ((d :dyn D)) int (only-c d))
-            (defun main () int (as int (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))))
+            (defun main () int (as int (+ (* 10 (via (make-instance 'cell :n 0))) (via (make-instance 'pair :n 0)))))
             "#
         ),
         25
@@ -935,7 +937,7 @@ fn compiles_and_runs_a_multi_slot_vtable() {
               (sides ((self Self)) int 3))
             (defun paint ((s :dyn Shape)) int (draw s))
             (defun outline ((s :dyn Shape)) int (sides s))
-            (defun main () int (as int (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1)))))
+            (defun main () int (as int (+ (* 10 (paint (make-instance 'tri :n 1))) (outline (make-instance 'tri :n 1)))))
             "#
         ),
         73
@@ -1780,11 +1782,12 @@ fn a_print_object_method_may_use_a_channel_in_a_standalone_executable() {
     let (code, out, err) = compile_and_capture_with(
         "po_chan_aot",
         r##"(defstruct point (x int) (y int))
-           (defmethod print-object ((self point) (escape bool)) string
-             (let ((ch (the Chan<int> (Chan::new 1))))
-               (send ch 7)
-               (format false "#<p ~a ~a>" self::x (recv ch))))
-           (defun main () int (progn (println "~a" (point::new 1 2)) 0))"##,
+           (impl point
+  (print-object (self (escape bool)) string
+               (let ((ch (the Chan<int> (Chan::new 1))))
+                 (send ch 7)
+                 (format false "#<p ~a ~a>" self::x (recv ch)))))
+           (defun main () int (progn (println "~a" (make-instance 'point :x 1 :y 2)) 0))"##,
         &[],
     );
     assert_eq!(code, Some(0), "stderr was: {}", err);
@@ -1800,11 +1803,12 @@ fn a_print_object_method_that_would_block_is_refused_not_aborted() {
     let (code, _, err) = compile_and_capture_with(
         "po_chan_block_aot",
         r#"(defstruct probe (ch Chan<int>))
-           (defmethod print-object ((self probe) (escape bool)) string
-             (format false "<~a>" (recv self::ch)))
+           (impl probe
+  (print-object (self (escape bool)) string
+               (format false "<~a>" (recv self::ch))))
            (defun main () int
              (let ((ch (the Chan<int> (Chan::new 1))))
-               (progn (println "~a" (probe::new ch)) 0)))"#,
+               (progn (println "~a" (make-instance 'probe :ch ch)) 0)))"#,
         &[],
     );
     assert_eq!(code, Some(1), "stderr was: {}", err);
@@ -1969,7 +1973,7 @@ fn an_aot_executable_evaluates_a_struct_to_itself() {
         r#"
         (defstruct q (x i32))
         (defun main () int
-          (let ((v (q::new 7)))
+          (let ((v (make-instance 'q :x 7)))
             (match (eval v)
               ((ok s) (match s
                         ((the q w) (progn (setf w::x 8) (as int v::x)))

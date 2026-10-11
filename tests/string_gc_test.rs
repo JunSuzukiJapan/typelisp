@@ -122,7 +122,7 @@ fn a_string_struct_field_survives_collection() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, r#"(churn (named::new "hello" 1))"#)
+    let v = eval_in(&mut h, &mut chk, &mut interp, r#"(churn (make-instance 'named :n "hello" :k 1))"#)
         .expect("eval under gc stress failed");
     assert_string(&h, &v, "hello");
 }

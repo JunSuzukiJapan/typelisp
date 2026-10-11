@@ -75,7 +75,7 @@ fn a_user_type_can_implement_hash() {
           (and (= self::x other::x) (= self::y other::y))))
         (impl Hash point (sxhash ((self Self)) int
           (logand (+ (* (as int self::x) 31) (as int self::y)) *sxhash-mask*)))
-        (sxhash (point::new 1 2))
+        (sxhash (make-instance 'point :x 1 :y 2))
     ";
     assert_eq!(eval_ok(src), Value::Int(33));
 }
@@ -120,7 +120,7 @@ fn a_key_type_the_table_cannot_hold_is_a_type_error() {
     let src = "
         (defstruct point (x int) (y int))
         (defvar (h HashTable<point,int>) (HashTable::new))
-        (set h (point::new 1 2) 3)
+        (set h (make-instance 'point :x 1 :y 2) 3)
     ";
     let msg = check_err(src);
     assert!(msg.contains("does not implement trait"), "unexpected message: {}", msg);
@@ -189,9 +189,9 @@ fn a_user_type_that_implements_hash_is_a_key() {
         "{}
          (defvar (h HashTable<point,string>) (HashTable::new))
          (progn
-           (set h (point::new 1 2) \"a\")
-           (set h (point::new 3 4) \"b\")
-           (match (get h (point::new 1 2)) ((some v) v) ((none) \"missing\")))",
+           (set h (make-instance 'point :x 1 :y 2) \"a\")
+           (set h (make-instance 'point :x 3 :y 4) \"b\")
+           (match (get h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) \"missing\")))",
         POINT
     );
     match eval_ok(&src) {
@@ -204,8 +204,8 @@ fn a_user_type_that_implements_hash_is_a_key() {
     let src = format!(
         "{}
          (defvar (h HashTable<point,int>) (HashTable::new))
-         (progn (set h (point::new 1 2) 7)
-                (match (get h (point::new 1 2)) ((some v) v) ((none) -1)))",
+         (progn (set h (make-instance 'point :x 1 :y 2) 7)
+                (match (get h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) -1)))",
         POINT
     );
     assert_eq!(eval_ok(&src), Value::Int(7));
@@ -217,13 +217,13 @@ fn a_user_key_overwrites_removes_and_counts_like_a_scalar_one() {
         "{}
          (defvar (h HashTable<point,int>) (HashTable::new))
          (progn
-           (set h (point::new 1 2) 1)
-           (set h (point::new 3 4) 2)
-           (set h (point::new 1 2) 9)          ; overwrite, not a second entry
+           (set h (make-instance 'point :x 1 :y 2) 1)
+           (set h (make-instance 'point :x 3 :y 4) 2)
+           (set h (make-instance 'point :x 1 :y 2) 9)          ; overwrite, not a second entry
            (let ((after-overwrite (count h))
-                 (removed (match (remove h (point::new 1 2)) ((some v) v) ((none) -1)))
+                 (removed (match (remove h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) -1)))
                  (after-remove (count h))
-                 (gone (match (remove h (point::new 1 2)) ((some v) v) ((none) -1))))
+                 (gone (match (remove h (make-instance 'point :x 1 :y 2)) ((some v) v) ((none) -1))))
              (+ (* 1000 after-overwrite) (+ (* 100 removed) (+ (* 10 after-remove) (+ 1 gone))))))",
         POINT
     );
@@ -243,11 +243,11 @@ fn colliding_keys_stay_separate_entries() {
         (impl Hash k (sxhash ((self Self)) int 0))
         (defvar (h HashTable<k,int>) (HashTable::new))
         (progn
-          (set h (k::new 1) 10)
-          (set h (k::new 2) 20)
+          (set h (make-instance 'k :n 1) 10)
+          (set h (make-instance 'k :n 2) 20)
           (+ (* 100 (count h))
-             (+ (match (get h (k::new 1)) ((some v) v) ((none) 0))
-                (match (get h (k::new 2)) ((some v) v) ((none) 0)))))
+             (+ (match (get h (make-instance 'k :n 1)) ((some v) v) ((none) 0))
+                (match (get h (make-instance 'k :n 2)) ((some v) v) ((none) 0)))))
     "#;
     assert_eq!(eval_ok(src), Value::Int(230));
 }
@@ -274,7 +274,7 @@ fn keys_and_entries_see_user_keys() {
     let src = format!(
         "{}
          (defvar (h HashTable<point,int>) (HashTable::new))
-         (progn (set h (point::new 1 2) 5) (set h (point::new 3 4) 6)
+         (progn (set h (make-instance 'point :x 1 :y 2) 5) (set h (make-instance 'point :x 3 :y 4) 6)
                 (+ (* 10 (len (keys h)))
                    (foldl (iter (values h)) (lambda ((a int) (b int)) int (+ a b)) 0)))",
         POINT

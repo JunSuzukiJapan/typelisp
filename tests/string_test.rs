@@ -185,7 +185,7 @@ fn string_eq_survives_being_stored_and_read_back() {
         "through a cons cell"
     );
     assert_eq!(
-        eval_ok(r#"(defstruct bx (s string)) (let ((s "abc")) (let ((b (bx::new s))) (eq s b::s)))"#),
+        eval_ok(r#"(defstruct bx (s string)) (let ((s "abc")) (let ((b (make-instance 'bx :s s))) (eq s b::s)))"#),
         Value::Bool(true),
         "through a struct field"
     );

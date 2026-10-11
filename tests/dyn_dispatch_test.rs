@@ -60,7 +60,7 @@ fn a_concrete_value_is_boxed_implicitly_at_a_dyn_parameter() {
     let src = format!(
         "{SHAPES}
          (defun render ((d :dyn Drawable)) string (draw d))
-         (render (circle::new 3))"
+         (render (make-instance 'circle :r 3))"
     );
     assert_eq!(eval_string(&src), "circle");
 }
@@ -71,7 +71,7 @@ fn the_same_call_site_dispatches_to_each_implementation() {
     let src = format!(
         "{SHAPES}
          (defun render ((d :dyn Drawable)) string (draw d))
-         (append (render (circle::new 3)) (render (square::new 2)))"
+         (append (render (make-instance 'circle :r 3)) (render (make-instance 'square :side 2)))"
     );
     assert_eq!(eval_string(&src), "circlesquare");
 }
@@ -83,7 +83,7 @@ fn a_second_slot_dispatches_independently_of_the_first() {
     let src = format!(
         "{SHAPES}
          (defun count-sides ((d :dyn Drawable)) int (sides d))
-         (+ (count-sides (circle::new 3)) (count-sides (square::new 2)))"
+         (+ (count-sides (make-instance 'circle :r 3)) (count-sides (make-instance 'square :side 2)))"
     );
     assert_eq!(eval_ok(&src), Value::Int(4));
 }
@@ -95,7 +95,7 @@ fn a_method_argument_and_return_value_cross_the_vtable() {
         (defstruct fixed (n int))
         (impl Scaler fixed (scale ((self Self) (k int)) int (* self::n k)))
         (defun apply-scale ((s :dyn Scaler) (k int)) int (scale s k))
-        (apply-scale (fixed::new 6) 7)"#;
+        (apply-scale (make-instance 'fixed :n 6) 7)"#;
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
@@ -106,14 +106,14 @@ fn as_boxes_a_trait_object_explicitly() {
     let src = format!(
         "{SHAPES}
          (defun render ((d :dyn Drawable)) string (draw d))
-         (render (as :dyn Drawable (square::new 2)))"
+         (render (as :dyn Drawable (make-instance 'square :side 2)))"
     );
     assert_eq!(eval_string(&src), "square");
 }
 
 #[test]
 fn try_as_to_a_trait_object_is_rejected() {
-    let src = format!("{SHAPES} (try-as :dyn Drawable (square::new 2))");
+    let src = format!("{SHAPES} (try-as :dyn Drawable (make-instance 'square :side 2))");
     assert!(eval_err(&src).contains("always succeeds or is a type error"));
 }
 
@@ -126,8 +126,8 @@ fn a_vector_of_trait_objects_holds_different_concrete_types() {
          (defun empty-shapes () Vector<:dyn Drawable> (Vector::new))
          (defun build () Vector<:dyn Drawable>
            (let ((v (empty-shapes)))
-             (push v (circle::new 3))
-             (push v (square::new 2))
+             (push v (make-instance 'circle :r 3))
+             (push v (make-instance 'square :side 2))
              v))
          (let ((v (build)) (out \"\"))
            (doiter (d (iter v)) (setf out (append out (draw d))))
@@ -185,7 +185,7 @@ fn a_type_that_does_not_implement_the_trait_cannot_be_boxed() {
         "{SHAPES}
          (defstruct dot (x int))
          (defun render ((d :dyn Drawable)) string (draw d))
-         (render (dot::new 1))"
+         (render (make-instance 'dot :x 1))"
     );
     assert!(eval_err(&src).contains("does not implement"));
 }
@@ -212,7 +212,7 @@ fn a_method_the_trait_does_not_declare_cannot_be_called_on_a_trait_object() {
     let src = format!(
         "{SHAPES}
          (defun radius ((d :dyn Drawable)) int (r d))
-         (radius (circle::new 3))"
+         (radius (make-instance 'circle :r 3))"
     );
     let m = eval_err(&src);
     assert!(m.contains("is not a method of"), "{}", m);
@@ -233,9 +233,9 @@ fn a_method_returning_self_makes_a_trait_not_object_safe() {
     let src = r#"
         (deftrait Cloneable () (dup ((self Self)) Self))
         (defstruct cell (n int))
-        (impl Cloneable cell (dup ((self Self)) Self (cell::new self::n)))
+        (impl Cloneable cell (dup ((self Self)) Self (make-instance 'cell :n self::n)))
         (defun f ((c :dyn Cloneable)) int 0)
-        (f (cell::new 1))"#;
+        (f (make-instance 'cell :n 1))"#;
     let m = eval_err(src);
     assert!(m.contains("mentions `Self` outside the receiver position"), "{}", m);
 }
@@ -254,7 +254,7 @@ fn upcasting_to_a_non_supertrait_is_rejected() {
          (impl Named circle (name ((self Self)) string \"c\"))
          (defun render ((d :dyn Drawable)) string (draw d))
          (defun relabel ((n :dyn Named)) string (render n))
-         (relabel (circle::new 1))"
+         (relabel (make-instance 'circle :r 1))"
     );
     let m = eval_err(&src);
     assert!(m.contains("does not inherit"), "{}", m);
@@ -290,7 +290,7 @@ fn a_dyn_subtrait_can_call_an_inherited_method() {
     let src = format!(
         "{CHAIN}
          (defun describe ((g :dyn Greeter)) string (name g))
-         (describe (dog::new 1))"
+         (describe (make-instance 'dog :n 1))"
     );
     assert_eq!(eval_string(&src), "dog");
 }
@@ -301,7 +301,7 @@ fn an_inherited_slot_dispatches_per_implementation() {
         "{CHAIN}
          (defun describe ((g :dyn Greeter)) string
            (append (name g) (append \":\" (greeting g))))
-         (append (describe (dog::new 1)) (append \"/\" (describe (cat::new 2))))"
+         (append (describe (make-instance 'dog :n 1)) (append \"/\" (describe (make-instance 'cat :n 2))))"
     );
     assert_eq!(eval_string(&src), "dog:woof/cat:meow");
 }
@@ -315,7 +315,7 @@ fn inherited_slots_precede_the_subtraits_own() {
         "{CHAIN}
          (defun who ((g :dyn Greeter)) string (name g))
          (defun what ((x :dyn Greeter)) string (greeting x))
-         (append (who (cat::new 1)) (what (cat::new 1)))"
+         (append (who (make-instance 'cat :n 1)) (what (make-instance 'cat :n 1)))"
     );
     assert_eq!(eval_string(&src), "catmeow");
 }
@@ -325,7 +325,7 @@ fn a_method_of_neither_the_trait_nor_its_supertraits_is_rejected() {
     let src = format!(
         "{CHAIN}
          (defun describe ((g :dyn Greeter)) string (nope g))
-         (describe (dog::new 1))"
+         (describe (make-instance 'dog :n 1))"
     );
     let m = eval_err(&src);
     assert!(m.contains("own or inherited methods"), "{}", m);
@@ -336,7 +336,7 @@ fn a_dyn_of_the_supertrait_still_sees_only_the_supertraits_methods() {
     let src = format!(
         "{CHAIN}
          (defun describe ((n :dyn Named)) string (greeting n))
-         (describe (dog::new 1))"
+         (describe (make-instance 'dog :n 1))"
     );
     let m = eval_err(&src);
     assert!(m.contains("own or inherited methods"), "{}", m);
@@ -350,7 +350,7 @@ fn a_dyn_subtrait_upcasts_to_its_supertrait() {
         "{CHAIN}
          (defun label ((n :dyn Named)) string (name n))
          (defun via ((g :dyn Greeter)) string (label g))
-         (append (via (dog::new 1)) (via (cat::new 2)))"
+         (append (via (make-instance 'dog :n 1)) (via (make-instance 'cat :n 2)))"
     );
     assert_eq!(eval_string(&src), "dogcat");
 }
@@ -363,7 +363,7 @@ fn an_upcast_value_still_dispatches_to_its_own_concrete_type() {
         "{CHAIN}
          (defun label ((n :dyn Named)) string (name n))
          (defun via ((g :dyn Greeter)) string (append (label g) (greeting g)))
-         (append (via (dog::new 1)) (via (cat::new 2)))"
+         (append (via (make-instance 'dog :n 1)) (via (make-instance 'cat :n 2)))"
     );
     assert_eq!(eval_string(&src), "dogwoofcatmeow");
 }
@@ -374,7 +374,7 @@ fn an_explicit_as_upcasts_a_trait_object() {
         "{CHAIN}
          (defun label ((n :dyn Named)) string (name n))
          (defun via ((g :dyn Greeter)) string (label (as :dyn Named g)))
-         (via (dog::new 1))"
+         (via (make-instance 'dog :n 1))"
     );
     assert_eq!(eval_string(&src), "dog");
 }
@@ -385,7 +385,7 @@ fn downcasting_to_a_subtrait_is_rejected() {
         "{CHAIN}
          (defun shout ((g :dyn Greeter)) string (greeting g))
          (defun via ((n :dyn Named)) string (shout n))
-         (via (dog::new 1))"
+         (via (make-instance 'dog :n 1))"
     );
     let m = eval_err(&src);
     assert!(m.contains("does not inherit"), "{}", m);
@@ -416,7 +416,7 @@ fn upcasting_to_a_non_first_supertrait_switches_to_that_supertraits_vtable() {
         "{DIAMOND}
          (defun only-c ((c :dyn C)) int (c-tag c))
          (defun via ((d :dyn D)) int (only-c d))
-         (via (cell::new 0))"
+         (via (make-instance 'cell :n 0))"
     );
     assert_eq!(eval_ok(&src), Value::Int(2));
 }
@@ -429,7 +429,7 @@ fn a_non_first_supertrait_upcast_still_dispatches_per_concrete_type() {
         "{DIAMOND}
          (defun only-c ((c :dyn C)) int (c-tag c))
          (defun via ((d :dyn D)) int (only-c d))
-         (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))"
+         (+ (* 10 (via (make-instance 'cell :n 0))) (via (make-instance 'pair :n 0)))"
     );
     assert_eq!(eval_ok(&src), Value::Int(25));
 }
@@ -440,7 +440,7 @@ fn an_explicit_as_upcasts_to_a_non_first_supertrait() {
         "{DIAMOND}
          (defun only-c ((c :dyn C)) int (c-tag c))
          (defun via ((d :dyn D)) int (only-c (as :dyn C d)))
-         (via (cell::new 0))"
+         (via (make-instance 'cell :n 0))"
     );
     assert_eq!(eval_ok(&src), Value::Int(2));
 }
@@ -466,7 +466,7 @@ fn upcasting_twice_reaches_a_supertrait_of_the_supertrait() {
         (defun only-a ((a :dyn A)) int (a-tag a))
         (defun only-c ((c :dyn C)) int (only-a c))
         (defun via ((d :dyn D)) int (only-c d))
-        (via (cell::new 0))"#;
+        (via (make-instance 'cell :n 0))"#;
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 
@@ -494,7 +494,7 @@ fn upcasting_reaches_a_trait_that_is_a_prefix_of_the_source_but_not_of_the_step(
         (defun only-a ((a :dyn A)) int (a-tag a))
         (defun only-c ((c :dyn C)) int (only-a c))
         (defun via ((d :dyn D)) int (only-c d))
-        (via (cell::new 0))"#;
+        (via (make-instance 'cell :n 0))"#;
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 
@@ -507,7 +507,7 @@ fn an_upcast_box_is_still_a_trait_object_for_match() {
          (defun name-of ((c :dyn C)) int
            (match c ((cell _) 10) ((pair _) 20) (_ 0)))
          (defun via ((d :dyn D)) int (name-of d))
-         (+ (via (cell::new 0)) (via (pair::new 0)))"
+         (+ (via (make-instance 'cell :n 0)) (via (make-instance 'pair :n 0)))"
     );
     assert_eq!(eval_ok(&src), Value::Int(30));
 }
@@ -524,6 +524,6 @@ fn upcasting_to_the_first_supertrait_of_a_multi_supertrait_chain_works() {
         (impl D cell (d-tag ((self Self)) int 3))
         (defun only-b ((b :dyn B)) int (b-tag b))
         (defun via ((d :dyn D)) int (only-b d))
-        (via (cell::new 0))"#;
+        (via (make-instance 'cell :n 0))"#;
     assert_eq!(eval_ok(src), Value::Int(1));
 }

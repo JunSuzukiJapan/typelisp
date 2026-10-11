@@ -8,15 +8,15 @@ use common::{check_err, eval_string, eval_string_compiled};
 const DEFS: &str = r##"
 (defstruct Point (pub x f64) (pub y f64))
 (impl Point
-  (pub at ((x f64) (y f64)) Point (Point::new x y))
-  (pub origin () Self (Point::new 0.0 0.0))
+  (pub at ((x f64) (y f64)) Point (make-instance 'Point :x x :y y))
+  (pub origin () Self (make-instance 'Point :x 0.0 :y 0.0))
   (pub area (self) f64 (* self::x self::y))
   (pub scaled ((self Self) (k f64) &optional (dk f64 0.0)) Point
-    (Point::new (* self::x (+ k dk)) (* self::y k))))
+    (make-instance 'Point :x (* self::x (+ k dk)) :y (* self::y k))))
 (defstruct Box<T> (v T))
 (impl Box<T> (where (print-object T))
   (pub show (self) string (format false "box:~a" (print-object self::v false)))
-  (pub map<U> (self (f (fn (T) U))) Box<U> (Box::new (f self::v))))
+  (pub map<U> (self (f (fn (T) U))) Box<U> (make-instance 'Box :v (f self::v))))
 "##;
 
 /// `body` (a `string`-valued expression) after [`DEFS`], interpreted and
@@ -47,7 +47,7 @@ fn self_and_optional_parameters() {
 #[test]
 fn a_generic_target_with_a_bound_and_a_method_type_parameter() {
     both(
-        r##"(show (map (Box::new 3) (lambda ((n int)) string (format false "<~a>" n))))"##,
+        r##"(show (map (make-instance 'Box :v 3) (lambda ((n int)) string (format false "<~a>" n))))"##,
         "box:<3>",
     );
 }
@@ -59,8 +59,8 @@ fn an_item_without_pub_is_private_to_its_module() {
 (module geo
   (pub defstruct pt (pub x int))
   (impl pt
-    (pub mk ((x int)) pt (pt::new x))
-    (hidden ((x int)) pt (pt::new x))))
+    (pub mk ((x int)) pt (make-instance 'pt :x x))
+    (hidden ((x int)) pt (make-instance 'pt :x x))))
 (format false "~a" (x (geo::pt::mk 4)))
 "##;
     assert_eq!(eval_string(src), "4");
@@ -68,7 +68,7 @@ fn an_item_without_pub_is_private_to_its_module() {
         r##"
 (module geo
   (pub defstruct pt (pub x int))
-  (impl pt (hidden ((x int)) pt (pt::new x))))
+  (impl pt (hidden ((x int)) pt (make-instance 'pt :x x))))
 (defun f () geo::pt (geo::pt::hidden 1))
 "##,
     );

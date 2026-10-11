@@ -146,7 +146,7 @@ fn a_dyn_call_to_an_interpreted_method_moves_the_task_too() {
            (compile start)
            (let ((tasks (the Vector<Task<int>> (Vector::new)))
                  (right 0))
-             (dotimes (i 8) (push tasks (start (fixed::new 42))))
+             (dotimes (i 8) (push tasks (start (make-instance 'fixed :n 42))))
              (doiter (t (iter tasks)) (if (eq (wait t) 42) (setf right (+ right 1)) right))
              (println "~a" right))"#,
         0,
@@ -189,7 +189,7 @@ fn a_worker_prints_what_the_interpreter_s_thread_prints() {
                       (print-object ((self Self) (escape bool)) string (format false "<~a,~a>" self::x self::y)))
                     (defstruct holder (o Option<int>))
                     (defun show () string
-                      (format false "~a ~a ~a ~a" (shape::tri 3 4 5) (point::new 1 2) (holder::new (Option::some 7)) (shape::dot)))
+                      (format false "~a ~a ~a ~a" (shape::tri 3 4 5) (make-instance 'point :x 1 :y 2) (make-instance 'holder :o (Option::some 7)) (shape::dot)))
                     (defun elsewhere () string (join (thread (show))))
                     (compile point::print-object)
                     (compile elsewhere)
@@ -214,7 +214,7 @@ fn an_interpreted_print_object_off_the_interpreter_s_thread_is_a_panic() {
     let source = r#"(defstruct blob (n int))
                     (impl print-object blob
                       (print-object ((self Self) (escape bool)) string "blob!"))
-                    (defun show () string (format false "~a" (blob::new 1)))
+                    (defun show () string (format false "~a" (make-instance 'blob :n 1)))
                     (defun elsewhere () string (join (thread (show))))
                     (compile elsewhere)
                     (println "~a" (elsewhere))"#;

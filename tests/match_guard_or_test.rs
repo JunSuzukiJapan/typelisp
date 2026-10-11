@@ -119,10 +119,10 @@ fn a_pattern_variable_captured_by_the_body_is_readable_in_the_guard() {
 #[test]
 fn a_value_pattern_under_the_in_a_closure_reads_a_captured_variable() {
     both(
-        r##"(let* ((want (P::new 3))
+        r##"(let* ((want (make-instance 'P :x 3))
                   (f (lambda ((d Option<Sexpr>)) bool
                        (match d ((the P (= want)) true) (_ false)))))
-             (format false "~a ~a" (f (P::new 3)) (f (P::new 4))))"##,
+             (format false "~a ~a" (f (make-instance 'P :x 3)) (f (make-instance 'P :x 4))))"##,
         "true false",
     );
 }

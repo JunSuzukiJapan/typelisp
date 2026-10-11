@@ -53,7 +53,7 @@ fn matching_a_trait_object_recovers_the_concrete_type_by_name() {
              ((circle r) (* 3 (* r r)))
              ((square s) (* s s))
              (_ 0)))
-         (+ (area (circle::new 2)) (area (square::new 5)))"
+         (+ (area (make-instance 'circle :r 2)) (area (make-instance 'square :side 5)))"
     );
     assert_eq!(eval_ok(&src), Value::Int(37));
 }
@@ -66,7 +66,7 @@ fn a_the_pattern_binds_the_whole_concrete_value() {
            (match d
              ((the square s) s::side)
              (_ 0)))
-         (side-of (square::new 7))"
+         (side-of (make-instance 'square :side 7))"
     );
     assert_eq!(eval_ok(&src), Value::Int(7));
 }
@@ -79,7 +79,7 @@ fn an_unmatched_concrete_type_falls_through_to_the_catchall() {
         "{SHAPES}
          (defun area ((d :dyn Drawable)) int
            (match d ((circle r) r) (_ -1)))
-         (area (square::new 5))"
+         (area (make-instance 'square :side 5))"
     );
     assert_eq!(eval_ok(&src), Value::Int(-1));
 }
@@ -93,7 +93,7 @@ fn a_trait_object_match_still_dispatches_dynamically_in_the_same_function() {
            (match d
              ((circle r) (append (draw d) \"!\"))
              (_ (draw d))))
-         (append (describe (circle::new 1)) (describe (square::new 1)))"
+         (append (describe (make-instance 'circle :r 1)) (describe (make-instance 'square :side 1)))"
     );
     assert_eq!(eval_string(&src), "circle!square");
 }
@@ -105,9 +105,9 @@ fn a_trait_object_prints_as_the_value_it_wraps() {
     let src = format!(
         "{SHAPES}
          (defun show ((d :dyn Drawable)) string (format false \"~a\" d))
-         (show (circle::new 3))"
+         (show (make-instance 'circle :r 3))"
     );
-    let plain = format!("{SHAPES} (format false \"~a\" (circle::new 3))");
+    let plain = format!("{SHAPES} (format false \"~a\" (make-instance 'circle :r 3))");
     assert_eq!(eval_string(&src), eval_string(&plain));
 }
 
@@ -120,14 +120,14 @@ fn comparison_sees_through_the_box() {
     let src = format!(
         "{SHAPES}
          (defun same ((a :dyn Drawable) (b :dyn Drawable)) bool (equalp a b))
-         (same (circle::new 3) (circle::new 3))"
+         (same (make-instance 'circle :r 3) (make-instance 'circle :r 3))"
     );
     assert_eq!(eval_ok(&src), Value::Bool(true));
 
     let differing = format!(
         "{SHAPES}
          (defun same ((a :dyn Drawable) (b :dyn Drawable)) bool (equalp a b))
-         (same (circle::new 3) (circle::new 4))"
+         (same (make-instance 'circle :r 3) (make-instance 'circle :r 4))"
     );
     assert_eq!(eval_ok(&differing), Value::Bool(false));
 }
@@ -138,7 +138,7 @@ fn identity_is_the_wrapped_object_not_the_box() {
     let src = format!(
         "{SHAPES}
          (defun same ((a :dyn Drawable) (b :dyn Drawable)) bool (eq a b))
-         (let ((c (circle::new 3))) (same c c))"
+         (let ((c (make-instance 'circle :r 3))) (same c c))"
     );
     assert_eq!(eval_ok(&src), Value::Bool(true));
 }
@@ -152,7 +152,7 @@ fn a_trait_object_can_be_stored_in_a_sexpr_list() {
          (defun box-it ((d :dyn Drawable)) Option<Sexpr> (list d))
          (defun first-draw ((xs Option<Sexpr>)) string
            (match (sexpr-car xs) ((circle r) \"circle\") (_ \"other\")))
-         (first-draw (box-it (circle::new 3)))"
+         (first-draw (box-it (make-instance 'circle :r 3)))"
     );
     assert_eq!(eval_string(&src), "circle");
 }

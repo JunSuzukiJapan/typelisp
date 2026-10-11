@@ -158,7 +158,7 @@ fn a_mixed_program_survives_collection() {
            (let* ((a p::x) (b p::y))
              (+ (if (< a 0) (- 0 a) a) (if (< b 0) (- 0 b) b))))
          (defun f () int
-           (let ((p (pt::new 3 -4)))
+           (let ((p (make-instance 'pt :x 3 :y -4)))
              (setf p::x 10)
              (incf p::y 1)
              (norm1 p)))",

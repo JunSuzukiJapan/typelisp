@@ -227,7 +227,7 @@ pub struct VarInfo {
 /// Distinguishes a multi-variant sum type (`Option`/`Result`/`Sexpr`/a future
 /// user ADT) from a `defstruct` product type. The two are otherwise the same
 /// `AdtDef`/`Variant` machinery (a struct registers exactly one variant,
-/// named `"new"` — see `Checker::check_defstruct`), but only a `Struct`
+/// named so that no source can spell it — see `Checker::check_defstruct`), but only a `Struct`
 /// constructs a *mutable* boxed struct (`BoxedObj::Struct`) rather than an
 /// immutable enum box (`Checker::check_construct` decides which by this field) — see [`AdtDef::field_names`] for the other `Struct`-only
 /// piece of metadata.

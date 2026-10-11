@@ -250,7 +250,7 @@ fn a_user_defined_type_can_be_a_stream() {
              (type Item char)
              (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
            (impl CharOutput counter)
-           (let ((c (counter::new 0)))
+           (let ((c (make-instance 'counter :n 0)))
              (write-line c "four")
              (format false "~a" c::n))"#,
     );
@@ -269,7 +269,7 @@ fn a_user_stream_can_go_into_a_broadcast_alongside_a_builtin_one() {
              (type Item char)
              (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
            (impl CharOutput counter)
-           (let ((c (counter::new 0))
+           (let ((c (make-instance 'counter :n 0))
                  (s (make-string-output-stream))
                  (v (the Vector<:dyn CharOutput> (Vector::new))))
              (push v c)
@@ -475,7 +475,7 @@ fn a_stream_that_cannot_tell_gets_its_newline() {
              (type Item char)
              (write-item ((self Self) (c char)) () (setf self::text (append self::text (char->string c)))))
            (impl CharOutput sink)
-           (let ((k (sink::new "")))
+           (let ((k (make-instance 'sink :text "")))
              (fresh-line k)
              (fresh-line k)
              (format false "~d" (length k::text)))"#,
@@ -756,7 +756,7 @@ fn a_user_defined_input_stream_can_be_read_from() {
                      (setf self::at (+ self::at 1))
                      (option::some c)))))
            (impl CharInput fixed)
-           (let ((p (make-peek-stream (fixed::new "(from a user stream)" 0))))
+           (let ((p (make-peek-stream (make-instance 'fixed :text "(from a user stream)" :at 0))))
              (match (read-sexpr p)
                ((ok o) (match o ((eof) "<eof>") ((datum d) (format false "~s" d))))
                ((err e) (message e))))"#,

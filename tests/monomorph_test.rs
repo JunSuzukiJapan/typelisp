@@ -248,14 +248,14 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
-// ---- generic-owner methods (defmethod / defstruct accessors) ------------------
+// ---- generic-owner methods (impl items / defstruct accessors) ------------------
 
 #[test]
 fn a_method_on_a_generic_type_specializes_at_the_call_site() {
     let (h, tls) = check_all(
         "(defstruct box<T> (v T)) \
-         (defmethod get-v ((self box<T>)) T self::v) \
-         (get-v (box::new 42))",
+         (impl box<T> (get-v (self) T self::v)) \
+         (get-v (make-instance 'box :v 42))",
     )
     .unwrap();
     // The call bundles the specialized `get-v` — and, transitively, the
@@ -270,8 +270,9 @@ fn a_method_on_a_generic_type_specializes_at_the_call_site() {
 fn a_generic_method_call_evaluates_through_its_specialization() {
     let src = r#"
         (defstruct box<T> (v T))
-        (defmethod get-v ((self box<T>)) T self::v)
-        (get-v (box::new 42))
+        (impl box<T>
+  (get-v (self) T self::v))
+        (get-v (make-instance 'box :v 42))
     "#;
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -279,8 +280,9 @@ fn a_generic_method_call_evaluates_through_its_specialization() {
 #[test]
 fn a_generic_method_with_a_match_body_specializes() {
     let src = r#"
-        (defmethod unwrap2 ((self Option<T>)) T
-          (match self ((some x) x) ((none) (panic "none"))))
+        (impl Option<T>
+  (unwrap2 (self) T
+            (match self ((some x) x) ((none) (panic "none")))))
         (unwrap2 (option::some 9))
     "#;
     assert_eq!(eval_ok(src), Value::Int(9));
@@ -290,7 +292,7 @@ fn a_generic_method_with_a_match_body_specializes() {
 fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
     let src = r#"
         (defstruct box<T> (v T))
-        (defvar (b box<int>) (box::new 1))
+        (defvar (b box<int>) (make-instance 'box :v 1))
         (setf b::v 5)
         b::v
     "#;
@@ -301,8 +303,9 @@ fn generic_defstruct_field_read_and_setf_work_through_specialized_accessors() {
 fn one_generic_type_instantiated_at_two_types_gets_independent_methods() {
     let src = r#"
         (defstruct box<T> (v T))
-        (defmethod get-v ((self box<T>)) T self::v)
-        (let ((a (box::new 1)) (b (box::new true)))
+        (impl box<T>
+  (get-v (self) T self::v))
+        (let ((a (make-instance 'box :v 1)) (b (make-instance 'box :v true)))
           (if (get-v b) (get-v a) 0))
     "#;
     assert_eq!(eval_ok(src), Value::Int(1));
@@ -321,7 +324,7 @@ fn a_sexpr_instantiated_generic_field_returns_the_datum_not_a_misdecoded_scalar(
     // node type `Sexpr`) the decode is type-directed and exact.
     let src = r#"
         (defstruct box<T> (v T))
-        (defvar (b box<Option<Sexpr>>) (box::new '42))
+        (defvar (b box<Option<Sexpr>>) (make-instance 'box :v '42))
         b::v
     "#;
     match run(src).expect("eval failed") {
@@ -373,9 +376,10 @@ fn a_generic_function_annotated_with_the_specializes() {
 fn a_generic_method_passed_as_an_argument_specializes() {
     let src = r#"
         (defstruct box<T> (v T))
-        (defmethod get-v ((self box<T>)) T self::v)
+        (impl box<T>
+  (get-v (self) T self::v))
         (defun call-it ((f (fn (box<int>) int)) (b box<int>)) int (f b))
-        (call-it get-v (box::new 7))
+        (call-it get-v (make-instance 'box :v 7))
     "#;
     assert_eq!(eval_ok(src), Value::Int(7));
 }

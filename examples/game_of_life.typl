@@ -14,7 +14,7 @@
         (dotimes (x w)
           (push row false))
         (push cells row)))
-    (board::new cells w h)))
+    (make-instance 'board :cells cells :w w :h h)))
 
 (defun cell-at ((b board) (x int) (y int)) bool
   (if (or (< x 0) (< y 0) (>= x (w b)) (>= y (h b)))

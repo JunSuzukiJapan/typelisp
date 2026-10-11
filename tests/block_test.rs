@@ -196,10 +196,11 @@ fn a_method_body_can_return_from_itself() {
     assert_eq!(
         text(
             "(defstruct point (x int) (y int))
-             (defmethod describe ((self point)) string
-               (if (= self::x 0) (return-from describe \"on the axis\") ())
-               \"off the axis\")
-             (format false \"~a/~a\" (describe (point::new 0 3)) (describe (point::new 1 3)))"
+             (impl point
+               (describe (self) string
+                 (if (= self::x 0) (return-from describe \"on the axis\") ())
+                 \"off the axis\"))
+             (format false \"~a/~a\" (describe (make-instance 'point :x 0 :y 3)) (describe (make-instance 'point :x 1 :y 3)))"
         ),
         "on the axis/off the axis"
     );

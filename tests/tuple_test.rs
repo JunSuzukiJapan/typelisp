@@ -95,7 +95,7 @@ fn a_tuple_type_is_a_type_argument() {
 /// An element type with no `print-object` of its own still prints as `#{..}`.
 #[test]
 fn a_tuple_of_a_type_without_print_object_prints_as_a_tuple() {
-    both(r##"(format false "~a" (tuple 1 (P::new 2)))"##, "#{1 #<p x: 2>}");
+    both(r##"(format false "~a" (tuple 1 (make-instance 'P :x 2)))"##, "#{1 #<p x: 2>}");
 }
 
 /// Read as data, `#{..}` is the `Sexpr` `tuple` variant, whose payload is a

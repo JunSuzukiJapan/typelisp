@@ -262,7 +262,7 @@ fn waiting_on_a_socket_from_a_print_method_is_refused() {
       ((ok c) (progn (close c) \"accepted\"))
       ((err e) (panic (message e))))))
 (let ((l (unwrap (tcp-listen \"127.0.0.1\" 0))))
-  (format false \"~a\" (peeker::new l)))"
+  (format false \"~a\" (make-instance 'peeker :l l)))"
     );
     let e = err(&src);
     assert!(e.contains("cannot block"), "{}", e);

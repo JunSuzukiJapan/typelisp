@@ -71,4 +71,4 @@
                  (progn (advance c) (setf e (add e (parse-term c))))
                  (progn (advance c) (setf e (sub e (parse-term c))))))
            e)))
-    (parse-expr (cursor::new toks 0))))
+    (parse-expr (make-instance 'cursor :toks toks :pos 0))))

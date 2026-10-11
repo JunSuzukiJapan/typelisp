@@ -231,7 +231,7 @@ fn a_static_method_call_still_names_the_type() {
     // exactly the `rect` part must be highlighted, not `::new`.
     let src = "\
 (defstruct rect (w int))
-(defun make () rect (rect::new 5))
+(defun make () rect (make-instance 'rect :w 5))
 ";
     let path = PathBuf::from("/tmp/typelisp-semantic-assoc-test/f.typl");
     let (_, tokens) = analyze_src(&path, src);

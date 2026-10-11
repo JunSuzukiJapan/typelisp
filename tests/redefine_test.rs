@@ -46,7 +46,7 @@ fn redefining_a_builtin_function_is_always_an_error() {
 
 #[test]
 fn redefining_a_builtin_instance_method_is_always_an_error() {
-    let src = "(defmethod + ((a int) (b int)) int a)";
+    let src = "(impl int (+ (self (b int)) int self))";
     for policy in [RedefPolicy::Warn, RedefPolicy::Error, RedefPolicy::Silent] {
         let (_, result) = run(src, policy);
         assert!(result.is_err(), "policy {:?} should still reject redefining a builtin method", policy);
@@ -99,8 +99,9 @@ fn redefining_a_user_var_warns_by_default() {
 
 #[test]
 fn redefining_a_user_method_warns_by_default() {
-    let src = "(defmethod double ((self int)) int (* self 2)) \
-               (defmethod double ((self int)) int (+ self self))";
+    let src = "(defstruct n (v int)) \
+               (impl n (double (self) int (* self::v 2))) \
+               (impl n (double (self) int (+ self::v self::v)))";
     let (warnings, result) = run(src, RedefPolicy::Warn);
     assert!(result.is_ok());
     assert_eq!(warnings.len(), 1);

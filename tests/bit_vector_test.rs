@@ -15,7 +15,7 @@ use typelisp::Value;
 /// `(show v)` reads one back — CL would write both as `#*1011`.
 const HELPERS: &str = r#"
 (defun bits ((s string)) BitVector
-  (let ((v (BitVector::make (length s))) (i 0))
+  (let ((v (BitVector::new (length s))) (i 0))
     (progn
       (while (< i (length s))
         (progn (set v i (equal (ref s i) #\1)) (setf i (+ i 1))))
@@ -40,19 +40,19 @@ fn shows(src: &str, expect: &str) {
 
 #[test]
 fn make_gives_a_vector_of_the_requested_length_with_every_bit_clear() {
-    assert_eq!(eval_ok("(len (BitVector::make 5))"), Value::Int(5));
-    shows("(BitVector::make 5)", "00000");
+    assert_eq!(eval_ok("(len (BitVector::new 5))"), Value::Int(5));
+    shows("(BitVector::new 5)", "00000");
 }
 
 #[test]
 fn a_zero_length_bit_vector_is_allowed() {
-    assert_eq!(eval_ok("(len (BitVector::make 0))"), Value::Int(0));
-    shows("(BitVector::make 0)", "");
+    assert_eq!(eval_ok("(len (BitVector::new 0))"), Value::Int(0));
+    shows("(BitVector::new 0)", "");
 }
 
 #[test]
 fn a_negative_length_is_refused() {
-    assert!(eval_err("(BitVector::make -1)").contains("negative"));
+    assert!(eval_err("(BitVector::new -1)").contains("negative"));
 }
 
 // ---- get / set --------------------------------------------------------------
@@ -74,7 +74,7 @@ fn bits_are_addressed_independently_across_a_word_boundary() {
     // first of word 1. The bit at the top of a word is the one worth pinning:
     // packing 31 rather than 32 is what keeps the sign bit clear, so a word
     // is always a non-negative number (see the type's own note).
-    let src = "(let ((v (BitVector::make 70)))
+    let src = "(let ((v (BitVector::new 70)))
                  (progn (set v 30 true) (set v 31 true)
                         (+ (if (get v 30) 1 0) (* 2 (if (get v 31) 1 0))
                            (* 4 (if (get v 29) 1 0)) (* 8 (if (get v 32) 1 0)))))";
@@ -90,7 +90,7 @@ fn every_bit_of_a_multi_word_vector_can_be_set_on_its_own() {
                    (let ((i 0))
                      (while (< i n)
                        (progn
-                         (let ((v (BitVector::make n)) (seen 0))
+                         (let ((v (BitVector::new n)) (seen 0))
                            (progn
                              (set v i true)
                              (let ((j 0))
@@ -106,11 +106,11 @@ fn every_bit_of_a_multi_word_vector_can_be_set_on_its_own() {
 
 #[test]
 fn an_index_past_the_end_is_an_error() {
-    assert!(eval_err("(get (BitVector::make 4) 4)").contains("out of range"));
-    assert!(eval_err("(set (BitVector::make 4) -1 true)").contains("out of range"));
+    assert!(eval_err("(get (BitVector::new 4) 4)").contains("out of range"));
+    assert!(eval_err("(set (BitVector::new 4) -1 true)").contains("out of range"));
     // Past the length but still inside the allocated word: the length is
     // what decides, not the packing.
-    assert!(eval_err("(get (BitVector::make 4) 40)").contains("out of range"));
+    assert!(eval_err("(get (BitVector::new 4) 40)").contains("out of range"));
 }
 
 // ---- CL's `bit` / `sbit` ----------------------------------------------------
@@ -180,8 +180,8 @@ fn operands_of_different_lengths_are_refused() {
 fn bit_not_does_not_leave_set_bits_past_the_length() {
     // `lognot` sets all 64 bits of the word; the bits past the length must
     // come back clear, or a later `bit-and` would see them.
-    let src = "(let ((v (bit-not (BitVector::make 3))))
-                 (show (bit-and v (bit-not (BitVector::make 3)))))";
+    let src = "(let ((v (bit-not (BitVector::new 3))))
+                 (show (bit-and v (bit-not (BitVector::new 3)))))";
     assert_eq!(eval_ok(&with_helpers(&format!("(equal {} \"111\")", src))), Value::Bool(true));
 }
 
@@ -193,7 +193,7 @@ fn a_complement_round_trip_is_the_identity() {
 #[test]
 fn the_padding_stays_clear_across_a_word_boundary() {
     // 65 bits: word 2 holds three live bits and 28 padding bits.
-    let src = "(let ((v (bit-not (BitVector::make 65))) (n 0))
+    let src = "(let ((v (bit-not (BitVector::new 65))) (n 0))
                  (progn
                    (let ((i 0))
                      (while (< i 65)
@@ -209,13 +209,13 @@ fn two_bit_vectors_with_the_same_bits_are_the_same_value() {
     // all-zero vector would carry different words from an all-ones vector
     // built bit by bit, while showing the same bits.
     let ones = "\"1111111111111111111111111111111111111111\"";  // 40 bits, two words
-    let src = format!("(equalp (bit-not (BitVector::make 40)) (bits {}))", ones);
+    let src = format!("(equalp (bit-not (BitVector::new 40)) (bits {}))", ones);
     assert_eq!(eval_ok(&with_helpers(&src)), Value::Bool(true));
 }
 
 #[test]
 fn a_bit_wise_operation_leaves_the_words_canonical_too() {
-    let src = "(equalp (bit-ior (BitVector::make 40) (bit-not (BitVector::make 40)))
-                       (bit-not (BitVector::make 40)))";
+    let src = "(equalp (bit-ior (BitVector::new 40) (bit-not (BitVector::new 40)))
+                       (bit-not (BitVector::new 40)))";
     assert_eq!(eval_ok(&with_helpers(src)), Value::Bool(true));
 }

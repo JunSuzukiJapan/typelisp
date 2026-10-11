@@ -88,7 +88,7 @@ fn return_with_no_value_exits_the_doiter_loop_itself() {
 
 #[test]
 fn doiter_on_a_type_with_no_iter_impl_is_a_type_error() {
-    let src = "(defstruct box (n int)) (doiter (x (box::new 1)) ())";
+    let src = "(defstruct box (n int)) (doiter (x (make-instance 'box :n 1)) ())";
     assert!(check(src).is_err());
 }
 

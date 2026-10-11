@@ -28,7 +28,7 @@ fn fmt(src: &str) -> String {
 const CYCLE_DEFS: &str = r#"
     (defstruct node (val int) (next Option<node>))
     (defun cycle () node
-      (let ((a (node::new 1 (Option::none))))
+      (let ((a (make-instance 'node :val 1 :next (Option::none))))
         (setf a::next (Option::some a))
         a))
 "#;
@@ -116,7 +116,7 @@ fn print_level_applies_to_struct_and_enum_values() {
         (defstruct pt (x int) (y int))
         (defstruct pair (a pt) (b pt))
         (setf *print-level* 1)
-        (format false "~a" (pair::new (pt::new 1 2) (pt::new 3 4)))
+        (format false "~a" (make-instance 'pair :a (pt::new 1 2) :b (pt::new 3 4)))
     "#;
     assert_eq!(fmt(src), "#<pair a: # b: #>");
 }
@@ -175,7 +175,7 @@ fn print_length_truncates_struct_fields() {
     let src = r#"
         (defstruct quad (a int) (b int) (c int) (d int))
         (setf *print-length* 2)
-        (format false "~a" (quad::new 1 2 3 4))
+        (format false "~a" (make-instance 'quad :a 1 :b 2 :c 3 :d 4))
     "#;
     assert_eq!(fmt(src), "#<quad a: 1 b: 2 ...>");
 }

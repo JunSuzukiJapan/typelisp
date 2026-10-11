@@ -47,11 +47,11 @@ use crate::{Checker, Heap, Interp, Reader, Value};
 /// own comment below).
 ///
 /// `Option<T>`/`Result<T,E>` accessors (`unwrap`/`unwrap-or`/`is-some`/
-/// `is-none`/`is-ok`/`is-err`) are `defmethod`, not `defun` — see the
+/// `is-none`/`is-ok`/`is-err`) are methods, not `defun`s — see the
 /// comment above their definitions below for why. `identity`/`const`/
 /// `compose`/`flip` are generic `defun`s — see the comment above their
 /// definitions for why those, unlike the accessors, fit `defun` rather than
-/// `defmethod`. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2c,
+/// a method. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2c,
 /// the `Sexpr`-list free function), and `assoc` (§4.2's list section) round
 /// out step 7c — `min`/`max`/`range` are not in the catalog, so they're left
 /// undone rather than guessed at.
@@ -119,6 +119,18 @@ fn tuple_source() -> String {
         let name = format!("tuple{}<{}>", n, params.join(","));
         let slots: Vec<String> = params.iter().zip(&fields).map(|(p, f)| format!("(pub {} {})", f, p)).collect();
         writeln!(out, "(module %internal (pub defstruct {} {}))", name, slots.join(" ")).unwrap();
+        // `new`: the elements in order, what the `tuple` macro calls.
+        let new_params: Vec<String> = params.iter().enumerate().map(|(i, p)| format!("(x{} {})", i, p)).collect();
+        let new_slots: Vec<String> = fields.iter().enumerate().map(|(i, f)| format!(":{} x{}", f, i)).collect();
+        writeln!(
+            out,
+            "(impl {} (pub new ({}) Self (make-instance '{} {})))",
+            generic,
+            new_params.join(" "),
+            path,
+            new_slots.join(" ")
+        )
+        .unwrap();
         // `equals`: every element, left to right.
         let eqs: Vec<String> = fields.iter().map(|f| format!("(equals self::{f} other::{f})")).collect();
         let eq_body = if n == 1 { eqs[0].clone() } else { format!("(and {})", eqs.join(" ")) };
@@ -408,8 +420,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; down as generic `Iter` combinators over `Vector<T>`/`HashTable<K,V>`; a
 ;; `cons<T,U>`/`Sexpr` list API is to be redesigned later.
 
-;; Option<T>/Result<T,E> accessors (roadmap step 7c). Written as `defmethod`,
-;; not `defun`: `unwrap`/`unwrap-or` need the same name on both `Option<T>`
+;; Option<T>/Result<T,E> accessors (roadmap step 7c). Written as methods,
+;; not `defun`s: `unwrap`/`unwrap-or` need the same name on both `Option<T>`
 ;; and `Result<T,E>`, which only an instance method's per-receiver-type assoc
 ;; table allows (a free function has exactly one signature for its name —
 ;; see registry::int_assoc's step-6 comment for the same constraint on `+`).
@@ -485,7 +497,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 
 ;; Higher-order helpers (roadmap step 7c) — the motivating use case for
 ;; `defun`'s generic type parameters (`Checker::check_call`'s `unify`/
-;; `subst_apply` integration): each is plain `defun`, not `defmethod`, since
+;; `subst_apply` integration): each is plain `defun`, not a method, since
 ;; none of them is a method "on" a receiver type — they operate purely on
 ;; function values. `compose`/`flip` return a `lambda`, which closes over the
 ;; outer defun's parameters (`f`/`g`) the same way any nested lambda would.
@@ -568,7 +580,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; (integers only), and `expt` (all numbers). Written here as ordinary typelisp
 ;; *methods* — not Rust builtins — so they compile through the normal function
 ;; path (`(compile f)` where `f` uses them) instead of needing a native-lowered
-;; `rt_*` shim per operation. `defmethod` dispatches on the receiver type, so
+;; `rt_*` shim per operation. A method dispatches on the receiver type, so
 ;; the same `abs`/`signum`/... name overloads across `i32`/`int`/`f64`/
 ;; `ratio`; each is built only from that type's primitives. `mod`/`rem` follow
 ;; CL: `mod` is floored (integer `mod` is a builtin; `f64`/`ratio` `mod` here
@@ -655,8 +667,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 
 ;; CL's numeric predicates (`zerop`/`plusp`/`minusp`/`evenp`/`oddp`) and
 ;; increment/decrement shorthands (`1+`/`1-`), built from the primitives
-;; above the same way `abs`/`signum`/`rem` are — per-type `defmethod`s rather
-;; than one generic definition, for the same reason (`defmethod` resolves by
+;; above the same way `abs`/`signum`/`rem` are — per-type methods rather
+;; than one generic definition, for the same reason (a method resolves by
 ;; the receiver's exact type, not by a trait bound). `evenp`/`oddp` are
 ;; integer-only (CL signals a type error on a non-integer; `i32`/
 ;; `int` here). See the `--- ratio ---` section above for why its `0`/`1`
@@ -803,8 +815,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; (`reader-scan-atom`) and the self-hosting island both call it as a
 ;; predicate.
 ;;
-;; A free `defun` rather than a `defmethod`, and likewise `digit->char`: CL
-;; gives both an optional radix, which `defmethod` could not declare when
+;; A free `defun` rather than a method, and likewise `digit->char`: CL
+;; gives both an optional radix, which a method could not declare when
 ;; these were written. Phase 5b lifted that restriction and they stayed
 ;; `defun`s — nothing at a call site tells the two apart for a `char`
 ;; receiver, so moving them would be churn.
@@ -1045,7 +1057,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; as a string (CL takes any character sequence; a string *is* the character
 ;; sequence this language has). A free `defun` with an `&optional` default of
 ;; the usual whitespace — the same history as `digit-weight` above: written
-;; before `defmethod` could take `&optional`, and left alone once it could.
+;; before a method could take `&optional`, and left alone once it could.
 (module %internal (pub defun char-in-bag ((c char) (bag string)) bool
   (let ((i 0) (n (length bag)) (hit false))
     (progn
@@ -1507,7 +1519,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; one of the function's own type parameters, inferred at each call site from
 ;; the predicate/mapping function's argument type and verified against the
 ;; iterator's real `Item` (`Checker::check_call`'s where-bound validation).
-;; This is why they are generic `defun`s, not `defmethod`s: `map`/`foldl`/
+;; This is why they are generic `defun`s, not methods: `map`/`foldl`/
 ;; `foldr` need type variables (`U`/`B`, the mapped element / accumulator)
 ;; beyond the receiver's, which a method — generic only through its owner's
 ;; parameters — cannot introduce.
@@ -1779,7 +1791,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; above are already a *generic, statically-typed* pair (`cons-cell<A,B>`,
 ;; not a homogeneous list), so the two results fit it directly with no new
 ;; mechanism: `(car (floor-div x y))`/`(cdr (floor-div x y))`. Named `*-div`
-;; rather than reusing `floor` etc. outright because `defmethod` dispatches
+;; rather than reusing `floor` etc. outright because a method dispatches
 ;; on receiver *type*, not arity — one name can't hold both the existing
 ;; unary rounding method and a binary one on the same receiver type.
 ;;
@@ -2327,7 +2339,7 @@ user-visible capacity."
 ;; the two that did not, and they now do. The other operands keep CL's
 ;; relative order, so `(dpb newbyte spec n)` becomes `(dpb n newbyte spec)`.
 ;;
-;; These are generic free functions rather than one `defmethod` per width:
+;; These are generic free functions rather than one method per width:
 ;; the bodies below are identical text at every width, so eight copies of
 ;; each of five definitions would be forty definitions saying one thing.
 (impl cons-cell<int,int>
@@ -2679,8 +2691,8 @@ user-visible capacity."
 ;; The rest of CL's list/sequence catalog — cl-parity-plan.md Phase 3a/3b/3c.
 ;;
 ;; Same shape as the `Iter` library above and for the same reason: these are
-;; generic `defun`s over `(where (Iter I (Item A)))`, not `defmethod`s, because
-;; a `defmethod` resolves by the receiver's *exact* type and would have to be
+;; generic `defun`s over `(where (Iter I (Item A)))`, not methods, because
+;; a method resolves by the receiver's *exact* type and would have to be
 ;; written once per collection. `Vector<T>` reaches them through `(iter v)`,
 ;; exactly as `map`/`filter` are already reached.
 ;;
@@ -2818,9 +2830,9 @@ user-visible capacity."
 
 ;; CL's `caar`..`cddddr`, over *nested pairs* rather than lists: `cadr` wants a
 ;; `cons-cell<A,cons-cell<B,C>>`, which is what `(cons 1 (cons 2 3))` builds.
-;; Free `defun`s rather than `defmethod`s on `cons-cell` — the receiver of a
-;; `defmethod` only binds type variables that sit at the *top level* of its
-;; type arguments (`check_defmethod`'s `written_vars`), so `((self
+;; Free `defun`s rather than methods on `cons-cell` — the receiver of a
+;; method only binds type variables that sit at the *top level* of its
+;; type arguments (`check_defmethod_in_form`'s `written_vars`), so `((self
 ;; cons-cell<A,cons-cell<B,C>>))` leaves `B`/`C` unbound and `car` stops
 ;; resolving on it. Generated mechanically; the type of `cXr` is read
 ;; right-to-left, one `cons-cell` nesting per letter.
@@ -3205,7 +3217,7 @@ user-visible capacity."
 ;; fill-pointer vector and a simple one has nothing to attach to.
 ;;
 ;; The receivers spell `Vector`'s type parameter `T` because that is the name
-;; `Vector<T>` itself was declared with — a generic `defmethod`'s registered
+;; `Vector<T>` itself was declared with — a generic method's registered
 ;; signature is rewritten into the owner's parameter names, so any name works,
 ;; but matching keeps the two readable side by side.
 (impl Vector<T>
@@ -3596,7 +3608,7 @@ user-visible capacity."
   "CL's `psetq`. `psetf` with places restricted to variables; same expansion."
   `(psetf ,@pairs))
 
-;; `pushnew`: push unless already present. A `defmethod` rather than a macro —
+;; `pushnew`: push unless already present. A method rather than a macro —
 ;; CL needs a macro because its `place` must be re-written, and a `Vector<T>`
 ;; mutates in place instead.
 (impl Vector<T>
@@ -3850,9 +3862,7 @@ user-visible capacity."
 
 ;; ---------------------------------------------------------------------------
 ;; `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`: Rust's `HashSet`, `BTreeMap`
-;; and `VecDeque`. Created with `make`, as `Array<T>` is: `new` is the
-;; field-order constructor `defstruct` generates, and these fields are the
-;; representation. The method names follow `HashTable` (`get` `set` `remove`
+;; and `VecDeque`, each created with `new`. The method names follow `HashTable` (`get` `set` `remove`
 ;; `count` `clear`); a set's add is `insert`, since `add` is the `Add` trait's.
 ;; `iter` walks a snapshot, as `HashTable`'s does, so changing the collection
 ;; inside a `doiter` over it is not seen by that loop.
@@ -3860,7 +3870,7 @@ user-visible capacity."
 ;; A set is a table whose values are `()`.
 (pub defstruct HashSet<T> (table HashTable<T,()>))
 (impl HashSet<T>
-  (pub make () HashSet<T> (make-instance 'HashSet :table (the HashTable<T,()> (HashTable::new))))
+  (pub new () HashSet<T> (make-instance 'HashSet :table (the HashTable<T,()> (HashTable::new))))
   (pub insert (self (x T)) bool (where (Hash T))
     (if (is-some (get self::table x)) false (progn (set self::table x ()) true)))
   (pub contains (self (x T)) bool (where (Hash T))
@@ -3903,7 +3913,7 @@ user-visible capacity."
     x)))
 (pub defstruct SortedTable<K,V> (ks Vector<K>) (vs Vector<V>))
 (impl SortedTable<K,V>
-  (pub make () SortedTable<K,V>
+  (pub new () SortedTable<K,V>
     (make-instance 'SortedTable :ks (the Vector<K> (Vector::new)) :vs (the Vector<V> (Vector::new))))
   (pub get (self (k K)) Option<V> (where (Ord K))
     (let ((i (%internal::sorted-position self::ks k)))
@@ -3947,7 +3957,7 @@ user-visible capacity."
 ;; costs a constant amount per element.
 (pub defstruct Deque<T> (before Vector<T>) (after Vector<T>))
 (impl Deque<T>
-  (pub make () Deque<T>
+  (pub new () Deque<T>
     (make-instance 'Deque :before (the Vector<T> (Vector::new)) :after (the Vector<T> (Vector::new))))
   (pub count (self) int (+ (len self::before) (len self::after)))
   (pub push-front (self (x T)) () (push self::before x))
@@ -4243,7 +4253,7 @@ user-visible capacity."
 
 ;; CL's two-argument `atan`, which `phase` is built on. `(atan y x)` is sugar
 ;; for this (`Checker::check_list`, the same arity dispatch two-argument `log`
-;; uses) — `defmethod` cannot overload on arity, and `atan` is a built-in `f64`
+;; uses) — a method cannot overload on arity, and `atan` is a built-in `f64`
 ;; method already.
 (pub defun atan2 ((y f64) (x f64)) f64
   "The angle of the vector `(x,y)`, in (-pi,pi]. CL's `(atan y x)`."
@@ -4285,7 +4295,7 @@ user-visible capacity."
   "`e^(i*theta)` — the unit complex at angle `theta`."
   (make-instance 'complex :re (cos theta) :im (sin theta)))
 
-;; Arithmetic. These are `defmethod`s named for the operators, which is allowed
+;; Arithmetic. These are methods named for the operators, which is allowed
 ;; because `complex` is not a primitive with a built-in table of its own —
 ;; the reason `impl Add i32` cannot name its method `+` (see the arithmetic
 ;; traits above) does not apply here.
@@ -6543,13 +6553,12 @@ user-visible capacity."
 ;;    are questions the static type has already answered and none of them
 ;;    exists here (see `docs/dev/cl-missing-classes-and-methods.md`).
 ;; 2. Subscripts are a `Vector<i32>` rather than a `&rest` of integers: a
-;;    `defmethod` resolves by arity, never by a trailing run of same-typed
+;;    method resolves by arity, never by a trailing run of same-typed
 ;;    arguments. The CL-shaped `(aref a i j)` is checker sugar over exactly
 ;;    these methods — see `Checker::check_aref`.
-;; 3. Creation is `Array::make`, not `Array::new`. `new` is the field-order
-;;    constructor every `defstruct` generates, and this one's fields are the
-;;    *representation* (dimensions, flat storage, fill pointer) rather than
-;;    what a caller wants to hand over.
+;; 3. `Array::new` takes what a caller wants to hand over rather than the
+;;    fields, which are the *representation* (dimensions, flat storage, fill
+;;    pointer).
 ;; 4. CL's `make-array` keywords: `:initial-element` is the required `init`
 ;;    argument, since there are no unbound array cells here; `:fill-pointer`
 ;;    is a `&key`; and `:adjustable` has no counterpart, because `adjust`
@@ -6565,7 +6574,7 @@ user-visible capacity."
 
 ;; The array a `#nA(..)` literal in source evaluates to
 ;; (`Checker::check_array_literal`): its dimensions and its row-major elements
-;; already built, no fill pointer. Not `Array::make`, which needs an element
+;; already built, no fill pointer. Not `Array::new`, which needs an element
 ;; to fill with — a literal with a zero dimension has none.
 (module %internal (pub defun array-from-row-major<T> ((dims Vector<int>) (data Vector<T>)) Array<T>
   (make-instance 'Array :dims dims :data data :fill-pointer (Option::none))))
@@ -6573,13 +6582,13 @@ user-visible capacity."
 ;; CL's `make-array`. `dims` is copied, so a later `push` to the caller's own
 ;; vector cannot change the array's shape behind its back.
 (impl Array<T>
-  (pub make ((dims Vector<int>) (init T) &key (fill-pointer int)) Array<T>
+  (pub new ((dims Vector<int>) (init T) &key (fill-pointer int)) Array<T>
     (let ((d (the Vector<int> (Vector::new))) (n 1))
       (progn
         (doiter (x (iter dims))
           (progn
             (if (< x 0)
-                (panic (format false "Array::make: dimension ~a is negative" x))
+                (panic (format false "Array::new: dimension ~a is negative" x))
                 ())
             (push d x)
             (setf n (* n x))))
@@ -6588,10 +6597,10 @@ user-visible capacity."
           ((some f)
            (progn
              (if (/= (len d) 1)
-                 (panic "Array::make: :fill-pointer needs a one-dimensional array")
+                 (panic "Array::new: :fill-pointer needs a one-dimensional array")
                  ())
              (if (or (< f 0) (> f n))
-                 (panic (format false "Array::make: :fill-pointer ~a is not in 0..~a" f n))
+                 (panic (format false "Array::new: :fill-pointer ~a is not in 0..~a" f n))
                  ()))))
         (make-instance 'Array :dims d :data (Vector::filled n init) :fill-pointer fill-pointer)))))
 
@@ -6677,7 +6686,7 @@ user-visible capacity."
 
 ;; CL's `vector-push-extend`: write at the fill pointer, growing the storage
 ;; when the pointer has reached the end. A fill-pointer array is
-;; one-dimensional by construction (`Array::make` refuses any other rank), so
+;; one-dimensional by construction (`Array::new` refuses any other rank), so
 ;; growing it means growing its single dimension.
 (impl Array<T>
   (pub push-extend (self (x T)) ()
@@ -6727,7 +6736,7 @@ user-visible capacity."
 ;; CL's `adjust-array`: reshape in place, keeping every element whose
 ;; subscripts still name a cell. CL requires the new rank to match the old
 ;; one, and so does this. New cells get `init` — CL's `:initial-element`,
-;; required here for the same reason `Array::make` requires it.
+;; required here for the same reason `Array::new` requires it.
 ;;
 ;; Mutates and returns `()`, where CL returns the array; CL has to, because a
 ;; non-adjustable CL array may come back as a *different* array. Every array
@@ -6857,9 +6866,8 @@ user-visible capacity."
 ;; (`bitvector-trim`), so the representation of a given bit vector is unique
 ;; and `lognot` cannot leave phantom set bits behind it.
 ;;
-;; As with `Array<T>`, creation is `BitVector::make` rather than
-;; `BitVector::new`: `new` is the field-order constructor `defstruct`
-;; generates, and this type's fields are its packed representation.
+;; As with `Array<T>`, `BitVector::new` takes a length, not the packed
+;; representation the fields hold.
 ;; `bit-vector-p` does not exist — the static type has already answered it.
 
 (pub defstruct BitVector
@@ -6870,9 +6878,9 @@ user-visible capacity."
 ;; CL's `(make-array n :element-type 'bit)`. Every bit starts at 0, which is
 ;; what CL's `:initial-element` defaults to for a bit array.
 (impl BitVector
-  (pub make ((n int)) BitVector
+  (pub new ((n int)) BitVector
     (if (< n 0)
-        (panic (format false "BitVector::make: length ~a is negative" n))
+        (panic (format false "BitVector::new: length ~a is negative" n))
         (make-instance 'BitVector :words (Vector::filled (/ (+ n 30) 31) (the int 0)) :nbits n)))
   (pub len (self) int self::nbits))
 
@@ -6932,7 +6940,7 @@ user-visible capacity."
 (module %internal (pub defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (int int) int))) BitVector
   (if (/= a::nbits b::nbits)
       (panic (format false "~a: bit vectors differ in length (~a and ~a)" who a::nbits b::nbits))
-      (let ((out (BitVector::make a::nbits)) (i 0) (n (len a::words)))
+      (let ((out (BitVector::new a::nbits)) (i 0) (n (len a::words)))
         (progn
           (while (< i n)
             (progn
@@ -6966,7 +6974,7 @@ user-visible capacity."
   (pub bit-orc2 (self (other BitVector)) BitVector
     (%internal::bitvector-zip self other "bit-orc2" (lambda ((x int) (y int)) int (logorc2 x y))))
   (pub bit-not (self) BitVector
-    (let ((out (BitVector::make self::nbits)) (i 0) (n (len self::words)))
+    (let ((out (BitVector::new self::nbits)) (i 0) (n (len self::words)))
       (progn
         (while (< i n)
           (progn
@@ -7000,6 +7008,8 @@ user-visible capacity."
 (pub defstruct SimpleError
   "An error that carries nothing but its message — CL's `simple-error`."
   (text string))
+(impl SimpleError
+  (pub new ((text string)) SimpleError (make-instance 'SimpleError :text text)))
 (impl Error SimpleError
   (message ((self Self)) string self::text))
 (impl print-object SimpleError
@@ -7185,14 +7195,10 @@ user-visible capacity."
 ;; once it has finished, as Go's can. The gate is only ever read or replaced
 ;; while the counter's token is held, so a waiter sees the gate belonging to
 ;; the count it saw.
-;;
-;; `WaitGroup::make` and not `WaitGroup::new`: a `defstruct`'s `new` takes its
-;; fields, and this one takes none. `Array<T>::make`/`BitVector::make` are the
-;; same shape for the same reason.
 (pub defstruct WaitGroup (count Chan<int>) (gate Chan<()>))
 
 (impl WaitGroup
-  (pub make () WaitGroup
+  (pub new () WaitGroup
     "A wait group with nothing outstanding."
     (let ((c (the Chan<int> (Chan::new 1))))
       (send c 0)
@@ -7269,7 +7275,7 @@ user-visible capacity."
 (pub defstruct Mutex<T> (pub v T) (gate Chan<()>))
 
 (impl Mutex<T>
-  (pub make ((v T)) Mutex<T>
+  (pub new ((v T)) Mutex<T>
     "A mutex holding `v`, unlocked."
     (let ((g (the Chan<()> (Chan::new 1))))
       (send g ())
@@ -7325,7 +7331,7 @@ user-visible capacity."
 ;; be cancelled, has no counterpart.
 (pub defstruct Context (done-ch Chan<()>) (cancelled Mutex<bool>) (children Vector<Context>) (parent Option<Context>))
 (module %internal (pub defun context-child ((parent Option<Context>)) Context
-  (make-instance 'Context :done-ch (the Chan<()> (Chan::new 0)) :cancelled (Mutex::make false) :children (the Vector<Context> (Vector::new)) :parent parent)))
+  (make-instance 'Context :done-ch (the Chan<()> (Chan::new 0)) :cancelled (Mutex::new false) :children (the Vector<Context> (Vector::new)) :parent parent)))
 (impl Context
   (pub background () Context (%internal::context-child (Option::none)))
   (pub done (self) Chan<()> self::done-ch)

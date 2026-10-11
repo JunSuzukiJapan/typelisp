@@ -98,6 +98,6 @@ fn pushing_after_creating_an_iterator_is_visible_through_it() {
 
 #[test]
 fn next_on_a_type_with_no_iter_impl_is_a_type_error() {
-    let src = "(defstruct box (n int)) (next (box::new 1))";
+    let src = "(defstruct box (n int)) (next (make-instance 'box :n 1))";
     assert!(check(src).is_err());
 }

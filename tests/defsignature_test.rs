@@ -313,7 +313,7 @@ fn a_type_still_has_to_be_defined_before_it_is_named() {
     // a deliberate, visible change.
     let src = "
         (defsignature make-it () pt)
-        (defun make-it () pt (pt::new 1))
+        (defun make-it () pt (make-instance 'pt :x 1))
         (defstruct pt (x int))
         (make-it)";
     let msg = expect_err(src);

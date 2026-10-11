@@ -19,7 +19,7 @@
         (dotimes (x w)
           (push row #\Space))
         (push cells row)))
-    (canvas::new cells w h)))
+    (make-instance 'canvas :cells cells :w w :h h)))
 
 ;; Points out of range are silently dropped (so shapes need not care about the
 ;; bounds).

@@ -655,28 +655,9 @@ enum SlotDefault {
     Inherited(crate::owned_form::OwnedForm),
 }
 
-/// A `(:constructor name)` / `(:constructor name (slot...))` option.
-struct CtorSpec {
-    name: String,
-    /// `None` — a keyword constructor: every slot is a `&key` at its own
-    /// default, so every slot must have one. `Some(params)` — a BOA
-    /// constructor taking exactly these slots positionally; every slot it
-    /// does not name is filled from that slot's default.
-    boa: Option<Vec<BoaParam>>,
-}
-
-/// One parameter of a BOA constructor's lambda list: a slot name, optionally
-/// after an `&optional` marker (in which case that slot's own default becomes
-/// the parameter's).
-struct BoaParam {
-    name: String,
-    optional: bool,
-}
-
 /// A `(defstruct (Name option...) ...)` option list, parsed.
 #[derive(Default)]
 struct StructOptions {
-    constructors: Vec<CtorSpec>,
     copier: Option<String>,
     /// `(:include Parent)` — the parent type as written, for
     /// `parse_type_here_at`.
@@ -916,11 +897,22 @@ pub struct NsContext {
     file_ns: Vec<Vec<String>>,
 }
 
+/// What writing `defmethod` says: methods are written in the type's `impl`.
+fn defmethod_is_gone() -> Error {
+    Error::TypeError(
+        "defmethod is gone — write methods in the type's `impl`: (impl Type (pub name (self args...) ReturnType body...)); \
+         an item without `self` is a static method, called (Type::name args...)"
+            .into(),
+    )
+}
+
 /// The type checker, holding the data-type and function registries plus the
 /// current namespace (module) path.
 /// The name a `defstruct`'s one constructor is registered under — what
-/// `make-instance` calls.
-const STRUCT_CTOR: &str = "new";
+/// `make-instance` calls. It holds `(`, which the reader never puts in a
+/// symbol, so no source can name it: `Name::new` is the type's own static
+/// method, written in its `impl`.
+pub(crate) const STRUCT_CTOR: &str = "(make-instance)";
 
 pub struct Checker {
     reg: Registry,
@@ -3119,7 +3111,7 @@ impl Checker {
                     wk::DEFCONSTANT => return self.check_defvar(heap, interp, &elems[1..], false, false, def_loc, false),
                     wk::DEFMACRO => return self.check_defmacro(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::MODULE => return self.check_module(heap, interp, &elems[1..]),
-                    wk::DEFMETHOD => return self.check_defmethod(heap, interp, &elems[1..], parts_locs, false, def_loc),
+                    wk::DEFMETHOD => return Err(defmethod_is_gone()),
                     wk::DEFSTRUCT => return self.check_defstruct(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFENUM => return self.check_defenum(heap, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFTRAIT => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
@@ -3197,7 +3189,7 @@ impl Checker {
                 }
                 wk::DEFCONSTANT => return self.check_defvar(heap, interp, &parts[1..], false, true, def_loc, false),
                 wk::DEFMACRO => return self.check_defmacro(heap, interp, &parts[1..], inner_locs, true, def_loc),
-                wk::DEFMETHOD => return self.check_defmethod(heap, interp, &parts[1..], inner_locs, true, def_loc),
+                wk::DEFMETHOD => return Err(defmethod_is_gone()),
                 wk::DEFSTRUCT => return self.check_defstruct(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFENUM => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFTYPE => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
@@ -4845,7 +4837,7 @@ impl Checker {
         // implemented the trait — and this request is not a call anyone
         // wrote, so an unsatisfiable one has to be *dropped*, not reported:
         // building an array of a type that prints the built-in way is not an
-        // error, and specializing it anyway turns `(Array::make d (point::new
+        // error, and specializing it anyway turns `(Array::new d (point::new
         // 1))` into "does not implement trait print-object".
         if !self.print_object_bounds_hold(path, args) {
             return;
@@ -6163,20 +6155,26 @@ impl Checker {
                 let name = heap.symbol_name(*id);
                 if !name.starts_with(':') {
                     return Err(Error::TypeError(format!(
-                        "defstruct: `{}` is not an option — a definition name's type parameters go on the name itself (`Name<{}>`); the list after `defstruct` is the option list (`:constructor`, `:copier`, `:include`)",
+                        "defstruct: `{}` is not an option — a definition name's type parameters go on the name itself (`Name<{}>`); the list after `defstruct` is the option list (`:copier`, `:include`)",
                         name, name
                     )));
                 }
             }
             let items = heap.list_to_vec(*opt).map_err(|_| {
-                Error::TypeError("defstruct: each option must be a list, e.g. (:constructor make-point)".into())
+                Error::TypeError("defstruct: each option must be a list, e.g. (:copier copy-point)".into())
             })?;
             let key = match items.first() {
                 Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
                 _ => return Err(Error::TypeError("defstruct: an option starts with a keyword, e.g. (:copier copy-point)".into())),
             };
             match key.as_str() {
-                ":constructor" => out.constructors.push(self.parse_ctor_option(heap, &items[1..])?),
+                ":constructor" => {
+                    return Err(Error::TypeError(
+                        "defstruct: (:constructor ...) is gone — write the constructor as a static method in the type's `impl`, \
+                         e.g. (impl Point (pub new ((x int) (y int)) Point (make-instance 'Point :x x :y y)))"
+                            .into(),
+                    ))
+                }
                 ":copier" => {
                     let name = single_name_option(heap, &items[1..], ":copier")?;
                     if out.copier.is_some() {
@@ -6213,62 +6211,13 @@ impl Checker {
                 }
                 other => {
                     return Err(Error::TypeError(format!(
-                        "defstruct: unknown option `{}` (known: :constructor, :copier, :include)",
+                        "defstruct: unknown option `{}` (known: :copier, :include)",
                         other
                     )))
                 }
             }
         }
         Ok(out)
-    }
-
-    /// `(:constructor name)` or `(:constructor name (slot... [&optional slot...]))`.
-    fn parse_ctor_option(&self, heap: &Heap, rest: &[Value]) -> Result<CtorSpec, Error> {
-        let name = match rest.first() {
-            Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
-            _ => {
-                return Err(Error::TypeError(
-                    "defstruct: (:constructor name) needs a name — `new` is the structural constructor and is always present, so there is nothing to suppress".into(),
-                ))
-            }
-        };
-        let boa = match rest.len() {
-            1 => None,
-            2 => {
-                let items = heap.list_to_vec(rest[1])?;
-                let mut params = Vec::new();
-                let mut optional = false;
-                for it in &items {
-                    let Value::Symbol(id) = it else {
-                        return Err(Error::TypeError(
-                            "defstruct: a BOA constructor's lambda list holds slot names, not types — each slot's type is its declaration's".into(),
-                        ));
-                    };
-                    let n = heap.symbol_name(*id);
-                    if n == "&optional" {
-                        if optional {
-                            return Err(Error::TypeError("defstruct: &optional may appear only once".into()));
-                        }
-                        optional = true;
-                        continue;
-                    }
-                    if n.starts_with('&') {
-                        return Err(Error::TypeError(format!(
-                            "defstruct: a BOA constructor's lambda list takes slot names and `&optional`, not `{}`",
-                            n
-                        )));
-                    }
-                    params.push(BoaParam { name: n.to_string(), optional });
-                }
-                Some(params)
-            }
-            _ => {
-                return Err(Error::TypeError(
-                    "defstruct: (:constructor name) or (:constructor name (slot...))".into(),
-                ))
-            }
-        };
-        Ok(CtorSpec { name, boa })
     }
 
     // ---- deftrait / impl ---------------------------------------------------
@@ -8647,18 +8596,6 @@ impl Checker {
         self.file_ns = saved.file_ns;
     }
 
-    fn check_defmethod(
-        &mut self,
-        heap: &mut Heap,
-        interp: &dyn MacroExpander,
-        parts: &[Value],
-        parts_locs: &[Option<Loc>],
-        public: bool,
-        def_loc: Option<Loc>,
-    ) -> Result<TopLevelForm, Error> {
-        self.check_defmethod_in(heap, interp, parts, parts_locs, public, def_loc, None)
-    }
-
     /// [`Self::check_defmethod_in_form`] with the method's type variables in
     /// scope for [`Self::reject_unknown_type_name`]. They are declared in two
     /// places: the unresolved names its *receiver* writes (`(self Vector<T>)`,
@@ -9114,11 +9051,9 @@ impl Checker {
     /// `(defstruct Name<T1,T2...> (field Type)...)`, the name position
     /// parsed exactly like `(defun name<T1,T2...> ...)`'s
     /// (`Checker::parse_defun_name`, reused as-is) — a mutable product type:
-    /// a single constructor, deliberately named `"new"` rather than `Name`
-    /// itself, so `Type::new` resolves through the existing `Type::ctor`
-    /// branch of `check_path_call` with no new constructor-resolution logic,
-    /// and never occupies a bare/flat name (the "don't pollute the
-    /// namespace" design goal this whole redesign was scoped around).
+    /// a single constructor named [`STRUCT_CTOR`], which no source can
+    /// spell: a value is built with `make-instance`, and `Type::new` is
+    /// whatever static method the type's `impl` writes under that name.
     /// `check_construct` builds instances (reading `AdtKind::Struct` to
     /// choose a mutable struct box over an enum one) — generic substitution there
     /// (and in `match`'s `check_ctor_pattern`) is already `AdtDef.params`-
@@ -9337,7 +9272,7 @@ impl Checker {
         let def = AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),
-            variants: vec![Variant { name: "new".to_string(), fields: field_types }],
+            variants: vec![Variant { name: STRUCT_CTOR.to_string(), fields: field_types }],
             assoc,
             public,
             builtin: false,
@@ -9375,19 +9310,12 @@ impl Checker {
             self.reg.struct_defaults.insert(type_fq.clone(), owned);
         }
 
-        // Generated constructors and the copier, *after* the type is
-        // registered: unlike the accessors (whose ASTs are synthesized
-        // directly), these are synthesized as **source** and run through
-        // `check_defmethod_in`. That is what buys them the whole method
-        // pipeline for free — `&key`/`&optional` filling (Phase 5b),
-        // visibility, and, for a generic owner, the `MethodTemplate::Form`
-        // retention that makes them specializable. It needs the type and its
-        // `new` to already exist, hence the position.
-        for spec in &options.constructors {
-            let form = self.constructor_source(members.heap(), &name, &type_params, &fields, spec)?;
-            let checked = self.check_synthetic_defmethod(members.heap(), interp, form, public, def_loc.clone())?;
-            members.push(checked);
-        }
+        // The copier, *after* the type is registered: unlike the accessors
+        // (whose ASTs are synthesized directly), it is synthesized as
+        // **source** and run through `check_defmethod_in`, which gives it
+        // visibility and, for a generic owner, the `MethodTemplate::Form`
+        // retention that makes it specializable. It calls the type's
+        // constructor, hence the position.
         if let Some(copier) = &options.copier {
             let form = self.copier_source(members.heap(), &name, &type_params, &fields, copier)?;
             let checked = self.check_synthetic_defmethod(members.heap(), interp, form, public, def_loc.clone())?;
@@ -9489,151 +9417,6 @@ impl Checker {
         heap.intern_symbol(&text)
     }
 
-    /// One slot's default value form, materialized into `heap`.
-    fn slot_default_source(&self, heap: &mut Heap, d: &SlotDefault) -> Result<Value, Error> {
-        match d {
-            SlotDefault::Written(v) => Ok(*v),
-            SlotDefault::Inherited(o) => crate::owned_form::owned_to_value(heap, o),
-        }
-    }
-
-    /// Synthesize a `(:constructor ...)` option's `defmethod` **source** —
-    /// everything after the `defmethod` keyword, as one list.
-    ///
-    /// Source rather than a lowered AST (which is how the accessors are
-    /// built) because a constructor needs the whole method pipeline:
-    /// `&key`/`&optional` filling, visibility, and — for a generic owner —
-    /// the `MethodTemplate::Form` retention that makes it specializable.
-    /// Synthesizing source and handing it to `check_defmethod_in` gets all of
-    /// that with no second implementation.
-    ///
-    /// The body is always `(Name::new slot...)`: `new` stays the one
-    /// structural constructor, and everything generated here is a *way of
-    /// calling it*.
-    fn constructor_source(
-        &self,
-        heap: &mut Heap,
-        name: &str,
-        type_params: &[String],
-        fields: &[StructField],
-        spec: &CtorSpec,
-    ) -> Result<Value, Error> {
-        // One outer builder holds every finished piece rooted; each
-        // sub-list is built in a nested scope that reborrows its heap.
-        let mut out = Items::new(heap);
-        let mname = out.heap().intern_symbol(&spec.name);
-        out.push(mname);
-
-        // `bound` marks the slots a parameter supplies; the rest come from
-        // their own defaults.
-        let mut bound: Vec<bool> = vec![false; fields.len()];
-        let mut sig = Items::new(out.heap());
-        let recv = self.owner_type_source(sig.heap(), name, type_params);
-        sig.push(recv);
-        match &spec.boa {
-            None => {
-                // Keyword constructor: every slot is a `&key` at its own
-                // default. A slot without one cannot be filled — there is no
-                // "unbound slot" here the way CL has.
-                let marker = sig.heap().intern_symbol("&key");
-                sig.push(marker);
-                for (i, f) in fields.iter().enumerate() {
-                    let Some(d) = &f.default else {
-                        return Err(Error::TypeError(format!(
-                            "defstruct {}: (:constructor {}) takes every slot by keyword, so slot `{}` needs a default — give it one, or declare a BOA constructor `(:constructor {} ({} ...))` that takes it positionally",
-                            name, spec.name, f.name, spec.name, f.name
-                        )));
-                    };
-                    let item = self.param_source(sig.heap(), &f.name, &f.ty, Some(d))?;
-                    sig.push(item);
-                    bound[i] = true;
-                }
-            }
-            Some(params) => {
-                let mut seen_optional = false;
-                for p in params {
-                    let Some(i) = fields.iter().position(|f| f.name == p.name) else {
-                        return Err(Error::TypeError(format!(
-                            "defstruct {}: (:constructor {}) names `{}`, which is not a slot",
-                            name, spec.name, p.name
-                        )));
-                    };
-                    if bound[i] {
-                        return Err(Error::TypeError(format!(
-                            "defstruct {}: (:constructor {}) names slot `{}` twice",
-                            name, spec.name, p.name
-                        )));
-                    }
-                    let default = if p.optional {
-                        if !seen_optional {
-                            let marker = sig.heap().intern_symbol("&optional");
-                            sig.push(marker);
-                            seen_optional = true;
-                        }
-                        match &fields[i].default {
-                            Some(d) => Some(d),
-                            None => {
-                                return Err(Error::TypeError(format!(
-                                    "defstruct {}: (:constructor {}) makes slot `{}` optional, so that slot needs a default to fall back on",
-                                    name, spec.name, p.name
-                                )))
-                            }
-                        }
-                    } else {
-                        None
-                    };
-                    let item = self.param_source(sig.heap(), &fields[i].name, &fields[i].ty, default)?;
-                    sig.push(item);
-                    bound[i] = true;
-                }
-            }
-        }
-        let sig_list = sig.finish_list()?;
-        out.push(sig_list);
-        let ret = self.owner_type_source(out.heap(), name, type_params);
-        out.push(ret);
-
-        // `(Name::new v...)`: a bound slot contributes its parameter's name,
-        // an unbound one its own default.
-        let mut call = Items::new(out.heap());
-        let ctor_path = Path::from_segments(vec![name.to_string(), "new".to_string()]);
-        let head = forms::path_form(call.heap(), &ctor_path);
-        call.push(head);
-        for (i, field) in fields.iter().enumerate() {
-            let arg = if bound[i] {
-                call.heap().intern_symbol(&field.name)
-            } else {
-                match &field.default {
-                    Some(d) => self.slot_default_source(call.heap(), d)?,
-                    None => {
-                        return Err(Error::TypeError(format!(
-                            "defstruct {}: (:constructor {}) does not take slot `{}` and that slot has no default, so the constructor could not fill it",
-                            name, spec.name, field.name
-                        )))
-                    }
-                }
-            };
-            call.push(arg);
-        }
-        let body = call.finish_list()?;
-        out.push(body);
-        out.finish_list()
-    }
-
-    /// One `(name Type)` / `(name Type default)` parameter item.
-    fn param_source(&self, heap: &mut Heap, name: &str, ty: &Type, default: Option<&SlotDefault>) -> Result<Value, Error> {
-        let mut f = Items::new(heap);
-        let n = f.heap().intern_symbol(name);
-        f.push(n);
-        let t = self.type_source(f.heap(), ty)?;
-        f.push(t);
-        if let Some(d) = default {
-            let v = self.slot_default_source(f.heap(), d)?;
-            f.push(v);
-        }
-        f.finish_list()
-    }
-
     /// Synthesize a `(:copier name)` option's `defmethod` source: an
     /// *instance* method returning a fresh value with the same slot values —
     /// CL's copier is likewise shallow.
@@ -9668,7 +9451,7 @@ impl Checker {
 
         let body = {
             let mut call = Items::new(out.heap());
-            let ctor_path = Path::from_segments(vec![name.to_string(), "new".to_string()]);
+            let ctor_path = Path::from_segments(vec![name.to_string(), STRUCT_CTOR.to_string()]);
             let head = forms::path_form(call.heap(), &ctor_path);
             call.push(head);
             for field in fields {
@@ -10298,7 +10081,7 @@ impl Checker {
         let path = crate::types::tuple_path(elems.len());
         let data = expected.filter(|t| is_sexpr_expectation(t));
         let mut s = RootScope::new(heap);
-        let new = forms::path_form(&mut s, &path.child("new"));
+        let new = forms::path_form(&mut s, &path.child(STRUCT_CTOR));
         let mut items: Vec<(Value, Option<Loc>)> = vec![(new, None)];
         for &e in &elems {
             let ef = literal_element_form(&mut s, e, data.is_some())?;
@@ -10321,7 +10104,7 @@ impl Checker {
     /// [`Self::check_vector_literal`] types a vector. Built from a vector of
     /// the dimensions and a vector of the elements in row-major order, so a
     /// literal with a zero dimension — which has no element to fill an
-    /// `Array::make` with — is built the same way.
+    /// `Array::new` with — is built the same way.
     fn check_array_literal(
         &self,
         heap: &mut Heap,
@@ -11579,6 +11362,13 @@ impl Checker {
                             arg_locs,
                         );
                     }
+                }
+                if def.kind == AdtKind::Struct && !def.builtin {
+                    return Err(Error::TypeError(format!(
+                        "`{}` has no static method `{}`; a struct's methods are written in its `impl`, \
+                         e.g. (impl {} (pub {} (...) {} (make-instance '{} :slot value...)))",
+                        type_fq, member, type_fq, member, type_fq, type_fq
+                    )));
                 }
             }
         }
@@ -17016,6 +16806,11 @@ impl Checker {
                 if crate::sexpr_variant::is_ctor_name(&heap.symbol_name(id)));
             if !is_builtin_head {
                 if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0], parts_locs[0].1.as_ref())? {
+                    if self.reg.type_def(&adt_name).is_some_and(|d| d.kind == AdtKind::Struct) {
+                        let parts_locs = self.struct_pattern_parts(heap, &adt_name, &parts_locs)?;
+                        let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
+                        return self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, true);
+                    }
                     return self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, true);
                 }
             }
@@ -17051,10 +16846,100 @@ impl Checker {
         // variants), not the namespace — the type context disambiguates it.
         let (adt_name, targs) = self.expect_adt(expected)?;
         let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+        if def.kind == AdtKind::Struct && !def.builtin {
+            let head_ty = match parts[0] {
+                Value::Symbol(id) => self.resolve_bare_type(heap.symbol_name(id)),
+                Value::Path(pid) => {
+                    let segs: Vec<String> =
+                        heap.path_segments(pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
+                    self.resolve_type_path(&segs)
+                }
+                _ => None,
+            };
+            if head_ty.as_ref() != Some(&adt_name) {
+                return Err(Error::TypeError(format!(
+                    "pattern: a `{}` value is matched as ({} :slot pattern...), not `{}`",
+                    adt_name,
+                    adt_name.last_segment(),
+                    ctor
+                )));
+            }
+            if let Some(l) = &parts_locs[0].1 {
+                self.record_type_use(&adt_name, l.clone());
+            }
+            let parts_locs = self.struct_pattern_parts(heap, &adt_name, &parts_locs)?;
+            let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
+            return self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, 0, &parts, &parts_locs, false);
+        }
         let variant = def.variants.iter().position(|vr| vr.name == ctor).ok_or_else(|| {
             Error::TypeError(format!("`{}` is not a constructor of `{}`", ctor, adt_name))
         })?;
         self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, false)
+    }
+
+    /// A struct pattern `(Type :slot pattern... :slot...)` rewritten into
+    /// the positional shape [`Self::check_ctor_pattern_fields`] checks: the
+    /// head, then one sub-pattern per slot in declaration order. A keyword
+    /// followed by another keyword (or by nothing) binds the slot to a
+    /// variable of its own name; a slot not written is `_`.
+    fn struct_pattern_parts(
+        &self,
+        heap: &mut Heap,
+        adt_name: &Path,
+        parts_locs: &[(Value, Option<Loc>)],
+    ) -> Result<Vec<(Value, Option<Loc>)>, Error> {
+        let def = self.reg.type_def(adt_name).expect("adt exists");
+        let field_names = def.field_names.clone();
+        let shape = |got: &str| {
+            Error::TypeError(format!(
+                "pattern `{}`: a struct pattern names its slots, ({} :{} pattern...) or ({} :{}) to bind `{}`, but {}",
+                adt_name,
+                adt_name.last_segment(),
+                field_names.first().map(String::as_str).unwrap_or("slot"),
+                adt_name.last_segment(),
+                field_names.first().map(String::as_str).unwrap_or("slot"),
+                field_names.first().map(String::as_str).unwrap_or("slot"),
+                got
+            ))
+        };
+        let keyword = |heap: &Heap, v: Value| match v {
+            Value::Symbol(id) => heap.symbol_name(id).strip_prefix(':').map(str::to_string),
+            _ => None,
+        };
+        let mut slots: Vec<Option<(Value, Option<Loc>)>> = vec![None; field_names.len()];
+        let rest = &parts_locs[1..];
+        let mut k = 0;
+        while k < rest.len() {
+            let Some(slot) = keyword(heap, rest[k].0) else {
+                return Err(shape(&format!("`{}` is not a slot keyword", core::print(heap, rest[k].0))));
+            };
+            let Some(i) = field_names.iter().position(|f| *f == slot) else {
+                return Err(Error::TypeError(format!(
+                    "pattern `{}`: no slot `{}` (its slots are {})",
+                    adt_name,
+                    slot,
+                    field_names.iter().map(|f| format!("`{}`", f)).collect::<Vec<_>>().join(", ")
+                )));
+            };
+            if slots[i].is_some() {
+                return Err(Error::TypeError(format!("pattern `{}`: slot `{}` is written twice", adt_name, slot)));
+            }
+            let sub = match rest.get(k + 1) {
+                Some(next) if keyword(heap, next.0).is_none() => {
+                    k += 2;
+                    next.clone()
+                }
+                _ => {
+                    k += 1;
+                    (heap.intern_symbol(&slot), rest[k - 1].1.clone())
+                }
+            };
+            slots[i] = Some(sub);
+        }
+        let wildcard = heap.intern_symbol("_");
+        let mut out = vec![parts_locs[0].clone()];
+        out.extend(slots.into_iter().map(|s| s.unwrap_or((wildcard, None))));
+        Ok(out)
     }
 
     /// Resolve a Sexpr-downcast pattern's head to `(adt path, type args,

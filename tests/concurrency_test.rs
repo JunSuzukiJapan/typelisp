@@ -168,8 +168,9 @@ fn a_method_call_can_be_spawned() {
     assert_eq!(
         int(r#"(defvar (seen int) 0)
                (defstruct crate (v int))
-               (defmethod stash ((self crate)) int (setf seen self::v))
-               (task (stash (crate::new 9)))
+               (impl crate
+  (stash (self) int (setf seen self::v)))
+               (task (stash (make-instance 'crate :v 9)))
                seen"#),
         9
     );
@@ -724,7 +725,7 @@ fn a_compiled_sleep_suspends_only_the_calling_task() {
                  (with-lock (f flag) (setf f true)))
                (compile sleeper)
                (compile mark)
-               (let ((flag (the Mutex<bool> (Mutex::make false)))
+               (let ((flag (the Mutex<bool> (Mutex::new false)))
                      (sleepers (the Vector<Task<bool>> (Vector::new)))
                      (missed 0))
                  (dotimes (i (+ (Thread::available-parallelism) 1))
@@ -988,8 +989,8 @@ fn a_compiled_dyn_call_of_an_interpreted_method_can_suspend() {
                    (progn (dotimes (i n) (setf trail (append trail self::name)) (yield)) 0)))
                (defun drive-it ((t :dyn Ticker)) int (tick t 3))
                (compile drive-it)
-               (let ((a (task (drive-it (marker::new "a"))))
-                     (b (task (drive-it (marker::new "b")))))
+               (let ((a (task (drive-it (make-instance 'marker :name "a"))))
+                     (b (task (drive-it (make-instance 'marker :name "b")))))
                  (progn (wait a) (wait b)))
                trail"#
         ),

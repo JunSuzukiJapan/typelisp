@@ -156,14 +156,15 @@ fn with_standard_io_syntax_restores_the_escape_flag() {
 
 const POINT: &str = r#"
 (defstruct point (x int) (y int))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
 "#;
 
 #[test]
 fn a_call_directive_runs_the_method_on_the_arguments_type() {
     is_true(&format!(
-        r#"{} (equal (format false "~/brief/" (point::new 3 4)) "3/4")"#,
+        r#"{} (equal (format false "~/brief/" (make-instance 'point :x 3 :y 4)) "3/4")"#,
         POINT
     ));
 }
@@ -171,7 +172,7 @@ fn a_call_directive_runs_the_method_on_the_arguments_type() {
 #[test]
 fn the_colon_flag_reaches_the_method() {
     is_true(&format!(
-        r#"{} (equal (format false "~:/brief/" (point::new 3 4)) "<3,4>")"#,
+        r#"{} (equal (format false "~:/brief/" (make-instance 'point :x 3 :y 4)) "<3,4>")"#,
         POINT
     ));
 }
@@ -179,8 +180,9 @@ fn the_colon_flag_reaches_the_method() {
 #[test]
 fn the_at_flag_reaches_the_method() {
     is_true(
-        r#"(defmethod flags ((self string) (colon bool) (at bool)) string
-             (if at "at" "plain"))
+        r#"(impl string
+  (flags (self (colon bool) (at bool)) string
+               (if at "at" "plain")))
            (equal (format false "~@/flags/" "x") "at")"#,
     );
 }
@@ -188,7 +190,7 @@ fn the_at_flag_reaches_the_method() {
 #[test]
 fn a_call_directive_sits_inside_surrounding_text() {
     is_true(&format!(
-        r#"{} (equal (format false "p=~/brief/!" (point::new 1 2)) "p=1/2!")"#,
+        r#"{} (equal (format false "p=~/brief/!" (make-instance 'point :x 1 :y 2)) "p=1/2!")"#,
         POINT
     ));
 }
@@ -196,7 +198,7 @@ fn a_call_directive_sits_inside_surrounding_text() {
 #[test]
 fn a_call_directive_consumes_exactly_one_argument() {
     is_true(&format!(
-        r#"{} (equal (format false "~a ~/brief/ ~a" 1 (point::new 2 3) 4) "1 2/3 4")"#,
+        r#"{} (equal (format false "~a ~/brief/ ~a" 1 (make-instance 'point :x 2 :y 3) 4) "1 2/3 4")"#,
         POINT
     ));
 }
@@ -204,7 +206,8 @@ fn a_call_directive_consumes_exactly_one_argument() {
 #[test]
 fn a_string_argument_dispatches_on_string() {
     is_true(
-        r#"(defmethod shout ((self string) (colon bool) (at bool)) string (append self "!"))
+        r#"(impl string
+  (shout (self (colon bool) (at bool)) string (append self "!")))
            (equal (format false "~/shout/" "hi") "hi!")"#,
     );
 }
@@ -212,7 +215,8 @@ fn a_string_argument_dispatches_on_string() {
 #[test]
 fn an_integer_argument_dispatches_when_only_one_width_defines_the_name() {
     is_true(
-        r#"(defmethod twice ((self int) (colon bool) (at bool)) string (format false "~a ~a" self self))
+        r#"(impl int
+  (twice (self (colon bool) (at bool)) string (format false "~a ~a" self self)))
            (equal (format false "~/twice/" 7) "7 7")"#,
     );
 }
@@ -227,8 +231,10 @@ fn an_integer_argument_dispatches_when_only_one_width_defines_the_name() {
 /// them settled it: `7` is an `int` and `(the u8 7)` is a `u8`.
 #[test]
 fn each_integer_width_dispatches_to_its_own_method() {
-    const DEFS: &str = r#"(defmethod both ((self int) (colon bool) (at bool)) string "32")
-           (defmethod both ((self u8) (colon bool) (at bool)) string "8")"#;
+    const DEFS: &str = r#"(impl int
+  (both (self (colon bool) (at bool)) string "32"))
+           (impl u8
+  (both (self (colon bool) (at bool)) string "8"))"#;
     is_true(&format!(r#"{DEFS}
            (equal (format false "~/both/" 7) "32")"#));
     is_true(&format!(r#"{DEFS}
@@ -240,7 +246,8 @@ fn each_integer_width_dispatches_to_its_own_method() {
 /// `int`.
 #[test]
 fn an_integer_argument_reaches_only_its_own_widths_method() {
-    const DEF: &str = r#"(defmethod thrice ((self u8) (colon bool) (at bool)) string (format false "~a ~a ~a" self self self))"#;
+    const DEF: &str = r#"(impl u8
+  (thrice (self (colon bool) (at bool)) string (format false "~a ~a ~a" self self self)))"#;
     let e = check_err(&format!(r#"{DEF}
            (format false "~/thrice/" 7)"#));
     assert!(e.contains("no argument here has a method `thrice`"), "{}", e);
@@ -260,7 +267,8 @@ fn a_missing_method_is_an_error_not_a_fallback() {
 #[test]
 fn a_method_of_the_wrong_shape_is_reported_as_such() {
     let e = check_err(
-        r#"(defmethod short ((self string)) string self)
+        r#"(impl string
+  (short (self) string self))
            (format false "~/short/" "hi")"#,
     );
     assert!(e.contains("(colon bool) (at bool)"), "{}", e);
@@ -285,7 +293,8 @@ fn a_computed_control_string_is_refused() {
 #[test]
 fn the_name_is_case_folded_like_every_other_name() {
     is_true(
-        r#"(defmethod shout ((self string) (colon bool) (at bool)) string (append self "!"))
+        r#"(impl string
+  (shout (self (colon bool) (at bool)) string (append self "!")))
            (equal (format false "~/SHOUT/" "hi") "hi!")"#,
     );
 }
@@ -294,7 +303,7 @@ fn the_name_is_case_folded_like_every_other_name() {
 fn a_call_directive_works_through_a_stream_destination() {
     is_true(&format!(
         r#"{} (let ((s (make-string-output-stream)))
-                (progn (format s "~/brief/" (point::new 5 6))
+                (progn (format s "~/brief/" (make-instance 'point :x 5 :y 6))
                        (equal (get-output-stream-string s) "5/6")))"#,
         POINT
     ));
@@ -315,13 +324,13 @@ fn print_object_reaches_a_generic_type() {
     is_true(
         r#"(defstruct gen<T> (v T))
            (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
-           (equal (format false "~a" (gen::new 1)) "GEN")"#,
+           (equal (format false "~a" (make-instance 'gen :v 1)) "GEN")"#,
     );
     // Still reachable by name, as it always was.
     is_true(
         r#"(defstruct gen<T> (v T))
            (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
-           (equal (print-object (gen::new 1) true) "GEN")"#,
+           (equal (print-object (make-instance 'gen :v 1) true) "GEN")"#,
     );
 }
 
@@ -340,8 +349,8 @@ fn each_instantiation_reaches_its_own_print_object() {
              (where (print-object T))
              (print-object ((self Self) (escape bool)) string
                (append "gen-of-" (print-object (v self) escape))))
-           (and (equal (format false "~a" (gen::new (wi::new 1))) "gen-of-INT")
-                (equal (format false "~a" (gen::new (ws::new "x"))) "gen-of-STR"))"#,
+           (and (equal (format false "~a" (make-instance 'gen :v (wi::new 1))) "gen-of-INT")
+                (equal (format false "~a" (make-instance 'gen :v (ws::new "x"))) "gen-of-STR"))"#,
     );
 }
 
@@ -395,18 +404,18 @@ fn an_array_prints_in_cl_syntax() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2) (push d 3)
-               (let ((a (Array::make d 0)))
+               (let ((a (Array::new d 0)))
                  (progn (setf (aref a 0 0) 7)
                         (equal (format false "~a" a) "#2A((7 0 0) (0 0 0))")))))"##,
     );
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 3)
-               (equal (format false "~a" (Array::make d 1)) "#(1 1 1)")))"##,
+               (equal (format false "~a" (Array::new d 1)) "#(1 1 1)")))"##,
     );
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
-             (equal (format false "~a" (Array::make d 5)) "#0A5"))"##,
+             (equal (format false "~a" (Array::new d 5)) "#0A5"))"##,
     );
 }
 
@@ -417,7 +426,7 @@ fn an_arrays_elements_follow_the_escape_choice() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2)
-               (let ((a (Array::make d "q")))
+               (let ((a (Array::new d "q")))
                  (and (equal (format false "~s" a) "#(\"q\" \"q\")")
                       (equal (format false "~a" a) "#(q q)")))))"##,
     );
@@ -430,7 +439,7 @@ fn a_fill_pointer_cuts_what_prints() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 4)
-               (equal (format false "~a" (Array::make d 0 :fill-pointer 2)) "#(0 0)")))"##,
+               (equal (format false "~a" (Array::new d 0 :fill-pointer 2)) "#(0 0)")))"##,
     );
 }
 
@@ -442,7 +451,7 @@ fn print_array_false_shows_only_the_shape() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2) (push d 3)
-               (let ((a (Array::make d 0)))
+               (let ((a (Array::new d 0)))
                  (dlet ((*print-array* false))
                    (equal (format false "~a" a) "#<array 2x3>")))))"##,
     );
@@ -461,7 +470,7 @@ fn an_array_of_a_type_with_no_print_object_still_builds() {
         r##"(defstruct plain (n int))
            (let ((d (the Vector<int> (Vector::new))))
              (progn (push d 1)
-               (let ((a (Array::make d (plain::new 1))))
+               (let ((a (Array::new d (make-instance 'plain :n 1))))
                  (equal (format false "~a" a)
                         "#<array<plain> dims: #(1) data: #(#<plain n: 1>) fill-pointer: none>"))))"##,
     );
@@ -475,8 +484,8 @@ fn arrays_nest_through_the_bound() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2)
-               (let ((inner (Array::make d 1)))
-                 (equal (format false "~a" (Array::make d inner)) "#(#(1 1) #(1 1))"))))"##,
+               (let ((inner (Array::new d 1)))
+                 (equal (format false "~a" (Array::new d inner)) "#(#(1 1) #(1 1))"))))"##,
     );
 }
 

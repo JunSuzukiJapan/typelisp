@@ -219,8 +219,9 @@ fn a_bounded_generic_can_delegate_with_a_structured_associated_type_pin() {
 fn a_generic_defmethod_may_name_the_receivers_type_parameter_freely() {
     assert_eq!(
         eval_ok_with_prelude(
-            "(defmethod keepif ((self Vector<A>) (pred (fn (A) bool))) Vector<A>
-               (filter (iter self) pred))
+            "(impl Vector<A>
+  (keepif (self (pred (fn (A) bool))) Vector<A>
+                 (filter (iter self) pred)))
              (let ((v (the Vector<int> (Vector::new))))
                (push v 1) (push v 5)
                (len (keepif v (lambda ((x int)) bool (> x 2)))))"
@@ -235,8 +236,9 @@ fn a_generic_defmethod_on_a_user_struct_may_rename_its_type_parameter() {
     assert_eq!(
         eval_ok_with_prelude(
             "(defstruct box<T> (v T))
-             (defmethod apply-to ((self box<A>) (f (fn (A) A))) A (f self::v))
-             (apply-to (box::new 4) (lambda ((x int)) int (* x 2)))"
+             (impl box<A>
+  (apply-to (self (f (fn (A) A))) A (f self::v)))
+             (apply-to (make-instance 'box :v 4) (lambda ((x int)) int (* x 2)))"
         ),
         Value::Int(8)
     );

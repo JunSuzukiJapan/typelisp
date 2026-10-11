@@ -50,19 +50,24 @@ fn type_variables_declared_in_the_name_are_not_unknown() {
                (defenum may<T> (j T) (n))
                (deftype pair<A> cons-cell<A,A>)
                (defun g<T> ((x T)) int (let ((f (lambda ((y T)) int 1))) (f x)))
-               (g (box::new 1))";
+               (g (make-instance 'box :v 1))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
 fn a_method_s_type_variables_are_the_ones_its_receiver_writes() {
-    assert_unknown("(defstruct box<T> (v T)) (defmethod bad ((self box<T>) (x U)) T self::v)", "u");
-    assert_unknown("(defstruct pt (x int)) (defmethod m ((self pt) (y nosuch)) int 1)", "nosuch");
-    assert_unknown("(defstruct pt (x int)) (defmethod m ((self pt)) int (the nosuch 1))", "nosuch");
-    assert_unknown("(defstruct box<T> (v T)) (defmethod mk (box<T> (x U)) box<T> (box::new x))", "u");
+    assert_unknown("(defstruct box<T> (v T)) (impl box<T>
+  (bad (self (x U)) T self::v))", "u");
+    assert_unknown("(defstruct pt (x int)) (impl pt
+  (m (self (y nosuch)) int 1))", "nosuch");
+    assert_unknown("(defstruct pt (x int)) (impl pt
+  (m (self) int (the nosuch 1)))", "nosuch");
+    assert_unknown("(defstruct box<T> (v T)) (impl box<T>
+  (mk ((x U)) box<T> (make-instance 'box :v x)))", "u");
     let src = "(defstruct box<T> (v T))
-               (defmethod get-v ((self box<T>)) T self::v)
-               (defmethod wrap (box<T> (x T)) box<T> (box::new x))
+               (impl box<T>
+  (get-v (self) T self::v)
+  (wrap ((x T)) box<T> (make-instance 'box :v x)))
                (get-v (box::wrap 7))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
@@ -78,7 +83,7 @@ fn an_impl_s_type_variables_are_its_target_s_and_its_own() {
          (deftrait Clamp (Ord) (clamp ((self Self) (lo Self) (hi Self)) Self
            (if (less self lo) lo (if (less hi self) hi self))))
          (impl<T> Clamp T (where (Ord T)))
-         (+ (length (show (box::new 1))) (clamp 5 1 3))"
+         (+ (length (show (make-instance 'box :v 1))) (clamp 5 1 3))"
     );
     assert_eq!(eval_ok(&src), Value::Int(4));
 }
@@ -91,7 +96,7 @@ fn a_trait_s_type_variables_are_self_and_its_associated_types() {
 #[test]
 fn a_type_may_name_itself() {
     let src = "(defstruct node (v int) (next Option<node>))
-               (let ((a (node::new 1 (Option::none)))) (progn (setf a::next (Option::some a)) a::v))";
+               (let ((a (make-instance 'node :v 1 :next (Option::none)))) (progn (setf a::next (Option::some a)) a::v))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 

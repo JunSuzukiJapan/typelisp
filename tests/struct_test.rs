@@ -103,8 +103,8 @@ fn defstruct_registers_a_type() {
 }
 
 #[test]
-fn struct_new_constructs_an_instance() {
-    let src = "(defstruct point (x int) (y int)) (point::new 1 2)";
+fn make_instance_constructs_an_instance() {
+    let src = "(defstruct point (x int) (y int)) (make-instance 'point :x 1 :y 2)";
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
         Value::Boxed(id) => {
@@ -118,21 +118,35 @@ fn struct_new_constructs_an_instance() {
 }
 
 #[test]
-fn struct_new_is_not_reachable_as_a_bare_name() {
-    // Consistent with `Option`/`Result`'s constructors (`namespace_test.rs`)
-    // — a struct's constructor lives only under its type, never bare.
+fn a_struct_has_no_constructor_under_a_bare_name() {
     let src = "(defstruct point (x int) (y int)) (new 1 2)";
     assert!(check(src).is_err());
 }
 
+/// `defstruct` writes no `new`: `point::new` is the type's own static method,
+/// and without one the error says where to write it.
 #[test]
-fn struct_new_wrong_field_count_is_a_type_error() {
-    assert!(check("(defstruct point (x int) (y int)) (point::new 1)").is_err());
+fn a_struct_has_no_new_until_its_impl_writes_one() {
+    let msg = format!("{:?}", check("(defstruct point (x int) (y int)) (point::new 1 2)").unwrap_err());
+    assert!(msg.contains("has no static method `new`") && msg.contains("(impl point"), "{}", msg);
+    let src = "(defstruct point (x int) (y int)) \
+               (impl point (new ((x int)) point (make-instance 'point :x x :y 0))) \
+               (y (point::new 1))";
+    assert_eq!(eval_ok(src), Value::Int(0));
+}
+
+/// `defmethod` is gone; the error says what to write instead.
+#[test]
+fn defmethod_points_at_impl() {
+    for src in ["(defstruct point (x int)) (defmethod f ((self point)) int 1)", "(defstruct point (x int)) (pub defmethod f ((self point)) int 1)"] {
+        let msg = format!("{:?}", check(src).unwrap_err());
+        assert!(msg.contains("defmethod is gone") && msg.contains("(impl Type"), "{}", msg);
+    }
 }
 
 #[test]
-fn struct_new_wrong_field_type_is_a_type_error() {
-    assert!(check("(defstruct point (x int) (y int)) (point::new 1 true)").is_err());
+fn make_instance_wrong_field_type_is_a_type_error() {
+    assert!(check("(defstruct point (x int) (y int)) (make-instance 'point :x 1 :y true)").is_err());
 }
 
 #[test]
@@ -162,7 +176,7 @@ fn redefining_a_struct_type_warns_by_default() {
 fn two_different_struct_types_do_not_collide() {
     let src = "(defstruct point (x int) (y int)) \
                (defstruct rect (w int) (h int)) \
-               (point::new 1 2)";
+               (make-instance 'point :x 1 :y 2)";
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
         Value::Boxed(id) => assert_eq!(&*h.struct_type_name(id), "point"),
@@ -179,34 +193,34 @@ fn defstruct_rejects_duplicate_field_names() {
 
 #[test]
 fn field_accessor_call_reads_a_field() {
-    let src = "(defstruct point (x int) (y int)) (let ((p (point::new 1 2))) (x p))";
+    let src = "(defstruct point (x int) (y int)) (let ((p (make-instance 'point :x 1 :y 2))) (x p))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
 
 #[test]
 fn field_path_sugar_reads_a_field() {
-    let src = "(defstruct point (x int) (y int)) (let ((p (point::new 1 2))) p::x)";
+    let src = "(defstruct point (x int) (y int)) (let ((p (make-instance 'point :x 1 :y 2))) p::x)";
     assert_eq!(eval_ok(src), Value::Int(1));
-    let src2 = "(defstruct point (x int) (y int)) (let ((p (point::new 1 2))) p::y)";
+    let src2 = "(defstruct point (x int) (y int)) (let ((p (make-instance 'point :x 1 :y 2))) p::y)";
     assert_eq!(eval_ok(src2), Value::Int(2));
 }
 
 #[test]
 fn field_path_sugar_and_plain_call_agree() {
     let src = "(defstruct point (x int) (y int)) \
-               (let ((p (point::new 7 9))) (= p::x (x p)))";
+               (let ((p (make-instance 'point :x 7 :y 9))) (= p::x (x p)))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
 #[test]
 fn field_path_sugar_works_on_a_global() {
-    let src = "(defstruct point (x int) (y int)) (defvar (p point) (point::new 3 4)) p::x";
+    let src = "(defstruct point (x int) (y int)) (defvar (p point) (make-instance 'point :x 3 :y 4)) p::x";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 #[test]
 fn field_path_sugar_on_a_nonexistent_field_is_a_type_error() {
-    let src = "(defstruct point (x int) (y int)) (let ((p (point::new 1 2))) p::z)";
+    let src = "(defstruct point (x int) (y int)) (let ((p (make-instance 'point :x 1 :y 2))) p::z)";
     assert!(check(src).is_err());
 }
 
@@ -222,14 +236,14 @@ fn field_path_sugar_on_an_unbound_name_falls_back_to_path_resolution_error() {
 #[test]
 fn setf_field_path_writes_in_place() {
     let src = "(defstruct point (x int) (y int)) \
-               (let ((p (point::new 1 2))) (setf p::x 10) p::x)";
+               (let ((p (make-instance 'point :x 1 :y 2))) (setf p::x 10) p::x)";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
 
 #[test]
 fn setf_field_path_does_not_touch_other_fields() {
     let src = "(defstruct point (x int) (y int)) \
-               (let ((p (point::new 1 2))) (setf p::x 10) p::y)";
+               (let ((p (make-instance 'point :x 1 :y 2))) (setf p::x 10) p::y)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
@@ -240,33 +254,33 @@ fn setf_field_path_is_visible_through_aliases() {
     // caller's own binding — unlike `RtValue::Data`'s value semantics.
     let src = "(defstruct point (x int) (y int)) \
                (defun bump ((p point)) () (setf p::x (+ p::x 1))) \
-               (let ((p (point::new 1 2))) (bump p) p::x)";
+               (let ((p (make-instance 'point :x 1 :y 2))) (bump p) p::x)";
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
 #[test]
 fn setf_field_path_returns_unit() {
     let src = "(defstruct point (x int) (y int)) \
-               (let ((p (point::new 1 2))) (setf p::x 10))";
+               (let ((p (make-instance 'point :x 1 :y 2))) (setf p::x 10))";
     assert_eq!(eval_ok(src), Value::Empty);
 }
 
 #[test]
 fn setf_field_path_on_a_global_writes_in_place() {
     let src = "(defstruct point (x int) (y int)) \
-               (defvar (p point) (point::new 1 2)) (setf p::x 99) p::x";
+               (defvar (p point) (make-instance 'point :x 1 :y 2)) (setf p::x 99) p::x";
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn setf_field_path_wrong_value_type_is_a_type_error() {
-    let src = "(defstruct point (x int) (y int)) (let ((p (point::new 1 2))) (setf p::x true))";
+    let src = "(defstruct point (x int) (y int)) (let ((p (make-instance 'point :x 1 :y 2))) (setf p::x true))";
     assert!(check(src).is_err());
 }
 
 #[test]
 fn setf_field_path_on_a_nonexistent_field_is_a_type_error() {
-    let src = "(defstruct point (x int) (y int)) (let ((p (point::new 1 2))) (setf p::z 1))";
+    let src = "(defstruct point (x int) (y int)) (let ((p (make-instance 'point :x 1 :y 2))) (setf p::z 1))";
     assert!(check(src).is_err());
 }
 
@@ -275,41 +289,38 @@ fn set_field_method_call_works_without_the_path_sugar() {
     // `(setf p::x v)` is sugar for `(set-x p v)` — the underlying setter
     // method is an ordinary callable, like the getter.
     let src = "(defstruct point (x int) (y int)) \
-               (let ((p (point::new 1 2))) (set-x p 10) p::x)";
+               (let ((p (make-instance 'point :x 1 :y 2))) (set-x p 10) p::x)";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
 
-// ---- Phase 7: defmethod compatibility + match destructuring -----------------
+// ---- methods + match destructuring -----------------
 
 #[test]
-fn defmethod_on_a_struct_receiver_works_unmodified() {
-    // `assoc`/`check_instance_method` are type-agnostic — a user `defmethod`
-    // on a `defstruct` receiver needs no new code, just like on `Option`/
-    // `HashTable`/a primitive.
+fn a_method_on_a_struct_receiver() {
     let src = "(defstruct point (x int) (y int)) \
-               (defmethod area ((self point)) int (* (x self) (y self))) \
-               (area (point::new 3 4))";
+               (impl point (area (self) int (* (x self) (y self)))) \
+               (area (make-instance 'point :x 3 :y 4))";
     assert_eq!(eval_ok(src), Value::Int(12));
 }
 
 #[test]
-fn defmethod_on_a_struct_can_use_the_field_path_sugar_on_self() {
+fn a_method_on_a_struct_can_use_the_field_path_sugar_on_self() {
     let src = "(defstruct point (x int) (y int)) \
-               (defmethod area ((self point)) int (* self::x self::y)) \
-               (area (point::new 3 4))";
+               (impl point (area (self) int (* self::x self::y))) \
+               (area (make-instance 'point :x 3 :y 4))";
     assert_eq!(eval_ok(src), Value::Int(12));
 }
 
 #[test]
-fn defmethod_redefinition_on_a_struct_warns_by_default() {
+fn method_redefinition_on_a_struct_warns_by_default() {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
     let vs = r
         .read_all(
             &mut h,
             "(defstruct point (x int)) \
-             (defmethod tag ((self point)) int 1) \
-             (defmethod tag ((self point)) int 2)",
+             (impl point (tag (self) int 1)) \
+             (impl point (tag (self) int 2))",
         )
         .expect("read failed");
     let mut chk = Checker::new();
@@ -323,14 +334,14 @@ fn defmethod_redefinition_on_a_struct_warns_by_default() {
 #[test]
 fn match_destructures_a_struct_instance() {
     let src = "(defstruct point (x int) (y int)) \
-               (match (point::new 1 2) ((new a b) (+ a b)))";
+               (match (make-instance 'point :x 1 :y 2) ((point :x a :y b) (+ a b)))";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
 
 #[test]
-fn match_on_a_struct_binds_fields_by_position() {
+fn match_on_a_struct_binds_slots_by_keyword_in_any_order() {
     let src = "(defstruct point (x int) (y int)) \
-               (match (point::new 5 9) ((new a b) (- a b)))";
+               (match (make-instance 'point :x 5 :y 9) ((point :y b :x a) (- a b)))";
     assert_eq!(eval_ok(src), Value::Int(-4));
 }
 
@@ -338,7 +349,7 @@ fn match_on_a_struct_binds_fields_by_position() {
 
 #[test]
 fn generic_defstruct_constructs_an_instance() {
-    let src = "(defstruct pair<T,U> (first T) (second U)) (pair::new 1 true)";
+    let src = "(defstruct pair<T,U> (first T) (second U)) (make-instance 'pair :first 1 :second true)";
     let (h, v) = run_with_heap(src).expect("eval failed");
     match v {
         Value::Boxed(id) => {
@@ -357,24 +368,24 @@ fn generic_defstruct_constructs_an_instance() {
 #[test]
 fn generic_defstruct_field_accessors_work() {
     let src = "(defstruct pair<T,U> (first T) (second U)) \
-               (let ((p (pair::new 1 true))) (first p))";
+               (let ((p (make-instance 'pair :first 1 :second true))) (first p))";
     assert_eq!(eval_ok(src), Value::Int(1));
     let src2 = "(defstruct pair<T,U> (first T) (second U)) \
-                (let ((p (pair::new 1 true))) p::second)";
+                (let ((p (make-instance 'pair :first 1 :second true))) p::second)";
     assert_eq!(eval_ok(src2), Value::Bool(true));
 }
 
 #[test]
 fn generic_defstruct_setf_works() {
     let src = "(defstruct pair<T,U> (first T) (second U)) \
-               (let ((p (pair::new 1 true))) (setf p::first 99) p::first)";
+               (let ((p (make-instance 'pair :first 1 :second true))) (setf p::first 99) p::first)";
     assert_eq!(eval_ok(src), Value::Int(99));
 }
 
 #[test]
 fn generic_defstruct_different_instantiations_coexist() {
     let src = "(defstruct pair<T,U> (first T) (second U)) \
-               (+ (first (pair::new 1 true)) (first (pair::new 2 \"x\")))";
+               (+ (first (make-instance 'pair :first 1 :second true)) (first (make-instance 'pair :first 2 :second \"x\")))";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
 
@@ -383,7 +394,7 @@ fn generic_defstruct_inconsistent_type_argument_is_a_type_error() {
     // Both fields share the same type parameter `T` — `unify` should reject
     // an `int` and a `bool` both claiming to be `T`, the same inference
     // discipline `Option<T>`/`HashTable<K,V>` already have.
-    let src = "(defstruct box<T> (a T) (b T)) (box::new 1 true)";
+    let src = "(defstruct box<T> (a T) (b T)) (make-instance 'box :a 1 :b true)";
     assert!(check(src).is_err());
 }
 
@@ -406,7 +417,7 @@ fn sexpr_typed_field_reads_back_as_a_sexpr_not_a_scalar() {
     // stored node is read back with `sexpr-int`, which still panics (rather
     // than silently succeeding) if `content` decoded to a bare scalar.
     let src = "(defstruct holder (content Option<Sexpr>)) \
-               (let ((h (holder::new '42))) \
+               (let ((h (make-instance 'holder :content '42))) \
                  (sexpr-int (content h)))";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -417,7 +428,7 @@ fn sexpr_typed_field_holding_a_quoted_float_reads_back_as_a_sexpr() {
     // called out as its known ambiguity (a boxed float is also what an
     // `f64` field stores).
     let src = "(defstruct holder (content Option<Sexpr>)) \
-               (let ((h (holder::new '2.5))) \
+               (let ((h (make-instance 'holder :content '2.5))) \
                  (sexpr-f64 (content h)))";
     // A float is a `BoxedObj::Float` since the scalar unification, so reading
     // the result needs the heap it lives in.
@@ -431,10 +442,46 @@ fn sexpr_typed_field_holding_a_quoted_float_reads_back_as_a_sexpr() {
 #[test]
 fn setf_then_read_of_a_sexpr_typed_field_round_trips() {
     let src = "(defstruct holder (content Option<Sexpr>)) \
-               (let ((h (holder::new '1))) \
+               (let ((h (make-instance 'holder :content '1))) \
                  (setf h::content '99) \
                  (sexpr-int h::content))";
     assert_eq!(eval_ok(src), Value::Int(99));
+}
+
+/// A slot written without a pattern binds a variable of its own name; a
+/// slot not written is not matched.
+#[test]
+fn match_on_a_struct_binds_a_slot_to_its_own_name() {
+    let src = "(defstruct point (x int) (y int) (z int)) \
+               (match (make-instance 'point :x 5 :y 9 :z 1) ((point :x :z) (- x z)))";
+    assert_eq!(eval_ok(src), Value::Int(4));
+}
+
+/// A slot's pattern may be any pattern; a literal one makes the arm fall through.
+#[test]
+fn match_on_a_struct_tests_a_slots_nested_pattern() {
+    let src = "(defstruct holder (o Option<int>) (n int)) \
+               (defun f ((h holder)) int (match h ((holder :o (some v) :n) (+ v n)) ((holder :n) n))) \
+               (+ (f (make-instance 'holder :o (Option::some 10) :n 1)) (f (make-instance 'holder :o (Option::none) :n 100)))";
+    assert_eq!(eval_ok(src), Value::Int(111));
+}
+
+/// The downcast out of a `Sexpr` is written the same way.
+#[test]
+fn a_downcast_struct_pattern_names_its_slots() {
+    let src = "(defstruct point (x int) (y int)) \
+               (match (the Sexpr (make-instance 'point :x 3 :y 4)) ((point :y) y) (_ 0))";
+    assert_eq!(eval_ok(src), Value::Int(4));
+}
+
+#[test]
+fn a_positional_struct_pattern_says_how_to_write_it() {
+    let msg = format!("{:?}", check("(defstruct point (x int) (y int)) (match (make-instance 'point :x 1 :y 2) ((new a b) a))").unwrap_err());
+    assert!(msg.contains("(point :slot pattern...)"), "{}", msg);
+    let msg = format!("{:?}", check("(defstruct point (x int) (y int)) (match (make-instance 'point :x 1 :y 2) ((point a b) a))").unwrap_err());
+    assert!(msg.contains("(point :x pattern...)"), "{}", msg);
+    let msg = format!("{:?}", check("(defstruct point (x int) (y int)) (match (make-instance 'point :x 1 :y 2) ((point :w) w))").unwrap_err());
+    assert!(msg.contains("no slot `w`"), "{}", msg);
 }
 
 #[test]
@@ -443,8 +490,8 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
     // (`Pattern::Ctor::sexpr_fields`, baked at check time), independently
     // of the accessor path the tests above cover.
     let src = "(defstruct holder (content Option<Sexpr>) (k int)) \
-               (match (holder::new '7 3) \
-                 ((new c n) (+ (sexpr-int c) n)))";
+               (match (make-instance 'holder :content '7 :k 3) \
+                 ((holder :content c :k n) (+ (sexpr-int c) n)))";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
 
@@ -462,28 +509,28 @@ fn match_on_a_struct_binds_a_sexpr_typed_field_as_a_sexpr() {
 #[test]
 fn a_unit_typed_field_reads_back_as_unit() {
     let src = "(defstruct holder (u ()) (k int)) \
-               (let ((h (holder::new () 5))) h::u)";
+               (let ((h (make-instance 'holder :u () :k 5))) h::u)";
     assert_eq!(eval_ok(src), Value::Empty);
 }
 
 #[test]
 fn a_unit_typed_field_does_not_disturb_its_neighbours() {
     let src = "(defstruct holder (u ()) (k int)) \
-               (let ((h (holder::new () 5))) h::k)";
+               (let ((h (make-instance 'holder :u () :k 5))) h::k)";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
 
 #[test]
 fn match_binds_a_unit_typed_field_as_unit() {
     let src = "(defstruct holder (u ()) (k int)) \
-               (match (holder::new () 3) ((new u n) u))";
+               (match (make-instance 'holder :u () :k 3) ((holder :u) u))";
     assert_eq!(eval_ok(src), Value::Empty);
 }
 
 #[test]
 fn match_reads_the_fields_beside_a_unit_one_correctly() {
     let src = "(defstruct holder (u ()) (k int)) \
-               (match (holder::new () 3) ((new u n) n))";
+               (match (make-instance 'holder :u () :k 3) ((holder :u :k n) n))";
     assert_eq!(eval_ok(src), Value::Int(3));
 }
 

@@ -56,7 +56,7 @@ const CLAMP: &str = "
 
 #[test]
 fn a_blanket_impl_supplies_a_method_to_a_qualifying_type() {
-    let src = format!("{CLAMP} (clamped (cell::new 9) (cell::new 1) (cell::new 5))");
+    let src = format!("{CLAMP} (clamped (make-instance 'cell :n 9) (make-instance 'cell :n 1) (make-instance 'cell :n 5))");
     assert_eq!(eval_ok(&src), Value::Int(5));
 }
 
@@ -66,8 +66,8 @@ fn one_blanket_impl_covers_two_concrete_types() {
         "{CLAMP}
          (defstruct tick (t int))
          (impl Ranked tick (rank ((self Self)) int (* self::t 2)))
-         (+ (clamped (cell::new 9) (cell::new 1) (cell::new 5))
-            (clamped (tick::new 9) (tick::new 1) (tick::new 5)))"
+         (+ (clamped (make-instance 'cell :n 9) (make-instance 'cell :n 1) (make-instance 'cell :n 5))
+            (clamped (make-instance 'tick :t 9) (make-instance 'tick :t 1) (make-instance 'tick :t 5)))"
     );
     assert_eq!(eval_ok(&src), Value::Int(15));
 }
@@ -78,7 +78,7 @@ fn a_blanket_impl_satisfies_a_where_bound() {
     let src = format!(
         "{CLAMP}
          (defun mid<T> ((x T) (lo T) (hi T)) int (where (Clamp T)) (clamped x lo hi))
-         (mid (cell::new 9) (cell::new 1) (cell::new 5))"
+         (mid (make-instance 'cell :n 9) (make-instance 'cell :n 1) (make-instance 'cell :n 5))"
     );
     assert_eq!(eval_ok(&src), Value::Int(5));
 }
@@ -88,7 +88,7 @@ fn a_type_failing_the_blankets_bounds_is_not_covered() {
     let src = format!(
         "{CLAMP}
          (defstruct plain (n int))
-         (clamped (plain::new 9) (plain::new 1) (plain::new 5))"
+         (clamped (make-instance 'plain :n 9) (make-instance 'plain :n 1) (make-instance 'plain :n 5))"
     );
     let m = eval_err(&src);
     assert!(m.contains("NoSuchFunction") || m.contains("no such function"), "{}", m);
@@ -101,7 +101,7 @@ fn an_explicit_impl_wins_over_the_blanket() {
          (defstruct tick (t int))
          (impl Ranked tick (rank ((self Self)) int self::t))
          (impl Clamp tick (clamped ((self Self) (lo Self) (hi Self)) int 999))
-         (clamped (tick::new 9) (tick::new 1) (tick::new 5))"
+         (clamped (make-instance 'tick :t 9) (make-instance 'tick :t 1) (make-instance 'tick :t 5))"
     );
     assert_eq!(eval_ok(&src), Value::Int(999));
 }
@@ -136,7 +136,7 @@ fn mutually_recursive_blanket_bounds_do_not_hang() {
         (defstruct s (n int))
         (impl<T> A T (where (B T)))
         (impl<T> B T (where (A T)))
-        (a (s::new 1))";
+        (a (make-instance 's :n 1))";
     let m = eval_err(src);
     assert!(m.contains("NoSuchFunction") || m.contains("no such function"), "{}", m);
 }
@@ -153,13 +153,13 @@ fn a_blanket_provided_method_is_reachable_through_a_trait_object() {
         (impl Ranked cell (rank ((self Self)) int self::n))
         (impl<T> Doubled T (where (Ranked T)))
         (defun peek ((d :dyn Doubled)) int (doubled d))
-        (peek (cell::new 7))";
+        (peek (make-instance 'cell :n 7))";
     assert_eq!(eval_ok(src), Value::Int(14));
 }
 
 #[test]
 fn a_self_taking_method_still_makes_a_trait_not_object_safe() {
-    let src = format!("{CLAMP} (defun peek ((c :dyn Clamp)) int 1) (peek (cell::new 1))");
+    let src = format!("{CLAMP} (defun peek ((c :dyn Clamp)) int 1) (peek (make-instance 'cell :n 1))");
     let m = eval_err(&src);
     assert!(m.contains("mentions `Self` outside the receiver position"), "{}", m);
 }
@@ -205,7 +205,7 @@ fn a_blanket_impls_body_may_use_its_declared_bounds() {
         "{DOUBLE}
          (impl<T> Doubled T (where (Ranked T))
            (doubled ((self Self)) int (* 2 (rank self))))
-         (doubled (cell::new 7))"
+         (doubled (make-instance 'cell :n 7))"
     );
     assert_eq!(eval_ok(&src), Value::Int(14));
 }
@@ -222,7 +222,7 @@ fn a_blanket_impls_body_may_call_a_sibling_method_on_self() {
          (impl<T> Halved T (where (Ranked T))
            (halved ((self Self)) int (/ (rank self) 2))
            (twice-halved ((self Self)) int (/ (halved self) 2)))
-         (twice-halved (cell::new 20))"
+         (twice-halved (make-instance 'cell :n 20))"
     );
     assert_eq!(eval_ok(&src), Value::Int(5));
 }
