@@ -12,22 +12,6 @@
 [name-resolution.md](name-resolution.md)。Phase 1〜4 と 3b がすべて済んだ。残りは利用者向けの文書
 （`format.md` §5 ほか、計画の §5 末尾）で、コンストラクタ再設計の Phase E でまとめて直す。
 
-**未修正の不具合: インラインの `(module ...)` の中の `defmacro` が、同じファイルでは展開できない
-（2026-10-12 発見、`main` にもある）。** 名前解決の作業が終わったら必ず直す（ユーザー指示）。
-
-```lisp
-;; main.typl
-(module m
-  (pub defmacro twice (x) `(+ ,x ,x 1)))
-(println "~d" (m::twice 5))   ; no such macro: main::m::twice（REPL では 11）
-```
-
-ファイルの定義は束に集めて後で走らせるが、`project::needs_immediate_exec` がすぐ実行するのは
-トップレベルの `defmacro`（と単型化の束の中のもの）だけで、`(module ...)` の中の `defmacro` は
-後回しになる。チェッカーの表には入っているので解決は通り、展開器に本体が無くて失敗する。
-直すときは入れ子の `defmacro` だけをすぐ実行する（モジュール全体を先に走らせると他の定義も
-早く走る）。モジュールの外から `m::twice`、中から `(twice 5)` の両方をテストにする。
-
 **CI/CD（作業中、ブランチ `feat/ci`）。** push/PR ごとにビルドと警告 0 を、
 リリース（`v*` タグ）のときだけテスト全体を回す。対象は macOS と Linux
 （Ubuntu 24.04・Debian 13・Fedora 44 でテスト全体が通ることを 2026-10-02 に確認済み）。

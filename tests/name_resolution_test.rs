@@ -82,10 +82,16 @@ fn a_nearer_function_hides_a_macro_further_out() {
     assert_eq!(eval_ok(src), Value::Int(10));
 }
 
-/// And a macro in a nearer module hides a function further out: as a value,
-/// `twice` inside `m` is the macro, which has none.
+/// And a macro in a nearer module hides a function further out — in a call,
+/// where it expands, and as a value, where a macro has none.
 #[test]
 fn a_nearer_macro_hides_a_function_further_out() {
+    let src = "(defun twice ((x int)) int (* x 2))
+               (module m
+                 (defmacro twice (x) `(+ ,x ,x 1))
+                 (pub defun g () int (twice 5)))
+               (m::g)";
+    assert_eq!(eval_ok(src), Value::Int(11));
     let msg = check_err(
         "(defun twice ((x int)) int (* x 2))
          (module m

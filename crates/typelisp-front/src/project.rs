@@ -735,7 +735,9 @@ fn value_path_segs(heap: &Heap, v: Value) -> Option<Vec<String>> {
 /// (`Defun`/`Defmacro`), so executing it early keeps the "exec never touches
 /// the root stack mid-batch" invariant this module and `main.rs` rely on. A
 /// user-written `module` is deliberately *not* matched — executing one early
-/// would run arbitrary body expressions out of order.
+/// would run arbitrary body expressions out of order. Its members that match
+/// are run by the checker itself as it checks the block
+/// (`Checker::check_module`), the one place between them.
 pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
     match core::op_sym(heap, tl).map(|s| s.well_known()) {
         Some(wk::DEFMACRO) => true,

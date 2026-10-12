@@ -68,6 +68,23 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
     );
 }
 
+/// A `defmacro` inside a `(module ...)` block of the entry file is usable
+/// later in the block and in the rest of the file, as in `typl`.
+#[test]
+fn a_macro_in_a_module_block_is_usable_in_a_compiled_executable() {
+    assert_eq!(
+        compile_and_run(
+            "module_block_macro",
+            r#"(module m
+                 (pub defmacro twice (x) `(+ ,x ,x 1))
+                 (pub defun g () int (twice 5)))
+               (defun main () int
+                 (if (= (+ (m::g) (m::twice 1)) 14) 0 1))"#,
+        ),
+        0
+    );
+}
+
 /// A `~/name/` that calls a function — the way to reach an argument of a
 /// built-in type, which takes no methods from a program — and one naming a
 /// function by its module path, in an executable.

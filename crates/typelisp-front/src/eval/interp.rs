@@ -2812,13 +2812,12 @@ impl MacroExpander for Interp {
         }
     }
 
-    /// Install a `macrolet` binding's checked `(defmacro ...)` form —
-    /// [`Self::exec`] on it, which is the same arm a top-level `defmacro`
-    /// takes. The name it registers under is synthesized and unwritable
-    /// (`Checker::check_macrolet`), so nothing else can collide with it and
-    /// nothing needs to remove it afterwards: the *scope* is the checker's
-    /// table, not this registration.
-    fn define_macro(&self, heap: &mut Heap, form: Value) -> Result<(), String> {
+    /// [`Self::exec`] on the form, which is the same arm the driver's own run
+    /// of it between top-level forms takes. A `macrolet` binding's name is
+    /// synthesized and unwritable (`Checker::check_macrolet`), so nothing else
+    /// can collide with it and nothing needs to remove it afterwards: the
+    /// *scope* is the checker's table, not this registration.
+    fn install(&self, heap: &mut Heap, form: Value) -> Result<(), String> {
         self.exec(heap, form).map(|_| ()).map_err(|e| e.to_string())
     }
 }

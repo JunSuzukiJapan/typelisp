@@ -153,16 +153,20 @@ fn parse_generic_name_header(raw: &str) -> Result<(String, Vec<String>), Error> 
 pub trait MacroExpander {
     fn expand_macro(&self, heap: &mut Heap, path: &Path, raw_args: Vec<Value>) -> Result<Value, String>;
 
-    /// Install a checked `(defmacro ...)` core form, so that a later
-    /// [`Self::expand_macro`] on its path finds a body to run.
+    /// Runs a checked form whose effect the next form's checking depends on —
+    /// a `(defmacro ...)`, so that a later [`Self::expand_macro`] on its path
+    /// finds a body to run, or a readtable registration.
     ///
     /// Every other definition reaches the evaluator through `exec`, called by
-    /// the driver on the form the checker returned. A `macrolet` binding has
-    /// no such moment: it is created *while an expression is being checked*,
-    /// by a `&self` method, and its body has to be runnable before the very
-    /// next form of the same expression is checked. This is the one edge
-    /// where checking installs something itself.
-    fn define_macro(&self, heap: &mut Heap, form: Value) -> Result<(), String>;
+    /// the driver on the form the checker returned, and between top-level
+    /// forms the driver runs these too (`project::needs_immediate_exec`).
+    /// Between the forms *inside* one top-level form there is no driver: a
+    /// `macrolet` binding is created while an expression is being checked, and
+    /// a `defmacro` in a `(module ...)` block is checked along with the rest
+    /// of the block, yet each has to be runnable before the very next form of
+    /// the same top-level form is checked. These are the edges where checking
+    /// installs something itself.
+    fn install(&self, heap: &mut Heap, form: Value) -> Result<(), String>;
 }
 
 /// What checking a top-level form produces: a *core top-level form*, one of
@@ -8649,7 +8653,22 @@ impl Checker {
                 // Rooted as it lands, for the same reason `check_impl`'s member
                 // loop does it: `check_form` hands back an *unrooted* form by
                 // contract, and every later member's checking allocates.
-                Ok(tl) => body.push(forms::rooted(heap, tl)),
+                Ok(tl) => {
+                    let tl = forms::rooted(heap, tl);
+                    body.push(tl);
+                    // What the driver runs between top-level forms has to run
+                    // between this block's members too, or a `defmacro` here
+                    // is unusable for the rest of the block — and, the block
+                    // running with the file's bundle, for the rest of the
+                    // file. It stays in the block: running it again there
+                    // registers the same thing.
+                    if crate::project::needs_immediate_exec(heap, tl) {
+                        if let Err(e) = interp.install(heap, tl) {
+                            result = Err(Error::TypeError(e));
+                            break;
+                        }
+                    }
+                }
                 Err(e) => {
                     result = Err(e);
                     break;
@@ -11206,7 +11225,7 @@ impl Checker {
                 &required_names, &optionals, &rest_name, &key_specs, &params,
             )?;
             heap.push_root(form);
-            let installed = interp.define_macro(heap, form);
+            let installed = interp.install(heap, form);
             heap.pop_root();
             installed.map_err(|e| Error::TypeError(format!("macrolet `{}`: {}", name, e)))?;
             scope.insert(name, (path, shape));
