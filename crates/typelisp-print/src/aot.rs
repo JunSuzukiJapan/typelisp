@@ -187,64 +187,22 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     }
 }
 
-/// `~/name/` in an AOT executable, dispatched through `PrintShared::format_call`.
+/// `~/name/` in an AOT executable, called through `PrintShared::format_call`.
 ///
-/// The table is filled at startup with the methods the checker found by
-/// scanning this program's literal control strings, so a name that reaches
-/// here either has an entry or was never reachable at all — the error says
-/// which, rather than the blanket "not available in a compiled executable"
-/// this hook used to be.
-///
-/// The type key is read off the value the same way the interpreter reads it
-/// (`Interp::format_call`): a numeric box names the primitive it is, any
-/// other box carries its own key, and each immediate maps to exactly the
-/// type it *is* — `Value::Int` included, which is an `i32` and nothing else
-/// now that the narrow widths are boxed.
+/// `name` is what the checker resolved the directive to, and the table holds
+/// every definition some directive in this program resolved to, registered
+/// at startup — so a name that reaches here has an entry.
 fn aot_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
-    let keys: Vec<String> = match v {
-        Value::Boxed(id) => {
-            match heap.primitive_box_type_name(id).map(str::to_string).or_else(|| stored_type_key(heap, id)) {
-                Some(k) => vec![k],
-                None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
-            }
-        }
-        Value::Str(_) => vec!["string".to_string()],
-        Value::Bool(_) => vec!["bool".to_string()],
-        Value::Char(_) => vec!["char".to_string()],
-        Value::Symbol(_) => vec!["symbol".to_string()],
-        Value::Empty | Value::Cons(_) | Value::Path(_) => vec!["sexpr".to_string()],
-        Value::Int(_) => vec!["i32".to_string()],
-    };
-    let found: Vec<usize> = {
-        let shared = crate::shared::print_shared();
-        let t = shared.format_call.read();
-        keys.iter().filter_map(|k| t.get(&(k.clone(), name.to_string())).copied()).collect()
-    };
-    let addr = match found.len() {
-        1 => found[0],
-        0 => {
-            return Err(format!(
-                "format: ~/{}/ — {} has no method `{}` registered in this executable",
-                name,
-                keys.iter().map(|k| format!("`{}`", k)).collect::<Vec<_>>().join(" or "),
-                name
-            ))
-        }
-        _ => {
-            return Err(format!(
-                "format: ~/{}/ — an integer argument could be either width and both \
-                 `i64` and `i32` define `{}`; there is nothing in the value to choose by",
-                name, name
-            ))
-        }
+    let Some(addr) = crate::shared::print_shared().format_call.read().get(name).copied() else {
+        return Err(format!("format: ~/{}/ is not registered in this executable", name));
     };
     // SAFETY: the same contract `aot_print_object` relies on — `addr` came
     // from `rt_format_call_method`, whose only caller is the startup sequence
     // `build_main_wrapper` generates, and the address is a `ptrtoint` of a
     // function this file compiled under the shared compiled-function ABI. The
-    // checker verified the signature (`(Self, bool, bool) -> string`) before
+    // checker verified the signature (`(T, bool, bool) -> string`) before
     // naming it. `extern "C-unwind"` because a `(panic ...)` inside the
-    // method unwinds out through here.
+    // definition unwinds out through here.
     let f: unsafe extern "C-unwind" fn(*const i64, u32) -> i64 = unsafe { std::mem::transmute(addr) };
     let args = [encode(v), i64::from(colon), i64::from(at)];
     match decode(unsafe { f(args.as_ptr(), 3) }) {
@@ -358,27 +316,27 @@ pub unsafe extern "C" fn rt_print_object_method(args: *const i64, argc: u32) -> 
     0
 }
 
-/// Registers one method reachable through `~/name/`: `args` is `[key_ptr,
-/// key_len, name_ptr, name_len, fn_addr]`.
+/// Registers one definition a `~/name/` directive resolved to: `args` is
+/// `[name_ptr, name_len, fn_addr]`, the name being what the checker resolved
+/// the directive to.
 ///
-/// One call per `(type, method)` the checker found while scanning this
-/// program's literal control strings — see [`aot_format_call`].
+/// One call per definition the checker resolved some directive in this
+/// program to — see [`aot_format_call`].
 ///
 /// # Safety
 ///
-/// `args` must point to 5 valid `i64`s, the last being the address of a
+/// `args` must point to 3 valid `i64`s, the last being the address of a
 /// function compiled under the shared compiled-function ABI whose signature
-/// is `((self Self) (colon bool) (at bool)) -> string`.
+/// is `((x T) (colon bool) (at bool)) -> string`.
 #[no_mangle]
 pub unsafe extern "C" fn rt_format_call_method(args: *const i64, argc: u32) -> i64 {
-    if argc < 5 {
-        fatal("rt_format_call_method: expected 5 arguments");
+    if argc < 3 {
+        fatal("rt_format_call_method: expected 3 arguments");
     }
-    let key = static_str(args, 0, "rt_format_call_method");
-    let name = static_str(args, 2, "rt_format_call_method");
-    let addr = *args.add(4) as usize;
+    let name = static_str(args, 0, "rt_format_call_method");
+    let addr = *args.add(2) as usize;
     install();
-    crate::shared::print_shared().format_call.write().insert((key.to_string(), name.to_string()), addr);
+    crate::shared::print_shared().format_call.write().insert(name.to_string(), addr);
     0
 }
 

@@ -164,3 +164,19 @@ fn a_mixed_program_survives_collection() {
              (norm1 p)))",
     );
 }
+
+/// A `~/name/` directive is resolved by checking a call built for it, and the
+/// control string is rebuilt with the resolved names
+/// (`Checker::resolve_format_calls`) — every one of those nodes has to stay
+/// rooted until the call it ends up in is built.
+#[test]
+fn call_directive_resolution_survives_collection() {
+    assert_stress_agrees_with_prelude(
+        r#"(defstruct point (x int) (y int))
+           (impl point (brief (self (colon bool) (at bool)) string (format false "~a/~a" self::x self::y)))
+           (defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
+           (defun f () string
+             (format false "~a ~/brief/ ~:/shout/ ~@{~/shout/~}" 1 (make-instance 'point :x 1 :y 2) "a" "b" "c"))
+           (defun g () () (println "~/shout/ ~/brief/" "x" (make-instance 'point :x 3 :y 4)))"#,
+    );
+}

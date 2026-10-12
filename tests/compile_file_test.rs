@@ -46,13 +46,12 @@ fn compile_and_capture(name: &str, source: &str) -> (i32, String) {
 
 /// `~/name/` in a standalone executable.
 ///
-/// The directive names its method in a string, and an AOT program has no
-/// interpreter to look a name up in — so it used to be refused outright.
-/// `format`/`print`/`println` now take a *literal* control string, the
-/// checker scans it (`Checker::format_call_methods`), and `compile_file`
-/// emits one `rt_format_call_method` registration per method it named,
-/// beside the `print-object` ones. Exit code 0 means the directive produced
-/// exactly what the interpreter produces for the same program.
+/// An AOT program has no table of definitions to fetch one from by name, so
+/// `compile_file` emits one `rt_format_call_method` registration per
+/// definition the checker resolved a directive to
+/// (`Checker::format_call_targets`), beside the `print-object` ones. Exit
+/// code 0 means the directive produced exactly what the interpreter produces
+/// for the same program.
 #[test]
 fn a_call_directive_dispatches_in_a_compiled_executable() {
     assert_eq!(
@@ -64,6 +63,24 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
                    (format false "~a yen" (yen self))))
                (defun main () int
                  (if (equal (format false "~/jp/" (make-instance 'money :yen 300)) "300 yen") 0 1))"#,
+        ),
+        0
+    );
+}
+
+/// A `~/name/` that calls a function — the way to reach an argument of a
+/// built-in type, which takes no methods from a program — and one naming a
+/// function by its module path, in an executable.
+#[test]
+fn a_call_directive_calls_a_function_in_a_compiled_executable() {
+    assert_eq!(
+        compile_and_run(
+            "format_call_fn",
+            r#"(defun yen ((n int) (colon bool) (at bool)) string
+                 (if colon (format false "JPY ~d" n) (format false "~d yen" n)))
+               (module m (pub defun shout ((s string) (colon bool) (at bool)) string (append s "!")))
+               (defun main () int
+                 (if (equal (format false "~/yen/, ~:/yen/, ~/m::shout/" 300 5 "hi") "300 yen, JPY 5, hi!") 0 1))"#,
         ),
         0
     );

@@ -549,27 +549,24 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         print_objects.extend(prelude_methods);
     }
 
-    // The methods a `~/name/` directive in this file can reach, from the
-    // checker's scan of each literal control string
-    // (`Checker::format_call_methods`). The interpreter needs no such list —
-    // it looks the name up in its own method table when the directive runs —
-    // but a standalone executable has no table, so each pair becomes a
-    // startup registration below, exactly as `print-object` does.
-    let format_calls: Vec<(String, String, String)> = chk
-        .format_call_methods()
+    // What the `~/name/` directives in this file resolved to
+    // (`Checker::format_call_targets`). The interpreter fetches the
+    // definition from its own tables when the directive runs, but a
+    // standalone executable has none, so each becomes a startup registration
+    // below, exactly as `print-object` does.
+    let format_calls: Vec<(String, String)> = chk
+        .format_call_targets()
         .into_iter()
-        .map(|(path, method)| {
-            let target = CompileTarget::Method(path.clone(), method.clone());
+        .map(|target| {
             let symbol = items
                 .iter()
                 .find(|item| **item == target)
                 .map(target_symbol_name)
                 .ok_or_else(|| format!(
-                    "compile-file: `~/{}/` names `{}`, which was not compiled into this file",
-                    method,
+                    "compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file",
                     target.link_name()
                 ))?;
-            Ok((crate::type_key::type_key_of(&path).into_owned(), method, symbol))
+            Ok((target.link_name(), symbol))
         })
         .collect::<Result<_, String>>()?;
 
@@ -749,7 +746,7 @@ fn build_main_wrapper(
     field_templates: &[(String, i64, i64, String)],
     field_names: &[(String, i64, String)],
     print_objects: &[(String, String)],
-    format_calls: &[(String, String, String)],
+    format_calls: &[(String, String)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(String, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], &str)>,
@@ -958,14 +955,13 @@ fn build_main_wrapper(
             let fn_ptr = classic_door(ctx, module, target)?;
             call(&builder, "rt_print_object_method", &[key_ptr, key_len, fn_ptr])?;
         }
-        for (key, method, symbol) in format_calls {
+        for (name, symbol) in format_calls {
             let target = module.get_function(symbol).ok_or_else(|| {
-                format!("compile-file: `~/{}/` names `{}`, which was not compiled into this file", method, symbol)
+                format!("compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file", name)
             })?;
-            let (key_ptr, key_len) = literal(&builder, key)?;
-            let (name_ptr, name_len) = literal(&builder, method)?;
+            let (name_ptr, name_len) = literal(&builder, name)?;
             let fn_ptr = classic_door(ctx, module, target)?;
-            call(&builder, "rt_format_call_method", &[key_ptr, key_len, name_ptr, name_len, fn_ptr])?;
+            call(&builder, "rt_format_call_method", &[name_ptr, name_len, fn_ptr])?;
         }
         for (name, id) in printer_globals {
             let (name_ptr, name_len) = literal(&builder, name)?;

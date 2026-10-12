@@ -230,6 +230,48 @@ fn an_interpreted_print_object_off_the_interpreter_s_thread_is_a_panic() {
     }
 }
 
+/// (n) What a `~/name/` directive resolved to — a method or a function —
+/// runs off the interpreter's thread once compiled, as it does on it.
+#[test]
+fn a_worker_calls_what_a_call_directive_resolved_to() {
+    let source = r#"(defstruct point (x int) (y int))
+                    (impl point (brief (self (colon bool) (at bool)) string (format false "~a/~a" self::x self::y)))
+                    (defun yen ((n int) (colon bool) (at bool)) string (format false "~d yen" n))
+                    (defun show () string (format false "~/brief/ ~/yen/" (make-instance 'point :x 1 :y 2) 300))
+                    (defun elsewhere () string (join (thread (show))))
+                    (compile point::brief)
+                    (compile yen)
+                    (compile elsewhere)
+                    (println "~a" (show))
+                    (println "~a" (elsewhere))"#;
+    for threads in ["1", "4"] {
+        let (code, out, err) = run_on("typl_worker_format_call", source, threads);
+        assert_eq!(code, Some(0), "TYPELISP_THREADS={}: stderr was: {}", threads, err);
+        assert_eq!(out, "1/2 300 yen\n1/2 300 yen\n", "TYPELISP_THREADS={}: stderr was: {}", threads, err);
+    }
+}
+
+/// (n) And a function a `~/name/` calls that nobody compiled cannot run off
+/// the interpreter's thread, which printing there says.
+#[test]
+fn an_interpreted_call_directive_callee_off_the_interpreter_s_thread_is_a_panic() {
+    let source = r#"(defun yen ((n int) (colon bool) (at bool)) string (format false "~d yen" n))
+                    (defun show () string (format false "~/yen/" 300))
+                    (defun elsewhere () string (join (thread (show))))
+                    (compile elsewhere)
+                    (println "~a" (elsewhere))"#;
+    for threads in ["1", "4"] {
+        let (code, out, err) = run_on("typl_worker_format_call_interpreted", source, threads);
+        assert_ne!(code, Some(0), "TYPELISP_THREADS={}: stdout was: {}", threads, out);
+        assert!(
+            err.contains("yen`, which a ~/name/ directive calls, is not compiled"),
+            "TYPELISP_THREADS={}: stderr was: {}",
+            threads,
+            err
+        );
+    }
+}
+
 /// (l) The other way into the move: a compiled call only the interpreter can
 /// answer — `eval`, here, and `read` behind it — made by a task on another
 /// thread. The task moves to the interpreter's thread before the call, gets

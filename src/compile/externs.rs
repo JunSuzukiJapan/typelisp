@@ -720,11 +720,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 328] {
         ("rt_print_field_template", rt_print_field_template as *const () as usize),
         ("rt_print_field_name", rt_print_field_name as *const () as usize),
         ("rt_print_object_method", rt_print_object_method as *const () as usize),
-        // The `~/name/` directive's own table: one entry per `(type, method)`
-        // the checker found by scanning this program's literal control
-        // strings (`Checker::format_call_methods`). AOT-only for the same
-        // reason as the two above — the interpreter looks the name up in its
-        // own method table when the directive runs.
+        // The `~/name/` directive's own table: one entry per definition the
+        // checker resolved a directive in this program to
+        // (`Checker::format_call_targets`). AOT-only for the same reason as
+        // the two above — the interpreter fetches the definition from its own
+        // tables when the directive runs.
         ("rt_format_call_method", rt_format_call_method as *const () as usize),
         // Each printer control variable's compiled global id, so the
         // executable's printer reads the value the program `setf`'d. AOT-only:

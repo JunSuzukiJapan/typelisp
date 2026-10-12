@@ -45,8 +45,8 @@ pub struct PrintHooks {
     pub field_name: fn(&str, usize) -> Result<Option<String>, String>,
     /// `(heap, value, escape) -> rendering`. See [`PrintEnv::print_object`].
     pub print_object: fn(&mut Heap, Value, bool) -> Result<Option<String>, String>,
-    /// `(heap, name, value, colon, at) -> rendering`, for `~/name/`. See
-    /// [`PrintEnv::format_call`].
+    /// `(heap, resolved name, value, colon, at) -> rendering`, for
+    /// `~/name/`. See [`PrintEnv::format_call`].
     pub format_call: fn(&mut Heap, &str, Value, bool, bool) -> Result<String, String>,
     /// The layout control variables ([`read_opts`]), read fresh per printing
     /// operation — they are ordinary globals a program may have `setf`'d
@@ -69,7 +69,7 @@ pub const BARE_HOOKS: PrintHooks = PrintHooks {
     field_is_niched_option: |key, _, _| Err(format!("printing a `{}` needs a program that defines it, and none is installed", key)),
     field_name: |key, _| Err(format!("printing a `{}` needs a program that defines it, and none is installed", key)),
     print_object: |_, _, _| Err(NO_PROGRAM_FOR_METHODS.to_string()),
-    format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program to look the method up in", name)),
+    format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program that defines it, and none is installed", name)),
     opts: |_| Err(NO_PROGRAM.to_string()),
     print_vars: |_| Err(NO_PROGRAM.to_string()),
 };

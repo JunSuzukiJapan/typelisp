@@ -29,7 +29,7 @@ use crate::{Path, Type};
 /// confuse.
 ///
 /// Also what a dump records for each body its bitcode carries.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CompileTarget {
     Fn(Path),
     Method(Path, String),

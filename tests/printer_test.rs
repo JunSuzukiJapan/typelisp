@@ -178,11 +178,9 @@ fn the_colon_flag_reaches_the_method() {
 }
 
 #[test]
-fn the_at_flag_reaches_the_method() {
+fn the_at_flag_reaches_the_callee() {
     is_true(
-        r#"(impl string
-  (flags (self (colon bool) (at bool)) string
-               (if at "at" "plain")))
+        r#"(defun flags ((s string) (colon bool) (at bool)) string (if at "at" "plain"))
            (equal (format false "~@/flags/" "x") "at")"#,
     );
 }
@@ -203,75 +201,116 @@ fn a_call_directive_consumes_exactly_one_argument() {
     ));
 }
 
+/// A type that takes no methods from a program — a built-in one — is
+/// reached through a function: the directive calls what `(shout arg colon
+/// at)` would call at the site.
 #[test]
-fn a_string_argument_dispatches_on_string() {
+fn a_call_directive_calls_a_function() {
     is_true(
-        r#"(impl string
-  (shout (self (colon bool) (at bool)) string (append self "!")))
+        r#"(defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
            (equal (format false "~/shout/" "hi") "hi!")"#,
     );
 }
 
 #[test]
-fn an_integer_argument_dispatches_when_only_one_width_defines_the_name() {
+fn an_integer_argument_reaches_a_function_taking_an_integer() {
     is_true(
-        r#"(impl int
-  (twice (self (colon bool) (at bool)) string (format false "~a ~a" self self)))
+        r#"(defun twice ((n int) (colon bool) (at bool)) string (format false "~a ~a" n n))
            (equal (format false "~/twice/" 7) "7 7")"#,
     );
 }
 
-/// Two widths defining the same name is not ambiguous: each argument says
-/// which type it is, so each reaches its own method.
-///
-/// This used to be an *error* — "could be any width" — because a normalized
-/// `u8` and a normalized `int` were the same `Value::Int` when they held the
-/// same small number, and the runtime offered all six integer types as
-/// candidates rather than guess. Giving the narrow widths a box that names
-/// them settled it: `7` is an `int` and `(the u8 7)` is a `u8`.
+/// A narrow integer reaches a function taking its own width with its value
+/// intact: in the argument list it is a box naming its width, and the
+/// function takes the plain word.
 #[test]
-fn each_integer_width_dispatches_to_its_own_method() {
-    const DEFS: &str = r#"(impl int
-  (both (self (colon bool) (at bool)) string "32"))
-           (impl u8
-  (both (self (colon bool) (at bool)) string "8"))"#;
-    is_true(&format!(r#"{DEFS}
-           (equal (format false "~/both/" 7) "32")"#));
-    is_true(&format!(r#"{DEFS}
-           (equal (format false "~/both/" (the u8 7)) "8")"#));
+fn a_narrow_integer_reaches_a_function_taking_its_width() {
+    is_true(
+        r#"(defun thrice ((n u8) (colon bool) (at bool)) string (format false "~a ~a ~a" n n n))
+           (equal (format false "~/thrice/" (the u8 200)) "200 200 200")"#,
+    );
 }
 
-/// A method on a width other than the argument's own is *not* reached — the
-/// argument's type is the whole of the dispatch, and a bare literal is an
-/// `int`.
+/// An argument of another width is a type error, as the call `(thrice 7
+/// colon at)` would be: a bare literal is an `int`.
 #[test]
-fn an_integer_argument_reaches_only_its_own_widths_method() {
-    const DEF: &str = r#"(impl u8
-  (thrice (self (colon bool) (at bool)) string (format false "~a ~a ~a" self self self)))"#;
-    let e = check_err(&format!(r#"{DEF}
-           (format false "~/thrice/" 7)"#));
-    assert!(e.contains("no argument here has a method `thrice`"), "{}", e);
-    is_true(&format!(r#"{DEF}
-           (equal (format false "~/thrice/" (the u8 7)) "7 7 7")"#));
+fn an_argument_of_another_width_is_a_type_error() {
+    let e = check_err(
+        r#"(defun thrice ((n u8) (colon bool) (at bool)) string (format false "~a" n))
+           (format false "~/thrice/" 7)"#,
+    );
+    assert!(e.contains("~/thrice/ calls what (thrice arg colon at) with arg a `int` would"), "{}", e);
 }
 
 #[test]
-fn a_missing_method_is_an_error_not_a_fallback() {
+fn a_missing_name_is_an_error_not_a_fallback() {
     // Unlike `print-object`, which has the built-in rendering to fall back
     // to: the control string asked for something by name. Reported at check
-    // time now — the scan of the literal knows the argument's type.
+    // time — the argument's type is known there.
     let e = check_err(r#"(format false "~/nope/" "hi")"#);
-    assert!(e.contains("no argument here has a method `nope`"), "{}", e);
+    assert!(e.contains("~/nope/ calls what (nope arg colon at) with arg a `string` would"), "{}", e);
 }
 
 #[test]
-fn a_method_of_the_wrong_shape_is_reported_as_such() {
+fn a_callee_of_the_wrong_shape_is_reported_as_such() {
     let e = check_err(
-        r#"(impl string
-  (short (self) string self))
+        r#"(defun short ((s string)) string s)
            (format false "~/short/" "hi")"#,
     );
-    assert!(e.contains("(colon bool) (at bool)"), "{}", e);
+    assert!(e.contains("(short arg colon at)"), "{}", e);
+}
+
+/// The argument's type is the receiver, as in a call: its method comes
+/// before a function of the same name, and an argument whose type has no
+/// such method reaches the function.
+#[test]
+fn a_method_of_the_arguments_type_comes_before_a_function() {
+    is_true(&format!(
+        r#"{} (defun brief ((s string) (colon bool) (at bool)) string (append "s:" s))
+              (equal (format false "~/brief/ ~/brief/" (make-instance 'point :x 3 :y 4) "t") "3/4 s:t")"#,
+        POINT
+    ));
+}
+
+/// A function in a module is named by its path, as in a call.
+#[test]
+fn a_call_directive_names_a_function_by_its_path() {
+    is_true(
+        r#"(module m (pub defun shout ((s string) (colon bool) (at bool)) string (append s "!")))
+           (equal (format false "~/m::shout/" "hi") "hi!")"#,
+    );
+}
+
+/// Inside `~{` the directive is handed the list's elements, whose type is
+/// only `Sexpr` — no receiver to resolve the name against, so it is refused.
+#[test]
+fn a_call_directive_on_list_elements_is_refused() {
+    let e = check_err(&format!(
+        r#"{} (format false "~{{~/brief/~}}" (list (make-instance 'point :x 1 :y 2)))"#,
+        POINT
+    ));
+    assert!(e.contains("element of a list argument"), "{}", e);
+}
+
+/// `~@{` goes round the call's own arguments, whose types are known.
+#[test]
+fn a_call_directive_over_the_remaining_arguments_is_resolved() {
+    is_true(
+        r#"(defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
+           (equal (format false "~@{~/shout/ ~}" "a" "b") "a! b! ")"#,
+    );
+}
+
+/// One directive calls one definition: one that can be handed arguments of
+/// two types calling different definitions is refused.
+#[test]
+fn a_directive_that_would_call_two_definitions_is_refused() {
+    let e = check_err(&format!(
+        r#"{} (defun brief ((s string) (colon bool) (at bool)) string s)
+              (format false "~:[~;~*~]~/brief/" true "s" (make-instance 'point :x 1 :y 2))"#,
+        POINT
+    ));
+    assert!(e.contains("which call different definitions"), "{}", e);
 }
 
 #[test]
@@ -281,9 +320,9 @@ fn an_unterminated_call_directive_is_a_syntax_error() {
 }
 
 /// The control string is a literal, like Rust's `format!` — a string built at
-/// run time cannot be scanned for the directives that decide which methods
-/// `~/name/` reaches, and scanning is what makes the directive work in an AOT
-/// executable at all.
+/// run time cannot be scanned for the directives that decide what `~/name/`
+/// calls, and resolving that at check time is what makes the directive work
+/// at all.
 #[test]
 fn a_computed_control_string_is_refused() {
     let e = check_err(r#"(defun go ((ctrl string)) string (format false ctrl))"#);
@@ -293,8 +332,7 @@ fn a_computed_control_string_is_refused() {
 #[test]
 fn the_name_is_case_folded_like_every_other_name() {
     is_true(
-        r#"(impl string
-  (shout (self (colon bool) (at bool)) string (append self "!")))
+        r#"(defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
            (equal (format false "~/SHOUT/" "hi") "hi!")"#,
     );
 }

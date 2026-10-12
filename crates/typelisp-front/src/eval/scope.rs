@@ -307,6 +307,22 @@ impl ModuleScope {
         }
     }
 
+    /// Every function registered anywhere under this node, as `(path,
+    /// definition)` — the other half of what a worker thread's printer is
+    /// given a snapshot of, for the functions `~/name/` calls.
+    pub(crate) fn collect_fns(&self, prefix: &[String], out: &mut Vec<(Path, Rc<FnDef>)>) {
+        for (name, f) in &self.fns {
+            let mut segs = prefix.to_vec();
+            segs.push(name.clone());
+            out.push((Path::from_segments(segs), Rc::clone(f)));
+        }
+        for (name, child) in &self.children {
+            let mut segs = prefix.to_vec();
+            segs.push(name.clone());
+            child.collect_fns(&segs, out);
+        }
+    }
+
     pub(crate) fn collect_field_templates(&self, prefix: &[String], out: &mut Vec<(Path, Option<usize>, Option<usize>, String)>) {
         for (name, entry) in &self.types {
             let mut segs = prefix.to_vec();

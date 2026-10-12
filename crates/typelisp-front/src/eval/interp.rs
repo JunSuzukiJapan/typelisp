@@ -424,37 +424,8 @@ pub(crate) fn is_print_object_sig(f: &FnDef) -> bool {
     matches!(f.sig.as_ref(), Some((params, ret)) if params.len() == 2 && params[1] == Repr::Bool && *ret == Repr::Str)
 }
 
-/// The method `~/name/` dispatches `v` to — see [`Interp::format_call`]:
-/// the type `v` is a value of, as a method-table key, and the name to look up
-/// there.
-pub(crate) fn format_call_target(heap: &Heap, name: &str, v: Value) -> Result<(Path, String), String> {
-    let type_path: Path = match v {
-        Value::Boxed(id) => match heap.primitive_box_type_name(id).map(Path::root).or_else(|| heap_type_path(heap, id)) {
-            Some(p) => p,
-            None => return Err(format!("format: ~/{}/ — this value carries no type name to dispatch on", name)),
-        },
-        Value::Str(_) => Path::root("string"),
-        Value::Bool(_) => Path::root("bool"),
-        Value::Char(_) => Path::root("char"),
-        Value::Symbol(_) => Path::root("symbol"),
-        Value::Empty | Value::Cons(_) | Value::Path(_) => Path::root("sexpr"),
-        Value::Int(_) => Path::root("int"),
-    };
-    // A generic receiver's method is registered per instantiation, so the
-    // name to look up comes off the value's own key — see
-    // `print_object_target`.
-    let looked_up = match v {
-        Value::Boxed(id) => match crate::type_key::heap_type_key(heap, id) {
-            Some(key) => crate::type_key::specialized_method_name(&key, name),
-            None => name.to_string(),
-        },
-        _ => name.to_string(),
-    };
-    Ok((type_path, looked_up))
-}
-
-/// Whether a `~/name/` method takes its receiver as a raw machine word, or
-/// `None` when `f` does not have a `~/name/` method's signature at all.
+/// Whether what a `~/name/` calls takes its argument as a raw machine word,
+/// or `None` when `f` does not have the signature `~/name/` calls at all.
 pub(crate) fn format_call_receiver_is_word(f: &FnDef) -> Option<bool> {
     match f.sig.as_ref() {
         Some((params, ret))
@@ -466,12 +437,10 @@ pub(crate) fn format_call_receiver_is_word(f: &FnDef) -> Option<bool> {
     }
 }
 
-/// What `~/name/` says of a method it found that is not one.
-pub(crate) fn format_call_sig_error(name: &str, type_path: &Path) -> String {
-    format!(
-        "format: ~/{}/ — `{}`'s `{}` must be `((self Self) (colon bool) (at bool)) -> string`",
-        name, type_path, name
-    )
+/// What `~/name/` says of a definition it was handed that does not have the
+/// signature it calls.
+pub(crate) fn format_call_sig_error(name: &str) -> String {
+    format!("format: ~/{}/ must be `((x T) (colon bool) (at bool)) -> string`", name)
 }
 
 /// Calls the compiled body at `address`, built under `abi`, with `args`
@@ -2409,19 +2378,10 @@ impl Interp {
 
     /// `~/name/`'s rendering of `v` — CL's function-call directive.
     ///
-    /// `name` is a method on `v`'s **own** type, resolved here exactly the way
-    /// [`Self::print_object`] resolves `print-object`. It cannot be a global
-    /// function the way CL's is: a control string is an ordinary runtime
-    /// `string`, so nothing is known at check time about which directive meets
-    /// which argument, and a registered `FnDef` keeps only `Repr`s by then —
-    /// `Repr::Struct` is every `defstruct` at once, so a name-only lookup
-    /// would happily call `point`'s helper with a `pathname`. Dispatching on
-    /// the value keeps the call type-correct by construction.
-    ///
-    /// Unlike `print-object`, a missing method is an **error** rather than a
-    /// silent fallback: `~a` has a built-in rendering to fall back to and
-    /// `~/name/` does not — the control string asked for something specific by
-    /// name, so failing to find it is a mistake worth naming.
+    /// `name` is what the checker resolved the directive to
+    /// ([`crate::CompileTarget::link_name`]) — `(name v colon at)` resolved
+    /// at the site, against the type of every argument the directive can
+    /// meet — so the definition is fetched by what it is, not looked up.
     pub(crate) fn format_call(
         &self,
         heap: &mut Heap,
@@ -2430,29 +2390,14 @@ impl Interp {
         colon: bool,
         at: bool,
     ) -> Result<String, String> {
-        // The type `v` is a value of, as a method-table key. Boxed values
-        // carry their own; the immediate ones do not, so they are mapped
-        // here — soundly, because each mapping is exact: every `Value::Str`
-        // *is* a `string`, so a method registered on `string` receives what
-        // it declared.
-        //
-        // One type, not a list of candidates. `Value::Int` is an `int` and
-        // nothing else, because the six narrow integer types reach the
-        // printer as boxes that name themselves (`BoxedObj::Narrow`). This
-        // used to offer all six integer types and call it an error when more
-        // than one defined the name — a guess dressed as a diagnostic, forced
-        // by the value having no width to read. Deleting the 64-bit types did
-        // *not* remove that ambiguity (it only narrowed the word); giving
-        // narrow integers a box did.
-        let (type_path, looked_up) = format_call_target(heap, name, v)?;
-        let Some(f) = self.root.borrow().get_method(&type_path, &looked_up) else {
-            return Err(format!("format: ~/{}/ — `{}` has no method `{}`", name, type_path, name));
+        let Some(f) = self.target_def(&crate::CompileTarget::from_link_name(name)) else {
+            return Err(format!("format: ~/{}/ — no such definition", name));
         };
-        // Whether the receiver's *declared* representation is a raw machine
-        // word — which is the question that decides what to hand the method,
-        // not the shape the printer happens to be holding.
+        // Whether the argument's *declared* representation is a raw machine
+        // word — which is the question that decides what to hand over, not
+        // the shape the printer happens to be holding.
         let Some(receiver_is_word) = format_call_receiver_is_word(&f) else {
-            return Err(format_call_sig_error(name, &type_path));
+            return Err(format_call_sig_error(name));
         };
         // A narrow integer arrives here as a `BoxedObj::Narrow`, because a
         // `Sexpr` is the one place a value's width is written down. A `u8`
@@ -2471,7 +2416,7 @@ impl Interp {
         // `enter`, not `apply` — see `print_object_method`'s call for why.
         match self.enter(heap, &f, vec![receiver, Value::Bool(colon), Value::Bool(at)]).map_err(|e| e.to_string())? {
             Value::Str(id) => Ok(heap.string(id).to_string()),
-            other => Err(format!("format: ~/{}/ on `{}` returned {:?}, not a string", name, type_path, other)),
+            other => Err(format!("format: ~/{}/ returned {:?}, not a string", name, other)),
         }
     }
 
@@ -4257,6 +4202,14 @@ fn eval_llvm_builtin_method(
 }
 
 impl crate::CompileTarget {
+    /// The definition a [`Self::link_name`] names.
+    pub fn from_link_name(name: &str) -> crate::CompileTarget {
+        match crate::types::split_method_link_name(name) {
+            Some((type_name, method)) => crate::CompileTarget::Method(type_name, method.to_string()),
+            None => crate::CompileTarget::Fn(crate::dump::parse_path(name)),
+        }
+    }
+
     /// The definition's name as one string: its path for a function,
     /// [`crate::types::method_link_name`] for a method. For messages; nothing reads a
     /// definition back out of it.
