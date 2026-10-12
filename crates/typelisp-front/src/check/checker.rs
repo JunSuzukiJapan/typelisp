@@ -910,7 +910,7 @@ fn defmethod_is_gone() -> Error {
 /// current namespace (module) path.
 /// What a module-level name holds: a function or a global variable. A name
 /// has one value whichever kind it is, so it is never both
-/// (`Checker::check_fn_var_clash`).
+/// (`Checker::check_value_clash`).
 enum ModuleValue {
     Fn(Path),
     Var(Path, VarInfo),
@@ -939,11 +939,37 @@ impl ModuleValueKind {
     }
 }
 
-/// What module `m` holds under `name`, if anything.
+/// What module `m` holds under `name` among functions and globals.
 fn module_value_in(m: &Namespace, name: &str) -> Option<ModuleValueKind> {
     match m.fns.get(name) {
         Some(sig) => Some(ModuleValueKind::Fn { public: sig.public }),
         None => m.vars.get(name).map(|vi| ModuleValueKind::Var(vi.clone())),
+    }
+}
+
+/// What a module-level name means in one module: a function, a global
+/// variable or a macro. The three share one name space, so a module holds at
+/// most one of them under a name (`Checker::check_value_clash`), and the
+/// nearest module that holds any of them decides what the name is.
+enum ModuleEntry {
+    Value(ModuleValueKind),
+    Macro { public: bool, shape: MacroShape },
+}
+
+impl ModuleEntry {
+    fn public(&self) -> bool {
+        match self {
+            ModuleEntry::Value(kind) => kind.public(),
+            ModuleEntry::Macro { public, .. } => *public,
+        }
+    }
+}
+
+/// What module `m` holds under `name`, if anything.
+fn module_entry_in(m: &Namespace, name: &str) -> Option<ModuleEntry> {
+    match m.macros.get(name) {
+        Some(def) => Some(ModuleEntry::Macro { public: def.public, shape: MacroShape::of(def) }),
+        None => module_value_in(m, name).map(ModuleEntry::Value),
     }
 }
 
@@ -2544,23 +2570,28 @@ impl Checker {
         }
     }
 
-    /// Functions and global variables share one name space per module: a
-    /// name has one value, whether that value is a function or not, so a
-    /// `defun` and a `defvar` in the same module may not carry the same name,
-    /// in either definition order. They live in separate tables
-    /// (`Namespace::fns` / `Namespace::vars`), so this is where the rule is
-    /// enforced.
+    /// Functions, global variables and macros share one name space per
+    /// module: a name has one meaning, whichever kind it is, so no two of a
+    /// `defun`, a `defvar` and a `defmacro` in the same module may carry the
+    /// same name, in either definition order. They live in separate tables
+    /// (`Namespace::fns` / `Namespace::vars` / `Namespace::macros`), so this
+    /// is where the rule is enforced.
     ///
-    /// `kind` is what is being defined now (`"function"` or `"variable"`).
-    fn check_fn_var_clash(&self, kind: &str, name: &str) -> Result<(), Error> {
-        let (clashes, other) = match kind {
-            "variable" => (self.cur_ns().fns.contains_key(name), "function"),
-            _ => (self.cur_ns().vars.contains_key(name), "variable"),
-        };
-        if clashes {
+    /// `kind` is what is being defined now (`"function"`, `"variable"` or
+    /// `"macro"`).
+    fn check_value_clash(&self, kind: &str, name: &str) -> Result<(), Error> {
+        let ns = self.cur_ns();
+        let other = [
+            ("function", ns.fns.contains_key(name)),
+            ("variable", ns.vars.contains_key(name)),
+            ("macro", ns.macros.contains_key(name)),
+        ]
+        .into_iter()
+        .find(|&(other, present)| present && other != kind);
+        if let Some((other, _)) = other {
             return Err(Error::TypeError(format!(
-                "cannot define {} `{}`: a {} of that name already exists here — a name has one value, \
-                 whether a function or a variable",
+                "cannot define {} `{}`: a {} of that name already exists here — a name has one meaning, \
+                 whether a function, a variable or a macro",
                 kind, name, other
             )));
         }
@@ -2819,7 +2850,7 @@ impl Checker {
         // check would otherwise report about a name that is plainly defined.
         // The redefinition path still runs for the built-in case, which has
         // its own message.
-        self.check_fn_var_clash("function", &name)?;
+        self.check_value_clash("function", &name)?;
         if let Some(existing) = self.cur_ns().fns.get(&name) {
             if existing.builtin {
                 self.check_redef("function", &name, Some(existing))?;
@@ -2982,7 +3013,7 @@ impl Checker {
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let library = Self::parse_defffi_options(heap, &parts[3..])?;
 
-        self.check_fn_var_clash("function", &name)?;
+        self.check_value_clash("function", &name)?;
         if let Some(existing) = self.cur_ns().fns.get(&name) {
             if existing.builtin {
                 self.check_redef("function", &name, Some(existing))?;
@@ -3428,12 +3459,16 @@ impl Checker {
     ///
     /// A bare name: a local, a macro, a constructor or static method brought
     /// in by `use`, a method of the receiver's type, then the module-level
-    /// value (a function or a global). `receiver` gives the receiver's type —
+    /// value (a function or a global). A module-level macro and value are one
+    /// name space ([`Self::resolve_module_entry`]): the macro step is taken
+    /// only when the nearest module defining the name defines a macro, and is
+    /// tried that early because a macro's arguments are not expressions — the
+    /// receiver's type cannot be learned from them. `receiver` gives the receiver's type —
     /// a call's first argument, the first parameter of the `(fn ...)` a value
     /// is expected to be — and is asked only when the earlier steps come up
     /// empty, since learning it can mean checking an argument.
     ///
-    /// A path: a macro, a module-level value, then a variant or member of a
+    /// A path: a module-level macro or value, then a variant or member of a
     /// type.
     fn resolve_name(
         &self,
@@ -3463,11 +3498,10 @@ impl Checker {
                 self.resolve_module_value(name).map(Resolved::Value)
             }
             Written::Path(segs) => {
-                if let Some((path, shape)) = self.resolve_macro_path(segs) {
-                    return Some(Resolved::Macro(path, shape));
-                }
-                if let Some(v) = self.resolve_module_value_path(segs) {
-                    return Some(Resolved::Value(v));
+                match self.resolve_module_entry_path(segs) {
+                    Some((path, ModuleEntry::Macro { shape, .. })) => return Some(Resolved::Macro(path, shape)),
+                    Some((path, ModuleEntry::Value(kind))) => return Some(Resolved::Value(kind.at(path))),
+                    None => {}
                 }
                 let (member, type_segs) = segs.split_last()?;
                 if type_segs.is_empty() {
@@ -3486,33 +3520,57 @@ impl Checker {
         }
     }
 
-    /// What a bare module-level name holds — a function or a global
-    /// variable, never both ([`Self::check_fn_var_clash`]) — walking the
-    /// current namespace's ancestor chain (see [`Self::ns_ancestors`]),
-    /// nearest module first. A name found anywhere on that chain is in scope
-    /// without needing `pub`, exactly like a same-module reference.
+    /// What a bare module-level name means — a function, a global variable
+    /// or a macro, never two of them ([`Self::check_value_clash`]) — with its
+    /// absolute path, walking the current namespace's ancestor chain (see
+    /// [`Self::ns_ancestors`]), nearest module first. A name found anywhere on
+    /// that chain is in scope without needing `pub`, exactly like a
+    /// same-module reference.
     ///
-    /// The one walk both kinds share: a variable in a nearer module hides a
-    /// function of the same name further out, and the other way round,
-    /// because a name has one value whichever kind it is.
+    /// The one walk all three kinds share: a nearer definition hides a
+    /// further one of any kind, because a name has one meaning whichever kind
+    /// it is. A function in a module therefore hides a root macro of the same
+    /// name inside that module.
     ///
     /// A `use` import comes after this module's own definition of the name and
     /// before everything further out: an import never beats a definition made
     /// here, which is why `check_use` warns that such an import does nothing.
-    fn resolve_module_value(&self, name: &str) -> Option<ModuleValue> {
-        if let Some(kind) = module_value_in(self.cur_ns(), name) {
-            return Some(kind.at(item_path(&self.ns, name)));
+    /// An import that names no function, global or macro (it names a type)
+    /// leaves the walk going, as [`Self::resolve_bare_type`] does for the
+    /// other name space.
+    fn resolve_module_entry(&self, name: &str) -> Option<(Path, ModuleEntry)> {
+        if let Some(entry) = module_entry_in(self.cur_ns(), name) {
+            return Some((item_path(&self.ns, name), entry));
         }
         if let Some(path) = self.lookup_alias(name) {
-            return self.resolve_module_value_path(&path);
+            if let Some(found) = self.resolve_module_entry_path(&path) {
+                return Some(found);
+            }
         }
-        self.find_on_chain(|prefix, m| module_value_in(m, name).map(|kind| kind.at(item_path(prefix, name))))
+        self.find_on_chain(|prefix, m| module_entry_in(m, name).map(|entry| (item_path(prefix, name), entry)))
+    }
+
+    /// [`Self::resolve_module_entry`] for a qualified `module::...::name`.
+    fn resolve_module_entry_path(&self, segs: &[String]) -> Option<(Path, ModuleEntry)> {
+        self.find_in_module(segs, |m, n| module_entry_in(m, n).map(|entry| (entry.public(), entry)))
+    }
+
+    /// What a bare module-level name holds, if it is a function or a global
+    /// variable — see [`Self::resolve_module_entry`]. `None` when the nearest
+    /// definition is a macro, which hides any value further out.
+    fn resolve_module_value(&self, name: &str) -> Option<ModuleValue> {
+        match self.resolve_module_entry(name)? {
+            (path, ModuleEntry::Value(kind)) => Some(kind.at(path)),
+            (_, ModuleEntry::Macro { .. }) => None,
+        }
     }
 
     /// [`Self::resolve_module_value`] for a qualified `module::...::name`.
     fn resolve_module_value_path(&self, segs: &[String]) -> Option<ModuleValue> {
-        self.find_in_module(segs, |m, n| module_value_in(m, n).map(|kind| (kind.public(), kind)))
-            .map(|(path, kind)| kind.at(path))
+        match self.resolve_module_entry_path(segs)? {
+            (path, ModuleEntry::Value(kind)) => Some(kind.at(path)),
+            (_, ModuleEntry::Macro { .. }) => None,
+        }
     }
 
     /// The function a bare name holds, if what it holds is a function — see
@@ -3525,9 +3583,9 @@ impl Checker {
     }
 
     /// Resolve a bare macro name to its absolute [`Path`] and the call-site
-    /// arity shape ([`MacroShape`]) — walks the ancestor chain like
-    /// [`Self::resolve_fn`] (without `use`-alias support, which `defmacro`
-    /// doesn't have yet).
+    /// arity shape ([`MacroShape`]): a `macrolet` binding, or else the
+    /// module-level name, if the nearest definition of it is a macro
+    /// ([`Self::resolve_module_entry`]).
     fn resolve_macro(&self, name: &str) -> Option<(Path, MacroShape)> {
         // `macrolet` first, innermost scope first: a local macro shadows a
         // global one of the same name for the extent of its body, which is
@@ -3537,16 +3595,20 @@ impl Checker {
                 return Some(found.clone());
             }
         }
-        self.find_on_chain(|prefix, m| m.macros.get(name).map(|def| (item_path(prefix, name), MacroShape::of(def))))
+        match self.resolve_module_entry(name)? {
+            (path, ModuleEntry::Macro { shape, .. }) => Some((path, shape)),
+            (_, ModuleEntry::Value(_)) => None,
+        }
     }
 
     /// Resolve a module-qualified macro name (`mod::macro-name`) to its
     /// absolute [`Path`] and call-site arity shape ([`MacroShape`]) — the
-    /// path-qualified counterpart of [`Self::resolve_macro`], mirroring
-    /// [`Self::resolve_module_value_path`]'s module lookup and visibility rule (public
-    /// unless the caller is in scope of the defining module).
+    /// path-qualified counterpart of [`Self::resolve_macro`].
     fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, MacroShape)> {
-        self.find_in_module(segs, |m, n| m.macros.get(n).map(|def| (def.public, MacroShape::of(def))))
+        match self.resolve_module_entry_path(segs)? {
+            (path, ModuleEntry::Macro { shape, .. }) => Some((path, shape)),
+            (_, ModuleEntry::Value(_)) => None,
+        }
     }
 
     /// Heads with built-in meaning — the expression special forms matched in
@@ -4592,7 +4654,7 @@ impl Checker {
         // reports through `check_redef` as before. The declared signature is
         // kept to compare against below: a declaration nobody checks is a
         // declaration nobody can trust.
-        self.check_fn_var_clash("function", &name)?;
+        self.check_value_clash("function", &name)?;
         let declared = if self.claim_predeclared(&fq_name.to_string()) {
             self.cur_ns().fns.get(&name).cloned()
         } else {
@@ -4718,7 +4780,7 @@ impl Checker {
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
 
-        self.check_fn_var_clash("function", &name)?;
+        self.check_value_clash("function", &name)?;
         self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
 
         // A generic `&optional`/`&key` defun additionally retains its raw
@@ -5770,6 +5832,7 @@ impl Checker {
         params.extend(key_specs.iter().map(|(n, _)| n.clone()));
 
         let fq_name = self.fq(&name);
+        self.check_value_clash("macro", &name)?;
         self.check_redef("macro", &name, self.cur_ns().macros.get(&name))?;
         self.reg.root.module_mut(&self.ns).macros.insert(
             name,
@@ -14278,7 +14341,7 @@ impl Checker {
         // visible via the registry.
         let value = self.check(heap, interp, &Env::new(), parts[1], Some(&ann))?;
         let ty = ann;
-        self.check_fn_var_clash("variable", &name)?;
+        self.check_value_clash("variable", &name)?;
         self.check_redef("variable", &name, self.cur_ns().vars.get(&name))?;
         self.reg
             .root
