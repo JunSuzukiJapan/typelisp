@@ -8,9 +8,9 @@
 
 ## 残っている作業
 
-**名前解決の一本化（作業中、ブランチ `feat/constructors`）。** 計画は
-[name-resolution.md](name-resolution.md)。Phase 1〜3 と 3b（マクロを関数・変数と同じ名前空間に）が
-済み、残りは Phase 4（`format` の `~/name/` を同じ解決の上に作り直す）。
+**名前解決の一本化（ブランチ `feat/constructors`）。** 計画は
+[name-resolution.md](name-resolution.md)。Phase 1〜4 と 3b がすべて済んだ。残りは利用者向けの文書
+（`format.md` §5 ほか、計画の §5 末尾）で、コンストラクタ再設計の Phase E でまとめて直す。
 
 **未修正の不具合: インラインの `(module ...)` の中の `defmacro` が、同じファイルでは展開できない
 （2026-10-12 発見、`main` にもある）。** 名前解決の作業が終わったら必ず直す（ユーザー指示）。
