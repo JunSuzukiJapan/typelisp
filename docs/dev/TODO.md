@@ -1,12 +1,32 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-10-02 / ブランチ: `feat/ci`
+最終更新: 2026-10-12 / ブランチ: `feat/constructors`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
 [implementation-log.md](implementation-log.md)（作業 1 件ごとの経緯・設計判断）へ移す。
 
 ## 残っている作業
+
+**名前解決の一本化（作業中、ブランチ `feat/constructors`）。** 計画は
+[name-resolution.md](name-resolution.md)。Phase 1〜3 と 3b（マクロを関数・変数と同じ名前空間に）が
+済み、残りは Phase 4（`format` の `~/name/` を同じ解決の上に作り直す）。
+
+**未修正の不具合: インラインの `(module ...)` の中の `defmacro` が、同じファイルでは展開できない
+（2026-10-12 発見、`main` にもある）。** 名前解決の作業が終わったら必ず直す（ユーザー指示）。
+
+```lisp
+;; main.typl
+(module m
+  (pub defmacro twice (x) `(+ ,x ,x 1)))
+(println "~d" (m::twice 5))   ; no such macro: main::m::twice（REPL では 11）
+```
+
+ファイルの定義は束に集めて後で走らせるが、`project::needs_immediate_exec` がすぐ実行するのは
+トップレベルの `defmacro`（と単型化の束の中のもの）だけで、`(module ...)` の中の `defmacro` は
+後回しになる。チェッカーの表には入っているので解決は通り、展開器に本体が無くて失敗する。
+直すときは入れ子の `defmacro` だけをすぐ実行する（モジュール全体を先に走らせると他の定義も
+早く走る）。モジュールの外から `m::twice`、中から `(twice 5)` の両方をテストにする。
 
 **CI/CD（作業中、ブランチ `feat/ci`）。** push/PR ごとにビルドと警告 0 を、
 リリース（`v*` タグ）のときだけテスト全体を回す。対象は macOS と Linux
