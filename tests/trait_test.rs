@@ -80,7 +80,7 @@ fn deftrait_registers_with_no_error() {
 
 #[test]
 fn impl_on_a_concrete_type_dispatches_as_an_ordinary_method() {
-    let src = format!("{} (let ((b (box::new 42))) (count b))", COUNTER_PRELUDE);
+    let src = format!("{} (let ((b (make-instance 'box :n 42))) (count b))", COUNTER_PRELUDE);
     assert_eq!(eval_ok(&src), Value::Int(42));
 }
 
@@ -112,7 +112,7 @@ fn calling_an_unimplemented_trait_method_on_a_concrete_type_is_a_type_error() {
     // doing something else.
     let src = "(deftrait Counted () (count ((self Self)) int))
                (defstruct box (n int))
-               (let ((b (box::new 1))) (count b))";
+               (let ((b (make-instance 'box :n 1))) (count b))";
     assert!(check(src).is_err());
 }
 
@@ -125,7 +125,7 @@ fn generic_function_calls_a_trait_method_via_where_bound() {
     // to `Expr::Assoc` there — `TraitCall` itself never executes.
     let src = format!(
         "{} (defun describe<T> ((it T)) int (where (Counted T)) (count it))
-            (describe (box::new 7))",
+            (describe (make-instance 'box :n 7))",
         COUNTER_PRELUDE
     );
     assert_eq!(eval_ok(&src), Value::Int(7));
@@ -135,7 +135,7 @@ fn generic_function_calls_a_trait_method_via_where_bound() {
 fn where_bound_function_rejects_a_method_the_trait_does_not_declare() {
     let src = format!(
         "{} (defun describe<T> ((it T)) int (where (Counted T)) (nope it))
-            (describe (box::new 7))",
+            (describe (make-instance 'box :n 7))",
         COUNTER_PRELUDE
     );
     assert!(check(&src).is_err());
@@ -150,22 +150,23 @@ fn two_types_implementing_the_same_trait_dispatch_independently() {
         (impl Counted box-a (count ((self Self)) int self::n))
         (impl Counted box-b (count ((self Self)) int (* 2 self::n)))
         (defun describe<T> ((it T)) int (where (Counted T)) (count it))
-        (+ (describe (box-a::new 3)) (describe (box-b::new 3)))";
+        (+ (describe (make-instance 'box-a :n 3)) (describe (make-instance 'box-b :n 3)))";
     assert_eq!(eval_ok(src), Value::Int(3 + 6));
 }
 
 #[test]
-fn defmethod_on_a_generic_owner_can_carry_a_where_clause() {
-    // A `where` clause directly on a `defmethod` (not via `impl`): the body
+fn a_method_on_a_generic_owner_can_carry_a_where_clause() {
+    // A `where` clause directly on an inherent `impl` item: the body
     // calls a trait method on the owner's own type variable. The
     // once-through diagnostic check resolves `(count self::x)` through the
     // bounds branch (`Expr::TraitCall`); the call site's specialization
     // re-checks with `A = box` concrete.
     let src = format!(
         "{} (defstruct pair<A> (x A) (y A))
-            (defmethod count-both ((self pair<A>)) int (where (Counted A))
-              (+ (count self::x) (count self::y)))
-            (count-both (pair::new (box::new 20) (box::new 22)))",
+            (impl pair<A>
+              (count-both (self) int (where (Counted A))
+                (+ (count self::x) (count self::y))))
+            (count-both (make-instance 'pair :x (make-instance 'box :n 20) :y (make-instance 'box :n 22)))",
         COUNTER_PRELUDE
     );
     assert_eq!(eval_ok(&src), Value::Int(42));
@@ -183,8 +184,8 @@ fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
         (impl Eq2 pr<A,B>
           (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
-        (if (same (pr::new (pr::new 1 2) 3) (pr::new (pr::new 1 2) 3))
-            (if (same (pr::new (pr::new 1 2) 3) (pr::new (pr::new 1 9) 3)) 0 1)
+        (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3))
+            (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 9) :b 3)) 0 1)
             0)";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -203,7 +204,7 @@ fn bounded_method_call_rejects_an_owner_argument_lacking_the_impl() {
         (impl Eq2 pr<A,B>
           (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
-        (same (pr::new (no-eq::new 1) 2) (pr::new (no-eq::new 1) 2))";
+        (same (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2) (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2))";
     let err = check(src).expect_err("must fail to check");
     let msg = format!("{:?}", err);
     assert!(
@@ -223,7 +224,7 @@ fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
     let src = format!(
         "{} (defstruct box2 (n int))
             (defun describe<T> ((it T)) int (where (Counted T)) (count it))
-            (describe (box2::new 5))",
+            (describe (make-instance 'box2 :n 5))",
         COUNTER_PRELUDE
     );
     assert!(check(&src).is_err());
@@ -262,7 +263,7 @@ fn forwarding_a_bare_type_parameter_with_a_matching_where_bound_type_checks_and_
     let src = format!(
         "{} (defun describe<T> ((it T)) int (where (Counted T)) (count it))
             (defun forwards<T> ((it T)) int (where (Counted T)) (describe it))
-            (forwards (box::new 7))",
+            (forwards (make-instance 'box :n 7))",
         COUNTER_PRELUDE
     );
     assert_eq!(eval_ok(&src), Value::Int(7));
@@ -310,7 +311,7 @@ fn forwarding_a_wrapped_open_type_variable_to_a_pinned_bound_does_not_reject_at_
 fn forwarding_a_wrapped_open_type_variable_specializes_and_runs_at_a_satisfying_type() {
     let src = format!(
         "{} (defun outer<U> ((w wrap<U>)) int (get-int w))
-            (outer (wrap::new 42))",
+            (outer (make-instance 'wrap :v 42))",
         BOXED_PRELUDE
     );
     assert_eq!(eval_ok(&src), Value::Int(42));
@@ -325,7 +326,7 @@ fn forwarding_a_wrapped_open_type_variable_specializes_and_runs_at_a_satisfying_
 fn forwarding_a_wrapped_open_type_variable_rejects_at_specialization_when_the_pin_fails() {
     let src = format!(
         "{} (defun outer<U> ((w wrap<U>)) int (get-int w))
-            (outer (wrap::new true))",
+            (outer (make-instance 'wrap :v true))",
         BOXED_PRELUDE
     );
     assert!(check(&src).is_err(), "Item bool must still fail the Item int pin once U is concrete");
@@ -360,7 +361,7 @@ fn a_supertrait_method_is_callable_on_a_bound_type_parameter() {
     let src = format!(
         "{}
          (defun both<T> ((x T)) int (where (Derived T)) (+ (base-tag x) (derived-tag x)))
-         (both (cell::new 3))",
+         (both (make-instance 'cell :n 3))",
         SUPER_PRELUDE
     );
     assert_eq!(eval_ok(&src), Value::Int(33));
@@ -374,7 +375,7 @@ fn a_supertrait_bound_discharges_a_callees_bound_on_the_base_trait() {
         "{}
          (defun inner<T> ((x T)) int (where (Base T)) (base-tag x))
          (defun outer<T> ((x T)) int (where (Derived T)) (inner x))
-         (outer (cell::new 7))",
+         (outer (make-instance 'cell :n 7))",
         SUPER_PRELUDE
     );
     assert_eq!(eval_ok(&src), Value::Int(7));
@@ -457,7 +458,7 @@ fn a_diamond_inherits_the_shared_method_once() {
         (impl D cell (d-tag ((self Self)) int 4))
         (defun sum<T> ((x T)) int (where (D T))
           (+ (tag x) (+ (b-tag x) (+ (c-tag x) (d-tag x)))))
-        (sum (cell::new 1))";
+        (sum (make-instance 'cell :n 1))";
     assert_eq!(eval_ok(src), Value::Int(10));
 }
 
@@ -490,7 +491,7 @@ fn a_supertrait_associated_type_pin_resolves_an_inherited_method() {
         (impl Src counter (type Item int) (next ((self Self)) int self::n))
         (impl CharSrc counter (rewind ((self Self)) () ()))
         (defun peek<T> ((x T)) int (where (CharSrc T)) (next x))
-        (peek (counter::new 5))";
+        (peek (make-instance 'counter :n 5))";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
 
@@ -507,13 +508,13 @@ const DEFAULTED: &str = "
 
 #[test]
 fn an_omitted_method_uses_the_traits_default_body() {
-    let src = format!("{} (differs (point::new 1) (point::new 2))", DEFAULTED);
+    let src = format!("{} (differs (make-instance 'point :x 1) (make-instance 'point :x 2))", DEFAULTED);
     assert_eq!(eval_ok(&src), Value::Bool(true));
 }
 
 #[test]
 fn a_default_body_calls_the_impls_own_core_method() {
-    let src = format!("{} (differs (point::new 3) (point::new 3))", DEFAULTED);
+    let src = format!("{} (differs (make-instance 'point :x 3) (make-instance 'point :x 3))", DEFAULTED);
     assert_eq!(eval_ok(&src), Value::Bool(false));
 }
 
@@ -528,7 +529,7 @@ fn an_impl_can_override_a_default_body() {
           (same ((self Self) (other Self)) bool (= self::x other::x))
           ;; deliberately wrong, to prove the written body wins
           (differs ((self Self) (other Self)) bool false))
-        (differs (point::new 1) (point::new 2))";
+        (differs (make-instance 'point :x 1) (make-instance 'point :x 2))";
     assert_eq!(eval_ok(src), Value::Bool(false));
 }
 
@@ -544,7 +545,7 @@ fn a_default_body_resolves_names_in_the_traits_module() {
             (doubled ((self Self)) int (helper (base self)))))
         (defstruct box (n int))
         (impl m::Doubler box (base ((self Self)) int self::n))
-        (doubled (box::new 21))";
+        (doubled (make-instance 'box :n 21))";
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
@@ -556,7 +557,7 @@ fn a_trailing_string_on_a_bodyless_signature_is_a_default_body_not_a_docstring()
     let src = "(deftrait T () (f ((self Self)) string \"doc\"))
                (defstruct s (n int))
                (impl T s)
-               (f (s::new 1))";
+               (f (make-instance 's :n 1))";
     assert_eq!(eval_string(src), "doc");
 }
 
@@ -574,9 +575,9 @@ fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
           (same ((self Self) (other Self)) bool)
           (differs ((self Self) (other Self)) bool (if (same self other) false true)))
         (module m
-          (pub defstruct point (x int))
+          (pub defstruct point (pub x int))
           (impl Eq3 point (same ((self Self) (other Self)) bool (= self::x other::x))))
-        (differs (m::point::new 1) (m::point::new 2))";
+        (differs (make-instance 'm::point :x 1) (make-instance 'm::point :x 2))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
 
@@ -586,9 +587,9 @@ fn a_trait_method_is_callable_from_outside_the_implementing_module() {
         (deftrait Named ()
           (label ((self Self)) string))
         (module m
-          (pub defstruct tag (n int))
+          (pub defstruct tag (pub n int))
           (impl Named tag (label ((self Self)) string \"tag\")))
-        (label (m::tag::new 1))";
+        (label (make-instance 'm::tag :n 1))";
     assert_eq!(eval_string(src), "tag");
 }
 
@@ -755,7 +756,7 @@ fn an_impl_omitting_an_associated_type_is_rejected() {
 /// variable, must come back as *that variable* — not the literal `Self` type
 /// variable the trait's template is written in.
 ///
-/// The bounds branch of `Checker::check_instance_method` used to substitute
+/// The bounds branch of `Checker::receiver_method` used to substitute
 /// only the trait's associated types into the method's return type, so
 /// `(add a b)` under `(where (Add T))` yielded `self` and the enclosing
 /// generic's `T` return position rejected it. Nothing in the prelude caught
@@ -830,7 +831,7 @@ fn an_associated_type_inside_a_generic_is_substituted() {
                  (push v #\\a)
                  (push v #\\b)
                  v))
-             (put-all (holder::new 7) (two))",
+             (put-all (make-instance 'holder :n 7) (two))",
             SINK
         )),
         Value::Int(7)

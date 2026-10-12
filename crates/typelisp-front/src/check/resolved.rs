@@ -3,9 +3,9 @@
 //! Not an AST: checking lowers a read `Sexpr` ([`Value`](crate::Value)) into
 //! cons-cell core IR, so a checked program is heap data, not a Rust tree. What
 //! survives here is the handful of *answers* the checker has to hand its
-//! consumers because they cannot re-derive them — a name resolved to a target
-//! ([`Ref`], [`CompileTarget`]) and a pattern's shape ([`Pattern`], which the
-//! core `pat-*` forms are built from).
+//! consumers because they cannot re-derive them — a definition a name
+//! resolved to ([`CompileTarget`]) and a pattern's shape ([`Pattern`], which
+//! the core `pat-*` forms are built from).
 //!
 //! This was `src/check/ast.rs`, holding `Typed`/`Expr`/`Arm`. The plan for the
 //! cons-cell interpreter had the file deleted outright; what actually happened
@@ -16,64 +16,23 @@ use typelisp_mem::Value;
 
 use crate::check::repr::Repr;
 use crate::{Path, Type};
-/// A reference to a free function or global variable — everything both
-/// `Interp` and the compile pipeline need to resolve one, kept as two
-/// independent halves rather than a single collapsed `Path`:
+/// A definition with a body of its own, named the way the checker resolved
+/// it: a free function (or a macro, whose expander is one) by its path, or a
+/// method by its type's path and its own name.
 ///
-/// - `written`/`home` are what `eval::scope::ModuleScope` (see that
-///   module's doc comment) uses to *re-derive* the target itself at
-///   runtime, walking its own tree from `home` — mirroring
-///   `Checker::resolve_fn`/`resolve_fn_path`/`resolve_global`/
-///   `resolve_global_path` (checker.rs:1061-1093, 1374-1410) — rather than
-///   trusting `resolved` as a lookup key. `written` is the name exactly as
-///   it appeared at the reference site (`["inc"]` bare, `["m","inc"]`
-///   qualified) and `home` is the lexically enclosing module's own raw
-///   segments (`Checker::ns` at the point this reference was checked, e.g.
-///   `[]` at the root) — the walk's starting point. Plain `Vec<String>`
-///   rather than [`Path`] because the root module has *zero* segments,
-///   which `Path` (always at least one — the local name) can't represent.
-/// - `resolved` is the checker's own fully-qualified answer, kept only for
-///   compile-time-only consumers that have no way to redo resolution
-///   themselves: `compile::core_bridge` (deliberately `Registry`-free),
-///   `compile::aot`, and `check::locate`'s LSP goto-definition. `Interp`
-///   itself never reads this field.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Ref {
-    pub written: Vec<String>,
-    pub home: Vec<String>,
-    pub resolved: Path,
-}
-
-impl Ref {
-    /// A synthesized reference with no real "as written" source form (the
-    /// checker's own internal rewrites — e.g. `sexpr-cons`, quasiquote's
-    /// `append_fq` — where `resolved` is already exactly right and there's
-    /// no user-facing shadowing concern `written`+`home` would need to
-    /// disambiguate). `home` is `resolved`'s own parent module, so a
-    /// bare-name ancestor-walk starting there still finds the same target
-    /// as direct descent would.
-    pub fn synthetic(resolved: Path) -> Ref {
-        let written = vec![resolved.last_segment().to_string()];
-        let home = resolved.parent().to_vec();
-        Ref { written, home, resolved }
-    }
-}
-
 /// The target of a `(compile name)` / `(compile type::method)` form —
-/// `Checker::check_compile` builds this from whichever resolution it
-/// already performs for its own generic-target check (`resolve_fn`/
-/// `resolve_type_name`), instead of discarding that result and handing
-/// `Interp` a bare name string to re-resolve by an unqualified, module-blind
-/// search (the bug this replaces — see `docs/implementation-log.md`).
-/// `Fn`'s `Ref` gets the exact same independent `written`+`home`
-/// re-resolution at runtime as an ordinary `call`; `Method`'s
-/// `type_name` is already a fully resolved type identity (never searched,
-/// same reasoning as `assoc`/`MethodRef`), so only `home` is needed
-/// for the `pub`-or-`in_scope` check.
-#[derive(Clone, Debug, PartialEq)]
+/// `Checker::resolve_callable` builds it out of the one name resolution — and
+/// also how the compile pipeline names a node of its call graph and an entry
+/// of a precompiled library. Nothing reads a definition back out of a spelled
+/// name: a function `b` of module `a` and a method `b` of type `a` are two
+/// different values of this type, where their names as text would be easy to
+/// confuse.
+///
+/// Also what a dump records for each body its bitcode carries.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum CompileTarget {
-    Fn(Ref),
-    Method { type_name: Path, method: String, home: Vec<String> },
+    Fn(Path),
+    Method(Path, String),
 }
 
 /// A match pattern.

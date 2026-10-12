@@ -47,11 +47,11 @@ use crate::{Checker, Heap, Interp, Reader, Value};
 /// own comment below).
 ///
 /// `Option<T>`/`Result<T,E>` accessors (`unwrap`/`unwrap-or`/`is-some`/
-/// `is-none`/`is-ok`/`is-err`) are `defmethod`, not `defun` — see the
+/// `is-none`/`is-ok`/`is-err`) are methods, not `defun`s — see the
 /// comment above their definitions below for why. `identity`/`const`/
 /// `compose`/`flip` are generic `defun`s — see the comment above their
 /// definitions for why those, unlike the accessors, fit `defun` rather than
-/// `defmethod`. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2c,
+/// a method. `gcd`/`lcm`/`signum`/`abs` (catalog §2.2f), `sort` (§2.2c,
 /// the `Sexpr`-list free function), and `assoc` (§4.2's list section) round
 /// out step 7c — `min`/`max`/`range` are not in the catalog, so they're left
 /// undone rather than guessed at.
@@ -119,6 +119,18 @@ fn tuple_source() -> String {
         let name = format!("tuple{}<{}>", n, params.join(","));
         let slots: Vec<String> = params.iter().zip(&fields).map(|(p, f)| format!("(pub {} {})", f, p)).collect();
         writeln!(out, "(module %internal (pub defstruct {} {}))", name, slots.join(" ")).unwrap();
+        // `new`: the elements in order, what the `tuple` macro calls.
+        let new_params: Vec<String> = params.iter().enumerate().map(|(i, p)| format!("(x{} {})", i, p)).collect();
+        let new_slots: Vec<String> = fields.iter().enumerate().map(|(i, f)| format!(":{} x{}", f, i)).collect();
+        writeln!(
+            out,
+            "(impl {} (pub new ({}) Self (make-instance '{} {})))",
+            generic,
+            new_params.join(" "),
+            path,
+            new_slots.join(" ")
+        )
+        .unwrap();
         // `equals`: every element, left to right.
         let eqs: Vec<String> = fields.iter().map(|f| format!("(equals self::{f} other::{f})")).collect();
         let eq_body = if n == 1 { eqs[0].clone() } else { format!("(and {})", eqs.join(" ")) };
@@ -408,65 +420,69 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; down as generic `Iter` combinators over `Vector<T>`/`HashTable<K,V>`; a
 ;; `cons<T,U>`/`Sexpr` list API is to be redesigned later.
 
-;; Option<T>/Result<T,E> accessors (roadmap step 7c). Written as `defmethod`,
-;; not `defun`: `unwrap`/`unwrap-or` need the same name on both `Option<T>`
+;; Option<T>/Result<T,E> accessors (roadmap step 7c). Written as methods,
+;; not `defun`s: `unwrap`/`unwrap-or` need the same name on both `Option<T>`
 ;; and `Result<T,E>`, which only an instance method's per-receiver-type assoc
 ;; table allows (a free function has exactly one signature for its name —
 ;; see registry::int_assoc's step-6 comment for the same constraint on `+`).
-;; `(unwrap opt)` resolves via `Checker::check_instance_method`: it checks
+;; `(unwrap opt)` resolves via `Checker::receiver_method`: it checks
 ;; `opt` first, then looks up `unwrap` in *its* type's assoc table, so the
 ;; same call syntax reaches `Option`'s or `Result`'s method independently.
 ;; The receiver's type parameter (`T`/`E` here) is resolved per call site
 ;; from the receiver's concrete type, exactly like `HashTable<K,V>`'s own
 ;; methods — no relation to `defun`'s separate generic-parameter syntax.
-(defmethod unwrap ((self Option<T>)) T
-  (match self ((some x) x) ((none) (panic "unwrap: called on none"))))
-(defmethod unwrap-or ((self Option<T>) (default T)) T
-  (match self ((some x) x) ((none) default)))
-(defmethod is-some ((self Option<T>)) bool
-  (match self ((some _) true) ((none) false)))
-(defmethod is-none ((self Option<T>)) bool
-  (not (is-some self)))
+(impl Option<T>
+  (unwrap (self) T
+    (match self ((some x) x) ((none) (panic "unwrap: called on none"))))
+  (unwrap-or (self (default T)) T
+    (match self ((some x) x) ((none) default)))
+  (is-some (self) bool
+    (match self ((some _) true) ((none) false)))
+  (is-none (self) bool
+    (not (is-some self))))
 
-(defmethod unwrap ((self Result<T,E>)) T
-  (match self ((ok x) x) ((err _) (panic "unwrap: called on err"))))
-(defmethod unwrap-or ((self Result<T,E>) (default T)) T
-  (match self ((ok x) x) ((err _) default)))
-(defmethod is-ok ((self Result<T,E>)) bool
-  (match self ((ok _) true) ((err _) false)))
-(defmethod is-err ((self Result<T,E>)) bool
-  (not (is-ok self)))
+(impl Result<T,E>
+  (unwrap (self) T
+    (match self ((ok x) x) ((err _) (panic "unwrap: called on err"))))
+  (unwrap-or (self (default T)) T
+    (match self ((ok x) x) ((err _) default)))
+  (is-ok (self) bool
+    (match self ((ok _) true) ((err _) false)))
+  (is-err (self) bool
+    (not (is-ok self))))
 
 ;; Rust's combinators on `Option`/`Result`. Methods for the same reason as
 ;; `unwrap` above: `map`/`and-then`/`or-else`/`unwrap-or-else`/`expect` are
 ;; one name on both types. A method named `map` does not shadow the `Iter`
 ;; combinator `map`: a call reaches the method only when its first argument's
 ;; type has one. The receiver comes first, so they chain with `->`.
-(defmethod map<U> ((self Option<T>) (f (fn (T) U))) Option<U>
-  (match self ((some x) (Option::some (f x))) ((none) (Option::none))))
-(defmethod and-then<U> ((self Option<T>) (f (fn (T) Option<U>))) Option<U>
-  (match self ((some x) (f x)) ((none) (Option::none))))
-(defmethod or-else ((self Option<T>) (f (fn () Option<T>))) Option<T>
-  (match self ((some _) self) ((none) (f))))
-(defmethod ok-or<E> ((self Option<T>) (e E)) Result<T,E>
-  (match self ((some x) (Result::ok x)) ((none) (Result::err e))))
-(defmethod unwrap-or-else ((self Option<T>) (f (fn () T))) T
-  (match self ((some x) x) ((none) (f))))
-(defmethod expect ((self Option<T>) (msg string)) T
-  (match self ((some x) x) ((none) (panic msg))))
+(impl Option<T>
+  (map<U> (self (f (fn (T) U))) Option<U>
+    (match self ((some x) (Option::some (f x))) ((none) (Option::none))))
+  (and-then<U> (self (f (fn (T) Option<U>))) Option<U>
+    (match self ((some x) (f x)) ((none) (Option::none))))
+  (or-else (self (f (fn () Option<T>))) Option<T>
+    (match self ((some _) self) ((none) (f))))
+  (ok-or<E> (self (e E)) Result<T,E>
+    (match self ((some x) (Result::ok x)) ((none) (Result::err e))))
+  (unwrap-or-else (self (f (fn () T))) T
+    (match self ((some x) x) ((none) (f))))
+  (expect (self (msg string)) T
+    (match self ((some x) x) ((none) (panic msg)))))
 
-(defmethod map<U> ((self Result<T,E>) (f (fn (T) U))) Result<U,E>
-  (match self ((ok x) (Result::ok (f x))) ((err e) (Result::err e))))
-(defmethod map-err<E2> ((self Result<T,E>) (f (fn (E) E2))) Result<T,E2>
-  (match self ((ok x) (Result::ok x)) ((err e) (Result::err (f e)))))
-(defmethod and-then<U> ((self Result<T,E>) (f (fn (T) Result<U,E>))) Result<U,E>
-  (match self ((ok x) (f x)) ((err e) (Result::err e))))
-(defmethod or-else<E2> ((self Result<T,E>) (f (fn (E) Result<T,E2>))) Result<T,E2>
-  (match self ((ok x) (Result::ok x)) ((err e) (f e))))
-(defmethod unwrap-or-else ((self Result<T,E>) (f (fn (E) T))) T
-  (match self ((ok x) x) ((err e) (f e))))
-(defmethod expect ((self Result<T,E>) (msg string)) T
-  (match self ((ok x) x) ((err _) (panic msg))))
+(impl Result<T,E>
+  (map<U> (self (f (fn (T) U))) Result<U,E>
+    (match self ((ok x) (Result::ok (f x))) ((err e) (Result::err e))))
+  (map-err<E2> (self (f (fn (E) E2))) Result<T,E2>
+    (match self ((ok x) (Result::ok x)) ((err e) (Result::err (f e)))))
+  (and-then<U> (self (f (fn (T) Result<U,E>))) Result<U,E>
+    (match self ((ok x) (f x)) ((err e) (Result::err e))))
+  (or-else<E2> (self (f (fn (E) Result<T,E2>))) Result<T,E2>
+    (match self ((ok x) (Result::ok x)) ((err e) (f e))))
+  (unwrap-or-else (self (f (fn (E) T))) T
+    (match self ((ok x) x) ((err e) (f e))))
+  (expect (self (msg string)) T
+    (match self ((ok x) x) ((err _) (panic msg)))))
 
 ;; Clojure's `->`: each step gets the value so far as its first argument.
 ;; A bare symbol `g` is the step `(g)`.
@@ -481,7 +497,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 
 ;; Higher-order helpers (roadmap step 7c) — the motivating use case for
 ;; `defun`'s generic type parameters (`Checker::check_call`'s `unify`/
-;; `subst_apply` integration): each is plain `defun`, not `defmethod`, since
+;; `subst_apply` integration): each is plain `defun`, not a method, since
 ;; none of them is a method "on" a receiver type — they operate purely on
 ;; function values. `compose`/`flip` return a `lambda`, which closes over the
 ;; outer defun's parameters (`f`/`g`) the same way any nested lambda would.
@@ -518,32 +534,45 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `(println ...)` is the format special form, which takes a control string;
 ;; these are reached only as function values. Each prints its receiver the
 ;; way `~a` does, through the same printer.
-(defmethod print ((self bool)) () (print "~a" self))
-(defmethod println ((self bool)) () (println "~a" self))
-(defmethod print ((self char)) () (print "~a" self))
-(defmethod println ((self char)) () (println "~a" self))
-(defmethod print ((self string)) () (print "~a" self))
-(defmethod println ((self string)) () (println "~a" self))
-(defmethod print ((self int)) () (print "~a" self))
-(defmethod println ((self int)) () (println "~a" self))
-(defmethod print ((self i8)) () (print "~a" self))
-(defmethod println ((self i8)) () (println "~a" self))
-(defmethod print ((self i16)) () (print "~a" self))
-(defmethod println ((self i16)) () (println "~a" self))
-(defmethod print ((self i32)) () (print "~a" self))
-(defmethod println ((self i32)) () (println "~a" self))
-(defmethod print ((self u8)) () (print "~a" self))
-(defmethod println ((self u8)) () (println "~a" self))
-(defmethod print ((self u16)) () (print "~a" self))
-(defmethod println ((self u16)) () (println "~a" self))
-(defmethod print ((self u32)) () (print "~a" self))
-(defmethod println ((self u32)) () (println "~a" self))
-(defmethod print ((self f32)) () (print "~a" self))
-(defmethod println ((self f32)) () (println "~a" self))
-(defmethod print ((self f64)) () (print "~a" self))
-(defmethod println ((self f64)) () (println "~a" self))
-(defmethod print ((self ratio)) () (print "~a" self))
-(defmethod println ((self ratio)) () (println "~a" self))
+(impl bool
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl char
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl string
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl int
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl i8
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl i16
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl i32
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl u8
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl u16
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl u32
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl f32
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl f64
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
+(impl ratio
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
 
 ;; CL's numeric catalog beyond the primitive machine operations
 ;; (`+`/`-`/`*`/`/`/`mod`/comparisons/conversions, which are Rust builtins in
@@ -551,7 +580,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; (integers only), and `expt` (all numbers). Written here as ordinary typelisp
 ;; *methods* — not Rust builtins — so they compile through the normal function
 ;; path (`(compile f)` where `f` uses them) instead of needing a native-lowered
-;; `rt_*` shim per operation. `defmethod` dispatches on the receiver type, so
+;; `rt_*` shim per operation. A method dispatches on the receiver type, so
 ;; the same `abs`/`signum`/... name overloads across `i32`/`int`/`f64`/
 ;; `ratio`; each is built only from that type's primitives. `mod`/`rem` follow
 ;; CL: `mod` is floored (integer `mod` is a builtin; `f64`/`ratio` `mod` here
@@ -568,72 +597,78 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `(- self self)` — both carry the receiver's type without a bare literal.
 
 ;; --- i32 ---
-(defmethod abs ((self i32)) i32 (if (< self 0) (* self -1) self))
-(defmethod signum ((self i32)) i32 (if (= self 0) self (/ self (abs self))))
-(defmethod rem ((self i32) (b i32)) i32 (- self (* b (/ self b))))
-(defmethod gcd ((self i32) (b i32)) i32 (if (= b 0) (abs self) (gcd b (mod self b))))
-(defmethod lcm ((self i32) (b i32)) i32
-  (if (or (= self 0) (= b 0)) (- self self) (/ (abs (* self b)) (gcd self b))))
+(impl i32
+  (abs (self) i32 (if (< self 0) (* self -1) self))
+  (signum (self) i32 (if (= self 0) self (/ self (abs self))))
+  (rem (self (b i32)) i32 (- self (* b (/ self b))))
+  (gcd (self (b i32)) i32 (if (= b 0) (abs self) (gcd b (mod self b))))
+  (lcm (self (b i32)) i32
+    (if (or (= self 0) (= b 0)) (- self self) (/ (abs (* self b)) (gcd self b)))))
 
 ;; --- f64 --- (`mod`/`rem` via the quotient identity)
-(defmethod abs ((self f64)) f64 (if (< self 0.0) (* self -1.0) self))
-(defmethod signum ((self f64)) f64 (if (= self 0.0) self (/ self (abs self))))
-(defmethod mod ((self f64) (b f64)) f64 (- self (* b (floor (/ self b)))))
-(defmethod rem ((self f64) (b f64)) f64 (- self (* b (truncate (/ self b)))))
+(impl f64
+  (abs (self) f64 (if (< self 0.0) (* self -1.0) self))
+  (signum (self) f64 (if (= self 0.0) self (/ self (abs self))))
+  (mod (self (b f64)) f64 (- self (* b (floor (/ self b)))))
+  (rem (self (b f64)) f64 (- self (* b (truncate (/ self b))))))
 
 ;; --- int --- (negation is `(- 0 self)`: a bare integer literal is an
 ;; `int`, the receiver's own type, so the first operand dispatches correctly
 ;; with no conversion. `expt` is non-negative-exponent only — a negative one
 ;; would be a `ratio`, which an `int`-returning method can't hold)
-(defmethod abs ((self int)) int
-  (if (< self 0) (- 0 self) self))
-(defmethod signum ((self int)) int
-  (if (= self 0) self (/ self (abs self))))
-(defmethod rem ((self int) (b int)) int (- self (* b (/ self b))))
-(defmethod gcd ((self int) (b int)) int
-  (if (= b 0) (abs self) (gcd b (mod self b))))
-(defmethod lcm ((self int) (b int)) int
-  (if (or (= self 0) (= b 0)) 0
-      (/ (abs (* self b)) (gcd self b))))
+(impl int
+  (abs (self) int
+    (if (< self 0) (- 0 self) self))
+  (signum (self) int
+    (if (= self 0) self (/ self (abs self))))
+  (rem (self (b int)) int (- self (* b (/ self b))))
+  (gcd (self (b int)) int
+    (if (= b 0) (abs self) (gcd b (mod self b))))
+  (lcm (self (b int)) int
+    (if (or (= self 0) (= b 0)) 0
+        (/ (abs (* self b)) (gcd self b)))))
 ;; Exponentiation by squaring (log-depth recursion — a linear `e`-deep
 ;; recursion overflows the interpreter's tree-walking stack for large `e`).
-(defmethod expt ((self int) (e int)) int
-  (if (< e 0)
-      (panic "expt: negative exponent has no int result (it would be a ratio)")
-      (if (= e 0) 1
-          (if (= (mod e 2) 0)
-              (let ((h (expt self (/ e 2)))) (* h h))
-              (* self (expt self (- e 1)))))))
+(impl int
+  (expt (self (e int)) int
+    (if (< e 0)
+        (panic "expt: negative exponent has no int result (it would be a ratio)")
+        (if (= e 0) 1
+            (if (= (mod e 2) 0)
+                (let ((h (expt self (/ e 2)))) (* h h))
+                (* self (expt self (- e 1))))))))
 
 ;; --- ratio --- (`ratio->int` truncates toward zero, so `(int->ratio
 ;; (ratio->int q))` is `truncate(q)`; `rem` uses it directly, `mod` adjusts
 ;; the remainder by `b` when their signs differ, i.e. floored)
-(defmethod abs ((self ratio)) ratio
-  (if (< self (int->ratio 0)) (- (int->ratio 0) self) self))
-(defmethod signum ((self ratio)) ratio
-  (if (= self (int->ratio 0)) self (/ self (abs self))))
-(defmethod rem ((self ratio) (b ratio)) ratio
-  (- self (* b (int->ratio (ratio->int (/ self b))))))
-(defmethod mod ((self ratio) (b ratio)) ratio
-  (let ((r (rem self b)))
-    (if (or (and (< r (int->ratio 0)) (> b (int->ratio 0)))
-            (and (> r (int->ratio 0)) (< b (int->ratio 0))))
-        (+ r b)
-        r)))
+(impl ratio
+  (abs (self) ratio
+    (if (< self (int->ratio 0)) (- (int->ratio 0) self) self))
+  (signum (self) ratio
+    (if (= self (int->ratio 0)) self (/ self (abs self))))
+  (rem (self (b ratio)) ratio
+    (- self (* b (int->ratio (ratio->int (/ self b))))))
+  (mod (self (b ratio)) ratio
+    (let ((r (rem self b)))
+      (if (or (and (< r (int->ratio 0)) (> b (int->ratio 0)))
+              (and (> r (int->ratio 0)) (< b (int->ratio 0))))
+          (+ r b)
+          r))))
 (module %internal (pub defun ratio-expt-int ((base ratio) (n int)) ratio
   (if (< n 0)
       (%internal::ratio-expt-int (/ (int->ratio 1) base) (- 0 n))
       (if (= n 0) (int->ratio 1)
           (* base (%internal::ratio-expt-int base (- n 1)))))))
-(defmethod expt ((self ratio) (e ratio)) ratio
-  (if (= e (int->ratio (ratio->int e)))
-      (%internal::ratio-expt-int self (ratio->int e))
-      (panic "expt: ratio exponent must be integer-valued")))
+(impl ratio
+  (expt (self (e ratio)) ratio
+    (if (= e (int->ratio (ratio->int e)))
+        (%internal::ratio-expt-int self (ratio->int e))
+        (panic "expt: ratio exponent must be integer-valued"))))
 
 ;; CL's numeric predicates (`zerop`/`plusp`/`minusp`/`evenp`/`oddp`) and
 ;; increment/decrement shorthands (`1+`/`1-`), built from the primitives
-;; above the same way `abs`/`signum`/`rem` are — per-type `defmethod`s rather
-;; than one generic definition, for the same reason (`defmethod` resolves by
+;; above the same way `abs`/`signum`/`rem` are — per-type methods rather
+;; than one generic definition, for the same reason (a method resolves by
 ;; the receiver's exact type, not by a trait bound). `evenp`/`oddp` are
 ;; integer-only (CL signals a type error on a non-integer; `i32`/
 ;; `int` here). See the `--- ratio ---` section above for why its `0`/`1`
@@ -642,33 +677,37 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; own (an `int` receiver needs no such spelling, since a bare literal
 ;; already is one).
 ;; --- i32 ---
-(defmethod zerop ((self i32)) bool (= self 0))
-(defmethod plusp ((self i32)) bool (> self 0))
-(defmethod minusp ((self i32)) bool (< self 0))
-(defmethod evenp ((self i32)) bool (= (mod self 2) 0))
-(defmethod oddp ((self i32)) bool (/= (mod self 2) 0))
-(defmethod 1+ ((self i32)) i32 (+ self 1))
-(defmethod 1- ((self i32)) i32 (- self 1))
+(impl i32
+  (zerop (self) bool (= self 0))
+  (plusp (self) bool (> self 0))
+  (minusp (self) bool (< self 0))
+  (evenp (self) bool (= (mod self 2) 0))
+  (oddp (self) bool (/= (mod self 2) 0))
+  (1+ (self) i32 (+ self 1))
+  (1- (self) i32 (- self 1)))
 ;; --- f64 --- (no evenp/oddp: CL requires an integer argument)
-(defmethod zerop ((self f64)) bool (= self 0.0))
-(defmethod plusp ((self f64)) bool (> self 0.0))
-(defmethod minusp ((self f64)) bool (< self 0.0))
-(defmethod 1+ ((self f64)) f64 (+ self 1.0))
-(defmethod 1- ((self f64)) f64 (- self 1.0))
+(impl f64
+  (zerop (self) bool (= self 0.0))
+  (plusp (self) bool (> self 0.0))
+  (minusp (self) bool (< self 0.0))
+  (1+ (self) f64 (+ self 1.0))
+  (1- (self) f64 (- self 1.0)))
 ;; --- int ---
-(defmethod zerop ((self int)) bool (= self 0))
-(defmethod plusp ((self int)) bool (> self 0))
-(defmethod minusp ((self int)) bool (< self 0))
-(defmethod evenp ((self int)) bool (= (mod self 2) 0))
-(defmethod oddp ((self int)) bool (/= (mod self 2) 0))
-(defmethod 1+ ((self int)) int (+ self 1))
-(defmethod 1- ((self int)) int (- self 1))
+(impl int
+  (zerop (self) bool (= self 0))
+  (plusp (self) bool (> self 0))
+  (minusp (self) bool (< self 0))
+  (evenp (self) bool (= (mod self 2) 0))
+  (oddp (self) bool (/= (mod self 2) 0))
+  (1+ (self) int (+ self 1))
+  (1- (self) int (- self 1)))
 ;; --- ratio --- (no evenp/oddp: CL requires an integer argument)
-(defmethod zerop ((self ratio)) bool (= self (int->ratio 0)))
-(defmethod plusp ((self ratio)) bool (> self (int->ratio 0)))
-(defmethod minusp ((self ratio)) bool (< self (int->ratio 0)))
-(defmethod 1+ ((self ratio)) ratio (+ self (int->ratio 1)))
-(defmethod 1- ((self ratio)) ratio (- self (int->ratio 1)))
+(impl ratio
+  (zerop (self) bool (= self (int->ratio 0)))
+  (plusp (self) bool (> self (int->ratio 0)))
+  (minusp (self) bool (< self (int->ratio 0)))
+  (1+ (self) ratio (+ self (int->ratio 1)))
+  (1- (self) ratio (- self (int->ratio 1))))
 
 ;; `pi`: CL's `long-float` circle-ratio constant, `f64`-valued here (this
 ;; language's only floating-point type).
@@ -679,21 +718,23 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; these compile via the normal path (built from already-native ops), unlike
 ;; the primitives themselves.
 ;; --- i32 ---
-(defmethod logeqv ((self i32) (b i32)) i32 (lognot (logxor self b)))
-(defmethod lognand ((self i32) (b i32)) i32 (lognot (logand self b)))
-(defmethod lognor ((self i32) (b i32)) i32 (lognot (logior self b)))
-(defmethod logandc1 ((self i32) (b i32)) i32 (logand (lognot self) b))
-(defmethod logandc2 ((self i32) (b i32)) i32 (logand self (lognot b)))
-(defmethod logorc1 ((self i32) (b i32)) i32 (logior (lognot self) b))
-(defmethod logorc2 ((self i32) (b i32)) i32 (logior self (lognot b)))
+(impl i32
+  (logeqv (self (b i32)) i32 (lognot (logxor self b)))
+  (lognand (self (b i32)) i32 (lognot (logand self b)))
+  (lognor (self (b i32)) i32 (lognot (logior self b)))
+  (logandc1 (self (b i32)) i32 (logand (lognot self) b))
+  (logandc2 (self (b i32)) i32 (logand self (lognot b)))
+  (logorc1 (self (b i32)) i32 (logior (lognot self) b))
+  (logorc2 (self (b i32)) i32 (logior self (lognot b))))
 ;; --- int ---
-(defmethod logeqv ((self int) (b int)) int (lognot (logxor self b)))
-(defmethod lognand ((self int) (b int)) int (lognot (logand self b)))
-(defmethod lognor ((self int) (b int)) int (lognot (logior self b)))
-(defmethod logandc1 ((self int) (b int)) int (logand (lognot self) b))
-(defmethod logandc2 ((self int) (b int)) int (logand self (lognot b)))
-(defmethod logorc1 ((self int) (b int)) int (logior (lognot self) b))
-(defmethod logorc2 ((self int) (b int)) int (logior self (lognot b)))
+(impl int
+  (logeqv (self (b int)) int (lognot (logxor self b)))
+  (lognand (self (b int)) int (lognot (logand self b)))
+  (lognor (self (b int)) int (lognot (logior self b)))
+  (logandc1 (self (b int)) int (logand (lognot self) b))
+  (logandc2 (self (b int)) int (logand self (lognot b)))
+  (logorc1 (self (b int)) int (logior (lognot self) b))
+  (logorc2 (self (b int)) int (logior self (lognot b))))
 
 ;; CL's character catalog beyond the primitives in `registry::char_assoc`
 ;; (`upcase`/`downcase`/`<`/`alphap`/`digitp`/`char->int`/`equalp`).
@@ -732,35 +773,40 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `char/=`: CL's inequality. `char` had `equal` but no `/=`, so the checker's
 ;; variadic `/=` sugar (`check_variadic_cmp`, `docs/ja/reference/functions/numbers.md` §8.1) had no binary
 ;; method to expand onto for characters.
-(defmethod /= ((self char) (b char)) bool (not (equal self b)))
+(impl char
+  (/= (self (b char)) bool (not (equal self b))))
 ;; The case-insensitive order comparisons (`char-lessp` and friends). CL
 ;; defines them by case-folding both operands, which is what `equalp` on
 ;; `char` already does for equality — these are its ordering siblings.
-(defmethod lessp ((self char) (b char)) bool
-  (< (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
-(defmethod greaterp ((self char) (b char)) bool
-  (> (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
-(defmethod not-lessp ((self char) (b char)) bool
-  (>= (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
-(defmethod not-greaterp ((self char) (b char)) bool
-  (<= (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
+(impl char
+  (lessp (self (b char)) bool
+    (< (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
+  (greaterp (self (b char)) bool
+    (> (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
+  (not-lessp (self (b char)) bool
+    (>= (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b))))
+  (not-greaterp (self (b char)) bool
+    (<= (%internal::ascii-downcase-code (char->int self)) (%internal::ascii-downcase-code (char->int b)))))
 ;; Case classification. `both-casep` is CL's `both-case-p`: whether this
 ;; character has *both* cases, i.e. whether case conversion means anything for
 ;; it — true for ASCII letters, false for digits and punctuation.
-(defmethod upper-casep ((self char)) bool
-  (let ((n (char->int self))) (and (>= n 65) (<= n 90))))
-(defmethod lower-casep ((self char)) bool
-  (let ((n (char->int self))) (and (>= n 97) (<= n 122))))
-(defmethod both-casep ((self char)) bool (%internal::ascii-alpha-code (char->int self)))
-(defmethod alphanumericp ((self char)) bool
-  (let ((n (char->int self))) (or (%internal::ascii-alpha-code n) (%internal::ascii-digit-code n))))
+(impl char
+  (upper-casep (self) bool
+    (let ((n (char->int self))) (and (>= n 65) (<= n 90))))
+  (lower-casep (self) bool
+    (let ((n (char->int self))) (and (>= n 97) (<= n 122))))
+  (both-casep (self) bool (%internal::ascii-alpha-code (char->int self)))
+  (alphanumericp (self) bool
+    (let ((n (char->int self))) (or (%internal::ascii-alpha-code n) (%internal::ascii-digit-code n)))))
 ;; `graphic-char-p`: printable, space included, everything else excluded.
-(defmethod graphicp ((self char)) bool
-  (let ((n (char->int self))) (and (>= n 32) (< n 127))))
+(impl char
+  (graphicp (self) bool
+    (let ((n (char->int self))) (and (>= n 32) (< n 127)))))
 ;; `standard-char-p`: CL's 96-character standard set — the graphic characters
 ;; plus newline, and nothing else.
-(defmethod standardp ((self char)) bool
-  (let ((n (char->int self))) (or (and (>= n 32) (< n 127)) (= n 10))))
+(impl char
+  (standardp (self) bool
+    (let ((n (char->int self))) (or (and (>= n 32) (< n 127)) (= n 10)))))
 
 ;; CL's `digit-char-p`: the character's *weight* in `radix`, or `none` when it
 ;; is not a digit in that radix. This is the CL-conformant reading of that
@@ -769,8 +815,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; (`reader-scan-atom`) and the self-hosting island both call it as a
 ;; predicate.
 ;;
-;; A free `defun` rather than a `defmethod`, and likewise `digit->char`: CL
-;; gives both an optional radix, which `defmethod` could not declare when
+;; A free `defun` rather than a method, and likewise `digit->char`: CL
+;; gives both an optional radix, which a method could not declare when
 ;; these were written. Phase 5b lifted that restriction and they stayed
 ;; `defun`s — nothing at a call site tells the two apart for a `char`
 ;; receiver, so moving them would be churn.
@@ -797,15 +843,16 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; else gets `none`, which is what CL says for every graphic character.
 ;; `name->char` accepts the reader's aliases (`linefeed`, `null`) too, and is
 ;; case-insensitive because the reader's own lookup is.
-(defmethod char->name ((self char)) Option<string>
-  (cond ((equal self #\newline)   (option::some "newline"))
-        ((equal self #\space)     (option::some "space"))
-        ((equal self #\tab)       (option::some "tab"))
-        ((equal self #\return)    (option::some "return"))
-        ((equal self #\page)      (option::some "page"))
-        ((equal self #\nul)       (option::some "nul"))
-        ((equal self #\backspace) (option::some "backspace"))
-        (else (option::none))))
+(impl char
+  (char->name (self) Option<string>
+    (cond ((equal self #\newline)   (option::some "newline"))
+          ((equal self #\space)     (option::some "space"))
+          ((equal self #\tab)       (option::some "tab"))
+          ((equal self #\return)    (option::some "return"))
+          ((equal self #\page)      (option::some "page"))
+          ((equal self #\nul)       (option::some "nul"))
+          ((equal self #\backspace) (option::some "backspace"))
+          (else (option::none)))))
 (defun name->char ((name string)) Option<char>
   (cond ((equalp name "space")     (option::some #\space))
         ((equalp name "newline")   (option::some #\newline))
@@ -837,7 +884,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
     (if (and (>= n 65) (<= n 90)) (ref "abcdefghijklmnopqrstuvwxyz" (- n 65)) c))))
 
 ;; `string/=`: CL's inequality, the counterpart of `char`'s `/=` above.
-(defmethod /= ((self string) (b string)) bool (not (equal self b)))
+(impl string
+  (/= (self (b string)) bool (not (equal self b))))
 ;; `string-lessp` and friends: CL's case-insensitive order comparisons.
 ;; Lexicographic on case-folded code points, with the shorter string first on
 ;; a common prefix — the same order `<` gives, folded.
@@ -851,19 +899,21 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (progn (if (< x y) (setf r -1) (if (> x y) (setf r 1) 0)) (setf i (+ i 1)))))
       (if (/= r 0) r
           (if (< (length a) (length b)) -1 (if (> (length a) (length b)) 1 0)))))))
-(defmethod lessp ((self string) (b string)) bool (< (%internal::string-fold-compare self b) 0))
-(defmethod greaterp ((self string) (b string)) bool (> (%internal::string-fold-compare self b) 0))
-(defmethod not-lessp ((self string) (b string)) bool (>= (%internal::string-fold-compare self b) 0))
-(defmethod not-greaterp ((self string) (b string)) bool (<= (%internal::string-fold-compare self b) 0))
+(impl string
+  (lessp (self (b string)) bool (< (%internal::string-fold-compare self b) 0))
+  (greaterp (self (b string)) bool (> (%internal::string-fold-compare self b) 0))
+  (not-lessp (self (b string)) bool (>= (%internal::string-fold-compare self b) 0))
+  (not-greaterp (self (b string)) bool (<= (%internal::string-fold-compare self b) 0)))
 
 ;; `make-string`: `n` copies of `c`. A static method, so it reads like every
 ;; other constructor in this language (`Vector::new`, `HashTable::new`) rather
 ;; than as a `make-*` free function — cl-parity-plan.md §1.1.
-(defmethod filled (string (n int) (c char)) string
-  (let ((out "") (i 0))
-    (progn
-      (while (< i n) (progn (setf out (append out (char->string c))) (setf i (+ i 1))))
-      out)))
+(impl string
+  (filled ((n int) (c char)) string
+    (let ((out "") (i 0))
+      (progn
+        (while (< i n) (progn (setf out (append out (char->string c))) (setf i (+ i 1))))
+        out))))
 
 ;; cl-parity-plan.md Phase 3e: the readers for CL's sequence keywords
 ;; (`:key`/`:test`/`:test-not`/`:start`/`:end`/`:from-end`/`:count`). Each
@@ -930,31 +980,32 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; the pattern, so a `:start1` written out of habit is an unknown keyword
 ;; rather than a wrong answer. `mismatch` below keeps CL's numbers, because
 ;; there the argument order does agree.
-(defmethod search ((self string) (sub string)
-                   &key (key (fn (char) char)) (test (fn (char char) bool))
-                        (test-not (fn (char char) bool)) (from-end bool)
-                        (start int) (end int) (sub-start int) (sub-end int))
-    Option<int>
-  (let ((proj (match key ((some f) f) ((none) (lambda ((c char)) char c)))))
-    (let ((same (lambda ((p char) (q char)) bool
-                  (match test
-                    ((some f) (f (proj p) (proj q)))
-                    ((none) (match test-not
-                              ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equal (proj p) (proj q)))))))))
-      (let ((e (%internal::seq-window-end end (length self)))
-            (ps (%internal::seq-window-start sub-start))
-            (last (%internal::seq-flag from-end))
-            (found (the Option<int> (option::none)))
-            (i (%internal::seq-window-start start)))
-        (let ((m (- (%internal::seq-window-end sub-end (length sub)) ps)))
-          (progn
-            (while (if (<= (+ i m) e) (if last true (is-none found)) false)
-              (progn
-                (when (%internal::string-window-equal self i sub ps m same)
-                  (setf found (option::some i)))
-                (setf i (+ i 1))))
-            found))))))
+(impl string
+  (search (self (sub string)
+                     &key (key (fn (char) char)) (test (fn (char char) bool))
+                          (test-not (fn (char char) bool)) (from-end bool)
+                          (start int) (end int) (sub-start int) (sub-end int))
+      Option<int>
+    (let ((proj (match key ((some f) f) ((none) (lambda ((c char)) char c)))))
+      (let ((same (lambda ((p char) (q char)) bool
+                    (match test
+                      ((some f) (f (proj p) (proj q)))
+                      ((none) (match test-not
+                                ((some g) (not (g (proj p) (proj q))))
+                                ((none) (equal (proj p) (proj q)))))))))
+        (let ((e (%internal::seq-window-end end (length self)))
+              (ps (%internal::seq-window-start sub-start))
+              (last (%internal::seq-flag from-end))
+              (found (the Option<int> (option::none)))
+              (i (%internal::seq-window-start start)))
+          (let ((m (- (%internal::seq-window-end sub-end (length sub)) ps)))
+            (progn
+              (while (if (<= (+ i m) e) (if last true (is-none found)) false)
+                (progn
+                  (when (%internal::string-window-equal self i sub ps m same)
+                    (setf found (option::some i)))
+                  (setf i (+ i 1))))
+              found)))))))
 ;; `mismatch`: the index of the first position where the two differ, or `none`
 ;; when one is a prefix of the other *and* they are the same length — i.e.
 ;; `none` exactly when they are `equal`. A length difference mismatches at the
@@ -964,48 +1015,49 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; rightmost difference, which is what CL's own wording ("one plus the index
 ;; of the rightmost position in which the sequences differ") comes to. Every
 ;; index returned is an index into the receiver, windows or no windows.
-(defmethod mismatch ((self string) (b string)
-                     &key (key (fn (char) char)) (test (fn (char char) bool))
-                          (test-not (fn (char char) bool)) (from-end bool)
-                          (start1 int) (end1 int) (start2 int) (end2 int))
-    Option<int>
-  (let ((proj (match key ((some f) f) ((none) (lambda ((c char)) char c)))))
-    (let ((same (lambda ((p char) (q char)) bool
-                  (match test
-                    ((some f) (f (proj p) (proj q)))
-                    ((none) (match test-not
-                              ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equal (proj p) (proj q)))))))))
-      (let ((s1 (%internal::seq-window-start start1)) (e1 (%internal::seq-window-end end1 (length self)))
-            (s2 (%internal::seq-window-start start2)) (e2 (%internal::seq-window-end end2 (length b))))
-        (let ((n (min (- e1 s1) (- e2 s2)))
-              (found (the Option<int> (option::none)))
-              (k 0))
-          (if (%internal::seq-flag from-end)
-              (progn
-                (while (if (is-none found) (< k n) false)
-                  (progn
-                    (setf k (+ k 1))
-                    (unless (same (ref b (- e2 k)) (ref self (- e1 k)))
-                      (setf found (option::some (+ (- e1 k) 1))))))
-                (match found
-                  ((some j) (option::some j))
-                  ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (- e1 n))))))
-              (progn
-                (while (if (is-none found) (< k n) false)
-                  (progn
-                    (unless (same (ref b (+ s2 k)) (ref self (+ s1 k)))
-                      (setf found (option::some (+ s1 k))))
-                    (setf k (+ k 1))))
-                (match found
-                  ((some j) (option::some j))
-                  ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (+ s1 n)))))))))))) 
+(impl string
+  (mismatch (self (b string)
+                       &key (key (fn (char) char)) (test (fn (char char) bool))
+                            (test-not (fn (char char) bool)) (from-end bool)
+                            (start1 int) (end1 int) (start2 int) (end2 int))
+      Option<int>
+    (let ((proj (match key ((some f) f) ((none) (lambda ((c char)) char c)))))
+      (let ((same (lambda ((p char) (q char)) bool
+                    (match test
+                      ((some f) (f (proj p) (proj q)))
+                      ((none) (match test-not
+                                ((some g) (not (g (proj p) (proj q))))
+                                ((none) (equal (proj p) (proj q)))))))))
+        (let ((s1 (%internal::seq-window-start start1)) (e1 (%internal::seq-window-end end1 (length self)))
+              (s2 (%internal::seq-window-start start2)) (e2 (%internal::seq-window-end end2 (length b))))
+          (let ((n (min (- e1 s1) (- e2 s2)))
+                (found (the Option<int> (option::none)))
+                (k 0))
+            (if (%internal::seq-flag from-end)
+                (progn
+                  (while (if (is-none found) (< k n) false)
+                    (progn
+                      (setf k (+ k 1))
+                      (unless (same (ref b (- e2 k)) (ref self (- e1 k)))
+                        (setf found (option::some (+ (- e1 k) 1))))))
+                  (match found
+                    ((some j) (option::some j))
+                    ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (- e1 n))))))
+                (progn
+                  (while (if (is-none found) (< k n) false)
+                    (progn
+                      (unless (same (ref b (+ s2 k)) (ref self (+ s1 k)))
+                        (setf found (option::some (+ s1 k))))
+                      (setf k (+ k 1))))
+                  (match found
+                    ((some j) (option::some j))
+                    ((none) (if (= (- e1 s1) (- e2 s2)) (option::none) (option::some (+ s1 n))))))))))))) 
 
 ;; The `string-trim` family. `bag` is the set of characters to strip, spelled
 ;; as a string (CL takes any character sequence; a string *is* the character
 ;; sequence this language has). A free `defun` with an `&optional` default of
 ;; the usual whitespace — the same history as `digit-weight` above: written
-;; before `defmethod` could take `&optional`, and left alone once it could.
+;; before a method could take `&optional`, and left alone once it could.
 (module %internal (pub defun char-in-bag ((c char) (bag string)) bool
   (let ((i 0) (n (length bag)) (hit false))
     (progn
@@ -1063,49 +1115,57 @@ pub const SOURCE_TEMPLATE: &str = r##"
 
 ;; `string-capitalize`: each word's first character up, the rest down, where a
 ;; word is a maximal run of alphanumerics — CL's own definition.
-(defmethod capitalize ((self string)) string
-  (let ((out "") (i 0) (n (length self)) (in-word false))
-    (progn
-      (while (< i n)
-        (let ((c (ref self i)))
-          (progn
-            (if (alphanumericp c)
-                (progn
-                  (setf out (append out (char->string (if in-word (%internal::ascii-downcase-char c) (%internal::ascii-upcase-char c)))))
-                  (setf in-word true))
-                (progn (setf out (append out (char->string c))) (setf in-word false)))
-            (setf i (+ i 1)))))
-      out)))
+(impl string
+  (capitalize (self) string
+    (let ((out "") (i 0) (n (length self)) (in-word false))
+      (progn
+        (while (< i n)
+          (let ((c (ref self i)))
+            (progn
+              (if (alphanumericp c)
+                  (progn
+                    (setf out (append out (char->string (if in-word (%internal::ascii-downcase-char c) (%internal::ascii-upcase-char c)))))
+                    (setf in-word true))
+                  (progn (setf out (append out (char->string c))) (setf in-word false)))
+              (setf i (+ i 1)))))
+        out))))
 
 ;; `split`: the pieces of `self` between occurrences of `sep`. Not CL (which
 ;; has no splitter at all), but the operation every program that reads lines
 ;; ends up writing. Adjacent separators produce empty pieces, and an empty
 ;; separator is rejected rather than looping forever.
-(defmethod split ((self string) (sep string)) Vector<string>
-  (let ((out (the Vector<string> (Vector::new))) (rest self) (going true))
-    (progn
-      (if (= (length sep) 0) (panic "split: the separator must not be empty") ())
-      (while going
-        (match (search rest sep)
-          ((some k)
-           (progn
-             (push out (substring rest 0 k))
-             (setf rest (substring rest (+ k (length sep)) (length rest)))
-             ()))
-          ((none) (progn (push out rest) (setf going false) ()))))
-      out)))
+(impl string
+  (split (self (sep string)) Vector<string>
+    (let ((out (the Vector<string> (Vector::new))) (rest self) (going true))
+      (progn
+        (if (= (length sep) 0) (panic "split: the separator must not be empty") ())
+        (while going
+          (match (search rest sep)
+            ((some k)
+             (progn
+               (push out (substring rest 0 k))
+               (setf rest (substring rest (+ k (length sep)) (length rest)))
+               ()))
+            ((none) (progn (push out rest) (setf going false) ()))))
+        out))))
 
 ;; `to-string`: a value's `~a` rendering as a string. CL reaches this through
 ;; `princ-to-string`/`write-to-string` (Phase 8a); this is the receiver-first
 ;; form, per scalar type rather than as one generic `defun` because `format`'s
 ;; `&rest` demands a concretely Sexpr-encodable element type and rejects a
 ;; type variable outright.
-(defmethod to-string ((self int)) string (format false "~a" self))
-(defmethod to-string ((self i32)) string (format false "~a" self))
-(defmethod to-string ((self f64)) string (format false "~a" self))
-(defmethod to-string ((self bool)) string (format false "~a" self))
-(defmethod to-string ((self char)) string (char->string self))
-(defmethod to-string ((self string)) string self)
+(impl int
+  (to-string (self) string (format false "~a" self)))
+(impl i32
+  (to-string (self) string (format false "~a" self)))
+(impl f64
+  (to-string (self) string (format false "~a" self)))
+(impl bool
+  (to-string (self) string (format false "~a" self)))
+(impl char
+  (to-string (self) string (char->string self)))
+(impl string
+  (to-string (self) string self))
 
 ;; `sort`/`insert-sorted`/`member`/`assoc`/`every`/`any` (user-facing `Sexpr`
 ;; list operations) were removed with the rest of the `Sexpr` list surface
@@ -1150,7 +1210,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; binding type from the scrutinee's own type (`next`'s return, `Option<Item>`)
 ;; the same way it already does for every other `match`, so this needs no
 ;; checker-level special form — `(next tmp)` resolves through the ordinary
-;; instance-method/trait-bound call machinery (`Checker::check_instance_method`),
+;; instance-method/trait-bound call machinery (`Checker::receiver_method`),
 ;; concrete or `where`-bounded type variable alike.
 (defmacro doiter (spec &rest body)
   (let ((var (sexpr-car spec))
@@ -1443,7 +1503,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (setf self::pos (+ self::pos 1))
           (Option::some v))
         (Option::none))))
-(defmethod iter ((self Vector<T>)) vector-iter<T> (vector-iter::new self 0))
+(impl Vector<T>
+  (iter (self) vector-iter<T> (make-instance 'vector-iter :vec self :pos 0)))
 
 ;; Generic collection combinators (redesign Phase 4). Each takes an
 ;; *iterator* — any type implementing the `Iter` trait — rather than one
@@ -1458,7 +1519,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; one of the function's own type parameters, inferred at each call site from
 ;; the predicate/mapping function's argument type and verified against the
 ;; iterator's real `Item` (`Checker::check_call`'s where-bound validation).
-;; This is why they are generic `defun`s, not `defmethod`s: `map`/`foldl`/
+;; This is why they are generic `defun`s, not methods: `map`/`foldl`/
 ;; `foldr` need type variables (`U`/`B`, the mapped element / accumulator)
 ;; beyond the receiver's, which a method — generic only through its owner's
 ;; parameters — cannot introduce.
@@ -1721,7 +1782,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; typed list node — is a different thing entirely, built/walked through the
 ;; `sexpr-*` island layer (`sexpr-cons`/`sexpr-car`/`sexpr-cdr`), never this
 ;; pair. Mutate a pair field with `(setf p::car v)`.
-(defun cons<A,B> ((a A) (b B)) cons-cell<A,B> (cons-cell::new a b))
+(defun cons<A,B> ((a A) (b B)) cons-cell<A,B> (make-instance 'cons-cell :car a :cdr b))
 
 ;; CL's 2-argument `floor`/`ceiling`/`round`/`truncate` (`(floor 7 2) => 3,
 ;; 1`): a division that reports both quotient and remainder. CL returns them
@@ -1730,7 +1791,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; above are already a *generic, statically-typed* pair (`cons-cell<A,B>`,
 ;; not a homogeneous list), so the two results fit it directly with no new
 ;; mechanism: `(car (floor-div x y))`/`(cdr (floor-div x y))`. Named `*-div`
-;; rather than reusing `floor` etc. outright because `defmethod` dispatches
+;; rather than reusing `floor` etc. outright because a method dispatches
 ;; on receiver *type*, not arity — one name can't hold both the existing
 ;; unary rounding method and a binary one on the same receiver type.
 ;;
@@ -1747,58 +1808,61 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; helper since it needs the opposite (truncated) remainder, already
 ;; available as `rem`.
 ;; --- int ---
-(defmethod floor-div ((self int) (b int)) cons-cell<int,int>
-  (let ((r (mod self b))) (cons (/ (- self r) b) r)))
-(defmethod truncate-div ((self int) (b int)) cons-cell<int,int>
-  (cons (/ self b) (rem self b)))
-(defmethod ceiling-div ((self int) (b int)) cons-cell<int,int>
-  (let ((fd (floor-div self b)))
-    (if (= (cdr fd) 0) fd
-        (let ((q (+ (car fd) 1))) (cons q (- self (* q b)))))))
-(defmethod round-div ((self int) (b int)) cons-cell<int,int>
-  (let ((fd (floor-div self b)))
-    (let ((fq (car fd)) (fr (cdr fd)))
-      (let ((afr2 (abs (* fr 2))) (ab (abs b)))
-        (if (< afr2 ab) fd
-            (if (> afr2 ab) (let ((q (+ fq 1))) (cons q (- self (* q b))))
-                (if (= (mod fq 2) 0) fd
-                    (let ((q (+ fq 1))) (cons q (- self (* q b)))))))))))
+(impl int
+  (floor-div (self (b int)) cons-cell<int,int>
+    (let ((r (mod self b))) (cons (/ (- self r) b) r)))
+  (truncate-div (self (b int)) cons-cell<int,int>
+    (cons (/ self b) (rem self b)))
+  (ceiling-div (self (b int)) cons-cell<int,int>
+    (let ((fd (floor-div self b)))
+      (if (= (cdr fd) 0) fd
+          (let ((q (+ (car fd) 1))) (cons q (- self (* q b)))))))
+  (round-div (self (b int)) cons-cell<int,int>
+    (let ((fd (floor-div self b)))
+      (let ((fq (car fd)) (fr (cdr fd)))
+        (let ((afr2 (abs (* fr 2))) (ab (abs b)))
+          (if (< afr2 ab) fd
+              (if (> afr2 ab) (let ((q (+ fq 1))) (cons q (- self (* q b))))
+                  (if (= (mod fq 2) 0) fd
+                      (let ((q (+ fq 1))) (cons q (- self (* q b))))))))))))
 
 ;; --- i32 ---
-(defmethod floor-div ((self i32) (b i32)) cons-cell<i32,i32>
-  (let ((r (mod self b))) (cons (/ (- self r) b) r)))
-(defmethod truncate-div ((self i32) (b i32)) cons-cell<i32,i32>
-  (cons (/ self b) (rem self b)))
-(defmethod ceiling-div ((self i32) (b i32)) cons-cell<i32,i32>
-  (let ((fd (floor-div self b)))
-    (if (= (cdr fd) 0) fd
-        (let ((q (+ (car fd) 1))) (cons q (- self (* q b)))))))
-(defmethod round-div ((self i32) (b i32)) cons-cell<i32,i32>
-  (let ((fd (floor-div self b)))
-    (let ((fq (car fd)) (fr (cdr fd)))
-      (let ((afr2 (abs (* fr 2))) (ab (abs b)))
-        (if (< afr2 ab) fd
-            (if (> afr2 ab) (let ((q (+ fq 1))) (cons q (- self (* q b))))
-                (if (= (mod fq 2) 0) fd
-                    (let ((q (+ fq 1))) (cons q (- self (* q b)))))))))))
+(impl i32
+  (floor-div (self (b i32)) cons-cell<i32,i32>
+    (let ((r (mod self b))) (cons (/ (- self r) b) r)))
+  (truncate-div (self (b i32)) cons-cell<i32,i32>
+    (cons (/ self b) (rem self b)))
+  (ceiling-div (self (b i32)) cons-cell<i32,i32>
+    (let ((fd (floor-div self b)))
+      (if (= (cdr fd) 0) fd
+          (let ((q (+ (car fd) 1))) (cons q (- self (* q b)))))))
+  (round-div (self (b i32)) cons-cell<i32,i32>
+    (let ((fd (floor-div self b)))
+      (let ((fq (car fd)) (fr (cdr fd)))
+        (let ((afr2 (abs (* fr 2))) (ab (abs b)))
+          (if (< afr2 ab) fd
+              (if (> afr2 ab) (let ((q (+ fq 1))) (cons q (- self (* q b))))
+                  (if (= (mod fq 2) 0) fd
+                      (let ((q (+ fq 1))) (cons q (- self (* q b))))))))))))
 
 ;; --- f64 ---
-(defmethod floor-div ((self f64) (b f64)) cons-cell<f64,f64>
-  (let ((r (mod self b))) (cons (/ (- self r) b) r)))
-(defmethod truncate-div ((self f64) (b f64)) cons-cell<f64,f64>
-  (cons (truncate (/ self b)) (rem self b)))
-(defmethod ceiling-div ((self f64) (b f64)) cons-cell<f64,f64>
-  (let ((fd (floor-div self b)))
-    (if (= (cdr fd) 0.0) fd
-        (let ((q (+ (car fd) 1.0))) (cons q (- self (* q b)))))))
-(defmethod round-div ((self f64) (b f64)) cons-cell<f64,f64>
-  (let ((fd (floor-div self b)))
-    (let ((fq (car fd)) (fr (cdr fd)))
-      (let ((afr2 (abs (* fr 2.0))) (ab (abs b)))
-        (if (< afr2 ab) fd
-            (if (> afr2 ab) (let ((q (+ fq 1.0))) (cons q (- self (* q b))))
-                (if (= (mod fq 2.0) 0.0) fd
-                    (let ((q (+ fq 1.0))) (cons q (- self (* q b)))))))))))
+(impl f64
+  (floor-div (self (b f64)) cons-cell<f64,f64>
+    (let ((r (mod self b))) (cons (/ (- self r) b) r)))
+  (truncate-div (self (b f64)) cons-cell<f64,f64>
+    (cons (truncate (/ self b)) (rem self b)))
+  (ceiling-div (self (b f64)) cons-cell<f64,f64>
+    (let ((fd (floor-div self b)))
+      (if (= (cdr fd) 0.0) fd
+          (let ((q (+ (car fd) 1.0))) (cons q (- self (* q b)))))))
+  (round-div (self (b f64)) cons-cell<f64,f64>
+    (let ((fd (floor-div self b)))
+      (let ((fq (car fd)) (fr (cdr fd)))
+        (let ((afr2 (abs (* fr 2.0))) (ab (abs b)))
+          (if (< afr2 ab) fd
+              (if (> afr2 ab) (let ((q (+ fq 1.0))) (cons q (- self (* q b))))
+                  (if (= (mod fq 2.0) 0.0) fd
+                      (let ((q (+ fq 1.0))) (cons q (- self (* q b))))))))))))
 
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
@@ -1833,7 +1897,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
           (setf self::pos (+ self::pos 1))
           (Option::some e))
         (Option::none))))
-(defmethod iter ((self HashTable<K,V>)) hashtable-iter<K,V> (hashtable-iter::new (entries self) 0))
+(impl HashTable<K,V>
+  (iter (self) hashtable-iter<K,V> (make-instance 'hashtable-iter :snapshot (entries self) :pos 0)))
 
 ;; CL's `maphash` and `hash-table-size`, receiver-first and without the type
 ;; name in the method name (§1.1 of cl-parity-plan.md) — `(maphash h f)` and
@@ -1843,15 +1908,15 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; user-visible capacity distinct from its occupancy, and reporting a made-up
 ;; number would be worse than reporting the real one. CL only promises that
 ;; `hash-table-size` is a non-negative integer.
-(pub defmethod maphash ((self HashTable<K,V>) (f (fn (K V) ()))) ()
-  "Call `f` on every key/value pair, in no particular order. CL's `maphash`."
-  (doiter (e (iter self)) (f (car e) (cdr e))))
-
-(pub defmethod size ((self HashTable<K,V>)) int
-  "How many entries the table holds. CL's `hash-table-size`, which this
+(impl HashTable<K,V>
+  (pub maphash (self (f (fn (K V) ()))) ()
+    "Call `f` on every key/value pair, in no particular order. CL's `maphash`."
+    (doiter (e (iter self)) (f (car e) (cdr e))))
+  (pub size (self) int
+    "How many entries the table holds. CL's `hash-table-size`, which this
 language reports as the occupancy — a Rust `HashMap` has no separate
 user-visible capacity."
-  (count self))
+    (count self)))
 
 ;; `Eq`/`Ord` (redesign Phase 6.5): user-visible equality/ordering *traits*, so
 ;; `member`/`assoc`/`find`/`position`/`count` below can require `(where (Eq A))`
@@ -2048,28 +2113,27 @@ user-visible capacity."
           (setf i (+ i 1))))
       found))))
 
-(pub defmethod get ((self HashTable<K,V>) (k K)) Option<V>
-  (where (Hash K))
-  "The value `k` maps to, or `none`. CL's `gethash`."
-  (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
-    (if (< i 0) (Option::none) (Option::some (bucket-value self h i)))))
-
-(pub defmethod set ((self HashTable<K,V>) (k K) (v V)) ()
-  (where (Hash K))
-  "Maps `k` to `v`, replacing whatever it mapped to before. CL's
+(impl HashTable<K,V>
+  (pub get (self (k K)) Option<V>
+    (where (Hash K))
+    "The value `k` maps to, or `none`. CL's `gethash`."
+    (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
+      (if (< i 0) (Option::none) (Option::some (bucket-value self h i)))))
+  (pub set (self (k K) (v V)) ()
+    (where (Hash K))
+    "Maps `k` to `v`, replacing whatever it mapped to before. CL's
    `(setf (gethash k table) v)`."
-  (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
-    (bucket-put self h (if (< i 0) (bucket-count self h) i) k v)))
-
-(pub defmethod remove ((self HashTable<K,V>) (k K)) Option<V>
-  (where (Hash K))
-  "Removes `k` and answers the value it held, or `none`. CL's `remhash`
+    (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
+      (bucket-put self h (if (< i 0) (bucket-count self h) i) k v)))
+  (pub remove (self (k K)) Option<V>
+    (where (Hash K))
+    "Removes `k` and answers the value it held, or `none`. CL's `remhash`
    answers a boolean; answering the value says that and more."
-  (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
-    (if (< i 0)
-        (Option::none)
-        (let ((v (bucket-value self h i)))
-          (progn (bucket-delete self h i) (Option::some v))))))
+    (let* ((h (sxhash k)) (i (%internal::hashtable-bucket-index self h k)))
+      (if (< i 0)
+          (Option::none)
+          (let ((v (bucket-value self h i)))
+            (progn (bucket-delete self h i) (Option::some v)))))))
 
 ;; ---------------------------------------------------------------------
 ;; The arithmetic traits.
@@ -2131,13 +2195,19 @@ user-visible capacity."
 ;; `i32` (integer) and `f64` (float) methods above carry — floored for
 ;; `mod`, truncated for `rem`. The integer widths get `mod` from the built-in
 ;; table, so only `f32` needs one here.
-(defmethod mod ((self f32) (b f32)) f32 (- self (* b (floor (/ self b)))))
-(defmethod rem ((self f32) (b f32)) f32 (- self (* b (truncate (/ self b)))))
-(defmethod rem ((self i8   ) (b i8   )) i8    (- self (* b (/ self b))))
-(defmethod rem ((self i16  ) (b i16  )) i16   (- self (* b (/ self b))))
-(defmethod rem ((self u8   ) (b u8   )) u8    (- self (* b (/ self b))))
-(defmethod rem ((self u16  ) (b u16  )) u16   (- self (* b (/ self b))))
-(defmethod rem ((self u32  ) (b u32  )) u32   (- self (* b (/ self b))))
+(impl f32
+  (mod (self (b f32)) f32 (- self (* b (floor (/ self b)))))
+  (rem (self (b f32)) f32 (- self (* b (truncate (/ self b))))))
+(impl i8
+  (rem (self (b i8   )) i8    (- self (* b (/ self b)))))
+(impl i16
+  (rem (self (b i16  )) i16   (- self (* b (/ self b)))))
+(impl u8
+  (rem (self (b u8   )) u8    (- self (* b (/ self b)))))
+(impl u16
+  (rem (self (b u16  )) u16   (- self (* b (/ self b)))))
+(impl u32
+  (rem (self (b u32  )) u32   (- self (* b (/ self b)))))
 
 ;; The impls. Each is the built-in operator under the trait's name.
 (impl Add i32    (add ((self Self) (other Self)) Self (+ self other)))
@@ -2269,11 +2339,12 @@ user-visible capacity."
 ;; the two that did not, and they now do. The other operands keep CL's
 ;; relative order, so `(dpb newbyte spec n)` becomes `(dpb n newbyte spec)`.
 ;;
-;; These are generic free functions rather than one `defmethod` per width:
+;; These are generic free functions rather than one method per width:
 ;; the bodies below are identical text at every width, so eight copies of
 ;; each of five definitions would be forty definitions saying one thing.
-(defmethod byte-size ((self cons-cell<int,int>)) int (car self))
-(defmethod byte-position ((self cons-cell<int,int>)) int (cdr self))
+(impl cons-cell<int,int>
+  (byte-size (self) int (car self))
+  (byte-position (self) int (cdr self)))
 (defun byte ((size int) (position int)) cons-cell<int,int> (cons size position))
 
 ;; The low `size` bits set, in `sample`'s own type.
@@ -2620,8 +2691,8 @@ user-visible capacity."
 ;; The rest of CL's list/sequence catalog — cl-parity-plan.md Phase 3a/3b/3c.
 ;;
 ;; Same shape as the `Iter` library above and for the same reason: these are
-;; generic `defun`s over `(where (Iter I (Item A)))`, not `defmethod`s, because
-;; a `defmethod` resolves by the receiver's *exact* type and would have to be
+;; generic `defun`s over `(where (Iter I (Item A)))`, not methods, because
+;; a method resolves by the receiver's *exact* type and would have to be
 ;; written once per collection. `Vector<T>` reaches them through `(iter v)`,
 ;; exactly as `map`/`filter` are already reached.
 ;;
@@ -2752,15 +2823,16 @@ user-visible capacity."
 ;; CL's `make-list`/`make-sequence`: `n` copies of `x`. A static method, so it
 ;; reads like `Vector::new` — and, like `Vector::new`, its type argument comes
 ;; from the surrounding expected type, so a bare `let` binding needs `the`.
-(defmethod filled (Vector<T> (n int) (x T)) Vector<T>
-  (let ((out (the Vector<T> (Vector::new))) (i 0))
-    (progn (while (< i n) (progn (push out x) (setf i (+ i 1)))) out)))
+(impl Vector<T>
+  (filled ((n int) (x T)) Vector<T>
+    (let ((out (the Vector<T> (Vector::new))) (i 0))
+      (progn (while (< i n) (progn (push out x) (setf i (+ i 1)))) out))))
 
 ;; CL's `caar`..`cddddr`, over *nested pairs* rather than lists: `cadr` wants a
 ;; `cons-cell<A,cons-cell<B,C>>`, which is what `(cons 1 (cons 2 3))` builds.
-;; Free `defun`s rather than `defmethod`s on `cons-cell` — the receiver of a
-;; `defmethod` only binds type variables that sit at the *top level* of its
-;; type arguments (`check_defmethod`'s `written_vars`), so `((self
+;; Free `defun`s rather than methods on `cons-cell` — the receiver of a
+;; method only binds type variables that sit at the *top level* of its
+;; type arguments (`check_defmethod_in_form`'s `written_vars`), so `((self
 ;; cons-cell<A,cons-cell<B,C>>))` leaves `B`/`C` unbound and `car` stops
 ;; resolving on it. Generated mechanically; the type of `cXr` is read
 ;; right-to-left, one `cons-cell` nesting per letter.
@@ -3145,31 +3217,32 @@ user-visible capacity."
 ;; fill-pointer vector and a simple one has nothing to attach to.
 ;;
 ;; The receivers spell `Vector`'s type parameter `T` because that is the name
-;; `Vector<T>` itself was declared with — a generic `defmethod`'s registered
+;; `Vector<T>` itself was declared with — a generic method's registered
 ;; signature is rewritten into the owner's parameter names, so any name works,
 ;; but matching keeps the two readable side by side.
-(defmethod set-contents ((self Vector<T>) (src Vector<T>)) Vector<T>
-  "Replaces every element of `self` with `src`'s, in place, changing its
+(impl Vector<T>
+  (set-contents (self (src Vector<T>)) Vector<T>
+    "Replaces every element of `self` with `src`'s, in place, changing its
    length. The shared bottom half of the `delete`/`n...` family: each of them
    computes the new contents with the corresponding non-destructive function
    above and then installs the answer here, rather than repeating a
    compaction loop per operation."
-  (progn
-    (while (> (len self) 0) (progn (pop self) ()))
-    (doiter (x (iter src)) (push self x))
-    self))
-(defmethod nreverse ((self Vector<T>)) Vector<T>
-  (let ((i 0) (j (- (len self) 1)))
     (progn
-      (while (< i j)
-        (let ((tmp (get self i)))
-          (progn
-            (set self i (get self j))
-            (set self j tmp)
-            (setf i (+ i 1))
-            (setf j (- j 1))
-            ())))
-      self)))
+      (while (> (len self) 0) (progn (pop self) ()))
+      (doiter (x (iter src)) (push self x))
+      self))
+  (nreverse (self) Vector<T>
+    (let ((i 0) (j (- (len self) 1)))
+      (progn
+        (while (< i j)
+          (let ((tmp (get self i)))
+            (progn
+              (set self i (get self j))
+              (set self j tmp)
+              (setf i (+ i 1))
+              (setf j (- j 1))
+              ())))
+        self))))
 ;; **The keywords are CL's own set for each operation**, and each one is
 ;; unpacked here rather than handed on to the non-destructive function above.
 ;; A keyword parameter arrives as an `Option`, while the callee's keyword
@@ -3178,131 +3251,135 @@ user-visible capacity."
 ;; either direction. What the two halves do share is the *core* that does the
 ;; work (`seq-edit-core`, `seq-dedup-core`), which takes the resolved
 ;; closures; only the two `let` lines that resolve them repeat.
-(defmethod delete ((self Vector<T>) (x T)
-                   &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
-                        (start int) (end int) (from-end bool) (count int))
-    Vector<T>
-  (where (Eq T))
-  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
-    (let ((same (lambda ((p T) (q T)) bool
-                  (match test
-                    ((some f) (f p (proj q)))
-                    ((none) (match test-not
-                              ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+(impl Vector<T>
+  (delete (self (x T)
+                     &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
+                          (start int) (end int) (from-end bool) (count int))
+      Vector<T>
+    (where (Eq T))
+    (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+      (let ((same (lambda ((p T) (q T)) bool
+                    (match test
+                      ((some f) (f p (proj q)))
+                      ((none) (match test-not
+                                ((some g) (not (g p (proj q))))
+                                ((none) (equals p (proj q)))))))))
+        (set-contents self
+          (%internal::seq-edit-core (iter self)
+            (lambda ((i int) (y T)) bool
+              (if (%internal::seq-in-bounds i start end) (same x y) false))
+            (lambda ((y T)) Option<T> (Option::none))
+            (%internal::seq-limit count) (%internal::seq-flag from-end))))))
+  (delete-if (self (pred (fn (T) bool))
+                        &key (key (fn (T) T)) (start int) (end int) (from-end bool) (count int))
+      Vector<T>
+    (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
       (set-contents self
         (%internal::seq-edit-core (iter self)
           (lambda ((i int) (y T)) bool
-            (if (%internal::seq-in-bounds i start end) (same x y) false))
+            (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
           (lambda ((y T)) Option<T> (Option::none))
-          (%internal::seq-limit count) (%internal::seq-flag from-end))))))
-(defmethod delete-if ((self Vector<T>) (pred (fn (T) bool))
-                      &key (key (fn (T) T)) (start int) (end int) (from-end bool) (count int))
-    Vector<T>
-  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
-    (set-contents self
-      (%internal::seq-edit-core (iter self)
-        (lambda ((i int) (y T)) bool
-          (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
-        (lambda ((y T)) Option<T> (Option::none))
-        (%internal::seq-limit count) (%internal::seq-flag from-end)))))
-(defmethod delete-if-not ((self Vector<T>) (pred (fn (T) bool))
-                          &key (key (fn (T) T)) (start int) (end int) (from-end bool) (count int))
-    Vector<T>
-  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
-    (set-contents self
-      (%internal::seq-edit-core (iter self)
-        (lambda ((i int) (y T)) bool
-          (if (%internal::seq-in-bounds i start end) (not (pred (proj y))) false))
-        (lambda ((y T)) Option<T> (Option::none))
-        (%internal::seq-limit count) (%internal::seq-flag from-end)))))
-(defmethod delete-duplicates ((self Vector<T>)
-                              &key (key (fn (T) T)) (test (fn (T T) bool))
-                                   (test-not (fn (T T) bool))
-                                   (start int) (end int) (from-end bool))
-    Vector<T>
-  (where (Eq T))
-  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
-    (let ((same (lambda ((p T) (q T)) bool
-                  (match test
-                    ((some f) (f (proj p) (proj q)))
-                    ((none) (match test-not
-                              ((some g) (not (g (proj p) (proj q))))
-                              ((none) (equals (proj p) (proj q)))))))))
-      (set-contents self
-        (%internal::seq-dedup-core (iter self) same start end (%internal::seq-flag from-end))))))
-(defmethod nsubstitute ((self Vector<T>) (new T) (old T)
-                        &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
-                             (start int) (end int) (from-end bool) (count int))
-    Vector<T>
-  (where (Eq T))
-  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
-    (let ((same (lambda ((p T) (q T)) bool
-                  (match test
-                    ((some f) (f p (proj q)))
-                    ((none) (match test-not
-                              ((some g) (not (g p (proj q))))
-                              ((none) (equals p (proj q)))))))))
+          (%internal::seq-limit count) (%internal::seq-flag from-end)))))
+  (delete-if-not (self (pred (fn (T) bool))
+                            &key (key (fn (T) T)) (start int) (end int) (from-end bool) (count int))
+      Vector<T>
+    (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
       (set-contents self
         (%internal::seq-edit-core (iter self)
           (lambda ((i int) (y T)) bool
-            (if (%internal::seq-in-bounds i start end) (same old y) false))
+            (if (%internal::seq-in-bounds i start end) (not (pred (proj y))) false))
+          (lambda ((y T)) Option<T> (Option::none))
+          (%internal::seq-limit count) (%internal::seq-flag from-end)))))
+  (delete-duplicates (self
+                                &key (key (fn (T) T)) (test (fn (T T) bool))
+                                     (test-not (fn (T T) bool))
+                                     (start int) (end int) (from-end bool))
+      Vector<T>
+    (where (Eq T))
+    (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+      (let ((same (lambda ((p T) (q T)) bool
+                    (match test
+                      ((some f) (f (proj p) (proj q)))
+                      ((none) (match test-not
+                                ((some g) (not (g (proj p) (proj q))))
+                                ((none) (equals (proj p) (proj q)))))))))
+        (set-contents self
+          (%internal::seq-dedup-core (iter self) same start end (%internal::seq-flag from-end))))))
+  (nsubstitute (self (new T) (old T)
+                          &key (key (fn (T) T)) (test (fn (T T) bool)) (test-not (fn (T T) bool))
+                               (start int) (end int) (from-end bool) (count int))
+      Vector<T>
+    (where (Eq T))
+    (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+      (let ((same (lambda ((p T) (q T)) bool
+                    (match test
+                      ((some f) (f p (proj q)))
+                      ((none) (match test-not
+                                ((some g) (not (g p (proj q))))
+                                ((none) (equals p (proj q)))))))))
+        (set-contents self
+          (%internal::seq-edit-core (iter self)
+            (lambda ((i int) (y T)) bool
+              (if (%internal::seq-in-bounds i start end) (same old y) false))
+            (lambda ((y T)) Option<T> (Option::some new))
+            (%internal::seq-limit count) (%internal::seq-flag from-end))))))
+  (nsubstitute-if (self (new T) (pred (fn (T) bool))
+                             &key (key (fn (T) T)) (start int) (end int)
+                                  (from-end bool) (count int))
+      Vector<T>
+    (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
+      (set-contents self
+        (%internal::seq-edit-core (iter self)
+          (lambda ((i int) (y T)) bool
+            (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
           (lambda ((y T)) Option<T> (Option::some new))
-          (%internal::seq-limit count) (%internal::seq-flag from-end))))))
-(defmethod nsubstitute-if ((self Vector<T>) (new T) (pred (fn (T) bool))
-                           &key (key (fn (T) T)) (start int) (end int)
-                                (from-end bool) (count int))
-    Vector<T>
-  (let ((proj (match key ((some f) f) ((none) (lambda ((y T)) T y)))))
-    (set-contents self
-      (%internal::seq-edit-core (iter self)
-        (lambda ((i int) (y T)) bool
-          (if (%internal::seq-in-bounds i start end) (pred (proj y)) false))
-        (lambda ((y T)) Option<T> (Option::some new))
-        (%internal::seq-limit count) (%internal::seq-flag from-end)))))
-(defmethod nbutlast ((self Vector<T>)) Vector<T>
-  (progn (if (> (len self) 0) (progn (pop self) ()) ()) self))
+          (%internal::seq-limit count) (%internal::seq-flag from-end)))))
+  (nbutlast (self) Vector<T>
+    (progn (if (> (len self) 0) (progn (pop self) ()) ()) self)))
 ;; CL's `fill`/`replace`/`map-into` all write into an existing sequence and
 ;; leave its length alone, copying `(min (len self) (len src))` elements.
 ;; `fill` takes CL's `:start`/`:end`, and `replace` CL's four-window set —
 ;; whose numbering means here exactly what it means in CL, since the receiver
 ;; is CL's own `sequence-1`.
-(defmethod fill ((self Vector<T>) (x T) &key (start int) (end int)) Vector<T>
-  (let ((i 0))
-    (progn
-      (while (< i (len self))
-        (progn (when (%internal::seq-in-bounds i start end) (set self i x)) (setf i (+ i 1))))
-      self)))
-(defmethod replace ((self Vector<T>) (src Vector<T>)
-                    &key (start1 int) (end1 int) (start2 int) (end2 int))
-    Vector<T>
-  (let ((i (%internal::seq-window-start start1)) (j (%internal::seq-window-start start2))
-        (stop1 (%internal::seq-window-end end1 (len self))) (stop2 (%internal::seq-window-end end2 (len src))))
-    (progn
-      (while (if (< i stop1) (< j stop2) false)
-        (progn (set self i (get src j)) (setf i (+ i 1)) (setf j (+ j 1))))
-      self)))
-(defmethod map-into ((self Vector<T>) (src Vector<T>) (f (fn (T) T))) Vector<T>
-  (let ((i 0) (n (min (len self) (len src))))
-    (progn (while (< i n) (progn (set self i (f (get src i))) (setf i (+ i 1)))) self)))
+(impl Vector<T>
+  (fill (self (x T) &key (start int) (end int)) Vector<T>
+    (let ((i 0))
+      (progn
+        (while (< i (len self))
+          (progn (when (%internal::seq-in-bounds i start end) (set self i x)) (setf i (+ i 1))))
+        self)))
+  (replace (self (src Vector<T>)
+                      &key (start1 int) (end1 int) (start2 int) (end2 int))
+      Vector<T>
+    (let ((i (%internal::seq-window-start start1)) (j (%internal::seq-window-start start2))
+          (stop1 (%internal::seq-window-end end1 (len self))) (stop2 (%internal::seq-window-end end2 (len src))))
+      (progn
+        (while (if (< i stop1) (< j stop2) false)
+          (progn (set self i (get src j)) (setf i (+ i 1)) (setf j (+ j 1))))
+        self)))
+  (map-into (self (src Vector<T>) (f (fn (T) T))) Vector<T>
+    (let ((i 0) (n (min (len self) (len src))))
+      (progn (while (< i n) (progn (set self i (f (get src i))) (setf i (+ i 1)))) self))))
 ;; CL's `nconc` splices by rewriting the last cons of the first list, which is
 ;; why it is the one destructive operation (D4) genuinely warned about. Here
 ;; there is no last cons and nothing is shared: `other`'s elements are simply
 ;; appended into `self`, which `other` neither observes nor is affected by.
-(defmethod nconc ((self Vector<T>) (other Vector<T>)) Vector<T>
-  (progn (doiter (x (iter other)) (push self x)) self))
-(defmethod nreconc ((self Vector<T>) (other Vector<T>)) Vector<T>
-  (nconc (nreverse self) other))
+(impl Vector<T>
+  (nconc (self (other Vector<T>)) Vector<T>
+    (progn (doiter (x (iter other)) (push self x)) self))
+  (nreconc (self (other Vector<T>)) Vector<T>
+    (nconc (nreverse self) other)))
 ;; CL's `rplaca`/`rplacd`: `cons-cell`'s own field setters, returning the cell
 ;; rather than `()` so they compose the way CL's do. Deliberately *not*
 ;; offered for `Sexpr` — beyond §1.2's "no `Sexpr` list methods", a `Sexpr`
 ;; cons carries its `car`'s source span inline (`value::Cell::car_loc`), and
 ;; overwriting the `car` would leave the old element's position attached to
 ;; the new one, quietly misplacing every later diagnostic.
-(defmethod rplaca ((self cons-cell<A,B>) (x A)) cons-cell<A,B>
-  (progn (set-car self x) self))
-(defmethod rplacd ((self cons-cell<A,B>) (x B)) cons-cell<A,B>
-  (progn (set-cdr self x) self))
+(impl cons-cell<A,B>
+  (rplaca (self (x A)) cons-cell<A,B>
+    (progn (set-car self x) self))
+  (rplacd (self (x B)) cons-cell<A,B>
+    (progn (set-cdr self x) self)))
 
 ;; ---------------------------------------------------------------------------
 ;; The rest of CL's numeric catalog — cl-parity-plan.md Phase 1c.
@@ -3315,86 +3392,94 @@ user-visible capacity."
 ;; `f64` (`docs/ja/reference/functions/numbers.md` §4) — CL's undecorated names return an integer, so it is
 ;; the `f`-prefixed CL names that these match. Thin aliases, kept so ported CL
 ;; reads unchanged.
-(defmethod ffloor ((self f64)) f64 (floor self))
-(defmethod fceiling ((self f64)) f64 (ceiling self))
-(defmethod fround ((self f64)) f64 (round self))
-(defmethod ftruncate ((self f64)) f64 (truncate self))
+(impl f64
+  (ffloor (self) f64 (floor self))
+  (fceiling (self) f64 (ceiling self))
+  (fround (self) f64 (round self))
+  (ftruncate (self) f64 (truncate self)))
 
 ;; CL's `isqrt`: the greatest integer whose square does not exceed `self`.
 ;; Integer Newton, keeping the *previous* estimate and stopping when the next
 ;; one stops decreasing — testing "unchanged" instead loops forever on the
 ;; inputs where the iteration oscillates between two neighbouring values.
-(defmethod isqrt ((self int)) int
-  (if (< self 0)
-      (panic "isqrt: negative argument")
-      (if (< self 2)
-          self
-          (let ((g self) (k (/ (+ self 1) 2)))
-            (progn
-              (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
-              g)))))
-(defmethod isqrt ((self i32)) i32
-  (if (< self 0)
-      (panic "isqrt: negative argument")
-      (if (< self 2)
-          self
-          (let ((g self) (k (/ (+ self 1) 2)))
-            (progn
-              (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
-              g)))))
+(impl int
+  (isqrt (self) int
+    (if (< self 0)
+        (panic "isqrt: negative argument")
+        (if (< self 2)
+            self
+            (let ((g self) (k (/ (+ self 1) 2)))
+              (progn
+                (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
+                g))))))
+(impl i32
+  (isqrt (self) i32
+    (if (< self 0)
+        (panic "isqrt: negative argument")
+        (if (< self 2)
+            self
+            (let ((g self) (k (/ (+ self 1) 2)))
+              (progn
+                (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
+                g))))))
 
 ;; CL's integer `expt` at the fixed width, by squaring. CL answers a *ratio*
 ;; for a negative exponent; an `i32` result cannot hold one, so that case is
 ;; a panic rather than a silent truncation — convert to `ratio` first if you
 ;; want it (`int`/`ratio` already have their own `expt` above).
-(defmethod expt ((self i32) (e i32)) i32
-  (if (< e 0)
-      (panic "expt: a negative exponent on an integer is not an integer")
-      (if (= e 0)
-          1
-          (let ((half (expt self (/ e 2))))
-            (if (evenp e) (* half half) (* self (* half half)))))))
+(impl i32
+  (expt (self (e i32)) i32
+    (if (< e 0)
+        (panic "expt: a negative exponent on an integer is not an integer")
+        (if (= e 0)
+            1
+            (let ((half (expt self (/ e 2))))
+              (if (evenp e) (* half half) (* self (* half half))))))))
 
 ;; CL's float-representation accessors (CLHS 12.1.4.1). `f64` is IEEE-754
 ;; binary64 here and always will be, so `float-radix`/`float-digits`/
 ;; `float-precision` are the constants 2/53/53 rather than queries — CL allows
 ;; an implementation to fix them, and a denormal is the only case where
 ;; `float-precision` would differ, which this does not track.
-(defmethod float-radix ((self f64)) int 2)
-(defmethod float-digits ((self f64)) int 53)
-(defmethod float-precision ((self f64)) int (if (= self 0.0) 0 53))
-(defmethod float-sign ((self f64)) f64 (if (< self 0.0) -1.0 1.0))
+(impl f64
+  (float-radix (self) int 2)
+  (float-digits (self) int 53)
+  (float-precision (self) int (if (= self 0.0) 0 53))
+  (float-sign (self) f64 (if (< self 0.0) -1.0 1.0)))
 ;; `(scale-float x n)` = `x * 2^n`. Halving/doubling in a loop rather than
 ;; `(* self (expt 2.0 (int->float n)))`: `int->float` is one of the builtins
 ;; the island has no lowering for, and reaching it would make this whole
 ;; section interpreted-only (the same constraint the character section above
 ;; works under). Every step here is exact in binary floating point.
-(defmethod scale-float ((self f64) (n int)) f64
-  (let ((r self) (k (abs n)))
-    (progn
-      (if (>= n 0)
-          (while (> k 0) (progn (setf r (* r 2.0)) (setf k (- k 1)) ()))
-          (while (> k 0) (progn (setf r (/ r 2.0)) (setf k (- k 1)) ())))
-      r)))
+(impl f64
+  (scale-float (self (n int)) f64
+    (let ((r self) (k (abs n)))
+      (progn
+        (if (>= n 0)
+            (while (> k 0) (progn (setf r (* r 2.0)) (setf k (- k 1)) ()))
+            (while (> k 0) (progn (setf r (/ r 2.0)) (setf k (- k 1)) ())))
+        r))))
 ;; `decode-float`: the significand scaled into `[1/2,1)` and the exponent that
 ;; puts it back, as a pair. CL returns three values (significand, exponent,
 ;; sign); multiple values are not taken (language-design.md §0), so the sign
 ;; is `float-sign` and this pair carries the other two. The significand is
 ;; unsigned, as CL specifies.
-(defmethod decode-float ((self f64)) cons-cell<f64,int>
-  (if (= self 0.0)
-      (cons 0.0 0)
-      (let ((m (abs self)) (e 0))
-        (progn
-          (while (>= m 1.0) (progn (setf m (/ m 2.0)) (setf e (+ e 1)) ()))
-          (while (< m 0.5) (progn (setf m (* m 2.0)) (setf e (- e 1)) ()))
-          (cons m e)))))
+(impl f64
+  (decode-float (self) cons-cell<f64,int>
+    (if (= self 0.0)
+        (cons 0.0 0)
+        (let ((m (abs self)) (e 0))
+          (progn
+            (while (>= m 1.0) (progn (setf m (/ m 2.0)) (setf e (+ e 1)) ()))
+            (while (< m 0.5) (progn (setf m (* m 2.0)) (setf e (- e 1)) ()))
+            (cons m e))))))
 ;; `integer-decode-float`: the same split with the significand as an exact
 ;; integer of `float-digits` bits, so `significand * 2^exponent` is the value
 ;; exactly. An `int`, since 53 bits do not fit an `i32`.
-(defmethod integer-decode-float ((self f64)) cons-cell<int,int>
-  (let ((d (decode-float self)))
-    (cons (float->int (scale-float (car d) 53)) (- (cdr d) 53))))
+(impl f64
+  (integer-decode-float (self) cons-cell<int,int>
+    (let ((d (decode-float self)))
+      (cons (float->int (scale-float (car d) 53)) (- (cdr d) 53)))))
 
 ;; CL's `rationalize`: the *simplest* rational that reads back as exactly this
 ;; float — as against `float->ratio` (CL's `rational`), which is the exact
@@ -3411,21 +3496,22 @@ user-visible capacity."
 ;; island lowering. Every convergent that matters is well under 2^53, so the
 ;; integers are exact, and `float->ratio` on an integral float is that integer
 ;; over 1 — which is how the answer is assembled at the end.
-(defmethod rationalize ((self f64)) ratio
-  (let ((h1 1.0) (h0 0.0) (k1 0.0) (k0 1.0) (b self)
-        (out (int->ratio 0)) (going true) (guard 0))
-    (progn
-      (while going
-        (let ((a (floor b)))
-          (let ((h2 (+ (* a h1) h0)) (k2 (+ (* a k1) k0)))
-            (progn
-              (setf h0 h1) (setf h1 h2)
-              (setf k0 k1) (setf k1 k2)
-              (setf guard (+ guard 1))
-              (if (or (= (/ h2 k2) self) (> guard 40))
-                  (progn (setf out (/ (float->ratio h2) (float->ratio k2))) (setf going false) ())
-                  (progn (setf b (/ 1.0 (- b a))) ()))))))
-      out)))
+(impl f64
+  (rationalize (self) ratio
+    (let ((h1 1.0) (h0 0.0) (k1 0.0) (k0 1.0) (b self)
+          (out (int->ratio 0)) (going true) (guard 0))
+      (progn
+        (while going
+          (let ((a (floor b)))
+            (let ((h2 (+ (* a h1) h0)) (k2 (+ (* a k1) k0)))
+              (progn
+                (setf h0 h1) (setf h1 h2)
+                (setf k0 k1) (setf k1 k2)
+                (setf guard (+ guard 1))
+                (if (or (= (/ h2 k2) self) (> guard 40))
+                    (progn (setf out (/ (float->ratio h2) (float->ratio k2))) (setf going false) ())
+                    (progn (setf b (/ 1.0 (- b a))) ()))))))
+        out))))
 
 ;; CL's numeric limit constants (CLHS 12.1.4.2 / 12.1.3). A fixnum is an
 ;; `int` that fits its 63-bit immediate word; past these bounds an `int` is
@@ -3522,11 +3608,12 @@ user-visible capacity."
   "CL's `psetq`. `psetf` with places restricted to variables; same expansion."
   `(psetf ,@pairs))
 
-;; `pushnew`: push unless already present. A `defmethod` rather than a macro —
+;; `pushnew`: push unless already present. A method rather than a macro —
 ;; CL needs a macro because its `place` must be re-written, and a `Vector<T>`
 ;; mutates in place instead.
-(defmethod pushnew ((self Vector<T>) (x T)) () (where (Eq T))
-  (if (member x (iter self)) () (push self x)))
+(impl Vector<T>
+  (pushnew (self (x T)) () (where (Eq T))
+    (if (member x (iter self)) () (push self x))))
 
 ;; ---------------------------------------------------------------------------
 ;; Pretty-printer controls (CLHS 22.1.1 / 22.2 — the `*print-*` variables the
@@ -3653,7 +3740,7 @@ user-visible capacity."
         ((some x) (let ((f self::f)) (Option::some (f x))))
         ((none) (Option::none)))))
   (pub defun map<I,A,U> ((it I) (f (fn (A) U))) map-iter<I,A,U> (where (Iter I (Item A)))
-    (map-iter::new it f))
+    (make-instance 'map-iter :src it :f f))
 
   (pub defstruct filter-iter<I,A> (src I) (pred (fn (A) bool)))
   (impl Iter filter-iter<I,A> (where (Iter I (Item A)))
@@ -3666,7 +3753,7 @@ user-visible capacity."
             (break)))
         found)))
   (pub defun filter<I,A> ((it I) (pred (fn (A) bool))) filter-iter<I,A> (where (Iter I (Item A)))
-    (filter-iter::new it pred))
+    (make-instance 'filter-iter :src it :pred pred))
 
   (pub defstruct take-iter<I,A> (src I) (n int))
   (impl Iter take-iter<I,A> (where (Iter I (Item A)))
@@ -3676,7 +3763,7 @@ user-visible capacity."
           (progn (setf self::n (- self::n 1)) (next self::src))
           (Option::none))))
   (pub defun take<I,A> ((it I) (n int)) take-iter<I,A> (where (Iter I (Item A)))
-    (take-iter::new it n))
+    (make-instance 'take-iter :src it :n n))
 
   (pub defstruct take-while-iter<I,A> (src I) (pred (fn (A) bool)) (done bool))
   (impl Iter take-while-iter<I,A> (where (Iter I (Item A)))
@@ -3689,7 +3776,7 @@ user-visible capacity."
                         (if (p x) (Option::some x) (progn (setf self::done true) (Option::none)))))
             ((none) (setf self::done true) (Option::none))))))
   (pub defun take-while<I,A> ((it I) (pred (fn (A) bool))) take-while-iter<I,A> (where (Iter I (Item A)))
-    (take-while-iter::new it pred false))
+    (make-instance 'take-while-iter :src it :pred pred :done false))
 
   (pub defstruct skip-iter<I,A> (src I) (n int))
   (impl Iter skip-iter<I,A> (where (Iter I (Item A)))
@@ -3700,7 +3787,7 @@ user-visible capacity."
         (next self::src))
       (next self::src)))
   (pub defun skip<I,A> ((it I) (n int)) skip-iter<I,A> (where (Iter I (Item A)))
-    (skip-iter::new it n))
+    (make-instance 'skip-iter :src it :n n))
 
   (pub defstruct enumerate-iter<I,A> (src I) (i int))
   (impl Iter enumerate-iter<I,A> (where (Iter I (Item A)))
@@ -3710,7 +3797,7 @@ user-visible capacity."
         ((some x) (let ((i self::i)) (setf self::i (+ i 1)) (Option::some (tuple i x))))
         ((none) (Option::none)))))
   (pub defun enumerate<I,A> ((it I)) enumerate-iter<I,A> (where (Iter I (Item A)))
-    (enumerate-iter::new it 0))
+    (make-instance 'enumerate-iter :src it :i 0))
 
   (pub defstruct zip-iter<I,J,A,B> (left I) (right J))
   (impl Iter zip-iter<I,J,A,B> (where (Iter I (Item A)) (Iter J (Item B)))
@@ -3722,7 +3809,7 @@ user-visible capacity."
                     ((none) (Option::none))))
         ((none) (Option::none)))))
   (pub defun zip<I,J,A,B> ((a I) (b J)) zip-iter<I,J,A,B> (where (Iter I (Item A)) (Iter J (Item B)))
-    (zip-iter::new a b))
+    (make-instance 'zip-iter :left a :right b))
 
   (pub defstruct chain-iter<I,J,A> (left I) (right J) (left-done bool))
   (impl Iter chain-iter<I,J,A> (where (Iter I (Item A)) (Iter J (Item A)))
@@ -3734,7 +3821,7 @@ user-visible capacity."
             ((some x) (Option::some x))
             ((none) (setf self::left-done true) (next self::right))))))
   (pub defun chain<I,J,A> ((a I) (b J)) chain-iter<I,J,A> (where (Iter I (Item A)) (Iter J (Item A)))
-    (chain-iter::new a b false))
+    (make-instance 'chain-iter :left a :right b :left-done false))
 
   (pub defstruct flat-map-iter<I,A,J,B> (src I) (f (fn (A) J)) (cur Option<J>))
   (impl Iter flat-map-iter<I,A,J,B> (where (Iter I (Item A)) (Iter J (Item B)))
@@ -3754,7 +3841,7 @@ user-visible capacity."
         out)))
   (pub defun flat-map<I,A,J,B> ((it I) (f (fn (A) J))) flat-map-iter<I,A,J,B>
     (where (Iter I (Item A)) (Iter J (Item B)))
-    (flat-map-iter::new it f (the Option<J> (Option::none))))
+    (make-instance 'flat-map-iter :src it :f f :cur (the Option<J> (Option::none))))
 
   (pub defstruct iterate-iter<A> (cur A) (f (fn (A) A)) (started bool))
   (impl Iter iterate-iter<A>
@@ -3765,35 +3852,34 @@ user-visible capacity."
       (setf self::started true)
       (Option::some self::cur)))
   (pub defun iterate<A> ((seed A) (f (fn (A) A))) iterate-iter<A>
-    (iterate-iter::new seed f false))
+    (make-instance 'iterate-iter :cur seed :f f :started false))
 
   (pub defstruct repeat-iter<A> (elem A))
   (impl Iter repeat-iter<A>
     (type Item A)
     (next ((self Self)) Option<A> (Option::some self::elem)))
-  (pub defun repeat<A> ((x A)) repeat-iter<A> (repeat-iter::new x)))
+  (pub defun repeat<A> ((x A)) repeat-iter<A> (make-instance 'repeat-iter :elem x)))
 
 ;; ---------------------------------------------------------------------------
 ;; `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`: Rust's `HashSet`, `BTreeMap`
-;; and `VecDeque`. Created with `make`, as `Array<T>` is: `new` is the
-;; field-order constructor `defstruct` generates, and these fields are the
-;; representation. The method names follow `HashTable` (`get` `set` `remove`
+;; and `VecDeque`, each created with `new`. The method names follow `HashTable` (`get` `set` `remove`
 ;; `count` `clear`); a set's add is `insert`, since `add` is the `Add` trait's.
 ;; `iter` walks a snapshot, as `HashTable`'s does, so changing the collection
 ;; inside a `doiter` over it is not seen by that loop.
 
 ;; A set is a table whose values are `()`.
 (pub defstruct HashSet<T> (table HashTable<T,()>))
-(pub defmethod make (HashSet<T>) HashSet<T> (HashSet::new (the HashTable<T,()> (HashTable::new))))
-(pub defmethod insert ((self HashSet<T>) (x T)) bool (where (Hash T))
-  (if (is-some (get self::table x)) false (progn (set self::table x ()) true)))
-(pub defmethod contains ((self HashSet<T>) (x T)) bool (where (Hash T))
-  (is-some (get self::table x)))
-(pub defmethod remove ((self HashSet<T>) (x T)) bool (where (Hash T))
-  (is-some (remove self::table x)))
-(pub defmethod count ((self HashSet<T>)) int (count self::table))
-(pub defmethod clear ((self HashSet<T>)) () (clear self::table))
-(pub defmethod iter ((self HashSet<T>)) vector-iter<T> (iter (keys self::table)))
+(impl HashSet<T>
+  (pub new () HashSet<T> (make-instance 'HashSet :table (the HashTable<T,()> (HashTable::new))))
+  (pub insert (self (x T)) bool (where (Hash T))
+    (if (is-some (get self::table x)) false (progn (set self::table x ()) true)))
+  (pub contains (self (x T)) bool (where (Hash T))
+    (is-some (get self::table x)))
+  (pub remove (self (x T)) bool (where (Hash T))
+    (is-some (remove self::table x)))
+  (pub count (self) int (count self::table))
+  (pub clear (self) () (clear self::table))
+  (pub iter (self) vector-iter<T> (iter (keys self::table))))
 (impl print-object HashSet<T> (where (print-object T))
   (print-object ((self Self) (escape bool)) string
     (let ((out "#<hashset"))
@@ -3826,36 +3912,37 @@ user-visible capacity."
     (pop v)
     x)))
 (pub defstruct SortedTable<K,V> (ks Vector<K>) (vs Vector<V>))
-(pub defmethod make (SortedTable<K,V>) SortedTable<K,V>
-  (SortedTable::new (the Vector<K> (Vector::new)) (the Vector<V> (Vector::new))))
-(pub defmethod get ((self SortedTable<K,V>) (k K)) Option<V> (where (Ord K))
-  (let ((i (%internal::sorted-position self::ks k)))
-    (if (and (< i (len self::ks)) (equals (get self::ks i) k))
-        (Option::some (get self::vs i))
-        (Option::none))))
-(pub defmethod set ((self SortedTable<K,V>) (k K) (v V)) () (where (Ord K))
-  (let ((i (%internal::sorted-position self::ks k)))
-    (if (and (< i (len self::ks)) (equals (get self::ks i) k))
-        (set self::vs i v)
-        (progn (%internal::vector-insert-at self::ks i k)
-               (%internal::vector-insert-at self::vs i v)))))
-(pub defmethod remove ((self SortedTable<K,V>) (k K)) Option<V> (where (Ord K))
-  (let ((i (%internal::sorted-position self::ks k)))
-    (if (and (< i (len self::ks)) (equals (get self::ks i) k))
-        (progn (%internal::vector-remove-at self::ks i)
-               (Option::some (%internal::vector-remove-at self::vs i)))
-        (Option::none))))
-(pub defmethod count ((self SortedTable<K,V>)) int (len self::ks))
-(pub defmethod clear ((self SortedTable<K,V>)) ()
-  (while (> (len self::ks) 0) (pop self::ks) (pop self::vs)))
-(pub defmethod keys ((self SortedTable<K,V>)) Vector<K> (collect (iter self::ks)))
-(pub defmethod values ((self SortedTable<K,V>)) Vector<V> (collect (iter self::vs)))
-(pub defmethod iter ((self SortedTable<K,V>)) vector-iter<#{K V}>
-  (let ((out (the Vector<#{K V}> (Vector::new))) (i 0))
-    (while (< i (len self::ks))
-      (push out (tuple (get self::ks i) (get self::vs i)))
-      (setf i (+ i 1)))
-    (iter out)))
+(impl SortedTable<K,V>
+  (pub new () SortedTable<K,V>
+    (make-instance 'SortedTable :ks (the Vector<K> (Vector::new)) :vs (the Vector<V> (Vector::new))))
+  (pub get (self (k K)) Option<V> (where (Ord K))
+    (let ((i (%internal::sorted-position self::ks k)))
+      (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+          (Option::some (get self::vs i))
+          (Option::none))))
+  (pub set (self (k K) (v V)) () (where (Ord K))
+    (let ((i (%internal::sorted-position self::ks k)))
+      (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+          (set self::vs i v)
+          (progn (%internal::vector-insert-at self::ks i k)
+                 (%internal::vector-insert-at self::vs i v)))))
+  (pub remove (self (k K)) Option<V> (where (Ord K))
+    (let ((i (%internal::sorted-position self::ks k)))
+      (if (and (< i (len self::ks)) (equals (get self::ks i) k))
+          (progn (%internal::vector-remove-at self::ks i)
+                 (Option::some (%internal::vector-remove-at self::vs i)))
+          (Option::none))))
+  (pub count (self) int (len self::ks))
+  (pub clear (self) ()
+    (while (> (len self::ks) 0) (pop self::ks) (pop self::vs)))
+  (pub keys (self) Vector<K> (collect (iter self::ks)))
+  (pub values (self) Vector<V> (collect (iter self::vs)))
+  (pub iter (self) vector-iter<#{K V}>
+    (let ((out (the Vector<#{K V}> (Vector::new))) (i 0))
+      (while (< i (len self::ks))
+        (push out (tuple (get self::ks i) (get self::vs i)))
+        (setf i (+ i 1)))
+      (iter out))))
 (impl print-object SortedTable<K,V> (where (print-object K) (print-object V))
   (print-object ((self Self) (escape bool)) string
     (let ((out "#<sortedtable"))
@@ -3869,11 +3956,12 @@ user-visible capacity."
 ;; side moves half of the other side across, so a run of pops from one end
 ;; costs a constant amount per element.
 (pub defstruct Deque<T> (before Vector<T>) (after Vector<T>))
-(pub defmethod make (Deque<T>) Deque<T>
-  (Deque::new (the Vector<T> (Vector::new)) (the Vector<T> (Vector::new))))
-(pub defmethod count ((self Deque<T>)) int (+ (len self::before) (len self::after)))
-(pub defmethod push-front ((self Deque<T>) (x T)) () (push self::before x))
-(pub defmethod push-back ((self Deque<T>) (x T)) () (push self::after x))
+(impl Deque<T>
+  (pub new () Deque<T>
+    (make-instance 'Deque :before (the Vector<T> (Vector::new)) :after (the Vector<T> (Vector::new))))
+  (pub count (self) int (+ (len self::before) (len self::after)))
+  (pub push-front (self (x T)) () (push self::before x))
+  (pub push-back (self (x T)) () (push self::after x)))
 (module %internal (pub defun deque-refill<T> ((into Vector<T>) (from Vector<T>)) ()
   (let ((n (len from)) (h (/ (+ (len from) 1) 2)) (rest (the Vector<T> (Vector::new))))
     (let ((i (- h 1)))
@@ -3881,33 +3969,34 @@ user-visible capacity."
     (let ((i h)) (while (< i n) (push rest (get from i)) (setf i (+ i 1))))
     (while (> (len from) 0) (pop from))
     (doiter (x (iter rest)) (push from x)))))
-(pub defmethod pop-front ((self Deque<T>)) Option<T>
-  (when (= 0 (len self::before)) (%internal::deque-refill self::before self::after))
-  (pop self::before))
-(pub defmethod pop-back ((self Deque<T>)) Option<T>
-  (when (= 0 (len self::after)) (%internal::deque-refill self::after self::before))
-  (pop self::after))
-(pub defmethod get ((self Deque<T>) (i int)) Option<T>
-  (let ((nf (len self::before)))
-    (cond ((or (< i 0) (>= i (count self))) (Option::none))
-          ((< i nf) (Option::some (get self::before (- nf 1 i))))
-          (true (Option::some (get self::after (- i nf)))))))
-(pub defmethod set ((self Deque<T>) (i int) (x T)) ()
-  (let ((nf (len self::before)))
-    (cond ((or (< i 0) (>= i (count self)))
-           (panic (format false "Deque::set: index ~a is out of range for count ~a" i (count self))))
-          ((< i nf) (set self::before (- nf 1 i) x))
-          (true (set self::after (- i nf) x)))))
-(pub defmethod front ((self Deque<T>)) Option<T> (get self 0))
-(pub defmethod back ((self Deque<T>)) Option<T> (get self (- (count self) 1)))
-(pub defmethod clear ((self Deque<T>)) ()
-  (while (> (len self::before) 0) (pop self::before))
-  (while (> (len self::after) 0) (pop self::after)))
-(pub defmethod iter ((self Deque<T>)) vector-iter<T>
-  (let ((out (the Vector<T> (Vector::new))) (i (- (len self::before) 1)))
-    (while (>= i 0) (push out (get self::before i)) (setf i (- i 1)))
-    (doiter (x (iter self::after)) (push out x))
-    (iter out)))
+(impl Deque<T>
+  (pub pop-front (self) Option<T>
+    (when (= 0 (len self::before)) (%internal::deque-refill self::before self::after))
+    (pop self::before))
+  (pub pop-back (self) Option<T>
+    (when (= 0 (len self::after)) (%internal::deque-refill self::after self::before))
+    (pop self::after))
+  (pub get (self (i int)) Option<T>
+    (let ((nf (len self::before)))
+      (cond ((or (< i 0) (>= i (count self))) (Option::none))
+            ((< i nf) (Option::some (get self::before (- nf 1 i))))
+            (true (Option::some (get self::after (- i nf)))))))
+  (pub set (self (i int) (x T)) ()
+    (let ((nf (len self::before)))
+      (cond ((or (< i 0) (>= i (count self)))
+             (panic (format false "Deque::set: index ~a is out of range for count ~a" i (count self))))
+            ((< i nf) (set self::before (- nf 1 i) x))
+            (true (set self::after (- i nf) x)))))
+  (pub front (self) Option<T> (get self 0))
+  (pub back (self) Option<T> (get self (- (count self) 1)))
+  (pub clear (self) ()
+    (while (> (len self::before) 0) (pop self::before))
+    (while (> (len self::after) 0) (pop self::after)))
+  (pub iter (self) vector-iter<T>
+    (let ((out (the Vector<T> (Vector::new))) (i (- (len self::before) 1)))
+      (while (>= i 0) (push out (get self::before i)) (setf i (- i 1)))
+      (doiter (x (iter self::after)) (push out x))
+      (iter out))))
 (impl print-object Deque<T> (where (print-object T))
   (print-object ((self Self) (escape bool)) string
     (let ((out "#<deque"))
@@ -4164,7 +4253,7 @@ user-visible capacity."
 
 ;; CL's two-argument `atan`, which `phase` is built on. `(atan y x)` is sugar
 ;; for this (`Checker::check_list`, the same arity dispatch two-argument `log`
-;; uses) — `defmethod` cannot overload on arity, and `atan` is a built-in `f64`
+;; uses) — a method cannot overload on arity, and `atan` is a built-in `f64`
 ;; method already.
 (pub defun atan2 ((y f64) (x f64)) f64
   "The angle of the vector `(x,y)`, in (-pi,pi]. CL's `(atan y x)`."
@@ -4178,77 +4267,79 @@ user-visible capacity."
 
 ;; CL's `complex` constructor. `complex::new` is the same thing spelled the way
 ;; every other struct is built.
-(pub defun complex ((re f64) (im f64)) complex (complex::new re im))
+(pub defun complex ((re f64) (im f64)) complex (make-instance 'complex :re re :im im))
 
 ;; `realpart`/`imagpart` answer for reals too, exactly as in CL: every real is
 ;; a complex whose imaginary part is zero. That is what lets a caller take the
 ;; real part of something without knowing which it has.
-(pub defmethod realpart ((self complex)) f64 self::re)
-(pub defmethod imagpart ((self complex)) f64 self::im)
-(pub defmethod realpart ((self f64)) f64 self)
-(pub defmethod imagpart ((self f64)) f64 0.0)
+(impl complex
+  (pub realpart (self) f64 self::re)
+  (pub imagpart (self) f64 self::im))
+(impl f64
+  (pub realpart (self) f64 self)
+  (pub imagpart (self) f64 0.0))
 
-(pub defmethod conjugate ((self complex)) complex (complex::new self::re (* self::im -1.0)))
-(pub defmethod conjugate ((self f64)) f64 self)
+(impl complex
+  (pub conjugate (self) complex (make-instance 'complex :re self::re :im (* self::im -1.0))))
+(impl f64
+  (pub conjugate (self) f64 self))
 
-(pub defmethod phase ((self complex)) f64
-  "The angle of `self` in the complex plane, in (-pi,pi]."
-  (atan2 self::im self::re))
-(pub defmethod phase ((self f64)) f64 (if (< self 0.0) pi 0.0))
+(impl complex
+  (pub phase (self) f64
+    "The angle of `self` in the complex plane, in (-pi,pi]."
+    (atan2 self::im self::re)))
+(impl f64
+  (pub phase (self) f64 (if (< self 0.0) pi 0.0)))
 
 (pub defun cis ((theta f64)) complex
   "`e^(i*theta)` — the unit complex at angle `theta`."
-  (complex::new (cos theta) (sin theta)))
+  (make-instance 'complex :re (cos theta) :im (sin theta)))
 
-;; Arithmetic. These are `defmethod`s named for the operators, which is allowed
+;; Arithmetic. These are methods named for the operators, which is allowed
 ;; because `complex` is not a primitive with a built-in table of its own —
 ;; the reason `impl Add i32` cannot name its method `+` (see the arithmetic
 ;; traits above) does not apply here.
-(pub defmethod + ((self complex) (other complex)) complex
-  (complex::new (+ self::re other::re) (+ self::im other::im)))
-(pub defmethod - ((self complex) (other complex)) complex
-  (complex::new (- self::re other::re) (- self::im other::im)))
-(pub defmethod * ((self complex) (other complex)) complex
-  (complex::new (- (* self::re other::re) (* self::im other::im))
-                (+ (* self::re other::im) (* self::im other::re))))
-(pub defmethod / ((self complex) (other complex)) complex
-  (let ((d (+ (* other::re other::re) (* other::im other::im))))
-    (complex::new (/ (+ (* self::re other::re) (* self::im other::im)) d)
-                  (/ (- (* self::im other::re) (* self::re other::im)) d))))
-
-(pub defmethod = ((self complex) (other complex)) bool
-  (if (= self::re other::re) (= self::im other::im) false))
-(pub defmethod /= ((self complex) (other complex)) bool (not (= self other)))
+(impl complex
+  (pub + (self (other complex)) complex
+    (make-instance 'complex :re (+ self::re other::re) :im (+ self::im other::im)))
+  (pub - (self (other complex)) complex
+    (make-instance 'complex :re (- self::re other::re) :im (- self::im other::im)))
+  (pub * (self (other complex)) complex
+    (make-instance 'complex :re (- (* self::re other::re) (* self::im other::im))
+                  :im (+ (* self::re other::im) (* self::im other::re))))
+  (pub / (self (other complex)) complex
+    (let ((d (+ (* other::re other::re) (* other::im other::im))))
+      (make-instance 'complex :re (/ (+ (* self::re other::re) (* self::im other::im)) d)
+                    :im (/ (- (* self::im other::re) (* self::re other::im)) d))))
+  (pub = (self (other complex)) bool
+    (if (= self::re other::re) (= self::im other::im) false))
+  (pub /= (self (other complex)) bool (not (= self other))))
 (impl Eq complex (equals ((self Self) (other Self)) bool (= self other)))
 ;; No `Ord`: the complex numbers are not ordered, and CL's `<` rejects them
 ;; for the same reason.
 
-(pub defmethod abs ((self complex)) f64
-  "The modulus. A *real*, as in CL — the one `abs` whose result is not the
+(impl complex
+  (pub abs (self) f64
+    "The modulus. A *real*, as in CL — the one `abs` whose result is not the
    receiver's own type."
-  (sqrt (+ (* self::re self::re) (* self::im self::im))))
-
-(pub defmethod zerop ((self complex)) bool
-  (if (= self::re 0.0) (= self::im 0.0) false))
-
-(pub defmethod exp ((self complex)) complex
-  (let ((m (exp self::re)))
-    (complex::new (* m (cos self::im)) (* m (sin self::im)))))
-
-(pub defmethod log ((self complex)) complex
-  "The principal branch: `log|z| + i*phase(z)`."
-  (complex::new (log (abs self)) (phase self)))
-
-(pub defmethod sqrt ((self complex)) complex
-  "The principal square root, from the half-angle form."
-  (let ((m (sqrt (abs self))) (h (/ (phase self) 2.0)))
-    (complex::new (* m (cos h)) (* m (sin h)))))
-
-(pub defmethod expt ((self complex) (power complex)) complex
-  "`z^w` as `exp(w * log z)`. `(expt 0 0)` is 1, as in CL."
-  (if (zerop self)
-      (if (zerop power) (complex::new 1.0 0.0) (complex::new 0.0 0.0))
-      (exp (* power (log self)))))
+    (sqrt (+ (* self::re self::re) (* self::im self::im))))
+  (pub zerop (self) bool
+    (if (= self::re 0.0) (= self::im 0.0) false))
+  (pub exp (self) complex
+    (let ((m (exp self::re)))
+      (make-instance 'complex :re (* m (cos self::im)) :im (* m (sin self::im)))))
+  (pub log (self) complex
+    "The principal branch: `log|z| + i*phase(z)`."
+    (make-instance 'complex :re (log (abs self)) :im (phase self)))
+  (pub sqrt (self) complex
+    "The principal square root, from the half-angle form."
+    (let ((m (sqrt (abs self))) (h (/ (phase self) 2.0)))
+      (make-instance 'complex :re (* m (cos h)) :im (* m (sin h)))))
+  (pub expt (self (power complex)) complex
+    "`z^w` as `exp(w * log z)`. `(expt 0 0)` is 1, as in CL."
+    (if (zerop self)
+        (if (zerop power) (make-instance 'complex :re 1.0 :im 0.0) (make-instance 'complex :re 0.0 :im 0.0))
+        (exp (* power (log self))))))
 
 ;; CL prints a complex as `#C(re im)`, and reads it back the same way — the
 ;; reader half is not here (this language has no `#C` syntax), so `escape`
@@ -4314,15 +4405,15 @@ user-visible capacity."
                   (if (equal seg "") () (progn (push dirs seg) ())))
               (setf i (+ i 1))
               ()))))
-      (pathname::new
-        dirs
-        (if (equal file "")
+      (make-instance 'pathname
+        :directory dirs
+        :name (if (equal file "")
             (option::none)
             (let ((at (%internal::name-type-dot file)))
               (if (< at 0) (option::some file) (option::some (substring file 0 at)))))
-        (let ((at (%internal::name-type-dot file)))
+        :extension (let ((at (%internal::name-type-dot file)))
           (if (< at 0) (option::none) (option::some (substring file (+ at 1) (length file)))))
-        (and (> (length s) 0) (equal (ref s 0) #\/))))))
+        :absolutep (and (> (length s) 0) (equal (ref s 0) #\/))))))
 
 (module %internal (pub defun pathname-file-part ((p pathname)) string
   "`name.type`, as text -- \"\" for a pathname naming only a directory."
@@ -4372,7 +4463,7 @@ user-visible capacity."
                                (absolute bool false)) pathname
   "Build a pathname from the components you have. Omitted `name`/`type` stay
    absent, which is what `merge-pathnames` fills in."
-  (pathname::new directory name type absolute))
+  (make-instance 'pathname :directory directory :name name :extension type :absolutep absolute))
 
 (pub defun pathname-directory<P> ((p P)) Vector<string> (where (Pathish P))
   "The directory components, outermost first."
@@ -4403,17 +4494,17 @@ user-visible capacity."
    name or type is taken over, and a *relative* `p` is placed under
    `default`'s directory. An absolute `p` keeps its own directory."
   (let ((a (to-pathname p)) (b (to-pathname default)))
-    (pathname::new
-      (if a::absolutep
+    (make-instance 'pathname
+      :directory (if a::absolutep
           a::directory
           (let ((dirs (the Vector<string> (Vector::new))))
             (progn
               (doiter (d (iter b::directory)) (push dirs d))
               (doiter (d (iter a::directory)) (push dirs d))
               dirs)))
-      (match a::name ((some x) (option::some x)) ((none) b::name))
-      (match a::extension ((some x) (option::some x)) ((none) b::extension))
-      (if a::absolutep true b::absolutep))))
+      :name (match a::name ((some x) (option::some x)) ((none) b::name))
+      :extension (match a::extension ((some x) (option::some x)) ((none) b::extension))
+      :absolutep (if a::absolutep true b::absolutep))))
 
 (pub defun enough-namestring<P,D> ((p P) (default D)) string (where (Pathish P) (Pathish D))
   "As much of `p` as it takes to name it relative to `default` -- `p` with
@@ -4961,7 +5052,7 @@ user-visible capacity."
     ((err e) (result::err e))
     ((ok addrs)
      (match (%internal::tcp-connect-addr addrs timeout)
-       ((ok h) (result::ok (socket-stream::new h)))
+       ((ok h) (result::ok (make-instance 'socket-stream :h h)))
        ((err e) (result::err e))))))
 
 (pub defun tls-connect ((host string) (port int)
@@ -4987,7 +5078,7 @@ user-visible capacity."
           ((ok _)
            (loop
              (match (%internal::net-tls-handshake h)
-               ((ok (none)) (return (the Result<socket-stream, NetError> (result::ok (socket-stream::new h)))))
+               ((ok (none)) (return (the Result<socket-stream, NetError> (result::ok (make-instance 'socket-stream :h h)))))
                ((ok (some interest))
                 (match (%internal::tcp-wait-within h interest timeout "tls-connect")
                   ((ok _) ())
@@ -4998,14 +5089,14 @@ user-visible capacity."
   "Connect to the Unix-domain socket at `path`. A local connect completes
    at once or is refused -- there is nothing to wait for -- so no timeout."
   (match (%internal::net-unix-connect path)
-    ((ok h) (result::ok (socket-stream::new h)))
+    ((ok h) (result::ok (make-instance 'socket-stream :h h)))
     ((err e) (result::err e))))
 
 (pub defun unix-listen ((path string)) Result<socket-listener, NetError>
   "Listen on a Unix-domain socket at `path`, which must not exist yet; a
    leftover file is refused rather than replaced. `close` removes the file."
   (match (%internal::net-unix-listen path)
-    ((ok h) (result::ok (socket-listener::new h)))
+    ((ok h) (result::ok (make-instance 'socket-listener :h h)))
     ((err e) (result::err e))))
 
 (pub defun tcp-listen ((host string) (port int)) Result<socket-listener, NetError>
@@ -5013,7 +5104,7 @@ user-visible capacity."
    every interface. Port `0` lets the OS pick a free one; `local-address`
    says which."
   (match (%internal::net-listen host port)
-    ((ok h) (result::ok (socket-listener::new h)))
+    ((ok h) (result::ok (make-instance 'socket-listener :h h)))
     ((err e) (result::err e))))
 
 (pub defun tls-listen ((host string) (port int) (cert-file string) (key-file string) &key (client-ca string))
@@ -5030,135 +5121,134 @@ user-visible capacity."
    present a certificate issued by one in that file, and one that does not
    fails the same way; without it, clients are not asked for one."
   (match (%internal::net-tls-listen host port cert-file key-file client-ca)
-    ((ok h) (result::ok (socket-listener::new h)))
+    ((ok h) (result::ok (make-instance 'socket-listener :h h)))
     ((err e) (result::err e))))
 
-(pub defmethod tls-add-certificate ((self socket-listener) (name string) (cert-file string) (key-file string)) Result<(), NetError>
-  "One more certificate for a `tls-listen` listener, presented to clients
+(impl socket-listener
+  (pub tls-add-certificate (self (name string) (cert-file string) (key-file string)) Result<(), NetError>
+    "One more certificate for a `tls-listen` listener, presented to clients
    that ask for `name` (SNI) -- one listener serving several sites, each
    with its own certificate. The chain is checked to be for `name` here, so
    a mismatch is this call's `Err` and not some client's failed handshake.
    Clients asking for a name nobody added, or sending none, get the
    certificate `tls-listen` was given. Takes effect for the next handshake;
    `requested-server-name` on a connection says which name it asked for."
-  (%internal::net-tls-add-certificate self::h name cert-file key-file))
-
-(pub defmethod accept ((self socket-listener) &key (timeout f64)) Result<socket-stream, NetError>
-  "The next connection, waiting for one -- at most `:timeout` seconds if
+    (%internal::net-tls-add-certificate self::h name cert-file key-file))
+  (pub accept (self &key (timeout f64)) Result<socket-stream, NetError>
+    "The next connection, waiting for one -- at most `:timeout` seconds if
    given, after which the `Err` says so. The usual shape of a server is
    `(loop (match (accept l) ((ok c) (task (serve c))) ((err e) ...)))`: one task
    per connection, each free to wait on its own socket."
-  (loop
-    (match (%internal::net-accept self::h)
-      ;; `the`: a loop's type is the join of its `return`s, and this one is
-      ;; seen first with its `E` still a hole.
-      ((ok (some h)) (return (the Result<socket-stream, NetError> (result::ok (socket-stream::new h)))))
-      ((ok (none))
-       (match (%internal::tcp-wait-within self::h %internal::net-readable timeout "accept")
-         ((ok _) ())
-         ((err e) (return (result::err e)))))
-      ((err e) (return (result::err e))))))
+    (loop
+      (match (%internal::net-accept self::h)
+        ;; `the`: a loop's type is the join of its `return`s, and this one is
+        ;; seen first with its `E` still a hole.
+        ((ok (some h)) (return (the Result<socket-stream, NetError> (result::ok (make-instance 'socket-stream :h h)))))
+        ((ok (none))
+         (match (%internal::tcp-wait-within self::h %internal::net-readable timeout "accept")
+           ((ok _) ())
+           ((err e) (return (result::err e)))))
+        ((err e) (return (result::err e)))))))
 
-(pub defmethod wait-readable ((self socket-stream) (secs f64)) bool
-  "Wait until something can be read without waiting, or `secs` run out:
+(impl socket-stream
+  (pub wait-readable (self (secs f64)) bool
+    "Wait until something can be read without waiting, or `secs` run out:
    `true` if the former. Something buffered counts. The way to put a clock
    on a read: `(if (wait-readable c 5.0) (read-line c) ...)`. What it
    promises is that the *next* read will not park; a `read-line` may still
    wait for the rest of its line."
-  (if (%internal::unwrap-net (%internal::net-buffered-p self::h))
-      true
-      (%internal::net-wait-for self::h %internal::net-readable secs)))
-
-(pub defmethod wait-writable ((self socket-stream) (secs f64)) bool
-  "Wait until the socket will take output, or `secs` run out: `true` if the
+    (if (%internal::unwrap-net (%internal::net-buffered-p self::h))
+        true
+        (%internal::net-wait-for self::h %internal::net-readable secs)))
+  (pub wait-writable (self (secs f64)) bool
+    "Wait until the socket will take output, or `secs` run out: `true` if the
    former."
-  (%internal::net-wait-for self::h %internal::net-writable secs))
-
-(pub defmethod socket-error ((self socket-stream)) Option<NetError>
-  "Why the peer's side of this connection is gone, if it is: the first
+    (%internal::net-wait-for self::h %internal::net-writable secs))
+  (pub socket-error (self) Option<NetError>
+    "Why the peer's side of this connection is gone, if it is: the first
    failure the peer caused (a reset, a TLS alert, a close under a write).
    `none` while the connection is sound -- including after a clean end of
    input, which is not a failure. Reads on a failed connection say `none`
    and writes go nowhere, so this is how to tell a client that finished
    from one that broke off, the way Go's `bufio.Scanner.Err` is."
-  (match (%internal::unwrap-net (%internal::net-socket-error self::h))
-    ((some m) (option::some (NetError::NetError m)))
-    ((none) (option::none))))
+    (match (%internal::unwrap-net (%internal::net-socket-error self::h))
+      ((some m) (option::some (NetError::NetError m)))
+      ((none) (option::none)))))
 
-(pub defmethod socket-error ((self socket-byte-stream)) Option<NetError>
-  "`socket-error` of the same connection, seen as bytes."
-  (match (%internal::unwrap-net (%internal::net-socket-error self::h))
-    ((some m) (option::some (NetError::NetError m)))
-    ((none) (option::none))))
+(impl socket-byte-stream
+  (pub socket-error (self) Option<NetError>
+    "`socket-error` of the same connection, seen as bytes."
+    (match (%internal::unwrap-net (%internal::net-socket-error self::h))
+      ((some m) (option::some (NetError::NetError m)))
+      ((none) (option::none)))))
 
-(pub defmethod peer-subject ((self socket-stream)) Option<string>
-  "Who the peer is, by the certificate it presented: the subject in the
+(impl socket-stream
+  (pub peer-subject (self) Option<string>
+    "Who the peer is, by the certificate it presented: the subject in the
    form `CN=client,O=Example,C=JP` (RFC 4514, most specific first). What a
    mutual-TLS server asks after the first read has completed the handshake;
    on the client it is the name the server's certificate was issued to.
    `none` on a plain connection, before the handshake, or when the peer sent
    no certificate (a server that did not ask for one)."
-  (%internal::unwrap-net (%internal::net-peer-subject self::h)))
-
-(pub defmethod requested-server-name ((self socket-stream)) Option<string>
-  "On a server-side TLS connection, the name the client asked for (SNI),
+    (%internal::unwrap-net (%internal::net-peer-subject self::h)))
+  (pub requested-server-name (self) Option<string>
+    "On a server-side TLS connection, the name the client asked for (SNI),
    once the handshake has read it: how a server holding certificates for
    several names -- `tls-add-certificate` -- knows which site this is.
    `none` on a plain or client-side connection, or when the client sent no
    name (it connected by address)."
-  (%internal::unwrap-net (%internal::net-server-name self::h)))
-
-(pub defmethod set-nodelay ((self socket-stream) (on bool)) ()
-  "Whether small writes go out at once (Nagle's algorithm off). Each
+    (%internal::unwrap-net (%internal::net-server-name self::h)))
+  (pub set-nodelay (self (on bool)) ()
+    "Whether small writes go out at once (Nagle's algorithm off). Each
    `write-string` reaches the socket before it returns, so with Nagle on a
    reply sent as two writes -- a header, then a body -- can wait for the
    peer's delayed ACK before the second leaves; a request/response protocol
    wants this `true`. A Unix-domain socket has no Nagle and accepts this as
    already so."
-  (%internal::unwrap-net (%internal::net-set-nodelay self::h on)))
-
-(pub defmethod set-keepalive ((self socket-stream) (on bool)) ()
-  "Whether the OS probes this connection while it is idle, so that a peer
+    (%internal::unwrap-net (%internal::net-set-nodelay self::h on)))
+  (pub set-keepalive (self (on bool)) ()
+    "Whether the OS probes this connection while it is idle, so that a peer
    that vanished without closing -- a pulled cable, a crashed host -- is
    noticed and the connection reset, instead of staying open forever. The
    OS default period is long (two hours on most systems);
    `set-keepalive-period` shortens it. A Unix-domain socket has no
    keepalive; asking is an error."
-  (%internal::unwrap-net (%internal::net-set-keepalive self::h on)))
-
-(pub defmethod set-keepalive-period ((self socket-stream) (secs int)) ()
-  "How long the connection must be idle before the first keepalive probe,
+    (%internal::unwrap-net (%internal::net-set-keepalive self::h on)))
+  (pub set-keepalive-period (self (secs int)) ()
+    "How long the connection must be idle before the first keepalive probe,
    and then how long between probes -- whole seconds, at least 1, the way
    Go's `SetKeepAlivePeriod` sets both. Takes effect with `set-keepalive`
    on."
-  (%internal::unwrap-net (%internal::net-set-keepalive-period self::h secs)))
+    (%internal::unwrap-net (%internal::net-set-keepalive-period self::h secs))))
 
 (pub defun byte-stream-of ((s socket-stream)) socket-byte-stream
   "The same connection as a byte stream. Both views share one buffer, so a
    protocol can read its header as text and its body as bytes."
-  (socket-byte-stream::new s::h))
+  (make-instance 'socket-byte-stream :h s::h))
 
 (pub defun char-stream-of ((s socket-byte-stream)) socket-stream
   "The same connection as a character stream."
-  (socket-stream::new s::h))
+  (make-instance 'socket-stream :h s::h))
 
-(pub defmethod shutdown-output ((self socket-stream)) ()
-  "Send what is buffered and close the sending side only: the peer reads end
+(impl socket-stream
+  (pub shutdown-output (self) ()
+    "Send what is buffered and close the sending side only: the peer reads end
    of input, and this side can still read the reply. What a request/response
    exchange says with -- the whole request has been sent."
-  (%internal::tcp-drain self::h)
-  (%internal::unwrap-net (%internal::net-shutdown-write self::h)))
-
-(pub defmethod local-address ((self socket-stream)) string
-  "This side's address as `host:port`."
-  (%internal::unwrap-net (%internal::net-local-address self::h)))
-(pub defmethod local-address ((self socket-listener)) string
-  "The address being listened on, as `host:port`. After `(tcp-listen host 0)`
+    (%internal::tcp-drain self::h)
+    (%internal::unwrap-net (%internal::net-shutdown-write self::h)))
+  (pub local-address (self) string
+    "This side's address as `host:port`."
+    (%internal::unwrap-net (%internal::net-local-address self::h))))
+(impl socket-listener
+  (pub local-address (self) string
+    "The address being listened on, as `host:port`. After `(tcp-listen host 0)`
    this is how the chosen port is learned."
-  (%internal::unwrap-net (%internal::net-local-address self::h)))
-(pub defmethod peer-address ((self socket-stream)) string
-  "The other side's address as `host:port`."
-  (%internal::unwrap-net (%internal::net-peer-address self::h)))
+    (%internal::unwrap-net (%internal::net-local-address self::h))))
+(impl socket-stream
+  (pub peer-address (self) string
+    "The other side's address as `host:port`."
+    (%internal::unwrap-net (%internal::net-peer-address self::h))))
 
 (pub defmacro with-connection (spec &rest body)
   "`(with-connection (var host port) body...)` -- connect, run the body,
@@ -5193,42 +5283,41 @@ user-visible capacity."
   "A UDP socket on `host`:`port` (`0`: any free port; `local-address` says
    which). Sending needs one too -- bind to port `0`."
   (match (%internal::net-udp-bind host port)
-    ((ok h) (result::ok (udp-socket::new h)))
+    ((ok h) (result::ok (make-instance 'udp-socket :h h)))
     ((err e) (result::err e))))
 
 (impl Stream udp-socket
   (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
   (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
 
-(pub defmethod local-address ((self udp-socket)) string
-  "This socket's address as `host:port`."
-  (%internal::unwrap-net (%internal::net-local-address self::h)))
-
-(pub defmethod send-to ((self udp-socket) (host string) (port int) (bytes Vector<int>)) Result<(), NetError>
-  "Send `bytes` as one datagram to `host`:`port`. Resolves the name (waiting
+(impl udp-socket
+  (pub local-address (self) string
+    "This socket's address as `host:port`."
+    (%internal::unwrap-net (%internal::net-local-address self::h)))
+  (pub send-to (self (host string) (port int) (bytes Vector<int>)) Result<(), NetError>
+    "Send `bytes` as one datagram to `host`:`port`. Resolves the name (waiting
    for it), then sends -- waiting only if the socket's own buffer is full.
    Delivery is not confirmed; that is UDP."
-  (match (%internal::tcp-resolve host port (option::none))
-    ((err e) (result::err e))
-    ((ok addrs)
-     (loop
-       (match (%internal::net-udp-send-to self::h (get addrs 0) bytes)
-         ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (%internal::net-wait self::h %internal::net-writable)))
-         ((err e) (return (result::err e))))))))
-
-(pub defmethod recv-from ((self udp-socket) &key (timeout f64)) Result<datagram, NetError>
-  "The next datagram, waiting for one -- at most `:timeout` seconds if given.
+    (match (%internal::tcp-resolve host port (option::none))
+      ((err e) (result::err e))
+      ((ok addrs)
+       (loop
+         (match (%internal::net-udp-send-to self::h (get addrs 0) bytes)
+           ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (%internal::net-wait self::h %internal::net-writable)))
+           ((err e) (return (result::err e))))))))
+  (pub recv-from (self &key (timeout f64)) Result<datagram, NetError>
+    "The next datagram, waiting for one -- at most `:timeout` seconds if given.
    `from` is the sender as `ip:port`, which `send-to` accepts back."
-  (loop
-    (match (%internal::net-udp-recv self::h)
-      ((ok (some bytes))
-       (return (the Result<datagram, NetError>
-                    (result::ok (datagram::new bytes (%internal::unwrap-net (%internal::net-udp-last-sender self::h)))))))
-      ((ok (none))
-       (match (%internal::tcp-wait-within self::h %internal::net-readable timeout "recv-from")
-         ((ok _) ())
-         ((err e) (return (result::err e)))))
-      ((err e) (return (result::err e))))))
+    (loop
+      (match (%internal::net-udp-recv self::h)
+        ((ok (some bytes))
+         (return (the Result<datagram, NetError>
+                      (result::ok (make-instance 'datagram :bytes bytes :from (%internal::unwrap-net (%internal::net-udp-last-sender self::h)))))))
+        ((ok (none))
+         (match (%internal::tcp-wait-within self::h %internal::net-readable timeout "recv-from")
+           ((ok _) ())
+           ((err e) (return (result::err e)))))
+        ((err e) (return (result::err e)))))))
 
 ;; ---- Bytes and text ----------------------------------------------------------
 
@@ -5301,9 +5390,9 @@ user-visible capacity."
 ;; that numbering or publish the vtable addresses (see the check at the end of
 ;; `compile::prelude_bootstrap::build_dump`). Dispatching on an already-boxed
 ;; `:dyn` is fine, which is why the composed streams below work.
-(pub defvar (*standard-input*  standard-stream) (standard-stream::new (%internal::stream-stdin)))
-(pub defvar (*standard-output* standard-stream) (standard-stream::new (%internal::stream-stdout)))
-(pub defvar (*error-output*    standard-stream) (standard-stream::new (%internal::stream-stderr)))
+(pub defvar (*standard-input*  standard-stream) (make-instance 'standard-stream :h (%internal::stream-stdin)))
+(pub defvar (*standard-output* standard-stream) (make-instance 'standard-stream :h (%internal::stream-stdout)))
+(pub defvar (*error-output*    standard-stream) (make-instance 'standard-stream :h (%internal::stream-stderr)))
 
 ;; CL's `*trace-output*`: where a program's own progress reporting goes, as
 ;; opposed to its output (`*standard-output*`) or its errors (`*error-output*`).
@@ -5316,7 +5405,7 @@ user-visible capacity."
 ;; above), so those three are not here. A program can build its own
 ;; `(make-two-way-stream ...)` and pass it around; only the *prelude* is
 ;; barred from holding one in a global.
-(pub defvar (*trace-output* standard-stream) (standard-stream::new (%internal::stream-stdout)))
+(pub defvar (*trace-output* standard-stream) (make-instance 'standard-stream :h (%internal::stream-stdout)))
 
 ;; ---------------------------------------------------------------------------
 ;; Composite streams. These are the whole argument for the trait design: each
@@ -5457,12 +5546,12 @@ user-visible capacity."
 
 (pub defun make-string-input-stream ((s string)) string-input-stream
   "A stream that yields the characters of `s`."
-  (string-input-stream::new (%internal::stream-string-input s)))
+  (make-instance 'string-input-stream :h (%internal::stream-string-input s)))
 
 (pub defun make-string-output-stream () string-output-stream
   "A stream that accumulates what is written to it; drain it with
    `get-output-stream-string`."
-  (string-output-stream::new (%internal::stream-string-output)))
+  (make-instance 'string-output-stream :h (%internal::stream-string-output)))
 
 (pub defun get-output-stream-string ((s string-output-stream)) string
   "Everything written to `s` since the last call, clearing it."
@@ -5470,21 +5559,21 @@ user-visible capacity."
 
 (pub defun make-broadcast-stream ((parts Vector<:dyn CharOutput>)) broadcast-stream
   "A stream that writes to every component, in order."
-  (broadcast-stream::new parts))
+  (make-instance 'broadcast-stream :parts parts))
 
 (pub defun make-two-way-stream ((in :dyn CharInput) (out :dyn CharOutput)) two-way-stream
-  (two-way-stream::new in out))
+  (make-instance 'two-way-stream :in in :out out))
 
 (pub defun make-echo-stream ((in :dyn CharInput) (out :dyn CharOutput)) echo-stream
-  (echo-stream::new in out))
+  (make-instance 'echo-stream :in in :out out))
 
 (pub defun make-concatenated-stream ((parts Vector<:dyn CharInput>)) concatenated-stream
-  (concatenated-stream::new parts 0))
+  (make-instance 'concatenated-stream :parts parts :at 0))
 
 (pub defun make-peek-stream ((in :dyn CharInput)) peek-stream
   "`in` with one character of pushback added, so it can be `read-sexpr`-ed.
    The built-in leaf streams already have pushback and need no wrapping."
-  (peek-stream::new in (option::none)))
+  (make-instance 'peek-stream :inner in :pending (option::none)))
 
 ;; `open`'s direction, as named constants rather than as CL's `:direction`
 ;; keyword argument: the direction is required, and three constants read at
@@ -5500,7 +5589,7 @@ user-visible capacity."
    `direction-output` / `direction-append`. `Err` if the file cannot be
    opened: a missing file is an ordinary outcome, not a panic."
   (match (%internal::stream-open-file (namestring name) direction)
-    ((ok h) (result::ok (file-stream::new h)))
+    ((ok h) (result::ok (make-instance 'file-stream :h h)))
     ((err e) (result::err e))))
 
 (pub defun open-input<P> ((name P)) Result<file-stream, FileError> (where (Pathish P))
@@ -5513,7 +5602,7 @@ user-visible capacity."
   "Open `name` for byte I/O in one of `direction-input` / `direction-output` /
    `direction-append`."
   (match (%internal::stream-open-file (namestring name) direction)
-    ((ok h) (result::ok (binary-file-stream::new h)))
+    ((ok h) (result::ok (make-instance 'binary-file-stream :h h)))
     ((err e) (result::err e))))
 
 (pub defun open-binary-input<P> ((name P)) Result<binary-file-stream, FileError> (where (Pathish P))
@@ -6301,7 +6390,7 @@ user-visible capacity."
    disagree."
   (let ((s (+ second by)))
     (let ((sec (mod s 86400)))
-      (universal-time::new (+ day (/ (- s sec) 86400)) sec)))))
+      (make-instance 'universal-time :day (+ day (/ (- s sec) 86400)) :second sec)))))
 
 (module %internal (pub defun local-zone-west ((day int) (second int)) int
   "Seconds west of Greenwich in the local zone, at that universal time.
@@ -6375,10 +6464,10 @@ user-visible capacity."
           (setf d (+ (- doy (/ (+ (* 153 mp) 2) 5)) 1))
           (setf m (+ mp (if (< mp 10) 3 -9)))
           (if (<= m 2) (progn (setf y (+ y 1)) ()) ())
-          (decoded-time::new (mod secs 60) (mod (/ secs 60) 60) (/ secs 3600)
-                             d m y (mod days 7)
-                             daylight
-                             (/ (int->float west) (int->float 3600))))))))
+          (make-instance 'decoded-time :second (mod secs 60) :minute (mod (/ secs 60) 60) :hour (/ secs 3600)
+                             :date d :month m :year y :day-of-week (mod days 7)
+                             :daylight-p daylight
+                             :zone (/ (int->float west) (int->float 3600))))))))
 
 (pub defun decode-universal-time ((ut universal-time) &optional (zone int)) decoded-time
   "`ut` broken into its calendar components. `zone` is an offset in hours west
@@ -6464,13 +6553,12 @@ user-visible capacity."
 ;;    are questions the static type has already answered and none of them
 ;;    exists here (see `docs/dev/cl-missing-classes-and-methods.md`).
 ;; 2. Subscripts are a `Vector<i32>` rather than a `&rest` of integers: a
-;;    `defmethod` resolves by arity, never by a trailing run of same-typed
+;;    method resolves by arity, never by a trailing run of same-typed
 ;;    arguments. The CL-shaped `(aref a i j)` is checker sugar over exactly
 ;;    these methods — see `Checker::check_aref`.
-;; 3. Creation is `Array::make`, not `Array::new`. `new` is the field-order
-;;    constructor every `defstruct` generates, and this one's fields are the
-;;    *representation* (dimensions, flat storage, fill pointer) rather than
-;;    what a caller wants to hand over.
+;; 3. `Array::new` takes what a caller wants to hand over rather than the
+;;    fields, which are the *representation* (dimensions, flat storage, fill
+;;    pointer).
 ;; 4. CL's `make-array` keywords: `:initial-element` is the required `init`
 ;;    argument, since there are no unbound array cells here; `:fill-pointer`
 ;;    is a `&key`; and `:adjustable` has no counterpart, because `adjust`
@@ -6486,92 +6574,100 @@ user-visible capacity."
 
 ;; The array a `#nA(..)` literal in source evaluates to
 ;; (`Checker::check_array_literal`): its dimensions and its row-major elements
-;; already built, no fill pointer. Not `Array::make`, which needs an element
+;; already built, no fill pointer. Not `Array::new`, which needs an element
 ;; to fill with — a literal with a zero dimension has none.
 (module %internal (pub defun array-from-row-major<T> ((dims Vector<int>) (data Vector<T>)) Array<T>
-  (Array::new dims data (Option::none))))
+  (make-instance 'Array :dims dims :data data :fill-pointer (Option::none))))
 
 ;; CL's `make-array`. `dims` is copied, so a later `push` to the caller's own
 ;; vector cannot change the array's shape behind its back.
-(pub defmethod make (Array<T> (dims Vector<int>) (init T) &key (fill-pointer int)) Array<T>
-  (let ((d (the Vector<int> (Vector::new))) (n 1))
-    (progn
-      (doiter (x (iter dims))
-        (progn
-          (if (< x 0)
-              (panic (format false "Array::make: dimension ~a is negative" x))
-              ())
-          (push d x)
-          (setf n (* n x))))
-      (match fill-pointer
-        ((none) ())
-        ((some f)
-         (progn
-           (if (/= (len d) 1)
-               (panic "Array::make: :fill-pointer needs a one-dimensional array")
-               ())
-           (if (or (< f 0) (> f n))
-               (panic (format false "Array::make: :fill-pointer ~a is not in 0..~a" f n))
-               ()))))
-      (Array::new d (Vector::filled n init) fill-pointer))))
+(impl Array<T>
+  (pub new ((dims Vector<int>) (init T) &key (fill-pointer int)) Array<T>
+    (let ((d (the Vector<int> (Vector::new))) (n 1))
+      (progn
+        (doiter (x (iter dims))
+          (progn
+            (if (< x 0)
+                (panic (format false "Array::new: dimension ~a is negative" x))
+                ())
+            (push d x)
+            (setf n (* n x))))
+        (match fill-pointer
+          ((none) ())
+          ((some f)
+           (progn
+             (if (/= (len d) 1)
+                 (panic "Array::new: :fill-pointer needs a one-dimensional array")
+                 ())
+             (if (or (< f 0) (> f n))
+                 (panic (format false "Array::new: :fill-pointer ~a is not in 0..~a" f n))
+                 ()))))
+        (make-instance 'Array :dims d :data (Vector::filled n init) :fill-pointer fill-pointer)))))
 
 ;; CL's `array-rank` / `array-dimension` / `array-dimensions` /
 ;; `array-total-size`. The type name is not repeated in the method name:
 ;; the receiver already says which type is being asked.
-(pub defmethod rank ((self Array<T>)) int (len self::dims))
-(pub defmethod dimension ((self Array<T>) (n int)) int (get self::dims n))
-(pub defmethod total-size ((self Array<T>)) int (len self::data))
+(impl Array<T>
+  (pub rank (self) int (len self::dims))
+  (pub dimension (self (n int)) int (get self::dims n))
+  (pub total-size (self) int (len self::data)))
 ;; A fresh vector, like CL's `array-dimensions` returns a fresh list — the
 ;; array's own is its representation and handing it out would let a caller
 ;; reshape the array by mutating what it got back.
-(pub defmethod dimensions ((self Array<T>)) Vector<int>
-  (let ((out (the Vector<int> (Vector::new))))
-    (progn (doiter (x (iter self::dims)) (push out x)) out)))
+(impl Array<T>
+  (pub dimensions (self) Vector<int>
+    (let ((out (the Vector<int> (Vector::new))))
+      (progn (doiter (x (iter self::dims)) (push out x)) out))))
 
 ;; CL's `array-in-bounds-p`: false for the wrong number of subscripts too,
 ;; which is what CL says (it is not an error to ask).
-(pub defmethod in-bounds ((self Array<T>) (idx Vector<int>)) bool
-  (if (/= (len idx) (len self::dims))
-      false
-      (let ((i 0) (ok true) (n (len idx)))
-        (progn
-          (while (< i n)
-            (progn
-              (let ((s (get idx i)))
-                (setf ok (and ok (>= s 0) (< s (get self::dims i)))))
-              (setf i (+ i 1))))
-          ok))))
+(impl Array<T>
+  (pub in-bounds (self (idx Vector<int>)) bool
+    (if (/= (len idx) (len self::dims))
+        false
+        (let ((i 0) (ok true) (n (len idx)))
+          (progn
+            (while (< i n)
+              (progn
+                (let ((s (get idx i)))
+                  (setf ok (and ok (>= s 0) (< s (get self::dims i)))))
+                (setf i (+ i 1))))
+            ok)))))
 
 ;; CL's `array-row-major-index`: the flat offset `idx` names, by the Horner
 ;; fold that row-major order *is*. Out-of-range subscripts are an error here
 ;; rather than a wrong-but-in-range offset — without the check `(aref a 0 5)`
 ;; on a 3x3 would quietly read row 1 rather than say anything.
-(pub defmethod row-major-index ((self Array<T>) (idx Vector<int>)) int
-  (if (in-bounds self idx)
-      (let ((acc 0) (i 0) (r (len self::dims)))
-        (progn
-          (while (< i r)
-            (progn
-              (setf acc (+ (* acc (get self::dims i)) (get idx i)))
-              (setf i (+ i 1))))
-          acc))
-      (panic "aref: subscripts are out of range for this array")))
+(impl Array<T>
+  (pub row-major-index (self (idx Vector<int>)) int
+    (if (in-bounds self idx)
+        (let ((acc 0) (i 0) (r (len self::dims)))
+          (progn
+            (while (< i r)
+              (progn
+                (setf acc (+ (* acc (get self::dims i)) (get idx i)))
+                (setf i (+ i 1))))
+            acc))
+        (panic "aref: subscripts are out of range for this array"))))
 
 ;; `aref` / `(setf (aref ...))`, spelled the way every other indexed container
 ;; in this language spells them. `(aref a i j)` is checker sugar for these.
-(pub defmethod get ((self Array<T>) (idx Vector<int>)) T
-  (get self::data (row-major-index self idx)))
-(pub defmethod set ((self Array<T>) (idx Vector<int>) (x T)) ()
-  (set self::data (row-major-index self idx) x))
+(impl Array<T>
+  (pub get (self (idx Vector<int>)) T
+    (get self::data (row-major-index self idx)))
+  (pub set (self (idx Vector<int>) (x T)) ()
+    (set self::data (row-major-index self idx) x)))
 
 ;; CL's `row-major-aref` and its `setf`: the flat offset directly.
-(pub defmethod row-major-get ((self Array<T>) (i int)) T (get self::data i))
-(pub defmethod row-major-set ((self Array<T>) (i int) (x T)) () (set self::data i x))
+(impl Array<T>
+  (pub row-major-get (self (i int)) T (get self::data i))
+  (pub row-major-set (self (i int) (x T)) () (set self::data i x)))
 
 ;; CL's `length` on an array: the fill pointer when there is one, and the
 ;; whole array when there is not.
-(pub defmethod len ((self Array<T>)) int
-  (match self::fill-pointer ((some n) n) ((none) (len self::data))))
+(impl Array<T>
+  (pub len (self) int
+    (match self::fill-pointer ((some n) n) ((none) (len self::data)))))
 
 ;; `array-iter<T>` is to `Array<T>` what `vector-iter<T>` is to `Vector<T>`:
 ;; a separate cursor per `(iter a)` call, walking row-major order and stopping
@@ -6585,32 +6681,35 @@ user-visible capacity."
           (setf self::pos (+ self::pos 1))
           (Option::some v))
         (Option::none))))
-(pub defmethod iter ((self Array<T>)) array-iter<T> (array-iter::new self 0))
+(impl Array<T>
+  (pub iter (self) array-iter<T> (make-instance 'array-iter :arr self :pos 0)))
 
 ;; CL's `vector-push-extend`: write at the fill pointer, growing the storage
 ;; when the pointer has reached the end. A fill-pointer array is
-;; one-dimensional by construction (`Array::make` refuses any other rank), so
+;; one-dimensional by construction (`Array::new` refuses any other rank), so
 ;; growing it means growing its single dimension.
-(pub defmethod push-extend ((self Array<T>) (x T)) ()
-  (match self::fill-pointer
-    ((none) (panic "push-extend: this array has no fill pointer"))
-    ((some n)
-     (progn
-       (if (< n (len self::data)) (set self::data n x) (push self::data x))
-       (set self::dims 0 (len self::data))
-       (setf self::fill-pointer (Option::some (+ n 1)))))))
+(impl Array<T>
+  (pub push-extend (self (x T)) ()
+    (match self::fill-pointer
+      ((none) (panic "push-extend: this array has no fill pointer"))
+      ((some n)
+       (progn
+         (if (< n (len self::data)) (set self::data n x) (push self::data x))
+         (set self::dims 0 (len self::data))
+         (setf self::fill-pointer (Option::some (+ n 1))))))))
 
 ;; CL's `vector-pop`. `Option<T>` on an empty array rather than an error, the
 ;; same answer `Vector<T>`'s own `pop` gives.
-(pub defmethod pop ((self Array<T>)) Option<T>
-  (match self::fill-pointer
-    ((none) (panic "pop: this array has no fill pointer"))
-    ((some n)
-     (if (<= n 0)
-         (Option::none)
-         (let ((v (get self::data (- n 1))))
-           (setf self::fill-pointer (Option::some (- n 1)))
-           (Option::some v))))))
+(impl Array<T>
+  (pub pop (self) Option<T>
+    (match self::fill-pointer
+      ((none) (panic "pop: this array has no fill pointer"))
+      ((some n)
+       (if (<= n 0)
+           (Option::none)
+           (let ((v (get self::data (- n 1))))
+             (setf self::fill-pointer (Option::some (- n 1)))
+             (Option::some v)))))))
 
 ;; Decode a row-major offset back into subscripts, into `out` (which must
 ;; already have one slot per dimension). The inverse of `row-major-index`'s
@@ -6637,41 +6736,42 @@ user-visible capacity."
 ;; CL's `adjust-array`: reshape in place, keeping every element whose
 ;; subscripts still name a cell. CL requires the new rank to match the old
 ;; one, and so does this. New cells get `init` — CL's `:initial-element`,
-;; required here for the same reason `Array::make` requires it.
+;; required here for the same reason `Array::new` requires it.
 ;;
 ;; Mutates and returns `()`, where CL returns the array; CL has to, because a
 ;; non-adjustable CL array may come back as a *different* array. Every array
 ;; here is adjustable, so there is never a second one to return.
-(pub defmethod adjust ((self Array<T>) (newdims Vector<int>) (init T)) ()
-  (let ((nd (the Vector<int> (Vector::new))) (n 1))
-    (progn
-      (if (/= (len newdims) (len self::dims))
-          (panic (format false "adjust: expected ~a dimension(s), got ~a"
-                         (len self::dims) (len newdims)))
-          ())
-      (doiter (x (iter newdims))
-        (progn
-          (if (< x 0)
-              (panic (format false "adjust: dimension ~a is negative" x))
-              ())
-          (push nd x)
-          (setf n (* n x))))
-      (let ((moved (Vector::filled n init))
-            (sub (Vector::filled (len nd) 0))
-            (i 0))
-        (progn
-          (while (< i n)
-            (progn
-              (%internal::array-decode nd i sub)
-              (if (%internal::array-subs-in-bounds sub self::dims)
-                  (set moved i (get self::data (row-major-index self sub)))
-                  ())
-              (setf i (+ i 1))))
-          (setf self::dims nd)
-          (setf self::data moved)
-          (match self::fill-pointer
-            ((none) ())
-            ((some f) (setf self::fill-pointer (Option::some (min f n))))))))))
+(impl Array<T>
+  (pub adjust (self (newdims Vector<int>) (init T)) ()
+    (let ((nd (the Vector<int> (Vector::new))) (n 1))
+      (progn
+        (if (/= (len newdims) (len self::dims))
+            (panic (format false "adjust: expected ~a dimension(s), got ~a"
+                           (len self::dims) (len newdims)))
+            ())
+        (doiter (x (iter newdims))
+          (progn
+            (if (< x 0)
+                (panic (format false "adjust: dimension ~a is negative" x))
+                ())
+            (push nd x)
+            (setf n (* n x))))
+        (let ((moved (Vector::filled n init))
+              (sub (Vector::filled (len nd) 0))
+              (i 0))
+          (progn
+            (while (< i n)
+              (progn
+                (%internal::array-decode nd i sub)
+                (if (%internal::array-subs-in-bounds sub self::dims)
+                    (set moved i (get self::data (row-major-index self sub)))
+                    ())
+                (setf i (+ i 1))))
+            (setf self::dims nd)
+            (setf self::data moved)
+            (match self::fill-pointer
+              ((none) ())
+              ((some f) (setf self::fill-pointer (Option::some (min f n)))))))))))
 
 
 ;; CL's array syntax (CLHS 22.1.3.4), written as the type's own
@@ -6766,9 +6866,8 @@ user-visible capacity."
 ;; (`bitvector-trim`), so the representation of a given bit vector is unique
 ;; and `lognot` cannot leave phantom set bits behind it.
 ;;
-;; As with `Array<T>`, creation is `BitVector::make` rather than
-;; `BitVector::new`: `new` is the field-order constructor `defstruct`
-;; generates, and this type's fields are its packed representation.
+;; As with `Array<T>`, `BitVector::new` takes a length, not the packed
+;; representation the fields hold.
 ;; `bit-vector-p` does not exist — the static type has already answered it.
 
 (pub defstruct BitVector
@@ -6778,36 +6877,36 @@ user-visible capacity."
 
 ;; CL's `(make-array n :element-type 'bit)`. Every bit starts at 0, which is
 ;; what CL's `:initial-element` defaults to for a bit array.
-(pub defmethod make (BitVector (n int)) BitVector
-  (if (< n 0)
-      (panic (format false "BitVector::make: length ~a is negative" n))
-      (BitVector::new (Vector::filled (/ (+ n 30) 31) (the int 0)) n)))
-
-(pub defmethod len ((self BitVector)) int self::nbits)
+(impl BitVector
+  (pub new ((n int)) BitVector
+    (if (< n 0)
+        (panic (format false "BitVector::new: length ~a is negative" n))
+        (make-instance 'BitVector :words (Vector::filled (/ (+ n 30) 31) (the int 0)) :nbits n)))
+  (pub len (self) int self::nbits))
 
 ;; CL's `bit` / `sbit` and their `setf`s are `get`/`set` here, the way every
 ;; other indexed container in this language spells them; the CL names are
 ;; kept as aliases below.
-(pub defmethod get ((self BitVector) (i int)) bool
-  (if (or (< i 0) (>= i self::nbits))
-      (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
-      (logbitp (get self::words (/ i 31)) (mod i 31))))
-
-(pub defmethod set ((self BitVector) (i int) (b bool)) ()
-  (if (or (< i 0) (>= i self::nbits))
-      (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
-      (let ((w (/ i 31)) (mask (ash (the int 1) (mod i 31))))
-        (set self::words w
-             (if b
-                 (logior (get self::words w) mask)
-                 (logand (get self::words w) (lognot mask)))))))
-
-(pub defmethod bit ((self BitVector) (i int)) bool (get self i))
-(pub defmethod set-bit ((self BitVector) (i int) (b bool)) () (set self i b))
+(impl BitVector
+  (pub get (self (i int)) bool
+    (if (or (< i 0) (>= i self::nbits))
+        (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
+        (logbitp (get self::words (/ i 31)) (mod i 31))))
+  (pub set (self (i int) (b bool)) ()
+    (if (or (< i 0) (>= i self::nbits))
+        (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
+        (let ((w (/ i 31)) (mask (ash (the int 1) (mod i 31))))
+          (set self::words w
+               (if b
+                   (logior (get self::words w) mask)
+                   (logand (get self::words w) (lognot mask)))))))
+  (pub bit (self (i int)) bool (get self i))
+  (pub set-bit (self (i int) (b bool)) () (set self i b)))
 ;; CL's `sbit` differs from `bit` only in requiring a *simple* bit vector,
 ;; a distinction this language's single bit-vector type does not have.
-(pub defmethod sbit ((self BitVector) (i int)) bool (get self i))
-(pub defmethod set-sbit ((self BitVector) (i int) (b bool)) () (set self i b))
+(impl BitVector
+  (pub sbit (self (i int)) bool (get self i))
+  (pub set-sbit (self (i int) (b bool)) () (set self i b)))
 
 ;; Put the words back in canonical form. Two things can put them out of it,
 ;; and both have to be undone or two bit vectors holding the same bits stop
@@ -6841,7 +6940,7 @@ user-visible capacity."
 (module %internal (pub defun bitvector-zip ((a BitVector) (b BitVector) (who string) (f (fn (int int) int))) BitVector
   (if (/= a::nbits b::nbits)
       (panic (format false "~a: bit vectors differ in length (~a and ~a)" who a::nbits b::nbits))
-      (let ((out (BitVector::make a::nbits)) (i 0) (n (len a::words)))
+      (let ((out (BitVector::new a::nbits)) (i 0) (n (len a::words)))
         (progn
           (while (< i n)
             (progn
@@ -6850,38 +6949,39 @@ user-visible capacity."
           (%internal::bitvector-trim out)
           out)))))
 
-(pub defmethod bit-and ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-and" (lambda ((x int) (y int)) int (logand x y))))
-(pub defmethod bit-ior ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-ior" (lambda ((x int) (y int)) int (logior x y))))
-(pub defmethod bit-xor ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-xor" (lambda ((x int) (y int)) int (logxor x y))))
+(impl BitVector
+  (pub bit-and (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-and" (lambda ((x int) (y int)) int (logand x y))))
+  (pub bit-ior (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-ior" (lambda ((x int) (y int)) int (logior x y))))
+  (pub bit-xor (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-xor" (lambda ((x int) (y int)) int (logxor x y)))))
 ;; The rest of CL's family. Nothing new is needed for any of them: each is
 ;; the same word-wise walk over the integer operation of the same name.
-(pub defmethod bit-eqv ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-eqv" (lambda ((x int) (y int)) int (logeqv x y))))
-(pub defmethod bit-nand ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-nand" (lambda ((x int) (y int)) int (lognand x y))))
-(pub defmethod bit-nor ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-nor" (lambda ((x int) (y int)) int (lognor x y))))
-(pub defmethod bit-andc1 ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-andc1" (lambda ((x int) (y int)) int (logandc1 x y))))
-(pub defmethod bit-andc2 ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-andc2" (lambda ((x int) (y int)) int (logandc2 x y))))
-(pub defmethod bit-orc1 ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-orc1" (lambda ((x int) (y int)) int (logorc1 x y))))
-(pub defmethod bit-orc2 ((self BitVector) (other BitVector)) BitVector
-  (%internal::bitvector-zip self other "bit-orc2" (lambda ((x int) (y int)) int (logorc2 x y))))
-
-(pub defmethod bit-not ((self BitVector)) BitVector
-  (let ((out (BitVector::make self::nbits)) (i 0) (n (len self::words)))
-    (progn
-      (while (< i n)
-        (progn
-          (set out::words i (lognot (get self::words i)))
-          (setf i (+ i 1))))
-      (%internal::bitvector-trim out)
-      out)))
+(impl BitVector
+  (pub bit-eqv (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-eqv" (lambda ((x int) (y int)) int (logeqv x y))))
+  (pub bit-nand (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-nand" (lambda ((x int) (y int)) int (lognand x y))))
+  (pub bit-nor (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-nor" (lambda ((x int) (y int)) int (lognor x y))))
+  (pub bit-andc1 (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-andc1" (lambda ((x int) (y int)) int (logandc1 x y))))
+  (pub bit-andc2 (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-andc2" (lambda ((x int) (y int)) int (logandc2 x y))))
+  (pub bit-orc1 (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-orc1" (lambda ((x int) (y int)) int (logorc1 x y))))
+  (pub bit-orc2 (self (other BitVector)) BitVector
+    (%internal::bitvector-zip self other "bit-orc2" (lambda ((x int) (y int)) int (logorc2 x y))))
+  (pub bit-not (self) BitVector
+    (let ((out (BitVector::new self::nbits)) (i 0) (n (len self::words)))
+      (progn
+        (while (< i n)
+          (progn
+            (set out::words i (lognot (get self::words i)))
+            (setf i (+ i 1))))
+        (%internal::bitvector-trim out)
+        out))))
 
 ;; ---------------------------------------------------------------------------
 ;; Errors: the general-purpose type, wrapping, and the two things CL had that
@@ -6908,6 +7008,8 @@ user-visible capacity."
 (pub defstruct SimpleError
   "An error that carries nothing but its message — CL's `simple-error`."
   (text string))
+(impl SimpleError
+  (pub new ((text string)) SimpleError (make-instance 'SimpleError :text text)))
 (impl Error SimpleError
   (message ((self Self)) string self::text))
 (impl print-object SimpleError
@@ -6916,7 +7018,7 @@ user-visible capacity."
 ;; CL's `simple-error` is what `(error "...")` signals; the same
 ;; convenience here is a constructor that formats, since a `Result` is
 ;; returned rather than signalled.
-(pub defun simple-error ((msg string)) SimpleError (SimpleError::new msg))
+(pub defun simple-error ((msg string)) SimpleError (make-instance 'SimpleError :text msg))
 
 ;; An error that wraps another, so a low-level cause can travel with the
 ;; context that makes it readable. This is the one error type whose `source`
@@ -6936,7 +7038,7 @@ user-visible capacity."
 ;; the same reason `as-dyn-error` is: the boxing happens where the call site
 ;; specializes this body.
 (pub defun wrap-error<E> ((msg string) (cause E)) WrappedError (where (Error E))
-  (WrappedError::new msg (as :dyn Error cause)))
+  (make-instance 'WrappedError :text msg :cause (as :dyn Error cause)))
 
 ;; The whole chain, one cause per line. CL has no counterpart (its condition
 ;; report is a single line); this is Rust's "caused by" chain, and it is the
@@ -7093,17 +7195,14 @@ user-visible capacity."
 ;; once it has finished, as Go's can. The gate is only ever read or replaced
 ;; while the counter's token is held, so a waiter sees the gate belonging to
 ;; the count it saw.
-;;
-;; `WaitGroup::make` and not `WaitGroup::new`: a `defstruct`'s `new` takes its
-;; fields, and this one takes none. `Array<T>::make`/`BitVector::make` are the
-;; same shape for the same reason.
 (pub defstruct WaitGroup (count Chan<int>) (gate Chan<()>))
 
-(pub defmethod make (WaitGroup) WaitGroup
-  "A wait group with nothing outstanding."
-  (let ((c (the Chan<int> (Chan::new 1))))
-    (send c 0)
-    (WaitGroup::new c (the Chan<()> (Chan::new 0)))))
+(impl WaitGroup
+  (pub new () WaitGroup
+    "A wait group with nothing outstanding."
+    (let ((c (the Chan<int> (Chan::new 1))))
+      (send c 0)
+      (make-instance 'WaitGroup :count c :gate (the Chan<()> (Chan::new 0))))))
 
 ;; The body of `add` and `done`: move the counter by `n` while holding its
 ;; token. Closing the gate before the token goes back means whoever next
@@ -7120,22 +7219,21 @@ user-visible capacity."
           (if (and (> old 0) (eq new 0)) (close wg::gate) ())
           (send wg::count new))))))
 
-(pub defmethod add ((self WaitGroup) (n int)) ()
-  "Add `n` to the counter, before starting the work it counts."
-  (%internal::wait-group-shift self n "add: a wait group's counter went below zero"))
-
-(pub defmethod done ((self WaitGroup)) ()
-  "One of the counted things finished. At zero, every waiter is released."
-  (%internal::wait-group-shift self -1 "done: a wait group's counter went below zero"))
-
-(pub defmethod wait ((self WaitGroup)) ()
-  "Wait until the counter reaches zero. Any number of tasks may."
-  (let* ((c (unwrap (recv self::count)))
-         (g self::gate))
-    (send self::count c)
-    (if (eq c 0)
-        ()
-        (progn (recv g) ()))))
+(impl WaitGroup
+  (pub add (self (n int)) ()
+    "Add `n` to the counter, before starting the work it counts."
+    (%internal::wait-group-shift self n "add: a wait group's counter went below zero"))
+  (pub done (self) ()
+    "One of the counted things finished. At zero, every waiter is released."
+    (%internal::wait-group-shift self -1 "done: a wait group's counter went below zero"))
+  (pub wait (self) ()
+    "Wait until the counter reaches zero. Any number of tasks may."
+    (let* ((c (unwrap (recv self::count)))
+           (g self::gate))
+      (send self::count c)
+      (if (eq c 0)
+          ()
+          (progn (recv g) ())))))
 
 
 ;; ---- Thread ---------------------------------------------------------------
@@ -7143,9 +7241,10 @@ user-visible capacity."
 ;; Rust's `std::thread::spawn`: run `f` on an OS thread of its own, and get
 ;; the `Thread<T>` whose `join` answers with what it returned. `(thread (f))`
 ;; spelled as a function, for a body that is a closure already.
-(pub defmethod spawn (Thread<T> (f (fn () T))) Thread<T>
-  "Run `f` on an OS thread of its own. `(join th)` waits for its result."
-  (thread (f)))
+(impl Thread<T>
+  (pub spawn ((f (fn () T))) Thread<T>
+    "Run `f` on an OS thread of its own. `(join th)` waits for its result."
+    (thread (f))))
 
 
 ;; ---- Mutex --------------------------------------------------------------
@@ -7175,21 +7274,20 @@ user-visible capacity."
 ;; another task may be halfway through changing it.
 (pub defstruct Mutex<T> (pub v T) (gate Chan<()>))
 
-(pub defmethod make (Mutex<T> (v T)) Mutex<T>
-  "A mutex holding `v`, unlocked."
-  (let ((g (the Chan<()> (Chan::new 1))))
-    (send g ())
-    (Mutex::new v g)))
-
-(pub defmethod lock ((self Mutex<T>)) ()
-  "Take the lock, waiting for it."
-  (progn (recv self::gate) ()))
-
-(pub defmethod unlock ((self Mutex<T>)) ()
-  "Give the lock back. Unlocking one that is not locked is a panic."
-  (select
-    ((send self::gate ()) ())
-    (else (panic "unlock: the mutex is not locked"))))
+(impl Mutex<T>
+  (pub new ((v T)) Mutex<T>
+    "A mutex holding `v`, unlocked."
+    (let ((g (the Chan<()> (Chan::new 1))))
+      (send g ())
+      (make-instance 'Mutex :v v :gate g)))
+  (pub lock (self) ()
+    "Take the lock, waiting for it."
+    (progn (recv self::gate) ()))
+  (pub unlock (self) ()
+    "Give the lock back. Unlocking one that is not locked is a panic."
+    (select
+      ((send self::gate ()) ())
+      (else (panic "unlock: the mutex is not locked")))))
 
 ;; `(with-lock (x m) body...)` — lock `m`, run `body` with `x` naming what it
 ;; holds, and release however the body is left.
@@ -7233,43 +7331,45 @@ user-visible capacity."
 ;; be cancelled, has no counterpart.
 (pub defstruct Context (done-ch Chan<()>) (cancelled Mutex<bool>) (children Vector<Context>) (parent Option<Context>))
 (module %internal (pub defun context-child ((parent Option<Context>)) Context
-  (Context::new (the Chan<()> (Chan::new 0)) (Mutex::make false) (the Vector<Context> (Vector::new)) parent)))
-(pub defmethod background (Context) Context (%internal::context-child (Option::none)))
-(pub defmethod done ((self Context)) Chan<()> self::done-ch)
-(pub defmethod is-cancelled ((self Context)) bool
-  (with-lock (c self::cancelled) c))
-(pub defmethod cancel ((self Context)) ()
-  (let ((kids (the Vector<Context> (Vector::new))) (first false))
-    (with-lock (c self::cancelled)
-      (unless c
-        (setf c true)
-        (setf first true)
-        (close self::done-ch)
-        (doiter (k (iter self::children)) (push kids k))
-        (while (> (len self::children) 0) (pop self::children))))
-    (when first
-      (doiter (k (iter kids)) (cancel k))
-      (match self::parent
-        ((some p) (with-lock (pc p::cancelled)
-                    (let ((rest (the Vector<Context> (Vector::new))))
-                      (doiter (k (iter p::children)) (unless (is-cancelled k) (push rest k)))
-                      (while (> (len p::children) 0) (pop p::children))
-                      (doiter (k (iter rest)) (push p::children k)))))
-        ((none) ())))))
-(pub defmethod with-cancel (Context (parent Context)) Context
-  (let ((child (%internal::context-child (Option::some parent))) (dead false))
-    (with-lock (c parent::cancelled)
-      (if c (setf dead true) (progn (push parent::children child) false)))
-    (when dead (cancel child))
-    child))
+  (make-instance 'Context :done-ch (the Chan<()> (Chan::new 0)) :cancelled (Mutex::new false) :children (the Vector<Context> (Vector::new)) :parent parent)))
+(impl Context
+  (pub background () Context (%internal::context-child (Option::none)))
+  (pub done (self) Chan<()> self::done-ch)
+  (pub is-cancelled (self) bool
+    (with-lock (c self::cancelled) c))
+  (pub cancel (self) ()
+    (let ((kids (the Vector<Context> (Vector::new))) (first false))
+      (with-lock (c self::cancelled)
+        (unless c
+          (setf c true)
+          (setf first true)
+          (close self::done-ch)
+          (doiter (k (iter self::children)) (push kids k))
+          (while (> (len self::children) 0) (pop self::children))))
+      (when first
+        (doiter (k (iter kids)) (cancel k))
+        (match self::parent
+          ((some p) (with-lock (pc p::cancelled)
+                      (let ((rest (the Vector<Context> (Vector::new))))
+                        (doiter (k (iter p::children)) (unless (is-cancelled k) (push rest k)))
+                        (while (> (len p::children) 0) (pop p::children))
+                        (doiter (k (iter rest)) (push p::children k)))))
+          ((none) ())))))
+  (pub with-cancel ((parent Context)) Context
+    (let ((child (%internal::context-child (Option::some parent))) (dead false))
+      (with-lock (c parent::cancelled)
+        (if c (setf dead true) (progn (push parent::children child) false)))
+      (when dead (cancel child))
+      child)))
 (module %internal (pub defun cancel-after ((ctx Context) (sec f64)) ()
   (select
     ((v (recv (done ctx))) ())
     ((v (recv (after sec))) (cancel ctx)))))
-(pub defmethod with-timeout (Context (parent Context) (sec f64)) Context
-  (let ((child (Context::with-cancel parent)))
-    (task (%internal::cancel-after child sec))
-    child))
+(impl Context
+  (pub with-timeout ((parent Context) (sec f64)) Context
+    (let ((child (Context::with-cancel parent)))
+      (task (%internal::cancel-after child sec))
+      child)))
 (impl print-object Context
   (print-object ((self Self) (escape bool)) string
     (if (is-cancelled self) "#<context cancelled>" "#<context>")))
@@ -7324,6 +7424,7 @@ pub fn load_interpreted_with(
     // It is a separate layer rather than the top of this file because the
     // compiler island needs the same macros without taking the prelude with
     // them — see `crate::core_macros`'s module comment.
+    chk.set_stdlib(true);
     crate::core_macros::load_with(heap, chk, interp, on_checked);
 
     let r = Reader::new();
@@ -7337,4 +7438,5 @@ pub fn load_interpreted_with(
         on_checked(heap, tl);
         interp.exec(heap, tl).expect("prelude: eval failed");
     }
+    chk.set_stdlib(false);
 }

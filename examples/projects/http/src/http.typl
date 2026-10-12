@@ -34,8 +34,8 @@
   (match (search line ":")
     ((none) (option::none))
     ((some i)
-     (option::some (header::new (trim (substring line 0 i))
-                                (trim (substring line (+ i 1) (length line))))))))
+     (option::some (make-instance 'header :name (trim (substring line 0 i))
+                                :value (trim (substring line (+ i 1) (length line))))))))
 
 ;; A line without its trailing CR (lines end in CRLF; `read-line` stops at LF).
 (defun read-crlf-line ((c socket-stream)) Option<string>
@@ -120,8 +120,8 @@
        (if (< (len parts) 2)
            (option::none)
            (let ((headers (read-headers c)))
-             (option::some (request::new (get parts 0) (get parts 1) headers
-                                         (read-body c headers false)))))))))
+             (option::some (make-instance 'request :method (get parts 0) :target (get parts 1) :headers headers
+                                         :body (read-body c headers false)))))))))
 
 (pub defun write-response ((c socket-stream) (r response)) ()
   "Send `r`, with `Content-Length` and `Connection: close` added."
@@ -134,8 +134,8 @@
 
 (pub defun text-response ((status int) (reason string) (body string)) response
   (let ((headers (the Vector<header> (Vector::new))))
-    (push headers (header::new "Content-Type" "text/plain; charset=utf-8"))
-    (response::new status reason headers body)))
+    (push headers (make-instance 'header :name "Content-Type" :value "text/plain; charset=utf-8"))
+    (make-instance 'response :status status :reason reason :headers headers :body body)))
 
 ;; ---- Client side ----------------------------------------------------------
 
@@ -161,10 +161,10 @@
             (match (search authority ":")
               ((some i)
                (match (parse-int (substring authority (+ i 1) (length authority)))
-                 ((ok port) (result::ok (url::new tls (substring authority 0 i) port target)))
+                 ((ok port) (result::ok (make-instance 'url :tls tls :host (substring authority 0 i) :port port :target target)))
                  ((err e) (result::err (simple-error (append "bad port in " s))))))
               ((none)
-               (result::ok (url::new tls authority (if tls 443 80) target)))))))))
+               (result::ok (make-instance 'url :tls tls :host authority :port (if tls 443 80) :target target)))))))))
 
 (pub defun read-response ((c socket-stream)) Option<response>
   (match (read-crlf-line c)
@@ -178,7 +178,7 @@
                              (substring line (+ (length (get parts 0)) (length (get parts 1)) 2) (length line))
                              ""))
                  (headers (read-headers c)))
-             (option::some (response::new status reason headers (read-body c headers true)))))))))
+             (option::some (make-instance 'response :status status :reason reason :headers headers :body (read-body c headers true)))))))))
 
 (pub defun http-get ((address string)) Result<response, :dyn Error>
   "GET `address`. Plain HTTP or TLS by the scheme; the connection is closed

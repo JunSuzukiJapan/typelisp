@@ -195,20 +195,17 @@ fn vector_of_sexpr_gets_elements_back_as_sexprs() {
     assert_eq!(eval_ok(src), Value::Int(42));
 }
 
-// ---- CL-order `push`/setf-able `(get ...)` place -----------------------------
+// ---- `push` takes the vector first / setf-able `(get ...)` place ------------
 
 #[test]
-fn push_accepts_cl_argument_order_too() {
-    // `(push item place)`, CL's own argument order, resolves via
-    // `Checker::try_instance_method_swapped` once the receiver-first
-    // `(push vec item)` convention fails to match.
+fn push_takes_the_vector_first() {
+    // The method is looked up from the first argument's type only, so CL's
+    // `(push item place)` order finds no `push` on the item's type.
     let src = "(defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v)))
-                 (push 1 v)
-                 (push v 2)
-                 (push 3 v)
-                 (get v 2))";
-    assert_eq!(eval_ok(src), Value::Int(3));
+                 (push 1 v))";
+    let msg = format!("{:?}", check(src).unwrap_err());
+    assert!(msg.contains("no method `push` for type `int`"), "{}", msg);
 }
 
 #[test]

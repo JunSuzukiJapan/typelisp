@@ -16,7 +16,7 @@ pub mod loop_dsl;
 pub mod locate;
 pub mod semantic;
 
-pub use resolved::{CompileTarget, Pattern, Ref};
+pub use resolved::{CompileTarget, Pattern};
 pub use registry::{AdtDef, AdtKind, AssocFn, CField, CStructDef, DefLocs, Docs, FnSig, MacroDef, Namespace, Registry, TypeAlias, VarInfo, Variant};
 pub use checker::{Checker, MacroExpander, MacroLambda, RedefPolicy, TopLevelForm, MONO_BUNDLE_MODULE};
 pub use locate::{

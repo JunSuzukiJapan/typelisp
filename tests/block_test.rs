@@ -136,7 +136,7 @@ fn the_innermost_block_of_a_name_wins() {
 
 #[test]
 fn return_from_can_leave_an_outer_block_from_inside_an_inner_one() {
-    assert_eq!(int("(block outer (+ (block inner (return-from outer 7)) 10))"), 7);
+    assert_eq!(int("(block outer (+ 10 (block inner (return-from outer 7))))"), 7);
 }
 
 // ------------------------------------------------- the implicit block
@@ -196,10 +196,11 @@ fn a_method_body_can_return_from_itself() {
     assert_eq!(
         text(
             "(defstruct point (x int) (y int))
-             (defmethod describe ((self point)) string
-               (if (= self::x 0) (return-from describe \"on the axis\") ())
-               \"off the axis\")
-             (format false \"~a/~a\" (describe (point::new 0 3)) (describe (point::new 1 3)))"
+             (impl point
+               (describe (self) string
+                 (if (= self::x 0) (return-from describe \"on the axis\") ())
+                 \"off the axis\"))
+             (format false \"~a/~a\" (describe (make-instance 'point :x 0 :y 3)) (describe (make-instance 'point :x 1 :y 3)))"
         ),
         "on the axis/off the axis"
     );
@@ -316,7 +317,7 @@ fn a_compiled_defun_returns_from_itself() {
 }
 
 const NESTED_BLOCKS: &str = r#"
-    (defun pick () int (block outer (+ (block inner (return-from outer 7)) 10)))
+    (defun pick () int (block outer (+ 10 (block inner (return-from outer 7)))))
     "#;
 
 #[test]

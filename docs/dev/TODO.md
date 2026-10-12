@@ -1,12 +1,16 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-10-02 / ブランチ: `feat/ci`
+最終更新: 2026-10-12 / ブランチ: `feat/constructors`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
 [implementation-log.md](implementation-log.md)（作業 1 件ごとの経緯・設計判断）へ移す。
 
 ## 残っている作業
+
+**名前解決の一本化（ブランチ `feat/constructors`）。** 計画は
+[name-resolution.md](name-resolution.md)。Phase 1〜4 と 3b がすべて済んだ。残りは利用者向けの文書
+（`format.md` §5 ほか、計画の §5 末尾）で、コンストラクタ再設計の Phase E でまとめて直す。
 
 **CI/CD（作業中、ブランチ `feat/ci`）。** push/PR ごとにビルドと警告 0 を、
 リリース（`v*` タグ）のときだけテスト全体を回す。対象は macOS と Linux

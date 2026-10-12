@@ -77,8 +77,8 @@ fn a_mutex_counts_every_increment_from_eight_tasks() {
                (with-lock (n m) (setf n (+ n 1))))
              (done wg))
            (defun main () int
-             (let ((m (the Mutex<int> (Mutex::make 0)))
-                   (wg (the WaitGroup (WaitGroup::make))))
+             (let ((m (the Mutex<int> (Mutex::new 0)))
+                   (wg (the WaitGroup (WaitGroup::new))))
                (add wg 8)
                (dotimes (i 8) (task (bump m wg 10000)))
                (wait wg)
@@ -112,7 +112,7 @@ fn tasks_allocating_on_every_thread_survive_collections() {
              (let ((total 0))
                (dotimes (r rounds)
                  (let* ((l (build 500))
-                        (p (pair::new r (format false "r~a" r))))
+                        (p (make-instance 'pair :a r :b (format false "r~a" r))))
                    (setf total (+ total (len l)))
                    (if (equal p::b (format false "r~a" p::a)) () (panic "a struct lost its string"))))
                total))
@@ -153,7 +153,7 @@ fn values_crossing_a_channel_survive_collections() {
            (defun close-when-done ((wg WaitGroup) (ch Chan<Option<Sexpr>>)) () (wait wg) (close ch))
            (defun main () int
              (let ((ch (the Chan<Option<Sexpr>> (Chan::new 4)))
-                   (wg (the WaitGroup (WaitGroup::make))))
+                   (wg (the WaitGroup (WaitGroup::new))))
                (add wg 4)
                (dotimes (i 4) (task (produce ch wg (+ 100 i))))
                (task (close-when-done wg ch))
@@ -188,7 +188,7 @@ fn a_pipeline_with_select_and_after_gives_the_same_answer() {
            (defun main () int
              (let ((a (the Chan<int> (Chan::new 0)))
                    (b (the Chan<int> (Chan::new 8)))
-                   (wg (the WaitGroup (WaitGroup::make))))
+                   (wg (the WaitGroup (WaitGroup::new))))
                (task (numbers a 1000))
                (add wg 3)
                (dotimes (i 3) (task (square a b wg)))

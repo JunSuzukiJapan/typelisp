@@ -363,8 +363,8 @@ const POINT: &str = r##"
   (print-object ((self Self) (escape bool)) string
     (if escape (format false "#S(point :x ~d :y ~d)" self::x self::y)
                (format false "(~d,~d)" self::x self::y))))
-(defvar (p point) (point::new 1 2))
-(defvar (q point) (point::new 3 4))
+(defvar (p point) (make-instance 'point :x 1 :y 2))
+(defvar (q point) (make-instance 'point :x 3 :y 4))
 "##;
 
 #[test]
@@ -392,7 +392,7 @@ fn a_nested_value_dispatches_too() {
 
 #[test]
 fn a_type_without_an_impl_keeps_the_built_in_representation() {
-    let out = stdout_of(r#"(defstruct plain (n int)) (print "~a" (plain::new 7))"#);
+    let out = stdout_of(r#"(defstruct plain (n int)) (print "~a" (make-instance 'plain :n 7))"#);
     assert!(out.ends_with("plain n: 7>"), "unexpected output: {}", out);
 }
 
@@ -403,8 +403,9 @@ fn a_method_named_print_object_that_is_not_the_trait_is_ignored() {
     let out = stdout_of(
         r#"
         (defstruct thing (n int))
-        (defmethod print-object ((self thing)) int self::n)
-        (print "~a" (thing::new 7))
+        (impl thing
+  (print-object (self) int self::n))
+        (print "~a" (make-instance 'thing :n 7))
     "#,
     );
     assert!(out.ends_with("thing n: 7>"), "unexpected output: {}", out);
@@ -418,7 +419,7 @@ fn a_print_object_that_prints_itself_falls_back_instead_of_looping() {
         (defstruct loopy (n int))
         (impl print-object loopy
           (print-object ((self Self) (escape bool)) string (format false "<~a>" self)))
-        (print "~a" (loopy::new 1))
+        (print "~a" (make-instance 'loopy :n 1))
     "#,
     );
     assert!(out.starts_with("<#<") && out.ends_with("loopy n: 1>>"), "unexpected output: {}", out);
@@ -450,7 +451,7 @@ fn a_print_object_that_conses_heavily_survives_collections() {
                 (setf acc (format false "~a" (list 1 2 3 4 5 6 7 8 9 10))))
               (format false "H~d" self::n))))
         (dotimes (i 100)
-          (println "~a" (list (heavy::new (as int i)) (heavy::new (as int i)))))
+          (println "~a" (list (make-instance 'heavy :n (as int i)) (make-instance 'heavy :n (as int i)))))
     "#,
     );
     let lines: Vec<&str> = out.lines().collect();

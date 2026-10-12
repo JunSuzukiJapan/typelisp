@@ -431,7 +431,7 @@ pub(super) fn dyn_value_form(heap: &mut Heap, value: Value) -> Result<Value, Err
     core::tagged(heap, "dyn-value", &[value])
 }
 
-/// `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) PUBLIC BODY...)`.
+/// `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) BODY...)`.
 ///
 /// A macro is an ordinary callable body — expanding it is calling it — so
 /// the only extra structure is how the non-required regions of its lambda
@@ -442,7 +442,6 @@ pub(super) fn defmacro_form(
     params: &[String],
     rest: bool,
     lambda: &MacroLambda,
-    public: bool,
     body: &[Value],
 ) -> Result<Value, Error> {
     let mut f = Items::new(heap);
@@ -475,7 +474,6 @@ pub(super) fn defmacro_form(
         l.finish_list()?
     };
     f.push(lam);
-    f.push(Value::Bool(public));
     f.extend(body.iter().copied());
     f.finish("defmacro")
 }
@@ -524,8 +522,7 @@ pub(super) fn expr_form(heap: &mut Heap, form: Value) -> Result<Value, Error> {
     core::tagged(heap, "expr", &[form])
 }
 
-/// `(compile-fn (fn (WRITTEN...) (HOME...) PATH))` or
-/// `(compile-fn (method PATH SYM (HOME...)))`.
+/// `(compile-fn (fn PATH))` or `(compile-fn (method PATH SYM))`.
 pub(super) fn compile_fn_form(heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
     let payload = compile_target_payload(heap, target)?;
     core::tagged(heap, "compile-fn", &[payload])
@@ -550,28 +547,22 @@ pub(super) fn disassemble_fn_form(heap: &mut Heap, target: &CompileTarget, llvm_
     core::tagged(heap, "disassemble-fn", &[payload, Value::Bool(llvm_ir)])
 }
 
-/// `(fn (WRITTEN...) (HOME...) PATH)` or `(method PATH SYM (HOME...))` — one
-/// resolved target, as the node payload every form that takes one carries.
+/// `(fn PATH)` or `(method PATH SYM)` — one resolved target, as the node
+/// payload every form that takes one carries.
 fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
     match target {
-        CompileTarget::Fn(r) => {
+        CompileTarget::Fn(path) => {
             let mut f = Items::new(heap);
-            let written = sym_list(f.heap(), &r.written)?;
-            f.push(written);
-            let home = sym_list(f.heap(), &r.home)?;
-            f.push(home);
-            let path = path_form(f.heap(), &r.resolved);
+            let path = path_form(f.heap(), path);
             f.push(path);
             f.finish("fn")
         }
-        CompileTarget::Method { type_name, method, home } => {
+        CompileTarget::Method(type_name, method) => {
             let mut f = Items::new(heap);
             let tp = path_form(f.heap(), type_name);
             f.push(tp);
             let m = f.heap().intern_symbol(method);
             f.push(m);
-            let home = sym_list(f.heap(), home)?;
-            f.push(home);
             f.finish("method")
         }
     }
@@ -789,12 +780,7 @@ pub(super) fn path_form(heap: &mut Heap, p: &Path) -> Value {
     heap.intern_path(&ids)
 }
 
-/// `(a b c)` — a list of symbols, for a reference's `written`/`home` name
-/// lists.
-///
-/// `home` is often empty: the root module has zero segments, which is exactly
-/// why these are lists of symbols rather than a `Path` (always at least one
-/// segment).
+/// `(a b c)` — a list of symbols, one per name.
 pub(super) fn sym_list(heap: &mut Heap, names: &[String]) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for n in names {

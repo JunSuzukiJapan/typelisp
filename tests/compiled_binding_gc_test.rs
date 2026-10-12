@@ -69,7 +69,7 @@ fn a_compiled_struct_local_survives_collection() {
     let (mut h, mut chk, mut interp) = stressed();
     let src = r#"(defstruct named (tag string) (n int))
                  (defun probe ((n int)) string
-                   (let ((p (named::new "keepme" n)))
+                   (let ((p (make-instance 'named :tag "keepme" :n n)))
                      (let ((a (sexpr-cons (quote x) (quote ()))))
                        (let ((b (sexpr-cons (quote y) a)))
                          (let ((c (sexpr-cons (quote z) b)))
@@ -108,9 +108,9 @@ fn a_compiled_struct_local_is_not_clobbered_by_a_later_box_allocation() {
     let (mut h, mut chk, mut interp) = stressed();
     let src = r#"(defstruct tagged (tag string))
                  (defun probe () string
-                   (let ((p (tagged::new "keepme")))
+                   (let ((p (make-instance 'tagged :tag "keepme")))
                      (let ((a (sexpr-cons (quote x) (quote ()))))
-                       (let ((q (tagged::new "clobber")))
+                       (let ((q (make-instance 'tagged :tag "clobber")))
                          (let ((b (sexpr-cons (quote y) a)))
                            p::tag)))))
                  (compile probe)

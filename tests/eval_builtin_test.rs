@@ -152,7 +152,7 @@ fn a_definition_made_by_a_compiled_functions_eval_survives_the_call() {
 fn a_struct_evaluates_to_itself() {
     let out = repl_stdout(
         "(defstruct q (x i32))\n\
-         (defvar (v q) (q::new 7))\n\
+         (defvar (v q) (make-instance 'q :x 7))\n\
          (match (eval v) ((ok s) (match s ((the q w) (progn (setf w::x 8) v::x)) (_ -1))) ((err _) -2))\n\
          :quit\n",
     );
@@ -185,7 +185,7 @@ fn compiling_code_that_holds_a_struct_literal_is_refused_by_name() {
         .write_all(
             b"(defstruct q (x i32))\n\
               (defun keep ((s Sexpr)) Sexpr s)\n\
-              (defmacro lit-q () (list (quote keep) (q::new 5)))\n\
+              (defmacro lit-q () (list (quote keep) (make-instance 'q :x 5)))\n\
               (defun f () Sexpr (lit-q))\n\
               (f)\n\
               (compile f)\n\

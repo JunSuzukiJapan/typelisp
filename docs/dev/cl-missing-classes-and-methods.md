@@ -173,7 +173,7 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 | `psetf` / `psetq` / `setq` | ✅ | 3つとも `defmacro`（`setf` へ展開）（2026-08-20、Phase 4a）。`psetf`/`psetq` は全ての値を先に評価してから代入するので `(psetq a b b a)` が交換になる |
 | `shiftf` / `rotatef` | ✅ | 2026-07-30 実装（`Checker::check_rotatef_shiftf`）。上記どの place 種でも使えるが、読み取り型と書き込み型が非対称な place（`HashTable<K,V>` の `get`→`Option<V>`／`set`→`V`）をまたぐ回転は型エラーになる（CL の untyped `gethash` と違い静的型があるため） |
 | `incf` / `decf` | ✅ | 2026-07-30 実装（`Checker::check_incf_decf`）。`delta` 省略時は `1` |
-| `push` / `pop` | ⚠️ | `Vector<T>` のメソッドとして存在（`(push vec item)`、受け手が先）。2026-07-30、`(push item vec)` という CL の引数順も同名のまま両立するようにした（`Checker::try_instance_method_swapped` — 通常の受け手優先解決が失敗した場合だけ引数を入れ替えて再試行する2引数汎用フォールバック）。`Vector<T>` は参照型（ヒープ上で直接変異）なので CL のような setf 展開は不要。`pushnew` は 2026-08-20（Phase 4a）に `defmethod` として追加——CL がマクロなのは place を書き換えるためで、ここは受け手がその場で変異するので不要。`remf` はプロパティリストごと対象外（§2.12） |
+| `push` / `pop` | ⚠️ | `Vector<T>` のメソッドとして存在（`(push vec item)`、受け手が先）。CL の引数順 `(push item vec)` は受け付けない（メソッドは第 1 引数の型だけから探す、2026-10-11）。`Vector<T>` は参照型（ヒープ上で直接変異）なので CL のような setf 展開は不要。`pushnew` は 2026-08-20（Phase 4a）に `defmethod` として追加——CL がマクロなのは place を書き換えるためで、ここは受け手がその場で変異するので不要。`remf` はプロパティリストごと対象外（§2.12） |
 | `block` / `return-from` | ✅ | 2026-09-04（Phase 4a）。**静的**な脱出で、字句的な入れ子を跨いで名前付きブロックへ抜けられる。`unwind-protect` の cleanup も走る。拡張 `loop` の `:named` もこの上に載っている |
 | `tagbody` / `go` | ⛔ | goto |
 | `catch` / `throw` | ✅ | 2026-08-16 実装（[syntax.md](../ja/reference/syntax.md) §8 / language-design.md §7.5）。**動的**な脱出で、関数を何段跨いでも同じタグの `catch` に届く。CL との差は**タグがリテラルシンボル限定**（評価されない）で、そのシンボルが飛ぶ値の型を運ぶこと（`Checker::throw_tags`。計算したタグでは突き合わせる型が無くなる）。`throw` の型は `!`、`(catch 'tag e)` の型は `e` の型とタグの型の合流 |

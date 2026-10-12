@@ -37,12 +37,12 @@ pub struct PrintShared {
     /// `type key -> the address of that type's compiled `print-object``,
     /// filled by `rt_print_object_method`.
     pub(crate) print_object: RwLock<HashMap<String, usize>>,
-    /// `(type key, method name) -> the address of that method's compiled
-    /// body`, filled by `rt_format_call_method` — what `~/name/` dispatches
-    /// through. Registered per *directive site*, not per type: the checker
-    /// scans each literal control string and names only the methods a `~/ /`
-    /// in this program can actually reach.
-    pub(crate) format_call: RwLock<HashMap<(String, String), usize>>,
+    /// `definition -> the address of its compiled body`, filled by
+    /// `rt_format_call_method` — what `~/name/` calls through. The name is the
+    /// one the checker resolved a directive to (`CompileTarget::link_name`),
+    /// and only the definitions some directive in this program resolved to
+    /// are registered.
+    pub(crate) format_call: RwLock<HashMap<String, usize>>,
     /// `printer control variable -> its compiled global id`, filled by
     /// `rt_print_global` — where the AOT hooks read `*print-base*` and the
     /// rest from.

@@ -161,7 +161,7 @@ fn some_and_none_round_trip_through_compiled_and_interpreted_code_for_every_nich
         (defun mk-char ((b bool)) Option<char> (if b (option::some #\z) (option::none)))
         (defun mk-bool ((b bool)) Option<bool> (if b (option::some false) (option::none)))
         (defun mk-str ((b bool)) Option<string> (if b (option::some "hi") (option::none)))
-        (defun mk-pt ((b bool)) Option<pt> (if b (option::some (pt::new 9)) (option::none)))
+        (defun mk-pt ((b bool)) Option<pt> (if b (option::some (make-instance 'pt :x 9)) (option::none)))
         (defun mk-sexpr ((b bool)) Option<Sexpr> (if b (option::some (unwrap (list 1 2))) (option::none)))
     "#;
     const NAMES: &[&str] = &[
@@ -261,9 +261,9 @@ fn a_niched_option_still_prints_as_some_and_none() {
         (defstruct pair (a Option<int>) (b Option<string>))
         (defstruct gen<T> (v T))
         (defenum shape (circle Option<f64>) (dot))
-        (defun mk-pair () pair (pair::new (option::some 1) (option::none)))
-        (defun mk-gen () gen<Option<int>> (gen::new (option::some 3)))
-        (defun mk-gen-none () gen<Option<int>> (gen::new (option::none)))
+        (defun mk-pair () pair (make-instance 'pair :a (option::some 1) :b (option::none)))
+        (defun mk-gen () gen<Option<int>> (make-instance 'gen :v (option::some 3)))
+        (defun mk-gen-none () gen<Option<int>> (make-instance 'gen :v (option::none)))
         (defun mk-shape () shape (shape::circle (option::some 1.5)))
         (defun mk-vec () Vector<Option<int>> (let ((v (the Vector<Option<int>> (Vector::new)))) (push v (option::some 1)) (push v (option::none)) v))
         (defun mk-nested () Option<Option<int>> (option::some (option::none)))
@@ -316,7 +316,7 @@ fn macroexpand_1_result_uses_the_niche() {
 fn a_traced_call_prints_a_niched_option_by_its_declared_type() {
     let out = eval_string(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
-         (setf *trace-output* (standard-stream::new *cap*))\n\
+         (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
          (defun opt ((o Option<int>)) Option<int> (match o ((some n) (option::some (+ n 1))) ((none) (option::none))))\n\
          (trace opt)\n\
          (opt (option::some 5))\n\

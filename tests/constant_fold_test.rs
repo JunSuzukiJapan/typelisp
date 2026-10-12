@@ -57,7 +57,7 @@ fn nested_and_variadic_calls_fold_bottom_up() {
     // A fold inside a body that is otherwise not constant.
     assert_eq!(
         lowered("(defun f ((x int)) int (+ x (* 2 3)))"),
-        "(defun f ((x int)) int false (assoc int + true () int (int int) \"int\" (var x) (int 6)))"
+        "(defun f ((x int)) int (assoc int + true int (int int) \"int\" (var x) (int 6)))"
     );
 }
 
@@ -131,11 +131,11 @@ fn a_dead_branch_is_still_checked() {
 fn a_call_that_would_raise_is_left_to_raise_at_runtime() {
     assert_eq!(
         lowered("(/ 1 0)"),
-        "(expr (assoc int / true () int (int int) \"int\" (int 1) (int 0)))"
+        "(expr (assoc int / true int (int int) \"int\" (int 1) (int 0)))"
     );
     assert_eq!(
         lowered("(mod (the i32 1) 0)"),
-        "(expr (assoc i32 mod true () int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 1) (int-any-width 0)))"
+        "(expr (assoc i32 mod true int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 1) (int-any-width 0)))"
     );
     // The fold must not have turned the runtime panic into a check error.
     let mut s = Session::new(Load::Prelude);
@@ -147,7 +147,7 @@ fn a_call_that_would_raise_is_left_to_raise_at_runtime() {
 fn a_non_literal_argument_is_not_folded() {
     assert_eq!(
         lowered("(let ((x 5)) (+ x 1))"),
-        "(expr (let ((x int (int 5))) (assoc int + true () int (int int) \"int\" (var x) (int 1))))"
+        "(expr (let ((x int (int 5))) (assoc int + true int (int int) \"int\" (var x) (int 1))))"
     );
 }
 

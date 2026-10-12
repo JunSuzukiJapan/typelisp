@@ -46,23 +46,58 @@ fn compile_and_capture(name: &str, source: &str) -> (i32, String) {
 
 /// `~/name/` in a standalone executable.
 ///
-/// The directive names its method in a string, and an AOT program has no
-/// interpreter to look a name up in — so it used to be refused outright.
-/// `format`/`print`/`println` now take a *literal* control string, the
-/// checker scans it (`Checker::format_call_methods`), and `compile_file`
-/// emits one `rt_format_call_method` registration per method it named,
-/// beside the `print-object` ones. Exit code 0 means the directive produced
-/// exactly what the interpreter produces for the same program.
+/// An AOT program has no table of definitions to fetch one from by name, so
+/// `compile_file` emits one `rt_format_call_method` registration per
+/// definition the checker resolved a directive to
+/// (`Checker::format_call_targets`), beside the `print-object` ones. Exit
+/// code 0 means the directive produced exactly what the interpreter produces
+/// for the same program.
 #[test]
 fn a_call_directive_dispatches_in_a_compiled_executable() {
     assert_eq!(
         compile_and_run(
             "format_call",
             r#"(defstruct money (yen int))
-               (defmethod jp ((self money) (colon bool) (at bool)) string
-                 (format false "~a yen" (yen self)))
+               (impl money
+  (jp (self (colon bool) (at bool)) string
+                   (format false "~a yen" (yen self))))
                (defun main () int
-                 (if (equal (format false "~/jp/" (money::new 300)) "300 yen") 0 1))"#,
+                 (if (equal (format false "~/jp/" (make-instance 'money :yen 300)) "300 yen") 0 1))"#,
+        ),
+        0
+    );
+}
+
+/// A `defmacro` inside a `(module ...)` block of the entry file is usable
+/// later in the block and in the rest of the file, as in `typl`.
+#[test]
+fn a_macro_in_a_module_block_is_usable_in_a_compiled_executable() {
+    assert_eq!(
+        compile_and_run(
+            "module_block_macro",
+            r#"(module m
+                 (pub defmacro twice (x) `(+ ,x ,x 1))
+                 (pub defun g () int (twice 5)))
+               (defun main () int
+                 (if (= (+ (m::g) (m::twice 1)) 14) 0 1))"#,
+        ),
+        0
+    );
+}
+
+/// A `~/name/` that calls a function — the way to reach an argument of a
+/// built-in type, which takes no methods from a program — and one naming a
+/// function by its module path, in an executable.
+#[test]
+fn a_call_directive_calls_a_function_in_a_compiled_executable() {
+    assert_eq!(
+        compile_and_run(
+            "format_call_fn",
+            r#"(defun yen ((n int) (colon bool) (at bool)) string
+                 (if colon (format false "JPY ~d" n) (format false "~d yen" n)))
+               (module m (pub defun shout ((s string) (colon bool) (at bool)) string (append s "!")))
+               (defun main () int
+                 (if (equal (format false "~/yen/, ~:/yen/, ~/m::shout/" 300 5 "hi") "300 yen, JPY 5, hi!") 0 1))"#,
         ),
         0
     );
@@ -163,8 +198,8 @@ fn the_entry_files_types_print_with_its_module_as_under_typl() {
         &src_path,
         r#"(defstruct point (x int) (y int))
            (defun main () ()
-             (println "~s" (point::new 1 2))
-             (match (eval (quote (point::new 3 4)))
+             (println "~s" (make-instance 'point :x 1 :y 2))
+             (match (eval (quote (make-instance 'point :x 3 :y 4)))
                ((ok v) (println "~s" v))
                ((err e) (println "~a" (message e)))))
            (main)"#,
@@ -256,7 +291,7 @@ fn compiles_and_runs_arithmetic_in_main() {
     // see this module's doc comment) always defaults to `int` (the
     // checker resolves `+`/`-`/`*`'s receiver type from its *first*
     // argument checked with `expected: None`, by design — see
-    // `Checker::try_instance_method`'s doc comment — so the outer
+    // `Checker::resolve_name`'s doc comment — so the outer
     // expectation from `main`'s declared return type never reaches it).
     // That's a type-checking-time distinction, not a codegen one: the core
     // IR's literal node is `int-any-width` and the island's
@@ -837,8 +872,9 @@ fn compiles_a_defstruct_with_a_method() {
             "struct_method",
             r#"
             (defstruct point (x int) (y int))
-            (defmethod norm ((self point)) int (+ (* self::x self::x) (* self::y self::y)))
-            (defun main () int (as int (norm (point::new 3 4))))
+            (impl point
+  (norm (self) int (+ (* self::x self::x) (* self::y self::y))))
+            (defun main () int (as int (norm (make-instance 'point :x 3 :y 4))))
             "#
         ),
         25
@@ -856,7 +892,7 @@ fn compiles_an_impl_block() {
             (deftrait Counted () (count ((self Self)) int))
             (defstruct box-a (n int))
             (impl Counted box-a (count ((self Self)) int self::n))
-            (defun main () int (as int (count (box-a::new 9))))
+            (defun main () int (as int (count (make-instance 'box-a :n 9))))
             "#
         ),
         9
@@ -882,7 +918,7 @@ fn compiles_and_runs_dynamic_dispatch_through_a_trait_object() {
             (impl Drawable square (draw ((self Self)) int 2))
             (defun render ((d :dyn Drawable)) int (draw d))
             (defun main () int
-              (as int (+ (* 10 (render (circle::new 3))) (render (square::new 4)))))
+              (as int (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4)))))
             "#
         ),
         12
@@ -912,7 +948,7 @@ fn compiles_and_runs_an_upcast_to_a_non_first_supertrait() {
             (impl D pair (d-tag ((self Self)) int 6))
             (defun only-c ((c :dyn C)) int (c-tag c))
             (defun via ((d :dyn D)) int (only-c d))
-            (defun main () int (as int (+ (* 10 (via (cell::new 0))) (via (pair::new 0)))))
+            (defun main () int (as int (+ (* 10 (via (make-instance 'cell :n 0))) (via (make-instance 'pair :n 0)))))
             "#
         ),
         25
@@ -935,7 +971,7 @@ fn compiles_and_runs_a_multi_slot_vtable() {
               (sides ((self Self)) int 3))
             (defun paint ((s :dyn Shape)) int (draw s))
             (defun outline ((s :dyn Shape)) int (sides s))
-            (defun main () int (as int (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1)))))
+            (defun main () int (as int (+ (* 10 (paint (make-instance 'tri :n 1))) (outline (make-instance 'tri :n 1)))))
             "#
         ),
         73
@@ -1264,8 +1300,7 @@ fn an_evaluated_task_runs_while_the_program_waits() {
 //
 // `compile-file` used to reject `use` outright and mangle a `defun` inside a
 // `(module ...)` to its bare last segment (`m::f` compiled to a symbol
-// `resolve_fn_def` could only find by looking up `f` at the root — "no such
-// function: f"). It now reads through the same `Loader` `typl file.typl`
+// nothing could find under its full path — "no such function: f"). It now reads through the same `Loader` `typl file.typl`
 // does for its dependencies (the entry file's own items stay at the root
 // namespace, unlike `typl`'s), so a module-qualified name compiles to its
 // full path and a `use`d file is pulled in and compiled alongside.
@@ -1502,7 +1537,7 @@ fn an_aot_executable_expands_a_prelude_macro_from_a_snapshot() {
             "aot_eval_prelude_macro",
             r#"
             (defun main () int
-              (match (eval (quote (length (with-output-to-string (s) (write-string "hello" s)))))
+              (match (eval (quote (length (with-output-to-string (s) (write-string s "hello")))))
                 ((ok v) (as int (sexpr-int v)))
                 ((err _) -1)))
             "#
@@ -1780,11 +1815,12 @@ fn a_print_object_method_may_use_a_channel_in_a_standalone_executable() {
     let (code, out, err) = compile_and_capture_with(
         "po_chan_aot",
         r##"(defstruct point (x int) (y int))
-           (defmethod print-object ((self point) (escape bool)) string
-             (let ((ch (the Chan<int> (Chan::new 1))))
-               (send ch 7)
-               (format false "#<p ~a ~a>" self::x (recv ch))))
-           (defun main () int (progn (println "~a" (point::new 1 2)) 0))"##,
+           (impl point
+  (print-object (self (escape bool)) string
+               (let ((ch (the Chan<int> (Chan::new 1))))
+                 (send ch 7)
+                 (format false "#<p ~a ~a>" self::x (recv ch)))))
+           (defun main () int (progn (println "~a" (make-instance 'point :x 1 :y 2)) 0))"##,
         &[],
     );
     assert_eq!(code, Some(0), "stderr was: {}", err);
@@ -1800,11 +1836,12 @@ fn a_print_object_method_that_would_block_is_refused_not_aborted() {
     let (code, _, err) = compile_and_capture_with(
         "po_chan_block_aot",
         r#"(defstruct probe (ch Chan<int>))
-           (defmethod print-object ((self probe) (escape bool)) string
-             (format false "<~a>" (recv self::ch)))
+           (impl probe
+  (print-object (self (escape bool)) string
+               (format false "<~a>" (recv self::ch))))
            (defun main () int
              (let ((ch (the Chan<int> (Chan::new 1))))
-               (progn (println "~a" (probe::new ch)) 0)))"#,
+               (progn (println "~a" (make-instance 'probe :ch ch)) 0)))"#,
         &[],
     );
     assert_eq!(code, Some(1), "stderr was: {}", err);
@@ -1969,7 +2006,7 @@ fn an_aot_executable_evaluates_a_struct_to_itself() {
         r#"
         (defstruct q (x i32))
         (defun main () int
-          (let ((v (q::new 7)))
+          (let ((v (make-instance 'q :x 7)))
             (match (eval v)
               ((ok s) (match s
                         ((the q w) (progn (setf w::x 8) (as int v::x)))

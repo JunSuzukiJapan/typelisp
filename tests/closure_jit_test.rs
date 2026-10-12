@@ -36,7 +36,7 @@ fn fnref_of_a_plain_function_is_callable() {
 #[test]
 fn methodref_of_a_defstruct_field_accessor_is_callable() {
     let src = "(defstruct point (x int) (y int)) \
-               (defun make-point ((a int) (b int)) point (point::new a b)) \
+               (defun make-point ((a int) (b int)) point (make-instance 'point :x a :y b)) \
                (defun call-getter ((f (fn (point) int)) (p point)) int (f p)) \
                (call-getter x (make-point 7 1))";
     assert_eq!(eval_ok(src), Value::Int(7));

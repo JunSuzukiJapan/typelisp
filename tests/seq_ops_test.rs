@@ -196,7 +196,7 @@ fn member_on_strings_compares_content_not_identity() {
 fn member_over_an_element_type_without_eq_is_a_type_error() {
     let src = "(defstruct point (x int))
                (defun make-v () Vector<point> (Vector::new))
-               (member (point::new 1) (iter (make-v)))";
+               (member (make-instance 'point :x 1) (iter (make-v)))";
     assert!(check(src).is_err());
 }
 
@@ -285,9 +285,9 @@ fn sort_is_stable_for_equal_keys() {
     let src = "(defstruct rec (k int) (tag int))
                (defun make-v () Vector<rec> (Vector::new))
                (let ((v (make-v)))
-                 (push v (rec::new 2 99))
-                 (push v (rec::new 1 10))
-                 (push v (rec::new 1 20))
+                 (push v (make-instance 'rec :k 2 :tag 99))
+                 (push v (make-instance 'rec :k 1 :tag 10))
+                 (push v (make-instance 'rec :k 1 :tag 20))
                  (let ((out (sort (iter v) (lambda ((a rec) (b rec)) bool (< a::k b::k)))))
                    (let ((first (get out 0)) (second (get out 1)))
                      (+ (* first::tag 100) second::tag))))";
@@ -304,10 +304,10 @@ fn member_works_over_a_user_type_with_an_eq_impl() {
                    (if (= self::x other::x) (= self::y other::y) false)))
                (defun make-v () Vector<point> (Vector::new))
                (let ((v (make-v)))
-                 (push v (point::new 1 2))
-                 (push v (point::new 3 4))
-                 (if (member (point::new 3 4) (iter v))
-                     (if (member (point::new 3 5) (iter v)) 0 1)
+                 (push v (make-instance 'point :x 1 :y 2))
+                 (push v (make-instance 'point :x 3 :y 4))
+                 (if (member (make-instance 'point :x 3 :y 4) (iter v))
+                     (if (member (make-instance 'point :x 3 :y 5) (iter v)) 0 1)
                      0))";
     assert_eq!(eval_ok(src), Value::Int(1));
 }
@@ -401,7 +401,7 @@ fn pair_equals_rejects_an_element_type_without_eq() {
     // `point` has no `Eq` impl, so `cons-cell<point,int>`'s bounded `equals`
     // must fail at the call site with a real trait error.
     let src = "(defstruct point (x int))
-               (equals (cons (point::new 1) 2) (cons (point::new 1) 2))";
+               (equals (cons (make-instance 'point :x 1) 2) (cons (make-instance 'point :x 1) 2))";
     let err = check(src).expect_err("must fail to check");
     let msg = format!("{:?}", err);
     assert!(

@@ -37,7 +37,7 @@
 //! arrives at run time, where nothing can check it), `~@[` (it tests for nil,
 //! which this language does not have) and the empty-bodied `~{~}`.
 //!
-//! [`check_arguments`] runs the same rules over the argument *types* before the
+//! [`call_sites`] runs the same rules over the argument *types* before the
 //! program runs, which is where the checker reports them.
 
 use std::collections::{BTreeSet, HashMap};
@@ -395,9 +395,12 @@ enum Node {
     /// written `~@;` — which marks the preceding prefix segment as a
     /// *per-line* prefix.
     Block { head: Head, segments: Vec<Vec<Node>>, sep_at: Vec<bool> },
-    /// `~/name/` — CL's function-call directive. `name` is resolved against
-    /// the argument's own type at render time; see [`crate::PrintEnv::format_call`].
-    Call { head: Head, name: String },
+    /// `~/name/` — CL's function-call directive. The checker resolves `name`
+    /// as a call `(name arg colon at)` at the site and hands the engine a
+    /// control string whose name is what it resolved to ([`call_sites`],
+    /// [`rename_calls`]); see [`crate::PrintEnv::format_call`]. `span` is
+    /// where the name sits in the control string, in chars.
+    Call { head: Head, name: String, span: (usize, usize) },
     /// `~^` — escape upward out of the nearest `~{`/`~<` (or the whole op).
     Escape { head: Head },
 }
@@ -419,23 +422,12 @@ fn parse(control: &str) -> Result<Vec<Node>, String> {
     Ok(nodes)
 }
 
-/// Every `~/name/` directive `control` contains, in source order.
-///
-/// The compile-time half of [`Node::Call`]'s dispatch. `format`/`print`/
-/// `println` take a *literal* control string, so the checker can scan it with
-/// this and learn which methods the directive can reach before the program
-/// runs — which is what lets an AOT executable register exactly those
-/// (`crate::aot`), and what turns a misspelled name into a check error rather
-/// than a failure in the middle of printing.
-///
-/// `Err` is the control string not parsing at all, which the checker reports
-/// the same way: a literal that the engine could never render is worth
-/// hearing about at the call site rather than at the call.
-pub fn call_directive_names(control: &str) -> Result<Vec<String>, String> {
-    fn walk(nodes: &[Node], out: &mut Vec<String>) {
+/// Every `~/name/` directive's node in `nodes`, in source order.
+fn call_nodes(nodes: &[Node]) -> Vec<&Node> {
+    fn walk<'a>(nodes: &'a [Node], out: &mut Vec<&'a Node>) {
         for n in nodes {
             match n {
-                Node::Call { name, .. } => out.push(name.clone()),
+                Node::Call { .. } => out.push(n),
                 Node::Case { body, .. } | Node::Iter { body, .. } => walk(body, out),
                 Node::Cond { clauses, .. } => {
                     for c in clauses {
@@ -452,7 +444,97 @@ pub fn call_directive_names(control: &str) -> Result<Vec<String>, String> {
         }
     }
     let mut out = Vec::new();
-    walk(&parse(control)?, &mut out);
+    walk(nodes, &mut out);
+    out
+}
+
+/// Where a `~/name/` directive can take its argument from.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum CallArg {
+    /// The call's own argument at this index.
+    Arg(usize),
+    /// An element of a list argument (`~{`, `~:{`, `~:@{`, `~<…~:>`), whose
+    /// type the call's argument types do not say.
+    Element,
+}
+
+/// One `~/name/` directive of a control string.
+#[derive(Debug)]
+pub struct CallSite {
+    pub name: String,
+    pub colon: bool,
+    pub at: bool,
+    /// Every argument the cursor can hand it. Empty when no path through the
+    /// control string reaches it.
+    pub args: BTreeSet<CallArg>,
+}
+
+/// Checks the arguments of a `format`/`print`/`println` call against its
+/// literal control string, before the program runs — that every directive
+/// that consumes an argument has one, of a type it accepts — and returns its
+/// `~/name/` directives in source order, each with the arguments it can be
+/// handed.
+///
+/// The argument cursor is followed through the whole directive language. Where
+/// the path depends on a value only known at run time — which `~[` clause is
+/// chosen, whether a `~^` fires, how many times a `~@{` goes round — every
+/// possibility is followed, so a mistake on any of them is reported, and a
+/// `~/name/` learns every argument it can meet. The elements of a list
+/// argument (`~{`, `~:{`, `~<…~:>`) are `Sexpr`s whose count the type does not
+/// say; directives consuming them are checked when the elements arrive.
+///
+/// Extra arguments are allowed, as in CL.
+///
+/// What a `~/name/` calls is the checker's to decide: it resolves the name as
+/// a call at the site, and hands the engine the control string with the names
+/// replaced by what they resolved to ([`rename_calls`]).
+pub fn call_sites(control: &str, args: &[ArgType]) -> Result<Vec<CallSite>, String> {
+    let nodes = parse(control)?;
+    let sim = Sim::default();
+    sim.seq(Frame::Static(args, 0), &nodes, &BTreeSet::from([Cur::At(0)]))?;
+    let met = sim.calls.into_inner();
+    Ok(call_nodes(&nodes)
+        .into_iter()
+        .map(|n| match n {
+            Node::Call { head, name, span } => CallSite {
+                name: name.clone(),
+                colon: head.colon,
+                at: head.at,
+                args: met.get(&span.0).cloned().unwrap_or_default(),
+            },
+            _ => unreachable!("call_nodes returns `~/name/` nodes only"),
+        })
+        .collect())
+}
+
+/// `control` with the name of each `~/name/` directive, in source order,
+/// replaced by `names`.
+pub fn rename_calls(control: &str, names: &[String]) -> Result<String, String> {
+    let nodes = parse(control)?;
+    let spans: Vec<(usize, usize)> = call_nodes(&nodes)
+        .into_iter()
+        .map(|n| match n {
+            Node::Call { span, .. } => *span,
+            _ => unreachable!("call_nodes returns `~/name/` nodes only"),
+        })
+        .collect();
+    if spans.len() != names.len() {
+        return Err(format!(
+            "format: {} names for the {} `~/name/` directives of {:?}",
+            names.len(),
+            spans.len(),
+            control
+        ));
+    }
+    let chars: Vec<char> = control.chars().collect();
+    let mut out = String::new();
+    let mut from = 0;
+    for ((start, end), name) in spans.iter().zip(names) {
+        out.extend(&chars[from..*start]);
+        out.push_str(name);
+        from = *end;
+    }
+    out.extend(&chars[from..]);
     Ok(out)
 }
 
@@ -529,24 +611,25 @@ fn parse_seq(chars: &[char], pos: &mut usize, stops: &[char]) -> Result<(Vec<Nod
                 // is how the reader interns every name the lookup will match
                 // against.
                 let mut name = String::new();
-                loop {
+                let start = *pos;
+                let end = loop {
                     match chars.get(*pos) {
                         None => return Err("format: unterminated ~/ — the name needs a closing `/`".to_string()),
                         Some('/') => {
                             *pos += 1;
-                            break;
+                            break *pos - 1;
                         }
                         Some(c) => {
                             name.push(*c);
                             *pos += 1;
                         }
                     }
-                }
+                };
                 if name.is_empty() {
-                    return Err("format: ~// names no method".to_string());
+                    return Err("format: ~// names nothing to call".to_string());
                 }
                 head.validate('/', &format!("/{}/", name))?;
-                nodes.push(Node::Call { head, name: name.to_ascii_lowercase() });
+                nodes.push(Node::Call { head, name: name.to_ascii_lowercase(), span: (start, end) });
             }
             '^' => {
                 head.validate('^', "^")?;
@@ -741,7 +824,7 @@ fn parse_head(chars: &[char], pos: &mut usize) -> Result<Head, String> {
 // Static checking
 // ===========================================================================
 
-/// What the checker knows about one argument's type, for [`check_arguments`].
+/// What the checker knows about one argument's type, for [`call_sites`].
 #[derive(Clone, Debug)]
 pub struct ArgType {
     pub kind: ArgKind,
@@ -806,30 +889,12 @@ impl Need {
     }
 }
 
-/// Checks the arguments of a `format`/`print`/`println` call against its
-/// literal control string, before the program runs: that every directive
-/// that consumes an argument has one, of a type it accepts.
-///
-/// The argument cursor is followed through the whole directive language. Where
-/// the path depends on a value only known at run time — which `~[` clause is
-/// chosen, whether a `~^` fires, how many times a `~@{` goes round — every
-/// possibility is followed, so a mistake on any of them is reported. The
-/// elements of a list argument (`~{`, `~:{`, `~<…~:>`) are `Sexpr`s whose
-/// count the type does not say; directives consuming them are checked when
-/// the elements arrive.
-///
-/// Extra arguments are allowed, as in CL.
-pub fn check_arguments(control: &str, args: &[ArgType]) -> Result<(), String> {
-    let nodes = parse(control)?;
-    Sim.seq(Frame::Static(args), &nodes, &BTreeSet::from([Cur::At(0)]))?;
-    Ok(())
-}
-
 /// The argument list a stretch of directives consumes from: the call's own
-/// arguments (or a known slice of them), or the elements of a list argument.
+/// arguments (or a known slice of them, with the index of its first in the
+/// whole call), or the elements of a list argument.
 #[derive(Clone, Copy)]
 enum Frame<'a> {
-    Static(&'a [ArgType]),
+    Static(&'a [ArgType], usize),
     Elements,
 }
 
@@ -859,13 +924,18 @@ enum PVal {
     Unknown,
 }
 
-struct Sim;
+#[derive(Default)]
+struct Sim {
+    /// What each `~/name/` met, by where its name starts in the control
+    /// string.
+    calls: std::cell::RefCell<std::collections::BTreeMap<usize, BTreeSet<CallArg>>>,
+}
 
 impl Sim {
     /// Consumes one argument at `cur` for `what`, which demands `need`.
     fn consume(&self, frame: Frame, cur: Cur, need: Need, what: &str) -> Result<Cur, String> {
         match (frame, cur) {
-            (Frame::Static(args), Cur::At(p)) => {
+            (Frame::Static(args, _), Cur::At(p)) => {
                 let Some(arg) = args.get(p) else {
                     return Err(format!(
                         "format: {} has no argument left to consume ({} {} given)",
@@ -899,7 +969,7 @@ impl Sim {
                 Param::Char(c) => PVal::Known(*c as i64),
                 Param::Default => PVal::Omitted,
                 Param::Count => match (frame, cur) {
-                    (Frame::Static(args), Cur::At(i)) => {
+                    (Frame::Static(args, _), Cur::At(i)) => {
                         let n = (args.len() - i) as i64;
                         kind.check_int(n).map_err(|why| format!("format: {}'s `#` parameter: {}", what, why))?;
                         PVal::Known(n)
@@ -935,9 +1005,14 @@ impl Sim {
         match node {
             Node::Text(_) => Ok(normal(cur)),
             Node::Dir { head, ch } => self.dir(frame, head, *ch, cur).map(normal),
-            Node::Call { head, name } => {
+            Node::Call { head, name, span } => {
                 let what = format!("~/{}/", name);
                 let (cur, _) = self.params(frame, cur, head, &what)?;
+                let arg = match (frame, cur) {
+                    (Frame::Static(_, base), Cur::At(p)) => CallArg::Arg(base + p),
+                    _ => CallArg::Element,
+                };
+                self.calls.borrow_mut().entry(span.0).or_default().insert(arg);
                 self.consume(frame, cur, Need::Any, &what).map(normal)
             }
             Node::Case { body, .. } => self.seq(frame, body, &Curs::from([cur])),
@@ -957,7 +1032,7 @@ impl Sim {
                         2 => present[0] == present[1],
                         _ => present[0] <= present[1] && present[1] <= present[2],
                     }),
-                    (Some(_), Frame::Static(args), Cur::At(p)) => Some(p == args.len()),
+                    (Some(_), Frame::Static(args, _), Cur::At(p)) => Some(p == args.len()),
                     _ => None,
                 };
                 let mut e = Exits::default();
@@ -1075,7 +1150,7 @@ impl Sim {
 
     /// `~*`, `~:*`, `~@*`: moves the cursor.
     fn goto(&self, frame: Frame, head: &Head, n: PVal, cur: Cur) -> Result<Cur, String> {
-        let (Frame::Static(args), Cur::At(p)) = (frame, cur) else { return Ok(Cur::Elements) };
+        let (Frame::Static(args, _), Cur::At(p)) = (frame, cur) else { return Ok(Cur::Elements) };
         let n = match n {
             PVal::Known(n) => n,
             PVal::Omitted if head.at => 0,
@@ -1101,7 +1176,7 @@ impl Sim {
 
     /// Every way `~{…~}` (any of its four forms) can leave the cursor.
     fn iter(&self, frame: Frame, head: &Head, body: &[Node], close_colon: bool, max: PVal, cur: Cur) -> Result<Curs, String> {
-        let empty = Frame::Static(&[]);
+        let empty = Frame::Static(&[], 0);
         match (head.colon, head.at) {
             // One list argument, whose elements the body consumes.
             (false, false) | (true, false) => {
@@ -1117,7 +1192,7 @@ impl Sim {
             }
             // `~:@{`: every remaining argument is a list.
             (true, true) => match (frame, cur) {
-                (Frame::Static(args), Cur::At(p)) => {
+                (Frame::Static(args, _), Cur::At(p)) => {
                     for (i, arg) in args.iter().enumerate().skip(p) {
                         if !Need::List.accepts(arg.kind) {
                             return Err(format!(
@@ -1144,9 +1219,9 @@ impl Sim {
             },
             // `~@{`: the body goes round over the remaining arguments.
             (false, true) => match (frame, cur) {
-                (Frame::Static(args), Cur::At(p)) => {
+                (Frame::Static(args, base), Cur::At(p)) => {
                     let rest = &args[p..];
-                    let ends = self.rounds(Frame::Static(rest), body, close_colon, max)?;
+                    let ends = self.rounds(Frame::Static(rest, base + p), body, close_colon, max)?;
                     Ok(ends
                         .into_iter()
                         .map(|c| match c {
@@ -1165,7 +1240,7 @@ impl Sim {
 
     /// `~@{`'s loop over a known argument list: where it can stop.
     fn rounds(&self, frame: Frame, body: &[Node], close_colon: bool, max: PVal) -> Result<Curs, String> {
-        let Frame::Static(args) = frame else { unreachable!("`~@{{` over the call's own arguments") };
+        let Frame::Static(args, _) = frame else { unreachable!("`~@{{` over the call's own arguments") };
         if args.is_empty() {
             if close_colon {
                 self.seq(frame, body, &Curs::from([Cur::At(0)]))?;
@@ -1352,7 +1427,7 @@ impl State<'_> {
                 Node::Dir { head, ch } => {
                     self.interp_dir(head, *ch, out)?;
                 }
-                Node::Call { head, name } => {
+                Node::Call { head, name, .. } => {
                     let v = self.next_arg()?;
                     let text = self.ctx.env.format_call(self.heap, name, v, head.colon, head.at)?;
                     out.push_str(&text);

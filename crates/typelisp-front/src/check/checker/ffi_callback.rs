@@ -78,7 +78,7 @@ impl Checker {
         let target = match core::op(heap, checked.form) {
             Some("lambda") => self.lift_lambda(heap, checked.form, fn_ty)?,
             Some("fnref") => {
-                let path = core::path_field(heap, checked.form, 2)
+                let path = core::path_field(heap, checked.form, 0)
                     .ok_or_else(|| Error::TypeError("internal error: a fnref node without a path".into()))?;
                 if self.reg.fn_sig(&path).is_some_and(|s| s.builtin) {
                     return Err(Error::TypeError(format!(
@@ -112,12 +112,11 @@ impl Checker {
         Ok(Checked::new(form, Type::Ptr))
     }
 
-    /// `(call (" ffi-callback-address") HOME PATH (REPR) (str KEY))` — the
-    /// entry's address, as a raw word.
+    /// `(call PATH (REPR) (str KEY))` to the address builtin — the entry's
+    /// address, as a raw word.
     fn callback_address_form(&self, heap: &mut Heap, key: &str) -> Result<Value, Error> {
         let arg = Checked::new(forms::str_lit_form(heap, key)?, Type::Str);
-        let r = Ref::synthetic(Path::root(ADDRESS_BUILTIN));
-        let form = self.call_form(heap, &r, &[arg])?;
+        let form = self.call_form(heap, &Path::root(ADDRESS_BUILTIN), &[arg])?;
         Ok(forms::rooted(heap, form))
     }
 
@@ -155,7 +154,7 @@ impl Checker {
     }
 
     /// A checked `(lambda ((SYM REPR)...) RET-REPR BODY...)` as a top-level
-    /// `(defun PATH ((SYM REPR)...) RET-REPR false BODY...)`, or an error
+    /// `(defun PATH ((SYM REPR)...) RET-REPR BODY...)`, or an error
     /// naming what it captures.
     fn lift_lambda(&self, heap: &mut Heap, lambda: Value, fn_ty: &Type) -> Result<Path, Error> {
         let fields = core::fields(heap, lambda)?;
@@ -174,9 +173,7 @@ impl Checker {
         let mut f = Items::new(heap);
         let p = forms::path_form(f.heap(), &path);
         f.push(p);
-        f.extend(fields.iter().copied().take(2));
-        f.push(Value::Bool(false));
-        f.extend(fields[2..].iter().copied());
+        f.extend(fields.iter().copied());
         let form = f.finish("defun")?;
         let form = forms::rooted(heap, form);
         self.lifted.borrow_mut().push(LiftedCallback { path: path.clone(), sig: Self::lifted_sig(fn_ty), form });
@@ -228,7 +225,7 @@ impl Checker {
         Ok(())
     }
 
-    /// `(defun LIFTED ((" a0" T0)...) R false (labels (DEF...) (G " a0"...)))`,
+    /// `(defun LIFTED ((" a0" T0)...) R (labels (DEF...) (G " a0"...)))`,
     /// where `DEF...` are `g` and every sibling it reaches, or an error naming
     /// what they capture.
     fn lift_labels_callback(&self, heap: &mut Heap, defs: &[LabelsDef], p: &PendingLabelsCallback) -> Result<(), Error> {
@@ -289,7 +286,7 @@ impl Checker {
         let kept: Vec<LabelsDef> = defs.iter().filter(|(n, _, _, _)| reached.contains(&n.as_str())).cloned().collect();
         let block = self.labels_form(heap, &kept, &[call])?;
         let block = forms::rooted(heap, block);
-        let form = self.defun_form(heap, &p.lifted, &params, g_ret, false, &[block])?;
+        let form = self.defun_form(heap, &p.lifted, &params, g_ret, &[block])?;
         let form = forms::rooted(heap, form);
         self.lifted.borrow_mut().push(LiftedCallback { path: p.lifted.clone(), sig: Self::lifted_sig(&fn_ty), form });
         Ok(())

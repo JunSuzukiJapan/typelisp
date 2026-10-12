@@ -30,14 +30,11 @@ use inkwell::AddressSpace;
 use typelisp_mem::{Heap, RootScope, Value};
 
 use crate::check::repr::Repr;
-use crate::eval::interp::{
-    fn_path_from_node_name, intern_names, intern_params, method_link_name, str_rt, CallEdge, EvalError,
-    Interp, Uncompilable,
-};
+use crate::eval::interp::{intern_names, intern_params, str_rt, EvalError, Interp, Uncompilable};
 use crate::compile::externs::{
     is_native_lowered_primitive_method, is_rt_builtin, rt_extern_functions,
 };
-use crate::compile::symbols::{CompiledItem, HASHTABLE_BUILTIN_METHODS};
+use crate::compile::symbols::{target_symbol_name, HASHTABLE_BUILTIN_METHODS};
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES, NATIVE_LOWERED_PRIMITIVES};
 use crate::CompileTarget;
 
@@ -119,14 +116,14 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
     // Checking for a body rather than a declaration matters: `rt_*` shims
     // and any not-yet-filled forward declaration answer `get_function`
     // too.
-    let items: Vec<&crate::compile::symbols::CompiledItem> = lib
+    let items: Vec<&CompileTarget> = lib
         .items
         .iter()
         .filter(|item| {
-            module.get_function(&item.symbol_name()).is_some_and(|f| f.count_basic_blocks() > 0)
+            module.get_function(&target_symbol_name(item)).is_some_and(|f| f.count_basic_blocks() > 0)
         })
         .collect();
-    let internal_names: Vec<String> = items.iter().map(|item| item.symbol_name()).collect();
+    let internal_names: Vec<String> = items.iter().map(|item| target_symbol_name(item)).collect();
     // Wire only the `rt_*` shims the module actually forward-declares.
     // Skipping the rest is not a leniency: a module can only *call* what
     // it declares, so a shim with no declaration here has no call site to
@@ -146,14 +143,8 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
         .map_err(|e| format!("{} JIT install failed: {}", lib.label, e))?;
 
     for (item, cf) in items.iter().zip(compiled_fns) {
-        let def = match item {
-            crate::compile::symbols::CompiledItem::Fn(path) => interp.root.borrow().get_fn(path),
-            crate::compile::symbols::CompiledItem::Method(type_path, method) => {
-                interp.root.borrow().get_method(type_path, method)
-            }
-        }
-        .ok_or_else(|| {
-            format!("{}: `{}` is not registered — exec its SOURCE first", lib.label, item.node_name())
+        let def = interp.target_def(item).ok_or_else(|| {
+            format!("{}: `{}` is not registered — exec its SOURCE first", lib.label, item.link_name())
         })?;
         *def.compiled.borrow_mut() = Some(Rc::new(cf));
     }
@@ -179,7 +170,7 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
 /// forward declaration is matched to its definition by name, so declaring
 /// these under the wrong one is not a second declaration — it is the
 /// declaration the island then tries to give a coroutine body to.
-pub(crate) fn fresh_module_with_declarations(name: &str, items: &[CompiledItem]) -> Rc<RefCell<Module<'static>>> {
+pub(crate) fn fresh_module_with_declarations(name: &str, items: &[CompileTarget]) -> Rc<RefCell<Module<'static>>> {
     let ctx = crate::compile::llvm_context();
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let module = ctx.create_module(name);
@@ -196,7 +187,7 @@ pub(crate) fn fresh_module_with_declarations(name: &str, items: &[CompiledItem])
         fn_ty
     };
     for item in items {
-        let sym = item.symbol_name();
+        let sym = target_symbol_name(item);
         if module.get_function(&sym).is_none() {
             module.add_function(&sym, lisp_fn_ty, None);
         }
@@ -204,8 +195,8 @@ pub(crate) fn fresh_module_with_declarations(name: &str, items: &[CompiledItem])
     Rc::new(RefCell::new(module))
 }
 
-/// Compiles the `defun` named `name` (looked up in the scope tree) into one
-/// LLVM function — named `internal_name` — added to `module`. Shared by
+/// Compiles `target`'s body (looked up in the scope tree) into one LLVM
+/// function — named `internal_name` — added to `module`. Shared by
 /// [`crate::eval::interp::Interp::compile_function`] (JIT, Phase 1) — which always passes a
 /// throwaway, single-use module and the same name twice — and
 /// `compile::aot::compile_file` (AOT, Phase 2) — which passes the same
@@ -231,10 +222,10 @@ pub fn add_compiled_function(
     interp: &Interp,
     heap: &mut Heap,
     module: Rc<RefCell<Module<'static>>>,
-    name: &str,
+    target: &CompileTarget,
     internal_name: &str,
 ) -> Result<(), EvalError> {
-    let (params, body) = interp.compiled_fn_body(name)?;
+    let (params, body) = interp.compiled_fn_body(target)?;
     translate_and_compile(interp, heap, module, &params, &body, internal_name, &HashSet::new())
 }
 
@@ -466,17 +457,10 @@ pub fn add_compiled_global_init(
 /// previously-defined `defun`/`defmethod` and marks the target `FnDef`
 /// node compiled (see `FnDef::compiled`) so `call`/`assoc`
 /// dispatches to native code instead of tree-walking it from then on.
-/// `target` is already fully resolved by `Checker::check_compile` (a
-/// `Ref` re-verified here via `crate::eval::interp::Interp::resolve_fn_ref`, or a `type_name`+
-/// `method` re-verified via `ModuleScope::resolve_method` — the same
-/// independent re-resolution every other reference gets, not a bare
-/// name to search the whole tree for by local name alone). The
-/// qualified string this derives from that resolved identity only feeds
-/// [`crate::eval::interp::Interp::compute_sccs`]'s *internal* graph bookkeeping — unchanged
-/// from before, and still keyed by local type name for a method
-/// ([`crate::eval::interp::Interp::method_key`]), since transitively-discovered call targets
-/// already reach that machinery the same way. See
-/// [`crate::eval::interp::Interp::add_compiled_function`] for the supported-shape scope.
+/// `target` is already fully resolved by `Checker::check_compile`, and is
+/// also what the call graph ([`compute_sccs`]) names each node by — a
+/// function and a method stay two different values all the way through. See
+/// [`add_compiled_function`] for the supported-shape scope.
 ///
 /// labels/closures Stage 3 (single-function shape) / Stage 5 (SCC
 /// generalization): unlike `compile::aot::compile_file` (one shared
@@ -532,30 +516,14 @@ pub fn add_compiled_global_init(
 /// (`f64`/`char` builtins — still out of scope) panics clearly right
 /// here rather than deep inside `compile-assoc`'s own `get-function`.
 pub fn compile_function(interp: &Interp, heap: &mut Heap, target: &CompileTarget) -> Result<Value, EvalError> {
-    let (name, already_compiled) = match target {
-        CompileTarget::Fn(r) => {
-            interp.resolve_fn_ref(r).ok_or_else(|| {
-                EvalError::Internal(format!(
-                    "compile: `{}` resolved at check time but not here",
-                    r.written.join("::")
-                ))
-            })?;
-            (r.resolved.to_string(), interp.root.borrow().fn_compiled(&r.resolved))
-        }
-        CompileTarget::Method { type_name, method, home } => {
-            interp.root.borrow().resolve_method(home, type_name, method).ok_or_else(|| {
-                EvalError::Internal(format!(
-                    "compile: `{}` resolved at check time but not here",
-                    method_link_name(type_name, method)
-                ))
-            })?;
-            (method_link_name(type_name, method), interp.root.borrow().method_compiled(type_name, method))
-        }
-    };
+    let def = interp.target_def(target).ok_or_else(|| {
+        EvalError::Internal(format!("compile: `{}` resolved at check time but not here", target.link_name()))
+    })?;
+    let already_compiled = def.compiled.borrow().is_some();
     if already_compiled {
         return Ok(Value::Bool(true));
     }
-    for scc in compute_sccs(interp, heap, &name)? {
+    for scc in compute_sccs(interp, heap, target)? {
         compile_scc(interp, heap, &scc)?;
     }
     Ok(Value::Bool(true))
@@ -588,32 +556,16 @@ pub fn disassemble_function(
     target: &CompileTarget,
     llvm_ir: bool,
 ) -> Result<String, EvalError> {
-    let name = match target {
-        CompileTarget::Fn(r) => {
-            interp.resolve_fn_ref(r).ok_or_else(|| {
-                EvalError::Internal(format!(
-                    "disassemble: `{}` resolved at check time but not here",
-                    r.written.join("::")
-                ))
-            })?;
-            r.resolved.to_string()
-        }
-        CompileTarget::Method { type_name, method, home } => {
-            interp.root.borrow().resolve_method(home, type_name, method).ok_or_else(|| {
-                EvalError::Internal(format!(
-                    "disassemble: `{}` resolved at check time but not here",
-                    method_link_name(type_name, method)
-                ))
-            })?;
-            method_link_name(type_name, method)
-        }
-    };
+    let name = target.link_name();
+    interp
+        .target_def(target)
+        .ok_or_else(|| EvalError::Internal(format!("disassemble: `{}` resolved at check time but not here", name)))?;
     // An FFI declaration has no forms to translate, so the module built below
     // would hold a function with an empty body — not the thunk the name
     // actually reaches, and disassembling it would be a confident wrong
     // answer. The thunk's own machine code is not reachable from here: it was
     // JIT'd into an engine this function does not have.
-    if interp.fn_is_ffi(&name) {
+    if interp.fn_is_ffi(target) {
         return Err(EvalError::Panic(format!(
             "disassemble: `{}` is a C function declared by `defffi`. What it reaches is the C \
              function's own machine code, which this compiler did not produce and cannot show; \
@@ -621,18 +573,15 @@ pub fn disassemble_function(
             name
         )));
     }
-    let symbol = crate::compile::symbols::user_symbol_name(&name);
-    let edges = call_graph_edges(interp, heap, &name)?;
+    let symbol = target_symbol_name(target);
+    let edges = call_graph_edges(interp, heap, target)?;
 
     let module = {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("disassemble")));
         crate::compile::llvm_builtins::declare_external_compiled_function(&module, &symbol);
         for edge in &edges {
-            let target_symbol = match edge {
-                CallEdge::Fn(p) => crate::compile::symbols::user_symbol_name(&p.to_string()),
-                CallEdge::Method(t, m) => crate::compile::symbols::user_method_symbol_name(t, m),
-            };
+            let target_symbol = target_symbol_name(edge);
             if target_symbol != symbol {
                 crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol);
             }
@@ -643,7 +592,7 @@ pub fn disassemble_function(
         module
     };
 
-    add_compiled_function(interp, heap, module.clone(), &name, &symbol)?;
+    add_compiled_function(interp, heap, module.clone(), target, &symbol)?;
 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let verified = crate::compile::verify_module_naming_functions(&module.borrow(), "disassemble: module");
@@ -686,8 +635,8 @@ pub fn disassemble_function(
 /// about the *root* cause: dozens of prelude stream methods are
 /// uncompilable for the single reason that `stream-read-char` has no
 /// lowering, and [`Uncompilable::MissingTarget`] says so for each.
-pub(crate) fn precheck_compilable(interp: &Interp, heap: &Heap, name: &str) -> Result<(), Uncompilable> {
-    match compute_sccs(interp, heap, name) {
+pub(crate) fn precheck_compilable(interp: &Interp, heap: &Heap, target: &CompileTarget) -> Result<(), Uncompilable> {
+    match compute_sccs(interp, heap, target) {
         Ok(_) => Ok(()),
         Err(e) => Err(match e.into_kind() {
             EvalError::NoSuchFunction(target) => Uncompilable::MissingTarget(target),
@@ -697,13 +646,12 @@ pub(crate) fn precheck_compilable(interp: &Interp, heap: &Heap, name: &str) -> R
     }
 }
 
-/// `name`'s own outgoing edges in the top-level compile call graph —
-/// every concrete function/method *instantiation* `name`'s body calls,
+/// `node`'s own outgoing edges in the top-level compile call graph —
+/// every concrete function/method *instantiation* `node`'s body calls,
 /// filtered exactly the way `compile_function_rec` always has: self-
-/// recursion and `rt_*`/native builtins excluded from
-/// [`CallEdge::Fn`]; `Vector`/`HashTable`'s op-node-lowered builtin
-/// methods and natively-lowered primitive-receiver builtins excluded
-/// from [`CallEdge::Method`]. A method target with no registered
+/// recursion and `rt_*`/native builtins excluded from the functions;
+/// `Vector`/`HashTable`'s op-node-lowered builtin methods and
+/// natively-lowered primitive-receiver builtins excluded from the methods. A method target with no registered
 /// implementation at all (a builtin `compile-assoc` doesn't lower
 /// natively, e.g. `f64::sqrt`) is a compile-time error here, same as
 /// before Stage 5 — this is the one path that produces a real user-
@@ -711,10 +659,8 @@ pub(crate) fn precheck_compilable(interp: &Interp, heap: &Heap, name: &str) -> R
 /// the graph [`crate::eval::interp::Interp::compute_sccs`] walks. Shared by that graph walk and
 /// [`crate::eval::interp::Interp::compile_scc`] (which needs the same edges again, in typed
 /// form, to know what to forward-declare/wire as `externals`).
-pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Result<Vec<CallEdge>, EvalError> {
-    let path = fn_path_from_node_name(name);
-    let method_key = interp.method_key(name);
-    let (_, body) = interp.compiled_fn_body(name)?;
+pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarget) -> Result<Vec<CompileTarget>, EvalError> {
+    let (_, body) = interp.compiled_fn_body(node)?;
     let targets = match crate::compile::core_bridge::collect_targets(heap, &body) {
         Ok(t) => t,
         Err(e) => return Err(EvalError::Panic(e.to_string())),
@@ -725,14 +671,14 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
         targets
             .calls
             .into_iter()
-            .filter(|p| *p != path && !is_rt_builtin(p))
-            .map(CallEdge::Fn),
+            .filter(|p| !matches!(node, CompileTarget::Fn(own) if own == p) && !is_rt_builtin(p))
+            .map(CompileTarget::Fn),
     );
 
     let method_targets: Vec<(Path, String)> = targets
         .methods
         .into_iter()
-        .filter(|key| method_key.as_ref() != Some(key))
+        .filter(|(t, m)| !matches!(node, CompileTarget::Method(own_t, own_m) if own_t == t && own_m == m))
         .filter(|key| {
             // `Vector<T>`'s field-backed builtin methods (`new`/`get`/
             // `set`/`len`/`push`/`pop`) are lowered to a `vector-op` node
@@ -801,12 +747,12 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
     for (type_name, method) in &method_targets {
         if !interp.root.borrow().has_method(type_name, method) {
             return Err(EvalError::Uncompilable {
-                caller: name.to_string(),
-                target: method_link_name(type_name, method),
+                caller: node.link_name(),
+                target: crate::types::method_link_name(type_name, method),
             });
         }
     }
-    edges.extend(method_targets.into_iter().map(|(p, m)| CallEdge::Method(p, m)));
+    edges.extend(method_targets.into_iter().map(|(p, m)| CompileTarget::Method(p, m)));
     Ok(edges)
 }
 
@@ -826,14 +772,14 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, name: &str) -> Resu
 /// self-loop is the common case (an ordinary, non-recursive-with-others
 /// function); a multi-member SCC is genuine mutual recursion across
 /// separate top-level functions, unsupported before this stage.
-pub(crate) fn compute_sccs(interp: &Interp, heap: &Heap, name: &str) -> Result<Vec<Vec<String>>, EvalError> {
+pub(crate) fn compute_sccs(interp: &Interp, heap: &Heap, root: &CompileTarget) -> Result<Vec<Vec<CompileTarget>>, EvalError> {
     let mut counter = 0usize;
-    let mut indices: HashMap<String, usize> = HashMap::new();
-    let mut lowlink: HashMap<String, usize> = HashMap::new();
-    let mut on_stack: HashSet<String> = HashSet::new();
-    let mut stack: Vec<String> = Vec::new();
-    let mut sccs: Vec<Vec<String>> = Vec::new();
-    scc_strongconnect(interp, heap, name, &mut counter, &mut indices, &mut lowlink, &mut on_stack, &mut stack, &mut sccs)?;
+    let mut indices: HashMap<CompileTarget, usize> = HashMap::new();
+    let mut lowlink: HashMap<CompileTarget, usize> = HashMap::new();
+    let mut on_stack: HashSet<CompileTarget> = HashSet::new();
+    let mut stack: Vec<CompileTarget> = Vec::new();
+    let mut sccs: Vec<Vec<CompileTarget>> = Vec::new();
+    scc_strongconnect(interp, heap, root, &mut counter, &mut indices, &mut lowlink, &mut on_stack, &mut stack, &mut sccs)?;
     Ok(sccs)
 }
 
@@ -846,36 +792,31 @@ pub(crate) fn compute_sccs(interp: &Interp, heap: &Heap, name: &str) -> Result<V
 pub(crate) fn scc_strongconnect(
     interp: &Interp,
     heap: &Heap,
-    node: &str,
+    node: &CompileTarget,
     counter: &mut usize,
-    indices: &mut HashMap<String, usize>,
-    lowlink: &mut HashMap<String, usize>,
-    on_stack: &mut HashSet<String>,
-    stack: &mut Vec<String>,
-    sccs: &mut Vec<Vec<String>>,
+    indices: &mut HashMap<CompileTarget, usize>,
+    lowlink: &mut HashMap<CompileTarget, usize>,
+    on_stack: &mut HashSet<CompileTarget>,
+    stack: &mut Vec<CompileTarget>,
+    sccs: &mut Vec<Vec<CompileTarget>>,
 ) -> Result<(), EvalError> {
-    indices.insert(node.to_string(), *counter);
-    lowlink.insert(node.to_string(), *counter);
+    indices.insert(node.clone(), *counter);
+    lowlink.insert(node.clone(), *counter);
     *counter += 1;
-    stack.push(node.to_string());
-    on_stack.insert(node.to_string());
+    stack.push(node.clone());
+    on_stack.insert(node.clone());
 
-    for edge in call_graph_edges(interp, heap, node)? {
-        let already_compiled = match &edge {
-            CallEdge::Fn(p) => interp.root.borrow().fn_compiled(p),
-            CallEdge::Method(p, m) => interp.root.borrow().method_compiled(p, m),
-        };
-        if already_compiled {
+    for target in call_graph_edges(interp, heap, node)? {
+        if interp.is_compiled(&target) {
             continue;
         }
-        let target = edge.node_name();
         if !indices.contains_key(&target) {
             scc_strongconnect(interp, heap, &target, counter, indices, lowlink, on_stack, stack, sccs)?;
             let merged = lowlink[node].min(lowlink[&target]);
-            lowlink.insert(node.to_string(), merged);
+            lowlink.insert(node.clone(), merged);
         } else if on_stack.contains(&target) {
             let merged = lowlink[node].min(indices[&target]);
-            lowlink.insert(node.to_string(), merged);
+            lowlink.insert(node.clone(), merged);
         }
     }
 
@@ -884,7 +825,7 @@ pub(crate) fn scc_strongconnect(
         loop {
             let w = stack.pop().expect("node's own strongconnect frame pushed it onto the stack");
             on_stack.remove(&w);
-            let is_root = w == node;
+            let is_root = w == *node;
             component.push(w);
             if is_root {
                 break;
@@ -918,39 +859,28 @@ pub(crate) fn scc_strongconnect(
 /// every member shares one piece of JIT'd code (mutual calls within the SCC
 /// need no `externals` entry at all — they resolve directly against the
 /// sibling's own definition in this same module).
-pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Result<(), EvalError> {
+pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[CompileTarget]) -> Result<(), EvalError> {
     emitted_layout_is_runnable().map_err(EvalError::Internal)?;
-    let member_set: HashSet<&str> = members.iter().map(|s| s.as_str()).collect();
+    let member_set: HashSet<&CompileTarget> = members.iter().collect();
 
-    let mut call_targets: Vec<Path> = Vec::new();
-    let mut method_targets: Vec<(Path, String)> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut targets: Vec<CompileTarget> = Vec::new();
+    let mut seen: HashSet<CompileTarget> = HashSet::new();
     for member in members {
         for edge in call_graph_edges(interp, heap, member)? {
-            let target_name = edge.node_name();
             // A sibling within this same SCC resolves through the SCC's
             // own internal forward declarations below, not `externals`.
-            if member_set.contains(target_name.as_str()) || !seen.insert(target_name) {
+            if member_set.contains(&edge) || !seen.insert(edge.clone()) {
                 continue;
             }
-            match edge {
-                CallEdge::Fn(p) => call_targets.push(p),
-                CallEdge::Method(p, m) => method_targets.push((p, m)),
-            }
+            targets.push(edge);
         }
     }
 
     let module = {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let module = Rc::new(RefCell::new(crate::compile::llvm_context().create_module("compiled")));
-        for member in members {
-            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &crate::compile::symbols::user_symbol_name(member));
-        }
-        for target in &call_targets {
-            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &crate::compile::symbols::user_symbol_name(&target.to_string()));
-        }
-        for (type_name, method) in &method_targets {
-            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &crate::compile::symbols::user_method_symbol_name(type_name, method));
+        for member in members.iter().chain(&targets) {
+            crate::compile::llvm_builtins::declare_external_compiled_function(&module, &target_symbol_name(member));
         }
         for (rt_name, _) in rt_extern_functions() {
             crate::compile::llvm_builtins::declare_external_function(&module, rt_name);
@@ -959,23 +889,18 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Resu
     };
 
     for member in members {
-        add_compiled_function(interp, heap, module.clone(), member, &crate::compile::symbols::user_symbol_name(member))?;
+        add_compiled_function(interp, heap, module.clone(), member, &target_symbol_name(member))?;
     }
 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-    let mut externals: Vec<(String, usize)> = call_targets
+    let mut externals: Vec<(String, usize)> = targets
         .iter()
-        .map(|p| {
-            let f = interp.root.borrow().get_fn(p).expect("crate::eval::interp::Interp::compute_sccs's finish order guarantees this is already compiled");
-            let addr = f.compiled.borrow().as_ref().expect("crate::eval::interp::Interp::compute_sccs's finish order guarantees this is already compiled").address();
-            (crate::compile::symbols::user_symbol_name(&p.to_string()), addr)
+        .map(|t| {
+            let f = interp.target_def(t).expect("compute_sccs's finish order guarantees this is already compiled");
+            let addr = f.compiled.borrow().as_ref().expect("compute_sccs's finish order guarantees this is already compiled").address();
+            (target_symbol_name(t), addr)
         })
         .collect();
-    externals.extend(method_targets.iter().map(|(type_name, method)| {
-        let f = interp.root.borrow().get_method(type_name, method).expect("crate::eval::interp::Interp::compute_sccs's finish order guarantees this is already compiled");
-        let addr = f.compiled.borrow().as_ref().expect("crate::eval::interp::Interp::compute_sccs's finish order guarantees this is already compiled").address();
-        (crate::compile::symbols::user_method_symbol_name(type_name, method), addr)
-    }));
     externals.extend(rt_extern_functions().iter().map(|(n, addr)| (n.to_string(), *addr)));
     // Mirrors `compile::aot::compile_file`'s own `verify()` call in the
     // same position, before handing the module to LLVM for real: a
@@ -987,20 +912,12 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[String]) -> Resu
     // catchable Rust error. Verifying first turns that into a clean
     // `Panic` instead.
     module.borrow().verify().map_err(|e| EvalError::Panic(format!("compile: module failed verification: {}", e)))?;
-    let internal_names: Vec<String> = members.iter().map(|m| crate::compile::symbols::user_symbol_name(m)).collect();
+    let internal_names: Vec<String> = members.iter().map(target_symbol_name).collect();
     let compiled_fns = crate::compile::CompiledFn::new_multi(&module.borrow(), &internal_names, &externals, crate::compile::EMITTED_BODY_ABI)
         .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
     for (member, compiled) in members.iter().zip(compiled_fns) {
-        match interp.method_key(member) {
-            Some((type_path, method)) => {
-                let f = interp.root.borrow().get_method(&type_path, &method).expect("member is a registered method");
-                *f.compiled.borrow_mut() = Some(Rc::new(compiled));
-            }
-            None => {
-                let f = interp.root.borrow().get_fn(&fn_path_from_node_name(member)).expect("member is a registered function");
-                *f.compiled.borrow_mut() = Some(Rc::new(compiled));
-            }
-        }
+        let f = interp.target_def(member).expect("member is a registered definition");
+        *f.compiled.borrow_mut() = Some(Rc::new(compiled));
     }
     // After the addresses above are in place, never before: a method
     // that lands in some vtable's slot may well be a member of *this*

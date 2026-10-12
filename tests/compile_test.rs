@@ -1207,11 +1207,11 @@ fn compile_dispatches_a_lambda_that_captures_two_struct_pattern_bindings() {
         r#"
         (defstruct bx (v int) (w int))
         (defun mk2 ((b bx)) (fn (int) int)
-          (match b ((new v w) (lambda ((a int)) int (+ a (+ v w))))))
+          (match b ((bx :v :w) (lambda ((a int)) int (+ a (+ v w))))))
         (defun use2 ((b bx) (a int)) int ((mk2 b) a))
         (compile mk2)
         (compile use2)
-        (use2 (bx::new 3 4) 10)
+        (use2 (make-instance 'bx :v 3 :w 4) 10)
         "#,
     );
     match v {
@@ -1459,7 +1459,7 @@ fn compile_dispatches_a_defstruct_field_of_fn_type_to_native_code() {
         r#"
         (defstruct holder (f (fn (int) int)))
         (defun make-adder ((n int)) (fn (int) int) (lambda ((x int)) int (+ x n)))
-        (defun make-holder ((n int)) holder (holder::new (make-adder n)))
+        (defun make-holder ((n int)) holder (make-instance 'holder :f (make-adder n)))
         (compile make-adder)
         (compile make-holder)
         (compile holder::f)
@@ -2515,7 +2515,7 @@ fn compile_dispatches_a_defstruct_field_of_option_type_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct holder (val Option<int>))
-        (defun mk ((n int)) holder (holder::new (Option::some n)))
+        (defun mk ((n int)) holder (make-instance 'holder :val (Option::some n)))
         (compile mk)
         (match (val (mk 8)) ((Some x) x) ((None) -1))
         "#,
@@ -2572,8 +2572,8 @@ fn compile_dispatches_a_function_that_keeps_an_enum_scrutinee_rooted_across_many
 /// `(compile name)` only ever compiled a top-level `defun` (`self.fns`),
 /// never an instance method (`self.methods`). See the
 /// `compile_dispatches_a_defstruct_field_accessor_method_to_native_code`/
-/// `..._setter_method_to_native_code` tests below (`Interp::resolve_fn_def`/
-/// `method_key` — `(compile type::method)`) for the follow-up that closes
+/// `..._setter_method_to_native_code` tests below (`(compile type::method)`)
+/// for the follow-up that closes
 /// this specific gap: compiling the accessor/setter *method itself* (whose
 /// body is the bare `Expr::FieldGet`/`FieldSet`, no `Expr::Assoc` involved)
 /// and wiring `Expr::Assoc`'s own dispatch to use it once compiled, the same
@@ -2589,7 +2589,7 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct point (x int) (y int))
-        (defun make-point ((a int) (b int)) point (point::new a b))
+        (defun make-point ((a int) (b int)) point (make-instance 'point :x a :y b))
         (compile make-point)
         (make-point 3 4)
         "#,
@@ -2601,9 +2601,8 @@ fn compile_dispatches_a_function_that_constructs_a_defstruct_instance_to_native_
     }
 }
 
-/// `(compile point::x)`: `Interp::method_key`/`resolve_fn_def` resolve a
-/// `"type::method"` name against `self.methods` instead of `self.fns`,
-/// compiling `point`'s auto-generated `x` accessor (body: bare
+/// `(compile point::x)` names the method `x` of `point` rather than a
+/// function, compiling `point`'s auto-generated `x` accessor (body: bare
 /// `Expr::FieldGet`, no `Expr::Assoc`) on its own — closing the gap the
 /// `..._constructs_a_defstruct_instance..._` test above's doc comment
 /// describes. `make-point`'s own *construction* stays exactly as before
@@ -2621,7 +2620,7 @@ fn compile_dispatches_a_defstruct_field_accessor_method_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct point (x int) (y int))
-        (defun make-point ((a int) (b int)) point (point::new a b))
+        (defun make-point ((a int) (b int)) point (make-instance 'point :x a :y b))
         (compile make-point)
         (compile point::x)
         (let ((p (make-point 3 4))) p::x)
@@ -2642,7 +2641,7 @@ fn compile_dispatches_a_defstruct_field_setter_method_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct point (x int) (y int))
-        (defun make-point ((a int) (b int)) point (point::new a b))
+        (defun make-point ((a int) (b int)) point (make-instance 'point :x a :y b))
         (compile make-point)
         (compile point::x)
         (compile point::set-x)
@@ -2669,7 +2668,7 @@ fn compile_dispatches_a_function_that_calls_a_compiled_method_in_its_own_body() 
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct point (x int) (y int))
-        (defun make-point ((a int) (b int)) point (point::new a b))
+        (defun make-point ((a int) (b int)) point (make-instance 'point :x a :y b))
         (compile make-point)
         (compile point::x)
         (compile point::y)
@@ -2704,15 +2703,16 @@ fn compile_dispatches_a_self_recursive_method_to_native_code() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct counter (n int))
-        (defun make-counter ((a int)) counter (counter::new a))
+        (defun make-counter ((a int)) counter (make-instance 'counter :n a))
         (compile make-counter)
         (compile counter::n)
         (compile counter::set-n)
-        (defmethod countdown ((self counter)) int
-          (if (<= self::n 0)
-              0
-              (let ((ignored (setf self::n (- self::n 1))))
-                (countdown self))))
+        (impl counter
+  (countdown (self) int
+            (if (<= self::n 0)
+                0
+                (let ((ignored (setf self::n (- self::n 1))))
+                  (countdown self)))))
         (compile counter::countdown)
         (countdown (make-counter 5))
         "#,
@@ -2733,7 +2733,7 @@ fn compile_transitively_compiles_a_called_user_method() {
         (defstruct point (x int) (y int))
         (defun sum-coords ((p point)) int (+ p::x p::y))
         (compile sum-coords)
-        (sum-coords (point::new 3 4))
+        (sum-coords (make-instance 'point :x 3 :y 4))
         "#,
     )
     .expect("transitive compile of the `point` accessors should succeed");
@@ -2798,8 +2798,7 @@ fn a_seeded_stream_agrees_across_the_compile_boundary() {
 ///
 /// Nothing is left to look up at runtime — the checker's resolution is the
 /// answer — so there is no reason to carry the failure to the `(compile ...)`
-/// call the way this used to (an `EvalError::NoSuchFunction` out of
-/// `Interp::resolve_fn_ref`). See `Checker::check_compile`'s doc comment.
+/// call. See `Checker::check_compile`'s doc comment.
 #[test]
 fn compile_of_an_unresolvable_name_is_a_check_time_error() {
     // A bare name that names nothing.
@@ -2865,12 +2864,9 @@ fn compile_resolves_a_bare_name_against_its_own_module_not_just_root() {
 /// The module-scoped counterpart of `compile_resolves_a_bare_name_against_its_own_module_not_just_root`:
 /// two sibling modules each define their own `tag`, and `(compile tag)`
 /// written inside `a` must resolve — and actually dispatch — to `a`'s own
-/// `tag`, never `b`'s same-named one, even though nothing here is `pub`. The
-/// old module-blind runtime resolution (`Interp::method_key`'s "search the
-/// whole tree by local name" fallback) had no way to prefer the caller's own
-/// module in a case like this; the new `written`+`home` resolution does, by
-/// construction (`ModuleScope::resolve_fn`'s ancestor-chain walk starting
-/// from `a` never even reaches `b`).
+/// `tag`, never `b`'s same-named one, even though nothing here is `pub`: the
+/// checker resolves the name from `a`, whose ancestor chain never reaches `b`,
+/// and the runtime uses that answer as is.
 #[test]
 fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() {
     let v = eval_ok_with_compiler(
@@ -2894,8 +2890,7 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
 /// same-named accessors as external `Expr::Assoc` targets from within one
 /// compiled function. Before this fix, a method's mangled LLVM symbol
 /// (`user_method_symbol_name`) and every internal SCC bookkeeping key
-/// derived from it (`Interp::method_key`, `CallEdge::Method`'s node name)
-/// were built from the receiver type's *local* name only (`tl_box::n` for
+/// derived from it were built from the receiver type's *local* name only (`tl_box::n` for
 /// *both* structs) — so `compiler.rs`'s `get-function "tl_box::n"` inside
 /// `sum-both`'s own module would resolve to the *same* declared value for
 /// both calls, and whichever real address `Interp::compile_scc` supplied last
@@ -2907,8 +2902,8 @@ fn compile_a_same_named_method_in_two_sibling_modules_does_not_alias_the_others_
         r#"
         (module a (pub defstruct box (pub n int)))
         (module b (pub defstruct box (pub n int)))
-        (defun make-a () a::box (a::box::new 100))
-        (defun make-b () b::box (b::box::new 200))
+        (defun make-a () a::box (make-instance 'a::box :n 100))
+        (defun make-b () b::box (make-instance 'b::box :n 200))
         (compile make-a)
         (compile make-b)
         (compile a::box::n)
@@ -2919,6 +2914,27 @@ fn compile_a_same_named_method_in_two_sibling_modules_does_not_alias_the_others_
         "#,
     );
     assert_eq!(v, Value::Int(300));
+}
+
+/// Module `a`'s function `b` and type `a`'s method `b` are different names
+/// once compiled: the function's symbol is `tl_a::b`, the method's
+/// `tl_a''b`. While both were `tl_a::b`, `use-both`'s two calls reached one
+/// body, and the call that passed an `int` where the method's receiver was
+/// expected failed with `rt_struct_field_get: first argument is not a boxed
+/// Sexpr`.
+#[test]
+fn compile_a_modules_function_and_a_same_named_types_method_are_different_symbols() {
+    let v = eval_ok_with_compiler(
+        r#"
+        (module a (pub defun b ((x int)) int (+ x 100)))
+        (defstruct a (v int))
+        (impl a (pub b (self) int (+ self::v 1)))
+        (defun use-both () int (+ (a::b 1) (b (make-instance 'a :v 5))))
+        (compile use-both)
+        (use-both)
+        "#,
+    );
+    assert_eq!(v, Value::Int(107));
 }
 
 /// `(compile "name")`/`(compile "type::method")` — a string literal, not an
@@ -3124,7 +3140,7 @@ fn a_where_bounded_generic_specializes_and_dispatches_into_compiled_methods() {
         (defstruct box-a (n int))
         (impl Counted box-a (count ((self Self)) int self::n))
         (defun describe<T> ((it T)) int (where (Counted T)) (count it))
-        (defun make-box-a ((n int)) box-a (box-a::new n))
+        (defun make-box-a ((n int)) box-a (make-instance 'box-a :n n))
         (compile box-a::n)
         (compile box-a::count)
         (compile make-box-a)
@@ -3150,8 +3166,8 @@ fn a_where_bounded_generic_specializes_per_impl_and_dispatches_into_compiled_met
         (impl Counted box-a (count ((self Self)) int self::n))
         (impl Counted box-b (count ((self Self)) int (* 2 self::n)))
         (defun describe<T> ((it T)) int (where (Counted T)) (count it))
-        (defun make-box-a ((n int)) box-a (box-a::new n))
-        (defun make-box-b ((n int)) box-b (box-b::new n))
+        (defun make-box-a ((n int)) box-a (make-instance 'box-a :n n))
+        (defun make-box-b ((n int)) box-b (make-instance 'box-b :n n))
         (compile box-a::n)
         (compile box-b::n)
         (compile box-a::count)
@@ -3301,7 +3317,7 @@ fn compile_dispatches_a_function_that_constructs_a_nested_defstruct_to_native_co
         r#"
         (defstruct inner (v int))
         (defstruct outer (child inner))
-        (defun make-outer ((n int)) outer (outer::new (inner::new n)))
+        (defun make-outer ((n int)) outer (make-instance 'outer :child (make-instance 'inner :v n)))
         (compile make-outer)
         (compile inner::v)
         (compile outer::child)
@@ -3327,13 +3343,13 @@ fn compile_dispatches_a_nested_defstruct_field_setter_to_native_code() {
         r#"
         (defstruct inner (v int))
         (defstruct outer (child inner))
-        (defun make-outer ((n int)) outer (outer::new (inner::new n)))
+        (defun make-outer ((n int)) outer (make-instance 'outer :child (make-instance 'inner :v n)))
         (compile make-outer)
         (compile inner::v)
         (compile outer::child)
         (compile outer::set-child)
         (let ((o (make-outer 1)))
-          (setf o::child (inner::new 9))
+          (setf o::child (make-instance 'inner :v 9))
           (v o::child))
         "#,
     )
@@ -3615,33 +3631,33 @@ fn compile_matches_a_builtin_option() {
 // compiled `Match` (recorded in TODO.md at the time; see
 // `docs/dev/implementation-log.md`'s 2026-07-12 entry).
 
-/// A compiled `match` destructures a `defstruct` instance's fields by
-/// position, the same as the interpreter's own
+/// A compiled `match` destructures a `defstruct` instance's slots by
+/// keyword, the same as the interpreter's own
 /// `match_destructures_a_struct_instance` (`tests/struct_test.rs`).
 #[test]
 fn compile_matches_and_destructures_a_defstruct_instance() {
     let v = eval_ok_with_compiler(
         r#"
         (defstruct point (x int) (y int))
-        (defun sum ((p point)) int (match p ((new a b) (+ a b))))
+        (defun sum ((p point)) int (match p ((point :x a :y b) (+ a b))))
         (compile sum)
-        (sum (point::new 3 4))
+        (sum (make-instance 'point :x 3 :y 4))
         "#,
     );
     assert_eq!(v, Value::Int(7));
 }
 
-/// A wildcard sub-pattern skips field extraction entirely, and binding order
-/// follows field declaration order, not name — mirrors the interpreter's own
-/// `match_on_a_struct_binds_fields_by_position`.
+/// A slot the pattern does not name skips field extraction entirely, and the
+/// slots are written in any order — mirrors the interpreter's own
+/// `match_on_a_struct_binds_slots_by_keyword_in_any_order`.
 #[test]
-fn compile_match_on_a_defstruct_binds_fields_by_position_and_skips_wildcards() {
+fn compile_match_on_a_defstruct_binds_slots_by_keyword_and_skips_the_rest() {
     let v = eval_ok_with_compiler(
         r#"
         (defstruct point (x int) (y int) (z int))
-        (defun diff ((p point)) int (match p ((new a _ c) (- a c))))
+        (defun diff ((p point)) int (match p ((point :z c :x a) (- a c))))
         (compile diff)
-        (diff (point::new 9 100 3))
+        (diff (make-instance 'point :x 9 :y 100 :z 3))
         "#,
     );
     assert_eq!(v, Value::Int(6));
@@ -3653,10 +3669,10 @@ fn compile_match_on_a_defstruct_binds_fields_by_position_and_skips_wildcards() {
 fn compile_and_interpret_agree_on_a_defstruct_match() {
     let prog = r#"
         (defstruct point (x int) (y int))
-        (defun sum ((p point)) int (match p ((new a b) (+ a b))))
+        (defun sum ((p point)) int (match p ((point :x a :y b) (+ a b))))
     "#;
-    let compiled = eval_ok_with_compiler(&format!("{}\n(compile sum)\n(sum (point::new 5 6))", prog));
-    let interpreted = eval_ok(&format!("{}\n(sum (point::new 5 6))", prog));
+    let compiled = eval_ok_with_compiler(&format!("{}\n(compile sum)\n(sum (make-instance 'point :x 5 :y 6))", prog));
+    let interpreted = eval_ok(&format!("{}\n(sum (make-instance 'point :x 5 :y 6))", prog));
     assert_eq!(compiled, interpreted);
     assert_eq!(compiled, Value::Int(11));
 }
@@ -4318,14 +4334,15 @@ fn compile_dispatches_a_user_defined_method_reified_as_a_value_to_native_code() 
     let v = eval_ok_with_compiler(
         r#"
         (defstruct point (x int))
-        (defmethod double ((self point)) int (* self::x 2))
+        (impl point
+  (double (self) int (* self::x 2)))
         (compile point::x)
         (compile point::double)
         (defun apply1 ((f (fn (point) int)) (p point)) int (f p))
         (compile apply1)
         (defun use-double ((p point)) int (apply1 double p))
         (compile use-double)
-        (use-double (point::new 21))
+        (use-double (make-instance 'point :x 21))
         "#,
     );
     assert_eq!(v, Value::Int(42));
@@ -5486,7 +5503,7 @@ fn compile_dispatches_a_trait_object_call_through_its_vtable() {
         (impl Drawable circle (draw ((self Self)) int 1))
         (impl Drawable square (draw ((self Self)) int 2))
         (defun render ((d :dyn Drawable)) int (draw d))
-        (defun both () int (+ (* 10 (render (circle::new 3))) (render (square::new 4))))
+        (defun both () int (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4))))
         (compile both)
         (both)
         "#,
@@ -5511,7 +5528,7 @@ fn compile_indexes_the_right_vtable_slot_for_each_method() {
           (sides ((self Self)) int 3))
         (defun outline ((s :dyn Shape)) int (sides s))
         (defun paint ((s :dyn Shape)) int (draw s))
-        (defun both () int (+ (* 10 (paint (tri::new 1))) (outline (tri::new 1))))
+        (defun both () int (+ (* 10 (paint (make-instance 'tri :n 1))) (outline (make-instance 'tri :n 1))))
         (compile both)
         (both)
         "#,
@@ -5542,7 +5559,7 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
         (defun pb ((s :dyn Sub)) int (base-b s))
         (defun pc ((s :dyn Sub)) int (sub-c s))
         (defun all () int
-          (+ (* 100 (pa (tri::new 0))) (+ (* 10 (pb (tri::new 0))) (pc (tri::new 0)))))
+          (+ (* 100 (pa (make-instance 'tri :n 0))) (+ (* 10 (pb (make-instance 'tri :n 0))) (pc (make-instance 'tri :n 0)))))
         (compile all)
         (all)
         "#,
@@ -5573,7 +5590,7 @@ fn compile_upcasts_to_a_non_first_supertrait_through_the_conversion_table() {
         (impl D pair (d-tag ((self Self)) int 6))
         (defun only-c ((c :dyn C)) int (c-tag c))
         (defun via ((d :dyn D)) int (only-c d))
-        (defun both () int (+ (* 10 (via (cell::new 0))) (via (pair::new 0))))
+        (defun both () int (+ (* 10 (via (make-instance 'cell :n 0))) (via (make-instance 'pair :n 0))))
         (compile both)
         (both)
         "#,
@@ -5599,7 +5616,7 @@ fn compile_upcasts_a_trait_object_boxed_by_interpreted_code() {
         (defun only-c ((c :dyn C)) int (c-tag c))
         (defun via ((d :dyn D)) int (only-c d))
         (compile via)
-        (via (cell::new 0))
+        (via (make-instance 'cell :n 0))
         "#,
     )
     .expect("eval failed");
@@ -5616,7 +5633,7 @@ fn compile_passes_arguments_through_a_trait_object_call() {
         (defstruct fixed (n int))
         (impl Scaler fixed (scale ((self Self) (k int)) int (* self::n k)))
         (defun apply-scale ((s :dyn Scaler) (k int)) int (scale s k))
-        (defun rec () int (apply-scale (fixed::new 6) 7))
+        (defun rec () int (apply-scale (make-instance 'fixed :n 6) 7))
         (compile rec)
         (rec)
         "#,
@@ -5637,10 +5654,10 @@ fn compile_and_interpret_agree_on_a_trait_object_match() {
         (impl Drawable square (draw ((self Self)) int 2))
         (defun area ((d :dyn Drawable)) int
           (match d
-            ((circle r) (* 100 r))
+            ((circle :r) (* 100 r))
             ((the square s) s::side)
             (_ 0)))
-        (defun rec () int (+ (area (circle::new 3)) (area (square::new 4))))
+        (defun rec () int (+ (area (make-instance 'circle :r 3)) (area (make-instance 'square :side 4))))
         "#;
     let interpreted = run_with_compiler_and_prelude(&format!("{src} (rec)")).expect("eval failed");
     let compiled = run_with_compiler_and_prelude(&format!("{src} (compile rec) (rec)")).expect("eval failed");
@@ -5682,11 +5699,12 @@ fn a_macro_expander_can_be_compiled() {
     };
 
     run(&mut h, &mut chk, &interp, "(defmacro twice (x) `(+ ,x ,x))");
-    assert!(!interp.is_compiled("twice"), "a freshly defined macro has no compiled body yet");
+    let twice = typelisp::CompileTarget::Fn(typelisp::Path::root("twice"));
+    assert!(!interp.is_compiled(&twice), "a freshly defined macro has no compiled body yet");
     assert_eq!(run(&mut h, &mut chk, &interp, "(twice 21)"), Value::Int(42));
 
     run(&mut h, &mut chk, &interp, "(compile twice)");
-    assert!(interp.is_compiled("twice"), "`(compile twice)` should have installed a native expander");
+    assert!(interp.is_compiled(&twice), "`(compile twice)` should have installed a native expander");
     assert_eq!(
         run(&mut h, &mut chk, &interp, "(twice 21)"),
         Value::Int(42),
@@ -5709,7 +5727,7 @@ fn compile_dispatches_when_only_the_dispatching_function_is_compiled() {
         (impl Drawable square (draw ((self Self)) int 2))
         (defun render ((d :dyn Drawable)) int (draw d))
         (compile render)
-        (+ (* 10 (render (circle::new 3))) (render (square::new 4)))
+        (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4)))
         "#,
     )
     .expect("eval failed");
@@ -5730,7 +5748,7 @@ fn compile_dispatches_to_an_impl_added_after_the_call_site_was_compiled() {
         (compile render)
         (defstruct square (side int))
         (impl Drawable square (draw ((self Self)) int 2))
-        (+ (* 10 (render (circle::new 3))) (render (square::new 4)))
+        (+ (* 10 (render (make-instance 'circle :r 3))) (render (make-instance 'square :side 4)))
         "#,
     )
     .expect("eval failed");
@@ -5776,7 +5794,7 @@ fn compile_dispatches_a_result_carrying_a_user_error_type() {
         r#"
         (defstruct io-err (code int))
         (defun open-it ((ok bool)) Result<int,io-err>
-          (if ok (result::ok 7) (result::err (io-err::new 42))))
+          (if ok (result::ok 7) (result::err (make-instance 'io-err :code 42))))
         (defun code ((ok bool)) int
           (match (open-it ok) ((Ok v) v) ((Err e) e::code)))
         (compile code)
@@ -5820,7 +5838,7 @@ fn compile_dispatches_message_on_a_dyn_error() {
           (source ((self Self)) Option<:dyn Error> (option::none)))
         (defun describe ((e :dyn Error)) string (message e))
         (defun both () string
-          (append (describe (app-err::new "mine"))
+          (append (describe (make-instance 'app-err :why "mine"))
                   (describe (ParseIntError::ParseIntError "/builtin"))))
         (compile both)
         (both)
@@ -5845,7 +5863,7 @@ fn compile_round_trips_a_unit_typed_struct_field() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct holder (u ()) (k int))
-        (defun make ((n int)) holder (holder::new () n))
+        (defun make ((n int)) holder (make-instance 'holder :u () :k n))
         (defun read-k ((h holder)) int h::k)
         (compile make)
         (compile read-k)
@@ -5864,9 +5882,9 @@ fn a_struct_built_by_compiled_code_reads_back_in_the_interpreter() {
     let v = run_with_compiler_and_prelude(
         r#"
         (defstruct holder (u ()) (k int))
-        (defun make ((n int)) holder (holder::new () n))
+        (defun make ((n int)) holder (make-instance 'holder :u () :k n))
         (compile make)
-        (match (make 4) ((new u n) n))
+        (match (make 4) ((holder :k n) n))
         "#,
     )
     .expect("eval failed");
@@ -5941,11 +5959,11 @@ fn a_module_type_named_vector_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (pub defstruct vector (a int))
-          (pub defmethod len ((self vector)) int (* 100 self::a))
+          (pub defstruct vector (pub a int))
+          (impl vector (pub len (self) int (* 100 self::a)))
           (pub defun call-len ((v vector)) int (len v)))
         (compile m::call-len)
-        (m::call-len (m::vector::new 3))
+        (m::call-len (make-instance 'm::vector :a 3))
         "#,
     )
     .expect("eval failed");
@@ -5959,11 +5977,11 @@ fn a_module_type_named_hashtable_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
-          (pub defstruct hashtable (a int) (b int))
-          (pub defmethod count ((self hashtable)) int (+ self::a self::b))
+          (pub defstruct hashtable (pub a int) (pub b int))
+          (impl hashtable (pub count (self) int (+ self::a self::b)))
           (pub defun call-count ((h hashtable)) int (count h)))
         (compile m::call-count)
-        (m::call-count (m::hashtable::new 20 22))
+        (m::call-count (make-instance 'm::hashtable :a 20 :b 22))
         "#,
     )
     .expect("eval failed");
@@ -6020,8 +6038,8 @@ const CONFORMANCE_MODULE: &str = r#"
   ;; builders — `-i` stays interpreted, `-c` gets compiled below
   (pub defun enum-i ((n int)) expr (num n))
   (pub defun enum-c ((n int)) expr (num n))
-  (pub defun struct-i ((n int)) pt (pt::new n 0))
-  (pub defun struct-c ((n int)) pt (pt::new n 0))
+  (pub defun struct-i ((n int)) pt (make-instance 'pt :x n :y 0))
+  (pub defun struct-c ((n int)) pt (make-instance 'pt :x n :y 0))
   ;; a nested function is always compiled, whether or not anything asks
   (pub defun enum-nested ((n int)) expr (labels ((f ((k int)) expr (num k))) (f n)))
 
@@ -6170,7 +6188,7 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
 /// node, which is a later stage. Only the *body* is bridged here.
 #[test]
 fn the_island_compiles_a_body_the_new_bridge_produced() {
-    let body = bridge_to_island_text("(assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))");
+    let body = bridge_to_island_text("(assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))");
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
@@ -6196,9 +6214,9 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
 #[test]
 fn the_island_compiles_a_bridged_let_and_if() {
     let body = bridge_to_island_text(
-        "(let ((d int-any-width (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))))
-           (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var d) (int-any-width 0))
-               (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 0) (var d))
+        "(let ((d int-any-width (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))))
+           (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var d) (int-any-width 0))
+               (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 0) (var d))
                (var d)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&format!(
@@ -6281,11 +6299,11 @@ fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
         "(let ((acc int-any-width (int-any-width 0)) (i int-any-width (int-any-width 0)))
            (loop unit
-             (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var i) (var b))
+             (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var i) (var b))
                  (unit)
                  (break))
-             (set acc (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var a)))
-             (set i (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var i) (int-any-width 1))))
+             (set acc (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var a)))
+             (set i (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var i) (int-any-width 1))))
            (var acc))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
@@ -6318,11 +6336,11 @@ fn the_island_runs_a_bridged_loop() {
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
         "(labels ((rec ((n int-any-width) (acc int-any-width)) int-any-width
-                    (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var n) (int-any-width 1))
+                    (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var n) (int-any-width 1))
                         (var acc)
                         (apply (var rec) int-any-width (int-any-width int-any-width)
-                          (assoc i32 - true () int-any-width (int-any-width int-any-width) \"i32\" (var n) (int-any-width 1))
-                          (assoc i32 * true () int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
+                          (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (var n) (int-any-width 1))
+                          (assoc i32 * true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
            (apply (var rec) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
     );
     let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
@@ -6354,7 +6372,7 @@ fn the_island_runs_a_bridged_labels_block() {
 fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
         "(let ((n int-any-width (var a)))
-           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc i32 + true () int-any-width (int-any-width int-any-width) \"i32\" (var x) (var n)))))
+           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var x) (var n)))))
              (apply (var f) int-any-width (int-any-width) (int-any-width 1))))",
     );
     // The capture really is a cell on both sides of the boundary.
@@ -6418,10 +6436,10 @@ fn the_island_runs_a_whole_bridged_defun() {
     let form = r
         .read_all(
             &mut h,
-            "(defun m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width true
-               (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var x) (var lo))
+            "(defun m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width
+               (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var x) (var lo))
                    (var lo)
-                   (if (assoc i32 < true () bool (int-any-width int-any-width) \"bool\" (var hi) (var x))
+                   (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var hi) (var x))
                        (var hi)
                        (var x))))",
         )
@@ -6465,7 +6483,7 @@ fn compile_reads_a_hashtable_field_out_of_a_struct() {
         r#"
         (defstruct cache (table HashTable<int,int>))
         (defun probe () int
-          (let ((c (cache::new (the HashTable<int,int> (HashTable::new)))))
+          (let ((c (make-instance 'cache :table (the HashTable<int,int> (HashTable::new)))))
             (let ((t c::table))
               (set t 1 41)
               (match (get t 1) ((Some n) (+ n 1)) (None 0)))))
@@ -6617,7 +6635,7 @@ fn a_compiled_function_reads_and_writes_an_array_through_aref() {
           (let ((d (the Vector<int> (Vector::new))))
             (progn
               (push d 2) (push d 3)
-              (let ((a (Array::make d 0)))
+              (let ((a (Array::new d 0)))
                 (progn (setf (aref a 1 2) 9) (aref a 1 2))))))
         (compile cell)
         (cell)
@@ -6632,7 +6650,7 @@ fn a_compiled_function_walks_an_array_in_row_major_order() {
           (let ((d (the Vector<int> (Vector::new))))
             (progn
               (push d 2) (push d 2)
-              (let ((a (Array::make d 0)) (acc 0))
+              (let ((a (Array::new d 0)) (acc 0))
                 (progn
                   (setf (aref a 0 0) 1) (setf (aref a 0 1) 2)
                   (setf (aref a 1 0) 3) (setf (aref a 1 1) 4)
@@ -6651,7 +6669,7 @@ fn a_compiled_functions_fill_pointer_grows_the_same_way() {
           (let ((d (the Vector<int> (Vector::new))))
             (progn
               (push d 1)
-              (let ((a (Array::make d 0 :fill-pointer 0)))
+              (let ((a (Array::new d 0 :fill-pointer 0)))
                 (progn (push-extend a 7) (push-extend a 8)
                        (+ (* 100 (total-size a)) (* 10 (len a)) (unwrap (pop a))))))))
         (compile grown)
@@ -6666,7 +6684,7 @@ fn a_compiled_functions_fill_pointer_grows_the_same_way() {
 fn a_compiled_function_sets_and_reads_bits_across_word_boundaries() {
     let src = "
         (defun edges () int
-          (let ((v (BitVector::make 70)))
+          (let ((v (BitVector::new 70)))
             (progn
               (set v 31 true) (set v 32 true) (set v 69 true)
               (+ (if (get v 31) 1 0) (* 2 (if (get v 32) 1 0))
@@ -6681,7 +6699,7 @@ fn a_compiled_function_sets_and_reads_bits_across_word_boundaries() {
 fn a_compiled_bit_wise_operation_leaves_no_bits_past_the_length() {
     let src = "
         (defun ones () int
-          (let ((v (bit-not (BitVector::make 35))) (n 0) (i 0))
+          (let ((v (bit-not (BitVector::new 35))) (n 0) (i 0))
             (progn
               (while (< i 35) (progn (setf n (+ n (if (get v i) 1 0))) (setf i (+ i 1))))
               n)))
@@ -6790,11 +6808,11 @@ fn compile_and_interpret_agree_on_a_hashtable_with_a_user_key() {
         (defun probe ((a int) (b int)) int
           (let ((h (the HashTable<pt,int> (HashTable::new))))
             (progn
-              (set h (pt::new a b) 7)
-              (set h (pt::new b a) 9)
-              (let ((hit (match (get h (pt::new a b)) ((some v) v) ((none) -1)))
-                    (miss (match (get h (pt::new 99 99)) ((some v) v) ((none) 0)))
-                    (gone (match (remove h (pt::new b a)) ((some v) v) ((none) -1))))
+              (set h (make-instance 'pt :x a :y b) 7)
+              (set h (make-instance 'pt :x b :y a) 9)
+              (let ((hit (match (get h (make-instance 'pt :x a :y b)) ((some v) v) ((none) -1)))
+                    (miss (match (get h (make-instance 'pt :x 99 :y 99)) ((some v) v) ((none) 0)))
+                    (gone (match (remove h (make-instance 'pt :x b :y a)) ((some v) v) ((none) -1))))
                 (+ hit (+ miss (+ gone (count h))))))))
     "#;
     let compiled = run_with_compiler_and_prelude(&format!("{}\n(compile probe)\n(probe 1 2)", prog))
@@ -6819,7 +6837,7 @@ fn a_specialization_at_a_module_qualified_type_resolves() {
           (pub defun probe ((n int)) int
             (let ((d (the Vector<int> (Vector::new))))
               (progn (push d 1)
-                (let ((a (Array::make d (pt::new n))))
+                (let ((a (Array::new d (make-instance 'pt :x n))))
                   (x (get a (Vector::filled 1 0))))))))
         (compile m::probe)
         (m::probe 7)

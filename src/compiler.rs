@@ -253,10 +253,9 @@
 //! composability gap that, until now, meant a `defun` whose body called
 //! `p::x` could never itself be `compile`d at all. Resolved the same way a
 //! top-level `defun`-to-`defun` call already is (`compile-call`): the callee
-//! is found via `get-function` under the mangled name `type-name::method`
-//! (exactly the literal string a standalone `(compile "type-name::method")`
-//! names its own LLVM function, `Interp::add_compiled_function`'s
-//! `internal_name`), and `Interp::compile_function` requires — and forward-
+//! is found via `get-function` under the mangled name `tl_type-name''method`
+//! (exactly the name its own LLVM function was given,
+//! `Interp::add_compiled_function`'s `internal_name`), and `Interp::compile_function` requires — and forward-
 //! declares — every such target the same way it already does for an
 //! `Expr::Call` target, so self-recursive method calls and ordinary
 //! method-to-method calls both Just Work without `compile-assoc` itself
@@ -2553,10 +2552,9 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; casing needed here (it flows through
 ;; `compile-call-args` like any other argument).
 ;; The callee is found by `get-function` under the
-;; mangled name `type-name::method` — exactly the
-;; literal string a standalone `(compile
-;; "type-name::method")` call names its own LLVM
-;; function (`Interp::add_compiled_function`'s
+;; mangled name `tl_type-name''method` — exactly the
+;; name its own LLVM function was given
+;; (`Interp::add_compiled_function`'s
 ;; `internal_name`), so a self-recursive method call
 ;; resolves to the `add-function` `compile-function`'s
 ;; own first step already declared, the same way a
@@ -3045,13 +3043,13 @@ const SOURCE_TEMPLATE: &str = r#"
 
 ;; The user-defined-method leg of `compile-assoc`'s
 ;; dispatch (see its doc comment): call the callee
-;; under the mangled name `type-name::method`,
+;; under the mangled name `tl_type-name''method`,
 ;; arguments through `compile-call-args` exactly like
 ;; an ordinary call's. A `labels` sibling (not a
 ;; toplevel `defun`) because it closes over `m` and
 ;; mutually recurses with `compile-call-args`.
 (defun compile-assoc-user ((m llvm-module) (builder llvm-builder) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (type-name string) (method string) (args-ptr llvm-value) (argc int)) llvm-value
-    (coroutine-call builder m (build-fn-address builder (get-function m (append "tl_" (append type-name (append "::" method))))) args-ptr argc))
+    (coroutine-call builder m (build-fn-address builder (get-function m (append "tl_" (append type-name (append "''" method))))) args-ptr argc))
 
 ;; `(llvm-op opid (kind . arg)...)` — an `llvm-*`/
 ;; native-`Scope<V>` builtin method call

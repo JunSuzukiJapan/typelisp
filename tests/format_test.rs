@@ -315,16 +315,16 @@ fn a_pathname_prints_as_sbcl_does() {
 
 #[test]
 fn a_time_prints_as_the_integer_cl_has_for_it() {
-    assert_eq!(fmt(r#"(format false "~s" (universal-time::new 2 5))"#), "172805");
-    assert_eq!(fmt(r#"(format false "~a" (internal-time::new 3 250))"#), "3000250");
+    assert_eq!(fmt(r#"(format false "~s" (make-instance 'universal-time :day 2 :second 5))"#), "172805");
+    assert_eq!(fmt(r#"(format false "~a" (make-instance 'internal-time :second 3 :microsecond 250))"#), "3000250");
 }
 
 #[test]
 fn a_struct_prints_its_field_names() {
     // `x: 1`, not `:x 1`, which would read as a keyword argument.
-    assert_eq!(fmt(r#"(defstruct point (x int) (y int)) (format false "~s" (point::new 1 2))"#), "#<point x: 1 y: 2>");
+    assert_eq!(fmt(r#"(defstruct point (x int) (y int)) (format false "~s" (make-instance 'point :x 1 :y 2))"#), "#<point x: 1 y: 2>");
     assert_eq!(
-        fmt(r#"(defstruct tag (name string)) (format false "~s ~a" (tag::new "a") (tag::new "b"))"#),
+        fmt(r#"(defstruct tag (name string)) (format false "~s ~a" (make-instance 'tag :name "a") (make-instance 'tag :name "b"))"#),
         "#<tag name: \"a\"> #<tag name: b>"
     );
     // A `Vector<T>`'s fields are its elements, which have no names.
@@ -348,13 +348,13 @@ fn a_stream_prints_as_sbcl_does() {
 #[test]
 fn a_decoded_time_prints_as_a_date_and_a_clock() {
     assert_eq!(
-        fmt(r#"(format false "~s" (decode-universal-time (universal-time::new 45000 3723) 0))"#),
+        fmt(r#"(format false "~s" (decode-universal-time (make-instance 'universal-time :day 45000 :second 3723) 0))"#),
         "#<decoded-time 2023-03-17 01:02:03 +00:00 Fri>"
     );
     // CL's zone is hours *west*, without daylight saving; the offset shown is
     // the clock's own.
     assert_eq!(
-        fmt(r#"(format false "~s" (decoded-time::new 5 4 3 2 1 2000 6 true 5.0))"#),
+        fmt(r#"(format false "~s" (make-instance 'decoded-time :second 5 :minute 4 :hour 3 :date 2 :month 1 :year 2000 :day-of-week 6 :daylight-p true :zone 5.0))"#),
         "#<decoded-time 2000-01-02 03:04:05 -04:00 Sun dst>"
     );
 }
@@ -362,7 +362,7 @@ fn a_decoded_time_prints_as_a_date_and_a_clock() {
 #[test]
 fn heap_info_prints_how_full_the_arena_is() {
     assert_eq!(
-        fmt(r#"(format false "~s" (heap-info::new 100 25 75 1 2 3 4 true))"#),
+        fmt(r#"(format false "~s" (make-instance 'heap-info :capacity 100 :live 25 :free 75 :symbols 1 :strings 2 :boxes 3 :gc-count 4 :growable true))"#),
         "#<heap-info 25 of 100 cells live (25%), 75 free, 1 symbols, 2 strings, 3 boxes, 4 collections, growable>"
     );
 }

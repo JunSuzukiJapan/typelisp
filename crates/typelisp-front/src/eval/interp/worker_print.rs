@@ -3,8 +3,8 @@
 //!
 //! The printer asks its environment six things it cannot read off the heap
 //! ([`typelisp_print::runtime::PrintHooks`]): an enum variant's name, whether
-//! a field holds a niche-represented `Option`, a type's `print-object`, a
-//! `~/name/` method, and the two sets of control variables. On the
+//! a field holds a niche-represented `Option`, a type's `print-object`, what
+//! a `~/name/` directive calls, and the two sets of control variables. On the
 //! interpreter's thread the `Interp` answers from its module tree. A worker
 //! has no `Interp` — its tables are `Rc`s and `RefCell`s the interpreter's
 //! thread mutates — so it answers from a [`PrintSnapshot`] the interpreter
@@ -46,14 +46,14 @@ pub(crate) struct PrintSnapshot {
     field_templates: typelisp_print::aot::FieldTemplates,
     /// `(base type key, index) -> field name` — `Interp::field_name_descriptors`.
     field_names: typelisp_print::aot::FieldNames,
-    /// Every method with a `print-object` or a `~/name/` method's signature,
-    /// by `(receiver type path, method name)`.
-    methods: HashMap<(Path, String), PrintMethod>,
+    /// Every method with a `print-object`'s signature, and every function and
+    /// method with the signature `~/name/` calls, by what it is.
+    defs: HashMap<crate::CompileTarget, PrintMethod>,
     /// Where each printer control variable lives, by name.
     globals: HashMap<String, GlobalRef>,
 }
 
-/// A method the printer may call.
+/// A definition the printer may call.
 enum PrintMethod {
     /// Compiled: callable from any thread, given how its arguments cross.
     Compiled { address: usize, abi: u8, receiver: Repr },
@@ -139,9 +139,9 @@ fn worker_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option
         return Ok(None);
     }
     let snapshot = current();
-    let (address, abi, receiver) = match snapshot.methods.get(&(type_path.clone(), method)) {
+    let (address, abi, receiver) = match snapshot.defs.get(&crate::CompileTarget::Method(type_path.clone(), method)) {
         None => return Ok(None),
-        Some(PrintMethod::Interpreted) => return Err(interpreted_off_main("print-object", &type_path)),
+        Some(PrintMethod::Interpreted) => return Err(interpreted_off_main(&format!("print-object of `{}`", type_path))),
         Some(PrintMethod::Compiled { address, abi, receiver }) => (*address, *abi, receiver.clone()),
     };
     let args = [encode(heap, v, &receiver)?, i64::from(escape)];
@@ -158,11 +158,10 @@ fn worker_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option
 
 /// `Interp::format_call`, from the snapshot.
 fn worker_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
-    let (type_path, looked_up) = super::format_call_target(heap, name, v)?;
     let snapshot = current();
-    let (address, abi, receiver) = match snapshot.methods.get(&(type_path.clone(), looked_up)) {
-        None => return Err(format!("format: ~/{}/ — `{}` has no method `{}`", name, type_path, name)),
-        Some(PrintMethod::Interpreted) => return Err(interpreted_off_main(&format!("~/{}/", name), &type_path)),
+    let (address, abi, receiver) = match snapshot.defs.get(&crate::CompileTarget::from_link_name(name)) {
+        None => return Err(format!("format: ~/{}/ — no such definition", name)),
+        Some(PrintMethod::Interpreted) => return Err(interpreted_off_main(&format!("`{}`, which a ~/name/ directive calls,", name))),
         Some(PrintMethod::Compiled { address, abi, receiver }) => (*address, *abi, receiver.clone()),
     };
     // A narrow integer is a box in a `Sexpr` and a plain word as a
@@ -177,7 +176,7 @@ fn worker_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bo
     let args = [encode(heap, receiver_value, &receiver)?, i64::from(colon), i64::from(at)];
     match call(address, abi, &args)? {
         Value::Str(id) => Ok(heap.string(id).to_string()),
-        other => Err(format!("format: ~/{}/ on `{}` returned {:?}, not a string", name, type_path, other)),
+        other => Err(format!("format: ~/{}/ returned {:?}, not a string", name, other)),
     }
 }
 
@@ -194,11 +193,11 @@ fn call(address: usize, abi: u8, args: &[i64]) -> Result<Value, String> {
         .map_err(|e| e.to_string())
 }
 
-fn interpreted_off_main(what: &str, type_path: &Path) -> String {
+fn interpreted_off_main(what: &str) -> String {
     format!(
-        "{} of `{}` is not compiled, and a worker thread cannot run it; \
+        "{} is not compiled, and a worker thread cannot run it; \
          `(compile ...)` it, or print the value from the main task",
-        what, type_path
+        what
     )
 }
 
@@ -245,11 +244,17 @@ impl Interp {
         for (key, index, name) in self.field_name_descriptors() {
             snapshot.field_names.insert((key, index), name);
         }
+        let mut defs: Vec<(crate::CompileTarget, Rc<super::FnDef>)> = Vec::new();
         let mut methods = Vec::new();
         self.root.borrow().collect_methods(&[], &mut methods);
+        defs.extend(methods.into_iter().map(|(type_path, method, f)| (crate::CompileTarget::Method(type_path, method), f)));
+        let mut fns = Vec::new();
+        self.root.borrow().collect_fns(&[], &mut fns);
+        defs.extend(fns.into_iter().map(|(path, f)| (crate::CompileTarget::Fn(path), f)));
         let mut bodies = self.printer_bodies.borrow_mut();
-        for (type_path, method, f) in methods {
-            if !super::is_print_object_sig(&f) && super::format_call_receiver_is_word(&f).is_none() {
+        for (target, f) in defs {
+            let print_object = matches!(target, crate::CompileTarget::Method(..)) && super::is_print_object_sig(&f);
+            if !print_object && super::format_call_receiver_is_word(&f).is_none() {
                 continue;
             }
             let entry = match (f.compiled.borrow().as_ref(), f.sig.as_ref()) {
@@ -259,7 +264,7 @@ impl Interp {
                 }
                 _ => PrintMethod::Interpreted,
             };
-            snapshot.methods.insert((type_path, method), entry);
+            snapshot.defs.insert(target, entry);
         }
         for name in typelisp_print::runtime::PRINTER_GLOBALS {
             let path = Path::root(name);

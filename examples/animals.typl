@@ -21,8 +21,8 @@
 
 (defun main () ()
   (let ((animals (the Vector<:dyn Animal> (Vector::new))))
-    (push animals (Dog::new "Pochi"))
-    (push animals (Cat::new "Tama"))
+    (push animals (make-instance 'Dog :nick "Pochi"))
+    (push animals (make-instance 'Cat :nick "Tama"))
     (doiter (a (iter animals))
       (println "~a" (speak a)))))
 

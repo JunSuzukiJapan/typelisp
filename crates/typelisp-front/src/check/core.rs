@@ -2,7 +2,7 @@
 //! checker lowers to and the interpreter evaluates.
 //!
 //! A core form is an ordinary tagged proper list, `(tag field...)`, whose `tag`
-//! is an interned symbol: `(int 42)`, `(if C T E)`, `(call WRITTEN HOME PATH
+//! is an interned symbol: `(int 42)`, `(if C T E)`, `(call PATH (R...)
 //! ARG...)`. There is no Rust AST — the program is cons cells from the reader
 //! all the way through evaluation, and the self-hosted compiler in
 //! `crate::compiler` pattern-matches this same shape. User data can never be

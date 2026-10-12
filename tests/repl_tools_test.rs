@@ -77,7 +77,7 @@ fn check_error(src: &str) -> String {
 fn stdout_of(src: &str) -> String {
     eval_string(&format!(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
-         (setf *standard-output* (standard-stream::new *cap*))\n\
+         (setf *standard-output* (make-instance 'standard-stream :h *cap*))\n\
          {}\n\
          (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
         src
@@ -378,10 +378,10 @@ fn disassemble_can_print_llvm_ir_instead() {
 fn disassemble_leaves_the_definition_interpreted() {
     let after_disassemble = eval_string(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
-         (setf *trace-output* (standard-stream::new *cap*))\n\
+         (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
          (defun f ((n int)) int (+ n 1))\n\
          (defun quiet () () ())\n\
-         (setf *standard-output* (standard-stream::new (%internal::stream-string-output)))\n\
+         (setf *standard-output* (make-instance 'standard-stream :h (%internal::stream-string-output)))\n\
          (disassemble f)\n\
          (trace f)\n\
          (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
@@ -393,16 +393,16 @@ fn disassemble_leaves_the_definition_interpreted() {
     );
 }
 
-/// A method is disassembled under its `type::method` link name, the same one
-/// the compile driver and `Interp::method_key` use.
+/// A method is disassembled under its link name, the same one the compile
+/// driver uses.
 #[test]
 fn a_method_can_be_disassembled() {
     let out = stdout_of(
         "(defstruct pt (pub x int) (pub y int))\n\
-         (defmethod total ((self pt)) int (+ self::x self::y))\n\
+         (impl pt (total (self) int (+ self::x self::y)))\n\
          (disassemble pt::total true)",
     );
-    assert!(out.contains("pt::total"), "the method's link name is missing: {:?}", out);
+    assert!(out.contains("pt''total"), "the method's link name is missing: {:?}", out);
 }
 
 /// A generic definition has no single body to show — the same refusal

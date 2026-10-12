@@ -68,7 +68,8 @@ use inkwell::AddressSpace;
 use inkwell::OptimizationLevel;
 
 use crate::check::core;
-use crate::compile::symbols::CompiledItem;
+use crate::compile::symbols::target_symbol_name;
+use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
 
 const ENTRY_POINT_NAME: &str = "main";
@@ -85,7 +86,7 @@ const ENTRY_POINT_NAME: &str = "main";
 /// the same items; the enclosing
 /// module is already baked into
 /// each item's own fully-qualified `Path`, so flattening loses nothing —
-/// each `defun`/`defmethod` becomes a [`CompiledItem`] by that full path,
+/// each `defun`/`defmethod` becomes a [`CompileTarget`] by that full path,
 /// never by its last segment alone, which is what lets a module-qualified
 /// name and a same-named one in another module compile to different LLVM
 /// symbols.
@@ -97,7 +98,7 @@ fn collect_aot_item(
     heap: &mut Heap,
     interp: &mut Interp,
     tl: TopLevelForm,
-    items: &mut Vec<CompiledItem>,
+    items: &mut Vec<CompileTarget>,
     defvar_inits: &mut Vec<(Path, Value)>,
     ffi_decls: &mut Vec<typelisp_front::eval::interp::FfiDecl>,
     entry_path: &Path,
@@ -127,7 +128,7 @@ fn collect_aot_item(
                     path, ENTRY_POINT_NAME, entry_path
                 ));
             }
-            items.push(CompiledItem::Fn(path));
+            items.push(CompileTarget::Fn(path));
             None
         }
         "defmethod" => {
@@ -136,7 +137,7 @@ fn collect_aot_item(
                 Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
                 _ => return Err("compile-file: defmethod without a name".to_string()),
             };
-            items.push(CompiledItem::Method(type_path, method));
+            items.push(CompileTarget::Method(type_path, method));
             None
         }
         // The whole form travels, not just the initializer: the global's
@@ -224,10 +225,10 @@ fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     if core::op(heap, form) != Some("call") {
         return false;
     }
-    // `(call WRITTEN HOME PATH (R...) ARG...)`: the resolved path, and no
-    // arguments past the representation list.
-    let is_main = core::path_field(heap, form, 2).is_some_and(|p| &p == entry_path);
-    is_main && core::fields(heap, form).map(|f| f.len() == 4).unwrap_or(false)
+    // `(call PATH (R...) ARG...)`: the resolved path, and no arguments past
+    // the representation list.
+    let is_main = core::path_field(heap, form, 0).is_some_and(|p| &p == entry_path);
+    is_main && core::fields(heap, form).map(|f| f.len() == 2).unwrap_or(false)
 }
 
 /// [`compile_file`] for a caller that is itself a running program — the
@@ -321,7 +322,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // per entry, and `Interp::promote_global`'s doc comment for why this
     // must promote eagerly, in this same declaration order, rather than
     // waiting for some `defun` body to reference a global the way JIT does).
-    let mut items: Vec<CompiledItem> = Vec::new();
+    let mut items: Vec<CompileTarget> = Vec::new();
     let mut defvar_inits: Vec<(Path, Value)> = Vec::new();
     let mut ffi_decls: Vec<typelisp_front::eval::interp::FfiDecl> = Vec::new();
     let entry_path = entry_point_path(&entry_segs);
@@ -377,7 +378,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         collect_aot_item(&mut heap, &mut interp, tl, &mut items, &mut defvar_inits, &mut ffi_decls, &entry_path)?;
     }
 
-    if !items.iter().any(|i| matches!(i, CompiledItem::Fn(p) if p == &entry_path)) {
+    if !items.iter().any(|i| matches!(i, CompileTarget::Fn(p) if p == &entry_path)) {
         return Err(format!(
             "no zero-argument `{}` defun found (required as the entry point)",
             ENTRY_POINT_NAME
@@ -467,7 +468,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             ctx.i64_type().fn_type(&[ptr_ty.into(), ctx.i32_type().into()], false)
         };
         for item in &items {
-            let symbol = item.symbol_name();
+            let symbol = target_symbol_name(item);
             if m.get_function(&symbol).is_none() {
                 m.add_function(&symbol, lisp_fn_ty, None);
             }
@@ -489,7 +490,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // (`tl_p::main` for `p.typl`). A `defmethod`'s symbol is
         // `user_method_symbol_name`'s `tl_type::method`, exactly what a
         // compiled call site emits.
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), &item.node_name(), &item.symbol_name()).map_err(|e| e.to_string())?;
+        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item)).map_err(|e| e.to_string())?;
     }
 
     // One `add_compiled_global_init` per `defvar`, in the order
@@ -519,7 +520,10 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // print-object` in it is here whether or not anything calls it.
     let mut print_objects: Vec<(String, String)> = items
         .iter()
-        .filter_map(|item| Some((print_object_key(&item.node_name())?, item.symbol_name())))
+        .filter_map(|item| match item {
+            CompileTarget::Method(type_path, method) => Some((print_object_key(type_path, method)?, target_symbol_name(item))),
+            CompileTarget::Fn(_) => None,
+        })
         .collect();
     // The prelude's own `print-object`s (`complex`, `pathname`, the streams,
     // the error types, ...), which no item of this file names: they are
@@ -536,7 +540,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             .filter_map(|f| {
                 let symbol = f.get_name().to_str().ok()?.to_string();
                 let node = symbol.strip_prefix(crate::compile::USER_SYMBOL_PREFIX)?;
-                Some((print_object_key(node)?, symbol))
+                let (type_path, method) = crate::types::split_method_link_name(node)?;
+                Some((print_object_key(&type_path, method)?, symbol))
             })
             .filter(|(key, _)| !print_objects.iter().any(|(k, _)| k == key))
             .collect();
@@ -544,26 +549,24 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         print_objects.extend(prelude_methods);
     }
 
-    // The methods a `~/name/` directive in this file can reach, from the
-    // checker's scan of each literal control string
-    // (`Checker::format_call_methods`). The interpreter needs no such list —
-    // it looks the name up in its own method table when the directive runs —
-    // but a standalone executable has no table, so each pair becomes a
-    // startup registration below, exactly as `print-object` does.
-    let format_calls: Vec<(String, String, String)> = chk
-        .format_call_methods()
+    // What the `~/name/` directives in this file resolved to
+    // (`Checker::format_call_targets`). The interpreter fetches the
+    // definition from its own tables when the directive runs, but a
+    // standalone executable has none, so each becomes a startup registration
+    // below, exactly as `print-object` does.
+    let format_calls: Vec<(String, String)> = chk
+        .format_call_targets()
         .into_iter()
-        .map(|(path, method)| {
-            let node = format!("{}::{}", path, method);
+        .map(|target| {
             let symbol = items
                 .iter()
-                .find(|item| item.node_name() == node)
-                .map(|item| item.symbol_name())
+                .find(|item| **item == target)
+                .map(target_symbol_name)
                 .ok_or_else(|| format!(
-                    "compile-file: `~/{}/` names `{}`, which was not compiled into this file",
-                    method, node
+                    "compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file",
+                    target.link_name()
                 ))?;
-            Ok((crate::type_key::type_key_of(&path).into_owned(), method, symbol))
+            Ok((target.link_name(), symbol))
         })
         .collect::<Result<_, String>>()?;
 
@@ -650,7 +653,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         build_main_wrapper(
             ctx,
             &m,
-            &CompiledItem::Fn(entry_path.clone()).symbol_name(),
+            &target_symbol_name(&CompileTarget::Fn(entry_path.clone())),
             &global_init_names,
             &interp.vtable_descriptors(),
             &interp.upcast_descriptors(),
@@ -676,26 +679,21 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     result
 }
 
-/// The type key a `print-object` method is registered under, from its node
-/// name — `None` for any other function.
+/// The type key the method `method` of `type_path` is registered under if it
+/// is a `print-object` — `None` for any other method.
 ///
 /// Two shapes, because a generic type's `print-object` is monomorphized:
-/// `point::print-object` for a plain type, and `gen::print-object <i32>` for
-/// one instantiation of a generic — whose *value* carries the key `gen<i32>`,
-/// so that is what the table has to be keyed by
+/// `print-object` for a plain type, and `print-object <i32>` for one
+/// instantiation of a generic — whose *value* carries the key `gen<i32>`, so
+/// that is what the table has to be keyed by
 /// (`type_key::specialized_method_name` is the same correspondence read the
 /// other way).
-fn print_object_key(node: &str) -> Option<String> {
-    let (type_name, targs) = match node.rsplit_once("::print-object") {
-        Some((ty, "")) => (ty, None),
-        Some((ty, rest)) => {
-            let args = rest.strip_prefix(" <")?.strip_suffix('>')?;
-            (ty, Some(args))
-        }
-        None => return None,
+fn print_object_key(type_path: &Path, method: &str) -> Option<String> {
+    let targs = match method.strip_prefix("print-object")? {
+        "" => None,
+        rest => Some(rest.strip_prefix(" <")?.strip_suffix('>')?),
     };
-    let path = Path::from_segments(type_name.split("::").map(str::to_string).collect());
-    let base = crate::type_key::type_key_of(&path).into_owned();
+    let base = crate::type_key::type_key_of(type_path).into_owned();
     Some(match targs {
         Some(args) => format!("{}<{}>", base, args),
         None => base,
@@ -748,7 +746,7 @@ fn build_main_wrapper(
     field_templates: &[(String, i64, i64, String)],
     field_names: &[(String, i64, String)],
     print_objects: &[(String, String)],
-    format_calls: &[(String, String, String)],
+    format_calls: &[(String, String)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(String, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], &str)>,
@@ -957,14 +955,13 @@ fn build_main_wrapper(
             let fn_ptr = classic_door(ctx, module, target)?;
             call(&builder, "rt_print_object_method", &[key_ptr, key_len, fn_ptr])?;
         }
-        for (key, method, symbol) in format_calls {
+        for (name, symbol) in format_calls {
             let target = module.get_function(symbol).ok_or_else(|| {
-                format!("compile-file: `~/{}/` names `{}`, which was not compiled into this file", method, symbol)
+                format!("compile-file: a `~/name/` directive calls `{}`, which was not compiled into this file", name)
             })?;
-            let (key_ptr, key_len) = literal(&builder, key)?;
-            let (name_ptr, name_len) = literal(&builder, method)?;
+            let (name_ptr, name_len) = literal(&builder, name)?;
             let fn_ptr = classic_door(ctx, module, target)?;
-            call(&builder, "rt_format_call_method", &[key_ptr, key_len, name_ptr, name_len, fn_ptr])?;
+            call(&builder, "rt_format_call_method", &[name_ptr, name_len, fn_ptr])?;
         }
         for (name, id) in printer_globals {
             let (name_ptr, name_len) = literal(&builder, name)?;

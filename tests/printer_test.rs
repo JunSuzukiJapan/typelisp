@@ -156,14 +156,15 @@ fn with_standard_io_syntax_restores_the_escape_flag() {
 
 const POINT: &str = r#"
 (defstruct point (x int) (y int))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
 "#;
 
 #[test]
 fn a_call_directive_runs_the_method_on_the_arguments_type() {
     is_true(&format!(
-        r#"{} (equal (format false "~/brief/" (point::new 3 4)) "3/4")"#,
+        r#"{} (equal (format false "~/brief/" (make-instance 'point :x 3 :y 4)) "3/4")"#,
         POINT
     ));
 }
@@ -171,16 +172,15 @@ fn a_call_directive_runs_the_method_on_the_arguments_type() {
 #[test]
 fn the_colon_flag_reaches_the_method() {
     is_true(&format!(
-        r#"{} (equal (format false "~:/brief/" (point::new 3 4)) "<3,4>")"#,
+        r#"{} (equal (format false "~:/brief/" (make-instance 'point :x 3 :y 4)) "<3,4>")"#,
         POINT
     ));
 }
 
 #[test]
-fn the_at_flag_reaches_the_method() {
+fn the_at_flag_reaches_the_callee() {
     is_true(
-        r#"(defmethod flags ((self string) (colon bool) (at bool)) string
-             (if at "at" "plain"))
+        r#"(defun flags ((s string) (colon bool) (at bool)) string (if at "at" "plain"))
            (equal (format false "~@/flags/" "x") "at")"#,
     );
 }
@@ -188,7 +188,7 @@ fn the_at_flag_reaches_the_method() {
 #[test]
 fn a_call_directive_sits_inside_surrounding_text() {
     is_true(&format!(
-        r#"{} (equal (format false "p=~/brief/!" (point::new 1 2)) "p=1/2!")"#,
+        r#"{} (equal (format false "p=~/brief/!" (make-instance 'point :x 1 :y 2)) "p=1/2!")"#,
         POINT
     ));
 }
@@ -196,74 +196,121 @@ fn a_call_directive_sits_inside_surrounding_text() {
 #[test]
 fn a_call_directive_consumes_exactly_one_argument() {
     is_true(&format!(
-        r#"{} (equal (format false "~a ~/brief/ ~a" 1 (point::new 2 3) 4) "1 2/3 4")"#,
+        r#"{} (equal (format false "~a ~/brief/ ~a" 1 (make-instance 'point :x 2 :y 3) 4) "1 2/3 4")"#,
         POINT
     ));
 }
 
+/// A type that takes no methods from a program — a built-in one — is
+/// reached through a function: the directive calls what `(shout arg colon
+/// at)` would call at the site.
 #[test]
-fn a_string_argument_dispatches_on_string() {
+fn a_call_directive_calls_a_function() {
     is_true(
-        r#"(defmethod shout ((self string) (colon bool) (at bool)) string (append self "!"))
+        r#"(defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
            (equal (format false "~/shout/" "hi") "hi!")"#,
     );
 }
 
 #[test]
-fn an_integer_argument_dispatches_when_only_one_width_defines_the_name() {
+fn an_integer_argument_reaches_a_function_taking_an_integer() {
     is_true(
-        r#"(defmethod twice ((self int) (colon bool) (at bool)) string (format false "~a ~a" self self))
+        r#"(defun twice ((n int) (colon bool) (at bool)) string (format false "~a ~a" n n))
            (equal (format false "~/twice/" 7) "7 7")"#,
     );
 }
 
-/// Two widths defining the same name is not ambiguous: each argument says
-/// which type it is, so each reaches its own method.
-///
-/// This used to be an *error* — "could be any width" — because a normalized
-/// `u8` and a normalized `int` were the same `Value::Int` when they held the
-/// same small number, and the runtime offered all six integer types as
-/// candidates rather than guess. Giving the narrow widths a box that names
-/// them settled it: `7` is an `int` and `(the u8 7)` is a `u8`.
+/// A narrow integer reaches a function taking its own width with its value
+/// intact: in the argument list it is a box naming its width, and the
+/// function takes the plain word.
 #[test]
-fn each_integer_width_dispatches_to_its_own_method() {
-    const DEFS: &str = r#"(defmethod both ((self int) (colon bool) (at bool)) string "32")
-           (defmethod both ((self u8) (colon bool) (at bool)) string "8")"#;
-    is_true(&format!(r#"{DEFS}
-           (equal (format false "~/both/" 7) "32")"#));
-    is_true(&format!(r#"{DEFS}
-           (equal (format false "~/both/" (the u8 7)) "8")"#));
+fn a_narrow_integer_reaches_a_function_taking_its_width() {
+    is_true(
+        r#"(defun thrice ((n u8) (colon bool) (at bool)) string (format false "~a ~a ~a" n n n))
+           (equal (format false "~/thrice/" (the u8 200)) "200 200 200")"#,
+    );
 }
 
-/// A method on a width other than the argument's own is *not* reached — the
-/// argument's type is the whole of the dispatch, and a bare literal is an
-/// `int`.
+/// An argument of another width is a type error, as the call `(thrice 7
+/// colon at)` would be: a bare literal is an `int`.
 #[test]
-fn an_integer_argument_reaches_only_its_own_widths_method() {
-    const DEF: &str = r#"(defmethod thrice ((self u8) (colon bool) (at bool)) string (format false "~a ~a ~a" self self self))"#;
-    let e = check_err(&format!(r#"{DEF}
-           (format false "~/thrice/" 7)"#));
-    assert!(e.contains("no argument here has a method `thrice`"), "{}", e);
-    is_true(&format!(r#"{DEF}
-           (equal (format false "~/thrice/" (the u8 7)) "7 7 7")"#));
+fn an_argument_of_another_width_is_a_type_error() {
+    let e = check_err(
+        r#"(defun thrice ((n u8) (colon bool) (at bool)) string (format false "~a" n))
+           (format false "~/thrice/" 7)"#,
+    );
+    assert!(e.contains("~/thrice/ calls what (thrice arg colon at) with arg a `int` would"), "{}", e);
 }
 
 #[test]
-fn a_missing_method_is_an_error_not_a_fallback() {
+fn a_missing_name_is_an_error_not_a_fallback() {
     // Unlike `print-object`, which has the built-in rendering to fall back
     // to: the control string asked for something by name. Reported at check
-    // time now — the scan of the literal knows the argument's type.
+    // time — the argument's type is known there.
     let e = check_err(r#"(format false "~/nope/" "hi")"#);
-    assert!(e.contains("no argument here has a method `nope`"), "{}", e);
+    assert!(e.contains("~/nope/ calls what (nope arg colon at) with arg a `string` would"), "{}", e);
 }
 
 #[test]
-fn a_method_of_the_wrong_shape_is_reported_as_such() {
+fn a_callee_of_the_wrong_shape_is_reported_as_such() {
     let e = check_err(
-        r#"(defmethod short ((self string)) string self)
+        r#"(defun short ((s string)) string s)
            (format false "~/short/" "hi")"#,
     );
-    assert!(e.contains("(colon bool) (at bool)"), "{}", e);
+    assert!(e.contains("(short arg colon at)"), "{}", e);
+}
+
+/// The argument's type is the receiver, as in a call: its method comes
+/// before a function of the same name, and an argument whose type has no
+/// such method reaches the function.
+#[test]
+fn a_method_of_the_arguments_type_comes_before_a_function() {
+    is_true(&format!(
+        r#"{} (defun brief ((s string) (colon bool) (at bool)) string (append "s:" s))
+              (equal (format false "~/brief/ ~/brief/" (make-instance 'point :x 3 :y 4) "t") "3/4 s:t")"#,
+        POINT
+    ));
+}
+
+/// A function in a module is named by its path, as in a call.
+#[test]
+fn a_call_directive_names_a_function_by_its_path() {
+    is_true(
+        r#"(module m (pub defun shout ((s string) (colon bool) (at bool)) string (append s "!")))
+           (equal (format false "~/m::shout/" "hi") "hi!")"#,
+    );
+}
+
+/// Inside `~{` the directive is handed the list's elements, whose type is
+/// only `Sexpr` — no receiver to resolve the name against, so it is refused.
+#[test]
+fn a_call_directive_on_list_elements_is_refused() {
+    let e = check_err(&format!(
+        r#"{} (format false "~{{~/brief/~}}" (list (make-instance 'point :x 1 :y 2)))"#,
+        POINT
+    ));
+    assert!(e.contains("element of a list argument"), "{}", e);
+}
+
+/// `~@{` goes round the call's own arguments, whose types are known.
+#[test]
+fn a_call_directive_over_the_remaining_arguments_is_resolved() {
+    is_true(
+        r#"(defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
+           (equal (format false "~@{~/shout/ ~}" "a" "b") "a! b! ")"#,
+    );
+}
+
+/// One directive calls one definition: one that can be handed arguments of
+/// two types calling different definitions is refused.
+#[test]
+fn a_directive_that_would_call_two_definitions_is_refused() {
+    let e = check_err(&format!(
+        r#"{} (defun brief ((s string) (colon bool) (at bool)) string s)
+              (format false "~:[~;~*~]~/brief/" true "s" (make-instance 'point :x 1 :y 2))"#,
+        POINT
+    ));
+    assert!(e.contains("which call different definitions"), "{}", e);
 }
 
 #[test]
@@ -273,9 +320,9 @@ fn an_unterminated_call_directive_is_a_syntax_error() {
 }
 
 /// The control string is a literal, like Rust's `format!` — a string built at
-/// run time cannot be scanned for the directives that decide which methods
-/// `~/name/` reaches, and scanning is what makes the directive work in an AOT
-/// executable at all.
+/// run time cannot be scanned for the directives that decide what `~/name/`
+/// calls, and resolving that at check time is what makes the directive work
+/// at all.
 #[test]
 fn a_computed_control_string_is_refused() {
     let e = check_err(r#"(defun go ((ctrl string)) string (format false ctrl))"#);
@@ -285,7 +332,7 @@ fn a_computed_control_string_is_refused() {
 #[test]
 fn the_name_is_case_folded_like_every_other_name() {
     is_true(
-        r#"(defmethod shout ((self string) (colon bool) (at bool)) string (append self "!"))
+        r#"(defun shout ((s string) (colon bool) (at bool)) string (append s "!"))
            (equal (format false "~/SHOUT/" "hi") "hi!")"#,
     );
 }
@@ -294,7 +341,7 @@ fn the_name_is_case_folded_like_every_other_name() {
 fn a_call_directive_works_through_a_stream_destination() {
     is_true(&format!(
         r#"{} (let ((s (make-string-output-stream)))
-                (progn (format s "~/brief/" (point::new 5 6))
+                (progn (format s "~/brief/" (make-instance 'point :x 5 :y 6))
                        (equal (get-output-stream-string s) "5/6")))"#,
         POINT
     ));
@@ -315,13 +362,13 @@ fn print_object_reaches_a_generic_type() {
     is_true(
         r#"(defstruct gen<T> (v T))
            (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
-           (equal (format false "~a" (gen::new 1)) "GEN")"#,
+           (equal (format false "~a" (make-instance 'gen :v 1)) "GEN")"#,
     );
     // Still reachable by name, as it always was.
     is_true(
         r#"(defstruct gen<T> (v T))
            (impl print-object gen<T> (print-object ((self Self) (escape bool)) string "GEN"))
-           (equal (print-object (gen::new 1) true) "GEN")"#,
+           (equal (print-object (make-instance 'gen :v 1) true) "GEN")"#,
     );
 }
 
@@ -340,8 +387,8 @@ fn each_instantiation_reaches_its_own_print_object() {
              (where (print-object T))
              (print-object ((self Self) (escape bool)) string
                (append "gen-of-" (print-object (v self) escape))))
-           (and (equal (format false "~a" (gen::new (wi::new 1))) "gen-of-INT")
-                (equal (format false "~a" (gen::new (ws::new "x"))) "gen-of-STR"))"#,
+           (and (equal (format false "~a" (make-instance 'gen :v (make-instance 'wi :n 1))) "gen-of-INT")
+                (equal (format false "~a" (make-instance 'gen :v (make-instance 'ws :s "x"))) "gen-of-STR"))"#,
     );
 }
 
@@ -395,18 +442,18 @@ fn an_array_prints_in_cl_syntax() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2) (push d 3)
-               (let ((a (Array::make d 0)))
+               (let ((a (Array::new d 0)))
                  (progn (setf (aref a 0 0) 7)
                         (equal (format false "~a" a) "#2A((7 0 0) (0 0 0))")))))"##,
     );
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 3)
-               (equal (format false "~a" (Array::make d 1)) "#(1 1 1)")))"##,
+               (equal (format false "~a" (Array::new d 1)) "#(1 1 1)")))"##,
     );
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
-             (equal (format false "~a" (Array::make d 5)) "#0A5"))"##,
+             (equal (format false "~a" (Array::new d 5)) "#0A5"))"##,
     );
 }
 
@@ -417,7 +464,7 @@ fn an_arrays_elements_follow_the_escape_choice() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2)
-               (let ((a (Array::make d "q")))
+               (let ((a (Array::new d "q")))
                  (and (equal (format false "~s" a) "#(\"q\" \"q\")")
                       (equal (format false "~a" a) "#(q q)")))))"##,
     );
@@ -430,7 +477,7 @@ fn a_fill_pointer_cuts_what_prints() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 4)
-               (equal (format false "~a" (Array::make d 0 :fill-pointer 2)) "#(0 0)")))"##,
+               (equal (format false "~a" (Array::new d 0 :fill-pointer 2)) "#(0 0)")))"##,
     );
 }
 
@@ -442,7 +489,7 @@ fn print_array_false_shows_only_the_shape() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2) (push d 3)
-               (let ((a (Array::make d 0)))
+               (let ((a (Array::new d 0)))
                  (dlet ((*print-array* false))
                    (equal (format false "~a" a) "#<array 2x3>")))))"##,
     );
@@ -461,7 +508,7 @@ fn an_array_of_a_type_with_no_print_object_still_builds() {
         r##"(defstruct plain (n int))
            (let ((d (the Vector<int> (Vector::new))))
              (progn (push d 1)
-               (let ((a (Array::make d (plain::new 1))))
+               (let ((a (Array::new d (make-instance 'plain :n 1))))
                  (equal (format false "~a" a)
                         "#<array<plain> dims: #(1) data: #(#<plain n: 1>) fill-pointer: none>"))))"##,
     );
@@ -475,8 +522,8 @@ fn arrays_nest_through_the_bound() {
     is_true(
         r##"(let ((d (the Vector<int> (Vector::new))))
              (progn (push d 2)
-               (let ((inner (Array::make d 1)))
-                 (equal (format false "~a" (Array::make d inner)) "#(#(1 1) #(1 1))"))))"##,
+               (let ((inner (Array::new d 1)))
+                 (equal (format false "~a" (Array::new d inner)) "#(#(1 1) #(1 1))"))))"##,
     );
 }
 
@@ -492,11 +539,10 @@ fn the_scalar_impls_render_what_the_printer_renders() {
 }
 
 /// A `where`-bounded receiver keeps its method even when some *other* type
-/// implements the same trait with a matching argument in the second position.
-/// `(print-object x true)` under `(where (print-object T))` used to be re-read
-/// with its arguments swapped — `try_instance_method`'s peek stops before the
-/// bounds, and the swapped order then resolved against `bool`'s impl, so the
-/// error named a call nobody wrote ("expected Bool, found t").
+/// implements the same trait with a matching argument in the second position:
+/// the method comes from the first argument's type only, so
+/// `(print-object x true)` under `(where (print-object T))` never resolves
+/// against `bool`'s impl.
 #[test]
 fn a_bound_method_is_not_re_read_with_swapped_arguments() {
     is_true(

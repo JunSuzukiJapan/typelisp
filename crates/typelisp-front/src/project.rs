@@ -735,7 +735,9 @@ fn value_path_segs(heap: &Heap, v: Value) -> Option<Vec<String>> {
 /// (`Defun`/`Defmacro`), so executing it early keeps the "exec never touches
 /// the root stack mid-batch" invariant this module and `main.rs` rely on. A
 /// user-written `module` is deliberately *not* matched — executing one early
-/// would run arbitrary body expressions out of order.
+/// would run arbitrary body expressions out of order. Its members that match
+/// are run by the checker itself as it checks the block
+/// (`Checker::check_module`), the one place between them.
 pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
     match core::op_sym(heap, tl).map(|s| s.well_known()) {
         Some(wk::DEFMACRO) => true,
@@ -766,14 +768,14 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
 /// Whether `form` is a call to one of the two builtins that install a reader
 /// macro.
 ///
-/// By callee, because it is an ordinary call and not a definition: field 2 of
-/// a `call` node is the resolved path (`core_eval::call_core`). Only a call
+/// By callee, because it is an ordinary call and not a definition: field 0 of
+/// a `call` node is the resolved path. Only a call
 /// *directly* at top level counts — one buried in a `progn` or a `let` would
 /// have to be evaluated to be found, which is the thing being decided.
 fn is_readtable_registration(heap: &Heap, form: Value) -> bool {
     core::op_sym(heap, form).map(|s| s.well_known()) == Some(wk::CALL)
         && matches!(
-            core::path_field(heap, form, 2).as_ref().map(|p| p.to_string()).as_deref(),
+            core::path_field(heap, form, 0).as_ref().map(|p| p.to_string()).as_deref(),
             Some("set-macro-character") | Some("set-dispatch-macro-character")
         )
 }

@@ -215,10 +215,10 @@ fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
         "(defstruct point (x int) (y int))\
          \n(impl Eq point (equals ((self Self) (other Self)) bool\
          \n  (and (= self::x other::x) (= self::y other::y))))\
-         \n(defvar (origin point) (point::new 0 0))\
+         \n(defvar (origin point) (make-instance 'point :x 0 :y 0))\
          \n(defun f ((p point)) int\
-         \n  (match p ((= origin) 1) ((= (point::new 1 2)) 2) (_ 0)))",
-        "(+ (* 100 (f (point::new 0 0))) (+ (* 10 (f (point::new 1 2))) (f (point::new 9 9))))",
+         \n  (match p ((= origin) 1) ((= (make-instance 'point :x 1 :y 2)) 2) (_ 0)))",
+        "(+ (* 100 (f (make-instance 'point :x 0 :y 0))) (+ (* 10 (f (make-instance 'point :x 1 :y 2))) (f (make-instance 'point :x 9 :y 9))))",
         digits(1, 2, 0),
     );
 }
@@ -247,7 +247,7 @@ fn a_value_pattern_works_in_a_generic_body_under_an_eq_bound() {
 fn a_type_without_eq_is_refused_at_the_pattern() {
     let e = err(
         "(defstruct opaque (x int))\
-         \n(defvar (o opaque) (opaque::new 1))\
+         \n(defvar (o opaque) (make-instance 'opaque :x 1))\
          \n(defun f ((p opaque)) int (match p ((= o) 1) (_ 0)))\
          \n(f o)",
     );
@@ -365,8 +365,8 @@ fn a_scalar_scrutinee_matches_by_literal() {
 fn two_value_patterns_in_one_pattern_do_not_read_each_others_value() {
     both(
         r#"(defstruct pair (a string) (b string))
-           (defun f ((p pair)) int (match p ((new "x" "y") 1) ((new "x" _) 2) (_ 0)))"#,
-        r#"(+ (* 100 (f (pair::new "x" "y"))) (+ (* 10 (f (pair::new "x" "z"))) (f (pair::new "q" "y"))))"#,
+           (defun f ((p pair)) int (match p ((pair :a "x" :b "y") 1) ((pair :a "x") 2) (_ 0)))"#,
+        r#"(+ (* 100 (f (make-instance 'pair :a "x" :b "y"))) (+ (* 10 (f (make-instance 'pair :a "x" :b "z"))) (f (make-instance 'pair :a "q" :b "y"))))"#,
         digits(1, 2, 0),
     );
 }

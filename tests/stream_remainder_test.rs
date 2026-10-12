@@ -98,7 +98,7 @@ fn a_user_stream_that_says_nothing_reports_nothing_ready() {
                          (setf self::at (+ self::at 1))
                          (option::some c)))))
                (impl CharInput fixed)
-               (let ((s (fixed::new "abc" 0)))
+               (let ((s (make-instance 'fixed :text "abc" :at 0)))
                  (format false "~a ~a ~a" (listen s) (read-char-no-hang s) (read-char s)))"#
         ),
         "false none (some a)"
@@ -118,7 +118,7 @@ fn a_user_stream_that_answers_is_believed() {
                  (read-item ((self Self)) Option<char> (option::some #\q))
                  (listen ((self Self)) bool true))
                (impl CharInput always)
-               (let ((s (always::new 0)))
+               (let ((s (make-instance 'always :n 0)))
                  (format false "~a ~a" (listen s) (read-char-no-hang s)))"#
         ),
         "true (some q)"

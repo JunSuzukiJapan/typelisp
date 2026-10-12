@@ -35,7 +35,8 @@
 use std::collections::BTreeMap;
 
 use crate::check::core;
-use crate::compile::symbols::CompiledItem;
+use crate::compile::symbols::target_symbol_name;
+use crate::CompileTarget;
 use crate::eval::interp::Uncompilable;
 use crate::{EvalError, Heap, Interp, Path, Value};
 
@@ -252,7 +253,7 @@ pub const PRELUDE_COMPILE_UNSUPPORTED: &[(&str, &str)] = &[];
 #[derive(Default)]
 pub struct PreludePlan {
     /// Every `defun`/`defmethod` with a body to compile, in declaration order.
-    pub items: Vec<CompiledItem>,
+    pub items: Vec<CompileTarget>,
     /// Every `defvar`/`defconstant`, in declaration order.
     pub globals: Vec<Path>,
     /// Every checked top-level form, in declaration order, rooted for the
@@ -280,10 +281,10 @@ impl PreludePlan {
     /// startup-time budget, versus a transitive call-graph walk per
     /// definition) and impossible to disagree with, which a second run of the
     /// same predicate is not.
-    pub fn compilable(&self, heap: &Heap, interp: &Interp) -> Vec<CompiledItem> {
+    pub fn compilable(&self, heap: &Heap, interp: &Interp) -> Vec<CompileTarget> {
         self.items
             .iter()
-            .filter(|item| crate::compile::driver::precheck_compilable(interp, heap, &item.node_name()).is_ok())
+            .filter(|item| crate::compile::driver::precheck_compilable(interp, heap, item).is_ok())
             .cloned()
             .collect()
     }
@@ -307,7 +308,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         }
         "defun" => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defun without a name".to_string())?;
-            plan.items.push(CompiledItem::Fn(path));
+            plan.items.push(CompileTarget::Fn(path));
         }
         "defmethod" => {
             let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmethod without a type".to_string())?;
@@ -315,7 +316,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
                 Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
                 _ => return Err("prelude: defmethod without a name".to_string()),
             };
-            plan.items.push(CompiledItem::Method(type_path, method));
+            plan.items.push(CompileTarget::Method(type_path, method));
         }
         // `defconstant` lowers to the same core form.
         "defvar" => {
@@ -332,7 +333,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         // before any codegen runs).
         "defmacro" => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmacro without a name".to_string())?;
-            plan.items.push(CompiledItem::Fn(path));
+            plan.items.push(CompileTarget::Fn(path));
         }
         // No codegen of their own. `exec` still registers what they define:
         // an enum's variants and a struct's field representations, which the
@@ -389,8 +390,8 @@ fn reconcile_unsupported(heap: &Heap, interp: &Interp, plan: &PreludePlan) -> Re
     let mut blockers: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut broken: Vec<(String, EvalError)> = Vec::new();
     for item in &plan.items {
-        let node = item.node_name();
-        match crate::compile::driver::precheck_compilable(interp, heap, &node) {
+        let node = item.link_name();
+        match crate::compile::driver::precheck_compilable(interp, heap, item) {
             Ok(()) => {}
             Err(Uncompilable::MissingTarget(target)) => blockers.entry(target).or_default().push(node),
             Err(Uncompilable::Other(e)) => broken.push((node, e)),
@@ -470,8 +471,8 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
     // without the lock held — the same constraint `aot::compile_file` and the
     // island generator both document at their own loops.
     for item in &items {
-        let node = item.node_name();
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), &node, &item.symbol_name()).map_err(|e| {
+        let node = item.link_name();
+        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item)).map_err(|e| {
             format!(
                 "prelude: compiling `{}` failed: {} — the precheck said it was fine, so this is a \
                  gap the call-graph walk cannot see rather than a missing lowering to record in \
@@ -528,7 +529,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         Some(typelisp_front::dump::sources_digest(&crate::prelude::dumped_sources())),
         Some(plan.source_hash),
         &plan.forms,
-        items.iter().map(unit_item).collect(),
+        items.clone(),
         globals,
         // These bodies were emitted by whichever island this process is
         // running, so that is the ABI they answer to.
@@ -555,16 +556,3 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
     Ok(typelisp_front::dump::write(&[(types, bitcode)]))
 }
 
-/// One compiled definition in the form a dump records it.
-///
-/// The backend's [`CompiledItem`] and the front end's `UnitItem` are the same
-/// two cases; they are separate types because the front end must not depend on
-/// the backend (see `typelisp_front::dump::UnitItem`).
-pub(crate) fn unit_item(item: &CompiledItem) -> typelisp_front::dump::UnitItem {
-    match item {
-        CompiledItem::Fn(path) => typelisp_front::dump::UnitItem::Fn(path.clone()),
-        CompiledItem::Method(path, name) => {
-            typelisp_front::dump::UnitItem::Method(path.clone(), name.clone())
-        }
-    }
-}

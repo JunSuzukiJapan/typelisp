@@ -210,13 +210,13 @@ fn a_structs_slot_defaults_survive_the_image() {
     write(
         &dir,
         "mk.typl",
-        "(pub defstruct (base (:constructor mk-base)) (pub id int 7))\n(dump \"session.typld\")\n",
+        "(pub defstruct base (pub id int 7))\n(dump \"session.typld\")\n",
     );
     write(
         &dir,
         "use.typl",
-        "(defstruct (derived (:include mk::base) (:constructor mk (extra))) (extra int))\n\
-         (println \"~a\" (id (derived::mk 1)))\n",
+        "(defstruct (derived (:include mk::base)) (extra int))\n\
+         (println \"~a\" (id (make-instance 'derived :extra 1)))\n",
     );
     run(&dir, &["mk.typl"]);
     assert_eq!(run(&dir, &["--image", "session.typld", "use.typl"]).trim(), "7");

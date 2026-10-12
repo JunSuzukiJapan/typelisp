@@ -86,7 +86,7 @@ fn run(src: &str) -> String {
 /// which is what makes `day-of-week` (CL's 0 = Monday) a plain remainder.
 #[test]
 fn universal_time_zero_is_the_start_of_1900() {
-    let t = "(universal-time::new 0 0) 0";
+    let t = "(make-instance 'universal-time :day 0 :second 0) 0";
     assert_eq!(decoded(t, "second"), "0");
     assert_eq!(decoded(t, "minute"), "0");
     assert_eq!(decoded(t, "hour"), "0");
@@ -177,7 +177,7 @@ fn a_negative_universal_time_is_rejected() {
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
     let vs = r
-        .read_all(&mut h, "(decode-universal-time (universal-time::new -1 0))")
+        .read_all(&mut h, "(decode-universal-time (make-instance 'universal-time :day -1 :second 0))")
         .expect("read failed");
     let tl = chk.check_form(&mut h, &interp, vs[0]).expect("check failed");
     match interp.exec(&mut h, tl) {
@@ -405,7 +405,7 @@ fn the_no_zone_default_decodes_into_local_time() {
                          ((some w) w)
                          ((none) (panic \"no zone\"))))
                  (local (decode-universal-time ut)))
-             (let ((shifted (decode-universal-time (universal-time::new ut::day (- ut::second west)) 0)))
+             (let ((shifted (decode-universal-time (make-instance 'universal-time :day ut::day :second (- ut::second west)) 0)))
                (and (= local::hour shifted::hour)
                     (and (= local::minute shifted::minute)
                          (= local::date shifted::date))))))",
@@ -422,10 +422,10 @@ fn the_no_zone_default_decodes_into_local_time() {
 /// reported zone comes back as the one that was asked for.
 #[test]
 fn an_explicit_zone_reports_itself_and_no_daylight_saving() {
-    let t = "(universal-time::new 0 0) 5";
+    let t = "(make-instance 'universal-time :day 0 :second 0) 5";
     assert_eq!(decoded(t, "daylight-p"), "false");
     assert_eq!(decoded(t, "zone"), "5.0");
-    assert_eq!(decoded("(universal-time::new 0 0) -9", "zone"), "-9.0");
+    assert_eq!(decoded("(make-instance 'universal-time :day 0 :second 0) -9", "zone"), "-9.0");
 }
 
 /// The reported zone is an `f64` so that a half-hour offset survives it.

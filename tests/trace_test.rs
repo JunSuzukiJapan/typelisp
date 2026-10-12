@@ -29,7 +29,7 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, Heap, Interp, Reader
 fn traced(src: &str) -> String {
     let full = format!(
         "(defvar (*cap* i32) (%internal::stream-string-output))\n\
-         (setf *trace-output* (standard-stream::new *cap*))\n\
+         (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
          {}\n\
          (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))",
         src
@@ -137,11 +137,11 @@ fn a_recursive_call_is_reported_at_every_depth() {
 fn values_are_printed_the_way_the_program_prints_them() {
     let out = traced(
         "(defstruct pt (pub x int) (pub y int))\n\
-         (defmethod total ((self pt)) int (+ self::x self::y))\n\
+         (impl pt (total (self) int (+ self::x self::y)))\n\
          (trace pt::total)\n\
-         (total (pt::new 3 4))",
+         (total (make-instance 'pt :x 3 :y 4))",
     );
-    assert_eq!(out, "  0: (pt::total #<pt x: 3 y: 4>)\n  0: pt::total returned 7\n");
+    assert_eq!(out, "  0: (pt''total #<pt x: 3 y: 4>)\n  0: pt''total returned 7\n");
 }
 
 /// A `throw` past a traced frame is reported rather than silently leaving a
@@ -225,8 +225,8 @@ fn tracing_survives_redefinition() {
     );
 }
 
-/// A name inside a module is traced under its qualified name — the spelling
-/// `Interp::method_key` parses back and the compile driver's link names use.
+/// A name inside a module is traced under its qualified name — the
+/// definition's link name, the one the compile driver uses too.
 ///
 /// Written inside `(module m ...)` on purpose: a type or function whose path
 /// has one segment cannot show a qualification bug, and this codebase has
@@ -361,10 +361,10 @@ fn trace_rendering_holds_its_roots_under_gc_stress() {
         let src = "(defstruct pt (pub x int) (pub y int))\n\
                    (defun shift ((p pt) (d int) (s string)) int (+ p::x d))\n\
                    (defvar (*cap* i32) (%internal::stream-string-output))\n\
-                   (setf *trace-output* (standard-stream::new *cap*))\n\
+                   (setf *trace-output* (make-instance 'standard-stream :h *cap*))\n\
                    (trace shift)\n\
-                   (shift (pt::new 1 2) 3 \"four\")\n\
-                   (shift (pt::new 5 6) 7 \"eight\")\n\
+                   (shift (make-instance 'pt :x 1 :y 2) 3 \"four\")\n\
+                   (shift (make-instance 'pt :x 5 :y 6) 7 \"eight\")\n\
                    (match (%internal::stream-take-output-string *cap*) ((ok s) s) ((err _) \"<capture failed>\"))";
         let mut h = Heap::with_capacity(1 << 16);
         let mut chk = Checker::new();
@@ -414,10 +414,10 @@ fn a_print_object_method_is_reported_when_the_printer_calls_it() {
          (impl print-object pt\n\
            (print-object ((self Self) (escape bool)) string (format false \"<~d>\" self::n)))\n\
          (trace pt::print-object)\n\
-         (format false \"~a\" (pt::new 7))",
+         (format false \"~a\" (make-instance 'pt :n 7))",
     );
-    assert!(out.contains("(pt::print-object"), "the printer's call was not reported: {:?}", out);
-    assert!(out.contains("pt::print-object returned"), "the return was not reported: {:?}", out);
+    assert!(out.contains("(pt''print-object"), "the printer's call was not reported: {:?}", out);
+    assert!(out.contains("pt''print-object returned"), "the return was not reported: {:?}", out);
 }
 
 /// The same for `format`'s `~/name/`, which reaches its method the same way.
@@ -425,12 +425,12 @@ fn a_print_object_method_is_reported_when_the_printer_calls_it() {
 fn a_call_directives_method_is_reported() {
     let out = traced(
         "(defstruct money (yen int))\n\
-         (defmethod jp ((self money) (colon bool) (at bool)) string\n\
-           (format false \"~d yen\" self::yen))\n\
+         (impl money (jp (self (colon bool) (at bool)) string\n\
+           (format false \"~d yen\" self::yen)))\n\
          (trace money::jp)\n\
-         (format false \"~/jp/\" (money::new 300))",
+         (format false \"~/jp/\" (make-instance 'money :yen 300))",
     );
-    assert!(out.contains("(money::jp"), "the directive's call was not reported: {:?}", out);
+    assert!(out.contains("(money''jp"), "the directive's call was not reported: {:?}", out);
 }
 
 /// **A compiled `print-object` body is the one the printer runs.**
@@ -443,7 +443,7 @@ fn a_call_directives_method_is_reported() {
 ///
 /// **The assertion is on the call line, not on the name.** `(trace f)` on a
 /// definition that has a compiled body writes a note naming it, so a bare
-/// `contains("pt::print-object")` passed with the fix reverted — a test that
+/// `contains("pt''print-object")` passed with the fix reverted — a test that
 /// could not fail.
 #[test]
 fn a_compiled_print_object_method_is_still_reported() {
@@ -453,7 +453,7 @@ fn a_compiled_print_object_method_is_still_reported() {
            (print-object ((self Self) (escape bool)) string (format false \"<~d>\" self::n)))\n\
          (compile pt::print-object)\n\
          (trace pt::print-object)\n\
-         (format false \"~a\" (pt::new 7))",
+         (format false \"~a\" (make-instance 'pt :n 7))",
     );
-    assert!(out.contains("(pt::print-object"), "the printer's call was not reported: {:?}", out);
+    assert!(out.contains("(pt''print-object"), "the printer's call was not reported: {:?}", out);
 }

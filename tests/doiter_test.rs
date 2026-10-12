@@ -88,14 +88,14 @@ fn return_with_no_value_exits_the_doiter_loop_itself() {
 
 #[test]
 fn doiter_on_a_type_with_no_iter_impl_is_a_type_error() {
-    let src = "(defstruct box (n int)) (doiter (x (box::new 1)) ())";
+    let src = "(defstruct box (n int)) (doiter (x (make-instance 'box :n 1)) ())";
     assert!(check(src).is_err());
 }
 
 #[test]
 fn doiter_works_inside_a_where_bounded_generic_function() {
     // `it: T` inside `count-iter`'s own body — no concrete `AdtDef` for `t`,
-    // so `next` resolves through `Expr::TraitCall` (`Checker::check_instance_method`'s
+    // so `next` resolves through `Expr::TraitCall` (`Checker::receiver_method`'s
     // type-variable branch, reached transitively through `doiter`'s `defmacro`
     // expansion), not `Expr::Assoc`. `x`'s own type is `T`'s *associated*
     // type `Item` — left as `Iter`'s own unresolved `item` template here

@@ -336,7 +336,7 @@ fn an_option_sexpr_does_not_narrow_to_a_bare_sexpr() {
     // A user ADT still widens into an S-expression slot — the rule this
     // exclusion is carved out of must stay intact.
     assert!(program(
-        "(defstruct point (x int)) (defun f ((s Option<Sexpr>)) int 1) (f (point::new 1))"
+        "(defstruct point (x int)) (defun f ((s Option<Sexpr>)) int 1) (f (make-instance 'point :x 1))"
     )
     .is_ok());
 }
@@ -966,7 +966,7 @@ fn type_error_carries_source_location() {
 fn equality_requires_its_two_arguments_to_have_one_type() {
     for src in [
         // Two unrelated user structs — the case that used to answer `false`.
-        "(defstruct pa (x int)) (defstruct pb (y string)) (equalp (pa::new 1) (pb::new \"z\"))",
+        "(defstruct pa (x int)) (defstruct pb (y string)) (equalp (make-instance 'pa :x 1) (make-instance 'pb :y \"z\"))",
         // Two different instantiations of the same generic.
         "(equalp (the Option<char> (option::none)) (the Option<int> (option::none)))",
         // And the case that was already an error, still is.
@@ -986,7 +986,7 @@ fn equality_still_compares_every_same_typed_pair() {
     for src in [
         "(equal (quote (1 2 3)) (quote (1 2 3)))",
         "(equalp (option::some #\\x) (option::some #\\x))",
-        "(defstruct pt (x int)) (equalp (pt::new 1) (pt::new 1))",
+        "(defstruct pt (x int)) (equalp (make-instance 'pt :x 1) (make-instance 'pt :x 1))",
     ] {
         assert!(program(src).is_ok(), "should check: {}", src);
     }

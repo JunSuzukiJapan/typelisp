@@ -79,65 +79,35 @@ pub fn callee_symbol_name(path: &crate::Path) -> String {
     }
 }
 
-/// One definition with a compiled body, named the two ways the compile
-/// boundary needs it: as a *node* (what `Interp::resolve_fn_def` and
-/// `add_compiled_function` take) and as an *LLVM symbol* (what a call site
-/// emits and the linker/JIT resolves).
+/// The LLVM symbol `target`'s compiled body is defined under — the same
+/// string a *call site* emits for it (`core_bridge::translate_call`'s
+/// [`callee_symbol_name`], `translate_assoc`'s [`user_method_symbol_name`]),
+/// so a body and the calls to it can't be declared under two different names.
 ///
-/// Keeping both derivations on one type is the point: a `defun` and a
-/// `defmethod` spell each of the two names differently, and every place that
-/// builds a precompiled library — the generators in
-/// [`crate::compile::bootstrap`] and [`crate::compile::prelude_bootstrap`],
-/// and `Interp::install_compiled_library` on the loading side — needs the
-/// same pair. Deriving them separately in each is how the island's own
-/// `defun`-only, root-path-only shortcut got baked in.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CompiledItem {
-    /// A top-level `defun`, by its fully-qualified path.
-    Fn(Path),
-    /// A `defmethod`, by its receiver type's fully-qualified path and its own
-    /// name.
-    Method(Path, String),
-}
-
-impl CompiledItem {
-    /// The name `Interp::resolve_fn_def`/`add_compiled_function` accept: a
-    /// `::`-joined function path, or `type-path::method`. The two are
-    /// deliberately indistinguishable as strings — `resolve_fn_def` tries the
-    /// method table first and falls through to the function table, so a
-    /// module-qualified `defun` and a method never need separate spellings.
-    pub fn node_name(&self) -> String {
-        match self {
-            CompiledItem::Fn(path) => path.to_string(),
-            CompiledItem::Method(type_path, method) => format!("{}::{}", type_path, method),
-        }
-    }
-
-    /// The LLVM symbol its compiled body is defined under — the same string a
-    /// *call site* emits for it (`core_bridge::translate_call`'s
-    /// `user_symbol_name(&path.segments().join("::"))`, `translate_assoc`'s
-    /// `user_method_symbol_name`), so a body and the calls to it can't be
-    /// declared under two different names.
-    pub fn symbol_name(&self) -> String {
-        match self {
-            CompiledItem::Fn(path) => user_symbol_name(&path.to_string()),
-            CompiledItem::Method(type_path, method) => user_method_symbol_name(type_path, method),
-        }
+/// One function for every place that builds or loads a precompiled library —
+/// the generators in [`crate::compile::bootstrap`] and
+/// [`crate::compile::prelude_bootstrap`], the JIT and `compile-file` — so they
+/// cannot come to spell a definition two ways.
+pub fn target_symbol_name(target: &crate::CompileTarget) -> String {
+    match target {
+        crate::CompileTarget::Fn(path) => user_symbol_name(&path.to_string()),
+        crate::CompileTarget::Method(type_path, method) => user_method_symbol_name(type_path, method),
     }
 }
 
 /// A user-defined method's own LLVM symbol name — the `assoc`
-/// counterpart of [`user_symbol_name`]. `compiler.rs`'s `compile-assoc-user`
-/// mangles `type-name`/`method` back into this exact same
-/// `tl_type::path::method` string (its own `(append "tl_" (append type-name
-/// (append "::" method)))`, where `type-name` is whatever full `::`-joined
-/// path [`ast_to_sexpr_scoped`]'s `assoc`/`methodref` arms
-/// embedded — never just the type's local segment, or two same-named types
-/// in different modules would mangle to the same symbol) before its
-/// `get-function` lookup, so this must stay in lockstep with that — see
-/// [`crate::compile::USER_SYMBOL_PREFIX`]'s doc comment.
+/// counterpart of [`user_symbol_name`]: the prefix, then
+/// [`method_link_name`](crate::types::method_link_name)
+/// (`tl_type::path''method`). `compiler.rs`'s `compile-assoc-user` builds
+/// this exact same string from `type-name`/`method` (its own `(append "tl_"
+/// (append type-name (append "''" method)))`, where `type-name` is the full
+/// `::`-joined path `core_bridge::translate_assoc` embedded — never just the
+/// type's local segment, or two same-named types in different modules would
+/// mangle to the same symbol) before its `get-function` lookup, so this must
+/// stay in lockstep with that — see [`crate::compile::USER_SYMBOL_PREFIX`]'s
+/// doc comment.
 pub fn user_method_symbol_name(type_name: &Path, method: &str) -> String {
-    format!("{}{}::{}", crate::compile::USER_SYMBOL_PREFIX, type_name, method)
+    format!("{}{}", crate::compile::USER_SYMBOL_PREFIX, crate::types::method_link_name(type_name, method))
 }
 
 /// `Vector<T>`'s builtin methods that have no compiled `defmethod` body and so

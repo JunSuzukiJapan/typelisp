@@ -7,7 +7,17 @@
 //! installs nothing would pass that one and be worthless.
 
 use typelisp::check::core;
-use typelisp::{Checker, Heap, Interp, Reader, Value};
+use typelisp::{Checker, CompileTarget, Heap, Interp, Path, Reader, Value};
+
+/// A function at the root.
+fn f(name: &str) -> CompileTarget {
+    CompileTarget::Fn(Path::root(name))
+}
+
+/// A method of a root-level type.
+fn m(type_name: &str, name: &str) -> CompileTarget {
+    CompileTarget::Method(Path::root(type_name), name.to_string())
+}
 
 /// A prelude-loaded environment, with the compiled bodies (`compiled = true`)
 /// or purely interpreted.
@@ -47,8 +57,16 @@ fn eval(heap: &mut Heap, chk: &mut Checker, interp: &Interp, src: &str) -> Value
 #[test]
 fn loading_the_prelude_installs_native_bodies() {
     let (_heap, _chk, interp) = env(true);
-    for name in ["not", "sexpr-map", "i32::gcd", "i32::abs", "int::signum", "f64::rem", "i32::equals"] {
-        assert!(interp.is_compiled(name), "`{}` should have a compiled body after load_prelude", name);
+    for target in [
+        f("not"),
+        f("sexpr-map"),
+        m("i32", "gcd"),
+        m("i32", "abs"),
+        m("int", "signum"),
+        m("f64", "rem"),
+        m("i32", "equals"),
+    ] {
+        assert!(interp.is_compiled(&target), "`{:?}` should have a compiled body after load_prelude", target);
     }
 }
 
@@ -59,19 +77,19 @@ fn loading_the_prelude_installs_native_bodies() {
 #[test]
 fn the_families_that_used_to_be_blocked_are_compiled_now() {
     let (_heap, _chk, interp) = env(true);
-    for name in [
+    for target in [
         // was: `stream-read-char` / `stream-write-string`
-        "file-stream::read-char",
-        "string-output-stream::write-string",
+        m("file-stream", "read-char"),
+        m("string-output-stream", "write-string"),
         // was: `symbol->string`
-        "keywordp",
+        f("keywordp"),
         // was: `char::char->string`
-        "%internal::reader-whitespacep",
+        CompileTarget::Fn(Path::internal("reader-whitespacep")),
         // was: `random-state-next` / `make-random-state-fresh`
-        "random",
-        "make-random-state",
+        f("random"),
+        f("make-random-state"),
     ] {
-        assert!(interp.is_compiled(name), "`{}` should have a compiled body after load_prelude", name);
+        assert!(interp.is_compiled(&target), "`{:?}` should have a compiled body after load_prelude", target);
     }
 }
 
@@ -91,7 +109,7 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
 fn macro_expanders_have_native_bodies_too() {
     let (_heap, _chk, interp) = env(true);
     for name in ["cond", "case", "when", "and", "while", "dotimes", "do", "setq"] {
-        assert!(interp.is_compiled(name), "`{}`'s expander should have a compiled body after load_prelude", name);
+        assert!(interp.is_compiled(&f(name)), "`{}`'s expander should have a compiled body after load_prelude", name);
     }
 }
 
@@ -105,7 +123,7 @@ fn macro_expanders_have_native_bodies_too() {
 fn a_generic_definition_has_no_precompiled_body() {
     let (_heap, _chk, interp) = env(true);
     for name in ["pathname-name", "merge-pathnames"] {
-        assert!(!interp.is_compiled(name), "`{}` is generic and cannot have one body", name);
+        assert!(!interp.is_compiled(&f(name)), "`{}` is generic and cannot have one body", name);
     }
 }
 

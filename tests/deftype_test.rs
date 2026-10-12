@@ -108,7 +108,7 @@ fn an_alias_works_in_a_defstruct_field() {
     let src = "
         (deftype meters int)
         (defstruct segment (len meters))
-        (len (segment::new 12))
+        (len (make-instance 'segment :len 12))
     ";
     assert_eq!(eval_ok(src), Value::Int(12));
 }

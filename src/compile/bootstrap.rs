@@ -52,7 +52,8 @@
 //! [`build_island_bitcode`]'s own `install_island_bitcode(..., false)` call.
 
 use crate::check::core;
-use crate::compile::symbols::CompiledItem;
+use crate::compile::symbols::target_symbol_name;
+use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Reader, Value};
 
 /// Builds the compiler island's AOT bitcode in a throwaway environment.
@@ -85,7 +86,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         .read_all(&mut heap, &crate::compiler::SOURCE)
         .map_err(|e| format!("island read failed: {}", e))?;
     let forms_digest = hash_read_forms(&heap, &forms)?;
-    let mut items: Vec<CompiledItem> = Vec::new();
+    let mut items: Vec<CompileTarget> = Vec::new();
     let mut checked: Vec<Value> = Vec::new();
     for v in forms {
         let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| format!("island check failed: {}", e))?;
@@ -157,8 +158,8 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     // run without the lock held — same constraint `aot::compile_file`
     // documents at its own loop.
     for item in &items {
-        let node_name = item.node_name();
-        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), &node_name, &item.symbol_name())
+        let node_name = item.link_name();
+        crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item))
             .map_err(|e| format!("island compile of `{}` failed: {}", node_name, e))?;
     }
 
@@ -200,7 +201,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         Some(typelisp_front::dump::source_digest(&crate::compiler::SOURCE)),
         Some(forms_digest),
         &checked,
-        items.iter().map(crate::compile::prelude_bootstrap::unit_item).collect(),
+        items.clone(),
         // The island defines 121 `defun`s and one `defmacro`, and no globals at
         // all — nothing here to give compiled-slot storage to.
         Vec::new(),
@@ -393,7 +394,7 @@ fn is_read_literal_box(heap: &Heap, id: typelisp_mem::BoxId) -> bool {
 /// The last segment of a `(defun PATH ...)` form's name, or `None` for anything
 /// else — the island is all `defun`s, and this is what names each one for
 /// `install_island_bitcode`'s symbol list.
-fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompiledItem>) -> Result<(), String> {
+fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompileTarget>) -> Result<(), String> {
     let tag = core::op(heap, tl).map(str::to_string).unwrap_or_default();
     match tag.as_str() {
         // The same three shapes `aot::collect_aot_item` flattens, and for the
@@ -416,7 +417,7 @@ fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompiledItem>) -> 
         "defun" => {
             let path = core::path_field(heap, tl, 0)
                 .ok_or_else(|| "island: defun without a name".to_string())?;
-            out.push(CompiledItem::Fn(path));
+            out.push(CompileTarget::Fn(path));
         }
         "defmethod" => {
             let type_path = core::path_field(heap, tl, 0)
@@ -425,7 +426,7 @@ fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompiledItem>) -> 
                 Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
                 _ => return Err("island: defmethod without a name".to_string()),
             };
-            out.push(CompiledItem::Method(type_path, method));
+            out.push(CompileTarget::Method(type_path, method));
         }
         // Declares a signature and emits no body of its own.
         "defsignature" => {}
@@ -468,7 +469,7 @@ mod tests {
             let tl = chk.check_form(&mut heap, &interp, v).expect("check failed");
             collect_island_items(&heap, tl, &mut items).expect("collection failed");
         }
-        let names: Vec<String> = items.iter().map(|i| i.node_name()).collect();
+        let names: Vec<String> = items.iter().map(|i| i.link_name()).collect();
         assert!(names.iter().any(|n| n == "island-probe"), "the caller itself is missing: {:?}", names);
         assert!(
             names.len() > 1,

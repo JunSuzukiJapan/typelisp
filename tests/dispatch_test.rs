@@ -7,7 +7,7 @@
 //! method) always won, regardless of the call's actual argument type —
 //! calling `(remove h k)` for a `HashTable<K,V>` `h` failed with a type
 //! mismatch instead of reaching `HashTable`'s method.
-//! `Checker::try_instance_method` now tries a receiver-typed instance method
+//! `Checker::resolve_name` now tries a receiver-typed instance method
 //! on the first argument's type *before* the free function, falling back to
 //! the free function only when no type-specific method matches — mirroring
 //! CLOS, where an existing ordinary function of the same name becomes a
@@ -79,7 +79,7 @@ fn count_if_resolves_to_the_free_generic_combinator_over_an_iterator() {
 
 #[test]
 fn integer_literal_still_gets_the_free_functions_exact_parameter_width() {
-    // `try_instance_method` peeks at the first argument with `expected: None`
+    // `resolve_name`'s receiver step peeks at the first argument with `expected: None`
     // before falling back to the free function. If that peek's default type
     // (`int`) leaked into the free-function call instead of being re-checked
     // against the real parameter type, this would fail to type-check at all
@@ -104,7 +104,7 @@ fn an_undefined_name_with_no_method_or_free_function_is_still_a_clean_error() {
 
 #[test]
 fn unbound_variable_in_first_argument_position_still_surfaces_the_real_error() {
-    // `try_instance_method` swallows a checking error on the first argument
+    // `resolve_name`'s receiver step swallows a checking error on the first argument
     // and returns `None` (deferring to the free-function path), rather than
     // propagating it directly — this confirms the real error still surfaces
     // from there instead of being masked as `NoSuchFunction`.

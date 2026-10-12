@@ -51,4 +51,4 @@
           (if (is-ok n) (lit (unwrap n)) (var tok))))))
 
 (pub defun parse ((toks Vector<string>)) lexpr
-  (parse-expr (cursor::new toks 0)))
+  (parse-expr (make-instance 'cursor :toks toks :pos 0)))

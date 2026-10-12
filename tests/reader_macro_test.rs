@@ -91,6 +91,15 @@ fn a_macro_character_replaces_what_follows_it() {
     assert_eq!(run_project(&dir, "main.typl"), Ok(Some(Value::Bool(true))));
 }
 
+/// A registration inside a `(module ...)` block takes effect for the rest of
+/// the file, as one at the top level does: the block runs later with the
+/// file's bundle, so the checker runs it as it checks the block.
+#[test]
+fn a_macro_character_registered_in_a_module_block_reads_the_rest_of_the_file() {
+    let dir = fixture("in-module", &[("main.typl", &format!("(module m\n{})\n(defvar (b bool) !false)\nb\n", BANG))]);
+    assert_eq!(run_project(&dir, "main.typl"), Ok(Some(Value::Bool(true))));
+}
+
 #[test]
 fn the_reader_resumes_exactly_where_the_macro_stopped() {
     // The macro reads `(equal 1 2)` out of a stream of its own; the `if` it

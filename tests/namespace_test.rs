@@ -53,60 +53,11 @@ fn unknown_qualified_path_errors() {
     assert!(program("(nosuch::fn 1)").is_err());
 }
 
-// ---- instance methods -------------------------------------------------------
+// ---- methods ----------------------------------------------------------------
 //
-// `defmethod` on a user-defined type's own dedicated instance-method-
-// dispatch test used `defstruct` as its receiver type, and was dropped when
-// `defstruct` was deleted on 2026-06-23. `defstruct` came back redesigned the
-// next day, so the scenario is expressible again — it is covered in
-// `tests/struct_test.rs` rather than here. `defmethod` on built-in/primitive
-// receivers (below) exercises the same dispatch machinery.
-
-// ---- defmethod on primitive receivers ---------------------------------------
-// `int`/`f64`/`char`/`bool`/`Str`/etc. are primitive `Type` variants, not
-// `Type::Named`, but are still valid `defmethod` receivers (see
-// `crate::prim_type_path`).
-
-#[test]
-fn instance_method_on_i32() {
-    let src = "(defmethod double ((self int)) int (+ self self)) (double 3)";
-    assert_eq!(ty_program(src), Type::Int);
-}
-
-#[test]
-fn instance_method_on_bool() {
-    let src = "(defmethod id ((self bool)) bool self) (id true)";
-    assert_eq!(ty_program(src), Type::Bool);
-}
-
-#[test]
-fn instance_method_on_char() {
-    let src = r"(defmethod id ((self char)) char self) (id #\a)";
-    assert_eq!(ty_program(src), Type::Char);
-}
-
-#[test]
-fn instance_method_on_str() {
-    let src = r#"(defmethod id ((self string)) string self) (id "hi")"#;
-    assert_eq!(ty_program(src), Type::Str);
-}
-
-#[test]
-fn static_method_on_primitive_via_path() {
-    let src = "(defmethod zero (int) int 0) (int::zero)";
-    assert_eq!(ty_program(src), Type::Int);
-}
-
-#[test]
-fn instance_method_on_primitive_wrong_type_errors() {
-    let src = "(defmethod double ((self int)) int (+ self self)) (double true)";
-    assert!(program(src).is_err());
-}
-
-// ---- static / associated methods -------------------------------------------
-
-// `static_method_on_primitive_via_path` above already exercises a static
-// method invoked via `Type::method` path syntax without needing `defstruct`.
+// Methods on a program's own types are covered in `tests/struct_test.rs` and
+// `tests/inherent_impl_test.rs`; a program cannot add methods to a standard
+// library type such as `int` (`tests/inherent_impl_test.rs`).
 
 // ---- use --------------------------------------------------------------------
 
@@ -186,12 +137,12 @@ fn use_hashtable_makes_its_static_new_callable_bare() {
 /// pattern head all resolve `p` to `m::p`.
 #[test]
 fn a_used_type_is_the_same_name_in_type_member_position() {
-    let def = "(module m (pub defstruct p (pub x i32)) (pub defmethod origin (p) p (p::new 0))) (use m::p)";
+    let def = "(module m (pub defstruct p (pub x i32)) (impl p (pub origin () p (make-instance 'p :x 0)))) (use m::p)";
     let m_p = Type::Named(Path::of(&["m", "p"]), vec![]);
-    assert_eq!(ty_program(&format!("{} (p::new 1)", def)), m_p);
+    assert_eq!(ty_program(&format!("{} (make-instance 'p :x 1)", def)), m_p);
     assert_eq!(ty_program(&format!("{} (p::origin)", def)), m_p);
-    assert_eq!(ty_program(&format!("{} (defun f ((v p)) p v) (f (p::new 2))", def)), m_p);
-    let pattern = format!("{} (match (the Sexpr (p::new 3)) ((p x) x) (_ 0))", def);
+    assert_eq!(ty_program(&format!("{} (defun f ((v p)) p v) (f (make-instance 'p :x 2))", def)), m_p);
+    let pattern = format!("{} (match (the Sexpr (make-instance 'p :x 3)) ((p :x) x) (_ 0))", def);
     assert_eq!(ty_program(&pattern), Type::I32);
 }
 
@@ -243,34 +194,34 @@ fn struct_field_without_pub_is_inaccessible_cross_module_even_on_a_pub_struct() 
     // is the bare instance-method call form (dispatch is by `p`'s type, not
     // by namespace lookup, so it works the same from any module).
     let src = "(module geo (pub defstruct point (x int) (y int))) \
-               (let ((p (geo::point::new 1 2))) (x p))";
+               (let ((p (make-instance 'geo::point :x 1 :y 2))) (x p))";
     assert!(program(src).is_err());
 }
 
 #[test]
 fn struct_field_path_sugar_without_pub_is_inaccessible_cross_module() {
     let src = "(module geo (pub defstruct point (x int) (y int))) \
-               (let ((p (geo::point::new 1 2))) p::x)";
+               (let ((p (make-instance 'geo::point :x 1 :y 2))) p::x)";
     assert!(program(src).is_err());
 }
 
 #[test]
 fn struct_field_marked_pub_is_accessible_cross_module() {
-    let src = "(module geo (pub defstruct point (pub x int) (y int))) \
+    let src = "(module geo (pub defstruct point (pub x int) (y int)) (impl point (pub new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
                (let ((p (geo::point::new 1 2))) p::x)";
     assert_eq!(ty_program(src), Type::Int);
 }
 
 #[test]
 fn struct_field_marked_pub_setter_is_accessible_cross_module() {
-    let src = "(module geo (pub defstruct point (pub x int) (y int))) \
+    let src = "(module geo (pub defstruct point (pub x int) (y int)) (impl point (pub new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
                (let ((p (geo::point::new 1 2))) (setf p::x 9))";
     assert_eq!(ty_program(src), Type::Unit);
 }
 
 #[test]
 fn struct_field_not_marked_pub_setter_is_inaccessible_cross_module() {
-    let src = "(module geo (pub defstruct point (x int) (pub y int))) \
+    let src = "(module geo (pub defstruct point (x int) (pub y int)) (impl point (pub new ((x int) (y int)) point (make-instance 'point :x x :y y)))) \
                (let ((p (geo::point::new 1 2))) (setf p::x 9))";
     assert!(program(src).is_err());
 }
@@ -290,7 +241,7 @@ fn struct_pub_field_on_a_non_pub_struct_is_still_accessible_cross_module() {
     // expose individual `pub` fields to outside code.
     let src = "(module geo \
                  (defstruct point (pub x int) (y int)) \
-                 (pub defun origin () point (point::new 0 0))) \
+                 (pub defun origin () point (make-instance 'point :x 0 :y 0))) \
                (x (geo::origin))";
     assert_eq!(ty_program(src), Type::Int);
 }

@@ -7,10 +7,11 @@
 //! the half that needs LLVM: turning a unit's bitcode section into installed
 //! native bodies.
 
-use typelisp_front::dump::{apply_types, UnitItem, UnitState};
+use typelisp_front::dump::{apply_types, UnitState};
 
 
-use crate::compile::symbols::CompiledItem;
+use crate::compile::symbols::target_symbol_name;
+use crate::CompileTarget;
 use crate::{Checker, Heap, Interp};
 
 /// Reads one unit's checked state, without applying it.
@@ -68,14 +69,7 @@ fn load_unit_with(
     // that knows what ABI its bodies answer to.
     let body_abi = state.body_abi;
     let body_layout = state.body_layout;
-    let items: Vec<CompiledItem> = state
-        .items
-        .iter()
-        .map(|i| match i {
-            UnitItem::Fn(path) => CompiledItem::Fn(path.clone()),
-            UnitItem::Method(path, name) => CompiledItem::Method(path.clone(), name.clone()),
-        })
-        .collect();
+    let items: Vec<CompileTarget> = state.items.clone();
 
     apply_types(heap, chk, interp, state)?;
 
@@ -290,10 +284,10 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
     for tl in &forms {
         crate::compile::prelude_bootstrap::collect_item(heap, *tl, &mut plan)?;
     }
-    let compiled: Vec<CompiledItem> = plan
+    let compiled: Vec<CompileTarget> = plan
         .items
         .iter()
-        .filter(|item| is_compiled(interp, item))
+        .filter(|item| interp.is_compiled(item))
         .cloned()
         .collect();
     let bitcode = if compiled.is_empty() { Vec::new() } else { emit_bitcode(interp, heap, &compiled)? };
@@ -316,7 +310,7 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
         None,
         None,
         &forms,
-        compiled.iter().map(crate::compile::prelude_bootstrap::unit_item).collect(),
+        compiled.clone(),
         globals,
         // This unit carries bodies, so it has to say which ABI they answer to
         // -- `capture_types`' classic default is only right for a unit with
@@ -350,20 +344,11 @@ pub fn dump_image(interp: &Interp, heap: &mut Heap, path: &str) -> Result<(), St
         .map_err(|e| format!("dump: writing \"{}\": {}", path, e))
 }
 
-/// Whether the interpreter has a native body for `item`.
-fn is_compiled(interp: &Interp, item: &CompiledItem) -> bool {
-    let def = match item {
-        CompiledItem::Fn(path) => interp.root.borrow().get_fn(path),
-        CompiledItem::Method(type_path, method) => interp.root.borrow().get_method(type_path, method),
-    };
-    def.is_some_and(|d| d.compiled.borrow().is_some())
-}
-
 /// Compiles `items` into one module and serializes it — the same shape the
 /// prelude and island generators build, minus their forward-declaration pass
 /// (a session's definitions were compiled once already, so their call graph is
 /// known to work).
-fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompiledItem]) -> Result<Vec<u8>, String> {
+fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompileTarget]) -> Result<Vec<u8>, String> {
     use inkwell::AddressSpace;
     use std::cell::RefCell;
     use std::rc::Rc;
@@ -388,7 +373,7 @@ fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompiledItem]) -> Res
             fn_ty
         };
         for item in items {
-            let sym = item.symbol_name();
+            let sym = target_symbol_name(item);
             if module.get_function(&sym).is_none() {
                 module.add_function(&sym, lisp_fn_ty, None);
             }
@@ -400,8 +385,8 @@ fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompiledItem]) -> Res
     // call and `Mutex` is not reentrant — the same constraint every other
     // compile loop in this crate documents.
     for item in items {
-        let node = item.node_name();
-        crate::compile::driver::add_compiled_function(interp, heap, module.clone(), &node, &item.symbol_name())
+        let node = item.link_name();
+        crate::compile::driver::add_compiled_function(interp, heap, module.clone(), item, &target_symbol_name(item))
             .map_err(|e| format!("dump: re-compiling `{}` failed: {}", node, e))?;
     }
 

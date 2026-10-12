@@ -50,7 +50,7 @@ fn a_vector_echo_names_its_element_type() {
 
 #[test]
 fn a_generic_struct_echo_names_its_type_arguments() {
-    assert_echo("(defstruct pair<A,B> (left A) (right B))", "(pair::new 1 \"one\")", "#<pair<int,string> left: 1 right: \"one\">");
+    assert_echo("(defstruct pair<A,B> (left A) (right B))", "(make-instance 'pair :left 1 :right \"one\")", "#<pair<int,string> left: 1 right: \"one\">");
     assert_echo("", "(cons 1 \"a\")", "#<cons-cell<int,string> car: 1 cdr: \"a\">");
 }
 
@@ -58,15 +58,15 @@ fn a_generic_struct_echo_names_its_type_arguments() {
 fn the_echo_uses_a_print_object_method() {
     let defs = "(defstruct money (yen int))\n\
                 (impl print-object money (print-object ((self Self) (escape bool)) string (format false \"~a yen\" self::yen)))";
-    assert_echo(defs, "(money::new 5)", "5 yen");
-    assert_echo(defs, "(list 1 (money::new 7))", "(1 7 yen)");
+    assert_echo(defs, "(make-instance 'money :yen 5)", "5 yen");
+    assert_echo(defs, "(list 1 (make-instance 'money :yen 7))", "(1 7 yen)");
 }
 
 #[test]
 fn a_niched_option_echoes_with_its_wrapper() {
     assert_echo("", "(Option::some \"x\")", "(some \"x\")");
     assert_echo("", "(the Option<int> (Option::none))", "none");
-    assert_echo("(defstruct holder (o Option<int>))", "(holder::new (Option::some 3))", "#<holder o: (some 3)>");
+    assert_echo("(defstruct holder (o Option<int>))", "(make-instance 'holder :o (Option::some 3))", "#<holder o: (some 3)>");
 }
 
 #[test]

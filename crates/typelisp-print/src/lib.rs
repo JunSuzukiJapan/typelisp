@@ -87,20 +87,16 @@ pub trait PrintEnv {
     /// `~/name/`'s rendering of `v` — CL's function-call directive, with
     /// `colon` and `at` carrying the directive's own `:` and `@` flags.
     ///
-    /// **`name` is looked up as a method on `v`'s own type**, not as a global
-    /// function the way CL's is. That is not a shortcut: a control string is
-    /// an ordinary runtime `string`, so which directive runs on which argument
-    /// is not known until it runs, and by then a registered definition carries
-    /// only its [`Repr`]s — `Repr::Struct` is every `defstruct` at once, so a
-    /// global-function lookup could not tell `point`'s helper from `pathname`'s
-    /// and would call one with the other's value. Dispatching on the value
-    /// instead is the same mechanism [`Self::print_object`] uses, and it is
-    /// sound for the same reason: the method was type-checked against exactly
-    /// the type that is now being handed to it.
+    /// **`name` is what the checker resolved the directive to**, not the name
+    /// written: the function's path (`m::brief`) or the method's
+    /// `type''method`. The checker resolved `(name arg colon at)` at the site
+    /// for every argument the directive can meet (`format::call_sites`) and
+    /// handed the engine the control string with that name in place
+    /// (`format::rename_calls`), so nothing is looked up by name here — the
+    /// definition is fetched by what it is, and it was type-checked against
+    /// the type of the value now being handed to it.
     ///
-    /// The method must be `((self Self) (colon bool) (at bool)) -> string`.
-    /// A value with no heap type of its own (`i64`/`bool`/`char`) has no
-    /// method table to look in, and says so.
+    /// The definition is `((x T) (colon bool) (at bool)) -> string`.
     fn format_call(&self, heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String>;
 }
 

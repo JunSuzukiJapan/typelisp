@@ -210,7 +210,7 @@ fn generic_optional_where_bound_is_validated() {
     assert_eq!(eval_ok(&format!("{} (check-eq 1 1)", prog)), Value::Bool(true));
     assert_eq!(eval_ok(&format!("{} (check-eq 1 2)", prog)), Value::Bool(false));
     let msg = check_err(&format!(
-        "{} (check-eq (no-eq::new 1) (no-eq::new 1))",
+        "{} (check-eq (make-instance 'no-eq :n 1) (make-instance 'no-eq :n 1))",
         prog
     ));
     assert!(msg.contains("does not implement trait"), "unexpected message: {}", msg);
@@ -282,8 +282,9 @@ fn generic_optional_self_recursive() {
 fn method_optional_default_is_used_when_the_argument_is_omitted() {
     let src = "
         (defstruct counter (n int))
-        (defmethod bump ((self counter) &optional (by int 1)) int (+ self::n by))
-        (bump (counter::new 10))
+        (impl counter
+  (bump (self &optional (by int 1)) int (+ self::n by)))
+        (bump (make-instance 'counter :n 10))
     ";
     assert_eq!(eval_ok(src), Value::Int(11));
 }
@@ -292,8 +293,9 @@ fn method_optional_default_is_used_when_the_argument_is_omitted() {
 fn method_optional_supplied_value_overrides_the_default() {
     let src = "
         (defstruct counter (n int))
-        (defmethod bump ((self counter) &optional (by int 1)) int (+ self::n by))
-        (bump (counter::new 10) 5)
+        (impl counter
+  (bump (self &optional (by int 1)) int (+ self::n by)))
+        (bump (make-instance 'counter :n 10) 5)
     ";
     assert_eq!(eval_ok(src), Value::Int(15));
 }
@@ -302,9 +304,10 @@ fn method_optional_supplied_value_overrides_the_default() {
 fn method_defaultless_optional_arrives_as_an_option() {
     let src = "
         (defstruct counter (n int))
-        (defmethod bump ((self counter) &optional (by int)) int
-          (match by ((some k) (+ self::n k)) ((none) self::n)))
-        (+ (bump (counter::new 10)) (bump (counter::new 10) 5))
+        (impl counter
+  (bump (self &optional (by int)) int
+            (match by ((some k) (+ self::n k)) ((none) self::n))))
+        (+ (bump (make-instance 'counter :n 10)) (bump (make-instance 'counter :n 10) 5))
     ";
     assert_eq!(eval_ok(src), Value::Int(25));
 }
@@ -313,9 +316,10 @@ fn method_defaultless_optional_arrives_as_an_option() {
 fn method_keyword_arguments_match_by_label() {
     let src = "
         (defstruct box (w int) (h int))
-        (defmethod grow ((self box) &key (dw int 0) (dh int 0)) int
-          (+ (+ self::w dw) (+ self::h dh)))
-        (grow (box::new 1 2) :dh 10)
+        (impl box
+  (grow (self &key (dw int 0) (dh int 0)) int
+            (+ (+ self::w dw) (+ self::h dh))))
+        (grow (make-instance 'box :w 1 :h 2) :dh 10)
     ";
     assert_eq!(eval_ok(src), Value::Int(13));
 }
@@ -325,8 +329,9 @@ fn method_rest_collects_the_trailing_arguments() {
     let src = "
         (defun len ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ 1 (len (sexpr-cdr s))) 0))
         (defstruct acc (base int))
-        (defmethod total ((self acc) &rest (xs int)) int (+ self::base (len xs)))
-        (total (acc::new 100) 1 2 3)
+        (impl acc
+  (total (self &rest (xs int)) int (+ self::base (len xs))))
+        (total (make-instance 'acc :base 100) 1 2 3)
     ";
     assert_eq!(eval_ok(src), Value::Int(103));
 }
@@ -335,7 +340,8 @@ fn method_rest_collects_the_trailing_arguments() {
 fn static_method_takes_keyword_arguments() {
     let src = "
         (defstruct point (x int) (y int))
-        (defmethod origin (point &key (x int 0) (y int 0)) point (point::new x y))
+        (impl point
+  (origin (&key (x int 0) (y int 0)) point (make-instance 'point :x x :y y)))
         (x (point::origin :y 7))
     ";
     assert_eq!(eval_ok(src), Value::Int(0));
@@ -348,8 +354,9 @@ fn method_on_a_generic_owner_takes_an_optional() {
     // the definition-side restriction below does not bite.
     let src = "
         (defstruct cell<T> (v T))
-        (defmethod shown ((self cell<int>) &optional (extra int 100)) int (+ self::v extra))
-        (shown (cell::new 1))
+        (impl cell<int>
+  (shown (self &optional (extra int 100)) int (+ self::v extra)))
+        (shown (make-instance 'cell :v 1))
     ";
     assert_eq!(eval_ok(src), Value::Int(101));
 }
@@ -358,9 +365,10 @@ fn method_on_a_generic_owner_takes_an_optional() {
 fn method_keyword_and_optional_agree_between_interp_and_compile() {
     let src = "
         (defstruct box (w int) (h int))
-        (defmethod grow ((self box) &key (dw int 0) (dh int 0)) int
-          (+ (+ self::w dw) (+ self::h dh)))
-        (defun run () int (+ (grow (box::new 1 2)) (grow (box::new 1 2) :dw 10)))
+        (impl box
+  (grow (self &key (dw int 0) (dh int 0)) int
+            (+ (+ self::w dw) (+ self::h dh))))
+        (defun run () int (+ (grow (make-instance 'box :w 1 :h 2)) (grow (make-instance 'box :w 1 :h 2) :dw 10)))
         %COMPILE%
         (run)
     ";
@@ -371,8 +379,9 @@ fn method_keyword_and_optional_agree_between_interp_and_compile() {
 fn method_unknown_keyword_is_rejected() {
     let src = "
         (defstruct box (w int))
-        (defmethod grow ((self box) &key (dw int 0)) int (+ self::w dw))
-        (grow (box::new 1) :nope 2)
+        (impl box
+  (grow (self &key (dw int 0)) int (+ self::w dw)))
+        (grow (make-instance 'box :w 1) :nope 2)
     ";
     assert!(check_err(src).contains("unknown keyword argument :nope"), "{}", check_err(src));
 }
@@ -381,8 +390,9 @@ fn method_unknown_keyword_is_rejected() {
 fn method_too_many_positional_arguments_are_rejected() {
     let src = "
         (defstruct box (w int))
-        (defmethod grow ((self box) &optional (dw int 0)) int (+ self::w dw))
-        (grow (box::new 1) 2 3)
+        (impl box
+  (grow (self &optional (dw int 0)) int (+ self::w dw)))
+        (grow (make-instance 'box :w 1) 2 3)
     ";
     assert!(check_err(src).contains("expected at most"), "{}", check_err(src));
 }
@@ -394,7 +404,8 @@ fn a_defaulted_method_parameter_may_not_mention_the_owners_type_parameter() {
     // not still name an abstract variable.
     let src = "
         (defstruct cell<T> (v T))
-        (defmethod pick ((self cell<T>) &optional (alt T self::v)) T alt)
+        (impl cell<T>
+  (pick (self &optional (alt T self::v)) T alt))
     ";
     assert!(check_err(src).contains("may not default"), "{}", check_err(src));
 }
@@ -451,7 +462,8 @@ fn an_inherent_method_with_sections_cannot_be_adopted_as_a_trait_method() {
     let src = "
         (deftrait greet () (hello ((self Self)) int))
         (defstruct thing (n int))
-        (defmethod hello ((self thing) &key (extra int 0)) int (+ self::n extra))
+        (impl thing
+  (hello (self &key (extra int 0)) int (+ self::n extra)))
         (impl greet thing)
     ";
     let msg = check_err(src);

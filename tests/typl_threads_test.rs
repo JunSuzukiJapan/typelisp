@@ -146,7 +146,7 @@ fn a_dyn_call_to_an_interpreted_method_moves_the_task_too() {
            (compile start)
            (let ((tasks (the Vector<Task<int>> (Vector::new)))
                  (right 0))
-             (dotimes (i 8) (push tasks (start (fixed::new 42))))
+             (dotimes (i 8) (push tasks (start (make-instance 'fixed :n 42))))
              (doiter (t (iter tasks)) (if (eq (wait t) 42) (setf right (+ right 1)) right))
              (println "~a" right))"#,
         0,
@@ -189,7 +189,7 @@ fn a_worker_prints_what_the_interpreter_s_thread_prints() {
                       (print-object ((self Self) (escape bool)) string (format false "<~a,~a>" self::x self::y)))
                     (defstruct holder (o Option<int>))
                     (defun show () string
-                      (format false "~a ~a ~a ~a" (shape::tri 3 4 5) (point::new 1 2) (holder::new (Option::some 7)) (shape::dot)))
+                      (format false "~a ~a ~a ~a" (shape::tri 3 4 5) (make-instance 'point :x 1 :y 2) (make-instance 'holder :o (Option::some 7)) (shape::dot)))
                     (defun elsewhere () string (join (thread (show))))
                     (compile point::print-object)
                     (compile elsewhere)
@@ -214,7 +214,7 @@ fn an_interpreted_print_object_off_the_interpreter_s_thread_is_a_panic() {
     let source = r#"(defstruct blob (n int))
                     (impl print-object blob
                       (print-object ((self Self) (escape bool)) string "blob!"))
-                    (defun show () string (format false "~a" (blob::new 1)))
+                    (defun show () string (format false "~a" (make-instance 'blob :n 1)))
                     (defun elsewhere () string (join (thread (show))))
                     (compile elsewhere)
                     (println "~a" (elsewhere))"#;
@@ -223,6 +223,48 @@ fn an_interpreted_print_object_off_the_interpreter_s_thread_is_a_panic() {
         assert_ne!(code, Some(0), "TYPELISP_THREADS={}: stdout was: {}", threads, out);
         assert!(
             err.contains("print-object of `") && err.contains("blob` is not compiled"),
+            "TYPELISP_THREADS={}: stderr was: {}",
+            threads,
+            err
+        );
+    }
+}
+
+/// (n) What a `~/name/` directive resolved to — a method or a function —
+/// runs off the interpreter's thread once compiled, as it does on it.
+#[test]
+fn a_worker_calls_what_a_call_directive_resolved_to() {
+    let source = r#"(defstruct point (x int) (y int))
+                    (impl point (brief (self (colon bool) (at bool)) string (format false "~a/~a" self::x self::y)))
+                    (defun yen ((n int) (colon bool) (at bool)) string (format false "~d yen" n))
+                    (defun show () string (format false "~/brief/ ~/yen/" (make-instance 'point :x 1 :y 2) 300))
+                    (defun elsewhere () string (join (thread (show))))
+                    (compile point::brief)
+                    (compile yen)
+                    (compile elsewhere)
+                    (println "~a" (show))
+                    (println "~a" (elsewhere))"#;
+    for threads in ["1", "4"] {
+        let (code, out, err) = run_on("typl_worker_format_call", source, threads);
+        assert_eq!(code, Some(0), "TYPELISP_THREADS={}: stderr was: {}", threads, err);
+        assert_eq!(out, "1/2 300 yen\n1/2 300 yen\n", "TYPELISP_THREADS={}: stderr was: {}", threads, err);
+    }
+}
+
+/// (n) And a function a `~/name/` calls that nobody compiled cannot run off
+/// the interpreter's thread, which printing there says.
+#[test]
+fn an_interpreted_call_directive_callee_off_the_interpreter_s_thread_is_a_panic() {
+    let source = r#"(defun yen ((n int) (colon bool) (at bool)) string (format false "~d yen" n))
+                    (defun show () string (format false "~/yen/" 300))
+                    (defun elsewhere () string (join (thread (show))))
+                    (compile elsewhere)
+                    (println "~a" (elsewhere))"#;
+    for threads in ["1", "4"] {
+        let (code, out, err) = run_on("typl_worker_format_call_interpreted", source, threads);
+        assert_ne!(code, Some(0), "TYPELISP_THREADS={}: stdout was: {}", threads, out);
+        assert!(
+            err.contains("yen`, which a ~/name/ directive calls, is not compiled"),
             "TYPELISP_THREADS={}: stderr was: {}",
             threads,
             err

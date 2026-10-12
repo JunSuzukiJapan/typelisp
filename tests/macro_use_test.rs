@@ -320,3 +320,40 @@ fn cross_module_macro_generating_a_quoted_path_to_a_third_module() {
     );
     assert_eq!(result, Ok(Some(Value::Int(77))));
 }
+
+/// A `defmacro` inside a `(module ...)` block of a file is usable for the
+/// rest of the block and the rest of the file. The block is checked as one
+/// top-level form and runs later with the file's bundle, so the macro used to
+/// be found by the checker and missing from the expander: `no such macro`.
+#[test]
+fn a_macro_in_a_module_block_is_usable_in_the_same_file() {
+    let result = run_project(
+        "macro-in-module-block",
+        &[(
+            "main.typl",
+            "(module m
+               (pub defmacro twice (x) `(+ ,x ,x 1))
+               (pub defun g () int (twice 5)))
+             (module m
+               (pub defun h () int (twice 10)))
+             (+ (m::g) (m::h) (m::twice 100))",
+        )],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(Value::Int(11 + 21 + 201))));
+}
+
+/// The same through a dependency: a block in `lib.typl` defines the macro,
+/// and `main.typl` calls it by its path.
+#[test]
+fn a_macro_in_a_module_block_of_a_dependency_is_usable_from_another_file() {
+    let result = run_project(
+        "macro-in-module-block-dep",
+        &[
+            ("lib.typl", "(module m (pub defmacro twice (x) `(+ ,x ,x 1)))"),
+            ("main.typl", "(use lib)\n(lib::m::twice 4)"),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(Value::Int(9))));
+}

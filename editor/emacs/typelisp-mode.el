@@ -82,7 +82,7 @@ session has changed.")
     "let" "let*" "if" "when" "unless" "cond" "case" "and" "or" "progn" "unsafe"
     ;; memory for `def-c-struct's and typed pointers, inside `unsafe'
     "c-alloc" "c-ref" "c-deref"
-    "the" "match" "if-let" "while-let"
+    "the" "match" "if-let" "while-let" "make-instance"
     ;; CL's chapter-5 control forms (cl-parity-plan.md Phase 4a, §4/§7)
     "ecase" "ccase" "prog1" "prog2" "setq" "psetq" "psetf"
     ;; iteration (§5)

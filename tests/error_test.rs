@@ -238,7 +238,7 @@ fn a_defstruct_error_type_rides_in_result() {
     let src = r#"
         (defstruct IoErr (path string))
         (defun open-it ((p string)) Result<int,IoErr>
-          (if (equal p "") (result::err (IoErr::new "<empty>")) (result::ok 3)))
+          (if (equal p "") (result::err (make-instance 'IoErr :path "<empty>")) (result::ok 3)))
         (match (open-it "") ((ok _) "?") ((err e) e::path))
     "#;
     assert_eq!(run_str(src), "<empty>");
@@ -274,7 +274,7 @@ fn source_returns_the_wrapped_error() {
           (source ((self Self)) Option<:dyn Error> (option::some self::cause)))
         (defun root-message ((e :dyn Error)) string
           (match (source e) ((some inner) (message inner)) ((none) (message e))))
-        (root-message (HighErr::new (LowErr::new "disk offline")))
+        (root-message (make-instance 'HighErr :cause (make-instance 'LowErr :detail "disk offline")))
     "#;
     assert_eq!(run_str(src), "disk offline");
 }
@@ -289,7 +289,7 @@ fn as_dyn_error_unifies_builtin_and_user_error_types() {
         (impl Error AppErr
           (message ((self Self)) string self::why)
           (source ((self Self)) Option<:dyn Error> (option::none)))
-        (defun fail-app () Result<int,AppErr> (result::err (AppErr::new "app said no")))
+        (defun fail-app () Result<int,AppErr> (result::err (make-instance 'AppErr :why "app said no")))
         (defun describe ((r Result<int, :dyn Error>)) string
           (match r ((ok _) "?") ((err e) (message e))))
         (append (describe (as-dyn-error (fail-app)))

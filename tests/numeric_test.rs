@@ -6,7 +6,7 @@
 //!
 //! `int`'s arithmetic moved from free functions to an instance method too
 //! (so the same `+`/`<`/etc. symbol can dispatch per receiver type — see
-//! `Checker::check_instance_method`); its own regression coverage already
+//! `Checker::receiver_method`); its own regression coverage already
 //! lives in `tests/eval_test.rs` (`arithmetic`, `comparison`,
 //! `builtin_as_value`, the `dotimes`/`while` family, etc.) and isn't
 //! duplicated here.

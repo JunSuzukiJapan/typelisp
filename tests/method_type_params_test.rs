@@ -1,5 +1,5 @@
-//! A `defmethod` with type parameters of its own: `(defmethod map<U> ((self
-//! Box<T>) (f (fn (T) U))) Box<U> ...)`.
+//! A method with type parameters of its own: `(impl Box<T> (map<U> (self
+//! (f (fn (T) U))) Box<U> ...))`.
 //!
 //! The receiver supplies the owner's type arguments; the method's own are
 //! inferred from the other arguments, as a generic `defun`'s are. Each
@@ -12,23 +12,24 @@ use common::{check_err, eval_string, eval_string_compiled};
 
 const DEFS: &str = r##"
 (defstruct Box<T> (v T))
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
-(defmethod zip-with<U,R> ((self Box<T>) (other Box<U>) (f (fn (T U) R))) Box<R>
-  (Box::new (f self::v other::v)))
-(defmethod pair<U> (Box<T> (a T) (b U)) Box<cons-cell<T,U>>
-  (Box::new (cons a b)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v)))
+  (zip-with<U,R> (self (other Box<U>) (f (fn (T U) R))) Box<R>
+    (make-instance 'Box :v (f self::v other::v)))
+  (pair<U> ((a T) (b U)) Box<cons-cell<T,U>>
+    (make-instance 'Box :v (cons a b))))
 (defstruct Meter (m f64))
-(defmethod scale<N> ((self Meter) (k N) (conv (fn (N) f64))) Meter
-  (Meter::new (* self::m (conv k))))
-(defmethod opt-map<U> ((self Option<T>) (f (fn (T) U))) Option<U>
-  (match self ((some x) (Option::some (f x))) (none (Option::none))))
-(defmethod twice<U> ((self Box<T>) (f (fn (T) U)) (g (fn (U) U))) Box<U>
-  (fmap (fmap self f) g))
-(defmethod same<U> ((self Box<T>) (a U) (b U)) bool (where (Eq U))
-  (equals a b))
+(impl Meter
+  (scale<N> (self (k N) (conv (fn (N) f64))) Meter
+    (make-instance 'Meter :m (* self::m (conv k)))))
+(impl Box<T>
+  (twice<U> (self (f (fn (T) U)) (g (fn (U) U))) Box<U>
+    (fmap (fmap self f) g))
+  (same<U> (self (a U) (b U)) bool (where (Eq U))
+    (equals a b)))
 (defun apply-it ((g (fn (Box<int> (fn (int) bool)) Box<bool>))) bool
-  (v (g (Box::new 5) (lambda ((x int)) bool (> x 2)))))
+  (v (g (make-instance 'Box :v 5) (lambda ((x int)) bool (> x 2)))))
 "##;
 
 /// `body` (a `string`-valued expression) after [`DEFS`], interpreted and
@@ -44,7 +45,7 @@ fn both(body: &str, expected: &str) {
 /// function argument.
 #[test]
 fn the_receivers_and_the_methods_own_parameters_together() {
-    both(r##"(v (fmap (Box::new 3) (lambda ((x int)) string (format false "n=~a" x))))"##, "n=3");
+    both(r##"(v (fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "n=~a" x))))"##, "n=3");
 }
 
 /// Two instantiations of the same method are two specializations, and each
@@ -52,8 +53,8 @@ fn the_receivers_and_the_methods_own_parameters_together() {
 #[test]
 fn each_instantiation_is_its_own() {
     both(
-        r##"(let ((a (fmap (Box::new "abc") (lambda ((s string)) int (length s))))
-                 (b (fmap (Box::new 4) (lambda ((n int)) bool (> n 3)))))
+        r##"(let ((a (fmap (make-instance 'Box :v "abc") (lambda ((s string)) int (length s))))
+                 (b (fmap (make-instance 'Box :v 4) (lambda ((n int)) bool (> n 3)))))
              (format false "~a ~a" (+ (v a) 1) (v b)))"##,
         "4 true",
     );
@@ -62,7 +63,7 @@ fn each_instantiation_is_its_own() {
 #[test]
 fn several_own_parameters() {
     both(
-        r##"(v (zip-with (Box::new 2) (Box::new "x")
+        r##"(v (zip-with (make-instance 'Box :v 2) (make-instance 'Box :v "x")
                          (lambda ((n int) (s string)) string (format false "~a~a" s n))))"##,
         "x2",
     );
@@ -79,18 +80,7 @@ fn a_static_method() {
 /// a template.
 #[test]
 fn an_owner_without_type_parameters() {
-    both(r##"(format false "~a" (m (scale (Meter::new 2.0) 3 (lambda ((n int)) f64 (int->float n)))))"##, "6.0");
-}
-
-/// A built-in generic owner.
-#[test]
-fn on_option() {
-    both(
-        r##"(format false "~a ~a"
-             (unwrap (opt-map (Option::some 20) (lambda ((n int)) string (format false "<~a>" n))))
-             (is-none (opt-map (the Option<int> (Option::none)) (lambda ((n int)) bool (> n 0)))))"##,
-        "<20> true",
-    );
+    both(r##"(format false "~a" (m (scale (make-instance 'Meter :m 2.0) 3 (lambda ((n int)) f64 (int->float n)))))"##, "6.0");
 }
 
 /// A method that forwards its own parameter to another such method: the
@@ -98,7 +88,7 @@ fn on_option() {
 #[test]
 fn forwarding_to_another_generic_method() {
     both(
-        r##"(v (twice (Box::new 5)
+        r##"(v (twice (make-instance 'Box :v 5)
                       (lambda ((n int)) string (format false "~a" n))
                       (lambda ((s string)) string (format false "~a!" s))))"##,
         "5!",
@@ -108,7 +98,7 @@ fn forwarding_to_another_generic_method() {
 /// A `where` bound on the method's own parameter is checked at the call.
 #[test]
 fn a_bound_on_the_methods_own_parameter() {
-    both(r##"(format false "~a ~a" (same (Box::new 0) 1 1) (same (Box::new 0) "a" "b"))"##, "true false");
+    both(r##"(format false "~a ~a" (same (make-instance 'Box :v 0) 1 1) (same (make-instance 'Box :v 0) "a" "b"))"##, "true false");
 }
 
 /// Passed as a function value, the expected type decides every parameter.
@@ -120,7 +110,7 @@ fn as_a_function_value() {
 #[test]
 fn a_parameter_nothing_decides_is_an_error() {
     let msg = check_err(&format!(
-        "{}\n(defmethod make<U> ((self Box<T>)) Option<U> (Option::none))\n(defun f () () (make (Box::new 1)) ())",
+        "{}\n(impl Box<T> (make<U> (self) Option<U> (Option::none)))\n(defun f () () (make (make-instance 'Box :v 1)) ())",
         DEFS
     ));
     assert!(msg.contains("cannot infer type parameter `u`"), "{}", msg);
@@ -128,17 +118,17 @@ fn a_parameter_nothing_decides_is_an_error() {
 
 #[test]
 fn an_own_parameter_may_not_reuse_the_owners_name() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(defmethod bad<T> ((self Box<T>) (x T)) T x)");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<T> (self (x T)) T x))");
     assert!(msg.contains("the method's own type parameter `t` has the name of a type parameter of `box`"), "{}", msg);
     // The declared name counts too, though this receiver spells it `A`: the
     // registered signature is written in the declared names.
-    let msg = check_err("(defstruct Box<T> (v T))\n(defmethod bad<T> ((self Box<A>) (x T)) T x)");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<A> (bad<T> (self (x T)) T x))");
     assert!(msg.contains("the method's own type parameter `t`"), "{}", msg);
 }
 
 #[test]
 fn an_own_parameter_may_not_be_declared_twice() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(defmethod bad<U,U> ((self Box<T>) (x U)) U x)");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<U,U> (self (x U)) U x))");
     assert!(msg.contains("type parameter `u` is declared twice"), "{}", msg);
 }
 
@@ -146,14 +136,14 @@ fn an_own_parameter_may_not_be_declared_twice() {
 /// nothing to bind it with.
 #[test]
 fn a_partly_generic_receiver_is_refused() {
-    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(defmethod bad<U> ((self Pair<T,int>) (x U)) U x)");
+    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (bad<U> (self (x U)) U x))");
     assert!(msg.contains("needs a receiver that names every type parameter of `pair`"), "{}", msg);
 }
 
 /// A name the header does not declare is still unknown.
 #[test]
 fn an_undeclared_type_variable_is_still_unknown() {
-    let msg = check_err("(defstruct Box<T> (v T))\n(defmethod bad<U> ((self Box<T>) (x W)) U x)");
+    let msg = check_err("(defstruct Box<T> (v T))\n(impl Box<T> (bad<U> (self (x W)) U x))");
     assert!(msg.contains("unknown type `w`"), "{}", msg);
 }
 

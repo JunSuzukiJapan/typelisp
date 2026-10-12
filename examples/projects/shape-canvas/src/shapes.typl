@@ -138,7 +138,7 @@
       (result::ok acc)
       (match (parse-int (get ws from))
         ((ok n) (push acc n) (scan-nums ws (+ from 1) acc))
-        ((err e) (result::err (bad-number::new (get ws from) e))))))
+        ((err e) (result::err (make-instance 'bad-number :word (get ws from) :cause e))))))
 
 ;; A concrete type is returned but the return type is :dyn Shape -- implicit coercion
 ;; applies in return position, so it is boxed without writing (as :dyn Shape ...).
@@ -147,19 +147,19 @@
 (defun build-shape ((kind string) (ns Vector<int>)) Result<:dyn Shape, :dyn Error>
   (cond
     ((and (equal kind "rect") (= (len ns) 4))
-     (result::ok (rect::new (get ns 0) (get ns 1) (get ns 2) (get ns 3))))
+     (result::ok (make-instance 'rect :x (get ns 0) :y (get ns 1) :w (get ns 2) :h (get ns 3))))
     ((and (equal kind "circle") (= (len ns) 3))
-     (result::ok (circle::new (get ns 0) (get ns 1) (get ns 2))))
+     (result::ok (make-instance 'circle :cx (get ns 0) :cy (get ns 1) :r (get ns 2))))
     ((and (equal kind "hline") (= (len ns) 3))
-     (result::ok (hline::new (get ns 0) (get ns 1) (get ns 2))))
+     (result::ok (make-instance 'hline :x (get ns 0) :y (get ns 1) :len (get ns 2))))
     ;; Both an unknown name and a wrong number of arguments end up here.
     ;; 名前が知らないものだった場合も、引数の個数が合わない場合もここへ落ちる。
-    (else (result::err (bad-command::new (format false "~a with ~d args" kind (len ns)))))))
+    (else (result::err (make-instance 'bad-command :detail (format false "~a with ~d args" kind (len ns)))))))
 
 (defun parse-line ((line string)) Result<:dyn Shape, :dyn Error>
   (let ((ws (split-words line)))
     (if (= (len ws) 0)
-        (result::err (bad-command::new "(blank line)"))
+        (result::err (make-instance 'bad-command :detail "(blank line)"))
         (match (scan-nums ws 1 (the Vector<int> (Vector::new)))
           ((ok ns) (build-shape (get ws 0) ns))
           ((err e) (result::err e))))))

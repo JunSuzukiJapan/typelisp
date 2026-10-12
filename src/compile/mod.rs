@@ -94,7 +94,7 @@ pub struct CompiledLibrary<'a> {
     pub label: &'a str,
     pub bitcode: &'a [u8],
     /// Every definition whose native body this artifact carries.
-    pub items: &'a [symbols::CompiledItem],
+    pub items: &'a [crate::CompileTarget],
     /// Which ABI those bodies answer to (`typelisp_abi::BODY_ABI_*`), straight
     /// off the dump that carried them.
     ///

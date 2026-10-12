@@ -132,6 +132,6 @@ fn a_float_struct_field_survives_collection() {
     )
     .expect("definition failed");
     h.set_gc_stress(true);
-    let v = eval_in(&mut h, &mut chk, &mut interp, "(churn (pt::new 2.5 1.0))").expect("eval under gc stress failed");
+    let v = eval_in(&mut h, &mut chk, &mut interp, "(churn (make-instance 'pt :x 2.5 :y 1.0))").expect("eval under gc stress failed");
     assert_float(&h, &v, 2.5);
 }

@@ -230,7 +230,7 @@ fn a_static_method_call_still_names_the_type() {
     // `(rect::new 1)` — the type sits in the token's second-to-last segment;
     // exactly the `rect` part must be highlighted, not `::new`.
     let src = "\
-(defstruct rect (w int))
+(defstruct rect (w int)) (impl rect (new ((w int)) rect (make-instance 'rect :w w)))
 (defun make () rect (rect::new 5))
 ";
     let path = PathBuf::from("/tmp/typelisp-semantic-assoc-test/f.typl");

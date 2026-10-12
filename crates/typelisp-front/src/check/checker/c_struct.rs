@@ -488,8 +488,7 @@ impl Checker {
 
     /// A call to one of the internal builtins.
     fn c_call(&self, heap: &mut Heap, name: &str, args: &[Checked]) -> Result<Value, Error> {
-        let r = Ref::synthetic(Path::root(name));
-        let form = self.call_form(heap, &r, args)?;
+        let form = self.call_form(heap, &Path::root(name), args)?;
         Ok(forms::rooted(heap, form))
     }
 
