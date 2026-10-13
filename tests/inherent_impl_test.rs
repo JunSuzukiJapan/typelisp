@@ -22,9 +22,14 @@ const DEFS: &str = r##"
 /// `body` (a `string`-valued expression) after [`DEFS`], interpreted and
 /// inside a compiled function, both expected to give `expected`.
 fn both(body: &str, expected: &str) {
-    let interpreted = eval_string(&format!("{}\n{}", DEFS, body));
+    both_with(DEFS, body, expected);
+}
+
+/// [`both`] after `defs` instead of [`DEFS`].
+fn both_with(defs: &str, body: &str, expected: &str) {
+    let interpreted = eval_string(&format!("{}\n{}", defs, body));
     assert_eq!(interpreted, expected, "interpreted: {}", body);
-    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", DEFS, body));
+    let compiled = eval_string_compiled(&format!("{}\n(defun go () string {})\n(compile go)\n(go)", defs, body));
     assert_eq!(compiled, expected, "compiled: {}", body);
 }
 
@@ -89,4 +94,40 @@ fn a_program_cannot_impl_a_standard_library_type() {
 fn an_item_must_have_a_parameter_list_and_a_return_type() {
     let msg = check_err("(defstruct p (x int))\n(impl p (pub f))");
     assert!(msg.contains("(pub? name (params...) ReturnType body...)"), "{}", msg);
+}
+
+/// An `impl` for one instantiation of a generic type takes that
+/// instantiation only: the method is registered under the type alone, and the
+/// call has to compare the receiver with the declared one. It used to pass the
+/// check and stop at run time inside the body.
+#[test]
+fn an_impl_for_one_instantiation_takes_only_that_instantiation() {
+    let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n";
+    both_with(defs, r##"(format false "~a" (twice (make-instance 'Box :v 4)))"##, "8");
+    let msg = check_err(&format!("{}(defun f () int (twice (make-instance 'Box :v \"s\")))", defs));
+    assert!(msg.contains("`twice` is a method of `box<int>`, and the receiver is a `box<string>`"), "{}", msg);
+}
+
+/// Taken as a value, such a method has its one type, like a method of a type
+/// without parameters.
+#[test]
+fn a_method_for_one_instantiation_is_a_value_of_its_one_type() {
+    let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n\
+                (defun app ((f (fn (Box<int>) int)) (b Box<int>)) int (f b))\n";
+    both_with(defs, r##"(format false "~a" (app twice (make-instance 'Box :v 5)))"##, "10");
+    let msg = check_err(
+        "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n\
+         (defun app ((f (fn (Box<string>) int)) (b Box<string>)) int (f b))\n\
+         (defun g () int (app twice (make-instance 'Box :v \"s\")))",
+    );
+    assert!(msg.contains("type mismatch"), "{}", msg);
+}
+
+/// The target names every type parameter as a variable, or none: nothing
+/// would bind the one variable of `Pair<T,int>`, whose methods used to pass
+/// the check and fail at run time.
+#[test]
+fn a_target_with_some_variables_and_some_types_is_refused() {
+    let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (pub sb (self) int self::b))");
+    assert!(msg.contains("names every type parameter of `pair` as a distinct variable"), "{}", msg);
 }

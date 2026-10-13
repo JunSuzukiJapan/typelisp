@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 格式指令
 
 寫在 `print`/`println`/`format` 的控制字串中的指令。幾乎涵蓋了 CL 的全部 `format` 指令。函式本身的說明見
@@ -62,7 +62,7 @@
 | `~<...~;...~>` | 對齊（把各段分布到 `~mincol` 寬度。`:`/`@`=兩端的填充） |
 | `~<...~;...~:>` | **邏輯區塊**（以 `~:>` 結束。與上面的對齊是不同的東西）。第一段=prefix，最後一段=suffix（都只能是字面字串）。以 `~@;` 分隔時 prefix 是**行首 prefix**。`~:<` 把 prefix/suffix 預設為 `(`/`)`。引數是一個串列（`~@<` 就地使用剩餘引數） |
 | `~*` | 略過引數（`~n*`=前進 n 個, `~:*`=回退, `~@*`=跳到絕對位置） |
-| `~/name/` | 方法呼叫（第 5 章。`:`/`@` 旗標傳給方法。不接受參數） |
+| `~/name/` | 函式・方法呼叫（第 5 章。`:`/`@` 旗標傳給呼叫對象。不取參數） |
 
 不支援 CL 的以下指令（檢查時的錯誤）。
 
@@ -72,20 +72,29 @@
 
 ## 5. `~/name/`
 
-**與 CL 有一點不同：名稱不是以全域函式查找，而是以引數本身型別的方法查找。** 方法的形式為 `((self Self) (colon bool) (at bool)) → string`，
-指令的 `:`/`@` 原樣傳入。
-
-CL 那種以全域函式查找的方式在這個語言中無法安全實作。即使控制字串是字面值，串列引數的元素（`~{` 內部）是什麼型別在檢查時也無法決定，只依
-名稱查找就可能呼叫到給別的型別準備的函式。依值的型別選擇，該方法正是針對該型別經過型別檢查的，所以是安全的（與 `print-object` 是同一機制）。
-它也可以用於 `string`/`bool`/`char`/`symbol`/串列之類的值。只有整數無法從值區分寬度，所以**只在多個整數型別定義了同名方法時**才是錯誤。
-
-無法決定作用於哪個引數，但可以決定可能呼叫哪些方法。檢查器從字面的控制字串收集所有 `~/name/`，記錄該呼叫處的引數型別中具有上述形式方法的
-那些。因此，**如果沒有任何引數的型別具有該方法，就是檢查時的錯誤**（而不是執行期），在 AOT 執行檔中也能運作。
+`~/name/` 依照在該處寫成 `(name 引數 colon at)` 的呼叫相同的規則解析 `name`，並輸出呼叫結果的字串。
+消耗一個引數。`colon`、`at` 是表示指令是否帶有 `:`、`@` 的 `bool`。
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- 名稱的解析與一般呼叫相同（[語法參考 3.10](../syntax.md#310-module--use--命名空間)）。引數的型別有方法 `name` 時呼叫它，否則呼叫可見的
+  函式 `name`。模組中的函式可以用路徑書寫（`~/m::shout/`）。
+- 能呼叫的是以 typelisp 寫的函式或方法，並且原樣接收引數、`colon`、`at`，回傳 `string`。內建函式不能呼叫。
+- **呼叫對象在檢查時決定**。檢查器也考慮 `~*` 與 `~[` 造成的移動，求出可能到達該 `~/name/` 的所有引數，
+  並分別依其型別解析。只要有一個無法解析就是檢查時的錯誤；可能到達的引數使呼叫對象分成兩個以上時也是
+  錯誤。執行時不尋找名稱，所以在 AOT 執行檔中也一樣能運作。
+- **不能用在 `~{`、`~:{`、`~:@{`、`~<...~:>` 之中**（檢查時的錯誤）。串列引數的元素型別是 `Sexpr`，
+  無法用來決定呼叫對象。`~@{` 走訪的是呼叫的其餘引數，型別已知，所以可以使用。
+
+與 CL 的差異：CL 把名稱當作全域函式尋找。這裡與呼叫的解析相同，所以引數型別的方法會先於同名的函式被選中。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Модулі та розкладання по файлах
 
 Цей посібник пояснює, як скласти програму з кількох файлів. Докладні правила наведено в розділах 3.10–3.13
@@ -46,14 +46,17 @@ src = "src"
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; a field without pub cannot be read from outside
+  (tag string))                        ; поле без pub не можна ні читати, ні писати ззовні
 
-(defun square ((n i32)) i32 (* n n))   ; a function without pub cannot be called from outside either
+(defun square ((n i32)) i32 (* n n))   ; функцію без pub теж не можна викликати ззовні
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -75,11 +78,14 @@ typl main.typl        # => 25
 
 ### Що стає публічним
 
-- Функції, структури, переліки, глобальні змінні, макроси та методи видимі з інших модулів лише тоді,
-  коли мають `pub`. Ставте `pub` одразу перед визначенням, як-от `(pub defun ...)`.
-- Для структур **публічність типу й публічність полів — окремі речі**.
-  `(pub defstruct point ...)` робить тип видимим, а читати й записувати ззовні можна лише поля, записані
-  як `(pub x i32)`.
+- Функції, структури, переліки, глобальні змінні й макроси видно з інших модулів, лише якщо в них є `pub`.
+  Ставте `pub` одразу перед визначенням, як у `(pub defun ...)`.
+- З методів, написаних в `impl`, ззовні можна використовувати лише ті, що записані поелементно як
+  `(pub new ...)`.
+- У структур **публічність типу й публічність полів — різні речі**. `(pub defstruct point ...)` робить тип
+  видимим, а ззовні читати й писати можна лише поля, записані як `(pub x i32)`.
+- Так само в інших модулях у `make-instance` можна задавати лише поля з `pub`. У `point` вище поле `tag`
+  не `pub`, тож ззовні його не можна створити через `make-instance` — використовується `point::new`.
 - Використання непублічної назви ззовні дає помилку «не вдається розв'язати», як-от
   `unresolved path: geometry::square`. Це те саме повідомлення, що й для назви з помилкою в написанні,
   тож якщо написання правильне, а назва все одно не розв'язується, підозрюйте пропущений `pub`.
@@ -112,10 +118,11 @@ typl main.typl        # => 25
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, not core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, not core::area
 ```
 
-Методи всередині `impl` завжди публічні, навіть без `pub`.
+Методи `impl` трейту завжди публічні, навіть без `pub`. З методів власного `impl` (`(impl point ...)`)
+публічні лише ті, що мають `pub`.
 
 Сам трейт не можна зробити публічним для інших модулів. Тримайте визначення трейта, його `impl` і код, що
 використовує його через `:dyn`, в одному модулі.

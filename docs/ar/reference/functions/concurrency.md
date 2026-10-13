@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # المهام والقنوات
 
 مفردات المهام (الخيوط الخفيفة). أما `task` و`thread` اللتان تبدآنها، و`select` التي تنتظر على عدة أشياء،
@@ -79,7 +79,7 @@
 
 | الاسم | الاستخدام | النوع | المعنى |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | مجموعة لا شيء معلَّق فيها |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | مجموعة لا شيء معلَّق فيها |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | يضيف إلى العدّاد. افعلها قبل أن يبدأ العمل |
 | `done` | `(done wg)` | `(WaitGroup)→()` | انتهت واحدة. وعند 0 يُحرَّر كل المنتظرين |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | ينتظر حتى يبلغ 0. ومن أي عدد من المهام |
@@ -114,13 +114,13 @@
 
 | الاسم | الاستخدام | النوع | المعنى |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | mutex غير مقفل يحمل `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | mutex غير مقفل يحمل `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | يأخذ القفل (ينتظر) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | يحرره. ويحدث `panic` إذا لم يكن مقفلًا |
 | `with-lock` | `(with-lock (x m) body...)` | ماكرو | يقفل ويربط المحتوى بـ `x` وينفّذ `body` و**يحرر دائمًا** |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

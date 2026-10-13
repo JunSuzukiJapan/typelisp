@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # การคอมไพล์
 
 หากไม่ทำอะไรเพิ่ม โปรแกรม typelisp จะรันในอินเทอร์พรีเตอร์ นอกจากนี้ยังมีวิธีคอมไพล์เป็นโค้ดเนทีฟ
@@ -125,7 +125,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 สิ่งที่ไฟล์ที่คอมไพล์แบบ AOT มีได้
 
-- ระดับบนสุดของไฟล์จุดเริ่มต้นมีได้เฉพาะการนิยาม (`defun` `defmethod` `defvar`
+- ระดับบนสุดของไฟล์จุดเริ่มต้นมีได้เฉพาะการนิยาม (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) และ `use` `module` นิพจน์ระดับบนสุด
   เช่น `(println ...)` ไม่อนุญาต ยกเว้น `(main)` ตัวสุดท้าย ให้ใส่งานไว้ใน `main`

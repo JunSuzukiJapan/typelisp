@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Task และ channel
 
 คำศัพท์ของ task (เธรดน้ำหนักเบา) `task` และ `thread` ที่ใช้เริ่ม task และ `select`
@@ -83,7 +83,7 @@ task เป็นแบบ **ร่วมมือ (cooperative)**: task สล�
 
 | ชื่อ | การใช้ | ชนิด | ความหมาย |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | กลุ่มที่ไม่มีอะไรค้าง |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | กลุ่มที่ไม่มีอะไรค้าง |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | เพิ่มตัวนับ ทำก่อนงานเริ่ม |
 | `done` | `(done wg)` | `(WaitGroup)→()` | เสร็จหนึ่งอย่าง เมื่อเป็น 0 ผู้รอทุกตัวถูกปล่อย |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | รอจนถึง 0 จาก task จำนวนเท่าใดก็ได้ |
@@ -119,13 +119,13 @@ task เป็นแบบ **ร่วมมือ (cooperative)**: task สล�
 
 | ชื่อ | การใช้ | ชนิด | ความหมาย |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | mutex ที่ไม่ล็อกซึ่งเก็บ `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | mutex ที่ไม่ล็อกซึ่งเก็บ `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | ถือล็อก (รอ) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | ปล่อย panic หากไม่ได้ล็อก |
 | `with-lock` | `(with-lock (x m) body...)` | แมโคร | ล็อก ผูกเนื้อหากับ `x` รัน `body` และปล่อย **เสมอ** |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

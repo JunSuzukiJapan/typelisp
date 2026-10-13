@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # أساسيات الأنواع
 
 typelisp لغة ذات أنواع ساكنة. يشرح هذا الفصل ما يفعله فاحص الأنواع من أجلك، والأنواع التي ستستخدمها
@@ -147,30 +147,48 @@ none
   (y int))
 ```
 
-يمنحك التعريف ما يلي:
+تُصنع القيم بـ `make-instance`. اكتب اسم النوع مقتبسًا بـ `'`، ومرّر الحقول أزواجًا `:الاسم القيمة` بأي
+ترتيب.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; إنشاء واحدة (الوسائط بترتيب الحقول)
-  (println "~a" p::x)           ; قراءة حقل؛ وتصلح أيضًا (x p)
+(let ((p (make-instance 'point :x 3 :y 4)))   ; صنع قيمة
+  (println "~a" p::x)           ; قراءة حقل؛ يصلح (x p) أيضًا
   (setf p::x 10)                ; تغييره
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-ولإعطاء بنية دوالًا خاصة بها استخدم `defmethod`. ونوع الوسيط الأول (`self`) هو الذي يقرر النوع الذي
-ينتمي إليه التابع.
+التعبير الإضافي في إعلان الحقل يصبح **القيمة الافتراضية** لذلك الحقل. والحقل المحذوف من `make-instance`
+يأخذ قيمته الافتراضية. وحذف حقل لا قيمة افتراضية له خطأ نوع.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count قيمته 0
 ```
 
-وكتابة اسم النوع وحده بدلًا من وسيط `self` تصنع دالة تُستدعى على الصورة `point::origin`.
+لإعطاء بنية دوالّ خاصة بها، استعمل `impl`. كل عنصر من `(impl اسم_النوع عنصر...)` على الصورة
+`(الاسم (الوسائط...) نوع_الإرجاع الجسم...)`، وإن كان وسيطه الأول `self` صار **تابعًا** لذلك النوع.
+ويُكتب `self` من دون نوع.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+والعنصر الذي لا يأخذ `self` يصبح دالة تُستدعى على الصورة `point::origin`. وإن هيّأت دالة تصنع القيمة
+باسم `new`، أمكن لمن يستعملها أن يكتب باختصار `(point::new 3 4)`.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -237,7 +255,7 @@ none
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 داخل دالة عامة لا يُعرف شيء عن `T`، فلا يمكنك مقارنة قيم `T` ولا جمعها. ولاشتراط شيء مثل "أي نوع

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # สตรีมและไฟล์
 
 trait และเมทอดของสตรีม ชนิดสตรีมที่เป็นรูปธรรม การดำเนินการกับไฟล์ และ pathname ซ็อกเก็ตเครือข่ายก็เป็น
@@ -176,7 +176,7 @@ pathname designator ของ CL แก้ไขผ่าน trait `Pathish` แ
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
-(write-line (counter::new 0) "four")   ; write-line, terpri and fresh-line all work
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri and fresh-line all work
 ```
 
 อินพุตก็ทำงานแบบเดียวกัน: คุณเขียนเฉพาะ `read-item` แม้ชนิดที่ไม่มีการดันกลับของตัวเอง

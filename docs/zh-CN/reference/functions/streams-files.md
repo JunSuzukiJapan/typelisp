@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 流与文件
 
 流的 trait 与方法、具体流类型、文件操作、路径名。网络套接字也是流的一员，见[网络](network.md)。
@@ -163,7 +163,7 @@ trait 解析（第 9 章）。
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 其余方法全部使用默认实现
 
-(write-line (counter::new 0) "four")   ; write-line、terpri、fresh-line 都能工作
+(write-line (make-instance 'counter :n 0) "four")   ; write-line、terpri、fresh-line 都能工作
 ```
 
 输入一方也一样，只写 `read-item`。即使是自身没有退回功能的类型，用 `(read-sexpr (make-peek-stream my-stream))` 包装后也能

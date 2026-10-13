@@ -171,7 +171,7 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 残りのメソッドは全部デフォルト
 
-(write-line (counter::new 0) "四文字")  ; write-line も terpri も fresh-line も動く
+(write-line (make-instance 'counter :n 0) "四文字")  ; write-line も terpri も fresh-line も動く
 ```
 
 入力側も同じで、書くのは `read-item` だけ。押し戻しを自前で持たない型でも、

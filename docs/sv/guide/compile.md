@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -126,7 +126,7 @@ bara med den `typl` som byggdes tillsammans med den. Efter att ha byggt om `typl
 
 ### 3.3 Vad en AOT-kompilerad fil får innehålla
 
-- Toppnivån i ingångsfilen får bara innehålla definitioner (`defun` `defmethod` `defvar`
+- Toppnivån i ingångsfilen får bara innehålla definitioner (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) samt `use` och `module`. Toppnivåuttryck som
   `(println ...)` är inte tillåtna, med undantag för det avslutande `(main)`. Lägg arbetet inuti

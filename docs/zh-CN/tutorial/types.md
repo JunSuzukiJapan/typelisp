@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 类型基础
 
 typelisp 是静态类型语言。本章介绍类型检查能为你做什么、常用的类型（`Option`、`Result`、结构体、枚举）以及
@@ -138,29 +138,46 @@ none
   (y int))
 ```
 
-定义之后可以使用以下内容：
+值用 `make-instance` 创建。用 `'` 引用类型名，再以 `:名字 值` 的组传入字段。顺序任意。
 
 ```lisp
-(let ((p (point::new 3 4)))     ; 创建（按字段顺序传参）
-  (println "~a" p::x)           ; 读取字段，也可写成 (x p)
-  (setf p::x 10)                ; 修改
+(let ((p (make-instance 'point :x 3 :y 4)))   ; 创建
+  (println "~a" p::x)           ; 读取字段。也可以写成 (x p)
+  (setf p::x 10)                ; 改写
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-要给结构体添加函数，使用 `defmethod`。第一个参数（`self`）的类型决定方法属于哪个类型。
+在字段的声明中再写一个表达式，就成为该字段的**默认值**。在 `make-instance` 中省略的字段用默认值
+填充。省略没有默认值的字段是类型错误。
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count 为 0
 ```
 
-不写 `self` 而只写类型名，就得到以 `point::origin` 形式调用的函数。
+要让结构体拥有函数，使用 `impl`。`(impl 类型名 项目...)` 的每个项目是 `(名字 (参数...) 返回类型 本体...)`
+的形式，第一个参数是 `self` 时，就成为该类型的**方法**。`self` 不写类型。
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+不取 `self` 的项目会成为以 `point::origin` 形式调用的函数。把创建值的函数以 `new` 为名准备好，
+使用方就能简短地写成 `(point::new 3 4)`。
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -227,7 +244,7 @@ none
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 在泛型函数中对 `T` 一无所知，所以不能比较或相加 `T` 的值。要加上"只要能比较的类型就行"之类的条件，使用

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Basis van types
 
 typelisp is een statisch getypeerde taal. Dit hoofdstuk legt uit wat de typechecker voor je doet, de
@@ -149,31 +149,49 @@ Een type met benoemde velden wordt gedefinieerd met `defstruct`.
   (y int))
 ```
 
-De definitie geeft je het volgende:
+Waarden worden met `make-instance` gemaakt. Schrijf de typenaam gequote met `'` en geef de velden als
+paren `:naam waarde`, in willekeurige volgorde.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; create one (arguments in field order)
-  (println "~a" p::x)           ; read a field; (x p) also works
-  (setf p::x 10)                ; change it
+(let ((p (make-instance 'point :x 3 :y 4)))   ; er een maken
+  (println "~a" p::x)           ; een veld lezen; (x p) kan ook
+  (setf p::x 10)                ; het wijzigen
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-Om een struct eigen functies te geven, gebruik je `defmethod`. Het type van het eerste argument
-(`self`) bepaalt bij welk type de methode hoort.
+Nog een expressie in de declaratie van een veld wordt de **standaardwaarde** van dat veld. Een veld dat in
+`make-instance` wordt weggelaten, krijgt zijn standaardwaarde. Een veld zonder standaardwaarde weglaten is
+een typefout.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count is 0
 ```
 
-Schrijf je in plaats van een `self`-argument alleen de typenaam, dan ontstaat een functie die als
-`point::origin` wordt aangeroepen.
+Om een struct eigen functies te geven, gebruik je `impl`. Elk item van `(impl Typenaam item...)` heeft de
+vorm `(naam (argumenten...) Teruggeeftype romp...)`, en als het eerste argument `self` is, wordt het een
+**methode** van dat type. `self` wordt zonder type geschreven.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+Een item zonder `self` wordt een functie die je aanroept als `point::origin`. Als je een functie die de
+waarde maakt de naam `new` geeft, kunnen gebruikers kort `(point::new 3 4)` schrijven.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -244,7 +262,7 @@ dit soort.
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 Binnen een generieke functie is niets over `T` bekend, dus je kunt waarden van `T` niet vergelijken of

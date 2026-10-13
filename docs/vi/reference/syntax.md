@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -159,14 +159,14 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
 - Kiểu của các đối số và kiểu trả về là bắt buộc.
 - Một hàm generic viết các tham số kiểu của nó trong ngoặc nhọn sau tên:
   `(defun name<T1,T2...> (params) Ret body...)` (cùng cú pháp ngoặc nhọn như `Vector<T>` ở các vị trí kiểu).
-- `defun`/`lambda`/`defmethod` chấp nhận các đối số biến đổi khi `&rest (name Type)` được viết ở cuối:
+- `defun`/`lambda`/phương thức trong `impl` chấp nhận các đối số biến đổi khi `&rest (name Type)` được viết ở cuối:
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)` (trong thân, `xs` luôn được gán là một
   `Option<Sexpr>`, một danh sách S-expression. Mỗi đối số thực tế ở lời gọi được kiểm tra kiểu là `Type2` riêng
   lẻ rồi được bọc vào một `Sexpr`).
   `defmacro` cũng có `&rest` riêng, nhưng khác ở chỗ nó luôn là một `Sexpr` không kiểu (`defun`/`lambda` nêu
   kiểu phần tử). Một kiểu hàm cũng có thể mô tả một hàm có đối số biến đổi, dưới dạng
   `(fn (T1... &rest Te) Ret)`.
-- **`&optional` / `&key`** (cho `defun` và `defmethod`; không cho `lambda`/`labels`, vì lý do bên dưới, và
+- **`&optional` / `&key`** (cho `defun` và phương thức trong `impl`; không cho `lambda`/`labels`, vì lý do bên dưới, và
   `defmacro` có một cách triển khai riêng, cũng ở bên dưới). Thứ tự là của CL:
   `required &optional &rest &key`. Mỗi tham số được viết `(name Type)` hoặc `(name Type default-expr)`:
 
@@ -193,15 +193,18 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
     nhau.
   - Chúng có thể dùng trong các hàm generic, nhưng **một tham số kiểu chỉ xuất hiện trong các đối số bị bỏ
     qua không thể được suy ra và là lỗi** (không có giá trị nào để khớp).
-  - **`defmethod` có thể có cùng ba phần** (cho cả phương thức thể hiện lẫn hàm tĩnh). Hãy liệt kê
-    `&optional`/`&rest`/`&key` sau bên nhận:
+  - **Phương thức trong `impl` có thể có cùng ba phần** (cả phương thức thể hiện lẫn phương thức tĩnh).
+    Phương thức thể hiện liệt kê `&optional`/`&rest`/`&key` sau `self`:
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; hàm tĩnh
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; phương thức tĩnh
     (point::origin :y 7)
     ```
 
@@ -209,7 +212,7 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
     mặc định không thể nhắc đến các tham số kiểu của chủ sở hữu** (cùng hạn chế mà `defun` có với các tham số
     kiểu của chính nó: thứ được nhúng khi đối số bị bỏ qua là một biểu thức *đã kiểm tra*, nên kiểu của nó
     không thể để lại là một biến trừu tượng).
-  - **Chúng không thể dùng trong các phương thức của trait.** `deftrait` không có cú pháp cho chúng, và nếu
+  - **Chúng không thể dùng trong các phương thức của trait.** Điều này áp dụng cả cho các phương thức viết trong `impl` của một trait. `deftrait` không có cú pháp cho chúng, và nếu
     chỉ phía `impl` có thể khai báo các phần, các lời gọi với bên nhận `:dyn` (điền các đối số từ khai báo của
     trait) và các lời gọi với bên nhận cụ thể (điền từ khai báo của `impl`) sẽ trở thành những thứ khác nhau.
     Số ngôi của một vị trí vtable là cố định.
@@ -265,8 +268,7 @@ Ba thứ không thể khai báo:
   vào lời gọi khi đối số bị bỏ qua), và một khai báo không có chỗ cho nó.
 - **Bất cứ thứ gì ngoài `defun`.** Một `defmacro` cần thân macro **đã chạy** để khai triển, điều mà việc đăng
   ký một chữ ký không thể thay thế. Với các kiểu (`defstruct`/`defenum`/`deftrait`), việc đăng ký chúng là
-  "thứ mà chính mã đăng ký kiểu cần", không tự đầy đủ như một chữ ký. Một `defmethod` được đăng ký trên kiểu sở
-  hữu nó, nên nó đi theo kiểu.
+  "thứ mà chính mã đăng ký kiểu cần", không tự đầy đủ như một chữ ký. Các phương thức của một `impl` được đăng ký trên kiểu sở hữu chúng, nên chúng đi theo kiểu.
 
 Đối ứng của CL là `(declaim (ftype (function (i32) bool) even2))`, nhưng nó đi kèm cả một hệ thống khai báo
 và chỉ mang tính **tham khảo**. Ở đây, với kiểu tĩnh, các khai báo được kiểm tra.
@@ -585,40 +587,75 @@ trị về những gì đã được viết.
 Chú thích kiểu là bắt buộc (nó không được suy ra từ biểu thức khởi tạo). `defvar` có thể thay đổi;
 `defconstant` thì không (`setf` là lỗi).
 
-### 3.5 defmethod — định nghĩa phương thức
+### 3.5 impl — phương thức của một kiểu
 
 ```lisp
-; phương thức thể hiện: có thể gọi là (m obj args...)
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; phương thức tĩnh: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; phương thức thể hiện: (name obj args...)
+  (pub name ...))                                      ; công khai cả bên ngoài module của kiểu
 
-; hàm tĩnh / liên kết: có thể gọi là (Type::name args...)
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; một kiểu generic
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-Bên gọi phân giải phương thức từ kiểu tĩnh của `obj` (dispatch đơn, tĩnh). Một docstring có thể đặt ở cùng vị
-trí và theo cùng quy tắc như với `defun` (ngay sau mệnh đề `where`, ở đầu thân, chỉ khi có các dạng của thân
-theo sau). Điều tương tự áp dụng cho các phương thức bên trong `impl`; chúng được lấy bằng
-`(documentation Type::method)`.
+Cho một kiểu định nghĩa bằng `defstruct` (3.6) hoặc `defenum` (3.7) các phương thức. Tương ứng với impl
+cố hữu của Rust (`impl Point { ... }`).
 
-Tham số kiểu riêng của một phương thức được viết trong tên của nó bằng `<...>`, giống như `defun`.
-Tham số kiểu của kiểu bên nhận (`T` bên dưới) do bên nhận quyết định; tham số riêng của phương thức
-(`U`) được suy ra từ các đối số của mỗi lần gọi.
+- Một mục có dạng `(tên (tham số...) KiểuTrảVề thân...)`, giống một mục trong `impl` của trait (3.9).
+- Mục có tham số đầu là `self` là **phương thức thể hiện**, được gọi dưới dạng `(name obj args...)`.
+  `self` không cần kiểu (`(self)` giống `((self Self))`, và `Self` là kiểu đích).
+- Mục không có `self` là **phương thức tĩnh**, được gọi dưới dạng `(Type::name args...)`. Phương thức
+  tĩnh tạo ra một giá trị chính là hàm dựng của kiểu đó. Tên tùy bạn; nên dùng `new`.
+- **Tính công khai đặt theo từng mục.** Chỉ những mục viết `(pub name ...)` mới dùng được bên ngoài module
+  định nghĩa kiểu. Không có `pub`, mục chỉ dùng được bên trong module đó.
+- Một kiểu có thể có bao nhiêu `impl` cũng được.
+- Bên gọi phân giải phương thức theo kiểu tĩnh của `obj` (phân phối đơn, tĩnh). Phương thức được tìm **chỉ
+  theo kiểu của đối số đầu tiên** (3.10).
+- **Docstring** có thể đặt ở cùng vị trí và theo cùng quy tắc như với `defun` (ở đầu thân, chỉ khi có
+  dạng thân theo sau). Lấy ra bằng `(documentation Type::name)`. Điều tương tự áp dụng cho các phương thức
+  trong `impl` của một trait.
+- Chỉ các kiểu của chính chương trình mới viết được. Không viết được cho kiểu của thư viện chuẩn như
+  `Vector`, `Option` hay `int` (lỗi báo `... is a standard library type`). Để thêm một thao tác cho kiểu
+  chuẩn, hãy định nghĩa một trait rồi viết `impl` của nó cho kiểu đó.
+- Trong `(impl X ...)`, nếu theo sau `X` là một mục (một danh sách), một `where` hoặc không có gì, đó là
+  impl cố hữu này; nếu là một tên, đó là `impl` của một trait (`(impl Trait Type ...)`, 3.9).
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; phương thức tĩnh
+(area (Point::new 2.0 3.0))   ; phương thức thể hiện. => 6.0
+```
+
+Tham số kiểu riêng của một phương thức được viết trong tên của nó bằng `<...>`, như với `defun`. Tham số
+kiểu của kiểu đích (`T` bên dưới) do bên nhận quyết định; tham số riêng của phương thức (`U`) được suy
+ra từ đối số của mỗi lần gọi.
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Đặt cho tham số kiểu riêng của phương thức những tên khác với các tham số kiểu mà kiểu bên nhận
-  khai báo (`T` của `(defstruct Box<T> ...)`) và khác với các tên viết trong bên nhận.
-- Nếu kiểu bên nhận là generic, trong bên nhận hãy viết tất cả tham số kiểu của nó dưới dạng biến
-  (`Box<T>`) hoặc tất cả dưới dạng kiểu cụ thể (`Box<int>`).
-- Phương thức bên trong `impl` không thể thêm tham số kiểu: chữ ký của nó theo chữ ký mà trait khai
-  báo.
+- Đặt cho tham số kiểu riêng của phương thức những tên khác với tham số kiểu của kiểu đích viết trong
+  `impl` (`T` của `(impl Box<T> ...)`).
+- `impl` của một kiểu generic viết mọi tham số kiểu dưới dạng biến (`Box<T>`), hoặc tất cả dưới dạng
+  kiểu cụ thể (`Box<int>`; khi đó các phương thức chỉ dùng được cho giá trị của kiểu đó).
+- Phương thức trong `impl` của một trait không thể thêm tham số kiểu: chữ ký của nó theo chữ ký mà trait
+  khai báo.
 
 ### 3.6 defstruct — struct (kiểu do người dùng định nghĩa)
 
@@ -634,63 +671,85 @@ Tham số kiểu của kiểu bên nhận (`T` bên dưới) do bên nhận quy�
   ...)
 ```
 
-- Mỗi trường là `(name type)` hoặc `(pub name type)` (khả năng hiển thị theo từng trường, độc lập với `pub`
-  của chính struct). Thêm một biểu thức ở cuối trở thành **giá trị mặc định** của slot (`(x i32 0)`); xem danh
-  sách tùy chọn bên dưới.
+- Mỗi trường là `(name type)` hoặc `(pub name type)` (công khai theo từng trường, độc lập với `pub` của chính
+  struct). Thêm một biểu thức nữa ở cuối sẽ trở thành **giá trị mặc định** của slot (`(x i32 0)`).
+- Giá trị được tạo bằng `make-instance` (bên dưới). Không có hàm dựng nhận các trường theo thứ tự nào được
+  sinh ra. Nếu muốn có hàm dựng, hãy viết nó trong `impl` (3.5) như một phương thức tĩnh.
 - Những thứ sau được sinh tự động:
-  - Hàm khởi tạo `Name::new` (đối số theo thứ tự trường)
-  - Các getter `(field-name instance)`, với đường cú pháp `instance::field-name`
-  - Các setter `(set-field-name instance value)`, với đường cú pháp `(setf instance::field-name value)`
+  - Bộ đọc `(field-name instance)`, với cách viết tắt `instance::field-name`
+  - Bộ ghi `(set-field-name instance value)`, với cách viết tắt `(setf instance::field-name value)`
 - Để làm cho chính struct là `pub`, hãy đặt `pub` ở phía trước, như `(pub defstruct ...)`.
 - **Hãy định nghĩa một kiểu trước khi nêu tên nó.** Kiểu của một trường có thể là chính struct đó
   (`(next Option<node>)`), nhưng không thể là một kiểu được định nghĩa sau: kiểu không có khai báo trước tương
   ứng với `defsignature`. Một tên chưa được định nghĩa cho cùng lỗi `unknown type` trong một kiểu đối số của
   `defun` hoặc trong `the`. Vì vậy hai kiểu tham chiếu lẫn nhau không thể viết được.
-- **Biến kiểu chỉ là những biến được viết ở các vị trí khai báo.** Với
-  `defun`/`defstruct`/`defenum`/`deftype`, là `<T>` của tên; với `defmethod`, là kiểu của bên nhận
-  (`(self box<T>)`, hoặc `box<T>` với một hàm tĩnh) và `<U>` của tên phương thức; với `impl`, là
-  kiểu đích và `impl<T>`; với `deftrait`, là `Self` và các kiểu liên kết của `(type Item)`. Một tên
-  xuất hiện lần đầu ở bất kỳ nơi nào khác (đối số, giá trị trả về, `the`/`lambda` trong thân) không
-  trở thành biến kiểu; nó là `unknown type`.
+- **Biến kiểu chỉ là những gì được viết ở vị trí khai báo.** Với `defun`/`defstruct`/`defenum`/`deftype`,
+  là `<T>` của tên; với `impl` cố hữu, là kiểu đích (`(impl box<T> ...)`) và `<U>` trong tên của mỗi
+  phương thức; với `impl` của trait, là kiểu đích và `impl<T>`; với `deftrait`, là `Self` và các kiểu
+  liên kết của `(type Item)`. Một tên xuất hiện lần đầu ở bất kỳ chỗ nào khác (đối số, giá trị trả về,
+  `the`/`lambda` trong thân) không trở thành biến kiểu; nó là `unknown type`.
 - **Docstring**: một literal chuỗi ngay sau tên, trước các trường, trở thành docstring
   (`(defstruct Name "doc" (field Type)...)`, cùng vị trí như `defstruct` của CL). Một trường luôn có dạng
   `(name Type ...)` và không bao giờ có thể là một chuỗi trần, nên không có sự mơ hồ. Lấy nó bằng
   `(documentation Name)`.
 
-#### Danh sách tùy chọn
-
-Viết một danh sách `(Name option...)` ở vị trí tên chỉ định các tùy chọn (cùng vị trí như CL).
+#### make-instance — tạo một giá trị
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; hàm khởi tạo keyword
-                  (:constructor at (x &optional y))  ; hàm khởi tạo BOA
-                  (:copier copy-point))
+(make-instance 'Name :field1 value1 :field2 value2 ...)
+```
+
+Giá trị struct được tạo bằng `make-instance`, như trong CLOS.
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; thứ tự tùy ý
+(make-instance 'point :x 1)           ; y nhận giá trị mặc định 0
+```
+
+- Tên kiểu được viết như một symbol trích dẫn bằng `'`. Nó không chọn kiểu lúc chạy; kiểu được xác định
+  lúc kiểm tra (như `'vector` của `concatenate`).
+- Các trường được đưa dưới dạng cặp `:tên giá-trị`. Các giá trị được đánh giá mỗi cái một lần, theo thứ
+  tự đã viết.
+- Trường không được đưa sẽ nhận giá trị mặc định. Không đưa một trường không có giá trị mặc định là lỗi
+  kiểu, và một trường không tồn tại hay cùng một trường đưa hai lần cũng vậy.
+- Đối số kiểu của một struct generic được suy ra từ các giá trị và kiểu mong đợi. Cũng có thể viết ra,
+  như `'Box<int>`.
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- Bên ngoài module định nghĩa kiểu, không thể đưa các trường không phải `pub`. Nếu một trường như vậy
+  không có giá trị mặc định, các module khác hoàn toàn không tạo được giá trị. Để cho phép, hãy viết một
+  hàm dựng `pub` trong `impl` (3.5).
+
+#### Danh sách tùy chọn
+
+Viết một danh sách `(Name option...)` ở vị trí tên sẽ chỉ định tùy chọn (cùng vị trí với CL).
+
+```lisp
+(defstruct (point (:copier copy-point))
   (x i32 0)          ; phần tử thứ ba là giá trị mặc định của slot đó
   (y i32 0))
 
-(point::make-point :y 7)   ; x là 0
-(point::at 1)              ; y là 0
-(point::at 1 2)
-(copy-point p)             ; một bản sao nông (giống copier của CL)
+(copy-point p)       ; một bản sao nông (giống copier của CL)
 ```
 
-- **`:constructor`**: thứ được sinh ra là một **hàm tĩnh** của kiểu (`point::make-point`), có thân luôn là
-  `(point::new ...)`. `new` vẫn là hàm khởi tạo cấu trúc duy nhất; thứ được tạo ở đây là một *cách gọi* nó.
-  Có thể khai báo nhiều cái.
-  - `(:constructor name)` nhận mọi slot dưới dạng `&key`. **Mọi slot cần có mặc định** (ngôn ngữ này không có
-    gì tương ứng với "slot chưa gán" của CL).
-  - `(:constructor name (slot...))` nhận các slot được nêu tên làm đối số theo vị trí (theo thứ tự bất kỳ). Các
-    slot không được nêu tên được điền bằng mặc định của chúng, nên **chúng cần có mặc định**. Sau
-    `&optional`, phần còn lại có thể bỏ qua (và tương tự cần có mặc định).
-- **`:copier`**: sinh ra một **phương thức thể hiện** trả về một giá trị mới có cùng giá trị slot. Nông, như
-  copier của CL.
+- **`:copier`**: sinh ra một **phương thức thể hiện** trả về giá trị mới có cùng các giá trị slot. Nông,
+  giống copier của CL.
 - **`:include Parent`**: đặt các slot của cha lên trước (mặc định cũng được kế thừa; cha có thể ở tệp khác).
   **Nó không tạo quan hệ kiểu nào**: con không phải kiểu con của cha, các phương thức của cha không áp dụng
   cho con, và không có phép kiểm tra lúc chạy nào nối hai kiểu. Ngôn ngữ này không có subtyping; các giao diện
   chung là việc của `deftrait`. Chỉ có *danh sách* các slot được nối.
-- **Mặc định của slot chỉ được đọc bởi các hàm khởi tạo được sinh ra.** Viết một mặc định mà không khai báo
-  `:constructor` nào là lỗi, vì nó không bao giờ có thể được dùng.
 - Các tùy chọn bị bỏ, và lý do:
+  - **`:constructor`**: hàm dựng được viết trong `impl` như một phương thức tĩnh (3.5). Viết tùy chọn này
+    là một lỗi, kèm hướng dẫn cách viết lại.
   - **`:conc-name`**: trong CL nó thêm tiền tố cho các hàm truy cập để tránh xung đột trong một không gian tên
     hàm phẳng. Ở đây, các hàm truy cập là phương thức dispatch theo kiểu của bên nhận, nên xung đột không xảy
     ra, và một tiền tố sẽ làm hỏng `instance::field` (vốn chỉ biết tên slot).
@@ -726,7 +785,7 @@ Viết một danh sách `(Name option...)` ở vị trí tên chỉ định các
     ((Some v) v)
     ((None) 0))
   ```
-- Phương thức và hàm liên kết được thêm sau bằng `defmethod`/`impl`, như với `defstruct`.
+- Phương thức và phương thức tĩnh được viết trong `impl` (3.5), như với `defstruct`.
 - Để làm cho chính enum là `pub`, hãy viết `(pub defenum ...)`.
 - **Docstring**: cùng vị trí và quy tắc như `defstruct`, ngay sau tên, trước các variant
   (`(defenum Name "doc" (Variant ...)...)`). Lấy nó bằng `(documentation Name)`.
@@ -776,9 +835,10 @@ kiểu, không phải một kiểu**.
   (method-name (recv params...) RetType body...))
 ```
 
-Thông qua `impl`, mỗi phương thức được đăng ký như một `defmethod` thông thường của `TargetType`. Trait được
-tham chiếu như các ràng buộc trait trong các mệnh đề `where` của hàm generic (xem
-[3.1 defun](#31-defun--định-nghĩa-hàm)). Tên trait cũng có thể là một đường dẫn `::` như `m::Trait`.
+Thông qua `impl`, mỗi phương thức được đăng ký như một phương thức của `TargetType` và được gọi như phương
+thức của một `impl` cố hữu (3.5). Các phương thức trong `impl` của một trait luôn công khai, không cần
+`pub`. Trait được tham chiếu như ràng buộc trait trong mệnh đề `where` của hàm generic (xem [3.1 defun](#31-defun--định-nghĩa-hàm)). Tên
+trait cũng có thể là một đường dẫn `::` như `m::Trait`.
 
 **Danh sách supertrait (bắt buộc)**: luôn được viết ngay sau tên trait. Mỗi phần tử là một tên trait trần,
 hoặc, nếu trait đó có kiểu liên kết, là `(Trait (Assoc Type))` với **mọi kiểu liên kết của nó được cố định**.
@@ -880,15 +940,32 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 (shadowing-import path...) ; một use cố ý lấy một tên trần đã được dùng
 ```
 
-- `module` tạo một không gian tên. **Kiểu không phải là không gian tên** (như trong Rust, một kiểu chỉ có các
-  hàm liên kết và phương thức).
-- `use` một kiểu cũng làm cho các hàm khởi tạo và các phương thức tĩnh công khai của nó khả dụng bằng tên trần
-  (ví dụ, sau `(use option)`, `some`/`none` có thể được gọi mà không cần `option::some`/`option::none`).
-- Thứ tự phân giải của các tên trần (định danh không có tiền tố): dạng đặc biệt → hàm khởi tạo → hàm tự do
-  (không gian tên hiện tại → gốc) → phương thức thể hiện (được phân giải theo kiểu tĩnh của đối số đầu tiên).
-  Nó không đi ngược lên qua các module cha trung gian.
-- Một đường dẫn có tiền tố `a::b` phân giải `a` theo thứ tự trên; nếu nó là một module thì đi vào bên trong,
-  và nếu nó là một kiểu, đoạn cuối được phân giải như một mục liên kết.
+- `module` tạo một không gian tên. **Kiểu không phải là không gian tên** (như trong Rust, một kiểu chỉ có
+  phương thức tĩnh và phương thức).
+- `use` một kiểu làm cho các biến thể của enum và các phương thức tĩnh công khai của kiểu đó cũng dùng được
+  bằng tên trần (ví dụ, sau `(use option)`, có thể gọi `some`/`none` mà không cần
+  `option::some`/`option::none`).
+- **Một tên chỉ có một nghĩa.** Hàm, biến toàn cục và macro dùng chung một không gian tên, và trong một
+  module không thể có hai trong số chúng trùng tên (lỗi bất kể cái nào được định nghĩa trước). Hàm và biến
+  không có không gian tên riêng như trong CL. Với cùng một tên ở các module khác nhau, cái gần hơn được
+  nhìn thấy.
+- Phân giải một tên trần `n` (ở vị trí gọi `(n a ...)`; tên của các dạng đặc biệt được xác định trước đó):
+  1. Biến cục bộ (tham số, và các ràng buộc của `let`, `labels`, `macrolet` và `symbol-macrolet`)
+  2. Nếu tên module `n` là một macro, macro đó
+  3. Các biến thể của enum đã `use`, và các phương thức tĩnh của kiểu đã `use`
+  4. Phương thức `n` của kiểu đối số đầu tiên (phương thức được tìm **chỉ theo kiểu của đối số đầu
+     tiên**)
+  5. Nếu tên module `n` là một hàm hoặc biến toàn cục, thì đó (với biến toàn cục, hàm là giá trị của nó
+     được gọi)
+
+  Tên module được tìm trong module hiện tại, rồi trong các bí danh `use`, rồi trong các module cha (đến
+  gốc), và được xác định bởi cái tìm thấy đầu tiên. Quy tắc này cũng áp dụng ở nơi một hàm được truyền
+  như giá trị; khi đó "kiểu của đối số đầu tiên" ở bước 4 là kiểu tham số đầu tiên của kiểu hàm được mong
+  đợi ở đó (viết `norm` ở nơi mong đợi `(fn (pt) int)` sẽ cho phương thức `norm` của `pt`). Nếu kiểu mong
+  đợi chưa được xác định, bỏ qua bước 4.
+- Một đường dẫn đầy đủ `a::...::n` được phân giải thành một tên module (macro, hàm hoặc biến toàn cục)
+  của module mà `a::...` chỉ đến, hoặc thành một biến thể hay phương thức tĩnh của một kiểu. `x::f` ở vị
+  trí giá trị (khi `x` là tên một giá trị) là việc đọc trường.
 - **`use` ảnh hưởng đến các dạng sau nó.** Một tệp được đọc từng dạng một, và các phụ thuộc được phân giải ngay
   trước khi dạng được kiểm tra, nên viết `m::f` **phía trên** `(use m)` cho `unresolved path`. Hãy đặt `use` ở
   đầu tệp.
@@ -952,15 +1029,17 @@ không bao giờ va chạm.
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-`pub` chỉ có thể đặt trên mười một loại ở trên (không phải `module`/`use`/`deftrait`/`impl`). Nó được viết với
-từ khóa định nghĩa ngay sau `pub`, không phải dạng `(pub (defun ...))` bọc định nghĩa trong ngoặc. Một `pub`
-chỉ công khai đúng một định nghĩa (không thể đánh dấu nhiều định nghĩa cùng lúc).
+`pub` chỉ đặt được cho mười loại ở trên (không cho `module`/`use`/`deftrait`/`impl`). Nó được viết với từ
+khóa định nghĩa ngay sau `pub`, không phải dạng `(pub (defun ...))` bọc định nghĩa trong ngoặc. Một `pub`
+công khai đúng một định nghĩa (không thể đánh dấu nhiều định nghĩa cùng lúc).
+
+Các phương thức của một `impl` cố hữu được công khai theo từng mục, bằng cách viết `(pub name ...)` (3.5).
+Các trường của struct được viết `(pub x i32)` (3.6).
 
 ### 3.14 defmacro — định nghĩa macro
 
@@ -1104,6 +1183,19 @@ Các loại mẫu:
   do người dùng định nghĩa trở thành quy tắc so sánh nguyên trạng. `expr` có thể tham chiếu mọi thứ nhìn thấy
   được từ vị trí của nhánh (đối số, ràng buộc bên ngoài, biến toàn cục)
 - `(Ctor sub-pattern...)` — các mẫu hàm khởi tạo (`Some x` `None` `Cons a d` `Ok v`, v.v.)
+- `(Type :slot pattern... :slot...)` — mẫu struct. Viết các slot sau tên kiểu dưới dạng từ khóa. Nếu sau
+  từ khóa là một mẫu, slot đó được so khớp với mẫu; nếu sau đó là một từ khóa khác hoặc không có gì, slot
+  được ràng buộc với một biến cùng tên. Các slot không viết không được so khớp (mẫu không phụ thuộc vào
+  số lượng hay thứ tự các trường):
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; ràng buộc x, và so khớp y với (some b)
+      ((point :x a) a)))                 ; ràng buộc a
+  ```
 - `#{p0 p1 ...}` — mẫu tuple. Mỗi phần tử được khớp bằng mẫu con của riêng nó. Đối với `Sexpr`, nó
   chỉ khớp với dữ liệu `#{..}` có cùng số phần tử
 - `(:or p1 p2 ...)` — mẫu hoặc: khớp khi bất kỳ lựa chọn nào khớp. Chỉ có một thân, nên mọi lựa chọn
@@ -1159,9 +1251,8 @@ Với một đối tượng `Sexpr`, ngoài 19 mẫu variant dựng sẵn ở tr
 thể hiện của ADT do người dùng định nghĩa): cú pháp để lấy lại, bằng `match`, một thể hiện của
 `defstruct`/`defenum` (chương 3) đã được chuyển đổi ngầm thành `Sexpr`, như trong `(list p 42)`:
 
-- `(TypeName sub-pattern...)` — phân rã trường với **tên kiểu** đứng đầu (chỉ struct: một `defstruct` luôn có
-  một variant, nên nó được viết bằng tên kiểu thay vì tên variant). Ví dụ, với
-  `(defstruct point (x f64) (y f64))`, là `(point x y)`.
+- `(TypeName :slot pattern...)` — phân rã trường với **tên kiểu** đứng đầu (chỉ struct), viết cùng dạng
+  với các mẫu struct ở trên. Ví dụ, với `(defstruct point (x f64) (y f64))`, `(point :x :y)`.
 - Một tên variant trần `(VariantName sub-pattern...)` — lấy ra một variant của một `defenum`. Được phân giải
   như một tên trần nhìn thấy được sau `(use EnumType)` (cùng quy tắc hiển thị như khi gọi hàm khởi tạo). Ví dụ,
   với `(defenum color (red) (blue))`, là `(red)` `(blue)` sau `(use color)`. Nếu tên variant của nhiều enum nhìn
@@ -1201,7 +1292,7 @@ khai là mở, nên nó không bao giờ có thể đầy đủ, và cần `_`:
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; phân rã trường với tên kiểu đứng đầu
+    ((circle :r) (* (* r r) 3))    ; phân rã trường với tên kiểu đứng đầu
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1261,7 +1352,7 @@ và không thể vượt qua ranh giới `lambda`). Kiểu của một `loop` l�
 (return-from name value)            ; thoát với một giá trị
 ```
 
-**Mỗi hàm của `defun` / `defmethod` / `labels` ngầm thiết lập một block mang tên của chính nó** (như trong CL).
+**Mỗi hàm của `defun` / phương thức trong `impl` / `labels` ngầm thiết lập một block mang tên của chính nó** (như trong CL).
 Vì vậy `(return-from f v)` là một lần thoát sớm khỏi hàm:
 
 ```lisp
@@ -1597,9 +1688,8 @@ Việc lưu trữ biến toàn cục được **dùng chung** với mã đã bi�
 `defvar` được chạy một lần bởi phần khởi tạo đã biên dịch, và việc khôi phục bỏ qua nó, nên một biểu thức
 khởi tạo có tác dụng phụ không chạy hai lần.
 
-`compile-file` cũng đọc thư viện chuẩn (và nhúng các thân của nó vào tệp thực thi), nên các hàm của thư viện
-chuẩn như `abs`/`gcd`, và `(impl print-object ...)` cũng như `(defmethod print-object ...)`, có thể dùng với
-AOT.
+`compile-file` cũng đọc thư viện chuẩn (và nhúng thân của nó vào tệp thực thi), nên các hàm thư viện chuẩn
+như `abs`/`gcd`, và `(impl print-object ...)`, dùng được với AOT.
 
 `compile-file` cũng chấp nhận `use` (và `import`/`shadowing-import`). `(use m)` của tệp đầu vào tìm tệp theo
 cùng quy tắc như `typl file.typl`, và các tệp phụ thuộc tìm được cũng được biên dịch và liên kết vào tệp thực
@@ -1812,9 +1902,9 @@ thực sự phải chờ là lỗi** (không dừng tiến trình ngay tại ch�
   các dạng cấp cao nhất, các thread khác không đẩy các task tiến lên (các task còn lại tiếp tục từ chỗ chúng dừng
   ở lần đánh giá kế tiếp). Cuối một lần đánh giá, nó chờ từng thread xong bước hiện tại của nó, nên nếu một hàm C
   (`defffi`) cứ chặn bên trong một `thread`, lần đánh giá không kết thúc cho đến khi nó trả về.
-- **In trên các worker**: các phương thức `print-object` / `~/name/` được thông dịch không thể chạy trên các
-  thread khác, nên in những giá trị như vậy trên một thread khác là một panic được đối xử giống một `(panic ...)`
-  (`(compile T::print-object)`, hoặc in từ task chính).
+- **In trên worker**: các phương thức `print-object` được thông dịch, và các hàm và phương thức được thông
+  dịch mà `~/name/` gọi, không thể chạy trên luồng khác, nên in những giá trị như vậy trên luồng khác là
+  một panic được xử lý như `(panic ...)` (`(compile T::print-object)`, hoặc in từ tác vụ chính).
 - **Tranh chấp dữ liệu là không xác định** (cùng vị thế như Go). Kết quả của việc nhiều task thay đổi cùng một
   giá trị mà không qua `Mutex<T>` / `Chan<T>` không được đảm bảo.
 - **`task` trả về một giá trị.** Khác câu lệnh `go` của Go, nó trả về một `Task<T>`, và `(wait t)` lấy kết quả.

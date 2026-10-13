@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -165,14 +165,14 @@ I källkod skrivs typer som vanliga symboler eller listor.
 - En generisk funktion skriver sina typparametrar inom vinkelparenteser efter sitt namn:
   `(defun name<T1,T2...> (params) Ret body...)` (samma vinkelparentessyntax som `Vector<T>` på
   typpositioner).
-- `defun`/`lambda`/`defmethod` accepterar variadiska argument när `&rest (name Type)` skrivs sist:
+- `defun`/`lambda`/metoder i `impl` accepterar variadiska argument när `&rest (name Type)` skrivs sist:
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)` (i kroppen är `xs` alltid bunden som en
   `Option<Sexpr>`, en lista av S-uttryck. Varje faktiskt argument vid anropet typkontrolleras som `Type2`
   individuellt och omsluts sedan i en `Sexpr`).
   `defmacro` har också sitt eget `&rest`, men skiljer sig genom att det alltid är en otypad `Sexpr`
   (`defun`/`lambda` anger elementtypen). En funktionstyp kan också beskriva en variadisk funktion, som
   `(fn (T1... &rest Te) Ret)`.
-- **`&optional` / `&key`** (för `defun` och `defmethod`; inte för `lambda`/`labels`, av skälet nedan, och
+- **`&optional` / `&key`** (för `defun` och metoder i `impl`; inte för `lambda`/`labels`, av skälet nedan, och
   `defmacro` har en separat implementation, också nedan). Ordningen är CL:s:
   `required &optional &rest &key`. Varje parameter skrivs `(name Type)` eller
   `(name Type default-expr)`:
@@ -200,15 +200,18 @@ I källkod skrivs typer som vanliga symboler eller listor.
     och `&rest` kan användas tillsammans.
   - De kan användas i generiska funktioner, men **en typparameter som bara förekommer i utelämnade
     argument kan inte härledas och är ett fel** (det finns inget värde att matcha mot).
-  - **`defmethod` kan ha samma tre avsnitt** (både för instansmetoder och statiska funktioner).
-    Lista `&optional`/`&rest`/`&key` efter mottagaren:
+  - **Metoder i `impl` kan ha samma tre avsnitt** (både instansmetoder och statiska metoder). En
+    instansmetod skriver `&optional`/`&rest`/`&key` efter `self`:
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; statisk funktion
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; statisk metod
     (point::origin :y 7)
     ```
 
@@ -216,7 +219,7 @@ I källkod skrivs typer som vanliga symboler eller listor.
     standarduttryck kan inte nämna ägarens typparametrar** (samma begränsning som `defun` har för sina
     egna typparametrar: det som bäddas in när argumentet utelämnas är ett *kontrollerat* uttryck, så dess
     typ kan inte lämnas som en abstrakt variabel).
-  - **De kan inte användas i trait-metoder.** `deftrait` har ingen syntax för dem, och om bara
+  - **De kan inte användas i trait-metoder.** Det gäller också metoderna som står i ett traits `impl`. `deftrait` har ingen syntax för dem, och om bara
     `impl`-sidan kunde deklarera avsnitt skulle anrop med en `:dyn`-mottagare (som fyller argument från
     traitets deklaration) och anrop med en konkret mottagare (som fyller dem från `impl`-deklarationen)
     bli olika saker. Aritet för en vtable-plats är fast.
@@ -278,8 +281,7 @@ Tre saker kan inte deklareras:
 - **Allt annat än `defun`.** Ett `defmacro` kräver att makrokroppen **redan har körts** för att kunna
   expandera, vilket inte kan ersättas av att registrera en signatur. För typer
   (`defstruct`/`defenum`/`deftrait`) är registreringen "vad koden som registrerar själva typen behöver",
-  vilket inte är fristående på det sätt en signatur är. En `defmethod` registreras på typen som äger den,
-  så den följer typen.
+  vilket inte är fristående på det sätt en signatur är. Metoderna i en `impl` registreras på typen som äger dem, så de följer typen.
 
 CL:s motsvarighet är `(declaim (ftype (function (i32) bool) even2))`, men det kommer med ett helt
 deklarationssystem och är bara **rådgivande**. Här, med statisk typning, kontrolleras deklarationer.
@@ -605,39 +607,74 @@ igen för tillbaka värdena till det som står skrivet.
 Typannoteringen är obligatorisk (den härleds inte från initieraren). `defvar` kan ändras; `defconstant`
 kan inte (`setf` är ett fel).
 
-### 3.5 defmethod — metoddefinitioner
+### 3.5 impl — en typs metoder
 
 ```lisp
-; instansmetod: kan anropas som (m obj args...)
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; statisk metod: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; instansmetod: (name obj args...)
+  (pub name ...))                                      ; publik även utanför typens modul
 
-; statisk / associerad funktion: kan anropas som (Type::name args...)
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; en generisk typ
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-Anroparen löser upp metoden från den statiska typen på `obj` (enkel, statisk dispatch). En
-dokumentationssträng kan placeras på samma position och under samma regler som för `defun` (direkt efter
-`where`-satsen, i början av kroppen, bara när kroppsformer följer). Detsamma gäller metoder inuti `impl`;
-de hämtas med `(documentation Type::method)`.
+Ger metoder till en typ som definierats med `defstruct` (3.6) eller `defenum` (3.7). Motsvarar Rusts
+inneboende impl (`impl Point { ... }`).
 
-En metods egna typparametrar skrivs i namnet med `<...>`, som för `defun`. Mottagartypens
-typparametrar (`T` nedan) bestäms av mottagaren; metodens egna (`U`) härleds från argumenten i varje
-anrop.
+- En post har formen `(namn (parametrar...) Returtyp kropp...)`, samma som en post i ett traits `impl`
+  (3.9).
+- En post vars första parameter är `self` är en **instansmetod**, som anropas som `(name obj args...)`.
+  `self` behöver ingen typ (`(self)` är samma sak som `((self Self))`, och `Self` är måltypen).
+- En post utan `self` är en **statisk metod**, som anropas som `(Type::name args...)`. En statisk metod
+  som skapar ett värde är typens konstruktor. Namnet är fritt; `new` rekommenderas.
+- **Synligheten gäller per post.** Endast poster som skrivs `(pub name ...)` kan användas utanför den modul
+  som definierar typen. Utan `pub` kan en post bara användas inom den modulen.
+- En typ kan ha hur många `impl` som helst.
+- Anroparen avgör metoden utifrån den statiska typen hos `obj` (enkel, statisk dispatch). En metod söks
+  **bara utifrån typen hos det första argumentet** (3.10).
+- **Docstrings** kan placeras på samma ställe och enligt samma regler som för `defun` (i början av
+  kroppen, bara när kroppsformer följer). Hämta dem med `(documentation Type::name)`. Detsamma gäller
+  metoderna i ett traits `impl`.
+- Bara programmets egna typer kan ha en. En typ från standardbiblioteket som `Vector`, `Option` eller
+  `int` kan inte det (felet säger `... is a standard library type`). För att lägga till en operation till
+  en standardtyp, definiera ett trait och skriv dess `impl` för den typen.
+- Om det som följer `X` i `(impl X ...)` är en post (en lista), ett `where` eller ingenting, är det den
+  inneboende impl:en; är det ett namn, är det ett traits `impl` (`(impl Trait Type ...)`, 3.9).
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; statisk metod
+(area (Point::new 2.0 3.0))   ; instansmetod. => 6.0
+```
+
+En metods egna typparametrar skrivs i dess namn med `<...>`, som för `defun`. Måltypens typparametrar (`T`
+nedan) bestäms av mottagaren; metodens egna (`U`) härleds ur argumenten i varje anrop.
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Metodens egna typparametrar ska ha andra namn än både typparametrarna som mottagartypen deklarerar
-  (`T` i `(defstruct Box<T> ...)`) och namnen som står i mottagaren.
-- Om mottagartypen är generisk skriver man i mottagaren antingen alla dess typparametrar som
-  variabler (`Box<T>`) eller alla som konkreta typer (`Box<int>`).
-- En metod i `impl` kan inte lägga till typparametrar: dess signatur följer den som traitet
+- Ge metodens egna typparametrar namn som skiljer sig från måltypens typparametrar som skrivs i `impl`
+  (`T` i `(impl Box<T> ...)`).
+- En `impl` för en generisk typ skriver alla dess typparametrar som variabler (`Box<T>`) eller alla som
+  konkreta typer (`Box<int>`; metoderna gäller då bara värden av den typen).
+- En metod i ett traits `impl` kan inte lägga till typparametrar: dess signatur följer den som traitet
   deklarerar.
 
 ### 3.6 defstruct — structs (användardefinierade typer)
@@ -654,63 +691,84 @@ anrop.
   ...)
 ```
 
-- Varje fält är `(name type)` eller `(pub name type)` (synlighet per fält, oberoende av structens eget
-  `pub`). Ytterligare ett uttryck på slutet blir platsens **standardvärde** (`(x i32 0)`); se
-  alternativlistan nedan.
+- Varje fält är `(name type)` eller `(pub name type)` (synlighet per fält, oberoende av structens eget `pub`).
+  Ytterligare ett uttryck i slutet blir platsens **standardvärde** (`(x i32 0)`).
+- Värden skapas med `make-instance` (nedan). Ingen konstruktor som tar fälten i ordning genereras. Vill du
+  ha en konstruktor, skriv den i `impl` (3.5) som en statisk metod.
 - Följande genereras automatiskt:
-  - Konstruktorn `Name::new` (argument i fältens ordning)
-  - Getters `(field-name instance)`, med sockret `instance::field-name`
-  - Setters `(set-field-name instance value)`, med sockret `(setf instance::field-name value)`
+  - Läsare `(field-name instance)`, med kortformen `instance::field-name`
+  - Skrivare `(set-field-name instance value)`, med kortformen `(setf instance::field-name value)`
 - För att göra själva structen `pub` sätter man `pub` framför, som i `(pub defstruct ...)`.
 - **Definiera en typ innan du namnger den.** Ett fälts typ kan vara själva structen (`(next Option<node>)`),
   men inte en typ som definieras senare: typer har ingen framåtdeklaration som motsvarar `defsignature`.
   Ett namn som ännu inte är definierat ger samma `unknown type`-fel i en `defun`-argumenttyp eller i
   `the`. Så två typer som refererar till varandra kan inte skrivas.
-- **Typvariabler är bara de som skrivs på deklarerande positioner.** För
-  `defun`/`defstruct`/`defenum`/`deftype` är det `<T>` i namnet; för `defmethod` mottagarens typ
-  (`(self box<T>)`, eller `box<T>` för en statisk metod) och `<U>` i metodens namn; för `impl`
-  måltypen och `impl<T>`; för `deftrait` `Self` och de associerade typerna i `(type Item)`. Ett namn
-  som förekommer för första gången någon annanstans (argument, returvärdet, `the`/`lambda` i
-  kroppen) blir inte en typvariabel; det är `unknown type`.
+- **Typvariabler är bara de som skrivs i deklarerande positioner.** För `defun`/`defstruct`/`defenum`/`deftype`
+  namnets `<T>`; för en inneboende `impl` måltypen (`(impl box<T> ...)`) och `<U>` i varje metods namn; för
+  ett traits `impl` måltypen och `impl<T>`; för `deftrait` `Self` och de associerade typerna i
+  `(type Item)`. Ett namn som dyker upp första gången någon annanstans (argument, returvärde,
+  `the`/`lambda` i kroppen) blir ingen typvariabel; det är `unknown type`.
 - **Dokumentationssträngar**: en strängliteral direkt efter namnet, före fälten, blir dokumentationssträngen
   (`(defstruct Name "doc" (field Type)...)`, samma position som CL:s `defstruct`). Ett fält har alltid
   formen `(name Type ...)` och kan aldrig vara en bar sträng, så det finns ingen tvetydighet. Hämta den med
   `(documentation Name)`.
 
-#### Alternativlista
-
-Att skriva en lista `(Name option...)` på namnpositionen anger alternativ (samma position som i CL).
+#### make-instance — skapa ett värde
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; nyckelordskonstruktor
-                  (:constructor at (x &optional y))  ; BOA-konstruktor
-                  (:copier copy-point))
-  (x i32 0)          ; ett tredje element är den platsens standardvärde
-  (y i32 0))
-
-(point::make-point :y 7)   ; x är 0
-(point::at 1)              ; y är 0
-(point::at 1 2)
-(copy-point p)             ; en ytlig kopia (samma som CL:s copier)
+(make-instance 'Name :field1 value1 :field2 value2 ...)
 ```
 
-- **`:constructor`**: det som genereras är en **statisk funktion** för typen (`point::make-point`), vars
-  kropp alltid är `(point::new ...)`. `new` förblir den enda strukturella konstruktorn; det som görs här
-  är ett *sätt att anropa* den. Flera kan deklareras.
-  - `(:constructor name)` tar varje plats som `&key`. **Varje plats behöver ett standardvärde** (det här
-    språket har inget som motsvarar CL:s "obunden plats").
-  - `(:constructor name (slot...))` tar de namngivna platserna som positionella argument (i vilken ordning
-    som helst). Platser som inte nämns fylls med sina standardvärden, så **de behöver standardvärden**.
-    Efter `&optional` får resten utelämnas (och behöver likaså standardvärden).
-- **`:copier`**: genererar en **instansmetod** som returnerar ett nytt värde med samma platsvärden. Ytlig,
+Ett structvärde skapas med `make-instance`, som i CLOS.
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; i valfri ordning
+(make-instance 'point :x 1)           ; y får sitt standardvärde 0
+```
+
+- Typnamnet skrivs som en symbol citerad med `'`. Den väljer ingen typ vid körning; typen bestäms vid
+  kontrollen (som `'vector` i `concatenate`).
+- Fält anges som par `:namn värde`. Värdena evalueras en gång var, i den skrivna ordningen.
+- Ett fält som inte anges får sitt standardvärde. Att inte ange ett fält utan standardvärde är ett typfel,
+  liksom ett okänt fält och samma fält angivet två gånger.
+- En generisk structs typargument härleds ur värdena och den förväntade typen. De kan också skrivas ut,
+  som i `'Box<int>`.
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- Utanför den modul som definierar typen kan fält som inte är `pub` inte anges. Har ett sådant fält inget
+  standardvärde kan andra moduler inte skapa värdet alls. För att låta dem göra det, skriv en
+  `pub`-konstruktor i `impl` (3.5).
+
+#### Alternativlista
+
+En lista `(Name option...)` på namnets plats anger alternativ (samma plats som i CL).
+
+```lisp
+(defstruct (point (:copier copy-point))
+  (x i32 0)          ; ett tredje element är platsens standardvärde
+  (y i32 0))
+
+(copy-point p)       ; en grund kopia (som CL:s copier)
+```
+
+- **`:copier`**: genererar en **instansmetod** som returnerar ett nytt värde med samma platsvärden. Grund,
   som CL:s copier.
 - **`:include Parent`**: lägger föräldrens platser först (standardvärden ärvs också; föräldern får finnas i
   en annan fil). **Det skapar ingen typrelation**: barnet är inte en subtyp av föräldern, förälderns
   metoder gäller inte barnet, och det finns inget test vid körning som länkar de två. Det här språket har
   ingen subtypning; gemensamma gränssnitt är `deftrait`s uppgift. Bara *listan* över platser förenas.
-- **Platsernas standardvärden läses bara av genererade konstruktorer.** Att skriva ett standardvärde utan
-  att deklarera någon `:constructor` är ett fel, eftersom det aldrig kunde användas.
 - Alternativ som utelämnats, och varför:
+  - **`:constructor`**: en konstruktor skrivs i `impl` som en statisk metod (3.5). Att skriva det här
+    alternativet är ett fel som visar hur man skriver om det.
   - **`:conc-name`**: i CL sätter det ett prefix på accessorer för att undvika krockar i en enda platt
     funktionsnamnrymd. Här är accessorer metoder som dispatchas på mottagarens typ, så krockar uppstår inte,
     och ett prefix skulle bryta `instance::field` (som bara känner till platsnamnet).
@@ -746,7 +804,7 @@ Att skriva en lista `(Name option...)` på namnpositionen anger alternativ (samm
     ((Some v) v)
     ((None) 0))
   ```
-- Metoder och associerade funktioner läggs till efteråt med `defmethod`/`impl`, som med `defstruct`.
+- Metoder och statiska metoder skrivs i `impl` (3.5), som för `defstruct`.
 - För att göra själva enumen `pub` skriver man `(pub defenum ...)`.
 - **Dokumentationssträngar**: samma position och regler som `defstruct`, direkt efter namnet, före
   varianterna (`(defenum Name "doc" (Variant ...)...)`). Hämta den med `(documentation Name)`.
@@ -797,9 +855,10 @@ typ, inte en typ**.
   (method-name (recv params...) RetType body...))
 ```
 
-Genom `impl` registreras varje metod som en vanlig `defmethod` för `TargetType`. Traits refereras som
-trait-gränser i `where`-satserna för generiska funktioner (se [3.1 defun](#31-defun--funktionsdefinitioner)).
-Ett traitnamn kan också vara en `::`-sökväg som `m::Trait`.
+Genom `impl` registreras varje metod som en metod hos `TargetType` och anropas som en metod i en inneboende
+`impl` (3.5). Metoderna i ett traits `impl` är alltid publika, utan `pub`. Traits refereras som
+traitgränser i `where`-satserna hos generiska funktioner (se [3.1 defun](#31-defun--funktionsdefinitioner)). Ett traitnamn kan också vara en
+`::`-sökväg som `m::Trait`.
 
 **Listan över supertraits (obligatorisk)**: skrivs alltid direkt efter traitnamnet. Varje element är ett
 bart traitnamn, eller, om det traitet har associerade typer, `(Trait (Assoc Type))` med **alla dess
@@ -905,15 +964,33 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
 (shadowing-import path...) ; ett use som medvetet tar ett bart namn som redan används
 ```
 
-- `module` skapar en namnrymd. **Typer är inte namnrymder** (som i Rust har en typ bara associerade
-  funktioner och metoder).
-- Att göra `use` på en typ gör dess konstruktorer och publika statiska metoder tillgängliga med bara namnet
-  också (till exempel kan efter `(use option)` `some`/`none` anropas utan `option::some`/`option::none`).
-- Upplösningsordningen för bara namn (okvalificerade identifierare): specialformer → konstruktorer → fria
-  funktioner (aktuell namnrymd → rot) → instansmetoder (upplösta efter den statiska typen på det första
-  argumentet). Den går inte upp genom mellanliggande föräldramoduler.
-- En kvalificerad sökväg `a::b` löser upp `a` i ordningen ovan; om det är en modul går den in i den, och om
-  det är en typ löses det sista segmentet upp som en associerad post.
+- `module` skapar en namnrymd. **Typer är inte namnrymder** (som i Rust har en typ bara statiska metoder och
+  metoder).
+- Att göra `use` på en typ gör även en enums varianter och typens publika statiska metoder tillgängliga under
+  det nakna namnet (till exempel kan `some`/`none` efter `(use option)` anropas utan
+  `option::some`/`option::none`).
+- **Ett namn har en betydelse.** Funktioner, globala variabler och makron delar en namnrymd, och inom en
+  modul kan inte två av dem ha samma namn (ett fel oavsett vilken som definieras först). Funktioner och
+  variabler har inte separata namnrymder som i CL. För samma namn i olika moduler är det närmaste synligt.
+- Upplösning av ett naket namn `n` (i anropspositionen `(n a ...)`; namn på specialformer bestäms före
+  detta):
+  1. Lokala (parametrar samt bindningarna i `let`, `labels`, `macrolet` och `symbol-macrolet`)
+  2. Om modulnamnet `n` är ett makro, det makrot
+  3. Varianterna i en enum som tagits in med `use`, och de statiska metoderna i en typ som tagits in med
+     `use`
+  4. Metoden `n` hos typen för det första argumentet (metoder söks **bara utifrån typen hos det första
+     argumentet**)
+  5. Om modulnamnet `n` är en funktion eller en global variabel, den (för en global variabel anropas
+     funktionen som är dess värde)
+
+  Ett modulnamn söks i den aktuella modulen, sedan i `use`-aliasen, sedan i föräldramodulerna (upp till
+  roten), och bestäms av den första träffen. Samma regel gäller där en funktion skickas som värde; "typen
+  för det första argumentet" i steg 4 är då den första parametertypen i den funktionstyp som förväntas där
+  (att skriva `norm` där `(fn (pt) int)` förväntas ger metoden `norm` hos `pt`). Är den förväntade typen
+  inte bestämd än hoppas steg 4 över.
+- En kvalificerad sökväg `a::...::n` löses upp till ett modulnamn (makro, funktion eller global variabel) i
+  den modul som `a::...` namnger, eller till en variant eller statisk metod hos en typ. `x::f` i en
+  värdeposition (där `x` namnger ett värde) är en fältläsning.
 - **`use` påverkar formerna efter det.** En fil läses en form i taget, och beroenden löses precis före
   formen kontrolleras, så att skriva `m::f` **ovanför** `(use m)` ger `unresolved path`. Sätt `use` överst i
   filen.
@@ -981,15 +1058,17 @@ aldrig.
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-`pub` kan sättas bara på de elva slagen ovan (inte på `module`/`use`/`deftrait`/`impl`). Det skrivs med
-definitionsnyckelordet direkt efter `pub`, inte i formen `(pub (defun ...))` där definitionen omsluts av
+`pub` kan bara sättas på de tio sorterna ovan (inte på `module`/`use`/`deftrait`/`impl`). Det skrivs med
+definitionens nyckelord direkt efter `pub`, inte i formen `(pub (defun ...))` som omsluter definitionen med
 parenteser. Ett `pub` gör exakt en definition publik (flera definitioner kan inte markeras på en gång).
+
+Metoderna i en inneboende `impl` görs publika post för post, som `(pub name ...)` (3.5). Structfält skrivs
+`(pub x i32)` (3.6).
 
 ### 3.14 defmacro — makrodefinitioner
 
@@ -1138,6 +1217,19 @@ Slag av mönster:
   användardefinierad `Eq`-implementation blir jämförelseregeln som den är. `expr` kan referera till allt
   som syns från grenens position (argument, yttre bindningar, globaler)
 - `(Ctor sub-pattern...)` — konstruktormönster (`Some x` `None` `Cons a d` `Ok v` och så vidare)
+- `(Type :slot pattern... :slot...)` — structmönster. Skriv platserna efter typnamnet som nyckelord. Följs
+  ett nyckelord av ett mönster matchas platsen mot mönstret; följs det av ett annat nyckelord eller
+  ingenting binds platsen till en variabel med samma namn. Platser som inte skrivs matchas inte (mönstret
+  beror alltså inte på fältens antal eller ordning):
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; binder x och matchar y mot (some b)
+      ((point :x a) a)))                 ; binder a
+  ```
 - `#{p0 p1 ...}` — ett tupelmönster. Varje element matchas mot sitt eget delmönster. Mot en `Sexpr`
   matchar det bara `#{..}`-data med samma antal element
 - `(:or p1 p2 ...)` — ett eller-mönster: det matchar när något av alternativen matchar. Det finns en
@@ -1196,9 +1288,8 @@ Mot en `Sexpr`-scrutinee kan man, förutom de 19 inbyggda variantmönstren ovan,
 med `match`, en instans av en `defstruct`/`defenum` (kapitel 3) som implicit konverterats till `Sexpr`,
 som i `(list p 42)`:
 
-- `(TypeName sub-pattern...)` — fältuppdelning med **typnamnet** först (bara structs: en `defstruct` har
-  alltid en variant, så den skrivs med typnamnet i stället för ett variantnamn). Till exempel för
-  `(defstruct point (x f64) (y f64))`, `(point x y)`.
+- `(TypeName :slot pattern...)` — fältuppdelning med **typnamnet** först (bara structar), skriven i samma
+  form som structmönstren ovan. Till exempel för `(defstruct point (x f64) (y f64))`: `(point :x :y)`.
 - Ett bart variantnamn `(VariantName sub-pattern...)` — tar ut en variant av en `defenum`. Löses upp som
   ett bart namn som syns efter `(use EnumType)` (samma synlighetsregler som när konstruktorn anropas).
   Till exempel för `(defenum color (red) (blue))`, `(red)` `(blue)` efter `(use color)`. Om variantnamn i
@@ -1239,7 +1330,7 @@ syntax behövs. Mängden implementerande typer är öppen, så den kan aldrig va
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; fältuppdelning med typnamnet först
+    ((circle :r) (* (* r r) 3))    ; fältuppdelning med typnamnet först
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1301,7 +1392,7 @@ de `break`/`return` som finns inuti den (`!` om den aldrig lämnas). För att l�
 (return-from name value)            ; lämnar med ett värde
 ```
 
-**Varje funktion i `defun` / `defmethod` / `labels` upprättar implicit ett block med sitt eget namn** (som i
+**Varje funktion i `defun` / metoder i `impl` / `labels` upprättar implicit ett block med sitt eget namn** (som i
 CL). Så `(return-from f v)` är en tidig retur från funktionen:
 
 ```lisp
@@ -1645,9 +1736,8 @@ Lagringen av globala variabler är **delad** med kompilerad kod (samma platser).
 körs en gång av den kompilerade initieringen, och återställningen hoppar över den, så en initierare med
 sidoeffekter körs inte två gånger.
 
-`compile-file` läser också standardbiblioteket (och bäddar in dess kroppar i den körbara filen), så
-standardbiblioteksfunktioner som `abs`/`gcd`, och `(impl print-object ...)` såväl som
-`(defmethod print-object ...)`, kan användas med AOT.
+`compile-file` läser även standardbiblioteket (och bäddar in dess kroppar i den körbara filen), så funktioner i
+standardbiblioteket som `abs`/`gcd`, och `(impl print-object ...)`, kan användas med AOT.
 
 `compile-file` accepterar också `use` (och `import`/`shadowing-import`). Ingångsfilens `(use m)` hittar
 filer enligt samma regler som `typl file.typl`, och de beroendefiler som hittas kompileras och länkas också
@@ -1867,9 +1957,9 @@ panic som `` `recv` cannot block: ... ``, behandlad på samma sätt som en `(pan
   nästa utvärdering). Vid slutet av en utvärdering väntar den på att varje tråd ska bli klar med sitt
   aktuella steg, så om en C-funktion (`defffi`) fortsätter blockera inuti en `thread` tar utvärderingen inte
   slut förrän den returnerar.
-- **Utskrift på arbetare**: tolkade `print-object`- / `~/name/`-metoder kan inte köras på andra trådar, så
-  att skriva ut sådana värden på en annan tråd är en panic som behandlas på samma sätt som en `(panic ...)`
-  (`(compile T::print-object)`, eller skriv ut från huvudtasken).
+- **Utskrift på workers**: tolkade `print-object`-metoder, och tolkade funktioner och metoder som `~/name/`
+  anropar, kan inte köras på andra trådar, så att skriva ut sådana värden på en annan tråd är en panic som
+  behandlas som en `(panic ...)` (`(compile T::print-object)`, eller skriv ut från huvuduppgiften).
 - **Dataracer är odefinierade** (samma ståndpunkt som Go). Resultatet av att flera tasks ändrar samma värde
   utan att gå genom `Mutex<T>` / `Chan<T>` är inte garanterat.
 - **`task` returnerar ett värde.** Till skillnad från Gos `go`-sats returnerar den en `Task<T>`, och

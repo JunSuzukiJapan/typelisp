@@ -4210,12 +4210,22 @@ impl crate::CompileTarget {
     }
 
     /// The definition's name as one string: its path for a function,
-    /// [`crate::types::method_link_name`] for a method. For messages; nothing reads a
-    /// definition back out of it.
+    /// [`crate::types::method_link_name`] for a method. What the runtime's
+    /// messages say, and what a rewritten `~/name/` control string carries
+    /// for [`Self::from_link_name`] to read back.
     pub fn link_name(&self) -> String {
         match self {
             crate::CompileTarget::Fn(path) => path.to_string(),
             crate::CompileTarget::Method(type_name, method) => crate::types::method_link_name(type_name, method),
+        }
+    }
+
+    /// The definition's name as the source writes it, `point::area` for a
+    /// method — what the checker's messages say.
+    pub fn written_name(&self) -> String {
+        match self {
+            crate::CompileTarget::Fn(path) => path.to_string(),
+            crate::CompileTarget::Method(type_name, method) => format!("{}::{}", type_name, method),
         }
     }
 }

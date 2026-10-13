@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Zadania i kanały
 
 Słownictwo zadań (lekkich wątków). `task` i `thread`, które je uruchamiają, oraz `select`,
@@ -83,7 +83,7 @@ więc `(sleep 1)` z CL zapisuje się tutaj `(sleep 1.0)`. Wartość ujemna lub N
 
 | Nazwa | Użycie | Typ | Znaczenie |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Grupa bez niczego oczekującego |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Grupa bez niczego oczekującego |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Zwiększa licznik. Rób to, zanim praca się zacznie |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Jedno się zakończyło. Przy 0 każdy czekający zostaje zwolniony |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Czeka, aż osiągnie 0. Z dowolnej liczby zadań |
@@ -119,13 +119,13 @@ pojemność wynosi 1, więc zadanie wysyłające może się zakończyć, nawet j
 
 | Nazwa | Użycie | Typ | Znaczenie |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Odblokowany mutex przechowujący `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Odblokowany mutex przechowujący `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Zajmuje zamek (czeka) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Zwalnia go. Powoduje panic, jeśli nie jest zajęty |
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Zajmuje zamek, wiąże zawartość z `x`, wykonuje `body` i **zawsze** zwalnia |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

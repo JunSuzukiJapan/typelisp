@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 출력
 
 `print`/`println`/`format`, 인수 하나의 출력 함수, 프리티 프린터, `print-object`, 출력을 제어하는 변수. 서식 지시자 목록은
@@ -21,8 +21,8 @@
 
 **제어 문자열은 리터럴이어야 한다**(Rust의 `format!`과 같은 제한). 그 안의 지시자가 인수를 몇 개, 어떤 타입으로 받을지
 정하므로 실행 중에 만든 문자열은 검사 시에 읽을 수 없다. 리터럴이어야 하므로 **인수의 개수와 타입은 검사 시에
-검사된다**. `(println "~d" "x")`와 `(println "~a ~a" 1)`은 검사 시 오류이다. 철자가 틀린 지시자, 닫히지 않은 `~(`, 어느
-인수도 답할 수 없는 `~/name/`도 검사 시 오류이다. 검사 규칙은 [format.md](format.md#1-지시자-쓰는-법)에 있다. 직접 만든
+검사된다**. `(println "~d" "x")`와 `(println "~a ~a" 1)`은 검사 시 오류이다. 철자가 틀린 지시자, 닫히지 않은 `~(`, 호출할
+대상을 정할 수 없는 `~/name/`도 검사 시 오류이다. 검사 규칙은 [format.md](format.md#1-지시자-쓰는-법)에 있다. 직접 만든
 문자열을 출력하려면 `(format false ...)`로 만들어 `(println "~a" s)`로 출력한다.
 
 가변 인수는 각자의 타입으로 `Sexpr`에 감싸져 넘겨진다. `i32`/`f64`/`int`/`ratio`/`char`/`bool`/`string`/`Sexpr`, 그리고
@@ -42,8 +42,8 @@
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -279,7 +279,7 @@ CL은 "무제한"에 `nil`을 쓰지만 이 언어에는 `nil`이 없으므로 `
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a가 a 자신을 가리킨다
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

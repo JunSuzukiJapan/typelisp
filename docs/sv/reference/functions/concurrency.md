@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tasks och kanaler
 
 Vokabulären för tasks (lättviktstrådar). `task` och `thread`, som startar dem, och `select`, som väntar
@@ -83,7 +83,7 @@ Liksom i CL tar `sleep` **sekunder**. Heltal konverteras inte automatiskt till f
 
 | Namn | Användning | Typ | Betydelse |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | En grupp utan något utestående |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | En grupp utan något utestående |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Lägger till räknaren. Gör det innan arbetet startar |
 | `done` | `(done wg)` | `(WaitGroup)→()` | En har blivit klar. Vid 0 släpps alla som väntar |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Väntar tills den når 0. Från hur många tasks som helst |
@@ -119,13 +119,13 @@ kapacitet är 1, så den sändande tasken kan bli klar även om ingen tar emot.
 
 | Namn | Användning | Typ | Betydelse |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | En olåst mutex som håller `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | En olåst mutex som håller `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Tar låset (väntar) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Släpper det. Ger panic om det inte är låst |
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Låser, binder innehållet till `x`, kör `body` och släpper **alltid** |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

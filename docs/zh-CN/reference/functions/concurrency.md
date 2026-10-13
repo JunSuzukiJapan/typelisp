@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 任务与通道
 
 任务（轻量级线程）的词汇。启动它们的 `task`・`thread` 和多路等待的 `select` 是特殊形式，见
@@ -75,7 +75,7 @@ panic。
 
 | 名称 | 用法 | 类型 | 含义 |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | 没有未完成项的组 |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | 没有未完成项的组 |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | 增加计数器。在工作开始之前 |
 | `done` | `(done wg)` | `(WaitGroup)→()` | 完成了一个。为 0 时释放所有等待者 |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | 等到变为 0。可以从任意多个任务等待 |
@@ -108,13 +108,13 @@ Go 的 `time.After`。可以直接写在 `select` 的超时分支中（[语法�
 
 | 名称 | 用法 | 类型 | 含义 |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | 持有 `v`、未加锁的互斥锁 |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | 持有 `v`、未加锁的互斥锁 |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | 取得锁（会等待） |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | 归还。未加锁时 panic |
 | `with-lock` | `(with-lock (x m) body...)` | 宏 | 加锁，把内容绑定到 `x` 执行 `body`，**一定**释放 |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

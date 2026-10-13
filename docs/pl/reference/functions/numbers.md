@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Liczby
 
 Operacje na liczbach całkowitych, zmiennoprzecinkowych, wymiernych, zespolonych i wartościach logicznych oraz inne
@@ -198,7 +198,7 @@ Struktura (`defstruct`) w bibliotece standardowej.
 
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Konstrukcja. Składowe można odczytać bezpośrednio jako `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Konstrukcja. Składowe można odczytać bezpośrednio jako `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Część rzeczywista i urojona. **Działają też na liczbach rzeczywistych** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), jak w CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Sprzężenie (działa też na liczbach rzeczywistych) |
 | `phase` | `(phase z)` | `complex→f64` | Argument w (-pi,pi] (działa też na liczbach rzeczywistych) |

@@ -40,7 +40,6 @@ export type IndentSpec = "defun" | number;
 export const INDENT_SPECS: ReadonlyMap<string, IndentSpec> = new Map<string, IndentSpec>([
   // Definition forms.
   ["defun", "defun"],
-  ["defmethod", "defun"],
   ["defmacro", "defun"],
   ["defstruct", "defun"],
   ["defenum", "defun"],

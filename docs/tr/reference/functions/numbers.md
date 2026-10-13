@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -198,7 +198,7 @@ Standart kütüphanedeki bir struct (`defstruct`).
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Oluşturma. Bileşenler doğrudan `z::re`/`z::im` olarak okunabilir |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Oluşturma. Bileşenler doğrudan `z::re`/`z::im` olarak okunabilir |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Gerçek kısım ve sanal kısım. **Gerçek sayılarda da çalışırlar** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), CL'deki gibi |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Eşlenik (gerçek sayılarda da çalışır) |
 | `phase` | `(phase z)` | `complex→f64` | (-pi,pi] aralığında argüman (gerçek sayılarda da çalışır) |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Concurrence
 
 En typelisp, on exécute du travail de façon concurrente en lançant des **tâches** (des threads légers), et les
@@ -88,12 +88,12 @@ quand des travaux lents et rapides sont mélangés, le travail se répartit natu
        (a (task (worker "A" jobs)))
        (b (task (worker "B" jobs)))
        (c (task (worker "C" jobs))))
-  (send jobs (job::new 1 0.3))
-  (send jobs (job::new 2 0.1))
-  (send jobs (job::new 3 0.1))
-  (send jobs (job::new 4 0.2))
-  (send jobs (job::new 5 0.1))
-  (send jobs (job::new 6 0.1))
+  (send jobs (make-instance 'job :id 1 :seconds 0.3))
+  (send jobs (make-instance 'job :id 2 :seconds 0.1))
+  (send jobs (make-instance 'job :id 3 :seconds 0.1))
+  (send jobs (make-instance 'job :id 4 :seconds 0.2))
+  (send jobs (make-instance 'job :id 5 :seconds 0.1))
+  (send jobs (make-instance 'job :id 6 :seconds 0.1))
   (close jobs)                    ; c'est tout le travail
   (println "A: ~a jobs, B: ~a jobs, C: ~a jobs" (wait a) (wait b) (wait c)))
 ```
@@ -171,8 +171,8 @@ quitté. Affecter la variable avec `setf` dans le corps change le contenu du `Mu
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
-(let ((counter (the Mutex<int> (Mutex::make 0)))
-      (wg (the WaitGroup (WaitGroup::make))))
+(let ((counter (the Mutex<int> (Mutex::new 0)))
+      (wg (the WaitGroup (WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Pencetakan
 
 `print`/`println`/`format`, pencetak satu argumen, pretty printer, `print-object`, dan variabel yang
@@ -27,8 +27,8 @@ adalah kesalahan tipe.
 dalamnya menentukan berapa banyak argumen yang diambil dan bertipe apa, sehingga string yang dibangun
 saat dijalankan tidak dapat dibaca saat pemeriksaan. Karena harus berupa literal, **jumlah dan tipe
 argumen diperiksa saat pemeriksaan**: `(println "~d" "x")` dan `(println "~a ~a" 1)` adalah kesalahan
-saat pemeriksaan. Direktif yang salah eja, `~(` yang tidak tertutup, dan `~/name/` yang tidak dapat
-dijawab oleh argumen mana pun juga merupakan kesalahan saat pemeriksaan. Aturan pemeriksaan ada di
+saat pemeriksaan. Direktif yang salah eja, `~(` yang tidak tertutup, dan `~/name/` yang tujuan
+panggilannya tidak dapat ditentukan juga merupakan kesalahan saat pemeriksaan. Aturan pemeriksaan ada di
 [format.md](format.md#1-cara-menulis-direktif). Untuk mencetak string yang Anda bangun, buatlah
 dengan `(format false ...)` dan cetak dengan `(println "~a" s)`.
 
@@ -53,8 +53,8 @@ dicetak sebagai `(ok 42)`, atau `(ok ())` untuk `none`.
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -315,7 +315,7 @@ melingkar):
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a points to a itself
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

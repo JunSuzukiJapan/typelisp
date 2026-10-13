@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tempo, ambiente e implementação
 
 Funções de tempo, consultas sobre o ambiente de execução, ferramentas da implementação, análise e avaliação de
@@ -214,12 +214,12 @@ ambiente global imediatamente e de forma permanente.
 
 ## 7. Docstrings / `documentation`
 
-`defun`/`defmethod` (incluindo os de dentro de `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+`defun`/métodos de `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
 `deftype`/`deftrait` podem levar docstrings. A posição segue a regra do CL para cada um:
 
 | Forma | Posição da docstring |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | No início do corpo (depois do tipo de retorno e da cláusula `where`). Só quando pelo menos uma forma do corpo a segue; uma string sozinha continua sendo o valor de retorno |
+| `defun` / métodos de `impl` / `defmacro` | No início do corpo (depois do tipo de retorno e da cláusula `where`). Só quando pelo menos uma forma do corpo a segue; uma string sozinha continua sendo o valor de retorno |
 | `defvar` / `defconstant` | **Depois** do valor inicial: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Logo depois** do nome, antes dos campos/variantes |
 | `deftype` | **Logo depois** do nome, antes do tipo: `(deftype meters "doc" i32)` |

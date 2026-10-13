@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Formatdirectieven
 
 De directieven die in de stuurstrings van `print`/`println`/`format` worden geschreven. Ze dekken
@@ -77,7 +77,7 @@ hij onwaar.
 | `~<...~;...~>` | Rechtvaardiging (verdeelt segmenten over `~mincol` kolommen. `:`/`@`=opvulling aan de uiteinden) |
 | `~<...~;...~:>` | **Logisch blok** (afgesloten met `~:>`; iets anders dan de bovenstaande rechtvaardiging). Het eerste segment is het voorvoegsel en het laatste het achtervoegsel (beide alleen letterlijke strings). Met het scheidingsteken `~@;` is het voorvoegsel een **voorvoegsel per regel**. `~:<` neemt als standaard voor voorvoegsel/achtervoegsel `(`/`)`. Het argument is één lijst (`~@<` gebruikt in plaats daarvan de resterende argumenten) |
 | `~*` | Argumenten overslaan (`~n*`=n vooruit, `~:*`=terug, `~@*`=naar een absolute positie) |
-| `~/name/` | Methode-aanroep (hoofdstuk 5. De vlaggen `:`/`@` worden aan de methode doorgegeven. Neemt geen parameters) |
+| `~/name/` | Aanroep van een functie of methode (hoofdstuk 5; de vlaggen `:`/`@` gaan naar wat wordt aangeroepen; neemt geen parameters) |
 
 De volgende CL-directieven worden niet ondersteund (het zijn fouten bij het controleren).
 
@@ -91,29 +91,37 @@ De volgende CL-directieven worden niet ondersteund (het zijn fouten bij het cont
 
 ## 5. `~/name/`
 
-**Eén verschil met CL: de naam wordt niet als globale functie opgezocht maar als methode van het eigen
-type van het argument.** De methode heeft de vorm `((self Self) (colon bool) (at bool)) → string`, en
-de `:`/`@` van de directief worden ongewijzigd doorgegeven.
-
-De manier van CL om hem als globale functie op te zoeken kan in deze taal niet veilig worden
-geïmplementeerd. Zelfs met een letterlijke stuurstring is het type van de elementen van een
-lijstargument (binnen `~{`) bij het controleren niet bekend, en een functie alleen op naam opzoeken
-zou een functie kunnen aanroepen die voor een ander type was bedoeld. Kiezen op het type van de waarde
-betekent dat de methode precies voor dat type wordt getypechecked, wat veilig is (hetzelfde mechanisme
-als `print-object`). Het werkt ook voor waarden als `string`/`bool`/`char`/`symbol`/lijsten. Alleen
-voor gehele getallen, waarvan de breedte niet uit de waarde kan worden afgeleid, is het een fout
-**wanneer meer dan één geheel type een methode met die naam definieert**.
-
-Op welk argument het van toepassing is, is niet bekend, maar welke methoden het kan aanroepen wel. De
-checker verzamelt elke `~/name/` uit de letterlijke stuurstring en legt vast welke van de types van de
-argumenten op die aanroepplek een methode van de bovenstaande vorm hebben. Dus **als geen van de
-argumenttypes de methode heeft, is het een fout bij het controleren** (niet tijdens runtime), en het
-werkt ook in AOT-uitvoerbare bestanden.
+`~/name/` lost `name` op volgens dezelfde regels als een aanroep `(name arg colon at)` die op die plek
+staat, en voert de string uit die de aanroep teruggeeft. Het verbruikt één argument. `colon` en `at` zijn
+`bool`-waarden die zeggen of de directief `:` en `@` draagt.
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- Het oplossen van de naam gaat zoals bij een aanroep ([Syntaxreferentie 3.10](../syntax.md#310-module--use--namespaces)). Heeft het type van
+  het argument een methode `name`, dan wordt die aangeroepen; anders de zichtbare functie `name`. Een
+  functie in een module kan met haar pad worden genoemd (`~/m::shout/`).
+- Aanroepbaar is een in typelisp geschreven functie of methode die het argument, `colon` en `at` ongewijzigd
+  neemt en een `string` teruggeeft. Ingebouwde functies kunnen niet worden aangeroepen.
+- **Wat er aangeroepen wordt, ligt vast bij de controle.** De controleur zoekt elk argument dat die
+  `~/name/` kan bereiken, rekening houdend met verplaatsingen door `~*` en `~[`, en lost de naam op voor het
+  type van elk ervan. Lukt dat voor één ervan niet, dan is dat een fout bij de controle, en dat geldt ook
+  als de mogelijke argumenten twee verschillende definities zouden aanroepen. Tijdens het uitvoeren wordt
+  geen naam opgezocht, dus het werkt in AOT-uitvoerbare bestanden op dezelfde manier.
+- **Binnen `~{`, `~:{`, `~:@{` en `~<...~:>` kan het niet worden gebruikt** (fout bij de controle). Het type
+  van de elementen van een lijstargument is `Sexpr`, en dat kan niet bepalen wat er aangeroepen wordt.
+  `~@{` loopt langs de resterende argumenten van de aanroep, waarvan de types bekend zijn, en daar kan het
+  dus wel.
+
+Het verschil met CL: CL zoekt de naam op als globale functie. Hier gaat het oplossen zoals bij een aanroep,
+dus een methode van het type van het argument wordt gekozen vóór een functie met dezelfde naam.

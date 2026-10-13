@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 写给 Common Lisp 用户
 
 typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名，但它是静态类型语言。因此，CL 的写法并不总能直接通过。
@@ -50,7 +50,9 @@ typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名�
 
 ## 3. 把函数当作值
 
-typelisp 不区分函数与变量的命名空间。函数名可以直接作为值传递。没有 `#'` 和 `funcall`。
+typelisp 不区分函数与变量的命名空间。函数名可以直接作为值传递。没有 `#'` 和 `funcall`。宏也属于同一个
+命名空间，所以在同一模块中，函数、全局变量、宏中的任意两个都不能取同一个名字（不能像 CL 那样同时有名为
+`list` 的函数和名为 `list` 的变量）。
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -70,6 +72,8 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 
 - 序列函数**对象在前，函数在后**：`(map it f)`、`(filter it f)`、`(foldl it f init)`。与 CL 的
   `(mapcar f list)` 顺序相反。
+- 添加元素的 `push` 也是**对象在前**：`(push v 3)`。不能按 CL 的 `(push 3 place)` 的顺序书写，因为方法只根据
+  第一个参数的类型选择（第 8 节）。
 - `lambda` 不能使用 `&optional` 和 `&key`（可以使用 `&rest`）。
 - **不能调用定义之前的函数。** 在 CL 中可以先调用以后才定义的函数，在这里会得到 `no such function`。相互递归的函数
   用 `defsignature` 先声明其中一个。
@@ -164,14 +168,25 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 没有 `defclass`、`defgeneric` 和方法组合。
 
 - 数据类型用 `defstruct`（结构体）和 `defenum`（和类型）定义。
-- `defmethod` 定义只按**第一个参数的静态类型**确定调用目标的方法。不进行多重分派。
+- 没有 `defmethod`。方法按类型集中写在 `impl` 中（与 Rust 的固有 impl 相同的形式）。调用目标只由**第一个参数的
+  静态类型**决定，不进行多重分派。
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 静态方法
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; 方法
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - 要让不同类型拥有共同的操作，使用 trait（`deftrait` / `impl`）。处理内部类型在运行时才确定的值时，使用 `:dyn Trait`
   类型（[语法参考 3.9](../reference/syntax.md#39-deftrait--impl--trait-机制)）。
 
 `defstruct` 的区别：
 
-- 构造函数是 `类型名::new`：`(point::new 1 2)`。想要 `make-point` 这样的名字时，可以用 `(:constructor make-point)`
-  选项创建。
+- 值与 CLOS 一样用 `make-instance` 创建：`(make-instance 'point :x 1 :y 2)`。不会生成 `make-point`，也没有
+  `:constructor` 选项。想要有名字的构造函数时，在 `impl` 中写成静态方法（上面的 `point::new`）。
 - 访问器除了 `(x p)`，也可以写成 `p::x`。用 `(setf p::x 5)` 修改。
 - 不会生成谓词（`point-p`）。没有 `:conc-name`、`:type`、`:named`。
 - `:include` 只是继承槽，并不会成为父类型的子类型。

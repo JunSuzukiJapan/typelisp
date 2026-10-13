@@ -147,13 +147,13 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - 引数の型・戻り値の型は必須。
 - ジェネリック関数は名前に山括弧で型パラメータを書く: `(defun name<T1,T2...> (params) Ret body...)`
   （型位置の `Vector<T>` と同じ山括弧構文）。
-- `defun`/`lambda`/`defmethod` は末尾に `&rest (name Type)` を書くと可変長引数を受け取れる:
+- `defun`/`lambda`/`impl` のメソッドは末尾に `&rest (name Type)` を書くと可変長引数を受け取れる:
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)`（本体内では `xs` は常に `Option<Sexpr>`
   ——S 式のリスト——として束縛される。呼び出し側の各実引数は `Type2` として個別に型検査されてから
   `Sexpr` へ包まれる）。
   `defmacro` にも独自の `&rest` があるが、常に無型の `Sexpr` である点が異なる（`defun`/`lambda`
   は要素型を明示する）。`fn` 型でも `(fn (T1... &rest Te) Ret)` の形で可変長関数の型を書ける。
-- **`&optional` / `&key`**（`defun` と `defmethod`。`lambda`/`labels` は後述の理由で対象外、
+- **`&optional` / `&key`**（`defun` と `impl` のメソッド。`lambda`/`labels` は後述の理由で対象外、
   `defmacro` は後述の別実装）。順序は CL 流に `必須 &optional &rest &key`。各パラメータは
   `(name Type)` か `(name Type デフォルト式)` と書く:
 
@@ -179,22 +179,25 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
     *値*に依存する）を、組み合わせを禁じることで回避している。`&optional` と `&rest` の併用は可。
   - ジェネリック関数でも使えるが、**省略された引数にしか現れない型パラメータは推論できず
     エラー**になる（そこには突き合わせる値が無いため）。
-  - **`defmethod` でも同じ 3 区画が書ける**（インスタンスメソッド・静的関数の両方）。受け手の
-    次から `&optional`/`&rest`/`&key` を並べる:
+  - **`impl` のメソッドでも同じ 3 区画が書ける**（インスタンスメソッド・静的メソッドの両方）。
+    インスタンスメソッドは `self` の次から `&optional`/`&rest`/`&key` を並べる:
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; 静的関数
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 静的メソッド
     (point::origin :y 7)
     ```
 
     ジェネリック型のメソッドでも使えるが、**デフォルト式を書いたパラメータの型に所有者の型
     パラメータを書くことはできない**（`defun` が自分の型パラメータについて負うのと同じ制限。
     省略時に埋め込まれるのは*検査済み*の式なので、その型が抽象変数のままでは困る）。
-  - **トレイトのメソッドでは使えない**。`deftrait` 側に構文が無く、`impl` 側だけが区画を宣言
+  - **トレイトのメソッドでは使えない**（トレイトの `impl` に書くメソッドも）。`deftrait` 側に構文が無く、`impl` 側だけが区画を宣言
     できてしまうと、`:dyn` 受け手の呼び出し（トレイトの宣言から引数を埋める）と具象受け手の
     呼び出し（`impl` の宣言から埋める）が別物になる。vtable スロットのアリティは固定。
   - **`lambda` / `labels` では使えない**（`&rest` は使える）。省略された引数を埋めるには
@@ -247,7 +250,7 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   呼び出し側へそのまま埋め込まれる）、宣言にはそれを置く場所が無い。
 - **`defun` 以外**。`defmacro` は展開にマクロ本体が**実行済み**である必要があり、シグネチャ
   登録では代替できない。型（`defstruct`/`defenum`/`deftrait`）は、その登録が「型を登録する
-  コード自身が必要とするもの」でシグネチャのように自己完結しない。`defmethod` は所有する型に
+  コード自身が必要とするもの」でシグネチャのように自己完結しない。`impl` のメソッドは所有する型に
   登録されるので型に従う。
 
 CL の対応物は `(declaim (ftype (function (i32) bool) even2))` だが、あちらは宣言システム
@@ -556,37 +559,72 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 
 型注釈は必須（初期化式から推論しない）。`defvar` は書き換え可能、`defconstant` は不可（`setf` でエラー）。
 
-### 3.5 defmethod — メソッド定義
+### 3.5 impl — 型のメソッド
 
 ```lisp
-; インスタンスメソッド: (m obj args...) の形で呼べる
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; 静的メソッド: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; インスタンスメソッド: (name obj args...)
+  (pub name ...))                                      ; 型を定義したモジュールの外にも公開する
 
-; static / 関連関数: (Type::name args...) の形で呼べる
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; ジェネリックな型
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-呼び出し側は `obj` の静的型からメソッドを解決する（単一・静的ディスパッチ）。`defun` と同じ位置・
-同じ規則で docstring を置ける（`where` 節の直後、本体の先頭、後ろに本体フォームが続く場合のみ）。
-`impl` 内のメソッドも同様——`(documentation Type::method)` で取り出す。
+`defstruct`（3.6）・`defenum`（3.7）で定義した型にメソッドを持たせる。Rust の固有 impl
+（`impl Point { ... }`）に当たる。
 
-メソッド自身の型パラメータは、`defun` と同じく名前に `<...>` で書く。受け手の型の型パラメータ
+- 項目の形は `(名前 (引数...) 戻り値の型 本体...)` で、トレイトの `impl`（3.9）の項目と同じ。
+- 引数の先頭が `self` の項目は**インスタンスメソッド**で、`(name obj args...)` の形で呼ぶ。
+  `self` には型を書かなくてよい（`(self)` は `((self Self))` と同じで、`Self` は対象の型）。
+- `self` の無い項目は**静的メソッド**で、`(Type::name args...)` の形で呼ぶ。値を作る静的
+  メソッドがその型のコンストラクタになる。名前は自由で、`new` を勧める。
+- **公開は項目ごと**。`(pub name ...)` と書いた項目だけが、型を定義したモジュールの外から使える。
+  付けなければそのモジュールの中だけで使える。
+- 1 つの型に `impl` をいくつ書いてもよい。
+- 呼び出し側は `obj` の静的型からメソッドを解決する（単一・静的ディスパッチ）。メソッドは
+  **第 1 引数の型だけ**から探す（3.10）。
+- **docstring** は `defun` と同じ位置・同じ規則で置ける（本体の先頭、後ろに本体フォームが続く
+  場合のみ）。`(documentation Type::name)` で取り出す。トレイトの `impl` のメソッドも同じ。
+- 書けるのは自分のプログラムの型だけ。`Vector`・`Option`・`int` のような標準ライブラリの型には
+  書けない（`... is a standard library type` のエラー）。標準の型に操作を足したいときは
+  トレイトを定義して、その型に `impl` する。
+- `(impl X ...)` の `X` の次が項目（リスト）か `where` か何も無ければこの固有 impl、
+  名前ならトレイトの `impl`（`(impl Trait Type ...)`、3.9）。
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; 静的メソッド
+(area (Point::new 2.0 3.0))   ; インスタンスメソッド。=> 6.0
+```
+
+メソッド自身の型パラメータは、`defun` と同じく名前に `<...>` で書く。対象の型の型パラメータ
 （下の例の `T`）は受け手から決まり、メソッド自身の型パラメータ（`U`）は呼び出しの引数から推論される。
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- メソッド自身の型パラメータには、受け手の型が宣言した型パラメータ（`(defstruct Box<T> ...)` の
-  `T`）とも、受け手に書いた名前とも違う名前を付ける。
-- 受け手の型がジェネリックなら、受け手にはその型パラメータを全部変数で書く（`Box<T>`）か、
-  全部具体的な型で書く（`Box<int>`）。
-- `impl` の中のメソッドには型パラメータを足せない。シグネチャはトレイトが宣言したものに従う。
+- メソッド自身の型パラメータには、`impl` に書いた対象の型の型パラメータ（`(impl Box<T> ...)` の
+  `T`）と違う名前を付ける。
+- ジェネリックな型の `impl` には、型パラメータを全部変数で書く（`Box<T>`）か、全部具体的な型で
+  書く（`Box<int>`。その型の値にだけ使えるメソッドになる）。
+- トレイトの `impl` のメソッドには型パラメータを足せない。シグネチャはトレイトが宣言したものに従う。
 
 ### 3.6 defstruct — 構造体（ユーザ定義型）
 
@@ -604,9 +642,10 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 
 - 各フィールドは `(name type)` または `(pub name type)`（フィールド単位で公開設定、構造体自体の
   `pub` とは独立）。末尾にもう 1 つ式を書くとそのスロットの**デフォルト値**になる
-  （`(x i32 0)`）——後述のオプションリスト参照。
+  （`(x i32 0)`）。
+- 値は `make-instance` で作る（下記）。フィールドの順に引数を取るコンストラクタは生成されない。
+  コンストラクタが欲しければ、`impl`（3.5）に静的メソッドとして書く。
 - 自動的に次が生成される:
-  - コンストラクタ `Name::new`（フィールド順に引数を渡す）
   - ゲッター `(field-name instance)`、糖衣構文 `instance::field-name`
   - セッター `(set-field-name instance value)`、糖衣構文 `(setf instance::field-name value)`
 - 構造体自体を `pub` にするには `(pub defstruct ...)` のように先頭に `pub` を付ける。
@@ -615,8 +654,8 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   名前は、`defun` の引数型でも `the` でも同じく `unknown type` のエラーになる。したがって互いを
   参照し合う 2 つの型は書けない。
 - **型変数は宣言部に書いたものだけ**。`defun`/`defstruct`/`defenum`/`deftype` は名前の `<T>`、
-  `defmethod` は受け手の型（`(self box<T>)`、静的メソッドなら `box<T>`）と名前の `<U>`、
-  `impl` は対象の型と `impl<T>`、`deftrait` は `Self` と `(type Item)` の関連型。それ以外の
+  固有 `impl` は対象の型（`(impl box<T> ...)`）と各メソッドの名前の `<U>`、トレイトの `impl` は
+  対象の型と `impl<T>`、`deftrait` は `Self` と `(type Item)` の関連型。それ以外の
   場所——引数・戻り値・本体の `the`/`lambda`——に初めて現れる名前は型変数にはならず、
   `unknown type` になる。
 - **docstring**: 名前の直後、フィールド列の前に文字列リテラルを置くと docstring になる
@@ -624,40 +663,61 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   `(name Type ...)` の形で裸の文字列にはなり得ないため曖昧性は無い。`(documentation Name)` で
   取り出す。
 
+#### make-instance — 値を作る
+
+```lisp
+(make-instance 'Name :field1 value1 :field2 value2 ...)
+```
+
+構造体の値は CLOS と同じ `make-instance` で作る。
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; 順番は自由
+(make-instance 'point :x 1)           ; y はデフォルト値の 0
+```
+
+- 型名は `'` で引用したシンボルで書く。実行時に型を選ぶのではなく、チェック時に決まる
+  （`concatenate` の `'vector` と同じ）。
+- フィールドは `:名前 値` の組で渡す。値は書いた順に 1 度ずつ評価する。
+- 書かなかったフィールドはデフォルト値で埋まる。デフォルト値の無いフィールドを書かなければ
+  型エラー。知らないフィールドや、同じフィールドを 2 度書くのも型エラー。
+- ジェネリックな構造体の型引数は、値と期待型から推論する。`'Box<int>` のように書いてもよい。
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- 型を定義したモジュールの外では、`pub` でないフィールドを書けない。そうしたフィールドに
+  デフォルト値が無ければ、外のモジュールは値を作れない。外で作らせたいときは、`impl` に
+  `pub` のコンストラクタを書く（3.5）。
+
 #### オプションリスト
 
 名前の位置に `(Name option...)` とリストを書くとオプションを指定できる（CL と同じ位置）。
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; キーワードコンストラクタ
-                  (:constructor at (x &optional y))  ; BOA コンストラクタ
-                  (:copier copy-point))
+(defstruct (point (:copier copy-point))
   (x i32 0)          ; 第3要素はそのスロットのデフォルト値
   (y i32 0))
 
-(point::make-point :y 7)   ; x は 0
-(point::at 1)              ; y は 0
-(point::at 1 2)
-(copy-point p)             ; 浅いコピー（CL の copier と同じ）
+(copy-point p)       ; 浅いコピー（CL の copier と同じ）
 ```
 
-- **`:constructor`** — 生成されるのは型の**静的関数**（`point::make-point`）で、本体は必ず
-  `(point::new ...)`。`new` は構造上の唯一のコンストラクタのままで、ここで作るのはその
-  *呼び方*。複数宣言できる。
-  - `(:constructor name)` — 全スロットを `&key` で取る。**全スロットにデフォルトが要る**
-    （CL の「未束縛スロット」に当たるものがこの言語には無いため）。
-  - `(:constructor name (slot...))` — 名指したスロットを位置引数で取る（順序は自由）。
-    名指さなかったスロットはそのスロットのデフォルトで埋まるので、**デフォルトが要る**。
-    `&optional` を挟むとそれ以降は省略可（同じくデフォルトが要る）。
 - **`:copier`** — 同じスロット値を持つ新しい値を返す**インスタンスメソッド**を生成する。
   CL の copier と同じく浅い。
 - **`:include Parent`** — 親のスロット列を先頭に連結する（デフォルトも引き継ぐ。別ファイルの
   親でもよい）。**型の関係は作らない**——子は親の部分型ではなく、親のメソッドは子に適用
   されず、両者を結ぶ実行時テストも無い。この言語に部分型は無く、共通のインタフェースは
   `deftrait` が受け持つ。連結されるのはスロットの*一覧*だけ。
-- **スロットのデフォルトは生成されるコンストラクタだけが読む**。`:constructor` を 1 つも
-  宣言していないのにデフォルトを書くと、使われようが無いのでエラーになる。
 - 入れないオプションと、その理由:
+  - **`:constructor`** — コンストラクタは `impl` に静的メソッドとして書く（3.5）。書くと、
+    その書き換え方を示すエラーになる。
   - **`:conc-name`** — CL ではアクセサに接頭辞を付けて、1 つの平坦な関数名前空間での衝突を
     避けるためのもの。ここではアクセサは受け手の型でディスパッチするメソッドなので衝突が
     起きないうえ、接頭辞を付けると `instance::field`（スロット名しか知らない）が壊れる。
@@ -692,7 +752,7 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
     ((Some v) v)
     ((None) 0))
   ```
-- メソッド/関連関数は `defstruct` と同様に `defmethod`/`impl` で後付けする。
+- メソッドと静的メソッドは `defstruct` と同じく `impl`（3.5）に書く。
 - 列挙型自体を `pub` にするには `(pub defenum ...)` と書く。
 - **docstring**: `defstruct` と同じ位置・同じ規則——名前の直後、バリアント列の前
   （`(defenum Name "doc" (Variant ...)...)`）。`(documentation Name)` で取り出す。
@@ -741,9 +801,10 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
   (method-name (recv params...) RetType body...))
 ```
 
-`impl` によって各メソッドは `TargetType` の通常の `defmethod` として登録される。ジェネリック関数の
-`where` 節でトレイト境界として参照する（[3.1 defun](#31-defun--関数定義) 参照）。トレイト名には `m::Trait` のような
-`::` パスも書ける。
+`impl` によって各メソッドは `TargetType` のメソッドとして登録され、固有 `impl`（3.5）のメソッドと
+同じように呼べる。トレイトの `impl` のメソッドは `pub` を書かなくても常に公開される。トレイトは
+ジェネリック関数の `where` 節でトレイト境界として参照する（[3.1 defun](#31-defun--関数定義) 参照）。
+トレイト名には `m::Trait` のような `::` パスも書ける。
 
 **継承リスト（必須）**: トレイト名の直後に必ず書く。要素は素のトレイト名か、そのトレイトが
 関連型を持つ場合は `(Trait (Assoc Type))` の形で**全ての関連型をピン留めした**もの。
@@ -838,13 +899,25 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (shadowing-import path...) ; 既に埋まっている裸名を承知の上で取る use
 ```
 
-- `module` は名前空間を作る。**型は名前空間ではない**（Rust と同様、型は関連関数/メソッドを持つのみ）。
-- `use` で型を導入すると、その型のコンストラクタと公開 static メソッドも裸名で使えるようになる
-  （例: `(use option)` の後は `some`/`none` を `option::some`/`option::none` なしで呼べる）。
-- 裸名（修飾なしの識別子）の解決順序: 特殊形 → コンストラクタ → 自由関数（現在の名前空間 → ルート）
-  → インスタンスメソッド（第一引数の静的型から解決）。中間の親モジュールへは遡らない。
-- 修飾パス `a::b` は `a` を上記の順序で解決し、モジュールなら内部を辿り、型なら最終セグメントを
-  関連項目として解決する。
+- `module` は名前空間を作る。**型は名前空間ではない**（Rust と同様、型は静的メソッドとメソッドを持つのみ）。
+- `use` で型を導入すると、列挙型の変種と、その型の公開された静的メソッドも裸名で使えるように
+  なる（例: `(use option)` の後は `some`/`none` を `option::some`/`option::none` なしで呼べる）。
+- **1 つの名前は 1 つの意味を持つ**。関数・グローバル変数・マクロは 1 つの名前空間に入り、
+  同じモジュールで 2 つに同じ名前は付けられない（どの順に定義してもエラー）。CL のように
+  関数と変数で名前空間が分かれてはいない。別のモジュールの同じ名前なら、近いほうが見える。
+- 裸名 `n` の解決（呼び出し `(n a ...)` の位置。特殊形の名前はこれより先に決まる）:
+  1. ローカル（引数、`let`・`labels`・`macrolet`・`symbol-macrolet` の束縛）
+  2. モジュールの名前 `n` がマクロなら、そのマクロ
+  3. `use` した列挙型の変種、`use` した型の静的メソッド
+  4. 第 1 引数の型のメソッド `n`（メソッドは**第 1 引数の型だけ**から探す）
+  5. モジュールの名前 `n` が関数かグローバル変数なら、それ（グローバル変数ならその値の関数を呼ぶ）
+
+  モジュールの名前は、今のモジュール → `use` の別名 → 親のモジュール（ルートまで）の順に探し、
+  最初に見つかったものに決まる。関数を値として渡す位置でも同じ規則で、4 の「第 1 引数の型」は、
+  そこで期待される関数型の第 1 引数の型になる（`(fn (pt) int)` が期待される位置に `norm` と書けば
+  `pt` のメソッド `norm`）。期待される型がまだ決まっていなければ 4 は飛ばす。
+- 修飾パス `a::...::n` は、`a::...` が指すモジュールの名前（マクロ・関数・グローバル変数）か、
+  型の変種・静的メソッドに解決する。値の位置の `x::f`（`x` が値の名前）はフィールドの読み出し。
 - **`use` はそれより後のフォームに効く。** ファイルは 1 フォームずつ読まれ、依存も
   そのフォームを検査する直前に解決されるので、`(use m)` より**上**で `m::f` と書くと
   `unresolved path` になる。`use` はファイルの先頭に置く。
@@ -911,15 +984,17 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-`pub` が付けられるのは上記11種類のみ（`module`/`use`/`deftrait`/`impl` には付けられない）。
+`pub` が付けられるのは上記10種類のみ（`module`/`use`/`deftrait`/`impl` には付けられない）。
 定義形を括弧で包む `(pub (defun ...))` 形式ではなく、`pub` の直後に定義キーワードを続ける。
 1つの `pub` が公開指定できる定義は1つだけ（複数の定義の一括指定はできない）。
+
+固有 `impl` のメソッドは、項目ごとに `(pub name ...)` と書く（3.5）。構造体のフィールドは
+`(pub x i32)` と書く（3.6）。
 
 ### 3.14 defmacro — マクロ定義
 
@@ -1059,6 +1134,19 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
   ユーザ定義の `Eq` 実装がそのまま比較規則になる。`expr` はその腕の位置から見えるものを何でも
   参照できる（引数、外側の束縛、グローバル）
 - `(Ctor sub-pattern...)` — コンストラクタパターン（`Some x` `None` `Cons a d` `Ok v` など）
+- `(Type :slot pattern... :slot...)` — 構造体のパターン。型名の後にスロットをキーワードで書く。
+  キーワードの次がパターンならそのスロットをそのパターンで照合し、次がキーワードか終わりなら
+  スロットを同じ名前の変数に束縛する。書かなかったスロットは照合しない（フィールドの数や順序に
+  依存しない）:
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; x に束縛し、y は (some b) で照合する
+      ((point :x a) a)))                 ; a に束縛する
+  ```
 - `#{p0 p1 ...}` — タプルパターン。要素ごとに部分パターンで照合する。`Sexpr` に対しては、
   同じ要素数の `#{..}` データにだけマッチする
 - `(:or p1 p2 ...)` — or パターン。どれか 1 つの選択肢にマッチすればよい。本体は 1 つなので、どの
@@ -1113,8 +1201,8 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 （ユーザ定義 ADT インスタンスの取り出し）が書ける — `(list p 42)` のように `Sexpr` へ暗黙変換された
 `defstruct`/`defenum`（3 章）のインスタンスを `match` で取り戻す構文:
 
-- `(TypeName sub-pattern...)` — **型名**を先頭に置くフィールド分解（struct 専用、`defstruct` は変種が
-  常に1つなので変種名でなく型名で書く）。例: `(defstruct point (x f64) (y f64))` に対し `(point x y)`。
+- `(TypeName :slot pattern...)` — **型名**を先頭に置くフィールド分解（struct 専用）。上の構造体の
+  パターンと同じ形で書く。例: `(defstruct point (x f64) (y f64))` に対し `(point :x :y)`。
 - 裸の変種名 `(VariantName sub-pattern...)` — `defenum` の変種抽出。`(use EnumType)` 済みで可視な
   裸の名前として解決される（構成子を呼ぶときと同じ可視性規則）。例: `(defenum color (red) (blue))` の
   `(use color)` 後に `(red)` `(blue)`。可視な複数 enum で変種名が衝突する場合は曖昧エラーになるため、
@@ -1152,7 +1240,7 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; 型名先頭のフィールド分解
+    ((circle :r) (* (* r r) 3))    ; 型名先頭のフィールド分解
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1211,7 +1299,7 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 (return-from name value)            ; 値を伴って抜ける
 ```
 
-**`defun` / `defmethod` / `labels` の各関数は、自分の名前の block を暗黙に張る**（CL と同じ）。
+**`defun` / `impl` のメソッド / `labels` の各関数は、自分の名前の block を暗黙に張る**（CL と同じ）。
 だから `(return-from f v)` が関数の早期リターンになる:
 
 ```lisp
@@ -1542,8 +1630,7 @@ typl --image session.typld             # REPL も同じ
 初期化子が二度走らないため。
 
 `compile-file` は標準ライブラリも読む（その本体を実行ファイルへ埋め込む）ので、`abs`/`gcd` のような
-標準ライブラリの関数も、`(impl print-object ...)` も、`(defmethod print-object ...)` と同じく
-AOT で使える。
+標準ライブラリの関数も、`(impl print-object ...)` も、AOT で使える。
 
 `compile-file` は `use`（および `import`/`shadowing-import`）も受理する。エントリファイルの
 `(use m)` は `typl file.typl` と同じ規則でファイルを探し、見つかった依存ファイルも
@@ -1759,8 +1846,8 @@ netpoller と同じ形。走れるタスクが無いときだけ、処理系は�
   トップレベルの形の合間には、他のスレッドはタスクを進めない（残ったタスクは次の評価で
   続きから走る）。評価の終わりには各スレッドが今の一歩を終えるのを待つので、`thread` の中で
   ブロックし続ける C 関数（`defffi`）があると、それが返るまで評価が終わらない。
-- **ワーカー上の印字**: 解釈実行される `print-object`／`~/name/` メソッドは他のスレッドでは
-  走らせられないので、そういう値を他のスレッドで印字すると `(panic ...)` と同じ扱いの panic になる
+- **ワーカー上の印字**: 解釈実行される `print-object` メソッドや、`~/name/` が呼ぶ解釈実行の
+  関数・メソッドは他のスレッドでは走らせられないので、そういう値を他のスレッドで印字すると `(panic ...)` と同じ扱いの panic になる
   （`(compile T::print-object)` するか、メインタスクから印字する）。
 - **データ競合は未定義**（Go と同じ立場）。`Mutex<T>`・`Chan<T>` を通さずに複数のタスクから
   同じ値を書き換えた結果は保証されない。

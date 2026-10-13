@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Common Lisp Programcıları İçin
 
 typelisp, Common Lisp'in (CL) sözdizimini ve fonksiyon adlarının çoğunu devralır, ancak statik tür
@@ -58,7 +58,9 @@ tamsayı türü yoktur.
 ## 3. Değer olarak fonksiyonlar
 
 typelisp, fonksiyonların ve değişkenlerin ad alanlarını ayırmaz. Bir fonksiyonun adı olduğu gibi
-değer olarak geçirilebilir. `#'` ve `funcall` yoktur.
+değer olarak geçirilebilir. `#'` ve `funcall` yoktur. Makrolar da aynı ad alanını paylaşır, bu yüzden bir modül içinde
+fonksiyon, global değişken ve makrodan ikisi aynı adı taşıyamaz (CL'den farklı olarak `list` adlı bir
+fonksiyonun yanında `list` adlı bir değişken olamaz).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -80,6 +82,8 @@ değer olarak geçirilebilir. `#'` ve `funcall` yoktur.
 
 - Dizi fonksiyonları **önce koleksiyonu, sonra fonksiyonu** alır: `(map it f)`, `(filter it f)`,
   `(foldl it f init)`. Bu, CL'nin `(mapcar f list)`'inin tersidir.
+- `push` da **önce koleksiyonu** alır: `(push v 3)`. CL'nin `(push 3 place)` sırasıyla yazılamaz, çünkü bir
+  metot yalnızca ilk argümanın türüne göre seçilir (8. bölüm).
 - `lambda`, `&optional` ya da `&key` kullanamaz (`&rest` kullanılabilir).
 - **Bir fonksiyon tanımlanmadan önce çağrılamaz.** CL'de sonradan tanımlayacağınız bir fonksiyonu
   çağırabilirsiniz, ancak burada bu `no such function` hatasını verir. Karşılıklı özyinelemeli
@@ -188,16 +192,27 @@ sembolle (`'done`) sınırlıdır ve bir etiketle fırlatılan değerlerin tek b
 `defclass`, `defgeneric` ya da metot kombinasyonu yoktur.
 
 - Veri türleri `defstruct` (struct'lar) ve `defenum` (toplam türler) ile tanımlanır.
-- `defmethod`, hedefi yalnızca **ilk bağımsız değişkenin statik türüyle** belirlenen metotlar
-  tanımlar. Çoklu dağıtım (multiple dispatch) yoktur.
+- `defmethod` yoktur. Metotlar her tür için bir `impl` içinde toplanır (Rust'ın içsel impl'iyle aynı biçim).
+  Hedef yalnızca **ilk argümanın statik türüne** göre belirlenir; çoklu gönderim yoktur.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; statik metot
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; metot
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - Türler arasında ortak işlemler vermek için trait'leri (`deftrait` / `impl`) kullanın. Somut türü
   çalışma zamanında belirlenen değerler için `:dyn Trait` türünü kullanın
   ([Sözdizimi Başvurusu 3.9](../reference/syntax.md#39-deftrait--impl--traitler)).
 
 `defstruct`'ın farkları:
 
-- Yapıcı `TypeName::new`'dir: `(point::new 1 2)`. `make-point` gibi bir ad istiyorsanız
-  `(:constructor make-point)` seçeneği bir tane oluşturur.
+- Değerler CLOS'taki gibi `make-instance` ile oluşturulur: `(make-instance 'point :x 1 :y 2)`. `make-point`
+  oluşturulmaz ve `:constructor` seçeneği yoktur. Adlandırılmış bir yapıcı istiyorsanız onu `impl`'e statik
+  metot olarak yazın (yukarıdaki `point::new`).
 - `(x p)`'nin yanı sıra bir erişimci `p::x` olarak yazılabilir. `(setf p::x 5)` ile değiştirin.
 - Hiçbir yüklem (`point-p`) oluşturulmaz. `:conc-name`, `:type` ya da `:named` yoktur.
 - `:include` yalnızca slotları miras alır; tür, ebeveynin bir alt türü olmaz.

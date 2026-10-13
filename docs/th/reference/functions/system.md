@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # เวลา สภาพแวดล้อม และการ implement
 
 ฟังก์ชันสำหรับเวลา การสอบถามสภาพแวดล้อมขณะรัน เครื่องมือของการ implement การแยกวิเคราะห์และ
@@ -214,12 +214,12 @@ CL คืน **สองค่า** (ค่าและตำแหน่ง) �
 
 ## 7. Docstring / `documentation`
 
-`defun`/`defmethod` (รวมภายใน `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+`defun`/เมทอดใน `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
 `deftype`/`deftrait` มี docstring ได้ ตำแหน่งตามกฎของ CL สำหรับแต่ละตัว:
 
 | ฟอร์ม | ตำแหน่งของ docstring |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | ที่จุดเริ่มต้นของตัวเนื้อหา (หลังชนิดที่คืนและอนุประโยค `where`) เฉพาะเมื่อมีอย่างน้อยหนึ่งฟอร์มของตัวเนื้อหาตามมา สตริงเดี่ยวยังคงเป็นค่าที่คืน |
+| `defun` / เมทอดใน `impl` / `defmacro` | ที่จุดเริ่มต้นของตัวเนื้อหา (หลังชนิดที่คืนและอนุประโยค `where`) เฉพาะเมื่อมีอย่างน้อยหนึ่งฟอร์มของตัวเนื้อหาตามมา สตริงเดี่ยวยังคงเป็นค่าที่คืน |
 | `defvar` / `defconstant` | **หลัง** ค่าเริ่มต้น: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **ทันทีหลัง** ชื่อ ก่อนฟิลด์/variant |
 | `deftype` | **ทันทีหลัง** ชื่อ ก่อนชนิด: `(deftype meters "doc" i32)` |

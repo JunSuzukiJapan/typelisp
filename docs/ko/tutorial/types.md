@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 타입의 기초
 
 typelisp는 정적 타입 언어이다. 이 장에서는 타입 검사기가 해 주는 일, 자주 쓰는 타입(`Option`, `Result`, 구조체,
@@ -143,29 +143,48 @@ none
   (y int))
 ```
 
-정의하면 다음을 쓸 수 있게 된다.
+값은 `make-instance`로 만든다. 타입 이름을 `'`로 인용해 쓰고, 필드를 `:이름 값`의 쌍으로 넘긴다.
+순서는 자유다.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; 만들기(인수는 필드 순서)
-  (println "~a" p::x)           ; 필드 읽기. (x p)도 된다
+(let ((p (make-instance 'point :x 3 :y 4)))   ; 만들기
+  (println "~a" p::x)           ; 필드 읽기. (x p)라고도 쓸 수 있다
   (setf p::x 10)                ; 바꾸기
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-구조체에 고유한 함수를 주려면 `defmethod`를 쓴다. 첫 번째 인수(`self`)의 타입이 메서드가 속하는 타입을 정한다.
+필드 선언에 식을 하나 더 쓰면 그 필드의 **기본값**이 된다. `make-instance`에서 생략한 필드는
+기본값으로 채워진다. 기본값이 없는 필드를 생략하면 타입 오류다.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count는 0
 ```
 
-`self` 인수 대신 타입 이름만 쓰면 `point::origin`으로 호출하는 함수가 된다.
+구조체에 함수를 주려면 `impl`을 쓴다. `(impl 타입이름 항목...)`의 각 항목은
+`(이름 (인수...) 반환타입 본체...)` 형태이며, 첫 번째 인수가 `self`이면 그 타입의 **메서드**가 된다.
+`self`에는 타입을 쓰지 않는다.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+`self`를 받지 않는 항목은 `point::origin` 형태로 호출하는 함수가 된다. 값을 만드는 함수를 `new`라는
+이름으로 준비해 두면 쓰는 쪽은 `(point::new 3 4)`로 짧게 쓸 수 있다.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -232,7 +251,7 @@ none
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 제네릭 함수 안에서는 `T`에 대해 아무것도 알 수 없으므로 `T`의 값을 비교하거나 더할 수 없다. "비교할 수 있는

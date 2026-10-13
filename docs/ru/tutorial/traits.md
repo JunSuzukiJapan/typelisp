@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Трейты
 
 Трейт — это обещание: «этот тип поддерживает такие операции». Трейты позволяют нескольким типам иметь общие
@@ -36,8 +36,8 @@
 Реализованные методы вызываются так же, как обычные функции.
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 Пропуск хотя бы одного из методов, объявленных трейтом, — ошибка типа в `impl`.
@@ -52,8 +52,8 @@
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 Благодаря `(where (Shape T))` тело может использовать `name` и `area` на значениях `T`. Без ограничения о `T` ничего
@@ -86,8 +86,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; написанная здесь имеет приоритет
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. Реализация стандартных трейтов
@@ -115,7 +115,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (реализация по умолчанию в Ord)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (реализация по умолчанию в Ord)
 ```
 
 Реализация `print-object` определяет, как `println` показывает значение. Аргумент `escape` равен `true`, когда
@@ -126,7 +126,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 В сочетании с ограничением трейтом можно написать функцию, работающую для любого типа, реализующего `Ord`.
@@ -157,8 +157,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

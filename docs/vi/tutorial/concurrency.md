@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Lập trình đồng thời
 
 Trong typelisp, bạn chạy công việc đồng thời bằng cách khởi động các **task** (thread nhẹ), và các task
@@ -87,12 +87,12 @@ việc vẫn được phân tán một cách tự nhiên.
        (a (task (worker "A" jobs)))
        (b (task (worker "B" jobs)))
        (c (task (worker "C" jobs))))
-  (send jobs (job::new 1 0.3))
-  (send jobs (job::new 2 0.1))
-  (send jobs (job::new 3 0.1))
-  (send jobs (job::new 4 0.2))
-  (send jobs (job::new 5 0.1))
-  (send jobs (job::new 6 0.1))
+  (send jobs (make-instance 'job :id 1 :seconds 0.3))
+  (send jobs (make-instance 'job :id 2 :seconds 0.1))
+  (send jobs (make-instance 'job :id 3 :seconds 0.1))
+  (send jobs (make-instance 'job :id 4 :seconds 0.2))
+  (send jobs (make-instance 'job :id 5 :seconds 0.1))
+  (send jobs (make-instance 'job :id 6 :seconds 0.1))
   (close jobs)                    ; hết việc rồi
   (println "A: ~a jobs, B: ~a jobs, C: ~a jobs" (wait a) (wait b) (wait c)))
 ```
@@ -172,8 +172,8 @@ mỗi task gọi `done` khi kết thúc, và `wait` cho đến khi bộ đếm v
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
-(let ((counter (the Mutex<int> (Mutex::make 0)))
-      (wg (the WaitGroup (WaitGroup::make))))
+(let ((counter (the Mutex<int> (Mutex::new 0)))
+      (wg (the WaitGroup (WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

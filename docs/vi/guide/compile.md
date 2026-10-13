@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -123,7 +123,7 @@ với `typl` được build cùng với nó. Sau khi build lại `typl`, hãy sa
 
 ### 3.3 Tệp biên dịch AOT được phép chứa gì
 
-- Cấp cao nhất của tệp đầu vào chỉ được chứa các định nghĩa (`defun` `defmethod` `defvar`
+- Cấp cao nhất của tệp đầu vào chỉ được chứa các định nghĩa (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) và `use` `module`. Các biểu thức cấp cao nhất như
   `(println ...)` không được phép, ngoại trừ `(main)` ở cuối. Hãy đặt công việc vào bên trong `main`.

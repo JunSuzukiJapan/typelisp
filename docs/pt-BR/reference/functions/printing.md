@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Impressão
 
 `print`/`println`/`format`, as impressoras de um argumento, o pretty printer, `print-object` e as variáveis que
@@ -26,7 +26,7 @@ vinculada por `(where (CharOutput S))`. Um `dest` que não é nem `bool` nem str
 contém decidem quantos argumentos são tomados e de que tipos, então uma string construída em tempo de execução
 não pode ser lida na verificação. Por ser obrigatoriamente um literal, **o número e os tipos dos argumentos são
 verificados na verificação**: `(println "~d" "x")` e `(println "~a ~a" 1)` são erros na verificação. Uma diretiva
-digitada errado, um `~(` não fechado e um `~/name/` que nenhum argumento pode responder também são erros na
+digitada errado, um `~(` não fechado e um `~/name/` cujo destino da chamada não pode ser determinado também são erros na
 verificação. As regras de verificação estão em [format.md](format.md#1-como-escrever-diretivas). Para imprimir
 uma string que você constrói, crie-a com `(format false ...)` e imprima-a com `(println "~a" s)`.
 
@@ -50,8 +50,8 @@ dentro de estruturas, enumerações e `Vector`. Um `Result<Option<Sexpr>,…>` d
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -308,7 +308,7 @@ podem ser mudadas depois de criadas, então uma lista como `'(1 2 3)` nunca pode
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a aponta para o próprio a
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

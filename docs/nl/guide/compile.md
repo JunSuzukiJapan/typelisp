@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -132,8 +132,7 @@ gebouwd.
 
 ### 3.3 Wat een AOT-gecompileerd bestand mag bevatten
 
-- Het hoogste niveau van het invoerbestand mag alleen definities bevatten (`defun` `defmethod`
-  `defvar` `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype`
+- Het hoogste niveau van het invoerbestand mag alleen definities bevatten (`defun` `defvar` `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype`
   `deftrait` `impl` `defffi`, `(unsafe (def-c-struct ...))`) en `use` `module`. Expressies op het
   hoogste niveau zoals `(println ...)` zijn niet toegestaan, behalve de laatste `(main)`. Zet het
   werk binnen `main`.

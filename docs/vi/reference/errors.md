@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Thông báo lỗi
 
 Ý nghĩa của các thông báo lỗi chính từ `typl` và cách sửa chúng.
@@ -58,6 +58,10 @@ Các sai sót được phát hiện trước khi chạy. Dạng đó không đư
 | `no such function: bar` | Không có hàm hay phương thức nào mang tên đó. Kiểm tra chính tả |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Phương thức được chọn theo kiểu của đối số đầu tiên. Có một phương thức tên đó, nhưng không dành cho kiểu của đối số đầu tiên (ở đây là `int`). Cuối thông báo liệt kê các kiểu có phương thức đó |
 | `unbound variable: y` | Không có biến nào mang tên đó. Kiểm tra chính tả và phạm vi của ràng buộc (có dùng ngoài `let` của nó không?) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Hai trong số hàm, biến toàn cục và macro được đặt cùng một tên trong một module. Đổi tên một trong số đó ([Tham chiếu cú pháp 3.10](syntax.md#310-module--use--không-gian-tên)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Không có `new` nào được sinh cho struct. Tạo giá trị bằng `make-instance`, hoặc viết một `new` trong `impl` ([Tham chiếu cú pháp 3.5](syntax.md#35-impl--phương-thức-của-một-kiểu)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | Không có `defmethod`. Phương thức được viết trong `impl` của kiểu ([Tham chiếu cú pháp 3.5](syntax.md#35-impl--phương-thức-của-một-kiểu)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | Không có tùy chọn `:constructor`. Hàm dựng được viết trong `impl` như một phương thức tĩnh |
 | ``use: unresolved `nosuch` `` | Không tìm thấy module được nêu trong `use`. Về cách tên tệp ánh xạ sang đường dẫn module, xem [Tham chiếu cú pháp 3.11](syntax.md#311-tệp-và-module-dự-án-nhiều-tệp) |
 | `unresolved path: c::hidden` | Module tồn tại, nhưng tên thì không, hoặc nó không hiển thị vì thiếu `pub` |
 | `circular module dependency: a -> b -> a` | Các module `use` lẫn nhau. Hãy chuyển phần dùng chung sang một module riêng |
@@ -69,10 +73,15 @@ Các sai sót được phát hiện trước khi chạy. Dạng đó không đư
 |---|---|
 | `f: expected 1 argument(s), got 2` | Số đối số không khớp |
 | `f: unknown keyword argument :b` | Đã truyền một đối số keyword mà hàm không có |
-| `new: expected 1 field(s), got 2` | Số giá trị truyền cho hàm khởi tạo struct không khớp với số trường |
+| `circle: expected 1 field(s), got 2` | Số giá trị truyền cho một biến thể enum không khớp với số trường của biến thể đó |
+| ``make-instance point: slot `y` is not given and has no default`` | Không đưa cho `make-instance` một trường không có giá trị mặc định |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Đã đưa một trường mà struct không có |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Đã đưa một trường không phải `pub` bên ngoài module định nghĩa kiểu. Hãy nhờ module đó cung cấp một hàm dựng `pub` |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Một phương thức viết cho một thể hiện cụ thể của kiểu generic (`(impl Box<int> ...)`) được gọi trên giá trị có đối số kiểu khác |
 | ``setf: cannot assign to constant `k` `` | Đã gán cho một tên định nghĩa bằng `defconstant`. Nếu cần thay đổi, hãy dùng `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | Một hàm được khai báo bằng `defsignature` chưa được định nghĩa |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | Không kiểu đối số nào có phương thức được gọi bằng `~/name/` ([Các chỉ thị định dạng chương 5](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | Lời gọi `(nosuch arg colon at)` viết ở vị trí đó không phân giải được. Hãy định nghĩa một phương thức của kiểu đối số hoặc một hàm ([Các chỉ thị định dạng chương 5](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | `~/name/` được viết ở nơi nó nhận các phần tử của danh sách, như bên trong `~{`. Kiểu của phần tử không xác định được cần gọi gì |
 
 ## 3. Lỗi khi đọc
 

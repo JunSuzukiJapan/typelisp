@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 格式指令
 
 写在 `print`/`println`/`format` 的控制字符串中的指令。几乎涵盖了 CL 的全部 `format` 指令。函数本身的说明见
@@ -64,7 +64,7 @@
 | `~<...~;...~>` | 对齐（把各段分布到 `~mincol` 宽度。`:`/`@`=两端的填充） |
 | `~<...~;...~:>` | **逻辑块**（以 `~:>` 结束。与上面的对齐是不同的东西）。第一段=prefix，最后一段=suffix（都只能是字面量字符串）。用 `~@;` 分隔时 prefix 是**行首 prefix**。`~:<` 把 prefix/suffix 默认为 `(`/`)`。参数是一个列表（`~@<` 就地使用剩余参数） |
 | `~*` | 跳过参数（`~n*`=前进 n 个, `~:*`=回退, `~@*`=跳到绝对位置） |
-| `~/name/` | 方法调用（第 5 章。`:`/`@` 标志传给方法。不接受参数） |
+| `~/name/` | 函数・方法调用（第 5 章。`:`/`@` 标志传给调用目标。不取参数） |
 
 不支持 CL 的以下指令（检查时的错误）。
 
@@ -74,22 +74,29 @@
 
 ## 5. `~/name/`
 
-**与 CL 有一点不同：名字不是作为全局函数查找，而是作为参数自身类型的方法查找。** 方法的形式为
-`((self Self) (colon bool) (at bool)) → string`，指令的 `:`/`@` 原样传入。
-
-CL 那种作为全局函数查找的方式在本语言中无法安全实现。即使控制字符串是字面量，列表参数的元素（`~{` 内部）是什么类型在检查时
-也无法确定，只按名字查找就可能调用到给别的类型准备的函数。按值的类型选择，该方法正是针对该类型经过类型检查的，所以是安全的
-（与 `print-object` 是同一机制）。它也可以用于 `string`/`bool`/`char`/`symbol`/列表之类的值。只有整数无法从值区分宽度，
-所以**只在多个整数类型定义了同名方法时**才是错误。
-
-无法确定作用于哪个参数，但可以确定可能调用哪些方法。检查器从字面量的控制字符串中收集所有 `~/name/`，记录该调用处的参数类型中
-具有上述形式方法的那些。因此，**如果没有任何参数的类型具有该方法，就是检查时的错误**（而不是运行时），在 AOT 可执行文件中
-也能工作。
+`~/name/` 按照在该处写成 `(name 参数 colon at)` 的调用相同的规则解析 `name`，并输出调用结果的字符串。
+消耗一个参数。`colon`、`at` 是表示指令是否带有 `:`、`@` 的 `bool`。
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- 名字的解析与普通调用相同（[语法参考 3.10](../syntax.md#310-module--use--命名空间)）。参数的类型有方法 `name` 时调用它，否则调用可见的
+  函数 `name`。模块中的函数可以用路径书写（`~/m::shout/`）。
+- 能调用的是用 typelisp 写的函数或方法，并且原样接收参数、`colon`、`at`，返回 `string`。内置函数不能调用。
+- **调用目标在检查时决定**。检查器也考虑 `~*` 和 `~[` 造成的移动，求出可能到达该 `~/name/` 的所有参数，
+  并分别按其类型解析。只要有一个无法解析就是检查时的错误；可能到达的参数使调用目标分成两个以上时也是
+  错误。运行时不查找名字，所以在 AOT 可执行文件中也一样能工作。
+- **不能用在 `~{`、`~:{`、`~:@{`、`~<...~:>` 之中**（检查时的错误）。列表参数的元素类型是 `Sexpr`，
+  无法用来决定调用目标。`~@{` 遍历的是调用的剩余参数，类型已知，所以可以使用。
+
+与 CL 的区别：CL 把名字当作全局函数查找。这里与调用的解析相同，所以参数类型的方法会先于同名的函数被选中。

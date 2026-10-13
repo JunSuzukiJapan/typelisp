@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Streams e arquivos
 
 Traits e métodos de stream, tipos de stream concretos, operações com arquivos e nomes de caminho. Os sockets de
@@ -174,7 +174,7 @@ Escreva um `write-item` e as implementações padrão trazem o resto. Ele també
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; todos os métodos restantes são os padrão
 
-(write-line (counter::new 0) "four")   ; write-line, terpri e fresh-line funcionam todos
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri e fresh-line funcionam todos
 ```
 
 A entrada funciona do mesmo jeito: você só escreve `read-item`. Mesmo um tipo sem devolução própria pode ser

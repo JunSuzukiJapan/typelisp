@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Mensajes de error
 
 Qué significan los principales mensajes de error de `typl` y cómo corregirlos.
@@ -59,6 +59,10 @@ Errores encontrados antes de ejecutar. La forma no se ejecuta hasta que se corri
 | `no such function: bar` | No hay ninguna función ni método con ese nombre. Comprueba la ortografía |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Los métodos se seleccionan por el tipo del primer argumento. Existe un método con ese nombre, pero no para el tipo del primer argumento (`int` aquí). El final del mensaje enumera los tipos que tienen el método |
 | `unbound variable: y` | No hay ninguna variable con ese nombre. Comprueba la ortografía y el alcance del enlace (¿se usa fuera de su `let`?) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Se dio el mismo nombre a dos de una función, una variable global y una macro en un mismo módulo. Cambia el nombre de una de ellas ([Referencia de sintaxis 3.10](syntax.md#310-module--use--espacios-de-nombres)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Para una estructura no se genera ningún `new`. Crea el valor con `make-instance` o escribe un `new` en `impl` ([Referencia de sintaxis 3.5](syntax.md#35-impl--métodos-de-un-tipo)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | No existe `defmethod`. Los métodos se escriben en el `impl` del tipo ([Referencia de sintaxis 3.5](syntax.md#35-impl--métodos-de-un-tipo)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | No existe la opción `:constructor`. El constructor se escribe en `impl` como método estático |
 | ``use: unresolved `nosuch` `` | No se encuentra el módulo indicado en `use`. Para ver cómo corresponden los nombres de archivo a las rutas de módulo, consulta [Referencia de sintaxis 3.11](syntax.md#311-archivos-y-módulos-proyectos-de-varios-archivos) |
 | `unresolved path: c::hidden` | El módulo existe, pero el nombre no, o no es visible porque le falta `pub` |
 | `circular module dependency: a -> b -> a` | Los módulos se usan mutuamente con `use`. Mueve la parte compartida a un módulo aparte |
@@ -70,10 +74,15 @@ Errores encontrados antes de ejecutar. La forma no se ejecuta hasta que se corri
 |---|---|
 | `f: expected 1 argument(s), got 2` | El número de argumentos no coincide |
 | `f: unknown keyword argument :b` | Se pasó un argumento de palabra clave que la función no tiene |
-| `new: expected 1 field(s), got 2` | El número de valores pasados a un constructor de estructura no coincide con el número de campos |
+| `circle: expected 1 field(s), got 2` | El número de valores pasados a una variante de un enum no coincide con el número de campos de esa variante |
+| ``make-instance point: slot `y` is not given and has no default`` | No se dio a `make-instance` un campo que no tiene valor por defecto |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Se dio un campo que la estructura no tiene |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Se dio un campo que no es `pub` fuera del módulo que define el tipo. Pide a ese módulo un constructor `pub` |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Se llamó a un método escrito para una instancia concreta de un tipo genérico (`(impl Box<int> ...)`) sobre un valor con otros argumentos de tipo |
 | ``setf: cannot assign to constant `k` `` | Se asignó a un nombre definido con `defconstant`. Si tiene que cambiar, usa `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | Una función declarada con `defsignature` no está definida |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | Ninguno de los tipos de los argumentos tiene el método llamado con `~/name/` ([Directivas de formato, capítulo 5](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | La llamada `(nosuch arg colon at)` escrita en ese lugar no se puede resolver. Define un método del tipo del argumento o una función ([Directivas de formato, capítulo 5](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | Se escribió `~/name/` donde recibe los elementos de una lista, como dentro de `~{`. El tipo de los elementos no puede decidir a qué llamar |
 
 ## 3. Errores de lectura
 

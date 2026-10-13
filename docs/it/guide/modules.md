@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Moduli e organizzazione dei file
 
 Questa guida spiega come mettere insieme un programma composto da più file. Le regole dettagliate si
@@ -46,14 +46,17 @@ in esecuzione (nel REPL, la directory corrente).
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; a field without pub cannot be read from outside
+  (tag string))                        ; un campo senza pub non si può leggere né scrivere da fuori
 
-(defun square ((n i32)) i32 (* n n))   ; a function without pub cannot be called from outside either
+(defun square ((n i32)) i32 (* n n))   ; anche una funzione senza pub non si può chiamare da fuori
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -75,11 +78,16 @@ caricarlo prima.
 
 ### Che cosa viene reso pubblico
 
-- Funzioni, strutture, enumerazioni, variabili globali, macro e metodi sono visibili da altri moduli
-  solo quando portano `pub`. Metti `pub` subito prima della definizione, come in `(pub defun ...)`.
-- Per le strutture, **rendere pubblico il tipo e rendere pubblici i campi sono due cose separate**.
-  `(pub defstruct point ...)` rende visibile il tipo, e solo i campi scritti come `(pub x i32)`
-  possono essere letti e scritti dall'esterno.
+- Funzioni, strutture, enum, variabili globali e macro sono visibili dagli altri moduli solo se portano
+  `pub`. Metti `pub` subito prima della definizione, come in `(pub defun ...)`.
+- Dei metodi scritti in un `impl`, si possono usare da fuori solo quelli scritti `(pub new ...)`, elemento
+  per elemento.
+- Per le strutture **rendere pubblico il tipo e rendere pubblici i campi sono cose separate**.
+  `(pub defstruct point ...)` rende visibile il tipo, e solo i campi scritti `(pub x i32)` si possono
+  leggere e scrivere da fuori.
+- Allo stesso modo, negli altri moduli si possono dare a `make-instance` solo i campi `pub`. Il `point`
+  qui sopra ha un `tag` che non è `pub`, quindi gli altri moduli non possono crearlo con `make-instance` e
+  usano `point::new`.
 - Usare dall'esterno un nome che non è pubblico produce un errore di "impossibile risolvere" come
   `unresolved path: geometry::square`. È lo stesso messaggio che si ottiene per un nome scritto male,
   quindi se l'ortografia è giusta e il nome continua a non risolversi, sospetta un `pub` mancante.
@@ -112,10 +120,11 @@ chiamano senza il nome del modulo.
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, not core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, not core::area
 ```
 
-I metodi dentro un `impl` sono sempre pubblici, anche senza `pub`.
+I metodi dell'`impl` di un trait sono sempre pubblici, anche senza `pub`. Dei metodi di un `impl` inerente
+(`(impl point ...)`), sono pubblici solo quelli con `pub`.
 
 Un trait in sé non può essere reso pubblico verso altri moduli. Tieni la definizione di un trait, gli
 `impl` per esso e il codice che lo usa tramite `:dyn` in un unico modulo.

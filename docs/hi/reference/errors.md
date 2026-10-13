@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # त्रुटि संदेश
 
 `typl` के मुख्य त्रुटि संदेशों का अर्थ और उन्हें कैसे ठीक करें।
@@ -56,6 +56,10 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `no such function: bar` | उस नाम का कोई फ़ंक्शन या मेथड नहीं है। वर्तनी जाँचें |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | मेथड पहले आर्ग्युमेंट के टाइप से चुने जाते हैं। उस नाम का मेथड मौजूद है, लेकिन पहले आर्ग्युमेंट के टाइप (यहाँ `int`) के लिए नहीं। संदेश का अंत उन टाइप को सूचीबद्ध करता है जिनके पास वह मेथड है |
 | `unbound variable: y` | उस नाम का कोई वेरिएबल नहीं है। वर्तनी और बाइंडिंग का स्कोप जाँचें (क्या इसका उपयोग इसके `let` के बाहर हो रहा है?) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | एक मॉड्यूल में फ़ंक्शन, ग्लोबल वेरिएबल और मैक्रो में से दो को एक ही नाम दिया गया। उनमें से एक का नाम बदलें ([सिंटैक्स संदर्भ 3.10](syntax.md#310-module--use--नेमस्पेस)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | स्ट्रक्ट के लिए कोई `new` उत्पन्न नहीं होता। मान `make-instance` से बनाएँ, या `impl` में एक `new` लिखें ([सिंटैक्स संदर्भ 3.5](syntax.md#35-impl--टाइप-के-मेथड)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` नहीं है। मेथड टाइप के `impl` में लिखे जाते हैं ([सिंटैक्स संदर्भ 3.5](syntax.md#35-impl--टाइप-के-मेथड)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` विकल्प नहीं है। कंस्ट्रक्टर `impl` में स्टैटिक मेथड के रूप में लिखा जाता है |
 | ``use: unresolved `nosuch` `` | `use` में नामित मॉड्यूल नहीं मिल सकता। फ़ाइल के नाम मॉड्यूल पाथ से कैसे मेल खाते हैं, इसके लिए [सिंटैक्स संदर्भ 3.11](syntax.md#311-फ़ाइलें-और-मॉड्यूल-बहु-फ़ाइल-प्रोजेक्ट) देखें |
 | `unresolved path: c::hidden` | मॉड्यूल मौजूद है, लेकिन नाम नहीं है, या `pub` न होने के कारण दिखाई नहीं देता |
 | `circular module dependency: a -> b -> a` | मॉड्यूल एक-दूसरे को `use` करते हैं। साझा हिस्से को अलग मॉड्यूल में ले जाएँ |
@@ -67,10 +71,15 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 |---|---|
 | `f: expected 1 argument(s), got 2` | आर्ग्युमेंट की संख्या मेल नहीं खाती |
 | `f: unknown keyword argument :b` | ऐसा कीवर्ड आर्ग्युमेंट पास किया गया जो फ़ंक्शन के पास नहीं है |
-| `new: expected 1 field(s), got 2` | struct कंस्ट्रक्टर को पास किए गए मानों की संख्या फ़ील्ड की संख्या से मेल नहीं खाती |
+| `circle: expected 1 field(s), got 2` | enum वेरिएंट को दिए गए मानों की संख्या उस वेरिएंट के फ़ील्ड की संख्या से मेल नहीं खाती |
+| ``make-instance point: slot `y` is not given and has no default`` | डिफ़ॉल्ट मान रहित फ़ील्ड `make-instance` को नहीं दिया गया |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | ऐसा फ़ील्ड दिया गया जो स्ट्रक्ट में नहीं है |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | टाइप परिभाषित करने वाले मॉड्यूल के बाहर ऐसा फ़ील्ड दिया गया जो `pub` नहीं है। उस मॉड्यूल से एक `pub` कंस्ट्रक्टर उपलब्ध कराने को कहें |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | जेनेरिक टाइप के किसी विशेष टाइप आर्ग्युमेंट (`(impl Box<int> ...)`) के लिए लिखा मेथड दूसरे टाइप आर्ग्युमेंट वाले मान पर कॉल किया गया |
 | ``setf: cannot assign to constant `k` `` | `defconstant` से परिभाषित नाम को असाइन किया गया। यदि उसे बदलना आवश्यक है, तो `defvar` का उपयोग करें |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | `defsignature` से घोषित फ़ंक्शन परिभाषित नहीं है |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | किसी भी आर्ग्युमेंट टाइप के पास वह मेथड नहीं है जिसे `~/name/` से कॉल किया गया ([फ़ॉर्मैट निर्देश अध्याय 5](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | उस स्थान पर लिखा कॉल `(nosuch arg colon at)` हल नहीं होता। आर्ग्युमेंट के टाइप का मेथड या कोई फ़ंक्शन परिभाषित करें ([फ़ॉर्मैट निर्देश अध्याय 5](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | `~/name/` ऐसी जगह लिखा गया जहाँ उसे सूची के तत्व मिलते हैं, जैसे `~{` के भीतर। तत्वों का टाइप तय नहीं कर सकता कि क्या कॉल करना है |
 
 ## 3. पढ़ने की त्रुटियाँ
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # trait
 
 trait 是「這個型別支援這些操作」的約定。它讓多個型別擁有同名的操作，使用這些操作的函式就不必為每個型別分別撰寫。其機制與 Rust 的
@@ -35,8 +35,8 @@ trait 幾乎相同。閱讀本章前請先讀[型別基礎](types.md)。
 實作的方法可以像一般函式一樣呼叫。
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 只要漏掉 trait 中宣告的任何一個方法，就會在 `impl` 處出現型別錯誤。
@@ -50,8 +50,8 @@ trait 幾乎相同。閱讀本章前請先讀[型別基礎](types.md)。
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 因為有 `(where (Shape T))`，本體中可以對 `T` 的值使用 `name` 與 `area`。沒有約束時對 `T` 一無所知，就無法呼叫。
@@ -82,8 +82,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; 自己寫的優先
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. 實作標準 trait
@@ -109,7 +109,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true（Ord 的預設實作）
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord 的預設實作）
 ```
 
 實作 `print-object` 就能決定 `println` 的顯示方式。被要求可讀回的形式時（如 `~s`），引數 `escape` 為 `true`。
@@ -119,7 +119,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 與 trait 約束搭配，就能寫出適用於任何實作了 `Ord` 的型別的函式。
@@ -150,8 +150,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

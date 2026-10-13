@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 打印
 
 `print`/`println`/`format`、单参数打印函数、pretty printer、`print-object`，以及控制打印的变量。格式指令一览见
@@ -21,7 +21,7 @@
 
 **控制字符串必须是字面量**（与 Rust 的 `format!` 同样的限制）。其中的指令决定取多少个参数、什么类型，所以运行时拼出的
 字符串在检查时无法读取。限定为字面量后，**参数的个数和类型在检查时就会被检查**——`(println "~d" "x")` 和
-`(println "~a ~a" 1)` 都是检查时的错误。拼错的指令、未闭合的 `~(`、没有任何参数能回应的 `~/name/` 也同样是检查时的
+`(println "~a ~a" 1)` 都是检查时的错误。拼错的指令、未闭合的 `~(`、无法确定调用目标的 `~/name/` 也同样是检查时的
 错误。检查规则见 [format.md](format.md#1-写法)。想输出拼出来的字符串时，用 `(format false ...)` 创建，再用
 `(println "~a" s)` 打印。
 
@@ -40,8 +40,8 @@
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -265,7 +265,7 @@ CL 用 `nil` 表示"无限制"，但本语言没有 `nil`，所以与 `*print-ri
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a 指向 a 自身
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

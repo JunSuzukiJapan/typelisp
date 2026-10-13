@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -92,12 +92,12 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 
 - 引數型別與回傳值型別是必要的。
 - 泛型函式在名稱後以角括號寫型別參數：`(defun name<T1,T2...> (params) Ret body...)`（與型別位置的 `Vector<T>` 相同的角括號語法）。
-- `defun`/`lambda`/`defmethod` 在尾端寫 `&rest (name Type)` 可以接受可變引數：
+- `defun`/`lambda`/`impl` 的方法在尾端寫 `&rest (name Type)` 可以接受可變引數：
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)`（在本體中 `xs` 一律繫結為 `Option<Sexpr>`——S 運算式的串列。呼叫端的每個實際引數各自
   作為 `Type2` 進行型別檢查後再包裝進 `Sexpr`）。
   `defmacro` 也有自己的 `&rest`，但不同之處在於它一律是無型別的 `Sexpr`（`defun`/`lambda` 明確寫出元素型別）。`fn` 型別也可以寫成
   `(fn (T1... &rest Te) Ret)` 的形式來表示可變引數函式的型別。
-- **`&optional` / `&key`**（用於 `defun` 與 `defmethod`。`lambda`/`labels` 由於下述原因不在對象之內，`defmacro` 是下述的另一種實作）。順序依 CL
+- **`&optional` / `&key`**（用於 `defun` 與 `impl` 的方法。`lambda`/`labels` 由於下述原因不在對象之內，`defmacro` 是下述的另一種實作）。順序依 CL
   為 `必要 &optional &rest &key`。每個參數寫成 `(name Type)` 或 `(name Type 預設式)`：
 
   ```lisp
@@ -118,20 +118,24 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
   - **`&key` 不能與 `&optional`/`&rest` 混在同一個引數清單中。** CL 本身有一個歧義（尾端的實際引數是由依位置填入的 `&optional` 接收，還是由依
     標籤比對的 `&key` 接收，取決於*值*），以禁止這種組合來避開。`&optional` 與 `&rest` 可以一起使用。
   - 泛型函式中也可以使用，但**只出現在被省略引數中的型別參數無法推論，是錯誤**（那裡沒有可以比對的值）。
-  - **`defmethod` 也可以寫同樣的 3 個區段**（實例方法與靜態函式都可以）。在接收者之後排列 `&optional`/`&rest`/`&key`：
+  - **`impl` 的方法也可以寫同樣的 3 個區段**（實例方法與靜態方法都可以）。實例方法在 `self` 之後
+    排列 `&optional`/`&rest`/`&key`：
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; 靜態函式
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 靜態方法
     (point::origin :y 7)
     ```
 
     泛型型別的方法中也可以使用，但**寫了預設式的參數的型別中不能寫擁有者的型別參數**（與 `defun` 對自身型別參數的限制相同。省略時嵌入的是
     *經過檢查的*式子，其型別不能停留在抽象的變數上）。
-  - **trait 的方法中不能使用。** `deftrait` 端沒有這種語法，如果只有 `impl` 端能宣告區段，那麼以 `:dyn` 為接收者的呼叫（從 trait 的宣告填入
+  - **trait 的方法中不能使用。**（寫在 trait 的 `impl` 中的方法也一樣） `deftrait` 端沒有這種語法，如果只有 `impl` 端能宣告區段，那麼以 `:dyn` 為接收者的呼叫（從 trait 的宣告填入
     引數）與以具體型別為接收者的呼叫（從 `impl` 的宣告填入）就會成為不同的東西。vtable 槽的引數個數是固定的。
   - **`lambda` / `labels` 中不能使用**（可以使用 `&rest`）。要填入被省略的引數，呼叫端需要讀取**被呼叫端經過檢查的預設式**，而它只能從依名稱
     解析的簽章中得到。`lambda` 作為值傳遞，描述這個值的只有函式型別 `(fn ...)`——那裡沒有放式子的地方，如果放了，「簽章相同而只有預設值不同的
@@ -171,7 +175,7 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **泛型函式。** 產生每種型別的實體需要本體，而宣告沒有本體。前置呼叫即使能解析，實體化也會失敗，所以在宣告時就拒絕。
 - **`&optional`/`&key`。** 它們的簽章包含每個預設值**經過檢查的**式子（省略引數時原樣嵌入呼叫端），而宣告沒有地方放它。
 - **`defun` 以外的東西。** `defmacro` 展開時需要巨集本體**已經執行過**，登記簽章無法取代。型別（`defstruct`/`defenum`/`deftrait`）的登記是
-  「登記型別的程式碼本身所需要的東西」，不像簽章那樣自成一體。`defmethod` 登記在所屬的型別上，所以隨型別而定。
+  「登記型別的程式碼本身所需要的東西」，不像簽章那樣自成一體。`impl` 的方法登記在所屬的型別上，所以隨型別而定。
 
 CL 中對應的是 `(declaim (ftype (function (i32) bool) even2))`，但那伴隨著整套宣告系統，而且只是**建議**。這裡是靜態型別，所以宣告會被檢查。
 
@@ -440,33 +444,69 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 型別註記是必要的（不從初始化式推論）。`defvar` 可以修改，`defconstant` 不可以（`setf` 是錯誤）。
 
-### 3.5 defmethod — 方法定義
+### 3.5 impl — 型別的方法
 
 ```lisp
-; 實例方法：可以以 (m obj args...) 的形式呼叫
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; 靜態方法: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; 實例方法: (name obj args...)
+  (pub name ...))                                      ; 在定義型別的模組之外也公開
 
-; static / 關聯函式：可以以 (Type::name args...) 的形式呼叫
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; 泛型型別
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-呼叫端依 `obj` 的靜態型別解析方法（單一、靜態分派）。可以在與 `defun` 相同的位置、依相同的規則放置文件字串（`where` 子句之後、本體開頭，僅當
-其後還有本體形式時）。`impl` 中的方法也一樣——以 `(documentation Type::method)` 取出。
+為以 `defstruct`（3.6）、`defenum`（3.7）定義的型別加上方法。相當於 Rust 的固有 impl
+（`impl Point { ... }`）。
 
-方法自身的型別參數與 `defun` 一樣，用 `<...>` 寫在名稱裡。接收者型別的型別參數（下例中的 `T`）由接收者決定，方法自身的型別參數（`U`）從每次呼叫的引數推斷。
+- 項目的形式是 `(名稱 (參數...) 回傳型別 本體...)`，與 trait 的 `impl`（3.9）的項目相同。
+- 第一個參數是 `self` 的項目是**實例方法**，以 `(name obj args...)` 的形式呼叫。`self` 不必寫型別
+  （`(self)` 與 `((self Self))` 相同，`Self` 是對象型別）。
+- 沒有 `self` 的項目是**靜態方法**，以 `(Type::name args...)` 的形式呼叫。建立值的靜態方法就是該型別
+  的建構函式。名稱可以自由決定，建議用 `new`。
+- **公開以項目為單位**。只有寫成 `(pub name ...)` 的項目才能在定義該型別的模組之外使用。不加 `pub`
+  的項目只能在該模組內使用。
+- 一個型別可以寫任意多個 `impl`。
+- 呼叫端依 `obj` 的靜態型別解析方法（單一、靜態分派）。方法**只**依**第一個引數的型別**尋找（3.10）。
+- **文件字串**可以與 `defun` 放在相同位置、依相同規則書寫（本體的開頭，僅當後面還有本體形式時）。
+  以 `(documentation Type::name)` 取出。trait 的 `impl` 的方法也一樣。
+- 只能為自己程式中的型別書寫。`Vector`、`Option`、`int` 這類標準函式庫的型別不能寫（會出現
+  `... is a standard library type` 錯誤）。想為標準型別增加操作時，定義一個 trait，再對該型別寫 `impl`。
+- 在 `(impl X ...)` 中，`X` 之後是項目（串列）、`where` 或什麼都沒有時，就是這裡的固有 impl；
+  是名稱時，就是 trait 的 `impl`（`(impl Trait Type ...)`，3.9）。
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; 靜態方法
+(area (Point::new 2.0 3.0))   ; 實例方法。=> 6.0
+```
+
+方法自身的型別參數與 `defun` 一樣，以 `<...>` 寫在名稱上。對象型別的型別參數（下例的 `T`）由接收者
+決定，方法自身的型別參數（`U`）由呼叫的引數推論。
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- 方法自身的型別參數的名稱，既要與接收者型別宣告的型別參數（`(defstruct Box<T> ...)` 的 `T`）不同，也要與接收者中寫的名稱不同。
-- 接收者型別是泛型時，接收者中要嘛把它的型別參數全部寫成變數（`Box<T>`），要嘛全部寫成具體型別（`Box<int>`）。
-- `impl` 中的方法不能新增型別參數，其簽名遵循 trait 宣告的簽名。
+- 方法自身的型別參數，要取與 `impl` 中所寫對象型別的型別參數（`(impl Box<T> ...)` 的 `T`）不同的名稱。
+- 泛型型別的 `impl`，要麼把型別參數全部寫成變數（`Box<T>`），要麼全部寫成具體型別（`Box<int>`。
+  此時方法只能用於該型別的值）。
+- trait 的 `impl` 的方法不能加上型別參數。簽章遵循 trait 所宣告的簽章。
 
 ### 3.6 defstruct — 結構（使用者定義型別）
 
@@ -482,48 +522,72 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   ...)
 ```
 
-- 每個欄位是 `(name type)` 或 `(pub name type)`（依欄位設定公開，與結構本身的 `pub` 無關）。尾端再寫一個式子，就成為該槽的**預設值**
-  （`(x i32 0)`）——見後面的選項清單。
+- 每個欄位是 `(name type)` 或 `(pub name type)`（依欄位設定公開，與結構本身的 `pub` 無關）。尾端再寫一個
+  式子，就成為該槽的**預設值**（`(x i32 0)`）。
+- 值以 `make-instance` 建立（見下文）。不會產生依欄位順序接收引數的建構函式。需要建構函式時，在
+  `impl`（3.5）中把它寫成靜態方法。
 - 自動產生以下內容：
-  - 建構函式 `Name::new`（依欄位順序傳入引數）
   - 讀取器 `(field-name instance)`，語法糖 `instance::field-name`
   - 設定器 `(set-field-name instance value)`，語法糖 `(setf instance::field-name value)`
 - 要讓結構本身 `pub`，像 `(pub defstruct ...)` 這樣在前面加 `pub`。
 - **型別要在被指名之前定義。** 欄位的型別可以寫自己（`(next Option<node>)`），但不能寫之後定義的型別——型別沒有相當於 `defsignature` 的前置
   宣告。尚未定義的名稱，在 `defun` 的引數型別與 `the` 中同樣會得到 `unknown type` 錯誤。因此互相參照的兩個型別無法寫出。
-- **型別變數只有寫在宣告部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名稱的 `<T>`，`defmethod` 是接收者的型別（`(self box<T>)`，
-  靜態方法是 `box<T>`）以及名稱中的 `<U>`，`impl` 是對象型別與 `impl<T>`，`deftrait` 是 `Self` 以及 `(type Item)` 的關聯型別。在其他地方——引數、回傳值、本體中
+- **型別變數只有寫在宣告部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名稱的 `<T>`，
+  固有 `impl` 是對象型別（`(impl box<T> ...)`）以及各方法名稱中的 `<U>`，trait 的 `impl` 是對象型別與
+  `impl<T>`，`deftrait` 是 `Self` 以及 `(type Item)` 的關聯型別。在其他地方——引數、回傳值、本體中
   的 `the`/`lambda`——第一次出現的名稱不會成為型別變數，而是 `unknown type`。
 - **文件字串**：在名稱之後、欄位清單之前放置字串字面值，它就成為文件字串（`(defstruct Name "doc" (field Type)...)`——與 CL 的 `defstruct`
   位置相同）。欄位一律是 `(name Type ...)` 的形式，不可能是裸字串，所以沒有歧義。以 `(documentation Name)` 取出。
 
-#### 選項清單
-
-在名稱的位置寫清單 `(Name option...)` 可以指定選項（與 CL 位置相同）。
+#### make-instance — 建立值
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; 關鍵字建構函式
-                  (:constructor at (x &optional y))  ; BOA 建構函式
-                  (:copier copy-point))
+(make-instance 'Name :field1 value1 :field2 value2 ...)
+```
+
+結構的值與 CLOS 一樣以 `make-instance` 建立。
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; 順序任意
+(make-instance 'point :x 1)           ; y 是預設值 0
+```
+
+- 型別名稱寫成以 `'` 引用的符號。不是在執行時選擇型別，而是在檢查時決定（與 `concatenate` 的
+  `'vector` 相同）。
+- 欄位以 `:名稱 值` 的組傳入。值依書寫順序各求值一次。
+- 沒寫的欄位以預設值填入。沒寫沒有預設值的欄位是型別錯誤。未知的欄位、同一欄位寫兩次也是型別錯誤。
+- 泛型結構的型別引數由值與期望型別推論。也可以像 `'Box<int>` 這樣寫出來。
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- 在定義型別的模組之外，不能寫非 `pub` 的欄位。如果這樣的欄位沒有預設值，其他模組就無法建立該值。
+  想讓外部建立時，在 `impl` 中寫一個 `pub` 的建構函式（3.5）。
+
+#### 選項清單
+
+在名稱的位置寫成 `(Name option...)` 清單即可指定選項（與 CL 位置相同）。
+
+```lisp
+(defstruct (point (:copier copy-point))
   (x i32 0)          ; 第 3 個元素是該槽的預設值
   (y i32 0))
 
-(point::make-point :y 7)   ; x 為 0
-(point::at 1)              ; y 為 0
-(point::at 1 2)
-(copy-point p)             ; 淺複製（與 CL 的 copier 相同）
+(copy-point p)       ; 淺複製（與 CL 的 copier 相同）
 ```
 
-- **`:constructor`** —— 產生的是型別的**靜態函式**（`point::make-point`），本體一定是 `(point::new ...)`。`new` 仍是結構上唯一的建構函式，
-  這裡建立的是它的*呼叫方式*。可以宣告多個。
-  - `(:constructor name)` —— 以 `&key` 接受所有槽。**所有槽都需要預設值**（這個語言沒有相當於 CL「未繫結槽」的東西）。
-  - `(:constructor name (slot...))` —— 以位置引數接受所列的槽（順序任意）。沒有列出的槽以預設值填入，所以**需要預設值**。插入 `&optional`
-    後，其後的可以省略（同樣需要預設值）。
-- **`:copier`** —— 產生回傳槽值相同的新值的**實例方法**。與 CL 的 copier 一樣是淺複製。
+- **`:copier`** — 產生一個回傳具有相同槽值之新值的**實例方法**。與 CL 的 copier 一樣是淺複製。
 - **`:include Parent`** —— 把父的槽清單接到開頭（預設值也繼承。父可以在別的檔案中）。**不建立型別關係**——子不是父的子型別，父的方法不適用於
   子，也沒有連接兩者的執行期檢查。這個語言沒有子型別，共同的介面由 `deftrait` 負責。連接的只是槽的*清單*。
-- **槽的預設值只由產生的建構函式讀取。** 一個 `:constructor` 都沒有宣告卻寫了預設值，因為不可能被使用，所以是錯誤。
 - 不加入的選項及其原因：
+  - **`:constructor`** — 建構函式在 `impl` 中寫成靜態方法（3.5）。寫了這個選項會出現錯誤，並說明如何改寫。
   - **`:conc-name`** —— 在 CL 中是為存取器加前綴，以避免在一個平坦的函式命名空間中衝突。在這裡存取器是依接收者型別分派的方法，不會衝突，而且
     加前綴會破壞 `instance::field`（只知道槽名稱）。
   - **`:predicate`** —— 在執行期回答「這個值是 `point` 嗎」。在這裡型別是沒有執行期見證的編譯時分類，也不存在「可能是 point 的未知型別的值」
@@ -552,7 +616,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
     ((Some v) v)
     ((None) 0))
   ```
-- 方法／關聯函式與 `defstruct` 一樣以 `defmethod`/`impl` 後加。
+- 方法與靜態方法和 `defstruct` 一樣寫在 `impl`（3.5）中。
 - 要讓列舉本身 `pub`，寫 `(pub defenum ...)`。
 - **文件字串**：與 `defstruct` 相同的位置與規則——名稱之後、變體清單之前（`(defenum Name "doc" (Variant ...)...)`）。以 `(documentation Name)` 取出。
 
@@ -593,8 +657,9 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   (method-name (recv params...) RetType body...))
 ```
 
-透過 `impl`，每個方法都作為 `TargetType` 的一般 `defmethod` 登記。在泛型函式的 `where` 子句中作為 trait 約束參照（見
-[3.1 defun](#31-defun--函式定義)）。trait 名稱也可以寫成 `m::Trait` 這樣的 `::` 路徑。
+透過 `impl`，每個方法都作為 `TargetType` 的方法登記，可以像固有 `impl`（3.5）的方法一樣呼叫。
+trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛型函式的 `where` 子句中作為 trait 約束參照
+（見 [3.1 defun](#31-defun--函式定義)）。trait 名稱也可以寫 `m::Trait` 這樣的 `::` 路徑。
 
 **繼承清單（必要）**：一定寫在 trait 名稱之後。元素是裸 trait 名稱，或者在該 trait 有關聯型別時，寫成**固定了所有關聯型別**的
 `(Trait (Assoc Type))`。
@@ -674,12 +739,24 @@ vtable 進行動態分派：
 (shadowing-import path...) ; 明知裸名稱已被占用仍要取用的 use
 ```
 
-- `module` 建立命名空間。**型別不是命名空間**（與 Rust 相同，型別只擁有關聯函式／方法）。
-- 以 `use` 引入型別後，該型別的建構函式與公開的 static 方法也可以用裸名稱使用（例如：`(use option)` 之後可以不寫 `option::some`/
-  `option::none` 而呼叫 `some`/`none`）。
-- 裸名稱（沒有限定的識別字）的解析順序：特殊形式 → 建構函式 → 自由函式（目前的命名空間 → 根）→ 實例方法（依第一個引數的靜態型別解析）。不會
-  回溯到中間的父模組。
-- 限定路徑 `a::b` 依上述順序解析 `a`，是模組就進入內部，是型別就把最後一個區段作為關聯項目解析。
+- `module` 建立命名空間。**型別不是命名空間**（與 Rust 一樣，型別只擁有靜態方法與方法）。
+- 以 `use` 引入型別後，列舉的變體與該型別公開的靜態方法也可以用裸名使用（例：`(use option)` 之後，
+  不寫 `option::some`/`option::none` 也能呼叫 `some`/`none`）。
+- **一個名稱只有一個意義**。函式、全域變數與巨集屬於同一個命名空間，在同一模組中其中任意兩個都不能
+  取同一個名稱（無論以什麼順序定義都是錯誤）。不像 CL 那樣把函式與變數的命名空間分開。不同模組中的
+  同名名稱，較近的那個可見。
+- 裸名 `n` 的解析（呼叫 `(n a ...)` 的位置。特殊形式的名稱在此之前決定）：
+  1. 區域（參數，以及 `let`、`labels`、`macrolet`、`symbol-macrolet` 的繫結）
+  2. 模組的名稱 `n` 是巨集時，該巨集
+  3. `use` 的列舉的變體、`use` 的型別的靜態方法
+  4. 第一個引數的型別的方法 `n`（方法**只**依**第一個引數的型別**尋找）
+  5. 模組的名稱 `n` 是函式或全域變數時，就是它（全域變數時呼叫其值所代表的函式）
+
+  模組的名稱依 目前的模組 → `use` 的別名 → 父模組（直到根）的順序尋找，取第一個找到的。把函式當作值
+  傳遞的位置也遵循同樣的規則，第 4 步的「第一個引數的型別」是該處所期望的函式型別的第一個參數的型別
+  （在期望 `(fn (pt) int)` 的位置寫 `norm`，就是 `pt` 的方法 `norm`）。期望的型別尚未確定時略過第 4 步。
+- 限定路徑 `a::...::n` 解析為 `a::...` 所指模組的名稱（巨集、函式、全域變數），或者型別的變體、靜態
+  方法。值位置上的 `x::f`（`x` 是值的名稱）是欄位的讀取。
 - **`use` 對其後的形式生效。** 檔案逐個形式讀取，相依關係也在檢查該形式之前解析，所以在 `(use m)` **上面**寫 `m::f` 會得到 `unresolved path`。
   請把 `use` 放在檔案開頭。
 - **`use` 可以接受多個路徑**（`(use a::f b::g)`）。`import` 是行為相同的 CL 相容寫法。
@@ -727,14 +804,16 @@ vtable 進行動態分派：
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-能加 `pub` 的只有上面 11 種（`module`/`use`/`deftrait`/`impl` 不能加）。不是以括號包住定義形式的 `(pub (defun ...))` 形式，而是在 `pub` 之後
-緊接定義關鍵字。一個 `pub` 只能公開一個定義（不能一次指定多個定義）。
+`pub` 只能用於上述 10 種（不能用於 `module`/`use`/`deftrait`/`impl`）。不是以括號包住定義形式的
+`(pub (defun ...))` 形式，而是在 `pub` 之後緊接定義關鍵字。一個 `pub` 只能公開一個定義（不能一次
+指定多個定義）。
+
+固有 `impl` 的方法依項目寫成 `(pub name ...)`（3.5）。結構的欄位寫成 `(pub x i32)`（3.6）。
 
 ### 3.14 defmacro — 巨集定義
 
@@ -858,6 +937,18 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 - `(= expr)` —— 對任意式子求值，以 `Eq::equals` 比較。是比較沒有字面值語法的型別（`defstruct` 實例、全域變數、計算結果）的唯一寫法，使用者定義的
   `Eq` 實作直接成為比較規則。`expr` 可以參照從該分支位置可見的任何東西（引數、外層繫結、全域變數）
 - `(Ctor sub-pattern...)` —— 建構函式模式（`Some x` `None` `Cons a d` `Ok v` 等）
+- `(Type :slot pattern... :slot...)` — 結構的模式。在型別名稱之後以關鍵字寫槽。關鍵字之後是模式時，
+  以該模式比對這個槽；之後是關鍵字或結束時，把槽繫結到同名的變數。沒寫的槽不參與比對（不依賴欄位的
+  數量與順序）：
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; 繫結 x，並以 (some b) 比對 y
+      ((point :x a) a)))                 ; 繫結到 a
+  ```
 - `#{p0 p1 ...}` —— 元組模式。逐個元素用子模式比對。對 `Sexpr` 而言，只符合元素個數相同的 `#{..}` 資料
 - `(:or p1 p2 ...)` —— or 模式。任一個選項符合即符合。分支本體只有一個，所以每個選項都必須以相同的型別繫結相同名稱的變數。也可以寫在建構函式模式內部（`(some (:or (circle r) (rect r _)))`）
 
@@ -901,8 +992,8 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 對 `Sexpr` 被比對值，除了上面的內建 19 種變體模式，還可以寫**向下轉型模式**（取出使用者定義 ADT 的實例）——以 `match` 取回像 `(list p 42)`
 這樣隱式轉換為 `Sexpr` 的 `defstruct`/`defenum`（第 3 章）實例的語法：
 
-- `(TypeName sub-pattern...)` —— 把**型別名稱**放在開頭的欄位拆解（只用於 struct，`defstruct` 一律只有一個變體，所以以型別名稱而不是變體名稱
-  書寫）。例：對 `(defstruct point (x f64) (y f64))` 寫 `(point x y)`。
+- `(TypeName :slot pattern...)` — 以**型別名稱**開頭的欄位分解（僅限 struct）。與上面的結構的模式
+  寫法相同。例：對於 `(defstruct point (x f64) (y f64))`，寫 `(point :x :y)`。
 - 裸變體名稱 `(VariantName sub-pattern...)` —— 取出 `defenum` 的變體。以 `(use EnumType)` 之後可見的裸名稱解析（與呼叫建構函式時的可見性規則
   相同）。例：對 `(defenum color (red) (blue))`，在 `(use color)` 之後寫 `(red)` `(blue)`。多個可見的 enum 的變體名稱衝突時會得到歧義錯誤，所以
   也可以寫限定形式 `(EnumType::VariantName ...)`（不需要 `use`）。
@@ -934,7 +1025,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; 型別名稱在前的欄位拆解
+    ((circle :r) (* (* r r) 3))    ; 型別名稱在前的欄位拆解
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -987,7 +1078,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 (return-from name value)            ; 帶值離開
 ```
 
-**`defun` / `defmethod` / `labels` 的每個函式都隱含地建立以自己名稱命名的 block**（與 CL 相同）。所以 `(return-from f v)` 就是函式的提早返回：
+**`defun` / `impl` 的方法 / `labels` 的每個函式都隱含地建立以自己名稱命名的 block**（與 CL 相同）。所以 `(return-from f v)` 就是函式的提早返回：
 
 ```lisp
 (defun first-even ((a i32) (b i32)) i32
@@ -1262,8 +1353,8 @@ typl --image session.typld             # REPL 也一樣
 
 全域變數的儲存與編譯後的程式碼**共享**（同一個槽）。`defvar` 的初始化式由編譯後的初始化執行一次，還原時略過——以免有副作用的初始化式執行兩次。
 
-`compile-file` 也會讀取標準函式庫（把其本體嵌入執行檔），所以 `abs`/`gcd` 這樣的標準函式庫函式，以及 `(impl print-object ...)`、
-`(defmethod print-object ...)` 都可以在 AOT 中使用。
+`compile-file` 也讀取標準函式庫（把其本體嵌入執行檔），所以 `abs`/`gcd` 這類標準函式庫的函式，以及
+`(impl print-object ...)`，都可以在 AOT 中使用。
 
 `compile-file` 也接受 `use`（以及 `import`/`shadowing-import`）。進入點檔案的 `(use m)` 依與 `typl file.typl` 相同的規則尋找檔案，找到的相依
 檔案也會被編譯並連結進執行檔——`main.typl` 以 `(use http)` 讀取 `http.typl` 的結構也能直接進行 AOT 編譯。進入點檔案本身的定義也與
@@ -1435,8 +1526,9 @@ typl --image session.typld             # REPL 也一樣
   留在那裡**（不會回去）。長時間的處理途中只要接觸過一次直譯執行的程式碼，剩下的部分就在直譯器的執行緒上執行。
 - **`typl` 的工作執行緒只存活一次頂層求值的時間。** 在 REPL 等待輸入期間以及頂層形式之間，其他執行緒不推進任務（剩下的任務在下次求值時接著
   執行）。求值結束時會等待各執行緒完成目前的一步，所以如果 `thread` 中有持續阻塞的 C 函式（`defffi`），在它返回之前求值不會結束。
-- **工作執行緒上的列印**：直譯執行的 `print-object`／`~/name/` 方法不能在其他執行緒上執行，所以在其他執行緒上列印這樣的值會成為與 `(panic ...)`
-  同樣處理的 panic（`(compile T::print-object)`，或者從主任務列印）。
+- **worker 上的印出**：解譯執行的 `print-object` 方法，以及 `~/name/` 所呼叫的解譯執行的函式與方法，
+  不能在其他執行緒上執行，所以在其他執行緒印出這樣的值會產生與 `(panic ...)` 同等對待的 panic
+  （`(compile T::print-object)`，或從主任務印出）。
 - **資料競爭是未定義的**（與 Go 立場相同）。不經過 `Mutex<T>`・`Chan<T>` 從多個任務修改同一個值的結果沒有保證。
 - **`task` 回傳值。** 與 Go 的 `go` 敘述不同，它回傳 `Task<T>`，以 `(wait t)` 可以取得結果。
 - **沒有 nil 通道。** Go 的 fan-in 慣用法（把關閉的通道設為 `nil` 以從 `select` 的分支中去掉）無法寫出，所以為每個輸入啟動一個任務，再以

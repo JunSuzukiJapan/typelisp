@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -224,12 +224,12 @@ geëvalueerd, en definities worden onmiddellijk en permanent in de globale omgev
 
 ## 7. Docstrings / `documentation`
 
-`defun`/`defmethod` (ook binnen `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+`defun`/methoden in `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
 `deftype`/`deftrait` kunnen docstrings dragen. De positie volgt per vorm de regel van CL:
 
 | Vorm | Positie van de docstring |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | Aan het begin van de body (na het returntype en de `where`-clausule). Alleen wanneer er minstens één bodyvorm volgt; een losse string blijft de returnwaarde |
+| `defun` / methoden in `impl` / `defmacro` | Aan het begin van de body (na het returntype en de `where`-clausule). Alleen wanneer er minstens één bodyvorm volgt; een losse string blijft de returnwaarde |
 | `defvar` / `defconstant` | **Na** de beginwaarde: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Direct na** de naam, vóór de velden/varianten |
 | `deftype` | **Direct na** de naam, vóór het type: `(deftype meters "doc" i32)` |

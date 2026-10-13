@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Modul dan Tata Letak Berkas
 
 Panduan ini menjelaskan cara menyusun program yang terdiri dari beberapa berkas. Aturan terperinci
@@ -46,14 +46,17 @@ dijalankan menjadi akar (di REPL, direktori saat ini).
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; a field without pub cannot be read from outside
+  (tag string))                        ; field tanpa pub tidak dapat dibaca maupun ditulis dari luar
 
-(defun square ((n i32)) i32 (* n n))   ; a function without pub cannot be called from outside either
+(defun square ((n i32)) i32 (* n n))   ; fungsi tanpa pub juga tidak dapat dipanggil dari luar
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -74,11 +77,16 @@ typl main.typl        # => 25
 
 ### Apa saja yang dipublikasikan
 
-- Fungsi, struct, enum, variabel global, makro, dan metode hanya terlihat dari modul lain jika
-  diberi `pub`. Taruh `pub` tepat sebelum definisi, seperti pada `(pub defun ...)`.
-- Untuk struct, **memublikasikan tipe dan memublikasikan field adalah dua hal yang terpisah**.
-  `(pub defstruct point ...)` membuat tipenya terlihat, dan hanya field yang ditulis sebagai
-  `(pub x i32)` yang dapat dibaca dan ditulis dari luar.
+- Fungsi, struct, enum, variabel global, dan makro hanya terlihat dari modul lain jika diberi `pub`. Letakkan
+  `pub` tepat sebelum definisi, seperti `(pub defun ...)`.
+- Dari metode yang ditulis di `impl`, hanya yang ditulis `(pub new ...)`, per item, yang dapat dipakai dari
+  luar.
+- Pada struct, **menjadikan tipe publik dan menjadikan field publik adalah hal yang terpisah**.
+  `(pub defstruct point ...)` membuat tipe terlihat, dan hanya field yang ditulis `(pub x i32)` yang dapat
+  dibaca dan ditulis dari luar.
+- Demikian pula, di modul lain hanya field `pub` yang dapat diberikan ke `make-instance`. `point` di atas
+  memiliki `tag` yang bukan `pub`, sehingga modul lain tidak dapat membuatnya dengan `make-instance` dan
+  memakai `point::new`.
 - Memakai nama yang tidak publik dari luar menghasilkan kesalahan "tidak dapat diselesaikan" seperti
   `unresolved path: geometry::square`. Pesannya sama dengan pesan untuk nama yang salah eja, jadi
   jika ejaannya sudah benar tetapi nama tetap tidak dapat diselesaikan, curigai `pub` yang
@@ -112,10 +120,11 @@ dipanggil tanpa nama modul.
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, not core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, not core::area
 ```
 
-Metode di dalam `impl` selalu publik, meskipun tanpa `pub`.
+Metode di `impl` sebuah trait selalu publik, bahkan tanpa `pub`. Dari metode `impl` inheren
+(`(impl point ...)`), hanya yang memakai `pub` yang publik.
 
 Trait itu sendiri tidak dapat dipublikasikan ke modul lain. Simpan definisi trait, `impl` untuknya,
 dan kode yang memakainya melalui `:dyn` dalam satu modul.

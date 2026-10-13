@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Strings, tekens en collecties
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` en `Deque<T>`.
@@ -126,8 +126,8 @@ het met `logand` te combineren met `*sxhash-mask*` (2^30-1). Om een string te ha
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 Of twee sleutels hetzelfde zijn wordt bepaald door **het sleuteltype zelf** (`sxhash`, en `equals` van
@@ -146,7 +146,7 @@ Een waarde kan als `#2A((1 2) (3 4))` worden geschreven
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` van CL. `dims` wordt gekopieerd. `init` is de beginwaarde van elke cel (`:initial-element` van CL; deze taal heeft geen "ongebonden cel", dus het is verplicht). `:fill-pointer` alleen voor één dimensie |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` van CL. `dims` wordt gekopieerd. `init` is de beginwaarde van elke cel (`:initial-element` van CL; deze taal heeft geen "ongebonden cel", dus het is verplicht). `:fill-pointer` alleen voor één dimensie |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | `aref` / `(setf (aref …))` van CL. Geeft een panic als een index buiten het bereik valt |
 | `aref` | `(aref a i j …)` | — | De schrijfwijze van CL met kale indexen. Expandeert naar de bovenstaande `get`/`set`. `(setf (aref a i j) v)` werkt ook |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | `row-major-aref` van CL. Een platte index |
@@ -167,8 +167,6 @@ Een waarde kan als `#2A((1 2) (3 4))` worden geschreven
   willekeurig vaak herhaald aan het einde", en de suiker van `aref` overbrugt die kloof.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`
   **bestaan niet**. Het statische type van de ontvanger beantwoordt deze vragen al.
-- `Array::new` is de door `defstruct` gegenereerde constructor in veldvolgorde en is niet bedoeld
-  om arrays te maken. Gebruik `Array::make`.
 - **Arrays worden in de arraysyntaxis van CL afgedrukt.** Rang 1 is `#(1 2 3)`; andere rangen zijn
   `#nA` gevolgd door zoveel niveaus haakjes (`#2A((1 2 3) (4 5 6))`); rang 0 is `#0A5`. Het afdrukken
   stopt bij de fill pointer als die er is. `*print-array*`
@@ -182,7 +180,7 @@ Een bitreeks met vaste lengte. Een `defstruct` in de standaardbibliotheek.
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | Lengte `n`, alle bits 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | Lengte `n`, alle bits 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | Panic buiten het bereik |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | Schrijfwijzen van CL. `(setf (bit v i) b)` werkt ook. `sbit` van CL verschilt van `bit` alleen doordat het een eenvoudige bitvector vereist, maar deze taal heeft maar één soort bitvector |
 | `len` | `(len v)` | `BitVector→int` | Aantal bits |
@@ -199,7 +197,7 @@ implementeren, net als een sleutel van een `HashTable`.
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | Maakt een lege verzameling. Het typeargument volgt uit het verwachte type |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | Maakt een lege verzameling. Het typeargument volgt uit het verwachte type |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Voegt `x` toe. `true` als het er nog niet was, `false` als het er al was |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Of `x` erin zit |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Haalt `x` eruit. `true` als het erin zat |
@@ -208,15 +206,13 @@ implementeren, net als een sleutel van een `HashTable`.
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Een iterator over de elementen. De volgorde ligt niet vast |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 Gemeenschappelijk voor de drie typen van hoofdstuk 7 tot 9:
 
-- Maak ze met `make`. `new` is de constructor in veldvolgorde die `defstruct` genereert, niet die om
-  ze mee te maken (zoals bij `Array::make`).
 - `iter` loopt over een kopie van het moment van aanroepen. Wijzig je dezelfde verzameling binnen
   een `doiter`, dan ziet die lus dat niet.
 - Als de elementtypen `print-object` implementeren, worden de elementen afgedrukt, in de vorm
@@ -230,7 +226,7 @@ nieuwe sleutel en `remove` schuiven de elementen na die positie op.
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Maakt een lege tabel |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | Maakt een lege tabel |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Opzoeken |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Invoegen of overschrijven |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Verwijdert en geeft de oude waarde terug als die er was |
@@ -241,7 +237,7 @@ nieuwe sleutel en `remove` schuiven de elementen na die positie op.
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | `#{sleutel waarde}`-tupels op sleutelvolgorde |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 en pear 3
 ```
@@ -252,7 +248,7 @@ Een reeks waaraan je aan beide kanten kunt toevoegen en uithalen (Rusts `VecDequ
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | Maakt een lege reeks |
+| `new` | `(Deque::new)` | `()→Deque<T>` | Maakt een lege reeks |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Voegt vooraan / achteraan toe |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Haalt het voorste / achterste element eruit en geeft het terug. `none` als leeg |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Bekijkt het voorste / achterste element (zonder het eruit te halen) |
@@ -263,7 +259,7 @@ Een reeks waaraan je aan beide kanten kunt toevoegen en uithalen (Rusts `VecDequ
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Van voren af, op volgorde |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

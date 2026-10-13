@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Числа
 
 Операції над цілими числами, числами з рухомою комою, раціональними, комплексними числами та булевими
@@ -197,7 +197,7 @@
 
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Побудова. Компоненти можна читати напряму як `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Побудова. Компоненти можна читати напряму як `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Дійсна й уявна частини. **Працюють також для дійсних чисел** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), як у CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Спряжене (працює й для дійсних чисел) |
 | `phase` | `(phase z)` | `complex→f64` | Аргумент у (-pi,pi] (працює й для дійсних чисел) |

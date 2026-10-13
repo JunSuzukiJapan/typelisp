@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 错误消息
 
 `typl` 给出的主要错误消息的含义和修正方法。
@@ -57,6 +57,10 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `no such function: bar` | 没有该名称的函数或方法。检查拼写 |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | 方法由第一个参数的类型选择。存在该名称的方法，但第一个参数的类型（这里是 `int`）没有。消息末尾是拥有该方法的类型一览 |
 | `unbound variable: y` | 没有该名称的变量。检查拼写以及绑定的范围（是否在 `let` 外使用） |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | 在同一模块中给函数、全局变量、宏中的两个取了同一个名字。改掉其中一个的名字（[语法参考 3.10](syntax.md#310-module--use--命名空间)） |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | 结构体不会自动生成 `new`。用 `make-instance` 创建值，或者在 `impl` 中写一个 `new`（[语法参考 3.5](syntax.md#35-impl--类型的方法)） |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | 没有 `defmethod`。方法写在类型的 `impl` 中（[语法参考 3.5](syntax.md#35-impl--类型的方法)） |
+| ``defstruct: (:constructor ...) is gone — ...`` | 没有 `:constructor` 选项。构造函数在 `impl` 中写成静态方法 |
 | ``use: unresolved `nosuch` `` | 找不到 `use` 的模块。文件名与模块路径的对应见[语法参考 3.11](syntax.md#311-文件与模块的对应多文件项目) |
 | `unresolved path: c::hidden` | 模块存在，但没有该名称，或者因为没有加 `pub` 而不可见 |
 | `circular module dependency: a -> b -> a` | 模块之间互相 `use`。把共同的部分分到另一个模块 |
@@ -68,10 +72,15 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 |---|---|
 | `f: expected 1 argument(s), got 2` | 参数个数不对 |
 | `f: unknown keyword argument :b` | 传入了该函数没有的关键字参数 |
-| `new: expected 1 field(s), got 2` | 传给结构体构造函数的值的个数与字段数不符 |
+| `circle: expected 1 field(s), got 2` | 传给枚举变体的值的个数与该变体的字段数不一致 |
+| ``make-instance point: slot `y` is not given and has no default`` | 没有在 `make-instance` 中写出没有默认值的字段 |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | 写了结构体中没有的字段 |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | 在定义类型的模块之外写了非 `pub` 的字段。请那个模块提供一个 `pub` 的构造函数 |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | 对另一种类型实参的值调用了为泛型类型的特定类型实参（`(impl Box<int> ...)`）写的方法 |
 | ``setf: cannot assign to constant `k` `` | 给用 `defconstant` 定义的名称赋值。需要修改的话改用 `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | 没有定义用 `defsignature` 声明的函数 |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | 没有任何参数的类型拥有用 `~/name/` 调用的方法（[格式指令第 5 章](functions/format.md#5-name)） |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | 在该处写成 `(nosuch 参数 colon at)` 的调用无法解析。请定义参数类型的方法或函数（[格式指令 第 5 章](functions/format.md#5-name)） |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | 在 `~{` 等之中、对应列表元素的位置写了 `~/name/`。元素的类型无法决定调用目标 |
 
 ## 3. 读取错误
 

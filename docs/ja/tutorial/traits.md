@@ -35,8 +35,8 @@
 実装したメソッドは普通の関数と同じ形で呼べます。
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 トレイトで宣言したメソッドを 1 つでも実装し忘れると、`impl` の位置で型エラーになります。
@@ -50,8 +50,8 @@
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 `(where (Shape T))` があるので、本体で `T` の値に `name` と `area` を使えます。境界が無ければ、
@@ -84,8 +84,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; 自分で書いたものが優先される
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. 標準のトレイトを実装する
@@ -112,7 +112,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true（Ord のデフォルト実装）
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true（Ord のデフォルト実装）
 ```
 
 `print-object` を実装すると、`println` での表示を決められます。引数 `escape` は、`~s` のように
@@ -123,7 +123,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 トレイト境界と組み合わせると、`Ord` を実装した型なら何にでも使える関数が書けます。
@@ -154,8 +154,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

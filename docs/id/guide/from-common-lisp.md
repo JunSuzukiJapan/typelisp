@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Untuk Pemrogram Common Lisp
 
 typelisp mewarisi sintaks Common Lisp (CL) dan banyak nama fungsinya, tetapi ia adalah bahasa dengan
@@ -60,7 +60,9 @@ bilangan bulat berlebar tetap 64 bit.
 ## 3. Fungsi sebagai nilai
 
 typelisp tidak memisahkan ruang nama fungsi dan variabel. Nama sebuah fungsi dapat diserahkan sebagai
-nilai apa adanya. Tidak ada `#'` dan tidak ada `funcall`.
+nilai apa adanya. Tidak ada `#'` dan tidak ada `funcall`. Makro juga berbagi ruang nama ini, jadi dalam satu modul tidak boleh ada dua
+di antara fungsi, variabel global, dan makro yang bernama sama (berbeda dengan CL, tidak bisa ada fungsi
+`list` berdampingan dengan variabel `list`).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -82,6 +84,8 @@ nilai apa adanya. Tidak ada `#'` dan tidak ada `funcall`.
 
 - Fungsi sekuens menerima **koleksi lebih dulu dan fungsi kemudian**: `(map it f)`,
   `(filter it f)`, `(foldl it f init)`. Ini kebalikan dari `(mapcar f list)` pada CL.
+- `push` juga menerima **koleksi terlebih dahulu**: `(push v 3)`. Ia tidak dapat ditulis dengan urutan CL,
+  `(push 3 place)`, karena metode dipilih hanya berdasarkan tipe argumen pertama (bagian 8).
 - `lambda` tidak dapat memakai `&optional` atau `&key` (`&rest` dapat dipakai).
 - **Fungsi tidak dapat dipanggil sebelum didefinisikan.** Di CL Anda dapat memanggil fungsi yang
   didefinisikan kemudian, tetapi di sini itu menghasilkan `no such function`. Untuk fungsi yang
@@ -190,16 +194,27 @@ dievaluasi (`'done`), dan nilai yang dilempar dengan satu tag memiliki satu tipe
 Tidak ada `defclass`, `defgeneric`, atau kombinasi metode.
 
 - Tipe data didefinisikan dengan `defstruct` (struct) dan `defenum` (sum type).
-- `defmethod` mendefinisikan metode yang targetnya ditentukan hanya oleh **tipe statis argumen
-  pertama**. Tidak ada multiple dispatch.
+- Tidak ada `defmethod`. Metode dikumpulkan per tipe di dalam `impl` (bentuk yang sama dengan impl inheren
+  Rust). Sasaran ditentukan hanya oleh **tipe statis argumen pertama**; tidak ada dispatch berganda.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; metode statis
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; metode
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - Untuk memberikan operasi yang sama pada banyak tipe, gunakan trait (`deftrait` / `impl`). Untuk
   nilai yang tipe konkretnya ditentukan saat dijalankan, gunakan tipe `:dyn Trait`
   ([Referensi Sintaks 3.9](../reference/syntax.md#39-deftrait--impl--trait)).
 
 Perbedaan `defstruct`:
 
-- Konstruktornya adalah `TypeName::new`: `(point::new 1 2)`. Jika Anda menginginkan nama seperti
-  `make-point`, opsi `(:constructor make-point)` membuatnya.
+- Nilai dibuat dengan `make-instance`, seperti di CLOS: `(make-instance 'point :x 1 :y 2)`. Tidak ada
+  `make-point` yang dibuat, dan tidak ada opsi `:constructor`. Jika ingin konstruktor bernama, tulis di
+  `impl` sebagai metode statis (`point::new` di atas).
 - Selain `(x p)`, pengakses dapat ditulis `p::x`. Ubah dengan `(setf p::x 5)`.
 - Tidak ada predikat (`point-p`) yang dibuat. Tidak ada `:conc-name`, `:type`, atau `:named`.
 - `:include` hanya mewarisi slot; tipenya tidak menjadi subtipe dari induk.

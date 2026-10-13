@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 列印
 
 `print`/`println`/`format`、單引數列印函式、pretty printer、`print-object`，以及控制列印的變數。格式指令一覽見 [format.md](format.md)。
@@ -21,7 +21,7 @@
 
 **控制字串必須是字面值**（與 Rust 的 `format!` 同樣的限制）。其中的指令決定取幾個引數、什麼型別，所以執行期組出的字串在檢查時無法讀取。
 限定為字面值後，**引數的個數與型別在檢查時就會被檢查**——`(println "~d" "x")` 與 `(println "~a ~a" 1)` 都是檢查時的錯誤。拼錯的指令、未
-閉合的 `~(`、沒有任何引數能回應的 `~/name/` 也同樣是檢查時的錯誤。檢查規則見 [format.md](format.md#1-寫法)。想輸出組出來的字串時，以
+閉合的 `~(`、無法決定呼叫對象的 `~/name/` 也同樣是檢查時的錯誤。檢查規則見 [format.md](format.md#1-寫法)。想輸出組出來的字串時，以
 `(format false ...)` 建立，再以 `(println "~a" s)` 列印。
 
 可變引數以各自的型別包裝進 `Sexpr` 後傳遞——`i32`/`f64`/`int`/`ratio`/`char`/`bool`/`string`/`Sexpr`，以及使用者定義的 `defstruct`/
@@ -39,8 +39,8 @@
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -260,7 +260,7 @@ CL 以 `nil` 表示「無限制」，但這個語言沒有 `nil`，所以與 `*p
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a 指向 a 自己
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

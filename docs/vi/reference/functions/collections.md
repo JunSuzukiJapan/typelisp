@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Chuỗi, ký tự và tập hợp
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` và `Deque<T>`.
@@ -125,8 +125,8 @@ khai cho `string` dùng.
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 Việc hai khóa có giống nhau hay không được quyết định bởi **chính kiểu khóa** (`sxhash`, và `equals` từ
@@ -144,7 +144,7 @@ Giá trị có thể viết là `#2A((1 2) (3 4))` ([Tham chiếu cú pháp](../
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` của CL. `dims` được sao chép. `init` là giá trị ban đầu của mọi ô (`:initial-element` của CL; ngôn ngữ này không có "ô chưa gán", nên nó là bắt buộc). `:fill-pointer` chỉ cho một chiều |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` của CL. `dims` được sao chép. `init` là giá trị ban đầu của mọi ô (`:initial-element` của CL; ngôn ngữ này không có "ô chưa gán", nên nó là bắt buộc). `:fill-pointer` chỉ cho một chiều |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | `aref` / `(setf (aref …))` của CL. Panic nếu một chỉ số ngoài phạm vi |
 | `aref` | `(aref a i j …)` | — | Cách viết của CL với các chỉ số trần. Khai triển thành `get`/`set` ở trên. `(setf (aref a i j) v)` cũng dùng được |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | `row-major-aref` của CL. Một chỉ số phẳng |
@@ -165,8 +165,6 @@ Giá trị có thể viết là `#2A((1 2) (3 4))` ([Tham chiếu cú pháp](../
   số lần nào ở cuối", và đường cú pháp `aref` bắc cầu qua khoảng trống đó.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`
   **không tồn tại**. Kiểu tĩnh của bên nhận đã trả lời những câu hỏi này.
-- `Array::new` là hàm khởi tạo theo thứ tự trường do `defstruct` sinh ra và không nhằm để tạo mảng. Hãy
-  dùng `Array::make`.
 - **Mảng được in theo cú pháp mảng của CL.** Hạng 1 là `#(1 2 3)`; các hạng khác là `#nA` theo sau bởi
   từng đó mức ngoặc (`#2A((1 2 3) (4 5 6))`); hạng 0 là `#0A5`. Việc in dừng ở fill pointer nếu có. Đặt
   `*print-array*` ([In](printing.md#6-điều-khiển-lượng-được-in)) thành false thì chỉ in hình dạng,
@@ -179,7 +177,7 @@ Một dãy bit có độ dài cố định. Một `defstruct` trong thư viện 
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | Độ dài `n`, mọi bit bằng 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | Độ dài `n`, mọi bit bằng 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | Panic khi ngoài phạm vi |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | Cách viết của CL. `(setf (bit v i) b)` cũng dùng được. `sbit` của CL chỉ khác `bit` ở chỗ yêu cầu một bit vector đơn giản, nhưng ngôn ngữ này chỉ có một loại bit vector |
 | `len` | `(len v)` | `BitVector→int` | Số bit |
@@ -195,7 +193,7 @@ dung là `HashTable<T,()>`. Kiểu phần tử phải cài đặt `Hash`, giốn
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | Tạo một tập rỗng. Đối số kiểu lấy từ kiểu mong đợi |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | Tạo một tập rỗng. Đối số kiểu lấy từ kiểu mong đợi |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Thêm `x`. `true` nếu chưa có, `false` nếu đã có |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` có trong tập hay không |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Bỏ `x` ra. `true` nếu đã có |
@@ -204,15 +202,13 @@ dung là `HashTable<T,()>`. Kiểu phần tử phải cài đặt `Hash`, giốn
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Iterator qua các phần tử. Thứ tự không xác định |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 Điểm chung của ba kiểu ở chương 7 đến 9:
 
-- Tạo bằng `make`. `new` là constructor theo thứ tự trường do `defstruct` sinh ra, không dùng để tạo
-  (giống `Array::make`).
 - `iter` duyệt một bản sao lấy tại lúc gọi. Thay đổi chính collection đó bên trong `doiter` thì vòng
   lặp ấy không thấy.
 - Nếu kiểu phần tử cài đặt `print-object`, các phần tử được in ra theo dạng `#<hashset "a" "b">`
@@ -226,7 +222,7 @@ mới và `remove` dời các phần tử sau vị trí của nó.
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Tạo một bảng rỗng |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | Tạo một bảng rỗng |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Tra cứu |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Chèn hoặc ghi đè |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Xóa, trả về giá trị cũ nếu có |
@@ -237,7 +233,7 @@ mới và `remove` dời các phần tử sau vị trí của nó.
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Các tuple `#{khóa giá-trị}` theo thứ tự khóa |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 và pear 3
 ```
@@ -248,7 +244,7 @@ Dãy có thể thêm vào và lấy ra ở cả hai đầu (`VecDeque` của Rus
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | Tạo một dãy rỗng |
+| `new` | `(Deque::new)` | `()→Deque<T>` | Tạo một dãy rỗng |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Thêm vào đầu / cuối |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Lấy phần tử ở đầu / cuối ra và trả về. `none` nếu rỗng |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Xem phần tử ở đầu / cuối (không lấy ra) |
@@ -259,7 +255,7 @@ Dãy có thể thêm vào và lấy ra ở cả hai đầu (`VecDeque` của Rus
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Từ đầu, theo thứ tự |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

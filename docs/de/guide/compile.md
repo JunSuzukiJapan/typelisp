@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -128,7 +128,7 @@ sie erneut.
 
 ### 3.3 Was eine AOT-kompilierte Datei enthalten darf
 
-- Die oberste Ebene der Einstiegsdatei darf nur Definitionen (`defun` `defmethod` `defvar`
+- Die oberste Ebene der Einstiegsdatei darf nur Definitionen (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) sowie `use` `module` enthalten. Ausdrücke auf oberster
   Ebene wie `(println ...)` sind nicht erlaubt, abgesehen vom abschließenden `(main)`. Die Arbeit gehört

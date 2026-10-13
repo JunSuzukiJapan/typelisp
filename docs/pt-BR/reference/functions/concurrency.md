@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tarefas e canais
 
 O vocabulário das tarefas (threads leves). `task` e `thread`, que as iniciam, e `select`, que espera várias
@@ -84,7 +84,7 @@ flutuante, então o `(sleep 1)` do CL é escrito aqui `(sleep 1.0)`. Um valor ne
 
 | Nome | Uso | Tipo | Significado |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Um grupo sem nada pendente |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Um grupo sem nada pendente |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Soma ao contador. Faça isso antes de o trabalho começar |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Um terminou. Ao chegar a 0, todos os que esperam são liberados |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Espera até chegar a 0. A partir de quantas tarefas forem |
@@ -121,13 +121,13 @@ Sua capacidade é 1, então a tarefa que envia pode terminar mesmo que ninguém 
 
 | Nome | Uso | Tipo | Significado |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Um mutex destravado contendo `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Um mutex destravado contendo `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Pega a trava (espera) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Libera-a. Panic se não estiver travado |
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Trava, vincula o conteúdo a `x`, executa `body` e **sempre** libera |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

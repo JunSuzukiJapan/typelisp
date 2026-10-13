@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 型別基礎
 
 typelisp 是靜態型別語言。本章說明型別檢查能為你做什麼、常用的型別（`Option`、`Result`、結構、列舉）以及泛型。閱讀本章前請先讀
@@ -136,29 +136,46 @@ none
   (y int))
 ```
 
-定義之後可以使用以下功能：
+值以 `make-instance` 建立。以 `'` 引用型別名稱，再以 `:名稱 值` 的組傳入欄位。順序任意。
 
 ```lisp
-(let ((p (point::new 3 4)))     ; 建立（依欄位順序傳入引數）
-  (println "~a" p::x)           ; 讀取欄位，也可寫成 (x p)
-  (setf p::x 10)                ; 修改
+(let ((p (make-instance 'point :x 3 :y 4)))   ; 建立
+  (println "~a" p::x)           ; 讀取欄位。也可以寫成 (x p)
+  (setf p::x 10)                ; 改寫
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-要讓結構擁有函式，使用 `defmethod`。第一個引數（`self`）的型別決定方法屬於哪個型別。
+在欄位的宣告中再寫一個式子，就成為該欄位的**預設值**。在 `make-instance` 中省略的欄位以預設值填入。
+省略沒有預設值的欄位是型別錯誤。
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count 為 0
 ```
 
-不寫 `self` 而只寫型別名稱，就會得到以 `point::origin` 形式呼叫的函式。
+要讓結構擁有函式，使用 `impl`。`(impl 型別名稱 項目...)` 的每個項目是 `(名稱 (引數...) 回傳型別 本體...)`
+的形式，第一個引數是 `self` 時，就成為該型別的**方法**。`self` 不寫型別。
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+不取 `self` 的項目會成為以 `point::origin` 形式呼叫的函式。把建立值的函式以 `new` 為名準備好，
+使用端就能簡短地寫成 `(point::new 3 4)`。
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -223,7 +240,7 @@ none
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 在泛型函式中對 `T` 一無所知，所以不能比較或相加 `T` 的值。要加上「只要能比較的型別就好」之類的條件，使用 trait（[trait](traits.md)）。

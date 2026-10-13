@@ -119,8 +119,8 @@
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 キーが同じかどうかを決めるのは**キーの型自身**（`sxhash` と、`Hash` のスーパトレイト
@@ -137,7 +137,7 @@
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL `make-array`。`dims` は複製される。`init` が全セルの初期値（CL の `:initial-element`。この言語に「未束縛のセル」は無いので必須）。`:fill-pointer` は 1 次元のときだけ |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL `make-array`。`dims` は複製される。`init` が全セルの初期値（CL の `:initial-element`。この言語に「未束縛のセル」は無いので必須）。`:fill-pointer` は 1 次元のときだけ |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | CL `aref` / `(setf (aref …))`。添字が範囲外なら panic |
 | `aref` | `(aref a i j …)` | — | 裸の添字で書く CL の綴り。上の `get`/`set` に展開される。`(setf (aref a i j) v)` も同じ |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | CL `row-major-aref`。平坦な添字 |
@@ -158,8 +158,6 @@
   `aref` の糖衣がその差を埋めている。
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` /
   `array-has-fill-pointer-p` は**無い**。受け手の静的型が既に答えている問い。
-- `Array::new` は `defstruct` が生成するフィールド順のコンストラクタで、作るときに使うものでは
-  ない。`Array::make` を使う。
 - **印字は CL の配列構文**。ランク 1 は `#(1 2 3)`、それ以外は `#nA` と次元ぶんの括弧
   （`#2A((1 2 3) (4 5 6))`）、ランク 0 は `#0A5`。fill pointer があればそこで切る。
   `*print-array*`（[印字](printing.md#6-印字量の制御)）を偽にすると形だけの `#<array 2x3>` になる。
@@ -172,7 +170,7 @@
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | 長さ `n`、全ビット 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | 長さ `n`、全ビット 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | 範囲外は panic |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | CL の綴り。`(setf (bit v i) b)` も書ける。CL の `sbit` は simple なビットベクタを要求する点だけが `bit` と違うが、この言語のビットベクタは 1 種類しかない |
 | `len` | `(len v)` | `BitVector→int` | ビット数 |
@@ -188,7 +186,7 @@
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | 空の集合を作る。型引数は期待型から決まる |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | 空の集合を作る。型引数は期待型から決まる |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 追加する。新しく入れば `true`、既にあれば `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` があるか |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 取り除く。あれば `true` |
@@ -197,15 +195,13 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 要素のイテレータ。順序は決まっていない |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 7〜9 章の 3 つの型に共通すること:
 
-- 作るときは `make` を使う。`new` は `defstruct` が生成するフィールド順のコンストラクタで、
-  作るときに使うものではない（`Array::make` と同じ）。
 - `iter` は呼んだ時点の写しを回す。`doiter` の中で同じコレクションを変えても、そのループには見えない。
 - 要素の型が `print-object` を実装していれば、`#<hashset "a" "b">` `#<sortedtable 1 "a">`
   `#<deque 1 2>` の形で要素を印字する。
@@ -218,7 +214,7 @@
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | 空の表を作る |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | 空の表を作る |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | 検索 |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | 挿入・上書き |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | 削除し、あれば旧値を返す |
@@ -229,7 +225,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | キーの順に `#{キー 値}` のタプルを返す |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 と pear 3
 ```
@@ -240,7 +236,7 @@
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | 空の列を作る |
+| `new` | `(Deque::new)` | `()→Deque<T>` | 空の列を作る |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 先頭／末尾に追加 |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 先頭／末尾を取り除いて返す。空なら `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 先頭／末尾を見る（取り除かない） |
@@ -251,7 +247,7 @@
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | 先頭から順に |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

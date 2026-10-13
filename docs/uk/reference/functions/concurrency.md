@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Задачі та канали
 
 Словник задач (легких потоків). `task` і `thread`, що їх запускають, та `select`, що чекає на кілька
@@ -84,7 +84,7 @@
 
 | Назва | Використання | Тип | Значення |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Група без незавершених справ |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Група без незавершених справ |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Додає до лічильника. Робіть це до початку роботи |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Одна справа завершилась. На 0 усі, хто чекає, звільняються |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Чекає, доки досягне 0. Із будь-якої кількості задач |
@@ -120,13 +120,13 @@ Go, група, що повернулася до 0, може використо�
 
 | Назва | Використання | Тип | Значення |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Незаблокований м'ютекс, що містить `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Незаблокований м'ютекс, що містить `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Бере блокування (чекає) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Звільняє його. Panic, якщо не заблоковано |
 | `with-lock` | `(with-lock (x m) body...)` | Макрос | Блокує, зв'язує вміст з `x`, виконує `body` і **завжди** звільняє |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

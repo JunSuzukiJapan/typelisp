@@ -23,7 +23,6 @@ const SYMBOL = "[A-Za-z0-9_?!*<>=/+\\-.%&^~:]+";
  */
 export type DefinitionKind =
   | "function"
-  | "method"
   | "macro"
   | "struct"
   | "enum"
@@ -66,7 +65,6 @@ const NAMED = `\\s*\\(?\\s*(${SYMBOL})`;
 
 const PATTERNS: Pattern[] = [
   { kind: "function", regex: new RegExp(head("defun") + NAMED, "gi") },
-  { kind: "method", regex: new RegExp(head("defmethod") + NAMED, "gi") },
   { kind: "macro", regex: new RegExp(head("defmacro") + NAMED, "gi") },
   { kind: "struct", regex: new RegExp(head("defstruct") + NAMED, "gi") },
   { kind: "enum", regex: new RegExp(head("defenum") + NAMED, "gi") },
@@ -74,10 +72,11 @@ const PATTERNS: Pattern[] = [
   { kind: "variable", regex: new RegExp(head("defvar") + NAMED, "gi") },
   { kind: "constant", regex: new RegExp(head("defconstant") + NAMED, "gi") },
   { kind: "module", regex: new RegExp(head("module") + NAMED, "gi") },
-  // `(impl Trait Type ...)` -- both names identify the block, so both are shown.
+  // `(impl Trait Type ...)` -- both names identify the block, so both are
+  // shown -- or the inherent `(impl Type item...)`, whose methods it holds.
   {
     kind: "impl",
-    regex: new RegExp(head("impl(?:<[^>]*>)?") + `\\s*(${SYMBOL}\\s+${SYMBOL})`, "gi"),
+    regex: new RegExp(head("impl(?:<[^>]*>)?") + `\\s*(${SYMBOL}(?:\\s+${SYMBOL})?)`, "gi"),
   },
 ];
 

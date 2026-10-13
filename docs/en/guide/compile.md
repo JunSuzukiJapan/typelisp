@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -125,7 +125,7 @@ with the `typl` built together with it. After rebuilding `typl`, copy it again.
 
 ### 3.3 What an AOT-compiled file may contain
 
-- The top level of the entry file may contain only definitions (`defun` `defmethod` `defvar`
+- The top level of the entry file may contain only definitions (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) and `use` `module`. Top-level expressions such as
   `(println ...)` are not allowed, except for the final `(main)`. Put the work inside `main`.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Traity
 
 Trait to obietnica, że „ten typ obsługuje te operacje". Traity pozwalają kilku typom dzielić operacje o
@@ -38,8 +38,8 @@ Aby zaimplementować trait dla typu, napisz `impl`.
 Zaimplementowane metody wywołuje się tak samo jak zwykłe funkcje.
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 Pominięcie choćby jednej z metod zadeklarowanych przez trait jest błędem typu w `impl`.
@@ -54,8 +54,8 @@ Na parametr typu funkcji generycznej można nałożyć warunek za pomocą `where
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 Dzięki `(where (Shape T))` ciało funkcji może używać `name` i `area` na wartościach typu `T`. Bez
@@ -88,8 +88,8 @@ Jeśli metoda traitu ma ciało, jest ono używane, gdy `impl` pomija tę metodę
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; wersja zapisana tutaj ma pierwszeństwo
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. Implementowanie traitów standardowych
@@ -117,7 +117,7 @@ z `Eq`, `impl` dla `Eq` musi być pierwszy.
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (domyślna implementacja w Ord)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (domyślna implementacja w Ord)
 ```
 
 Zaimplementowanie `print-object` decyduje o tym, jak `println` pokazuje wartość. Argument `escape` ma wartość `true`,
@@ -128,7 +128,7 @@ gdy żądana jest postać, którą można wczytać z powrotem, jak przy `~s`.
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 W połączeniu z ograniczeniem traitu możesz napisać funkcję działającą dla dowolnego typu implementującego `Ord`.
@@ -160,8 +160,8 @@ Wszystkie elementy `Vector<T>` mają ten sam typ, więc wartości `circle` i `re
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

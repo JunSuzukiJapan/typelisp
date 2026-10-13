@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tür Temelleri
 
 typelisp statik tür denetimli bir dildir. Bu bölüm, tür denetleyicisinin sizin için ne yaptığını, en
@@ -149,31 +149,48 @@ Adlandırılmış alanları olan bir tür `defstruct` ile tanımlanır.
   (y int))
 ```
 
-Tanım size şunları verir:
+Değerler `make-instance` ile oluşturulur. Tür adını `'` ile alıntılayarak yazın ve alanları herhangi bir
+sırayla `:ad değer` çiftleri olarak verin.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; create one (arguments in field order)
-  (println "~a" p::x)           ; read a field; (x p) also works
-  (setf p::x 10)                ; change it
+(let ((p (make-instance 'point :x 3 :y 4)))   ; bir tane oluştur
+  (println "~a" p::x)           ; bir alanı oku; (x p) de olur
+  (setf p::x 10)                ; değiştir
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-Bir struct'a kendine ait fonksiyonlar vermek için `defmethod` kullanın. İlk bağımsız değişkenin
-(`self`) türü, metodun hangi türe ait olduğunu belirler.
+Bir alanın bildiriminde bir ifade daha yazılırsa o alanın **varsayılan değeri** olur. `make-instance`'ta
+atlanan alan varsayılan değerini alır. Varsayılan değeri olmayan bir alanı atlamak bir tür hatasıdır.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count 0'dır
 ```
 
-Bir `self` bağımsız değişkeni yerine yalnızca tür adını yazmak, `point::origin` olarak çağrılan bir
-fonksiyon yapar.
+Bir yapıya kendi fonksiyonlarını vermek için `impl` kullanın. `(impl TürAdı öğe...)`'nin her öğesi
+`(ad (argümanlar...) DönüşTürü gövde...)` biçimindedir ve ilk argümanı `self` ise o türün bir **metodu** olur.
+`self` türsüz yazılır.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+`self` almayan bir öğe, `point::origin` biçiminde çağrılan bir fonksiyon olur. Değeri oluşturan bir
+fonksiyonu `new` adıyla hazırlarsanız, kullananlar kısaca `(point::new 3 4)` yazabilir.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -242,7 +259,7 @@ türlerdir.
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 Jenerik bir fonksiyonun içinde `T` hakkında hiçbir şey bilinmez; bu yüzden `T` türündeki değerleri

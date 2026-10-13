@@ -124,7 +124,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 AOT コンパイルできるファイルの形
 
-- 入口のファイルのトップレベルに書けるのは、定義（`defun` `defmethod` `defvar` `defparameter`
+- 入口のファイルのトップレベルに書けるのは、定義（`defun` `defvar` `defparameter`
   `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl`
   `defffi`、`(unsafe (def-c-struct ...))`）と `use` `module` だけです。`(println ...)` のような
   トップレベルの式は、末尾の `(main)` を除いて書けません。処理は `main` の中に書いてください。

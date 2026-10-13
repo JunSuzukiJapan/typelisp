@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Task dan Kanal
 
 Kosakata task (thread ringan). `task` dan `thread`, yang memulainya, dan `select`, yang menunggu
@@ -88,7 +88,7 @@ melakukan panic.
 
 | Nama | Penggunaan | Tipe | Arti |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Grup tanpa yang tertunda |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Grup tanpa yang tertunda |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Menambah penghitung. Lakukan sebelum pekerjaan dimulai |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Satu telah selesai. Pada 0, setiap penunggu dilepaskan |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Menunggu sampai mencapai 0. Dari sejumlah task mana pun |
@@ -126,13 +126,13 @@ Kapasitasnya 1, sehingga task pengirim dapat selesai meskipun tidak ada yang men
 
 | Nama | Penggunaan | Tipe | Arti |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Mutex yang tidak terkunci dan menyimpan `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Mutex yang tidak terkunci dan menyimpan `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Mengambil kunci (menunggu) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Melepasnya. Panic jika tidak terkunci |
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Mengunci, mengikat isinya ke `x`, menjalankan `body`, dan **selalu** melepas |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

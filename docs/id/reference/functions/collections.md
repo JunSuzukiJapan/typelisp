@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # String, Karakter, dan Koleksi
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, dan `Deque<T>`.
@@ -126,8 +126,8 @@ dengan `logand` terhadap `*sxhash-mask*` (2^30-1). Untuk meng-hash string, Anda 
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 Apakah dua kunci sama ditentukan oleh **tipe kunci itu sendiri** (`sxhash`, dan `equals` dari `Eq`,
@@ -145,7 +145,7 @@ Nilainya dapat ditulis `#2A((1 2) (3 4))` ([Referensi Sintaks](../syntax.md#1-un
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` pada CL. `dims` disalin. `init` adalah nilai awal setiap sel (`:initial-element` pada CL; bahasa ini tidak memiliki "sel tak terikat", sehingga wajib). `:fill-pointer` hanya untuk satu dimensi |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` pada CL. `dims` disalin. `init` adalah nilai awal setiap sel (`:initial-element` pada CL; bahasa ini tidak memiliki "sel tak terikat", sehingga wajib). `:fill-pointer` hanya untuk satu dimensi |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | `aref` / `(setf (aref …))` pada CL. Panic jika indeks di luar rentang |
 | `aref` | `(aref a i j …)` | — | Ejaan CL dengan indeks polos. Diekspansi menjadi `get`/`set` di atas. `(setf (aref a i j) v)` juga berfungsi |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | `row-major-aref` pada CL. Indeks datar |
@@ -166,8 +166,6 @@ Nilainya dapat ditulis `#2A((1 2) (3 4))` ([Referensi Sintaks](../syntax.md#1-un
   berulang sebanyak apa pun di akhir", dan gula sintaks `aref` menjembatani kekurangan itu.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`
   **tidak ada**. Tipe statis penerima sudah menjawab pertanyaan-pertanyaan itu.
-- `Array::new` adalah konstruktor berurutan field yang dihasilkan `defstruct` dan tidak dimaksudkan
-  untuk membuat larik. Gunakan `Array::make`.
 - **Larik dicetak dalam sintaks larik CL.** Rank 1 adalah `#(1 2 3)`; rank lain adalah `#nA` diikuti
   tanda kurung sebanyak tingkat itu (`#2A((1 2 3) (4 5 6))`); rank 0 adalah `#0A5`. Pencetakan
   berhenti pada fill pointer jika ada. Menyetel `*print-array*`
@@ -181,7 +179,7 @@ Urutan bit berpanjang tetap. `defstruct` pada pustaka standar.
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | Panjang `n`, semua bit 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | Panjang `n`, semua bit 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | Panic jika di luar rentang |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | Ejaan CL. `(setf (bit v i) b)` juga berfungsi. `sbit` pada CL berbeda dari `bit` hanya dalam mensyaratkan vektor bit sederhana, tetapi bahasa ini hanya memiliki satu jenis vektor bit |
 | `len` | `(len v)` | `BitVector→int` | Jumlah bit |
@@ -198,7 +196,7 @@ isinya `HashTable<T,()>`. Tipe elemen harus mengimplementasikan `Hash`, sama sep
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | Membuat himpunan kosong. Argumen tipe diambil dari tipe yang diharapkan |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | Membuat himpunan kosong. Argumen tipe diambil dari tipe yang diharapkan |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Menambahkan `x`. `true` bila belum ada, `false` bila sudah ada |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Apakah `x` ada |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Mengeluarkan `x`. `true` bila tadinya ada |
@@ -207,15 +205,13 @@ isinya `HashTable<T,()>`. Tipe elemen harus mengimplementasikan `Hash`, sama sep
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Iterator atas elemen. Urutannya tidak ditentukan |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 Berlaku sama untuk ketiga tipe di bab 7 sampai 9:
 
-- Buat dengan `make`. `new` adalah konstruktor urutan field yang dihasilkan `defstruct`, bukan untuk
-  membuatnya (sama seperti `Array::make`).
 - `iter` menelusuri salinan yang diambil saat dipanggil. Mengubah koleksi yang sama di dalam
   `doiter` tidak terlihat oleh perulangan itu.
 - Bila tipe elemen mengimplementasikan `print-object`, elemennya dicetak dalam bentuk
@@ -230,7 +226,7 @@ posisinya.
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Membuat tabel kosong |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | Membuat tabel kosong |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Pencarian |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Menyisipkan atau menimpa |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Menghapus, mengembalikan nilai lama bila ada |
@@ -241,7 +237,7 @@ posisinya.
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Tuple `#{kunci nilai}` menurut urutan kunci |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 dan pear 3
 ```
@@ -252,7 +248,7 @@ Barisan yang bisa ditambah dan diambil dari kedua ujungnya (`VecDeque` milik Rus
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | Membuat barisan kosong |
+| `new` | `(Deque::new)` | `()→Deque<T>` | Membuat barisan kosong |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Menambah di depan / belakang |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Mengambil elemen depan / belakang dan mengembalikannya. `none` bila kosong |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Melihat elemen depan / belakang (tanpa mengambilnya) |
@@ -263,7 +259,7 @@ Barisan yang bisa ditambah dan diambil dari kedua ujungnya (`VecDeque` milik Rus
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Dari depan, berurutan |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # संख्याएँ
 
 पूर्णांक, फ़्लोटिंग-पॉइंट संख्याओं, परिमेय संख्याओं, कॉम्प्लेक्स संख्याओं और बूलियन पर ऑपरेशन, और अन्य संख्या-संबंधित फ़ंक्शन। कॉल के रूप कैसे पढ़ें इसके लिए [बिल्ट-इन फ़ंक्शन](README.md) देखें।
@@ -147,7 +147,7 @@ CL-संगत मनमानी सटीकता वाली परिम�
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | निर्माण। घटक सीधे `z::re`/`z::im` के रूप में पढ़े जा सकते हैं |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | निर्माण। घटक सीधे `z::re`/`z::im` के रूप में पढ़े जा सकते हैं |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | वास्तविक भाग और काल्पनिक भाग। **ये वास्तविक संख्याओं पर भी काम करते हैं** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), CL की तरह |
 | `conjugate` | `(conjugate z)` | `complex→complex` | संयुग्मी (वास्तविक संख्याओं पर भी काम करता है) |
 | `phase` | `(phase z)` | `complex→f64` | (-pi,pi] में कोणांक (वास्तविक संख्याओं पर भी काम करता है) |

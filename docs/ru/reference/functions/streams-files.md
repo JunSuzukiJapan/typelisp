@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Потоки и файлы
 
 Трейты и методы потоков, конкретные типы потоков, операции с файлами и пути. Сетевые сокеты тоже являются потоками и
@@ -173,7 +173,7 @@ CL определяет тип элементов **в вызове**, как `(
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; все остальные методы — по умолчанию
 
-(write-line (counter::new 0) "four")   ; write-line, terpri и fresh-line работают
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri и fresh-line работают
 ```
 
 Ввод работает так же: пишется только `read-item`. Даже тип без собственного возврата символа можно читать, обернув

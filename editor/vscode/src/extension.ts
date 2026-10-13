@@ -157,7 +157,6 @@ const onTypeFormattingProvider: vscode.OnTypeFormattingEditProvider = {
 
 const SYMBOL_KINDS: Record<DefinitionKind, vscode.SymbolKind> = {
   function: vscode.SymbolKind.Function,
-  method: vscode.SymbolKind.Method,
   macro: vscode.SymbolKind.Event,
   struct: vscode.SymbolKind.Struct,
   enum: vscode.SymbolKind.Enum,

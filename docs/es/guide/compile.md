@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Compilación
 
 Si no se hace nada más, los programas de typelisp se ejecutan en el intérprete. Además hay dos formas de
@@ -125,7 +125,7 @@ funciona con el `typl` compilado junto con él. Tras recompilar `typl`, vuelve a
 
 ### 3.3 Qué puede contener un archivo compilado con AOT
 
-- El nivel superior del archivo de entrada solo puede contener definiciones (`defun` `defmethod` `defvar`
+- El nivel superior del archivo de entrada solo puede contener definiciones (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) y `use` `module`. No se permiten expresiones de nivel
   superior como `(println ...)`, salvo el `(main)` final. Pon el trabajo dentro de `main`.

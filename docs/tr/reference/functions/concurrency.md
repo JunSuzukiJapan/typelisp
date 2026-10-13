@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Task'ler ve Kanallar
 
 Task'lerin (hafif thread'lerin) sözcük dağarcığı. Onları başlatan `task` ve `thread` ile birkaç şeyi
@@ -84,7 +84,7 @@ panic olur.
 
 | Ad | Kullanım | Tür | Anlamı |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Bekleyen hiçbir şeyi olmayan bir grup |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Bekleyen hiçbir şeyi olmayan bir grup |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Sayaca ekler. İş başlamadan önce yapın |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Biri bitti. 0'da tüm bekleyenler serbest bırakılır |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | 0'a ulaşana kadar bekler. İstenen sayıda task'ten |
@@ -120,13 +120,13 @@ Kapasitesi 1'dir; bu yüzden kimse almasa bile gönderen task bitebilir.
 
 | Ad | Kullanım | Tür | Anlamı |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | `v`'yi tutan kilitsiz bir mutex |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | `v`'yi tutan kilitsiz bir mutex |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Kilidi alır (bekler) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Bırakır. Kilitli değilse panic olur |
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Kilitler, içeriği `x`'e bağlar, `body`'yi çalıştırır ve **her zaman** bırakır |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -92,12 +92,12 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 
 - 参数类型和返回值类型是必需的。
 - 泛型函数在名字后用尖括号写类型参数：`(defun name<T1,T2...> (params) Ret body...)`（与类型位置的 `Vector<T>` 相同的尖括号语法）。
-- `defun`/`lambda`/`defmethod` 在末尾写 `&rest (name Type)` 可以接受可变参数：
+- `defun`/`lambda`/`impl` 的方法在末尾写 `&rest (name Type)` 可以接受可变参数：
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)`（在函数体中 `xs` 总是绑定为 `Option<Sexpr>`——S 表达式的列表。调用方
   的每个实际参数各自作为 `Type2` 进行类型检查后再包装进 `Sexpr`）。
   `defmacro` 也有自己的 `&rest`，但不同之处在于它总是无类型的 `Sexpr`（`defun`/`lambda` 明确写出元素类型）。`fn` 类型也可以写成
   `(fn (T1... &rest Te) Ret)` 的形式来表示可变参数函数的类型。
-- **`&optional` / `&key`**（用于 `defun` 和 `defmethod`。`lambda`/`labels` 由于下述原因不在对象之内，`defmacro` 是下述的另一种
+- **`&optional` / `&key`**（用于 `defun` 和 `impl` 的方法。`lambda`/`labels` 由于下述原因不在对象之内，`defmacro` 是下述的另一种
   实现）。顺序遵循 CL 为 `必需 &optional &rest &key`。每个参数写成 `(name Type)` 或 `(name Type 默认式)`：
 
   ```lisp
@@ -118,20 +118,24 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
   - **`&key` 不能与 `&optional`/`&rest` 混在同一个参数列表中。** CL 本身有一个歧义（末尾的实际参数是由按位置填充的 `&optional`
     接收，还是由按标签匹配的 `&key` 接收，取决于*值*），通过禁止这种组合来回避。`&optional` 与 `&rest` 可以一起使用。
   - 泛型函数中也可以使用，但**只出现在被省略参数中的类型参数无法推断，是错误**（那里没有可以对照的值）。
-  - **`defmethod` 也可以写同样的 3 个区段**（实例方法和静态函数都可以）。在接收者之后排列 `&optional`/`&rest`/`&key`：
+  - **`impl` 的方法也可以写同样的 3 个区段**（实例方法和静态方法都可以）。实例方法在 `self` 之后
+    排列 `&optional`/`&rest`/`&key`：
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; 静态函数
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 静态方法
     (point::origin :y 7)
     ```
 
     泛型类型的方法中也可以使用，但**写了默认式的参数的类型中不能写所有者的类型参数**（与 `defun` 对自身类型参数的限制相同。
     省略时嵌入的是*经过检查的*式子，其类型不能停留在抽象的变量上）。
-  - **trait 的方法中不能使用。** `deftrait` 一侧没有这种语法，如果只有 `impl` 一侧能声明区段，那么以 `:dyn` 为接收者的调用
+  - **trait 的方法中不能使用。**（写在 trait 的 `impl` 中的方法也一样） `deftrait` 一侧没有这种语法，如果只有 `impl` 一侧能声明区段，那么以 `:dyn` 为接收者的调用
     （从 trait 的声明填充参数）与以具体类型为接收者的调用（从 `impl` 的声明填充）就会成为不同的东西。vtable 槽的参数个数是固定的。
   - **`lambda` / `labels` 中不能使用**（可以使用 `&rest`）。要填补被省略的参数，调用方需要读取**被调用方经过检查的默认式**，
     而它只能从按名字解析的签名中得到。`lambda` 作为值传递，描述这个值的只有函数类型 `(fn ...)`——那里没有放式子的地方，如果放了，
@@ -172,7 +176,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **泛型函数。** 生成每种类型的实体需要函数体，而声明没有函数体。前向调用即使能解析，实例化也会失败，所以在声明时就拒绝。
 - **`&optional`/`&key`。** 它们的签名包含每个默认值**经过检查的**式子（省略参数时原样嵌入调用方），而声明没有地方放它。
 - **`defun` 以外的东西。** `defmacro` 展开时需要宏函数体**已经执行过**，注册签名无法替代。类型（`defstruct`/`defenum`/
-  `deftrait`）的注册是"注册类型的代码本身所需要的东西"，不像签名那样自成一体。`defmethod` 注册到所属类型上，所以随类型而定。
+  `deftrait`）的注册是"注册类型的代码本身所需要的东西"，不像签名那样自成一体。`impl` 的方法注册到所属类型上，所以随类型而定。
 
 CL 中对应的是 `(declaim (ftype (function (i32) bool) even2))`，但那伴随着整套声明系统，而且只是**建议**。这里是静态类型，
 所以声明会被检查。
@@ -448,33 +452,69 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 类型注解是必需的（不从初始化式推断）。`defvar` 可以修改，`defconstant` 不可以（`setf` 是错误）。
 
-### 3.5 defmethod — 方法定义
+### 3.5 impl — 类型的方法
 
 ```lisp
-; 实例方法：可以以 (m obj args...) 的形式调用
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; 静态方法: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; 实例方法: (name obj args...)
+  (pub name ...))                                      ; 在定义类型的模块之外也公开
 
-; static / 关联函数：可以以 (Type::name args...) 的形式调用
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; 泛型类型
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-调用方按 `obj` 的静态类型解析方法（单一、静态分派）。可以在与 `defun` 相同的位置、按相同的规则放置文档字符串（`where` 子句之后、
-函数体开头，仅当其后还有函数体形式时）。`impl` 中的方法也一样——用 `(documentation Type::method)` 取出。
+给用 `defstruct`（3.6）、`defenum`（3.7）定义的类型添加方法。相当于 Rust 的固有 impl
+（`impl Point { ... }`）。
 
-方法自身的类型参数与 `defun` 一样，用 `<...>` 写在名字里。接收者类型的类型参数（下例中的 `T`）由接收者决定，方法自身的类型参数（`U`）从每次调用的参数推断。
+- 项目的形式是 `(名字 (参数...) 返回类型 本体...)`，与 trait 的 `impl`（3.9）的项目相同。
+- 第一个参数是 `self` 的项目是**实例方法**，以 `(name obj args...)` 的形式调用。`self` 不必写类型
+  （`(self)` 与 `((self Self))` 相同，`Self` 是目标类型）。
+- 没有 `self` 的项目是**静态方法**，以 `(Type::name args...)` 的形式调用。创建值的静态方法就是该类型
+  的构造函数。名字可以自由决定，推荐用 `new`。
+- **公开以项目为单位**。只有写成 `(pub name ...)` 的项目才能在定义该类型的模块之外使用。不加 `pub`
+  的项目只能在该模块内使用。
+- 一个类型可以写任意多个 `impl`。
+- 调用方根据 `obj` 的静态类型解析方法（单一、静态分派）。方法**只**根据**第一个参数的类型**查找（3.10）。
+- **docstring** 可以与 `defun` 放在相同位置、按相同规则书写（本体的开头，仅当后面还有本体形式时）。
+  用 `(documentation Type::name)` 取出。trait 的 `impl` 的方法也一样。
+- 只能为自己程序中的类型书写。`Vector`、`Option`、`int` 这样的标准库类型不能写（会报
+  `... is a standard library type` 错误）。想给标准类型增加操作时，定义一个 trait，再对该类型写 `impl`。
+- 在 `(impl X ...)` 中，`X` 之后是项目（列表）、`where` 或什么都没有时，就是这里的固有 impl；
+  是名字时，就是 trait 的 `impl`（`(impl Trait Type ...)`，3.9）。
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; 静态方法
+(area (Point::new 2.0 3.0))   ; 实例方法。=> 6.0
+```
+
+方法自身的类型参数与 `defun` 一样，用 `<...>` 写在名字上。目标类型的类型参数（下例中的 `T`）由接收者
+决定，方法自身的类型参数（`U`）从调用的参数推断。
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- 方法自身的类型参数的名字，既要与接收者类型声明的类型参数（`(defstruct Box<T> ...)` 的 `T`）不同，也要与接收者中写的名字不同。
-- 接收者类型是泛型时，接收者中要么把它的类型参数全部写成变量（`Box<T>`），要么全部写成具体类型（`Box<int>`）。
-- `impl` 中的方法不能添加类型参数，其签名遵循 trait 声明的签名。
+- 方法自身的类型参数，要取与 `impl` 中所写目标类型的类型参数（`(impl Box<T> ...)` 的 `T`）不同的名字。
+- 泛型类型的 `impl`，要么把类型参数全部写成变量（`Box<T>`），要么全部写成具体类型（`Box<int>`。
+  此时方法只能用于该类型的值）。
+- trait 的 `impl` 的方法不能添加类型参数。签名遵循 trait 所声明的签名。
 
 ### 3.6 defstruct — 结构体（用户定义类型）
 
@@ -490,49 +530,73 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   ...)
 ```
 
-- 每个字段是 `(name type)` 或 `(pub name type)`（按字段设置公开，与结构体本身的 `pub` 无关）。末尾再写一个式子，就成为该槽的
-  **默认值**（`(x i32 0)`）——见后面的选项列表。
-- 自动生成以下内容：
-  - 构造函数 `Name::new`（按字段顺序传参）
+- 每个字段是 `(name type)` 或 `(pub name type)`（按字段设定公开，与结构体本身的 `pub` 无关）。在末尾
+  再写一个表达式就成为该槽的**默认值**（`(x i32 0)`）。
+- 值用 `make-instance` 创建（见下文）。不会生成按字段顺序接收参数的构造函数。需要构造函数时，在
+  `impl`（3.5）中把它写成静态方法。
+- 会自动生成以下内容：
   - 读取器 `(field-name instance)`，语法糖 `instance::field-name`
   - 设置器 `(set-field-name instance value)`，语法糖 `(setf instance::field-name value)`
 - 要让结构体本身 `pub`，像 `(pub defstruct ...)` 这样在前面加 `pub`。
 - **类型要在被指名之前定义。** 字段的类型可以写自身（`(next Option<node>)`），但不能写之后定义的类型——类型没有相当于
   `defsignature` 的前向声明。尚未定义的名字，在 `defun` 的参数类型和 `the` 中同样会得到 `unknown type` 错误。因此互相引用的两个
   类型无法写出。
-- **类型变量只有写在声明部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名字的 `<T>`，`defmethod` 是接收者的类型
-  （`(self box<T>)`，静态方法是 `box<T>`）以及名字中的 `<U>`，`impl` 是对象类型和 `impl<T>`，`deftrait` 是 `Self` 以及 `(type Item)` 的关联类型。
-  在其他地方——参数、返回值、函数体中的 `the`/`lambda`——首次出现的名字不会成为类型变量，而是 `unknown type`。
+- **类型变量只有写在声明部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名字的 `<T>`，
+  固有 `impl` 是目标类型（`(impl box<T> ...)`）和各方法名字的 `<U>`，trait 的 `impl` 是目标类型和
+  `impl<T>`，`deftrait` 是 `Self` 和 `(type Item)` 的关联类型。在其他位置（参数、返回值、本体中的
+  `the`/`lambda`）首次出现的名字不会成为类型变量，而是 `unknown type`。
 - **文档字符串**：在名字之后、字段列表之前放置字符串字面量，它就成为文档字符串（`(defstruct Name "doc" (field Type)...)`——与
   CL 的 `defstruct` 位置相同）。字段总是 `(name Type ...)` 的形式，不可能是裸字符串，所以没有歧义。用 `(documentation Name)` 取出。
 
-#### 选项列表
-
-在名字的位置写列表 `(Name option...)` 可以指定选项（与 CL 位置相同）。
+#### make-instance — 创建值
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; 关键字构造函数
-                  (:constructor at (x &optional y))  ; BOA 构造函数
-                  (:copier copy-point))
+(make-instance 'Name :field1 value1 :field2 value2 ...)
+```
+
+结构体的值与 CLOS 一样用 `make-instance` 创建。
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; 顺序任意
+(make-instance 'point :x 1)           ; y 是默认值 0
+```
+
+- 类型名写成用 `'` 引用的符号。不是在运行时选择类型，而是在检查时决定（与 `concatenate` 的
+  `'vector` 相同）。
+- 字段以 `:名字 值` 的组传入。值按书写顺序各求值一次。
+- 没写的字段用默认值填充。没写没有默认值的字段是类型错误。未知的字段、同一字段写两次也是类型错误。
+- 泛型结构体的类型实参从值和期望类型推断。也可以像 `'Box<int>` 这样写出来。
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- 在定义类型的模块之外，不能写非 `pub` 的字段。如果这样的字段没有默认值，其他模块就无法创建该值。
+  想让外部创建时，在 `impl` 中写一个 `pub` 的构造函数（3.5）。
+
+#### 选项列表
+
+在名字的位置写成 `(Name option...)` 列表即可指定选项（与 CL 位置相同）。
+
+```lisp
+(defstruct (point (:copier copy-point))
   (x i32 0)          ; 第 3 个元素是该槽的默认值
   (y i32 0))
 
-(point::make-point :y 7)   ; x 为 0
-(point::at 1)              ; y 为 0
-(point::at 1 2)
-(copy-point p)             ; 浅复制（与 CL 的 copier 相同）
+(copy-point p)       ; 浅拷贝（与 CL 的 copier 相同）
 ```
 
-- **`:constructor`** —— 生成的是类型的**静态函数**（`point::make-point`），函数体一定是 `(point::new ...)`。`new` 仍是结构上
-  唯一的构造函数，这里创建的是它的*调用方式*。可以声明多个。
-  - `(:constructor name)` —— 以 `&key` 接受所有槽。**所有槽都需要默认值**（本语言没有相当于 CL"未绑定槽"的东西）。
-  - `(:constructor name (slot...))` —— 以位置参数接受所列的槽（顺序任意）。没有列出的槽用默认值填充，所以**需要默认值**。插入
-    `&optional` 后，其后的可以省略（同样需要默认值）。
-- **`:copier`** —— 生成返回槽值相同的新值的**实例方法**。与 CL 的 copier 一样是浅复制。
+- **`:copier`** — 生成一个返回具有相同槽值的新值的**实例方法**。与 CL 的 copier 一样是浅拷贝。
 - **`:include Parent`** —— 把父的槽列表连接到开头（默认值也继承。父可以在别的文件中）。**不建立类型关系**——子不是父的子类型，
   父的方法不适用于子，也没有连接两者的运行时检查。本语言没有子类型，共同的接口由 `deftrait` 负责。连接的只是槽的*列表*。
-- **槽的默认值只由生成的构造函数读取。** 一个 `:constructor` 都没有声明却写了默认值，因为不可能被使用，所以是错误。
 - 不加入的选项及其原因：
+  - **`:constructor`** — 构造函数在 `impl` 中写成静态方法（3.5）。写了这个选项会报错，并说明如何改写。
   - **`:conc-name`** —— 在 CL 中是给访问器加前缀，以避免在一个平坦的函数命名空间中冲突。在这里访问器是按接收者类型分派的方法，
     不会冲突，而且加前缀会破坏 `instance::field`（只知道槽名）。
   - **`:predicate`** —— 在运行时回答"这个值是 `point` 吗"。在这里类型是没有运行时见证的编译时分类，也不存在"可能是 point 的
@@ -562,7 +626,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
     ((Some v) v)
     ((None) 0))
   ```
-- 方法／关联函数与 `defstruct` 一样用 `defmethod`/`impl` 后加。
+- 方法和静态方法与 `defstruct` 一样写在 `impl`（3.5）中。
 - 要让枚举本身 `pub`，写 `(pub defenum ...)`。
 - **文档字符串**：与 `defstruct` 相同的位置和规则——名字之后、变体列表之前（`(defenum Name "doc" (Variant ...)...)`）。用
   `(documentation Name)` 取出。
@@ -605,8 +669,9 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   (method-name (recv params...) RetType body...))
 ```
 
-通过 `impl`，每个方法都作为 `TargetType` 的普通 `defmethod` 注册。在泛型函数的 `where` 子句中作为 trait 约束引用（见
-[3.1 defun](#31-defun--函数定义)）。trait 名也可以写成 `m::Trait` 这样的 `::` 路径。
+通过 `impl`，每个方法都作为 `TargetType` 的方法注册，可以像固有 `impl`（3.5）的方法一样调用。
+trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛型函数的 `where` 子句中作为 trait 约束引用
+（见 [3.1 defun](#31-defun--函数定义)）。trait 名也可以写 `m::Trait` 这样的 `::` 路径。
 
 **继承列表（必需）**：一定写在 trait 名之后。元素是裸 trait 名，或者在该 trait 有关联类型时，写成**固定了所有关联类型**的
 `(Trait (Assoc Type))`。
@@ -690,12 +755,24 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 (shadowing-import path...) ; 明知裸名已被占用仍要取用的 use
 ```
 
-- `module` 创建命名空间。**类型不是命名空间**（与 Rust 相同，类型只拥有关联函数／方法）。
-- 用 `use` 引入类型后，该类型的构造函数和公开的 static 方法也可以用裸名使用（例如：`(use option)` 之后可以不写
-  `option::some`/`option::none` 而调用 `some`/`none`）。
-- 裸名（没有限定的标识符）的解析顺序：特殊形式 → 构造函数 → 自由函数（当前命名空间 → 根）→ 实例方法（按第一个参数的静态类型
-  解析）。不会追溯到中间的父模块。
-- 限定路径 `a::b` 按上述顺序解析 `a`，是模块就进入内部，是类型就把最后一段作为关联项解析。
+- `module` 创建命名空间。**类型不是命名空间**（与 Rust 一样，类型只拥有静态方法和方法）。
+- 用 `use` 引入类型后，枚举的变体和该类型公开的静态方法也可以用裸名使用（例：`(use option)` 之后，
+  不写 `option::some`/`option::none` 也能调用 `some`/`none`）。
+- **一个名字只有一个含义**。函数、全局变量和宏属于同一个命名空间，在同一模块中它们中的任意两个都不能
+  取同一个名字（无论以什么顺序定义都会报错）。不像 CL 那样把函数和变量的命名空间分开。不同模块中的
+  同名名字，较近的那个可见。
+- 裸名 `n` 的解析（调用 `(n a ...)` 的位置。特殊形式的名字在此之前决定）：
+  1. 局部（参数，以及 `let`、`labels`、`macrolet`、`symbol-macrolet` 的绑定）
+  2. 模块的名字 `n` 是宏时，该宏
+  3. `use` 的枚举的变体、`use` 的类型的静态方法
+  4. 第一个参数的类型的方法 `n`（方法**只**根据**第一个参数的类型**查找）
+  5. 模块的名字 `n` 是函数或全局变量时，就是它（全局变量时调用其值所表示的函数）
+
+  模块的名字按 当前模块 → `use` 的别名 → 父模块（直到根）的顺序查找，取第一个找到的。把函数作为值
+  传递的位置也遵循同样的规则，第 4 步的"第一个参数的类型"是该处所期望的函数类型的第一个参数的类型
+  （在期望 `(fn (pt) int)` 的位置写 `norm`，就是 `pt` 的方法 `norm`）。期望的类型尚未确定时跳过第 4 步。
+- 限定路径 `a::...::n` 解析为 `a::...` 所指模块的名字（宏、函数、全局变量），或者类型的变体、静态
+  方法。值位置上的 `x::f`（`x` 是值的名字）是字段的读取。
 - **`use` 对其后的形式生效。** 文件逐个形式读取，依赖也在检查该形式之前解析，所以在 `(use m)` **上面**写 `m::f` 会得到
   `unresolved path`。请把 `use` 放在文件开头。
 - **`use` 可以接受多个路径**（`(use a::f b::g)`）。`import` 是行为相同的 CL 兼容写法。
@@ -745,14 +822,16 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-能加 `pub` 的只有上面 11 种（`module`/`use`/`deftrait`/`impl` 不能加）。不是用括号包裹定义形式的 `(pub (defun ...))` 形式，而是在
-`pub` 之后紧接定义关键字。一个 `pub` 只能公开一个定义（不能一次指定多个定义）。
+`pub` 只能用于上述 10 种（不能用于 `module`/`use`/`deftrait`/`impl`）。不是用括号包住定义形式的
+`(pub (defun ...))` 形式，而是在 `pub` 之后紧接定义关键字。一个 `pub` 只能公开一个定义（不能一次
+指定多个定义）。
+
+固有 `impl` 的方法按项目写成 `(pub name ...)`（3.5）。结构体的字段写成 `(pub x i32)`（3.6）。
 
 ### 3.14 defmacro — 宏定义
 
@@ -880,6 +959,18 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 - `(= expr)` —— 求值任意式子，用 `Eq::equals` 比较。是比较没有字面量语法的类型（`defstruct` 实例、全局变量、计算结果）的唯一写法，
   用户定义的 `Eq` 实现直接成为比较规则。`expr` 可以引用从该分支位置可见的任何东西（参数、外层绑定、全局变量）
 - `(Ctor sub-pattern...)` —— 构造函数模式（`Some x` `None` `Cons a d` `Ok v` 等）
+- `(Type :slot pattern... :slot...)` — 结构体模式。在类型名之后用关键字写槽。关键字后面是模式时，
+  用该模式匹配这个槽；后面是关键字或结束时，把槽绑定到同名的变量。没写的槽不参与匹配（不依赖字段的
+  数量和顺序）：
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; 绑定 x，并用 (some b) 匹配 y
+      ((point :x a) a)))                 ; 绑定到 a
+  ```
 - `#{p0 p1 ...}` —— 元组模式。逐个元素用子模式匹配。对 `Sexpr` 而言，只匹配元素个数相同的 `#{..}` 数据
 - `(:or p1 p2 ...)` —— or 模式。任意一个选项匹配即匹配。分支体只有一个，所以每个选项都必须以相同的类型绑定相同名字的变量。也可以写在构造函数模式内部（`(some (:or (circle r) (rect r _)))`）
 
@@ -924,8 +1015,8 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 对 `Sexpr` 被匹配值，除了上面的内置 19 种变体模式，还可以写**向下转换模式**（取出用户定义 ADT 的实例）——用 `match` 取回像
 `(list p 42)` 这样隐式转换为 `Sexpr` 的 `defstruct`/`defenum`（第 3 章）实例的语法：
 
-- `(TypeName sub-pattern...)` —— 把**类型名**放在开头的字段拆解（只用于 struct，`defstruct` 总是只有一个变体，所以用类型名而不是
-  变体名书写）。例：对 `(defstruct point (x f64) (y f64))` 写 `(point x y)`。
+- `(TypeName :slot pattern...)` — 以**类型名**开头的字段分解（仅限 struct）。与上面的结构体模式
+  写法相同。例：对于 `(defstruct point (x f64) (y f64))`，写 `(point :x :y)`。
 - 裸变体名 `(VariantName sub-pattern...)` —— 取出 `defenum` 的变体。作为 `(use EnumType)` 之后可见的裸名解析（与调用构造函数时的
   可见性规则相同）。例：对 `(defenum color (red) (blue))`，在 `(use color)` 之后写 `(red)` `(blue)`。多个可见的 enum 的变体名冲突
   时会得到歧义错误，所以也可以写限定形式 `(EnumType::VariantName ...)`（不需要 `use`）。
@@ -958,7 +1049,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; 类型名在前的字段拆解
+    ((circle :r) (* (* r r) 3))    ; 类型名在前的字段拆解
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1011,7 +1102,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 (return-from name value)            ; 带值退出
 ```
 
-**`defun` / `defmethod` / `labels` 的每个函数都隐式地建立以自己名字命名的 block**（与 CL 相同）。所以 `(return-from f v)` 就是
+**`defun` / `impl` 的方法 / `labels` 的每个函数都隐式地建立以自己名字命名的 block**（与 CL 相同）。所以 `(return-from f v)` 就是
 函数的提前返回：
 
 ```lisp
@@ -1295,8 +1386,8 @@ typl --image session.typld             # REPL 也一样
 全局变量的存储与编译后的代码**共享**（同一个槽）。`defvar` 的初始化式由编译后的初始化执行一次，恢复时跳过——以免有副作用的初始化式
 执行两次。
 
-`compile-file` 也会读取标准库（把其函数体嵌入可执行文件），所以 `abs`/`gcd` 这样的标准库函数，以及 `(impl print-object ...)`、
-`(defmethod print-object ...)` 都可以在 AOT 中使用。
+`compile-file` 也读取标准库（把其本体嵌入可执行文件），所以 `abs`/`gcd` 这样的标准库函数，以及
+`(impl print-object ...)`，都可以在 AOT 中使用。
 
 `compile-file` 也接受 `use`（以及 `import`/`shadowing-import`）。入口文件的 `(use m)` 按与 `typl file.typl` 相同的规则查找文件，
 找到的依赖文件也会被编译并链接进可执行文件——`main.typl` 用 `(use http)` 读取 `http.typl` 的结构也能直接进行 AOT 编译。入口文件
@@ -1471,8 +1562,9 @@ typl --image session.typld             # REPL 也一样
   线程，之后一直留在那里**（不会回去）。长时间的处理中途只要接触过一次解释执行的代码，剩余部分就在解释器的线程上运行。
 - **`typl` 的工作线程只存活一次顶层求值的时间。** 在 REPL 等待输入期间以及顶层形式之间，其他线程不推进任务（剩下的任务在下次求值时
   接着运行）。求值结束时会等待各线程完成当前的一步，所以如果 `thread` 中有持续阻塞的 C 函数（`defffi`），在它返回之前求值不会结束。
-- **工作线程上的打印**：解释执行的 `print-object`／`~/name/` 方法不能在其他线程上运行，所以在其他线程上打印这样的值会成为与
-  `(panic ...)` 同样处理的 panic（`(compile T::print-object)`，或者从主任务打印）。
+- **worker 上的打印**：解释执行的 `print-object` 方法，以及 `~/name/` 所调用的解释执行的函数和方法，
+  不能在其他线程上运行，所以在其他线程打印这样的值会产生与 `(panic ...)` 同等对待的 panic
+  （`(compile T::print-object)`，或者从主任务打印）。
 - **数据竞争是未定义的**（与 Go 立场相同）。不经过 `Mutex<T>`・`Chan<T>` 从多个任务修改同一个值的结果没有保证。
 - **`task` 返回值。** 与 Go 的 `go` 语句不同，它返回 `Task<T>`，用 `(wait t)` 可以取得结果。
 - **没有 nil 通道。** Go 的 fan-in 惯用法（把关闭的通道设为 `nil` 以从 `select` 的分支中去掉）无法写出，所以为每个输入启动一个任务，

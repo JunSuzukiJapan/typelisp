@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 給 Common Lisp 使用者
 
 typelisp 繼承了 Common Lisp（以下簡稱 CL）的語法與許多函式名稱，但它是靜態型別語言。因此 CL 的寫法不一定能直接通過。本指南整理了熟悉
@@ -49,7 +49,9 @@ CL 的人容易遇到的問題，以及改寫的方式。
 
 ## 3. 把函式當作值
 
-typelisp 不區分函式與變數的命名空間。函式名稱可以直接作為值傳遞。沒有 `#'` 與 `funcall`。
+typelisp 不區分函式與變數的命名空間。函式名稱可以直接作為值傳遞。沒有 `#'` 與 `funcall`。巨集也屬於同一個
+命名空間，所以在同一模組中，函式、全域變數、巨集中的任意兩個都不能取同一個名稱（不能像 CL 那樣同時有名為
+`list` 的函式與名為 `list` 的變數）。
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -68,6 +70,8 @@ typelisp 不區分函式與變數的命名空間。函式名稱可以直接作�
   ```
 
 - 序列函式**對象在前，函式在後**：`(map it f)`、`(filter it f)`、`(foldl it f init)`。與 CL 的 `(mapcar f list)` 順序相反。
+- 加入元素的 `push` 也是**對象在前**：`(push v 3)`。不能依 CL 的 `(push 3 place)` 的順序書寫，因為方法只依
+  第一個引數的型別選擇（第 8 節）。
 - `lambda` 不能使用 `&optional` 與 `&key`（可以使用 `&rest`）。
 - **不能呼叫定義之前的函式。** 在 CL 中可以先呼叫之後才定義的函式，在這裡會得到 `no such function`。相互遞迴的函式用 `defsignature`
   先宣告其中一個。
@@ -161,13 +165,25 @@ typelisp 不區分函式與變數的命名空間。函式名稱可以直接作�
 沒有 `defclass`、`defgeneric` 與方法組合。
 
 - 資料型別以 `defstruct`（結構）與 `defenum`（和型別）定義。
-- `defmethod` 定義只依**第一個引數的靜態型別**決定呼叫對象的方法。不進行多重分派。
+- 沒有 `defmethod`。方法依型別集中寫在 `impl` 中（與 Rust 的固有 impl 相同的形式）。呼叫對象只由**第一個引數的
+  靜態型別**決定，不進行多重分派。
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 靜態方法
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; 方法
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - 要讓不同型別擁有共同的操作，使用 trait（`deftrait` / `impl`）。處理內部型別在執行期才決定的值時，使用 `:dyn Trait` 型別
   （[語法參考 3.9](../reference/syntax.md#39-deftrait--impl--trait-機制)）。
 
 `defstruct` 的差異：
 
-- 建構函式是 `型別名稱::new`：`(point::new 1 2)`。想要 `make-point` 這樣的名稱時，可以用 `(:constructor make-point)` 選項建立。
+- 值與 CLOS 一樣以 `make-instance` 建立：`(make-instance 'point :x 1 :y 2)`。不會產生 `make-point`，也沒有
+  `:constructor` 選項。想要有名稱的建構函式時，在 `impl` 中寫成靜態方法（上面的 `point::new`）。
 - 存取器除了 `(x p)`，也可以寫成 `p::x`。以 `(setf p::x 5)` 修改。
 - 不會產生述詞（`point-p`）。沒有 `:conc-name`、`:type`、`:named`。
 - `:include` 只是繼承槽，並不會成為父型別的子型別。

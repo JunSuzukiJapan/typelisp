@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Module và cách bố trí tệp
 
 Tài liệu này giải thích cách ghép một chương trình gồm nhiều tệp. Các quy tắc chi tiết nằm ở các mục
@@ -46,14 +46,17 @@ nơi tìm thấy làm thư mục gốc mã nguồn. Nếu không tìm thấy, th
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; trường không có pub không thể đọc từ bên ngoài
+  (tag string))                        ; trường không có pub không đọc cũng không ghi được từ bên ngoài
 
-(defun square ((n i32)) i32 (* n n))   ; hàm không có pub cũng không thể gọi từ bên ngoài
+(defun square ((n i32)) i32 (* n n))   ; hàm không có pub cũng không gọi được từ bên ngoài
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -74,11 +77,13 @@ typl main.typl        # => 25
 
 ### Những gì được công khai
 
-- Hàm, struct, enum, biến toàn cục, macro và phương thức chỉ nhìn thấy được từ các module khác khi có
-  `pub`. Đặt `pub` ngay trước định nghĩa, như trong `(pub defun ...)`.
-- Với struct, **công khai kiểu và công khai trường là hai việc riêng**.
-  `(pub defstruct point ...)` làm cho kiểu nhìn thấy được, và chỉ những trường viết dưới dạng
-  `(pub x i32)` mới đọc và ghi được từ bên ngoài.
+- Hàm, struct, enum, biến toàn cục và macro chỉ nhìn thấy được từ các module khác khi có `pub`. Đặt `pub`
+  ngay trước định nghĩa, như `(pub defun ...)`.
+- Trong các phương thức viết trong `impl`, chỉ những mục viết `(pub new ...)` mới dùng được từ bên ngoài.
+- Với struct, **công khai kiểu và công khai trường là hai việc riêng**. `(pub defstruct point ...)` làm kiểu
+  nhìn thấy được, và chỉ các trường viết `(pub x i32)` mới đọc ghi được từ bên ngoài.
+- Tương tự, ở module khác chỉ đưa được các trường `pub` cho `make-instance`. `point` ở trên có `tag` không
+  phải `pub`, nên module khác không tạo được nó bằng `make-instance` mà dùng `point::new`.
 - Dùng từ bên ngoài một tên không công khai sẽ cho lỗi "không phân giải được" như
   `unresolved path: geometry::square`. Đây là cùng thông báo như khi viết sai tên, nên nếu chính tả
   đã đúng mà tên vẫn không phân giải được, hãy nghi ngờ là thiếu `pub`.
@@ -111,10 +116,11 @@ chúng được gọi mà không cần tên module.
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, không phải core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, không phải core::area
 ```
 
-Các phương thức bên trong `impl` luôn công khai, kể cả khi không có `pub`.
+Các phương thức trong `impl` của trait luôn công khai, kể cả khi không có `pub`. Trong các phương thức của
+`impl` cố hữu (`(impl point ...)`), chỉ những phương thức có `pub` mới công khai.
 
 Bản thân trait không thể được công khai cho các module khác. Hãy giữ định nghĩa của trait, các `impl`
 cho nó và mã dùng nó qua `:dyn` trong cùng một module.

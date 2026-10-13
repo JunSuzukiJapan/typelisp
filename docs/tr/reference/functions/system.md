@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -217,12 +217,12 @@ kalıcı olarak kaydedilir.
 
 ## 7. Docstring'ler / `documentation`
 
-`defun`/`defmethod` (`impl` içindekiler dahil)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+`defun`/`impl` metotları/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
 `deftype`/`deftrait` docstring taşıyabilir. Konum, her biri için CL'nin kuralını izler:
 
 | Form | Docstring'in konumu |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | Gövdenin başında (dönüş türünden ve `where` yan tümcesinden sonra). Yalnızca en az bir gövde formu izlediğinde; tek başına bir string dönüş değeri olarak kalır |
+| `defun` / `impl` metotları / `defmacro` | Gövdenin başında (dönüş türünden ve `where` yan tümcesinden sonra). Yalnızca en az bir gövde formu izlediğinde; tek başına bir string dönüş değeri olarak kalır |
 | `defvar` / `defconstant` | Başlangıç değerinden **sonra**: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | Adın **hemen ardından**, alanlardan/varyantlardan önce |
 | `deftype` | Adın **hemen ardından**, türden önce: `(deftype meters "doc" i32)` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # String'ler, Karakterler ve Koleksiyonlar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` ve `Deque<T>`.
@@ -124,8 +124,8 @@ kullandığı `(sxhash-string s)`'i (32 bit FNV-1a) çağırabilirsiniz.
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 İki anahtarın aynı olup olmadığına nesne kimliği değil, **anahtar türünün kendisi** (`sxhash` ve `Hash`'in
@@ -144,7 +144,7 @@ Başvurusu](../syntax.md#1-sözcüksel-öğeler)).
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL'nin `make-array`'i. `dims` kopyalanır. `init`, her hücrenin başlangıç değeridir (CL'nin `:initial-element`'i; bu dilde "bağlanmamış hücre" yoktur, bu yüzden zorunludur). `:fill-pointer` yalnızca tek boyut için |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL'nin `make-array`'i. `dims` kopyalanır. `init`, her hücrenin başlangıç değeridir (CL'nin `:initial-element`'i; bu dilde "bağlanmamış hücre" yoktur, bu yüzden zorunludur). `:fill-pointer` yalnızca tek boyut için |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | CL'nin `aref` / `(setf (aref …))`'i. Bir indeks aralık dışındaysa panic olur |
 | `aref` | `(aref a i j …)` | — | Çıplak indekslerle CL yazımı. Yukarıdaki `get`/`set`'e açılır. `(setf (aref a i j) v)` de çalışır |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | CL'nin `row-major-aref`'i. Düz bir indeks |
@@ -165,8 +165,6 @@ Başvurusu](../syntax.md#1-sözcüksel-öğeler)).
   tekrarını" bildiremez ve `aref` şekeri bu boşluğu kapatır.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`
   **yoktur**. Alıcının statik türü bu soruları zaten yanıtlar.
-- `Array::new`, `defstruct`'ın ürettiği alan sıralı yapıcıdır ve dizi oluşturmak için tasarlanmamıştır.
-  `Array::make` kullanın.
 - **Diziler CL'nin dizi sözdizimiyle yazdırılır.** Rank 1 `#(1 2 3)`'tür; diğer rank'lar `#nA` ve onu
   izleyen o kadar düzey parantezdir (`#2A((1 2 3) (4 5 6))`); rank 0 `#0A5`'tir. Varsa doldurma
   işaretçisinde yazdırma durur. `*print-array*`'i ([Yazdırma](printing.md#6-ne-kadarının-yazdırılacağını-denetleme))
@@ -179,7 +177,7 @@ Sabit uzunluklu bir bit dizisi. Standart kütüphanedeki bir `defstruct`.
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | Uzunluk `n`, tüm bitler 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | Uzunluk `n`, tüm bitler 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | Aralık dışında panic olur |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | CL yazımları. `(setf (bit v i) b)` de çalışır. CL'nin `sbit`'i `bit`'ten yalnızca basit bir bit vektörü istemesiyle ayrılır, ancak bu dilde yalnızca tek tür bit vektörü vardır |
 | `len` | `(len v)` | `BitVector→int` | Bit sayısı |
@@ -195,7 +193,7 @@ kütüphane `defstruct`'ı. Öğe türü, bir `HashTable` anahtarı gibi `Hash`'
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | Boş bir küme oluşturur. Tür argümanı beklenen türden gelir |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | Boş bir küme oluşturur. Tür argümanı beklenen türden gelir |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x`'i ekler. Yoksa `true`, zaten varsa `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x`'in olup olmadığı |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x`'i çıkarır. Varsa `true` |
@@ -204,15 +202,13 @@ kütüphane `defstruct`'ı. Öğe türü, bir `HashTable` anahtarı gibi `Hash`'
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Öğeler üzerinde bir yineleyici. Sıra belirsizdir |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 7–9. bölümlerdeki üç türün ortak noktaları:
 
-- `make` ile oluşturulur. `new`, `defstruct`'ın ürettiği alan sırasındaki yapıcıdır; oluşturmak için
-  kullanılmaz (`Array::make`'teki gibi).
 - `iter`, çağrıldığı andaki bir kopyayı dolaşır. Bir `doiter` içinde aynı koleksiyonu değiştirmek o
   döngüde görünmez.
 - Öğe türleri `print-object`'i uyguluyorsa öğeler `#<hashset "a" "b">` `#<sortedtable 1 "a">`
@@ -226,7 +222,7 @@ anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Boş bir tablo oluşturur |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | Boş bir tablo oluşturur |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Arama |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Ekler ya da üzerine yazar |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Siler, varsa eski değeri döndürür |
@@ -237,7 +233,7 @@ anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Anahtar sırasında `#{anahtar değer}` demetleri |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 ve pear 3
 ```
@@ -248,7 +244,7 @@ anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | Boş bir dizi oluşturur |
+| `new` | `(Deque::new)` | `()→Deque<T>` | Boş bir dizi oluşturur |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Başa / sona ekler |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeyi çıkarıp döndürür. Boşsa `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Baştaki / sondaki öğeye bakar (çıkarmadan) |
@@ -259,7 +255,7 @@ anahtarın `set`'i ve `remove`, konumundan sonraki öğeleri kaydırır.
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Baştan sırayla |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

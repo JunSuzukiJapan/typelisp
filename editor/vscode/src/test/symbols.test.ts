@@ -20,12 +20,12 @@ test("each definition form is found, with or without pub", () => {
   const src = [
     "(defun f ((x i32)) i32 x)",
     "(pub defun g () i32 1)",
-    "(defmethod area ((self Self)) i32 1)",
     "(defmacro twice (e) `(progn ,e ,e))",
     "(defstruct point<T> (x T) (y T))",
     "(pub defenum color (red) (blue))",
     "(deftrait Shape (label ((self Self)) string))",
     "(impl Shape point (label ((self Self)) string \"p\"))",
+    "(impl point (pub area (self) i32 1))",
     "(defvar (*flag* bool) false)",
     "(pub defconstant (limit i32) 10)",
     "(module geo)",
@@ -33,12 +33,12 @@ test("each definition form is found, with or without pub", () => {
   assert.deepEqual(names(findDefinitions(src)), [
     "function:f",
     "function:g (pub)",
-    "method:area",
     "macro:twice",
     "struct:point<T>",
     "enum:color (pub)",
     "trait:Shape",
     "impl:Shape point",
+    "impl:point",
     "variable:*flag*",
     "constant:limit (pub)",
     "module:geo",
@@ -107,7 +107,7 @@ test("the scanner finds exactly the definitions a line-oriented count does", () 
   // second opinion on the regex scanner -- and requiring exact equality catches
   // both a missed definition and a phantom one.
   const heads =
-    /^\((?:pub )?(?:defun|defmethod|defmacro|defstruct|defenum|deftrait|impl|defvar|defconstant|module)\b/gm;
+    /^\((?:pub )?(?:defun|defmacro|defstruct|defenum|deftrait|impl|defvar|defconstant|module)\b/gm;
   for (const rel of [
     "examples/bst.typl",
     "examples/game_of_life.typl",

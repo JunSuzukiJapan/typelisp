@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Các chỉ thị định dạng
 
 Các chỉ thị được viết trong chuỗi điều khiển của `print`/`println`/`format`. Chúng bao phủ gần hết các chỉ
@@ -73,7 +73,7 @@ làm gì khi `*print-pretty*` là false. Mặc định nó là false.
 | `~<...~;...~>` | Căn chỉnh (trải các đoạn trên `~mincol` cột. `:`/`@`=phần đệm ở hai đầu) |
 | `~<...~;...~:>` | **Khối logic** (đóng bằng `~:>`; khác với căn chỉnh ở trên). Đoạn đầu là tiền tố và đoạn cuối là hậu tố (cả hai chỉ là chuỗi nguyên văn). Với dấu phân cách `~@;`, tiền tố là **tiền tố theo từng dòng**. `~:<` mặc định tiền tố/hậu tố là `(`/`)`. Đối số là một danh sách (`~@<` dùng các đối số còn lại tại chỗ) |
 | `~*` | Bỏ qua đối số (`~n*`=tiến n, `~:*`=lùi, `~@*`=đến một vị trí tuyệt đối) |
-| `~/name/` | Gọi phương thức (chương 5. Các cờ `:`/`@` được truyền cho phương thức. Không nhận tham số) |
+| `~/name/` | Gọi hàm hoặc phương thức (chương 5; cờ `:`/`@` được truyền cho đích gọi; không nhận tham số) |
 
 Các chỉ thị CL sau không được hỗ trợ (chúng là lỗi lúc kiểm tra).
 
@@ -85,27 +85,35 @@ Các chỉ thị CL sau không được hỗ trợ (chúng là lỗi lúc kiểm
 
 ## 5. `~/name/`
 
-**Một điểm khác với CL: tên được tra không phải như một hàm toàn cục mà như một phương thức của chính kiểu
-của đối số.** Phương thức có dạng `((self Self) (colon bool) (at bool)) → string`, và các `:`/`@` của chỉ thị
-được truyền nguyên trạng.
-
-Cách tra như một hàm toàn cục của CL không thể được triển khai an toàn trong ngôn ngữ này. Ngay cả với một
-chuỗi điều khiển literal, kiểu của các phần tử của một đối số danh sách (bên trong `~{`) không được biết lúc
-kiểm tra, và việc tra hàm chỉ bằng tên có thể gọi một hàm dành cho kiểu khác. Chọn theo kiểu của giá trị có
-nghĩa là phương thức được kiểm tra kiểu đúng cho kiểu đó, như vậy là an toàn (cùng cơ chế với
-`print-object`). Nó cũng hoạt động với các giá trị như `string`/`bool`/`char`/`symbol`/danh sách. Chỉ với
-số nguyên, vốn không thể biết độ rộng từ giá trị, thì là lỗi **khi có nhiều hơn một kiểu số nguyên định
-nghĩa phương thức tên đó**.
-
-Không biết nó áp dụng cho đối số nào, nhưng biết nó có thể gọi những phương thức nào. Bộ kiểm tra thu thập
-mọi `~/name/` từ chuỗi điều khiển literal và ghi lại, trong số các kiểu của đối số tại vị trí gọi đó, những
-kiểu có một phương thức dạng trên. Vì vậy **nếu không kiểu đối số nào có phương thức đó, đó là lỗi lúc kiểm
-tra** (không phải lúc chạy), và nó cũng hoạt động trong các tệp thực thi AOT.
+`~/name/` phân giải `name` theo cùng quy tắc như một lời gọi `(name arg colon at)` viết tại vị trí đó, và xuất
+chuỗi mà lời gọi trả về. Nó tiêu thụ một đối số. `colon` và `at` là các giá trị `bool` cho biết chỉ thị có `:`
+và `@` hay không.
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- Việc phân giải tên giống như với lời gọi ([Tham chiếu cú pháp 3.10](../syntax.md#310-module--use--không-gian-tên)). Nếu kiểu của đối số có
+  phương thức `name` thì gọi nó; nếu không, gọi hàm `name` nhìn thấy được. Hàm trong module có thể được
+  viết bằng đường dẫn (`~/m::shout/`).
+- Thứ có thể gọi là hàm hoặc phương thức viết bằng typelisp, nhận nguyên đối số, `colon` và `at`, và trả về
+  `string`. Không gọi được hàm dựng sẵn.
+- **Gọi gì được xác định lúc kiểm tra.** Bộ kiểm tra tìm mọi đối số có thể đến được `~/name/` đó, tính cả
+  các bước nhảy của `~*` và `~[`, rồi phân giải tên theo kiểu của từng đối số. Nếu có một cái không phân
+  giải được thì là lỗi lúc kiểm tra, và trường hợp các đối số có thể đến được sẽ gọi hai định nghĩa khác
+  nhau cũng vậy. Lúc chạy không tìm tên nào, nên nó chạy giống hệt trong tệp thực thi AOT.
+- **Không dùng được bên trong `~{`, `~:{`, `~:@{` hay `~<...~:>`** (lỗi lúc kiểm tra). Kiểu của phần tử
+  trong đối số danh sách là `Sexpr`, không xác định được cần gọi gì. `~@{` duyệt các đối số còn lại của lời
+  gọi, có kiểu đã biết, nên dùng được ở đó.
+
+Khác biệt với CL: CL tìm tên như một hàm toàn cục. Ở đây việc phân giải giống như với lời gọi, nên phương thức
+của kiểu đối số được chọn trước hàm cùng tên.

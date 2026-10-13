@@ -35,7 +35,7 @@
     ((none) (option::none))
     ((some i)
      (option::some (make-instance 'header :name (trim (substring line 0 i))
-                                :value (trim (substring line (+ i 1) (length line))))))))
+                                  :value (trim (substring line (+ i 1) (length line))))))))
 
 ;; A line without its trailing CR (lines end in CRLF; `read-line` stops at LF).
 (defun read-crlf-line ((c socket-stream)) Option<string>
@@ -121,7 +121,7 @@
            (option::none)
            (let ((headers (read-headers c)))
              (option::some (make-instance 'request :method (get parts 0) :target (get parts 1) :headers headers
-                                         :body (read-body c headers false)))))))))
+                                          :body (read-body c headers false)))))))))
 
 (pub defun write-response ((c socket-stream) (r response)) ()
   "Send `r`, with `Content-Length` and `Connection: close` added."

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # टास्क और चैनल
 
 टास्क (हल्के थ्रेड) की शब्दावली। उन्हें शुरू करने वाले `task` और `thread`, और कई चीज़ों की प्रतीक्षा करने वाला `select`, विशेष फ़ॉर्म हैं और [सिंटैक्स संदर्भ](../syntax.md#12-कंकरेंसी-टास्क) में हैं। यह अध्याय बाकी को कवर करता है: टाइप, मेथड और फ़ंक्शन।
@@ -66,7 +66,7 @@ CL की तरह, `sleep` **सेकंड** लेता है। पू�
 
 | नाम | उपयोग | टाइप | अर्थ |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | ऐसा समूह जिसमें कुछ बकाया नहीं है |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | ऐसा समूह जिसमें कुछ बकाया नहीं है |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | काउंटर में जोड़ता है। काम शुरू होने से पहले करें |
 | `done` | `(done wg)` | `(WaitGroup)→()` | एक पूरा हो गया। 0 पर, हर प्रतीक्षारत मुक्त हो जाता है |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | 0 तक पहुँचने की प्रतीक्षा करता है। कितने भी टास्क से |
@@ -96,13 +96,13 @@ Go का `time.After`। इसे `select` की टाइमआउट शा
 
 | नाम | उपयोग | टाइप | अर्थ |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | `v` रखने वाला अनलॉक्ड म्यूटेक्स |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | `v` रखने वाला अनलॉक्ड म्यूटेक्स |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | लॉक लेता है (प्रतीक्षा करता है) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | उसे छोड़ता है। यदि लॉक नहीं है तो panic करता है |
 | `with-lock` | `(with-lock (x m) body...)` | Macro | लॉक लेता है, सामग्री को `x` से बाँधता है, `body` चलाता है, और **हमेशा** छोड़ देता है |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -115,7 +115,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 可以进行 AOT 编译的文件形式
 
-- 入口文件的顶层只能写定义（`defun` `defmethod` `defvar` `defparameter` `defconstant` `defmacro`
+- 入口文件的顶层只能写定义（`defun` `defvar` `defparameter` `defconstant` `defmacro`
   `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`、`(unsafe (def-c-struct ...))`）
   以及 `use` `module`。除了末尾的 `(main)`，不能写 `(println ...)` 这样的顶层表达式。处理请写在 `main` 中。
 - 没有不带参数的 `main` 时会报错。

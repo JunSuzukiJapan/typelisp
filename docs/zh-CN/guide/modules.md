@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 模块与文件结构
 
 本指南说明如何组织由多个文件构成的程序。详细的语法规则见[语法参考](../reference/syntax.md#310-module--use--命名空间)
@@ -44,14 +44,17 @@ src = "src"
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; 没有 pub 的字段从外部不能读取
+  (tag string))                        ; 没有 pub 的字段不能从外部读写
 
-(defun square ((n i32)) i32 (* n n))   ; 没有 pub 的函数从外部也不能调用
+(defun square ((n i32)) i32 (* n n))   ; 没有 pub 的函数也不能从外部调用
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`：
@@ -72,10 +75,13 @@ typl main.typl        # => 25
 
 ### 公开的单位
 
-- 函数、结构体、枚举、全局变量、宏、方法，各自只有加了 `pub` 的才对其他模块可见。写法是像 `(pub defun ...)`
-  这样在定义前面加 `pub`。
-- 结构体的**类型公开与字段公开是分开的**。`(pub defstruct point ...)` 使类型可见，只有写成 `(pub x i32)` 的字段
-  才能从外部读写。
+- 函数、结构体、枚举、全局变量、宏，各自只有加了 `pub` 的才能被其他模块看到。写法是像 `(pub defun ...)`
+  这样，把 `pub` 放在定义之前。
+- 写在 `impl` 中的方法，只有按项目写成 `(pub new ...)` 的才能从外部使用。
+- 结构体的**类型公开与字段公开是分开的**。`(pub defstruct point ...)` 使类型可见，各字段只有写成
+  `(pub x i32)` 的才能从外部读写。
+- 在外部模块中能写进 `make-instance` 的也只有 `pub` 的字段。上面的 `point` 的 `tag` 不是 `pub`，所以在外部
+  不能用 `make-instance` 创建，要用 `point::new`。
 - 从外部使用未公开的名字，会得到 `unresolved path: geometry::square` 这样"无法解析"的错误。这与拼错名字时的
   消息相同，所以拼写正确却无法解析时，请怀疑是否忘了加 `pub`。
 
@@ -101,10 +107,11 @@ typl main.typl        # => 25
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; 是 area 而不是 core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; 是 area 而不是 core::area
 ```
 
-`impl` 中的方法即使不写 `pub` 也总是公开的。
+trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。固有 `impl`（`(impl point ...)`）的方法只有加了 `pub`
+的才公开。
 
 trait 本身不能公开给其他模块。请把 trait 的定义、对它的 `impl`，以及通过 `:dyn` 使用该 trait 的代码放在同一个
 模块中。

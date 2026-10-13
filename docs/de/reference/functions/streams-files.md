@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Streams und Dateien
 
 Stream-Traits und -Methoden, konkrete Stream-Typen, Dateioperationen und Pfadnamen. Netzwerk-Sockets sind
@@ -178,7 +178,7 @@ zusammengesetzte Streams gesteckt werden.
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; alle übrigen Methoden sind die Standardimplementierungen
 
-(write-line (counter::new 0) "four")   ; write-line, terpri und fresh-line funktionieren alle
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri und fresh-line funktionieren alle
 ```
 
 Eingabe funktioniert genauso: Man schreibt nur `read-item`. Selbst ein Typ ohne eigenes Zurückstellen lässt

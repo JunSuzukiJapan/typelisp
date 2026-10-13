@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Pesan Kesalahan
 
 Arti pesan kesalahan utama dari `typl` dan cara memperbaikinya.
@@ -59,6 +59,10 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | `no such function: bar` | Tidak ada fungsi atau metode dengan nama itu. Periksa ejaannya |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metode dipilih berdasarkan tipe argumen pertama. Metode bernama itu ada, tetapi tidak untuk tipe argumen pertama (di sini `int`). Akhir pesan mendaftar tipe yang memiliki metode itu |
 | `unbound variable: y` | Tidak ada variabel dengan nama itu. Periksa ejaan dan lingkup pengikatannya (apakah dipakai di luar `let`-nya?) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Dua di antara fungsi, variabel global, dan makro diberi nama yang sama dalam satu modul. Ganti nama salah satunya ([Referensi Sintaks 3.10](syntax.md#310-module--use--ruang-nama)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Tidak ada `new` yang dihasilkan untuk struct. Buat nilainya dengan `make-instance`, atau tulis `new` di `impl` ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | Tidak ada `defmethod`. Metode ditulis di `impl` tipe ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | Tidak ada opsi `:constructor`. Konstruktor ditulis di `impl` sebagai metode statis |
 | ``use: unresolved `nosuch` `` | Modul yang disebut pada `use` tidak ditemukan. Untuk cara nama berkas dipetakan ke path modul, lihat [Referensi Sintaks 3.11](syntax.md#311-berkas-dan-modul-proyek-multiberkas) |
 | `unresolved path: c::hidden` | Modulnya ada, tetapi namanya tidak, atau tidak terlihat karena tidak memiliki `pub` |
 | `circular module dependency: a -> b -> a` | Modul saling meng-`use`. Pindahkan bagian bersama ke modul terpisah |
@@ -70,10 +74,15 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 |---|---|
 | `f: expected 1 argument(s), got 2` | Jumlah argumen tidak sesuai |
 | `f: unknown keyword argument :b` | Argumen keyword yang tidak dimiliki fungsi diberikan |
-| `new: expected 1 field(s), got 2` | Jumlah nilai yang diberikan ke konstruktor struct tidak sesuai dengan jumlah field |
+| `circle: expected 1 field(s), got 2` | Jumlah nilai yang diberikan ke varian enum tidak sama dengan jumlah field varian itu |
+| ``make-instance point: slot `y` is not given and has no default`` | Field tanpa nilai bawaan tidak diberikan ke `make-instance` |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Diberikan field yang tidak dimiliki struct |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Field yang bukan `pub` diberikan di luar modul yang mendefinisikan tipe. Mintalah modul itu menyediakan konstruktor `pub` |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Metode yang ditulis untuk satu instansiasi tipe generik (`(impl Box<int> ...)`) dipanggil pada nilai dengan argumen tipe lain |
 | ``setf: cannot assign to constant `k` `` | Nama yang didefinisikan dengan `defconstant` ditugasi. Jika perlu berubah, gunakan `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | Fungsi yang dideklarasikan dengan `defsignature` tidak didefinisikan |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | Tidak ada tipe argumen yang memiliki metode yang dipanggil dengan `~/name/` ([Direktif Format bab 5](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | Pemanggilan `(nosuch arg colon at)` yang ditulis di tempat itu tidak dapat diselesaikan. Definisikan metode tipe argumen atau sebuah fungsi ([Direktif Format bab 5](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | `~/name/` ditulis di tempat ia menerima elemen list, seperti di dalam `~{`. Tipe elemen tidak dapat menentukan apa yang dipanggil |
 
 ## 3. Kesalahan pembacaan
 

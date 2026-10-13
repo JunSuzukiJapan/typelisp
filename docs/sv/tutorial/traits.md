@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Traits
 
 Ett trait är ett löfte om att "den här typen stöder dessa operationer". Med traits kan flera typer dela
@@ -38,8 +38,8 @@ För att implementera ett trait för en typ skriver man en `impl`.
 De implementerade metoderna anropas precis som vanliga funktioner.
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 Att utelämna även bara en av de metoder traitet deklarerar är ett typfel vid `impl`.
@@ -54,8 +54,8 @@ Man kan ställa ett villkor på en generisk funktions typparameter med `where`. 
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 Tack vare `(where (Shape T))` kan kroppen använda `name` och `area` på värden av typen `T`. Utan gränsen
@@ -88,8 +88,8 @@ Om en trait-metod har en kropp används den kroppen när en `impl` utelämnar me
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; den som skrivs här har företräde
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. Implementera standardtraits
@@ -117,7 +117,7 @@ från `Eq` måste `impl` för `Eq` komma först.
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (standardimplementationen i Ord)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (standardimplementationen i Ord)
 ```
 
 Att implementera `print-object` avgör hur `println` visar värdet. Argumentet `escape` är `true` när en
@@ -128,7 +128,7 @@ form som kan läsas tillbaka efterfrågas, som med `~s`.
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 Kombinerat med en trait-gräns kan du skriva en funktion som fungerar för vilken typ som helst som
@@ -161,8 +161,8 @@ samma `Vector<circle>`. För att hantera "något som implementerar `Shape`" till
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

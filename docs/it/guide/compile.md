@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Compilazione
 
 Se non fai altro, i programmi typelisp vengono eseguiti nell'interprete. Inoltre esistono due modi per
@@ -127,7 +127,7 @@ funziona solo con il `typl` compilato insieme ad esso. Dopo aver ricompilato `ty
 
 ### 3.3 Che cosa può contenere un file compilato con AOT
 
-- Il primo livello del file di ingresso può contenere solo definizioni (`defun` `defmethod` `defvar`
+- Il primo livello del file di ingresso può contenere solo definizioni (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) e `use` `module`. Le espressioni di primo livello
   come `(println ...)` non sono ammesse, tranne il `(main)` finale. Metti il lavoro dentro `main`.

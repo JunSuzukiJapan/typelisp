@@ -24,7 +24,7 @@
 引数をいくつ・どの型で取るかを決めるので、実行時に組み立てた文字列は検査時に読めない。
 リテラルに限ることで、**引数の数と型がチェック時に検査される**——`(println "~d" "x")` や
 `(println "~a ~a" 1)` はチェック時のエラーになる。綴りを間違えたディレクティブ・閉じていない `~(`・
-どの引数も答えられない `~/name/` も同じくチェック時のエラー。検査の規則は
+呼ぶ先を決められない `~/name/` も同じくチェック時のエラー。検査の規則は
 [format.md](format.md#1-書き方)。文字列を組み立てて出したいときは `(format false ...)` で
 作って `(println "~a" s)` と印字する。
 
@@ -47,8 +47,8 @@
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -296,7 +296,7 @@ CL は「無制限」を `nil` で表すが、この言語に `nil` は無いの
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a が a 自身を指す
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

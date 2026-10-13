@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
@@ -171,7 +171,7 @@ CL 的 `integer`，也就是这门语言的**整数**——未注解的整数字
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | 创建。分量可以用 `z::re`/`z::im` 直接读取 |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | 创建。分量可以用 `z::re`/`z::im` 直接读取 |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | 实部、虚部。**也作用于实数**（`(realpart 3.0)`→`3.0`、`(imagpart 3.0)`→`0.0`）。与 CL 相同 |
 | `conjugate` | `(conjugate z)` | `complex→complex` | 共轭（也作用于实数） |
 | `phase` | `(phase z)` | `complex→f64` | 辐角 (-pi,pi]（也作用于实数） |

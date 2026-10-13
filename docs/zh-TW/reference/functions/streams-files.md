@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 串流與檔案
 
 串流的 trait 與方法、具體串流型別、檔案操作、路徑名稱。網路 socket 也是串流的一員，見[網路](network.md)。
@@ -160,7 +160,7 @@ CL 在**呼叫**中決定元素型別，如 `(open name :element-type '(unsigned
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 其餘方法全部使用預設實作
 
-(write-line (counter::new 0) "four")   ; write-line、terpri、fresh-line 都能運作
+(write-line (make-instance 'counter :n 0) "four")   ; write-line、terpri、fresh-line 都能運作
 ```
 
 輸入端也一樣，只寫 `read-item`。即使是本身沒有推回功能的型別，以 `(read-sexpr (make-peek-stream my-stream))` 包住後也能 `read`。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -211,12 +211,12 @@ globala miljön omedelbart och permanent.
 
 ## 7. Dokumentationssträngar / `documentation`
 
-`defun`/`defmethod` (även inuti `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+`defun`/metoder i `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
 `deftype`/`deftrait` kan bära dokumentationssträngar. Positionen följer CL:s regel för var och en:
 
 | Form | Dokumentationssträngens position |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | I början av kroppen (efter returtypen och `where`-satsen). Bara när minst en kroppsform följer; en ensam sträng förblir returvärdet |
+| `defun` / metoder i `impl` / `defmacro` | I början av kroppen (efter returtypen och `where`-satsen). Bara när minst en kroppsform följer; en ensam sträng förblir returvärdet |
 | `defvar` / `defconstant` | **Efter** startvärdet: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Direkt efter** namnet, före fälten/varianterna |
 | `deftype` | **Direkt efter** namnet, före typen: `(deftype meters "doc" i32)` |

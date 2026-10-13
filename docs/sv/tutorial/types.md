@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Grunderna i typer
 
 typelisp är ett statiskt typat språk. Det här kapitlet förklarar vad typkontrollen gör åt dig, de typer
@@ -148,31 +148,48 @@ En typ med namngivna fält definieras med `defstruct`.
   (y int))
 ```
 
-Definitionen ger dig följande:
+Värden skapas med `make-instance`. Skriv typnamnet citerat med `'` och ange fälten som par
+`:namn värde`, i valfri ordning.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; skapa en (argumenten i fältens ordning)
-  (println "~a" p::x)           ; läs ett fält; (x p) fungerar också
+(let ((p (make-instance 'point :x 3 :y 4)))   ; skapa ett
+  (println "~a" p::x)           ; läs ett fält; (x p) går också
   (setf p::x 10)                ; ändra det
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-För att ge en struct egna funktioner används `defmethod`. Typen på det första argumentet (`self`)
-avgör vilken typ metoden tillhör.
+Ytterligare ett uttryck i ett fälts deklaration blir fältets **standardvärde**. Ett fält som utelämnas i
+`make-instance` får sitt standardvärde. Att utelämna ett fält utan standardvärde är ett typfel.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count är 0
 ```
 
-Om man skriver bara typnamnet i stället för ett `self`-argument blir det en funktion som anropas som
-`point::origin`.
+För att ge en struct egna funktioner använder du `impl`. Varje post i `(impl Typnamn post...)` har formen
+`(namn (argument...) Returtyp kropp...)`, och om det första argumentet är `self` blir den en **metod** hos
+den typen. `self` skrivs utan typ.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+En post utan `self` blir en funktion som anropas som `point::origin`. Om du ordnar en funktion som skapar
+värdet under namnet `new` kan användarna kort skriva `(point::new 3 4)`.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -243,7 +260,7 @@ slaget.
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 Inuti en generisk funktion vet man ingenting om `T`, så man kan inte jämföra eller addera värden av

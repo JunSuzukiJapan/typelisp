@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 字符串、字符与集合
 
 `string`、`char`、`Vector<T>`、`HashTable<K,V>`、`Array<T>`、`BitVector`、`HashSet<T>`、`SortedTable<K,V>`、`Deque<T>`。
@@ -119,8 +119,8 @@
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 键是否相同由**键的类型本身**决定（`sxhash`，以及 `Hash` 的超 trait `Eq` 的 `equals`），而不是对象的同一性。所以像上面
@@ -135,7 +135,7 @@
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL 的 `make-array`。`dims` 会被复制。`init` 是所有单元的初始值（CL 的 `:initial-element`。本语言没有"未绑定的单元"，所以是必需的）。`:fill-pointer` 只用于一维 |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL 的 `make-array`。`dims` 会被复制。`init` 是所有单元的初始值（CL 的 `:initial-element`。本语言没有"未绑定的单元"，所以是必需的）。`:fill-pointer` 只用于一维 |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | CL 的 `aref` / `(setf (aref …))`。下标越界时 panic |
 | `aref` | `(aref a i j …)` | — | 用裸下标书写的 CL 写法。展开为上面的 `get`/`set`。`(setf (aref a i j) v)` 也一样 |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | CL 的 `row-major-aref`。平坦的下标 |
@@ -155,7 +155,6 @@
 - **下标是 `Vector<int>`。** 方法无法声明"末尾跟着若干个同类型参数"的形式，`aref` 语法糖弥补了这一差距。
 - **没有** `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`。接收者的
   静态类型已经回答了这些问题。
-- `Array::new` 是 `defstruct` 生成的按字段顺序的构造函数，不是用来创建数组的。请使用 `Array::make`。
 - **打印采用 CL 的数组语法。** 秩 1 为 `#(1 2 3)`，其他为 `#nA` 加上与维数相同层数的括号（`#2A((1 2 3) (4 5 6))`），
   秩 0 为 `#0A5`。有填充指针时在那里截断。把 `*print-array*`（[打印](printing.md#6-控制打印量)）设为假，就只打印
   形状 `#<array 2x3>`。只有元素是没有写 `print-object` 的 `defstruct` 的数组以内置形式 `#<array<...> ...>` 打印
@@ -167,7 +166,7 @@
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | 长度为 `n`，所有位为 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | 长度为 `n`，所有位为 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | 越界时 panic |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | CL 的写法。也可以写 `(setf (bit v i) b)`。CL 的 `sbit` 与 `bit` 的唯一区别是要求简单位向量，但本语言的位向量只有一种 |
 | `len` | `(len v)` | `BitVector→int` | 位数 |
@@ -182,7 +181,7 @@
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | 创建空集合。类型参数由期望类型决定 |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | 创建空集合。类型参数由期望类型决定 |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | 加入 `x`。新加入时为 `true`，已存在时为 `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | 是否含有 `x` |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | 去掉 `x`。原本存在时为 `true` |
@@ -191,14 +190,13 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 元素的迭代器。顺序不确定 |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 第 7～9 章的三个类型的共同点：
 
-- 用 `make` 创建。`new` 是 `defstruct` 生成的按字段顺序的构造函数，不是用来创建的（与 `Array::make` 相同）。
 - `iter` 遍历调用时刻的副本。在 `doiter` 中修改同一个集合，该循环看不到。
 - 元素类型实现了 `print-object` 时，以 `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>` 的形式打印元素。
 
@@ -208,7 +206,7 @@
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | 创建空表 |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | 创建空表 |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | 查找 |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | 插入或覆盖 |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | 删除，若有则返回旧值 |
@@ -219,7 +217,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | 按键的顺序返回 `#{键 值}` 元组 |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 和 pear 3
 ```
@@ -230,7 +228,7 @@
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | 创建空序列 |
+| `new` | `(Deque::new)` | `()→Deque<T>` | 创建空序列 |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 加到开头／末尾 |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 取出开头／末尾的元素并返回。为空时为 `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 查看开头／末尾的元素（不取出） |
@@ -241,7 +239,7 @@
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | 从开头依次 |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

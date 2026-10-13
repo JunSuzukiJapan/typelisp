@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tal
 
 Operationer på heltal, flyttal, kvoter, komplexa tal och booleska värden, samt andra talrelaterade
@@ -199,7 +199,7 @@ En struct (`defstruct`) i standardbiblioteket.
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Konstruktion. Komponenterna kan läsas direkt som `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Konstruktion. Komponenterna kan läsas direkt som `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Realdel och imaginärdel. **De fungerar också på reella tal** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), som i CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Konjugat (fungerar också på reella tal) |
 | `phase` | `(phase z)` | `complex→f64` | Argument i (-pi,pi] (fungerar också på reella tal) |

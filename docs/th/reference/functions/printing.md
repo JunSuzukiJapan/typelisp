@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # การพิมพ์
 
 `print`/`println`/`format`, ตัวพิมพ์แบบหนึ่งอาร์กิวเมนต์, pretty printer, `print-object` และ
@@ -26,7 +26,7 @@
 สตริงตัดสินว่าใช้อาร์กิวเมนต์กี่ตัวและชนิดใด ดังนั้นสตริงที่สร้างตอนรันจึงอ่านตอนตรวจสอบไม่ได้
 เพราะต้องเป็น literal **จำนวนและชนิดของอาร์กิวเมนต์ถูกตรวจสอบตอนตรวจสอบ**:
 `(println "~d" "x")` และ `(println "~a ~a" 1)` เป็นข้อผิดพลาดตอนตรวจสอบ คำสั่งที่สะกดผิด
-`~(` ที่ไม่ปิด และ `~/name/` ที่ไม่มีอาร์กิวเมนต์ใดตอบได้ ก็เป็นข้อผิดพลาดตอนตรวจสอบเช่นกัน
+`~(` ที่ไม่ปิด และ `~/name/` ที่กำหนดสิ่งที่จะเรียกไม่ได้ ก็เป็นข้อผิดพลาดตอนตรวจสอบเช่นกัน
 กฎการตรวจสอบอยู่ใน [format.md](format.md#1-วิธีเขียนคำสั่ง) หากต้องการพิมพ์สตริงที่คุณ
 สร้าง ให้สร้างด้วย `(format false ...)` และพิมพ์ด้วย `(println "~a" s)`
 
@@ -50,8 +50,8 @@
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -308,7 +308,7 @@ CL ใช้ `nil` สำหรับ "ไม่จำกัด" แต่ภา
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a points to a itself
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

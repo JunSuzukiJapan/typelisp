@@ -185,7 +185,7 @@ CL 準拠の任意精度有理数。常に既約・正の分母で保たれ、�
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | 生成。`z::re`/`z::im` で成分を直接読める |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | 生成。`z::re`/`z::im` で成分を直接読める |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | 実部・虚部。**実数にも効く**（`(realpart 3.0)`→`3.0`、`(imagpart 3.0)`→`0.0`）。CL と同じ |
 | `conjugate` | `(conjugate z)` | `complex→complex` | 共役（実数にも効く） |
 | `phase` | `(phase z)` | `complex→f64` | 偏角 (-pi,pi]（実数にも効く） |

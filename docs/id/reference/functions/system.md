@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Waktu, Lingkungan, dan Implementasi
 
 Fungsi untuk waktu, pertanyaan tentang lingkungan runtime, alat implementasi, penguraian dan
@@ -227,12 +227,12 @@ langsung didaftarkan ke lingkungan global secara permanen.
 
 ## 7. Docstring / `documentation`
 
-`defun`/`defmethod` (termasuk di dalam `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/
+`defun`/metode di `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/
 `defenum`/`deftype`/`deftrait` dapat membawa docstring. Posisinya mengikuti aturan CL untuk masing-masing:
 
 | Bentuk | Posisi docstring |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | Di awal badan (setelah tipe kembalian dan klausa `where`). Hanya ketika setidaknya satu bentuk badan menyusul; string tunggal tetap menjadi nilai kembalian |
+| `defun` / metode di `impl` / `defmacro` | Di awal badan (setelah tipe kembalian dan klausa `where`). Hanya ketika setidaknya satu bentuk badan menyusul; string tunggal tetap menjadi nilai kembalian |
 | `defvar` / `defconstant` | **Setelah** nilai awal: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Tepat setelah** nama, sebelum field/varian |
 | `deftype` | **Tepat setelah** nama, sebelum tipe: `(deftype meters "doc" i32)` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # สตริง อักขระ และคอลเลกชัน
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` และ `Deque<T>`
@@ -123,8 +123,8 @@
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 คีย์สองตัวเหมือนกันหรือไม่ตัดสินโดย **ชนิดของคีย์เอง** (`sxhash` และ `equals` จาก `Eq`
@@ -142,7 +142,7 @@
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` ของ CL `dims` ถูกคัดลอก `init` คือค่าเริ่มต้นของทุกเซลล์ (`:initial-element` ของ CL; ภาษานี้ไม่มี "เซลล์ที่ไม่ได้ผูก" จึงจำเป็นต้องมี) `:fill-pointer` เฉพาะมิติเดียว |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` ของ CL `dims` ถูกคัดลอก `init` คือค่าเริ่มต้นของทุกเซลล์ (`:initial-element` ของ CL; ภาษานี้ไม่มี "เซลล์ที่ไม่ได้ผูก" จึงจำเป็นต้องมี) `:fill-pointer` เฉพาะมิติเดียว |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | `aref` / `(setf (aref …))` ของ CL panic หากดัชนีเกินช่วง |
 | `aref` | `(aref a i j …)` | — | การสะกดแบบ CL ที่ใช้ดัชนีเปล่า ขยายเป็น `get`/`set` ข้างบน `(setf (aref a i j) v)` ก็ใช้ได้ |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | `row-major-aref` ของ CL ดัชนีแบบแบน |
@@ -163,8 +163,6 @@
   `aref` ช่วยอุดช่องว่างนั้น
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`
   **ไม่มี** ชนิดสถิตของตัวรับตอบคำถามเหล่านี้อยู่แล้ว
-- `Array::new` เป็นตัวสร้างตามลำดับฟิลด์ที่ `defstruct` สร้างให้ และไม่ได้มีไว้สร้าง
-  อาร์เรย์ ให้ใช้ `Array::make`
 - **อาร์เรย์พิมพ์ด้วยไวยากรณ์อาร์เรย์ของ CL** rank 1 คือ `#(1 2 3)`; rank อื่นคือ `#nA` ตามด้วยวงเล็บ
   ตามจำนวนระดับนั้น (`#2A((1 2 3) (4 5 6))`); rank 0 คือ `#0A5` การพิมพ์หยุดที่ fill
   pointer หากมี การตั้ง `*print-array*` ([การพิมพ์](printing.md#6-การควบคุมปริมาณที่พิมพ์))
@@ -177,7 +175,7 @@
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | ความยาว `n` ทุกบิตเป็น 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | ความยาว `n` ทุกบิตเป็น 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | panic เมื่อเกินช่วง |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | การสะกดแบบ CL `(setf (bit v i) b)` ก็ใช้ได้ `sbit` ของ CL ต่างจาก `bit` เพียงตรงที่ต้องเป็น simple bit vector แต่ภาษานี้มี bit vector ชนิดเดียว |
 | `len` | `(len v)` | `BitVector→int` | จำนวนบิต |
@@ -192,7 +190,7 @@
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | สร้างเซตว่าง อาร์กิวเมนต์ชนิดได้จากชนิดที่คาดหวัง |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | สร้างเซตว่าง อาร์กิวเมนต์ชนิดได้จากชนิดที่คาดหวัง |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | เพิ่ม `x` คืน `true` ถ้าเพิ่งใส่เข้าไป `false` ถ้ามีอยู่แล้ว |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | มี `x` อยู่หรือไม่ |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | เอา `x` ออก คืน `true` ถ้ามีอยู่ |
@@ -201,14 +199,13 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | อิเทอเรเตอร์ของสมาชิก ลำดับไม่กำหนด |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 สิ่งที่ทั้งสามชนิดในบทที่ 7 ถึง 9 มีร่วมกัน:
 
-- สร้างด้วย `make` ส่วน `new` คือคอนสตรักเตอร์ตามลำดับฟิลด์ที่ `defstruct` สร้างให้ ไม่ใช่ตัวที่ใช้สร้าง (เหมือน `Array::make`)
 - `iter` ไล่ดูสำเนาที่ถ่ายไว้ตอนเรียก ถ้าแก้คอลเลกชันเดียวกันในระหว่าง `doiter` ลูปนั้นจะไม่เห็น
 - ถ้าชนิดของสมาชิก implement `print-object` จะพิมพ์สมาชิกในรูป `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>`
 
@@ -218,7 +215,7 @@
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | สร้างตารางว่าง |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | สร้างตารางว่าง |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | ค้นหา |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | แทรกหรือเขียนทับ |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | ลบ และคืนค่าเก่าถ้ามี |
@@ -229,7 +226,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | ทูเพิล `#{คีย์ ค่า}` เรียงตามคีย์ |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 และ pear 3
 ```
@@ -240,7 +237,7 @@
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | สร้างลำดับว่าง |
+| `new` | `(Deque::new)` | `()→Deque<T>` | สร้างลำดับว่าง |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | เพิ่มที่หัว / ท้าย |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | เอาสมาชิกที่หัว / ท้ายออกแล้วคืนให้ ถ้าว่างคืน `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | ดูสมาชิกที่หัว / ท้าย (ไม่เอาออก) |
@@ -251,7 +248,7 @@
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | จากหัวไปตามลำดับ |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

@@ -311,6 +311,8 @@ fn a_directive_that_would_call_two_definitions_is_refused() {
         POINT
     ));
     assert!(e.contains("which call different definitions"), "{}", e);
+    // In the source's spelling: `''` is the method's internal name.
+    assert!(e.contains("point::brief`)") && !e.contains("''"), "{}", e);
 }
 
 #[test]

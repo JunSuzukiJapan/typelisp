@@ -137,7 +137,7 @@ fn an_own_parameter_may_not_be_declared_twice() {
 #[test]
 fn a_partly_generic_receiver_is_refused() {
     let msg = check_err("(defstruct Pair<A,B> (a A) (b B))\n(impl Pair<T,int> (bad<U> (self (x U)) U x))");
-    assert!(msg.contains("needs a receiver that names every type parameter of `pair`"), "{}", msg);
+    assert!(msg.contains("names every type parameter of `pair` as a distinct variable"), "{}", msg);
 }
 
 /// A name the header does not declare is still unknown.

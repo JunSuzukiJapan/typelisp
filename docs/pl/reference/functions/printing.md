@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Wypisywanie
 
 `print`/`println`/`format`, drukarki jednoargumentowe, pretty printer, `print-object` oraz
@@ -26,7 +26,7 @@ związaną przez `(where (CharOutput S))`. `dest`, które nie jest ani `bool`, a
 w nim zawarte decydują o tym, ile argumentów jest branych i jakich typów, więc łańcuch zbudowany w czasie działania nie może być
 odczytany w czasie sprawdzania. Ponieważ musi być literałem, **liczba i typy argumentów są sprawdzane
 w czasie sprawdzania**: `(println "~d" "x")` i `(println "~a ~a" 1)` są błędami czasu sprawdzania. Błędnie zapisana
-dyrektywa, niezamknięte `~(` oraz `~/name/`, na które nie potrafi odpowiedzieć żaden argument, też są błędami czasu sprawdzania.
+dyrektywa, niezamknięte `~(` oraz `~/name/`, dla którego nie da się ustalić, co wywołać, też są błędami czasu sprawdzania.
 Reguły sprawdzania opisano w [format.md](format.md#1-jak-zapisywać-dyrektywy). Aby wypisać łańcuch, który
 budujesz, utwórz go za pomocą `(format false ...)` i wypisz za pomocą `(println "~a" s)`.
 
@@ -50,8 +50,8 @@ wewnątrz struktur, enumeracji i `Vector`. `Result<Option<Sexpr>,…>` z `(eval 
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -308,7 +308,7 @@ zmienić po utworzeniu, więc lista taka jak `'(1 2 3)` nigdy nie może być cyk
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a wskazuje na samo a
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

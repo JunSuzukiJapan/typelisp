@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # الطباعة
 
 `print`/`println`/`format` وطابعات الوسيط الواحد والطابعة المنسَّقة (pretty printer) و`print-object` والمتغيرات
@@ -24,7 +24,7 @@
 **يجب أن تكون سلسلة التحكم ثابتًا حرفيًا** (القيد نفسه كما في `format!` في Rust). فالموجِّهات فيها تحدد
 كم وسيطًا يؤخذ ومن أي أنواع، فلا يمكن قراءة سلسلة مبنية وقت التشغيل وقت الفحص. ولأنها يجب أن تكون ثابتًا
 حرفيًا فإن **عدد الوسائط وأنواعها يُفحص وقت الفحص**: `(println "~d" "x")` و`(println "~a ~a" 1)` خطآن
-وقت الفحص. وخطأ إملائي في موجِّه، و`~(` غير مغلقة، و`~/name/` لا يستطيع أي وسيط الإجابة عنها، أخطاء وقت
+وقت الفحص. وخطأ إملائي في موجِّه، و`~(` غير مغلقة، و`~/name/` لا يمكن تحديد ما يستدعيه، أخطاء وقت
 الفحص أيضًا. وقواعد الفحص في [format.md](format.md#1-كيفية-كتابة-الموجهات). ولطباعة سلسلة تبنيها اصنعها
 بـ `(format false ...)` واطبعها بـ `(println "~a" s)`.
 
@@ -46,8 +46,8 @@
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -292,7 +292,7 @@
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a تشير إلى a نفسها
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

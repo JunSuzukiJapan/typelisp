@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -193,7 +193,7 @@ Một struct (`defstruct`) trong thư viện chuẩn.
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Khởi tạo. Các thành phần có thể đọc trực tiếp là `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Khởi tạo. Các thành phần có thể đọc trực tiếp là `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Phần thực và phần ảo. **Chúng cũng hoạt động trên số thực** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), như trong CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Số phức liên hợp (cũng hoạt động trên số thực) |
 | `phase` | `(phase z)` | `complex→f64` | Argument trong (-pi,pi] (cũng hoạt động trên số thực) |

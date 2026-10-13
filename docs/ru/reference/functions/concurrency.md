@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Задачи и каналы
 
 Словарь задач (лёгких потоков). `task` и `thread`, которые их запускают, и `select`, который ждёт нескольких
@@ -81,7 +81,7 @@
 
 | Имя | Использование | Тип | Смысл |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Группа без незавершённых дел |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Группа без незавершённых дел |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Увеличивает счётчик. Делайте это до начала работы |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Одно дело завершено. При 0 освобождаются все ожидающие |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Ждёт, пока счётчик не дойдёт до 0. Из любого числа задач |
@@ -117,13 +117,13 @@
 
 | Имя | Использование | Тип | Смысл |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Незаблокированный мьютекс, содержащий `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Незаблокированный мьютекс, содержащий `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Берёт блокировку (ждёт) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Освобождает её. Panic, если она не взята |
 | `with-lock` | `(with-lock (x m) body...)` | Макрос | Блокирует, связывает содержимое с `x`, выполняет `body` и **всегда** освобождает |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

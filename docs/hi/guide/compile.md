@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # कंपाइल करना
 
 यदि आप और कुछ न करें, तो typelisp प्रोग्राम इंटरप्रेटर में चलते हैं। इसके अलावा नेटिव कोड में कंपाइल करने के दो तरीके हैं, और एक पर्यावरण को सहेजने का तरीका है। विनिर्देश का विवरण [सिंटैक्स संदर्भ अध्याय 10](../reference/syntax.md#10-कंपाइलेशन) में है।
@@ -105,7 +105,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 AOT-कंपाइल की गई फ़ाइल में क्या हो सकता है
 
-- एंट्री फ़ाइल के टॉप लेवल में केवल परिभाषाएँ हो सकती हैं (`defun` `defmethod` `defvar` `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`, `(unsafe (def-c-struct ...))`) और `use` `module`। `(println ...)` जैसे टॉप-लेवल एक्सप्रेशन की अनुमति नहीं है, अंतिम `(main)` को छोड़कर। काम को `main` के भीतर रखें।
+- एंट्री फ़ाइल के टॉप लेवल में केवल परिभाषाएँ हो सकती हैं (`defun` `defvar` `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`, `(unsafe (def-c-struct ...))`) और `use` `module`। `(println ...)` जैसे टॉप-लेवल एक्सप्रेशन की अनुमति नहीं है, अंतिम `(main)` को छोड़कर। काम को `main` के भीतर रखें।
 - बिना आर्ग्युमेंट वाले `main` के बिना, कंपाइलेशन त्रुटि के साथ विफल होता है।
 - `use` किए गए मॉड्यूल की फ़ाइलें भी कंपाइल होती हैं और एक ही एक्ज़ीक्यूटेबल में मिला दी जाती हैं।
 - `defffi` में `:library` से नामित लाइब्रेरी अपने-आप लिंक होती हैं ([C FFI](ffi.md))।

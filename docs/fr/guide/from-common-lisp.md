@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Pour les programmeurs Common Lisp
 
 typelisp reprend la syntaxe de Common Lisp (CL) et beaucoup de ses noms de fonctions, mais c'est un langage à
@@ -58,7 +58,9 @@ largeur fixe sur 64 bits.
 ## 3. Les fonctions comme valeurs
 
 typelisp ne sépare pas les espaces de noms des fonctions et des variables. Le nom d'une fonction peut être passé
-tel quel comme valeur. Il n'y a ni `#'` ni `funcall`.
+tel quel comme valeur. Il n'y a ni `#'` ni `funcall`. Les macros partagent aussi cet espace de noms, si bien que dans un
+module deux éléments parmi une fonction, une variable globale et une macro ne peuvent pas porter le même nom
+(contrairement à CL, on ne peut pas avoir une fonction `list` à côté d'une variable `list`).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -79,6 +81,9 @@ tel quel comme valeur. Il n'y a ni `#'` ni `funcall`.
 
 - Les fonctions de séquence prennent **la collection en premier et la fonction en second** : `(map it f)`,
   `(filter it f)`, `(foldl it f init)`. C'est l'inverse du `(mapcar f list)` de CL.
+- `push` prend lui aussi **la collection en premier** : `(push v 3)`. On ne peut pas l'écrire dans l'ordre
+  de CL, `(push 3 place)`, car une méthode est choisie uniquement d'après le type du premier argument
+  (section 8).
 - `lambda` ne peut pas utiliser `&optional` ni `&key` (`&rest`, si).
 - **Une fonction ne peut pas être appelée avant d'être définie.** En CL, on peut appeler une fonction définie plus
   loin ; ici, cela donne `no such function`. Pour des fonctions mutuellement récursives, déclarez d'abord l'une
@@ -187,16 +192,28 @@ non évalué (`'done`), et les valeurs lancées avec une étiquette ont un seul 
 Il n'y a ni `defclass`, ni `defgeneric`, ni combinaison de méthodes.
 
 - Les types de données se définissent avec `defstruct` (structures) et `defenum` (types somme).
-- `defmethod` définit des méthodes dont la cible est décidée uniquement par **le type statique du premier
-  argument**. Il n'y a pas de dispatch multiple.
+- Il n'y a pas de `defmethod`. Les méthodes sont regroupées par type dans un `impl` (la même forme que l'impl
+  inhérent de Rust). La cible est déterminée uniquement par **le type statique du premier argument** ; il
+  n'y a pas de dispatch multiple.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; méthode statique
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; méthode
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - Pour donner des opérations communes à plusieurs types, utilisez des traits (`deftrait` / `impl`). Pour des
   valeurs dont le type concret n'est connu qu'à l'exécution, utilisez le type `:dyn Trait`
   ([Référence de la syntaxe 3.9](../reference/syntax.md#39-deftrait--impl--traits)).
 
 Ce qui diffère pour `defstruct` :
 
-- Le constructeur est `NomDuType::new` : `(point::new 1 2)`. Si vous voulez un nom comme `make-point`, l'option
-  `(:constructor make-point)` en crée un.
+- Les valeurs se créent avec `make-instance`, comme en CLOS : `(make-instance 'point :x 1 :y 2)`. Aucun
+  `make-point` n'est créé, et l'option `:constructor` n'existe pas. Si vous voulez un constructeur nommé,
+  écrivez-le dans `impl` comme méthode statique (le `point::new` ci-dessus).
 - En plus de `(x p)`, un accesseur peut s'écrire `p::x`. On le modifie avec `(setf p::x 5)`.
 - Aucun prédicat (`point-p`) n'est créé. Il n'y a ni `:conc-name`, ni `:type`, ni `:named`.
 - `:include` hérite seulement des slots ; le type ne devient pas un sous-type du parent.

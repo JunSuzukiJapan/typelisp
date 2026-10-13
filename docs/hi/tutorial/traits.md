@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Trait
 
 Trait एक वादा है कि "यह टाइप ये ऑपरेशन सपोर्ट करता है"। Trait कई टाइप को एक ही नाम के ऑपरेशन साझा करने देते हैं, ताकि उन्हें इस्तेमाल करने वाले फ़ंक्शन को हर टाइप के लिए अलग-अलग न लिखना पड़े। वे लगभग ठीक Rust के trait की तरह काम करते हैं। यह अध्याय मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) पढ़ ली हैं।
@@ -34,8 +34,8 @@ Trait एक वादा है कि "यह टाइप ये ऑपरे
 लागू किए गए मेथड सामान्य फ़ंक्शन की तरह ही कॉल होते हैं।
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 Trait द्वारा घोषित मेथडों में से एक भी छोड़ देना `impl` पर टाइप त्रुटि है।
@@ -49,8 +49,8 @@ Trait द्वारा घोषित मेथडों में से ए
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 `(where (Shape T))` के कारण बॉडी `T` के मानों पर `name` और `area` का उपयोग कर सकती है। बाउंड के बिना `T` के बारे में कुछ ज्ञात नहीं होता, इसलिए उन्हें कॉल नहीं किया जा सकता।
@@ -81,8 +81,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; यहाँ लिखे गए को प्राथमिकता मिलती है
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. स्टैंडर्ड trait लागू करना
@@ -108,7 +108,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (Ord का डिफ़ॉल्ट इम्प्लीमेंटेशन)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (Ord का डिफ़ॉल्ट इम्प्लीमेंटेशन)
 ```
 
 `print-object` लागू करने से तय होता है कि `println` मान को कैसे दिखाता है। `escape` आर्ग्युमेंट तब `true` होता है जब `~s` की तरह वापस पढ़ा जा सकने वाला रूप माँगा गया हो।
@@ -118,7 +118,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 trait बाउंड के साथ मिलाकर आप ऐसा फ़ंक्शन लिख सकते हैं जो `Ord` को लागू करने वाले किसी भी टाइप के लिए काम करे।
@@ -148,8 +148,8 @@ trait बाउंड के साथ मिलाकर आप ऐसा फ�
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

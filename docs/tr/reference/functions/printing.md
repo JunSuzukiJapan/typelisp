@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Yazdırma
 
 `print`/`println`/`format`, tek bağımsız değişkenli yazıcılar, pretty printer, `print-object` ve
@@ -26,8 +26,8 @@ değişkeniyle aynı şekilde yazılabilir. Ne `bool` ne de akış olan bir `des
 kaç bağımsız değişkenin ve hangi türlerde alınacağını belirler; bu yüzden çalışma zamanında oluşturulan
 bir string denetim zamanında okunamaz. Sabit olmak zorunda olduğundan **bağımsız değişkenlerin sayısı ve
 türleri denetim zamanında kontrol edilir**: `(println "~d" "x")` ve `(println "~a ~a" 1)` denetim zamanı
-hatalarıdır. Yanlış yazılmış bir yönerge, kapatılmamış bir `~(` ve hiçbir bağımsız değişkenin
-yanıtlayamadığı bir `~/name/` de denetim zamanı hatalarıdır. Denetim kuralları
+hatalarıdır. Yanlış yazılmış bir yönerge, kapatılmamış bir `~(` ve neyi çağıracağı
+belirlenemeyen bir `~/name/` de denetim zamanı hatalarıdır. Denetim kuralları
 [format.md](format.md#1-yönergeler-nasıl-yazılır) belgesindedir. Oluşturduğunuz bir string'i yazdırmak
 için onu `(format false ...)` ile yapın ve `(println "~a" s)` ile yazdırın.
 
@@ -51,8 +51,8 @@ enum'ların ve `Vector`'lerin içindeki `Option<T>` alanları için de geçerlid
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -308,7 +308,7 @@ hücreleri oluşturulduktan sonra değiştirilemez; bu yüzden `'(1 2 3)` gibi b
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a points to a itself
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

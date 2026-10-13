@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Dasar-dasar Tipe
 
 typelisp adalah bahasa dengan tipe statis. Bab ini menjelaskan apa yang dilakukan pemeriksa tipe
@@ -150,31 +150,48 @@ Tipe dengan field bernama didefinisikan dengan `defstruct`.
   (y int))
 ```
 
-Definisi itu memberi Anda hal berikut:
+Nilai dibuat dengan `make-instance`. Tulis nama tipe yang dikutip dengan `'`, lalu berikan field sebagai
+pasangan `:nama nilai`, dengan urutan bebas.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; create one (arguments in field order)
-  (println "~a" p::x)           ; read a field; (x p) also works
-  (setf p::x 10)                ; change it
+(let ((p (make-instance 'point :x 3 :y 4)))   ; membuat satu
+  (println "~a" p::x)           ; membaca field; (x p) juga bisa
+  (setf p::x 10)                ; mengubahnya
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-Untuk memberi struct fungsi miliknya sendiri, gunakan `defmethod`. Tipe argumen pertama (`self`)
-menentukan tipe mana yang memiliki metode itu.
+Satu ekspresi lagi pada deklarasi field menjadi **nilai bawaan** field itu. Field yang dihilangkan di
+`make-instance` memakai nilai bawaannya. Menghilangkan field yang tidak punya nilai bawaan adalah galat tipe.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count bernilai 0
 ```
 
-Menulis hanya nama tipe sebagai ganti argumen `self` membuat fungsi yang dipanggil sebagai
-`point::origin`.
+Untuk memberi struct fungsi miliknya sendiri, gunakan `impl`. Setiap item dari `(impl NamaTipe item...)`
+berbentuk `(nama (argumen...) TipeKembali badan...)`, dan jika argumen pertamanya `self`, item itu menjadi
+**metode** tipe tersebut. `self` ditulis tanpa tipe.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+Item yang tidak menerima `self` menjadi fungsi yang dipanggil sebagai `point::origin`. Jika Anda menyediakan
+fungsi pembuat nilai dengan nama `new`, pemakainya bisa menulis singkat `(point::new 3 4)`.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -246,7 +263,7 @@ ini.
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 Di dalam fungsi generik tidak ada yang diketahui tentang `T`, sehingga Anda tidak dapat

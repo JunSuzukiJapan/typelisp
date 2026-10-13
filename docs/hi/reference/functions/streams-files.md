@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # स्ट्रीम और फ़ाइलें
 
 स्ट्रीम trait और मेथड, ठोस स्ट्रीम टाइप, फ़ाइल ऑपरेशन और पाथनेम। नेटवर्क सॉकेट भी स्ट्रीम हैं, और [नेटवर्किंग](network.md) में कवर हैं।
@@ -154,7 +154,7 @@ CL तत्व टाइप **कॉल में** तय करता है,
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; शेष हर मेथड डिफ़ॉल्ट है
 
-(write-line (counter::new 0) "four")   ; write-line, terpri और fresh-line सब काम करते हैं
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri और fresh-line सब काम करते हैं
 ```
 
 इनपुट भी इसी तरह काम करता है: आप केवल `read-item` लिखते हैं। अपने पुशबैक के बिना टाइप को भी लपेटने के बाद `read` किया जा सकता है, जैसे `(read-sexpr (make-peek-stream my-stream))`।

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Formatdirektiv
 
 De direktiv som skrivs i kontrollsträngarna för `print`/`println`/`format`. De täcker nästan alla av CL:s
@@ -74,7 +74,7 @@ i `~a`/`~s`/`~w`) alla ingenting när `*print-pretty*` är falskt. Den är falsk
 | `~<...~;...~>` | Justering (sprider segment över `~mincol` kolumner. `:`/`@`=utfyllnad i ändarna) |
 | `~<...~;...~:>` | **Logiskt block** (stängs med `~:>`; en annan sak än justeringen ovan). Det första segmentet är prefixet och det sista är suffixet (båda bara literala strängar). Med avgränsaren `~@;` är prefixet ett **prefix per rad**. `~:<` har som standard `(`/`)` som prefix/suffix. Argumentet är en lista (`~@<` använder de återstående argumenten på stället) |
 | `~*` | Hoppa över argument (`~n*`=framåt n, `~:*`=bakåt, `~@*`=till en absolut position) |
-| `~/name/` | Metodanrop (kapitel 5. Flaggorna `:`/`@` skickas till metoden. Tar inga parametrar) |
+| `~/name/` | Anrop av en funktion eller metod (kapitel 5; flaggorna `:`/`@` skickas till det som anropas; tar inga parametrar) |
 
 Följande CL-direktiv stöds inte (de är fel vid kontrolltillfället).
 
@@ -87,27 +87,36 @@ Följande CL-direktiv stöds inte (de är fel vid kontrolltillfället).
 
 ## 5. `~/name/`
 
-**En skillnad mot CL: namnet slås inte upp som en global funktion utan som en metod på argumentets egen
-typ.** Metoden har formen `((self Self) (colon bool) (at bool)) → string`, och direktivets `:`/`@`
-skickas vidare som de är.
-
-CL:s sätt att slå upp det som en global funktion kan inte implementeras säkert i det här språket. Även
-med en literal kontrollsträng är typen på elementen i ett listargument (inuti `~{`) inte känd vid
-kontrolltillfället, och att slå upp en funktion enbart på namn kan anropa en funktion avsedd för en annan
-typ. Att välja efter värdets typ innebär att metoden typkontrolleras för precis den typen, vilket är säkert
-(samma mekanism som `print-object`). Det fungerar också för värden som `string`/`bool`/`char`/`symbol`/
-listor. Bara för heltal, vars bredd inte kan avgöras från värdet, är det ett fel **när fler än en
-heltalstyp definierar en metod med det namnet**.
-
-Vilket argument det tillämpas på är inte känt, men vilka metoder det kan anropa är det. Kontrollen samlar
-varje `~/name/` från den literala kontrollsträngen och noterar, bland argumenttyperna på det anropsstället,
-de som har en metod av formen ovan. Så **om ingen av argumenttyperna har metoden är det ett fel vid
-kontrolltillfället** (inte vid körning), och det fungerar i AOT-körbara filer också.
+`~/name/` löser upp `name` enligt samma regler som ett anrop `(name arg colon at)` skrivet på den platsen
+och skriver ut strängen som anropet returnerar. Det förbrukar ett argument. `colon` och `at` är
+`bool`-värden som säger om direktivet har `:` och `@`.
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- Namnupplösningen är densamma som för ett anrop ([Syntaxreferens 3.10](../syntax.md#310-module--use--namnrymder)). Har argumentets typ en
+  metod `name` anropas den, annars den synliga funktionen `name`. En funktion i en modul kan anges med sin
+  sökväg (`~/m::shout/`).
+- Det som kan anropas är en funktion eller metod skriven i typelisp som tar argumentet, `colon` och `at`
+  som de är och returnerar en `string`. Inbyggda funktioner kan inte anropas.
+- **Vad som anropas bestäms vid kontrollen.** Kontrollen hittar varje argument som kan nå det `~/name/`,
+  med hänsyn till förflyttningar med `~*` och `~[`, och löser upp namnet för vart och ett av dess typer.
+  Går något av dem inte att lösa upp är det ett fel vid kontrollen, liksom om de möjliga argumenten skulle
+  anropa två olika definitioner. Inget namn slås upp vid körning, så det fungerar likadant i körbara
+  AOT-filer.
+- **Det kan inte användas inuti `~{`, `~:{`, `~:@{` eller `~<...~:>`** (fel vid kontrollen). Typen hos
+  elementen i ett listargument är `Sexpr`, som inte kan avgöra vad som ska anropas. `~@{` går igenom
+  anropets återstående argument, vars typer är kända, så där kan det användas.
+
+Skillnaden mot CL: CL slår upp namnet som en global funktion. Här är upplösningen densamma som för ett anrop,
+så en metod hos argumentets typ väljs före en funktion med samma namn.

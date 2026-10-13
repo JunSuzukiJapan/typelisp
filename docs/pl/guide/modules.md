@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Moduły i układ plików
 
 Ten przewodnik wyjaśnia, jak złożyć program składający się z kilku plików. Szczegółowe reguły znajdują się w
@@ -46,14 +46,17 @@ uruchamianego pliku (w REPL bieżący katalog).
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; pola bez pub nie można odczytać z zewnątrz
+  (tag string))                        ; pola bez pub nie można z zewnątrz ani czytać, ani zapisywać
 
 (defun square ((n i32)) i32 (* n n))   ; funkcji bez pub też nie można wywołać z zewnątrz
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -75,11 +78,15 @@ wcześniej.
 
 ### Co jest udostępniane
 
-- Funkcje, struktury, enumeracje, zmienne globalne, makra i metody są widoczne z innych modułów tylko
-  wtedy, gdy mają `pub`. Umieść `pub` tuż przed definicją, jak w `(pub defun ...)`.
-- W przypadku struktur **udostępnienie typu i udostępnienie pól to dwie osobne sprawy**.
-  `(pub defstruct point ...)` czyni typ widocznym, a z zewnątrz można odczytywać i zapisywać tylko
-  pola zapisane jako `(pub x i32)`.
+- Funkcje, struktury, enumy, zmienne globalne i makra są widoczne z innych modułów tylko wtedy, gdy mają
+  `pub`. Postaw `pub` tuż przed definicją, jak w `(pub defun ...)`.
+- Spośród metod zapisanych w `impl` z zewnątrz można używać tylko tych, które zapisano element po elemencie
+  jako `(pub new ...)`.
+- W strukturach **upublicznienie typu i upublicznienie pól to osobne sprawy**. `(pub defstruct point ...)`
+  czyni typ widocznym, a z zewnątrz można czytać i zapisywać tylko pola zapisane jako `(pub x i32)`.
+- Podobnie w innych modułach do `make-instance` można podawać tylko pola `pub`. `point` powyżej ma pole
+  `tag`, które nie jest `pub`, więc inne moduły nie mogą go utworzyć przez `make-instance` i używają
+  `point::new`.
 - Użycie z zewnątrz nazwy, która nie jest publiczna, daje błąd „nie można rozwiązać", taki jak
   `unresolved path: geometry::square`. To ten sam komunikat, co przy błędnie zapisanej nazwie, więc jeśli
   pisownia jest poprawna, a nazwa nadal się nie rozwiązuje, podejrzewaj brakujące `pub`.
@@ -112,10 +119,11 @@ wywołuje się je bez nazwy modułu.
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, a nie core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, a nie core::area
 ```
 
-Metody wewnątrz `impl` są zawsze publiczne, nawet bez `pub`.
+Metody w `impl` traitu są zawsze publiczne, nawet bez `pub`. Spośród metod własnego `impl` typu
+(`(impl point ...)`) publiczne są tylko te z `pub`.
 
 Samego traitu nie można udostępnić innym modułom. Definicję traitu, jego `impl` oraz kod
 używający go przez `:dyn` trzymaj w jednym module.

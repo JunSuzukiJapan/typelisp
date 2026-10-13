@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 模組與檔案結構
 
 本指南說明如何組織由多個檔案構成的程式。詳細的語法規則見[語法參考](../reference/syntax.md#310-module--use--命名空間)的 3.10 至 3.13 節。
@@ -43,14 +43,17 @@ src = "src"
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; 沒有 pub 的欄位從外部無法讀取
+  (tag string))                        ; 沒有 pub 的欄位不能從外部讀寫
 
-(defun square ((n i32)) i32 (* n n))   ; 沒有 pub 的函式從外部也無法呼叫
+(defun square ((n i32)) i32 (* n n))   ; 沒有 pub 的函式也不能從外部呼叫
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`：
@@ -71,8 +74,13 @@ typl main.typl        # => 25
 
 ### 公開的單位
 
-- 函式、結構、列舉、全域變數、巨集、方法，各自只有加了 `pub` 的才對其他模組可見。寫法是像 `(pub defun ...)` 這樣在定義前面加 `pub`。
-- 結構的**型別公開與欄位公開是分開的**。`(pub defstruct point ...)` 讓型別可見，只有寫成 `(pub x i32)` 的欄位才能從外部讀寫。
+- 函式、結構、列舉、全域變數、巨集，各自只有加了 `pub` 的才能被其他模組看到。寫法是像 `(pub defun ...)`
+  這樣，把 `pub` 放在定義之前。
+- 寫在 `impl` 中的方法，只有依項目寫成 `(pub new ...)` 的才能從外部使用。
+- 結構的**型別公開與欄位公開是分開的**。`(pub defstruct point ...)` 使型別可見，各欄位只有寫成
+  `(pub x i32)` 的才能從外部讀寫。
+- 在外部模組中能寫進 `make-instance` 的也只有 `pub` 的欄位。上面的 `point` 的 `tag` 不是 `pub`，所以在外部
+  不能以 `make-instance` 建立，要用 `point::new`。
 - 從外部使用未公開的名稱，會得到 `unresolved path: geometry::square` 這樣「無法解析」的錯誤。這與名稱拼錯時的訊息相同，所以拼寫正確卻
   無法解析時，請懷疑是否忘了加 `pub`。
 
@@ -98,10 +106,11 @@ typl main.typl        # => 25
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; 是 area 而不是 core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; 是 area 而不是 core::area
 ```
 
-`impl` 中的方法即使不寫 `pub` 也一律公開。
+trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。固有 `impl`（`(impl point ...)`）的方法只有加了 `pub`
+的才公開。
 
 trait 本身不能公開給其他模組。請把 trait 的定義、對它的 `impl`，以及透過 `:dyn` 使用該 trait 的程式碼放在同一個模組中。
 

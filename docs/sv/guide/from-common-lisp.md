@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # För Common Lisp-programmerare
 
 typelisp ärver syntaxen och många av funktionsnamnen från Common Lisp (CL), men är ett statiskt typat
@@ -59,7 +59,9 @@ för dess storlek. Typerna med fast bredd `i8` till `i32` och `u8` till `u32` fi
 ## 3. Funktioner som värden
 
 typelisp skiljer inte på namnrymderna för funktioner och variabler. En funktions namn kan skickas som ett
-värde som det är. Det finns inget `#'` och inget `funcall`.
+värde som det är. Det finns inget `#'` och inget `funcall`. Även makron delar den namnrymden, så inom en modul kan inte två av en funktion,
+en global variabel och ett makro ha samma namn (till skillnad från CL kan det inte finnas en funktion `list`
+bredvid en variabel `list`).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -80,6 +82,8 @@ värde som det är. Det finns inget `#'` och inget `funcall`.
 
 - Sekvensfunktioner tar **samlingen först och funktionen sedan**: `(map it f)`, `(filter it f)`,
   `(foldl it f init)`. Det är tvärtom mot CL:s `(mapcar f list)`.
+- Även `push` tar **samlingen först**: `(push v 3)`. Det kan inte skrivas i CL:s ordning, `(push 3 place)`,
+  eftersom en metod väljs bara utifrån typen hos det första argumentet (avsnitt 8).
 - `lambda` kan inte använda `&optional` eller `&key` (`&rest` kan användas).
 - **En funktion kan inte anropas före sin definition.** I CL kan du anropa en funktion du definierar
   senare, men här ger det `no such function`. För ömsesidigt rekursiva funktioner deklarerar man en av
@@ -187,16 +191,27 @@ literal symbol (`'done`), och de värden som kastas med en tagg har en enda typ.
 Det finns inget `defclass`, `defgeneric` eller metodkombination.
 
 - Datatyper definieras med `defstruct` (structs) och `defenum` (summatyper).
-- `defmethod` definierar metoder vars mål avgörs enbart av **den statiska typen på det första
-  argumentet**. Det finns ingen multipel dispatch.
+- Det finns inget `defmethod`. Metoder samlas per typ i en `impl` (samma form som Rusts inneboende impl).
+  Målet avgörs bara av **den statiska typen hos det första argumentet**; det finns ingen multipel dispatch.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; statisk metod
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; metod
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - För att ge operationer gemensamt över typer används traits (`deftrait` / `impl`). För värden vars
   konkreta typ avgörs vid körning används typen `:dyn Trait`
   ([Syntaxreferens 3.9](../reference/syntax.md#39-deftrait--impl--traits)).
 
 Hur `defstruct` skiljer sig:
 
-- Konstruktorn är `TypeName::new`: `(point::new 1 2)`. Om du vill ha ett namn som `make-point` skapar
-  flaggan `(:constructor make-point)` ett.
+- Värden skapas med `make-instance`, som i CLOS: `(make-instance 'point :x 1 :y 2)`. Inget `make-point`
+  skapas, och det finns inget alternativ `:constructor`. Vill du ha en namngiven konstruktor skriver du den
+  i `impl` som en statisk metod (`point::new` ovan).
 - Förutom `(x p)` kan en accessor skrivas `p::x`. Ändra den med `(setf p::x 5)`.
 - Inget predikat (`point-p`) skapas. Det finns inget `:conc-name`, `:type` eller `:named`.
 - `:include` ärver bara slots; typen blir inte en subtyp till föräldern.
