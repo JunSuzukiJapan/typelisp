@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -652,10 +652,37 @@ ra từ đối số của mỗi lần gọi.
 
 - Đặt cho tham số kiểu riêng của phương thức những tên khác với tham số kiểu của kiểu đích viết trong
   `impl` (`T` của `(impl Box<T> ...)`).
-- `impl` của một kiểu generic viết mọi tham số kiểu dưới dạng biến (`Box<T>`), hoặc tất cả dưới dạng
-  kiểu cụ thể (`Box<int>`; khi đó các phương thức chỉ dùng được cho giá trị của kiểu đó).
 - Phương thức trong `impl` của một trait không thể thêm tham số kiểu: chữ ký của nó theo chữ ký mà trait
   khai báo.
+
+`impl` của một kiểu generic viết tất cả tham số kiểu dưới dạng biến (`Box<T>`, dùng chung cho mọi thể hiện)
+hoặc tất cả dưới dạng kiểu cụ thể (`Box<int>`, chỉ riêng cho thể hiện đó). Các `impl` của những thể hiện khác
+nhau là những cài đặt riêng biệt, nên `Box<int>` và `Box<string>` có thể mỗi bên có một phương thức cùng tên.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Phương thức thể hiện được chọn theo kiểu của đối tượng nhận. Thể hiện không có `impl` (chẳng hạn
+  `Box<f64>`) không có phương thức đó.
+- Phương thức tĩnh được chọn theo kiểu mà lời gọi được kỳ vọng trả về (`(the Box<int> ...)` ở trên). Nếu chỉ
+  một thể hiện có phương thức tĩnh với tên đó thì không cần kiểu kỳ vọng.
+- Không thể viết một phương thức cùng tên vừa trong `impl` dùng biến (`Box<T>`) vừa trong `impl` của một thể
+  hiện (`Box<int>`); theo thứ tự nào cũng là lỗi. Hàm truy cập của trường cũng được tính là phương thức của
+  `impl` dùng biến.
+- Để gọi tên một phương thức như vậy trong `documentation`, `compile`, `trace` và tương tự, hãy viết thể hiện:
+  `Box<int>::twice`. Nếu chỉ một thể hiện có phương thức đó thì `Box::twice` cũng được.
 
 ### 3.6 defstruct — struct (kiểu do người dùng định nghĩa)
 
@@ -866,6 +893,12 @@ Rust: các sai sót sẽ thất bại với mọi `impl` và mọi kiểu triể
 nào bỏ ra, đều bị bắt ở đó. Các lời gọi trên `self` tới các phương thức của chính trait hoặc các supertrait của
 nó đi qua ràng buộc này, và các kiểu liên kết được cố định bằng chính chúng, nên một chữ ký trả về `Item` được
 khớp với thân mà không cần biết kiểu cụ thể.
+
+**Cài đặt theo từng thể hiện**: một kiểu generic có thể có `impl` riêng cho từng thể hiện
+(`(impl Show Box<int> ...)` và `(impl Show Box<string> ...)`). `:dyn`, ràng buộc `where`, kiểu liên kết và
+`print-object` đều có hiệu lực theo từng thể hiện, và thể hiện không có `impl` (`Box<f64>`) không cài đặt
+trait đó. Không thể cài đặt cùng một trait cho cả `Box<T>` lẫn `Box<int>` (cùng quy tắc với phương thức ở
+3.5). Trait cha chỉ cần được cài đặt ở thể hiện đó (bằng `impl` của `Box<int>` hoặc của `Box<T>`).
 
 **Blanket implementation**: làm cho đích là một biến kiểu thì triển khai trait cùng lúc cho mọi kiểu đáp ứng
 các ràng buộc.

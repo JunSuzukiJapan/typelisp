@@ -68,6 +68,30 @@ fn a_call_directive_dispatches_in_a_compiled_executable() {
     );
 }
 
+/// An `impl` for each instantiation of a generic type: the executable
+/// prints each with its own `print-object` and dispatches each through
+/// `:dyn` to its own body, as `typl` does.
+#[test]
+fn each_instantiations_impl_works_in_a_compiled_executable() {
+    let (code, out, err) = compile_and_capture_with(
+        "per_instantiation_aot",
+        r##"(deftrait Show () (show ((self Self)) string))
+           (defstruct Box<T> (v T))
+           (impl print-object Box<int> (print-object ((self Self) (escape bool)) string (format false "#<int-box ~a>" self::v)))
+           (impl print-object Box<string> (print-object ((self Self) (escape bool)) string (format false "#<str-box ~a>" self::v)))
+           (impl Show Box<int> (show ((self Self)) string "int"))
+           (impl Show Box<string> (show ((self Self)) string "string"))
+           (defun via ((s :dyn Show)) string (show s))
+           (defun main () int
+             (progn (println "~a ~a ~a ~a" (make-instance 'Box :v 1) (make-instance 'Box :v "s")
+                             (via (make-instance 'Box :v 2)) (via (make-instance 'Box :v "t")))
+                    0))"##,
+        &[],
+    );
+    assert_eq!(code, Some(0), "stderr was: {}", err);
+    assert_eq!(out.trim(), "#<int-box 1> #<str-box s> int string");
+}
+
 /// A `defmacro` inside a `(module ...)` block of the entry file is usable
 /// later in the block and in the rest of the file, as in `typl`.
 #[test]

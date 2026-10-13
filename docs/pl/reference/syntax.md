@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -674,10 +674,37 @@ każdego wywołania.
 
 - Nadaj własnym parametrom typu metody nazwy inne niż parametry typu typu docelowego zapisane w `impl`
   (`T` w `(impl Box<T> ...)`).
-- `impl` typu generycznego zapisuje wszystkie jego parametry typu jako zmienne (`Box<T>`) albo wszystkie
-  jako konkretne typy (`Box<int>`; metody działają wtedy tylko dla wartości tego typu).
 - Metoda w `impl` traitu nie może dodawać parametrów typu: jej sygnatura idzie za tą, którą deklaruje
   trait.
+
+`impl` typu generycznego zapisuje wszystkie parametry typu jako zmienne (`Box<T>`, wspólny dla wszystkich
+instancjacji) albo wszystkie jako typy konkretne (`Box<int>`, tylko dla tej instancjacji). `impl` różnych
+instancjacji to osobne implementacje, więc `Box<int>` i `Box<string>` mogą mieć każdy własną metodę o tej
+samej nazwie.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Metoda instancji jest wybierana według typu odbiorcy. Instancjacja bez `impl` (na przykład `Box<f64>`) nie
+  ma tej metody.
+- Metoda statyczna jest wybierana według typu, który wywołanie ma zwrócić (`(the Box<int> ...)` powyżej). Jeśli
+  metodę statyczną o tej nazwie ma tylko jedna instancjacja, oczekiwany typ nie jest potrzebny.
+- Metody o jednej nazwie nie można napisać jednocześnie w `impl` ze zmiennymi (`Box<T>`) i w `impl` instancjacji
+  (`Box<int>`); w dowolnej kolejności jest to błąd. Akcesor pola liczy się jako metoda `impl` ze zmiennymi.
+- Aby wskazać taką metodę w `documentation`, `compile`, `trace` i podobnych, napisz instancjację:
+  `Box<int>::twice`. Jeśli metodę ma tylko jedna instancjacja, wystarczy też `Box::twice`.
 
 ### 3.6 defstruct — struktury (typy definiowane przez użytkownika)
 
@@ -892,6 +919,13 @@ implementującego typu, nawet w wartościach domyślnych, które żadne `impl` n
 samego traitu lub jego supertraitów przechodzą przez to ograniczenie, a typy powiązane są ustalone na
 siebie, więc sygnatura zwracająca `Item` jest dopasowywana do ciała bez znajomości konkretnego
 typu.
+
+**Implementacje dla każdej instancjacji**: typ generyczny może mieć osobny `impl` dla każdej instancjacji
+(`(impl Show Box<int> ...)` i `(impl Show Box<string> ...)`). `:dyn`, ograniczenia `where`, typy powiązane i
+`print-object` działają dla każdej instancjacji osobno, a instancjacja bez `impl` (`Box<f64>`) nie implementuje
+cechy. Tej samej cechy nie można zaimplementować jednocześnie dla `Box<T>` i dla `Box<int>` (ta sama reguła co
+dla metod w 3.5). Wystarczy, że nadcecha jest zaimplementowana w tej instancjacji (przez `impl` dla `Box<int>`
+lub dla `Box<T>`).
 
 **Implementacje blankietowe (blanket)**: uczynienie celu zmienną typową implementuje trait naraz dla każdego
 typu spełniającego ograniczenia.

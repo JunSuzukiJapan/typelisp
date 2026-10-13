@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -512,9 +512,34 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 ```
 
 - 方法自身的类型参数，要取与 `impl` 中所写目标类型的类型参数（`(impl Box<T> ...)` 的 `T`）不同的名字。
-- 泛型类型的 `impl`，要么把类型参数全部写成变量（`Box<T>`），要么全部写成具体类型（`Box<int>`。
-  此时方法只能用于该类型的值）。
 - trait 的 `impl` 的方法不能添加类型参数。签名遵循 trait 所声明的签名。
+
+泛型类型的 `impl`，要么把类型参数全部写成变量（`Box<T>`，所有具体类型共用），要么全部写成具体类型
+（`Box<int>`，只属于该具体类型）。各具体类型的 `impl` 是彼此独立的实现，所以可以分别给 `Box<int>` 和
+`Box<string>` 写同名的方法。
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- 实例方法按接收者的类型选择。没有 `impl` 的具体类型（例如 `Box<f64>`）没有该方法。
+- 静态方法按调用所期望的返回类型选择（上例中的 `(the Box<int> ...)`）。只有一个具体类型拥有该名字的
+  静态方法时，不需要期望类型。
+- 同名的方法不能同时写在用变量写的 `impl`（`Box<T>`）和具体类型的 `impl`（`Box<int>`）中，不论先写哪个
+  都是错误。字段的访问器也算作用变量写的那一方的方法。
+- 在 `documentation`、`compile`、`trace` 等处指名这样的方法时，写出具体类型：`Box<int>::twice`。只有一个
+  具体类型拥有该方法时，也可以写 `Box::twice`。
 
 ### 3.6 defstruct — 结构体（用户定义类型）
 
@@ -693,6 +718,11 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 （以 `Self: 该 trait` 为约束）（与 Rust 相同）——即使是没有任何 `impl` 省略的默认实现，对任何实现类型都通不过的错误也会在那里被
 排除。对 `self` 调用该 trait 自身及其继承来源的方法会借这个约束通过，关联类型固定为自身，所以返回 `Item` 的签名与函数体在不知道
 具体类型的情况下进行对照。
+
+**按具体类型的实现**：泛型类型可以为每个具体类型分别写 `impl`（`(impl Show Box<int> ...)` 和
+`(impl Show Box<string> ...)`）。`:dyn`、`where` 约束、关联类型和 `print-object` 也都按具体类型生效，
+没有 `impl` 的具体类型（`Box<f64>`）不实现该 trait。同一个 trait 不能同时为 `Box<T>` 和 `Box<int>` 写
+`impl`（与 3.5 中方法的规则相同）。父 trait 只需在该具体类型上已实现即可（`Box<int>` 或 `Box<T>` 的 `impl`）。
 
 **全面实现（blanket implementation）**：把对象设为类型变量，就能一次性为满足约束的所有类型实现。
 

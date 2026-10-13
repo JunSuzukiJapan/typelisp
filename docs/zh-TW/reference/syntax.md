@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -504,9 +504,34 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 ```
 
 - 方法自身的型別參數，要取與 `impl` 中所寫對象型別的型別參數（`(impl Box<T> ...)` 的 `T`）不同的名稱。
-- 泛型型別的 `impl`，要麼把型別參數全部寫成變數（`Box<T>`），要麼全部寫成具體型別（`Box<int>`。
-  此時方法只能用於該型別的值）。
 - trait 的 `impl` 的方法不能加上型別參數。簽章遵循 trait 所宣告的簽章。
+
+泛型型別的 `impl`，要嘛把型別參數全部寫成變數（`Box<T>`，所有具體型別共用），要嘛全部寫成具體型別
+（`Box<int>`，只屬於該具體型別）。各具體型別的 `impl` 是彼此獨立的實作，所以可以分別給 `Box<int>` 和
+`Box<string>` 寫同名的方法。
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- 實例方法依接收者的型別選擇。沒有 `impl` 的具體型別（例如 `Box<f64>`）沒有該方法。
+- 靜態方法依呼叫所期望的回傳型別選擇（上例中的 `(the Box<int> ...)`）。只有一個具體型別擁有該名稱的
+  靜態方法時，不需要期望型別。
+- 同名的方法不能同時寫在以變數寫的 `impl`（`Box<T>`）和具體型別的 `impl`（`Box<int>`）中，不論先寫哪個
+  都是錯誤。欄位的存取器也算作以變數寫的那一方的方法。
+- 在 `documentation`、`compile`、`trace` 等處指名這樣的方法時，寫出具體型別：`Box<int>::twice`。只有一個
+  具體型別擁有該方法時，也可以寫 `Box::twice`。
 
 ### 3.6 defstruct — 結構（使用者定義型別）
 
@@ -679,6 +704,11 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 有本體的方法也可以寫 `where` 子句與文件字串。本體的型別檢查**在宣告時進行一次**，`Self` 保持為型別變數（以 `Self: 該 trait` 為約束）（與 Rust
 相同）——即使是沒有任何 `impl` 省略的預設實作，對任何實作型別都通不過的錯誤也會在那裡被排除。對 `self` 呼叫該 trait 本身及其繼承來源的方法會
 藉這個約束通過，關聯型別固定為自己，所以回傳 `Item` 的簽章與本體在不知道具體型別的情況下進行比對。
+
+**依具體型別的實作**：泛型型別可以為每個具體型別分別寫 `impl`（`(impl Show Box<int> ...)` 和
+`(impl Show Box<string> ...)`）。`:dyn`、`where` 約束、關聯型別和 `print-object` 也都依具體型別生效，
+沒有 `impl` 的具體型別（`Box<f64>`）不實作該 trait。同一個 trait 不能同時為 `Box<T>` 和 `Box<int>` 寫
+`impl`（與 3.5 中方法的規則相同）。父 trait 只需在該具體型別上已實作即可（`Box<int>` 或 `Box<T>` 的 `impl`）。
 
 **全面實作（blanket implementation）**：把對象設為型別變數，就能一次為滿足約束的所有型別實作。
 

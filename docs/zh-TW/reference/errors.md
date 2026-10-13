@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
 # 錯誤訊息
 
 `typl` 提供的主要錯誤訊息的意義與修正方式。
@@ -55,12 +55,15 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | 訊息 | 意義與修正方式 |
 |---|---|
 | `no such function: bar` | 沒有該名稱的函式或方法。檢查拼寫 |
-| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | 方法由第一個引數的型別選擇。存在該名稱的方法，但第一個引數的型別（這裡是 `int`）沒有。訊息最後是擁有該方法的型別一覽 |
+| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | 方法由第一個引數的型別選擇。存在該名稱的方法，但第一個引數的型別（這裡是 `int`）沒有。訊息最後是擁有該方法的型別一覽（若是為某個具體型別的 `impl` 寫的方法，則是 `box<int>` 這樣的具體型別） |
+| ``no method `twice` for type `box<string>` (the first parameter of the function this value is expected to be, which selects the method); `twice` is a method of `box<int>` `` | 作為值傳遞的方法，依其被傳作的函式型別的第一個參數的型別來選擇。該型別（這裡是 `box<string>`）沒有這個名稱的方法。訊息末尾列出擁有該方法的型別 |
 | `unbound variable: y` | 沒有該名稱的變數。檢查拼寫以及繫結的範圍（是否在 `let` 外使用） |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | 在同一模組中為函式、全域變數、巨集中的兩個取了同一個名稱。改掉其中一個的名稱（[語法參考 3.10](syntax.md#310-module--use--命名空間)） |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | 結構不會自動產生 `new`。以 `make-instance` 建立值，或在 `impl` 中寫一個 `new`（[語法參考 3.5](syntax.md#35-impl--型別的方法)） |
 | ``defmethod is gone — write methods in the type's `impl`: ...`` | 沒有 `defmethod`。方法寫在型別的 `impl` 中（[語法參考 3.5](syntax.md#35-impl--型別的方法)） |
 | ``defstruct: (:constructor ...) is gone — ...`` | 沒有 `:constructor` 選項。建構函式在 `impl` 中寫成靜態方法 |
+| ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | 同名的方法同時寫在了把型別參數寫成變數的 `impl`（`Box<T>`）和具體型別的 `impl`（`Box<int>`）中（與先後順序無關）。只保留其中一個（[語法參考 3.5](syntax.md#35-impl--型別的方法)） |
+| ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | 同一個 trait 同時為 `Box<T>` 和 `Box<int>` 寫了 `impl`。只保留其中一個 |
 | ``use: unresolved `nosuch` `` | 找不到 `use` 的模組。檔名與模組路徑的對應見[語法參考 3.11](syntax.md#311-檔案與模組的對應多檔案專案) |
 | `unresolved path: c::hidden` | 模組存在，但沒有該名稱，或者因為沒有加 `pub` 而不可見 |
 | `circular module dependency: a -> b -> a` | 模組之間互相 `use`。把共同的部分分到另一個模組 |
@@ -76,7 +79,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``make-instance point: slot `y` is not given and has no default`` | 沒有在 `make-instance` 中寫出沒有預設值的欄位 |
 | ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | 寫了結構中沒有的欄位 |
 | ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | 在定義型別的模組之外寫了非 `pub` 的欄位。請該模組提供一個 `pub` 的建構函式 |
-| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | 對其他型別引數的值呼叫了為泛型型別的特定型別引數（`(impl Box<int> ...)`）寫的方法 |
+| ``` `box::make` is written for `box<int>`, `box<string>`; the type the call is expected to return picks one, ...``` | 多個具體型別的 `impl` 中有同名的靜態方法，無法決定呼叫哪一個。像 `(the Box<int> (Box::make))` 這樣寫出期望型別 |
+| ``compile: `box::twice` is written for more than one instantiation of `box`; name one: ...`` | 只用型別的名稱把依具體型別寫的方法交給了 `compile`、`trace`、`documentation` 等。像 `box<int>::twice` 這樣寫出具體型別 |
 | ``setf: cannot assign to constant `k` `` | 對以 `defconstant` 定義的名稱指派。需要修改的話改用 `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | 沒有定義以 `defsignature` 宣告的函式 |
 | ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | 在該處寫成 `(nosuch 引數 colon at)` 的呼叫無法解析。請定義引數型別的方法或函式（[格式指令第 5 章](functions/format.md#5-name)） |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -697,10 +697,38 @@ Die Typparameter des Zieltyps (`T` unten) werden durch den Empfänger festgelegt
 
 - Gib den eigenen Typparametern der Methode Namen, die sich von den im `impl` geschriebenen
   Typparametern des Zieltyps unterscheiden (dem `T` von `(impl Box<T> ...)`).
-- Das `impl` eines generischen Typs schreibt alle seine Typparameter als Variablen (`Box<T>`) oder alle
-  als konkrete Typen (`Box<int>`; die Methoden gelten dann nur für Werte dieses Typs).
 - Eine Methode im `impl` eines Traits kann keine Typparameter hinzufügen: Ihre Signatur folgt der, die
   der Trait deklariert.
+
+Das `impl` eines generischen Typs schreibt alle seine Typparameter als Variablen (`Box<T>`, allen
+Instanziierungen gemeinsam) oder alle als konkrete Typen (`Box<int>`, nur für diese Instanziierung). Die
+`impl`s verschiedener Instanziierungen sind getrennte Implementierungen, daher können `Box<int>` und
+`Box<string>` je eine Methode desselben Namens haben.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Eine Instanzmethode wird nach dem Typ des Empfängers gewählt. Eine Instanziierung ohne `impl` (etwa
+  `Box<f64>`) hat die Methode nicht.
+- Eine statische Methode wird nach dem Typ gewählt, den der Aufruf zurückgeben soll (das `(the Box<int> ...)`
+  oben). Hat nur eine Instanziierung eine statische Methode dieses Namens, ist kein erwarteter Typ nötig.
+- Eine Methode desselben Namens kann nicht zugleich in einem `impl` mit Variablen (`Box<T>`) und im `impl`
+  einer Instanziierung (`Box<int>`) stehen; in beiden Reihenfolgen ist das ein Fehler. Der Accessor eines
+  Felds zählt als Methode des `impl` mit Variablen.
+- Um eine solche Methode in `documentation`, `compile`, `trace` und Ähnlichem zu benennen, schreibt man die
+  Instanziierung: `Box<int>::twice`. Hat nur eine Instanziierung die Methode, geht auch `Box::twice`.
 
 ### 3.6 defstruct — Strukturen (benutzerdefinierte Typen)
 
@@ -920,6 +948,13 @@ scheitern würden, werden dort gefunden, auch in Standardimplementierungen, die 
 Aufrufe auf `self` von Methoden des Traits selbst oder seiner Obertraits gehen durch diese Schranke, und
 assoziierte Typen sind auf sich selbst festgelegt, daher wird eine Signatur, die `Item` zurückgibt, gegen den
 Rumpf abgeglichen, ohne den konkreten Typ zu kennen.
+
+**Implementierungen je Instanziierung**: Ein generischer Typ kann für jede Instanziierung ein eigenes
+`impl` haben (`(impl Show Box<int> ...)` und `(impl Show Box<string> ...)`). `:dyn`, `where`-Schranken,
+assoziierte Typen und `print-object` wirken je Instanziierung, und eine Instanziierung ohne `impl`
+(`Box<f64>`) implementiert den Trait nicht. Derselbe Trait kann nicht zugleich für `Box<T>` und `Box<int>`
+implementiert werden (dieselbe Regel wie für Methoden in 3.5). Ein Supertrait muss nur an dieser
+Instanziierung implementiert sein (durch ein `impl` von `Box<int>` oder von `Box<T>`).
 
 **Pauschalimplementierungen**: Macht man das Ziel zu einer Typvariable, wird der Trait auf einen Schlag für jeden
 Typ implementiert, der die Schranken erfüllt.

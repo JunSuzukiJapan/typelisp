@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
 # Hata Mesajları
 
 `typl`'nin başlıca hata mesajlarının ne anlama geldiği ve nasıl düzeltileceği.
@@ -57,12 +57,15 @@ olduğu anlamına gelir.
 | Mesaj | Anlamı ve düzeltme |
 |---|---|
 | `no such function: bar` | Bu adda bir fonksiyon ya da metot yok. Yazımı kontrol edin |
-| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metotlar ilk bağımsız değişkenin türüne göre seçilir. Bu adda bir metot var, ancak ilk bağımsız değişkenin türü için (burada `int`) yok. Mesajın sonu, metoda sahip türleri listeler |
+| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metotlar ilk bağımsız değişkenin türüne göre seçilir. Bu adda bir metot var, ancak ilk bağımsız değişkenin türü için (burada `int`) yok. Mesajın sonu, metoda sahip türleri listeler (bir örneklenme için yazılmış metotta örneklenmenin kendisi, örneğin `box<int>`) |
+| ``no method `twice` for type `box<string>` (the first parameter of the function this value is expected to be, which selects the method); `twice` is a method of `box<int>` `` | Değer olarak geçirilen bir metot, geçirildiği fonksiyon tipinin ilk parametresinin tipine göre seçilir. Bu tipin (burada `box<string>`) o adda bir metodu yoktur. İletinin sonu, o metoda sahip tipleri listeler |
 | `unbound variable: y` | Bu adda bir değişken yok. Yazımı ve bağlamanın kapsamını kontrol edin (`let`'inin dışında mı kullanılıyor?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Bir modülde fonksiyon, global değişken ve makrodan ikisine aynı ad verildi. Birinin adını değiştirin ([Sözdizimi Başvurusu 3.10](syntax.md#310-module--use--ad-alanları)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Bir yapı için `new` üretilmez. Değeri `make-instance` ile oluşturun ya da `impl`'e bir `new` yazın ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
 | ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` yoktur. Metotlar türün `impl`'ine yazılır ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` seçeneği yoktur. Yapıcı `impl`'e statik metot olarak yazılır |
+| ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Aynı adlı bir metot hem tür parametreleri değişken olan bir `impl`'de (`Box<T>`) hem de bir örneklenmenin `impl`'inde (`Box<int>`) yazılmış, sıra fark etmez. Yalnızca birini bırakın ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
+| ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Aynı trait hem `Box<T>` hem de `Box<int>` için uygulanmış. Yalnızca birini bırakın |
 | ``use: unresolved `nosuch` `` | `use` içinde adı verilen modül bulunamıyor. Dosya adlarının modül yollarına nasıl karşılık geldiği için [Sözdizimi Başvurusu 3.11](syntax.md#311-dosyalar-ve-modüller-çok-dosyalı-projeler)'e bakın |
 | `unresolved path: c::hidden` | Modül var, ancak ad yok ya da `pub` eksik olduğu için görünür değil |
 | `circular module dependency: a -> b -> a` | Modüller birbirini `use` ediyor. Ortak kısmı ayrı bir modüle taşıyın |
@@ -78,7 +81,8 @@ olduğu anlamına gelir.
 | ``make-instance point: slot `y` is not given and has no default`` | Varsayılan değeri olmayan bir alan `make-instance`'a verilmedi |
 | ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Yapıda olmayan bir alan verildi |
 | ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | `pub` olmayan bir alan, türü tanımlayan modülün dışında verildi. O modülden `pub` bir yapıcı isteyin |
-| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Genel bir türün belirli bir örneklenmesi (`(impl Box<int> ...)`) için yazılmış bir metot, başka tür argümanlarına sahip bir değer üzerinde çağrıldı |
+| ``` `box::make` is written for `box<int>`, `box<string>`; the type the call is expected to return picks one, ...``` | Birden çok örneklenmenin `impl`'inde o adda statik metot var ve hangisinin çağrılacağına hiçbir şey karar vermiyor. `(the Box<int> (Box::make))` gibi beklenen türü yazın |
+| ``compile: `box::twice` is written for more than one instantiation of `box`; name one: ...`` | Örneklenme başına yazılmış bir metot `compile`, `trace`, `documentation` gibi yerlere yalnızca türün adıyla verilmiş. `box<int>::twice` gibi örneklenmeyi yazın |
 | ``setf: cannot assign to constant `k` `` | `defconstant` ile tanımlanmış bir ada atama yapıldı. Değişmesi gerekiyorsa `defvar` kullanın |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | `defsignature` ile bildirilen bir fonksiyon tanımlanmamış |
 | ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | O yere yazılan `(nosuch arg colon at)` çağrısı çözülemiyor. Argümanın türünün bir metodunu ya da bir fonksiyon tanımlayın ([Biçim Yönergeleri 5. bölüm](functions/format.md#5-name)) |

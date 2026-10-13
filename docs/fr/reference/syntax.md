@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -683,10 +683,38 @@ Les paramètres de type du type cible (`T` ci-dessous) sont fixés par le receve
 
 - Donnez aux paramètres de type propres de la méthode des noms différents des paramètres de type du type
   cible écrits dans l'`impl` (le `T` de `(impl Box<T> ...)`).
-- L'`impl` d'un type générique écrit tous ses paramètres de type comme variables (`Box<T>`) ou tous comme
-  types concrets (`Box<int>` ; les méthodes ne s'appliquent alors qu'aux valeurs de ce type).
 - Une méthode de l'`impl` d'un trait ne peut pas ajouter de paramètres de type : sa signature suit celle
   que déclare le trait.
+
+L'`impl` d'un type générique écrit tous ses paramètres de type comme des variables (`Box<T>`, commun à toutes
+les instanciations) ou tous comme des types concrets (`Box<int>`, propre à cette instanciation). Les `impl`
+d'instanciations différentes sont des implémentations séparées : `Box<int>` et `Box<string>` peuvent donc avoir
+chacun une méthode du même nom.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Une méthode d'instance est choisie d'après le type du receveur. Une instanciation sans `impl` (par exemple
+  `Box<f64>`) n'a pas la méthode.
+- Une méthode statique est choisie d'après le type que l'appel doit renvoyer (le `(the Box<int> ...)`
+  ci-dessus). Si une seule instanciation a une méthode statique de ce nom, aucun type attendu n'est nécessaire.
+- Une méthode d'un même nom ne peut pas être écrite à la fois dans un `impl` à variables (`Box<T>`) et dans
+  l'`impl` d'une instanciation (`Box<int>`) ; dans un ordre comme dans l'autre, c'est une erreur. L'accesseur
+  d'un champ compte comme une méthode de l'`impl` à variables.
+- Pour nommer une telle méthode dans `documentation`, `compile`, `trace` et autres, écrivez l'instanciation :
+  `Box<int>::twice`. Si une seule instanciation a la méthode, `Box::twice` convient aussi.
 
 ### 3.6 defstruct — structures (types définis par l'utilisateur)
 
@@ -901,6 +929,13 @@ ce module. Les méthodes avec corps peuvent aussi avoir des clauses `where` et d
 implémentant, même dans des implémentations par défaut qu'aucun `impl` n'omet jamais, y sont détectées. Les appels sur
 `self` aux méthodes du trait lui-même ou de ses super-traits passent par cette borne, et les types associés sont
 fixés à eux-mêmes ; une signature qui renvoie `Item` est donc confrontée au corps sans connaître le type concret.
+
+**Implémentations par instanciation** : un type générique peut avoir un `impl` distinct pour chaque
+instanciation (`(impl Show Box<int> ...)` et `(impl Show Box<string> ...)`). `:dyn`, les bornes `where`, les
+types associés et `print-object` fonctionnent par instanciation, et une instanciation sans `impl`
+(`Box<f64>`) n'implémente pas le trait. Le même trait ne peut pas être implémenté à la fois pour `Box<T>` et
+pour `Box<int>` (la même règle que pour les méthodes en 3.5). Il suffit que le supertrait soit implémenté à
+cette instanciation (par un `impl` de `Box<int>` ou de `Box<T>`).
 
 **Implémentations génériques globales** : faire de la cible une variable de type implémente le trait d'un coup pour
 chaque type qui satisfait les bornes.

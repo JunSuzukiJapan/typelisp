@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
 # Повідомлення про помилки
 
 Що означають основні повідомлення про помилки від `typl` і як їх виправити.
@@ -56,12 +56,15 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | Повідомлення | Значення та виправлення |
 |---|---|
 | `no such function: bar` | Функції чи методу з такою назвою немає. Перевірте написання |
-| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Методи вибираються за типом першого аргументу. Метод із такою назвою існує, але не для типу першого аргументу (тут `int`). Наприкінці повідомлення перелічено типи, що мають цей метод |
+| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Методи вибираються за типом першого аргументу. Метод із такою назвою існує, але не для типу першого аргументу (тут `int`). Наприкінці повідомлення перелічено типи, що мають цей метод (для методу, написаного для однієї конкретизації, — сама конкретизація, наприклад `box<int>`) |
+| ``no method `twice` for type `box<string>` (the first parameter of the function this value is expected to be, which selects the method); `twice` is a method of `box<int>` `` | Метод, переданий як значення, вибирається за типом першого параметра того функціонального типу, як який його передають. Цей тип (тут `box<string>`) не має методу з такою назвою. Наприкінці повідомлення перелічено типи, що його мають |
 | `unbound variable: y` | Змінної з такою назвою немає. Перевірте написання та область дії зв'язування (чи не використано її поза своїм `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | В одному модулі двом із функції, глобальної змінної та макросу дано одне ім'я. Перейменуйте одне з них ([Довідник із синтаксису 3.10](syntax.md#310-module--use--простори-імен)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Для структури `new` не генерується. Створіть значення через `make-instance` або напишіть `new` в `impl` ([Довідник із синтаксису 3.5](syntax.md#35-impl--методи-типу)) |
 | ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` немає. Методи пишуться в `impl` типу ([Довідник із синтаксису 3.5](syntax.md#35-impl--методи-типу)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Опції `:constructor` немає. Конструктор пишеться в `impl` як статичний метод |
+| ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Метод з однією назвою написано і в `impl`, де параметри типу — змінні (`Box<T>`), і в `impl` конкретизації (`Box<int>`), у будь-якому порядку. Залиште лише один ([Довідник із синтаксису 3.5](syntax.md#35-impl--методи-типу)) |
+| ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Той самий трейт реалізовано і для `Box<T>`, і для `Box<int>`. Залиште лише одну реалізацію |
 | ``use: unresolved `nosuch` `` | Модуль, названий у `use`, не знайдено. Як імена файлів відповідають шляхам модулів, див. [Довідник із синтаксису 3.11](syntax.md#311-файли-та-модулі-багатофайлові-проєкти) |
 | `unresolved path: c::hidden` | Модуль існує, але імені немає, або воно невидиме, бо не має `pub` |
 | `circular module dependency: a -> b -> a` | Модулі підключають один одного через `use`. Винесіть спільну частину в окремий модуль |
@@ -77,7 +80,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``make-instance point: slot `y` is not given and has no default`` | У `make-instance` не задано поле без значення за замовчуванням |
 | ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Задано поле, якого немає в структурі |
 | ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Поле без `pub` задано поза модулем, де визначено тип. Попросіть цей модуль надати конструктор із `pub` |
-| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Метод, написаний для конкретного набору аргументів типу узагальненого типу (`(impl Box<int> ...)`), викликано на значенні з іншими аргументами типу |
+| ``` `box::make` is written for `box<int>`, `box<string>`; the type the call is expected to return picks one, ...``` | В `impl` кількох конкретизацій є статичний метод із такою назвою, і ніщо не визначає, який викликати. Вкажіть очікуваний тип, як у `(the Box<int> (Box::make))` |
+| ``compile: `box::twice` is written for more than one instantiation of `box`; name one: ...`` | Метод, написаний для конкретизації, передано в `compile`, `trace`, `documentation` тощо лише за назвою типу. Пишіть конкретизацію, як у `box<int>::twice` |
 | ``setf: cannot assign to constant `k` `` | Присвоєно назві, визначеній через `defconstant`. Якщо її потрібно змінювати, використовуйте `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | Функцію, оголошену через `defsignature`, не визначено |
 | ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | Виклик `(nosuch arg colon at)`, записаний у цьому місці, не розв'язується. Визначте метод типу аргументу або функцію ([Директиви формату, розділ 5](functions/format.md#5-name)) |

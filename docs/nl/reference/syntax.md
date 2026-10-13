@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -708,10 +708,38 @@ zelf (`U`) worden afgeleid uit de argumenten van elke aanroep.
 
 - Geef de eigen typeparameters van de methode namen die verschillen van de typeparameters van het doeltype
   die in de `impl` staan (de `T` van `(impl Box<T> ...)`).
-- De `impl` van een generiek type schrijft al zijn typeparameters als variabelen (`Box<T>`) of allemaal
-  als concrete types (`Box<int>`; de methoden werken dan alleen op waarden van dat type).
 - Een methode in de `impl` van een trait kan geen typeparameters toevoegen: haar signatuur volgt die welke
   de trait declareert.
+
+De `impl` van een generiek type schrijft al zijn typeparameters als variabelen (`Box<T>`, gedeeld door alle
+instantiaties) of allemaal als concrete types (`Box<int>`, alleen voor die instantiatie). De `impl`s van
+verschillende instantiaties zijn aparte implementaties, dus `Box<int>` en `Box<string>` kunnen elk een methode
+met dezelfde naam hebben.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Een instantiemethode wordt gekozen op het type van de ontvanger. Een instantiatie zonder `impl` (bijvoorbeeld
+  `Box<f64>`) heeft de methode niet.
+- Een statische methode wordt gekozen op het type dat de aanroep moet teruggeven (de `(the Box<int> ...)`
+  hierboven). Heeft maar één instantiatie een statische methode met die naam, dan is geen verwacht type nodig.
+- Een methode met één naam kan niet tegelijk in een `impl` met variabelen (`Box<T>`) en in de `impl` van een
+  instantiatie (`Box<int>`) staan; in beide volgordes is dat een fout. De accessor van een veld telt als
+  methode van de `impl` met variabelen.
+- Om zo'n methode te noemen in `documentation`, `compile`, `trace` en dergelijke, schrijf je de instantiatie:
+  `Box<int>::twice`. Heeft maar één instantiatie de methode, dan kan ook `Box::twice`.
 
 ### 3.6 defstruct — structs (door de gebruiker gedefinieerde types)
 
@@ -929,6 +957,13 @@ implementerend type zouden mislukken, zelfs in standaardwaarden die geen enkele 
 worden daar gevangen. Aanroepen op `self` van methoden van de trait zelf of zijn supertraits gaan door
 deze bound, en geassocieerde types staan vast op zichzelf, dus een signatuur die `Item` teruggeeft wordt
 tegen de body gematcht zonder het concrete type te kennen.
+
+**Implementaties per instantiatie**: een generiek type kan voor elke instantiatie een eigen `impl` hebben
+(`(impl Show Box<int> ...)` en `(impl Show Box<string> ...)`). `:dyn`, `where`-grenzen, geassocieerde types
+en `print-object` werken per instantiatie, en een instantiatie zonder `impl` (`Box<f64>`) implementeert de
+trait niet. Dezelfde trait kan niet tegelijk voor `Box<T>` en voor `Box<int>` worden geïmplementeerd (dezelfde
+regel als voor methoden in 3.5). Een supertrait hoeft alleen bij die instantiatie geïmplementeerd te zijn (door
+een `impl` van `Box<int>` of van `Box<T>`).
 
 **Blanket-implementaties**: de target een typevariabele maken implementeert de trait in één keer voor elk
 type dat aan de bounds voldoet.

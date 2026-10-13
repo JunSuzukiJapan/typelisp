@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
 # 오류 메시지
 
 `typl`이 내는 주요 오류 메시지의 의미와 고치는 방법.
@@ -55,12 +55,15 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | 메시지 | 의미와 고치는 법 |
 |---|---|
 | `no such function: bar` | 그 이름의 함수나 메서드가 없다. 철자를 확인한다 |
-| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | 메서드는 첫 번째 인수의 타입으로 선택된다. 그 이름의 메서드는 있지만 첫 번째 인수의 타입(여기서는 `int`)에는 없다. 메시지 끝에 그 메서드를 가진 타입이 나열된다 |
+| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | 메서드는 첫 번째 인수의 타입으로 선택된다. 그 이름의 메서드는 있지만 첫 번째 인수의 타입(여기서는 `int`)에는 없다. 메시지 끝에 그 메서드를 가진 타입이 나열된다(구체 타입마다의 `impl`에 쓴 메서드라면 `box<int>` 같은 구체 타입) |
+| ``no method `twice` for type `box<string>` (the first parameter of the function this value is expected to be, which selects the method); `twice` is a method of `box<int>` `` | 값으로 넘긴 메서드는 넘겨받는 함수 타입의 첫 번째 매개변수 타입으로 선택된다. 그 타입(여기서는 `box<string>`)에는 그 이름의 메서드가 없다. 메시지 끝에 그 메서드를 가진 타입 목록이 나온다 |
 | `unbound variable: y` | 그 이름의 변수가 없다. 철자와 바인딩의 범위(`let` 밖에서 쓰고 있지 않은지)를 확인한다 |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | 같은 모듈에서 함수·전역 변수·매크로 중 두 개에 같은 이름을 붙였다. 어느 한쪽의 이름을 바꾼다([문법 레퍼런스 3.10](syntax.md#310-module--use--이름공간)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | 구조체에 `new`는 자동으로 만들어지지 않는다. 값은 `make-instance`로 만들거나 `impl`에 `new`를 쓴다([문법 레퍼런스 3.5](syntax.md#35-impl--타입의-메서드)) |
 | ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod`는 없다. 메서드는 타입의 `impl`에 쓴다([문법 레퍼런스 3.5](syntax.md#35-impl--타입의-메서드)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` 옵션은 없다. 생성자는 `impl`에 정적 메서드로 쓴다 |
+| ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | 같은 이름의 메서드를 타입 매개변수를 변수로 쓴 `impl`(`Box<T>`)과 구체 타입의 `impl`(`Box<int>`) 양쪽에 썼다(쓴 순서와 무관). 한쪽으로 모은다([문법 레퍼런스 3.5](syntax.md#35-impl--타입의-메서드)) |
+| ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | 같은 트레이트를 `Box<T>`와 `Box<int>` 양쪽에 `impl`했다. 한쪽으로 모은다 |
 | ``use: unresolved `nosuch` `` | `use`로 지정한 모듈을 찾을 수 없다. 파일 이름과 모듈 경로의 대응은 [문법 레퍼런스 3.11](syntax.md#311-파일과-모듈의-대응여러-파일-프로젝트)을 참고한다 |
 | `unresolved path: c::hidden` | 모듈은 있지만 그 이름이 없거나, `pub`이 없어서 보이지 않는다 |
 | `circular module dependency: a -> b -> a` | 모듈끼리 서로 `use`하고 있다. 공통 부분을 다른 모듈로 옮긴다 |
@@ -76,7 +79,8 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``make-instance point: slot `y` is not given and has no default`` | 기본값이 없는 필드를 `make-instance`에 쓰지 않았다 |
 | ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | 구조체에 없는 필드를 썼다 |
 | ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | 타입을 정의한 모듈 밖에서 `pub`이 아닌 필드를 썼다. 그 모듈에 `pub` 생성자를 써 달라고 한다 |
-| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | 제네릭 타입의 특정 타입 인수(`(impl Box<int> ...)`)에 쓴 메서드를 다른 타입 인수의 값에 호출했다 |
+| ``` `box::make` is written for `box<int>`, `box<string>`; the type the call is expected to return picks one, ...``` | 여러 구체 타입의 `impl`에 같은 이름의 정적 메서드가 있어 어느 것을 부를지 정해지지 않는다. `(the Box<int> (Box::make))`처럼 기대 타입을 쓴다 |
+| ``compile: `box::twice` is written for more than one instantiation of `box`; name one: ...`` | 구체 타입마다 쓴 메서드를 타입 이름만으로 `compile`, `trace`, `documentation` 등에 넘겼다. `box<int>::twice`처럼 구체 타입을 쓴다 |
 | ``setf: cannot assign to constant `k` `` | `defconstant`로 정의한 이름에 대입했다. 바꿔야 한다면 `defvar`를 쓴다 |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | `defsignature`로 선언한 함수가 정의되지 않았다 |
 | ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | 그 자리에 `(nosuch 인수 colon at)`이라고 쓴 호출을 해석할 수 없다. 인수 타입의 메서드나 함수를 정의한다([서식 지시자 5장](functions/format.md#5-name)) |

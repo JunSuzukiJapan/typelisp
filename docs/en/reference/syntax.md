@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -672,10 +672,38 @@ the arguments of each call.
 
 - Give the method's own type parameters names that differ from the target type's type parameters
   written in the `impl` (the `T` of `(impl Box<T> ...)`).
-- The `impl` of a generic type writes all of its type parameters as variables (`Box<T>`), or all of
-  them as concrete types (`Box<int>`; the methods then work only on values of that type).
 - A method of a trait's `impl` cannot add type parameters: its signature follows the one the trait
   declares.
+
+The `impl` of a generic type writes all of its type parameters as variables (`Box<T>`, shared by every
+instantiation) or all of them as concrete types (`Box<int>`, for that instantiation only). The `impl`s
+of different instantiations are separate implementations, so `Box<int>` and `Box<string>` can each have
+a method of the same name.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- An instance method is chosen by the receiver's type. An instantiation with no `impl` (`Box<f64>`, for
+  example) does not have the method.
+- A static method is chosen by the type the call is expected to return (the `(the Box<int> ...)`
+  above). When only one instantiation has a static method of that name, no expected type is needed.
+- A method of one name cannot be written both in an `impl` with variables (`Box<T>`) and in an `impl`
+  of an instantiation (`Box<int>`); either order is an error. A field's accessor counts as a method of
+  the `impl` with variables.
+- To name such a method in `documentation`, `compile`, `trace` and the like, write the instantiation:
+  `Box<int>::twice`. When only one instantiation has the method, `Box::twice` works too.
 
 ### 3.6 defstruct — structs (user-defined types)
 
@@ -890,6 +918,13 @@ implementing type, even in defaults no `impl` ever omits, are caught there. Call
 the trait itself or its supertraits pass through this bound, and associated types are fixed to
 themselves, so a signature returning `Item` is matched against the body without knowing the concrete
 type.
+
+**Implementations per instantiation**: a generic type can have a separate `impl` for each
+instantiation (`(impl Show Box<int> ...)` and `(impl Show Box<string> ...)`). `:dyn`, `where` bounds,
+associated types and `print-object` all work per instantiation, and an instantiation with no `impl`
+(`Box<f64>`) does not implement the trait. The same trait cannot be implemented for both `Box<T>` and
+`Box<int>` (the same rule as for methods in 3.5). A supertrait only has to be implemented at that
+instantiation (by an `impl` of `Box<int>` or of `Box<T>`).
 
 **Blanket implementations**: making the target a type variable implements the trait at once for every
 type meeting the bounds.

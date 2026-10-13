@@ -12339,3 +12339,53 @@ CI の arm64 runner は `macos-26` にした。
 
 `split_fn_type` は、元の `split_fn_key` が数えていなかった `<>` の深さも数える。総称型の引数に
 `,` を含む型キーが、関数型の引数の区切りと取り違えられなくなった。
+
+## 総称型の具体型ごとの impl（2026-10-13）
+
+ユーザー決定: 1 つの総称型の別々の具体型に、別々の impl を書けるようにする（固有 impl もトレイト
+impl も）。内部の名前は他とぶつからないようにする。計画は
+[per-instantiation-impls-plan.md](per-instantiation-impls-plan.md)。
+
+**名前。** 具体型の impl のメソッドは `m <A...>`（`ConcreteNames::specialization`）で登録する。
+総称 impl の特殊化と同じ綴りだが、同じメソッド（トレイト）を `Box<T>` と `Box<int>` の両方に
+書くことを断るので、1 つの名前につく定義は常に 1 つになる。別の綴りにしなかったのは、実行時の
+`print-object` が値の型キー（`box<int>`）から `print-object <int>` を組み立てて引くから。同じ綴りなら
+インタプリタ・AOT・ダンプの側は変えずに済み、具体型の impl に書いた `print-object` もそのまま効く
+（以前は `print-object` の名前で登録されていたので、値からは見つからなかった）。
+
+**登録表。** `AdtDef::insts`（具体型の型キーの綴り → `InstImpls { args, assoc, impls, trait_assoc }`）。
+`assoc`・`impls`・`trait_assoc` はすべての具体型に共通の定義だけを持つ。「この impl は 1 つの具体型の
+ものか」は `Checker::written_instantiation` 1 か所で決め、メソッドの登録（`check_defmethod_in_form`）と
+トレイトの impl（`check_impl_form`）の両方がそれを使う。
+
+**呼び出しの選び方。** `Checker::select_method`。受け手があればその型引数で、静的メソッドなら期待される
+戻り値の型で選ぶ（候補が 1 つなら期待型は要らない）。名前解決の「第 1 引数の型のメソッド」は
+`AdtDef::method_at` を使うので、`impl` の無い具体型（`Box<f64>`）にはそのメソッドが無く、次の段
+（関数）へ進む。fd9694c で入れた受け手の突き合わせは、選び方が受け手の型引数で決まるようになって
+発火しなくなったので消した。
+
+**トレイト。** `type_implements`・`:dyn` の vtable・関連型（`resolve_trait_assoc_type`）・スーパートレイトの
+検査・`:dyn` の呼び先の一覧が `insts` を見る。fd9694c の `explicit_impl_covers`（受け手の型から
+推し量っていた）は、記録そのものが具体型ごとになったので `AdtDef::implements_at` に置き換えた。
+
+**見つけた不具合。** ブランケット impl を総称型の具体型に実体化すると、実体化は具体型の impl として
+`twice-rank <int>` で登録するのに、呼び出し側（`check_blanket_method_call`）は実体化より前に素の
+`twice-rank` で名前を作っていた。インタプリタが本体を見つけられず、組み込みメソッドとして LLVM
+バックエンドを探して止まった。両者が同じ規則（`Checker::name_written_for`）で名前を作るようにした。
+これは以前、`Box<int>` と `Box<string>` への実体化が互いを置き換えていた問題の裏返しでもある。
+
+**名前で定義を指す道具。** `documentation`・`ed`・`compile`・`trace`・`disassemble` は `Box<int>::twice` を
+受け付ける（`Checker::instantiated_member`）。そのメソッドを持つ具体型が 1 つだけなら `Box::twice` でも
+よく、複数なら候補を挙げてエラーにする（`Checker::member_body_name`）。
+
+**値として渡したときのエラー。** メソッドを値として渡すと、渡す先の関数型の第一引数で選ぶ。そこに
+無いときは `unbound variable` と言っていた（具体型ごとの impl に限らず、普通の型のメソッドでも同じ）。
+呼び出しと同じく、そのメソッドを持つ型を挙げるようにした（`Checker::owner_list` を共有）。
+
+**成果物。** `AdtDef` の形が変わったので `dump::FORMAT_VERSION` を 20 に上げ、島（解釈島から G1、
+native で G2 が一致）と prelude の成果物を作り直した。prelude の `(impl cons-cell<int,int> ...)` は
+具体型の impl として入り直した。
+
+**テスト。** `tests/per_instantiation_impl_test.rs`（固有・トレイト・`:dyn`・`where`・関連型・
+スーパートレイト・ブランケット・`print-object`・`~/name/`・重複の拒否・名前で指す道具。インタプリタと
+compile の両方）、`compile_file_test` に AOT の実行ファイルでの `print-object` と `:dyn`。

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # เอกสารอ้างอิงไวยากรณ์ typelisp
 
 typelisp เป็น Lisp ที่มีระบบชนิดแบบสถิต เขียนด้วย S-expression สำหรับรายการฟังก์ชันและเมทอดที่มีให้ในตัว
@@ -628,9 +628,34 @@ GC ไม่ติดตาม `ptr` มันชี้ออกนอกฮี�
 
 - ตั้งชื่อพารามิเตอร์ชนิดของเมทอดเองให้ต่างจากพารามิเตอร์ชนิดของชนิดเป้าหมายที่เขียนใน `impl` (`T` ของ
   `(impl Box<T> ...)`)
-- `impl` ของชนิด generic เขียนพารามิเตอร์ชนิดทั้งหมดเป็นตัวแปร (`Box<T>`) หรือทั้งหมดเป็นชนิดที่เจาะจง
-  (`Box<int>` แล้วเมทอดจะใช้ได้กับค่าของชนิดนั้นเท่านั้น)
 - เมทอดใน `impl` ของ trait เพิ่มพารามิเตอร์ชนิดไม่ได้ ลายเซ็นของมันเป็นไปตามที่ trait ประกาศ
+
+`impl` ของชนิด generic เขียนพารามิเตอร์ชนิดทั้งหมดเป็นตัวแปร (`Box<T>` ใช้ร่วมกันทุกชนิดเฉพาะ) หรือทั้งหมดเป็น
+ชนิดเฉพาะ (`Box<int>` เป็นของชนิดเฉพาะนั้นเท่านั้น) `impl` ของชนิดเฉพาะต่างกันเป็นการ implement แยกกัน จึงเขียน
+เมทอดชื่อเดียวกันให้ `Box<int>` และ `Box<string>` แยกกันได้
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- เมทอดของอินสแตนซ์เลือกตามชนิดของตัวรับ ชนิดเฉพาะที่ไม่มี `impl` (เช่น `Box<f64>`) ไม่มีเมทอดนั้น
+- เมทอด static เลือกตามชนิดที่คาดว่าการเรียกจะคืนค่า (`(the Box<int> ...)` ข้างบน) ถ้ามีชนิดเฉพาะเพียงชนิดเดียว
+  ที่มีเมทอด static ชื่อนั้น ก็ไม่ต้องมีชนิดที่คาดหวัง
+- เขียนเมทอดชื่อเดียวกันทั้งใน `impl` ที่ใช้ตัวแปร (`Box<T>`) และใน `impl` ของชนิดเฉพาะ (`Box<int>`) ไม่ได้
+  เขียนลำดับไหนก็เป็นข้อผิดพลาด accessor ของฟิลด์ก็นับเป็นเมทอดของฝั่ง `impl` ที่ใช้ตัวแปร
+- เมื่อระบุชื่อเมทอดเช่นนี้ใน `documentation`, `compile`, `trace` ฯลฯ ให้เขียนชนิดเฉพาะ: `Box<int>::twice`
+  ถ้ามีชนิดเฉพาะเพียงชนิดเดียวที่มีเมทอดนั้น เขียน `Box::twice` ก็ได้
 
 ### 3.6 defstruct — struct (ชนิดที่ผู้ใช้นิยาม)
 
@@ -839,6 +864,12 @@ type ทั้งหมดของมัน**
 trait เองหรือ supertrait ผ่าน bound นี้ และ associated type ถูกกำหนดเป็น
 ตัวมันเอง ดังนั้น signature ที่คืน `Item` ถูกจับคู่กับตัวเนื้อหาโดยไม่ต้องทราบชนิด
 ที่เป็นรูปธรรม
+
+**การ implement แยกตามชนิดเฉพาะ**: ชนิด generic เขียน `impl` แยกให้แต่ละชนิดเฉพาะได้
+(`(impl Show Box<int> ...)` และ `(impl Show Box<string> ...)`) `:dyn` bound ของ `where` associated type และ
+`print-object` ก็มีผลแยกตามชนิดเฉพาะ และชนิดเฉพาะที่ไม่มี `impl` (`Box<f64>`) ไม่ได้ implement trait นั้น
+implement trait เดียวกันให้ทั้ง `Box<T>` และ `Box<int>` ไม่ได้ (กฎเดียวกับเมทอดใน 3.5) supertrait เพียงแค่
+ถูก implement ที่ชนิดเฉพาะนั้นก็พอ (โดย `impl` ของ `Box<int>` หรือของ `Box<T>`)
 
 **Blanket implementation**: การทำให้เป้าหมายเป็นตัวแปรชนิดจะ implement trait ในคราวเดียวสำหรับทุก
 ชนิดที่ตรงตาม bound

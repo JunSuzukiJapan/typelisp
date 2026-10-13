@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -672,10 +672,38 @@ nedan) bestäms av mottagaren; metodens egna (`U`) härleds ur argumenten i varj
 
 - Ge metodens egna typparametrar namn som skiljer sig från måltypens typparametrar som skrivs i `impl`
   (`T` i `(impl Box<T> ...)`).
-- En `impl` för en generisk typ skriver alla dess typparametrar som variabler (`Box<T>`) eller alla som
-  konkreta typer (`Box<int>`; metoderna gäller då bara värden av den typen).
 - En metod i ett traits `impl` kan inte lägga till typparametrar: dess signatur följer den som traitet
   deklarerar.
+
+`impl` för en generisk typ skriver alla sina typparametrar som variabler (`Box<T>`, gemensam för alla
+instansieringar) eller alla som konkreta typer (`Box<int>`, bara för den instansieringen). `impl` för olika
+instansieringar är separata implementationer, så `Box<int>` och `Box<string>` kan ha var sin metod med samma
+namn.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- En instansmetod väljs efter mottagarens typ. En instansiering utan `impl` (till exempel `Box<f64>`) har inte
+  metoden.
+- En statisk metod väljs efter den typ anropet förväntas returnera (`(the Box<int> ...)` ovan). Har bara en
+  instansiering en statisk metod med det namnet behövs ingen förväntad typ.
+- En metod med ett visst namn kan inte skrivas både i en `impl` med variabler (`Box<T>`) och i en
+  instansierings `impl` (`Box<int>`); i vilken ordning som helst är det ett fel. Ett fälts accessor räknas som
+  en metod i `impl` med variabler.
+- För att nämna en sådan metod i `documentation`, `compile`, `trace` och liknande skriver du instansieringen:
+  `Box<int>::twice`. Har bara en instansiering metoden går även `Box::twice`.
 
 ### 3.6 defstruct — structs (användardefinierade typer)
 
@@ -888,6 +916,13 @@ typ, även i standardvärden som ingen `impl` någonsin utelämnar, fångas där
 själva traitet eller dess supertraits passerar genom den här gränsen, och associerade typer är fastlagda
 till sig själva, så en signatur som returnerar `Item` matchas mot kroppen utan att känna till den konkreta
 typen.
+
+**Implementationer per instansiering**: en generisk typ kan ha en egen `impl` för varje instansiering
+(`(impl Show Box<int> ...)` och `(impl Show Box<string> ...)`). `:dyn`, `where`-gränser, associerade typer
+och `print-object` gäller per instansiering, och en instansiering utan `impl` (`Box<f64>`) implementerar inte
+traiten. Samma trait kan inte implementeras både för `Box<T>` och för `Box<int>` (samma regel som för metoder
+i 3.5). En supertrait behöver bara vara implementerad för den instansieringen (av en `impl` för `Box<int>`
+eller för `Box<T>`).
 
 **Generella implementationer (blanket implementations)**: att göra målet till en typvariabel
 implementerar traitet på en gång för varje typ som uppfyller gränserna.

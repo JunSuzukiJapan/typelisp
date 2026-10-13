@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -678,9 +678,36 @@ parametreleri (aşağıdaki `T`) alıcı tarafından belirlenir; metodun kendi p
 
 - Metodun kendi tür parametrelerine, `impl`'de yazılan hedef türün tür parametrelerinden
   (`(impl Box<T> ...)`'in `T`'si) farklı adlar verin.
-- Genel bir türün `impl`'i tüm tür parametrelerini değişken olarak (`Box<T>`) ya da tümünü somut tür
-  olarak (`Box<int>`; bu durumda metotlar yalnızca o türün değerlerinde çalışır) yazar.
 - Bir trait'in `impl`'indeki metot tür parametresi ekleyemez: imzası trait'in bildirdiğini izler.
+
+Genel bir türün `impl`'i tür parametrelerinin hepsini değişken olarak (`Box<T>`, tüm örneklenmeler için
+ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme için) yazar. Farklı örneklenmelerin
+`impl`'leri ayrı uygulamalardır; bu yüzden `Box<int>` ve `Box<string>` aynı adda birer metoda sahip olabilir.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Örnek metodu alıcının türüne göre seçilir. `impl`'i olmayan bir örneklenmede (örneğin `Box<f64>`) o metot
+  yoktur.
+- Statik metot, çağrının döndürmesi beklenen türe göre seçilir (yukarıdaki `(the Box<int> ...)`). O adda
+  statik metodu olan yalnızca bir örneklenme varsa beklenen tür gerekmez.
+- Aynı adlı bir metot hem değişkenli bir `impl`'de (`Box<T>`) hem de bir örneklenmenin `impl`'inde
+  (`Box<int>`) yazılamaz; hangi sırayla olursa olsun hatadır. Bir alanın erişimcisi de değişkenli `impl`'in
+  metodu sayılır.
+- Böyle bir metodu `documentation`, `compile`, `trace` gibi yerlerde adlandırmak için örneklenmeyi yazın:
+  `Box<int>::twice`. Metot yalnızca bir örneklenmede varsa `Box::twice` da olur.
 
 ### 3.6 defstruct — struct'lar (kullanıcı tanımlı türler)
 
@@ -892,6 +919,12 @@ başarısız olacak hatalar, hiçbir `impl`'in asla atlamadığı varsayılanlar
 `self` üzerinde trait'in kendisinin ya da üst trait'lerinin metotlarına yapılan çağrılar bu sınırdan
 geçer ve ilişkili türler kendilerine sabitlenir; bu yüzden `Item` döndüren bir imza, somut türü bilmeden
 gövdeyle eşleştirilir.
+
+**Örneklenme başına uygulamalar**: genel bir türün her örneklenmesi için ayrı bir `impl` olabilir
+(`(impl Show Box<int> ...)` ve `(impl Show Box<string> ...)`). `:dyn`, `where` sınırları, ilişkili türler
+ve `print-object` örneklenme başına çalışır; `impl`'i olmayan bir örneklenme (`Box<f64>`) trait'i uygulamaz.
+Aynı trait hem `Box<T>` hem de `Box<int>` için uygulanamaz (3.5'teki metotlarla aynı kural). Üst trait'in o
+örneklenmede uygulanmış olması yeterlidir (`Box<int>`'in ya da `Box<T>`'nin bir `impl`'iyle).
 
 **Blanket gerçekleştirmeler**: hedefi bir tür değişkeni yapmak, trait'i sınırları karşılayan her tür için
 bir anda gerçekleştirir.
