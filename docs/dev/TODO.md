@@ -8,14 +8,11 @@
 
 ## 残っている作業
 
-**総称型の具体型ごとの impl（未決）。** `(impl Show Box<int> ...)` と `(impl Show Box<string> ...)`
-のように総称型の 2 つの具体型に別々の impl を書くと（固有 impl でも同じ）、メソッドが型の名前だけで
-登録されるため 2 つ目が 1 つ目を置き換える（再定義の警告が出る）。置き換えられた側の値は直接の
-呼び出しでも `:dyn` でも `where` でも型エラーになるので、違う本体が走ることは無い。具体型ごとに
-別の実装を持てるようにするか、
-2 つ目をエラーにするかを決める。名前解決の一本化とコンストラクタの再設計は文書まで済んだ
-（2026-10-12）。経緯は [implementation-log.md](implementation-log.md) の
-「コンストラクタ再設計 Phase E」の節。
+**総称型の具体型ごとの impl（作業中、ブランチ `feat/per-instantiation-impls`）。**
+`(impl Show Box<int> ...)` と `(impl Show Box<string> ...)` のように、1 つの総称型の別々の具体型に
+別々の impl を書けるようにする（2026-10-13 ユーザー決定。固有 impl も同じ）。内部の名前は他と
+ぶつからないようにする。今は 2 つ目が 1 つ目を置き換える（置き換えられた側の値は型エラーになる）。
+計画は [per-instantiation-impls-plan.md](per-instantiation-impls-plan.md)。
 
 **CI/CD（作業中、ブランチ `feat/ci`）。** push/PR ごとにビルドと警告 0 を、
 リリース（`v*` タグ）のときだけテスト全体を回す。対象は macOS と Linux
