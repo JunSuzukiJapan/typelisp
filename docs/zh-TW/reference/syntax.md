@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -40,6 +40,7 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **向量**：`#(1 2 3)`（與 CL 相同）。內容全部是字面值，不會求值——`#(a b)` 中的 `a` 是符號而不是變數。元素型別由上下文決定（`(the Vector<i32> #(1 2))`），沒有上下文時取第一個元素的型別（`#(1 2 3)` 是 `Vector<int>`）。元素型別必須一致，`#(1 "a")` 是型別錯誤。既沒有元素也沒有上下文的 `#()` 也是型別錯誤。每次求值都會建立新的向量。在預期 S 運算式資料的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 讀到的資料），它是元素全部為資料的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `vector` 變體。
 - **陣列**：`#2A((1 2) (3 4))`（與 CL 相同）。`#` 與 `A` 之間的數是維數，內容中串列巢狀的前這麼多層就是各個維度。`#0A x` 是只有一個元素的零維陣列。同一層的串列長度不一致是讀取錯誤。型別的決定方式與向量相同，結果是 `Array<T>`（沒有元素時需要上下文，例如 `(the Array<f64> #2A(()))`）。作為 S 運算式資料，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `array` 變體。
 - **元組**：`#{"foo" 123 45.6}`。內容全部是字面值，不求值（`#{a b}` 的 `a` 是符號）。各元素的型別依位置由上下文決定（`(the #{i32 f64} #{1 2.0})`），沒有上下文時就是各元素自身的型別（`#{"foo" 123}` 是 `#{string int}`）。元素為 1～12 個。每次求值都會產生新的元組。要用計算出的值建構元組，使用 `(tuple a b)`。在期望 S 運算式資料的位置，它是元素全部為資料的元組——即 `Sexpr` 的 `tuple` 變體。
+- **屬性**：`#[test]` 是附加在下一個形式上的標記（與 Rust 的寫法相同）。目前唯一的屬性是 `test`，加在 `defun` 上（[3.16 `#[test]`](#316-test--測試函式)）。用 `read` 讀取時，它會成為串列 `(%internal::attribute (test) form)`。
 - **空串列 `()`**：依上下文，是 `Unit` 型別的值，或是 `Option<Sexpr>` 的 `none`。**`Sexpr` 沒有空串列的變體**——`Sexpr` 表示「非空的 S
   運算式」，S 運算式資料的型別是 `Option<Sexpr>`（見 [4.3 match](#43-match--模式比對) 的「`Option<Sexpr>` 的模式」）。
 - **quote/quasiquote/unquote**：
@@ -869,6 +870,50 @@ vtable 進行動態分派：
 
 兩者都是**運算式**的特殊形式，執行期什麼也不留下（被編譯的是本體展開後的形式）。lambda 清單與 `defmacro` 相同。詳細規則與例子見
 [區域巨集繫結](functions/system.md#9-區域巨集繫結macrolet--symbol-macrolet)。
+
+### 3.16 `#[test]` — 測試函式
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()`（也不能有型別參數）。不需要 `pub`。
+
+- **一般執行和 `compile-file` 會略過它**，連內容也不檢查（與 Rust 只在 `--test` 時編譯測試相同）。程式本身無法呼叫測試函式。
+- 測試可以寫在任何放置函式的檔案中、任何 `module` 之內。也可以另外寫在專案的 `tests/` 資料夾裡。
+- 失敗指 `panic` 與執行時錯誤。用 `assert`，或會印出兩邊的 `assert-eq`（[系統](functions/system.md)）來檢查。即使一個測試失敗，其餘測試也會繼續執行。
+
+```sh
+typl test                 # 執行此資料夾中專案的全部測試
+typl test parse           # 只執行名稱（如 `tests::more::parse-int` 這樣的完整名稱）包含 parse 的測試
+typl test foo.typl        # foo.typl（及其 use 的檔案）中的測試
+typl test foo.typl parse  # 其中名稱包含 parse 的測試
+```
+
+在專案中（沿上層資料夾找到的 `typelisp.toml`），`typl test` 讀入原始碼資料夾下的所有 `.typl` 檔案，以及與 `typelisp.toml` 同一資料夾中 `tests/` 下的所有 `.typl` 檔案。`tests/` 下檔案的模組由其相對於 `typelisp.toml` 所在資料夾的路徑決定（`tests/parse.typl` 是 `tests::parse`）。
+
+`typl test` **不執行**所讀入檔案的**頂層運算式**。那是程式本身的工作，測試時不做（與 Go 的 `go test` 不呼叫 `main` 相同）。定義（`defun`、`defvar` 的初始值等）與讀取器巨集的註冊照常進行。只要任何地方有型別錯誤，就一個測試也不會執行。
+
+結果每個測試一行，最後彙整輸出失敗測試的原因。只要有一個失敗，結束碼就是 1。
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+測試中 `print` 的內容會直接輸出到標準輸出（不擷取）。
 
 ## 4. 繫結與條件分支
 

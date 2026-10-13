@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # الزمن والبيئة والتنفيذ
 
 دوال الزمن والاستعلام عن بيئة التشغيل وأدوات التنفيذ وتحليل النصوص وتقييمها والسلاسل التوثيقية والماكرو.
@@ -308,6 +308,7 @@ time-zone is supplied, daylight saving time information is ignored*).
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | تحدث `panic` إذا كانت خاطئة. وبدون رسالة تكون `assertion failed: <الاختبار كما كُتب>` (وهي ماكرو، فتستطيع تسمية التعبير نفسه). ولا توجد في هذه اللغة restarts في CL |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`، حيث يطبّق `T` كلًا من `Eq` و`print-object` | يُحدث panic إذا لم تكن القيمتان متساويتين وفق `equals`، مع طباعة الطرفين (سطران: `  left: ...` / ` right: ...`). السطر الأول بلا رسالة هو `assertion failed: <التعبير كما كُتب>`، ومع رسالة هو `msg`. يُستخدم أساسًا داخل دوال `#[test]` ([الصياغة](../syntax.md)). مقابل `assert_eq!` في Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | تكتب سطرًا واحدًا مسبوقًا بـ `WARNING: ` إلى `*error-output*` و**تواصل**. وهي طريقة للإبلاغ عن شيء دون إعادة `Result` ودون إنهاء البرنامج |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | تستبدل المتغيرات العامة أثناء `body` فقط وتستعيدها عند الخروج. وتكتب CL هذا بـ `let`، لكن `let` في هذه اللغة تربط معجميًا دائمًا، ومن هنا الاسم المنفصل (الدور نفسه لماكرو Emacs Lisp بالاسم نفسه). وتستعيدها مهما كانت طريقة مغادرة الجسم: اكتمال عادي أو `throw` أو `panic` أو `break`/`return`. **وليست ربطًا لكل مهمة** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | تنفّذ `body` وكل متغير تحكم في الطابعة عند قيمته القياسية و`*read-eval*` مضبوط على `true` ([الطباعة](printing.md#6-التحكم-في-مقدار-ما-يطبع)) |

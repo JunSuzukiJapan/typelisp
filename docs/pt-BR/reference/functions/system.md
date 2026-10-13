@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Tempo, ambiente e implementação
 
 Funções de tempo, consultas sobre o ambiente de execução, ferramentas da implementação, análise e avaliação de
@@ -321,6 +321,7 @@ execução: o que é compilado é a forma expandida do corpo.
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Panic se for falso. Sem mensagem, `assertion failed: <o teste como foi escrito>` (é uma macro, então pode nomear a própria expressão). Os restarts do CL não existem nesta linguagem |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, onde `T` implementa `Eq` e `print-object` | Faz panic se os dois não forem iguais por `equals`, imprimindo os dois lados (duas linhas, `  left: ...` / ` right: ...`). A primeira linha é `assertion failed: <a expressão como escrita>` sem mensagem, e `msg` com ela. Usado principalmente dentro de funções `#[test]` ([Sintaxe](../syntax.md)). O `assert_eq!` do Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Escreve uma linha prefixada com `WARNING: ` em `*error-output*` e **continua**. Uma forma de relatar algo sem devolver um `Result` e sem encerrar o programa |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Substitui globais só durante `body` e as restaura na saída. O CL escreve isso como `let`, mas `let` nesta linguagem sempre vincula lexicamente, daí o nome separado (o mesmo papel da macro homônima do Emacs Lisp). Restaura-as qualquer que seja a forma de sair do corpo: conclusão normal, `throw`, `panic`, `break`/`return`. **Não é um vínculo por tarefa** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Executa `body` com todas as variáveis de controle da impressora em seus valores padrão e `*read-eval*` como `true` ([Impressão](printing.md#6-controlar-quanto-é-impresso)) |

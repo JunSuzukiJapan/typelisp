@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -76,6 +76,7 @@ a informacje o czytaniu komunikatów o błędach w [errors.md](errors.md).
   `#{string int}`). Krotka ma od 1 do 12 elementów. Każde obliczenie tworzy nową krotkę. Aby
   zbudować ją z obliczonych wartości, używa się `(tuple a b)`. Tam, gdzie oczekiwane są dane
   S-wyrażeń, jest to krotka, której wszystkie elementy są danymi: wariant `tuple` typu `Sexpr`.
+- **Atrybuty**: `#[test]` to znacznik dołączony do następnej formy (zapisywany jak w Rust). Jedynym atrybutem jest na razie `test`, który umieszcza się na `defun` ([3.16 `#[test]`](#316-test--funkcje-testowe)). Odczytany przez `read` staje się listą `(%internal::attribute (test) form)`.
 - **Pusta lista `()`**: zależnie od kontekstu wartość typu `Unit` lub `none` z
   `Option<Sexpr>`. **`Sexpr` nie ma wariantu pustej listy**: `Sexpr` oznacza „niepuste S-wyrażenie",
   a typem danych w postaci S-wyrażeń jest `Option<Sexpr>` (zobacz „Wzorce dla `Option<Sexpr>`" w
@@ -1135,6 +1136,50 @@ struktury zapisuje się `(pub x i32)` (3.6).
 Obie to **wyrażeniowe** formy specjalne i nic nie zostaje w czasie działania (kompilowana jest rozwinięta postać
 ciała). Lista lambda jest taka sama jak w `defmacro`. Szczegółowe reguły i przykłady znajdują się w
 [Lokalnych wiązaniach makr](functions/system.md#9-lokalne-wiązania-makr-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — funkcje testowe
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+`defun` oznaczony `#[test]` jest funkcją testową, którą `typl test` wywołuje po kolei (tak jak `#[test]` w Rust). Nie może przyjmować argumentów i musi zwracać `()` (nie może też mieć parametrów typu). Nie potrzebuje `pub`.
+
+- **Zwykłe uruchomienie i `compile-file` ją pomijają**, nawet nie sprawdzając jej treści (tak jak Rust kompiluje testy tylko z `--test`). Sam program nie może wywołać funkcji testowej.
+- Test można napisać w dowolnym pliku zawierającym funkcje, wewnątrz dowolnego `module`. Testy można też trzymać osobno w folderze `tests/` projektu.
+- Test kończy się niepowodzeniem przez `panic` lub błąd wykonania. Sprawdza się to przez `assert` albo `assert-eq`, który wypisuje obie strony ([System](functions/system.md)). Gdy jeden test się nie powiedzie, pozostałe i tak się wykonują.
+
+```sh
+typl test                 # uruchamia wszystkie testy projektu w tym folderze
+typl test parse           # tylko te, których nazwa (pełna nazwa, np. `tests::more::parse-int`) zawiera parse
+typl test foo.typl        # testy z foo.typl (i z plików, których używa)
+typl test foo.typl parse  # spośród nich te, które mają parse w nazwie
+```
+
+W projekcie (pliku `typelisp.toml` znalezionym przez przechodzenie w górę folderów) `typl test` wczytuje każdy plik `.typl` pod folderem źródeł oraz każdy plik `.typl` pod folderem `tests/` obok `typelisp.toml`. Moduł pliku pod `tests/` wynika z jego ścieżki od folderu `typelisp.toml` (`tests/parse.typl` to `tests::parse`).
+
+`typl test` **nie wykonuje wyrażeń najwyższego poziomu** wczytywanych plików. To własna praca programu, której przebieg testów nie wykonuje (tak jak `go test` nie wywołuje `main`). Definicje (`defun`, wartość początkowa `defvar` itd.) oraz rejestracje makr czytnika odbywają się jak zwykle. Jeśli gdziekolwiek jest błąd typu, nie uruchamia się żaden test.
+
+Wynik to jeden wiersz na test, a przyczyny niepowodzeń są zebrane na końcu. Jeśli choć jeden test się nie powiedzie, kod wyjścia wynosi 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+To, co test wypisuje przez `print`, trafia prosto na standardowe wyjście (nie jest przechwytywane).
 
 ## 4. Wiązanie i instrukcje warunkowe
 

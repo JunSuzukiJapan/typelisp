@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Waktu, Lingkungan, dan Implementasi
 
 Fungsi untuk waktu, pertanyaan tentang lingkungan runtime, alat implementasi, penguraian dan
@@ -336,6 +336,7 @@ tersisa saat dijalankan: yang dikompilasi adalah bentuk ekspansi dari badan.
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Panic jika salah. Tanpa pesan, `assertion failed: <tes sebagaimana ditulis>` (ia adalah makro, sehingga dapat menyebut ekspresinya sendiri). Restart CL tidak ada di bahasa ini |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, dengan `T` mengimplementasikan `Eq` dan `print-object` | Panic jika keduanya tidak sama menurut `equals`, sambil mencetak kedua sisi (dua baris, `  left: ...` / ` right: ...`). Baris pertama adalah `assertion failed: <ekspresi sebagaimana ditulis>` tanpa pesan, dan `msg` jika ada pesan. Terutama dipakai di dalam fungsi `#[test]` ([Sintaks](../syntax.md)). `assert_eq!` milik Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Menulis satu baris berawalan `WARNING: ` ke `*error-output*` dan **melanjutkan**. Cara melaporkan sesuatu tanpa mengembalikan `Result` dan tanpa mengakhiri program |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Mengganti variabel global hanya selama `body` dan memulihkannya saat keluar. CL menulis ini sebagai `let`, tetapi `let` pada bahasa ini selalu mengikat secara leksikal, karena itu namanya terpisah (peran yang sama seperti makro Emacs Lisp bernama sama). Memulihkan bagaimanapun badan ditinggalkan: selesai normal, `throw`, `panic`, `break`/`return`. **Bukan pengikatan per task** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Menjalankan `body` dengan setiap variabel kendali pencetak pada nilai standarnya dan `*read-eval*` disetel ke `true` ([Pencetakan](printing.md#6-mengendalikan-seberapa-banyak-yang-dicetak)) |

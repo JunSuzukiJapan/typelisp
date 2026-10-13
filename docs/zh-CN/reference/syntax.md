@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -40,6 +40,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **向量**：`#(1 2 3)`（与 CL 相同）。内容全部是字面量，不会求值——`#(a b)` 中的 `a` 是符号而不是变量。元素类型由上下文决定（`(the Vector<i32> #(1 2))`），没有上下文时取第一个元素的类型（`#(1 2 3)` 是 `Vector<int>`）。元素类型必须一致，`#(1 "a")` 是类型错误。既没有元素也没有上下文的 `#()` 也是类型错误。每次求值都会创建新的向量。在期望 S 表达式数据的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 读到的数据），它是元素全部为数据的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `vector` 变体。
 - **数组**：`#2A((1 2) (3 4))`（与 CL 相同）。`#` 与 `A` 之间的数是维数，内容中列表嵌套的前这么多层就是各个维度。`#0A x` 是只有一个元素的零维数组。同一层的列表长度不一致是读取错误。类型的确定方式与向量相同，结果是 `Array<T>`（没有元素时需要上下文，例如 `(the Array<f64> #2A(()))`）。作为 S 表达式数据，它是 `Array<Option<Sexpr>>`——即 `Sexpr` 的 `array` 变体。
 - **元组**：`#{"foo" 123 45.6}`。内容全部是字面量，不求值（`#{a b}` 的 `a` 是符号）。各元素的类型按位置由上下文决定（`(the #{i32 f64} #{1 2.0})`），没有上下文时就是各元素自身的类型（`#{"foo" 123}` 是 `#{string int}`）。元素为 1～12 个。每次求值都会产生新的元组。要用计算出的值构造元组，使用 `(tuple a b)`。在期望 S 表达式数据的位置，它是元素全部为数据的元组——即 `Sexpr` 的 `tuple` 变体。
+- **属性**：`#[test]` 是附加在下一个形式上的标记（与 Rust 的写法相同）。目前唯一的属性是 `test`，加在 `defun` 上（[3.16 `#[test]`](#316-test--测试函数)）。用 `read` 读取时，它成为列表 `(%internal::attribute (test) form)`。
 - **空列表 `()`**：根据上下文，是 `Unit` 类型的值，或者是 `Option<Sexpr>` 的 `none`。**`Sexpr` 没有空列表的变体**——`Sexpr`
   表示"非空的 S 表达式"，S 表达式数据的类型是 `Option<Sexpr>`（见 [4.3 match](#43-match--模式匹配) 的"`Option<Sexpr>` 的模式"）。
 - **quote/quasiquote/unquote**：
@@ -888,6 +889,50 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
 
 两者都是**表达式**的特殊形式，运行时什么也不留下（被编译的是函数体展开后的形式）。lambda 列表与 `defmacro` 相同。详细规则和例子见
 [局部宏绑定](functions/system.md#9-局部宏绑定macrolet--symbol-macrolet)。
+
+### 3.16 `#[test]` — 测试函数
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()`（也不能有类型参数）。不需要 `pub`。
+
+- **普通运行和 `compile-file` 会跳过它**，连内容也不检查（与 Rust 只在 `--test` 时编译测试相同）。程序本身无法调用测试函数。
+- 测试可以写在任何放置函数的文件中、任何 `module` 之内。也可以单独写在项目的 `tests/` 文件夹里。
+- 失败指 `panic` 和运行时错误。用 `assert`，或会打印两边的 `assert-eq`（[系统](functions/system.md)）来检查。即使一个测试失败，其余测试也会继续运行。
+
+```sh
+typl test                 # 运行此文件夹中项目的全部测试
+typl test parse           # 只运行名称（如 `tests::more::parse-int` 这样的完整名称）包含 parse 的测试
+typl test foo.typl        # foo.typl（及其 use 的文件）中的测试
+typl test foo.typl parse  # 其中名称包含 parse 的测试
+```
+
+在项目中（沿上级文件夹找到的 `typelisp.toml`），`typl test` 读入源码文件夹下的所有 `.typl` 文件，以及与 `typelisp.toml` 同一文件夹中 `tests/` 下的所有 `.typl` 文件。`tests/` 下文件的模块由其相对于 `typelisp.toml` 所在文件夹的路径决定（`tests/parse.typl` 是 `tests::parse`）。
+
+`typl test` **不执行**所读入文件的**顶层表达式**。那是程序自身的工作，测试中不做（与 Go 的 `go test` 不调用 `main` 相同）。定义（`defun`、`defvar` 的初始值等）和读取器宏的注册照常进行。只要任何地方有类型错误，就一个测试也不会运行。
+
+结果每个测试一行，最后汇总输出失败测试的原因。只要有一个失败，退出码就是 1。
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+测试中 `print` 的内容会直接输出到标准输出（不捕获）。
 
 ## 4. 绑定与条件分支
 

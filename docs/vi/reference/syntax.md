@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -72,6 +72,7 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   (`#{"foo" 123}` là `#{string int}`). Một tuple có từ 1 đến 12 phần tử. Mỗi lần đánh giá tạo ra một
   tuple mới. Để dựng từ các giá trị đã tính, dùng `(tuple a b)`. Ở nơi mong đợi dữ liệu
   S-expression, nó là tuple mà mọi phần tử đều là dữ liệu: variant `tuple` của `Sexpr`.
+- **Thuộc tính**: `#[test]` là một dấu gắn vào dạng tiếp theo (viết như trong Rust). Hiện chỉ có một thuộc tính là `test`, và nó đặt lên một `defun` ([3.16 `#[test]`](#316-test--hàm-kiểm-thử)). Khi đọc bằng `read`, nó trở thành danh sách `(%internal::attribute (test) form)`.
 - **Danh sách rỗng `()`**: tùy ngữ cảnh, là giá trị của kiểu `Unit` hoặc là `none` của `Option<Sexpr>`.
   **`Sexpr` không có variant danh sách rỗng**: `Sexpr` nghĩa là "một S-expression không rỗng", và kiểu của dữ
   liệu S-expression là `Option<Sexpr>` (xem "Mẫu cho `Option<Sexpr>`" ở
@@ -1103,6 +1104,50 @@ Các trường của struct được viết `(pub x i32)` (3.6).
 Cả hai là các dạng đặc biệt **biểu thức**, và không có gì còn lại lúc chạy (thứ được biên dịch là dạng đã khai
 triển của thân). Danh sách lambda giống như của `defmacro`. Các quy tắc chi tiết và ví dụ nằm ở
 [Ràng buộc macro cục bộ](functions/system.md#9-ràng-buộc-macro-cục-bộ-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — hàm kiểm thử
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` (cũng không thể nhận tham số kiểu). Không cần `pub`.
+
+- **Lần chạy thông thường và `compile-file` bỏ qua nó**, thậm chí không kiểm tra nội dung (giống như Rust chỉ biên dịch các kiểm thử khi có `--test`). Bản thân chương trình không thể gọi một hàm kiểm thử.
+- Có thể viết kiểm thử trong bất kỳ tệp nào chứa hàm, bên trong bất kỳ `module` nào. Cũng có thể để kiểm thử riêng trong thư mục `tests/` của dự án.
+- Một kiểm thử thất bại khi có `panic` hoặc lỗi lúc chạy. Kiểm tra bằng `assert`, hoặc bằng `assert-eq` (in ra cả hai vế) ([Hệ thống](functions/system.md)). Khi một kiểm thử thất bại, các kiểm thử còn lại vẫn chạy.
+
+```sh
+typl test                 # chạy mọi kiểm thử của dự án trong thư mục này
+typl test parse           # chỉ những kiểm thử có tên (tên đầy đủ, như `tests::more::parse-int`) chứa parse
+typl test foo.typl        # các kiểm thử của foo.typl (và của các tệp nó use)
+typl test foo.typl parse  # trong số đó, những cái có parse trong tên
+```
+
+Trong một dự án (tệp `typelisp.toml` tìm được khi đi ngược lên các thư mục), `typl test` nạp mọi tệp `.typl` dưới thư mục mã nguồn và mọi tệp `.typl` dưới thư mục `tests/` nằm cạnh `typelisp.toml`. Module của một tệp dưới `tests/` được xác định bởi đường dẫn của nó tính từ thư mục chứa `typelisp.toml` (`tests/parse.typl` là `tests::parse`).
+
+`typl test` **không chạy các biểu thức cấp cao nhất** của những tệp nó nạp. Đó là công việc riêng của chương trình, điều mà một lần chạy kiểm thử không làm (giống như `go test` không gọi `main`). Các định nghĩa (`defun`, giá trị khởi tạo của `defvar`, v.v.) và việc đăng ký macro đọc vẫn diễn ra như thường. Nếu ở đâu đó có lỗi kiểu, không kiểm thử nào chạy.
+
+Kết quả là mỗi kiểm thử một dòng, với lý do của các lần thất bại được gom lại ở cuối. Chỉ cần một kiểm thử thất bại, mã thoát là 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Những gì kiểm thử in ra bằng `print` đi thẳng ra đầu ra chuẩn (không bị thu giữ).
 
 ## 4. Ràng buộc và rẽ nhánh
 

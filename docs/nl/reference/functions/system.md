@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Tijd, omgeving en implementatie
 
 Functies voor tijd, vragen over de runtime-omgeving, implementatiehulpmiddelen, het parsen en
@@ -334,6 +334,7 @@ niets over: wat wordt gecompileerd is de geëxpandeerde vorm van de body.
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Geeft een panic als onwaar. Zonder melding `assertion failed: <de test zoals geschreven>` (het is een macro, dus hij kan de expressie zelf noemen). De restarts van CL bestaan niet in deze taal |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, waarbij `T` `Eq` en `print-object` implementeert | Panic als de twee volgens `equals` niet gelijk zijn, met beide kanten afgedrukt (twee regels, `  left: ...` / ` right: ...`). De eerste regel is zonder bericht `assertion failed: <de expressie zoals geschreven>`, met bericht `msg`. Vooral gebruikt in `#[test]`-functies ([Syntaxis](../syntax.md)). Rusts `assert_eq!` |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Schrijft één regel met het voorvoegsel `WARNING: ` naar `*error-output*` en **gaat door**. Een manier om iets te melden zonder een `Result` terug te geven en zonder het programma te beëindigen |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Vervangt globale variabelen alleen tijdens `body` en herstelt ze bij het verlaten. CL schrijft dit als `let`, maar `let` in deze taal bindt altijd lexicaal, vandaar de aparte naam (dezelfde rol als de Emacs Lisp-macro met dezelfde naam). Herstelt ze hoe de body ook wordt verlaten: normale voltooiing, `throw`, `panic`, `break`/`return`. **Geen binding per taak** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Voert `body` uit met elke besturingsvariabele van de printer op zijn standaardwaarde en `*read-eval*` op `true` ([Afdrukken](printing.md#6-bepalen-hoeveel-wordt-afgedrukt)) |

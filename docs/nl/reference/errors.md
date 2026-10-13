@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4adbf0e3f78566a6c1f79d671a5d08627e -->
 # Foutmeldingen
 
 Wat de belangrijkste foutmeldingen van `typl` betekenen en hoe je ze oplost.

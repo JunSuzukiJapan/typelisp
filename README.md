@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: README_JP.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -292,6 +292,22 @@ program (it receives them with `(command-line-args)`).
 typl foo.typl
 typl foo.typl a b c
 ```
+
+### Running tests
+
+Runs the functions marked `#[test]` (test functions). Run in a project folder (the folder with
+`typelisp.toml`, or one below it), it collects test functions from every file of the project and
+from the files in the `tests/` folder. Given a file name, it runs only that file's test functions.
+A string at the end runs only the tests whose name contains it.
+
+```sh
+typl test
+typl test parse
+typl test foo.typl
+```
+
+For how to write them, see "`#[test]` — test functions" in the
+[syntax reference](docs/en/reference/syntax.md).
 
 ### Compiling a file
 

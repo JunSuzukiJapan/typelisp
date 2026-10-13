@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -80,6 +80,7 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
   Auswertung erzeugt ein neues Tupel. Um eines aus berechneten Werten zu bauen, verwendet man
   `(tuple a b)`. Wo S-Ausdrucksdaten erwartet werden, ist es ein Tupel, dessen Elemente alle Daten
   sind: die Variante `tuple` von `Sexpr`.
+- **Attribute**: `#[test]` ist eine Markierung, die an der nächsten Form hängt (wie in Rust geschrieben). Das bisher einzige Attribut ist `test`, und es gehört an ein `defun` ([3.16 `#[test]`](#316-test--testfunktionen)). Mit `read` gelesen wird daraus die Liste `(%internal::attribute (test) form)`.
 - **Die leere Liste `()`**: je nach Kontext der Wert des Typs `Unit` oder das `none` von `Option<Sexpr>`.
   **`Sexpr` hat keine Variante für die leere Liste**: `Sexpr` bedeutet „ein nicht leerer S-Ausdruck“, und der
   Typ von S-Ausdrucksdaten ist `Option<Sexpr>` (siehe „Muster für `Option<Sexpr>`“ in
@@ -1172,6 +1173,50 @@ Beide sind Spezialformen für **Ausdrücke**, und zur Laufzeit bleibt nichts üb
 expandierte Form des Rumpfes). Die Lambda-Liste ist dieselbe wie bei `defmacro`. Die genauen Regeln und
 Beispiele stehen unter
 [Lokale Makrobindungen](functions/system.md#9-lokale-makrobindungen-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — Testfunktionen
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+Ein mit `#[test]` markiertes `defun` ist eine Testfunktion, die `typl test` eine nach der anderen aufruft (wie Rusts `#[test]`). Sie darf keine Argumente nehmen und muss `()` zurückgeben (Typparameter kann sie auch nicht nehmen). `pub` braucht sie nicht.
+
+- **Ein gewöhnlicher Lauf und `compile-file` überspringen sie**, ohne auch nur ihren Inhalt zu prüfen (so wie Rust Tests nur unter `--test` kompiliert). Das Programm selbst kann keine Testfunktion aufrufen.
+- Ein Test kann in jeder Datei stehen, die Funktionen enthält, und in jedem `module`. Tests lassen sich auch getrennt im Ordner `tests/` des Projekts ablegen.
+- Ein Test schlägt durch ein `panic` oder einen Laufzeitfehler fehl. Geprüft wird mit `assert` oder mit `assert-eq`, das beide Seiten ausgibt ([System](functions/system.md)). Schlägt ein Test fehl, laufen die übrigen trotzdem.
+
+```sh
+typl test                 # alle Tests des Projekts in diesem Ordner ausführen
+typl test parse           # nur die, deren Name (der volle Name, etwa `tests::more::parse-int`) parse enthält
+typl test foo.typl        # die Tests von foo.typl (und der Dateien, die es per use lädt)
+typl test foo.typl parse  # davon die, deren Name parse enthält
+```
+
+In einem Projekt (der `typelisp.toml`, die man findet, wenn man die Ordner nach oben geht) lädt `typl test` jede `.typl`-Datei unter dem Quellordner und jede `.typl`-Datei unter dem Ordner `tests/` neben der `typelisp.toml`. Das Modul einer Datei unter `tests/` ergibt sich aus ihrem Pfad vom Ordner der `typelisp.toml` aus (`tests/parse.typl` ist `tests::parse`).
+
+`typl test` **führt die Ausdrücke auf oberster Ebene** der geladenen Dateien **nicht aus**. Das ist die eigene Arbeit des Programms, die ein Testlauf nicht tut (so wie `go test` `main` nicht aufruft). Definitionen (`defun`, der Anfangswert eines `defvar` usw.) und Registrierungen von Reader-Makros geschehen wie gewohnt. Gibt es irgendwo einen Typfehler, läuft kein einziger Test.
+
+Das Ergebnis ist eine Zeile pro Test; die Gründe der Fehlschläge stehen gesammelt am Ende. Schlägt auch nur ein Test fehl, ist der Exit-Code 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Was ein Test mit `print` ausgibt, geht direkt auf die Standardausgabe (es wird nicht abgefangen).
 
 ## 4. Bindung und Verzweigung
 

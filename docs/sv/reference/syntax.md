@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -76,6 +76,7 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
   `#{string int}`). En tupel har 1 till 12 element. Varje evaluering skapar en ny tupel. För att
   bygga en av beräknade värden använder man `(tuple a b)`. Där S-uttrycksdata förväntas är det en
   tupel vars element alla är data: varianten `tuple` av `Sexpr`.
+- **Attribut**: `#[test]` är en markering som hör till nästa form (skriven som i Rust). Det enda attributet hittills är `test`, och det sätts på en `defun` ([3.16 `#[test]`](#316-test--testfunktioner)). Läst med `read` blir det listan `(%internal::attribute (test) form)`.
 - **Den tomma listan `()`**: beroende på sammanhang värdet av typen `Unit` eller `none` i
   `Option<Sexpr>`. **`Sexpr` har ingen variant för den tomma listan**: `Sexpr` betyder "ett icke-tomt
   S-uttryck", och typen för S-uttrycksdata är `Option<Sexpr>` (se "Mönster för `Option<Sexpr>`" i
@@ -1135,6 +1136,50 @@ Båda är **uttrycks**-specialformer, och ingenting finns kvar vid körning (det
 expanderade formen av kroppen). Lambdalistan är densamma som för `defmacro`. De detaljerade reglerna och
 exemplen finns i
 [Lokala makrobindningar](functions/system.md#9-lokala-makrobindningar-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — testfunktioner
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+En `defun` märkt med `#[test]` är en testfunktion, som `typl test` anropar en i taget (som Rusts `#[test]`). Den får inte ta några argument och måste returnera `()` (den kan inte heller ta typparametrar). Den behöver inte `pub`.
+
+- **En vanlig körning och `compile-file` hoppar över den**, utan att ens kontrollera innehållet (precis som Rust bara kompilerar tester med `--test`). Programmet självt kan inte anropa en testfunktion.
+- Ett test kan skrivas i vilken fil som helst som innehåller funktioner, inuti vilken `module` som helst. Tester kan också ligga separat i projektets mapp `tests/`.
+- Ett test misslyckas genom en `panic` eller ett körtidsfel. Kontrollera med `assert`, eller med `assert-eq`, som skriver ut båda sidorna ([System](functions/system.md)). När ett test misslyckas körs resten ändå.
+
+```sh
+typl test                 # kör alla tester i projektet i den här mappen
+typl test parse           # bara de vars namn (hela namnet, som `tests::more::parse-int`) innehåller parse
+typl test foo.typl        # testerna i foo.typl (och i filerna den använder)
+typl test foo.typl parse  # av dem, de som har parse i namnet
+```
+
+I ett projekt (den `typelisp.toml` som hittas genom att gå uppåt i mapparna) laddar `typl test` varje `.typl`-fil under källmappen och varje `.typl`-fil under mappen `tests/` bredvid `typelisp.toml`. Modulen för en fil under `tests/` ges av dess sökväg från mappen med `typelisp.toml` (`tests/parse.typl` är `tests::parse`).
+
+`typl test` **kör inte uttrycken på toppnivå** i filerna den laddar. Det är programmets eget arbete, som en testkörning inte gör (precis som `go test` inte anropar `main`). Definitioner (`defun`, startvärdet för en `defvar` och så vidare) och registreringar av läsarmakron sker som vanligt. Finns det ett typfel någonstans körs inget test alls.
+
+Resultatet är en rad per test, med orsakerna till misslyckandena samlade i slutet. Om ens ett test misslyckas är slutkoden 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Det ett test skriver ut med `print` går direkt till standard ut (det fångas inte upp).
 
 ## 4. Bindning och villkor
 

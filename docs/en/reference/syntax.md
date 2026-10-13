@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -75,6 +75,7 @@ and for reading error messages, [errors.md](errors.md).
   `#{string int}`). A tuple has 1 to 12 elements. Each evaluation makes a new tuple. To build one
   from computed values, use `(tuple a b)`. Where S-expression data is expected, it is a tuple whose
   elements are all data: the `tuple` variant of `Sexpr`.
+- **Attributes**: `#[test]` is a mark attached to the next form (written as in Rust). The only attribute so far is `test`, which goes on a `defun` ([3.16 `#[test]`](#316-test--test-functions)). Read with `read`, it becomes the list `(%internal::attribute (test) form)`.
 - **The empty list `()`**: depending on context, the value of the `Unit` type or the `none` of
   `Option<Sexpr>`. **`Sexpr` has no empty-list variant**: `Sexpr` means "a non-empty S-expression",
   and the type of S-expression data is `Option<Sexpr>` (see "Patterns for `Option<Sexpr>`" in
@@ -1137,6 +1138,50 @@ Both are **expression** special forms, and nothing remains at run time (what get
 expanded form of the body). The lambda list is the same as for `defmacro`. The detailed rules and
 examples are in
 [Local macro bindings](functions/system.md#9-local-macro-bindings-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — test functions
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+A `defun` marked `#[test]` is a test function, which `typl test` calls one at a time (the same as Rust's `#[test]`). It must take no arguments and return `()` (it cannot take type parameters either). It does not need `pub`.
+
+- **An ordinary run and `compile-file` skip it**, without even checking its contents (just as Rust compiles tests only under `--test`). The program itself cannot call a test function.
+- A test can be written in any file that holds functions, inside any `module`. Tests can also be kept separately in the project's `tests/` folder.
+- A test fails by a `panic` or a runtime error. Check things with `assert`, or with `assert-eq`, which prints both sides ([System](functions/system.md)). When one test fails, the rest still run.
+
+```sh
+typl test                 # run every test of the project in this folder
+typl test parse           # only those whose name (the full name, like `tests::more::parse-int`) contains parse
+typl test foo.typl        # the tests of foo.typl (and of the files it uses)
+typl test foo.typl parse  # of those, the ones whose name contains parse
+```
+
+In a project (the `typelisp.toml` found by walking up the folders), `typl test` loads every `.typl` file under the source folder and every `.typl` file under the `tests/` folder next to `typelisp.toml`. The module of a file under `tests/` is given by its path from the folder of `typelisp.toml` (`tests/parse.typl` is `tests::parse`).
+
+`typl test` **does not run the top-level expressions** of the files it loads. That is the program's own work, which a test run does not do (the same as `go test` not calling `main`). Definitions (`defun`, the initial value of a `defvar`, and so on) and reader macro registrations happen as usual. If there is a type error anywhere, no test runs.
+
+The result is one line per test, with the reasons for the failures gathered at the end. If even one test fails, the exit code is 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+What a test `print`s goes straight to standard output (it is not captured).
 
 ## 4. Binding and conditionals
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Tiempo, entorno e implementación
 
 Funciones de tiempo, consultas sobre el entorno de ejecución, herramientas de la implementación, análisis y
@@ -330,6 +330,7 @@ de ejecución: lo que se compila es la forma expandida del cuerpo.
 | Nombre | Forma | Tipo | Descripción |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Panic si es falso. Sin mensaje, `assertion failed: <la prueba tal como se escribió>` (es una macro, así que puede nombrar la propia expresión). Los reinicios de CL no existen en este lenguaje |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, donde `T` implementa `Eq` y `print-object` | Hace panic si los dos no son iguales según `equals`, imprimiendo ambos lados (dos líneas, `  left: ...` / ` right: ...`). La primera línea es `assertion failed: <la expresión tal como se escribió>` sin mensaje, y `msg` con él. Se usa sobre todo dentro de funciones `#[test]` ([Sintaxis](../syntax.md)). El `assert_eq!` de Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Escribe una línea con el prefijo `WARNING: ` en `*error-output*` y **continúa**. Una forma de informar de algo sin devolver un `Result` y sin terminar el programa |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Sustituye globales solo durante `body` y las restaura al salir. CL escribe esto como `let`, pero `let` en este lenguaje siempre enlaza léxicamente, de ahí el nombre aparte (el mismo papel que la macro homónima de Emacs Lisp). Las restaura se salga como se salga del cuerpo: terminación normal, `throw`, `panic`, `break`/`return`. **No es un enlace por tarea** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Ejecuta `body` con todas las variables de control de la impresora en sus valores estándar y `*read-eval*` a `true` ([Impresión](printing.md#6-controlar-cuánto-se-imprime)) |

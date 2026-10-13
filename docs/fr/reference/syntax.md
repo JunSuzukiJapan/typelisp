@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -79,6 +79,7 @@ messages d'erreur, [errors.md](errors.md).
   nouveau tuple. Pour en construire un à partir de valeurs calculées, on utilise `(tuple a b)`. Là
   où des données S-expression sont attendues, c'est un tuple dont tous les éléments sont des données
   : la variante `tuple` de `Sexpr`.
+- **Attributs** : `#[test]` est une marque attachée à la forme suivante (écrite comme en Rust). Le seul attribut pour l'instant est `test`, qui se place sur un `defun` ([3.16 `#[test]`](#316-test--fonctions-de-test)). Lu avec `read`, il devient la liste `(%internal::attribute (test) form)`.
 - **La liste vide `()`** : selon le contexte, la valeur du type `Unit` ou le `none` de `Option<Sexpr>`. **`Sexpr` n'a
   pas de variante liste vide** : `Sexpr` signifie « une S-expression non vide », et le type des données S-expression
   est `Option<Sexpr>` (voir « Motifs pour `Option<Sexpr>` » dans [4.3 match](#43-match--filtrage-par-motifs)).
@@ -1150,6 +1151,50 @@ Ce sont toutes deux des formes spéciales d'**expression**, et rien ne subsiste 
 la forme développée du corps). La liste lambda est la même que pour `defmacro`. Les règles détaillées et les exemples
 se trouvent dans
 [Liaisons de macros locales](functions/system.md#9-liaisons-de-macros-locales-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — fonctions de test
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+Un `defun` marqué `#[test]` est une fonction de test, que `typl test` appelle une à une (comme le `#[test]` de Rust). Elle ne doit prendre aucun argument et doit renvoyer `()` (elle ne peut pas non plus prendre de paramètres de type). Elle n'a pas besoin de `pub`.
+
+- **Une exécution ordinaire et `compile-file` l'ignorent**, sans même vérifier son contenu (comme Rust ne compile les tests que sous `--test`). Le programme lui-même ne peut pas appeler une fonction de test.
+- Un test peut s'écrire dans n'importe quel fichier contenant des fonctions, à l'intérieur de n'importe quel `module`. Les tests peuvent aussi être rangés à part dans le dossier `tests/` du projet.
+- Un test échoue par un `panic` ou une erreur d'exécution. On vérifie avec `assert`, ou avec `assert-eq`, qui affiche les deux côtés ([Système](functions/system.md)). Quand un test échoue, les autres s'exécutent quand même.
+
+```sh
+typl test                 # exécute tous les tests du projet de ce dossier
+typl test parse           # seulement ceux dont le nom (le nom complet, comme `tests::more::parse-int`) contient parse
+typl test foo.typl        # les tests de foo.typl (et des fichiers qu'il utilise)
+typl test foo.typl parse  # parmi eux, ceux dont le nom contient parse
+```
+
+Dans un projet (le `typelisp.toml` trouvé en remontant les dossiers), `typl test` charge tous les fichiers `.typl` sous le dossier des sources et tous les fichiers `.typl` sous le dossier `tests/` à côté de `typelisp.toml`. Le module d'un fichier sous `tests/` est donné par son chemin depuis le dossier de `typelisp.toml` (`tests/parse.typl` est `tests::parse`).
+
+`typl test` **n'exécute pas les expressions de premier niveau** des fichiers qu'il charge. C'est le travail propre du programme, qu'une exécution de tests ne fait pas (comme `go test` n'appelle pas `main`). Les définitions (`defun`, la valeur initiale d'un `defvar`, etc.) et les enregistrements de macros de lecteur ont lieu comme d'habitude. S'il y a une erreur de type quelque part, aucun test ne s'exécute.
+
+Le résultat tient en une ligne par test, avec les raisons des échecs regroupées à la fin. Si un seul test échoue, le code de sortie est 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Ce qu'un test affiche avec `print` va directement sur la sortie standard (ce n'est pas capturé).
 
 ## 4. Liaison et conditionnelles
 

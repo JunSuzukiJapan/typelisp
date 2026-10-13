@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -80,6 +80,7 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   nieuwe tuple. Om er een te bouwen uit berekende waarden gebruik je `(tuple a b)`. Waar
   S-expressiedata worden verwacht, is het een tuple waarvan alle elementen data zijn: de variant
   `tuple` van `Sexpr`.
+- **Attributen**: `#[test]` is een markering die aan de volgende vorm vastzit (geschreven zoals in Rust). Het enige attribuut tot nu toe is `test`, en dat hoort bij een `defun` ([3.16 `#[test]`](#316-test--testfuncties)). Gelezen met `read` wordt het de lijst `(%internal::attribute (test) form)`.
 - **De lege lijst `()`**: afhankelijk van de context de waarde van het type `Unit` of de `none` van
   `Option<Sexpr>`. **`Sexpr` heeft geen variant voor de lege lijst**: `Sexpr` betekent "een niet-lege
   S-expressie", en het type van S-expressiedata is `Option<Sexpr>` (zie "Patronen voor
@@ -1184,6 +1185,50 @@ Beide zijn **expressie**-speciale vormen, en tijdens runtime blijft er niets ove
 is de geëxpandeerde vorm van de body). De lambdalijst is dezelfde als bij `defmacro`. De gedetailleerde
 regels en voorbeelden staan in
 [Lokale macrobindingen](functions/system.md#9-lokale-macrobindingen-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — testfuncties
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig.
+
+- **Een gewone run en `compile-file` slaan haar over**, zonder zelfs de inhoud te controleren (zoals Rust tests alleen onder `--test` compileert). Het programma zelf kan een testfunctie niet aanroepen.
+- Een test kan in elk bestand staan dat functies bevat, binnen elke `module`. Tests kunnen ook apart in de map `tests/` van het project staan.
+- Een test faalt door een `panic` of een runtimefout. Controleer met `assert`, of met `assert-eq`, dat beide kanten afdrukt ([Systeem](functions/system.md)). Als één test faalt, lopen de andere toch.
+
+```sh
+typl test                 # voer alle tests van het project in deze map uit
+typl test parse           # alleen die waarvan de naam (de volledige naam, zoals `tests::more::parse-int`) parse bevat
+typl test foo.typl        # de tests van foo.typl (en van de bestanden die het gebruikt)
+typl test foo.typl parse  # daarvan die met parse in de naam
+```
+
+In een project (de `typelisp.toml` die je vindt door de mappen omhoog te volgen) laadt `typl test` elk `.typl`-bestand onder de bronmap en elk `.typl`-bestand onder de map `tests/` naast `typelisp.toml`. De module van een bestand onder `tests/` volgt uit zijn pad vanaf de map van `typelisp.toml` (`tests/parse.typl` is `tests::parse`).
+
+`typl test` **voert de expressies op het hoogste niveau** van de geladen bestanden **niet uit**. Dat is het eigen werk van het programma, dat een testrun niet doet (zoals `go test` `main` niet aanroept). Definities (`defun`, de beginwaarde van een `defvar` enzovoort) en registraties van readermacro's gebeuren zoals gewoonlijk. Is er ergens een typefout, dan loopt er geen enkele test.
+
+Het resultaat is één regel per test, met de redenen van de mislukkingen verzameld aan het eind. Faalt ook maar één test, dan is de exitcode 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Wat een test met `print` afdrukt, gaat direct naar standaarduitvoer (het wordt niet opgevangen).
 
 ## 4. Binding en voorwaarden
 

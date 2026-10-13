@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4adbf0e3f78566a6c1f79d671a5d08627e -->
 # 錯誤訊息
 
 `typl` 提供的主要錯誤訊息的意義與修正方式。

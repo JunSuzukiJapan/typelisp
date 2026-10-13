@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4adbf0e3f78566a6c1f79d671a5d08627e -->
 # Komunikaty o błędach
 
 Co oznaczają główne komunikaty o błędach z `typl` i jak je naprawić.

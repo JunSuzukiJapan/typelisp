@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Zaman, Ortam ve Gerçekleştirim
 
 Zaman, çalışma zamanı ortamı hakkındaki sorgular, gerçekleştirim araçları, metin ayrıştırma ve
@@ -325,6 +325,7 @@ kalmaz: derlenen şey gövdenin açılmış biçimidir.
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | False ise panic olur. Mesaj olmadan `assertion failed: <yazıldığı gibi sınama>` (bir makro olduğundan ifadenin kendisini adlandırabilir). CL'nin yeniden başlatmaları (restart) bu dilde yoktur |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`; `T`, `Eq` ve `print-object`'i uygular | İkisi `equals`'a göre eşit değilse iki tarafı da yazdırarak panic yapar (iki satır, `  left: ...` / ` right: ...`). İlk satır mesaj yoksa `assertion failed: <yazıldığı haliyle ifade>`, varsa `msg`'dir. Esas olarak `#[test]` fonksiyonlarının içinde kullanılır ([Sözdizimi](../syntax.md)). Rust'ın `assert_eq!`'i |
 | `warn` | `(warn control args...)` | `(string,...)→()` | `*error-output*`'a `WARNING: ` önekli bir satır yazar ve **devam eder**. Bir `Result` döndürmeden ve programı bitirmeden bir şeyi bildirmenin yolu |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Globalleri yalnızca `body` süresince değiştirir ve çıkışta geri yükler. CL bunu `let` olarak yazar, ancak bu dilde `let` her zaman sözcüksel olarak bağlar; bu yüzden ayrı ad (aynı adlı Emacs Lisp makrosuyla aynı rol). Gövdeden nasıl çıkılırsa çıkılsın geri yükler: normal tamamlanma, `throw`, `panic`, `break`/`return`. **Task başına bir bağlama değildir** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | `body`'yi her yazıcı denetim değişkeni standart değerinde ve `*read-eval*` `true` olarak ayarlı çalıştırır ([Yazdırma](printing.md#6-ne-kadarının-yazdırılacağını-denetleme)) |
