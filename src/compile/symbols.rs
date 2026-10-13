@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::types::Path;
+use typelisp_mem::ConcreteNames;
 
 /// The two trait-object id tables a translation reads, interned by `Interp`
 /// *before* translation starts: both are baked into the emitted IR as
@@ -53,16 +54,6 @@ pub fn fresh_lambda_name(prefix: &str) -> String {
     format!("{}${}", prefix, n)
 }
 
-/// A user-defined free function/`labels` sibling's own LLVM symbol name —
-/// see [`crate::compile::USER_SYMBOL_PREFIX`]'s doc comment for why this is
-/// never `logical_name` unprefixed. The single place [`translate_call`]/
-/// [`translate_fnref`]'s embedded `(call ...)`-node name string is built,
-/// so it always agrees with whatever `Interp::compile_scc`/
-/// `compile::aot` declare/wire the *actual* LLVM function under.
-pub fn user_symbol_name(logical_name: &str) -> String {
-    format!("{}{}", crate::compile::USER_SYMBOL_PREFIX, logical_name)
-}
-
 /// The LLVM symbol a call to `path` must name: the `typelisp-rt` shim, when
 /// `path` is a free builtin with no typelisp body
 /// ([`crate::compile::externs::builtin_shim`]), and otherwise the mangled
@@ -75,13 +66,13 @@ pub fn user_symbol_name(logical_name: &str) -> String {
 pub fn callee_symbol_name(path: &crate::Path) -> String {
     match crate::compile::externs::builtin_shim(path) {
         Some(shim) => shim.to_string(),
-        None => user_symbol_name(&path.segments().join("::")),
+        None => ConcreteNames::symbol(&path.to_string()),
     }
 }
 
 /// The LLVM symbol `target`'s compiled body is defined under — the same
 /// string a *call site* emits for it (`core_bridge::translate_call`'s
-/// [`callee_symbol_name`], `translate_assoc`'s [`user_method_symbol_name`]),
+/// [`callee_symbol_name`], `translate_assoc`'s [`ConcreteNames::method_symbol`]),
 /// so a body and the calls to it can't be declared under two different names.
 ///
 /// One function for every place that builds or loads a precompiled library —
@@ -90,25 +81,11 @@ pub fn callee_symbol_name(path: &crate::Path) -> String {
 /// cannot come to spell a definition two ways.
 pub fn target_symbol_name(target: &crate::CompileTarget) -> String {
     match target {
-        crate::CompileTarget::Fn(path) => user_symbol_name(&path.to_string()),
-        crate::CompileTarget::Method(type_path, method) => user_method_symbol_name(type_path, method),
+        crate::CompileTarget::Fn(path) => ConcreteNames::symbol(&path.to_string()),
+        crate::CompileTarget::Method(type_path, method) => ConcreteNames::method_symbol(type_path, method),
     }
 }
 
-/// A user-defined method's own LLVM symbol name — the `assoc`
-/// counterpart of [`user_symbol_name`]: the prefix, then
-/// [`method_link_name`](crate::types::method_link_name)
-/// (`tl_type::path''method`). `compiler.rs`'s `compile-assoc-user` builds
-/// this exact same string from `type-name`/`method` (its own `(append "tl_"
-/// (append type-name (append "''" method)))`, where `type-name` is the full
-/// `::`-joined path `core_bridge::translate_assoc` embedded — never just the
-/// type's local segment, or two same-named types in different modules would
-/// mangle to the same symbol) before its `get-function` lookup, so this must
-/// stay in lockstep with that — see [`crate::compile::USER_SYMBOL_PREFIX`]'s
-/// doc comment.
-pub fn user_method_symbol_name(type_name: &Path, method: &str) -> String {
-    format!("{}{}", crate::compile::USER_SYMBOL_PREFIX, crate::types::method_link_name(type_name, method))
-}
 
 /// `Vector<T>`'s builtin methods that have no compiled `defmethod` body and so
 /// must be lowered to a dedicated `vector-op` node (`translate_vector_method`)

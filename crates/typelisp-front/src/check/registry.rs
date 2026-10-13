@@ -477,7 +477,7 @@ pub struct Namespace {
     /// `deftype` aliases defined directly here, keyed by unqualified name.
     /// Kept apart from `types`: an alias is not a type, it is a *spelling*
     /// that `Checker::canon` rewrites away, so nothing past the type parser
-    /// ever sees one (`mangle_type`, the fasl, the compile pipeline, an error
+    /// ever sees one (`ConcreteNames::type_key`, the fasl, the compile pipeline, an error
     /// message — all show the expansion).
     pub type_aliases: HashMap<String, TypeAlias>,
     /// Bare names snapshotted from a `(use Type)` of a type's *static*

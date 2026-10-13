@@ -495,7 +495,7 @@ pub fn add_compiled_global_init(
 /// exact same three steps, *keyed and named differently*: looked up in
 /// [`crate::eval::interp::Interp::methods`]/[`crate::eval::interp::Interp::compiled_methods`] instead of
 /// [`crate::eval::interp::Interp::fns`]/[`crate::eval::interp::Interp::compiled`], and forward-declared/wired under the
-/// mangled name [`method_link_name`] builds — the same literal string
+/// mangled name [`typelisp_mem::ConcreteNames::method_link`] builds — the same literal string
 /// this very method itself uses as `internal_name` when `name` is a
 /// method (see [`crate::eval::interp::Interp::add_compiled_function`]'s call below), which is
 /// also exactly what `compiler.rs`'s `compile-assoc` mangles a callee's
@@ -748,7 +748,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
         if !interp.root.borrow().has_method(type_name, method) {
             return Err(EvalError::Uncompilable {
                 caller: node.link_name(),
-                target: crate::types::method_link_name(type_name, method),
+                target: typelisp_mem::ConcreteNames::method_link(type_name, method),
             });
         }
     }
@@ -842,7 +842,7 @@ pub(crate) fn scc_strongconnect(
 /// other — into one shared, throwaway LLVM module, replacing the single-
 /// function-per-module shape every `compile_function_rec` call used
 /// before this stage. Every `members` name is forward-declared under its
-/// real internal name (`core_bridge::user_symbol_name`) *before* any of
+/// real internal name (`ConcreteNames::symbol`) *before* any of
 /// their bodies are translated, exactly like an external call target
 /// always was — so a call from one member to a sibling still without a
 /// body yet resolves to that same declaration by name

@@ -12,17 +12,19 @@
 /// arity up to this.
 pub const TUPLE_MAX_ARITY: usize = 12;
 
+use crate::ConcreteNames;
+
 const PREFIX: &str = "%internal::tuple";
 const ELEMENT: &str = "option<sexpr>";
 
 /// The key of the `#{..}` datum of `arity` elements.
 pub fn sexpr_tuple_key(arity: usize) -> String {
     debug_assert!((1..=TUPLE_MAX_ARITY).contains(&arity), "no tuple type of arity {}", arity);
-    format!("{}{}<{}>", PREFIX, arity, vec![ELEMENT; arity].join(","))
+    ConcreteNames::instantiated_type(&format!("{}{}", PREFIX, arity), &vec![ELEMENT; arity])
 }
 
 /// Whether `base` — a type key with its `<..>` arguments taken off
-/// ([`crate::base_type_key`]) — names a tuple type, of any element types.
+/// ([`ConcreteNames::base_type`]) — names a tuple type, of any element types.
 pub fn is_tuple_base_key(base: &str) -> bool {
     base.strip_prefix(PREFIX)
         .and_then(|n| n.parse::<usize>().ok())
@@ -32,9 +34,7 @@ pub fn is_tuple_base_key(base: &str) -> bool {
 /// The arity of the `#{..}` datum whose key is `key`, or `None` when `key`
 /// is not one — including a tuple whose elements are of other types.
 pub fn sexpr_tuple_arity(key: &str) -> Option<usize> {
-    let rest = key.strip_prefix(PREFIX)?;
-    let digits = rest.find('<')?;
-    let arity: usize = rest[..digits].parse().ok()?;
+    let arity: usize = ConcreteNames::base_type(key).strip_prefix(PREFIX)?.parse().ok()?;
     if !(1..=TUPLE_MAX_ARITY).contains(&arity) {
         return None;
     }

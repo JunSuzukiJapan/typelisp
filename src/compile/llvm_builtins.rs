@@ -2524,7 +2524,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         // `Option<llvm-value>`, spelled through the one producer: a type's
         // runtime identity includes its instantiation, and `native-scope::get`
         // is the one builtin here that returns a generic box.
-        let key = typelisp_front::type_key::type_key_of_type(&crate::types::Type::Named(
+        let key = typelisp_mem::ConcreteNames::type_key(&crate::types::Type::Named(
             crate::Path::root("option"),
             vec![crate::types::Type::Named(crate::Path::root("llvm-value"), vec![])],
         ));

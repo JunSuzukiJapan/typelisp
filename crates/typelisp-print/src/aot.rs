@@ -81,7 +81,7 @@ pub type FieldNames = std::collections::HashMap<(String, i64), String>;
 /// the key's *base*: the tables hold one entry per type, while the key a
 /// value carries names its instantiation (`option<char>`).
 fn field_template_in<'t>(templates: &'t FieldTemplates, key: &str, variant: Option<usize>, index: usize) -> Option<&'t String> {
-    let base = typelisp_mem::base_type_key(key).to_string();
+    let base = typelisp_mem::ConcreteNames::base_type(key).to_string();
     let variant = variant.map_or(NO_VARIANT, |v| v as i64);
     templates.get(&(base.clone(), variant, index as i64)).or_else(|| templates.get(&(base, variant, EVERY_FIELD)))
 }
@@ -89,7 +89,7 @@ fn field_template_in<'t>(templates: &'t FieldTemplates, key: &str, variant: Opti
 /// [`crate::PrintEnv::enum_variant_name`] answered from a registration table
 /// — an AOT executable's, or a worker thread's copy of the interpreter's.
 pub fn variant_name_in(names: &VariantNames, key: &str, variant: usize) -> Result<String, String> {
-    let base = typelisp_mem::base_type_key(key);
+    let base = typelisp_mem::ConcreteNames::base_type(key);
     names
         .get(&(base.to_string(), variant))
         .cloned()
@@ -103,8 +103,8 @@ pub fn variant_name_in(names: &VariantNames, key: &str, variant: usize) -> Resul
 pub fn field_is_niched_in(templates: &FieldTemplates, key: &str, variant: Option<usize>, index: usize) -> Result<bool, String> {
     let template = field_template_in(templates, key, variant, index)
         .ok_or_else(|| format!("internal error: no type is registered for field {} of `{}`", index, key))?;
-    let args = typelisp_mem::type_key_args(key);
-    Ok(typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(template, &args)))
+    let args = typelisp_mem::ConcreteNames::type_arg_list(key);
+    Ok(typelisp_mem::option_prints_wrapped(&typelisp_mem::ConcreteNames::instantiate_template(template, &args)))
 }
 
 /// [`crate::PrintEnv::field_name`] from a registration table. The name table
@@ -112,7 +112,7 @@ pub fn field_is_niched_in(templates: &FieldTemplates, key: &str, variant: Option
 /// of every struct — is what tells a positional field (`Ok(None)`) from a type
 /// nobody registered (`Err`).
 pub fn field_name_in(names: &FieldNames, templates: &FieldTemplates, key: &str, index: usize) -> Result<Option<String>, String> {
-    let base = typelisp_mem::base_type_key(key).to_string();
+    let base = typelisp_mem::ConcreteNames::base_type(key).to_string();
     if let Some(name) = names.get(&(base, index as i64)) {
         return Ok(Some(name.clone()));
     }

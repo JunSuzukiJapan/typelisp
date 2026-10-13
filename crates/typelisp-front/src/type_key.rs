@@ -37,6 +37,7 @@ use std::borrow::Cow;
 
 use crate::mem::BoxId;
 use crate::{Heap, Path, Type, TypeKeyId};
+use typelisp_mem::{ConcreteNames, TypeKey};
 
 /// How `p` is spelled when interned as (or looked up among) type identities.
 /// The one place a type identity *name* is produced.
@@ -82,14 +83,8 @@ pub fn alloc_typed_enum(
     heap.alloc_enum(key, variant, fields)
 }
 
-/// The key one level inside `key` — see [`typelisp_mem::inner_type_key`],
-/// which lives a crate down because the runtime shims spell keys too
-/// (`typelisp_rt`'s `rt_hashtable_entries` builds the cells of a
-/// `Vector<cons-cell<K,V>>` and is handed only the vector's key).
-pub use typelisp_mem::inner_type_key as inner_key;
-
 /// Allocate a boxed struct whose runtime identity is `key` — the spelling
-/// [`type_key_of_type`] produced at the construction site, carried through the
+/// [`typelisp_mem::ConcreteNames::type_key`] produced at the construction site, carried through the
 /// core IR's `construct` node.
 ///
 /// The [`Path`]-taking [`alloc_typed_struct`] answers the same question for a
@@ -108,7 +103,7 @@ pub fn alloc_sexpr_vector(heap: &mut Heap, elems: Vec<crate::Value>) -> crate::V
 
 /// The tuple of `Option<Sexpr>` elements `elems` — what `#{..}` reads as.
 /// Its key is `typelisp_mem::sexpr_tuple_key`'s, which
-/// `tests/type_identity_guard_test.rs` holds equal to [`type_key_of_type`]'s.
+/// `tests/type_identity_guard_test.rs` holds equal to [`typelisp_mem::ConcreteNames::type_key`]'s.
 pub fn alloc_sexpr_tuple(heap: &mut Heap, elems: Vec<crate::Value>) -> crate::Value {
     alloc_struct_keyed(heap, &crate::sexpr_tuple_key(elems.len()), elems)
 }
@@ -153,7 +148,7 @@ pub fn heap_type_is(heap: &Heap, id: BoxId, p: &Path) -> bool {
 }
 
 /// Whether boxed value `id` is an instance of the type spelled `key` — the
-/// [`type_key_of_type`] spelling a pattern node carries.
+/// [`typelisp_mem::ConcreteNames::type_key`] spelling a pattern node carries.
 ///
 /// The instantiation-aware counterpart of [`heap_type_is`]: `gen<i32>` and
 /// `gen<string>` answer differently here and identically there.
@@ -170,39 +165,6 @@ pub fn heap_type_is_key(heap: &Heap, id: BoxId, key: &str) -> bool {
 /// to look up.
 pub fn heap_type_is_id(heap: &Heap, id: BoxId, key: TypeKeyId) -> bool {
     stored_key(heap, id) == Some(key)
-}
-
-/// A key split into the type's path and its type arguments, as written:
-/// `gen<i32>` -> `("gen", Some("i32"))`, `point` -> `("point", None)`.
-///
-/// What a *lookup* needs. A generic type's methods are registered on the base
-/// type under a mangled name (`Checker::mangled_method_name`: `print-object
-/// <i32>`), so a dispatcher holding a value's key needs both halves — the
-/// path to find the type, the arguments to name the specialization.
-pub fn split_key(key: &str) -> (&str, Option<&str>) {
-    // The base half comes from `typelisp-mem` so the printer's AOT tier — which
-    // cannot see this crate — splits a key exactly the same way.
-    let base = typelisp_mem::base_type_key(key);
-    if base.len() == key.len() {
-        (key, None)
-    } else {
-        (base, Some(&key[base.len() + 1..key.len() - 1]))
-    }
-}
-
-/// The method name a *specialization* of `method` is registered under for a
-/// value whose key is `key` — `("gen<i32>", "print-object")` ->
-/// `"print-object <i32>"`, and plain `"print-object"` for a non-generic type.
-///
-/// The reader's half of `Checker::mangled_method_name`, which is what makes a
-/// generic type's `print-object` findable at all: the registration names the
-/// instantiation, and until values carried theirs, nothing holding one could
-/// spell it.
-pub fn specialized_method_name(key: &str, method: &str) -> String {
-    match split_key(key).1 {
-        Some(args) => format!("{} <{}>", method, args),
-        None => method.to_string(),
-    }
 }
 
 /// The raw key stored in boxed value `id` — the spelling, instantiation and
@@ -227,21 +189,36 @@ pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
     heap_type_key(heap, id).map(|k| {
         // The *base*: a key carries its instantiation now (`gen<i32>`), and a
         // `Path` has no room for one. Callers that need the arguments ask
-        // [`heap_type_key`]/[`split_key`] instead — the printer's dispatch is
-        // the one that does.
-        Path::from_segments(split_key(&k).0.split("::").map(str::to_string).collect())
+        // [`heap_type_key`] and [`ConcreteNames`] instead — the printer's
+        // dispatch is the one that does.
+        Path::from_segments(ConcreteNames::base_type(&k).split("::").map(str::to_string).collect())
     })
 }
 
-/// How the type `t` is spelled as a runtime identity: the whole path, plus
-/// its type arguments when it has any (`gen<i32>`, `hashtable<string,i32>`).
+/// A field's type as a *key template*: its key with each of the owning
+/// type's parameters (`params`, in declaration order) written as
+/// [`ConcreteNames::template_param`] — `Option<T>` in a `gen<T>` is
+/// `option<$0>`. [`ConcreteNames::instantiate_template`] turns one back into
+/// the key a particular instantiation's field has, from the value's own key;
+/// that is how the printer, which sees a struct only through its box, learns
+/// that a field is a niche-represented `Option` it must render as one.
+pub fn field_key_template(params: &[String], field: &Type) -> String {
+    let subst: std::collections::BTreeMap<String, Type> = params
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (p.clone(), Type::Named(Path::root(&ConcreteNames::template_param(i)), Vec::new())))
+        .collect();
+    ConcreteNames::type_key(&crate::check::checker::subst_apply(field, &subst))
+}
+
+/// How a type is spelled as a runtime identity: the whole path, plus its type
+/// arguments when it has any (`gen<i32>`, `hashtable<string,i32>`).
 ///
-/// The one place a type identity *name* is produced from a [`Type`], and the
-/// same spelling three separate mechanisms need:
+/// The same spelling three separate mechanisms need:
 ///
 /// * a heap value's type key — which instantiation this value is,
-/// * a specialization's registered name (`Checker::mangled_method_name`),
-/// * a `:dyn` box's concrete key (`Checker::check_as_dyn`).
+/// * a specialization's registered name ([`ConcreteNames::specialization`]),
+/// * a `:dyn` box's concrete key (`Checker::coerce_to_dyn`).
 ///
 /// They are one question asked in three places. `:dyn` was the only one that
 /// answered it with the type arguments included, which is exactly why a
@@ -250,65 +227,34 @@ pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
 ///
 /// For a type with no arguments this is [`type_key_of`] of its path, character
 /// for character — so the keys of every non-generic type are unchanged.
-/// A field's type as a *key template*: `type_key_of_type` of `field` with
-/// each of the owning type's parameters (`params`, in declaration order)
-/// written as `$N`, its index — `Option<T>` in a `gen<T>` is `option<$0>`.
-/// `typelisp_mem::instantiate_key_template` turns one back into the key a
-/// particular instantiation's field has, from the value's own key; that is
-/// how the printer, which sees a struct only through its box, learns that a
-/// field is a niche-represented `Option` it must render as one.
-///
-/// `$` never occurs in a key, so the placeholder cannot collide with a name.
-pub fn field_key_template(params: &[String], field: &Type) -> String {
-    let subst: std::collections::BTreeMap<String, Type> = params
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (p.clone(), Type::Named(Path::root(&format!("${}", i)), Vec::new())))
-        .collect();
-    type_key_of_type(&crate::check::checker::subst_apply(field, &subst))
-}
-
-pub fn type_key_of_type(t: &Type) -> String {
-    match t {
-        Type::Ptr => "ptr".into(),
-        Type::CLong => "c-long".into(),
-        Type::CULong => "c-ulong".into(),
-        Type::I8 => "i8".into(),
-        Type::I16 => "i16".into(),
-        Type::I32 => "i32".into(),
-        Type::U8 => "u8".into(),
-        Type::U16 => "u16".into(),
-        Type::U32 => "u32".into(),
-        Type::F32 => "f32".into(),
-        Type::F64 => "f64".into(),
-        Type::Int => "int".into(),
-        Type::Ratio => "ratio".into(),
-        Type::RandomState => "random-state".into(),
-        Type::Bool => "bool".into(),
-        Type::Char => "char".into(),
-        Type::Str => "string".into(),
-        Type::Symbol => "symbol".into(),
-        Type::Unit => "()".into(),
-        Type::Never => "!".into(),
-        Type::PtrTo(t) => format!("(ptr {})", type_key_of_type(t)),
-        Type::CStruct(p) => p.to_string(),
-        Type::Named(p, args) if args.is_empty() => p.to_string(),
-        Type::Named(p, args) => {
-            format!("{}<{}>", p, args.iter().map(type_key_of_type).collect::<Vec<_>>().join(","))
-        }
-        // The space is load-bearing, the same way `mangled_method_name`'s is:
-        // the reader treats it as a token boundary outside `<>`, so no
-        // user-written name can ever collide with a mangled one.
-        Type::Dyn(p, pins) if pins.is_empty() => format!("dyn {}", p),
-        Type::Dyn(p, pins) => {
-            format!("dyn {}<{}>", p, pins.iter().map(type_key_of_type).collect::<Vec<_>>().join(","))
-        }
-        Type::Fn(ps, rest, r) => {
-            let mut inner: Vec<String> = ps.iter().map(type_key_of_type).collect();
-            if let Some(t) = rest {
-                inner.push(format!("&rest {}", type_key_of_type(t)));
-            }
-            format!("(fn ({}) {})", inner.join(","), type_key_of_type(r))
+impl TypeKey for Type {
+    fn type_key(&self) -> String {
+        match self {
+            Type::Ptr => "ptr".into(),
+            Type::CLong => "c-long".into(),
+            Type::CULong => "c-ulong".into(),
+            Type::I8 => "i8".into(),
+            Type::I16 => "i16".into(),
+            Type::I32 => "i32".into(),
+            Type::U8 => "u8".into(),
+            Type::U16 => "u16".into(),
+            Type::U32 => "u32".into(),
+            Type::F32 => "f32".into(),
+            Type::F64 => "f64".into(),
+            Type::Int => "int".into(),
+            Type::Ratio => "ratio".into(),
+            Type::RandomState => "random-state".into(),
+            Type::Bool => "bool".into(),
+            Type::Char => "char".into(),
+            Type::Str => "string".into(),
+            Type::Symbol => "symbol".into(),
+            Type::Unit => "()".into(),
+            Type::Never => "!".into(),
+            Type::PtrTo(t) => ConcreteNames::ptr_type(&**t),
+            Type::CStruct(p) => p.to_string(),
+            Type::Named(p, args) => ConcreteNames::instantiated_type(&p.to_string(), args),
+            Type::Dyn(p, pins) => ConcreteNames::dyn_type(&p.to_string(), pins),
+            Type::Fn(ps, rest, r) => ConcreteNames::fn_type(ps, rest.as_deref(), &**r),
         }
     }
 }

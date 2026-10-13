@@ -270,7 +270,7 @@ fn reprs(out: &mut String, defs: &Defs) {
             out,
             "| `{}` | `{}` | {} | {} | {} |",
             name,
-            typelisp_front::type_key::type_key_of_type(ty),
+            typelisp_mem::ConcreteNames::type_key(ty),
             repr.tag(),
             repr.field_kind(),
             repr.binding_kind()

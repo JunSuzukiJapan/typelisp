@@ -2905,7 +2905,7 @@ impl Renderer {
                 // A `Vector<T>` prints in CL's vector syntax, which reads
                 // back as `#(..)` — or, with `*print-array*` off, as its type
                 // and length alone.
-                if typelisp_mem::base_type_key(&key) == "vector" {
+                if typelisp_mem::ConcreteNames::base_type(&key) == "vector" {
                     let n = heap.struct_field_count(id);
                     if !ctx.print_vars.array {
                         out.push_str(&format!("#<{} {}>", key, n));
@@ -2930,7 +2930,7 @@ impl Renderer {
                 // read from `#{..}` has no `print-object` made for it, and a
                 // typed one whose elements have none would otherwise fall to
                 // the `#<..>` below.
-                if typelisp_mem::is_tuple_base_key(typelisp_mem::base_type_key(&key)) {
+                if typelisp_mem::is_tuple_base_key(typelisp_mem::ConcreteNames::base_type(&key)) {
                     out.push_str("#{");
                     for i in 0..heap.struct_field_count(id) {
                         if Self::length_reached(ctx, i) {

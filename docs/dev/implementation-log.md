@@ -12300,3 +12300,42 @@ CI の arm64 runner は `macos-26` にした。
 2 つ目が 1 つ目を置き換える（再定義の警告が出る）。上の突き合わせで、置き換えられた側の値は
 直接の呼び出しでも `:dyn` でも `where` でも型エラーになり、違う本体が走ることは無くなった。
 具体型ごとに別の実装を持てるようにするか、2 つ目をエラーにするかは決めていない。
+
+## 具体名を 1 つの構造体に集める（ConcreteNames、2026-10-13）
+
+ユーザー指示: ジェネリックな型・関数・メソッドを具体的な名前にする機能を、専用の構造体 1 つに集める。
+総称型の具体型ごとの impl（[per-instantiation-impls-plan.md](per-instantiation-impls-plan.md)）に
+取りかかったところで出た指示で、そちらの前にこれを済ませた。
+
+**散らばっていた所。** 同じ綴りの規則が 5 か所で作られ、読み戻されていた。
+
+- `typelisp-mem`: `base_type_key`、`inner_type_key`、`type_key_args`、`instantiate_key_template`。
+- `typelisp-front`: `type_key.rs` の `type_key_of_type`・`split_key`・`specialized_method_name`、
+  `types.rs` の `method_link_name`・`split_method_link_name`、`checker.rs` の `mangle_type`・
+  `mangled_fn_path`・`mangled_method_name`・ブランケットの記憶の鍵、`ffi_callback.rs` の
+  `split_fn_key`。
+- `src/compile`: `USER_SYMBOL_PREFIX`、`symbols.rs` の `user_symbol_name`・
+  `user_method_symbol_name`、`aot.rs` の `print_object_key`、`ffi.rs` の `typed_pointee`。
+- 島（`compiler.rs` の SOURCE）: `compile-assoc-user` が `"tl_"`・型・`"''"`・メソッドを自分で
+  つないでいた。
+
+**集めた先。** `typelisp_mem::ConcreteNames`（`crates/typelisp-mem/src/names.rs`）。印字系の AOT 層が
+`typelisp-front` を見られないので、最も下のクレートに置いた。文字列だけを扱い、`Type` は
+`TypeKey` トレイトを通して渡る（`typelisp-front` が `impl TypeKey for Type` を持つ。中身は `Type` の
+各形を `ConcreteNames` の組み立てに振り分けるだけで、綴りは持たない）。受け持つのは、型キー
+（`gen<i32>`、`dyn T<..>`、`(fn (..) r)`、`(ptr x)` と、それぞれの読み戻し）、鍵の雛形（`$N`）、
+特殊化の名前（`f <i32>` と、値の型キーとの行き来）、メソッドのリンク名（`T''m`）、LLVM のシンボル
+（`tl_`）、ブランケットの記憶の鍵。
+
+**島。** `core_bridge` が `assoc` ノードにシンボルを入れ（`(assoc TYPE METHOD INSTANCE SYMBOL ARG...)`）、
+島はそれを呼ぶだけにした。島が受理するノードの形が変わるので、committed の島では新しい SOURCE を
+コンパイルできない。成果物は `TYPELISP_BOOTSTRAP_INTERPRETED=1` で解釈島から作り（G1）、native で
+もう一度作って一致を確かめた（G2）。
+
+**範囲の外に置いたもの。** 組み込み関数の戻り値の型キーを書いたリテラル（`typelisp-rt` の表の
+`"result<f64,parsefloaterror>"` など、約 120 個）は、規則ではなくデータなので残した。型の名前と
+メソッド名を `point::area` とソースの形で書くメッセージ、prelude が生成するソースの総称形
+（`tuple2<T0,T1>`）、匿名関数の番号付き名前、`tl_main` のような固定の名前も対象外。
+
+`split_fn_type` は、元の `split_fn_key` が数えていなかった `<>` の深さも数える。総称型の引数に
+`,` を含む型キーが、関数型の引数の区切りと取り違えられなくなった。

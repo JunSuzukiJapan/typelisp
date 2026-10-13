@@ -25,7 +25,7 @@ use crate::reader::Reader;
 /// The runtime type keys these two builtins' results carry.
 ///
 /// A type's identity includes its instantiation
-/// (`typelisp::type_key::type_key_of_type`), and this crate has no `Path` to
+/// (`typelisp_mem::ConcreteNames::type_key`), and this crate has no `Path` to
 /// derive one from — so they are spelled here and compared against the
 /// registry's own return types by `tests/type_identity_guard_test.rs`, the
 /// same arrangement `typelisp_rt::stream_builtin` uses.

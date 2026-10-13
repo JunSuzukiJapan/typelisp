@@ -250,7 +250,7 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
 }
 
 /// Every key a runtime shim spells for a builtin's *result* must be the one
-/// `type_key_of_type` produces for that builtin's registered return type.
+/// `ConcreteNames::type_key` produces for that builtin's registered return type.
 ///
 /// A type's runtime identity includes its instantiation now, and the shims
 /// below the checker (`typelisp_rt`, `typelisp_read`) have no `Path` to derive
@@ -283,7 +283,7 @@ fn the_runtime_result_keys_match_the_registry() {
             _ => panic!("`{}` is registered both at the root and in the internal module", name),
         }
     };
-    let expected = |name: &str| -> String { typelisp::type_key::type_key_of_type(&sig_of(name).ret) };
+    let expected = |name: &str| -> String { typelisp_mem::ConcreteNames::type_key(&sig_of(name).ret) };
 
     for (name, key) in typelisp_rt::stream_builtin::RESULT_KEYS {
         assert_eq!(*key, expected(name), "`{}`'s result key", name);
@@ -318,7 +318,7 @@ fn the_runtime_result_keys_match_the_registry() {
         let sig = sig_of(name);
         match &sig.ret {
             typelisp::Type::Named(_, args) if !args.is_empty() => {
-                typelisp::type_key::type_key_of_type(&args[0])
+                typelisp_mem::ConcreteNames::type_key(&args[0])
             }
             other => panic!("`{}` returns {:?}, which has no payload type", name, other),
         }
@@ -338,7 +338,7 @@ fn the_runtime_result_keys_match_the_registry() {
 
 /// The boxes `#(..)` and `#nA(..)` read as are the `Sexpr` `vector`/`array`
 /// variants' payloads, so their pre-interned keys must be what
-/// `type_key_of_type` spells for the payload types the registry gives those
+/// `ConcreteNames::type_key` spells for the payload types the registry gives those
 /// variants — otherwise a `(the Vector<Option<Sexpr>> x)` downcast of a read
 /// vector would not match it. The array's dimensions box is spelled by the
 /// reader too.
@@ -354,13 +354,13 @@ fn the_read_vector_and_array_keys_are_the_sexpr_variants_payloads() {
     let payload_key = |variant: usize| -> String {
         let fields = &sexpr.variants[variant].fields;
         assert_eq!(fields.len(), 1, "`{}` should carry one payload", sexpr_variant::NAMES[variant]);
-        typelisp::type_key::type_key_of_type(&fields[0])
+        typelisp_mem::ConcreteNames::type_key(&fields[0])
     };
     assert_eq!(BUILTIN_TYPE_KEYS[TypeKeyId::SEXPR_VECTOR.as_u32() as usize], payload_key(sexpr_variant::VECTOR));
     assert_eq!(BUILTIN_TYPE_KEYS[TypeKeyId::SEXPR_ARRAY.as_u32() as usize], payload_key(sexpr_variant::ARRAY));
     assert_eq!(
         typelisp_read::ARRAY_DIMS_KEY,
-        typelisp::type_key::type_key_of_type(&typelisp::Type::Named(Path::root("vector"), vec![typelisp::Type::Int]))
+        typelisp_mem::ConcreteNames::type_key(&typelisp::Type::Named(Path::root("vector"), vec![typelisp::Type::Int]))
     );
 }
 
@@ -376,7 +376,7 @@ fn the_read_tuple_key_is_the_checkers_tuple_of_data() {
     let data = Type::Named(Path::root("option"), vec![Type::Named(Path::root("sexpr"), vec![])]);
     for n in 1..=typelisp::TUPLE_MAX_ARITY {
         let ty = Type::Named(tuple_path(n), vec![data.clone(); n]);
-        assert_eq!(typelisp::sexpr_tuple_key(n), typelisp::type_key::type_key_of_type(&ty), "arity {}", n);
+        assert_eq!(typelisp::sexpr_tuple_key(n), typelisp_mem::ConcreteNames::type_key(&ty), "arity {}", n);
     }
 }
 

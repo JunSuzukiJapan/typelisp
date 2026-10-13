@@ -395,7 +395,7 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = expect_llvm_module(eval_ok_with_compiler(
-        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i32" "+" true (0 var "a" false) (0 var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false)))"#,
     ));
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
     // call, even from a test driving the raw builtins directly rather than
@@ -456,7 +456,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_i32''+" (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -886,7 +886,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"
         (let ((m (llvm-module::create "mod")))
-          (compile-function m "double" '((x . 0)) '(assoc "i32" "+" true (0 var "x" false) (0 var "x" false)))
+          (compile-function m "double" '((x . 0)) '(assoc "i32" "+" true "tl_i32''+" (0 var "x" false) (0 var "x" false)))
           (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
         "#,
     ));
@@ -1524,7 +1524,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_i32''+" (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
@@ -1828,7 +1828,7 @@ fn the_compiler_body_compiles_a_bool_literal_node() {
 fn the_compiler_body_compiles_an_integer_comparison() {
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "lt" '((a . 0) (b . 0))
-              '(assoc "i32" "<" true (0 var "a" false) (0 var "b" false)))"#,
+              '(assoc "i32" "<" true "tl_i32''<" (0 var "a" false) (0 var "b" false)))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -1868,7 +1868,7 @@ fn the_compiler_body_compiles_an_if_expression() {
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "maxab" '((a . 0) (b . 0))
               '(if false
-                   (assoc "i32" ">" true (0 var "a" false) (0 var "b" false))
+                   (assoc "i32" ">" true "tl_i32''>" (0 var "a" false) (0 var "b" false))
                    (var "a" false)
                    (var "b" false)))"#,
     ));
@@ -1892,7 +1892,7 @@ fn the_compiler_body_compiles_an_if_expression() {
 fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let module = expect_llvm_module(eval_ok_with_compiler(
         r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
-              '(assoc "i32" "+" true
+              '(assoc "i32" "+" true "tl_i32''+"
                  (0 let (((x . 0) . (int-any-width 0 99))) (var "x" false))
                  (0 var "x" false)))"#,
     ));
@@ -2889,7 +2889,7 @@ fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() 
 /// (already type-correct) dispatch — `sum-both`'s own body calls *both*
 /// same-named accessors as external `Expr::Assoc` targets from within one
 /// compiled function. Before this fix, a method's mangled LLVM symbol
-/// (`user_method_symbol_name`) and every internal SCC bookkeeping key
+/// (`ConcreteNames::method_symbol`) and every internal SCC bookkeeping key
 /// derived from it were built from the receiver type's *local* name only (`tl_box::n` for
 /// *both* structs) — so `compiler.rs`'s `get-function "tl_box::n"` inside
 /// `sum-both`'s own module would resolve to the *same* declared value for
@@ -3705,7 +3705,7 @@ fn compile_matches_a_sexpr_scrutinee_and_extracts_payloads() {
 }
 
 /// A user `defun` literally named `rt_cons` gets its own distinct LLVM
-/// symbol (`tl_rt_cons`, the `USER_SYMBOL_PREFIX` prefix) — it never
+/// symbol (`tl_rt_cons`, the `ConcreteNames::symbol` prefix) — it never
 /// collides with the real `rt_cons` runtime shim `compiler.rs`'s
 /// `compile-call` rewrites a bare `sexpr-cons` call to (see
 /// `is_rt_builtin`). Both the user's own `rt_cons` and the built-in
@@ -4982,7 +4982,7 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
 /// A user `defun` whose name matches a libm symbol that an LLVM float
 /// intrinsic lowers to (here `pow`, which `expt`'s `build-fpow` emits) must
 /// not collide with libm once compiled: the `tl_` symbol prefix
-/// (`USER_SYMBOL_PREFIX`, `ast_bridge::user_symbol_name`) means the user
+/// (`ConcreteNames::symbol`) means the user
 /// `pow`'s own symbol is `tl_pow`, never bare `pow`, so the JIT's resolver
 /// binds `expt`'s lowered `pow` call to libm and the user `pow` to its own
 /// body. (This regression previously fired via `mod`->`frem`->`fmod`; `mod` no
@@ -6192,7 +6192,7 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
-    assert_eq!(body, r#"(assoc "i32" "+" true (0 var "a" false) (0 var "b" false))"#);
+    assert_eq!(body, r#"(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#);
 
     let module = expect_llvm_module(eval_ok_with_compiler(&format!(
         r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '{})"#,

@@ -9,7 +9,7 @@
 //!
 //! Compiles the node shapes `core_bridge::to_island` actually produces a
 //! real translation for today — integer literals (`(int-any-width n)`), fixed-width
-//! arithmetic (`(var name is-fn)`/`(assoc type method instance arg...)`, for
+//! arithmetic (`(var name is-fn)`/`(assoc type method instance symbol arg...)`, for
 //! `+`/`-`/`*` only), `labels`-sibling/self direct calls
 //! (`(apply name (is-fn . arg-form)...)`/`(labels ((captured . is-fn)...)
 //! ((name ((param . is-fn)...) body))... trailing-body)`, the labels-
@@ -249,12 +249,13 @@
 //!
 //! **`compile-assoc` can call another already-`compile`d user-defined method**
 //! (a `defmethod` or a `defstruct` accessor/setter, `(assoc type-name method
-//! instance arg...)` for any `type-name` other than `i64`/`int`) — the
+//! instance symbol arg...)` for any `type-name` other than `i64`/`int`) — the
 //! composability gap that, until now, meant a `defun` whose body called
 //! `p::x` could never itself be `compile`d at all. Resolved the same way a
 //! top-level `defun`-to-`defun` call already is (`compile-call`): the callee
-//! is found via `get-function` under the mangled name `tl_type-name''method`
-//! (exactly the name its own LLVM function was given,
+//! is found via `get-function` under the node's `symbol`, which `core_bridge`
+//! spells with `ConcreteNames::method_symbol` (exactly the name its own LLVM
+//! function was given,
 //! `Interp::add_compiled_function`'s `internal_name`), and `Interp::compile_function` requires — and forward-
 //! declares — every such target the same way it already does for an
 //! `Expr::Call` target, so self-recursive method calls and ordinary
@@ -326,7 +327,7 @@ const SOURCE_TEMPLATE: &str = r#"
    Option<llvm-basic-block> Option<Sexpr>)
   llvm-value)
 (defsignature compile-assoc-user
-  (llvm-module llvm-builder llvm-function Option<llvm-basic-block> string string llvm-value int)
+  (llvm-module llvm-builder llvm-function Option<llvm-basic-block> string llvm-value int)
   llvm-value)
 (defsignature compile-bignum-literal
   (llvm-module string llvm-builder Scope<llvm-value> Scope<llvm-function> Option<Sexpr> llvm-function
@@ -1296,7 +1297,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `rt_str_*` primitive calls (string) rather than a real function call?
 ;; Anything *not* on these lists — a user-defined method on a primitive
 ;; receiver, e.g. the prelude's `impl Eq i32` → `equals` — falls through to
-;; `compile-assoc-user`'s ordinary mangled-name call. (Chained `if`s: the
+;; `compile-assoc-user`'s ordinary call by symbol. (Chained `if`s: the
 ;; prelude's `or` macro isn't loaded under `run_with_compiler`.)
 ;; Which receiver type names go to `int-native-method?`/`float-native-method?`
 ;; above. Every integer width is one catalog and one 64-bit register, and both
@@ -2518,7 +2519,7 @@ const SOURCE_TEMPLATE: &str = r#"
            (compile-escaping-env-args m fn-name builder env fn-env captured env-ptr rest (+ idx 1))))
         ()))
 
-;; `(assoc type-name method instance arg...)` — two
+;; `(assoc type-name method instance symbol arg...)` — two
 ;; cases, dispatched *per (type-name, method) pair*,
 ;; not per receiver type alone. `i64`/`i32` receivers
 ;; (the same runtime representation, `RtValue::Int(i64)`,
@@ -2552,7 +2553,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; casing needed here (it flows through
 ;; `compile-call-args` like any other argument).
 ;; The callee is found by `get-function` under the
-;; mangled name `tl_type-name''method` — exactly the
+;; node's `symbol` — exactly the
 ;; name its own LLVM function was given
 ;; (`Interp::add_compiled_function`'s
 ;; `internal_name`), so a self-recursive method call
@@ -2590,7 +2591,8 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun compile-assoc ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((type-name (sexpr-str (sexpr-car (sexpr-cdr e))))
            (method (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr e)))))
-           (rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))
+           (callee (sexpr-str (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e)))))))
+           (rest (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
            ;; Every operand, evaluated once, in order, into frame slots --
            ;; before the dispatch rather than inside each arm.
            ;;
@@ -3039,17 +3041,17 @@ const SOURCE_TEMPLATE: &str = r#"
                         ("min"
                          (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-word builder 0)) a b2))
                         (else (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-word builder 0)))))))))
-        (else (compile-assoc-user m builder cur-fn protect type-name method ops (sexpr-list-length rest)))))))
+        (else (compile-assoc-user m builder cur-fn protect callee ops (sexpr-list-length rest)))))))
 
 ;; The user-defined-method leg of `compile-assoc`'s
 ;; dispatch (see its doc comment): call the callee
-;; under the mangled name `tl_type-name''method`,
-;; arguments through `compile-call-args` exactly like
-;; an ordinary call's. A `labels` sibling (not a
-;; toplevel `defun`) because it closes over `m` and
-;; mutually recurses with `compile-call-args`.
-(defun compile-assoc-user ((m llvm-module) (builder llvm-builder) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (type-name string) (method string) (args-ptr llvm-value) (argc int)) llvm-value
-    (coroutine-call builder m (build-fn-address builder (get-function m (append "tl_" (append type-name (append "''" method))))) args-ptr argc))
+;; under the node's `symbol`, `callee` here, arguments through
+;; `compile-call-args` exactly like an ordinary
+;; call's. A `labels` sibling (not a toplevel
+;; `defun`) because it closes over `m` and mutually
+;; recurses with `compile-call-args`.
+(defun compile-assoc-user ((m llvm-module) (builder llvm-builder) (cur-fn llvm-function) (protect Option<llvm-basic-block>) (callee string) (args-ptr llvm-value) (argc int)) llvm-value
+    (coroutine-call builder m (build-fn-address builder (get-function m callee)) args-ptr argc))
 
 ;; `(llvm-op opid (kind . arg)...)` — an `llvm-*`/
 ;; native-`Scope<V>` builtin method call

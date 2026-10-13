@@ -64,7 +64,7 @@ pub use core_eval::read_ffi_decl;
 /// rather than in a flat program-wide table; see that module's doc comment.
 pub struct FnDef {
     /// This definition's link name: a free function's fully-qualified path
-    /// (`m::inc`), or a method's [`crate::types::method_link_name`].
+    /// (`m::inc`), or a method's [`typelisp_mem::ConcreteNames::method_link`].
     ///
     /// The scope tree keys these by their *last* segment inside a namespace,
     /// which is enough to find one but not enough to *name* one: `enter` has
@@ -410,7 +410,7 @@ pub(crate) fn print_object_target(heap: &Heap, v: Value) -> Option<(Path, String
     let Value::Boxed(id) = v else { return None };
     let type_path = heap_type_path(heap, id)?;
     let method = match crate::type_key::heap_type_key(heap, id) {
-        Some(key) => crate::type_key::specialized_method_name(&key, "print-object"),
+        Some(key) => typelisp_mem::ConcreteNames::method_for_value(&key, "print-object"),
         None => "print-object".to_string(),
     };
     Some((type_path, method))
@@ -659,7 +659,7 @@ pub struct Interp {
     pub(crate) vtables: RefCell<Vec<Vec<(Path, String)>>>,
     /// `(concrete type key, trait path)` -> `vtable_id`, so the same pair
     /// interns to one id however many times it is boxed. The key's first
-    /// half is `mangle_type`'s rendering (the `dyn-new` node's own concrete
+    /// half is `ConcreteNames::type_key`'s rendering (the `dyn-new` node's own concrete
     /// key), since `Type` has no `Hash`.
     pub vtable_ids: RefCell<HashMap<(String, Path), u32>>,
     /// `(vtable id, trait id)` -> the vtable id the *same concrete type* uses
@@ -773,7 +773,7 @@ impl Interp {
                 handle.to_string(),
                 scope::TypeEntry::Struct {
                     reprs: Vec::new(),
-                    templates: scope::FieldTemplates::Positional(vec![crate::type_key::type_key_of_type(&crate::Type::Int)]),
+                    templates: scope::FieldTemplates::Positional(vec![typelisp_mem::ConcreteNames::type_key(&crate::Type::Int)]),
                     names: Vec::new(),
                 },
             );
@@ -2436,7 +2436,7 @@ impl Interp {
         // the enum is registered under its bare path. Splitting is what
         // `heap_type_path` does for every other lookup; missing it here is why
         // `(some 1)` printed as `(<unknown-variant> 1)`.
-        let base = crate::type_key::split_key(type_key).0;
+        let base = typelisp_mem::ConcreteNames::base_type(type_key);
         let path = Path::from_segments(base.split("::").map(str::to_string).collect());
         self.root.borrow().enum_variant_name(&path, variant)
     }
@@ -2445,18 +2445,18 @@ impl Interp {
     /// key's own arguments — `gen<option<int>>`'s field `$0` is
     /// `option<int>`, a niche. See [`typelisp_print::PrintEnv`].
     fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> Result<bool, String> {
-        let base = crate::type_key::split_key(type_key).0;
+        let base = typelisp_mem::ConcreteNames::base_type(type_key);
         let path = Path::from_segments(base.split("::").map(str::to_string).collect());
         let root = self.root.borrow();
         let template = root.field_template(&path, variant, index)?;
-        let args = typelisp_mem::type_key_args(type_key);
-        Ok(typelisp_mem::option_prints_wrapped(&typelisp_mem::instantiate_key_template(template, &args)))
+        let args = typelisp_mem::ConcreteNames::type_arg_list(type_key);
+        Ok(typelisp_mem::option_prints_wrapped(&typelisp_mem::ConcreteNames::instantiate_template(template, &args)))
     }
 
     /// The name the struct's definition gives field `index`, from the scope
     /// tree. See [`typelisp_print::PrintEnv::field_name`].
     fn field_name(&self, type_key: &str, index: usize) -> Result<Option<String>, String> {
-        let base = crate::type_key::split_key(type_key).0;
+        let base = typelisp_mem::ConcreteNames::base_type(type_key);
         let path = Path::from_segments(base.split("::").map(str::to_string).collect());
         Ok(self.root.borrow().field_name(&path, index)?.map(str::to_string))
     }
@@ -4039,7 +4039,7 @@ struct Recording {
 /// the node (it owns the readers), and the backend emits the thunk (it owns
 /// the codegen).
 ///
-/// `params`/`ret` are *C type* spellings — `type_key::type_key_of_type`'s
+/// `params`/`ret` are *C type* spellings — `ConcreteNames::type_key`'s
 /// output, so `"i8"`, `"f32"`, `"string"`, `"ptr"`. The `Repr`s beside them in
 /// the node say how each value crosses the compiled boundary; these say what
 /// the C function is declared to take, which is a different question with a
@@ -4194,7 +4194,7 @@ fn eval_llvm_builtin_method(
     method: &str,
     args: &[Value],
 ) -> Option<Result<Value, EvalError>> {
-    match backend(&format!("`{}`", crate::types::method_link_name(type_name, method))) {
+    match backend(&format!("`{}`", typelisp_mem::ConcreteNames::method_link(type_name, method))) {
         Ok(b) => (b.llvm_builtin)(heap, type_name, method, args),
         Err(e) => Some(Err(e)),
     }
@@ -4203,20 +4203,20 @@ fn eval_llvm_builtin_method(
 impl crate::CompileTarget {
     /// The definition a [`Self::link_name`] names.
     pub fn from_link_name(name: &str) -> crate::CompileTarget {
-        match crate::types::split_method_link_name(name) {
-            Some((type_name, method)) => crate::CompileTarget::Method(type_name, method.to_string()),
+        match typelisp_mem::ConcreteNames::split_method_link(name) {
+            Some((type_name, method)) => crate::CompileTarget::Method(crate::dump::parse_path(type_name), method.to_string()),
             None => crate::CompileTarget::Fn(crate::dump::parse_path(name)),
         }
     }
 
     /// The definition's name as one string: its path for a function,
-    /// [`crate::types::method_link_name`] for a method. What the runtime's
+    /// [`typelisp_mem::ConcreteNames::method_link`] for a method. What the runtime's
     /// messages say, and what a rewritten `~/name/` control string carries
     /// for [`Self::from_link_name`] to read back.
     pub fn link_name(&self) -> String {
         match self {
             crate::CompileTarget::Fn(path) => path.to_string(),
-            crate::CompileTarget::Method(type_name, method) => crate::types::method_link_name(type_name, method),
+            crate::CompileTarget::Method(type_name, method) => typelisp_mem::ConcreteNames::method_link(type_name, method),
         }
     }
 
@@ -4286,7 +4286,7 @@ impl Interp {
 /// `macroexpand`/`macroexpand-1`'s result and its inner `Option`, as runtime
 /// type keys. Both have a fixed signature, so unlike a container method's
 /// there is nothing for a call site to say — but the *spelling* still has to
-/// be the one `type_key::type_key_of_type` produces, which
+/// be the one `ConcreteNames::type_key` produces, which
 /// `tests/type_identity_guard_test.rs` checks against the registry.
 /// The prelude function the reader's macro-character hook goes through — see
 /// [`Interp::call_reader_macro_fn`]. It lives in [`crate::INTERNAL_MODULE`].
@@ -4419,8 +4419,9 @@ fn hashtable_entries(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<V
     let id = expect_struct_box(&args[0])?;
     // Two identities here, and only the outer one was handed in: the result is
     // a `Vector<cons-cell<K,V>>`, so each cell's own key is one level inside
-    // it. `inner_key` is the inverse of the spelling, for exactly this.
-    let cell_key = crate::type_key::inner_key(ret_key)
+    // it. `ConcreteNames::single_type_arg` is the inverse of the spelling,
+    // for exactly this.
+    let cell_key = typelisp_mem::ConcreteNames::single_type_arg(ret_key)
         .unwrap_or_else(|| panic!("hashtable::entries: `{}` is not a one-argument container key", ret_key))
         .to_string();
     let fields = heap

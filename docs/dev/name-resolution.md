@@ -96,10 +96,12 @@
 リーダーの区切り文字なのでソースに書いた名前には入らないから（`#` は名前に入るので `##` では
 根の関数 `a##b` と衝突する）。
 
-メソッドの名前を文字列にするのは `types::method_link_name` だけで、逆向きは
-`types::split_method_link_name` だけ。これを使うのは、LLVM のシンボル（`tl_a''b`）、インタプリタに
+メソッドの名前を文字列にするのは `ConcreteNames::method_link` だけで、逆向きは
+`ConcreteNames::split_method_link` だけ（`typelisp_mem::ConcreteNames`、具体名をすべて受け持つ構造体）。
+これを使うのは、LLVM のシンボル（`tl_a''b`、`ConcreteNames::method_symbol`）、インタプリタに
 登録する名前（`trace` の鍵と表示）、実行時のメッセージ、ダンプが docstring と総称メソッドの
-テンプレートを置く鍵。島の `compile-assoc-user` だけは同じ文字列を自分で組み立てる。チェッカーの
+テンプレートを置く鍵。島の `compile-assoc-user` は、`core_bridge` が `assoc` ノードに入れた
+シンボルをそのまま呼ぶ（2026-10-13 までは同じ文字列を島が自分で組み立てていた）。チェッカーの
 型エラーは、ソースに書く形どおり `a::b` と書く。
 
 ## 4. 実装の順序

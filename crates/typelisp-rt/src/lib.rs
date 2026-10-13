@@ -2366,13 +2366,13 @@ pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i6
     let id = hashtable_arg(args, argc, "rt_hashtable_entries");
     // Two identities, one handed in: the result is a `Vector<cons-cell<K,V>>`,
     // so each cell's key is one level inside the vector's
-    // (`typelisp_mem::inner_type_key`, shared with the interpreted side so the
+    // (`typelisp_mem::ConcreteNames::single_type_arg`, shared with the interpreted side so the
     // two spell the cells the same).
     let vec_key_name = match decode(*args.add(1)) {
         Value::Str(id) => active_heap().string(id).to_string(),
         other => fatal(&format!("rt_hashtable_entries: the result key is not a string: {:?}", other)),
     };
-    let cell_key_name = match typelisp_mem::inner_type_key(&vec_key_name) {
+    let cell_key_name = match typelisp_mem::ConcreteNames::single_type_arg(&vec_key_name) {
         Some(k) => k.to_string(),
         None => fatal("rt_hashtable_entries: the result key is not a one-argument container key"),
     };
