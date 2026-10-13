@@ -29,7 +29,7 @@ pub const ADDRESS_BUILTIN: &str = " ffi-callback-address";
 const SEP: char = '\u{1f}';
 
 /// One callback entry: the function's full path and the C types it is called
-/// with, spelled as `type_key::type_key_of_type` spells them.
+/// with, spelled as `ConcreteNames::type_key` spells them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CallbackSig {
     pub path: String,
@@ -44,8 +44,8 @@ impl CallbackSig {
         match ty {
             Type::Fn(params, None, ret) => Some(CallbackSig {
                 path: path.to_string(),
-                params: params.iter().map(crate::type_key::type_key_of_type).collect(),
-                ret: crate::type_key::type_key_of_type(ret),
+                params: params.iter().map(typelisp_mem::ConcreteNames::type_key).collect(),
+                ret: typelisp_mem::ConcreteNames::type_key(ret),
             }),
             _ => None,
         }
@@ -80,44 +80,6 @@ impl CallbackSig {
     }
 }
 
-/// The parameter and return keys of a function type's key,
-/// `(fn (K,K...) K)` — what `type_key_of_type` writes for `Type::Fn` — or
-/// `None` if `key` is not one. Split at top-level commas only, so a
-/// parameter key that itself contains parentheses stays whole.
-pub fn split_fn_key(key: &str) -> Option<(Vec<String>, String)> {
-    let rest = key.strip_prefix("(fn (")?;
-    let mut depth = 0usize;
-    let mut params = Vec::new();
-    let mut cur = String::new();
-    let mut chars = rest.char_indices();
-    let close = loop {
-        let (i, c) = chars.next()?;
-        match c {
-            '(' => {
-                depth += 1;
-                cur.push(c);
-            }
-            ')' if depth == 0 => break i,
-            ')' => {
-                depth -= 1;
-                cur.push(c);
-            }
-            ',' if depth == 0 => params.push(std::mem::take(&mut cur)),
-            _ => cur.push(c),
-        }
-    };
-    if !cur.is_empty() {
-        params.push(cur);
-    }
-    let ret = rest[close + 1..].strip_prefix(' ')?.strip_suffix(')')?;
-    // `&rest` is written into the parameter list by `type_key_of_type`; a
-    // callback type never has one, and a key with one is not a callback's.
-    if params.iter().any(|p| p.starts_with("&rest")) {
-        return None;
-    }
-    Some((params, ret.to_string()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,17 +90,5 @@ mod tests {
         assert_eq!(CallbackSig::parse(&sig.key()).unwrap(), sig);
         let none = CallbackSig { path: "go".into(), params: vec![], ret: "()".into() };
         assert_eq!(CallbackSig::parse(&none.key()).unwrap(), none);
-    }
-
-    #[test]
-    fn a_function_type_key_splits_at_top_level_commas() {
-        assert_eq!(split_fn_key("(fn (ptr,ptr) i32)"), Some((vec!["ptr".into(), "ptr".into()], "i32".into())));
-        assert_eq!(split_fn_key("(fn () ())"), Some((vec![], "()".into())));
-        assert_eq!(
-            split_fn_key("(fn ((ptr point),i32) bool)"),
-            Some((vec!["(ptr point)".into(), "i32".into()], "bool".into()))
-        );
-        assert_eq!(split_fn_key("ptr"), None);
-        assert_eq!(split_fn_key("(fn (i32,&rest i32) i32)"), None);
     }
 }

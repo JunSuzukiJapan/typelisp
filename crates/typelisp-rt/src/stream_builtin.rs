@@ -45,7 +45,7 @@ use crate::stream::with_streams;
 /// that wrap something generic inside it — the key of that inner value.
 ///
 /// A type's identity includes its instantiation
-/// (`typelisp::type_key::type_key_of_type`), and these shims build their
+/// (`typelisp_mem::ConcreteNames::type_key`), and these shims build their
 /// `Result`/`Option`/`Vector` boxes with no `Path` to derive one from: this
 /// crate sits below the checker. So the spelling is written here, once per
 /// builtin, and `tests/type_identity_guard_test.rs` compares every row

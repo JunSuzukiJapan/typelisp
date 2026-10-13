@@ -1419,7 +1419,7 @@ impl Heap {
     }
 
     /// The primitive type a numeric box *is*, spelled the way the checker
-    /// spells it (`typelisp_front::type_key::type_key_of_type`) — `None` for
+    /// spells it (`typelisp_mem::ConcreteNames::type_key`) — `None` for
     /// every other box (a struct, an enum, a closure, a cell, ...), which
     /// carries an interned type key instead.
     ///
@@ -3261,50 +3261,6 @@ impl Drop for Heap {
         // closure) is not running either; unregistering is all it needs.
         self.shared.threads.unregister(&self.slot);
     }
-}
-
-/// A type key's base name, without its instantiation: `option<char>` ->
-/// `option`, `point` -> `point`.
-///
-/// Lives here, below both tiers, because both of them look a *type* up by a
-/// key a *value* carries. Registration is per type (an enum's variant names,
-/// its definition); a key names an instantiation. Splitting in only one tier
-/// is how `(some 1)` came out as `(<unknown-variant> 1)` in the interpreter
-/// while the AOT printer had the same gap the other way round.
-pub fn base_type_key(key: &str) -> &str {
-    match key.find('<') {
-        Some(i) if key.ends_with('>') => &key[..i],
-        _ => key,
-    }
-}
-
-/// The key one level inside `key`: `vector<cons-cell<i32,string>>` ->
-/// `cons-cell<i32,string>`, `option<char>` -> `char`.
-///
-/// The inverse of a type key's `Name<args>` spelling for a *single* argument.
-/// A type's runtime identity includes its instantiation, and two callers build
-/// an inner box out of an outer box's key: `HashTable::entries` (interpreted
-/// and compiled both) builds `cons-cell`s for a `Vector<cons-cell<K,V>>`.
-/// They must agree on the spelling, so the unwrapping lives here — below both
-/// — rather than once in each.
-///
-/// `None` when the key names no instantiation, or names more than one
-/// argument: "the first of several" is not a question any caller is asking.
-pub fn inner_type_key(key: &str) -> Option<&str> {
-    let open = key.find('<')?;
-    let inner = key[open + 1..].strip_suffix('>')?;
-    // Parentheses nest too: a function type's parameter list is spelled
-    // `(fn (int,string) int)`, and its commas are its own.
-    let mut depth = 0i32;
-    for c in inner.chars() {
-        match c {
-            '<' | '(' => depth += 1,
-            '>' | ')' => depth -= 1,
-            ',' if depth == 0 => return None,
-            _ => {}
-        }
-    }
-    Some(inner)
 }
 
 #[cfg(test)]

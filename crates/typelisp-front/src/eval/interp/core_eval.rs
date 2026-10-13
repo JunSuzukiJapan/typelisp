@@ -1785,7 +1785,7 @@ impl Interp {
                 let body = body_forms(heap, tl, 5, "defmethod")?;
                 heap.push_permanent_root(tl);
                 let def = FnDef { ffi: false,
-                    name: crate::types::method_link_name(&type_name, &method),
+                    name: typelisp_mem::ConcreteNames::method_link(&type_name, &method),
                     params,
                     body,
                     rest: false,

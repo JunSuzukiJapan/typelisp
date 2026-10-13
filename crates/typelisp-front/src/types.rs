@@ -106,32 +106,6 @@ impl fmt::Display for Path {
     }
 }
 
-/// What [`method_link_name`] puts between a type and its method.
-///
-/// Not `::`: module `a`'s function `b` is `a::b`, and type `a`'s method `b`
-/// has to be a different name. `'` is a reader delimiter, so no name written
-/// in source contains it.
-const METHOD_SEPARATOR: &str = "''";
-
-/// **The** string for a method: the type's whole path (never just its last
-/// segment — two types in different modules may share both a local name and
-/// a method name), [`METHOD_SEPARATOR`], then the method. What a message
-/// names the method by, the key `trace` keeps it under, the key a dump files
-/// its docstring and template under, and the LLVM symbol's spelling past its
-/// prefix (`symbols::user_method_symbol_name`, and `compiler.rs`'s
-/// `compile-assoc-user`, which builds the same string to look the function
-/// up with `get-function`).
-pub fn method_link_name(type_name: &Path, method: &str) -> String {
-    format!("{}{}{}", type_name, METHOD_SEPARATOR, method)
-}
-
-/// The type and method a [`method_link_name`] was built from, or `None` for
-/// a name with no separator in it — a function's.
-pub fn split_method_link_name(name: &str) -> Option<(Path, &str)> {
-    let (type_name, method) = name.split_once(METHOD_SEPARATOR)?;
-    Some((Path(type_name.split("::").map(str::to_string).collect()), method))
-}
-
 /// `p` as an interned heap [`PathId`] — the segments interned as symbols,
 /// then the sequence interned as a path. Both tables are permanent, so the id
 /// stays valid for the heap's lifetime and equal paths always share one id.
@@ -339,7 +313,7 @@ pub enum Type {
 ///
 /// `Debug` is the representation (`Named(Path(["vector"]), [Int])`), which
 /// reads as an internal detail in front of a user; the registry key
-/// ([`crate::type_key::type_key_of_type`]) is the runtime's spelling and
+/// ([`typelisp_mem::ConcreteNames::type_key`]) is the runtime's spelling and
 /// writes a trait object as `dyn Trait`, which is not what the reader
 /// accepts. The reader lowercases every name, so the built-in generic types
 /// are given back the capitals the documentation spells them with.
@@ -395,7 +369,7 @@ impl fmt::Display for Type {
                 }
                 write!(f, ") {})", r)
             }
-            other => write!(f, "{}", crate::type_key::type_key_of_type(other)),
+            other => write!(f, "{}", typelisp_mem::ConcreteNames::type_key(other)),
         }
     }
 }

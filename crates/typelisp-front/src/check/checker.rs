@@ -13,6 +13,7 @@ use crate::{wk, parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, Root
 
 use super::loop_dsl;
 use typelisp_read::name_lexer::{NameLexer, NameTok};
+use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
@@ -672,7 +673,7 @@ struct StructOptions {
 /// monomorphized specializations together with the form that requested them.
 /// Contains a space, which [`crate::read::Reader`] treats as a delimiter — so
 /// no user-written `module` form can ever collide with it (see
-/// `mangled_fn_path` for the same trick on function names).
+/// [`ConcreteNames::specialization`] for the same trick on function names).
 pub const MONO_BUNDLE_MODULE: &str = "<monomorph specializations>";
 
 /// Upper bound on specializations generated while draining one top-level
@@ -1514,7 +1515,7 @@ impl Checker {
                 MethodTemplate::Setter { index } => crate::dump::WireMethodTemplate::Setter { index: *index },
             };
             let (bytes, hash) = crate::dump::wire(&w)?;
-            visit(crate::dump::cat::METHOD_TEMPLATE, crate::types::method_link_name(&key.0, &key.1), bytes, hash)?;
+            visit(crate::dump::cat::METHOD_TEMPLATE, typelisp_mem::ConcreteNames::method_link(&key.0, &key.1), bytes, hash)?;
         }
         Ok(())
     }
@@ -1740,7 +1741,7 @@ impl Checker {
         // instantiation travels from here, the one place that knows it. The
         // representation above cannot stand in: `Repr::Vector(Int)` is
         // `Vector<i32>` and `Vector<i64>` at once.
-        let key = crate::type_key::type_key_of_type(ret);
+        let key = ConcreteNames::type_key(ret);
         let key = f.heap().alloc_string(key);
         f.push(key);
         for (i, a) in args.iter().enumerate() {
@@ -1797,7 +1798,7 @@ impl Checker {
         f.push(m);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
-        let key = crate::type_key::type_key_of_type(ret);
+        let key = ConcreteNames::type_key(ret);
         let key = f.heap().alloc_string(key);
         f.push(key);
         // Same reason as `Self::assoc_form`: called through a function value,
@@ -1879,7 +1880,7 @@ impl Checker {
         // above stays for the questions that are about the *definition*
         // (struct or enum, where it was defined); this is the one about the
         // *value* (which instantiation it is).
-        let key = crate::type_key::type_key_of_type(&Type::Named(type_name.clone(), targs.to_vec()));
+        let key = ConcreteNames::type_key(&Type::Named(type_name.clone(), targs.to_vec()));
         let key = f.heap().alloc_string(key);
         f.push(key);
         f.push(Value::Int(variant as i64));
@@ -2042,7 +2043,7 @@ impl Checker {
                 // *downcast* it is the whole point — testing the base path
                 // alone let a `gen<string>` value into a `(the gen<i32> ...)`
                 // arm, which then read its field as an `i32`.
-                let key = crate::type_key::type_key_of_type(&Type::Named(type_name.clone(), targs.clone()));
+                let key = ConcreteNames::type_key(&Type::Named(type_name.clone(), targs.clone()));
                 let key = f.heap().alloc_string(key);
                 f.push(key);
                 f.push(Value::Int(*variant as i64));
@@ -2072,7 +2073,7 @@ impl Checker {
                 // arguments — it does now, and this is where that stops being
                 // decoration: `(the gen<i32> x)` no longer accepts a
                 // `gen<string>` and then reads its field as an `i32`.
-                let key = crate::type_key::type_key_of_type(ty);
+                let key = ConcreteNames::type_key(ty);
                 let key = f.heap().alloc_string(key);
                 f.push(key);
                 let one = self.pattern_form(f.heap(), sub)?;
@@ -2297,12 +2298,12 @@ impl Checker {
         f.push(r);
         let mut cs = Items::new(f.heap());
         for t in params {
-            let k = cs.heap().intern_symbol(&crate::type_key::type_key_of_type(t));
+            let k = cs.heap().intern_symbol(&ConcreteNames::type_key(t));
             cs.push(k);
         }
         let ctypes = cs.finish_list()?;
         f.push(ctypes);
-        let rk = f.heap().intern_symbol(&crate::type_key::type_key_of_type(ret));
+        let rk = f.heap().intern_symbol(&ConcreteNames::type_key(ret));
         f.push(rk);
         f.finish("defffi")
     }
@@ -2952,7 +2953,7 @@ impl Checker {
                         return Err(Error::TypeError(format!(
                             "defffi: `{}` is a callback taking or returning a function, which C \
                              could only do through another callback — declare that one as `ptr`",
-                            crate::type_key::type_key_of_type(&ty)
+                            ConcreteNames::type_key(&ty)
                         )));
                     }
                     Self::reject_raw_word_nested(t)?;
@@ -4433,7 +4434,7 @@ impl Checker {
                 "`{}` puts a raw C word inside another type, and every such slot tags what it \
                  holds — which would drop the word's top three bits. A `ptr`/`c-long`/`c-ulong` \
                  can be a parameter or a return type, and nothing else.",
-                crate::type_key::type_key_of_type(ty)
+                ConcreteNames::type_key(ty)
             )));
         }
         Ok(())
@@ -4453,7 +4454,7 @@ impl Checker {
                  or convert it (`as i32`, `as bignum`).",
                 what,
                 name,
-                crate::type_key::type_key_of_type(ty)
+                ConcreteNames::type_key(ty)
             )));
         }
         Ok(())
@@ -4973,7 +4974,7 @@ impl Checker {
     /// [`Self::drain_specializations`], because this runs inside expression
     /// checking (`&self`) which cannot re-enter definition checking.
     fn request_fn_specialization(&self, base: &Path, args: Vec<Type>) -> Path {
-        let mangled = mangled_fn_path(base, &args);
+        let mangled = Path::from_segments(ConcreteNames::specialized_path(base.segments(), &args));
         let mut memo = self.spec_memo.borrow_mut();
         if memo.insert((mangled.clone(), None)) {
             self.spec_pending.borrow_mut().push(SpecRequest::Fn {
@@ -5041,7 +5042,7 @@ impl Checker {
     }
 
     fn request_method_specialization(&self, type_fq: &Path, base: &str, args: Vec<Type>) -> String {
-        let mangled = mangled_method_name(base, &args);
+        let mangled = ConcreteNames::specialization(base, &args);
         let mut memo = self.spec_memo.borrow_mut();
         if memo.insert((type_fq.clone(), Some(mangled.clone()))) {
             self.spec_pending.borrow_mut().push(SpecRequest::Method {
@@ -5073,7 +5074,7 @@ impl Checker {
                     SpecRequest::Fn { mangled, .. } => mangled.to_string(),
                     SpecRequest::Method { type_fq, mangled, .. } => format!("{}::{}", type_fq, mangled),
                     SpecRequest::Blanket { trait_path, target } => {
-                        format!("impl {} {}", trait_path, mangle_type(target))
+                        format!("impl {} {}", trait_path, ConcreteNames::type_key(target))
                     }
                 };
                 return Err(Error::TypeError(format!(
@@ -5433,10 +5434,10 @@ impl Checker {
     /// and this can never disagree on a type.
     fn option_form(&self, heap: &mut Heap, ty: &Type, payload: Option<Value>) -> Result<Value, Error> {
         let Type::Named(name, targs) = ty else {
-            return Err(Error::TypeError(format!("option_form: `{}` is not an Option type", mangle_type(ty))));
+            return Err(Error::TypeError(format!("option_form: `{}` is not an Option type", ConcreteNames::type_key(ty))));
         };
         if !crate::types::path_is_builtin(name, "option") || targs.len() != 1 {
-            return Err(Error::TypeError(format!("option_form: `{}` is not an Option type", mangle_type(ty))));
+            return Err(Error::TypeError(format!("option_form: `{}` is not an Option type", ConcreteNames::type_key(ty))));
         }
         if let Some(repr) = self.repr(ty).niche_payload() {
             return match payload {
@@ -5459,7 +5460,7 @@ impl Checker {
         if self.repr(ty).niche_payload().is_none() {
             return Ok(None);
         }
-        let key = crate::type_key::type_key_of_type(ty);
+        let key = ConcreteNames::type_key(ty);
         Ok(Some(forms::box_option_form(heap, &key, form)?))
     }
 
@@ -7226,8 +7227,8 @@ impl Checker {
             let describe = |params: &[Type], ret: &Type| {
                 format!(
                     "({}) {}",
-                    params.iter().map(mangle_type).collect::<Vec<_>>().join(" "),
-                    mangle_type(ret)
+                    params.iter().map(ConcreteNames::type_key).collect::<Vec<_>>().join(" "),
+                    ConcreteNames::type_key(ret)
                 )
             };
             if af.instance != want_instance {
@@ -7523,7 +7524,7 @@ impl Checker {
     /// Queue a blanket impl's materialization at one concrete type, deduped
     /// through the same `spec_memo` monomorphization uses.
     fn request_blanket_materialization(&self, trait_path: &Path, type_fq: &Path, ty: &Type) {
-        let key = format!("blanket {} {}", trait_path, mangle_type(ty));
+        let key = ConcreteNames::blanket_instance(trait_path, &ConcreteNames::type_key(ty));
         if self.spec_memo.borrow_mut().insert((type_fq.clone(), Some(key))) {
             self.spec_pending.borrow_mut().push(SpecRequest::Blanket {
                 trait_path: trait_path.clone(),
@@ -7538,7 +7539,7 @@ impl Checker {
     ///
     /// `check_impl` can use the target type *as written* because the user
     /// wrote it; a blanket materialization has no written form to reuse, only
-    /// a resolved `Type`. `mangle_type` already produces exactly the type
+    /// a resolved `Type`. `ConcreteNames::type_key` already produces exactly the type
     /// grammar for nominal and primitive types (`a::b<c,d>` is one symbol
     /// that `parse_type_name_rec` reads straight back), so this is that plus
     /// the shapes with no single-token spelling.
@@ -7547,9 +7548,9 @@ impl Checker {
             Type::Unit => Ok(Value::Empty),
             Type::Dyn(..) | Type::Fn(..) | Type::Never => Err(Error::TypeError(format!(
                 "`{}` cannot be the target of a blanket impl — it is not a nominal type",
-                mangle_type(t)
+                ConcreteNames::type_key(t)
             ))),
-            other => Ok(heap.intern_symbol(&mangle_type(other))),
+            other => Ok(heap.intern_symbol(&ConcreteNames::type_key(other))),
         }
     }
 
@@ -7920,10 +7921,10 @@ impl Checker {
                             trait_fq,
                             sup.trait_path,
                             aname,
-                            mangle_type(&want),
+                            ConcreteNames::type_key(&want),
                             target_fq,
                             sup.trait_path,
-                            mangle_type(&actual)
+                            ConcreteNames::type_key(&actual)
                         )))
                     }
                     None => {
@@ -8032,8 +8033,8 @@ impl Checker {
         let mismatch = |why: &str| {
             Error::TypeError(format!(
                 "cannot convert `{}` to `{}` — {}; box the concrete value as `:dyn {}` instead",
-                mangle_type(&from_ty),
-                mangle_type(&to_ty),
+                ConcreteNames::type_key(&from_ty),
+                ConcreteNames::type_key(&to_ty),
                 why,
                 to
             ))
@@ -8058,8 +8059,8 @@ impl Checker {
                         from,
                         to,
                         name,
-                        mangle_type(actual),
-                        mangle_type(want)
+                        ConcreteNames::type_key(actual),
+                        ConcreteNames::type_key(want)
                     )))
                 }
                 None => {
@@ -8199,7 +8200,7 @@ impl Checker {
         // only has the trait.
         let order = &self.check_object_safe(trait_path)?.vtable_order;
         let supers = self.dyn_super_vtables(trait_path, order, &slots);
-        let concrete_key = mangle_type(&value.ty);
+        let concrete_key = ConcreteNames::type_key(&value.ty);
         let form = self.dyn_new_form(
             heap,
             &concrete_key,
@@ -8435,7 +8436,7 @@ impl Checker {
                 None => {
                     return Err(Error::TypeError(format!(
                         "`{}` cannot be used as `:dyn {}`: it is not a nominal type",
-                        mangle_type(concrete),
+                        ConcreteNames::type_key(concrete),
                         trait_path
                     )))
                 }
@@ -8464,7 +8465,7 @@ impl Checker {
         if !self.is_heap_repr(concrete) {
             return Err(Error::TypeError(format!(
                 "`{}` has no heap representation (its values are not `Sexpr`-encodable), so it cannot be boxed as `:dyn {}`",
-                mangle_type(concrete),
+                ConcreteNames::type_key(concrete),
                 trait_path
             )));
         }
@@ -8477,7 +8478,7 @@ impl Checker {
         if self.repr(concrete).niche_payload().is_some() {
             return Err(Error::TypeError(format!(
                 "`{}` is a niche-represented Option with no box to carry a type key, so it cannot be boxed as `:dyn {}`",
-                mangle_type(concrete),
+                ConcreteNames::type_key(concrete),
                 trait_path
             )));
         }
@@ -8492,10 +8493,10 @@ impl Checker {
                         type_fq,
                         trait_path,
                         name,
-                        mangle_type(&actual),
+                        ConcreteNames::type_key(&actual),
                         trait_path,
                         name,
-                        mangle_type(pin)
+                        ConcreteNames::type_key(pin)
                     )))
                 }
                 None => {
@@ -8542,7 +8543,7 @@ impl Checker {
                 if targs.len() != def.params.len() || targs.iter().any(|t| self.type_is_open(t)) {
                     return Err(Error::TypeError(format!(
                         "`{}` is not fully concrete, so `:dyn {}`'s vtable cannot be laid out yet",
-                        mangle_type(concrete),
+                        ConcreteNames::type_key(concrete),
                         trait_path
                     )));
                 }
@@ -9575,7 +9576,7 @@ impl Checker {
     /// A [`Type`] rendered back into the surface syntax a type annotation is
     /// written in, so a synthesized definition can carry it.
     ///
-    /// [`mangle_type`] alone is not enough: it is a *serialization* (commas
+    /// [`ConcreteNames::type_key`] alone is not enough: it is a *serialization* (commas
     /// inside `(fn ...)`, a bare `dyn` head), tuned for making two distinct
     /// canonical types render differently, not for being read back. It is
     /// exactly right for the atomic cases, which is why they go through it.
@@ -9610,12 +9611,12 @@ impl Checker {
                 let mut f = Items::new(heap);
                 let head = f.heap().intern_symbol(":dyn");
                 f.push(head);
-                let inner = mangle_type(&Type::Named(path.clone(), pins.clone()));
+                let inner = ConcreteNames::type_key(&Type::Named(path.clone(), pins.clone()));
                 let name = f.heap().intern_symbol(&inner);
                 f.push(name);
                 f.finish_list()
             }
-            other => Ok(heap.intern_symbol(&mangle_type(other))),
+            other => Ok(heap.intern_symbol(&ConcreteNames::type_key(other))),
         }
     }
 
@@ -9706,7 +9707,7 @@ impl Checker {
     /// substitution rather than a fixpoint, and an alias cycle is
     /// unconstructible rather than merely detected. Because the rewrite
     /// happens inside the type parser, nothing downstream ever learns an
-    /// alias existed: `mangle_type`, the monomorphization keys, the dump, the
+    /// alias existed: `ConcreteNames::type_key`, the monomorphization keys, the dump, the
     /// compile pipeline and every error message all show the expansion. That
     /// is the deliberate trade — CL's `deftype` is likewise a
     /// *type-specifier* abbreviation, not a distinct type, and `typep` on one
@@ -10417,7 +10418,7 @@ impl Checker {
                     let e = Error::TypeError(format!(
                         "a `{}` is a raw machine word from the C FFI and can only be a value \
                          inside `(unsafe ...)` — nothing here can check that it points at anything",
-                        crate::type_key::type_key_of_type(&checked.ty)
+                        ConcreteNames::type_key(&checked.ty)
                     ));
                     return Err(match &loc {
                         Some(l) => e.at(l.clone()),
@@ -12399,7 +12400,7 @@ impl Checker {
             SpawnKind::Task => super::registry::task_of(inner.ty),
             SpawnKind::Thread => super::registry::thread_of(inner.ty),
         };
-        let key = crate::type_key::type_key_of_type(&ty);
+        let key = ConcreteNames::type_key(&ty);
         let form = forms::spawn_form(heap, form_name, ret, &key, inner.form)?;
         Ok(Checked::new(form, ty))
     }
@@ -12537,7 +12538,7 @@ impl Checker {
                 // answer, and hiding it would leave an arm that can only be
                 // written by testing the channel some other way.
                 let bound = super::registry::option_of(elem);
-                let key = crate::type_key::type_key_of_type(&bound);
+                let key = ConcreteNames::type_key(&bound);
                 let chan_name = format!("select operand {}", binds.len());
                 binds.push((chan_name.clone(), chan.ty.clone(), chan.form));
                 let child = env.extended_with_locs(vec![(var.clone(), bound, loc.clone())])?;
@@ -12656,7 +12657,7 @@ impl Checker {
             if try_variant {
                 return Err(Error::TypeError(format!(
                     "try-as: `{}` either always succeeds or is a type error (a type's trait impls are known statically) — use `as`",
-                    mangle_type(&target)
+                    ConcreteNames::type_key(&target)
                 )));
             }
             return self.coerce_to_dyn(heap, env, src, trait_path, pins);
@@ -12728,7 +12729,7 @@ impl Checker {
         // cast is `int->W`, and `W` being a C word does not change which
         // family asked for it.
         let family = if target.is_int_family() || target.is_c_word() { "int" } else { "float" };
-        let name = crate::type_key::type_key_of_type(target);
+        let name = ConcreteNames::type_key(target);
         let method = if try_variant { format!("try-{}->{}", family, name) } else { format!("{}->{}", family, name) };
         let owner = prim_type_path(&src.ty).expect("a width cast's source is a primitive type");
         self.check_assoc_call(
@@ -13996,7 +13997,7 @@ impl Checker {
             "aref: `{}` is not an `Array<T>`. `aref` collects its subscripts into the \
              `Vector<i32>` an array is indexed by; a `Vector<T>`, `string` or `HashTable<K,V>` \
              takes its key directly, as `(get x k)` / `(setf (get x k) v)`.",
-            mangle_type(&recv_ty)
+            ConcreteNames::type_key(&recv_ty)
         )))
     }
 
@@ -14568,14 +14569,14 @@ impl Checker {
     /// putting a type it worked out into the tree it is building, since
     /// nothing downstream can rederive it.
     ///
-    /// The written form is [`mangle_type`]'s, which is the surface syntax,
+    /// The written form is [`ConcreteNames::type_key`]'s, which is the surface syntax,
     /// and the round trip through [`Self::parse_type_here_at`] is *checked*
     /// rather than assumed: not every type has surface syntax — a function
     /// type's parentheses cannot be written inside `<>`
     /// (`read::reader::read_type_in_args`) — and refusing to write one says
     /// so here instead of emitting a form that fails somewhere less legible.
     fn the_form(&self, heap: &mut Heap, outer: &str, elem: &Type, ctor: &str) -> Result<Value, Error> {
-        let text = format!("{}<{}>", outer, mangle_type(elem));
+        let text = ConcreteNames::instantiated_type(outer, &[elem]);
         let ty_form = heap.intern_symbol(&text);
         let ok = match self.parse_type_here_at(heap, ty_form, None) {
             Ok(Type::Named(_, args)) => args.len() == 1 && args[0] == *elem,
@@ -17321,9 +17322,9 @@ impl Checker {
             let must_name = || {
                 Error::TypeError(format!(
                     "pattern: `(the {} ..)` on a niche-represented Option must name a constructor — `(the {} (some x))` or `(the {} (none))` — since the Sexpr holds it boxed",
-                    mangle_type(&ty),
-                    mangle_type(&ty),
-                    mangle_type(&ty)
+                    ConcreteNames::type_key(&ty),
+                    ConcreteNames::type_key(&ty),
+                    ConcreteNames::type_key(&ty)
                 ))
             };
             let sub_locs = heap.list_to_vec_locs(parts[2]).map_err(|_| must_name())?;
@@ -17950,7 +17951,7 @@ fn int_lit_ty(expected: Option<&Type>) -> Type {
 /// with. Rejected here rather than silently cut, because a cut is a thing the
 /// caller can ask for and mean — that request is spelled `(as u8 300)`.
 fn int_lit_in_range(n: i64, ty: &Type) -> bool {
-    match crate::types::int_width_signed(&crate::type_key::type_key_of_type(ty)) {
+    match crate::types::int_width_signed(&ConcreteNames::type_key(ty)) {
         Some((width, signed)) => crate::types::normalize_int(n, width, signed) == n,
         None => true,
     }
@@ -17965,7 +17966,7 @@ fn int_lit_in_range(n: i64, ty: &Type) -> bool {
 /// reaches the width cast through `bignum->int`, which is itself `i32`-wide,
 /// so suggesting `as` for one would send the caller at a second failure.
 fn int_lit_range_error(n: &str, ty: &Type, castable: bool) -> Error {
-    let name = crate::type_key::type_key_of_type(ty);
+    let name = ConcreteNames::type_key(ty);
     let range = match crate::types::int_width_signed(&name) {
         Some((width, true)) => format!("{}..={}", -(1i64 << (width - 1)), (1i64 << (width - 1)) - 1),
         Some((width, false)) => format!("0..={}", (1i64 << width) - 1),
@@ -18014,11 +18015,6 @@ fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
     }
 }
 
-/// Renders a canonicalized (fully module-qualified) type as the string used
-/// inside a specialization's mangled name — a faithful, unambiguous
-/// serialization, so two distinct canonical types can never render equal
-/// (which is what lets `mangled_fn_path` double as the instantiation's
-/// identity). Nested generics render Rust-style: `vector<cons-cell<string,i32>>`.
 /// The parameter types a *function value* of this signature really takes:
 /// the required ones, then `&optional`, then `&key`. `FnSig::params` holds
 /// the required list alone because a call site that resolved the callee *by
@@ -18045,37 +18041,6 @@ fn fn_value_params(sig: &FnSig) -> Vec<Type> {
 /// keeps for it.
 fn fn_value_type(sig: &FnSig) -> Type {
     Type::Fn(fn_value_params(sig), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()))
-}
-
-/// The spelling of `t` as one token — a type's *identity as written*.
-///
-/// The one producer lives in [`crate::type_key`], because the three things
-/// that need such a spelling must not drift apart: a specialization's name
-/// ([`mangled_method_name`]), a `:dyn` box's concrete key, and a heap value's
-/// runtime type key are all *the same question* — which instantiation is this
-/// — and answering it two ways is what made `gen<i32>` and `gen<string>`
-/// indistinguishable to the printer.
-fn mangle_type(t: &Type) -> String {
-    crate::type_key::type_key_of_type(t)
-}
-
-/// The specialized function's [`Path`] for `base` instantiated at `args`:
-/// the base path with its final segment rewritten to e.g. `"identity <i32>"`.
-/// The space is load-bearing: the reader treats whitespace as a delimiter,
-/// so no source-written symbol can ever spell this name — a user `(defun
-/// identity<i32> ...)` (a perfectly legal token) can therefore never collide
-/// with a generated specialization in `Interp`'s function table.
-fn mangled_fn_path(base: &Path, args: &[Type]) -> Path {
-    let mut segs = base.parent().to_vec();
-    segs.push(mangled_method_name(base.last_segment(), args));
-    Path::from_segments(segs)
-}
-
-/// The mangled *local* name shared by function and method specializations —
-/// e.g. `"unwrap <i32>"`. See [`mangled_fn_path`]'s doc comment for why the
-/// space makes collisions with source-written names impossible.
-fn mangled_method_name(base: &str, args: &[Type]) -> String {
-    format!("{} <{}>", base, args.iter().map(mangle_type).collect::<Vec<_>>().join(","))
 }
 
 /// Every name [`subst_apply`] would look up: the simple, argument-less
@@ -18481,7 +18446,7 @@ fn loop_thereis_error(ty: &Type) -> Error {
     Error::TypeError(format!(
         "loop :thereis: expected an `Option<T>`, got `{}` — CL's `thereis` answers the first \
          non-nil value, and `Option` is what that is here (a `bool` test is `:always`/`:never`)",
-        mangle_type(ty)
+        ConcreteNames::type_key(ty)
     ))
 }
 

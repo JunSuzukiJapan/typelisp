@@ -352,8 +352,8 @@ fn walk(
     doc_table!(cat::DOC_VAR, docs.vars, |p: &Path| p.to_string());
     doc_table!(cat::DOC_TRAIT, docs.traits, |p: &Path| p.to_string());
     doc_table!(cat::DOC_MACRO, docs.macros, |p: &Path| p.to_string());
-    doc_table!(cat::DOC_METHOD, docs.methods, |k: &(Path, String)| crate::types::method_link_name(&k.0, &k.1));
-    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods, |k: &(Path, String)| crate::types::method_link_name(&k.0, &k.1));
+    doc_table!(cat::DOC_METHOD, docs.methods, |k: &(Path, String)| typelisp_mem::ConcreteNames::method_link(&k.0, &k.1));
+    doc_table!(cat::DOC_TRAIT_METHOD, docs.trait_methods, |k: &(Path, String)| typelisp_mem::ConcreteNames::method_link(&k.0, &k.1));
 
     for (tag, ty) in throw_tags {
         let (bytes, hash) = wire(ty)?;
@@ -585,10 +585,10 @@ fn doc_text(payload: &[u8]) -> Result<String, String> {
 }
 
 /// A method entry's name back into the registry's key — the inverse of the
-/// [`crate::types::method_link_name`] the walk wrote it with.
+/// [`typelisp_mem::ConcreteNames::method_link`] the walk wrote it with.
 pub fn parse_method_key(key: &str) -> Result<(Path, String), String> {
-    match crate::types::split_method_link_name(key) {
-        Some((path, method)) => Ok((path, method.to_string())),
+    match typelisp_mem::ConcreteNames::split_method_link(key) {
+        Some((path, method)) => Ok((parse_path(path), method.to_string())),
         None => Err(format!("dump: `{}` is not a method key", key)),
     }
 }

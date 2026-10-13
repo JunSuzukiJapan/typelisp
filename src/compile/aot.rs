@@ -71,6 +71,7 @@ use crate::check::core;
 use crate::compile::symbols::target_symbol_name;
 use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
+use typelisp_mem::ConcreteNames;
 
 const ENTRY_POINT_NAME: &str = "main";
 
@@ -484,12 +485,11 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // touches the LLVM Context family of APIs directly with no calls back
     // into `Interp`/the typelisp compiler body.
     for item in &items {
-        // Every user body's own LLVM symbol name gets the `tl_` prefix
-        // (`crate::compile::USER_SYMBOL_PREFIX`) — `main` is no longer a
-        // special case: `build_main_wrapper` calls it by that same symbol
-        // (`tl_p::main` for `p.typl`). A `defmethod`'s symbol is
-        // `user_method_symbol_name`'s `tl_type::method`, exactly what a
-        // compiled call site emits.
+        // Every user body's own LLVM symbol name is `ConcreteNames::symbol`'s
+        // — `main` is no longer a special case: `build_main_wrapper` calls it
+        // by that same symbol (`tl_p::main` for `p.typl`). A method's symbol
+        // is `ConcreteNames::method_symbol`'s `tl_type''method`, exactly what
+        // a compiled call site emits.
         crate::compile::driver::add_compiled_function(&interp, &mut heap, module.clone(), item, &target_symbol_name(item)).map_err(|e| e.to_string())?;
     }
 
@@ -521,7 +521,9 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let mut print_objects: Vec<(String, String)> = items
         .iter()
         .filter_map(|item| match item {
-            CompileTarget::Method(type_path, method) => Some((print_object_key(type_path, method)?, target_symbol_name(item))),
+            CompileTarget::Method(type_path, method) => {
+                Some((ConcreteNames::value_key_for_method(&type_path.to_string(), "print-object", method)?, target_symbol_name(item)))
+            }
             CompileTarget::Fn(_) => None,
         })
         .collect();
@@ -539,9 +541,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             .filter(|f| f.count_basic_blocks() > 0)
             .filter_map(|f| {
                 let symbol = f.get_name().to_str().ok()?.to_string();
-                let node = symbol.strip_prefix(crate::compile::USER_SYMBOL_PREFIX)?;
-                let (type_path, method) = crate::types::split_method_link_name(node)?;
-                Some((print_object_key(&type_path, method)?, symbol))
+                let (type_path, method) = ConcreteNames::split_method_link(ConcreteNames::link_name_of_symbol(&symbol)?)?;
+                Some((ConcreteNames::value_key_for_method(type_path, "print-object", method)?, symbol))
             })
             .filter(|(key, _)| !print_objects.iter().any(|(k, _)| k == key))
             .collect();
@@ -679,26 +680,6 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     result
 }
 
-/// The type key the method `method` of `type_path` is registered under if it
-/// is a `print-object` — `None` for any other method.
-///
-/// Two shapes, because a generic type's `print-object` is monomorphized:
-/// `print-object` for a plain type, and `print-object <i32>` for one
-/// instantiation of a generic — whose *value* carries the key `gen<i32>`, so
-/// that is what the table has to be keyed by
-/// (`type_key::specialized_method_name` is the same correspondence read the
-/// other way).
-fn print_object_key(type_path: &Path, method: &str) -> Option<String> {
-    let targs = match method.strip_prefix("print-object")? {
-        "" => None,
-        rest => Some(rest.strip_prefix(" <")?.strip_suffix('>')?),
-    };
-    let base = crate::type_key::type_key_of(type_path).into_owned();
-    Some(match targs {
-        Some(args) => format!("{}<{}>", base, args),
-        None => base,
-    })
-}
 
 /// Adds a real, C-ABI `main` to `module` that calls the compiled entry
 /// point (the symbol `entry_symbol`, `tl_p::main` for `p.typl` — called
@@ -794,7 +775,7 @@ fn build_main_wrapper(
             .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
         for (id, slots) in vtables {
             for (slot, (type_name, method)) in slots.iter().enumerate() {
-                let symbol = crate::compile::symbols::user_method_symbol_name(type_name, method);
+                let symbol = ConcreteNames::method_symbol(type_name, method);
                 let target = module.get_function(&symbol).ok_or_else(|| {
                     format!(
                         "compile-file: dyn dispatch target `{}::{}` was not compiled into this file",

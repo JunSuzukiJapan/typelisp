@@ -86,7 +86,7 @@ pub enum Pattern {
         type_name: Path,
         /// The type arguments this pattern's ADT is instantiated at, so the
         /// lowered node can spell the *value's* runtime identity
-        /// (`type_key::type_key_of_type`) rather than just the ADT's path.
+        /// (`ConcreteNames::type_key`) rather than just the ADT's path.
         ///
         /// Recorded for the same reason `field_types` is: the pattern site is
         /// where the instantiation is known. Without it a downcast tested only

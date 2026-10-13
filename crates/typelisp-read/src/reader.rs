@@ -1099,7 +1099,7 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
 
 /// The `Vector<int>` box an array's dimensions are kept in. Spelled here
 /// because the reader cannot derive a type key; `tests/type_identity_guard_test.rs`
-/// checks it against the one `type_key_of_type` produces.
+/// checks it against the one `ConcreteNames::type_key` produces.
 pub const ARRAY_DIMS_KEY: &str = "vector<int>";
 
 /// `#(a b c)`: the elements, read as data, in a `Vector<Option<Sexpr>>` box —

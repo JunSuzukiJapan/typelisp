@@ -15,7 +15,6 @@ mod common;
 
 use common::{check_err, eval_ok, eval_string, eval_string_compiled, Load, Session};
 use typelisp::check::repr::Repr;
-use typelisp::type_key::type_key_of_type;
 use typelisp::{Path, Type, Value};
 
 /// `expr` rendered with `~a`, interpreted and compiled (after `(compile
@@ -69,8 +68,8 @@ fn the_type_side_and_the_key_side_agree_on_what_niches() {
     for payload in payloads {
         let ty = option(payload.clone());
         let by_type = Repr::of_by(&ty, &|_| None).niche_payload().is_some();
-        let by_key = typelisp_mem::is_niched_option_key(&type_key_of_type(&ty));
-        assert_eq!(by_type, by_key, "Option<{:?}> ({})", payload, type_key_of_type(&ty));
+        let by_key = typelisp_mem::is_niched_option_key(&typelisp_mem::ConcreteNames::type_key(&ty));
+        assert_eq!(by_type, by_key, "Option<{:?}> ({})", payload, typelisp_mem::ConcreteNames::type_key(&ty));
     }
 }
 

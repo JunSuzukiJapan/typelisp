@@ -2000,7 +2000,7 @@ impl Interp {
             ArgsKind::Assoc => {
                 let type_name = path_field(heap, form, 0, "assoc")?;
                 let method = sym_field(heap, form, 1, "assoc")?;
-                let name = crate::types::method_link_name(&type_name, &method);
+                let name = typelisp_mem::ConcreteNames::method_link(&type_name, &method);
                 let Some(f) = self.root.borrow().get_method(&type_name, &method) else {
                     return Err(not_compilable(format!("`{}`", name), "is a built-in with no body to compile".to_string()));
                 };
@@ -2445,7 +2445,7 @@ impl Interp {
                         match super::eval_builtin_method(heap, &type_name, &name, &argv, &ret_key) {
                             Some(r) => r?,
                             None => {
-                                return Err(EvalError::NoSuchFunction(crate::types::method_link_name(&type_name, &name)))
+                                return Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, &name)))
                             }
                         }
                     }
@@ -2588,7 +2588,7 @@ impl Interp {
             Some(f) => self.enter_fn(heap, form, &f, argv),
             None => match super::eval_builtin_method(heap, &type_name, &method, &argv, &ret_key) {
                 Some(result) => Ok((State::Apply(result?), None)),
-                None => Err(EvalError::NoSuchFunction(crate::types::method_link_name(&type_name, &method))),
+                None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, &method))),
             },
         }
     }
@@ -2631,7 +2631,7 @@ impl Interp {
         let f = self.root.borrow().get_method(&target_type, &target_method);
         match f {
             Some(f) => self.enter_fn(heap, form, &f, argv),
-            None => Err(EvalError::NoSuchFunction(crate::types::method_link_name(&target_type, &target_method))),
+            None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&target_type, &target_method))),
         }
     }
 

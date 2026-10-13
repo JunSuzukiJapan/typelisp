@@ -16,7 +16,7 @@
 //!
 //! # Why that makes the rest of the compiler unaware of the FFI
 //!
-//! The thunk is named by [`crate::compile::symbols::user_symbol_name`] — the
+//! The thunk is named by [`ConcreteNames::symbol`] — the
 //! same rule a `defun`'s compiled body is named by. Two things follow, and
 //! they are the whole reason for this design:
 //!
@@ -47,6 +47,7 @@ use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue};
 
 use typelisp_front::eval::interp::{CompiledBody, FfiDecl, Interp};
+use typelisp_mem::ConcreteNames;
 
 use crate::compile::llvm_builtins::compiled_fn_type;
 use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
@@ -88,7 +89,7 @@ enum CType {
 impl CType {
     /// The C type a declared typelisp type means, or `None` if it means none.
     ///
-    /// The spellings are `type_key::type_key_of_type`'s, which is what the
+    /// The spellings are `ConcreteNames::type_key`'s, which is what the
     /// `defffi` node carries — one producer, so there is nothing to keep in
     /// agreement.
     fn from_key(key: &str) -> Option<CType> {
@@ -96,12 +97,12 @@ impl CType {
         // calls (`typelisp_front::ffi_callback`), so to the thunk it is a
         // pointer. Whether the callback's own types can be spelled is
         // [`callback_ctypes`]'s question.
-        if typelisp_front::ffi_callback::split_fn_key(key).is_some() {
+        if ConcreteNames::split_fn_type(key).is_some() {
             return Some(CType::Ptr);
         }
         // A typed pointer is an address like any other; which C object it
         // points at is checked by the runtime, not the C signature.
-        if typed_pointee(key).is_some() {
+        if ConcreteNames::ptr_target(key).is_some() {
             return Some(CType::Ptr);
         }
         // Covers the six widths *and* `c-long`/`c-ulong`, which that function
@@ -213,7 +214,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     }
 
     // ---- the thunk, under the shared signature ----
-    let name = crate::compile::symbols::user_symbol_name(&decl.path.to_string());
+    let name = ConcreteNames::symbol(&decl.path.to_string());
     if module.get_function(&name).is_some() {
         return Err(format!("internal error: `{}` is already defined in this module", name));
     }
@@ -429,7 +430,7 @@ fn ctypes(keys: &[String], decl: &FfiDecl) -> Result<Vec<CType>, String> {
     // A callback parameter's own types are checked here, at the declaration,
     // rather than when an entry is first made for it.
     for k in keys {
-        if let Some((params, ret)) = typelisp_front::ffi_callback::split_fn_key(k) {
+        if let Some((params, ret)) = ConcreteNames::split_fn_type(k) {
             callback_ctypes(&params, &ret).map_err(|e| format!("defffi: `{}`: {}", decl.path, e))?;
         }
     }
@@ -701,11 +702,6 @@ pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBod
 // its answer into the C value it returns. Both conversions are the ones the
 // thunk already has, run in the other direction.
 
-/// The pointee's key of a typed pointer's key (`(ptr point)` → `point`).
-fn typed_pointee(key: &str) -> Option<&str> {
-    key.strip_prefix("(ptr ")?.strip_suffix(')')
-}
-
 /// A callback's C parameter and return types, from their type keys — or why
 /// C cannot call a function with them.
 fn callback_ctypes(params: &[String], ret: &str) -> Result<(Vec<CType>, CType), String> {
@@ -871,7 +867,7 @@ pub(crate) fn emit_callback_entry_in_module(
 ) -> Result<FunctionValue<'static>, String> {
     let (params, ret) = callback_sig_ctypes(sig)?;
     let pointees = callback_pointees(sig);
-    let symbol = crate::compile::symbols::user_symbol_name(&sig.path);
+    let symbol = ConcreteNames::symbol(&sig.path);
     let body = module
         .get_function(&symbol)
         .ok_or_else(|| format!("compile-file: `{}` is passed to C as a callback but was not compiled", sig.path))?;
@@ -881,7 +877,7 @@ pub(crate) fn emit_callback_entry_in_module(
 
 /// Each parameter's pointee key, for the ones that are typed pointers.
 fn callback_pointees(sig: &typelisp_front::ffi_callback::CallbackSig) -> Vec<Option<String>> {
-    sig.params.iter().map(|p| typed_pointee(p).map(str::to_string)).collect()
+    sig.params.iter().map(|p| ConcreteNames::ptr_target(p).map(str::to_string)).collect()
 }
 
 thread_local! {

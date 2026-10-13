@@ -56,14 +56,14 @@
 
 use std::collections::{HashMap, HashSet};
 
-use typelisp_mem::{wk, Error, Heap, RootScope, SymRef, Value};
+use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, SymRef, Value};
 
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, LLVM_METHOD_RECEIVER_TYPES};
 
 use super::symbols::{
-    callee_symbol_name, fresh_lambda_name, llvm_op_id, user_method_symbol_name, DynTables,
+    callee_symbol_name, fresh_lambda_name, llvm_op_id, DynTables,
     HASHTABLE_BUILTIN_METHODS, VECTOR_BUILTIN_METHODS,
 };
 use typelisp_front::check::freevars::{free_vars, names_captured_by_nested};
@@ -1078,7 +1078,7 @@ fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 ///
 /// The island looks the callee up by the name written here and nothing else:
 /// the mangled name `Interp::compile_scc`/`compile::aot` declare an ordinary
-/// function under ([`user_symbol_name`]), or — for a free builtin with no
+/// function under ([`ConcreteNames::symbol`]), or — for a free builtin with no
 /// typelisp body — the `crate::compile::runtime` shim that *is* its
 /// implementation ([`crate::compile::externs::rt_builtin_symbol`]). Both
 /// decisions live on this side; see that function on why the island no
@@ -1267,16 +1267,20 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         return f.finish("llvm-op");
     }
 
-    // The generic path. The type name is its *fully qualified* path: the
-    // island mangles it back into a `tl_type::path::method` lookup name
-    // ([`user_method_symbol_name`]), and two same-named types in different
-    // modules would otherwise collide on one symbol.
+    // The generic path: `(assoc TYPE METHOD INSTANCE SYMBOL ARG...)`. The
+    // island dispatches the methods it lowers itself on the type and method
+    // names, and calls every other one by `SYMBOL`
+    // ([`ConcreteNames::method_symbol`]), the name its body was compiled
+    // under.
+    let symbol = ConcreteNames::method_symbol(&type_name, &method);
     let type_v = heap.alloc_string(type_name.to_string());
     let mut f = Items::new(heap);
     f.push(type_v);
     let method_v = f.heap().alloc_string(method);
     f.push(method_v);
     f.push(Value::Bool(instance));
+    let symbol_v = f.heap().alloc_string(symbol);
+    f.push(symbol_v);
     arg_pairs(&mut f, &reprs, &args, cx)?;
     f.finish("assoc")
 }
@@ -1689,7 +1693,7 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
             }
             let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
             let method = symbol_field(heap, form, 1)?;
-            (user_method_symbol_name(&path, &method), params_of(heap, parts[3])?, parts[5..].to_vec())
+            (ConcreteNames::method_symbol(&path, &method), params_of(heap, parts[3])?, parts[5..].to_vec())
         }
         _ => return Ok(None),
     };
@@ -2428,12 +2432,15 @@ fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     let method = symbol_field(heap, form, 1)?;
     let reprs = repr_list(heap, core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?)?;
     forwarding_lambda(heap, "method", &reprs, cx, move |heap, forwarded| {
+        let symbol = ConcreteNames::method_symbol(&path, &method);
         let type_v = heap.alloc_string(path.to_string());
         let mut f = Items::new(heap);
         f.push(type_v);
         let method_v = f.heap().alloc_string(method);
         f.push(method_v);
         f.push(Value::Bool(true));
+        let symbol_v = f.heap().alloc_string(symbol);
+        f.push(symbol_v);
         f.extend(forwarded.iter().copied());
         f.finish("assoc")
     })
@@ -3412,11 +3419,11 @@ mod tests {
     fn an_ordinary_method_call_keeps_its_qualified_type_name() {
         assert_eq!(
             bridged("(assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))"),
-            r#"(assoc "i32" "+" true (0 var "a" false) (0 var "b" false))"#
+            r#"(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
             bridged("(assoc m::point area true int-any-width (struct) \"i32\" (var p))"),
-            r#"(assoc "m::point" "area" true (2 var "p" false))"#
+            r#"(assoc "m::point" "area" true "tl_m::point''area" (2 var "p" false))"#
         );
     }
 
@@ -3484,7 +3491,7 @@ mod tests {
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
             bridged("(assoc scope get true enum ((scope int-any-width) str) \"option<i32>\" (var e) (var n))"),
-            r#"(assoc "scope" "get" true (2 var "e" false) (2 var "n" false))"#
+            r#"(assoc "scope" "get" true "tl_scope''get" (2 var "e" false) (2 var "n" false))"#
         );
     }
 
@@ -3642,7 +3649,7 @@ mod tests {
             &DEFS,
             r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true bool (str str) "bool" (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
         );
-        assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true"#), "{}", printed);
+        assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true "tl_string''equals""#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
         assert!(printed.ends_with(" 2)"), "{}", printed);
     }
@@ -3854,7 +3861,7 @@ mod tests {
     fn a_method_reference_forwards_onto_the_method() {
         let printed = bridged("(methodref point area (struct) \"i32\")");
         assert!(
-            printed.ends_with(r#" () ((arg0 . 2)) (assoc "point" "area" true (2 var "arg0" false)))"#),
+            printed.ends_with(r#" () ((arg0 . 2)) (assoc "point" "area" true "tl_point''area" (2 var "arg0" false)))"#),
             "{}",
             printed
         );
@@ -3965,7 +3972,7 @@ mod tests {
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
-        assert_eq!(body, r#"(assoc "i32" "+" true (0 var "a" false) (0 var "b" false))"#);
+        assert_eq!(body, r#"(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#);
         // The same mangling a call to it produces.
         assert!(bridged("(call m::add ())").contains(r#""tl_m::add""#));
     }

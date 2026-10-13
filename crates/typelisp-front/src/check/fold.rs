@@ -113,7 +113,7 @@ pub(super) fn fold_builtin_method(
             None => return Ok(None),
         }
     }
-    let ret_key = crate::type_key::type_key_of_type(ret);
+    let ret_key = typelisp_mem::ConcreteNames::type_key(ret);
     let value = match eval_builtin_method(heap, type_name, method, &values, &ret_key) {
         Some(Ok(v)) => v,
         // A language-level error: the program raises here at runtime.

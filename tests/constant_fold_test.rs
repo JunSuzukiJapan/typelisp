@@ -203,7 +203,7 @@ fn literal_of(ty: &Type) -> Option<String> {
         Type::Ratio => "1/2".to_string(),
         Type::Char => "#\\a".to_string(),
         Type::Bool => "true".to_string(),
-        t if t.is_integer() => format!("(the {} 1)", typelisp::type_key::type_key_of_type(t)),
+        t if t.is_integer() => format!("(the {} 1)", typelisp_mem::ConcreteNames::type_key(t)),
         _ => return None,
     })
 }

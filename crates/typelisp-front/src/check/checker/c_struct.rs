@@ -312,7 +312,7 @@ impl Checker {
     /// Every `(offset, key)` a C object of type `ty` placed at `base` starts
     /// at: itself, and — for a struct — each field, recursively.
     fn c_positions(&self, ty: &Type, base: u64, out: &mut Vec<(u64, String)>) -> Result<(), Error> {
-        out.push((base, crate::type_key::type_key_of_type(ty)));
+        out.push((base, typelisp_mem::ConcreteNames::type_key(ty)));
         if let Type::CStruct(p) = ty {
             for f in self.c_struct_def(p)?.fields {
                 self.c_positions(&f.ty, base + f.offset, out)?;
@@ -505,7 +505,7 @@ impl Checker {
     /// `(" c-ptr-check" FORM KEY)` — `form`, a typed pointer to `pointee`
     /// that came from C, once it is known to point into live memory.
     pub(super) fn c_checked_from_c(&self, heap: &mut Heap, form: Value, pointee: &Type) -> Result<Value, Error> {
-        let key = self.c_text(heap, &crate::type_key::type_key_of_type(pointee))?;
+        let key = self.c_text(heap, &typelisp_mem::ConcreteNames::type_key(pointee))?;
         self.c_call(heap, b::PTR_CHECK, &[Checked::new(form, Type::Ptr), key])
     }
 
@@ -590,7 +590,7 @@ impl Checker {
         let i = self.c_int_arg(heap, interp, env, args[1], nth_loc(arg_locs, 1).as_ref())?;
         let (size, _) = self.c_layout(&elem)?;
         let size = self.c_word(heap, interp, size)?;
-        let key = self.c_text(heap, &crate::type_key::type_key_of_type(&elem))?;
+        let key = self.c_text(heap, &typelisp_mem::ConcreteNames::type_key(&elem))?;
         let form = self.c_call(heap, b::INDEX, &[p, i, size, key])?;
         Ok(Checked::new(form, ty))
     }
