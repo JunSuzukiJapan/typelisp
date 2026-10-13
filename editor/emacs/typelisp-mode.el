@@ -365,7 +365,8 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; the REPL tool layer's ordinary functions (CLHS 25.2).  `heap-info' is
     ;; what `room' prints and what a program reads the same numbers from.
     "room" "heap-info" "dribble")
-  "Builtin functions and methods from the standard catalog (docs/ja/reference/functions/).")
+  "Builtin functions and methods from the standard catalog.
+See docs/ja/reference/functions/.")
 
 (defconst typelisp-primitive-types
   '("i8" "i16" "i32" "u8" "u16" "u32"
@@ -375,12 +376,12 @@ function types; `&optional' and `&key' are `defmacro'-only.")
 Includes the arbitrary-precision `int' (a fixnum that becomes a bignum box
 past 63 bits) and the heap-boxed `ratio', which are their own static types
 with no implicit conversion to or from the fixed-width numerics
-(docs/ja/reference/syntax.md §2), and the opaque mutable `random-state' PRNG stream
-(CLHS 12.1.6).
+(docs/ja/reference/syntax.md §2), and the opaque mutable `random-state'
+PRNG stream (CLHS 12.1.6).
 
 `ptr' / `c-long' / `c-ulong' are the C-boundary words: only writable inside
-`unsafe', and only as an argument, a return type or a local (docs/ja/reference/syntax.md
-§3.3).")
+`unsafe', and only as an argument, a return type or a local
+(docs/ja/reference/syntax.md §3.3).")
 
 (defconst typelisp-builtin-types
   '(;; stream traits and concrete stream types (§18)
@@ -473,12 +474,11 @@ and the form's own head (docs/ja/reference/syntax.md §3).")
           ;; prefix parameters and modifiers: 3, 'c, v, #, comma-separated,
           ;; plus the `:' / `@' modifiers
           "\\(?:'.\\|[-+0-9,vV#:@]\\)*"
-          ;; The directive character itself (`~<newline>' ignores whitespace).
-          ;; `/' is deliberately absent: `~/name/' function-call directives are
-          ;; rejected by the formatter, so leaving one unhighlighted is a hint
-          ;; rather than a gap.
-          "\\(?:[][a-zA-Z%&|~$_^<>{}();*?]\\|\n\\)")
-  "Regexp matching a `format' control-string directive (docs/ja/reference/functions/format.md).")
+          ;; The directive character itself (`~<newline>' ignores whitespace),
+          ;; or `~/name/', which calls the function or method `name'.
+          "\\(?:[][a-zA-Z%&|~$_^<>{}();*?]\\|\n\\|/[^/\n]+/\\)")
+  "Regexp matching a `format' control-string directive.
+See docs/ja/reference/functions/format.md.")
 
 ;;; Types this buffer defines -------------------------------------------------
 
