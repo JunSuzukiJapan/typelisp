@@ -3267,7 +3267,7 @@ impl Checker {
         &self.reg
     }
 
-    /// `(pub defun ...)` / `(pub defmethod ...)` etc. — mark the next definition public.
+    /// `(pub defun ...)`, `(pub defstruct ...)` etc. — mark the next definition public.
     fn check_pub(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         if parts.is_empty() {
             return Err(Error::TypeError("pub: expected a definition form".into()));
@@ -3295,7 +3295,7 @@ impl Checker {
             }
         }
         Err(Error::TypeError(
-            "pub: expected defun/defsignature/defffi/defmacro/defmethod/defstruct/defenum/deftype/defvar/defparameter/defconstant"
+            "pub: expected defun/defsignature/defffi/defmacro/defstruct/defenum/deftype/defvar/defparameter/defconstant"
                 .into(),
         ))
     }
@@ -4098,7 +4098,11 @@ impl Checker {
         let def = self.reg.type_def(type_fq).expect("the resolution found the method on this type");
         let af = def.assoc.get(name).expect("the resolution found the method on this type");
         let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
-        if def.params.is_empty() && af.sig.type_params.is_empty() {
+        // A method written for one instantiation (`(impl Box<int> ...)`)
+        // mentions none of the owner's parameters, so it has one type, like a
+        // method of a type without parameters.
+        let owner_params: HashSet<String> = def.params.iter().cloned().collect();
+        if af.sig.type_params.is_empty() && !type_has_param(&ty, &owner_params) {
             let params = af.sig.params.clone();
             let ret = af.sig.ret.clone();
             let form = self.methodref_form(heap, type_fq, name, &params, &ret)?;
@@ -7458,7 +7462,7 @@ impl Checker {
             other => prim_type_path(other),
         };
         if let Some(def) = type_fq.as_ref().and_then(|p| self.reg.type_def(p)) {
-            if def.impls.contains(&tb.trait_path) {
+            if self.explicit_impl_covers(def, &tb.trait_path, ty) {
                 return true;
             }
         }
@@ -7489,6 +7493,31 @@ impl Checker {
             }
         }
         true
+    }
+
+    /// Whether an explicit `impl` of `trait_path` covers `ty`.
+    ///
+    /// `AdtDef::impls` names the trait per type, not per instantiation, so an
+    /// `impl` written for one instantiation (`(impl Show Box<int> ...)`) is
+    /// recorded for every `Box`. The trait's methods, registered on the type,
+    /// still carry the receiver the `impl` was written for: read at `ty`'s
+    /// arguments it comes back as `ty` exactly when the `impl` covers it (an
+    /// `impl` generic through its owner gets `ty` back for every `ty`).
+    fn explicit_impl_covers(&self, def: &AdtDef, trait_path: &Path, ty: &Type) -> bool {
+        if !def.impls.contains(trait_path) {
+            return false;
+        }
+        let Some(tdef) = self.reg.trait_def(trait_path) else { return true };
+        let subst: BTreeMap<String, Type> = match ty {
+            Type::Named(_, args) if args.len() == def.params.len() => {
+                def.params.iter().cloned().zip(args.iter().cloned()).collect()
+            }
+            _ => BTreeMap::new(),
+        };
+        tdef.method_order.iter().all(|m| match def.assoc.get(m) {
+            Some(af) if af.instance => af.sig.params.first().is_none_or(|r| subst_apply(r, &subst) == *ty),
+            _ => true,
+        })
     }
 
     /// Queue a blanket impl's materialization at one concrete type, deduped
@@ -8415,7 +8444,7 @@ impl Checker {
         let Some(def) = self.reg.type_def(&type_fq) else {
             return Err(Error::TypeError(format!("dyn {}: unknown type `{}`", trait_path, type_fq)));
         };
-        if !def.impls.contains(trait_path)
+        if !self.explicit_impl_covers(def, trait_path, concrete)
             && !self.type_implements(
                 concrete,
                 &TraitBound { trait_path: trait_path.clone(), assoc: BTreeMap::new() },
@@ -8424,7 +8453,7 @@ impl Checker {
         {
             return Err(Error::TypeError(format!(
                 "`{}` does not implement `{}`, so it cannot be used as `:dyn {}`",
-                type_fq, trait_path, trait_path
+                concrete, trait_path, trait_path
             )));
         }
         // The fat box holds one `Value`, so the concrete value must have a
@@ -8878,13 +8907,13 @@ impl Checker {
             for (i, p) in own_params.iter().enumerate() {
                 if own_params[..i].contains(p) {
                     return Err(Error::TypeError(format!(
-                        "defmethod {}::{}: type parameter `{}` is declared twice",
+                        "method {}::{}: type parameter `{}` is declared twice",
                         type_fq, method, p
                     )));
                 }
                 if written_vars.contains(p) || declared.contains(p) {
                     return Err(Error::TypeError(format!(
-                        "defmethod {}::{}: the method's own type parameter `{}` has the name of a type \
+                        "method {}::{}: the method's own type parameter `{}` has the name of a type \
                          parameter of `{}` (declared as `{}<{}>`); give it another name",
                         type_fq,
                         method,
@@ -8895,17 +8924,22 @@ impl Checker {
                     )));
                 }
             }
-            // Specialization binds the receiver's variables by position
-            // against the owner's arguments, so they have to be all of them
-            // or none. `(self Pair<T,int>)` names one, and nothing would bind
-            // it.
-            if !generic_owner && !written_vars.is_empty() {
-                return Err(Error::TypeError(format!(
-                    "defmethod {}::{}: a method with type parameters of its own needs a receiver \
-                     that names every type parameter of `{}` as a variable, or none of them",
-                    type_fq, method, type_fq
-                )));
-            }
+        }
+        // Specialization binds the receiver's variables by position against
+        // the owner's arguments, so they have to be all of them or none.
+        // `(impl Pair<T,int> ...)` names one, and nothing would bind it: the
+        // body was checked with `T` abstract and then ran unspecialized.
+        if !generic_owner && !written_vars.is_empty() {
+            return Err(Error::TypeError(format!(
+                "method {}::{}: an `impl` of `{}` names every type parameter of `{}` as a distinct \
+                 variable (`{}<{}>`), or none of them",
+                type_fq,
+                method,
+                recv_ty,
+                type_fq,
+                type_fq,
+                self.reg.type_def(&type_fq).map(|d| d.params.join(",")).unwrap_or_default()
+            )));
         }
         // Generic through its owner, through its own parameters, or both:
         // either way the body is only checked for real once the variables are
@@ -8992,7 +9026,7 @@ impl Checker {
             // checked in an empty `Env` — is the error the user sees.
             if default_raw.is_some() && type_has_param(&decl_ty, &owner_param_set) {
                 return Err(Error::TypeError(format!(
-                    "defmethod {}::{}: &optional parameter `{}` may not default when its type \
+                    "method {}::{}: &optional parameter `{}` may not default when its type \
                      mentions a type parameter (the owner's or the method's own) — declare it with \
                      no default instead",
                     type_fq, method, pname
@@ -9006,7 +9040,7 @@ impl Checker {
             let decl_ty = rename(decl_ty);
             if default_raw.is_some() && type_has_param(&decl_ty, &owner_param_set) {
                 return Err(Error::TypeError(format!(
-                    "defmethod {}::{}: &key parameter `{}` may not default when its type \
+                    "method {}::{}: &key parameter `{}` may not default when its type \
                      mentions a type parameter (the owner's or the method's own) — declare it with \
                      no default instead",
                     type_fq, method, pname
@@ -9125,17 +9159,20 @@ impl Checker {
     ) -> Result<MethodSig, Error> {
         if parts.len() < 3 {
             return Err(Error::TypeError(
-                "defmethod: (defmethod name (receiver params...) ret body...)".into(),
+                "impl: a method is (name ((self Self) params...) ReturnType body...)".into(),
             ));
         }
         let (method, own_params) = match parts[0] {
             Value::Symbol(id) => parse_generic_name_header(heap.symbol_name(id))?,
-            _ => return Err(Error::TypeError("defmethod: name must be a symbol".into())),
+            _ => return Err(Error::TypeError("impl: a method's name must be a symbol".into())),
         };
         let sig_list_locs = heap.list_to_vec_locs(parts[1])?;
         let sig_list: Vec<Value> = sig_list_locs.iter().map(|(v, _)| *v).collect();
         if sig_list.is_empty() {
-            return Err(Error::TypeError("defmethod: needs a receiver".into()));
+            return Err(Error::TypeError(format!(
+                "impl: method `{}` needs a receiver: (name ((self Self) params...) ReturnType body...)",
+                method
+            )));
         }
         // `(self T)` -> instance method; a bare type name -> static method.
         let (instance, self_name, self_name_loc, type_expr, type_expr_loc) = match sig_list[0] {
@@ -9143,11 +9180,16 @@ impl Checker {
                 let recv_locs = heap.list_to_vec_locs(sig_list[0])?;
                 let recv: Vec<Value> = recv_locs.iter().map(|(v, _)| *v).collect();
                 if recv.len() != 2 {
-                    return Err(Error::TypeError("defmethod: receiver must be (self Type)".into()));
+                    return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method)));
                 }
                 let sname = match recv[0] {
                     Value::Symbol(id) => heap.symbol_name(id).to_string(),
-                    _ => return Err(Error::TypeError("defmethod: receiver name must be a symbol".into())),
+                    _ => {
+                        return Err(Error::TypeError(format!(
+                            "impl: method `{}`: the receiver's name must be a symbol",
+                            method
+                        )))
+                    }
                 };
                 let sname_loc = recv_locs.first().and_then(|(_, l)| l.clone());
                 let ty_loc = recv_locs.get(1).and_then(|(_, l)| l.clone());
@@ -9156,21 +9198,26 @@ impl Checker {
             Value::Symbol(_) | Value::Path(_) => {
                 (false, None, None, sig_list[0], sig_list_locs.first().and_then(|(_, l)| l.clone()))
             }
-            _ => return Err(Error::TypeError("defmethod: receiver must be (self Type) or a type name".into())),
+            _ => return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method))),
         };
         let recv_ty = self.parse_type_here_at(heap, type_expr, type_expr_loc.as_ref())?;
         let type_fq = match &recv_ty {
             Type::Named(n, _) => n.clone(),
             other => match prim_type_path(other) {
                 Some(p) => p,
-                None => return Err(Error::TypeError("defmethod: receiver must be a data type".into())),
+                None => {
+                    return Err(Error::TypeError(format!(
+                        "impl: method `{}`: the receiver's type must be a data type",
+                        method
+                    )))
+                }
             },
         };
         if !abstract_receiver && self.reg.type_def(&type_fq).is_none() {
-            return Err(Error::TypeError(format!("defmethod: unknown type `{}`", type_fq)));
+            return Err(Error::TypeError(format!("impl: method `{}`: unknown type `{}`", method, type_fq)));
         }
         let (required, required_locs, optionals, rest, keys) =
-            self.parse_params_full(heap, &sig_list[1..], "defmethod")?;
+            self.parse_params_full(heap, &sig_list[1..], &format!("impl: method `{}`", method))?;
         // Runtime params, in the order `MethodSig::params` documents. With no
         // `&optional`/`&rest`/`&key` written this is just the required list,
         // exactly what `parse_param_pairs` used to return here.
@@ -11936,6 +11983,28 @@ impl Checker {
             if args.len() == def.params.len() {
                 for (p, a) in def.params.iter().zip(args.iter()) {
                     subst.insert(p.clone(), a.clone());
+                }
+            }
+        }
+        // The receiver is the method's first parameter. A method written for
+        // one instantiation (`(impl Box<int> ...)`) is registered under the
+        // type alone, so a `Box<string>` finds it too, and only its declared
+        // receiver type says it takes a `Box<int>`. `subst` came from the
+        // receiver, so a method generic through its owner gets the receiver's
+        // own type back here.
+        //
+        // Only another instantiation of the owner is refused. A receiver of
+        // some other type was sent to this table by the lookup on purpose (a
+        // `Sexpr` finds `sexpr`'s methods, whose receiver is an
+        // `Option<Sexpr>`).
+        if let (Some(r), Some(declared)) = (&receiver, af.sig.params.first()) {
+            let declared = subst_apply(declared, &subst);
+            if let (Type::Named(rn, _), Type::Named(dn, _)) = (&r.ty, &declared) {
+                if rn == type_fq && dn == type_fq && r.ty != declared {
+                    return Err(Error::TypeError(format!(
+                        "`{}` is a method of `{}`, and the receiver is a `{}`",
+                        method, declared, r.ty
+                    )));
                 }
             }
         }
@@ -15113,8 +15182,8 @@ impl Checker {
                         site.name,
                         first_ty,
                         ty,
-                        first.link_name(),
-                        target.link_name()
+                        first.written_name(),
+                        target.written_name()
                     )))
                 }
                 Some(_) => {}
@@ -18376,7 +18445,7 @@ fn parse_macro_lambda_list(heap: &Heap, param_vals: &[Value]) -> Result<MacroLam
 ///
 /// `&rest` is unaffected and works on both: it is entirely a matter of
 /// types, and `Type::Fn` has a slot for it.
-const OPT_KEY_NEEDS_A_NAME: &str = "{}: &optional/&key need a named callee (defun/defmethod) — a \
+const OPT_KEY_NEEDS_A_NAME: &str = "{}: &optional/&key need a named callee (a `defun`, or a method in an `impl`) — a \
      function value is described by its `Type::Fn` alone, which has no place to carry a default \
      expression for a call site to fill in. `&rest` does work here.";
 

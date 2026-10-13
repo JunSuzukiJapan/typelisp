@@ -527,3 +527,27 @@ fn upcasting_to_the_first_supertrait_of_a_multi_supertrait_chain_works() {
         (via (make-instance 'cell :n 0))"#;
     assert_eq!(eval_ok(src), Value::Int(1));
 }
+
+// ---- an impl for one instantiation ----------------------------------------
+
+/// An `impl` written for one instantiation of a generic type covers that
+/// instantiation only. The trait is recorded per type, so a `box<string>`
+/// used to pass as `:dyn show` and ran the `box<int>` body at run time.
+#[test]
+fn an_impl_for_one_instantiation_covers_only_that_instantiation() {
+    let defs = r#"
+(deftrait Show () (show ((self Self)) string))
+(defstruct Box<T> (v T))
+(impl Show Box<int> (show ((self Self)) string (format false "int box ~a" (+ self::v 1))))
+(defun f ((s :dyn Show)) string (show s))
+"#;
+    assert_eq!(eval_ok(&format!("{}(equal (f (make-instance 'Box :v 1)) \"int box 2\")", defs)), Value::Bool(true));
+    let e = eval_err(&format!("{}(f (make-instance 'Box :v \"s\"))", defs));
+    assert!(e.contains("box<string>` does not implement `show`, so it cannot be used as `:dyn show`"), "{}", e);
+    // A `where` bound asks the same question.
+    let e = eval_err(&format!(
+        "{}(defun g<T> ((b T)) string (where (Show T)) (show b))\n(g (make-instance 'Box :v \"s\"))",
+        defs
+    ));
+    assert!(e.contains("box<string>` does not implement trait `show`"), "{}", e);
+}
