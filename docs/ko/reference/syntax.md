@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -573,9 +573,35 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 
 - 메서드 자신의 타입 매개변수에는 `impl`에 쓴 대상 타입의 타입 매개변수(`(impl Box<T> ...)`의 `T`)와
   다른 이름을 붙인다.
-- 제네릭 타입의 `impl`에는 타입 매개변수를 모두 변수로 쓰거나(`Box<T>`), 모두 구체적인 타입으로 쓴다
-  (`Box<int>`. 그 타입의 값에만 쓸 수 있는 메서드가 된다).
 - 트레이트의 `impl`의 메서드에는 타입 매개변수를 더할 수 없다. 시그니처는 트레이트가 선언한 것을 따른다.
+
+제네릭 타입의 `impl`은 타입 매개변수를 모두 변수로 쓰거나(`Box<T>`, 모든 구체 타입에 공통) 모두 구체 타입으로
+쓴다(`Box<int>`, 그 구체 타입만의 것). 구체 타입마다의 `impl`은 서로 별개의 구현이므로, `Box<int>`와
+`Box<string>`에 같은 이름의 메서드를 따로 쓸 수 있다.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- 인스턴스 메서드는 수신자의 타입으로 선택된다. `impl`이 없는 구체 타입(예를 들어 `Box<f64>`)에는 그 메서드가
+  없다.
+- 정적 메서드는 호출에 기대되는 반환 타입으로 선택된다(위 예의 `(the Box<int> ...)`). 그 이름의 정적 메서드를
+  가진 구체 타입이 하나뿐이면 기대 타입은 필요 없다.
+- 같은 이름의 메서드를 변수로 쓴 `impl`(`Box<T>`)과 구체 타입의 `impl`(`Box<int>`) 양쪽에 쓸 수는 없다(쓴
+  순서와 관계없이 오류). 필드의 접근자도 변수로 쓴 쪽의 메서드에 해당한다.
+- `documentation`, `compile`, `trace` 등에서 이런 메서드를 지명할 때는 `Box<int>::twice`처럼 구체 타입을 쓴다.
+  그 메서드를 가진 구체 타입이 하나뿐이면 `Box::twice`도 된다.
 
 ### 3.6 defstruct — 구조체(사용자 정의 타입)
 
@@ -769,6 +795,12 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (Rust와 같다). 어떤 `impl`도 생략하지 않는 기본 구현이라도, 어느 구현 타입에 대해서도 통과하지 못할 실수는 거기서 걸러진다.
 `self`에 대해 그 트레이트 자신과 상속원의 메서드를 호출하는 것은 이 경계로 통과하며, 연관 타입은 자기 자신으로 고정되므로
 `Item`을 반환하는 시그니처와 본체가 구체 타입을 모른 채 대조된다.
+
+**구체 타입마다의 구현**: 제네릭 타입에는 구체 타입마다 별도의 `impl`을 쓸 수 있다(`(impl Show Box<int> ...)`와
+`(impl Show Box<string> ...)`). `:dyn`, `where` 경계, 연관 타입, `print-object`도 구체 타입마다 적용되며, `impl`이
+없는 구체 타입(`Box<f64>`)은 그 트레이트를 구현하지 않는다. 같은 트레이트를 `Box<T>`와 `Box<int>` 양쪽에
+`impl`할 수는 없다(3.5의 메서드와 같은 규칙). 상위 트레이트는 그 구체 타입에서 구현되어 있으면 된다(`Box<int>`
+또는 `Box<T>`의 `impl`).
 
 **블랭킷 구현**: 대상을 타입 변수로 하면 경계를 만족하는 모든 타입에 한꺼번에 구현한다.
 

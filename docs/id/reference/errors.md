@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
 # Pesan Kesalahan
 
 Arti pesan kesalahan utama dari `typl` dan cara memperbaikinya.
@@ -57,12 +57,15 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | Pesan | Arti dan perbaikan |
 |---|---|
 | `no such function: bar` | Tidak ada fungsi atau metode dengan nama itu. Periksa ejaannya |
-| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metode dipilih berdasarkan tipe argumen pertama. Metode bernama itu ada, tetapi tidak untuk tipe argumen pertama (di sini `int`). Akhir pesan mendaftar tipe yang memiliki metode itu |
+| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metode dipilih berdasarkan tipe argumen pertama. Metode bernama itu ada, tetapi tidak untuk tipe argumen pertama (di sini `int`). Akhir pesan mendaftar tipe yang memiliki metode itu (untuk metode yang ditulis bagi satu instansiasi, instansiasinya, seperti `box<int>`) |
+| ``no method `twice` for type `box<string>` (the first parameter of the function this value is expected to be, which selects the method); `twice` is a method of `box<int>` `` | Metode yang diteruskan sebagai nilai dipilih menurut tipe parameter pertama dari tipe fungsi tempat ia diteruskan. Tipe itu (di sini `box<string>`) tidak memiliki metode dengan nama tersebut. Akhir pesan mencantumkan tipe-tipe yang memilikinya |
 | `unbound variable: y` | Tidak ada variabel dengan nama itu. Periksa ejaan dan lingkup pengikatannya (apakah dipakai di luar `let`-nya?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Dua di antara fungsi, variabel global, dan makro diberi nama yang sama dalam satu modul. Ganti nama salah satunya ([Referensi Sintaks 3.10](syntax.md#310-module--use--ruang-nama)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Tidak ada `new` yang dihasilkan untuk struct. Buat nilainya dengan `make-instance`, atau tulis `new` di `impl` ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
 | ``defmethod is gone — write methods in the type's `impl`: ...`` | Tidak ada `defmethod`. Metode ditulis di `impl` tipe ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Tidak ada opsi `:constructor`. Konstruktor ditulis di `impl` sebagai metode statis |
+| ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Metode bernama sama ditulis baik di `impl` yang parameter tipenya variabel (`Box<T>`) maupun di `impl` sebuah instansiasi (`Box<int>`), dalam urutan mana pun. Pertahankan salah satunya saja ([Referensi Sintaks 3.5](syntax.md#35-impl--metode-sebuah-tipe)) |
+| ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Trait yang sama diimplementasikan untuk `Box<T>` dan untuk `Box<int>`. Pertahankan salah satunya saja |
 | ``use: unresolved `nosuch` `` | Modul yang disebut pada `use` tidak ditemukan. Untuk cara nama berkas dipetakan ke path modul, lihat [Referensi Sintaks 3.11](syntax.md#311-berkas-dan-modul-proyek-multiberkas) |
 | `unresolved path: c::hidden` | Modulnya ada, tetapi namanya tidak, atau tidak terlihat karena tidak memiliki `pub` |
 | `circular module dependency: a -> b -> a` | Modul saling meng-`use`. Pindahkan bagian bersama ke modul terpisah |
@@ -78,7 +81,8 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | ``make-instance point: slot `y` is not given and has no default`` | Field tanpa nilai bawaan tidak diberikan ke `make-instance` |
 | ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Diberikan field yang tidak dimiliki struct |
 | ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Field yang bukan `pub` diberikan di luar modul yang mendefinisikan tipe. Mintalah modul itu menyediakan konstruktor `pub` |
-| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Metode yang ditulis untuk satu instansiasi tipe generik (`(impl Box<int> ...)`) dipanggil pada nilai dengan argumen tipe lain |
+| ``` `box::make` is written for `box<int>`, `box<string>`; the type the call is expected to return picks one, ...``` | `impl` beberapa instansiasi memiliki metode statis dengan nama itu, dan tidak ada yang menentukan mana yang dipanggil. Tulis tipe yang diharapkan, seperti `(the Box<int> (Box::make))` |
+| ``compile: `box::twice` is written for more than one instantiation of `box`; name one: ...`` | Metode yang ditulis per instansiasi diberikan ke `compile`, `trace`, `documentation`, dan sejenisnya hanya dengan nama tipenya. Tulis instansiasinya, seperti `box<int>::twice` |
 | ``setf: cannot assign to constant `k` `` | Nama yang didefinisikan dengan `defconstant` ditugasi. Jika perlu berubah, gunakan `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | Fungsi yang dideklarasikan dengan `defsignature` tidak didefinisikan |
 | ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | Pemanggilan `(nosuch arg colon at)` yang ditulis di tempat itu tidak dapat diselesaikan. Definisikan metode tipe argumen atau sebuah fungsi ([Direktif Format bab 5](functions/format.md#5-name)) |

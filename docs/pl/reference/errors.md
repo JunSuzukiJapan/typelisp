@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
 # Komunikaty o błędach
 
 Co oznaczają główne komunikaty o błędach z `typl` i jak je naprawić.
@@ -56,12 +56,15 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 | Komunikat | Znaczenie i naprawa |
 |---|---|
 | `no such function: bar` | Nie ma funkcji ani metody o tej nazwie. Sprawdź pisownię |
-| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metody są wybierane według typu pierwszego argumentu. Metoda o tej nazwie istnieje, ale nie dla typu pierwszego argumentu (tutaj `int`). Koniec komunikatu wymienia typy, które mają tę metodę |
+| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metody są wybierane według typu pierwszego argumentu. Metoda o tej nazwie istnieje, ale nie dla typu pierwszego argumentu (tutaj `int`). Koniec komunikatu wymienia typy, które mają tę metodę (dla metody napisanej dla jednej instancjacji — sama instancjacja, np. `box<int>`) |
+| ``no method `twice` for type `box<string>` (the first parameter of the function this value is expected to be, which selects the method); `twice` is a method of `box<int>` `` | Metoda przekazana jako wartość jest wybierana według typu pierwszego parametru typu funkcji, jako który jest przekazywana. Ten typ (tutaj `box<string>`) nie ma metody o tej nazwie. Koniec komunikatu wymienia typy, które ją mają |
 | `unbound variable: y` | Nie ma zmiennej o tej nazwie. Sprawdź pisownię i zakres wiązania (czy jest użyta poza swoim `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | W jednym module dwóm spośród funkcji, zmiennej globalnej i makra nadano tę samą nazwę. Zmień nazwę jednego z nich (zob. [Referencja składni 3.10](syntax.md#310-module--use--przestrzenie-nazw)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Dla struktury nie jest generowane żadne `new`. Utwórz wartość przez `make-instance` albo napisz `new` w `impl` (zob. [Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
 | ``defmethod is gone — write methods in the type's `impl`: ...`` | Nie ma `defmethod`. Metody pisze się w `impl` typu (zob. [Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Nie ma opcji `:constructor`. Konstruktor pisze się w `impl` jako metodę statyczną |
+| ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | Metodę o jednej nazwie napisano zarówno w `impl`, którego parametry typu są zmiennymi (`Box<T>`), jak i w `impl` instancjacji (`Box<int>`), w dowolnej kolejności. Zostaw tylko jedną ([Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
+| ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Tę samą cechę zaimplementowano dla `Box<T>` i dla `Box<int>`. Zostaw tylko jedną implementację |
 | ``use: unresolved `nosuch` `` | Nie można znaleźć modułu wskazanego w `use`. Informacje o tym, jak nazwy plików odpowiadają ścieżkom modułów, znajdziesz w [Referencji składni 3.11](syntax.md#311-pliki-i-moduły-projekty-wieloplikowe) |
 | `unresolved path: c::hidden` | Moduł istnieje, ale nazwa nie, albo nie jest widoczna, bo brakuje jej `pub` |
 | `circular module dependency: a -> b -> a` | Moduły wprowadzają się nawzajem przez `use`. Przenieś wspólną część do osobnego modułu |
@@ -77,7 +80,8 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 | ``make-instance point: slot `y` is not given and has no default`` | Do `make-instance` nie podano pola bez wartości domyślnej |
 | ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Podano pole, którego struktura nie ma |
 | ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Pole, które nie jest `pub`, podano poza modułem definiującym typ. Poproś ten moduł o konstruktor z `pub` |
-| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Metodę napisaną dla jednej instancjacji typu generycznego (`(impl Box<int> ...)`) wywołano na wartości z innymi argumentami typu |
+| ``` `box::make` is written for `box<int>`, `box<string>`; the type the call is expected to return picks one, ...``` | `impl` kilku instancjacji mają metodę statyczną o tej nazwie i nic nie rozstrzyga, którą wywołać. Podaj oczekiwany typ, jak w `(the Box<int> (Box::make))` |
+| ``compile: `box::twice` is written for more than one instantiation of `box`; name one: ...`` | Metodę napisaną dla instancjacji przekazano do `compile`, `trace`, `documentation` itp. samą nazwą typu. Napisz instancjację, jak w `box<int>::twice` |
 | ``setf: cannot assign to constant `k` `` | Przypisano do nazwy zdefiniowanej za pomocą `defconstant`. Jeśli ma się zmieniać, użyj `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | Funkcja zadeklarowana za pomocą `defsignature` nie jest zdefiniowana |
 | ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | Wywołania `(nosuch arg colon at)` zapisanego w tym miejscu nie da się rozstrzygnąć. Zdefiniuj metodę typu argumentu albo funkcję ([Dyrektywy formatu, rozdział 5](functions/format.md#5-name)) |

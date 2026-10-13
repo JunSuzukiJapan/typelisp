@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -668,10 +668,38 @@ inferidos dos argumentos de cada chamada.
 
 - Dê aos parâmetros de tipo próprios do método nomes diferentes dos parâmetros de tipo do tipo alvo
   escritos no `impl` (o `T` de `(impl Box<T> ...)`).
-- O `impl` de um tipo genérico escreve todos os seus parâmetros de tipo como variáveis (`Box<T>`) ou
-  todos como tipos concretos (`Box<int>`; então os métodos só funcionam com valores desse tipo).
 - Um método do `impl` de um trait não pode acrescentar parâmetros de tipo: sua assinatura segue a que o
   trait declara.
+
+O `impl` de um tipo genérico escreve todos os seus parâmetros de tipo como variáveis (`Box<T>`, comum a todas
+as instâncias) ou todos como tipos concretos (`Box<int>`, só daquela instância). Os `impl` de instâncias
+diferentes são implementações separadas, então `Box<int>` e `Box<string>` podem ter cada um um método com o
+mesmo nome.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Um método de instância é escolhido pelo tipo do receptor. Uma instância sem `impl` (por exemplo,
+  `Box<f64>`) não tem o método.
+- Um método estático é escolhido pelo tipo que se espera que a chamada retorne (o `(the Box<int> ...)`
+  acima). Se só uma instância tem um método estático com esse nome, não é preciso tipo esperado.
+- Um método de um mesmo nome não pode ser escrito ao mesmo tempo num `impl` com variáveis (`Box<T>`) e no
+  `impl` de uma instância (`Box<int>`); em qualquer ordem é um erro. O acessor de um campo conta como um
+  método do `impl` com variáveis.
+- Para nomear um desses métodos em `documentation`, `compile`, `trace` e afins, escreva a instância:
+  `Box<int>::twice`. Se só uma instância tem o método, `Box::twice` também serve.
 
 ### 3.6 defstruct — estruturas (tipos definidos pelo usuário)
 
@@ -882,6 +910,13 @@ módulo. Os métodos com corpo também podem ter cláusulas `where` e docstrings
 mesmo em padrões que nenhum `impl` jamais omite, são pegos ali. As chamadas sobre `self` a métodos do próprio
 trait ou de seus supertraits passam por essa restrição, e os tipos associados são fixados a si mesmos, então uma
 assinatura que devolve `Item` é confrontada com o corpo sem conhecer o tipo concreto.
+
+**Implementações por instância**: um tipo genérico pode ter um `impl` separado para cada instância
+(`(impl Show Box<int> ...)` e `(impl Show Box<string> ...)`). `:dyn`, os limites `where`, os tipos associados
+e `print-object` funcionam por instância, e uma instância sem `impl` (`Box<f64>`) não implementa o trait. O
+mesmo trait não pode ser implementado para `Box<T>` e para `Box<int>` ao mesmo tempo (a mesma regra dos
+métodos em 3.5). Basta que o supertrait esteja implementado naquela instância (por um `impl` de `Box<int>` ou
+de `Box<T>`).
 
 **Implementações gerais (blanket)**: tornar o alvo uma variável de tipo implementa o trait de uma vez para todo
 tipo que atenda às restrições.

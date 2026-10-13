@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
 # Error Messages
 
 What the main error messages from `typl` mean and how to fix them.
@@ -57,12 +57,15 @@ Mistakes found before running. The form is not run until they are fixed.
 | Message | Meaning and fix |
 |---|---|
 | `no such function: bar` | There is no function or method of that name. Check the spelling |
-| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Methods are selected by the type of the first argument. A method of that name exists, but not for the type of the first argument (`int` here). The end of the message lists the types that have the method |
+| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Methods are selected by the type of the first argument. A method of that name exists, but not for the type of the first argument (`int` here). The end of the message lists the types that have the method (for a method written for one instantiation, the instantiation, such as `box<int>`) |
+| ``no method `twice` for type `box<string>` (the first parameter of the function this value is expected to be, which selects the method); `twice` is a method of `box<int>` `` | A method passed as a value is chosen by the type of the first parameter of the function type it is passed as. That type (here `box<string>`) has no method of that name. The end of the message lists the types that have it |
 | `unbound variable: y` | There is no variable of that name. Check the spelling and the scope of the binding (is it used outside its `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Two of a function, a global variable and a macro were given the same name in one module. Rename one of them ([Syntax Reference 3.10](syntax.md#310-module--use--namespaces)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | No `new` is generated for a struct. Make the value with `make-instance`, or write a `new` in `impl` ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
 | ``defmethod is gone — write methods in the type's `impl`: ...`` | There is no `defmethod`. Write methods in the type's `impl` ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | There is no `:constructor` option. Write the constructor in `impl` as a static method |
+| ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | A method of one name was written both in an `impl` whose type parameters are variables (`Box<T>`) and in an `impl` of an instantiation (`Box<int>`), in either order. Keep only one of them ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
+| ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | The same trait was implemented for both `Box<T>` and `Box<int>`. Keep only one of them |
 | ``use: unresolved `nosuch` `` | The module named in `use` cannot be found. For how file names map to module paths, see [Syntax Reference 3.11](syntax.md#311-files-and-modules-multi-file-projects) |
 | `unresolved path: c::hidden` | The module exists, but the name does not, or it is not visible because it lacks `pub` |
 | `circular module dependency: a -> b -> a` | Modules `use` each other. Move the shared part into a separate module |
@@ -78,7 +81,8 @@ Mistakes found before running. The form is not run until they are fixed.
 | ``make-instance point: slot `y` is not given and has no default`` | A field without a default value is not given to `make-instance` |
 | ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | A field the struct does not have was given |
 | ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | A field that is not `pub` was given outside the module that defines the type. Have that module provide a `pub` constructor |
-| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | A method written for one instantiation of a generic type (`(impl Box<int> ...)`) was called on a value with other type arguments |
+| ``` `box::make` is written for `box<int>`, `box<string>`; the type the call is expected to return picks one, ...``` | The `impl`s of several instantiations have a static method of that name, and nothing decides which to call. State the expected type, as in `(the Box<int> (Box::make))` |
+| ``compile: `box::twice` is written for more than one instantiation of `box`; name one: ...`` | A method written per instantiation was given to `compile`, `trace`, `documentation` and the like by the type's name alone. Write the instantiation, as in `box<int>::twice` |
 | ``setf: cannot assign to constant `k` `` | A name defined with `defconstant` was assigned to. If it needs to change, use `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | A function declared with `defsignature` is not defined |
 | ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | The call `(nosuch arg colon at)` written at that place cannot be resolved. Define a method of the argument's type or a function ([Format Directives chapter 5](functions/format.md#5-name)) |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -702,10 +702,40 @@ argumen tiap pemanggilan.
 
 - Beri parameter tipe milik metode nama yang berbeda dari parameter tipe tipe sasaran yang ditulis di
   `impl` (`T` pada `(impl Box<T> ...)`).
-- `impl` sebuah tipe generik menuliskan semua parameter tipenya sebagai variabel (`Box<T>`), atau semuanya
-  sebagai tipe konkret (`Box<int>`; metodenya lalu hanya berlaku untuk nilai bertipe itu).
 - Metode di `impl` sebuah trait tidak dapat menambah parameter tipe: signature-nya mengikuti yang
   dideklarasikan trait.
+
+`impl` sebuah tipe generik menulis semua parameter tipenya sebagai variabel (`Box<T>`, bersama untuk semua
+instansiasi) atau semuanya sebagai tipe konkret (`Box<int>`, khusus instansiasi itu). `impl` dari instansiasi
+yang berbeda adalah implementasi yang terpisah, jadi `Box<int>` dan `Box<string>` masing-masing bisa memiliki
+metode bernama sama.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Metode instans dipilih menurut tipe penerima. Instansiasi tanpa `impl` (misalnya `Box<f64>`) tidak memiliki
+  metode itu.
+- Metode statis dipilih menurut tipe yang diharapkan dikembalikan oleh panggilan (`(the Box<int> ...)` di
+  atas). Jika hanya satu instansiasi yang memiliki metode statis dengan nama itu, tipe yang diharapkan tidak
+  diperlukan.
+- Metode bernama sama tidak bisa ditulis sekaligus di `impl` dengan variabel (`Box<T>`) dan di `impl` sebuah
+  instansiasi (`Box<int>`); urutan mana pun adalah galat. Pengakses field juga dihitung sebagai metode dari
+  `impl` dengan variabel.
+- Untuk menyebut metode seperti itu di `documentation`, `compile`, `trace`, dan sejenisnya, tulis
+  instansiasinya: `Box<int>::twice`. Jika hanya satu instansiasi yang memiliki metode itu, `Box::twice` juga
+  bisa.
 
 ### 3.6 defstruct — struct (tipe buatan pengguna)
 
@@ -926,6 +956,13 @@ diperiksa tipenya **sekali, pada titik deklarasi**, dengan `Self` dibiarkan seba
 mana pun, tertangkap di sana. Pemanggilan pada `self` ke metode trait itu sendiri atau supertrait-nya
 melewati batas ini, dan tipe terkait ditetapkan ke dirinya sendiri, sehingga signature yang
 mengembalikan `Item` dicocokkan dengan badan tanpa mengetahui tipe konkretnya.
+
+**Implementasi per instansiasi**: tipe generik bisa memiliki `impl` terpisah untuk tiap instansiasi
+(`(impl Show Box<int> ...)` dan `(impl Show Box<string> ...)`). `:dyn`, batasan `where`, tipe terkait, dan
+`print-object` berlaku per instansiasi, dan instansiasi tanpa `impl` (`Box<f64>`) tidak mengimplementasikan
+trait itu. Trait yang sama tidak bisa diimplementasikan untuk `Box<T>` sekaligus `Box<int>` (aturan yang sama
+dengan metode di 3.5). Supertrait cukup diimplementasikan pada instansiasi itu (oleh `impl` untuk `Box<int>`
+atau untuk `Box<T>`).
 
 **Implementasi blanket**: menjadikan sasaran sebagai variabel tipe mengimplementasikan trait
 sekaligus untuk setiap tipe yang memenuhi batas.

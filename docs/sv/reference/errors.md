@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
 # Felmeddelanden
 
 Vad de viktigaste felmeddelandena från `typl` betyder och hur man åtgärdar dem.
@@ -56,12 +56,15 @@ Fel som hittas före körning. Formen körs inte förrän de är åtgärdade.
 | Meddelande | Betydelse och åtgärd |
 |---|---|
 | `no such function: bar` | Det finns ingen funktion eller metod med det namnet. Kontrollera stavningen |
-| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metoder väljs efter typen på det första argumentet. En metod med det namnet finns, men inte för det första argumentets typ (här `int`). Slutet av meddelandet listar de typer som har metoden |
+| ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metoder väljs efter typen på det första argumentet. En metod med det namnet finns, men inte för det första argumentets typ (här `int`). Slutet av meddelandet listar de typer som har metoden (för en metod skriven för en instansiering: instansieringen, som `box<int>`) |
+| ``no method `twice` for type `box<string>` (the first parameter of the function this value is expected to be, which selects the method); `twice` is a method of `box<int>` `` | En metod som skickas som värde väljs efter typen på den första parametern i den funktionstyp den skickas som. Den typen (här `box<string>`) har ingen metod med det namnet. Slutet av meddelandet listar de typer som har den |
 | `unbound variable: y` | Det finns ingen variabel med det namnet. Kontrollera stavningen och bindningens räckvidd (används den utanför sitt `let`?) |
 | ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Två av en funktion, en global variabel och ett makro har fått samma namn i en modul. Byt namn på en av dem ([Syntaxreferens 3.10](syntax.md#310-module--use--namnrymder)) |
 | ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Inget `new` genereras för en struct. Skapa värdet med `make-instance`, eller skriv ett `new` i `impl` ([Syntaxreferens 3.5](syntax.md#35-impl--en-typs-metoder)) |
 | ``defmethod is gone — write methods in the type's `impl`: ...`` | Det finns inget `defmethod`. Metoder skrivs i typens `impl` ([Syntaxreferens 3.5](syntax.md#35-impl--en-typs-metoder)) |
 | ``defstruct: (:constructor ...) is gone — ...`` | Det finns inget alternativ `:constructor`. Konstruktorn skrivs i `impl` som en statisk metod |
+| ``method box::m: `box` has a `m` for every instantiation already, so an `impl` of `box<int>` cannot define its own ...`` | En metod med ett visst namn har skrivits både i en `impl` vars typparametrar är variabler (`Box<T>`) och i en instansierings `impl` (`Box<int>`), i vilken ordning som helst. Behåll bara en av dem ([Syntaxreferens 3.5](syntax.md#35-impl--en-typs-metoder)) |
+| ``impl show box<int>: `box` implements `show` for every instantiation already, ...`` | Samma trait har implementerats för både `Box<T>` och `Box<int>`. Behåll bara en av dem |
 | ``use: unresolved `nosuch` `` | Modulen som anges i `use` hittas inte. För hur filnamn motsvarar modulsökvägar, se [Syntaxreferens 3.11](syntax.md#311-filer-och-moduler-projekt-med-flera-filer) |
 | `unresolved path: c::hidden` | Modulen finns, men inte namnet, eller så är det inte synligt eftersom det saknar `pub` |
 | `circular module dependency: a -> b -> a` | Moduler gör `use` på varandra. Flytta den gemensamma delen till en separat modul |
@@ -77,7 +80,8 @@ Fel som hittas före körning. Formen körs inte förrän de är åtgärdade.
 | ``make-instance point: slot `y` is not given and has no default`` | Ett fält utan standardvärde har inte angetts till `make-instance` |
 | ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Ett fält som structen inte har har angetts |
 | ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Ett fält som inte är `pub` har angetts utanför den modul som definierar typen. Be den modulen om en `pub`-konstruktor |
-| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | En metod som skrivits för en viss instansiering av en generisk typ (`(impl Box<int> ...)`) anropades på ett värde med andra typargument |
+| ``` `box::make` is written for `box<int>`, `box<string>`; the type the call is expected to return picks one, ...``` | `impl` för flera instansieringar har en statisk metod med det namnet, och inget avgör vilken som ska anropas. Ange den förväntade typen, som i `(the Box<int> (Box::make))` |
+| ``compile: `box::twice` is written for more than one instantiation of `box`; name one: ...`` | En metod skriven per instansiering gavs till `compile`, `trace`, `documentation` och liknande med bara typens namn. Skriv instansieringen, som i `box<int>::twice` |
 | ``setf: cannot assign to constant `k` `` | Ett namn som definierats med `defconstant` tilldelades. Om det behöver ändras, använd `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | En funktion som deklarerats med `defsignature` är inte definierad |
 | ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | Anropet `(nosuch arg colon at)` som skrivits på den platsen kan inte lösas upp. Definiera en metod hos argumentets typ eller en funktion ([Formatdirektiv kapitel 5](functions/format.md#5-name)) |

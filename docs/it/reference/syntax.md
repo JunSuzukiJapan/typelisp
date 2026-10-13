@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -702,10 +702,38 @@ metodo (`U`) sono inferiti dagli argomenti di ogni chiamata.
 
 - Dai ai parametri di tipo propri del metodo nomi diversi dai parametri di tipo del tipo di destinazione
   scritti nell'`impl` (la `T` di `(impl Box<T> ...)`).
-- L'`impl` di un tipo generico scrive tutti i suoi parametri di tipo come variabili (`Box<T>`) oppure
-  tutti come tipi concreti (`Box<int>`; i metodi valgono allora solo per i valori di quel tipo).
 - Un metodo dell'`impl` di un trait non può aggiungere parametri di tipo: la sua firma segue quella che
   il trait dichiara.
+
+L'`impl` di un tipo generico scrive tutti i suoi parametri di tipo come variabili (`Box<T>`, comune a tutte
+le istanziazioni) o tutti come tipi concreti (`Box<int>`, solo per quell'istanziazione). Gli `impl` di
+istanziazioni diverse sono implementazioni separate, quindi `Box<int>` e `Box<string>` possono avere ciascuno
+un metodo con lo stesso nome.
+
+```lisp
+(defstruct Box<T> (v T))
+
+(impl Box<int>
+  (twice (self) int (* 2 self::v))
+  (make () Box<int> (make-instance 'Box :v 7)))
+(impl Box<string>
+  (twice (self) string (format false "~a~a" self::v self::v))
+  (make () Box<string> (make-instance 'Box :v "s")))
+
+(twice (make-instance 'Box :v 4))      ; => 8
+(twice (make-instance 'Box :v "ab"))   ; => "abab"
+(twice (the Box<int> (Box::make)))     ; => 14
+```
+
+- Un metodo d'istanza si sceglie dal tipo del ricevente. Un'istanziazione senza `impl` (per esempio
+  `Box<f64>`) non ha il metodo.
+- Un metodo statico si sceglie dal tipo che la chiamata deve restituire (il `(the Box<int> ...)` sopra). Se
+  solo un'istanziazione ha un metodo statico con quel nome, non serve un tipo atteso.
+- Un metodo con lo stesso nome non può stare insieme in un `impl` con variabili (`Box<T>`) e nell'`impl` di
+  un'istanziazione (`Box<int>`); in qualunque ordine è un errore. L'accessore di un campo conta come metodo
+  dell'`impl` con variabili.
+- Per nominare un metodo del genere in `documentation`, `compile`, `trace` e simili, scrivi l'istanziazione:
+  `Box<int>::twice`. Se solo un'istanziazione ha il metodo, va bene anche `Box::twice`.
 
 ### 3.6 defstruct — strutture (tipi definiti dall'utente)
 
@@ -927,6 +955,13 @@ ogni `impl` e per ogni tipo che implementa, anche nei predefiniti che nessun `im
 trovati lì. Le chiamate su `self` a metodi del trait stesso o dei suoi supertrait passano attraverso
 questo vincolo, e i tipi associati sono fissati a se stessi, quindi una firma che restituisce `Item` viene
 confrontata con il corpo senza conoscere il tipo concreto.
+
+**Implementazioni per istanziazione**: un tipo generico può avere un `impl` distinto per ogni
+istanziazione (`(impl Show Box<int> ...)` e `(impl Show Box<string> ...)`). `:dyn`, i vincoli `where`, i
+tipi associati e `print-object` funzionano per istanziazione, e un'istanziazione senza `impl` (`Box<f64>`)
+non implementa il trait. Lo stesso trait non può essere implementato sia per `Box<T>` sia per `Box<int>` (la
+stessa regola dei metodi in 3.5). Basta che il supertrait sia implementato in quell'istanziazione (da un
+`impl` di `Box<int>` o di `Box<T>`).
 
 **Implementazioni blanket**: fare del bersaglio una variabile di tipo implementa il trait in un colpo solo
 per ogni tipo che soddisfa i vincoli.
