@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # समय, पर्यावरण और इम्प्लीमेंटेशन
 
 समय के फ़ंक्शन, रनटाइम पर्यावरण के बारे में प्रश्न, इम्प्लीमेंटेशन उपकरण, पाठ को पार्स और मूल्यांकित करना, डॉकस्ट्रिंग और macro।
@@ -160,11 +160,11 @@ CL `read-from-string` से **दो मान** (मान और स्थि
 
 ## 7. डॉकस्ट्रिंग / `documentation`
 
-`defun`/`defmethod` (`impl` के भीतर सहित)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftype`/`deftrait` डॉकस्ट्रिंग रख सकते हैं। स्थान हर एक के लिए CL के नियम का अनुसरण करता है:
+`defun`/`impl` के मेथड/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftype`/`deftrait` डॉकस्ट्रिंग रख सकते हैं। स्थान हर एक के लिए CL के नियम का अनुसरण करता है:
 
 | फ़ॉर्म | डॉकस्ट्रिंग का स्थान |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | बॉडी की शुरुआत में (रिटर्न टाइप और `where` क्लॉज़ के बाद)। केवल तब जब कम से कम एक बॉडी फ़ॉर्म आगे हो; अकेली स्ट्रिंग रिटर्न मान ही रहती है |
+| `defun` / `impl` के मेथड / `defmacro` | बॉडी की शुरुआत में (रिटर्न टाइप और `where` क्लॉज़ के बाद)। केवल तब जब कम से कम एक बॉडी फ़ॉर्म आगे हो; अकेली स्ट्रिंग रिटर्न मान ही रहती है |
 | `defvar` / `defconstant` | प्रारंभिक मान के **बाद**: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | नाम के **ठीक बाद**, फ़ील्ड/variant से पहले |
 | `deftype` | नाम के **ठीक बाद**, टाइप से पहले: `(deftype meters "doc" i32)` |

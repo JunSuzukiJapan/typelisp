@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Strings, caracteres e coleções
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` e `Deque<T>`.
@@ -125,8 +125,8 @@ bits), que é o que a implementação de `string` usa.
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 Se duas chaves são a mesma é decidido **pelo próprio tipo da chave** (`sxhash`, e `equals` de `Eq`, o
@@ -145,7 +145,7 @@ sintaxe](../syntax.md#1-elementos-léxicos)).
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | O `make-array` do CL. `dims` é copiado. `init` é o valor inicial de cada célula (o `:initial-element` do CL; esta linguagem não tem "célula não vinculada", então é obrigatório). `:fill-pointer` só para uma dimensão |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | O `make-array` do CL. `dims` é copiado. `init` é o valor inicial de cada célula (o `:initial-element` do CL; esta linguagem não tem "célula não vinculada", então é obrigatório). `:fill-pointer` só para uma dimensão |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | O `aref` / `(setf (aref …))` do CL. Panic se um índice estiver fora do intervalo |
 | `aref` | `(aref a i j …)` | — | A escrita do CL com os índices soltos. Expande para `get`/`set` acima. `(setf (aref a i j) v)` também funciona |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | O `row-major-aref` do CL. Um índice plano |
@@ -166,8 +166,6 @@ sintaxe](../syntax.md#1-elementos-léxicos)).
   qualquer número de vezes no final", e a escrita `aref` cobre essa lacuna.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p` **não
   existem**. O tipo estático do receptor já responde a essas perguntas.
-- `Array::new` é o construtor em ordem de campos gerado por `defstruct` e não serve para criar arrays. Use
-  `Array::make`.
 - **Os arrays são impressos na sintaxe de arrays do CL.** O rank 1 é `#(1 2 3)`; os outros ranks são `#nA`
   seguido de tantos níveis de parênteses (`#2A((1 2 3) (4 5 6))`); o rank 0 é `#0A5`. A impressão para no
   ponteiro de preenchimento se houver. Definir `*print-array*`
@@ -181,7 +179,7 @@ Uma sequência de bits de comprimento fixo. Um `defstruct` da biblioteca padrão
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | Comprimento `n`, todos os bits em 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | Comprimento `n`, todos os bits em 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | Panic fora do intervalo |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | As escritas do CL. `(setf (bit v i) b)` também funciona. O `sbit` do CL só difere de `bit` por exigir um vetor de bits simples, mas esta linguagem só tem um tipo de vetor de bits |
 | `len` | `(len v)` | `BitVector→int` | Número de bits |
@@ -198,7 +196,7 @@ de `HashTable`.
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | Cria um conjunto vazio. O argumento de tipo vem do tipo esperado |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | Cria um conjunto vazio. O argumento de tipo vem do tipo esperado |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Adiciona `x`. `true` se ainda não estava, `false` se já estava |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Se `x` está presente |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Tira `x`. `true` se estava |
@@ -207,15 +205,13 @@ de `HashTable`.
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Um iterador sobre os elementos. A ordem não é definida |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 Comum aos três tipos dos capítulos 7 a 9:
 
-- Crie-os com `make`. `new` é o construtor na ordem dos campos que o `defstruct` gera, não o que se
-  usa para criá-los (como em `Array::make`).
 - `iter` percorre uma cópia tirada no momento da chamada. Mudar a mesma coleção dentro de um
   `doiter` não é visto por esse laço.
 - Se os tipos dos elementos implementam `print-object`, os elementos são impressos, na forma
@@ -229,7 +225,7 @@ chave nova e `remove` deslocam os elementos depois da sua posição.
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Cria uma tabela vazia |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | Cria uma tabela vazia |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Busca |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Insere ou sobrescreve |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Remove, devolvendo o valor antigo se havia |
@@ -240,7 +236,7 @@ chave nova e `remove` deslocam os elementos depois da sua posição.
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Tuplas `#{chave valor}` em ordem de chave |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 e pear 3
 ```
@@ -251,7 +247,7 @@ Uma sequência em que se pode pôr e tirar pelas duas pontas (o `VecDeque` do Ru
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | Cria uma sequência vazia |
+| `new` | `(Deque::new)` | `()→Deque<T>` | Cria uma sequência vazia |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Adiciona no início / no fim |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Tira o elemento do início / do fim e o devolve. `none` se vazia |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Olha o elemento do início / do fim (sem tirá-lo) |
@@ -262,7 +258,7 @@ Uma sequência em que se pode pôr e tirar pelas duas pontas (o `VecDeque` do Ru
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Do início, em ordem |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

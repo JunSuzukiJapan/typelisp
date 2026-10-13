@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # السلاسل النصية والمحارف والمجموعات
 
 `string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector` و`HashSet<T>` و`SortedTable<K,V>` و`Deque<T>`.
@@ -123,8 +123,8 @@
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 يتحدد ما إذا كان مفتاحان هما نفسه بـ **نوع المفتاح نفسه** (`sxhash`، و`equals` من `Eq` السمة الأعلى لـ
@@ -140,7 +140,7 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` في CL. تُنسخ `dims`. و`init` القيمة الابتدائية لكل خلية (`:initial-element` في CL؛ ولا توجد في هذه اللغة "خلية غير مربوطة"، فهو مطلوب). و`:fill-pointer` لبعد واحد فقط |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` في CL. تُنسخ `dims`. و`init` القيمة الابتدائية لكل خلية (`:initial-element` في CL؛ ولا توجد في هذه اللغة "خلية غير مربوطة"، فهو مطلوب). و`:fill-pointer` لبعد واحد فقط |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | `aref` / `(setf (aref …))` في CL. ويحدث `panic` إذا كان فهرس خارج النطاق |
 | `aref` | `(aref a i j …)` | — | كتابة CL بفهارس مجردة. تتوسع إلى `get`/`set` أعلاه. ويعمل `(setf (aref a i j) v)` أيضًا |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | `row-major-aref` في CL. فهرس مسطّح |
@@ -161,8 +161,6 @@
   النهاية"، وتسدّ صياغة `aref` المختصرة هذه الفجوة.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`
   **غير موجودة**. فالنوع الساكن للمستقبِل يجيب عن هذه الأسئلة أصلًا.
-- `Array::new` هو المُنشِئ بترتيب الحقول الذي يولّده `defstruct` وليس مقصودًا لإنشاء المصفوفات. استخدم
-  `Array::make`.
 - **تُطبع المصفوفات بصياغة المصفوفات في CL.** الرتبة 1 هي `#(1 2 3)`؛ والرتب الأخرى `#nA` متبوعة بذلك
   العدد من مستويات الأقواس (`#2A((1 2 3) (4 5 6))`)؛ والرتبة 0 هي `#0A5`. وتتوقف الطباعة عند مؤشر الملء إن
   وُجد. وضبط `*print-array*` ([الطباعة](printing.md#6-التحكم-في-مقدار-ما-يطبع)) على false يطبع الشكل
@@ -175,7 +173,7 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | الطول `n` وكل البتات 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | الطول `n` وكل البتات 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | يحدث `panic` خارج النطاق |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | كتابتا CL. ويعمل `(setf (bit v i) b)` أيضًا. وتختلف `sbit` في CL عن `bit` فقط في اشتراط متجه بتات بسيط، لكن هذه اللغة فيها نوع واحد من متجهات البتات |
 | `len` | `(len v)` | `BitVector→int` | عدد البتات |
@@ -191,7 +189,7 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | تنشئ مجموعة فارغة. يُؤخذ وسيط النوع من النوع المتوقع |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | تنشئ مجموعة فارغة. يُؤخذ وسيط النوع من النوع المتوقع |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | تضيف `x`. `true` إن لم يكن موجودًا، و`false` إن كان موجودًا |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | هل `x` موجود |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | تُخرج `x`. `true` إن كان موجودًا |
@@ -200,15 +198,13 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | مكرِّر على العناصر. الترتيب غير محدد |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 ما تشترك فيه الأنواع الثلاثة في الفصول 7 إلى 9:
 
-- تُنشأ بـ `make`. أما `new` فهو المُنشِئ بترتيب الحقول الذي يولّده `defstruct`، وليس للإنشاء (كما
-  في `Array::make`).
 - يمرّ `iter` على نسخة مأخوذة لحظة استدعائه. تغيير المجموعة نفسها داخل `doiter` لا تراه تلك الحلقة.
 - إذا نفّذت أنواع العناصر `print-object` طُبعت العناصر على الشكل `#<hashset "a" "b">`
   `#<sortedtable 1 "a">` `#<deque 1 2>`.
@@ -221,7 +217,7 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | تنشئ جدولًا فارغًا |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | تنشئ جدولًا فارغًا |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | بحث |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | إدراج أو كتابة فوق القديم |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | تحذف وتُرجع القيمة القديمة إن وُجدت |
@@ -232,7 +228,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | صفوف `#{مفتاح قيمة}` بترتيب المفاتيح |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 و pear 3
 ```
@@ -243,7 +239,7 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | تنشئ تسلسلًا فارغًا |
+| `new` | `(Deque::new)` | `()→Deque<T>` | تنشئ تسلسلًا فارغًا |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | تضيف في المقدمة / المؤخرة |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | تُخرج عنصر المقدمة / المؤخرة وتُرجعه. `none` إن كان فارغًا |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | تنظر إلى عنصر المقدمة / المؤخرة (دون إخراجه) |
@@ -254,7 +250,7 @@
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | من المقدمة بالترتيب |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

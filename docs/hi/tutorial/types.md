@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # टाइप की बुनियादी बातें
 
 typelisp एक स्टैटिक रूप से टाइप की गई भाषा है। यह अध्याय समझाता है कि टाइप चेकर आपके लिए क्या करता है, वे टाइप जिनका आप सबसे अधिक उपयोग करेंगे
@@ -134,29 +134,48 @@ none
   (y int))
 ```
 
-यह परिभाषा आपको निम्नलिखित देती है:
+मान `make-instance` से बनाए जाते हैं। टाइप का नाम `'` से कोट करके लिखें, और फ़ील्ड `:नाम मान` जोड़ों के
+रूप में किसी भी क्रम में दें।
 
 ```lisp
-(let ((p (point::new 3 4)))     ; एक बनाएँ (आर्ग्युमेंट फ़ील्ड के क्रम में)
-  (println "~a" p::x)           ; फ़ील्ड पढ़ें; (x p) भी काम करता है
-  (setf p::x 10)                ; उसे बदलें
+(let ((p (make-instance 'point :x 3 :y 4)))   ; एक बनाएँ
+  (println "~a" p::x)           ; फ़ील्ड पढ़ें; (x p) भी चलता है
+  (setf p::x 10)                ; बदलें
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-struct को अपने फ़ंक्शन देने के लिए `defmethod` का उपयोग करें। पहले आर्ग्युमेंट (`self`) का टाइप तय करता है कि मेथड किस टाइप का है।
+फ़ील्ड की घोषणा में एक और एक्सप्रेशन उस फ़ील्ड का **डिफ़ॉल्ट मान** बन जाता है। `make-instance` में छोड़ा गया
+फ़ील्ड अपना डिफ़ॉल्ट मान लेता है। जिस फ़ील्ड का डिफ़ॉल्ट मान नहीं है उसे छोड़ना टाइप त्रुटि है।
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count 0 है
 ```
 
-`self` आर्ग्युमेंट की जगह केवल टाइप का नाम लिखने से एक ऐसा फ़ंक्शन बनता है जो `point::origin` के रूप में कॉल होता है।
+स्ट्रक्ट को अपने फ़ंक्शन देने के लिए `impl` का उपयोग करें। `(impl टाइप-नाम आइटम...)` का हर आइटम
+`(नाम (आर्ग्युमेंट...) रिटर्न-टाइप बॉडी...)` के रूप का होता है, और यदि उसका पहला आर्ग्युमेंट `self` है तो
+वह उस टाइप का **मेथड** बन जाता है। `self` बिना टाइप के लिखा जाता है।
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+जो आइटम `self` नहीं लेता, वह `point::origin` के रूप में कॉल होने वाला फ़ंक्शन बन जाता है। मान बनाने वाले
+फ़ंक्शन को `new` नाम से तैयार रखें तो उपयोग करने वाले संक्षेप में `(point::new 3 4)` लिख सकते हैं।
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -221,7 +240,7 @@ struct और enum भी जेनेरिक हो सकते हैं।
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 जेनेरिक फ़ंक्शन के भीतर `T` के बारे में कुछ ज्ञात नहीं होता, इसलिए आप `T` के मानों की तुलना या जोड़ नहीं कर सकते। "कोई भी टाइप जिसकी तुलना हो सके" जैसी माँग के लिए trait का उपयोग करें ([Trait](traits.md))।

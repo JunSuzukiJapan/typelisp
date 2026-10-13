@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -126,7 +126,7 @@ derlenmiş `typl` ile çalışır. `typl`'yi yeniden derledikten sonra onu yenid
 
 ### 3.3 AOT ile derlenen bir dosyada neler bulunabilir
 
-- Giriş dosyasının üst düzeyi yalnızca tanımlar (`defun` `defmethod` `defvar` `defparameter`
+- Giriş dosyasının üst düzeyi yalnızca tanımlar (`defun` `defvar` `defparameter`
   `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`,
   `(unsafe (def-c-struct ...))`) ile `use` ve `module` içerebilir. Son `(main)` dışında
   `(println ...)` gibi üst düzey ifadelere izin verilmez. İşi `main` içine koyun.

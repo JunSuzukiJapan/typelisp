@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Getallen
 
 Bewerkingen op gehele getallen, drijvendekommagetallen, rationale getallen, complexe getallen en
@@ -201,7 +201,7 @@ Een struct (`defstruct`) in de standaardbibliotheek.
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Constructie. De componenten kunnen direct als `z::re`/`z::im` worden gelezen |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Constructie. De componenten kunnen direct als `z::re`/`z::im` worden gelezen |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Reëel deel en imaginair deel. **Ze werken ook op reële getallen** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), zoals in CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Geconjugeerde (werkt ook op reële getallen) |
 | `phase` | `(phase z)` | `complex→f64` | Argument in (-pi,pi] (werkt ook op reële getallen) |

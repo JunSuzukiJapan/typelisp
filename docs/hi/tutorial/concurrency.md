@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # कंकरेंसी
 
 typelisp में काम को एक साथ चलाने के लिए आप **टास्क** (हल्के थ्रेड) शुरू करते हैं, और टास्क एक-दूसरे को **चैनल** के ज़रिए मान भेजते हैं। यह मॉडल Go के goroutine और चैनल के करीब है। यह अध्याय क्रम से कवर करता है: टास्क शुरू करना और उसका परिणाम पाना, चैनल, `select`, साझा डेटा की सुरक्षा, और समर्पित OS थ्रेड। यह मानकर चलता है कि आपने [टाइप की बुनियादी बातें](types.md) पढ़ ली हैं।
@@ -74,12 +74,12 @@ got 30
        (a (task (worker "A" jobs)))
        (b (task (worker "B" jobs)))
        (c (task (worker "C" jobs))))
-  (send jobs (job::new 1 0.3))
-  (send jobs (job::new 2 0.1))
-  (send jobs (job::new 3 0.1))
-  (send jobs (job::new 4 0.2))
-  (send jobs (job::new 5 0.1))
-  (send jobs (job::new 6 0.1))
+  (send jobs (make-instance 'job :id 1 :seconds 0.3))
+  (send jobs (make-instance 'job :id 2 :seconds 0.1))
+  (send jobs (make-instance 'job :id 3 :seconds 0.1))
+  (send jobs (make-instance 'job :id 4 :seconds 0.2))
+  (send jobs (make-instance 'job :id 5 :seconds 0.1))
+  (send jobs (make-instance 'job :id 6 :seconds 0.1))
   (close jobs)                    ; बस इतना ही काम है
   (println "A: ~a jobs, B: ~a jobs, C: ~a jobs" (wait a) (wait b) (wait c)))
 ```
@@ -149,8 +149,8 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
     (with-lock (c counter)
       (setf c (+ c 1)))))
 
-(let ((counter (the Mutex<int> (Mutex::make 0)))
-      (wg (the WaitGroup (WaitGroup::make))))
+(let ((counter (the Mutex<int> (Mutex::new 0)))
+      (wg (the WaitGroup (WaitGroup::new))))
   (dotimes (i 4)
     (add wg 1)
     (task ((lambda () ()

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -128,7 +128,7 @@ salin lagi.
 
 ### 3.3 Isi yang diperbolehkan pada berkas hasil kompilasi AOT
 
-- Tingkat atas berkas masuk hanya boleh berisi definisi (`defun` `defmethod` `defvar`
+- Tingkat atas berkas masuk hanya boleh berisi definisi (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) serta `use` dan `module`. Ekspresi tingkat atas
   seperti `(println ...)` tidak diperbolehkan, kecuali `(main)` terakhir. Taruh pekerjaannya di

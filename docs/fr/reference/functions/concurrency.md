@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tâches et canaux
 
 Le vocabulaire des tâches (threads légers). `task` et `thread`, qui les lancent, et `select`, qui attend plusieurs
@@ -84,7 +84,7 @@ flottante ; le `(sleep 1)` de CL s'écrit donc ici `(sleep 1.0)`. Une valeur né
 
 | Nom | Usage | Type | Signification |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Un groupe sans rien en attente |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Un groupe sans rien en attente |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Ajoute au compteur. À faire avant le début du travail |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Une chose est terminée. À 0, tous ceux qui attendent sont libérés |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Attend que le compteur atteigne 0. Depuis un nombre quelconque de tâches |
@@ -120,13 +120,13 @@ capacité est 1 ; la tâche émettrice peut donc se terminer même si personne n
 
 | Nom | Usage | Type | Signification |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Un mutex non verrouillé contenant `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Un mutex non verrouillé contenant `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Prend le verrou (attend) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Le libère. Panic s'il n'est pas verrouillé |
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Verrouille, lie le contenu à `x`, exécute `body` et libère **toujours** |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

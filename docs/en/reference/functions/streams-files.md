@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Streams and Files
 
 Stream traits and methods, concrete stream types, file operations and pathnames. Network sockets are
@@ -177,7 +177,7 @@ composite streams.
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
-(write-line (counter::new 0) "four")   ; write-line, terpri and fresh-line all work
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri and fresh-line all work
 ```
 
 Input works the same way: you only write `read-item`. Even a type with no pushback of its own can be

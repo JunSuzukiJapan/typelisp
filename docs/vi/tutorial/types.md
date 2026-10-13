@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Kiến thức cơ bản về kiểu
 
 typelisp là một ngôn ngữ có kiểu tĩnh. Chương này giải thích bộ kiểm tra kiểu làm gì cho bạn, các kiểu
@@ -147,30 +147,48 @@ Một kiểu có các trường được đặt tên được định nghĩa b�
   (y int))
 ```
 
-Định nghĩa này cho bạn những thứ sau:
+Giá trị được tạo bằng `make-instance`. Viết tên kiểu trích dẫn bằng `'`, và truyền các trường dưới dạng
+cặp `:tên giá-trị`, theo thứ tự tùy ý.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; tạo một giá trị (đối số theo thứ tự trường)
-  (println "~a" p::x)           ; đọc một trường; (x p) cũng dùng được
-  (setf p::x 10)                ; thay đổi nó
+(let ((p (make-instance 'point :x 3 :y 4)))   ; tạo một giá trị
+  (println "~a" p::x)           ; đọc một trường; viết (x p) cũng được
+  (setf p::x 10)                ; thay đổi
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-Để đưa cho struct các hàm của riêng nó, hãy dùng `defmethod`. Kiểu của đối số đầu tiên (`self`) quyết
-định phương thức thuộc về kiểu nào.
+Thêm một biểu thức nữa vào khai báo của một trường sẽ thành **giá trị mặc định** của trường đó. Trường bị bỏ
+qua trong `make-instance` sẽ nhận giá trị mặc định. Bỏ qua một trường không có giá trị mặc định là lỗi kiểu.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count là 0
 ```
 
-Viết chỉ tên kiểu thay cho đối số `self` sẽ tạo một hàm được gọi dưới dạng `point::origin`.
+Để cho struct các hàm riêng, dùng `impl`. Mỗi mục của `(impl TênKiểu mục...)` có dạng
+`(tên (đối-số...) KiểuTrảVề thân...)`, và nếu đối số đầu tiên là `self` thì nó thành một **phương thức** của
+kiểu đó. `self` được viết không kèm kiểu.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+Mục không nhận `self` trở thành một hàm được gọi dưới dạng `point::origin`. Nếu chuẩn bị sẵn hàm tạo giá trị
+với tên `new`, người dùng có thể viết ngắn gọn `(point::new 3 4)`.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -239,7 +257,7 @@ Struct và enum cũng có thể là generic. `Vector<T>`, `Option<T>` và `Resul
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 Bên trong một hàm generic không biết gì về `T`, nên bạn không thể so sánh hay cộng các giá trị kiểu `T`.

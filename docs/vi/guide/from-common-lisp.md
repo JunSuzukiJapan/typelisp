@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Dành cho lập trình viên Common Lisp
 
 typelisp kế thừa cú pháp của Common Lisp (CL) và nhiều tên hàm của nó, nhưng là một ngôn ngữ có kiểu
@@ -58,7 +58,8 @@ Kiểu số nguyên mặc định `int` có độ chính xác tùy ý; giống i
 ## 3. Hàm như giá trị
 
 typelisp không tách không gian tên của hàm và của biến. Tên của một hàm có thể được truyền như một
-giá trị nguyên dạng. Không có `#'` và không có `funcall`.
+giá trị nguyên dạng. Không có `#'` và không có `funcall`. Macro cũng dùng chung không gian tên này, nên trong một module không thể có
+hai trong số hàm, biến toàn cục và macro trùng tên (khác với CL, không thể có hàm `list` bên cạnh biến `list`).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -79,6 +80,8 @@ giá trị nguyên dạng. Không có `#'` và không có `funcall`.
 
 - Các hàm trên dãy nhận **tập hợp trước và hàm sau**: `(map it f)`, `(filter it f)`,
   `(foldl it f init)`. Đây là ngược với `(mapcar f list)` của CL.
+- `push` cũng nhận **tập hợp trước**: `(push v 3)`. Không viết được theo thứ tự của CL, `(push 3 place)`, vì
+  phương thức chỉ được chọn theo kiểu của đối số đầu tiên (mục 8).
 - `lambda` không thể dùng `&optional` hay `&key` (`&rest` thì dùng được).
 - **Không thể gọi một hàm trước khi nó được định nghĩa.** Trong CL bạn có thể gọi một hàm sẽ định nghĩa
   sau, nhưng ở đây điều đó cho `no such function`. Với các hàm đệ quy lẫn nhau, hãy khai báo trước một
@@ -186,16 +189,27 @@ literal không được đánh giá (`'done`), và các giá trị được ném
 Không có `defclass`, `defgeneric` hay kết hợp phương thức.
 
 - Các kiểu dữ liệu được định nghĩa bằng `defstruct` (struct) và `defenum` (sum type).
-- `defmethod` định nghĩa các phương thức mà đích của chúng được quyết định chỉ bởi **kiểu tĩnh của đối
-  số đầu tiên**. Không có multiple dispatch.
+- Không có `defmethod`. Phương thức được gom theo từng kiểu trong một `impl` (cùng dạng với impl cố hữu của
+  Rust). Đích gọi chỉ được quyết định bởi **kiểu tĩnh của đối số đầu tiên**; không có phân phối đa hình bội.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; phương thức tĩnh
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; phương thức
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - Để đưa ra các thao tác chung cho nhiều kiểu, hãy dùng trait (`deftrait` / `impl`). Với các giá trị mà
   kiểu cụ thể được quyết định lúc chạy, hãy dùng kiểu `:dyn Trait`
   ([Tham chiếu cú pháp 3.9](../reference/syntax.md#39-deftrait--impl--trait)).
 
 `defstruct` khác ở những điểm sau:
 
-- Hàm khởi tạo là `TypeName::new`: `(point::new 1 2)`. Nếu muốn một tên như `make-point`, tùy chọn
-  `(:constructor make-point)` sẽ tạo ra nó.
+- Giá trị được tạo bằng `make-instance`, như trong CLOS: `(make-instance 'point :x 1 :y 2)`. Không có
+  `make-point` nào được tạo, và không có tùy chọn `:constructor`. Nếu muốn có hàm dựng mang tên, hãy viết nó
+  trong `impl` như một phương thức tĩnh (`point::new` ở trên).
 - Ngoài `(x p)`, hàm truy cập có thể viết là `p::x`. Thay đổi bằng `(setf p::x 5)`.
 - Không có vị từ (`point-p`) nào được tạo. Không có `:conc-name`, `:type` hay `:named`.
 - `:include` chỉ kế thừa các slot; kiểu không trở thành kiểu con của kiểu cha.

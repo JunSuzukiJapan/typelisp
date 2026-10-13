@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Hata Mesajları
 
 `typl`'nin başlıca hata mesajlarının ne anlama geldiği ve nasıl düzeltileceği.
@@ -59,6 +59,10 @@ olduğu anlamına gelir.
 | `no such function: bar` | Bu adda bir fonksiyon ya da metot yok. Yazımı kontrol edin |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metotlar ilk bağımsız değişkenin türüne göre seçilir. Bu adda bir metot var, ancak ilk bağımsız değişkenin türü için (burada `int`) yok. Mesajın sonu, metoda sahip türleri listeler |
 | `unbound variable: y` | Bu adda bir değişken yok. Yazımı ve bağlamanın kapsamını kontrol edin (`let`'inin dışında mı kullanılıyor?) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Bir modülde fonksiyon, global değişken ve makrodan ikisine aynı ad verildi. Birinin adını değiştirin ([Sözdizimi Başvurusu 3.10](syntax.md#310-module--use--ad-alanları)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Bir yapı için `new` üretilmez. Değeri `make-instance` ile oluşturun ya da `impl`'e bir `new` yazın ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` yoktur. Metotlar türün `impl`'ine yazılır ([Sözdizimi Başvurusu 3.5](syntax.md#35-impl--bir-türün-metotları)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` seçeneği yoktur. Yapıcı `impl`'e statik metot olarak yazılır |
 | ``use: unresolved `nosuch` `` | `use` içinde adı verilen modül bulunamıyor. Dosya adlarının modül yollarına nasıl karşılık geldiği için [Sözdizimi Başvurusu 3.11](syntax.md#311-dosyalar-ve-modüller-çok-dosyalı-projeler)'e bakın |
 | `unresolved path: c::hidden` | Modül var, ancak ad yok ya da `pub` eksik olduğu için görünür değil |
 | `circular module dependency: a -> b -> a` | Modüller birbirini `use` ediyor. Ortak kısmı ayrı bir modüle taşıyın |
@@ -70,10 +74,15 @@ olduğu anlamına gelir.
 |---|---|
 | `f: expected 1 argument(s), got 2` | Bağımsız değişken sayısı uyuşmuyor |
 | `f: unknown keyword argument :b` | Fonksiyonda bulunmayan bir anahtar sözcüklü bağımsız değişken geçirildi |
-| `new: expected 1 field(s), got 2` | Bir struct yapıcısına geçirilen değer sayısı, alan sayısıyla uyuşmuyor |
+| `circle: expected 1 field(s), got 2` | Bir enum varyantına verilen değer sayısı o varyantın alan sayısıyla uyuşmuyor |
+| ``make-instance point: slot `y` is not given and has no default`` | Varsayılan değeri olmayan bir alan `make-instance`'a verilmedi |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Yapıda olmayan bir alan verildi |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | `pub` olmayan bir alan, türü tanımlayan modülün dışında verildi. O modülden `pub` bir yapıcı isteyin |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Genel bir türün belirli bir örneklenmesi (`(impl Box<int> ...)`) için yazılmış bir metot, başka tür argümanlarına sahip bir değer üzerinde çağrıldı |
 | ``setf: cannot assign to constant `k` `` | `defconstant` ile tanımlanmış bir ada atama yapıldı. Değişmesi gerekiyorsa `defvar` kullanın |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | `defsignature` ile bildirilen bir fonksiyon tanımlanmamış |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | Bağımsız değişken türlerinden hiçbirinde `~/name/` ile çağrılan metot yok ([Biçim Yönergeleri 5. bölüm](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | O yere yazılan `(nosuch arg colon at)` çağrısı çözülemiyor. Argümanın türünün bir metodunu ya da bir fonksiyon tanımlayın ([Biçim Yönergeleri 5. bölüm](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | `~/name/`, `~{` içi gibi bir listenin öğelerini aldığı bir yere yazıldı. Öğelerin türü neyin çağrılacağını belirleyemez |
 
 ## 3. Okuma hataları
 

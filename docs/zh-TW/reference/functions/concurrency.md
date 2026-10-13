@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 任務與通道
 
 任務（輕量級執行緒）的詞彙。啟動它們的 `task`・`thread` 與多路等待的 `select` 是特殊形式，見[語法參考](../syntax.md#12-並行任務)。本章是
@@ -70,7 +70,7 @@
 
 | 名稱 | 用法 | 型別 | 意義 |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | 沒有未完成項目的群組 |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | 沒有未完成項目的群組 |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | 增加計數器。在工作開始之前 |
 | `done` | `(done wg)` | `(WaitGroup)→()` | 完成了一個。變為 0 時釋放所有等待者 |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | 等到變為 0。可以從任意多個任務等待 |
@@ -103,13 +103,13 @@ Go 的 `time.After`。可以直接寫在 `select` 的逾時分支中（[語法�
 
 | 名稱 | 用法 | 型別 | 意義 |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | 持有 `v`、未上鎖的互斥鎖 |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | 持有 `v`、未上鎖的互斥鎖 |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | 取得鎖（會等待） |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | 歸還。未上鎖時 panic |
 | `with-lock` | `(with-lock (x m) body...)` | 巨集 | 上鎖，把內容繫結到 `x` 執行 `body`，**一定**釋放 |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

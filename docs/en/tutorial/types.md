@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Type Basics
 
 typelisp is a statically typed language. This chapter explains what the type checker does for
@@ -147,31 +147,49 @@ A type with named fields is defined with `defstruct`.
   (y int))
 ```
 
-The definition gives you the following:
+Values are made with `make-instance`. Write the type name quoted with `'`, and pass the fields as
+`:name value` pairs, in any order.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; create one (arguments in field order)
+(let ((p (make-instance 'point :x 3 :y 4)))   ; make one
   (println "~a" p::x)           ; read a field; (x p) also works
   (setf p::x 10)                ; change it
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-To give a struct functions of its own, use `defmethod`. The type of the first argument (`self`)
-decides which type the method belongs to.
+One more expression in a field's declaration becomes that field's **default value**. A field left out
+of `make-instance` takes its default value. Leaving out a field that has no default value is a type
+error.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count is 0
 ```
 
-Writing just the type name instead of a `self` argument makes a function called as
-`point::origin`.
+To give a struct functions of its own, use `impl`. Each item of `(impl TypeName item...)` has the
+form `(name (args...) ReturnType body...)`, and if its first argument is `self` it becomes a
+**method** of that type. `self` is written without a type.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+An item that takes no `self` becomes a function called as `point::origin`. If you provide a function
+that makes a value under the name `new`, users can write it briefly as `(point::new 3 4)`.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -241,7 +259,7 @@ kind.
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 Inside a generic function nothing is known about `T`, so you cannot compare or add values of `T`.

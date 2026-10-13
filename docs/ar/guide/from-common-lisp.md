@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # لمبرمجي Common Lisp
 
 ترث typelisp صياغة Common Lisp (واختصارًا CL) وكثيرًا من أسماء دواله، لكنها لغة ذات أنواع ساكنة. ولهذا
@@ -56,7 +56,9 @@
 ## 3. الدوال كقيم
 
 لا تفصل typelisp بين مساحتي أسماء الدوال والمتغيرات. ويمكن تمرير اسم دالة كقيمة كما هو. ولا يوجد `#'`
-ولا `funcall`.
+ولا `funcall`. والماكروهات أيضًا في مساحة الأسماء نفسها، فلا يمكن داخل وحدة واحدة أن
+يحمل اثنان من دالة ومتغير عام وماكرو الاسم نفسه (بخلاف CL، لا يمكن أن توجد دالة باسم `list` إلى جانب متغير
+باسم `list`).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -77,6 +79,8 @@
 
 - تأخذ دوال التسلسلات **المجموعة أولًا والدالة ثانيًا**: `(map it f)` و`(filter it f)` و`(foldl it f init)`.
   وهذا عكس `(mapcar f list)` في CL.
+- و`push` أيضًا يأخذ **المجموعة أولًا**: `(push v 3)`. ولا يمكن كتابته بترتيب CL، `(push 3 place)`، لأن
+  التابع يُختار بنوع الوسيط الأول وحده (القسم 8).
 - لا يمكن لـ `lambda` استخدام `&optional` ولا `&key` (يمكن استخدام `&rest`).
 - **لا يمكن استدعاء دالة قبل تعريفها.** في CL يمكنك استدعاء دالة ستعرّفها لاحقًا، أما هنا فيعطي ذلك
   `no such function`. وفي الدوال المتبادلة الاستدعاء أعلن إحداها بـ `defsignature` أولًا.
@@ -181,16 +185,26 @@
 لا يوجد `defclass` ولا `defgeneric` ولا دمج للتوابع (method combination).
 
 - تُعرَّف أنواع البيانات بـ `defstruct` (البنى) و`defenum` (أنواع المجموع).
-- يعرّف `defmethod` توابع يتحدد هدفها بـ **النوع الساكن للوسيط الأول** وحده. ولا يوجد إرسال متعدد
-  (multiple dispatch).
+- لا يوجد `defmethod`. تُجمع التوابع لكل نوع في `impl` (بصورة الـ impl الذاتي في Rust نفسها). ويتحدد الهدف
+  **بالنوع الساكن للوسيط الأول** وحده؛ ولا يوجد إرسال متعدد.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; تابع ساكن
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; تابع
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - ولإعطاء عمليات مشتركة بين الأنواع استخدم السمات (`deftrait` / `impl`). وللقيم التي يتحدد نوعها
   الملموس وقت التشغيل استخدم النوع `:dyn Trait`
   ([مرجع الصياغة 3.9](../reference/syntax.md#39-deftrait--impl--السمات)).
 
 كيف يختلف `defstruct`:
 
-- المُنشِئ هو `TypeName::new`: `(point::new 1 2)`. وإذا أردت اسمًا مثل `make-point` فإن الخيار
-  `(:constructor make-point)` ينشئه.
+- تُصنع القيم بـ `make-instance` كما في CLOS: `(make-instance 'point :x 1 :y 2)`. ولا يُنشأ `make-point`، ولا
+  يوجد خيار `:constructor`. وإن أردت مُنشئًا له اسم، فاكتبه في `impl` تابعًا ساكنًا (`point::new` أعلاه).
 - إضافة إلى `(x p)` يمكن كتابة دالة الوصول على الصورة `p::x`. وتُغيَّر بـ `(setf p::x 5)`.
 - لا يُنشأ محمول (predicate) مثل `point-p`. ولا يوجد `:conc-name` ولا `:type` ولا `:named`.
 - يرث `:include` الحقول فقط؛ ولا يصير النوع نوعًا فرعيًا من الأب.

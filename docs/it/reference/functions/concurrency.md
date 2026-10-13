@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Task e canali
 
 Il vocabolario dei task (thread leggeri). `task` e `thread`, che li avviano, e `select`, che attende su
@@ -86,7 +86,7 @@ panic.
 
 | Nome | Uso | Tipo | Significato |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Un gruppo senza nulla in sospeso |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Un gruppo senza nulla in sospeso |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Aggiunge al contatore. Fallo prima che il lavoro inizi |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Uno ha terminato. A 0, ogni chi attende viene rilasciato |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Attende finché non raggiunge 0. Da un numero qualsiasi di task |
@@ -122,13 +122,13 @@ sua capacità è 1, quindi il task che invia può terminare anche se nessuno ric
 
 | Nome | Uso | Tipo | Significato |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Un mutex sbloccato che contiene `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Un mutex sbloccato che contiene `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Acquisisce il lock (attende) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Lo rilascia. Va in panic se non è bloccato |
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Blocca, associa il contenuto a `x`, esegue `body` e rilascia **sempre** |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

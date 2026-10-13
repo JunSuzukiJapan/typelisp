@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Für Common-Lisp-Programmierer
 
 typelisp übernimmt die Syntax von Common Lisp (CL) und viele seiner Funktionsnamen, ist aber eine statisch
@@ -58,7 +58,9 @@ Auch die Typen fester Breite `i8` bis `i32` und `u8` bis `u32` gibt es. Einen Ga
 ## 3. Funktionen als Werte
 
 typelisp trennt die Namensräume von Funktionen und Variablen nicht. Der Name einer Funktion lässt sich
-unverändert als Wert übergeben. Es gibt kein `#'` und kein `funcall`.
+unverändert als Wert übergeben. Es gibt kein `#'` und kein `funcall`. Auch Makros teilen sich diesen Namensraum, daher können in einem Modul keine
+zwei von Funktion, globaler Variable und Makro denselben Namen haben (anders als in CL kann es keine Funktion
+`list` neben einer Variable `list` geben).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -79,6 +81,9 @@ unverändert als Wert übergeben. Es gibt kein `#'` und kein `funcall`.
 
 - Sequenzfunktionen nehmen **zuerst die Sammlung und dann die Funktion**: `(map it f)`, `(filter it f)`,
   `(foldl it f init)`. Das ist umgekehrt zu CLs `(mapcar f list)`.
+- Auch `push` nimmt **die Sammlung zuerst**: `(push v 3)`. In der Reihenfolge von CL, `(push 3 place)`,
+  lässt es sich nicht schreiben, weil eine Methode nur über den Typ des ersten Arguments gewählt wird
+  (Abschnitt 8).
 - `lambda` kann weder `&optional` noch `&key` verwenden (`&rest` schon).
 - **Eine Funktion kann nicht vor ihrer Definition aufgerufen werden.** In CL kann man eine Funktion aufrufen,
   die erst später definiert wird, hier ergibt das `no such function`. Bei sich gegenseitig rekursiven
@@ -189,16 +194,28 @@ literales Symbol (`'done`) beschränkt, und die mit einer Marke geworfenen Werte
 Es gibt kein `defclass`, kein `defgeneric` und keine Methodenkombination.
 
 - Datentypen werden mit `defstruct` (Strukturen) und `defenum` (Summentypen) definiert.
-- `defmethod` definiert Methoden, deren Ziel allein durch **den statischen Typ des ersten Arguments** bestimmt
-  wird. Mehrfachdispatch gibt es nicht.
+- Es gibt kein `defmethod`. Methoden werden pro Typ in einem `impl` gesammelt (dieselbe Form wie Rusts
+  inhärentes impl). Das Ziel wird nur über **den statischen Typ des ersten Arguments** bestimmt;
+  Mehrfachdispatch gibt es nicht.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; statische Methode
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; Methode
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - Um Typen gemeinsame Operationen zu geben, verwendet man Traits (`deftrait` / `impl`). Für Werte, deren
   konkreter Typ erst zur Laufzeit feststeht, verwendet man den Typ `:dyn Trait`
   ([Syntaxreferenz 3.9](../reference/syntax.md#39-deftrait--impl--traits)).
 
 Wie sich `defstruct` unterscheidet:
 
-- Der Konstruktor ist `Typname::new`: `(point::new 1 2)`. Wer einen Namen wie `make-point` will, bekommt ihn
-  mit der Option `(:constructor make-point)`.
+- Werte werden wie in CLOS mit `make-instance` erzeugt: `(make-instance 'point :x 1 :y 2)`. Es wird kein
+  `make-point` erzeugt, und es gibt keine Option `:constructor`. Wer einen benannten Konstruktor möchte,
+  schreibt ihn als statische Methode in `impl` (das `point::new` oben).
 - Neben `(x p)` lässt sich eine Zugriffsfunktion als `p::x` schreiben. Geändert wird mit `(setf p::x 5)`.
 - Es wird kein Prädikat (`point-p`) erzeugt. Es gibt kein `:conc-name`, `:type` oder `:named`.
 - `:include` übernimmt nur die Slots; der Typ wird kein Untertyp des Elterntyps.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Direktif Format
 
 Direktif yang ditulis pada string kendali `print`/`println`/`format`. Direktif ini mencakup hampir
@@ -77,7 +77,7 @@ salah.
 | `~<...~;...~>` | Justifikasi (menyebarkan segmen pada `~mincol` kolom. `:`/`@`=padding di ujung) |
 | `~<...~;...~:>` | **Blok logis** (ditutup dengan `~:>`; berbeda dari justifikasi di atas). Segmen pertama adalah awalan dan yang terakhir adalah akhiran (hanya string literal). Dengan pemisah `~@;`, awalan adalah **awalan per baris**. `~:<` menjadikan awalan/akhiran bawaan `(`/`)`. Argumennya satu daftar (`~@<` memakai argumen yang tersisa di tempat) |
 | `~*` | Melompati argumen (`~n*`=maju n, `~:*`=mundur, `~@*`=ke posisi absolut) |
-| `~/name/` | Pemanggilan metode (bab 5. Flag `:`/`@` diteruskan ke metode. Tidak menerima parameter) |
+| `~/name/` | Pemanggilan fungsi atau metode (bab 5; flag `:`/`@` diteruskan ke yang dipanggil; tidak menerima parameter) |
 
 Direktif CL berikut tidak didukung (semuanya kesalahan saat pemeriksaan).
 
@@ -91,29 +91,36 @@ Direktif CL berikut tidak didukung (semuanya kesalahan saat pemeriksaan).
 
 ## 5. `~/name/`
 
-**Satu perbedaan dari CL: nama dicari bukan sebagai fungsi global melainkan sebagai metode milik tipe
-argumen itu sendiri.** Metode berbentuk `((self Self) (colon bool) (at bool)) → string`, dan `:`/`@`
-milik direktif diteruskan apa adanya.
-
-Cara CL yang mencarinya sebagai fungsi global tidak dapat diimplementasikan dengan aman di bahasa
-ini. Bahkan dengan string kendali literal, tipe elemen argumen daftar (di dalam `~{`) tidak diketahui
-saat pemeriksaan, dan mencari fungsi hanya dengan nama dapat memanggil fungsi yang ditujukan untuk
-tipe lain. Memilih berdasarkan tipe nilai berarti metode diperiksa tipenya tepat untuk tipe itu, yang
-aman (mekanisme yang sama dengan `print-object`). Ini juga berfungsi untuk nilai seperti `string`/
-`bool`/`char`/`symbol`/daftar. Hanya untuk bilangan bulat, yang lebarnya tidak dapat diketahui dari
-nilainya, ini adalah kesalahan **ketika lebih dari satu tipe bilangan bulat mendefinisikan metode
-bernama itu**.
-
-Argumen mana yang dikenainya tidak diketahui, tetapi metode mana yang mungkin dipanggil diketahui.
-Pemeriksa mengumpulkan setiap `~/name/` dari string kendali literal dan mencatat, di antara tipe
-argumen pada tempat pemanggilan itu, yang memiliki metode berbentuk di atas. Jadi **jika tidak ada
-tipe argumen yang memiliki metode itu, ini adalah kesalahan saat pemeriksaan** (bukan saat
-dijalankan), dan ia berfungsi pada berkas eksekusi AOT juga.
+`~/name/` menyelesaikan `name` dengan aturan yang sama seperti pemanggilan `(name arg colon at)` yang ditulis
+di tempat itu, lalu mengeluarkan string yang dikembalikan pemanggilan itu. Ia memakai satu argumen. `colon`
+dan `at` adalah `bool` yang menyatakan apakah direktif membawa `:` dan `@`.
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- Resolusi nama sama dengan pemanggilan ([Referensi Sintaks 3.10](../syntax.md#310-module--use--ruang-nama)). Jika tipe argumen memiliki metode
+  `name`, metode itu yang dipanggil; jika tidak, fungsi `name` yang terlihat. Fungsi di dalam modul dapat
+  ditulis dengan jalurnya (`~/m::shout/`).
+- Yang dapat dipanggil adalah fungsi atau metode yang ditulis dalam typelisp, yang menerima argumen,
+  `colon`, dan `at` apa adanya dan mengembalikan `string`. Fungsi bawaan tidak dapat dipanggil.
+- **Apa yang dipanggil ditetapkan saat pemeriksaan.** Pemeriksa mencari setiap argumen yang dapat mencapai
+  `~/name/` itu, dengan memperhitungkan lompatan `~*` dan `~[`, lalu menyelesaikan nama untuk tipe masing-
+  masing. Jika salah satunya tidak dapat diselesaikan, itu galat saat pemeriksaan, begitu pula jika
+  argumen-argumen yang dapat mencapainya akan memanggil dua definisi yang berbeda. Tidak ada nama yang dicari
+  saat berjalan, sehingga cara kerjanya sama di executable AOT.
+- **Tidak dapat dipakai di dalam `~{`, `~:{`, `~:@{`, atau `~<...~:>`** (galat saat pemeriksaan). Tipe elemen
+  argumen list adalah `Sexpr`, yang tidak dapat menentukan apa yang dipanggil. `~@{` menelusuri sisa argumen
+  pemanggilan, yang tipenya diketahui, sehingga di sana dapat dipakai.
+
+Perbedaan dengan CL: CL mencari nama sebagai fungsi global. Di sini resolusinya sama dengan pemanggilan,
+sehingga metode tipe argumen dipilih lebih dulu daripada fungsi bernama sama.

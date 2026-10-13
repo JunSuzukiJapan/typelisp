@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 태스크와 채널
 
 태스크(경량 스레드)의 어휘. 태스크를 시작하는 `task`와 `thread`, 여러 가지를 기다리는 `select`는 특수 형식이며
@@ -77,7 +77,7 @@ CL과 마찬가지로 `sleep`은 **초**를 받는다. 정수는 부동소수점
 
 | 이름 | 쓰는 법 | 타입 | 의미 |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | 남은 일이 없는 그룹 |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | 남은 일이 없는 그룹 |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | 카운터를 늘린다. 일을 시작하기 전에 |
 | `done` | `(done wg)` | `(WaitGroup)→()` | 하나가 끝났다. 0이 되면 기다리는 쪽을 모두 풀어 준다 |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | 0이 될 때까지 기다린다. 몇 개의 태스크에서든 |
@@ -112,13 +112,13 @@ Go의 `time.After`. `select`의 타임아웃 갈래에 그대로 쓸 수 있다
 
 | 이름 | 쓰는 법 | 타입 | 의미 |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | `v`를 가진, 잠기지 않은 뮤텍스 |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | `v`를 가진, 잠기지 않은 뮤텍스 |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | 락을 잡는다(기다린다) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | 놓는다. 잠겨 있지 않으면 panic |
 | `with-lock` | `(with-lock (x m) body...)` | 매크로 | 잠그고, 내용을 `x`에 묶어 `body`를 실행하고, **반드시** 놓는다 |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

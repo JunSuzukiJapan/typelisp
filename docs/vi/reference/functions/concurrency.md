@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Task và kênh
 
 Từ vựng về task (thread nhẹ). `task` và `thread`, vốn khởi động chúng, và `select`, vốn chờ nhiều thứ, là
@@ -82,7 +82,7 @@ Như trong CL, `sleep` nhận **giây**. Số nguyên không được tự độ
 
 | Tên | Cách dùng | Kiểu | Ý nghĩa |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Một nhóm không có gì còn tồn đọng |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Một nhóm không có gì còn tồn đọng |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Cộng vào bộ đếm. Hãy làm trước khi công việc bắt đầu |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Một việc đã xong. Khi về 0, mọi bên đang chờ được nhả |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Chờ đến khi về 0. Từ bất kỳ số task nào |
@@ -118,13 +118,13 @@ lượng của nó là 1, nên task gửi có thể kết thúc ngay cả khi kh
 
 | Tên | Cách dùng | Kiểu | Ý nghĩa |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Một mutex chưa khóa giữ `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Một mutex chưa khóa giữ `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Lấy khóa (chờ) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Nhả nó. Panic nếu nó chưa bị khóa |
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Khóa, gán nội dung vào `x`, chạy `body`, và **luôn** nhả |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

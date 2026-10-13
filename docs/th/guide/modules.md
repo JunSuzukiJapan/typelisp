@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # โมดูลและการจัดวางไฟล์
 
 คู่มือนี้อธิบายวิธีประกอบโปรแกรมที่ประกอบด้วยหลายไฟล์ กฎโดยละเอียดอยู่ในหัวข้อ 3.10 ถึง 3.13 ของ
@@ -46,14 +46,17 @@ src = "src"
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; a field without pub cannot be read from outside
+  (tag string))                        ; ฟิลด์ที่ไม่มี pub อ่านและเขียนจากภายนอกไม่ได้
 
-(defun square ((n i32)) i32 (* n n))   ; a function without pub cannot be called from outside either
+(defun square ((n i32)) i32 (* n n))   ; ฟังก์ชันที่ไม่มี pub ก็เรียกจากภายนอกไม่ได้
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -74,11 +77,13 @@ typl main.typl        # => 25
 
 ### สิ่งที่ถูกทำให้เป็นสาธารณะ
 
-- ฟังก์ชัน, struct, enum, ตัวแปรโกลบอล, แมโคร และเมทอด จะมองเห็นได้จากโมดูลอื่นก็ต่อเมื่อมี
-  `pub` เท่านั้น ให้ใส่ `pub` ไว้ก่อนการนิยามทันที เช่น `(pub defun ...)`
-- สำหรับ struct **การทำให้ชนิดเป็นสาธารณะกับการทำให้ฟิลด์เป็นสาธารณะแยกจากกัน**
-  `(pub defstruct point ...)` ทำให้ชนิดมองเห็นได้ และมีเพียงฟิลด์ที่เขียนเป็น `(pub x i32)`
-  เท่านั้นที่อ่านและเขียนได้จากภายนอก
+- ฟังก์ชัน struct enum ตัวแปรโกลบอล และแมโคร มองเห็นได้จากโมดูลอื่นเฉพาะที่ใส่ `pub` ให้วาง `pub` ไว้หน้า
+  การนิยามทันที เช่น `(pub defun ...)`
+- จากเมทอดที่เขียนใน `impl` จะใช้จากภายนอกได้เฉพาะที่เขียนเป็น `(pub new ...)` ทีละรายการ
+- สำหรับ struct **การเปิดเผยชนิดกับการเปิดเผยฟิลด์แยกกัน** `(pub defstruct point ...)` ทำให้มองเห็นชนิด และ
+  อ่านเขียนจากภายนอกได้เฉพาะฟิลด์ที่เขียน `(pub x i32)`
+- ทำนองเดียวกัน ในโมดูลอื่นให้ฟิลด์แก่ `make-instance` ได้เฉพาะฟิลด์ที่เป็น `pub` `point` ข้างบนมี `tag` ที่ไม่ใช่
+  `pub` โมดูลอื่นจึงสร้างด้วย `make-instance` ไม่ได้ และใช้ `point::new` แทน
 - การใช้ชื่อที่ไม่เป็นสาธารณะจากภายนอกจะเกิดข้อผิดพลาด "cannot resolve" เช่น
   `unresolved path: geometry::square` ข้อความนี้เหมือนกับกรณีสะกดชื่อผิด ดังนั้นหากสะกดถูกต้อง
   แต่ชื่อยังแก้ไขไม่ได้ ให้สงสัยว่าลืมใส่ `pub`
@@ -111,10 +116,11 @@ typl main.typl        # => 25
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, not core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, not core::area
 ```
 
-เมทอดภายใน `impl` เป็นสาธารณะเสมอแม้ไม่มี `pub`
+เมทอดใน `impl` ของ trait เปิดเผยเสมอแม้ไม่ใส่ `pub` ส่วนเมทอดของ inherent `impl` (`(impl point ...)`)
+เปิดเผยเฉพาะที่ใส่ `pub`
 
 ตัว trait เองไม่สามารถทำให้เป็นสาธารณะแก่โมดูลอื่นได้ ให้เก็บการนิยาม trait, `impl` ของมัน
 และโค้ดที่ใช้มันผ่าน `:dyn` ไว้ในโมดูลเดียว

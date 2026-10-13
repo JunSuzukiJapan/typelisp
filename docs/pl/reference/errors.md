@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Komunikaty o błędach
 
 Co oznaczają główne komunikaty o błędach z `typl` i jak je naprawić.
@@ -58,6 +58,10 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 | `no such function: bar` | Nie ma funkcji ani metody o tej nazwie. Sprawdź pisownię |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Metody są wybierane według typu pierwszego argumentu. Metoda o tej nazwie istnieje, ale nie dla typu pierwszego argumentu (tutaj `int`). Koniec komunikatu wymienia typy, które mają tę metodę |
 | `unbound variable: y` | Nie ma zmiennej o tej nazwie. Sprawdź pisownię i zakres wiązania (czy jest użyta poza swoim `let`?) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | W jednym module dwóm spośród funkcji, zmiennej globalnej i makra nadano tę samą nazwę. Zmień nazwę jednego z nich (zob. [Referencja składni 3.10](syntax.md#310-module--use--przestrzenie-nazw)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Dla struktury nie jest generowane żadne `new`. Utwórz wartość przez `make-instance` albo napisz `new` w `impl` (zob. [Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | Nie ma `defmethod`. Metody pisze się w `impl` typu (zob. [Referencja składni 3.5](syntax.md#35-impl--metody-typu)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | Nie ma opcji `:constructor`. Konstruktor pisze się w `impl` jako metodę statyczną |
 | ``use: unresolved `nosuch` `` | Nie można znaleźć modułu wskazanego w `use`. Informacje o tym, jak nazwy plików odpowiadają ścieżkom modułów, znajdziesz w [Referencji składni 3.11](syntax.md#311-pliki-i-moduły-projekty-wieloplikowe) |
 | `unresolved path: c::hidden` | Moduł istnieje, ale nazwa nie, albo nie jest widoczna, bo brakuje jej `pub` |
 | `circular module dependency: a -> b -> a` | Moduły wprowadzają się nawzajem przez `use`. Przenieś wspólną część do osobnego modułu |
@@ -69,10 +73,15 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 |---|---|
 | `f: expected 1 argument(s), got 2` | Liczba argumentów się nie zgadza |
 | `f: unknown keyword argument :b` | Przekazano argument kluczowy, którego funkcja nie ma |
-| `new: expected 1 field(s), got 2` | Liczba wartości przekazanych do konstruktora struktury nie zgadza się z liczbą pól |
+| `circle: expected 1 field(s), got 2` | Liczba wartości przekazanych do wariantu enumu nie zgadza się z liczbą jego pól |
+| ``make-instance point: slot `y` is not given and has no default`` | Do `make-instance` nie podano pola bez wartości domyślnej |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Podano pole, którego struktura nie ma |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Pole, które nie jest `pub`, podano poza modułem definiującym typ. Poproś ten moduł o konstruktor z `pub` |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Metodę napisaną dla jednej instancjacji typu generycznego (`(impl Box<int> ...)`) wywołano na wartości z innymi argumentami typu |
 | ``setf: cannot assign to constant `k` `` | Przypisano do nazwy zdefiniowanej za pomocą `defconstant`. Jeśli ma się zmieniać, użyj `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | Funkcja zadeklarowana za pomocą `defsignature` nie jest zdefiniowana |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | Żaden z typów argumentów nie ma metody wywoływanej za pomocą `~/name/` ([Dyrektywy formatu, rozdział 5](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | Wywołania `(nosuch arg colon at)` zapisanego w tym miejscu nie da się rozstrzygnąć. Zdefiniuj metodę typu argumentu albo funkcję ([Dyrektywy formatu, rozdział 5](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | `~/name/` zapisano tam, gdzie dostaje elementy listy, np. wewnątrz `~{`. Typ elementów nie pozwala ustalić, co wywołać |
 
 ## 3. Błędy odczytu
 

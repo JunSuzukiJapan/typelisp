@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # ข้อความแสดงข้อผิดพลาด
 
 ความหมายของข้อความแสดงข้อผิดพลาดหลักจาก `typl` และวิธีแก้ไข
@@ -58,6 +58,10 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `no such function: bar` | ไม่มีฟังก์ชันหรือเมทอดชื่อนั้น ตรวจสอบการสะกด |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | เมทอดถูกเลือกโดยชนิดของอาร์กิวเมนต์แรก มีเมทอดชื่อนั้นอยู่ แต่ไม่ใช่สำหรับชนิดของอาร์กิวเมนต์แรก (ในที่นี้คือ `int`) ท้ายข้อความแสดงรายการชนิดที่มีเมทอดนั้น |
 | `unbound variable: y` | ไม่มีตัวแปรชื่อนั้น ตรวจสอบการสะกดและขอบเขตของการผูก (ใช้นอก `let` ของมันหรือไม่) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | ในโมดูลเดียว ตั้งชื่อเดียวกันให้สองสิ่งจากฟังก์ชัน ตัวแปรโกลบอล และแมโคร ให้เปลี่ยนชื่อหนึ่งในนั้น ([เอกสารอ้างอิงไวยากรณ์ 3.10](syntax.md#310-module--use--เนมสเปซ)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | ไม่มีการสร้าง `new` ให้ struct โดยอัตโนมัติ ให้สร้างค่าด้วย `make-instance` หรือเขียน `new` ใน `impl` ([เอกสารอ้างอิงไวยากรณ์ 3.5](syntax.md#35-impl--เมทอดของชนิด)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | ไม่มี `defmethod` เมทอดเขียนใน `impl` ของชนิด ([เอกสารอ้างอิงไวยากรณ์ 3.5](syntax.md#35-impl--เมทอดของชนิด)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | ไม่มีตัวเลือก `:constructor` ตัวสร้างเขียนใน `impl` เป็นเมทอดสถิต |
 | ``use: unresolved `nosuch` `` | หาโมดูลที่ระบุใน `use` ไม่พบ สำหรับการที่ชื่อไฟล์สอดคล้องกับพาธของโมดูล ดู[เอกสารอ้างอิงไวยากรณ์ 3.11](syntax.md#311-ไฟล์และโมดูล-โปรเจกต์หลายไฟล์) |
 | `unresolved path: c::hidden` | มีโมดูลอยู่ แต่ไม่มีชื่อนั้น หรือมองไม่เห็นเพราะไม่มี `pub` |
 | `circular module dependency: a -> b -> a` | โมดูล `use` กันเอง ให้ย้ายส่วนที่ใช้ร่วมกันไปไว้ในโมดูลแยก |
@@ -69,10 +73,15 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 |---|---|
 | `f: expected 1 argument(s), got 2` | จำนวนอาร์กิวเมนต์ไม่ตรงกัน |
 | `f: unknown keyword argument :b` | ส่งอาร์กิวเมนต์แบบคีย์เวิร์ดที่ฟังก์ชันไม่มี |
-| `new: expected 1 field(s), got 2` | จำนวนค่าที่ส่งให้ตัวสร้างของ struct ไม่ตรงกับจำนวนฟิลด์ |
+| `circle: expected 1 field(s), got 2` | จำนวนค่าที่ส่งให้ variant ของ enum ไม่ตรงกับจำนวนฟิลด์ของ variant นั้น |
+| ``make-instance point: slot `y` is not given and has no default`` | ไม่ได้ให้ฟิลด์ที่ไม่มีค่าเริ่มต้นแก่ `make-instance` |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | ให้ฟิลด์ที่ struct ไม่มี |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | ให้ฟิลด์ที่ไม่ใช่ `pub` นอกโมดูลที่นิยามชนิด ให้โมดูลนั้นเตรียมตัวสร้างที่เป็น `pub` |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | เรียกเมทอดที่เขียนให้อาร์กิวเมนต์ชนิดเฉพาะของชนิด generic (`(impl Box<int> ...)`) กับค่าที่มีอาร์กิวเมนต์ชนิดอื่น |
 | ``setf: cannot assign to constant `k` `` | กำหนดค่าให้ชื่อที่นิยามด้วย `defconstant` หากต้องเปลี่ยนค่า ให้ใช้ `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | ฟังก์ชันที่ประกาศด้วย `defsignature` ไม่ได้ถูกนิยาม |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | ไม่มีชนิดของอาร์กิวเมนต์ใดมีเมทอดที่เรียกด้วย `~/name/` ([คำสั่งรูปแบบ บทที่ 5](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | การเรียก `(nosuch arg colon at)` ที่เขียน ณ ตำแหน่งนั้นแก้ไขไม่ได้ ให้นิยามเมทอดของชนิดอาร์กิวเมนต์หรือฟังก์ชัน ([คำสั่งรูปแบบ บทที่ 5](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | เขียน `~/name/` ในที่ที่ได้รับสมาชิกของลิสต์ เช่นภายใน `~{` ชนิดของสมาชิกกำหนดสิ่งที่จะเรียกไม่ได้ |
 
 ## 3. ข้อผิดพลาดในการอ่าน
 

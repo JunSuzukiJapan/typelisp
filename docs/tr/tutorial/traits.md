@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Trait'ler
 
 Bir trait, "bu tür şu işlemleri destekler" sözüdür. Trait'ler birkaç türün aynı adlı işlemleri
@@ -37,8 +37,8 @@ Bir trait'i bir tür için gerçekleştirmek üzere bir `impl` yazın.
 Gerçekleştirilen metotlar sıradan fonksiyonlar gibi çağrılır.
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 Trait'in bildirdiği metotlardan birini bile atlamak, `impl`'de bir tür hatasıdır.
@@ -53,8 +53,8 @@ sınırı** denir.
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 `(where (Shape T))` sayesinde gövde, `T` türündeki değerlerde `name` ve `area`'yı kullanabilir. Sınır
@@ -87,8 +87,8 @@ Bir trait metodunun gövdesi varsa, bir `impl` o metodu atladığında bu gövde
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; the one written here takes priority
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. Standart trait'leri gerçekleştirme
@@ -116,7 +116,7 @@ aldığından önce `Eq`'in `impl`'i gelmelidir.
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (the default implementation in Ord)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
 ```
 
 `print-object`'i gerçekleştirmek, `println`'in değeri nasıl göstereceğini belirler. `escape`
@@ -127,7 +127,7 @@ bağımsız değişkeni, `~s` gibi geri okunabilecek bir biçim istendiğinde `t
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 Bir trait sınırıyla birleştirildiğinde, `Ord`'u gerçekleştiren her tür için çalışan bir fonksiyon
@@ -160,8 +160,8 @@ Bir `Vector<T>`'nin tüm elemanları aynı türdedir; bu yüzden `circle` ve `re
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

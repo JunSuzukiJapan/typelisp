@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Traits
 
 Um trait é uma promessa de que "este tipo suporta estas operações". Os traits permitem que vários tipos
@@ -38,8 +38,8 @@ Para implementar um trait para um tipo, escreva um `impl`.
 Os métodos implementados são chamados como funções comuns.
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 Deixar de fora mesmo um só dos métodos que o trait declara é um erro de tipo no `impl`.
@@ -54,8 +54,8 @@ Deixar de fora mesmo um só dos métodos que o trait declara é um erro de tipo 
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 Graças a `(where (Shape T))`, o corpo pode usar `name` e `area` em valores de `T`. Sem a restrição nada se
@@ -88,8 +88,8 @@ Se um método de trait tem corpo, esse corpo é usado quando um `impl` omite o m
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; a que é escrita aqui tem prioridade
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. Implementar traits padrão
@@ -117,7 +117,7 @@ o `impl` de `Eq` tem de vir primeiro.
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (a implementação padrão de Ord)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (a implementação padrão de Ord)
 ```
 
 Implementar `print-object` decide como `println` mostra o valor. O argumento `escape` é `true` quando se pede
@@ -128,7 +128,7 @@ uma forma que pode ser lida de volta, como com `~s`.
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 Combinado com uma restrição de trait, você pode escrever uma função que serve para qualquer tipo que
@@ -160,8 +160,8 @@ mesmo `Vector<circle>`. Para lidar juntos com "coisas que implementam `Shape`", 
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

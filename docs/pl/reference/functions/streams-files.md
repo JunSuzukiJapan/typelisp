@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Strumienie i pliki
 
 Traity i metody strumieni, konkretne typy strumieni, operacje na plikach i nazwy ścieżek. Gniazda sieciowe są
@@ -177,7 +177,7 @@ strumieni złożonych.
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; każda pozostała metoda jest domyślna
 
-(write-line (counter::new 0) "four")   ; write-line, terpri i fresh-line wszystkie działają
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri i fresh-line wszystkie działają
 ```
 
 Wejście działa tak samo: piszesz tylko `read-item`. Nawet typ bez własnego odkładania może być

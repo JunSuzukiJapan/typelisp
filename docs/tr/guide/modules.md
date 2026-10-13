@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Modüller ve Dosya Düzeni
 
 Bu kılavuz, birkaç dosyadan oluşan bir programın nasıl bir araya getirileceğini anlatır. Ayrıntılı
@@ -47,14 +47,17 @@ kök olur (REPL'de geçerli dizin).
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; a field without pub cannot be read from outside
+  (tag string))                        ; pub olmayan bir alan dışarıdan ne okunabilir ne yazılabilir
 
-(defun square ((n i32)) i32 (* n n))   ; a function without pub cannot be called from outside either
+(defun square ((n i32)) i32 (* n n))   ; pub olmayan bir fonksiyon da dışarıdan çağrılamaz
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -75,12 +78,15 @@ typl main.typl        # => 25
 
 ### Neler genel yapılır
 
-- Fonksiyonlar, struct'lar, enum'lar, global değişkenler, makrolar ve metotlar, yalnızca `pub`
-  taşıdıklarında diğer modüllerden görünür. `pub`'ı tanımın hemen önüne, `(pub defun ...)` gibi
-  koyun.
-- Struct'larda **türü genel yapmak ile alanları genel yapmak ayrı şeylerdir**.
-  `(pub defstruct point ...)` türü görünür kılar; dışarıdan yalnızca `(pub x i32)` biçiminde
-  yazılan alanlar okunabilir ve yazılabilir.
+- Fonksiyonlar, yapılar, enum'lar, global değişkenler ve makrolar yalnızca `pub` taşıdıklarında diğer
+  modüllerden görünür. `pub`'ı `(pub defun ...)`'daki gibi tanımın hemen önüne koyun.
+- Bir `impl`'e yazılan metotlardan yalnızca öğe öğe `(pub new ...)` diye yazılanlar dışarıdan
+  kullanılabilir.
+- Yapılarda **türü açmak ile alanları açmak ayrı şeylerdir**. `(pub defstruct point ...)` türü görünür
+  yapar ve dışarıdan yalnızca `(pub x i32)` diye yazılan alanlar okunup yazılabilir.
+- Aynı şekilde, diğer modüllerde `make-instance`'a yalnızca `pub` alanlar verilebilir. Yukarıdaki
+  `point`'in `tag` alanı `pub` değildir; bu yüzden diğer modüller onu `make-instance` ile oluşturamaz ve
+  `point::new` kullanır.
 - Genel olmayan bir ad dışarıdan kullanılırsa `unresolved path: geometry::square` gibi bir "çözümlenemedi"
   hatası alırsınız. Bu, yanlış yazılmış bir adla alınan mesajın aynısıdır; bu yüzden yazım doğruysa
   ve ad yine de çözümlenmiyorsa eksik bir `pub`'dan şüphelenin.
@@ -113,10 +119,11 @@ yüzden modül adı olmadan çağrılırlar.
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, not core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, not core::area
 ```
 
-Bir `impl` içindeki metotlar `pub` olmasa bile her zaman geneldir.
+Bir trait'in `impl`'indeki metotlar `pub` olmadan da her zaman açıktır. İçsel bir `impl`'in
+(`(impl point ...)`) metotlarından yalnızca `pub` olanlar açıktır.
 
 Bir trait'in kendisi diğer modüllere açık hale getirilemez. Bir trait'in tanımını, onun `impl`'lerini
 ve onu `:dyn` ile kullanan kodu tek bir modülde tutun.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Taken en kanalen
 
 De woordenschat van taken (lichtgewicht threads). `task` en `thread`, die ze starten, en `select`, dat
@@ -90,7 +90,7 @@ Een negatieve waarde of NaN geeft een panic.
 
 | Naam | Gebruik | Type | Betekenis |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Een groep met niets openstaands |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Een groep met niets openstaands |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Telt bij de teller op. Doe het voordat het werk begint |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Eén is klaar. Bij 0 worden alle wachtenden vrijgegeven |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Wacht tot de teller 0 bereikt. Vanuit een willekeurig aantal taken |
@@ -128,13 +128,13 @@ De capaciteit is 1, dus de verzendende taak kan eindigen ook als niemand ontvang
 
 | Naam | Gebruik | Type | Betekenis |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Een niet-vergrendelde mutex die `v` bevat |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Een niet-vergrendelde mutex die `v` bevat |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Neemt het slot (wacht) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Geeft het vrij. Geeft een panic als het niet is vergrendeld |
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Vergrendelt, bindt de inhoud aan `x`, voert `body` uit en geeft **altijd** vrij |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

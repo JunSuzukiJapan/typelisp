@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Números
 
 Operaciones sobre enteros, números de coma flotante, racionales, números complejos y booleanos, y otras
@@ -198,7 +198,7 @@ Una estructura (`defstruct`) de la biblioteca estándar.
 
 | Nombre | Forma | Tipo | Descripción |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Construcción. Los componentes se pueden leer directamente como `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Construcción. Los componentes se pueden leer directamente como `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Parte real y parte imaginaria. **También funcionan con números reales** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), como en CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Conjugado (también funciona con reales) |
 | `phase` | `(phase z)` | `complex→f64` | Argumento en (-pi,pi] (también funciona con reales) |

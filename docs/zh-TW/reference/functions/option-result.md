@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7bc227fccd76e389ecb46e23b24421514247c86c -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Option、Result 與錯誤型別
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -101,10 +101,10 @@
   (source ((self Self)) Option<:dyn Error> (option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; 把具體型別直接放進 E
-  (if (equal p "") (result::err (io-err::new "<empty>")) (result::ok 3)))
+  (if (equal p "") (result::err (make-instance 'io-err :path "<empty>")) (result::ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; 不區分種類統一處理
-(describe (io-err::new "/etc/app.conf"))
+(describe (make-instance 'io-err :path "/etc/app.conf"))
 (describe (ParseIntError::ParseIntError "boom"))
 ```
 

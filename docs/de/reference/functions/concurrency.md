@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tasks und Kanäle
 
 Das Vokabular der Tasks (leichtgewichtigen Threads). `task` und `thread`, die sie starten, und `select`, das
@@ -84,7 +84,7 @@ daher schreibt man CLs `(sleep 1)` hier `(sleep 1.0)`. Ein negativer Wert oder N
 
 | Name | Verwendung | Typ | Bedeutung |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Eine Gruppe ohne Ausstehendes |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Eine Gruppe ohne Ausstehendes |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Erhöht den Zähler. Vor Beginn der Arbeit aufrufen |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Eines ist fertig. Bei 0 werden alle Wartenden freigegeben |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Wartet, bis er 0 erreicht. Von beliebig vielen Tasks aus |
@@ -120,13 +120,13 @@ Kapazität ist 1, daher kann der sendende Task enden, auch wenn niemand empfäng
 
 | Name | Verwendung | Typ | Bedeutung |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Ein nicht gesperrter Mutex, der `v` enthält |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Ein nicht gesperrter Mutex, der `v` enthält |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Nimmt die Sperre (wartet) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Gibt sie frei. Panic, wenn er nicht gesperrt ist |
 | `with-lock` | `(with-lock (x m) body...)` | Makro | Sperrt, bindet den Inhalt an `x`, führt `body` aus und gibt **immer** frei |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

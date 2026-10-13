@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Common Lisp 사용자를 위해
 
 typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지만 정적 타입 언어이다. 그래서 CL 코드가 쓴 그대로
@@ -53,6 +53,8 @@ typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지
 ## 3. 값으로서의 함수
 
 typelisp는 함수와 변수의 이름공간을 나누지 않는다. 함수 이름을 그대로 값으로 넘길 수 있다. `#'`도 `funcall`도 없다.
+매크로도 같은 이름공간에 들어가므로, 같은 모듈 안에서 함수·전역 변수·매크로 중 두 개에 같은 이름을 붙일 수
+없다(CL처럼 `list`라는 함수와 `list`라는 변수를 나란히 둘 수 없다).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -72,6 +74,8 @@ typelisp는 함수와 변수의 이름공간을 나누지 않는다. 함수 이�
 
 - 시퀀스 함수는 **컬렉션이 먼저, 함수가 나중**이다: `(map it f)`, `(filter it f)`, `(foldl it f init)`. CL의
   `(mapcar f list)`와 반대이다.
+- 요소를 더하는 `push`도 **대상이 먼저**다: `(push v 3)`. CL의 `(push 3 place)` 순서로는 쓸 수 없다. 메서드는
+  첫 번째 인수의 타입만으로 선택되기 때문이다(8절).
 - `lambda`에서는 `&optional`과 `&key`를 쓸 수 없다(`&rest`는 쓸 수 있다).
 - **함수는 정의하기 전에 호출할 수 없다.** CL에서는 나중에 정의할 함수를 호출할 수 있지만 여기서는
   `no such function`이 된다. 상호 재귀하는 함수는 한쪽을 `defsignature`로 먼저 선언한다.
@@ -173,14 +177,25 @@ CL과 다른 점은 세 가지다. 요소의 타입이 모두 같아야 한다(`
 `defclass`, `defgeneric`, 메서드 결합은 없다.
 
 - 데이터 타입은 `defstruct`(구조체)와 `defenum`(합 타입)으로 정의한다.
-- `defmethod`는 **첫 번째 인수의 정적 타입**만으로 대상이 정해지는 메서드를 정의한다. 다중 디스패치는 없다.
+- `defmethod`는 없다. 메서드는 타입마다 `impl`에 모아 쓴다(Rust의 고유 impl과 같은 형태). 호출할 대상은
+  **첫 번째 인수의 정적 타입**만으로 정해지며, 다중 디스패치는 하지 않는다.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 정적 메서드
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; 메서드
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - 타입에 공통 연산을 주려면 트레이트(`deftrait` / `impl`)를 쓴다. 구체적인 타입이 실행 중에 정해지는 값에는
   `:dyn Trait` 타입을 쓴다([문법 레퍼런스 3.9](../reference/syntax.md#39-deftrait--impl--트레이트-기구)).
 
 `defstruct`의 차이:
 
-- 생성자는 `타입이름::new`이다: `(point::new 1 2)`. `make-point` 같은 이름을 원하면 `(:constructor make-point)`
-  옵션으로 만들 수 있다.
+- 값은 CLOS와 같이 `make-instance`로 만든다: `(make-instance 'point :x 1 :y 2)`. `make-point`는 만들어지지
+  않고 `:constructor` 옵션도 없다. 이름 붙은 생성자가 필요하면 `impl`에 정적 메서드로 쓴다(위의 `point::new`).
 - 접근자는 `(x p)` 외에 `p::x`로도 쓸 수 있다. `(setf p::x 5)`로 바꾼다.
 - 술어(`point-p`)는 만들어지지 않는다. `:conc-name`, `:type`, `:named`는 없다.
 - `:include`는 슬롯을 이어받을 뿐이며, 타입이 부모의 하위 타입이 되지는 않는다.

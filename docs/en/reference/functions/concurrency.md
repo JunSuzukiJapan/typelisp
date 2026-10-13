@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tasks and Channels
 
 The vocabulary of tasks (lightweight threads). `task` and `thread`, which start them, and `select`,
@@ -83,7 +83,7 @@ automatically, so CL's `(sleep 1)` is written `(sleep 1.0)` here. A negative val
 
 | Name | Usage | Type | Meaning |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | A group with nothing outstanding |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | A group with nothing outstanding |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Adds to the counter. Do it before the work starts |
 | `done` | `(done wg)` | `(WaitGroup)→()` | One has finished. At 0, every waiter is released |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Waits until it reaches 0. From any number of tasks |
@@ -119,13 +119,13 @@ capacity is 1, so the sending task can finish even if no one receives.
 
 | Name | Usage | Type | Meaning |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | An unlocked mutex holding `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | An unlocked mutex holding `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Takes the lock (waits) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Releases it. Panics if it is not locked |
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Locks, binds the contents to `x`, runs `body`, and **always** releases |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

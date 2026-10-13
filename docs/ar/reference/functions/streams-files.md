@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # التدفقات والملفات
 
 سمات التدفقات وتوابعها وأنواع التدفقات الملموسة وعمليات الملفات والمسارات. ومقابس الشبكة تدفقات أيضًا،
@@ -172,7 +172,7 @@
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; كل التوابع المتبقية افتراضية
 
-(write-line (counter::new 0) "four")   ; تعمل write-line وterpri وfresh-line كلها
+(write-line (make-instance 'counter :n 0) "four")   ; تعمل write-line وterpri وfresh-line كلها
 ```
 
 والدخل يعمل بالطريقة نفسها: تكتب `read-item` فقط. وحتى النوع الذي ليس له إرجاع خاص به يمكن `read`

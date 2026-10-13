@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Directives de format
 
 Les directives qu'on écrit dans les chaînes de contrôle de `print`/`println`/`format`. Elles couvrent presque toutes
@@ -75,7 +75,7 @@ Comme en CL, les directives du pretty printer (`~_` `~i` `~:t` `~<...~:>`, et le
 | `~<...~;...~>` | Justification (répartit les segments sur `~mincol` colonnes. `:`/`@`=remplissage aux extrémités) |
 | `~<...~;...~:>` | **Bloc logique** (fermé par `~:>` ; autre chose que la justification ci-dessus). Le premier segment est le préfixe et le dernier le suffixe (tous deux uniquement des chaînes littérales). Avec le séparateur `~@;`, le préfixe est un **préfixe par ligne**. `~:<` donne `(`/`)` comme préfixe/suffixe par défaut. L'argument est une liste (`~@<` utilise à la place les arguments restants) |
 | `~*` | Sauter des arguments (`~n*`=n en avant, `~:*`=en arrière, `~@*`=vers une position absolue) |
-| `~/name/` | Appel de méthode (chapitre 5. Les drapeaux `:`/`@` sont passés à la méthode. Ne prend pas de paramètres) |
+| `~/name/` | Appel d'une fonction ou d'une méthode (chapitre 5 ; les drapeaux `:`/`@` sont passés à la cible ; ne prend pas de paramètres) |
 
 Les directives de CL suivantes ne sont pas prises en charge (ce sont des erreurs à la vérification).
 
@@ -88,27 +88,36 @@ Les directives de CL suivantes ne sont pas prises en charge (ce sont des erreurs
 
 ## 5. `~/name/`
 
-**Une différence avec CL : le nom n'est pas cherché comme fonction globale mais comme méthode du propre type de
-l'argument.** La méthode a la forme `((self Self) (colon bool) (at bool)) → string`, et les `:`/`@` de la directive
-sont transmis tels quels.
-
-La façon de CL de le chercher comme fonction globale ne peut pas être mise en œuvre sûrement dans ce langage. Même
-avec une chaîne de contrôle littérale, le type des éléments d'un argument liste (à l'intérieur de `~{`) n'est pas
-connu à la vérification, et chercher une fonction par son seul nom pourrait appeler une fonction destinée à un
-autre type. Choisir selon le type de la valeur signifie que la méthode est vérifiée exactement pour ce type, ce
-qui est sûr (le même mécanisme que `print-object`). Cela fonctionne aussi pour des valeurs comme
-`string`/`bool`/`char`/`symbol`/listes. Seuls les entiers, dont la largeur ne se déduit pas de la valeur, donnent
-une erreur **quand plus d'un type entier définit une méthode de ce nom**.
-
-On ne sait pas à quel argument elle s'applique, mais on sait quelles méthodes elle peut appeler. Le vérificateur
-rassemble chaque `~/name/` de la chaîne de contrôle littérale et note, parmi les types des arguments à cet endroit
-d'appel, ceux qui ont une méthode de la forme ci-dessus. Ainsi, **si aucun des types d'arguments n'a la méthode,
-c'est une erreur à la vérification** (et non à l'exécution), et cela fonctionne aussi dans les exécutables AOT.
+`~/name/` résout `name` selon les mêmes règles qu'un appel `(name arg colon at)` écrit à cet endroit, et
+affiche la chaîne que renvoie l'appel. Il consomme un argument. `colon` et `at` sont des `bool` qui disent
+si la directive porte `:` et `@`.
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- La résolution du nom est la même que pour un appel ([Référence de la syntaxe 3.10](../syntax.md#310-module--use--espaces-de-noms)). Si le type
+  de l'argument a une méthode `name`, c'est elle qui est appelée ; sinon, la fonction visible `name`. Une
+  fonction d'un module peut être désignée par son chemin (`~/m::shout/`).
+- Ce qui peut être appelé est une fonction ou une méthode écrite en typelisp qui reçoit l'argument,
+  `colon` et `at` tels quels et renvoie une `string`. Les fonctions intégrées ne peuvent pas être appelées.
+- **Ce qui est appelé est fixé à la vérification.** Le vérificateur trouve chaque argument qui peut
+  atteindre ce `~/name/`, en tenant compte des déplacements par `~*` et `~[`, et résout le nom pour le
+  type de chacun. Si l'un d'eux ne peut pas être résolu, c'est une erreur à la vérification, de même si les
+  arguments qui peuvent l'atteindre appelleraient deux définitions différentes. Aucun nom n'est cherché à
+  l'exécution, donc cela fonctionne de la même façon dans les exécutables AOT.
+- **Il ne peut pas être utilisé dans `~{`, `~:{`, `~:@{` ni `~<...~:>`** (erreur à la vérification). Le
+  type des éléments d'un argument liste est `Sexpr`, qui ne peut pas déterminer ce qu'il faut appeler.
+  `~@{` parcourt les arguments restants de l'appel, dont les types sont connus ; il y est donc utilisable.
+
+La différence avec CL : CL cherche le nom comme fonction globale. Ici la résolution est la même que pour un
+appel, si bien qu'une méthode du type de l'argument est choisie avant une fonction de même nom.

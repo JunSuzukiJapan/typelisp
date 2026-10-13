@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 문자열, 문자, 컬렉션
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>`, `Deque<T>`.
@@ -121,8 +121,8 @@
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 두 키가 같은지는 객체의 동일성이 아니라 **키 타입 자신**(`sxhash`와, `Hash`의 상위 트레이트 `Eq`의 `equals`)이 정한다.
@@ -138,7 +138,7 @@
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL의 `make-array`. `dims`는 복사된다. `init`은 모든 칸의 초깃값(CL의 `:initial-element`. 이 언어에는 "묶이지 않은 칸"이 없으므로 필수). `:fill-pointer`는 1차원에서만 |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL의 `make-array`. `dims`는 복사된다. `init`은 모든 칸의 초깃값(CL의 `:initial-element`. 이 언어에는 "묶이지 않은 칸"이 없으므로 필수). `:fill-pointer`는 1차원에서만 |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | CL의 `aref` / `(setf (aref …))`. 인덱스가 범위를 벗어나면 panic |
 | `aref` | `(aref a i j …)` | — | 인덱스를 그대로 늘어놓는 CL의 표기. 위의 `get`/`set`으로 전개된다. `(setf (aref a i j) v)`도 된다 |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | CL의 `row-major-aref`. 평평한 인덱스 |
@@ -159,7 +159,6 @@
   틈을 메운다.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`는 **없다**. 받는 쪽의
   정적 타입이 이미 그 질문에 답한다.
-- `Array::new`는 `defstruct`가 만드는 필드 순서의 생성자이며 배열을 만드는 데 쓰는 것이 아니다. `Array::make`를 쓴다.
 - **배열은 CL의 배열 구문으로 출력된다.** 랭크 1은 `#(1 2 3)`, 그 밖의 랭크는 `#nA` 뒤에 그 수만큼 괄호를 겹친 것
   (`#2A((1 2 3) (4 5 6))`), 랭크 0은 `#0A5`. 채움 포인터가 있으면 거기서 출력을 멈춘다.
   `*print-array*`([출력](printing.md#6-출력량-제어))를 거짓으로 하면 모양만 `#<array 2x3>`으로 출력한다. 요소가
@@ -171,7 +170,7 @@
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | 길이 `n`, 모든 비트가 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | 길이 `n`, 모든 비트가 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | 범위를 벗어나면 panic |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | CL의 표기. `(setf (bit v i) b)`도 된다. CL의 `sbit`는 단순 비트 벡터를 요구하는 점만 `bit`와 다르지만, 이 언어에는 비트 벡터가 한 종류뿐이다 |
 | `len` | `(len v)` | `BitVector→int` | 비트 수 |
@@ -187,7 +186,7 @@
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | 빈 집합을 만든다. 타입 인수는 기대 타입에서 정해진다 |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | 빈 집합을 만든다. 타입 인수는 기대 타입에서 정해진다 |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x`를 추가한다. 새로 들어가면 `true`, 이미 있으면 `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x`가 있는지 |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x`를 뺀다. 있었으면 `true` |
@@ -196,14 +195,13 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | 요소의 이터레이터. 순서는 정해져 있지 않다 |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 7~9장의 세 타입에 공통되는 점:
 
-- 만들 때는 `make`를 쓴다. `new`는 `defstruct`가 생성하는 필드 순서의 생성자이며 만들 때 쓰는 것이 아니다(`Array::make`와 같다).
 - `iter`는 호출한 시점의 사본을 순회한다. `doiter` 안에서 같은 컬렉션을 바꿔도 그 루프에는 보이지 않는다.
 - 요소 타입이 `print-object`를 구현하면 `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>` 형태로 요소를
   출력한다.
@@ -215,7 +213,7 @@
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | 빈 표를 만든다 |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | 빈 표를 만든다 |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | 검색 |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | 삽입 또는 덮어쓰기 |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | 삭제하고, 있었으면 이전 값을 돌려준다 |
@@ -226,7 +224,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | 키 순서의 `#{키 값}` 튜플 |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 와 pear 3
 ```
@@ -237,7 +235,7 @@
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | 빈 열을 만든다 |
+| `new` | `(Deque::new)` | `()→Deque<T>` | 빈 열을 만든다 |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | 앞 / 뒤에 추가한다 |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 꺼내 돌려준다. 비어 있으면 `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | 앞 / 뒤의 요소를 본다(꺼내지 않는다) |
@@ -248,7 +246,7 @@
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | 앞에서부터 차례로 |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

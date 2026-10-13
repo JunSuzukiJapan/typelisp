@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Moduler och filuppdelning
 
 Den här guiden förklarar hur man sätter ihop ett program som består av flera filer. De detaljerade
@@ -45,14 +45,17 @@ aktuella katalogen).
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; ett fält utan pub kan inte läsas utifrån
+  (tag string))                        ; ett fält utan pub kan varken läsas eller skrivas utifrån
 
-(defun square ((n i32)) i32 (* n n))   ; en funktion utan pub kan inte heller anropas utifrån
+(defun square ((n i32)) i32 (* n n))   ; inte heller en funktion utan pub kan anropas utifrån
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -73,11 +76,15 @@ typl main.typl        # => 25
 
 ### Vad som görs publikt
 
-- Funktioner, structs, enums, globala variabler, makron och metoder är synliga från andra moduler bara
-  när de har `pub`. Sätt `pub` precis före definitionen, som i `(pub defun ...)`.
-- För structs är **att göra typen publik och att göra fält publika skilda saker**.
-  `(pub defstruct point ...)` gör typen synlig, och bara de fält som skrivs som `(pub x i32)` kan läsas
-  och skrivas utifrån.
+- Funktioner, structar, enums, globala variabler och makron syns från andra moduler bara när de har `pub`.
+  Sätt `pub` direkt före definitionen, som i `(pub defun ...)`.
+- Av metoderna som skrivs i en `impl` kan bara de som skrivits `(pub new ...)`, post för post, användas
+  utifrån.
+- För structar **är det två skilda saker att göra typen publik och att göra fälten publika**.
+  `(pub defstruct point ...)` gör typen synlig, och bara de fält som skrivits `(pub x i32)` kan läsas och
+  skrivas utifrån.
+- På samma sätt kan bara `pub`-fält anges till `make-instance` i andra moduler. `point` ovan har ett `tag`
+  som inte är `pub`, så andra moduler kan inte skapa den med `make-instance` utan använder `point::new`.
 - Att använda ett namn som inte är publikt utifrån ger ett "cannot resolve"-fel som
   `unresolved path: geometry::square`. Det är samma meddelande som för ett felstavat namn, så om
   stavningen är rätt och namnet ändå inte löses upp, misstänk ett saknat `pub`.
@@ -110,10 +117,11 @@ modulnamnet.
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, inte core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, inte core::area
 ```
 
-Metoder inuti en `impl` är alltid publika, även utan `pub`.
+Metoder i ett traits `impl` är alltid publika, även utan `pub`. Av metoderna i en inneboende `impl`
+(`(impl point ...)`) är bara de med `pub` publika.
 
 Ett trait i sig kan inte göras publikt för andra moduler. Håll ett traits definition, `impl`erna för det
 och koden som använder det via `:dyn` i en enda modul.

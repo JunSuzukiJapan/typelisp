@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Trait
 
 Trait là một lời hứa rằng "kiểu này hỗ trợ những thao tác này". Trait cho phép nhiều kiểu chia sẻ các
@@ -36,8 +36,8 @@ Hãy định nghĩa các thao tác trả về diện tích và tên của một 
 Các phương thức đã triển khai được gọi giống hệt hàm thông thường.
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 Bỏ sót dù chỉ một trong các phương thức mà trait khai báo là lỗi kiểu tại `impl`.
@@ -52,8 +52,8 @@ Bạn có thể đặt điều kiện lên tham số kiểu của một hàm gen
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 Nhờ `(where (Shape T))`, thân hàm có thể dùng `name` và `area` trên các giá trị kiểu `T`. Nếu không có
@@ -86,8 +86,8 @@ Nếu một phương thức của trait có thân, thân đó được dùng khi
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; bản viết ở đây được ưu tiên
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. Triển khai các trait chuẩn
@@ -115,7 +115,7 @@ của `Eq` phải đứng trước.
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (triển khai mặc định trong Ord)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (triển khai mặc định trong Ord)
 ```
 
 Triển khai `print-object` quyết định cách `println` hiển thị giá trị. Đối số `escape` là `true` khi
@@ -126,7 +126,7 @@ cần một dạng có thể đọc ngược lại, như với `~s`.
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 Kết hợp với ràng buộc trait, bạn có thể viết một hàm hoạt động với mọi kiểu triển khai `Ord`.
@@ -158,8 +158,8 @@ trong một `Vector<circle>`. Để xử lý chung "thứ gì đó triển khai 
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

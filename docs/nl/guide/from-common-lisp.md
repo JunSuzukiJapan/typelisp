@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Voor Common Lisp-programmeurs
 
 typelisp erft de syntaxis van Common Lisp (CL) en veel van zijn functienamen, maar is een statisch
@@ -59,7 +59,9 @@ en met `u32` bestaan ook. Er is geen geheel type van 64 bits met vaste breedte.
 ## 3. Functies als waarden
 
 typelisp scheidt de namespaces van functies en variabelen niet. De naam van een functie kan zoals hij
-is als waarde worden doorgegeven. Er is geen `#'` en geen `funcall`.
+is als waarde worden doorgegeven. Er is geen `#'` en geen `funcall`. Ook macro's delen deze naamruimte, dus binnen één module kunnen geen twee van
+een functie, een globale variabele en een macro dezelfde naam hebben (anders dan in CL kan er geen functie
+`list` naast een variabele `list` bestaan).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -81,6 +83,9 @@ is als waarde worden doorgegeven. Er is geen `#'` en geen `funcall`.
 
 - Sequentiefuncties nemen **eerst de collectie en dan de functie**: `(map it f)`, `(filter it f)`,
   `(foldl it f init)`. Dit is het omgekeerde van `(mapcar f list)` in CL.
+- Ook `push` neemt **de collectie eerst**: `(push v 3)`. Het kan niet in de volgorde van CL,
+  `(push 3 place)`, worden geschreven, omdat een methode alleen via het type van het eerste argument wordt
+  gekozen (paragraaf 8).
 - `lambda` kan `&optional` of `&key` niet gebruiken (`&rest` kan wel).
 - **Een functie kan niet worden aangeroepen voordat ze is gedefinieerd.** In CL kun je een functie
   aanroepen die je later definieert, maar hier geeft dat `no such function`. Declareer bij onderling
@@ -191,8 +196,19 @@ type.
 Er is geen `defclass`, `defgeneric` of methodecombinatie.
 
 - Gegevenstypes worden gedefinieerd met `defstruct` (structs) en `defenum` (somtypes).
-- `defmethod` definieert methoden waarvan het doel **alleen door het statische type van het eerste
-  argument** wordt bepaald. Er is geen meervoudige dispatch.
+- `defmethod` bestaat niet. Methoden worden per type in een `impl` verzameld (dezelfde vorm als de inherente
+  impl van Rust). Het doel wordt alleen bepaald door **het statische type van het eerste argument**; er is
+  geen meervoudige dispatch.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; statische methode
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; methode
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - Gebruik traits (`deftrait` / `impl`) om bewerkingen te geven die over types heen gemeenschappelijk
   zijn. Gebruik voor waarden waarvan het concrete type tijdens runtime wordt bepaald het type
   `:dyn Trait`
@@ -200,8 +216,9 @@ Er is geen `defclass`, `defgeneric` of methodecombinatie.
 
 Hoe `defstruct` verschilt:
 
-- De constructor is `TypeName::new`: `(point::new 1 2)`. Wil je een naam als `make-point`, dan maakt
-  de optie `(:constructor make-point)` er een.
+- Waarden worden met `make-instance` gemaakt, zoals in CLOS: `(make-instance 'point :x 1 :y 2)`. Er wordt
+  geen `make-point` gemaakt, en de optie `:constructor` bestaat niet. Wil je een constructor met een naam,
+  schrijf die dan als statische methode in `impl` (de `point::new` hierboven).
 - Naast `(x p)` kan een accessor als `p::x` worden geschreven. Wijzig met `(setf p::x 5)`.
 - Er wordt geen predicaat (`point-p`) gemaakt. Er is geen `:conc-name`, `:type` of `:named`.
 - `:include` erft alleen slots; het type wordt geen subtype van de ouder.

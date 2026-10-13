@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # พื้นฐานของชนิด
 
 typelisp เป็นภาษาที่มีระบบชนิดแบบสถิต บทนี้อธิบายสิ่งที่ตัวตรวจสอบชนิดทำให้คุณ
@@ -146,31 +146,47 @@ Common Lisp ที่ว่า "ทุกอย่างที่ไม่ใช
   (y int))
 ```
 
-การนิยามให้สิ่งต่อไปนี้แก่คุณ:
+ค่าสร้างด้วย `make-instance` เขียนชื่อชนิดโดย quote ด้วย `'` แล้วส่งฟิลด์เป็นคู่ `:ชื่อ ค่า` ตามลำดับใดก็ได้
 
 ```lisp
-(let ((p (point::new 3 4)))     ; create one (arguments in field order)
-  (println "~a" p::x)           ; read a field; (x p) also works
-  (setf p::x 10)                ; change it
+(let ((p (make-instance 'point :x 3 :y 4)))   ; สร้าง
+  (println "~a" p::x)           ; อ่านฟิลด์ เขียน (x p) ก็ได้
+  (setf p::x 10)                ; เปลี่ยนค่า
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-หากต้องการให้ struct มีฟังก์ชันของตัวเอง ให้ใช้ `defmethod` ชนิดของอาร์กิวเมนต์แรก (`self`)
-ตัดสินว่าเมทอดเป็นของชนิดใด
+นิพจน์อีกหนึ่งตัวในการประกาศฟิลด์จะเป็น **ค่าเริ่มต้น** ของฟิลด์นั้น ฟิลด์ที่ละไว้ใน `make-instance` จะได้ค่าเริ่มต้น
+การละฟิลด์ที่ไม่มีค่าเริ่มต้นเป็นข้อผิดพลาดชนิด
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count เป็น 0
 ```
 
-การเขียนเพียงชื่อชนิดแทนอาร์กิวเมนต์ `self` ทำให้ได้ฟังก์ชันที่เรียกเป็น
-`point::origin`
+หากต้องการให้ struct มีฟังก์ชันของตัวเอง ให้ใช้ `impl` แต่ละรายการของ `(impl ชื่อชนิด รายการ...)` มีรูป
+`(ชื่อ (อาร์กิวเมนต์...) ชนิดที่คืน ตัวเนื้อหา...)` และถ้าอาร์กิวเมนต์ตัวแรกเป็น `self` จะกลายเป็น **เมทอด**
+ของชนิดนั้น `self` เขียนโดยไม่ต้องมีชนิด
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+รายการที่ไม่รับ `self` จะเป็นฟังก์ชันที่เรียกในรูป `point::origin` หากเตรียมฟังก์ชันที่สร้างค่าไว้ในชื่อ `new`
+ผู้ใช้ก็เขียนสั้น ๆ ได้ว่า `(point::new 3 4)`
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -238,7 +254,7 @@ struct และ enum ก็เป็น generic ได้เช่นกัน 
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 ภายในฟังก์ชัน generic ไม่ทราบอะไรเกี่ยวกับ `T` เลย จึงเปรียบเทียบหรือบวกค่า `T` ไม่ได้

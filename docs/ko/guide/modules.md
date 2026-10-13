@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 모듈과 파일 구성
 
 이 가이드에서는 여러 파일로 된 프로그램을 구성하는 방법을 설명한다. 자세한 규칙은
@@ -44,14 +44,17 @@ src = "src"
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; pub이 없는 필드는 밖에서 읽을 수 없다
+  (tag string))                        ; pub이 없는 필드는 밖에서 읽고 쓸 수 없다
 
 (defun square ((n i32)) i32 (* n n))   ; pub이 없는 함수도 밖에서 호출할 수 없다
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -72,10 +75,13 @@ typl main.typl        # => 25
 
 ### 공개되는 것
 
-- 함수, 구조체, 열거형, 전역 변수, 매크로, 메서드는 `pub`이 붙어 있을 때만 다른 모듈에서 보인다. `(pub defun ...)`
-  처럼 정의 바로 앞에 `pub`을 둔다.
-- 구조체는 **타입의 공개와 필드의 공개가 따로**이다. `(pub defstruct point ...)`로 타입이 보이게 되고, `(pub x i32)`
-  처럼 쓴 필드만 밖에서 읽고 쓸 수 있다.
+- 함수·구조체·열거형·전역 변수·매크로는 각각 `pub`을 붙인 것만 다른 모듈에서 보인다. `(pub defun ...)`처럼
+  정의 바로 앞에 `pub`을 둔다.
+- `impl`에 쓴 메서드는 항목마다 `(pub new ...)`라고 쓴 것만 밖에서 쓸 수 있다.
+- 구조체는 **타입의 공개와 필드의 공개가 별개**다. `(pub defstruct point ...)`로 타입이 보이게 되고, 각 필드는
+  `(pub x i32)`라고 쓴 것만 밖에서 읽고 쓸 수 있다.
+- 바깥 모듈에서 `make-instance`에 쓸 수 있는 것도 `pub` 필드뿐이다. 위의 `point`는 `tag`가 `pub`이 아니므로
+  밖에서는 `make-instance`로 만들 수 없고 `point::new`를 쓴다.
 - 공개되지 않은 이름을 밖에서 쓰면 `unresolved path: geometry::square` 같은 "해석할 수 없다"는 오류가 된다. 철자를
   틀렸을 때와 같은 메시지이므로, 철자가 맞는데도 해석되지 않으면 `pub`이 빠졌는지 의심한다.
 
@@ -102,10 +108,11 @@ typl main.typl        # => 25
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; core::area가 아니라 area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; core::area가 아니라 area
 ```
 
-`impl` 안의 메서드는 `pub`이 없어도 항상 공개된다.
+트레이트의 `impl`의 메서드는 `pub`을 쓰지 않아도 항상 공개된다. 고유 `impl`(`(impl point ...)`)의 메서드는
+`pub`을 붙인 것만 공개된다.
 
 트레이트 자체를 다른 모듈에 공개할 수는 없다. 트레이트의 정의, 그 `impl`, `:dyn`을 통해 그것을 쓰는 코드는 하나의
 모듈에 둔다.

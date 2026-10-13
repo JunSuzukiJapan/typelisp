@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -124,7 +124,7 @@ z `typl` zbudowanym razem z nim. Po przebudowaniu `typl` skopiuj go ponownie.
 
 ### 3.3 Co może zawierać plik kompilowany AOT
 
-- Najwyższy poziom pliku wejściowego może zawierać tylko definicje (`defun` `defmethod` `defvar`
+- Najwyższy poziom pliku wejściowego może zawierać tylko definicje (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) oraz `use` `module`. Wyrażenia najwyższego poziomu, takie jak
   `(println ...)`, są niedozwolone, z wyjątkiem końcowego `(main)`. Umieść pracę wewnątrz `main`.

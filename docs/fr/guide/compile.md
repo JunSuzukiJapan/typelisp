@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -127,7 +127,7 @@ nouveau.
 
 ### 3.3 Ce que peut contenir un fichier compilé en AOT
 
-- Le niveau supérieur du fichier d'entrée ne peut contenir que des définitions (`defun` `defmethod` `defvar`
+- Le niveau supérieur du fichier d'entrée ne peut contenir que des définitions (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) ainsi que `use` et `module`. Les expressions de niveau
   supérieur comme `(println ...)` ne sont pas permises, à l'exception du `(main)` final. Mettez le travail

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Строки, символы и коллекции
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` и `Deque<T>`.
@@ -124,8 +124,8 @@
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 Одинаковы ли два ключа, решает **сам тип ключа** (`sxhash` и `equals` из `Eq`, супертрейта `Hash`), а не
@@ -143,7 +143,7 @@
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` из CL. `dims` копируется. `init` — начальное значение каждой ячейки (`:initial-element` из CL; в этом языке нет «несвязанной ячейки», поэтому он обязателен). `:fill-pointer` только для одной размерности |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | `make-array` из CL. `dims` копируется. `init` — начальное значение каждой ячейки (`:initial-element` из CL; в этом языке нет «несвязанной ячейки», поэтому он обязателен). `:fill-pointer` только для одной размерности |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | `aref` / `(setf (aref …))` из CL. Panic, если индекс вне диапазона |
 | `aref` | `(aref a i j …)` | — | Запись CL с голыми индексами. Раскрывается в `get`/`set` выше. `(setf (aref a i j) v)` тоже работает |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | `row-major-aref` из CL. Плоский индекс |
@@ -164,8 +164,6 @@
   число раз», и этот разрыв закрывает сахар `aref`.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p` **не существуют**.
   Статический тип получателя уже отвечает на эти вопросы.
-- `Array::new` — конструктор в порядке полей, порождаемый `defstruct`, и не предназначен для создания массивов.
-  Используйте `Array::make`.
 - **Массивы печатаются в синтаксисе массивов CL.** Ранг 1 — `#(1 2 3)`; другие ранги — `#nA`, за которым следует
   столько же уровней скобок (`#2A((1 2 3) (4 5 6))`); ранг 0 — `#0A5`. Печать останавливается на указателе
   заполнения, если он есть. Если установить `*print-array*` ([Печать](printing.md#6-управление-объёмом-вывода)) в
@@ -178,7 +176,7 @@
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | Длина `n`, все биты 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | Длина `n`, все биты 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | Вне диапазона — panic |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | Записи из CL. `(setf (bit v i) b)` тоже работает. `sbit` в CL отличается от `bit` лишь требованием простого битового вектора, но в этом языке битовый вектор только одного вида |
 | `len` | `(len v)` | `BitVector→int` | Число битов |
@@ -194,7 +192,7 @@
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | Создаёт пустое множество. Аргумент типа берётся из ожидаемого типа |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | Создаёт пустое множество. Аргумент типа берётся из ожидаемого типа |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Добавляет `x`. `true`, если его не было, `false`, если уже был |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Есть ли `x` |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Удаляет `x`. `true`, если он был |
@@ -203,15 +201,13 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | Итератор по элементам. Порядок не определён |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 Общее для трёх типов глав 7–9:
 
-- Создаются через `make`. `new` — это конструктор в порядке полей, который генерирует `defstruct`, и
-  создавать им не нужно (как и с `Array::make`).
 - `iter` обходит копию, снятую в момент вызова. Изменение той же коллекции внутри `doiter` этот цикл
   не видит.
 - Если типы элементов реализуют `print-object`, элементы печатаются в виде `#<hashset "a" "b">`
@@ -225,7 +221,7 @@
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Создаёт пустую таблицу |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | Создаёт пустую таблицу |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Поиск |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Вставка или перезапись |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Удаляет и возвращает старое значение, если оно было |
@@ -236,7 +232,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | Кортежи `#{ключ значение}` в порядке ключей |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 и pear 3
 ```
@@ -248,7 +244,7 @@ Rust).
 
 | Имя | Форма | Тип | Описание |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | Создаёт пустую последовательность |
+| `new` | `(Deque::new)` | `()→Deque<T>` | Создаёт пустую последовательность |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Добавляет в начало / конец |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Извлекает элемент из начала / конца и возвращает его. `none`, если пусто |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Смотрит на элемент в начале / конце (не извлекая) |
@@ -259,7 +255,7 @@ Rust).
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | С начала, по порядку |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

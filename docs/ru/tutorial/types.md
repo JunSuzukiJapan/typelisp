@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Основы типов
 
 typelisp — язык со статической типизацией. Эта глава объясняет, что делает для вас проверка типов, какие типы вы
@@ -147,30 +147,48 @@ Common Lisp нет.
   (y int))
 ```
 
-Определение даёт вам следующее:
+Значения создаются через `make-instance`. Имя типа пишется с `'`, а поля передаются парами
+`:имя значение` в любом порядке.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; создать (аргументы в порядке полей)
-  (println "~a" p::x)           ; прочитать поле; (x p) тоже работает
-  (setf p::x 10)                ; изменить его
+(let ((p (make-instance 'point :x 3 :y 4)))   ; создать
+  (println "~a" p::x)           ; прочитать поле; можно и (x p)
+  (setf p::x 10)                ; изменить
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-Чтобы дать структуре собственные функции, используйте `defmethod`. Тип первого аргумента (`self`) определяет, какому
-типу принадлежит метод.
+Ещё одно выражение в объявлении поля становится **значением по умолчанию** этого поля. Поле, пропущенное в
+`make-instance`, получает значение по умолчанию. Пропустить поле без значения по умолчанию — ошибка типа.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count равно 0
 ```
 
-Если вместо аргумента `self` написать только имя типа, получится функция, вызываемая как `point::origin`.
+Чтобы дать структуре собственные функции, используйте `impl`. Каждый элемент `(impl ИмяТипа элемент...)`
+имеет вид `(имя (аргументы...) ТипВозврата тело...)`, и если его первый аргумент — `self`, он становится
+**методом** этого типа. `self` пишется без типа.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+Элемент без `self` становится функцией, которая вызывается как `point::origin`. Если подготовить функцию,
+создающую значение, под именем `new`, пользователи смогут кратко писать `(point::new 3 4)`.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -237,7 +255,7 @@ Common Lisp нет.
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 Внутри обобщённой функции о `T` ничего не известно, поэтому значения `T` нельзя ни сравнивать, ни складывать. Чтобы

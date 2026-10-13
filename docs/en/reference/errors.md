@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Error Messages
 
 What the main error messages from `typl` mean and how to fix them.
@@ -59,6 +59,10 @@ Mistakes found before running. The form is not run until they are fixed.
 | `no such function: bar` | There is no function or method of that name. Check the spelling |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Methods are selected by the type of the first argument. A method of that name exists, but not for the type of the first argument (`int` here). The end of the message lists the types that have the method |
 | `unbound variable: y` | There is no variable of that name. Check the spelling and the scope of the binding (is it used outside its `let`?) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Two of a function, a global variable and a macro were given the same name in one module. Rename one of them ([Syntax Reference 3.10](syntax.md#310-module--use--namespaces)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | No `new` is generated for a struct. Make the value with `make-instance`, or write a `new` in `impl` ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | There is no `defmethod`. Write methods in the type's `impl` ([Syntax Reference 3.5](syntax.md#35-impl--methods-of-a-type)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | There is no `:constructor` option. Write the constructor in `impl` as a static method |
 | ``use: unresolved `nosuch` `` | The module named in `use` cannot be found. For how file names map to module paths, see [Syntax Reference 3.11](syntax.md#311-files-and-modules-multi-file-projects) |
 | `unresolved path: c::hidden` | The module exists, but the name does not, or it is not visible because it lacks `pub` |
 | `circular module dependency: a -> b -> a` | Modules `use` each other. Move the shared part into a separate module |
@@ -70,10 +74,15 @@ Mistakes found before running. The form is not run until they are fixed.
 |---|---|
 | `f: expected 1 argument(s), got 2` | The number of arguments does not match |
 | `f: unknown keyword argument :b` | A keyword argument the function does not have was passed |
-| `new: expected 1 field(s), got 2` | The number of values passed to a struct constructor does not match the number of fields |
+| `circle: expected 1 field(s), got 2` | The number of values passed to an enum variant does not match the number of that variant's fields |
+| ``make-instance point: slot `y` is not given and has no default`` | A field without a default value is not given to `make-instance` |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | A field the struct does not have was given |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | A field that is not `pub` was given outside the module that defines the type. Have that module provide a `pub` constructor |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | A method written for one instantiation of a generic type (`(impl Box<int> ...)`) was called on a value with other type arguments |
 | ``setf: cannot assign to constant `k` `` | A name defined with `defconstant` was assigned to. If it needs to change, use `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | A function declared with `defsignature` is not defined |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | None of the argument types has the method called with `~/name/` ([Format Directives chapter 5](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | The call `(nosuch arg colon at)` written at that place cannot be resolved. Define a method of the argument's type or a function ([Format Directives chapter 5](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | A `~/name/` was written where it gets the elements of a list, such as inside `~{`. The elements' type cannot settle what to call |
 
 ## 3. Read errors
 

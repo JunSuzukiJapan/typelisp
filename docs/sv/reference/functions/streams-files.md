@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Strömmar och filer
 
 Strömtraits och metoder, konkreta strömtyper, filoperationer och pathnames. Nätverkssocketar är också
@@ -178,7 +178,7 @@ sammansatta strömmar.
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; varje återstående metod är standardimplementationen
 
-(write-line (counter::new 0) "four")   ; write-line, terpri och fresh-line fungerar alla
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri och fresh-line fungerar alla
 ```
 
 Inmatning fungerar på samma sätt: du skriver bara `read-item`. Även en typ utan egen tillbakaskjutning kan

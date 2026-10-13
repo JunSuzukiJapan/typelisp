@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # स्ट्रिंग, कैरेक्टर और कलेक्शन
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` और `Deque<T>`।
@@ -117,8 +117,8 @@
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 दो कुंजियाँ समान हैं या नहीं, यह **कुंजी का टाइप स्वयं** तय करता है (`sxhash`, और `Hash` के supertrait `Eq` से `equals`), ऑब्जेक्ट पहचान नहीं। इसीलिए, ऊपर की तरह, आप ऐसी कुंजी से लुकअप कर सकते हैं जो "भिन्न मान है लेकिन बराबर है"।
@@ -132,7 +132,7 @@
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL का `make-array`। `dims` कॉपी होता है। `init` हर सेल का प्रारंभिक मान है (CL का `:initial-element`; इस भाषा में "unbound सेल" नहीं है, इसलिए यह आवश्यक है)। `:fill-pointer` केवल एक आयाम के लिए |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL का `make-array`। `dims` कॉपी होता है। `init` हर सेल का प्रारंभिक मान है (CL का `:initial-element`; इस भाषा में "unbound सेल" नहीं है, इसलिए यह आवश्यक है)। `:fill-pointer` केवल एक आयाम के लिए |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | CL का `aref` / `(setf (aref …))`। इंडेक्स सीमा से बाहर हो तो panic करता है |
 | `aref` | `(aref a i j …)` | — | नंगे इंडेक्स के साथ CL की वर्तनी। ऊपर के `get`/`set` में विस्तारित होता है। `(setf (aref a i j) v)` भी काम करता है |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | CL का `row-major-aref`। समतल इंडेक्स |
@@ -151,7 +151,6 @@
 
 - **इंडेक्स `Vector<int>` हैं।** मेथड "अंत में एक ही टाइप के आर्ग्युमेंट कितनी भी बार दोहराए जाएँ" घोषित नहीं कर सकता, और `aref` शॉर्टहैंड उस अंतर को पाटता है।
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p` **मौजूद नहीं हैं**। रिसीवर का स्टैटिक टाइप पहले से इन प्रश्नों का उत्तर देता है।
-- `Array::new` `defstruct` द्वारा बनाया गया फ़ील्ड-क्रम कंस्ट्रक्टर है और ऐरे बनाने के लिए नहीं है। `Array::make` का उपयोग करें।
 - **ऐरे CL के ऐरे सिंटैक्स में प्रिंट होते हैं।** रैंक 1 `#(1 2 3)` है; अन्य रैंक `#nA` के बाद उतने स्तर के कोष्ठक हैं (`#2A((1 2 3) (4 5 6))`); रैंक 0 `#0A5` है। यदि fill pointer है तो प्रिंटिंग वहीं रुकती है। `*print-array*` ([प्रिंटिंग](printing.md#6-कितना-प्रिंट-हो-इसे-नियंत्रित-करना)) को असत्य करने पर केवल आकार प्रिंट होता है, `#<array 2x3>`। केवल वह ऐरे जिसके तत्व बिना `print-object` वाला `defstruct` हों बिल्ट-इन रूप `#<array<...> ...>` में प्रिंट होता है (यह त्रुटि नहीं है)।
 
 ## 6. `BitVector` (बिट वेक्टर)
@@ -160,7 +159,7 @@
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | लंबाई `n`, सभी बिट 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | लंबाई `n`, सभी बिट 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | सीमा से बाहर panic करते हैं |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | CL की वर्तनियाँ। `(setf (bit v i) b)` भी काम करता है। CL का `sbit` `bit` से केवल सरल बिट वेक्टर की माँग में भिन्न है, लेकिन इस भाषा में केवल एक प्रकार का बिट वेक्टर है |
 | `len` | `(len v)` | `BitVector→int` | बिट की संख्या |
@@ -175,7 +174,7 @@
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | खाली सेट बनाता है। टाइप आर्ग्युमेंट अपेक्षित टाइप से तय होता है |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | खाली सेट बनाता है। टाइप आर्ग्युमेंट अपेक्षित टाइप से तय होता है |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | `x` जोड़ता है। नया हो तो `true`, पहले से हो तो `false` |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | `x` मौजूद है या नहीं |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | `x` निकालता है। मौजूद था तो `true` |
@@ -184,14 +183,13 @@
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | तत्वों का इटरेटर। क्रम तय नहीं है |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 अध्याय 7 से 9 के तीनों टाइपों में समान बातें:
 
-- इन्हें `make` से बनाएँ। `new` वह फ़ील्ड-क्रम कंस्ट्रक्टर है जो `defstruct` बनाता है, बनाने के लिए नहीं (`Array::make` की तरह)।
 - `iter` बुलाने के समय की प्रति पर चलता है। `doiter` के भीतर उसी संग्रह को बदलें तो वह लूप उसे नहीं देखता।
 - यदि तत्वों के टाइप `print-object` लागू करते हैं, तो तत्व `#<hashset "a" "b">` `#<sortedtable 1 "a">` `#<deque 1 2>` के रूप में छपते हैं।
 
@@ -201,7 +199,7 @@
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | खाली तालिका बनाता है |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | खाली तालिका बनाता है |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | खोज |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | डालना या ऊपर लिखना |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | हटाता है, हो तो पुराना मान लौटाता है |
@@ -212,7 +210,7 @@
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | कुंजी के क्रम में `#{कुंजी मान}` टपल |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 और pear 3
 ```
@@ -223,7 +221,7 @@
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | खाली अनुक्रम बनाता है |
+| `new` | `(Deque::new)` | `()→Deque<T>` | खाली अनुक्रम बनाता है |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | आगे / पीछे जोड़ता है |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व निकालकर लौटाता है। खाली हो तो `none` |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | आगे / पीछे का तत्व देखता है (निकाले बिना) |
@@ -234,7 +232,7 @@
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | आगे से क्रम में |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

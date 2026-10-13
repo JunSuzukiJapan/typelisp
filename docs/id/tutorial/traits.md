@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Trait
 
 Trait adalah janji bahwa "tipe ini mendukung operasi-operasi ini". Dengan trait, beberapa tipe dapat
@@ -39,8 +39,8 @@ Untuk mengimplementasikan trait pada sebuah tipe, tulis `impl`.
 Metode yang diimplementasikan dipanggil sama seperti fungsi biasa.
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 Menghilangkan satu saja metode yang dideklarasikan trait adalah kesalahan tipe pada `impl`.
@@ -55,8 +55,8 @@ trait**.
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 Berkat `(where (Shape T))`, badan fungsi dapat memakai `name` dan `area` pada nilai bertipe `T`. Tanpa
@@ -89,8 +89,8 @@ Jika sebuah metode trait memiliki badan, badan itu dipakai ketika `impl` menghil
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; the one written here takes priority
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. Mengimplementasikan trait standar
@@ -118,7 +118,7 @@ Mari implementasikan `Eq` dan `Ord` untuk tipe yang mewakili sejumlah uang. Kare
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (the default implementation in Ord)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (the default implementation in Ord)
 ```
 
 Mengimplementasikan `print-object` menentukan cara `println` menampilkan nilai. Argumen `escape`
@@ -129,7 +129,7 @@ bernilai `true` ketika bentuk yang dapat dibaca kembali diminta, seperti pada `~
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 Dikombinasikan dengan batas trait, Anda dapat menulis fungsi yang bekerja untuk tipe apa pun yang
@@ -163,8 +163,8 @@ gunakan tipe `:dyn Shape`.
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

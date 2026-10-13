@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Друк
 
 `print`/`println`/`format`, друкарі з одним аргументом, pretty printer, `print-object` і змінні, що
@@ -26,7 +26,7 @@
 визначають, скільки аргументів береться і яких типів, тож рядок, побудований під час виконання, не можна
 прочитати під час перевірки. Оскільки він має бути літералом, **кількість і типи аргументів перевіряються
 під час перевірки**: `(println "~d" "x")` і `(println "~a ~a" 1)` — це помилки під час перевірки. Директива
-з помилкою в написанні, незакрита `~(` і `~/name/`, на яку не може відповісти жоден аргумент, — теж
+з помилкою в написанні, незакрита `~(` і `~/name/`, для якої не можна визначити, що викликати, — теж
 помилки під час перевірки. Правила перевірки наведено в
 [format.md](format.md#1-як-записувати-директиви). Щоб надрукувати рядок, який ви будуєте, створіть його
 через `(format false ...)` і надрукуйте через `(println "~a" s)`.
@@ -51,8 +51,8 @@
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -307,7 +307,7 @@ CL використовує `nil` для «без обмеження», але �
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a points to a itself
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

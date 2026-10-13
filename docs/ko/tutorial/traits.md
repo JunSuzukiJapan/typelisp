@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 트레이트
 
 트레이트는 "이 타입은 이런 연산을 지원한다"는 약속이다. 트레이트를 쓰면 여러 타입이 같은 이름의 연산을 공유할 수
@@ -36,8 +36,8 @@
 구현한 메서드는 보통 함수처럼 호출한다.
 
 ```lisp
-(area (circle::new 2))     ; => 12
-(area (rect::new 3 4))     ; => 12
+(area (make-instance 'circle :r 2))     ; => 12
+(area (make-instance 'rect :w 3 :h 4))     ; => 12
 ```
 
 트레이트가 선언한 메서드를 하나라도 빠뜨리면 `impl`에서 타입 오류가 된다.
@@ -51,8 +51,8 @@
   (where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
-(report (circle::new 1))   ; => "circle: 3"
-(report (rect::new 2 5))   ; => "rect: 10"
+(report (make-instance 'circle :r 1))   ; => "circle: 3"
+(report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
 `(where (Shape T))`가 있으므로 본체에서 `T`의 값에 `name`과 `area`를 쓸 수 있다. 경계가 없으면 `T`에 대해 아무것도
@@ -84,8 +84,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (label ((self Self)) string "a rect")
   (describe ((self Self)) string "[rect]"))           ; 여기에 쓴 것이 우선
 
-(describe (circle::new 1))     ; => "<a circle>"
-(describe (rect::new 1 1))     ; => "[rect]"
+(describe (make-instance 'circle :r 1))     ; => "<a circle>"
+(describe (make-instance 'rect :w 1 :h 1))     ; => "[rect]"
 ```
 
 ## 4. 표준 트레이트 구현하기
@@ -111,7 +111,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 (impl Ord money
   (less ((self Self) (other Self)) bool (< self::yen other::yen)))
 
-(greater (money::new 5) (money::new 3))     ; => true (Ord의 기본 구현)
+(greater (make-instance 'money :yen 5) (make-instance 'money :yen 3))     ; => true (Ord의 기본 구현)
 ```
 
 `print-object`를 구현하면 `println`이 값을 표시하는 방식이 정해진다. 인수 `escape`는 `~s`처럼 다시 읽어 들일 수
@@ -122,7 +122,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
   (print-object ((self Self) (escape bool)) string
     (format false "~a yen" self::yen)))
 
-(println "~a" (money::new 500))              ; 500 yen
+(println "~a" (make-instance 'money :yen 500))              ; 500 yen
 ```
 
 트레이트 경계와 함께 쓰면 `Ord`를 구현한 어떤 타입에도 쓸 수 있는 함수를 쓸 수 있다.
@@ -153,8 +153,8 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
     sum))
 
 (let ((shapes (the Vector<:dyn Shape> (Vector::new))))
-  (push shapes (circle::new 1))
-  (push shapes (rect::new 2 3))
+  (push shapes (make-instance 'circle :r 1))
+  (push shapes (make-instance 'rect :w 2 :h 3))
   (doiter (s (iter shapes))
     (println "~a -> ~a" (name s) (area s)))
   (println "total ~a" (total-area shapes)))

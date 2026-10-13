@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ fc3823e182015d6a1ef25d03ecdf8ca958af01f2 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Grundlagen der Typen
 
 typelisp ist eine statisch typisierte Sprache. Dieses Kapitel erklärt, was die Typprüfung leistet, welche
@@ -150,31 +150,49 @@ Ein Typ mit benannten Feldern wird mit `defstruct` definiert.
   (y int))
 ```
 
-Die Definition stellt Folgendes bereit:
+Werte werden mit `make-instance` erzeugt. Schreibe den Typnamen mit `'` quotiert und übergib die
+Felder als Paare `:name wert`, in beliebiger Reihenfolge.
 
 ```lisp
-(let ((p (point::new 3 4)))     ; eine erzeugen (Argumente in Feldreihenfolge)
+(let ((p (make-instance 'point :x 3 :y 4)))   ; einen erzeugen
   (println "~a" p::x)           ; ein Feld lesen; (x p) geht auch
-  (setf p::x 10)                ; es ändern
+  (setf p::x 10)                ; ändern
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-Um einer Struktur eigene Funktionen zu geben, verwendet man `defmethod`. Der Typ des ersten Arguments
-(`self`) bestimmt, zu welchem Typ die Methode gehört.
+Ein weiterer Ausdruck in der Deklaration eines Felds wird zum **Standardwert** dieses Felds. Ein in
+`make-instance` weggelassenes Feld erhält seinen Standardwert. Ein Feld ohne Standardwert wegzulassen ist
+ein Typfehler.
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count ist 0
 ```
 
-Steht statt eines `self`-Arguments nur der Typname, entsteht eine Funktion, die als `point::origin`
-aufgerufen wird.
+Um einer Struktur eigene Funktionen zu geben, verwende `impl`. Jeder Eintrag von `(impl Typname Eintrag...)`
+hat die Form `(name (argumente...) Rückgabetyp rumpf...)`, und ist sein erstes Argument `self`, wird er
+zu einer **Methode** dieses Typs. `self` wird ohne Typ geschrieben.
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+Ein Eintrag ohne `self` wird zu einer Funktion, die als `point::origin` aufgerufen wird. Stellst du eine
+Funktion, die den Wert erzeugt, unter dem Namen `new` bereit, kann man kurz `(point::new 3 4)` schreiben.
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -246,7 +264,7 @@ dieser Art.
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 Innerhalb einer generischen Funktion weiß man nichts über `T`, daher kann man Werte von `T` weder vergleichen

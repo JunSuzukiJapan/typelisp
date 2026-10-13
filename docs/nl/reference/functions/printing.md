@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Afdrukken
 
 `print`/`println`/`format`, de printers met één argument, de pretty printer, `print-object` en de
@@ -28,7 +28,7 @@ daarin bepalen hoeveel argumenten van welke types worden genomen, dus een string
 wordt opgebouwd kan niet bij het controleren worden gelezen. Omdat hij een literal moet zijn, worden
 **het aantal en de types van de argumenten bij het controleren gecontroleerd**: `(println "~d" "x")` en
 `(println "~a ~a" 1)` zijn fouten bij het controleren. Een verkeerd gespelde directief, een niet
-gesloten `~(` en een `~/name/` die geen enkel argument kan beantwoorden zijn ook fouten bij het
+gesloten `~(` en een `~/name/` waarvan niet vast te stellen is wat hij aanroept zijn ook fouten bij het
 controleren. De controleregels staan in [format.md](format.md#1-hoe-je-directieven-schrijft). Om een
 string af te drukken die je opbouwt, maak je hem met `(format false ...)` en druk je hem af met
 `(println "~a" s)`.
@@ -54,8 +54,8 @@ geldt voor `Option<T>`-velden binnen structs, enums en `Vector`s. Een `Result<Op
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -317,7 +317,7 @@ circulair zijn):
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a points to a itself
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

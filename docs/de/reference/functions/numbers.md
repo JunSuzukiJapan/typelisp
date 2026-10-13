@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Zahlen
 
 Operationen auf Ganzzahlen, Gleitkommazahlen, rationalen Zahlen, komplexen Zahlen und Wahrheitswerten sowie
@@ -199,7 +199,7 @@ Eine Struktur (`defstruct`) der Standardbibliothek.
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Erzeugung. Die Komponenten lassen sich direkt als `z::re`/`z::im` lesen |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Erzeugung. Die Komponenten lassen sich direkt als `z::re`/`z::im` lesen |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Realteil und Imaginärteil. **Sie funktionieren auch auf reellen Zahlen** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), wie in CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Konjugierte (funktioniert auch auf reellen Zahlen) |
 | `phase` | `(phase z)` | `complex→f64` | Argument in (-pi,pi] (funktioniert auch auf reellen Zahlen) |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # ตัวเลข
 
 การดำเนินการกับจำนวนเต็ม จำนวนทศนิยม จำนวนตรรกยะ จำนวนเชิงซ้อน และบูลีน รวมถึงฟังก์ชันอื่นที่เกี่ยวกับ
@@ -194,7 +194,7 @@ struct (`defstruct`) ในไลบรารีมาตรฐาน
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | การสร้าง อ่านส่วนประกอบโดยตรงได้เป็น `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | การสร้าง อ่านส่วนประกอบโดยตรงได้เป็น `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | ส่วนจริงและส่วนจินตภาพ **ใช้กับจำนวนจริงได้ด้วย** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`) เหมือนใน CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | ตัวสังยุค (ใช้กับจำนวนจริงได้ด้วย) |
 | `phase` | `(phase z)` | `complex→f64` | อาร์กิวเมนต์ใน (-pi,pi] (ใช้กับจำนวนจริงได้ด้วย) |

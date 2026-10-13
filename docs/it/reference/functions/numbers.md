@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Numeri
 
 Operazioni su interi, numeri in virgola mobile, razionali, numeri complessi e booleani, e altre funzioni
@@ -199,7 +199,7 @@ Una struttura (`defstruct`) della libreria standard.
 
 | Nome | Forma | Tipo | Descrizione |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Costruzione. Le componenti si possono leggere direttamente come `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Costruzione. Le componenti si possono leggere direttamente come `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Parte reale e parte immaginaria. **Funzionano anche sui numeri reali** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), come in CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Coniugato (funziona anche sui numeri reali) |
 | `phase` | `(phase z)` | `complex→f64` | Argomento in (-pi,pi] (funziona anche sui numeri reali) |

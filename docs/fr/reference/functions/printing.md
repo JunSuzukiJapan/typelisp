@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Affichage
 
 `print`/`println`/`format`, les fonctions d'affichage à un argument, le pretty printer, `print-object` et les
@@ -26,8 +26,8 @@ la même façon avec un type de flux concret, un `:dyn CharOutput` ou une variab
 qu'elle contient décident combien d'arguments sont pris et de quels types ; une chaîne construite à l'exécution ne
 peut donc pas être lue à la vérification. Parce qu'elle doit être un littéral, **le nombre et les types des
 arguments sont contrôlés à la vérification** : `(println "~d" "x")` et `(println "~a ~a" 1)` sont des erreurs à la
-vérification. Une directive mal orthographiée, un `~(` non fermé et un `~/name/` auquel aucun argument ne peut
-répondre sont aussi des erreurs à la vérification. Les règles de contrôle se trouvent dans
+vérification. Une directive mal orthographiée, un `~(` non fermé et un `~/name/` dont la cible de
+l'appel ne peut pas être déterminée sont aussi des erreurs à la vérification. Les règles de contrôle se trouvent dans
 [format.md](format.md#1-comment-écrire-les-directives). Pour afficher une chaîne que vous construisez, créez-la avec
 `(format false ...)` et affichez-la avec `(println "~a" s)`.
 
@@ -52,8 +52,8 @@ s'affiche `()`. Les autres `Option<T>` s'affichent `(some ...)` / `none`. Il en 
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -310,7 +310,7 @@ circulaire) :
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a pointe vers a lui-même
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

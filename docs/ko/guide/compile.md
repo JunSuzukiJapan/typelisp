@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -119,7 +119,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 AOT 컴파일하는 파일에 쓸 수 있는 것
 
-- 시작점 파일의 최상위에 쓸 수 있는 것은 정의(`defun` `defmethod` `defvar` `defparameter` `defconstant`
+- 시작점 파일의 최상위에 쓸 수 있는 것은 정의(`defun` `defvar` `defparameter` `defconstant`
   `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`,
   `(unsafe (def-c-struct ...))`)와 `use` `module`뿐이다. `(println ...)` 같은 최상위 식은 마지막의
   `(main)`을 빼고 쓸 수 없다. 처리는 `main` 안에 쓴다.

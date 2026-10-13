@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Utskrift
 
 `print`/`println`/`format`, utskriftsfunktionerna med ett argument, den snygga skrivaren (pretty printer),
@@ -27,7 +27,7 @@ samma sätt med en konkret strömtyp, en `:dyn CharOutput` eller en typvariabel 
 hur många argument som tas och av vilka typer, så en sträng som byggs vid körning kan inte läsas vid
 kontrolltillfället. Eftersom den måste vara en literal **kontrolleras antalet och typerna på argumenten
 vid kontrolltillfället**: `(println "~d" "x")` och `(println "~a ~a" 1)` är fel vid kontrolltillfället.
-Ett felstavat direktiv, ett oavslutat `~(` och ett `~/name/` som inget argument kan svara på är också fel
+Ett felstavat direktiv, ett oavslutat `~(` och ett `~/name/` vars anropsmål inte kan avgöras är också fel
 vid kontrolltillfället. Kontrollreglerna finns i
 [format.md](format.md#1-hur-direktiv-skrivs). För att skriva ut en sträng du bygger, gör den med
 `(format false ...)` och skriv ut den med `(println "~a" s)`.
@@ -51,8 +51,8 @@ och `Vector`. Ett `Result<Option<Sexpr>,…>` från `(eval ...)` skrivs ut som `
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -307,7 +307,7 @@ inte ändras efter att de skapats, så en lista som `'(1 2 3)` kan aldrig vara c
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a pekar på a självt
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

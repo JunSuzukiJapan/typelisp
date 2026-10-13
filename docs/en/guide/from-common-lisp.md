@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # For Common Lisp Programmers
 
 typelisp inherits Common Lisp's (CL's) syntax and many of its function names, but it is a
@@ -59,7 +59,9 @@ fixed-width integer type.
 ## 3. Functions as values
 
 typelisp does not separate the namespaces of functions and variables. A function's name can be passed
-as a value as it is. There is no `#'` and no `funcall`.
+as a value as it is. There is no `#'` and no `funcall`. Macros share the same namespace too, so within
+one module no two of a function, a global variable and a macro can have the same name (unlike CL, you
+cannot have a function called `list` next to a variable called `list`).
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -80,6 +82,9 @@ as a value as it is. There is no `#'` and no `funcall`.
 
 - Sequence functions take **the collection first and the function second**: `(map it f)`,
   `(filter it f)`, `(foldl it f init)`. This is the reverse of CL's `(mapcar f list)`.
+- `push` also takes **the collection first**: `(push v 3)`. It cannot be written in CL's
+  `(push 3 place)` order, because a method is selected by the type of the first argument only
+  (section 8).
 - `lambda` cannot use `&optional` or `&key` (`&rest` can be used).
 - **A function cannot be called before it is defined.** In CL you can call a function you define
   later, but here that gives `no such function`. For mutually recursive functions, declare one of
@@ -187,16 +192,28 @@ literal symbol (`'done`), and the values thrown with one tag have a single type.
 There is no `defclass`, `defgeneric` or method combination.
 
 - Data types are defined with `defstruct` (structs) and `defenum` (sum types).
-- `defmethod` defines methods whose target is decided by **the static type of the first argument**
-  only. There is no multiple dispatch.
+- There is no `defmethod`. Methods are gathered per type in an `impl` (the same shape as Rust's inherent
+  impl). The target is decided by **the static type of the first argument** only; there is no multiple
+  dispatch.
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; static method
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; method
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
 - To give operations in common across types, use traits (`deftrait` / `impl`). For values whose
   concrete type is decided at run time, use the type `:dyn Trait`
   ([Syntax Reference 3.9](../reference/syntax.md#39-deftrait--impl--traits)).
 
 How `defstruct` differs:
 
-- The constructor is `TypeName::new`: `(point::new 1 2)`. If you want a name like `make-point`, the
-  `(:constructor make-point)` option creates one.
+- Values are made with `make-instance`, as in CLOS: `(make-instance 'point :x 1 :y 2)`. No
+  `make-point` is created, and there is no `:constructor` option. If you want a named constructor,
+  write it in `impl` as a static method (`point::new` above).
 - Besides `(x p)`, an accessor can be written `p::x`. Change it with `(setf p::x 5)`.
 - No predicate (`point-p`) is created. There is no `:conc-name`, `:type` or `:named`.
 - `:include` only inherits slots; the type does not become a subtype of the parent.

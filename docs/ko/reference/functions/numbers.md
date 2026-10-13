@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -176,7 +176,7 @@ CL 호환의 임의 정밀도 유리수. 항상 기약 분수이며 분모는 �
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | 구성. 성분은 `z::re`/`z::im`으로 바로 읽을 수 있다 |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | 구성. 성분은 `z::re`/`z::im`으로 바로 읽을 수 있다 |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | 실수부와 허수부. CL처럼 **실수에도 동작한다**(`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`) |
 | `conjugate` | `(conjugate z)` | `complex→complex` | 켤레(실수에도 동작한다) |
 | `phase` | `(phase z)` | `complex→f64` | (-pi,pi]의 편각(실수에도 동작한다) |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
@@ -26,7 +26,7 @@ giống nhau với một kiểu stream cụ thể, một `:dyn CharOutput`, ho�
 định có bao nhiêu đối số được lấy và thuộc kiểu nào, nên một chuỗi dựng lúc chạy không thể đọc được lúc
 kiểm tra. Vì nó phải là literal, **số lượng và kiểu của các đối số được kiểm tra lúc kiểm tra**:
 `(println "~d" "x")` và `(println "~a ~a" 1)` là các lỗi lúc kiểm tra. Một chỉ thị viết sai chính tả, một
-`~(` không đóng, và một `~/name/` mà không đối số nào đáp ứng được cũng là các lỗi lúc kiểm tra. Các quy tắc
+`~(` không đóng, và một `~/name/` không xác định được đích gọi cũng là các lỗi lúc kiểm tra. Các quy tắc
 kiểm tra nằm ở [format.md](format.md#1-cách-viết-chỉ-thị). Để in một chuỗi bạn dựng, hãy tạo nó bằng
 `(format false ...)` và in bằng `(println "~a" s)`.
 
@@ -50,8 +50,8 @@ với `none`.
 (println "~a" (the Option<Sexpr> ()))                  ; => ()
 (println "~a" (the Option<i32>   (Option::some 42)))   ; => (some 42)
 (defstruct p (x Option<int>))
-(println "~a" (p::new (Option::some 1)))               ; => #<p x: (some 1)>
-(println "~a" (p::new (Option::none)))                 ; => #<p x: none>
+(println "~a" (make-instance 'p :x (Option::some 1)))               ; => #<p x: (some 1)>
+(println "~a" (make-instance 'p :x (Option::none)))                 ; => #<p x: none>
 ```
 
 ```lisp
@@ -304,7 +304,7 @@ Một vòng chỉ có thể được tạo bằng cách "cho một trường `de
 ```lisp
 (defstruct node (val int) (next Option<node>))
 
-(let ((a (node::new 1 (Option::none))))
+(let ((a (make-instance 'node :val 1 :next (Option::none))))
   (setf a::next (Option::some a))   ; a trỏ vào chính a
   (setf *print-circle* true)
   (println "~a" a))                 ; => #1=#<node val: 1 next: (some #1#)>

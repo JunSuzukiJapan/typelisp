@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/errors.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Foutmeldingen
 
 Wat de belangrijkste foutmeldingen van `typl` betekenen en hoe je ze oplost.
@@ -59,6 +59,10 @@ Fouten die vóór het uitvoeren worden gevonden. De vorm wordt niet uitgevoerd t
 | `no such function: bar` | Er is geen functie of methode met die naam. Controleer de spelling |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | Methoden worden gekozen op het type van het eerste argument. Er bestaat een methode met die naam, maar niet voor het type van het eerste argument (hier `int`). Aan het eind van de melding staan de types die de methode hebben |
 | `unbound variable: y` | Er is geen variabele met die naam. Controleer de spelling en het bereik van de binding (wordt hij buiten zijn `let` gebruikt?) |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | Twee van een functie, een globale variabele en een macro kregen in één module dezelfde naam. Hernoem er één ([Syntaxreferentie 3.10](syntax.md#310-module--use--namespaces)) |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | Voor een struct wordt geen `new` gegenereerd. Maak de waarde met `make-instance` of schrijf een `new` in `impl` ([Syntaxreferentie 3.5](syntax.md#35-impl--methoden-van-een-type)) |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` bestaat niet. Methoden worden in de `impl` van het type geschreven ([Syntaxreferentie 3.5](syntax.md#35-impl--methoden-van-een-type)) |
+| ``defstruct: (:constructor ...) is gone — ...`` | De optie `:constructor` bestaat niet. De constructor wordt als statische methode in `impl` geschreven |
 | ``use: unresolved `nosuch` `` | De module die in `use` is genoemd kan niet worden gevonden. Hoe bestandsnamen op modulepaden worden afgebeeld staat in [Syntaxreferentie 3.11](syntax.md#311-bestanden-en-modules-projecten-met-meerdere-bestanden) |
 | `unresolved path: c::hidden` | De module bestaat, maar de naam niet, of hij is niet zichtbaar omdat `pub` ontbreekt |
 | `circular module dependency: a -> b -> a` | Modules gebruiken elkaar met `use`. Verplaats het gedeelde deel naar een aparte module |
@@ -70,10 +74,15 @@ Fouten die vóór het uitvoeren worden gevonden. De vorm wordt niet uitgevoerd t
 |---|---|
 | `f: expected 1 argument(s), got 2` | Het aantal argumenten komt niet overeen |
 | `f: unknown keyword argument :b` | Er werd een keyword-argument doorgegeven dat de functie niet heeft |
-| `new: expected 1 field(s), got 2` | Het aantal waarden dat aan een struct-constructor werd doorgegeven komt niet overeen met het aantal velden |
+| `circle: expected 1 field(s), got 2` | Het aantal waarden dat aan een enumvariant is gegeven, klopt niet met het aantal velden van die variant |
+| ``make-instance point: slot `y` is not given and has no default`` | Een veld zonder standaardwaarde is niet aan `make-instance` gegeven |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | Er is een veld gegeven dat de struct niet heeft |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | Een veld dat niet `pub` is, is gegeven buiten de module die het type definieert. Laat die module een `pub`-constructor aanbieden |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | Een methode die voor één instantiatie van een generiek type (`(impl Box<int> ...)`) is geschreven, is aangeroepen op een waarde met andere typeargumenten |
 | ``setf: cannot assign to constant `k` `` | Er werd toegewezen aan een naam die met `defconstant` is gedefinieerd. Moet hij kunnen veranderen, gebruik dan `defvar` |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | Een functie die met `defsignature` is gedeclareerd is niet gedefinieerd |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | Geen van de argumenttypes heeft de methode die met `~/name/` wordt aangeroepen ([Formatdirectieven hoofdstuk 5](functions/format.md#5-name)) |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | De aanroep `(nosuch arg colon at)` die op die plek staat, is niet op te lossen. Definieer een methode van het type van het argument of een functie ([Formatdirectieven hoofdstuk 5](functions/format.md#5-name)) |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | Een `~/name/` staat waar hij de elementen van een lijst krijgt, zoals binnen `~{`. Het type van de elementen kan niet bepalen wat er aangeroepen wordt |
 
 ## 3. Leesfouten
 

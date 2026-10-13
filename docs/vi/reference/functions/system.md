@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -210,12 +210,12 @@ ngay lập tức và vĩnh viễn vào môi trường toàn cục.
 
 ## 7. Docstring / `documentation`
 
-`defun`/`defmethod` (kể cả bên trong `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+`defun`/phương thức trong `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
 `deftype`/`deftrait` có thể mang docstring. Vị trí theo quy tắc của CL cho từng loại:
 
 | Dạng | Vị trí của docstring |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | Ở đầu thân (sau kiểu trả về và mệnh đề `where`). Chỉ khi có ít nhất một dạng của thân theo sau; một chuỗi đứng một mình vẫn là giá trị trả về |
+| `defun` / phương thức trong `impl` / `defmacro` | Ở đầu thân (sau kiểu trả về và mệnh đề `where`). Chỉ khi có ít nhất một dạng của thân theo sau; một chuỗi đứng một mình vẫn là giá trị trả về |
 | `defvar` / `defconstant` | **Sau** giá trị ban đầu: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Ngay sau** tên, trước các trường/variant |
 | `deftype` | **Ngay sau** tên, trước kiểu: `(deftype meters "doc" i32)` |

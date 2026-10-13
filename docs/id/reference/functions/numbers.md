@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Bilangan
 
 Operasi pada bilangan bulat, bilangan floating-point, rasional, bilangan kompleks, dan boolean, serta
@@ -200,7 +200,7 @@ Sebuah struct (`defstruct`) pada pustaka standar.
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | Konstruksi. Komponen dapat dibaca langsung sebagai `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | Konstruksi. Komponen dapat dibaca langsung sebagai `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | Bagian riil dan bagian imajiner. **Keduanya juga bekerja pada bilangan riil** (`(realpart 3.0)`→`3.0`, `(imagpart 3.0)`→`0.0`), seperti di CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | Konjugat (juga bekerja pada bilangan riil) |
 | `phase` | `(phase z)` | `complex→f64` | Argumen dalam (-pi,pi] (juga bekerja pada bilangan riil) |

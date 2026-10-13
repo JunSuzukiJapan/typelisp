@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -183,12 +183,12 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 
 ## 7. 文档字符串 / `documentation`
 
-`defun`/`defmethod`（包括 `impl` 内的）/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftype`/`deftrait` 可以
+`defun`/`impl` 的方法/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftype`/`deftrait` 可以
 拥有文档字符串。位置遵循 CL 各自的规则：
 
 | 形式 | 文档字符串的位置 |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | 函数体的开头（返回值类型、`where` 子句之后）。仅当其后至少还有一个函数体形式时——单独的字符串仍是返回值 |
+| `defun` / `impl` 的方法 / `defmacro` | 函数体的开头（返回值类型、`where` 子句之后）。仅当其后至少还有一个函数体形式时——单独的字符串仍是返回值 |
 | `defvar` / `defconstant` | 初始值的**后面**：`(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | 名字的**紧后**，字段／变体列表之前 |
 | `deftype` | 名字的**紧后**，类型之前：`(deftype meters "doc" i32)` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Modules and File Layout
 
 This guide explains how to put together a program made of several files. The detailed rules are in
@@ -46,14 +46,17 @@ being run is the root (in the REPL, the current directory).
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; a field without pub cannot be read from outside
+  (tag string))                        ; a field without pub cannot be read or written from outside
 
 (defun square ((n i32)) i32 (* n n))   ; a function without pub cannot be called from outside either
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -75,11 +78,15 @@ beforehand.
 
 ### What is made public
 
-- Functions, structs, enums, global variables, macros and methods are visible from other modules only
-  when they carry `pub`. Put `pub` right before the definition, as in `(pub defun ...)`.
+- Functions, structs, enums, global variables and macros are visible from other modules only when they
+  carry `pub`. Put `pub` right before the definition, as in `(pub defun ...)`.
+- Of the methods written in an `impl`, only those written as `(pub new ...)`, item by item, can be used
+  from outside.
 - For structs, **making the type public and making fields public are separate**.
   `(pub defstruct point ...)` makes the type visible, and only the fields written as `(pub x i32)`
   can be read and written from outside.
+- Likewise, only `pub` fields can be given to `make-instance` in other modules. The `point` above has a
+  `tag` that is not `pub`, so other modules cannot make it with `make-instance` and use `point::new`.
 - Using a name that is not public from outside gives a "cannot resolve" error such as
   `unresolved path: geometry::square`. It is the same message as for a misspelled name, so if the
   spelling is right and the name still does not resolve, suspect a missing `pub`.
@@ -112,10 +119,11 @@ called without the module name.
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, not core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, not core::area
 ```
 
-Methods inside an `impl` are always public, even without `pub`.
+Methods in a trait's `impl` are always public, even without `pub`. Of the methods in an inherent `impl`
+(`(impl point ...)`), only those with `pub` are public.
 
 A trait itself cannot be made public to other modules. Keep a trait's definition, the `impl`s for it
 and the code that uses it through `:dyn` in a single module.

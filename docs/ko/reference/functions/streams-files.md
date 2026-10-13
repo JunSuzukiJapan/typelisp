@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 스트림과 파일
 
 스트림의 트레이트와 메서드, 구체 스트림 타입, 파일 조작, 경로명. 네트워크 소켓도 스트림이며 [네트워크](network.md)에서
@@ -167,7 +167,7 @@ CL은 `(open name :element-type '(unsigned-byte 8))`처럼 **호출**에서 요�
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 남은 메서드는 모두 기본 구현
 
-(write-line (counter::new 0) "four")   ; write-line, terpri, fresh-line이 모두 동작한다
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri, fresh-line이 모두 동작한다
 ```
 
 입력도 마찬가지로 `read-item`만 쓴다. 자체 되돌리기가 없는 타입도 `(read-sexpr (make-peek-stream my-stream))`처럼 감싸면

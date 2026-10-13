@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -172,14 +172,14 @@ Im Quelltext werden Typen als gewöhnliche Symbole oder Listen geschrieben.
 - Argumenttypen und Rückgabetyp sind Pflicht.
 - Eine generische Funktion schreibt ihre Typparameter in spitzen Klammern nach ihrem Namen:
   `(defun name<T1,T2...> (params) Ret body...)` (dieselbe Spitzklammersyntax wie `Vector<T>` an Typstellen).
-- `defun`/`lambda`/`defmethod` akzeptieren variadische Argumente, wenn am Ende `&rest (name Type)` steht:
+- `defun`/`lambda`/Methoden in `impl` akzeptieren variadische Argumente, wenn am Ende `&rest (name Type)` steht:
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)` (im Rumpf ist `xs` immer als `Option<Sexpr>`
   gebunden, eine S-Ausdrucksliste. Jedes tatsächliche Argument wird beim Aufruf einzeln als `Type2` typgeprüft
   und dann in ein `Sexpr` gehüllt).
   `defmacro` hat ebenfalls ein eigenes `&rest`, unterscheidet sich aber darin, dass es immer ein untypisiertes
   `Sexpr` ist (`defun`/`lambda` geben den Elementtyp an). Ein Funktionstyp kann auch eine variadische Funktion
   beschreiben, als `(fn (T1... &rest Te) Ret)`.
-- **`&optional` / `&key`** (für `defun` und `defmethod`; nicht für `lambda`/`labels`, aus dem unten genannten
+- **`&optional` / `&key`** (für `defun` und Methoden in `impl`; nicht für `lambda`/`labels`, aus dem unten genannten
   Grund, und `defmacro` hat eine eigene Implementierung, ebenfalls unten). Die Reihenfolge ist die von CL:
   `required &optional &rest &key`. Jeder Parameter wird `(name Type)` oder `(name Type default-expr)`
   geschrieben:
@@ -209,15 +209,18 @@ Im Quelltext werden Typen als gewöhnliche Symbole oder Listen geschrieben.
   - Sie lassen sich in generischen Funktionen verwenden, aber **ein Typparameter, der nur in weggelassenen
     Argumenten vorkommt, lässt sich nicht ableiten und ist ein Fehler** (es gibt keinen Wert, gegen den man
     abgleichen könnte).
-  - **`defmethod` kann dieselben drei Abschnitte haben** (sowohl für Instanzmethoden als auch für statische
-    Funktionen). Man führt `&optional`/`&rest`/`&key` nach dem Empfänger auf:
+  - **Methoden in `impl` können dieselben drei Abschnitte haben** (sowohl Instanzmethoden als auch
+    statische Methoden). Eine Instanzmethode schreibt `&optional`/`&rest`/`&key` nach `self`:
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; statische Funktion
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; statische Methode
     (point::origin :y 7)
     ```
 
@@ -225,7 +228,7 @@ Im Quelltext werden Typen als gewöhnliche Symbole oder Listen geschrieben.
     Standardausdruck kann die Typparameter des Besitzers nicht erwähnen** (dieselbe Einschränkung, die `defun`
     für seine eigenen Typparameter hat: Was beim Weglassen des Arguments eingebettet wird, ist ein *geprüfter*
     Ausdruck, daher kann sein Typ nicht als abstrakte Variable stehen bleiben).
-  - **In Trait-Methoden lassen sie sich nicht verwenden.** `deftrait` hat keine Syntax dafür, und könnte nur
+  - **In Trait-Methoden lassen sie sich nicht verwenden.** Das gilt auch für die Methoden, die im `impl` eines Traits stehen. `deftrait` hat keine Syntax dafür, und könnte nur
     die `impl`-Seite Abschnitte deklarieren, würden Aufrufe mit einem `:dyn`-Empfänger (die Argumente aus der
     Deklaration des Traits ergänzen) und Aufrufe mit einem konkreten Empfänger (die sie aus der Deklaration des
     `impl` ergänzen) zu verschiedenen Dingen. Die Stelligkeit eines vtable-Eintrags ist fest.
@@ -288,8 +291,7 @@ Drei Dinge lassen sich nicht deklarieren:
 - **Alles außer `defun`.** Ein `defmacro` braucht zum Expandieren einen Makrorumpf, der **bereits gelaufen**
   ist, was die Registrierung einer Signatur nicht ersetzen kann. Bei Typen (`defstruct`/`defenum`/`deftrait`)
   ist die Registrierung „das, was der Code braucht, der den Typ selbst registriert“, was nicht so in sich
-  abgeschlossen ist wie eine Signatur. Ein `defmethod` wird an dem Typ registriert, dem es gehört, und folgt
-  daher dem Typ.
+  abgeschlossen ist wie eine Signatur. Die Methoden eines `impl` werden an dem Typ registriert, dem sie gehören, und folgen daher dem Typ.
 
 CLs Gegenstück ist `(declaim (ftype (function (i32) bool) even2))`, aber das bringt ein ganzes
 Deklarationssystem mit sich und ist nur **beratend**. Hier werden Deklarationen dank statischer Typisierung
@@ -626,41 +628,79 @@ Einstellungsdatei und liest sie erneut, bleiben die Werte, die die Sitzung geän
 Die Typannotation ist Pflicht (sie wird nicht aus dem Initialisierer abgeleitet). `defvar` lässt sich ändern;
 `defconstant` nicht (`setf` ist ein Fehler).
 
-### 3.5 defmethod — Methodendefinitionen
+### 3.5 impl — Methoden eines Typs
 
 ```lisp
-; Instanzmethode: aufrufbar als (m obj args...)
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; statische Methode: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; Instanzmethode: (name obj args...)
+  (pub name ...))                                      ; auch außerhalb des Moduls des Typs öffentlich
 
-; statische / assoziierte Funktion: aufrufbar als (Type::name args...)
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; ein generischer Typ
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-Der Aufrufer löst die Methode über den statischen Typ von `obj` auf (einfacher, statischer Dispatch). Ein
-Docstring kann an derselben Position und nach denselben Regeln wie bei `defun` stehen (direkt nach der
-`where`-Klausel, am Anfang des Rumpfes, nur wenn Rumpfformen folgen). Dasselbe gilt für Methoden innerhalb von
-`impl`; abgerufen werden sie mit `(documentation Type::method)`.
+Gibt einem mit `defstruct` (3.6) oder `defenum` (3.7) definierten Typ Methoden. Entspricht dem
+inhärenten impl von Rust (`impl Point { ... }`).
 
-Eigene Typparameter einer Methode stehen wie bei `defun` mit `<...>` im Namen. Die Typparameter des
-Empfängertyps (unten `T`) legt der Empfänger fest; die eigenen der Methode (`U`) werden aus den
-Argumenten jedes Aufrufs abgeleitet.
+- Ein Eintrag hat die Form `(Name (Parameter...) Rückgabetyp Rumpf...)`, dieselbe wie ein Eintrag im
+  `impl` eines Traits (3.9).
+- Ein Eintrag, dessen erster Parameter `self` ist, ist eine **Instanzmethode** und wird als
+  `(name obj args...)` aufgerufen. `self` braucht keinen Typ (`(self)` ist dasselbe wie `((self Self))`,
+  und `Self` ist der Zieltyp).
+- Ein Eintrag ohne `self` ist eine **statische Methode** und wird als `(Type::name args...)` aufgerufen.
+  Eine statische Methode, die einen Wert erzeugt, ist der Konstruktor dieses Typs. Der Name ist frei;
+  empfohlen wird `new`.
+- **Die Sichtbarkeit gilt pro Eintrag.** Nur Einträge, die als `(pub name ...)` geschrieben sind, können
+  außerhalb des Moduls verwendet werden, das den Typ definiert. Ohne `pub` ist ein Eintrag nur innerhalb
+  dieses Moduls verwendbar.
+- Ein Typ kann beliebig viele `impl` haben.
+- Der Aufrufer löst die Methode über den statischen Typ von `obj` auf (einfacher, statischer Dispatch).
+  Eine Methode wird **nur über den Typ des ersten Arguments** gesucht (3.10).
+- **Docstrings** können an derselben Stelle und nach denselben Regeln wie bei `defun` stehen (am Anfang
+  des Rumpfs, nur wenn noch Rumpfformen folgen). Abgerufen werden sie mit `(documentation Type::name)`.
+  Dasselbe gilt für die Methoden im `impl` eines Traits.
+- Nur die eigenen Typen des Programms können eines haben. Ein Typ der Standardbibliothek wie `Vector`,
+  `Option` oder `int` kann es nicht (der Fehler lautet `... is a standard library type`). Um einem
+  Standardtyp eine Operation hinzuzufügen, definiere einen Trait und schreibe dessen `impl` für diesen Typ.
+- Folgt in `(impl X ...)` auf `X` ein Eintrag (eine Liste), ein `where` oder nichts, ist es dieses
+  inhärente impl; folgt ein Name, ist es das `impl` eines Traits (`(impl Trait Type ...)`, 3.9).
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; statische Methode
+(area (Point::new 2.0 3.0))   ; Instanzmethode. => 6.0
+```
+
+Die eigenen Typparameter einer Methode werden wie bei `defun` mit `<...>` in ihren Namen geschrieben.
+Die Typparameter des Zieltyps (`T` unten) werden durch den Empfänger festgelegt; die eigenen der Methode
+(`U`) werden aus den Argumenten jedes Aufrufs abgeleitet.
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Die eigenen Typparameter einer Methode brauchen andere Namen als die Typparameter, die der
-  Empfängertyp deklariert (das `T` von `(defstruct Box<T> ...)`), und als die im Empfänger
-  geschriebenen Namen.
-- Ist der Empfängertyp generisch, schreibt man im Empfänger entweder alle seine Typparameter als
-  Variablen (`Box<T>`) oder alle als konkrete Typen (`Box<int>`).
-- Eine Methode in `impl` kann keine Typparameter hinzufügen: Ihre Signatur folgt der, die das Trait
-  deklariert.
+- Gib den eigenen Typparametern der Methode Namen, die sich von den im `impl` geschriebenen
+  Typparametern des Zieltyps unterscheiden (dem `T` von `(impl Box<T> ...)`).
+- Das `impl` eines generischen Typs schreibt alle seine Typparameter als Variablen (`Box<T>`) oder alle
+  als konkrete Typen (`Box<int>`; die Methoden gelten dann nur für Werte dieses Typs).
+- Eine Methode im `impl` eines Traits kann keine Typparameter hinzufügen: Ihre Signatur folgt der, die
+  der Trait deklariert.
 
 ### 3.6 defstruct — Strukturen (benutzerdefinierte Typen)
 
@@ -677,12 +717,13 @@ Argumenten jedes Aufrufs abgeleitet.
 ```
 
 - Jedes Feld ist `(name type)` oder `(pub name type)` (Sichtbarkeit pro Feld, unabhängig vom `pub` der Struktur
-  selbst). Ein weiterer Ausdruck am Ende wird zum **Standardwert** des Slots (`(x i32 0)`); siehe die
-  Optionsliste unten.
+  selbst). Ein weiterer Ausdruck am Ende wird zum **Standardwert** des Slots (`(x i32 0)`).
+- Werte werden mit `make-instance` erzeugt (unten). Ein Konstruktor, der die Felder in ihrer Reihenfolge
+  nimmt, wird nicht erzeugt. Wer einen Konstruktor möchte, schreibt ihn als statische Methode in `impl`
+  (3.5).
 - Folgendes wird automatisch erzeugt:
-  - Der Konstruktor `Name::new` (Argumente in Feldreihenfolge)
-  - Getter `(field-name instance)`, mit dem Zucker `instance::field-name`
-  - Setter `(set-field-name instance value)`, mit dem Zucker `(setf instance::field-name value)`
+  - Leser `(field-name instance)`, mit der Kurzform `instance::field-name`
+  - Schreiber `(set-field-name instance value)`, mit der Kurzform `(setf instance::field-name value)`
 - Um die Struktur selbst `pub` zu machen, stellt man `pub` voran, wie in `(pub defstruct ...)`.
 - **Einen Typ definiert man, bevor man ihn nennt.** Der Typ eines Feldes kann die Struktur selbst sein
   (`(next Option<node>)`), aber kein später definierter Typ: Typen haben keine Vorwärtsdeklaration, die
@@ -690,52 +731,74 @@ Argumenten jedes Aufrufs abgeleitet.
   denselben Fehler `unknown type`. Zwei Typen, die sich gegenseitig verweisen, lassen sich daher nicht
   schreiben.
 - **Typvariablen sind nur die an deklarierenden Stellen geschriebenen.** Bei
-  `defun`/`defstruct`/`defenum`/`deftype` das `<T>` des Namens; bei `defmethod` der Typ des
-  Empfängers (`(self box<T>)` oder `box<T>` bei einer statischen Methode) und das `<U>` des
-  Methodennamens; bei `impl` der Zieltyp und `impl<T>`; bei `deftrait` `Self` und die assoziierten
-  Typen aus `(type Item)`. Ein Name, der anderswo zum ersten Mal vorkommt (Argumente, Rückgabewert,
-  `the`/`lambda` im Rumpf), wird keine Typvariable; er ist `unknown type`.
+  `defun`/`defstruct`/`defenum`/`deftype` das `<T>` des Namens; bei einem inhärenten `impl` der Zieltyp
+  (`(impl box<T> ...)`) und das `<U>` im Namen jeder Methode; beim `impl` eines Traits der Zieltyp und
+  `impl<T>`; bei `deftrait` `Self` und die assoziierten Typen von `(type Item)`. Ein Name, der zum ersten
+  Mal an einer anderen Stelle auftaucht (Argumente, Rückgabewert, `the`/`lambda` im Rumpf), wird keine
+  Typvariable; er ist `unknown type`.
 - **Docstrings**: Ein Zeichenkettenliteral direkt nach dem Namen, vor den Feldern, wird zum Docstring
   (`(defstruct Name "doc" (field Type)...)`, dieselbe Position wie bei CLs `defstruct`). Ein Feld hat immer die
   Form `(name Type ...)` und kann nie eine bloße Zeichenkette sein, daher gibt es keine Mehrdeutigkeit.
   Abgerufen wird er mit `(documentation Name)`.
 
-#### Optionsliste
-
-Schreibt man an die Namensposition eine Liste `(Name option...)`, gibt man Optionen an (dieselbe Position wie in
-CL).
+#### make-instance — einen Wert erzeugen
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; Schlüsselwort-Konstruktor
-                  (:constructor at (x &optional y))  ; BOA-Konstruktor
-                  (:copier copy-point))
+(make-instance 'Name :field1 value1 :field2 value2 ...)
+```
+
+Ein Strukturwert wird wie in CLOS mit `make-instance` erzeugt.
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; beliebige Reihenfolge
+(make-instance 'point :x 1)           ; y ist sein Standardwert 0
+```
+
+- Der Typname wird als mit `'` quotiertes Symbol geschrieben. Er wählt keinen Typ zur Laufzeit; er steht
+  zur Prüfzeit fest (wie das `'vector` von `concatenate`).
+- Felder werden als Paare `:name wert` angegeben. Die Werte werden je einmal in der geschriebenen
+  Reihenfolge ausgewertet.
+- Ein nicht angegebenes Feld erhält seinen Standardwert. Ein Feld ohne Standardwert nicht anzugeben ist
+  ein Typfehler, ebenso ein unbekanntes Feld und dasselbe Feld zweimal.
+- Die Typargumente einer generischen Struktur werden aus den Werten und dem erwarteten Typ abgeleitet.
+  Man kann sie auch hinschreiben, wie in `'Box<int>`.
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- Außerhalb des Moduls, das den Typ definiert, können Felder, die nicht `pub` sind, nicht angegeben
+  werden. Hat ein solches Feld keinen Standardwert, können andere Module den Wert gar nicht erzeugen. Um
+  es ihnen zu erlauben, schreibe einen `pub`-Konstruktor in `impl` (3.5).
+
+#### Optionsliste
+
+Eine Liste `(Name option...)` an der Stelle des Namens gibt Optionen an (dieselbe Stelle wie in CL).
+
+```lisp
+(defstruct (point (:copier copy-point))
   (x i32 0)          ; ein drittes Element ist der Standardwert dieses Slots
   (y i32 0))
 
-(point::make-point :y 7)   ; x ist 0
-(point::at 1)              ; y ist 0
-(point::at 1 2)
-(copy-point p)             ; eine flache Kopie (dasselbe wie CLs copier)
+(copy-point p)       ; eine flache Kopie (wie der copier von CL)
 ```
 
-- **`:constructor`**: Erzeugt wird eine **statische Funktion** des Typs (`point::make-point`), deren Rumpf
-  immer `(point::new ...)` ist. `new` bleibt der eine strukturelle Konstruktor; was hier entsteht, ist eine
-  *Art, ihn aufzurufen*. Mehrere lassen sich deklarieren.
-  - `(:constructor name)` nimmt jeden Slot als `&key`. **Jeder Slot braucht einen Standardwert** (diese Sprache
-    hat nichts, was CLs „ungebundenem Slot“ entspräche).
-  - `(:constructor name (slot...))` nimmt die genannten Slots als positionelle Argumente (in beliebiger
-    Reihenfolge). Nicht genannte Slots werden mit ihren Standardwerten gefüllt, daher **brauchen sie
-    Standardwerte**. Nach `&optional` darf der Rest weggelassen werden (und braucht ebenso Standardwerte).
-- **`:copier`**: Erzeugt eine **Instanzmethode**, die einen neuen Wert mit denselben Slotwerten zurückgibt.
-  Flach, wie CLs copier.
+- **`:copier`**: erzeugt eine **Instanzmethode**, die einen neuen Wert mit denselben Slotwerten
+  zurückgibt. Flach, wie der copier von CL.
 - **`:include Parent`**: Stellt die Slots des Elterntyps voran (auch Standardwerte werden geerbt; der Elterntyp
   darf in einer anderen Datei stehen). **Es entsteht keine Typbeziehung**: Das Kind ist kein Untertyp des
   Elterntyps, die Methoden des Elterntyps gelten nicht für das Kind, und es gibt keine Laufzeitprüfung, die
   beide verbindet. Diese Sprache hat keine Untertypen; gemeinsame Schnittstellen sind die Aufgabe von
   `deftrait`. Nur die *Liste* der Slots wird zusammengefügt.
-- **Slot-Standardwerte werden nur von erzeugten Konstruktoren gelesen.** Einen Standardwert zu schreiben, ohne
-  ein `:constructor` zu deklarieren, ist ein Fehler, da er nie verwendet werden könnte.
 - Weggelassene Optionen und warum:
+  - **`:constructor`**: Ein Konstruktor wird als statische Methode in `impl` geschrieben (3.5). Diese
+    Option zu schreiben ist ein Fehler, der zeigt, wie man sie umschreibt.
   - **`:conc-name`**: In CL stellt es Zugriffsfunktionen ein Präfix voran, um Kollisionen in einem einzigen
     flachen Funktionsnamensraum zu vermeiden. Hier sind Zugriffsfunktionen Methoden, die nach dem Typ des
     Empfängers gewählt werden, daher kommt es nicht zu Kollisionen, und ein Präfix würde `instance::field`
@@ -772,8 +835,7 @@ CL).
     ((Some v) v)
     ((None) 0))
   ```
-- Methoden und assoziierte Funktionen werden wie bei `defstruct` nachträglich mit `defmethod`/`impl`
-  hinzugefügt.
+- Methoden und statische Methoden werden wie bei `defstruct` in `impl` (3.5) geschrieben.
 - Um das Enum selbst `pub` zu machen, schreibt man `(pub defenum ...)`.
 - **Docstrings**: dieselbe Position und dieselben Regeln wie bei `defstruct`, direkt nach dem Namen, vor den
   Varianten (`(defenum Name "doc" (Variant ...)...)`). Abgerufen wird er mit `(documentation Name)`.
@@ -824,9 +886,10 @@ eines Typs, kein Typ**.
   (method-name (recv params...) RetType body...))
 ```
 
-Über `impl` wird jede Methode als gewöhnliches `defmethod` von `TargetType` registriert. Auf Traits wird als
-Trait-Schranken in den `where`-Klauseln generischer Funktionen verwiesen (siehe
-[3.1 defun](#31-defun--funktionsdefinitionen)). Ein Trait-Name kann auch ein `::`-Pfad wie `m::Trait` sein.
+Über `impl` wird jede Methode als Methode von `TargetType` registriert und wie eine Methode eines
+inhärenten `impl` (3.5) aufgerufen. Die Methoden im `impl` eines Traits sind immer öffentlich, ohne `pub`.
+Traits werden in den `where`-Klauseln generischer Funktionen als Trait-Schranken referenziert (siehe
+[3.1 defun](#31-defun--funktionsdefinitionen)). Ein Traitname kann auch ein `::`-Pfad wie `m::Trait` sein.
 
 **Die Liste der Obertraits (Pflicht)**: steht immer direkt nach dem Trait-Namen. Jedes Element ist ein bloßer
 Trait-Name oder, wenn dieser Trait assoziierte Typen hat, `(Trait (Assoc Type))` mit **allen seinen
@@ -933,16 +996,34 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
 (shadowing-import path...) ; ein use, das bewusst einen bereits verwendeten bloßen Namen nimmt
 ```
 
-- `module` erzeugt einen Namensraum. **Typen sind keine Namensräume** (wie in Rust hat ein Typ nur assoziierte
-  Funktionen und Methoden).
-- Holt man einen Typ mit `use` herein, sind seine Konstruktoren und öffentlichen statischen Methoden auch über
-  den bloßen Namen verfügbar (zum Beispiel lassen sich nach `(use option)` `some`/`none` ohne
+- `module` erzeugt einen Namensraum. **Typen sind keine Namensräume** (wie in Rust hat ein Typ nur statische
+  Methoden und Methoden).
+- Ein `use` eines Typs macht die Varianten eines Enums und die öffentlichen statischen Methoden des Typs
+  auch unter dem bloßen Namen verfügbar (zum Beispiel lassen sich nach `(use option)` `some`/`none` ohne
   `option::some`/`option::none` aufrufen).
-- Die Auflösungsreihenfolge bloßer Namen (nicht qualifizierter Bezeichner): Spezialformen → Konstruktoren →
-  freie Funktionen (aktueller Namensraum → Wurzel) → Instanzmethoden (aufgelöst über den statischen Typ des
-  ersten Arguments). Sie geht nicht durch dazwischenliegende Elternmodule hinauf.
-- Ein qualifizierter Pfad `a::b` löst `a` in der obigen Reihenfolge auf; ist es ein Modul, geht er hinein, ist
-  es ein Typ, wird das letzte Segment als assoziiertes Element aufgelöst.
+- **Ein Name hat eine Bedeutung.** Funktionen, globale Variablen und Makros teilen sich einen
+  Namensraum, und innerhalb eines Moduls können keine zwei von ihnen denselben Namen haben (ein Fehler,
+  egal welcher zuerst definiert wird). Funktionen und Variablen haben keine getrennten Namensräume wie in
+  CL. Bei demselben Namen in verschiedenen Modulen ist der nähere sichtbar.
+- Auflösung eines bloßen Namens `n` (an der Aufrufstelle `(n a ...)`; Namen von Sonderformen stehen
+  vorher fest):
+  1. Lokale (Parameter sowie die Bindungen von `let`, `labels`, `macrolet` und `symbol-macrolet`)
+  2. Wenn der Modulname `n` ein Makro ist, dieses Makro
+  3. Die Varianten eines per `use` eingebundenen Enums und die statischen Methoden eines per `use`
+     eingebundenen Typs
+  4. Die Methode `n` des Typs des ersten Arguments (Methoden werden **nur über den Typ des ersten
+     Arguments** gesucht)
+  5. Wenn der Modulname `n` eine Funktion oder eine globale Variable ist, diese (bei einer globalen
+     Variable wird die Funktion aufgerufen, die ihr Wert ist)
+
+  Ein Modulname wird im aktuellen Modul, dann in den `use`-Aliasen, dann in den Elternmodulen (bis zur
+  Wurzel) gesucht und steht mit dem ersten Fund fest. Dieselbe Regel gilt, wo eine Funktion als Wert
+  übergeben wird; „der Typ des ersten Arguments“ in Schritt 4 ist dann der erste Parametertyp des dort
+  erwarteten Funktionstyps (`norm` an einer Stelle, die `(fn (pt) int)` erwartet, ergibt die Methode `norm`
+  von `pt`). Steht der erwartete Typ noch nicht fest, wird Schritt 4 übersprungen.
+- Ein qualifizierter Pfad `a::...::n` wird zu einem Modulnamen (Makro, Funktion oder globale Variable)
+  des von `a::...` benannten Moduls aufgelöst oder zu einer Variante oder statischen Methode eines Typs.
+  `x::f` an einer Wertstelle (wo `x` einen Wert benennt) ist ein Feldzugriff.
 - **`use` wirkt auf die Formen danach.** Eine Datei wird eine Form nach der anderen gelesen, und Abhängigkeiten
   werden direkt vor der Prüfung der Form aufgelöst; schreibt man `m::f` **oberhalb** von `(use m)`, ergibt das
   daher `unresolved path`. `use` setzt man an den Anfang der Datei.
@@ -1013,16 +1094,18 @@ ein Segment, im Stil von Rust / Python). Ein ausdrückliches `(module bar ...)` 
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-`pub` lässt sich nur an die elf obigen Arten setzen (nicht an `module`/`use`/`deftrait`/`impl`). Man schreibt
-das Definitionsschlüsselwort direkt nach `pub`, nicht in der Form `(pub (defun ...))`, die die Definition in
-Klammern hüllt. Ein `pub` macht genau eine Definition öffentlich (mehrere Definitionen lassen sich nicht auf
-einmal markieren).
+`pub` kann nur an die zehn obigen Arten gesetzt werden (nicht an `module`/`use`/`deftrait`/`impl`). Es wird
+geschrieben, indem das Definitionsschlüsselwort direkt auf `pub` folgt, nicht in der Form `(pub (defun ...))`,
+die die Definition in Klammern einschließt. Ein `pub` macht genau eine Definition öffentlich (mehrere
+Definitionen können nicht auf einmal markiert werden).
+
+Die Methoden eines inhärenten `impl` werden Eintrag für Eintrag als `(pub name ...)` öffentlich gemacht
+(3.5). Strukturfelder werden `(pub x i32)` geschrieben (3.6).
 
 ### 3.14 defmacro — Makrodefinitionen
 
@@ -1174,6 +1257,20 @@ Arten von Mustern:
   eine benutzerdefinierte `Eq`-Implementierung wird unverändert zur Vergleichsregel. `expr` kann sich auf alles
   beziehen, was von der Position des Zweigs aus sichtbar ist (Argumente, äußere Bindungen, globale Variablen)
 - `(Ctor sub-pattern...)` — Konstruktormuster (`Some x` `None` `Cons a d` `Ok v` usw.)
+- `(Type :slot pattern... :slot...)` — Strukturmuster. Schreibe die Slots nach dem Typnamen als
+  Schlüsselwörter. Folgt auf ein Schlüsselwort ein Muster, wird dieser Slot gegen das Muster geprüft;
+  folgt ein Schlüsselwort oder nichts, wird der Slot an eine Variable seines eigenen Namens gebunden.
+  Nicht geschriebene Slots werden nicht geprüft (das Muster hängt also nicht von Anzahl oder Reihenfolge
+  der Felder ab):
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; bindet x und prüft y gegen (some b)
+      ((point :x a) a)))                 ; bindet a
+  ```
 - `#{p0 p1 ...}` — ein Tupelmuster. Jedes Element wird mit seinem eigenen Teilmuster abgeglichen.
   Gegen ein `Sexpr` passt es nur auf `#{..}`-Daten mit derselben Anzahl an Elementen
 - `(:or p1 p2 ...)` — ein Oder-Muster: Es passt, wenn eine der Alternativen passt. Es gibt nur einen
@@ -1234,9 +1331,9 @@ Gegen einen `Sexpr` als untersuchten Wert lassen sich neben den 19 eingebauten V
 Instanz eines `defstruct`/`defenum` (Kapitel 3) zurückzubekommen, die implizit in `Sexpr` umgewandelt wurde, wie
 in `(list p 42)`:
 
-- `(TypeName sub-pattern...)` — Zerlegung in Felder mit dem **Typnamen** vorn (nur Strukturen: Ein `defstruct`
-  hat immer eine Variante, daher schreibt man es mit dem Typnamen statt mit einem Variantennamen). Zum Beispiel
-  für `(defstruct point (x f64) (y f64))` `(point x y)`.
+- `(TypeName :slot pattern...)` — Feldzerlegung mit dem **Typnamen** vorn (nur Strukturen), in derselben
+  Form wie die Strukturmuster oben geschrieben. Zum Beispiel für `(defstruct point (x f64) (y f64))`:
+  `(point :x :y)`.
 - Ein bloßer Variantenname `(VariantName sub-pattern...)` — holt eine Variante eines `defenum` heraus. Aufgelöst
   als bloßer Name, der nach `(use EnumType)` sichtbar ist (dieselben Sichtbarkeitsregeln wie beim Aufruf des
   Konstruktors). Zum Beispiel für `(defenum color (red) (blue))` nach `(use color)` `(red)` `(blue)`. Kollidieren
@@ -1278,7 +1375,7 @@ kann es nie vollständig sein, und `_` ist Pflicht:
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; Zerlegung in Felder mit dem Typnamen vorn
+    ((circle :r) (* (* r r) 3))    ; Zerlegung in Felder mit dem Typnamen vorn
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1339,7 +1436,7 @@ Funktion zu verlassen, verwendet man `return-from`, unten.
 (return-from name value)            ; verlässt ihn mit einem Wert
 ```
 
-**Jede Funktion von `defun` / `defmethod` / `labels` richtet implizit einen Block mit ihrem eigenen Namen ein**
+**Jede Funktion von `defun` / Methoden in `impl` / `labels` richtet implizit einen Block mit ihrem eigenen Namen ein**
 (wie in CL). Daher ist `(return-from f v)` eine vorzeitige Rückkehr aus der Funktion:
 
 ```lisp
@@ -1689,9 +1786,9 @@ Der Speicher globaler Variablen wird mit kompiliertem Code **geteilt** (dieselbe
 `defvar`-Initialisierer wird einmal von der kompilierten Initialisierung ausgeführt, und die Wiederherstellung
 überspringt ihn, daher läuft ein Initialisierer mit Seiteneffekten nicht zweimal.
 
-`compile-file` liest auch die Standardbibliothek (und bettet ihre Rümpfe in das ausführbare Programm ein), daher
-lassen sich Funktionen der Standardbibliothek wie `abs`/`gcd` sowie `(impl print-object ...)` und
-`(defmethod print-object ...)` mit AOT verwenden.
+`compile-file` liest auch die Standardbibliothek (und bettet deren Rümpfe in die ausführbare Datei ein), daher
+können Funktionen der Standardbibliothek wie `abs`/`gcd` und `(impl print-object ...)` mit AOT verwendet
+werden.
 
 `compile-file` akzeptiert auch `use` (und `import`/`shadowing-import`). Das `(use m)` der Einstiegsdatei findet
 Dateien nach denselben Regeln wie `typl file.typl`, und die gefundenen abhängigen Dateien werden ebenfalls
@@ -1916,9 +2013,10 @@ Prozesses, sondern ein Panic wie `` `recv` cannot block: ... ``, der wie ein `(p
   der nächsten Auswertung dort weiter, wo sie aufgehört haben). Am Ende einer Auswertung wartet es darauf, dass
   jeder Thread seinen aktuellen Schritt beendet; blockiert eine C-Funktion (`defffi`) innerhalb eines `thread`
   fortwährend, endet die Auswertung daher erst, wenn sie zurückkehrt.
-- **Ausgabe auf Arbeitern**: Interpretierte `print-object`- / `~/name/`-Methoden können nicht auf anderen Threads
-  laufen, daher ist die Ausgabe solcher Werte auf einem anderen Thread ein Panic, der wie ein `(panic ...)`
-  behandelt wird (`(compile T::print-object)` oder aus dem Haupttask ausgeben).
+- **Ausgabe auf Workern**: Interpretierte `print-object`-Methoden sowie interpretierte Funktionen und
+  Methoden, die `~/name/` aufruft, können nicht auf anderen Threads laufen; solche Werte auf einem anderen
+  Thread auszugeben ist daher ein Panic, der wie ein `(panic ...)` behandelt wird
+  (`(compile T::print-object)` oder aus der Haupttask ausgeben).
 - **Datenwettläufe sind undefiniert** (dieselbe Position wie Go). Das Ergebnis, wenn mehrere Tasks denselben Wert
   ändern, ohne über `Mutex<T>` / `Chan<T>` zu gehen, ist nicht garantiert.
 - **`task` gibt einen Wert zurück.** Anders als Gos `go`-Anweisung gibt es ein `Task<T>` zurück, und `(wait t)`

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 0f8a35599b7916036b773d6cb777b7de28762078 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Strängar, tecken och samlingar
 
 `string`, `char`, `Vector<T>`, `HashTable<K,V>`, `Array<T>`, `BitVector`, `HashSet<T>`, `SortedTable<K,V>` och `Deque<T>`.
@@ -126,8 +126,8 @@ som implementationen för `string` använder.
   (sxhash ((self Self)) int (logand (+ (* 31 self::x) self::y) *sxhash-mask*)))
 
 (let ((h (the HashTable<point,string> (HashTable::new))))
-  (progn (set h (point::new 1 2) "a")
-         (get h (point::new 1 2))))          ; => (some "a")
+  (progn (set h (make-instance 'point :x 1 :y 2) "a")
+         (get h (make-instance 'point :x 1 :y 2))))          ; => (some "a")
 ```
 
 Om två nycklar är samma avgörs av **nyckeltypen själv** (`sxhash`, och `equals` från `Eq`, supertraitet
@@ -146,7 +146,7 @@ Ett värde kan skrivas `#2A((1 2) (3 4))` (se
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `make` | `(Array::make dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL:s `make-array`. `dims` kopieras. `init` är startvärdet för varje cell (CL:s `:initial-element`; det här språket har ingen "obunden cell", så det är obligatoriskt). `:fill-pointer` bara för en dimension |
+| `new` | `(Array::new dims init &key fill-pointer)` | `(Vector<int>,T)→Array<T>` | CL:s `make-array`. `dims` kopieras. `init` är startvärdet för varje cell (CL:s `:initial-element`; det här språket har ingen "obunden cell", så det är obligatoriskt). `:fill-pointer` bara för en dimension |
 | `get` / `set` | `(get a idx)` / `(set a idx x)` | `(Array<T>,Vector<int>)→T` | CL:s `aref` / `(setf (aref …))`. Ger panic om ett index är utanför intervallet |
 | `aref` | `(aref a i j …)` | — | CL:s stavning med bara index. Expanderar till `get`/`set` ovan. `(setf (aref a i j) v)` fungerar också |
 | `row-major-get` / `row-major-set` | `(row-major-get a i)` | `(Array<T>,int)→T` | CL:s `row-major-aref`. Ett platt index |
@@ -167,8 +167,6 @@ Ett värde kan skrivas `#2A((1 2) (3 4))` (se
   många gånger på slutet", och sockret `aref` överbryggar det glappet.
 - `array-element-type` / `simple-vector-p` / `adjustable-array-p` / `array-has-fill-pointer-p`
   **finns inte**. Mottagarens statiska typ besvarar redan dessa frågor.
-- `Array::new` är den konstruktor i fältordning som `defstruct` genererar och är inte avsedd för att
-  skapa arrayer. Använd `Array::make`.
 - **Arrayer skrivs ut i CL:s arraysyntax.** Rang 1 är `#(1 2 3)`; andra ranger är `#nA` följt av lika
   många nivåer parenteser (`#2A((1 2 3) (4 5 6))`); rang 0 är `#0A5`. Utskriften stannar vid
   fyllpekaren om det finns en. Att sätta `*print-array*` ([Utskrift](printing.md#6-styra-hur-mycket-som-skrivs-ut))
@@ -181,7 +179,7 @@ En följd av bitar med fast längd. En `defstruct` i standardbiblioteket.
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `make` | `(BitVector::make n)` | `int→BitVector` | Längd `n`, alla bitar 0 |
+| `new` | `(BitVector::new n)` | `int→BitVector` | Längd `n`, alla bitar 0 |
 | `get` / `set` | `(get v i)` / `(set v i b)` | `(BitVector,int)→bool` | Ger panic utanför intervallet |
 | `bit` / `sbit` | `(bit v i)` | `(BitVector,int)→bool` | CL:s stavningar. `(setf (bit v i) b)` fungerar också. CL:s `sbit` skiljer sig från `bit` bara genom att kräva en enkel bitvektor, men det här språket har bara en sorts bitvektor |
 | `len` | `(len v)` | `BitVector→int` | Antal bitar |
@@ -198,7 +196,7 @@ innehåll är en `HashTable<T,()>`. Elementtypen måste implementera `Hash`, lik
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `make` | `(HashSet::make)` | `()→HashSet<T>` | Skapar en tom mängd. Typargumentet kommer från den förväntade typen |
+| `new` | `(HashSet::new)` | `()→HashSet<T>` | Skapar en tom mängd. Typargumentet kommer från den förväntade typen |
 | `insert` | `(insert s x)` | `(HashSet<T>,T)→bool` | Lägger till `x`. `true` om det inte fanns, `false` om det redan fanns |
 | `contains` | `(contains s x)` | `(HashSet<T>,T)→bool` | Om `x` finns |
 | `remove` | `(remove s x)` | `(HashSet<T>,T)→bool` | Tar bort `x`. `true` om det fanns |
@@ -207,15 +205,13 @@ innehåll är en `HashTable<T,()>`. Elementtypen måste implementera `Hash`, lik
 | `iter` | `(iter s)` | `HashSet<T>→vector-iter<T>` | En iterator över elementen. Ordningen är inte bestämd |
 
 ```lisp
-(let ((seen (the HashSet<string> (HashSet::make))))
+(let ((seen (the HashSet<string> (HashSet::new))))
   (doiter (w (iter (the Vector<string> #("a" "b" "a"))))
     (if (insert seen w) () (println "dup: ~a" w))))    ; dup: a
 ```
 
 Gemensamt för de tre typerna i kapitel 7 till 9:
 
-- Skapa dem med `make`. `new` är konstruktorn i fältordning som `defstruct` genererar, inte den man
-  skapar dem med (som med `Array::make`).
 - `iter` går igenom en kopia tagen vid anropet. Ändrar man samma samling inuti en `doiter` ser den
   loopen det inte.
 - Om elementtyperna implementerar `print-object` skrivs elementen ut, i formen `#<hashset "a" "b">`
@@ -229,7 +225,7 @@ och värden hålls i två `Vector` i nyckelordning, och sökning sker binärt. `
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `make` | `(SortedTable::make)` | `()→SortedTable<K,V>` | Skapar en tom tabell |
+| `new` | `(SortedTable::new)` | `()→SortedTable<K,V>` | Skapar en tom tabell |
 | `get` | `(get t k)` | `(SortedTable<K,V>,K)→Option<V>` | Uppslag |
 | `set` | `(set t k v)` | `(SortedTable<K,V>,K,V)→Unit` | Infogar eller skriver över |
 | `remove` | `(remove t k)` | `(SortedTable<K,V>,K)→Option<V>` | Tar bort och returnerar det gamla värdet om det fanns |
@@ -240,7 +236,7 @@ och värden hålls i två `Vector` i nyckelordning, och sökning sker binärt. `
 | `iter` | `(iter t)` | `SortedTable<K,V>→vector-iter<#{K V}>` | `#{nyckel värde}`-tupler i nyckelordning |
 
 ```lisp
-(let ((t (the SortedTable<string,int> (SortedTable::make))))
+(let ((t (the SortedTable<string,int> (SortedTable::new))))
   (set t "pear" 3) (set t "apple" 5)
   (doiter (#{k v} (iter t)) (println "~a ~a" k v)))    ; apple 5 och pear 3
 ```
@@ -251,7 +247,7 @@ En följd som man kan lägga till i och ta ut ur i båda ändar (Rusts `VecDeque
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `make` | `(Deque::make)` | `()→Deque<T>` | Skapar en tom följd |
+| `new` | `(Deque::new)` | `()→Deque<T>` | Skapar en tom följd |
 | `push-front` / `push-back` | `(push-front d x)` | `(Deque<T>,T)→Unit` | Lägger till först / sist |
 | `pop-front` / `pop-back` | `(pop-front d)` | `Deque<T>→Option<T>` | Tar ut det första / sista elementet och returnerar det. `none` om tom |
 | `front` / `back` | `(front d)` | `Deque<T>→Option<T>` | Tittar på det första / sista elementet (utan att ta ut det) |
@@ -262,7 +258,7 @@ En följd som man kan lägga till i och ta ut ur i båda ändar (Rusts `VecDeque
 | `iter` | `(iter d)` | `Deque<T>→vector-iter<T>` | Från början, i ordning |
 
 ```lisp
-(let ((q (the Deque<int> (Deque::make))))
+(let ((q (the Deque<int> (Deque::new))))
   (push-back q 1) (push-back q 2) (push-front q 0)
   (println "~s ~s ~s" (pop-front q) (pop-back q) q))    ; (some 0) (some 2) #<deque 1>
 ```

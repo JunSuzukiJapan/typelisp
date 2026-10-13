@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Время, среда и реализация
 
 Функции для времени, запросов о среде выполнения, инструменты реализации, разбор и вычисление текста, строки
@@ -210,12 +210,12 @@ CL возвращает из `read-from-string` **два значения** (з�
 
 ## 7. Строки документации / `documentation`
 
-`defun`/`defmethod` (в том числе внутри `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftype`/
+`defun`/методы `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/`deftype`/
 `deftrait` могут нести строки документации. Позиция следует правилу CL для каждого случая:
 
 | Форма | Позиция строки документации |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | В начале тела (после типа результата и предложения `where`). Только если следует хотя бы одна форма тела; одиночная строка остаётся результатом |
+| `defun` / методы `impl` / `defmacro` | В начале тела (после типа результата и предложения `where`). Только если следует хотя бы одна форма тела; одиночная строка остаётся результатом |
 | `defvar` / `defconstant` | **После** начального значения: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Сразу после** имени, перед полями/вариантами |
 | `deftype` | **Сразу после** имени, перед типом: `(deftype meters "doc" i32)` |

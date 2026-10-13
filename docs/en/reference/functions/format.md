@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Format Directives
 
 The directives written in the control strings of `print`/`println`/`format`. They cover nearly all of
@@ -74,7 +74,7 @@ As in CL, the pretty-printer directives (`~_` `~i` `~:t` `~<...~:>`, and the pre
 | `~<...~;...~>` | Justification (spreads segments over `~mincol` columns. `:`/`@`=padding at the ends) |
 | `~<...~;...~:>` | **Logical block** (closed with `~:>`; a different thing from the justification above). The first segment is the prefix and the last is the suffix (both literal strings only). With the `~@;` separator, the prefix is a **per-line prefix**. `~:<` defaults the prefix/suffix to `(`/`)`. The argument is one list (`~@<` uses the remaining arguments in place) |
 | `~*` | Skipping arguments (`~n*`=forward n, `~:*`=back, `~@*`=to an absolute position) |
-| `~/name/` | Method call (chapter 5. The `:`/`@` flags are passed to the method. Takes no parameters) |
+| `~/name/` | Calls a function or method (chapter 5; the `:`/`@` flags are passed to the callee; takes no parameters) |
 
 The following CL directives are not supported (they are check-time errors).
 
@@ -87,27 +87,36 @@ The following CL directives are not supported (they are check-time errors).
 
 ## 5. `~/name/`
 
-**One difference from CL: the name is looked up not as a global function but as a method of the
-argument's own type.** The method has the shape `((self Self) (colon bool) (at bool)) → string`, and
-the directive's `:`/`@` are passed through as they are.
-
-CL's way of looking it up as a global function cannot be implemented safely in this language. Even
-with a literal control string, the type of the elements of a list argument (inside `~{`) is not known
-at check time, and looking a function up by name alone could call a function meant for another type.
-Choosing by the value's type means the method is type-checked for exactly that type, which is safe
-(the same mechanism as `print-object`). It also works for values such as `string`/`bool`/`char`/
-`symbol`/lists. Only for integers, whose width cannot be told from the value, is it an error **when
-more than one integer type defines a method of that name**.
-
-Which argument it applies to is not known, but which methods it might call is. The checker collects
-every `~/name/` from the literal control string and records, among the types of the arguments at that
-call site, those that have a method of the shape above. So **if none of the argument types has the
-method, it is a check-time error** (not a run-time one), and it works in AOT executables too.
+`~/name/` resolves `name` by the same rules as a call `(name arg colon at)` written at that place, and
+outputs the string the call returns. It consumes one argument. `colon` and `at` are `bool`s saying
+whether the directive carries `:` and `@`.
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- Name resolution is the same as for a call ([Syntax Reference 3.10](../syntax.md#310-module--use--namespaces)). If the argument's type
+  has a method `name`, that is called; otherwise the visible function `name`. A function in a module
+  can be named by its path (`~/m::shout/`).
+- What can be called is a function or method written in typelisp that takes the argument, `colon` and
+  `at` as they are and returns a `string`. Built-in functions cannot be called.
+- **What to call is settled at check time.** The checker finds every argument that can reach the
+  `~/name/`, taking moves by `~*` and `~[` into account, and resolves the name for each one's type. If
+  one of them cannot be resolved, it is a check-time error, and so is the case where the arguments that
+  can reach it would call two different definitions. No name is looked up at run time, so it works the
+  same in AOT executables.
+- **It cannot be used inside `~{`, `~:{`, `~:@{` or `~<...~:>`** (a check-time error). The type of a list
+  argument's elements is `Sexpr`, which cannot settle what to call. `~@{` goes round the call's
+  remaining arguments, whose types are known, so it can be used there.
+
+The difference from CL: CL looks the name up as a global function. Here the resolution is the same as
+for a call, so a method of the argument's type is chosen before a function of the same name.

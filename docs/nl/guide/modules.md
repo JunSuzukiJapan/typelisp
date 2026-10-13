@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Modules en bestandsindeling
 
 Deze handleiding legt uit hoe je een programma samenstelt dat uit meerdere bestanden bestaat. De
@@ -47,14 +47,17 @@ van het uitgevoerde bestand de root (in de REPL de huidige map).
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; a field without pub cannot be read from outside
+  (tag string))                        ; een veld zonder pub kan van buiten niet gelezen of geschreven worden
 
-(defun square ((n i32)) i32 (* n n))   ; a function without pub cannot be called from outside either
+(defun square ((n i32)) i32 (* n n))   ; ook een functie zonder pub kan van buiten niet aangeroepen worden
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -76,11 +79,16 @@ laden.
 
 ### Wat openbaar wordt gemaakt
 
-- Functies, structs, enums, globale variabelen, macro's en methoden zijn alleen zichtbaar vanuit
-  andere modules als ze `pub` dragen. Zet `pub` direct vóór de definitie, zoals in `(pub defun ...)`.
-- Bij structs zijn **het openbaar maken van het type en het openbaar maken van velden twee aparte
-  zaken**. `(pub defstruct point ...)` maakt het type zichtbaar, en alleen de velden die als
-  `(pub x i32)` zijn geschreven kunnen van buiten worden gelezen en geschreven.
+- Functies, structs, enums, globale variabelen en macro's zijn alleen vanuit andere modules zichtbaar als ze
+  `pub` dragen. Zet `pub` direct voor de definitie, zoals in `(pub defun ...)`.
+- Van de methoden die in een `impl` staan, zijn alleen de items die als `(pub new ...)` zijn geschreven van
+  buiten bruikbaar.
+- Bij structs **zijn het publiek maken van het type en het publiek maken van de velden twee aparte zaken**.
+  `(pub defstruct point ...)` maakt het type zichtbaar, en alleen de velden die als `(pub x i32)` zijn
+  geschreven, kunnen van buiten gelezen en geschreven worden.
+- Evenzo kunnen in andere modules alleen `pub`-velden aan `make-instance` worden gegeven. De `point`
+  hierboven heeft een `tag` die niet `pub` is; andere modules kunnen hem daarom niet met `make-instance`
+  maken en gebruiken `point::new`.
 - Een naam die niet openbaar is van buitenaf gebruiken geeft een fout "kan niet worden opgelost",
   zoals `unresolved path: geometry::square`. Het is dezelfde melding als bij een verkeerd gespelde
   naam. Klopt de spelling en wordt de naam toch niet opgelost, vermoed dan een ontbrekende `pub`.
@@ -113,10 +121,11 @@ module, en worden dus zonder modulenaam aangeroepen.
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; area, not core::area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; area, not core::area
 ```
 
-Methoden binnen een `impl` zijn altijd openbaar, ook zonder `pub`.
+Methoden in de `impl` van een trait zijn altijd publiek, ook zonder `pub`. Van de methoden in een inherente
+`impl` (`(impl point ...)`) zijn alleen die met `pub` publiek.
 
 Een trait zelf kan niet openbaar worden gemaakt voor andere modules. Houd de definitie van een trait,
 de `impl`s ervoor en de code die hem via `:dyn` gebruikt in één enkele module.

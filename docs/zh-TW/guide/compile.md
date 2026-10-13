@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -112,7 +112,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 可以進行 AOT 編譯的檔案形式
 
-- 進入點檔案的頂層只能寫定義（`defun` `defmethod` `defvar` `defparameter` `defconstant` `defmacro`
+- 進入點檔案的頂層只能寫定義（`defun` `defvar` `defparameter` `defconstant` `defmacro`
   `defsignature` `defstruct` `defenum` `deftype` `deftrait` `impl` `defffi`、`(unsafe (def-c-struct ...))`）
   以及 `use` `module`。除了最後的 `(main)`，不能寫 `(println ...)` 這樣的頂層運算式。處理請寫在 `main` 中。
 - 沒有不接受引數的 `main` 時會出錯。

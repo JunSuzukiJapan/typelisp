@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Dyrektywy formatu
 
 Dyrektywy zapisywane w łańcuchach sterujących `print`/`println`/`format`. Obejmują niemal wszystkie
@@ -75,7 +75,7 @@ Tak jak w CL, dyrektywy ozdobnego wypisywania (`~_` `~i` `~:t` `~<...~:>` oraz �
 | `~<...~;...~>` | Justowanie (rozkłada segmenty na `~mincol` kolumn. `:`/`@`=dopełnienie na końcach) |
 | `~<...~;...~:>` | **Blok logiczny** (zamykany za pomocą `~:>`; to coś innego niż powyższe justowanie). Pierwszy segment jest prefiksem, a ostatni sufiksem (oba tylko jako literały łańcuchowe). Z separatorem `~@;` prefiks jest **prefiksem dla każdej linii**. `~:<` ustawia domyślnie prefiks/sufiks na `(`/`)`. Argumentem jest jedna lista (`~@<` używa na miejscu pozostałych argumentów) |
 | `~*` | Pomijanie argumentów (`~n*`=naprzód o n, `~:*`=wstecz, `~@*`=do pozycji bezwzględnej) |
-| `~/name/` | Wywołanie metody (rozdział 5. Flagi `:`/`@` są przekazywane do metody. Nie przyjmuje parametrów) |
+| `~/name/` | Wywołanie funkcji lub metody (rozdział 5; flagi `:`/`@` trafiają do wywoływanego; nie przyjmuje parametrów) |
 
 Następujące dyrektywy CL nie są obsługiwane (są błędami czasu sprawdzania).
 
@@ -88,27 +88,36 @@ Następujące dyrektywy CL nie są obsługiwane (są błędami czasu sprawdzania
 
 ## 5. `~/name/`
 
-**Jedna różnica względem CL: nazwa jest wyszukiwana nie jako funkcja globalna, lecz jako metoda
-własnego typu argumentu.** Metoda ma kształt `((self Self) (colon bool) (at bool)) → string`, a
-`:`/`@` dyrektywy są przekazywane bez zmian.
-
-Sposób z CL, polegający na wyszukiwaniu jako funkcji globalnej, nie może być bezpiecznie zaimplementowany w tym języku. Nawet
-przy literałowym łańcuchu sterującym typ elementów argumentu będącego listą (wewnątrz `~{`) nie jest znany
-w czasie sprawdzania, a wyszukiwanie funkcji po samej nazwie mogłoby wywołać funkcję przeznaczoną dla innego typu.
-Wybór według typu wartości oznacza, że metoda jest sprawdzana pod względem typów dokładnie dla tego typu, co jest bezpieczne
-(ten sam mechanizm co `print-object`). Działa to także dla wartości takich jak `string`/`bool`/`char`/
-`symbol`/listy. Tylko dla liczb całkowitych, których szerokości nie da się poznać z wartości, jest to błąd, **gdy
-więcej niż jeden typ całkowity definiuje metodę o tej nazwie**.
-
-Nie wiadomo, do którego argumentu się odnosi, ale wiadomo, które metody może wywołać. Moduł sprawdzający zbiera
-każde `~/name/` z literałowego łańcucha sterującego i zapisuje, wśród typów argumentów w tym miejscu
-wywołania, te, które mają metodę o powyższym kształcie. Zatem **jeśli żaden z typów argumentów nie ma
-tej metody, jest to błąd czasu sprawdzania** (nie czasu działania), i działa to także w plikach wykonywalnych AOT.
+`~/name/` rozstrzyga `name` według tych samych reguł co wywołanie `(name arg colon at)` zapisane w tym
+miejscu i wypisuje łańcuch zwrócony przez wywołanie. Zużywa jeden argument. `colon` i `at` to wartości
+`bool` mówiące, czy dyrektywa ma `:` i `@`.
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- Rozstrzyganie nazwy jest takie samo jak przy wywołaniu (zob. [Referencja składni 3.10](../syntax.md#310-module--use--przestrzenie-nazw)). Jeśli
+  typ argumentu ma metodę `name`, wywoływana jest ona; w przeciwnym razie widoczna funkcja `name`. Funkcję z
+  modułu można wskazać ścieżką (`~/m::shout/`).
+- Wywołać można funkcję lub metodę napisaną w typelisp, która przyjmuje argument, `colon` i `at` bez zmian
+  i zwraca `string`. Funkcji wbudowanych wywołać nie można.
+- **To, co zostanie wywołane, ustala się podczas sprawdzania.** Sprawdzający znajduje każdy argument, który
+  może dotrzeć do tego `~/name/`, uwzględniając przeskoki `~*` i `~[`, i rozstrzyga nazwę dla typu każdego
+  z nich. Jeśli któregoś nie da się rozstrzygnąć, jest to błąd czasu sprawdzania; błędem jest też sytuacja,
+  w której możliwe argumenty wywołałyby dwie różne definicje. W czasie wykonania nie szuka się żadnych nazw,
+  więc w plikach wykonywalnych AOT działa to tak samo.
+- **Nie można go użyć wewnątrz `~{`, `~:{`, `~:@{` ani `~<...~:>`** (błąd czasu sprawdzania). Typ elementów
+  argumentu-listy to `Sexpr`, który nie pozwala ustalić, co wywołać. `~@{` przechodzi przez pozostałe
+  argumenty wywołania, których typy są znane, więc tam można go użyć.
+
+Różnica względem CL: CL szuka nazwy jako funkcji globalnej. Tu rozstrzyganie jest takie samo jak przy
+wywołaniu, więc metoda typu argumentu jest wybierana przed funkcją o tej samej nazwie.

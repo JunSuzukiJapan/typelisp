@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -172,13 +172,13 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
 - Fungsi generik menulis parameter tipenya dalam kurung sudut setelah namanya:
   `(defun name<T1,T2...> (params) Ret body...)` (sintaks kurung sudut yang sama seperti `Vector<T>`
   pada posisi tipe).
-- `defun`/`lambda`/`defmethod` menerima argumen variadik ketika `&rest (name Type)` ditulis di akhir:
+- `defun`/`lambda`/metode di `impl` menerima argumen variadik ketika `&rest (name Type)` ditulis di akhir:
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)` (di badan, `xs` selalu terikat sebagai
   `Option<Sexpr>`, daftar S-expression. Setiap argumen aktual pada pemanggilan diperiksa tipenya
   sebagai `Type2` satu per satu lalu dibungkus menjadi `Sexpr`). `defmacro` juga memiliki `&rest`
   sendiri, tetapi berbeda karena selalu `Sexpr` tak bertipe (`defun`/`lambda` menyatakan tipe
   elemen). Tipe fungsi juga dapat menggambarkan fungsi variadik, sebagai `(fn (T1... &rest Te) Ret)`.
-- **`&optional` / `&key`** (untuk `defun` dan `defmethod`; tidak untuk `lambda`/`labels`, karena alasan
+- **`&optional` / `&key`** (untuk `defun` dan metode di `impl`; tidak untuk `lambda`/`labels`, karena alasan
   di bawah, dan `defmacro` memiliki implementasi terpisah, juga di bawah). Urutannya seperti CL:
   `required &optional &rest &key`. Setiap parameter ditulis `(name Type)` atau
   `(name Type default-expr)`:
@@ -208,15 +208,18 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
   - Semuanya dapat dipakai pada fungsi generik, tetapi **parameter tipe yang hanya muncul pada
     argumen yang dihilangkan tidak dapat disimpulkan dan merupakan kesalahan** (tidak ada nilai untuk
     dicocokkan).
-  - **`defmethod` dapat memiliki tiga bagian yang sama** (baik untuk metode instans maupun fungsi
-    statis). Daftarkan `&optional`/`&rest`/`&key` setelah penerima:
+  - **Metode di `impl` dapat memiliki tiga bagian yang sama** (baik metode instans maupun metode
+    statis). Metode instans menuliskan `&optional`/`&rest`/`&key` setelah `self`:
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; static function
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; metode statis
     (point::origin :y 7)
     ```
 
@@ -225,7 +228,7 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
     `defun` untuk parameter tipenya sendiri: yang disematkan ketika argumen dihilangkan adalah
     ekspresi yang *sudah diperiksa*, sehingga tipenya tidak dapat dibiarkan sebagai variabel
     abstrak).
-  - **Semuanya tidak dapat dipakai pada metode trait.** `deftrait` tidak memiliki sintaksnya, dan
+  - **Semuanya tidak dapat dipakai pada metode trait.** Ini juga berlaku untuk metode yang ditulis di `impl` sebuah trait. `deftrait` tidak memiliki sintaksnya, dan
     jika hanya sisi `impl` yang dapat mendeklarasikan bagian-bagian itu, pemanggilan dengan penerima
     `:dyn` (mengisi argumen dari deklarasi trait) dan pemanggilan dengan penerima konkret (mengisinya
     dari deklarasi `impl`) akan menjadi hal yang berbeda. Arity slot vtable ditetapkan.
@@ -290,8 +293,7 @@ Tiga hal tidak dapat dideklarasikan:
 - **Apa pun selain `defun`.** `defmacro` memerlukan badan makro **sudah dijalankan** agar dapat
   berekspansi, yang tidak dapat digantikan oleh pendaftaran signature. Untuk tipe
   (`defstruct`/`defenum`/`deftrait`), mendaftarkannya adalah "apa yang diperlukan kode yang
-  mendaftarkan tipe itu sendiri", yang tidak berdiri sendiri seperti signature. `defmethod`
-  didaftarkan pada tipe yang memilikinya, sehingga mengikuti tipe.
+  mendaftarkan tipe itu sendiri", yang tidak berdiri sendiri seperti signature. Metode sebuah `impl` didaftarkan pada tipe yang memilikinya, sehingga mengikuti tipe.
 
 Padanan di CL adalah `(declaim (ftype (function (i32) bool) even2))`, tetapi itu datang bersama
 seluruh sistem deklarasi dan hanya bersifat **anjuran**. Di sini, dengan tipe statis, deklarasi
@@ -634,39 +636,75 @@ yang tertulis.
 Anotasi tipe wajib (tidak disimpulkan dari penginisialisasi). `defvar` dapat diubah; `defconstant`
 tidak dapat (`setf` adalah kesalahan).
 
-### 3.5 defmethod — definisi metode
+### 3.5 impl — metode sebuah tipe
 
 ```lisp
-; instance method: can be called as (m obj args...)
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; metode statis: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; metode instans: (name obj args...)
+  (pub name ...))                                      ; publik juga di luar modul tipe
 
-; static / associated function: can be called as (Type::name args...)
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; tipe generik
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-Pemanggil menyelesaikan metode dari tipe statis `obj` (dispatch tunggal, statis). Docstring dapat
-ditaruh pada posisi yang sama dan dengan aturan yang sama seperti pada `defun` (tepat setelah klausa
-`where`, di awal badan, hanya ketika bentuk badan menyusul). Hal yang sama berlaku untuk metode di
-dalam `impl`; docstring diambil dengan `(documentation Type::method)`.
+Memberi metode pada tipe yang didefinisikan dengan `defstruct` (3.6) atau `defenum` (3.7). Ini setara
+dengan impl inheren di Rust (`impl Point { ... }`).
 
-Parameter tipe milik metode sendiri ditulis di namanya dengan `<...>`, sama seperti `defun`.
-Parameter tipe dari tipe penerima (`T` di bawah) ditentukan oleh penerima; parameter milik metode
-(`U`) disimpulkan dari argumen setiap pemanggilan.
+- Sebuah item berbentuk `(nama (parameter...) TipeKembali badan...)`, sama dengan item di `impl` sebuah
+  trait (3.9).
+- Item yang parameter pertamanya `self` adalah **metode instans**, dipanggil sebagai `(name obj args...)`.
+  `self` tidak perlu tipe (`(self)` sama dengan `((self Self))`, dan `Self` adalah tipe sasaran).
+- Item tanpa `self` adalah **metode statis**, dipanggil sebagai `(Type::name args...)`. Metode statis yang
+  membuat nilai adalah konstruktor tipe itu. Namanya bebas; disarankan `new`.
+- **Visibilitas diatur per item.** Hanya item yang ditulis `(pub name ...)` yang dapat dipakai di luar
+  modul yang mendefinisikan tipe. Tanpa `pub`, item hanya dapat dipakai di dalam modul itu.
+- Sebuah tipe boleh memiliki berapa pun `impl`.
+- Pemanggil menentukan metode dari tipe statis `obj` (dispatch tunggal dan statis). Metode dicari **hanya
+  berdasarkan tipe argumen pertama** (3.10).
+- **Docstring** dapat ditempatkan di posisi yang sama dan dengan aturan yang sama seperti `defun` (di awal
+  badan, hanya jika diikuti bentuk badan). Ambil dengan `(documentation Type::name)`. Hal yang sama berlaku
+  untuk metode di `impl` sebuah trait.
+- Hanya tipe milik program sendiri yang dapat memilikinya. Tipe pustaka standar seperti `Vector`, `Option`
+  atau `int` tidak bisa (galatnya berbunyi `... is a standard library type`). Untuk menambah operasi pada
+  tipe standar, definisikan sebuah trait lalu tulis `impl`-nya untuk tipe itu.
+- Dalam `(impl X ...)`, jika yang mengikuti `X` adalah item (sebuah list), `where`, atau tidak ada apa-apa,
+  itulah impl inheren ini; jika berupa nama, itu adalah `impl` sebuah trait (`(impl Trait Type ...)`, 3.9).
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; metode statis
+(area (Point::new 2.0 3.0))   ; metode instans. => 6.0
+```
+
+Parameter tipe milik metode sendiri ditulis pada namanya dengan `<...>`, seperti `defun`. Parameter tipe
+dari tipe sasaran (`T` di bawah) ditetapkan oleh penerima; parameter milik metode (`U`) disimpulkan dari
+argumen tiap pemanggilan.
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Beri parameter tipe milik metode nama yang berbeda dari parameter tipe yang dideklarasikan tipe
-  penerima (`T` pada `(defstruct Box<T> ...)`) maupun dari nama yang ditulis di penerima.
-- Jika tipe penerima generik, tulis di penerima semua parameter tipenya sebagai variabel (`Box<T>`)
-  atau semuanya sebagai tipe konkret (`Box<int>`).
-- Metode di dalam `impl` tidak dapat menambah parameter tipe: signaturnya mengikuti yang
+- Beri parameter tipe milik metode nama yang berbeda dari parameter tipe tipe sasaran yang ditulis di
+  `impl` (`T` pada `(impl Box<T> ...)`).
+- `impl` sebuah tipe generik menuliskan semua parameter tipenya sebagai variabel (`Box<T>`), atau semuanya
+  sebagai tipe konkret (`Box<int>`; metodenya lalu hanya berlaku untuk nilai bertipe itu).
+- Metode di `impl` sebuah trait tidak dapat menambah parameter tipe: signature-nya mengikuti yang
   dideklarasikan trait.
 
 ### 3.6 defstruct — struct (tipe buatan pengguna)
@@ -683,67 +721,87 @@ Parameter tipe dari tipe penerima (`T` di bawah) ditentukan oleh penerima; param
   ...)
 ```
 
-- Setiap field adalah `(name type)` atau `(pub name type)` (visibilitas per field, bebas dari `pub`
-  milik struct itu sendiri). Satu ekspresi lagi di akhir menjadi **nilai bawaan** slot itu
-  (`(x i32 0)`); lihat daftar opsi di bawah.
-- Hal berikut dihasilkan secara otomatis:
-  - Konstruktor `Name::new` (argumen berurutan field)
-  - Getter `(field-name instance)`, dengan gula sintaks `instance::field-name`
-  - Setter `(set-field-name instance value)`, dengan gula sintaks
-    `(setf instance::field-name value)`
+- Setiap field adalah `(name type)` atau `(pub name type)` (visibilitas per field, terlepas dari `pub` struct
+  itu sendiri). Satu ekspresi lagi di akhir menjadi **nilai bawaan** slot itu (`(x i32 0)`).
+- Nilai dibuat dengan `make-instance` (di bawah). Tidak ada konstruktor yang menerima field sesuai urutan
+  yang dihasilkan. Jika ingin konstruktor, tulis di `impl` (3.5) sebagai metode statis.
+- Yang berikut dihasilkan otomatis:
+  - Pembaca `(field-name instance)`, dengan bentuk singkat `instance::field-name`
+  - Penulis `(set-field-name instance value)`, dengan bentuk singkat `(setf instance::field-name value)`
 - Untuk menjadikan struct itu sendiri `pub`, taruh `pub` di depan, seperti `(pub defstruct ...)`.
 - **Definisikan tipe sebelum menamainya.** Tipe field dapat berupa struct itu sendiri
   (`(next Option<node>)`), tetapi bukan tipe yang didefinisikan kemudian: tipe tidak memiliki
   deklarasi maju yang sepadan dengan `defsignature`. Nama yang belum didefinisikan menghasilkan
   kesalahan `unknown type` yang sama pada tipe argumen `defun` atau pada `the`. Jadi dua tipe yang
   saling merujuk tidak dapat ditulis.
-- **Variabel tipe hanyalah yang ditulis pada posisi pendeklarasian.** Untuk
-  `defun`/`defstruct`/`defenum`/`deftype`, `<T>` pada nama; untuk `defmethod`, tipe penerima
-  (`(self box<T>)`, atau `box<T>` untuk metode statis) dan `<U>` pada nama metode; untuk `impl`,
-  tipe sasaran dan `impl<T>`; untuk `deftrait`, `Self` dan tipe terkait pada `(type Item)`. Nama
-  yang pertama kali muncul di tempat lain mana pun (argumen, nilai kembalian, `the`/`lambda` di
-  badan) tidak menjadi variabel tipe; ia adalah `unknown type`.
+- **Variabel tipe hanyalah yang ditulis di posisi deklarasi.** Untuk `defun`/`defstruct`/`defenum`/`deftype`,
+  `<T>` pada nama; untuk `impl` inheren, tipe sasaran (`(impl box<T> ...)`) dan `<U>` pada nama tiap
+  metode; untuk `impl` sebuah trait, tipe sasaran dan `impl<T>`; untuk `deftrait`, `Self` dan tipe terkait
+  dari `(type Item)`. Nama yang muncul pertama kali di tempat lain (argumen, nilai kembali, `the`/`lambda`
+  di badan) tidak menjadi variabel tipe; ia adalah `unknown type`.
 - **Docstring**: literal string tepat setelah nama, sebelum field, menjadi docstring
   (`(defstruct Name "doc" (field Type)...)`, posisi yang sama seperti `defstruct` pada CL). Sebuah
   field selalu berbentuk `(name Type ...)` dan tidak pernah dapat berupa string polos, sehingga tidak
   ada ambiguitas. Ambil dengan `(documentation Name)`.
 
-#### Daftar opsi
-
-Menulis daftar `(Name option...)` pada posisi nama menentukan opsi (posisi yang sama seperti CL).
+#### make-instance — membuat nilai
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; keyword constructor
-                  (:constructor at (x &optional y))  ; BOA constructor
-                  (:copier copy-point))
-  (x i32 0)          ; a third element is that slot's default value
-  (y i32 0))
-
-(point::make-point :y 7)   ; x is 0
-(point::at 1)              ; y is 0
-(point::at 1 2)
-(copy-point p)             ; a shallow copy (the same as CL's copier)
+(make-instance 'Name :field1 value1 :field2 value2 ...)
 ```
 
-- **`:constructor`**: yang dihasilkan adalah **fungsi statis** pada tipe itu (`point::make-point`),
-  yang badannya selalu `(point::new ...)`. `new` tetap satu-satunya konstruktor struktural; yang
-  dibuat di sini adalah *cara memanggilnya*. Beberapa dapat dideklarasikan.
-  - `(:constructor name)` menerima setiap slot sebagai `&key`. **Setiap slot memerlukan nilai
-    bawaan** (bahasa ini tidak memiliki padanan "slot tak terikat" pada CL).
-  - `(:constructor name (slot...))` menerima slot yang disebutkan sebagai argumen posisional
-    (dalam urutan apa pun). Slot yang tidak disebutkan diisi nilai bawaannya, sehingga **memerlukan
-    nilai bawaan**. Setelah `&optional`, sisanya boleh dihilangkan (dan juga memerlukan nilai
-    bawaan).
-- **`:copier`**: menghasilkan **metode instans** yang mengembalikan nilai baru dengan nilai slot yang
-  sama. Dangkal, seperti copier pada CL.
+Nilai struct dibuat dengan `make-instance`, seperti di CLOS.
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; urutan bebas
+(make-instance 'point :x 1)           ; y bernilai bawaan 0
+```
+
+- Nama tipe ditulis sebagai simbol yang dikutip dengan `'`. Ia tidak memilih tipe saat berjalan; tipenya
+  ditetapkan saat pemeriksaan (seperti `'vector` pada `concatenate`).
+- Field diberikan sebagai pasangan `:nama nilai`. Nilai dievaluasi masing-masing sekali, sesuai urutan
+  penulisan.
+- Field yang tidak diberikan memakai nilai bawaannya. Tidak memberikan field yang tidak punya nilai bawaan
+  adalah galat tipe, begitu pula field yang tidak dikenal dan field yang sama diberikan dua kali.
+- Argumen tipe struct generik disimpulkan dari nilai dan tipe yang diharapkan. Dapat juga ditulis, seperti
+  `'Box<int>`.
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- Di luar modul yang mendefinisikan tipe, field yang bukan `pub` tidak dapat diberikan. Jika field seperti
+  itu tidak punya nilai bawaan, modul lain sama sekali tidak dapat membuat nilainya. Untuk mengizinkannya,
+  tulis konstruktor `pub` di `impl` (3.5).
+
+#### Daftar opsi
+
+Menulis list `(Name option...)` di posisi nama menentukan opsi (posisi yang sama dengan CL).
+
+```lisp
+(defstruct (point (:copier copy-point))
+  (x i32 0)          ; elemen ketiga adalah nilai bawaan slot itu
+  (y i32 0))
+
+(copy-point p)       ; salinan dangkal (sama dengan copier CL)
+```
+
+- **`:copier`**: menghasilkan **metode instans** yang mengembalikan nilai baru dengan nilai slot yang sama.
+  Dangkal, seperti copier CL.
 - **`:include Parent`**: menaruh slot induk di depan (nilai bawaan juga diwarisi; induk boleh berada
   di berkas lain). **Ia tidak membuat hubungan tipe**: anak bukan subtipe dari induk, metode induk
   tidak berlaku pada anak, dan tidak ada pengujian saat dijalankan yang menghubungkan keduanya.
   Bahasa ini tidak memiliki subtyping; antarmuka bersama adalah tugas `deftrait`. Hanya *daftar* slot
   yang digabungkan.
-- **Nilai bawaan slot hanya dibaca oleh konstruktor yang dihasilkan.** Menulis nilai bawaan tanpa
-  mendeklarasikan `:constructor` apa pun adalah kesalahan, karena tidak akan pernah dapat dipakai.
 - Opsi yang ditinggalkan, dan alasannya:
+  - **`:constructor`**: konstruktor ditulis di `impl` sebagai metode statis (3.5). Menulis opsi ini adalah
+    galat yang menunjukkan cara menulis ulangnya.
   - **`:conc-name`**: di CL ia memberi awalan pada pengakses untuk menghindari bentrok dalam satu
     ruang nama fungsi yang datar. Di sini, pengakses adalah metode yang di-dispatch berdasarkan tipe
     penerima, sehingga bentrok tidak terjadi, dan awalan akan merusak `instance::field` (yang hanya
@@ -781,7 +839,7 @@ Menulis daftar `(Name option...)` pada posisi nama menentukan opsi (posisi yang 
     ((Some v) v)
     ((None) 0))
   ```
-- Metode dan fungsi terkait ditambahkan kemudian dengan `defmethod`/`impl`, seperti pada `defstruct`.
+- Metode dan metode statis ditulis di `impl` (3.5), sama seperti `defstruct`.
 - Untuk menjadikan enum itu sendiri `pub`, tulis `(pub defenum ...)`.
 - **Docstring**: posisi dan aturan yang sama seperti `defstruct`, tepat setelah nama, sebelum varian
   (`(defenum Name "doc" (Variant ...)...)`). Ambil dengan `(documentation Name)`.
@@ -834,9 +892,9 @@ untuk tipe, bukan sebuah tipe**.
   (method-name (recv params...) RetType body...))
 ```
 
-Melalui `impl`, setiap metode didaftarkan sebagai `defmethod` biasa milik `TargetType`. Trait
-dirujuk sebagai batas trait pada klausa `where` fungsi generik (lihat
-[3.1 defun](#31-defun--definisi-fungsi)). Nama trait juga dapat berupa path `::` seperti
+Melalui `impl`, setiap metode didaftarkan sebagai metode `TargetType` dan dipanggil seperti metode `impl`
+inheren (3.5). Metode di `impl` sebuah trait selalu publik, tanpa `pub`. Trait dirujuk sebagai batas trait
+dalam klausa `where` fungsi generik (lihat [3.1 defun](#31-defun--definisi-fungsi)). Nama trait juga dapat berupa jalur `::` seperti
 `m::Trait`.
 
 **Daftar supertrait (wajib)**: selalu ditulis tepat setelah nama trait. Setiap elemen adalah nama
@@ -947,16 +1005,31 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
 
-- `module` membuat ruang nama. **Tipe bukan ruang nama** (seperti di Rust, tipe hanya memiliki fungsi
-  terkait dan metode).
-- Meng-`use` sebuah tipe membuat konstruktor dan metode statis publiknya tersedia dengan nama polos
-  juga (misalnya, setelah `(use option)`, `some`/`none` dapat dipanggil tanpa
+- `module` membuat ruang nama. **Tipe bukan ruang nama** (seperti di Rust, tipe hanya memiliki metode statis
+  dan metode).
+- Melakukan `use` pada sebuah tipe membuat varian enum dan metode statis publik tipe itu juga tersedia
+  dengan nama polos (misalnya, setelah `(use option)`, `some`/`none` dapat dipanggil tanpa
   `option::some`/`option::none`).
-- Urutan penyelesaian nama polos (pengenal tak terkualifikasi): bentuk khusus → konstruktor →
-  fungsi bebas (ruang nama saat ini → akar) → metode instans (diselesaikan berdasarkan tipe statis
-  argumen pertama). Ia tidak naik melalui modul induk di antaranya.
-- Path terkualifikasi `a::b` menyelesaikan `a` dengan urutan di atas; jika ia modul, penyelesaian
-  masuk ke dalamnya, dan jika ia tipe, segmen terakhir diselesaikan sebagai butir terkait.
+- **Sebuah nama hanya punya satu arti.** Fungsi, variabel global, dan makro berbagi satu ruang nama, dan
+  dalam satu modul tidak boleh ada dua di antaranya yang bernama sama (galat, mana pun yang didefinisikan
+  lebih dulu). Fungsi dan variabel tidak punya ruang nama terpisah seperti di CL. Untuk nama yang sama di
+  modul berbeda, yang lebih dekat yang terlihat.
+- Resolusi nama polos `n` (di posisi pemanggilan `(n a ...)`; nama bentuk khusus ditetapkan sebelumnya):
+  1. Lokal (parameter, dan pengikatan `let`, `labels`, `macrolet`, serta `symbol-macrolet`)
+  2. Jika nama modul `n` adalah makro, makro itu
+  3. Varian enum yang di-`use`, dan metode statis tipe yang di-`use`
+  4. Metode `n` dari tipe argumen pertama (metode dicari **hanya berdasarkan tipe argumen pertama**)
+  5. Jika nama modul `n` adalah fungsi atau variabel global, itulah (untuk variabel global, fungsi yang
+     menjadi nilainya dipanggil)
+
+  Nama modul dicari di modul saat ini, lalu di alias `use`, lalu di modul induk (sampai akar), dan
+  ditetapkan oleh yang pertama ditemukan. Aturan yang sama berlaku di tempat fungsi diteruskan sebagai
+  nilai; "tipe argumen pertama" pada langkah 4 lalu adalah tipe parameter pertama dari tipe fungsi yang
+  diharapkan di sana (menulis `norm` di tempat yang mengharapkan `(fn (pt) int)` memberi metode `norm`
+  milik `pt`). Jika tipe yang diharapkan belum ditetapkan, langkah 4 dilewati.
+- Jalur berkualifikasi `a::...::n` diselesaikan menjadi nama modul (makro, fungsi, atau variabel global)
+  dari modul yang dinamai `a::...`, atau menjadi varian atau metode statis sebuah tipe. `x::f` di posisi
+  nilai (ketika `x` menamai sebuah nilai) adalah pembacaan field.
 - **`use` memengaruhi bentuk-bentuk sesudahnya.** Berkas dibaca satu bentuk sekali waktu, dan
   dependensi diselesaikan tepat sebelum bentuk diperiksa, sehingga menulis `m::f` **di atas**
   `(use m)` menghasilkan `unresolved path`. Taruh `use` di awal berkas.
@@ -1027,16 +1100,18 @@ path turunan dan deklarasi eksplisit tidak pernah bertabrakan.
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-`pub` hanya dapat ditaruh pada sebelas jenis di atas (tidak pada `module`/`use`/`deftrait`/`impl`).
-Ia ditulis dengan kata kunci definisi tepat setelah `pub`, bukan dalam bentuk `(pub (defun ...))`
-yang membungkus definisi dengan tanda kurung. Satu `pub` memublikasikan tepat satu definisi
-(beberapa definisi tidak dapat ditandai sekaligus).
+`pub` hanya dapat dipasang pada sepuluh jenis di atas (tidak pada `module`/`use`/`deftrait`/`impl`). Ia ditulis
+dengan kata kunci definisi tepat setelah `pub`, bukan dalam bentuk `(pub (defun ...))` yang membungkus
+definisi dengan tanda kurung. Satu `pub` membuat tepat satu definisi menjadi publik (beberapa definisi tidak
+dapat ditandai sekaligus).
+
+Metode `impl` inheren dijadikan publik per item, dengan menulis `(pub name ...)` (3.5). Field struct ditulis
+`(pub x i32)` (3.6).
 
 ### 3.14 defmacro — definisi makro
 
@@ -1193,6 +1268,19 @@ Jenis pola:
   komputasi), dan implementasi `Eq` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
   dapat merujuk apa pun yang terlihat dari posisi cabang (argumen, pengikatan luar, variabel global)
 - `(Ctor sub-pattern...)` — pola konstruktor (`Some x` `None` `Cons a d` `Ok v` dan sebagainya)
+- `(Type :slot pattern... :slot...)` — pola struct. Tulis slot setelah nama tipe sebagai kata kunci. Jika
+  sebuah kata kunci diikuti pola, slot itu dicocokkan dengan pola tersebut; jika diikuti kata kunci lain
+  atau tidak ada apa-apa, slot diikat ke variabel bernama sama. Slot yang tidak ditulis tidak dicocokkan
+  (jadi pola tidak bergantung pada jumlah maupun urutan field):
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; mengikat x, dan mencocokkan y dengan (some b)
+      ((point :x a) a)))                 ; mengikat a
+  ```
 - `#{p0 p1 ...}` — pola tuple. Setiap elemen dicocokkan dengan subpolanya sendiri. Terhadap `Sexpr`,
   ia hanya cocok dengan data `#{..}` yang jumlah elemennya sama
 - `(:or p1 p2 ...)` — pola atau: cocok bila salah satu alternatif cocok. Badannya hanya satu, jadi
@@ -1253,9 +1341,9 @@ instans ADT buatan pengguna) dapat ditulis: sintaks untuk mendapatkan kembali, d
 `defstruct`/`defenum` (bab 3) yang dikonversi secara implisit menjadi `Sexpr`, seperti pada
 `(list p 42)`:
 
-- `(TypeName sub-pattern...)` — dekomposisi field dengan **nama tipe** di depan (hanya struct:
-  `defstruct` selalu memiliki satu varian, sehingga ditulis dengan nama tipe dan bukan nama varian).
-  Misalnya, untuk `(defstruct point (x f64) (y f64))`, `(point x y)`.
+- `(TypeName :slot pattern...)` — penguraian field dengan **nama tipe** di depan (khusus struct), ditulis
+  dalam bentuk yang sama dengan pola struct di atas. Misalnya, untuk `(defstruct point (x f64) (y f64))`,
+  `(point :x :y)`.
 - Nama varian polos `(VariantName sub-pattern...)` — mengekstrak varian dari `defenum`. Diselesaikan
   sebagai nama polos yang terlihat setelah `(use EnumType)` (aturan keterlihatan yang sama seperti
   saat memanggil konstruktor). Misalnya, untuk `(defenum color (red) (blue))`, `(red)` `(blue)`
@@ -1298,7 +1386,7 @@ sintaks tambahan. Himpunan tipe pengimplementasi terbuka, sehingga tidak pernah 
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; field decomposition with the type name first
+    ((circle :r) (* (* r r) 3))    ; field decomposition with the type name first
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1361,7 +1449,7 @@ meninggalkan fungsi, gunakan `return-from`, di bawah.
 (return-from name value)            ; leaves with a value
 ```
 
-**Setiap fungsi `defun` / `defmethod` / `labels` secara implisit membuat block dengan namanya
+**Setiap fungsi `defun` / metode di `impl` / `labels` secara implisit membuat block dengan namanya
 sendiri** (seperti di CL). Jadi `(return-from f v)` adalah return awal dari fungsi:
 
 ```lisp
@@ -1719,9 +1807,8 @@ Penyimpanan variabel global **dibagi** dengan kode terkompilasi (slot yang sama)
 `defvar` dijalankan sekali oleh inisialisasi terkompilasi, dan pemulihan melewatinya, sehingga
 penginisialisasi dengan efek samping tidak berjalan dua kali.
 
-`compile-file` juga membaca pustaka standar (dan menyematkan badannya ke dalam berkas eksekusi),
-sehingga fungsi pustaka standar seperti `abs`/`gcd`, serta `(impl print-object ...)` maupun
-`(defmethod print-object ...)`, dapat dipakai dengan AOT.
+`compile-file` juga membaca pustaka standar (dan menanamkan badannya ke dalam executable), sehingga fungsi
+pustaka standar seperti `abs`/`gcd`, serta `(impl print-object ...)`, dapat dipakai dengan AOT.
 
 `compile-file` juga menerima `use` (dan `import`/`shadowing-import`). `(use m)` pada berkas masuk
 menemukan berkas dengan aturan yang sama seperti `typl file.typl`, dan berkas dependensi yang
@@ -1952,9 +2039,10 @@ adalah kesalahan** (bukan menghentikan proses saat itu juga, tetapi panic sepert
   dari tempat berhenti pada evaluasi berikutnya). Di akhir evaluasi, ia menunggu setiap thread
   menyelesaikan langkahnya saat ini, sehingga jika fungsi C (`defffi`) terus memblokir di dalam
   `thread`, evaluasi tidak berakhir sampai ia kembali.
-- **Pencetakan pada worker**: metode `print-object` / `~/name/` yang diinterpretasi tidak dapat
-  berjalan di thread lain, sehingga mencetak nilai seperti itu di thread lain adalah panic yang
-  diperlakukan sama seperti `(panic ...)` (`(compile T::print-object)`, atau cetak dari task utama).
+- **Mencetak di worker**: metode `print-object` yang diinterpretasikan, serta fungsi dan metode
+  terinterpretasi yang dipanggil `~/name/`, tidak dapat berjalan di thread lain, sehingga mencetak nilai
+  seperti itu di thread lain adalah panic yang diperlakukan sama dengan `(panic ...)`
+  (`(compile T::print-object)`, atau cetak dari tugas utama).
 - **Data race tidak terdefinisi** (posisi yang sama seperti Go). Hasil beberapa task yang mengubah
   nilai yang sama tanpa melalui `Mutex<T>` / `Chan<T>` tidak dijamin.
 - **`task` mengembalikan nilai.** Tidak seperti pernyataan `go` pada Go, ia mengembalikan `Task<T>`,

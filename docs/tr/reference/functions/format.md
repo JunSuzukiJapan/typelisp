@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Biçim Yönergeleri
 
 `print`/`println`/`format`'ın denetim string'lerinde yazılan yönergeler. CL'nin `format` yönergelerinin
@@ -75,7 +75,7 @@ pretty-print yolu) hepsi `*print-pretty*` false iken hiçbir şey yapmaz. Varsay
 | `~<...~;...~>` | Hizalama (parçaları `~mincol` sütuna yayar. `:`/`@`=uçlarda dolgu) |
 | `~<...~;...~:>` | **Mantıksal blok** (`~:>` ile kapatılır; yukarıdaki hizalamadan farklı bir şeydir). İlk parça önek, son parça sonektir (ikisi de yalnızca sabit string'ler). `~@;` ayırıcısıyla önek bir **satır başına önek** olur. `~:<` önek/soneki varsayılan olarak `(`/`)` yapar. Bağımsız değişken bir listedir (`~@<` kalan bağımsız değişkenleri yerinde kullanır) |
 | `~*` | Bağımsız değişkenleri atlama (`~n*`=n ileri, `~:*`=geri, `~@*`=mutlak bir konuma) |
-| `~/name/` | Metot çağrısı (5. bölüm. `:`/`@` bayrakları metoda geçirilir. Parametre almaz) |
+| `~/name/` | Fonksiyon ya da metot çağrısı (5. bölüm; `:`/`@` bayrakları çağrılana geçer; parametre almaz) |
 
 Aşağıdaki CL yönergeleri desteklenmez (bunlar denetim zamanı hatalarıdır).
 
@@ -89,28 +89,36 @@ Aşağıdaki CL yönergeleri desteklenmez (bunlar denetim zamanı hatalarıdır)
 
 ## 5. `~/name/`
 
-**CL'den bir fark: ad, global bir fonksiyon olarak değil, bağımsız değişkenin kendi türünün bir metodu
-olarak aranır.** Metot `((self Self) (colon bool) (at bool)) → string` biçimindedir ve yönergenin
-`:`/`@`'si olduğu gibi geçirilir.
-
-CL'nin onu global fonksiyon olarak arama yöntemi bu dilde güvenli biçimde gerçekleştirilemez. Denetim
-string'i sabit olsa bile, bir liste bağımsız değişkeninin (`~{` içindeki) elemanlarının türü denetim
-zamanında bilinmez ve bir fonksiyonu yalnızca adıyla aramak, başka bir tür için tasarlanmış bir
-fonksiyonu çağırabilir. Değerin türüne göre seçmek, metodun tam olarak o tür için tür denetiminden
-geçmesi anlamına gelir; bu da güvenlidir (`print-object` ile aynı mekanizma). `string`/`bool`/`char`/
-`symbol`/listeler gibi değerler için de çalışır. Yalnızca genişliği değerden anlaşılamayan tamsayılar
-için, **birden fazla tamsayı türü o adda bir metot tanımladığında** hatadır.
-
-Hangi bağımsız değişkene uygulandığı bilinmez, ancak hangi metotları çağırabileceği bilinir. Denetleyici
-sabit denetim string'indeki her `~/name/`'i toplar ve o çağrı yerindeki bağımsız değişkenlerin türleri
-arasından, yukarıdaki biçimde bir metoda sahip olanları kaydeder. Bu yüzden **bağımsız değişken
-türlerinden hiçbiri metoda sahip değilse bu bir denetim zamanı hatasıdır** (çalışma zamanı hatası
-değil) ve AOT çalıştırılabilir dosyalarında da çalışır.
+`~/name/`, `name`'i o yere yazılmış bir `(name arg colon at)` çağrısıyla aynı kurallarla çözer ve çağrının
+döndürdüğü dizeyi çıktılar. Bir argüman tüketir. `colon` ve `at`, yönergede `:` ve `@` olup olmadığını
+söyleyen `bool` değerlerdir.
 
 ```lisp
 (defstruct point (x i32) (y i32))
-(defmethod brief ((self point) (colon bool) (at bool)) string
-  (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y)))
-(println "~a" (format false "~/brief/"  (point::new 3 4)))   ; => 3/4
-(println "~a" (format false "~:/brief/" (point::new 3 4)))   ; => <3,4>
+(impl point
+  (brief (self (colon bool) (at bool)) string
+    (if colon (format false "<~a,~a>" self::x self::y) (format false "~a/~a" self::x self::y))))
+(defun yen ((n int) (colon bool) (at bool)) string
+  (format false "~a yen" n))
+
+(println "~a" (format false "~/brief/"  (make-instance 'point :x 3 :y 4)))   ; => 3/4
+(println "~a" (format false "~:/brief/" (make-instance 'point :x 3 :y 4)))   ; => <3,4>
+(println "~a" (format false "~/yen/" 500))                                    ; => 500 yen
 ```
+
+- Ad çözümlemesi bir çağrınınkiyle aynıdır ([Sözdizimi Başvurusu 3.10](../syntax.md#310-module--use--ad-alanları)). Argümanın türünün `name`
+  metodu varsa o çağrılır; yoksa görünür `name` fonksiyonu. Bir modüldeki fonksiyon yoluyla belirtilebilir
+  (`~/m::shout/`).
+- Çağrılabilen, typelisp ile yazılmış, argümanı, `colon`'ı ve `at`'i olduğu gibi alıp bir `string`
+  döndüren bir fonksiyon ya da metottur. Yerleşik fonksiyonlar çağrılamaz.
+- **Neyin çağrılacağı denetim sırasında belirlenir.** Denetleyici, `~*` ve `~[` ile yapılan atlamaları da
+  hesaba katarak o `~/name/`'e ulaşabilecek her argümanı bulur ve adı her birinin türüne göre çözer.
+  Bunlardan biri çözülemezse denetim zamanı hatasıdır; ulaşabilecek argümanlar iki farklı tanımı çağıracaksa
+  da öyledir. Çalışma zamanında hiçbir ad aranmaz, bu yüzden AOT çalıştırılabilir dosyalarında da aynı
+  şekilde çalışır.
+- **`~{`, `~:{`, `~:@{` ve `~<...~:>` içinde kullanılamaz** (denetim zamanı hatası). Bir liste argümanının
+  öğelerinin türü `Sexpr`'dir ve neyin çağrılacağını belirleyemez. `~@{` çağrının kalan argümanlarını
+  dolaşır; türleri bilindiği için orada kullanılabilir.
+
+CL'den farkı: CL adı global bir fonksiyon olarak arar. Burada çözümleme bir çağrınınkiyle aynıdır, bu yüzden
+argümanın türünün metodu aynı adlı fonksiyondan önce seçilir.

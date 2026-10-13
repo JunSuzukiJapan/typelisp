@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Stream và tệp
 
 Các trait và phương thức của stream, các kiểu stream cụ thể, thao tác tệp và pathname. Socket mạng cũng là
@@ -174,7 +174,7 @@ stream tổ hợp.
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; mọi phương thức còn lại là mặc định
 
-(write-line (counter::new 0) "four")   ; write-line, terpri và fresh-line đều hoạt động
+(write-line (make-instance 'counter :n 0) "four")   ; write-line, terpri và fresh-line đều hoạt động
 ```
 
 Đầu vào hoạt động tương tự: bạn chỉ viết `read-item`. Ngay cả một kiểu không có đẩy lại của riêng nó cũng có

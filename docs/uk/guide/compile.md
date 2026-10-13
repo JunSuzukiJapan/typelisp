@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Компіляція
 
 Якщо ви нічого більше не робите, програми typelisp виконуються в інтерпретаторі. Крім того, є два
@@ -127,7 +127,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 Що може містити AOT-скомпільований файл
 
-- Верхній рівень вхідного файлу може містити лише визначення (`defun` `defmethod` `defvar`
+- Верхній рівень вхідного файлу може містити лише визначення (`defun` `defvar`
   `defparameter` `defconstant` `defmacro` `defsignature` `defstruct` `defenum` `deftype` `deftrait`
   `impl` `defffi`, `(unsafe (def-c-struct ...))`) та `use` `module`. Вирази верхнього рівня на кшталт
   `(println ...)` не дозволені, за винятком завершального `(main)`. Робіть роботу всередині `main`.

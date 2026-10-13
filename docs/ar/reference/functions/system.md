@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # الزمن والبيئة والتنفيذ
 
 دوال الزمن والاستعلام عن بيئة التشغيل وأدوات التنفيذ وتحليل النصوص وتقييمها والسلاسل التوثيقية والماكرو.
@@ -205,12 +205,12 @@ time-zone is supplied, daylight saving time information is ignored*).
 
 ## 7. السلاسل التوثيقية / `documentation`
 
-يمكن أن تحمل `defun`/`defmethod` (بما في ذلك داخل `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/
+يمكن أن تحمل `defun`/توابع `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/
 `defenum`/`deftype`/`deftrait` سلاسل توثيقية (docstrings). والموضع يتبع قاعدة CL لكل منها:
 
 | الصيغة | موضع السلسلة التوثيقية |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | في بداية الجسم (بعد النوع الراجع وبند `where`). وفقط عندما تتبعها صيغة جسم واحدة على الأقل؛ والسلسلة وحدها تبقى القيمة الراجعة |
+| `defun` / توابع `impl` / `defmacro` | في بداية الجسم (بعد النوع الراجع وبند `where`). وفقط عندما تتبعها صيغة جسم واحدة على الأقل؛ والسلسلة وحدها تبقى القيمة الراجعة |
 | `defvar` / `defconstant` | **بعد** القيمة الابتدائية: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **مباشرة بعد** الاسم، قبل الحقول/المتغايرات |
 | `deftype` | **مباشرة بعد** الاسم، قبل النوع: `(deftype meters "doc" i32)` |

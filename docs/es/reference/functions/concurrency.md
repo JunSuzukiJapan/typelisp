@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/functions/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Tareas y canales
 
 El vocabulario de las tareas (hilos ligeros). `task` y `thread`, que las inician, y `select`, que espera
@@ -85,7 +85,7 @@ panic.
 
 | Nombre | Uso | Tipo | Significado |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | Un grupo sin nada pendiente |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | Un grupo sin nada pendiente |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | Suma al contador. Hazlo antes de que empiece el trabajo |
 | `done` | `(done wg)` | `(WaitGroup)→()` | Ha terminado uno. Al llegar a 0, se libera a todos los que esperan |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | Espera hasta que llegue a 0. Desde cualquier número de tareas |
@@ -121,13 +121,13 @@ capacidad es 1, así que la tarea que envía puede terminar aunque nadie reciba.
 
 | Nombre | Uso | Tipo | Significado |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | Un mutex sin bloquear que contiene `v` |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | Un mutex sin bloquear que contiene `v` |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | Toma el cerrojo (espera) |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | Lo libera. Panic si no está bloqueado |
 | `with-lock` | `(with-lock (x m) body...)` | Macro | Bloquea, liga el contenido a `x`, ejecuta `body` y **siempre** libera |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

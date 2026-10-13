@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -126,12 +126,12 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
 - 인수 타입과 반환 타입은 필수이다.
 - 제네릭 함수는 이름 뒤 꺾쇠괄호에 타입 매개변수를 쓴다: `(defun name<T1,T2...> (params) Ret body...)`(타입 위치의
   `Vector<T>`와 같은 꺾쇠괄호 구문).
-- `defun`/`lambda`/`defmethod`는 끝에 `&rest (name Type)`을 쓰면 가변 인수를 받는다:
+- `defun`/`lambda`/`impl`의 메서드는 끝에 `&rest (name Type)`을 쓰면 가변 인수를 받는다:
   `(defun name ((a Type1) &rest (xs Type2)) Ret body...)`(본체에서 `xs`는 항상 S 식 리스트인 `Option<Sexpr>`로 묶인다. 호출
   지점의 각 실제 인수는 하나하나 `Type2`로 타입 검사된 뒤 `Sexpr`에 감싸진다).
   `defmacro`에도 자체 `&rest`가 있지만 항상 타입 없는 `Sexpr`라는 점이 다르다(`defun`/`lambda`는 요소 타입을 명시한다).
   함수 타입도 `(fn (T1... &rest Te) Ret)` 형태로 가변 인수 함수를 나타낼 수 있다.
-- **`&optional` / `&key`**(`defun`과 `defmethod`용. `lambda`/`labels`는 아래의 이유로 대상이 아니며, `defmacro`는 아래에
+- **`&optional` / `&key`**(`defun`과 `impl`의 메서드용. `lambda`/`labels`는 아래의 이유로 대상이 아니며, `defmacro`는 아래에
   설명하는 다른 구현). 순서는 CL의 `필수 &optional &rest &key`이다. 각 매개변수는 `(name Type)` 또는
   `(name Type 기본값-식)`으로 쓴다.
 
@@ -155,22 +155,25 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
     `&optional`이 받을지 레이블로 맞추는 `&key`가 받을지가 *값*에 따라 달라진다)을 그 조합을 금지해서 피한다.
     `&optional`과 `&rest`는 함께 쓸 수 있다.
   - 제네릭 함수에서도 쓸 수 있지만 **생략된 인수에만 나오는 타입 매개변수는 추론할 수 없어 오류이다**(맞춰 볼 값이 없다).
-  - **`defmethod`도 같은 세 구역을 쓸 수 있다**(인스턴스 메서드와 정적 함수 모두). 받는 쪽 뒤에 `&optional`/`&rest`/`&key`를
-    늘어놓는다.
+  - **`impl`의 메서드도 같은 세 구역을 쓸 수 있다**(인스턴스 메서드와 정적 메서드 모두). 인스턴스 메서드는
+    `self` 뒤에 `&optional`/`&rest`/`&key`를 늘어놓는다:
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; 정적 함수
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; 정적 메서드
     (point::origin :y 7)
     ```
 
     제네릭 타입의 메서드에서도 쓸 수 있지만 **기본값 식을 가진 매개변수의 타입에 소유자의 타입 매개변수를 쓸 수 없다**
     (`defun`이 자기 타입 매개변수에 대해 가지는 것과 같은 제한. 생략했을 때 들어가는 것은 *검사된* 식이므로 그 타입을
     추상적인 변수로 남겨 둘 수 없다).
-  - **트레이트 메서드에서는 쓸 수 없다.** `deftrait`에는 그 구문이 없으며, `impl` 쪽만 구역을 선언할 수 있다면 `:dyn`을
+  - **트레이트 메서드에서는 쓸 수 없다.**(트레이트의 `impl`에 쓰는 메서드도 마찬가지다.) `deftrait`에는 그 구문이 없으며, `impl` 쪽만 구역을 선언할 수 있다면 `:dyn`을
     받는 쪽으로 하는 호출(트레이트의 선언에서 인수를 채운다)과 구체 타입을 받는 쪽으로 하는 호출(`impl`의 선언에서
     채운다)이 서로 다른 것이 되어 버린다. vtable 슬롯의 인수 개수는 고정이다.
   - **`lambda` / `labels`에서는 쓸 수 없다**(`&rest`는 쓸 수 있다). 생략한 인수를 채우려면 호출하는 쪽이 **호출되는 쪽의
@@ -220,7 +223,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   그것을 둘 곳이 없다.
 - **`defun` 이외의 것.** `defmacro`는 전개하려면 매크로 본체가 **이미 실행되어** 있어야 하며, 시그니처 등록으로 대신할 수
   없다. 타입(`defstruct`/`defenum`/`deftrait`)의 등록은 "타입을 등록하는 코드 자체가 필요로 하는 것"이라 시그니처처럼
-  자기 완결적이지 않다. `defmethod`는 소유하는 타입에 등록되므로 타입을 따른다.
+  자기 완결적이지 않다. `impl`의 메서드는 소유하는 타입에 등록되므로 타입을 따른다.
 
 CL에서 대응하는 것은 `(declaim (ftype (function (i32) bool) even2))`이지만, 그것은 선언 체계 전체를 동반하며 **권고**에
 지나지 않는다. 여기서는 정적 타입이므로 선언이 검사된다.
@@ -507,35 +510,72 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 
 타입 주석은 필수이다(초기화 식에서 추론하지 않는다). `defvar`는 바꿀 수 있고 `defconstant`는 바꿀 수 없다(`setf`는 오류).
 
-### 3.5 defmethod — 메서드 정의
+### 3.5 impl — 타입의 메서드
 
 ```lisp
-; 인스턴스 메서드: (m obj args...)로 호출할 수 있다
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; 정적 메서드: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; 인스턴스 메서드: (name obj args...)
+  (pub name ...))                                      ; 타입을 정의한 모듈 밖에도 공개한다
 
-; 정적 / 연관 함수: (Type::name args...)로 호출할 수 있다
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; 제네릭 타입
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-호출하는 쪽은 `obj`의 정적 타입으로 메서드를 해석한다(단일, 정적 디스패치). `defun`과 같은 위치에 같은 규칙으로 문서
-문자열을 둘 수 있다(`where` 절 바로 뒤, 본체 맨 앞, 뒤에 본체 형식이 있을 때만). `impl` 안의 메서드도 같으며
-`(documentation Type::method)`로 꺼낸다.
+`defstruct`(3.6)·`defenum`(3.7)으로 정의한 타입에 메서드를 준다. Rust의 고유 impl
+(`impl Point { ... }`)에 해당한다.
 
-메서드 자신의 타입 매개변수는 `defun`과 같이 이름에 `<...>`로 쓴다. 받는 쪽 타입의 타입 매개변수(아래 예의 `T`)는 받는 쪽로부터 정해지고, 메서드 자신의 타입
-매개변수(`U`)는 호출의 인수로부터 추론된다.
+- 항목의 형태는 `(이름 (인수...) 반환 타입 본체...)`이며, 트레이트의 `impl`(3.9)의 항목과 같다.
+- 첫 번째 인수가 `self`인 항목은 **인스턴스 메서드**이며 `(name obj args...)` 형태로 호출한다.
+  `self`에는 타입을 쓰지 않아도 된다(`(self)`는 `((self Self))`와 같고, `Self`는 대상 타입이다).
+- `self`가 없는 항목은 **정적 메서드**이며 `(Type::name args...)` 형태로 호출한다. 값을 만드는 정적
+  메서드가 그 타입의 생성자가 된다. 이름은 자유이며 `new`를 권한다.
+- **공개는 항목마다** 정한다. `(pub name ...)`로 쓴 항목만 타입을 정의한 모듈 밖에서 쓸 수 있다.
+  붙이지 않으면 그 모듈 안에서만 쓸 수 있다.
+- 한 타입에 `impl`을 몇 개 써도 된다.
+- 호출하는 쪽은 `obj`의 정적 타입으로 메서드를 결정한다(단일·정적 디스패치). 메서드는 **첫 번째 인수의
+  타입만**으로 찾는다(3.10).
+- **문서 문자열**은 `defun`과 같은 위치·같은 규칙으로 둘 수 있다(본체의 앞, 뒤에 본체 폼이 이어질 때만).
+  `(documentation Type::name)`으로 꺼낸다. 트레이트의 `impl`의 메서드도 마찬가지다.
+- 쓸 수 있는 것은 자기 프로그램의 타입뿐이다. `Vector`·`Option`·`int` 같은 표준 라이브러리의 타입에는
+  쓸 수 없다(`... is a standard library type` 오류). 표준 타입에 연산을 더하고 싶으면 트레이트를
+  정의하고 그 타입에 `impl`한다.
+- `(impl X ...)`에서 `X` 다음이 항목(리스트)이나 `where`이거나 아무것도 없으면 이 고유 impl이고,
+  이름이면 트레이트의 `impl`(`(impl Trait Type ...)`, 3.9)이다.
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; 정적 메서드
+(area (Point::new 2.0 3.0))   ; 인스턴스 메서드. => 6.0
+```
+
+메서드 자신의 타입 매개변수는 `defun`처럼 이름에 `<...>`로 쓴다. 대상 타입의 타입 매개변수(아래 예의
+`T`)는 받는 쪽에서 정해지고, 메서드 자신의 타입 매개변수(`U`)는 호출의 인수에서 추론된다.
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- 메서드 자신의 타입 매개변수에는 받는 쪽 타입이 선언한 타입 매개변수(`(defstruct Box<T> ...)`의 `T`)와도, 받는 쪽에 쓴 이름과도 다른 이름을 붙인다.
-- 받는 쪽 타입이 제네릭이면 받는 쪽에는 그 타입 매개변수를 모두 변수로 쓰거나(`Box<T>`) 모두 구체적인 타입으로 쓴다(`Box<int>`).
-- `impl` 안의 메서드에는 타입 매개변수를 추가할 수 없다. 시그니처는 트레이트가 선언한 것을 따른다.
+- 메서드 자신의 타입 매개변수에는 `impl`에 쓴 대상 타입의 타입 매개변수(`(impl Box<T> ...)`의 `T`)와
+  다른 이름을 붙인다.
+- 제네릭 타입의 `impl`에는 타입 매개변수를 모두 변수로 쓰거나(`Box<T>`), 모두 구체적인 타입으로 쓴다
+  (`Box<int>`. 그 타입의 값에만 쓸 수 있는 메서드가 된다).
+- 트레이트의 `impl`의 메서드에는 타입 매개변수를 더할 수 없다. 시그니처는 트레이트가 선언한 것을 따른다.
 
 ### 3.6 defstruct — 구조체(사용자 정의 타입)
 
@@ -552,53 +592,76 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 ```
 
 - 각 필드는 `(name type)` 또는 `(pub name type)`이다(필드마다의 공개 여부. 구조체 자체의 `pub`과는 독립적이다). 끝에 식을
-  하나 더 쓰면 그 슬롯의 **기본값**이 된다(`(x i32 0)`). 아래의 옵션 목록 참고.
+  하나 더 쓰면 그 슬롯의 **기본값**이 된다(`(x i32 0)`).
+- 값은 `make-instance`로 만든다(아래). 필드 순서대로 인수를 받는 생성자는 만들어지지 않는다. 생성자가
+  필요하면 `impl`(3.5)에 정적 메서드로 쓴다.
 - 다음이 자동으로 만들어진다.
-  - 생성자 `Name::new`(필드 순서대로 인수)
   - 읽기 접근자 `(field-name instance)`, 그 표기 `instance::field-name`
   - 쓰기 접근자 `(set-field-name instance value)`, 그 표기 `(setf instance::field-name value)`
 - 구조체 자체를 `pub`으로 하려면 `(pub defstruct ...)`처럼 앞에 `pub`을 붙인다.
 - **타입은 이름이 나오기 전에 정의한다.** 필드의 타입으로 자기 자신을 쓸 수는 있지만(`(next Option<node>)`) 나중에 정의하는
   타입은 쓸 수 없다. 타입에는 `defsignature`에 해당하는 전방 선언이 없다. 아직 정의되지 않은 이름은 `defun`의 인수 타입이나
   `the`에서도 같은 `unknown type` 오류가 된다. 그래서 서로를 참조하는 두 타입은 쓸 수 없다.
-- **타입 변수는 선언 위치에 쓴 것뿐이다.** `defun`/`defstruct`/`defenum`/`deftype`은 이름의 `<T>`, `defmethod`는 받는 쪽의
-  타입(`(self box<T>)`, 정적 메서드는 `box<T>`)와 이름의 `<U>`, `impl`은 대상 타입과 `impl<T>`, `deftrait`는 `Self`와
-  `(type Item)`의 연관 타입이다. 그 밖의 곳(인수, 반환값, 본체의 `the`/`lambda`)에서 처음 나오는 이름은 타입 변수가 되지 않고
-  `unknown type`이 된다.
+- **타입 변수는 선언 위치에 쓴 것뿐이다.** `defun`/`defstruct`/`defenum`/`deftype`은 이름의 `<T>`, 고유
+  `impl`은 대상 타입(`(impl box<T> ...)`)과 각 메서드 이름의 `<U>`, 트레이트의 `impl`은 대상 타입과
+  `impl<T>`, `deftrait`는 `Self`와 `(type Item)`의 연관 타입이다. 그 밖의 곳(인수, 반환값, 본체의
+  `the`/`lambda`)에서 처음 나오는 이름은 타입 변수가 되지 않고 `unknown type`이 된다.
 - **문서 문자열**: 이름 바로 뒤, 필드 앞의 문자열 리터럴은 문서 문자열이 된다(`(defstruct Name "doc" (field Type)...)`. CL의
   `defstruct`와 같은 위치). 필드는 항상 `(name Type ...)` 형태이며 맨 문자열일 수 없으므로 모호함이 없다.
   `(documentation Name)`으로 꺼낸다.
 
-#### 옵션 목록
-
-이름 위치에 리스트 `(Name option...)`을 쓰면 옵션을 지정한다(CL과 같은 위치).
+#### make-instance — 값을 만든다
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; 키워드 생성자
-                  (:constructor at (x &optional y))  ; BOA 생성자
-                  (:copier copy-point))
+(make-instance 'Name :field1 value1 :field2 value2 ...)
+```
+
+구조체의 값은 CLOS와 같은 `make-instance`로 만든다.
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; 순서는 자유
+(make-instance 'point :x 1)           ; y는 기본값 0
+```
+
+- 타입 이름은 `'`로 인용한 심볼로 쓴다. 실행 시에 타입을 고르는 것이 아니라 검사 시에 정해진다
+  (`concatenate`의 `'vector`와 같다).
+- 필드는 `:이름 값`의 쌍으로 넘긴다. 값은 쓴 순서대로 한 번씩 평가한다.
+- 쓰지 않은 필드는 기본값으로 채워진다. 기본값이 없는 필드를 쓰지 않으면 타입 오류다. 모르는 필드나
+  같은 필드를 두 번 쓰는 것도 타입 오류다.
+- 제네릭 구조체의 타입 인수는 값과 기대 타입에서 추론한다. `'Box<int>`처럼 써도 된다.
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- 타입을 정의한 모듈 밖에서는 `pub`이 아닌 필드를 쓸 수 없다. 그런 필드에 기본값이 없으면 바깥 모듈은
+  값을 만들 수 없다. 바깥에서 만들게 하려면 `impl`에 `pub` 생성자를 쓴다(3.5).
+
+#### 옵션 목록
+
+이름 위치에 `(Name option...)` 리스트를 쓰면 옵션을 지정할 수 있다(CL과 같은 위치).
+
+```lisp
+(defstruct (point (:copier copy-point))
   (x i32 0)          ; 세 번째 요소는 그 슬롯의 기본값
   (y i32 0))
 
-(point::make-point :y 7)   ; x는 0
-(point::at 1)              ; y는 0
-(point::at 1 2)
-(copy-point p)             ; 얕은 복사(CL의 copier와 같다)
+(copy-point p)       ; 얕은 복사(CL의 copier와 같다)
 ```
 
-- **`:constructor`** — 만들어지는 것은 타입의 **정적 함수**(`point::make-point`)이며, 본체는 항상 `(point::new ...)`이다.
-  `new`는 여전히 구조상 유일한 생성자이며, 여기서 만드는 것은 그것을 *호출하는 방법*이다. 여러 개를 선언할 수 있다.
-  - `(:constructor name)` — 모든 슬롯을 `&key`로 받는다. **모든 슬롯에 기본값이 필요하다**(이 언어에는 CL의 "묶이지 않은
-    슬롯"에 해당하는 것이 없다).
-  - `(:constructor name (slot...))` — 나열한 슬롯을 위치 인수로 받는다(순서는 자유). 나열하지 않은 슬롯은 기본값으로
-    채워지므로 **기본값이 필요하다**. `&optional`을 끼우면 그 뒤는 생략할 수 있다(마찬가지로 기본값이 필요하다).
-- **`:copier`** — 슬롯 값이 같은 새 값을 반환하는 **인스턴스 메서드**를 만든다. CL의 copier처럼 얕은 복사이다.
+- **`:copier`** — 같은 슬롯 값을 가진 새 값을 반환하는 **인스턴스 메서드**를 만든다. CL의 copier처럼 얕다.
 - **`:include Parent`** — 부모의 슬롯 목록을 앞에 붙인다(기본값도 이어받는다. 부모는 다른 파일에 있어도 된다). **타입
   관계는 만들지 않는다.** 자식은 부모의 하위 타입이 아니고, 부모의 메서드는 자식에 적용되지 않으며, 둘을 잇는 실행 시
   검사도 없다. 이 언어에는 하위 타입이 없으며, 공통 인터페이스는 `deftrait`가 맡는다. 이어지는 것은 슬롯의 *목록*뿐이다.
-- **슬롯의 기본값은 만들어진 생성자만 읽는다.** `:constructor`를 하나도 선언하지 않고 기본값을 쓰면 쓰일 수 없으므로
-  오류이다.
 - 넣지 않은 옵션과 그 이유:
+  - **`:constructor`** — 생성자는 `impl`에 정적 메서드로 쓴다(3.5). 쓰면 어떻게 고쳐 쓰면 되는지를 알려
+    주는 오류가 된다.
   - **`:conc-name`** — CL에서는 하나의 평평한 함수 이름공간에서의 충돌을 피하려고 접근자에 접두사를 붙인다. 여기서는
     접근자가 받는 쪽 타입으로 디스패치되는 메서드이므로 충돌하지 않고, 접두사는 `instance::field`(슬롯 이름만 안다)를
     망가뜨린다.
@@ -632,7 +695,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
     ((Some v) v)
     ((None) 0))
   ```
-- 메서드와 연관 함수는 `defstruct`처럼 `defmethod`/`impl`로 나중에 더한다.
+- 메서드와 정적 메서드는 `defstruct`처럼 `impl`(3.5)에 쓴다.
 - 열거형 자체를 `pub`으로 하려면 `(pub defenum ...)`이라고 쓴다.
 - **문서 문자열**: `defstruct`와 같은 위치와 규칙. 이름 바로 뒤, 변형 앞(`(defenum Name "doc" (Variant ...)...)`).
   `(documentation Name)`으로 꺼낸다.
@@ -679,8 +742,10 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   (method-name (recv params...) RetType body...))
 ```
 
-`impl`을 거쳐 각 메서드는 `TargetType`의 보통의 `defmethod`로 등록된다. 제네릭 함수의 `where` 절에서 트레이트 경계로
-참조한다([3.1 defun](#31-defun--함수-정의) 참고). 트레이트 이름은 `m::Trait`처럼 `::` 경로로 쓸 수도 있다.
+`impl`을 거쳐 각 메서드는 `TargetType`의 메서드로 등록되며, 고유 `impl`(3.5)의 메서드와 같은 방식으로
+호출할 수 있다. 트레이트의 `impl`의 메서드는 `pub`을 쓰지 않아도 항상 공개된다. 트레이트는 제네릭
+함수의 `where` 절에서 트레이트 경계로 참조한다([3.1 defun](#31-defun--함수-정의) 참고). 트레이트 이름에는 `m::Trait` 같은
+`::` 경로도 쓸 수 있다.
 
 **상위 트레이트 목록(필수)**: 항상 트레이트 이름 바로 뒤에 쓴다. 요소는 맨 트레이트 이름, 또는 그 트레이트에 연관 타입이
 있으면 **모든 연관 타입을 고정한** `(Trait (Assoc Type))`이다.
@@ -770,12 +835,26 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (shadowing-import path...) ; 맨 이름이 이미 쓰이고 있음을 알고도 가져오는 use
 ```
 
-- `module`은 이름공간을 만든다. **타입은 이름공간이 아니다**(Rust처럼 타입은 연관 함수와 메서드만 가진다).
-- 타입을 `use`하면 그 생성자와 공개된 정적 메서드도 맨 이름으로 쓸 수 있게 된다(예: `(use option)` 뒤에는
-  `option::some`/`option::none`이라고 쓰지 않고 `some`/`none`을 호출할 수 있다).
-- 맨 이름(한정하지 않은 식별자)의 해석 순서: 특수 형식 → 생성자 → 자유 함수(현재 이름공간 → 루트) → 인스턴스 메서드(첫 번째
-  인수의 정적 타입으로 해석). 중간의 부모 모듈로 거슬러 올라가지 않는다.
-- 한정 경로 `a::b`는 `a`를 위의 순서로 해석하고, 모듈이면 안으로 들어가며, 타입이면 마지막 구간을 연관 항목으로 해석한다.
+- `module`은 이름공간을 만든다. **타입은 이름공간이 아니다**(Rust처럼 타입은 정적 메서드와 메서드를 가질
+  뿐이다).
+- `use`로 타입을 들여오면 열거형의 변형과 그 타입의 공개된 정적 메서드도 맨 이름으로 쓸 수 있다
+  (예: `(use option)` 뒤에는 `some`/`none`을 `option::some`/`option::none` 없이 호출할 수 있다).
+- **한 이름은 한 가지 뜻을 가진다**. 함수·전역 변수·매크로는 한 이름공간에 들어가며, 같은 모듈에서 그중
+  두 개에 같은 이름을 붙일 수 없다(어떤 순서로 정의해도 오류). CL처럼 함수와 변수의 이름공간이 나뉘어
+  있지 않다. 다른 모듈의 같은 이름이라면 가까운 쪽이 보인다.
+- 맨 이름 `n`의 해석(호출 `(n a ...)`의 위치. 특수 형식의 이름은 이보다 먼저 정해진다):
+  1. 지역(인수, `let`·`labels`·`macrolet`·`symbol-macrolet`의 바인딩)
+  2. 모듈의 이름 `n`이 매크로라면 그 매크로
+  3. `use`한 열거형의 변형, `use`한 타입의 정적 메서드
+  4. 첫 번째 인수의 타입의 메서드 `n`(메서드는 **첫 번째 인수의 타입만**으로 찾는다)
+  5. 모듈의 이름 `n`이 함수나 전역 변수라면 그것(전역 변수라면 그 값인 함수를 호출한다)
+
+  모듈의 이름은 지금의 모듈 → `use`의 별칭 → 부모 모듈(루트까지)의 순서로 찾고, 처음 찾은 것으로
+  정해진다. 함수를 값으로 넘기는 위치에서도 같은 규칙이며, 4의 "첫 번째 인수의 타입"은 그곳에서 기대되는
+  함수 타입의 첫 번째 인수의 타입이 된다(`(fn (pt) int)`가 기대되는 위치에 `norm`이라고 쓰면 `pt`의 메서드
+  `norm`). 기대되는 타입이 아직 정해지지 않았으면 4는 건너뛴다.
+- 한정 경로 `a::...::n`은 `a::...`가 가리키는 모듈의 이름(매크로·함수·전역 변수), 또는 타입의 변형·정적
+  메서드로 해석된다. 값 위치의 `x::f`(`x`가 값의 이름)는 필드 읽기다.
 - **`use`는 그 뒤의 형식에 효과가 있다.** 파일은 형식 하나씩 읽히고 의존 관계도 그 형식을 검사하기 직전에 해석되므로,
   `(use m)`보다 **위에** `m::f`를 쓰면 `unresolved path`가 된다. `use`는 파일 맨 앞에 둔다.
 - **`use`는 여러 경로를 받을 수 있다**(`(use a::f b::g)`). `import`는 같은 동작의 CL 호환 표기이다.
@@ -830,15 +909,16 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-`pub`을 붙일 수 있는 것은 위의 11가지뿐이다(`module`/`use`/`deftrait`/`impl`에는 붙일 수 없다). 정의 형식을 괄호로 감싸는
-`(pub (defun ...))` 형태가 아니라 `pub` 바로 뒤에 정의 키워드를 쓴다. `pub` 하나는 정확히 하나의 정의를 공개한다(여러
-정의를 한꺼번에 지정할 수 없다).
+`pub`을 붙일 수 있는 것은 위의 10종류뿐이다(`module`/`use`/`deftrait`/`impl`에는 붙일 수 없다).
+정의 형식을 괄호로 감싸는 `(pub (defun ...))` 형식이 아니라, `pub` 바로 뒤에 정의 키워드를 잇는다.
+하나의 `pub`이 공개할 수 있는 정의는 하나뿐이다(여러 정의를 한꺼번에 지정할 수 없다).
+
+고유 `impl`의 메서드는 항목마다 `(pub name ...)`로 쓴다(3.5). 구조체의 필드는 `(pub x i32)`로 쓴다(3.6).
 
 ### 3.14 defmacro — 매크로 정의
 
@@ -974,6 +1054,18 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   결과)을 비교하는 유일한 방법이며, 사용자 정의 `Eq` 구현이 그대로 비교 규칙이 된다. `expr`은 그 갈래 위치에서 보이는
   모든 것(인수, 바깥 바인딩, 전역 변수)을 참조할 수 있다
 - `(Ctor sub-pattern...)` — 생성자 패턴(`Some x` `None` `Cons a d` `Ok v` 등)
+- `(Type :slot pattern... :slot...)` — 구조체의 패턴. 타입 이름 뒤에 슬롯을 키워드로 쓴다. 키워드
+  다음이 패턴이면 그 슬롯을 그 패턴으로 대조하고, 다음이 키워드이거나 끝이면 슬롯을 같은 이름의 변수에
+  바인딩한다. 쓰지 않은 슬롯은 대조하지 않는다(필드의 수나 순서에 의존하지 않는다):
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; x에 바인딩하고, y는 (some b)로 대조한다
+      ((point :x a) a)))                 ; a에 바인딩한다
+  ```
 - `#{p0 p1 ...}` — 튜플 패턴. 요소마다 부분 패턴으로 대조한다. `Sexpr`에 대해서는 요소 수가 같은 `#{..}` 데이터에만 맞는다
 - `(:or p1 p2 ...)` — or 패턴. 선택지 중 하나라도 맞으면 맞는다. 본체가 하나뿐이므로 모든 선택지가 같은 이름의 변수를 같은 타입으로 묶어야 한다. 생성자
   패턴 안에도 쓸 수 있다(`(some (:or (circle r) (rect r _)))`)
@@ -1022,8 +1114,8 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 `Sexpr` 검사 대상에 대해서는 위의 내장 19개 변형 패턴에 더해 **다운캐스트 패턴**(사용자 정의 ADT의 인스턴스를 꺼낸다)을 쓸
 수 있다. `(list p 42)`처럼 `Sexpr`로 암묵 변환된 `defstruct`/`defenum`(3장)의 인스턴스를 `match`로 되찾는 구문이다.
 
-- `(TypeName sub-pattern...)` — **타입 이름**을 앞에 둔 필드 분해(구조체 전용. `defstruct`는 항상 변형이 하나이므로 변형
-  이름이 아니라 타입 이름으로 쓴다). 예: `(defstruct point (x f64) (y f64))`에 대해 `(point x y)`.
+- `(TypeName :slot pattern...)` — **타입 이름**을 앞에 두는 필드 분해(struct 전용). 위의 구조체의 패턴과
+  같은 형태로 쓴다. 예: `(defstruct point (x f64) (y f64))`에 대해 `(point :x :y)`.
 - 맨 변형 이름 `(VariantName sub-pattern...)` — `defenum`의 변형을 꺼낸다. `(use EnumType)` 뒤에 보이는 맨 이름으로 해석된다
   (생성자를 호출할 때와 같은 가시성 규칙). 예: `(defenum color (red) (blue))`에 대해 `(use color)` 뒤에 `(red)` `(blue)`.
   보이는 여러 열거형의 변형 이름이 겹치면 모호성 오류가 되므로 한정 형식 `(EnumType::VariantName ...)`도 쓸 수 있다(`use`가
@@ -1058,7 +1150,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; 타입 이름을 앞에 둔 필드 분해
+    ((circle :r) (* (* r r) 3))    ; 타입 이름을 앞에 둔 필드 분해
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1114,7 +1206,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (return-from name value)            ; 값을 가지고 빠져나간다
 ```
 
-**`defun` / `defmethod` / `labels`의 각 함수는 자기 이름의 block을 암묵적으로 세운다**(CL과 같다). 그래서
+**`defun` / `impl`의 메서드 / `labels`의 각 함수는 자기 이름의 block을 암묵적으로 세운다**(CL과 같다). 그래서
 `(return-from f v)`는 함수의 이른 반환이다.
 
 ```lisp
@@ -1424,8 +1516,8 @@ typl --image session.typld             # REPL도 마찬가지
 전역 변수의 저장소는 컴파일된 코드와 **공유된다**(같은 슬롯). `defvar`의 초기화 식은 컴파일된 초기화가 한 번 실행하고
 복원은 그것을 건너뛴다. 부작용이 있는 초기화 식이 두 번 실행되지 않도록 하기 위해서이다.
 
-`compile-file`은 표준 라이브러리도 읽으므로(그 본체를 실행 파일에 넣는다) `abs`/`gcd` 같은 표준 라이브러리 함수와
-`(impl print-object ...)`, `(defmethod print-object ...)`도 AOT에서 쓸 수 있다.
+`compile-file`은 표준 라이브러리도 읽으므로(그 본체를 실행 파일에 넣는다), `abs`/`gcd` 같은 표준 라이브러리의
+함수도, `(impl print-object ...)`도 AOT에서 쓸 수 있다.
 
 `compile-file`은 `use`(그리고 `import`/`shadowing-import`)도 받는다. 시작점 파일의 `(use m)`은 `typl file.typl`과 같은 규칙으로
 파일을 찾고, 찾은 의존 파일도 컴파일되어 실행 파일에 링크된다. `main.typl`이 `(use http)`로 `http.typl`을 읽는 구성도 그대로
@@ -1617,8 +1709,9 @@ OS를 기다린다.
 - **`typl`의 워커는 최상위 평가 한 번 동안만 산다.** REPL이 입력을 기다리는 동안과 최상위 형식 사이에서는 다른 스레드가
   태스크를 진행하지 않는다(남은 태스크는 다음 평가에서 이어서 실행된다). 평가가 끝날 때 각 스레드가 지금의 한 단계를 마치기를
   기다리므로, `thread` 안에서 계속 블로킹하는 C 함수(`defffi`)가 있으면 그것이 반환될 때까지 평가가 끝나지 않는다.
-- **워커에서의 출력**: 인터프리트되는 `print-object` / `~/name/` 메서드는 다른 스레드에서 실행할 수 없으므로 그런 값을 다른
-  스레드에서 출력하면 `(panic ...)`과 똑같이 다루어지는 panic이 된다(`(compile T::print-object)`, 또는 주 태스크에서 출력한다).
+- **워커에서의 인쇄**: 해석 실행되는 `print-object` 메서드나, `~/name/`이 호출하는 해석 실행의 함수·메서드는
+  다른 스레드에서 실행할 수 없으므로, 그런 값을 다른 스레드에서 인쇄하면 `(panic ...)`과 같은 취급의
+  panic이 된다(`(compile T::print-object)`를 하거나 메인 태스크에서 인쇄한다).
 - **데이터 경합은 정의되지 않는다**(Go와 같은 입장). `Mutex<T>`・`Chan<T>`를 거치지 않고 여러 태스크가 같은 값을 바꾼 결과는
   보장되지 않는다.
 - **`task`는 값을 반환한다.** Go의 `go` 문과 달리 `Task<T>`를 반환하며 `(wait t)`로 결과를 얻을 수 있다.

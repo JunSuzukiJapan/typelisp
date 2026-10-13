@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -123,7 +123,7 @@ $ typl --lib-dir ~/lib/typelisp build.typl
 
 ### 3.3 ما يجوز أن يحتويه ملف مترجم بـ AOT
 
-- لا يجوز أن يحتوي المستوى الأعلى من ملف الدخول إلا على تعريفات (`defun` و`defmethod` و`defvar`
+- لا يجوز أن يحتوي المستوى الأعلى من ملف الدخول إلا على تعريفات (`defun` و`defvar`
   و`defparameter` و`defconstant` و`defmacro` و`defsignature` و`defstruct` و`defenum` و`deftype`
   و`deftrait` و`impl` و`defffi` و`(unsafe (def-c-struct ...))`) وعلى `use` و`module`. أما تعبيرات
   المستوى الأعلى مثل `(println ...)` فغير مسموحة، عدا `(main)` الأخيرة. ضع العمل داخل `main`.

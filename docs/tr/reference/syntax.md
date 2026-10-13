@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 8c7bff99b2cddddb57736d0567933bc024a5a467 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -169,14 +169,14 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
 - Jenerik bir fonksiyon tür parametrelerini adından sonra açılı parantezler içinde yazar:
   `(defun name<T1,T2...> (params) Ret body...)` (tür konumlarındaki `Vector<T>` ile aynı açılı parantez
   sözdizimi).
-- `defun`/`lambda`/`defmethod`, sonda `&rest (name Type)` yazıldığında değişken sayılı bağımsız
+- `defun`/`lambda`/`impl` metotları, sonda `&rest (name Type)` yazıldığında değişken sayılı bağımsız
   değişkenleri kabul eder: `(defun name ((a Type1) &rest (xs Type2)) Ret body...)` (gövdede `xs` her
   zaman bir `Option<Sexpr>`, yani bir S-ifade listesi olarak bağlanır. Çağrıdaki her gerçek bağımsız
   değişken ayrı ayrı `Type2` olarak tür denetiminden geçer ve sonra bir `Sexpr` içine sarılır).
   `defmacro`'nun da kendi `&rest`'i vardır, ancak her zaman türsüz bir `Sexpr` olmasıyla farklıdır
   (`defun`/`lambda` eleman türünü belirtir). Bir fonksiyon türü de değişken sayılı bir fonksiyonu
   `(fn (T1... &rest Te) Ret)` olarak betimleyebilir.
-- **`&optional` / `&key`** (`defun` ve `defmethod` için; aşağıdaki nedenle `lambda`/`labels` için değil
+- **`&optional` / `&key`** (`defun` ve `impl` metotları için; aşağıdaki nedenle `lambda`/`labels` için değil
   ve `defmacro`'nun ayrı bir gerçekleştirimi vardır, o da aşağıda). Sıra CL'dekidir:
   `required &optional &rest &key`. Her parametre `(name Type)` ya da `(name Type default-expr)` olarak
   yazılır:
@@ -204,15 +204,18 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
     birleşimi yasaklayarak önler. `&optional` ve `&rest` birlikte kullanılabilir.
   - Jenerik fonksiyonlarda kullanılabilirler, ancak **yalnızca atlanan bağımsız değişkenlerde görünen bir
     tür parametresi çıkarılamaz ve hatadır** (eşleşecek bir değer yoktur).
-  - **`defmethod` aynı üç bölüme sahip olabilir** (hem örnek metotları hem statik fonksiyonlar için).
-    `&optional`/`&rest`/`&key`'i alıcıdan sonra listeleyin:
+  - **`impl` metotları aynı üç bölüme sahip olabilir** (hem örnek metotları hem statik metotlar). Bir
+    örnek metodu `&optional`/`&rest`/`&key`'i `self`'ten sonra sıralar:
 
     ```lisp
     (defstruct box (w i32) (h i32))
-    (defmethod grow ((self box) &key (dw i32 0) (dh i32 0)) i32 ...)
-    (grow (box::new 1 2) :dh 10)
+    (impl box
+      (grow (self &key (dw i32 0) (dh i32 0)) i32 ...))
+    (grow (make-instance 'box :w 1 :h 2) :dh 10)
 
-    (defmethod origin (point &key (x i32 0) (y i32 0)) point (point::new x y))   ; static function
+    (defstruct point (x i32) (y i32))
+    (impl point
+      (origin (&key (x i32 0) (y i32 0)) point (make-instance 'point :x x :y y)))   ; statik metot
     (point::origin :y 7)
     ```
 
@@ -220,7 +223,7 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
     türü sahibin tür parametrelerinden söz edemez** (`defun`'un kendi tür parametreleri için sahip olduğu
     aynı kısıtlama: bağımsız değişken atlandığında gömülen şey *denetlenmiş* bir ifadedir; bu yüzden
     türü soyut bir değişken olarak bırakılamaz).
-  - **Trait metotlarında kullanılamazlar.** `deftrait`'in bunlar için sözdizimi yoktur ve yalnızca
+  - **Trait metotlarında kullanılamazlar.** Bu, bir trait'in `impl`'inde yazılan metotlar için de geçerlidir. `deftrait`'in bunlar için sözdizimi yoktur ve yalnızca
     `impl` tarafı bölümleri bildirebilseydi, bir `:dyn` alıcılı çağrılar (bağımsız değişkenleri trait'in
     bildiriminden dolduran) ile somut alıcılı çağrılar (bunları `impl`'in bildiriminden dolduran) farklı
     şeyler olurdu. Bir vtable yuvasının arity'si sabittir.
@@ -279,8 +282,7 @@ Bildirimler **denetlenir**:
 - **`defun` dışındaki her şey.** Bir `defmacro`, açılabilmek için makro gövdesinin **zaten çalışmış**
   olmasını gerektirir; bir imza kaydetmek bunun yerini tutamaz. Türler (`defstruct`/`defenum`/
   `deftrait`) için onları kaydetmek, "türün kendisini kaydeden kodun ihtiyaç duyduğu şeydir"; bu, bir
-  imzanın olduğu gibi kendi kendine yeterli değildir. Bir `defmethod`, sahibi olan türe kaydedilir; bu
-  yüzden türü izler.
+  imzanın olduğu gibi kendi kendine yeterli değildir. Bir `impl`'in metotları, sahibi olan türe kaydedilir; bu yüzden türü izler.
 
 CL'deki karşılığı `(declaim (ftype (function (i32) bool) even2))`'dir, ancak bu bütün bir bildirim
 sistemiyle gelir ve yalnızca **danışmandır**. Burada, statik tür denetimiyle bildirimler denetlenir.
@@ -610,39 +612,75 @@ yüzden yeniden okumak değerleri yazılana geri getirir.
 Tür ek açıklaması zorunludur (başlatıcıdan çıkarılmaz). `defvar` değiştirilebilir; `defconstant`
 değiştirilemez (`setf` bir hatadır).
 
-### 3.5 defmethod — metot tanımları
+### 3.5 impl — bir türün metotları
 
 ```lisp
-; instance method: can be called as (m obj args...)
-(defmethod name ((self Type) (arg Type2) ...) RetType body...)
+(impl Type
+  (name ((arg Type2) ...) RetType body...)            ; statik metot: (Type::name args...)
+  (name (self (arg Type2) ...) RetType body...)       ; örnek metodu: (name obj args...)
+  (pub name ...))                                      ; türün modülü dışında da açık
 
-; static / associated function: can be called as (Type::name args...)
-(defmethod name (Type (arg Type2) ...) RetType body...)
+; genel bir tür
+(impl Type<T> (where (Trait T)...) item...)
 ```
 
-Çağıran, metodu `obj`'nin statik türünden çözümler (tekli, statik dağıtım). Bir docstring, `defun` ile
-aynı konumda ve aynı kurallarla konabilir (`where` yan tümcesinden hemen sonra, gövdenin başında,
-yalnızca gövde formları izlediğinde). Aynısı `impl` içindeki metotlar için de geçerlidir;
-`(documentation Type::method)` ile alınırlar.
+`defstruct` (3.6) veya `defenum` (3.7) ile tanımlanan bir türe metot verir. Rust'ın içsel impl'ine
+(`impl Point { ... }`) karşılık gelir.
 
-Bir metodun kendi tür parametreleri, `defun`'da olduğu gibi adında `<...>` ile yazılır. Alıcı
-türünün tür parametreleri (aşağıda `T`) alıcı tarafından belirlenir; metodun kendi parametreleri
-(`U`) her çağrının argümanlarından çıkarılır.
+- Bir öğenin biçimi `(ad (parametreler...) DönüşTürü gövde...)` olup bir trait'in `impl`'indeki (3.9)
+  öğeyle aynıdır.
+- İlk parametresi `self` olan öğe bir **örnek metodudur** ve `(name obj args...)` biçiminde çağrılır.
+  `self` için tür yazmak gerekmez (`(self)`, `((self Self))` ile aynıdır ve `Self` hedef türdür).
+- `self` içermeyen öğe bir **statik metottur** ve `(Type::name args...)` biçiminde çağrılır. Değer üreten
+  statik metot o türün yapıcısıdır. Ad serbesttir; `new` önerilir.
+- **Görünürlük öğe başınadır.** Türü tanımlayan modülün dışında yalnızca `(pub name ...)` diye yazılan
+  öğeler kullanılabilir. `pub` olmadan bir öğe yalnızca o modülün içinde kullanılabilir.
+- Bir türün istenen sayıda `impl`'i olabilir.
+- Çağıran taraf metodu `obj`'nin statik türünden çözer (tekli, statik gönderim). Bir metot **yalnızca ilk
+  argümanın türüne göre** aranır (3.10).
+- **Docstring'ler** `defun`'dakiyle aynı konuma ve aynı kurallarla konabilir (gövdenin başına, yalnızca
+  ardından gövde formları geliyorsa). `(documentation Type::name)` ile alınır. Bir trait'in `impl`'inin
+  metotları için de aynısı geçerlidir.
+- Yalnızca programın kendi türleri için yazılabilir. `Vector`, `Option` veya `int` gibi standart
+  kütüphane türleri için yazılamaz (hata `... is a standard library type` der). Standart bir türe işlem
+  eklemek için bir trait tanımlayıp o tür için `impl`'ini yazın.
+- `(impl X ...)` içinde `X`'ten sonra bir öğe (bir liste), bir `where` ya da hiçbir şey geliyorsa bu
+  içsel impl'dir; bir ad geliyorsa bir trait'in `impl`'idir (`(impl Trait Type ...)`, 3.9).
+
+```lisp
+(defstruct Point (pub x f64) (pub y f64))
+
+(impl Point
+  (pub new ((x f64) (y f64)) Point
+    (make-instance 'Point :x x :y y))
+  (pub origin () Point
+    (make-instance 'Point :x 0.0 :y 0.0))
+  (pub area (self) f64
+    (* self::x self::y)))
+
+(Point::new 1.0 2.0)          ; statik metot
+(area (Point::new 2.0 3.0))   ; örnek metodu. => 6.0
+```
+
+Bir metodun kendi tür parametreleri, `defun`'daki gibi adına `<...>` ile yazılır. Hedef türün tür
+parametreleri (aşağıdaki `T`) alıcı tarafından belirlenir; metodun kendi parametreleri (`U`) her
+çağrının argümanlarından çıkarılır.
 
 ```lisp
 (defstruct Box<T> (v T))
 
-(defmethod fmap<U> ((self Box<T>) (f (fn (T) U))) Box<U>
-  (Box::new (f self::v)))
+(impl Box<T>
+  (fmap<U> (self (f (fn (T) U))) Box<U>
+    (make-instance 'Box :v (f self::v))))
 
-(fmap (Box::new 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
+(fmap (make-instance 'Box :v 3) (lambda ((x int)) string (format false "~a" x)))   ; Box<string>
 ```
 
-- Metodun kendi tür parametrelerine, alıcı türünün bildirdiği tür parametrelerinden
-  (`(defstruct Box<T> ...)` içindeki `T`) ve alıcıda yazılan adlardan farklı adlar verin.
-- Alıcı türü genelse, alıcıda onun tüm tür parametrelerini ya değişken olarak (`Box<T>`) ya da
-  hepsini somut tür olarak (`Box<int>`) yazın.
-- `impl` içindeki bir metoda tür parametresi eklenemez: imzası, trait'in bildirdiği imzayı izler.
+- Metodun kendi tür parametrelerine, `impl`'de yazılan hedef türün tür parametrelerinden
+  (`(impl Box<T> ...)`'in `T`'si) farklı adlar verin.
+- Genel bir türün `impl`'i tüm tür parametrelerini değişken olarak (`Box<T>`) ya da tümünü somut tür
+  olarak (`Box<int>`; bu durumda metotlar yalnızca o türün değerlerinde çalışır) yazar.
+- Bir trait'in `impl`'indeki metot tür parametresi ekleyemez: imzası trait'in bildirdiğini izler.
 
 ### 3.6 defstruct — struct'lar (kullanıcı tanımlı türler)
 
@@ -658,63 +696,84 @@ türünün tür parametreleri (aşağıda `T`) alıcı tarafından belirlenir; m
   ...)
 ```
 
-- Her alan `(name type)` ya da `(pub name type)`'dır (alan başına görünürlük, struct'ın kendi `pub`'ından
-  bağımsızdır). Sondaki bir ifade daha, slot'un **varsayılan değeri** olur (`(x i32 0)`); aşağıdaki seçenek
-  listesine bakın.
-- Aşağıdakiler otomatik olarak üretilir:
-  - Yapıcı `Name::new` (bağımsız değişkenler alan sırasıyla)
-  - `instance::field-name` şekeriyle birlikte `(field-name instance)` okuyucuları
-  - `(setf instance::field-name value)` şekeriyle birlikte `(set-field-name instance value)` yazıcıları
+- Her alan `(name type)` veya `(pub name type)` biçimindedir (alan başına görünürlük; yapının kendi `pub`'ından
+  bağımsız). Sona bir ifade daha yazılırsa o yuvanın **varsayılan değeri** olur (`(x i32 0)`).
+- Değerler `make-instance` ile oluşturulur (aşağıda). Alanları sırayla alan bir yapıcı üretilmez. Bir
+  yapıcı istiyorsanız, onu `impl`'e (3.5) statik metot olarak yazın.
+- Şunlar otomatik olarak üretilir:
+  - Okuyucular `(field-name instance)`, kısa yazımı `instance::field-name`
+  - Yazıcılar `(set-field-name instance value)`, kısa yazımı `(setf instance::field-name value)`
 - Struct'ın kendisini `pub` yapmak için `(pub defstruct ...)` gibi önüne `pub` koyun.
 - **Bir türü adlandırmadan önce tanımlayın.** Bir alanın türü struct'ın kendisi olabilir
   (`(next Option<node>)`), ancak sonradan tanımlanan bir tür olamaz: türlerin `defsignature`'a karşılık
   gelen bir ileri bildirimi yoktur. Henüz tanımlanmamış bir ad, bir `defun` bağımsız değişken türünde ya da
   `the` içinde aynı `unknown type` hatasını verir. Bu yüzden birbirine başvuran iki tür yazılamaz.
-- **Tür değişkenleri yalnızca bildirim konumlarında yazılanlardır.**
-  `defun`/`defstruct`/`defenum`/`deftype` için adın `<T>`'si; `defmethod` için alıcının türü
-  (`(self box<T>)` ya da statik bir metot için `box<T>`) ve metot adındaki `<U>`; `impl` için hedef
-  tür ve `impl<T>`; `deftrait` için `Self` ve `(type Item)`'ın ilişkili türleri. Başka herhangi bir
-  yerde (bağımsız değişkenler, dönüş değeri, gövdedeki `the`/`lambda`) ilk kez görünen bir ad tür
-  değişkeni olmaz; `unknown type`'tır.
+- **Tür değişkenleri yalnızca bildirim konumlarında yazılanlardır.** `defun`/`defstruct`/`defenum`/`deftype`
+  için adın `<T>`'si; içsel bir `impl` için hedef tür (`(impl box<T> ...)`) ve her metodun adındaki `<U>`;
+  bir trait'in `impl`'i için hedef tür ve `impl<T>`; `deftrait` için `Self` ve `(type Item)`'ın ilişkili
+  türleri. Başka bir yerde (argümanlar, dönüş değeri, gövdedeki `the`/`lambda`) ilk kez görünen bir ad
+  tür değişkeni olmaz; `unknown type` olur.
 - **Docstring'ler**: adın hemen ardından, alanlardan önce gelen bir string sabiti docstring olur
   (`(defstruct Name "doc" (field Type)...)`, CL'nin `defstruct`'ıyla aynı konum). Bir alan her zaman
   `(name Type ...)` biçimindedir ve asla çıplak bir string olamaz; bu yüzden belirsizlik yoktur.
   `(documentation Name)` ile alın.
 
-#### Seçenek listesi
-
-Ad konumuna bir liste `(Name option...)` yazmak seçenekleri belirtir (CL ile aynı konum).
+#### make-instance — değer oluşturmak
 
 ```lisp
-(defstruct (point (:constructor make-point)          ; keyword constructor
-                  (:constructor at (x &optional y))  ; BOA constructor
-                  (:copier copy-point))
-  (x i32 0)          ; a third element is that slot's default value
-  (y i32 0))
-
-(point::make-point :y 7)   ; x is 0
-(point::at 1)              ; y is 0
-(point::at 1 2)
-(copy-point p)             ; a shallow copy (the same as CL's copier)
+(make-instance 'Name :field1 value1 :field2 value2 ...)
 ```
 
-- **`:constructor`**: üretilen şey, türün bir **statik fonksiyonudur** (`point::make-point`) ve gövdesi
-  her zaman `(point::new ...)`'dir. `new`, tek yapısal yapıcı olarak kalır; burada yapılan şey onu
-  çağırmanın bir *yoludur*. Birkaç tane bildirilebilir.
-  - `(:constructor name)` her slot'u `&key` olarak alır. **Her slot'un bir varsayılanı gerekir** (bu dilde
-    CL'nin "bağlanmamış slot"una karşılık gelen bir şey yoktur).
-  - `(:constructor name (slot...))` adı verilen slot'ları konumsal bağımsız değişkenler olarak alır (her
-    sırada). Adı verilmeyen slot'lar varsayılanlarıyla doldurulur; bu yüzden **varsayılanları gerekir**.
-    `&optional`'dan sonra geri kalanlar atlanabilir (ve aynı şekilde varsayılan gerektirir).
-- **`:copier`**: aynı slot değerlerine sahip yeni bir değer döndüren bir **örnek metodu** üretir. CL'nin
-  kopyalayıcısı gibi sığdır.
+Bir yapı değeri, CLOS'taki gibi `make-instance` ile oluşturulur.
+
+```lisp
+(defstruct point (pub x i32) (pub y i32 0))
+
+(make-instance 'point :x 1 :y 2)
+(make-instance 'point :y 2 :x 1)      ; herhangi bir sırayla
+(make-instance 'point :x 1)           ; y varsayılan değeri 0'ı alır
+```
+
+- Tür adı `'` ile alıntılanmış bir sembol olarak yazılır. Çalışma zamanında bir tür seçmez; denetim
+  sırasında belirlenir (`concatenate`'in `'vector`'ü gibi).
+- Alanlar `:ad değer` çiftleri olarak verilir. Değerler yazıldıkları sırayla birer kez değerlendirilir.
+- Verilmeyen bir alan varsayılan değerini alır. Varsayılan değeri olmayan bir alanı vermemek bir tür
+  hatasıdır; bilinmeyen bir alan ve aynı alanın iki kez verilmesi de öyledir.
+- Genel bir yapının tür argümanları değerlerden ve beklenen türden çıkarılır. `'Box<int>`'teki gibi
+  yazılabilirler de.
+
+  ```lisp
+  (defstruct Box<T> (v T))
+  (make-instance 'Box :v 1)                    ; Box<int>
+  (the Box<f64> (make-instance 'Box :v 1.5))   ; Box<f64>
+  (make-instance 'Box<int> :v 7)
+  ```
+
+- Türü tanımlayan modülün dışında `pub` olmayan alanlar verilemez. Böyle bir alanın varsayılan değeri
+  yoksa diğer modüller değeri hiç oluşturamaz. Onlara izin vermek için `impl`'e `pub` bir yapıcı yazın
+  (3.5).
+
+#### Seçenek listesi
+
+Ad konumuna bir `(Name option...)` listesi yazmak seçenekleri belirtir (CL ile aynı konum).
+
+```lisp
+(defstruct (point (:copier copy-point))
+  (x i32 0)          ; üçüncü öğe o yuvanın varsayılan değeridir
+  (y i32 0))
+
+(copy-point p)       ; sığ bir kopya (CL'nin copier'ı gibi)
+```
+
+- **`:copier`**: aynı yuva değerlerine sahip yeni bir değer döndüren bir **örnek metodu** üretir. CL'nin
+  copier'ı gibi sığdır.
 - **`:include Parent`**: ebeveynin slot'larını başa ekler (varsayılanlar da miras alınır; ebeveyn başka bir
   dosyada olabilir). **Hiçbir tür ilişkisi yaratmaz**: çocuk ebeveynin bir alt türü değildir, ebeveynin
   metotları çocuğa uygulanmaz ve ikisini bağlayan bir çalışma zamanı sınaması yoktur. Bu dilde alt
   tipleme yoktur; ortak arayüzler `deftrait`'in işidir. Yalnızca slot'ların *listesi* birleştirilir.
-- **Slot varsayılanları yalnızca üretilen yapıcılar tarafından okunur.** Hiçbir `:constructor`
-  bildirmeden bir varsayılan yazmak hatadır; çünkü asla kullanılamazdı.
 - Dışarıda bırakılan seçenekler ve nedenleri:
+  - **`:constructor`**: yapıcı `impl`'e statik metot olarak yazılır (3.5). Bu seçeneği yazmak, nasıl
+    yeniden yazılacağını gösteren bir hatadır.
   - **`:conc-name`**: CL'de tek bir düz fonksiyon ad alanındaki çakışmaları önlemek için erişimcilere
     önek koyar. Burada erişimciler alıcının türüne göre dağıtılan metotlardır; bu yüzden çakışma olmaz ve
     bir önek `instance::field`'ı (yalnızca slot adını bilen) bozardı.
@@ -750,7 +809,7 @@ Ad konumuna bir liste `(Name option...)` yazmak seçenekleri belirtir (CL ile ay
     ((Some v) v)
     ((None) 0))
   ```
-- Metotlar ve ilişkili fonksiyonlar, `defstruct`'ta olduğu gibi, sonradan `defmethod`/`impl` ile eklenir.
+- Metotlar ve statik metotlar `defstruct`'taki gibi `impl`'e (3.5) yazılır.
 - Enum'un kendisini `pub` yapmak için `(pub defenum ...)` yazın.
 - **Docstring'ler**: `defstruct` ile aynı konum ve kurallar, adın hemen ardından, varyantlardan önce
   (`(defenum Name "doc" (Variant ...)...)`). `(documentation Name)` ile alın.
@@ -800,10 +859,10 @@ değil**.
   (method-name (recv params...) RetType body...))
 ```
 
-`impl` aracılığıyla her metot, `TargetType`'ın sıradan bir `defmethod`'u olarak kaydedilir. Trait'lere,
-jenerik fonksiyonların `where` yan tümcelerinde trait sınırları olarak başvurulur
-([3.1 defun](#31-defun--fonksiyon-tanımları)'a bakın). Bir trait adı `m::Trait` gibi bir `::` yolu da
-olabilir.
+`impl` aracılığıyla her metot `TargetType`'ın bir metodu olarak kaydedilir ve içsel bir `impl`'in (3.5)
+metodu gibi çağrılır. Bir trait'in `impl`'inin metotları `pub` olmadan da her zaman açıktır. Trait'lere
+genel fonksiyonların `where` yan tümcelerinde trait sınırı olarak başvurulur (bkz. [3.1 defun](#31-defun--fonksiyon-tanımları)). Bir trait adı
+`m::Trait` gibi bir `::` yolu da olabilir.
 
 **Üst trait listesi (zorunlu)**: her zaman trait adının hemen ardından yazılır. Her eleman çıplak bir
 trait adıdır ya da o trait'in ilişkili türleri varsa, **tüm ilişkili türleri sabitlenmiş** olarak
@@ -908,15 +967,31 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 (shadowing-import path...) ; a use that knowingly takes a bare name already in use
 ```
 
-- `module` bir ad alanı oluşturur. **Türler ad alanı değildir** (Rust'taki gibi bir türün yalnızca ilişkili
-  fonksiyonları ve metotları vardır).
-- Bir türü `use` etmek, onun yapıcılarını ve genel statik metotlarını da çıplak adla kullanılabilir kılar
-  (örneğin `(use option)`'dan sonra `some`/`none`, `option::some`/`option::none` olmadan çağrılabilir).
-- Çıplak adların (niteliksiz tanımlayıcılar) çözümleme sırası: özel formlar → yapıcılar → serbest
-  fonksiyonlar (geçerli ad alanı → kök) → örnek metotları (ilk bağımsız değişkenin statik türüyle
-  çözümlenir). Aradaki ebeveyn modüller üzerinden yukarı çıkmaz.
-- Nitelikli bir yol `a::b`, `a`'yı yukarıdaki sırayla çözümler; bir modülse içine girer, bir türse son
-  bölüm ilişkili bir öğe olarak çözümlenir.
+- `module` bir ad alanı oluşturur. **Türler ad alanı değildir** (Rust'taki gibi bir türün yalnızca statik
+  metotları ve metotları vardır).
+- Bir türü `use` etmek, bir enum'un varyantlarını ve türün açık statik metotlarını da çıplak adla
+  kullanılabilir kılar (örneğin `(use option)`'dan sonra `some`/`none`, `option::some`/`option::none`
+  yazılmadan çağrılabilir).
+- **Bir adın tek bir anlamı vardır.** Fonksiyonlar, global değişkenler ve makrolar tek bir ad alanını
+  paylaşır ve bir modül içinde bunlardan ikisi aynı adı taşıyamaz (hangisi önce tanımlanırsa tanımlansın
+  hatadır). CL'deki gibi fonksiyon ve değişken için ayrı ad alanları yoktur. Farklı modüllerde aynı ad
+  varsa yakın olan görünür.
+- Çıplak bir `n` adının çözülmesi (`(n a ...)` çağrı konumunda; özel form adları bundan önce belirlenir):
+  1. Yereller (parametreler ve `let`, `labels`, `macrolet`, `symbol-macrolet` bağlamaları)
+  2. `n` modül adı bir makroysa, o makro
+  3. `use` edilen bir enum'un varyantları ve `use` edilen bir türün statik metotları
+  4. İlk argümanın türünün `n` metodu (metotlar **yalnızca ilk argümanın türüne göre** aranır)
+  5. `n` modül adı bir fonksiyon veya global değişkense, o (global değişkende değeri olan fonksiyon
+     çağrılır)
+
+  Bir modül adı geçerli modülde, sonra `use` takma adlarında, sonra üst modüllerde (köke kadar) aranır ve
+  ilk bulunanla belirlenir. Bir fonksiyonun değer olarak geçirildiği yerde de aynı kural geçerlidir;
+  4. adımdaki "ilk argümanın türü" o zaman orada beklenen fonksiyon türünün ilk parametresinin türüdür
+  (`(fn (pt) int)` beklenen yere `norm` yazmak `pt`'nin `norm` metodunu verir). Beklenen tür henüz
+  belirlenmediyse 4. adım atlanır.
+- Nitelikli bir `a::...::n` yolu, `a::...`'nın adlandırdığı modülün bir modül adına (makro, fonksiyon
+  veya global değişken) ya da bir türün varyantına veya statik metoduna çözülür. Değer konumundaki `x::f`
+  (`x` bir değerin adıyken) bir alan okumasıdır.
 - **`use`, kendisinden sonraki formları etkiler.** Bir dosya her seferinde bir form okunur ve bağımlılıklar
   formun denetlenmesinden hemen önce çözümlenir; bu yüzden `m::f`'yi `(use m)`'in **üstüne** yazmak
   `unresolved path` verir. `use`'u dosyanın başına koyun.
@@ -982,16 +1057,17 @@ bu yüzden türetilen yol ile açık bir bildirim asla çakışmaz.
 (pub defparameter ...)
 (pub defconstant ...)
 (pub defmacro ...)
-(pub defmethod ...)
 (pub defstruct ...)
 (pub defenum ...)
 (pub deftype ...)
 ```
 
-`pub` yalnızca yukarıdaki on bir türe konabilir (`module`/`use`/`deftrait`/`impl`'e değil). Tanım
-anahtar sözcüğüyle `pub`'ın hemen ardından yazılır; tanımı parantezlere saran `(pub (defun ...))`
-biçiminde değil. Bir `pub`, tam olarak bir tanımı genel yapar (birkaç tanım bir seferde
-işaretlenemez).
+`pub` yalnızca yukarıdaki on türe konabilir (`module`/`use`/`deftrait`/`impl`'e konamaz). Tanım anahtar
+sözcüğü `pub`'ın hemen ardından gelecek şekilde yazılır; tanımı parantez içine alan `(pub (defun ...))`
+biçiminde değil. Bir `pub` tam olarak bir tanımı açık yapar (birden fazla tanım bir kerede işaretlenemez).
+
+İçsel bir `impl`'in metotları öğe öğe `(pub name ...)` yazılarak açık yapılır (3.5). Yapı alanları
+`(pub x i32)` diye yazılır (3.6).
 
 ### 3.14 defmacro — makro tanımları
 
@@ -1142,6 +1218,19 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   kullanıcı tanımlı bir `Eq` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
   konumundan görünen her şeye (bağımsız değişkenler, dış bağlamalar, globaller) başvurabilir
 - `(Ctor sub-pattern...)` — yapıcı örüntüleri (`Some x` `None` `Cons a d` `Ok v` vb.)
+- `(Type :slot pattern... :slot...)` — yapı desenleri. Yuvaları tür adından sonra anahtar sözcük olarak
+  yazın. Bir anahtar sözcüğü bir desen izliyorsa o yuva desenle eşleştirilir; ardından başka bir anahtar
+  sözcük geliyor ya da hiçbir şey gelmiyorsa yuva kendi adındaki bir değişkene bağlanır. Yazılmayan
+  yuvalar eşleştirilmez (desen, alanların sayısına ve sırasına bağlı değildir):
+
+  ```lisp
+  (defstruct point (x i32) (y Option<i32>))
+
+  (defun f ((p point)) i32
+    (match p
+      ((point :x :y (some b)) (+ x b))   ; x'i bağlar ve y'yi (some b) ile eşleştirir
+      ((point :x a) a)))                 ; a'yı bağlar
+  ```
 - `#{p0 p1 ...}` — bir demet örüntüsü. Her öğe kendi alt örüntüsüyle eşleştirilir. Bir `Sexpr`'e
   karşı yalnızca aynı sayıda öğeli `#{..}` verisiyle eşleşir
 - `(:or p1 p2 ...)` — bir veya-örüntüsü: seçeneklerden herhangi biri eşleşince eşleşir. Gövde
@@ -1200,9 +1289,9 @@ dönüşüm örüntüleri** (kullanıcı tanımlı ADT'lerin örneklerini çıka
 `(list p 42)` gibi bir `Sexpr`'e örtük olarak dönüştürülmüş bir `defstruct`/`defenum` (3. bölüm)
 örneğini `match` ile geri almak için sözdizimi:
 
-- `(TypeName sub-pattern...)` — **tür adı** önde olmak üzere alan ayrıştırma (yalnızca struct'lar: bir
-  `defstruct`'ın her zaman tek bir varyantı vardır; bu yüzden bir varyant adıyla değil, tür adıyla
-  yazılır). Örneğin `(defstruct point (x f64) (y f64))` için `(point x y)`.
+- `(TypeName :slot pattern...)` — **tür adı** başta olacak şekilde alan ayrıştırma (yalnızca struct),
+  yukarıdaki yapı desenleriyle aynı biçimde yazılır. Örneğin `(defstruct point (x f64) (y f64))` için
+  `(point :x :y)`.
 - Bir çıplak varyant adı `(VariantName sub-pattern...)` — bir `defenum`'un bir varyantını çıkarır.
   `(use EnumType)`'tan sonra görünen çıplak bir ad olarak çözümlenir (yapıcıyı çağırırken geçerli olan
   aynı görünürlük kuralları). Örneğin `(defenum color (red) (blue))` için `(use color)`'dan sonra `(red)`
@@ -1243,7 +1332,7 @@ bu yüzden ek sözdizimi yoktur. Gerçekleştiren türler kümesi açıktır; bu
 ```lisp
 (defun area ((d :dyn Drawable)) i32
   (match d
-    ((circle r) (* (* r r) 3))     ; field decomposition with the type name first
+    ((circle :r) (* (* r r) 3))    ; field decomposition with the type name first
     ((the square s) (* s::side s::side))
     (_ 0)))
 ```
@@ -1305,7 +1394,7 @@ aşağıdaki `return-from`'u kullanın.
 (return-from name value)            ; leaves with a value
 ```
 
-**`defun` / `defmethod` / `labels`'in her fonksiyonu, kendi adıyla örtük olarak bir block kurar** (CL'deki
+**`defun` / `impl` metotları / `labels`'in her fonksiyonu, kendi adıyla örtük olarak bir block kurar** (CL'deki
 gibi). Bu yüzden `(return-from f v)`, fonksiyondan erken bir dönüştür:
 
 ```lisp
@@ -1651,9 +1740,8 @@ Global değişkenlerin depolaması derlenmiş kodla **paylaşılır** (aynı yuv
 derlenmiş başlatma tarafından bir kez çalıştırılır ve geri yükleme onu atlar; bu yüzden yan etkili bir
 başlatıcı iki kez çalışmaz.
 
-`compile-file` standart kütüphaneyi de okur (ve gövdelerini çalıştırılabilir dosyaya gömer); bu yüzden
-`abs`/`gcd` gibi standart kütüphane fonksiyonları ile `(defmethod print-object ...)`'nin yanı sıra
-`(impl print-object ...)` de AOT ile kullanılabilir.
+`compile-file` standart kütüphaneyi de okur (ve gövdelerini çalıştırılabilir dosyaya gömer), bu yüzden
+`abs`/`gcd` gibi standart kütüphane fonksiyonları ve `(impl print-object ...)` AOT ile kullanılabilir.
 
 `compile-file` ayrıca `use`'u (ve `import`/`shadowing-import`'u) kabul eder. Giriş dosyasının `(use m)`'i
 dosyaları `typl file.typl` ile aynı kurallarla bulur ve bulunan bağımlılık dosyaları da derlenip
@@ -1872,9 +1960,10 @@ gibi bir panic, bir `(panic ...)` ile aynı şekilde ele alınır).
   kaldıkları yerden sürer). Bir değerlendirmenin sonunda her thread'in geçerli adımını bitirmesini bekler;
   bu yüzden bir `thread` içinde bir C fonksiyonu (`defffi`) bloke olmaya devam ederse değerlendirme o
   dönene kadar bitmez.
-- **İşçilerde yazdırma**: yorumlanan `print-object` / `~/name/` metotları diğer thread'lerde çalışamaz;
-  bu yüzden bu tür değerleri başka bir thread'de yazdırmak, bir `(panic ...)` ile aynı şekilde ele alınan
-  bir panic'tir (`(compile T::print-object)` yapın ya da ana task'ten yazdırın).
+- **Worker'larda yazdırma**: yorumlanan `print-object` metotları ve `~/name/`'in çağırdığı yorumlanan
+  fonksiyon ve metotlar başka iş parçacıklarında çalışamaz, bu yüzden böyle değerleri başka bir iş
+  parçacığında yazdırmak `(panic ...)` gibi ele alınan bir panic'tir (`(compile T::print-object)` ya da ana
+  görevden yazdırın).
 - **Veri yarışları tanımsızdır** (Go ile aynı konum). Birkaç task'in aynı değeri `Mutex<T>` / `Chan<T>`
   üzerinden geçmeden değiştirmesinin sonucu garanti edilmez.
 - **`task` bir değer döndürür.** Go'nun `go` deyiminden farklı olarak bir `Task<T>` döndürür ve

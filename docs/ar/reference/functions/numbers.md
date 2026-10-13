@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # الأعداد
 
 العمليات على الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية، ودوال
@@ -187,7 +187,7 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `complex` / `complex::new` | `(complex re im)` | `(f64,f64)→complex` | البناء. ويمكن قراءة المكونات مباشرة بـ `z::re`/`z::im` |
+| `complex` | `(complex re im)` | `(f64,f64)→complex` | البناء. ويمكن قراءة المكونات مباشرة بـ `z::re`/`z::im` |
 | `realpart` `imagpart` | `(op z)` | `complex→f64` | الجزء الحقيقي والجزء التخيلي. **وتعملان أيضًا على الأعداد الحقيقية** (`(realpart 3.0)`←`3.0`، `(imagpart 3.0)`←`0.0`)، كما في CL |
 | `conjugate` | `(conjugate z)` | `complex→complex` | المرافق (يعمل أيضًا على الأعداد الحقيقية) |
 | `phase` | `(phase z)` | `complex→f64` | الزاوية في (-pi,pi] (تعمل أيضًا على الأعداد الحقيقية) |

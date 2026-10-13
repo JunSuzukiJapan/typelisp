@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
 # Час, середовище та реалізація
 
 Функції для часу, запитів про середовище виконання, засобів реалізації, розбору й обчислення тексту,
@@ -216,12 +216,12 @@ CL повертає **два значення** (значення й позиц�
 
 ## 7. Рядки документації / `documentation`
 
-`defun`/`defmethod` (зокрема всередині `impl`)/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
+`defun`/методи `impl`/`defmacro`/`defvar`/`defconstant`/`defstruct`/`defenum`/
 `deftype`/`deftrait` можуть нести рядки документації. Позиція слідує правилу CL для кожного:
 
 | Форма | Позиція рядка документації |
 |---|---|
-| `defun` / `defmethod` / `defmacro` | На початку тіла (після типу результату та клаузи `where`). Лише коли слідує принаймні одна форма тіла; самотній рядок лишається значенням, що повертається |
+| `defun` / методи `impl` / `defmacro` | На початку тіла (після типу результату та клаузи `where`). Лише коли слідує принаймні одна форма тіла; самотній рядок лишається значенням, що повертається |
 | `defvar` / `defconstant` | **Після** початкового значення: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Одразу після** назви, перед полями/варіантами |
 | `deftype` | **Одразу після** назви, перед типом: `(deftype meters "doc" i32)` |
