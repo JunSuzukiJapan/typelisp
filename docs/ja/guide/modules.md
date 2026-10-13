@@ -45,14 +45,17 @@ src = "src"
 (pub defstruct point
   (pub x i32)
   (pub y i32)
-  (tag string))                        ; pub の無いフィールドは外から読めない
+  (tag string))                        ; pub の無いフィールドは外から読み書きできない
 
 (defun square ((n i32)) i32 (* n n))   ; pub の無い関数も外から呼べない
 
 (pub defun dist2 ((a point) (b point)) i32
   (+ (square (- a::x b::x)) (square (- a::y b::y))))
 
-(pub defmethod origin (point) point (point::new 0 0 "o"))
+(impl point
+  (pub new ((x i32) (y i32) (tag string)) point
+    (make-instance 'point :x x :y y :tag tag))
+  (pub origin () point (point::new 0 0 "o")))
 ```
 
 `main.typl`:
@@ -74,10 +77,13 @@ typl main.typl        # => 25
 
 ### 公開の単位
 
-- 関数・構造体・列挙型・グローバル変数・マクロ・メソッドは、それぞれ `pub` を付けたものだけが
+- 関数・構造体・列挙型・グローバル変数・マクロは、それぞれ `pub` を付けたものだけが
   他のモジュールから見えます。書き方は `(pub defun ...)` のように、定義の直前に `pub` を置きます。
+- `impl` に書いたメソッドは、項目ごとに `(pub new ...)` と書いたものだけが外から使えます。
 - 構造体は**型の公開とフィールドの公開が別**です。`(pub defstruct point ...)` で型が見えるように
   なり、各フィールドは `(pub x i32)` と書いたものだけが外から読み書きできます。
+- 外のモジュールで `make-instance` に書けるのも `pub` のフィールドだけです。上の `point` は
+  `tag` が `pub` でないので、外では `make-instance` で作れず、`point::new` を使います。
 - 公開されていない名前を外から使うと、`unresolved path: geometry::square` のように
   「解決できない」というエラーになります。名前を打ち間違えたときと同じメッセージなので、
   綴りが合っているのに解決しない場合は `pub` の付け忘れを疑ってください。
@@ -109,10 +115,11 @@ typl main.typl        # => 25
 
 ```lisp
 (use shapes::core)
-(println "~a" (area (core::square::new 4)))    ; core::area ではなく area
+(println "~a" (area (make-instance 'core::square :side 4)))    ; core::area ではなく area
 ```
 
-`impl` 内のメソッドは `pub` を書かなくても常に公開されます。
+トレイトの `impl` のメソッドは `pub` を書かなくても常に公開されます。固有の `impl`
+（`(impl point ...)`）のメソッドは、`pub` を付けたものだけが公開されます。
 
 トレイトそのものは他のモジュールへ公開できません。トレイトの定義と、それに対する `impl` と、
 `:dyn` でそのトレイトを使うコードは、1 つのモジュールにまとめてください。

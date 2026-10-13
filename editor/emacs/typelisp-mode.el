@@ -54,7 +54,7 @@
 ;;; Keyword tables ----------------------------------------------------------
 
 (defconst typelisp-definition-forms
-  '("defun" "defsignature" "defffi" "defmethod" "defmacro")
+  '("defun" "defsignature" "defffi" "defmacro")
   "Definition forms whose defined name is a function name.
 `defsignature' declares one ahead of its definition -- the only way to write
 mutual recursion at top level, since forms are checked in source order.
@@ -290,7 +290,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "caddr" "cadr" "cdaaar" "cdaadr" "cdaar" "cdadar"
     "cdaddr" "cdadr" "cdar" "cddaar" "cddadr" "cddar"
     "cdddar" "cddddr" "cdddr" "cddr"
-    ;; `pushnew' -- a `defmethod' on `Vector<T>', not one of the macros above
+    ;; `pushnew' -- a method of `Vector<T>', not one of the macros above
     "pushnew"
     ;; the destructive `Vector<T>' operations (Phase 3d, §6.2)
     "nreverse" "nconc" "nreconc" "nbutlast" "nsubstitute" "nsubstitute-if"
@@ -922,11 +922,10 @@ has already claimed it for `font-lock-string-face'."
   '(;; Definition forms.  All of them take `defun' rather than an integer,
     ;; because a typelisp header is *longer* than the Emacs Lisp shape the
     ;; integers were tuned for -- `(defun NAME (PARAMS) RETTYPE ...)' has three
-    ;; header elements, `(defmethod ...)' likewise, and `impl' has two -- while
+    ;; header elements, and a trait's `impl' has two -- while
     ;; `defun'-style indentation is defined by where the *line* ends and so
     ;; does not care how many elements precede the body.
     ("defun"       . defun)
-    ("defmethod"   . defun)
     ("defmacro"    . defun)
     ("defstruct"   . defun)
     ("defenum"     . defun)
@@ -1074,8 +1073,6 @@ STATE is the `parse-partial-sexp' state there.  A drop-in replacement for
 (defconst typelisp-imenu-generic-expression
   `(("Functions"
      ,(concat typelisp--pub-rx "defun\\_>[ \t\n]*\\(" typelisp--symbol-rx "\\)") 1)
-    ("Methods"
-     ,(concat typelisp--pub-rx "defmethod\\_>[ \t\n]*\\(" typelisp--symbol-rx "\\)") 1)
     ("Macros"
      ,(concat typelisp--pub-rx "defmacro\\_>[ \t\n]*\\(" typelisp--symbol-rx "\\)") 1)
     ("Types"
@@ -1084,9 +1081,10 @@ STATE is the `parse-partial-sexp' state there.  A drop-in replacement for
      1)
     ("Traits"
      ,(concat typelisp--pub-rx "deftrait\\_>[ \t\n]*\\(" typelisp--symbol-rx "\\)") 1)
+    ;; `(impl Trait Type ...)', or the inherent `(impl Type item...)'
     ("Impls"
-     ,(concat "(impl\\(?:<[^>]*>\\)?[ \t\n]+\\(" typelisp--symbol-rx "[ \t\n]+"
-              typelisp--symbol-rx "\\)")
+     ,(concat "(impl\\(?:<[^>]*>\\)?[ \t\n]+\\(" typelisp--symbol-rx "\\(?:[ \t\n]+"
+              typelisp--symbol-rx "\\)?\\)")
      1)
     ("Variables"
      ,(concat typelisp--pub-rx "def\\(?:var\\|constant\\)\\_>[ \t\n]*(?[ \t\n]*\\("

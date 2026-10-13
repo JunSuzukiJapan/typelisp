@@ -56,6 +56,10 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | `no such function: bar` | その名前の関数もメソッドも無い。綴りを確かめる |
 | ``no method `upcase` for type `int` (the type of the first argument, which selects the method); `upcase` is a method of `char`, `string` `` | メソッドは第一引数の型で選ばれる。その名前のメソッドはあるが、第一引数の型（ここでは `int`）には無い。メッセージの末尾が、そのメソッドを持つ型の一覧 |
 | `unbound variable: y` | その名前の変数が無い。綴りと、束縛の範囲（`let` の外で使っていないか）を確かめる |
+| ``cannot define variable `f`: a function of that name already exists here — a name has one meaning, whether a function, a variable or a macro`` | 同じモジュールで、関数・グローバル変数・マクロのうち 2 つに同じ名前を付けた。どちらかの名前を変える（[構文リファレンス 3.10](syntax.md#310-module--use--名前空間)） |
+| ``` `point` has no static method `new`; a struct's methods are written in its `impl`, ...``` | 構造体に `new` は自動では作られない。値は `make-instance` で作るか、`impl` に `new` を書く（[構文リファレンス 3.5](syntax.md#35-impl--型のメソッド)） |
+| ``defmethod is gone — write methods in the type's `impl`: ...`` | `defmethod` は無い。メソッドは型の `impl` に書く（[構文リファレンス 3.5](syntax.md#35-impl--型のメソッド)） |
+| ``defstruct: (:constructor ...) is gone — ...`` | `:constructor` オプションは無い。コンストラクタは `impl` に静的メソッドとして書く |
 | ``use: unresolved `nosuch` `` | `use` したモジュールが見つからない。ファイル名とモジュールパスの対応は [構文リファレンス 3.11](syntax.md#311-ファイルとモジュールの対応複数ファイルのプロジェクト) |
 | `unresolved path: c::hidden` | モジュールはあるが、その名前が無いか、`pub` が付いていないので見えない |
 | `circular module dependency: a -> b -> a` | モジュールが互いを `use` している。共通部分を別のモジュールに分ける |
@@ -67,10 +71,15 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 |---|---|
 | `f: expected 1 argument(s), got 2` | 引数の個数が合わない |
 | `f: unknown keyword argument :b` | その関数に無いキーワード引数を渡した |
-| `new: expected 1 field(s), got 2` | 構造体のコンストラクタに渡した値の個数がフィールドの数と合わない |
+| `circle: expected 1 field(s), got 2` | 列挙型の変種に渡した値の個数が、その変種のフィールドの数と合わない |
+| ``make-instance point: slot `y` is not given and has no default`` | デフォルト値の無いフィールドを `make-instance` に書いていない |
+| ``make-instance point: no slot `z` (its slots are `x`, `y`)`` | 構造体に無いフィールドを書いた |
+| ``make-instance geo::pt: slot `secret` is not `pub`, so it can be given only inside module `geo` `` | 型を定義したモジュールの外で、`pub` でないフィールドを書いた。そのモジュールに `pub` のコンストラクタを書いてもらう |
+| ``` `twice` is a method of `box<int>`, and the receiver is a `box<string>` ``` | ジェネリックな型の特定の型引数（`(impl Box<int> ...)`）に書いたメソッドを、別の型引数の値に呼んだ |
 | ``setf: cannot assign to constant `k` `` | `defconstant` で定義した名前に代入した。書き換えるなら `defvar` にする |
 | ``defsignature: `later` has no definition in this file — a declaration promises one`` | `defsignature` で宣言した関数を定義していない |
-| ``format: ~/nosuch/ — no argument here has a method `nosuch` of the shape ...`` | `~/name/` で呼ぶメソッドを、どの引数の型も持っていない（[書式ディレクティブ 5 章](functions/format.md#5-name)） |
+| ``format: ~/nosuch/ calls what (nosuch arg colon at) with arg a `string` would: no such function: nosuch`` | その場所で `(nosuch 引数 colon at)` と書いた呼び出しが解決できない。引数の型のメソッドか関数を定義する（[書式ディレクティブ 5 章](functions/format.md#5-name)） |
+| ``format: ~/brief/ can be handed an element of a list argument, whose type is only `Sexpr` — ...`` | `~{` などの中、リストの要素に当たる位置に `~/name/` を書いた。要素の型では呼ぶ先を決められない |
 
 ## 3. 読み取りのエラー
 

@@ -110,10 +110,10 @@ Rust の `std::error::Error` に倣い、**`Error` は型ではなくトレイ�
   (source ((self Self)) Option<:dyn Error> (option::none)))
 
 (defun open-it ((p string)) Result<i32, io-err>          ; 具象型をそのまま E に載せる
-  (if (equal p "") (result::err (io-err::new "<empty>")) (result::ok 3)))
+  (if (equal p "") (result::err (make-instance 'io-err :path "<empty>")) (result::ok 3)))
 
 (defun describe ((e :dyn Error)) string (message e))     ; 種類を問わず一様に扱う
-(describe (io-err::new "/etc/app.conf"))
+(describe (make-instance 'io-err :path "/etc/app.conf"))
 (describe (ParseIntError::ParseIntError "boom"))
 ```
 

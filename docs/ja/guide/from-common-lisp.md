@@ -56,7 +56,9 @@ typelisp は Common Lisp（以下 CL）の構文と多くの関数名を受け�
 ## 3. 関数を値として扱う
 
 typelisp は関数と変数の名前空間を分けていません。関数名はそのまま値として渡せます。
-`#'` と `funcall` はありません。
+`#'` と `funcall` はありません。マクロも同じ名前空間に入るので、同じモジュールの中で関数・
+グローバル変数・マクロのうち 2 つに同じ名前を付けることはできません（CL のように `list` という
+関数と `list` という変数を並べて置けません）。
 
 ```lisp
 (defun twice ((x int)) int (* 2 x))
@@ -77,6 +79,8 @@ typelisp は関数と変数の名前空間を分けていません。関数名�
 
 - シーケンス関数は**対象が先、関数が後**の順で引数を取ります：`(map it f)`、
   `(filter it f)`、`(foldl it f init)`。CL の `(mapcar f list)` とは逆です。
+- 要素を足す `push` も**対象が先**です：`(push v 3)`。CL の `(push 3 place)` の順には書けません。
+  メソッドは第 1 引数の型だけで選ばれるからです（8 節）。
 - `lambda` では `&optional` と `&key` を使えません（`&rest` は使えます）。
 - **定義より前の関数は呼べません。** CL では後で定義する関数を先に呼んでおけますが、ここでは
   `no such function` になります。相互再帰する関数は `defsignature` で片方を宣言しておきます。
@@ -180,16 +184,28 @@ CL との違いは 3 つあります。要素の型がそろっていなけれ�
 `defclass`・`defgeneric`・メソッドコンビネーションはありません。
 
 - データ型は `defstruct`（構造体）と `defenum`（直和型）で定義します。
-- `defmethod` は、**最初の引数の静的な型**だけで呼び出し先が決まるメソッドを定義します。
-  多重ディスパッチはしません。
+- `defmethod` はありません。メソッドは型ごとに `impl` にまとめて書きます（Rust の固有 impl と
+  同じ形）。呼び出し先は**最初の引数の静的な型**だけで決まり、多重ディスパッチはしません。
+
+  ```lisp
+  (defstruct point (x i32) (y i32))
+
+  (impl point
+    (new ((x i32) (y i32)) point (make-instance 'point :x x :y y))   ; 静的メソッド
+    (norm2 (self) i32 (+ (* self::x self::x) (* self::y self::y))))  ; メソッド
+
+  (norm2 (point::new 3 4))   ; => 25
+  ```
+
 - 型をまたいで共通の操作を持たせるときはトレイト（`deftrait` / `impl`）を使います。実行時に
   中身の型が決まる値を扱うときは `:dyn Trait` 型にします
   （[構文リファレンス 3.9](../reference/syntax.md#39-deftrait--impl--トレイト機構)）。
 
 `defstruct` の違い:
 
-- コンストラクタは `型名::new` です：`(point::new 1 2)`。`make-point` という名前が欲しいときは
-  `(:constructor make-point)` オプションで作れます。
+- 値は CLOS と同じく `make-instance` で作ります：`(make-instance 'point :x 1 :y 2)`。
+  `make-point` は作られず、`:constructor` オプションもありません。名前の付いたコンストラクタが
+  欲しいときは、`impl` に静的メソッドとして書きます（上の `point::new`）。
 - アクセサは `(x p)` のほか `p::x` とも書けます。`(setf p::x 5)` で書き換えます。
 - 述語（`point-p`）は作られません。`:conc-name`・`:type`・`:named` もありません。
 - `:include` はスロットを引き継ぐだけで、親の型の部分型にはなりません。

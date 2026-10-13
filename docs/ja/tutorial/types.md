@@ -146,30 +146,49 @@ none
   (y int))
 ```
 
-定義すると、次のものが使えるようになります。
+値は `make-instance` で作ります。型名を `'` で引用して書き、フィールドを `:名前 値` の組で
+渡します。順番は自由です。
 
 ```lisp
-(let ((p (point::new 3 4)))     ; 作る（フィールドの順に引数を渡す）
+(let ((p (make-instance 'point :x 3 :y 4)))   ; 作る
   (println "~a" p::x)           ; フィールドを読む。(x p) とも書ける
   (setf p::x 10)                ; 書き換える
   (println "~a" p))             ; #<point x: 10 y: 4>
 ```
 
-構造体に関数を持たせるには `defmethod` を使います。最初の引数（`self`）の型で、どの型の
-メソッドかが決まります。
+フィールドの宣言にもう 1 つ式を書くと、そのフィールドの**デフォルト値**になります。
+`make-instance` で省いたフィールドはデフォルト値で埋まります。デフォルト値の無いフィールドを
+省くと型エラーです。
 
 ```lisp
-(defmethod norm2 ((self point)) int
-  (+ (* self::x self::x) (* self::y self::y)))
+(defstruct counter
+  (name string)
+  (count int 0))
 
-(norm2 (point::new 3 4))        ; => 25
+(make-instance 'counter :name "hits")   ; count は 0
 ```
 
-`self` を取らずに型名だけを書くと、`point::origin` の形で呼ぶ関数になります。
+構造体に関数を持たせるには `impl` を使います。`(impl 型名 項目...)` の各項目は
+`(名前 (引数...) 戻り値の型 本体...)` の形で、最初の引数が `self` ならその型の**メソッド**に
+なります。`self` には型を書きません。
 
 ```lisp
-(defmethod origin (point) point
-  (point::new 0 0))
+(impl point
+  (norm2 (self) int
+    (+ (* self::x self::x) (* self::y self::y))))
+
+(norm2 (make-instance 'point :x 3 :y 4))   ; => 25
+```
+
+`self` を取らない項目は、`point::origin` の形で呼ぶ関数になります。値を作る関数を `new` という
+名前で用意しておくと、使う側は `(point::new 3 4)` と短く書けます。
+
+```lisp
+(impl point
+  (new ((x int) (y int)) point
+    (make-instance 'point :x x :y y))
+  (origin () point
+    (point::new 0 0)))
 
 (point::origin)                 ; => #<point x: 0 y: 0>
 ```
@@ -236,7 +255,7 @@ none
   (left A)
   (right B))
 
-(pair::new 1 "one")        ; pair<int,string>
+(make-instance 'pair :left 1 :right "one")   ; pair<int,string>
 ```
 
 ジェネリック関数の中では、`T` について何も分からないので、`T` の値どうしを比べたり足したりは

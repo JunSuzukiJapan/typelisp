@@ -80,7 +80,7 @@
 
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
-| `WaitGroup::make` | `(the WaitGroup (WaitGroup::make))` | `()→WaitGroup` | 何も未完了でない群 |
+| `WaitGroup::new` | `(the WaitGroup (WaitGroup::new))` | `()→WaitGroup` | 何も未完了でない群 |
 | `add` | `(add wg 1)` | `(WaitGroup,int)→()` | カウンタに足す。仕事を始める前に |
 | `done` | `(done wg)` | `(WaitGroup)→()` | 1 つ終わった。0 で全待機者が解放される |
 | `wait` | `(wait wg)` | `(WaitGroup)→()` | 0 になるまで待つ。何タスクからでも |
@@ -116,13 +116,13 @@ Go の `time.After`。`select` のタイムアウト腕にそのまま書ける
 
 | 名前 | 使い方 | 型 | 意味 |
 |---|---|---|---|
-| `Mutex::make` | `(the Mutex<i32> (Mutex::make 0))` | `(T)→Mutex<T>` | `v` を持つ、ロックされていないミューテックス |
+| `Mutex::new` | `(the Mutex<i32> (Mutex::new 0))` | `(T)→Mutex<T>` | `v` を持つ、ロックされていないミューテックス |
 | `lock` | `(lock m)` | `(Mutex<T>)→()` | ロックを取る（待つ） |
 | `unlock` | `(unlock m)` | `(Mutex<T>)→()` | 返す。ロックされていなければ panic |
 | `with-lock` | `(with-lock (x m) body...)` | マクロ | ロックし、`x` に中身を束ねて `body` を走らせ、**必ず**解放 |
 
 ```lisp
-(let ((counter (the Mutex<i32> (Mutex::make 0))))
+(let ((counter (the Mutex<i32> (Mutex::new 0))))
   (with-lock (n counter) (setf n (+ n 1)))
   (with-lock (n counter) n))                     ; => 1
 ```

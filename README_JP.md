@@ -22,10 +22,11 @@ TypeLisp は静的型付きの Lisp です。
 ```
 (defstruct Point (x i32) (y i32))
 
-(defmethod show ((p Point)) ()
-  (println "Point: (x ~d y ~d)" p::x p::y))
+(impl Point
+  (show (self) ()
+    (println "Point: (x ~d y ~d)" self::x self::y)))
 
-(show (Point::new 1 2))
+(show (make-instance 'Point :x 1 :y 2))
 ```
 
 ## 例
@@ -109,8 +110,8 @@ TypeLisp は静的型付きの Lisp です。
 
 (defun main () ()
   (let ((animals (the Vector<:dyn Animal> (Vector::new))))
-    (push animals (Dog::new "Pochi"))
-    (push animals (Cat::new "Tama"))
+    (push animals (make-instance 'Dog :nick "Pochi"))
+    (push animals (make-instance 'Cat :nick "Tama"))
     (doiter (a (iter animals))
       (println "~a" (speak a)))))
 
