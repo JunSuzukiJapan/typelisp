@@ -97,19 +97,20 @@ fn an_item_must_have_a_parameter_list_and_a_return_type() {
 }
 
 /// An `impl` for one instantiation of a generic type takes that
-/// instantiation only: the method is registered under the type alone, and the
-/// call has to compare the receiver with the declared one. It used to pass the
-/// check and stop at run time inside the body.
+/// instantiation only. It used to pass the check and stop at run time inside
+/// the body.
 #[test]
 fn an_impl_for_one_instantiation_takes_only_that_instantiation() {
     let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n";
     both_with(defs, r##"(format false "~a" (twice (make-instance 'Box :v 4)))"##, "8");
     let msg = check_err(&format!("{}(defun f () int (twice (make-instance 'Box :v \"s\")))", defs));
-    assert!(msg.contains("`twice` is a method of `box<int>`, and the receiver is a `box<string>`"), "{}", msg);
+    assert!(msg.contains("no method `twice` for type `box<string>`"), "{}", msg);
+    assert!(msg.contains("`twice` is a method of `box<int>`"), "{}", msg);
 }
 
 /// Taken as a value, such a method has its one type, like a method of a type
-/// without parameters.
+/// without parameters, and is found only where the expected function's first
+/// parameter is that instantiation.
 #[test]
 fn a_method_for_one_instantiation_is_a_value_of_its_one_type() {
     let defs = "(defstruct Box<T> (v T))\n(impl Box<int> (pub twice (self) int (* 2 self::v)))\n\
@@ -120,7 +121,8 @@ fn a_method_for_one_instantiation_is_a_value_of_its_one_type() {
          (defun app ((f (fn (Box<string>) int)) (b Box<string>)) int (f b))\n\
          (defun g () int (app twice (make-instance 'Box :v \"s\")))",
     );
-    assert!(msg.contains("type mismatch"), "{}", msg);
+    assert!(msg.contains("no method `twice` for type `box<string>`"), "{}", msg);
+    assert!(msg.contains("`twice` is a method of `box<int>`"), "{}", msg);
 }
 
 /// The target names every type parameter as a variable, or none: nothing

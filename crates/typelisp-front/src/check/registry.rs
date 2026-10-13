@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::{Loc, Path, Type};
+use typelisp_mem::ConcreteNames;
 
 /// One constructor of a data type: a name and its field types. Field types may
 /// reference the enclosing type's parameters as `Type::Named(param, [])`.
@@ -283,6 +284,61 @@ pub struct AdtDef {
     /// substitutes a *specific* instantiation's `params` (e.g.
     /// `vector-iter<i32>`) in before use.
     pub trait_assoc: BTreeMap<Path, BTreeMap<String, Type>>,
+    /// What `impl`s written for one instantiation of a generic type
+    /// (`(impl Box<int> ...)`, `(impl Show Box<int> ...)`) add to it, keyed
+    /// by [`ConcreteNames::type_args`]. `assoc`, `impls` and `trait_assoc` above hold only
+    /// what covers every instantiation. A method or trait is in one or the
+    /// other, never both (`Checker::check_defmethod_in_form` and
+    /// `Checker::check_impl_form` refuse the overlap), so a method's
+    /// instantiation is named by [`ConcreteNames::specialization`] with nothing else
+    /// answering to that name.
+    pub insts: BTreeMap<String, InstImpls>,
+}
+
+/// One instantiation's own `impl`s — see [`AdtDef::insts`].
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct InstImpls {
+    /// The type arguments, every one concrete.
+    pub args: Vec<Type>,
+    /// Methods, keyed by the name the source wrote (`twice`, not
+    /// `twice <int>`).
+    pub assoc: BTreeMap<String, AssocFn>,
+    pub impls: Vec<Path>,
+    pub trait_assoc: BTreeMap<Path, BTreeMap<String, Type>>,
+}
+
+impl InstImpls {
+    pub fn new(args: Vec<Type>) -> Self {
+        InstImpls { args, assoc: BTreeMap::new(), impls: Vec::new(), trait_assoc: BTreeMap::new() }
+    }
+}
+
+impl AdtDef {
+    /// `name` for a value of this type with type arguments `args`: the
+    /// instantiation's own definition, or the one covering every
+    /// instantiation.
+    pub fn method_at(&self, name: &str, args: &[Type]) -> Option<&AssocFn> {
+        match self.insts.get(&ConcreteNames::type_args(args)).and_then(|i| i.assoc.get(name)) {
+            Some(af) => Some(af),
+            None => self.assoc.get(name),
+        }
+    }
+
+    /// Every definition of `name`: the one covering every instantiation, or
+    /// each instantiation's own (with that instantiation).
+    pub fn method_defs<'a>(&'a self, name: &'a str) -> impl Iterator<Item = (&'a AssocFn, Option<&'a InstImpls>)> + 'a {
+        self.assoc
+            .get(name)
+            .map(|af| (af, None))
+            .into_iter()
+            .chain(self.insts.values().filter_map(move |i| i.assoc.get(name).map(|af| (af, Some(i)))))
+    }
+
+    /// Whether an `impl` of `trait_path` covers the instantiation `args`.
+    pub fn implements_at(&self, trait_path: &Path, args: &[Type]) -> bool {
+        self.impls.contains(trait_path)
+            || self.insts.get(&ConcreteNames::type_args(args)).is_some_and(|i| i.impls.contains(trait_path))
+    }
 }
 
 /// A `deftrait` definition (`Checker::check_deftrait`): a trait name, its
@@ -1031,11 +1087,12 @@ impl Registry {
     }
 }
 
-/// Depth-first walk of the module tree collecting types whose `impls` list
-/// contains `trait_path` — [`Registry::trait_impls`]'s recursion.
+/// Depth-first walk of the module tree collecting types with an `impl` of
+/// `trait_path`, for every instantiation or for one —
+/// [`Registry::trait_impls`]'s recursion.
 fn collect_trait_impls(ns: &Namespace, trait_path: &Path, out: &mut Vec<Path>) {
     for def in ns.types.values() {
-        if def.impls.contains(trait_path) {
+        if def.impls.contains(trait_path) || def.insts.values().any(|i| i.impls.contains(trait_path)) {
             out.push(def.name.clone());
         }
     }
@@ -1065,6 +1122,7 @@ fn builtin_adt(
         field_names: Vec::new(),
         impls: Vec::new(),
         trait_assoc: BTreeMap::new(),
+        insts: BTreeMap::new(),
     }
 }
 
