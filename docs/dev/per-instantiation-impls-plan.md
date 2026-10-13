@@ -1,6 +1,7 @@
 # 総称型の具体型ごとの impl — 実装計画
 
-作成: 2026-10-13
+作成: 2026-10-13。実装済み（2026-10-13、ブランチ `feat/per-instantiation-impls`）。経緯は
+[implementation-log.md](implementation-log.md) の「総称型の具体型ごとの impl」の節。
 
 ## 1. 決まったこと（2026-10-13、ユーザー決定）
 
@@ -58,8 +59,8 @@
 ## 4. 内部の名前
 
 総称型 `G` のメソッド `m` の、型引数 `A...` での実体の名前は、総称 impl の特殊化と同じ
-`m <A...>` にする。メソッド自身の型引数 `U...` があれば `m <A...,U...>`。リンク名は
-`G''m <A...>`。
+`m <A...>` にする（`ConcreteNames::specialization`）。メソッド自身の型引数 `U...` があれば
+`m <A...,U...>`。リンク名は `G''m <A...>`。綴りはすべて `typelisp_mem::ConcreteNames` が作る。
 
 この名前がぶつからない理由:
 
@@ -93,19 +94,24 @@ pub insts: BTreeMap<String, InstImpls>,   // キーは型引数の型キーを `
 
 - `AdtDef::assoc`/`impls`/`trait_assoc` は、すべての具体型を覆う定義（総称 impl、型引数の無い型）
   だけを持つ。具体型の impl は `insts` に入る。
-- `Type` は `Ord` を持たないので、キーは型キーの綴りにする（名前の `<...>` の中身と同じ）。
-- メソッドを引く入口を 1 つ作る（`AdtDef::method(name, args)`）。受け手の型引数が分かれば
-  `insts[args].assoc` か `assoc`、分からなければ「どこかにあるか」を答える。§3.1 の規則で、
-  両方にあることは無い。
+- `Type` は `Ord` を持たないので、キーは型キーの綴りにする（`ConcreteNames::type_args`、名前の
+  `<...>` の中身と同じ）。
+- 引く入口は `AdtDef::method_at(name, args)`（その具体型の定義か、すべての具体型に共通の定義）、
+  `AdtDef::method_defs(name)`（すべての定義）、`AdtDef::implements_at(trait, args)`。呼び出しが
+  どの定義を指すかは `Checker::select_method` が決める（受け手の型、静的メソッドなら期待される戻り値の型）。
 - 自前の型引数を持つ具体型 impl のメソッド（`(impl Box<int> (m<U> ...))`）の雛形は、
-  具体型ごとに別に要る。`generic_method_templates` のキーに具体型を足すか、`InstImpls` に
-  雛形を持たせる。特殊化の要求（`SpecRequest::Method`）の `args` の前半が型の型引数なので、
-  そこから具体型が分かる。
+  `generic_method_templates` に `(G, "m <A...>")` のキーで入る。特殊化の要求
+  （`SpecRequest::Method`）は雛形のキーの名前（`template`）を運ぶ。
 - `def_locs.methods` と `docs.methods`（キーは (型, メソッド名)）も、具体型の impl では名前を
   `m <A...>` にして入れる。
 - `AdtDef` はダンプに入るので、`dump::FORMAT_VERSION` を上げる。
 
 ## 6. 段階
+
+実装では Phase 1 と 2 を一度に入れた（トレイト impl のメソッドも同じ登録の関数を通るので、
+登録先を変えると両方が同時に変わる）。Phase 3 のうち、名前で定義を指す道具（`documentation`・`ed`・
+`compile`・`trace`・`disassemble`）は `G<A...>::m` を受け付ける形で入れた。LSP の定義へ移動と hover は、
+呼び出しのノードが持つ名前（`m <A...>`）で引くので、登録の鍵を同じ名前にしただけで合う。
 
 ### Phase 1: 固有 impl
 

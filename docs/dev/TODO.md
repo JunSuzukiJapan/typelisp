@@ -1,18 +1,12 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-10-12 / ブランチ: `feat/constructors`
+最終更新: 2026-10-13 / ブランチ: `feat/per-instantiation-impls`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
 [implementation-log.md](implementation-log.md)（作業 1 件ごとの経緯・設計判断）へ移す。
 
 ## 残っている作業
-
-**総称型の具体型ごとの impl（作業中、ブランチ `feat/per-instantiation-impls`）。**
-`(impl Show Box<int> ...)` と `(impl Show Box<string> ...)` のように、1 つの総称型の別々の具体型に
-別々の impl を書けるようにする（2026-10-13 ユーザー決定。固有 impl も同じ）。内部の名前は他と
-ぶつからないようにする。今は 2 つ目が 1 つ目を置き換える（置き換えられた側の値は型エラーになる）。
-計画は [per-instantiation-impls-plan.md](per-instantiation-impls-plan.md)。
 
 **CI/CD（作業中、ブランチ `feat/ci`）。** push/PR ごとにビルドと警告 0 を、
 リリース（`v*` タグ）のときだけテスト全体を回す。対象は macOS と Linux
