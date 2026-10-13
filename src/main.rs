@@ -37,6 +37,9 @@ Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
   typl [--lib-dir DIR] -c SOURCE [-o OUTPUT]     compile SOURCE to an executable
+  typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
+                                                 project here (or of FILE) whose
+                                                 name contains FILTER
 
 Options:
   -c, --compile SOURCE   compile SOURCE to a native executable
@@ -147,6 +150,9 @@ fn main() -> rustyline::Result<()> {
         std::process::exit(compile_command(flag, &args[1..]));
     }
     let heap_cells = heap_cells.unwrap_or(DEFAULT_HEAP_CELLS);
+    if args.first().is_some_and(|a| a == "test") {
+        std::process::exit(test_command(&args[1..], heap_cells, features, image));
+    }
     // The first non-flag argument names a source file to run;
     // with none, start the REPL.
     //
@@ -403,6 +409,54 @@ fn run_file(file: &str, heap_cells: usize, features: Vec<String>, image: Option<
         }
     }
     0
+}
+
+/// `typl test [FILE.typl] [FILTER]`: `args` is what follows `test`. Exits 0
+/// when every test that ran passed.
+fn test_command(args: &[String], heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> i32 {
+    let (file, rest) = match args.first() {
+        Some(a) if a.ends_with(".typl") => (Some(PathBuf::from(a)), &args[1..]),
+        _ => (None, args),
+    };
+    let filter = match rest {
+        [] => None,
+        [f] => Some(f.as_str()),
+        _ => {
+            eprintln!("typl test: [FILE.typl] [FILTER]: more than one filter given");
+            return 1;
+        }
+    };
+    let suite = match &file {
+        Some(f) => typelisp::testing::Suite::of_file(f),
+        None => std::env::current_dir()
+            .map_err(|e| format!("the current folder: {}", e))
+            .and_then(|dir| typelisp::testing::Suite::of_project(&dir)),
+    };
+    let suite = match suite {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("typl test: {}", e);
+            return 1;
+        }
+    };
+    let mut heap = Heap::with_capacity(heap_cells);
+    let reader = Reader::with_features(features);
+    let mut checker = Checker::new();
+    checker.set_redef_policy(parse_redef_policy());
+    let mut interp = Interp::new();
+    if let Err(e) = load_environment(&mut heap, &mut checker, &mut interp, image) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+    let mut out = std::io::stdout();
+    match typelisp::testing::run(&suite, filter, &mut heap, &reader, checker, &mut interp, &mut out) {
+        Ok(outcome) if outcome.failed == 0 => 0,
+        Ok(_) => 1,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            1
+        }
+    }
 }
 
 fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rustyline::Result<()> {

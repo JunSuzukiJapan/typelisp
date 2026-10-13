@@ -65,6 +65,9 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   型になる（`#{"foo" 123}` は `#{string int}`）。要素は 1〜12 個。評価するたびに新しいタプルが
   できる。計算した値から作るには `(tuple a b)` を使う。S 式データが期待される場所では、要素が
   すべてデータのタプル——`Sexpr` の `tuple` 変種——になる。
+- **属性**: `#[test]` は次のフォームに付く印（Rust と同じ書き方）。今ある属性は `test` だけで、
+  `defun` に付ける（[3.16 `#[test]`](#316-test--テスト関数)）。`read` で読むと
+  `(%internal::attribute (test) フォーム)` というリストになる。
 - **空リスト `()`**: 文脈によって `Unit` 型の値、または `Option<Sexpr>` の `none` になる。
   **`Sexpr` に空リストの変種は無い**——`Sexpr` は「空でない S 式」を表し、S 式データの型は
   `Option<Sexpr>` である（[4.3 match](#43-match--パターンマッチ) の「`Option<Sexpr>` のパターン」参照）。
@@ -1054,6 +1057,60 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 どちらも**式**の特殊形で、実行時には何も残らない（本体がコンパイルされるのは展開後の形）。
 ラムダリストは `defmacro` と同じ。詳しい規則と例は
 [局所的なマクロ束縛](functions/system.md#9-局所的なマクロ束縛macrolet--symbol-macrolet)。
+
+### 3.16 `#[test]` — テスト関数
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+`#[test]` を付けた `defun` はテスト関数になり、`typl test` が 1 つずつ呼ぶ（Rust の `#[test]` と
+同じ）。引数を取らず、`()` を返す関数でなければならない（型パラメータも取れない）。`pub` は要らない。
+
+- **普通に実行したとき・`compile-file` では読み飛ばす。** 中身の検査もしない（Rust がテストを
+  `--test` のときだけコンパイルするのと同じ）。プログラムの側からテスト関数は呼べない。
+- テストは、関数を置くどのファイルにも、どの `module` の中にも書ける。プロジェクトの `tests/`
+  フォルダに分けて書いてもよい。
+- 失敗は `panic` と実行時エラー。`assert`、両辺を印字する `assert-eq`
+  （[システム](functions/system.md)）で確かめる。1 つが失敗しても残りのテストは走る。
+
+```sh
+typl test                 # このフォルダのプロジェクトのテストをすべて走らせる
+typl test parse           # 名前（`tests::more::parse-int` のような完全な名前）に parse を含むものだけ
+typl test foo.typl        # foo.typl（と、それが use するファイル）のテスト
+typl test foo.typl parse  # その中で名前に parse を含むもの
+```
+
+プロジェクト（上のフォルダへたどって見つかる `typelisp.toml`）では、ソースのフォルダの下の
+`.typl` ファイルと、`typelisp.toml` と同じフォルダにある `tests/` の下の `.typl` ファイルを
+すべて読み込む。`tests/` の下のファイルのモジュールは、`typelisp.toml` のフォルダからの道筋で決まる
+（`tests/parse.typl` は `tests::parse`）。
+
+`typl test` は、読み込んだファイルの**トップレベルの式を実行しない**。それはプログラム自身の仕事で、
+テストでは行わない（Go の `go test` が `main` を呼ばないのと同じ）。定義（`defun`、`defvar` の
+初期値など）とリーダマクロの登録は普段どおり行う。どこかに型エラーがあると、テストは 1 つも
+走らない。
+
+結果は 1 テスト 1 行で、失敗したものの理由を最後にまとめて出す。1 つでも失敗すると終了コードは 1。
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+テストの中で `print` したものは、そのまま標準出力に出る（取り込まない）。
 
 ## 4. 束縛・条件分岐
 

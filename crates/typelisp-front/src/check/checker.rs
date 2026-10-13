@@ -23,8 +23,10 @@ use super::forms;
 use super::repr::Repr;
 use crate::dump::{CheckerDelta, RegistrySignature};
 
+mod attribute;
 mod c_struct;
 mod ffi_callback;
+pub use attribute::{TestCase, TestForms};
 use c_struct::type_mentions_typed_ptr;
 use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, InstImpls, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, TypeAlias, VarInfo, Variant};
 
@@ -1156,6 +1158,12 @@ pub struct Checker {
     /// LSP (`diagnostics_for`/`candidates_for`), which needs a best-effort tree
     /// for hover/goto-definition/completion even in the presence of type errors.
     recover: bool,
+    /// What a `#[test]` definition and a top-level expression are checked
+    /// into — see [`TestForms`].
+    test_forms: TestForms,
+    /// The tests recorded under [`TestForms::Collect`], drained by
+    /// [`Self::take_tests`].
+    tests: Vec<TestCase>,
     /// Recoverable errors accumulated while `recover` is set — mirrors
     /// `warnings`. Each carries its own innermost source location (via the
     /// `check_at`/`check_form` `Error::at` tagging that already runs before the
@@ -1331,6 +1339,8 @@ impl Checker {
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
             recover: false,
+            test_forms: TestForms::default(),
+            tests: Vec::new(),
             errors: RefCell::new(Vec::new()),
             local_refs: RefCell::new(HashMap::new()),
             node_types: RefCell::new(HashMap::new()),
@@ -2697,6 +2707,13 @@ impl Checker {
         // Rust local, the primary form would be collected out from under the
         // bundle — and, with the cell recycled, the bundle would end up holding a
         // *fragment* of it. Released with everything else by `truncate_roots`.
+        let primary = primary.and_then(|tl| {
+            if self.drops_toplevel_expr(heap, tl) {
+                self.nothing_form(heap)
+            } else {
+                Ok(tl)
+            }
+        });
         let primary = primary.map(|tl| forms::rooted(heap, tl));
         // Specialization-drain recovery boundary (B6): the primary form checked
         // fine, but instantiating a generic it calls failed. In `recover` mode
@@ -3181,6 +3198,12 @@ impl Checker {
             // hover — threaded to the body-checking helpers as `parts_locs`.
             let elem_locs: Vec<Option<Loc>> = heap.list_to_vec_locs(v)?.into_iter().map(|(_, l)| l).collect();
             let parts_locs = &elem_locs[1..];
+            if let Some(Value::Path(pid)) = elems.first() {
+                let is_attribute = heap.path_segments(*pid).iter().map(|s| heap.symbol_name(*s)).eq(typelisp_read::ATTRIBUTE_HEAD);
+                if is_attribute {
+                    return self.check_attribute(heap, interp, &elems[1..], def_loc);
+                }
+            }
             if let Some(Value::Symbol(id)) = elems.first() {
                 // `impl<T>` lexes as a single symbol, exactly like `defstruct
                 // vector-iter<T>`'s name does, so the head has to be split

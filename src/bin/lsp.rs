@@ -399,6 +399,9 @@ fn check_document(file: &str, text: &str, overlay: HashMap<PathBuf, String>) -> 
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut checker, &mut interp);
     checker.set_recover(true);
+    // A `#[test]` function is the user's code like any other, and its errors
+    // are reported like any other's.
+    checker.set_test_forms(TestForms::Check);
 
     let fs_file = FsPath::new(file);
     let dir = fs_file.parent().filter(|p| !p.as_os_str().is_empty()).map(FsPath::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
@@ -1013,5 +1016,19 @@ mod completion_helper_tests {
             .collect();
         assert!(locals.contains(&"o"), "parameter offered, got {:?}", locals);
         assert!(locals.contains(&"x"), "match-arm binding offered, got {:?}", locals);
+    }
+
+    /// A `#[test]` function, which an ordinary run leaves out unchecked, is
+    /// checked in the editor: an error in one is reported like any other.
+    #[test]
+    fn diagnostics_cover_a_test_function() {
+        let file = "/tmp/typelisp-lsp-test-attribute/f.typl";
+        let text = "#[test]\n(defun broken () () (no-such-function))\n";
+        let (diagnostics, _, _) = diagnostics_for(file, text, HashMap::new());
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("no-such-function")),
+            "got {:?}",
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
     }
 }

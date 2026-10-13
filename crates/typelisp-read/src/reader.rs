@@ -1019,6 +1019,8 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
         Some('(') => read_vector(cur, heap, ctx),
         // `#{a b c}` — a tuple.
         Some('{') => read_tuple(cur, heap, ctx),
+        // `#[test] form` — the form, with attributes (Rust's spelling).
+        Some('[') => read_attribute(cur, heap, ctx),
         // `#.` — read the next datum, run it, and read the value in its
         // place. The one place the reader is not a function of its text
         // alone, and the reason `ReadEval` exists.
@@ -1132,6 +1134,52 @@ fn read_tuple(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
     let v = heap.alloc_struct(key, elems);
     restore_roots(heap, mark);
     Ok(v)
+}
+
+/// The head of the form `#[ATTR...] FORM` reads as:
+/// `(%internal::attribute (ATTR...) FORM)`. Which attributes exist, and what
+/// they do to `FORM`, is the checker's business.
+pub const ATTRIBUTE_HEAD: [&str; 2] = ["%internal", "attribute"];
+
+/// `#[ATTR...] FORM` -> `(%internal::attribute (ATTR...) FORM)`. The cursor
+/// is on the `[`. The attributes are data, and so is `FORM`: an attribute
+/// belongs to the form after it, so there has to be one.
+fn read_attribute(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
+    cur.next(); // '['
+    let mark = heap.root_count();
+    let attrs = read_elements(cur, heap, ctx, ']', "#[")?;
+    if attrs.is_empty() {
+        restore_roots(heap, mark);
+        return Err(Error::ReadError("`#[]` names no attribute".to_string()));
+    }
+    let result = (|| {
+        skip_ws_comments(cur, heap, ctx)?;
+        if matches!(cur.peek(), None | Some(')')) {
+            return Err(Error::ReadError("`#[..]` must be followed by the form it belongs to".to_string()));
+        }
+        let form = read_datum(cur, heap, ctx)?;
+        heap.push_root(form);
+        let mut list = Value::Empty;
+        for &a in attrs.iter().rev() {
+            list = heap.cons(a, list)?;
+            heap.push_root(list);
+        }
+        let segs: Vec<SymRef> = ATTRIBUTE_HEAD
+            .iter()
+            .map(|s| match heap.intern_symbol(s) {
+                Value::Symbol(id) => id,
+                _ => unreachable!("intern_symbol always makes a symbol"),
+            })
+            .collect();
+        let head = heap.intern_path(&segs);
+        let tail = heap.cons(form, Value::Empty)?;
+        heap.push_root(tail);
+        let tail = heap.cons(list, tail)?;
+        heap.push_root(tail);
+        heap.cons(head, tail)
+    })();
+    restore_roots(heap, mark);
+    result
 }
 
 /// The data up to `close`, each rooted as it is read so that reading the next

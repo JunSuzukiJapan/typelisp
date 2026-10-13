@@ -75,6 +75,12 @@ pub const MANIFEST_NAME: &str = "typelisp.toml";
 /// optional `src = "dir"` key). `None` if no manifest is found — the caller
 /// falls back to the entry file's own directory.
 pub fn find_src_root(start_dir: &FsPath) -> Option<PathBuf> {
+    find_project(start_dir).map(|(_, src_root)| src_root)
+}
+
+/// [`find_src_root`], with the folder the manifest is in — the project's own
+/// folder, where `tests/` is (`typl test`).
+pub fn find_project(start_dir: &FsPath) -> Option<(PathBuf, PathBuf)> {
     let mut dir = start_dir.to_path_buf();
     loop {
         let manifest = dir.join(MANIFEST_NAME);
@@ -83,7 +89,8 @@ pub fn find_src_root(start_dir: &FsPath) -> Option<PathBuf> {
                 .ok()
                 .and_then(|text| parse_manifest_src(&text))
                 .unwrap_or_default();
-            return Some(if src.is_empty() { dir } else { dir.join(src) });
+            let src_root = if src.is_empty() { dir.clone() } else { dir.join(src) };
+            return Some((dir, src_root));
         }
         if !dir.pop() {
             return None;
@@ -216,6 +223,26 @@ impl Loader {
     ) -> Result<(), Error> {
         let segs = module_segs_for(file, &self.src_root)?;
         self.load_source(heap, reader, checker, interp, file, src, segs)
+    }
+
+    /// Load `file` as the module `segs`, unless that module is already in —
+    /// for a driver that loads a whole tree of files (`typl test`), where a
+    /// file an earlier one `use`d has been loaded already.
+    pub fn load_module_file(
+        &mut self,
+        heap: &mut Heap,
+        reader: &Reader,
+        checker: &mut Checker,
+        interp: &mut Interp,
+        file: &FsPath,
+        segs: Vec<String>,
+    ) -> Result<(), Error> {
+        if self.loaded.contains(&segs) {
+            return Ok(());
+        }
+        let src = self.read_source(file)?;
+        self.loaded_files.insert(file.to_path_buf());
+        self.load_source(heap, reader, checker, interp, file, &src, segs)
     }
 
     /// Scan `forms` for `use` dependencies and load them — the REPL's case,
