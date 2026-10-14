@@ -207,7 +207,14 @@ typelisp で書けるものは typelisp で書く（Rust 組み込みは Rust �
 - `typl test` はトップレベルの式を実行しない（Go の `main` と同じ）。プロジェクトの全ファイルを
   読むので、サーバを起動する `main.typl` のようなファイルを読んでも止まらないため。リーダマクロの
   登録（`needs_immediate_exec`）は残す。
-- テスト関数は引数なし・型パラメータなし・戻り値 `()`。`Result` を返す形は入れていない。
+- テスト関数は引数なし・型パラメータなし・戻り値 `()` か `Result<(), E>`（2026-10-14 ユーザー指示で
+  追加）。`E` には定義の時点で `print-object` を要求する（Rust の `Debug` に当たる）。ランナーは
+  `(match (NAME) ((ok _) ()) ((err e) (panic ...)))` を組み立て、`panic` の cons にテスト関数の
+  定義の位置を付ける。prelude の補助関数で `panic` すると、失敗の位置が `<prelude>:行` になるため。
+- 同じく 2026-10-14 のユーザー指示で、`eprint`/`eprintln`（標準エラー出力）と `typl -c --release` を
+  足した。リリースビルドでは引数ごと `()` に置き換える（検査はする）。「リリースビルド」は CLI の
+  `--release` だけ（ユーザー決定。`compile-file` 関数には無い）。実行ファイルの中の `eval` にも
+  `rt_eval_state` の 5 番目の引数で伝えるので、ABI 版は 0.2.10 になった。
 - 読み込むファイルは、ソースのルートの下の全 `.typl` と、`typelisp.toml` のフォルダの `tests/` の
   下の全 `.typl`。後者のモジュールは `typelisp.toml` のフォルダからの道筋（`tests::foo`）。
   `typl test FILE.typl [FILTER]` で 1 ファイルだけも走らせられる。既に読んだモジュールは
