@@ -93,7 +93,8 @@ fib(25) = 75025
 `--release` を付けると**リリースビルド**になり、`eprint`/`eprintln`（調べるための標準エラー出力。
 [印字](../reference/functions/printing.md)）を引数ごと取り除きます。取り除くものも型検査はするので、
 そこに型エラーがあればコンパイルは失敗します。`--release` を付けないときと、`typl` で直接実行する
-ときは、`eprint`/`eprintln` は標準エラー出力に書きます。
+ときは、`eprint`/`eprintln` は標準エラー出力に書きます。`compile-file` にはリリースビルドの指定が無く、
+`--release` を付けないときと同じになります。
 
 ```sh
 $ typl -c hello.typl --release
