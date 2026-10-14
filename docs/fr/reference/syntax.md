@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1160,7 +1160,7 @@ se trouvent dans
   (assert-eq (+ 1 2) 3))
 ```
 
-Un `defun` marqué `#[test]` est une fonction de test, que `typl test` appelle une à une (comme le `#[test]` de Rust). Elle ne doit prendre aucun argument et doit renvoyer `()` ou `Result<(), E>` (elle ne peut pas non plus prendre de paramètres de type). Elle n'a pas besoin de `pub`. Un test qui renvoie un `Result` échoue en renvoyant un `err`, et l'erreur est affichée ; `E` doit donc implémenter `print-object` (comme Rust exige `Debug` du type d'erreur d'un test).
+Un `defun` marqué `#[test]` est une fonction de test, que `typl test` appelle une à une (comme le `#[test]` de Rust). Elle ne doit prendre aucun argument et doit renvoyer `()` ou `Result<(), E>` (elle ne peut pas non plus prendre de paramètres de type). Elle n'a pas besoin de `pub`. Un test qui renvoie un `Result` échoue en renvoyant un `err`, et l'erreur est affichée ; `E` doit donc implémenter `Error` ou `print-object` (comme Rust exige `Debug` du type d'erreur d'un test). Un `Error` est affiché par `describe-error` (le message et la chaîne de ses causes), tout le reste par `print-object`. `:dyn Error` est aussi un `Error` : un test peut donc rassembler des erreurs différentes en un seul type et le renvoyer.
 
 ```lisp
 #[test]

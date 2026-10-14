@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1165,7 +1165,7 @@ ejemplos están en
   (assert-eq (+ 1 2) 3))
 ```
 
-Un `defun` marcado con `#[test]` es una función de prueba, que `typl test` llama de una en una (igual que `#[test]` de Rust). No debe recibir argumentos y debe devolver `()` o `Result<(), E>` (tampoco puede recibir parámetros de tipo). No necesita `pub`. Una prueba que devuelve un `Result` falla al devolver un `err`, y el error se imprime, así que `E` debe implementar `print-object` (igual que Rust pide `Debug` al tipo de error de una prueba).
+Un `defun` marcado con `#[test]` es una función de prueba, que `typl test` llama de una en una (igual que `#[test]` de Rust). No debe recibir argumentos y debe devolver `()` o `Result<(), E>` (tampoco puede recibir parámetros de tipo). No necesita `pub`. Una prueba que devuelve un `Result` falla al devolver un `err`, y el error se muestra, así que `E` debe implementar `Error` o `print-object` (igual que Rust pide `Debug` al tipo de error de una prueba). Un `Error` se muestra con `describe-error` (el mensaje y su cadena de causas), y cualquier otra cosa con `print-object`. `:dyn Error` también es un `Error`, así que una prueba puede reunir errores distintos en un solo tipo y devolverlo.
 
 ```lisp
 #[test]

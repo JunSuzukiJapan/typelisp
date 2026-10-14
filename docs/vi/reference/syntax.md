@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1113,7 +1113,7 @@ triển của thân). Danh sách lambda giống như của `defmacro`. Các quy 
   (assert-eq (+ 1 2) 3))
 ```
 
-Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` hoặc `Result<(), E>` (cũng không thể nhận tham số kiểu). Không cần `pub`. Một kiểm thử trả về `Result` sẽ thất bại khi trả về `err`, và lỗi được in ra, nên `E` phải cài đặt `print-object` (giống như Rust yêu cầu kiểu lỗi của kiểm thử có `Debug`).
+Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` hoặc `Result<(), E>` (cũng không thể nhận tham số kiểu). Không cần `pub`. Một kiểm thử trả về `Result` sẽ thất bại khi trả về `err`, và lỗi được hiển thị, nên `E` phải cài đặt `Error` hoặc `print-object` (giống như Rust yêu cầu kiểu lỗi của kiểm thử có `Debug`). `Error` được hiển thị bằng `describe-error` (thông điệp và chuỗi nguyên nhân), còn lại bằng `print-object`. `:dyn Error` cũng là `Error`, nên một kiểm thử có thể gom các lỗi khác nhau vào một kiểu rồi trả về.
 
 ```lisp
 #[test]

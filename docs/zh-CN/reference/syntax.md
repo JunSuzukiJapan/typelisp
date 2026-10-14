@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -898,7 +898,7 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
   (assert-eq (+ 1 2) 3))
 ```
 
-加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()` 或 `Result<(), E>`（也不能有类型参数）。不需要 `pub`。返回 `Result` 的测试在返回 `err` 时失败，并打印该错误，因此 `E` 必须实现 `print-object`（与 Rust 要求测试的错误类型实现 `Debug` 相同）。
+加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()` 或 `Result<(), E>`（也不能有类型参数）。不需要 `pub`。返回 `Result` 的测试在返回 `err` 时失败，并显示该错误，因此 `E` 必须实现 `Error` 或 `print-object`（与 Rust 要求测试的错误类型实现 `Debug` 相同）。是 `Error` 时用 `describe-error`（消息及原因链）显示，否则用 `print-object` 显示。`:dyn Error` 也是 `Error`，因此可以把各种错误归为一个类型返回。
 
 ```lisp
 #[test]

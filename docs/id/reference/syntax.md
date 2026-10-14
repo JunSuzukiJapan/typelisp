@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1192,7 +1192,7 @@ terperinci dan contohnya ada di
   (assert-eq (+ 1 2) 3))
 ```
 
-`defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` atau `Result<(), E>` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`. Pengujian yang mengembalikan `Result` gagal jika mengembalikan `err`, dan galatnya dicetak, sehingga `E` harus mengimplementasikan `print-object` (sama seperti Rust meminta `Debug` dari tipe galat pengujian).
+`defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` atau `Result<(), E>` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`. Pengujian yang mengembalikan `Result` gagal jika mengembalikan `err`, dan galatnya ditampilkan, sehingga `E` harus mengimplementasikan `Error` atau `print-object` (sama seperti Rust meminta `Debug` dari tipe galat pengujian). `Error` ditampilkan dengan `describe-error` (pesan dan rantai penyebabnya), selain itu dengan `print-object`. `:dyn Error` juga merupakan `Error`, sehingga pengujian dapat mengumpulkan berbagai galat ke dalam satu tipe lalu mengembalikannya.
 
 ```lisp
 #[test]

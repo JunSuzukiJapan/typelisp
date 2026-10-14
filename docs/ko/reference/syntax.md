@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -988,7 +988,7 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   (assert-eq (+ 1 2) 3))
 ```
 
-`#[test]`를 붙인 `defun`은 테스트 함수가 되며, `typl test`가 하나씩 호출합니다(Rust의 `#[test]`와 같음). 인수를 받지 않고 `()` 또는 `Result<(), E>`를 반환하는 함수여야 합니다(타입 매개변수도 받을 수 없음). `pub`은 필요 없습니다. `Result`를 반환하는 테스트는 `err`를 반환하면 실패하며 그 오류를 출력합니다. 따라서 `E`는 `print-object`를 구현해야 합니다(Rust가 테스트의 오류 타입에 `Debug`를 요구하는 것과 같음).
+`#[test]`를 붙인 `defun`은 테스트 함수가 되며, `typl test`가 하나씩 호출합니다(Rust의 `#[test]`와 같음). 인수를 받지 않고 `()` 또는 `Result<(), E>`를 반환하는 함수여야 합니다(타입 매개변수도 받을 수 없음). `pub`은 필요 없습니다. `Result`를 반환하는 테스트는 `err`를 반환하면 실패하며 그 오류를 표시합니다. 따라서 `E`는 `Error` 또는 `print-object`를 구현해야 합니다(Rust가 테스트의 오류 타입에 `Debug`를 요구하는 것과 같음). `Error`라면 `describe-error`(메시지와 원인의 연쇄)로, 그렇지 않으면 `print-object`로 표시합니다. `:dyn Error`도 `Error`이므로 여러 오류를 하나의 타입으로 모아 반환할 수 있습니다.
 
 ```lisp
 #[test]

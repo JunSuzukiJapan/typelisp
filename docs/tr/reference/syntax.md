@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1142,7 +1142,7 @@ bölümündedir.
   (assert-eq (+ 1 2) 3))
 ```
 
-`#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` ya da `Result<(), E>` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez. `Result` döndüren bir test, `err` döndürdüğünde başarısız olur ve hata yazdırılır; bu yüzden `E`, `print-object`'i uygulamalıdır (Rust'ın bir testin hata türünden `Debug` istemesi gibi).
+`#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` ya da `Result<(), E>` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez. `Result` döndüren bir test, `err` döndürdüğünde başarısız olur ve hata gösterilir; bu yüzden `E`, `Error` ya da `print-object`'i uygulamalıdır (Rust'ın bir testin hata türünden `Debug` istemesi gibi). Bir `Error`, `describe-error` ile (mesaj ve nedenler zinciri), diğer her şey `print-object` ile gösterilir. `:dyn Error` de bir `Error` olduğundan, bir test farklı hataları tek bir türde toplayıp döndürebilir.
 
 ```lisp
 #[test]

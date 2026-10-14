@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1194,7 +1194,7 @@ regels en voorbeelden staan in
   (assert-eq (+ 1 2) 3))
 ```
 
-Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` of `Result<(), E>` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig. Een test die een `Result` teruggeeft, faalt door een `err` terug te geven, en de fout wordt afgedrukt; daarom moet `E` `print-object` implementeren (zoals Rust `Debug` vraagt van het fouttype van een test).
+Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` of `Result<(), E>` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig. Een test die een `Result` teruggeeft, faalt door een `err` terug te geven, en de fout wordt getoond; daarom moet `E` `Error` of `print-object` implementeren (zoals Rust `Debug` vraagt van het fouttype van een test). Een `Error` wordt getoond met `describe-error` (het bericht en de keten van oorzaken), al het andere met `print-object`. Ook `:dyn Error` is een `Error`, dus een test kan verschillende fouten in één type verzamelen en teruggeven.
 
 ```lisp
 #[test]

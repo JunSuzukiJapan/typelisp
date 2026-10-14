@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -879,7 +879,7 @@ vtable 進行動態分派：
   (assert-eq (+ 1 2) 3))
 ```
 
-加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()` 或 `Result<(), E>`（也不能有型別參數）。不需要 `pub`。回傳 `Result` 的測試在回傳 `err` 時失敗，並印出該錯誤，因此 `E` 必須實作 `print-object`（與 Rust 要求測試的錯誤型別實作 `Debug` 相同）。
+加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()` 或 `Result<(), E>`（也不能有型別參數）。不需要 `pub`。回傳 `Result` 的測試在回傳 `err` 時失敗，並顯示該錯誤，因此 `E` 必須實作 `Error` 或 `print-object`（與 Rust 要求測試的錯誤型別實作 `Debug` 相同）。是 `Error` 時用 `describe-error`（訊息及原因鏈）顯示，否則用 `print-object` 顯示。`:dyn Error` 也是 `Error`，因此可以把各種錯誤歸為一個型別回傳。
 
 ```lisp
 #[test]

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1145,7 +1145,7 @@ exemplen finns i
   (assert-eq (+ 1 2) 3))
 ```
 
-En `defun` märkt med `#[test]` är en testfunktion, som `typl test` anropar en i taget (som Rusts `#[test]`). Den får inte ta några argument och måste returnera `()` eller `Result<(), E>` (den kan inte heller ta typparametrar). Den behöver inte `pub`. Ett test som returnerar ett `Result` misslyckas genom att returnera ett `err`, och felet skrivs ut, så `E` måste implementera `print-object` (precis som Rust kräver `Debug` av ett tests feltyp).
+En `defun` märkt med `#[test]` är en testfunktion, som `typl test` anropar en i taget (som Rusts `#[test]`). Den får inte ta några argument och måste returnera `()` eller `Result<(), E>` (den kan inte heller ta typparametrar). Den behöver inte `pub`. Ett test som returnerar ett `Result` misslyckas genom att returnera ett `err`, och felet visas, så `E` måste implementera `Error` eller `print-object` (precis som Rust kräver `Debug` av ett tests feltyp). Ett `Error` visas med `describe-error` (meddelandet och kedjan av orsaker), allt annat med `print-object`. Även `:dyn Error` är ett `Error`, så ett test kan samla olika fel i en typ och returnera den.
 
 ```lisp
 #[test]
