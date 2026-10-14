@@ -2802,6 +2802,19 @@ impl Renderer {
         depth: usize,
         out: &mut String,
     ) -> Result<(), String> {
+        typelisp_mem::grow_stack(|| self.render_here(heap, ctx, v, standard, depth, out))
+    }
+
+    /// [`Self::render`] on the stack it is given.
+    fn render_here(
+        &mut self,
+        heap: &mut Heap,
+        ctx: RenderCtx<'_>,
+        v: Value,
+        standard: bool,
+        depth: usize,
+        out: &mut String,
+    ) -> Result<(), String> {
         if self.prologue(heap, ctx, v, depth, out) {
             return Ok(());
         }
