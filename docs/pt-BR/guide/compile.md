@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
 # Compilação
 
 Se você não fizer nada além disso, os programas typelisp são executados no interpretador. Além disso há duas
@@ -91,7 +91,7 @@ Sem `-o`, o executável recebe o nome do arquivo-fonte sem `.typl` e é colocado
 arquivo-fonte. Se o nome do arquivo-fonte não terminar em `.typl`, `-o` é obrigatório. Com `-c`
 (`--compile`), não é possível passar `--image`, `--heap-cells` nem `--feature`.
 
-Com `--release` é um **build de release**, que remove `eprint`/`eprintln` (saída de erro padrão para investigação; [Impressão](../reference/functions/printing.md)) junto com seus argumentos. O que ele remove continua sendo verificado por tipos, então um erro de tipo ali faz a compilação falhar. Sem `--release`, e ao executar diretamente com `typl`, `eprint`/`eprintln` escrevem na saída de erro padrão.
+Com `--release` é um **build de release**, que remove `eprint`/`eprintln` (saída de erro padrão para investigação; [Impressão](../reference/functions/printing.md)) junto com seus argumentos. O que ele remove continua sendo verificado por tipos, então um erro de tipo ali faz a compilação falhar. Sem `--release`, e ao executar diretamente com `typl`, `eprint`/`eprintln` escrevem na saída de erro padrão. `compile-file` não tem como pedir um build de release, e compila como sem `--release`.
 
 ```sh
 $ typl -c hello.typl --release

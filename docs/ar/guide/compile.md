@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
 # الترجمة
 
 إذا لم تفعل شيئًا آخر فإن برامج typelisp تعمل في المفسِّر (interpreter). وإضافة إلى ذلك توجد طريقتان
@@ -90,7 +90,7 @@ fib(25) = 75025
 المصدر. وإذا لم ينتهِ اسم ملف المصدر بـ `.typl` فإن `-o` مطلوب. ومع `-c` (`--compile`) لا يمكن
 تمرير `--image` و`--heap-cells` و`--feature`.
 
-مع `--release` يكون **بناء إصدار**، يزيل `eprint`/`eprintln` (مخرجات الأخطاء القياسية للتحقيق في المشكلات؛ [الطباعة](../reference/functions/printing.md)) مع وسائطها. وما يُزال يخضع مع ذلك لفحص الأنواع، فإن وُجد فيه خطأ في الأنواع تفشل الترجمة. ومن دون `--release`، وعند التشغيل مباشرة بـ `typl`، يكتب `eprint`/`eprintln` إلى مخرج الأخطاء القياسي.
+مع `--release` يكون **بناء إصدار**، يزيل `eprint`/`eprintln` (مخرجات الأخطاء القياسية للتحقيق في المشكلات؛ [الطباعة](../reference/functions/printing.md)) مع وسائطها. وما يُزال يخضع مع ذلك لفحص الأنواع، فإن وُجد فيه خطأ في الأنواع تفشل الترجمة. ومن دون `--release`، وعند التشغيل مباشرة بـ `typl`، يكتب `eprint`/`eprintln` إلى مخرج الأخطاء القياسي. لا توجد في `compile-file` طريقة لطلب بناء إصدار، فهو يبني كما لو كان من دون `--release`.
 
 ```sh
 $ typl -c hello.typl --release
