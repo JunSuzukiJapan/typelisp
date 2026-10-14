@@ -1,19 +1,12 @@
 # typelisp 開発 TODO
 
-最終更新: 2026-10-13 / ブランチ: `feat/per-instantiation-impls`
+最終更新: 2026-10-14 / ブランチ: `main`
 
 このドキュメントは**現在残っている作業のみ**を記録する。終わった作業は
 [completed-work.md](completed-work.md)（何がどこまで進んだかの横断的な要約）と
 [implementation-log.md](implementation-log.md)（作業 1 件ごとの経緯・設計判断）へ移す。
 
 ## 残っている作業
-
-**CI/CD（作業中、ブランチ `feat/ci`）。** push/PR ごとにビルドと警告 0 を、
-リリース（`v*` タグ）のときだけテスト全体を回す。対象は macOS と Linux
-（Ubuntu 24.04・Debian 13・Fedora 44 でテスト全体が通ることを 2026-10-02 に確認済み）。
-Arch は対象外（2026-10-02 決定）：公式リポジトリの `llvm` が 23 で、LLVM 22 は
-実行時ライブラリ（`llvm22-libs`）しか無く `llvm-config`・ヘッダが無い。LLVM 23 へ移る
-ときに改めて考える。crates.io への公開は手動のまま。
 
 **軽量スレッド（タスク）は完了した。** プランは
 `~/.claude/plans/go-gorutine-adaptive-raccoon.md`。Phase A（評価器の CPS 化）、

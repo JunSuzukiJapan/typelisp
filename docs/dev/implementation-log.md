@@ -12389,3 +12389,68 @@ native で G2 が一致）と prelude の成果物を作り直した。prelude �
 **テスト。** `tests/per_instantiation_impl_test.rs`（固有・トレイト・`:dyn`・`where`・関連型・
 スーパートレイト・ブランケット・`print-object`・`~/name/`・重複の拒否・名前で指す道具。インタプリタと
 compile の両方）、`compile_file_test` に AOT の実行ファイルでの `print-object` と `:dyn`。
+
+## CI/CD（2026-10-02〜10-08）
+
+ブランチ `feat/ci`。ユーザの決定は 4 つ: Linux は主要ディストリを複数含める、テスト全体は
+リリース（`v*` タグ）のときだけ回し、push/PR はビルドと警告 0 にとどめる、crates.io への公開は
+手動のまま、セルフホストのランナーは使わない。
+
+- `ci.yml`（push/PR）: `cargo check` を `-D warnings` で、テストも含めて警告 0 を確かめ、
+  ビルドする。テストはリンクしない（130 本ほどのテストバイナリをリンクすると 15GB を超え、
+  ホスト型ランナーの空きに入らない）。2026-10-08 に、訳の鮮度（`scripts/check-translations.sh`）
+  の検査を足した。
+- `release.yml`（`v*` タグ）: 環境ごとにテストを 4 つに分けて回し（`scripts/test-each.sh`）、
+  macOS の配布物を作り、下書きのリリースを公開し、`install.sh` で入れて確かめる。手で起動
+  したときはビルドまで。
+- ビルド環境の準備は `.github/actions/setup-build` に 1 つにまとめた。ネットワークを使う手順は
+  3 回まで試す。テスト 1 ターゲットあたりの時間の上限は 3600 秒（`scripts/test-serial.sh` の
+  既定値にそろえ、`release.yml` での上書きはやめた）。
+- Arch は対象外（2026-10-02 決定）。公式リポジトリの `llvm` が 23 で、LLVM 22 は実行時
+  ライブラリ（`llvm22-libs`）しか無く、`llvm-config` とヘッダが無い。
+
+workflow ファイルを push するには、gh のトークンに `workflow` 権限が要る。
+
+## Rust/Go 由来の追加機能 8 項目（2026-10-09〜10-14）
+
+2026-10-09 にサンプルコードを見たうえでユーザが採用を決めた 8 項目を、影響の範囲が広い順に
+6 つの Phase で入れた。構文の確定事項、各 Phase の決定と計画からの差分は
+[rust-go-features-plan.md](rust-go-features-plan.md) にまとめてあり、ここには Phase をまたぐ
+経緯だけを書く。Phase 5 と 6 の間に、別の作業としてコンストラクタの再設計
+（[constructors-redesign.md](constructors-redesign.md)）と、総称型の具体型ごとの impl を挟んだ。
+
+**Phase 1〜5（2026-10-09〜10-10）。** リーダーの土台（`]` と `}` を区切り文字に、`#(..)`/`#NA`）
+から入り、`defmethod` の型パラメータ、`match` のガードと or パターン、タプル、prelude で書ける
+もの（コンビネータ、`lazy::`、コレクション、`Context`）の順。Sexpr の変種番号は事前に
+`sexpr_variant.rs` の 1 か所へ集め、変種は末尾に足した。Phase 5 で、`#(..)` `#{..}` `#NA` を
+運べない経路が 2 つ（prelude のソースハッシュ、ジェネリックの本体を持ち越す `OwnedForm`）
+後から見つかった。
+
+**Phase 6（2026-10-13〜10-14、ブランチ `feat/test-attribute`）。** `#[test]` を付けた `defun` と
+`typl test`、`assert-eq`。リーダーは `#[ATTR...] FORM` を `(%internal::attribute (ATTR...) FORM)`
+に読み、チェッカーの `TestForms`（`Skip`/`Check`/`Collect`）が扱いを決める。実装の後に、
+ユーザの指示で 3 つ足した。
+
+- テスト関数が `Result<(), E>` を返せるようにした。`E` は `Error` か `print-object` を実装する。
+  最初は prelude の補助関数の中で `panic` していたが、失敗の位置が `<prelude>:行` になった
+  ので、ランナーが `match` を組み立て、`panic` にテスト関数の定義の位置を付ける形に変えた。
+  `E` を最初は `print-object` に限っていたが、`:dyn Error` が返せないことが分かり（trait
+  object は自分のトレイトのメソッドしか持たない）、`Error` も受け付けて `describe-error` で
+  表示するようにした。
+- `eprint`/`eprintln` と `--release`。最初は `typl -c --release` だけにし、フラグを
+  チェッカー・`compile_file`・`restore_dump`、さらに `compile-file` の `:release` キーへと
+  引数で渡し始めていた。ユーザの指摘（「`--release` は release フラグを true にするだけで
+  よい、変わるものの側がフラグを見ればよい」）で、プロセスに 1 つのフラグ
+  （`typelisp_front::release`）に作り直した。`--release` は typl 全体のオプションになり、
+  受け渡しが残ったのは、実行ファイルがビルド時のフラグを受け取る `rt_eval_state` の
+  5 番目の引数だけ（ABI 版 0.2.10）。
+- 上の `:dyn Error` を確かめる途中で、`validate_where_bounds` が名前の無い型（trait object・
+  `()`・関数型など）の境界を `continue` で飛ばしていたことが分かった。`:dyn Error` が
+  `(where (Eq T))` を通り、本体の `equals` は trait object が答える `Sexpr` のメソッドとして
+  動いていた。`type_implements` が trait object をそのトレイトとスーパートレイトの実装と
+  みなすようにし、名前の無い型もそれで確かめる（`!` だけはどの境界も満たす）。全テストで、
+  断られるようになった既存のコードは無かった。
+
+途中で、直前のコミット（d110489）が訳の先頭行に短いハッシュを書いていて、main の CI の
+translations ジョブが 40 本を NOHEADER として落としていたのを見つけ、完全なハッシュに直した。
+

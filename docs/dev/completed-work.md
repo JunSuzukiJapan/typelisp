@@ -1,6 +1,6 @@
 # 完了した作業の要約
 
-最終更新: 2026-09-12
+最終更新: 2026-10-14
 
 [TODO.md](TODO.md) は**残っている作業だけ**を記録する。作業が終わったらそこから消すが、
 消したものの中には「何がどの順で片付いたか」「その作業が何を教えたか」という**横断的な
@@ -11,6 +11,39 @@
 複数の作業をまたいで分かったことの一覧。詳細を読みたくなったら必ずあちらへ飛ぶ。
 
 新しい項目はこのファイルの先頭（この前書きの直後）に足す——新しいものほど上。
+
+---
+
+**Rust/Go 由来の追加機能 8 項目**（2026-10-09〜10-14、計画は
+[rust-go-features-plan.md](rust-go-features-plan.md)）。**Phase 1〜6 すべて完了**。
+各 Phase で決めたこと・計画から変わった点は計画書の各 Phase の「完了」の段落、
+経緯は [implementation-log.md](implementation-log.md) の同名の節。
+
+- **Phase 1**: ベクタ・配列リテラル `#(..)` `#2A(..)`、`Sexpr` の vector/array 変種、`]` `}` を区切り文字に
+- **Phase 2**: `defmethod` 自身の型パラメータ（`map<U>`）
+- **Phase 3**: `match` のガード `(pat :when cond body)` と `(:or p1 p2)`
+- **Phase 4**: タプル `#{..}`（型も `#{int string}`、要素は `t::0`）
+- **Phase 5**: Option/Result のコンビネータと `->`、`lazy::` イテレータ、`HashSet`/`SortedTable`/`Deque`、`Context`
+- **Phase 6**: `#[test]` と `typl test`、`assert-eq`、`Result<(), E>` を返すテスト、
+  `eprint`/`eprintln` と `typl --release`
+
+**横断的な教訓**:
+- リテラルの種類を足すと、リーダーの出力を受け取る経路の全部（prelude のソースハッシュ、
+  ジェネリックの本体を持ち越す `OwnedForm`）が運べるかを探す必要があった。後から 2 か所出てきた。
+- 文書を変えたら、20 言語の訳を同じブランチで追従させる。訳の先頭行のハッシュは 40 桁の
+  完全なもので、短いハッシュを書いたコミットが main の CI（translations）を落としていた。
+- 「確かめて」と言われた 1 件（`Result<(), :dyn Error>` を返すテスト）を追った先で、`where`
+  境界の検証が名前の無い型を素通りさせていた不具合が見つかった。動く例を 1 つ足すたびに、
+  その近くの判定を実際に走らせて確かめる価値がある。
+
+---
+
+**CI/CD**（2026-10-02〜10-08）。push/PR ごとに macOS と Linux 3 ディストリ（Ubuntu 24.04・
+Debian 13・Fedora 44）でビルドと警告 0、訳の鮮度を確かめる（`ci.yml`）。`v*` タグでは
+全環境のテスト・macOS の配布物・リリース・インストール確認まで行う（`release.yml`）。
+テスト全体は数時間かかるのでリリースのときだけ。crates.io への公開は手動のまま。
+Arch は対象外（公式に LLVM 22 の開発用パッケージが無い。LLVM 23 へ移るときに改めて考える）。
+経緯は [implementation-log.md](implementation-log.md) の同名の節。
 
 ---
 
