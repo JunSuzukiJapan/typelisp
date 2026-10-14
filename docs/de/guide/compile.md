@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -92,6 +92,12 @@ fib(25) = 75025
 Ohne `-o` erhält das Programm den Namen der Quelldatei ohne `.typl` und landet im selben Ordner wie die
 Quelldatei. Endet der Name der Quelldatei nicht auf `.typl`, ist `-o` Pflicht. Zusammen mit `-c` (`--compile`)
 lassen sich `--image`, `--heap-cells` und `--feature` nicht angeben.
+
+Mit `--release` ist es ein **Release-Build**, der `eprint`/`eprintln` (Ausgaben zur Untersuchung auf der Standardfehlerausgabe; [Ausgabe](../reference/functions/printing.md)) samt Argumenten entfernt. Was entfernt wird, wird trotzdem typgeprüft; ein Typfehler darin lässt die Kompilierung also fehlschlagen. Ohne `--release` und beim direkten Ausführen mit `typl` schreiben `eprint`/`eprintln` auf die Standardfehlerausgabe.
+
+```sh
+$ typl -c hello.typl --release
+```
 
 Dasselbe lässt sich erreichen, indem man `compile-file` aus der REPL oder aus einem Programm aufruft.
 

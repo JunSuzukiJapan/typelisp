@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Compilation
 
 Sauf indication contraire, les programmes typelisp s'exécutent dans l'interpréteur. Il existe en outre deux façons
@@ -90,6 +90,12 @@ fib(25) = 75025
 Sans `-o`, l'exécutable porte le nom du fichier source sans `.typl` et est placé dans le même dossier que le
 fichier source. Si le nom du fichier source ne se termine pas par `.typl`, `-o` est obligatoire. Avec `-c`
 (`--compile`), on ne peut pas donner `--image`, `--heap-cells` ni `--feature`.
+
+Avec `--release`, c'est une **compilation release**, qui retire `eprint`/`eprintln` (sortie d'erreur standard pour l'investigation ; [Affichage](../reference/functions/printing.md)) avec leurs arguments. Ce qui est retiré est tout de même vérifié par les types : une erreur de type à cet endroit fait donc échouer la compilation. Sans `--release`, et lors d'une exécution directe avec `typl`, `eprint`/`eprintln` écrivent sur la sortie d'erreur standard.
+
+```sh
+$ typl -c hello.typl --release
+```
 
 On peut faire la même chose en appelant `compile-file` depuis la REPL ou depuis un programme.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Impresión
 
 `print`/`println`/`format`, las impresoras de un argumento, el pretty printer, `print-object` y las variables
@@ -7,7 +7,7 @@ streams y escribir en ellos está en [Streams y archivos](streams-files.md).
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` son todas **formas especiales que interpretan directivas de formato (las
+`print`/`println`/`eprint`/`eprintln`/`format` son todas **formas especiales que interpretan directivas de formato (las
 directivas del `format` de CL)**. El primer argumento (el segundo en `format`) es la **cadena de control**, y
 cada directiva consume por turno los argumentos variádicos que siguen.
 
@@ -15,6 +15,8 @@ cada directiva consume por turno los argumentos variádicos que siguen.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Expande la cadena de control y la escribe en la salida estándar sin salto de línea |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Lo mismo, con un salto de línea al final |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Igual que `print`, pero escribe en la salida de error estándar (`*error-output*`). El `eprint!` de Rust. **Una compilación release (`typl -c --release`) lo elimina junto con sus argumentos** (los argumentos no se evalúan). Se comprueban sus tipos incluso cuando se elimina |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Igual, con un salto de línea al final. El `eprintln!` de Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | El `format` de CL. Devuelve la cadena expandida. Si `dest` es `true` (el `t` de CL), también se escribe en la salida estándar; si es `false` (el `nil` de CL), no se escribe y solo se devuelve |
 | `format` (a un stream) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Si `dest` no es un `bool`, es el destino stream de CL. La cadena expandida se escribe en ese stream. El valor de retorno es `()` (el `nil` de CL), y no se devuelve ninguna cadena |
 

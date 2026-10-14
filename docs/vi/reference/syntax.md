@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1113,11 +1113,19 @@ triển của thân). Danh sách lambda giống như của `defmacro`. Các quy 
   (assert-eq (+ 1 2) 3))
 ```
 
-Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` (cũng không thể nhận tham số kiểu). Không cần `pub`.
+Một `defun` được đánh dấu `#[test]` là một hàm kiểm thử, được `typl test` gọi lần lượt từng cái (giống `#[test]` của Rust). Hàm không được nhận đối số và phải trả về `()` hoặc `Result<(), E>` (cũng không thể nhận tham số kiểu). Không cần `pub`. Một kiểm thử trả về `Result` sẽ thất bại khi trả về `err`, và lỗi được in ra, nên `E` phải cài đặt `print-object` (giống như Rust yêu cầu kiểu lỗi của kiểm thử có `Debug`).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **Lần chạy thông thường và `compile-file` bỏ qua nó**, thậm chí không kiểm tra nội dung (giống như Rust chỉ biên dịch các kiểm thử khi có `--test`). Bản thân chương trình không thể gọi một hàm kiểm thử.
 - Có thể viết kiểm thử trong bất kỳ tệp nào chứa hàm, bên trong bất kỳ `module` nào. Cũng có thể để kiểm thử riêng trong thư mục `tests/` của dự án.
-- Một kiểm thử thất bại khi có `panic` hoặc lỗi lúc chạy. Kiểm tra bằng `assert`, hoặc bằng `assert-eq` (in ra cả hai vế) ([Hệ thống](functions/system.md)). Khi một kiểm thử thất bại, các kiểm thử còn lại vẫn chạy.
+- Một kiểm thử thất bại khi có `panic`, lỗi lúc chạy, hoặc khi trả về `err`. Kiểm tra bằng `assert`, hoặc bằng `assert-eq` (in ra cả hai vế) ([Hệ thống](functions/system.md)). Khi một kiểm thử thất bại, các kiểm thử còn lại vẫn chạy.
 
 ```sh
 typl test                 # chạy mọi kiểm thử của dự án trong thư mục này
@@ -1147,7 +1155,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-Những gì kiểm thử in ra bằng `print` đi thẳng ra đầu ra chuẩn (không bị thu giữ).
+Những gì kiểm thử in ra bằng `print` đi thẳng ra đầu ra chuẩn (không bị thu giữ). Với đầu ra dùng để điều tra, `eprint`/`eprintln` ([In](functions/printing.md)) ghi ra đầu ra lỗi chuẩn và không lẫn với đầu ra của chương trình.
 
 ## 4. Ràng buộc và rẽ nhánh
 

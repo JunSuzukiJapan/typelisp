@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # 출력
 
 `print`/`println`/`format`, 인수 하나의 출력 함수, 프리티 프린터, `print-object`, 출력을 제어하는 변수. 서식 지시자 목록은
@@ -6,13 +6,15 @@
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format`은 모두 **서식 지시자(CL의 `format` 지시자)를 해석하는 특수 형식**이다. 첫 번째 인수(`format`은
+`print`/`println`/`eprint`/`eprintln`/`format`은 모두 **서식 지시자(CL의 `format` 지시자)를 해석하는 특수 형식**이다. 첫 번째 인수(`format`은
 두 번째)가 **제어 문자열**이며, 각 지시자가 뒤따르는 가변 인수를 차례로 소비한다.
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | 제어 문자열을 전개해 줄바꿈 없이 표준 출력에 쓴다 |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | 같은 것을 끝에 줄바꿈을 붙여 |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | `print`와 같지만 표준 오류 출력(`*error-output*`)에 씁니다. Rust의 `eprint!`. **릴리스 빌드(`typl -c --release`)에서는 인수째 제거됩니다**(인수는 평가되지 않음). 제거되는 경우에도 타입 검사는 수행합니다 |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | 위와 같으며 끝에 줄바꿈을 붙입니다. Rust의 `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL의 `format`. 전개한 문자열을 반환한다. `dest`가 `true`(CL의 `t`)이면 표준 출력에도 쓰고, `false`(CL의 `nil`)이면 쓰지 않고 반환만 한다 |
 | `format`(스트림으로) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest`가 `bool`이 아니면 CL의 스트림 출력 대상이다. 전개한 문자열을 그 스트림에 쓴다. 반환값은 `()`(CL의 `nil`)이며 문자열은 반환하지 않는다 |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1145,11 +1145,19 @@ ciała). Lista lambda jest taka sama jak w `defmacro`. Szczegółowe reguły i p
   (assert-eq (+ 1 2) 3))
 ```
 
-`defun` oznaczony `#[test]` jest funkcją testową, którą `typl test` wywołuje po kolei (tak jak `#[test]` w Rust). Nie może przyjmować argumentów i musi zwracać `()` (nie może też mieć parametrów typu). Nie potrzebuje `pub`.
+`defun` oznaczony `#[test]` jest funkcją testową, którą `typl test` wywołuje po kolei (tak jak `#[test]` w Rust). Nie może przyjmować argumentów i musi zwracać `()` lub `Result<(), E>` (nie może też mieć parametrów typu). Nie potrzebuje `pub`. Test zwracający `Result` kończy się niepowodzeniem, gdy zwróci `err`, a błąd zostaje wypisany, więc `E` musi implementować `print-object` (tak jak Rust wymaga `Debug` od typu błędu testu).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **Zwykłe uruchomienie i `compile-file` ją pomijają**, nawet nie sprawdzając jej treści (tak jak Rust kompiluje testy tylko z `--test`). Sam program nie może wywołać funkcji testowej.
 - Test można napisać w dowolnym pliku zawierającym funkcje, wewnątrz dowolnego `module`. Testy można też trzymać osobno w folderze `tests/` projektu.
-- Test kończy się niepowodzeniem przez `panic` lub błąd wykonania. Sprawdza się to przez `assert` albo `assert-eq`, który wypisuje obie strony ([System](functions/system.md)). Gdy jeden test się nie powiedzie, pozostałe i tak się wykonują.
+- Test kończy się niepowodzeniem przez `panic`, błąd wykonania lub zwrócenie `err`. Sprawdza się to przez `assert` albo `assert-eq`, który wypisuje obie strony ([System](functions/system.md)). Gdy jeden test się nie powiedzie, pozostałe i tak się wykonują.
 
 ```sh
 typl test                 # uruchamia wszystkie testy projektu w tym folderze
@@ -1179,7 +1187,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-To, co test wypisuje przez `print`, trafia prosto na standardowe wyjście (nie jest przechwytywane).
+To, co test wypisuje przez `print`, trafia prosto na standardowe wyjście (nie jest przechwytywane). Do wyjścia służącego badaniu problemów są `eprint`/`eprintln` ([Wypisywanie](functions/printing.md)), które piszą na standardowe wyjście błędów i nie mieszają się z wyjściem programu.
 
 ## 4. Wiązanie i instrukcje warunkowe
 

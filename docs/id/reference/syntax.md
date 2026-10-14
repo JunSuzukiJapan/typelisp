@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1192,11 +1192,19 @@ terperinci dan contohnya ada di
   (assert-eq (+ 1 2) 3))
 ```
 
-`defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`.
+`defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` atau `Result<(), E>` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`. Pengujian yang mengembalikan `Result` gagal jika mengembalikan `err`, dan galatnya dicetak, sehingga `E` harus mengimplementasikan `print-object` (sama seperti Rust meminta `Debug` dari tipe galat pengujian).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **Eksekusi biasa dan `compile-file` melewatinya**, bahkan tanpa memeriksa isinya (sama seperti Rust hanya mengompilasi pengujian dengan `--test`). Program itu sendiri tidak dapat memanggil fungsi uji.
 - Pengujian dapat ditulis di file mana pun yang berisi fungsi, di dalam `module` mana pun. Pengujian juga bisa disimpan terpisah di folder `tests/` proyek.
-- Pengujian gagal karena `panic` atau galat waktu jalan. Periksa dengan `assert`, atau dengan `assert-eq` yang mencetak kedua sisi ([Sistem](functions/system.md)). Jika satu pengujian gagal, sisanya tetap berjalan.
+- Pengujian gagal karena `panic`, galat waktu jalan, atau mengembalikan `err`. Periksa dengan `assert`, atau dengan `assert-eq` yang mencetak kedua sisi ([Sistem](functions/system.md)). Jika satu pengujian gagal, sisanya tetap berjalan.
 
 ```sh
 typl test                 # jalankan semua pengujian proyek di folder ini
@@ -1226,7 +1234,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-Apa yang dicetak pengujian dengan `print` langsung masuk ke keluaran standar (tidak ditangkap).
+Apa yang dicetak pengujian dengan `print` langsung masuk ke keluaran standar (tidak ditangkap). Untuk keluaran yang dimaksudkan untuk menyelidiki masalah, `eprint`/`eprintln` ([Pencetakan](functions/printing.md)) menulis ke galat standar dan tidak bercampur dengan keluaran program.
 
 ## 4. Pengikatan dan percabangan
 

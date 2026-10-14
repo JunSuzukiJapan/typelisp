@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1182,11 +1182,19 @@ Beispiele stehen unter
   (assert-eq (+ 1 2) 3))
 ```
 
-Ein mit `#[test]` markiertes `defun` ist eine Testfunktion, die `typl test` eine nach der anderen aufruft (wie Rusts `#[test]`). Sie darf keine Argumente nehmen und muss `()` zurückgeben (Typparameter kann sie auch nicht nehmen). `pub` braucht sie nicht.
+Ein mit `#[test]` markiertes `defun` ist eine Testfunktion, die `typl test` eine nach der anderen aufruft (wie Rusts `#[test]`). Sie darf keine Argumente nehmen und muss `()` oder `Result<(), E>` zurückgeben (Typparameter kann sie auch nicht nehmen). `pub` braucht sie nicht. Ein Test, der ein `Result` zurückgibt, schlägt fehl, wenn er ein `err` zurückgibt, und der Fehler wird ausgegeben; daher muss `E` `print-object` implementieren (so wie Rust für den Fehlertyp eines Tests `Debug` verlangt).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **Ein gewöhnlicher Lauf und `compile-file` überspringen sie**, ohne auch nur ihren Inhalt zu prüfen (so wie Rust Tests nur unter `--test` kompiliert). Das Programm selbst kann keine Testfunktion aufrufen.
 - Ein Test kann in jeder Datei stehen, die Funktionen enthält, und in jedem `module`. Tests lassen sich auch getrennt im Ordner `tests/` des Projekts ablegen.
-- Ein Test schlägt durch ein `panic` oder einen Laufzeitfehler fehl. Geprüft wird mit `assert` oder mit `assert-eq`, das beide Seiten ausgibt ([System](functions/system.md)). Schlägt ein Test fehl, laufen die übrigen trotzdem.
+- Ein Test schlägt durch ein `panic`, einen Laufzeitfehler oder die Rückgabe eines `err` fehl. Geprüft wird mit `assert` oder mit `assert-eq`, das beide Seiten ausgibt ([System](functions/system.md)). Schlägt ein Test fehl, laufen die übrigen trotzdem.
 
 ```sh
 typl test                 # alle Tests des Projekts in diesem Ordner ausführen
@@ -1216,7 +1224,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-Was ein Test mit `print` ausgibt, geht direkt auf die Standardausgabe (es wird nicht abgefangen).
+Was ein Test mit `print` ausgibt, geht direkt auf die Standardausgabe (es wird nicht abgefangen). Für Ausgaben zur Untersuchung schreiben `eprint`/`eprintln` ([Ausgabe](functions/printing.md)) auf die Standardfehlerausgabe und vermischen sich nicht mit der Ausgabe des Programms.
 
 ## 4. Bindung und Verzweigung
 

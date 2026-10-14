@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -90,6 +90,12 @@ fib(25) = 75025
 Utan `-o` får den körbara filen namnet på källfilen utan `.typl` och läggs i samma mapp som källfilen.
 Om källfilens namn inte slutar på `.typl` krävs `-o`. Med `-c` (`--compile`) kan `--image`,
 `--heap-cells` och `--feature` inte anges.
+
+Med `--release` blir det ett **release-bygge**, som tar bort `eprint`/`eprintln` (utdata till standard fel för felsökning; [Utskrift](../reference/functions/printing.md)) tillsammans med deras argument. Det som tas bort typkontrolleras ändå, så ett typfel där får kompileringen att misslyckas. Utan `--release`, och när man kör direkt med `typl`, skriver `eprint`/`eprintln` till standard fel.
+
+```sh
+$ typl -c hello.typl --release
+```
 
 Du kan göra samma sak genom att anropa `compile-file` från REPL eller från ett program.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -91,6 +91,12 @@ fib(25) = 75025
 Tanpa `-o`, berkas eksekusi dinamai sesuai berkas sumber tanpa `.typl` dan ditaruh di folder yang
 sama dengan berkas sumber. Jika nama berkas sumber tidak berakhiran `.typl`, `-o` wajib diberikan.
 Bersama `-c` (`--compile`), `--image`, `--heap-cells`, dan `--feature` tidak dapat diberikan.
+
+Dengan `--release`, hasilnya adalah **build rilis**, yang menghapus `eprint`/`eprintln` (keluaran galat standar untuk menyelidiki masalah; [Pencetakan](../reference/functions/printing.md)) beserta argumennya. Yang dihapus tetap diperiksa tipenya, sehingga galat tipe di sana membuat kompilasi gagal. Tanpa `--release`, dan saat dijalankan langsung dengan `typl`, `eprint`/`eprintln` menulis ke galat standar.
+
+```sh
+$ typl -c hello.typl --release
+```
 
 Anda dapat melakukan hal yang sama dengan memanggil `compile-file` dari REPL atau dari program.
 

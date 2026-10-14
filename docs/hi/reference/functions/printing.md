@@ -1,16 +1,18 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # प्रिंटिंग
 
 `print`/`println`/`format`, एक-आर्ग्युमेंट प्रिंटर, सुंदर प्रिंटर, `print-object`, और प्रिंटिंग को नियंत्रित करने वाले वेरिएबल। फ़ॉर्मैट निर्देशों की सूची [format.md](format.md) में है। स्ट्रीम से पढ़ना और लिखना [स्ट्रीम और फ़ाइलें](streams-files.md) में है।
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` सभी **विशेष फ़ॉर्म हैं जो फ़ॉर्मैट निर्देशों (CL के `format` निर्देश) की व्याख्या करते हैं**। पहला आर्ग्युमेंट (`format` के लिए दूसरा) **कंट्रोल स्ट्रिंग** है, और हर निर्देश आगे के वेरिएडिक आर्ग्युमेंट को बारी-बारी से खर्च करता है।
+`print`/`println`/`eprint`/`eprintln`/`format` सभी **विशेष फ़ॉर्म हैं जो फ़ॉर्मैट निर्देशों (CL के `format` निर्देश) की व्याख्या करते हैं**। पहला आर्ग्युमेंट (`format` के लिए दूसरा) **कंट्रोल स्ट्रिंग** है, और हर निर्देश आगे के वेरिएडिक आर्ग्युमेंट को बारी-बारी से खर्च करता है।
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | कंट्रोल स्ट्रिंग का विस्तार करके बिना नई पंक्ति के स्टैंडर्ड आउटपुट पर लिखता है |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | वही, अंत में नई पंक्ति के साथ |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | `print` जैसा, पर स्टैंडर्ड एरर (`*error-output*`) में लिखता है। Rust का `eprint!`। **रिलीज़ बिल्ड (`typl -c --release`) इसे आर्ग्युमेंट सहित हटा देता है** (आर्ग्युमेंट का मूल्यांकन नहीं होता)। हटाए जाने पर भी टाइप जाँच होती है |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | वैसा ही, अंत में नई पंक्ति के साथ। Rust का `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL का `format`। विस्तारित स्ट्रिंग लौटाता है। यदि `dest` `true` (CL का `t`) है, तो वह स्टैंडर्ड आउटपुट पर भी लिखी जाती है; यदि `false` (CL का `nil`) है, तो लिखी नहीं जाती और केवल लौटाई जाती है |
 | `format` (स्ट्रीम पर) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | यदि `dest` `bool` नहीं है, तो यह CL का स्ट्रीम गंतव्य है। विस्तारित स्ट्रिंग उस स्ट्रीम पर लिखी जाती है। रिटर्न मान `()` (CL का `nil`) है, और कोई स्ट्रिंग नहीं लौटाई जाती |
 

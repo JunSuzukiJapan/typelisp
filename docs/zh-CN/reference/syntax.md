@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -898,11 +898,19 @@ trait 的调用默认是**静态的**（按接收者的静态类型解析）。�
   (assert-eq (+ 1 2) 3))
 ```
 
-加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()`（也不能有类型参数）。不需要 `pub`。
+加上 `#[test]` 的 `defun` 是测试函数，由 `typl test` 逐个调用（与 Rust 的 `#[test]` 相同）。它必须不接受参数并返回 `()` 或 `Result<(), E>`（也不能有类型参数）。不需要 `pub`。返回 `Result` 的测试在返回 `err` 时失败，并打印该错误，因此 `E` 必须实现 `print-object`（与 Rust 要求测试的错误类型实现 `Debug` 相同）。
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **普通运行和 `compile-file` 会跳过它**，连内容也不检查（与 Rust 只在 `--test` 时编译测试相同）。程序本身无法调用测试函数。
 - 测试可以写在任何放置函数的文件中、任何 `module` 之内。也可以单独写在项目的 `tests/` 文件夹里。
-- 失败指 `panic` 和运行时错误。用 `assert`，或会打印两边的 `assert-eq`（[系统](functions/system.md)）来检查。即使一个测试失败，其余测试也会继续运行。
+- 失败指 `panic`、运行时错误和返回 `err`。用 `assert`，或会打印两边的 `assert-eq`（[系统](functions/system.md)）来检查。即使一个测试失败，其余测试也会继续运行。
 
 ```sh
 typl test                 # 运行此文件夹中项目的全部测试
@@ -932,7 +940,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-测试中 `print` 的内容会直接输出到标准输出（不捕获）。
+测试中 `print` 的内容会直接输出到标准输出（不捕获）。用于调查的输出，使用写到标准错误输出的 `eprint`/`eprintln`（[打印](functions/printing.md)），就不会与程序的输出混在一起。
 
 ## 4. 绑定与条件分支
 

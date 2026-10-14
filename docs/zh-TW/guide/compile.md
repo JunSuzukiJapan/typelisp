@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # 編譯
 
 不做任何處理的話，typelisp 程式由直譯器執行。此外還有兩種編譯為原生碼的方法，以及一種保存環境的方法。規格的詳情見
@@ -80,6 +80,12 @@ fib(25) = 75025
 
 省略 `-o` 時，會在原始檔所在資料夾產生以原始檔名去掉 `.typl` 命名的執行檔。原始檔名不以 `.typl` 結尾時需要 `-o`。使用 `-c`
 （`--compile`）時，不能指定 `--image`、`--heap-cells`、`--feature`。
+
+加上 `--release` 就是**發行建置**，會連同引數一起移除 `eprint`/`eprintln`（用於調查的標準錯誤輸出。[列印](../reference/functions/printing.md)）。被移除的部分也會進行型別檢查，所以其中有型別錯誤時編譯會失敗。不加 `--release` 時，以及直接用 `typl` 執行時，`eprint`/`eprintln` 會寫到標準錯誤輸出。
+
+```sh
+$ typl -c hello.typl --release
+```
 
 在 REPL 或程式中呼叫 `compile-file` 也能做同樣的事。
 

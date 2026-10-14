@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Stampa
 
 `print`/`println`/`format`, i printer a un argomento, il pretty printer, `print-object` e le variabili che
@@ -7,7 +7,7 @@ lettura e la scrittura sugli stream si trovano in [Stream e file](streams-files.
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` sono tutte **forme speciali che interpretano le direttive di formato (le
+`print`/`println`/`eprint`/`eprintln`/`format` sono tutte **forme speciali che interpretano le direttive di formato (le
 direttive di `format` di CL)**. Il primo argomento (il secondo per `format`) è la **stringa di
 controllo**, e ogni direttiva consuma a turno gli argomenti variadici che seguono.
 
@@ -15,6 +15,8 @@ controllo**, e ogni direttiva consuma a turno gli argomenti variadici che seguon
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Espande la stringa di controllo e la scrive sullo standard output senza a capo |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Lo stesso, con un a capo alla fine |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Come `print`, ma scrive sullo standard error (`*error-output*`). L'`eprint!` di Rust. **Una build release (`typl -c --release`) lo rimuove insieme agli argomenti** (gli argomenti non vengono valutati). Viene controllato nei tipi anche quando è rimosso |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Lo stesso, con un a capo finale. L'`eprintln!` di Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | Il `format` di CL. Restituisce la stringa espansa. Se `dest` è `true` (il `t` di CL), viene scritta anche sullo standard output; se è `false` (il `nil` di CL), non viene scritta e viene solo restituita |
 | `format` (su uno stream) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Se `dest` non è un `bool`, è la destinazione stream di CL. La stringa espansa viene scritta su quello stream. Il valore di ritorno è `()` (il `nil` di CL), e non viene restituita alcuna stringa |
 

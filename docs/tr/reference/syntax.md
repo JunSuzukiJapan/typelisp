@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1142,11 +1142,19 @@ bölümündedir.
   (assert-eq (+ 1 2) 3))
 ```
 
-`#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez.
+`#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` ya da `Result<(), E>` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez. `Result` döndüren bir test, `err` döndürdüğünde başarısız olur ve hata yazdırılır; bu yüzden `E`, `print-object`'i uygulamalıdır (Rust'ın bir testin hata türünden `Debug` istemesi gibi).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **Sıradan bir çalıştırma ve `compile-file` onu atlar**; içeriğini denetlemez bile (Rust'ın testleri yalnızca `--test` altında derlemesi gibi). Programın kendisi bir test fonksiyonunu çağıramaz.
 - Bir test, fonksiyon barındıran herhangi bir dosyaya, herhangi bir `module` içine yazılabilir. Testler ayrıca projenin `tests/` klasöründe ayrı tutulabilir.
-- Bir test, `panic` ya da bir çalışma zamanı hatasıyla başarısız olur. Denetim için `assert` ya da iki tarafı da yazdıran `assert-eq` kullanılır ([Sistem](functions/system.md)). Bir test başarısız olduğunda geri kalanlar yine çalışır.
+- Bir test, `panic`, bir çalışma zamanı hatası ya da `err` döndürmesiyle başarısız olur. Denetim için `assert` ya da iki tarafı da yazdıran `assert-eq` kullanılır ([Sistem](functions/system.md)). Bir test başarısız olduğunda geri kalanlar yine çalışır.
 
 ```sh
 typl test                 # bu klasördeki projenin tüm testlerini çalıştır
@@ -1176,7 +1184,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-Bir testin `print` ile yazdıkları doğrudan standart çıktıya gider (yakalanmaz).
+Bir testin `print` ile yazdıkları doğrudan standart çıktıya gider (yakalanmaz). İnceleme amaçlı çıktı için `eprint`/`eprintln` ([Yazdırma](functions/printing.md)) standart hata çıktısına yazar ve programın çıktısıyla karışmaz.
 
 ## 4. Bağlama ve koşullar
 

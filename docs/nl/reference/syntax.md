@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1194,11 +1194,19 @@ regels en voorbeelden staan in
   (assert-eq (+ 1 2) 3))
 ```
 
-Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig.
+Een `defun` met `#[test]` is een testfunctie, die `typl test` één voor één aanroept (net als `#[test]` in Rust). Ze mag geen argumenten nemen en moet `()` of `Result<(), E>` teruggeven (typeparameters kan ze ook niet nemen). `pub` is niet nodig. Een test die een `Result` teruggeeft, faalt door een `err` terug te geven, en de fout wordt afgedrukt; daarom moet `E` `print-object` implementeren (zoals Rust `Debug` vraagt van het fouttype van een test).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **Een gewone run en `compile-file` slaan haar over**, zonder zelfs de inhoud te controleren (zoals Rust tests alleen onder `--test` compileert). Het programma zelf kan een testfunctie niet aanroepen.
 - Een test kan in elk bestand staan dat functies bevat, binnen elke `module`. Tests kunnen ook apart in de map `tests/` van het project staan.
-- Een test faalt door een `panic` of een runtimefout. Controleer met `assert`, of met `assert-eq`, dat beide kanten afdrukt ([Systeem](functions/system.md)). Als één test faalt, lopen de andere toch.
+- Een test faalt door een `panic`, een runtimefout of het teruggeven van een `err`. Controleer met `assert`, of met `assert-eq`, dat beide kanten afdrukt ([Systeem](functions/system.md)). Als één test faalt, lopen de andere toch.
 
 ```sh
 typl test                 # voer alle tests van het project in deze map uit
@@ -1228,7 +1236,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-Wat een test met `print` afdrukt, gaat direct naar standaarduitvoer (het wordt niet opgevangen).
+Wat een test met `print` afdrukt, gaat direct naar standaarduitvoer (het wordt niet opgevangen). Voor uitvoer om iets te onderzoeken schrijven `eprint`/`eprintln` ([Afdrukken](functions/printing.md)) naar standaardfout en mengen ze zich niet met de uitvoer van het programma.
 
 ## 4. Binding en voorwaarden
 

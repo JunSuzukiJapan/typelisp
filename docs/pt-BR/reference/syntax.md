@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1139,11 +1139,19 @@ expandida do corpo). A lista lambda é a mesma de `defmacro`. As regras detalhad
   (assert-eq (+ 1 2) 3))
 ```
 
-Um `defun` marcado com `#[test]` é uma função de teste, que `typl test` chama uma de cada vez (igual ao `#[test]` do Rust). Ela não deve receber argumentos e deve retornar `()` (também não pode receber parâmetros de tipo). Não precisa de `pub`.
+Um `defun` marcado com `#[test]` é uma função de teste, que `typl test` chama uma de cada vez (igual ao `#[test]` do Rust). Ela não deve receber argumentos e deve retornar `()` ou `Result<(), E>` (também não pode receber parâmetros de tipo). Não precisa de `pub`. Um teste que retorna um `Result` falha ao retornar um `err`, e o erro é impresso; por isso `E` precisa implementar `print-object` (assim como o Rust exige `Debug` do tipo de erro de um teste).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **Uma execução comum e `compile-file` a ignoram**, sem sequer verificar seu conteúdo (assim como o Rust só compila testes com `--test`). O próprio programa não pode chamar uma função de teste.
 - Um teste pode ser escrito em qualquer arquivo que contenha funções, dentro de qualquer `module`. Os testes também podem ficar separados na pasta `tests/` do projeto.
-- Um teste falha por um `panic` ou por um erro em tempo de execução. Verifique com `assert`, ou com `assert-eq`, que imprime os dois lados ([Sistema](functions/system.md)). Quando um teste falha, os demais continuam rodando.
+- Um teste falha por um `panic`, por um erro em tempo de execução ou ao retornar um `err`. Verifique com `assert`, ou com `assert-eq`, que imprime os dois lados ([Sistema](functions/system.md)). Quando um teste falha, os demais continuam rodando.
 
 ```sh
 typl test                 # roda todos os testes do projeto desta pasta
@@ -1173,7 +1181,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-O que um teste imprime com `print` vai direto para a saída padrão (não é capturado).
+O que um teste imprime com `print` vai direto para a saída padrão (não é capturado). Para saída voltada à investigação, `eprint`/`eprintln` ([Impressão](functions/printing.md)) escrevem na saída de erro padrão e não se misturam com a saída do programa.
 
 ## 4. Vínculos e condicionais
 

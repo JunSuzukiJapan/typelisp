@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，
@@ -879,11 +879,19 @@ vtable 進行動態分派：
   (assert-eq (+ 1 2) 3))
 ```
 
-加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()`（也不能有型別參數）。不需要 `pub`。
+加上 `#[test]` 的 `defun` 是測試函式，由 `typl test` 逐一呼叫（與 Rust 的 `#[test]` 相同）。它必須不接受引數並回傳 `()` 或 `Result<(), E>`（也不能有型別參數）。不需要 `pub`。回傳 `Result` 的測試在回傳 `err` 時失敗，並印出該錯誤，因此 `E` 必須實作 `print-object`（與 Rust 要求測試的錯誤型別實作 `Debug` 相同）。
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **一般執行和 `compile-file` 會略過它**，連內容也不檢查（與 Rust 只在 `--test` 時編譯測試相同）。程式本身無法呼叫測試函式。
 - 測試可以寫在任何放置函式的檔案中、任何 `module` 之內。也可以另外寫在專案的 `tests/` 資料夾裡。
-- 失敗指 `panic` 與執行時錯誤。用 `assert`，或會印出兩邊的 `assert-eq`（[系統](functions/system.md)）來檢查。即使一個測試失敗，其餘測試也會繼續執行。
+- 失敗指 `panic`、執行時錯誤與回傳 `err`。用 `assert`，或會印出兩邊的 `assert-eq`（[系統](functions/system.md)）來檢查。即使一個測試失敗，其餘測試也會繼續執行。
 
 ```sh
 typl test                 # 執行此資料夾中專案的全部測試
@@ -913,7 +921,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-測試中 `print` 的內容會直接輸出到標準輸出（不擷取）。
+測試中 `print` 的內容會直接輸出到標準輸出（不擷取）。用於調查的輸出，使用寫到標準錯誤輸出的 `eprint`/`eprintln`（[列印](functions/printing.md)），就不會與程式的輸出混在一起。
 
 ## 4. 繫結與條件分支
 

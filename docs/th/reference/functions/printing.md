@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # การพิมพ์
 
 `print`/`println`/`format`, ตัวพิมพ์แบบหนึ่งอาร์กิวเมนต์, pretty printer, `print-object` และ
@@ -7,7 +7,7 @@
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` ล้วนเป็น **ฟอร์มพิเศษที่ตีความคำสั่งรูปแบบ (คำสั่ง `format` ของ CL)**
+`print`/`println`/`eprint`/`eprintln`/`format` ล้วนเป็น **ฟอร์มพิเศษที่ตีความคำสั่งรูปแบบ (คำสั่ง `format` ของ CL)**
 อาร์กิวเมนต์แรก (อาร์กิวเมนต์ที่สองสำหรับ `format`) คือ **สตริงควบคุม** และแต่ละ
 คำสั่งใช้อาร์กิวเมนต์ variadic ที่ตามมาตามลำดับ
 
@@ -15,6 +15,8 @@
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | ขยายสตริงควบคุมและเขียนไปยังเอาต์พุตมาตรฐานโดยไม่ขึ้นบรรทัดใหม่ |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | เหมือนกัน แต่ขึ้นบรรทัดใหม่ที่ท้าย |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | เหมือน `print` แต่เขียนไปยังเอาต์พุตข้อผิดพลาดมาตรฐาน (`*error-output*`) คือ `eprint!` ของ Rust **บิลด์ release (`typl -c --release`) จะลบออกพร้อมอาร์กิวเมนต์** (ไม่ประเมินอาร์กิวเมนต์) แม้จะถูกลบก็ยังตรวจสอบชนิด |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | เหมือนกัน แต่ขึ้นบรรทัดใหม่ท้ายสุด คือ `eprintln!` ของ Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` ของ CL คืนสตริงที่ขยายแล้ว หาก `dest` เป็น `true` (`t` ของ CL) จะเขียนไปยังเอาต์พุตมาตรฐานด้วย หากเป็น `false` (`nil` ของ CL) จะไม่เขียนและเพียงคืนค่า |
 | `format` (ไปยังสตรีม) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | หาก `dest` ไม่ใช่ `bool` จะเป็นปลายทางสตรีมของ CL สตริงที่ขยายแล้วถูกเขียนไปยังสตรีมนั้น ค่าที่คืนคือ `()` (`nil` ของ CL) และไม่คืนสตริง |
 

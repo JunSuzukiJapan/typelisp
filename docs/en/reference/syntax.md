@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1147,11 +1147,19 @@ examples are in
   (assert-eq (+ 1 2) 3))
 ```
 
-A `defun` marked `#[test]` is a test function, which `typl test` calls one at a time (the same as Rust's `#[test]`). It must take no arguments and return `()` (it cannot take type parameters either). It does not need `pub`.
+A `defun` marked `#[test]` is a test function, which `typl test` calls one at a time (the same as Rust's `#[test]`). It must take no arguments and return `()` or `Result<(), E>` (it cannot take type parameters either). It does not need `pub`. A test returning a `Result` fails by returning an `err`, and the error is printed, so `E` must implement `print-object` (just as Rust asks a test's error type for `Debug`).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **An ordinary run and `compile-file` skip it**, without even checking its contents (just as Rust compiles tests only under `--test`). The program itself cannot call a test function.
 - A test can be written in any file that holds functions, inside any `module`. Tests can also be kept separately in the project's `tests/` folder.
-- A test fails by a `panic` or a runtime error. Check things with `assert`, or with `assert-eq`, which prints both sides ([System](functions/system.md)). When one test fails, the rest still run.
+- A test fails by a `panic`, a runtime error, or returning an `err`. Check things with `assert`, or with `assert-eq`, which prints both sides ([System](functions/system.md)). When one test fails, the rest still run.
 
 ```sh
 typl test                 # run every test of the project in this folder
@@ -1181,7 +1189,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-What a test `print`s goes straight to standard output (it is not captured).
+What a test `print`s goes straight to standard output (it is not captured). For output meant for investigating, `eprint`/`eprintln` ([Printing](functions/printing.md)) write to standard error and do not mix with the program's output.
 
 ## 4. Binding and conditionals
 

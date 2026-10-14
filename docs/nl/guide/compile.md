@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -95,6 +95,12 @@ Zonder `-o` krijgt het uitvoerbare bestand de naam van het bronbestand zonder `.
 dezelfde map als het bronbestand geplaatst. Eindigt de naam van het bronbestand niet op `.typl`, dan
 is `-o` verplicht. Bij `-c` (`--compile`) kunnen `--image`, `--heap-cells` en `--feature` niet worden
 opgegeven.
+
+Met `--release` is het een **release-build**, die `eprint`/`eprintln` (uitvoer naar standaardfout om iets te onderzoeken; [Afdrukken](../reference/functions/printing.md)) samen met hun argumenten verwijdert. Wat wordt verwijderd, wordt toch op types gecontroleerd, dus een typefout daarin laat de compilatie mislukken. Zonder `--release`, en bij direct uitvoeren met `typl`, schrijven `eprint`/`eprintln` naar standaardfout.
+
+```sh
+$ typl -c hello.typl --release
+```
 
 Hetzelfde kun je doen door `compile-file` aan te roepen vanuit de REPL of vanuit een programma.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Pencetakan
 
 `print`/`println`/`format`, pencetak satu argumen, pretty printer, `print-object`, dan variabel yang
@@ -7,7 +7,7 @@ menulis ke stream ada di [Stream dan Berkas](streams-files.md).
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` semuanya adalah **bentuk khusus yang menginterpretasikan direktif format
+`print`/`println`/`eprint`/`eprintln`/`format` semuanya adalah **bentuk khusus yang menginterpretasikan direktif format
 (direktif `format` pada CL)**. Argumen pertama (kedua untuk `format`) adalah **string kendali**, dan
 setiap direktif mengonsumsi argumen variadik berikutnya secara berurutan.
 
@@ -15,6 +15,8 @@ setiap direktif mengonsumsi argumen variadik berikutnya secara berurutan.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Mengekspansi string kendali dan menulisnya ke keluaran standar tanpa baris baru |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Sama, dengan baris baru di akhir |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Sama seperti `print`, tetapi menulis ke galat standar (`*error-output*`). `eprint!` milik Rust. **Build rilis (`typl -c --release`) menghapusnya beserta argumennya** (argumen tidak dievaluasi). Tipenya tetap diperiksa meskipun dihapus |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Sama, dengan baris baru di akhir. `eprintln!` milik Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` pada CL. Mengembalikan string hasil ekspansi. Jika `dest` adalah `true` (`t` pada CL), string juga ditulis ke keluaran standar; jika `false` (`nil` pada CL), tidak ditulis dan hanya dikembalikan |
 | `format` (ke stream) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Jika `dest` bukan `bool`, ia adalah tujuan stream pada CL. String hasil ekspansi ditulis ke stream itu. Nilai kembaliannya `()` (`nil` pada CL), dan tidak ada string yang dikembalikan |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1145,11 +1145,19 @@ exemplen finns i
   (assert-eq (+ 1 2) 3))
 ```
 
-En `defun` märkt med `#[test]` är en testfunktion, som `typl test` anropar en i taget (som Rusts `#[test]`). Den får inte ta några argument och måste returnera `()` (den kan inte heller ta typparametrar). Den behöver inte `pub`.
+En `defun` märkt med `#[test]` är en testfunktion, som `typl test` anropar en i taget (som Rusts `#[test]`). Den får inte ta några argument och måste returnera `()` eller `Result<(), E>` (den kan inte heller ta typparametrar). Den behöver inte `pub`. Ett test som returnerar ett `Result` misslyckas genom att returnera ett `err`, och felet skrivs ut, så `E` måste implementera `print-object` (precis som Rust kräver `Debug` av ett tests feltyp).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **En vanlig körning och `compile-file` hoppar över den**, utan att ens kontrollera innehållet (precis som Rust bara kompilerar tester med `--test`). Programmet självt kan inte anropa en testfunktion.
 - Ett test kan skrivas i vilken fil som helst som innehåller funktioner, inuti vilken `module` som helst. Tester kan också ligga separat i projektets mapp `tests/`.
-- Ett test misslyckas genom en `panic` eller ett körtidsfel. Kontrollera med `assert`, eller med `assert-eq`, som skriver ut båda sidorna ([System](functions/system.md)). När ett test misslyckas körs resten ändå.
+- Ett test misslyckas genom en `panic`, ett körtidsfel eller genom att returnera ett `err`. Kontrollera med `assert`, eller med `assert-eq`, som skriver ut båda sidorna ([System](functions/system.md)). När ett test misslyckas körs resten ändå.
 
 ```sh
 typl test                 # kör alla tester i projektet i den här mappen
@@ -1179,7 +1187,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-Det ett test skriver ut med `print` går direkt till standard ut (det fångas inte upp).
+Det ett test skriver ut med `print` går direkt till standard ut (det fångas inte upp). För utdata avsedda för felsökning skriver `eprint`/`eprintln` ([Utskrift](functions/printing.md)) till standard fel och blandas inte med programmets utdata.
 
 ## 4. Bindning och villkor
 

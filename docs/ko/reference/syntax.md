@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -988,11 +988,19 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
   (assert-eq (+ 1 2) 3))
 ```
 
-`#[test]`를 붙인 `defun`은 테스트 함수가 되며, `typl test`가 하나씩 호출합니다(Rust의 `#[test]`와 같음). 인수를 받지 않고 `()`를 반환하는 함수여야 합니다(타입 매개변수도 받을 수 없음). `pub`은 필요 없습니다.
+`#[test]`를 붙인 `defun`은 테스트 함수가 되며, `typl test`가 하나씩 호출합니다(Rust의 `#[test]`와 같음). 인수를 받지 않고 `()` 또는 `Result<(), E>`를 반환하는 함수여야 합니다(타입 매개변수도 받을 수 없음). `pub`은 필요 없습니다. `Result`를 반환하는 테스트는 `err`를 반환하면 실패하며 그 오류를 출력합니다. 따라서 `E`는 `print-object`를 구현해야 합니다(Rust가 테스트의 오류 타입에 `Debug`를 요구하는 것과 같음).
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **일반 실행과 `compile-file`에서는 건너뜁니다.** 내용을 검사하지도 않습니다(Rust가 테스트를 `--test`일 때만 컴파일하는 것과 같음). 프로그램 쪽에서는 테스트 함수를 호출할 수 없습니다.
 - 테스트는 함수를 둘 수 있는 어느 파일에든, 어느 `module` 안에든 쓸 수 있습니다. 프로젝트의 `tests/` 폴더에 따로 써도 됩니다.
-- 실패는 `panic`과 실행 시간 오류입니다. `assert`, 또는 양변을 출력하는 `assert-eq`([시스템](functions/system.md))로 확인합니다. 하나가 실패해도 나머지 테스트는 실행됩니다.
+- 실패는 `panic`, 실행 시간 오류, `err`를 반환하는 것입니다. `assert`, 또는 양변을 출력하는 `assert-eq`([시스템](functions/system.md))로 확인합니다. 하나가 실패해도 나머지 테스트는 실행됩니다.
 
 ```sh
 typl test                 # 이 폴더의 프로젝트 테스트를 모두 실행
@@ -1022,7 +1030,7 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-테스트 안에서 `print`한 내용은 그대로 표준 출력으로 나갑니다(가로채지 않음).
+테스트 안에서 `print`한 내용은 그대로 표준 출력으로 나갑니다(가로채지 않음). 조사를 위한 출력에는 표준 오류 출력에 쓰는 `eprint`/`eprintln`([출력](functions/printing.md))을 사용하면 프로그램의 출력과 섞이지 않습니다.
 
 ## 4. 바인딩과 조건 분기
 
