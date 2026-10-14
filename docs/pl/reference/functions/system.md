@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Czas, środowisko i implementacja
 
 Funkcje do obsługi czasu, zapytania o środowisko uruchomieniowe, narzędzia implementacji, parsowanie i
@@ -323,6 +323,7 @@ kompilowana jest rozwinięta postać ciała.
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Powoduje panic, jeśli fałsz. Bez komunikatu `assertion failed: <test jak zapisano>` (jest to makro, więc może nazwać samo wyrażenie). Restarty z CL nie istnieją w tym języku |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, gdzie `T` implementuje `Eq` i `print-object` | Panic, jeśli obie wartości nie są równe według `equals`; wypisuje obie strony (dwa wiersze, `  left: ...` / ` right: ...`). Pierwszy wiersz to bez komunikatu `assertion failed: <wyrażenie w zapisanej postaci>`, a z komunikatem `msg`. Używane głównie w funkcjach `#[test]` ([Składnia](../syntax.md)). `assert_eq!` z Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Zapisuje jedną linię z prefiksem `WARNING: ` do `*error-output*` i **kontynuuje**. Sposób zgłoszenia czegoś bez zwracania `Result` i bez kończenia programu |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Zastępuje zmienne globalne tylko w czasie `body` i przywraca je przy wyjściu. CL zapisuje to jako `let`, ale `let` w tym języku zawsze wiąże leksykalnie, stąd osobna nazwa (ta sama rola co makro o tej samej nazwie w Emacs Lisp). Przywraca je bez względu na to, jak ciało zostanie opuszczone: normalne zakończenie, `throw`, `panic`, `break`/`return`. **Nie jest wiązaniem na zadanie** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Wykonuje `body` z każdą zmienną sterującą drukarki ustawioną na wartość standardową i `*read-eval*` ustawionym na `true` ([Wypisywanie](printing.md#6-kontrolowanie-ile-jest-wypisywane)) |

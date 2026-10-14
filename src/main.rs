@@ -37,10 +37,15 @@ Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
   typl [--lib-dir DIR] -c SOURCE [-o OUTPUT]     compile SOURCE to an executable
+  typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
+                                                 project here (or of FILE) whose
+                                                 name contains FILTER
 
 Options:
   -c, --compile SOURCE   compile SOURCE to a native executable
   -o OUTPUT              name of the executable (default: SOURCE without .typl)
+  --release              a release build: every eprint/eprintln is left out
+                         (of a run, a test, or the executable -c builds)
   --lib-dir DIR          link DIR/libtypelisp_front.a into compiled executables
                          (default: a release typl writes the one built into
                          it to $TYPELISP_HOME/lib, ~/.typelisp/lib if unset;
@@ -86,6 +91,19 @@ fn main() -> rustyline::Result<()> {
     // `--help`/`--version`/`--remove-lib` (and its `--others`/`--all`) are
     // `typl`'s only among the options before a script's name; from the name
     // on, they are the script's own arguments.
+    let own_len = args.iter().position(|a| !a.starts_with("--")).unwrap_or(args.len());
+    // `--release` only sets the process's release flag; what behaves
+    // differently in a release build asks it (`typelisp::release`).
+    let release = args[..own_len].iter().any(|a| a == "--release");
+    let args: Vec<String> = args
+        .iter()
+        .enumerate()
+        .filter(|&(i, a)| !(i < own_len && a == "--release"))
+        .map(|(_, a)| a.clone())
+        .collect();
+    if release {
+        typelisp::release::set_release(true);
+    }
     let own = &args[..args.iter().position(|a| !a.starts_with("--")).unwrap_or(args.len())];
     if own.iter().any(|a| a == "--help") {
         print!("{}", HELP);
@@ -147,6 +165,9 @@ fn main() -> rustyline::Result<()> {
         std::process::exit(compile_command(flag, &args[1..]));
     }
     let heap_cells = heap_cells.unwrap_or(DEFAULT_HEAP_CELLS);
+    if args.first().is_some_and(|a| a == "test") {
+        std::process::exit(test_command(&args[1..], heap_cells, features, image));
+    }
     // The first non-flag argument names a source file to run;
     // with none, start the REPL.
     //
@@ -170,14 +191,17 @@ fn main() -> rustyline::Result<()> {
 
 /// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c` (or
 /// `--compile`, which `flag` names for the diagnostics). Without `-o`, the
-/// executable is `SOURCE` with its `.typl` extension removed. Returns the
-/// process exit code.
+/// executable is `SOURCE` with its `.typl` extension removed. A `--release`
+/// among them is the global one, written after `-c`. Returns the process
+/// exit code.
 fn compile_command(flag: &str, args: &[String]) -> i32 {
     let mut source = None;
     let mut output = None;
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == "-o" {
+        if a == "--release" {
+            typelisp::release::set_release(true);
+        } else if a == "-o" {
             match it.next() {
                 Some(v) => output = Some(PathBuf::from(v)),
                 None => {
@@ -188,12 +212,12 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release])", flag, a, flag);
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release])", flag, flag);
         return 1;
     };
     let output = match output {
@@ -403,6 +427,54 @@ fn run_file(file: &str, heap_cells: usize, features: Vec<String>, image: Option<
         }
     }
     0
+}
+
+/// `typl test [FILE.typl] [FILTER]`: `args` is what follows `test`. Exits 0
+/// when every test that ran passed.
+fn test_command(args: &[String], heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> i32 {
+    let (file, rest) = match args.first() {
+        Some(a) if a.ends_with(".typl") => (Some(PathBuf::from(a)), &args[1..]),
+        _ => (None, args),
+    };
+    let filter = match rest {
+        [] => None,
+        [f] => Some(f.as_str()),
+        _ => {
+            eprintln!("typl test: [FILE.typl] [FILTER]: more than one filter given");
+            return 1;
+        }
+    };
+    let suite = match &file {
+        Some(f) => typelisp::testing::Suite::of_file(f),
+        None => std::env::current_dir()
+            .map_err(|e| format!("the current folder: {}", e))
+            .and_then(|dir| typelisp::testing::Suite::of_project(&dir)),
+    };
+    let suite = match suite {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("typl test: {}", e);
+            return 1;
+        }
+    };
+    let mut heap = Heap::with_capacity(heap_cells);
+    let reader = Reader::with_features(features);
+    let mut checker = Checker::new();
+    checker.set_redef_policy(parse_redef_policy());
+    let mut interp = Interp::new();
+    if let Err(e) = load_environment(&mut heap, &mut checker, &mut interp, image) {
+        eprintln!("error: {}", e);
+        return 1;
+    }
+    let mut out = std::io::stdout();
+    match typelisp::testing::run(&suite, filter, &mut heap, &reader, checker, &mut interp, &mut out) {
+        Ok(outcome) if outcome.failed == 0 => 0,
+        Ok(_) => 1,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            1
+        }
+    }
 }
 
 fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rustyline::Result<()> {

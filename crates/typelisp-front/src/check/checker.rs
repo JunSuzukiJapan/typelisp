@@ -23,8 +23,10 @@ use super::forms;
 use super::repr::Repr;
 use crate::dump::{CheckerDelta, RegistrySignature};
 
+mod attribute;
 mod c_struct;
 mod ffi_callback;
+pub use attribute::{TestCase, TestForms, TestReturn};
 use c_struct::type_mentions_typed_ptr;
 use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, InstImpls, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, TypeAlias, VarInfo, Variant};
 
@@ -1156,6 +1158,12 @@ pub struct Checker {
     /// LSP (`diagnostics_for`/`candidates_for`), which needs a best-effort tree
     /// for hover/goto-definition/completion even in the presence of type errors.
     recover: bool,
+    /// What a `#[test]` definition and a top-level expression are checked
+    /// into — see [`TestForms`].
+    test_forms: TestForms,
+    /// The tests recorded under [`TestForms::Collect`], drained by
+    /// [`Self::take_tests`].
+    tests: Vec<TestCase>,
     /// Recoverable errors accumulated while `recover` is set — mirrors
     /// `warnings`. Each carries its own innermost source location (via the
     /// `check_at`/`check_form` `Error::at` tagging that already runs before the
@@ -1331,6 +1339,8 @@ impl Checker {
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
             recover: false,
+            test_forms: TestForms::default(),
+            tests: Vec::new(),
             errors: RefCell::new(Vec::new()),
             local_refs: RefCell::new(HashMap::new()),
             node_types: RefCell::new(HashMap::new()),
@@ -2697,6 +2707,13 @@ impl Checker {
         // Rust local, the primary form would be collected out from under the
         // bundle — and, with the cell recycled, the bundle would end up holding a
         // *fragment* of it. Released with everything else by `truncate_roots`.
+        let primary = primary.and_then(|tl| {
+            if self.drops_toplevel_expr(heap, tl) {
+                self.nothing_form(heap)
+            } else {
+                Ok(tl)
+            }
+        });
         let primary = primary.map(|tl| forms::rooted(heap, tl));
         // Specialization-drain recovery boundary (B6): the primary form checked
         // fine, but instantiating a generic it calls failed. In `recover` mode
@@ -3181,6 +3198,12 @@ impl Checker {
             // hover — threaded to the body-checking helpers as `parts_locs`.
             let elem_locs: Vec<Option<Loc>> = heap.list_to_vec_locs(v)?.into_iter().map(|(_, l)| l).collect();
             let parts_locs = &elem_locs[1..];
+            if let Some(Value::Path(pid)) = elems.first() {
+                let is_attribute = heap.path_segments(*pid).iter().map(|s| heap.symbol_name(*s)).eq(typelisp_read::ATTRIBUTE_HEAD);
+                if is_attribute {
+                    return self.check_attribute(heap, interp, &elems[1..], def_loc);
+                }
+            }
             if let Some(Value::Symbol(id)) = elems.first() {
                 // `impl<T>` lexes as a single symbol, exactly like `defstruct
                 // vector-iter<T>`'s name does, so the head has to be split
@@ -3633,7 +3656,7 @@ impl Checker {
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
                 | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "task" | "thread" | "select"
-                | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
+                | "quote" | "quasiquote" | "format" | "print" | "println" | "eprint" | "eprintln" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block" | "c-alloc" | "c-ref" | "c-deref"
         ) || TOPLEVEL_FORM_HEADS.contains(&name)
@@ -7530,6 +7553,13 @@ impl Checker {
         if depth > BLANKET_BOUND_DEPTH {
             return false;
         }
+        // A trait object implements its trait and that trait's supertraits —
+        // what its vtable carries — besides whatever a blanket impl covers.
+        if let Type::Dyn(trait_path, _) = ty {
+            if *trait_path == tb.trait_path || self.supertrait_closure(trait_path).contains(&tb.trait_path) {
+                return true;
+            }
+        }
         let type_fq = match ty {
             Type::Named(n, _) => Some(n.clone()),
             other => prim_type_path(other),
@@ -11143,6 +11173,7 @@ impl Checker {
             "format" => return self.check_format(heap, interp, env, args, arg_locs),
             "print" => return self.check_print_like(heap, interp, env, "print-rt", Type::Unit, args, arg_locs),
             "println" => return self.check_print_like(heap, interp, env, "println-rt", Type::Unit, args, arg_locs),
+            "eprint" | "eprintln" => return self.check_eprint(heap, interp, env, &head, args, arg_locs),
             // These two are *shadowable* special forms: a local binding named
             // `read` (a lambda called `(read)`, say) must keep winning, the
             // way it did when `read` was an ordinary built-in function. The
@@ -15743,6 +15774,50 @@ impl Checker {
         result
     }
 
+    /// `(eprint control args...)` / `(eprintln control args...)` — Rust's
+    /// `eprint!`/`eprintln!`: `print`/`println` to `*error-output*`, for
+    /// output that is the programmer's and not the program's.
+    ///
+    /// Checked as `(format *error-output* control args...)` (with `~%` added
+    /// to the control string for `eprintln`). In a release build
+    /// ([`crate::release`]) the checked form is then dropped for `()`,
+    /// arguments and all: a debugging line
+    /// costs nothing there, and an error in it is still reported, so it
+    /// cannot rot unnoticed until the next debug build.
+    fn check_eprint(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        what: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Checked, Error> {
+        let Some(&control) = args.first() else {
+            return Err(Error::TypeError(format!("{}: expected at least a control string", what)));
+        };
+        let mut text = self.control_string(heap, what, control)?;
+        if what == "eprintln" {
+            text.push_str("~%");
+        }
+        let mut items: Vec<(Value, Option<Loc>)> =
+            vec![(heap.intern_symbol("format"), None), (heap.intern_symbol("*error-output*"), None)];
+        let mut s = RootScope::new(heap);
+        let control = s.alloc_string(text);
+        s.push_root(control);
+        items.push((control, nth_loc(arg_locs, 0)));
+        for (i, &a) in args[1..].iter().enumerate() {
+            items.push((a, nth_loc(arg_locs, 1 + i)));
+        }
+        let form = forms::list_from_vec_locs(&mut s, &items)?;
+        s.push_root(form);
+        let checked = self.check(&mut s, interp, env, form, None)?;
+        if crate::release::is_release() {
+            return self.check(&mut s, interp, env, Value::Empty, Some(&Type::Unit));
+        }
+        Ok(checked)
+    }
+
     /// The `(print control &rest args)` / `(println control &rest args)`
     /// special forms — thin front-ends over the same directive engine as
     /// [`Self::check_format`], always writing to stdout (`println` with a
@@ -16522,7 +16597,25 @@ impl Checker {
                 Type::Named(n, _) => Some(n.clone()),
                 other => prim_type_path(other),
             };
-            let Some(type_fq) = type_fq else { continue };
+            // A type with no name — a trait object, `()`, a function, a
+            // pointer — has no impls of its own, but it does implement what
+            // `type_implements` finds (a trait object its trait, a blanket
+            // impl anything). This used to `continue`, which let a
+            // `:dyn Error` through `(where (Eq T))`. `!` has no values, so
+            // nothing can be asked of one.
+            let Some(type_fq) = type_fq else {
+                if *concrete != Type::Never {
+                    for tb in trait_bounds {
+                        if !self.type_implements(concrete, tb, 0) {
+                            return Err(Error::TypeError(format!(
+                                "{}: type `{}` does not implement trait `{}` required by `where` clause on type parameter `{}`",
+                                name, concrete, tb.trait_path, tparam
+                            )));
+                        }
+                    }
+                }
+                continue;
+            };
             let def = self.reg.type_def(&type_fq).ok_or_else(|| {
                 Error::TypeError(format!(
                     "{}: type `{}` does not implement a trait required by `where` clause on type parameter `{}`",

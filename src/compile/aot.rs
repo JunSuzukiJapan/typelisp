@@ -264,6 +264,10 @@ pub fn compile_file_on_own_thread(source_path: &str, output_path: &str) -> Resul
 /// Reads `source_path`, compiles every `defun` in it (and every file it
 /// `use`s), and links a native executable at `output_path`. See the module
 /// doc comment for scope.
+///
+/// A release build when the process is one ([`crate::release`]): the
+/// checker leaves `eprint`/`eprintln` out, and the executable carries the
+/// flag for whatever it `eval`s.
 pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> {
     crate::compile::driver::emitted_layout_is_runnable()?;
     let source =
@@ -665,7 +669,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             &format_calls,
             &printer_globals,
             &callback_entries,
-            eval_env.as_deref().map(|bytes| (bytes, eval_ns.as_str())),
+            eval_env.as_deref().map(|bytes| (bytes, eval_ns.as_str(), crate::release::is_release())),
             main_returns_int,
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
@@ -714,8 +718,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
 /// `eval_env` is `Some` only for a program that calls `eval`: the
 /// environment, already built and serialized (`typelisp_front::dump`), for
 /// the startup to read back into [`EVAL_HEAP_CAPACITY`] cells before `main`
-/// proper begins, and the namespace (`p`, `::`-joined) an eval'd form is
-/// checked in.
+/// proper begins, the namespace (`p`, `::`-joined) an eval'd form is
+/// checked in, and whether this is a release build.
 fn build_main_wrapper(
     ctx: &'static Context,
     module: &Module<'static>,
@@ -730,7 +734,7 @@ fn build_main_wrapper(
     format_calls: &[(String, String)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(String, inkwell::values::FunctionValue<'static>)],
-    eval_env: Option<(&[u8], &str)>,
+    eval_env: Option<(&[u8], &str, bool)>,
     main_returns_int: bool,
 ) -> Result<(), String> {
     let tl_main = module
@@ -954,7 +958,7 @@ fn build_main_wrapper(
     // pre-heap stores. Emitted, like the printer's block above, only when the
     // module actually calls `rt_eval`: naming the shim is what pulls the
     // checker and the interpreter into the executable.
-    if let Some((bytes, ns)) = eval_env {
+    if let Some((bytes, ns, release)) = eval_env {
         let i64_ty = ctx.i64_type();
         let blob = module.add_global(ctx.i8_type().array_type(bytes.len() as u32), None, "typelisp_eval_env");
         blob.set_initializer(&ctx.const_string(bytes, false));
@@ -972,6 +976,7 @@ fn build_main_wrapper(
                 i64_ty.const_int(bytes.len() as u64, false),
                 ns_str.as_pointer_value().const_to_int(i64_ty),
                 i64_ty.const_int(ns.len() as u64, false),
+                i64_ty.const_int(release as u64, false),
             ],
         )?;
     }

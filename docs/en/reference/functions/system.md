@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Time, Environment and Implementation
 
 Functions for time, queries about the runtime environment, implementation tools, parsing and
@@ -323,6 +323,7 @@ what gets compiled is the expanded form of the body.
 | Name | Form | Type | Description |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Panics if false. Without a message, `assertion failed: <the test as written>` (it is a macro, so it can name the expression itself). CL's restarts do not exist in this language |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, where `T` implements `Eq` and `print-object` | Panics if the two are not equal by `equals`, printing both sides (two lines, `  left: ...` / ` right: ...`). The first line is `assertion failed: <the expression as written>` without a message, and `msg` with one. Used mainly inside `#[test]` functions ([Syntax](../syntax.md)). Rust's `assert_eq!` |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Writes one line prefixed with `WARNING: ` to `*error-output*` and **continues**. A way to report something without returning a `Result` and without ending the program |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Replaces globals only during `body` and restores them on the way out. CL writes this as `let`, but `let` in this language always binds lexically, hence the separate name (the same role as the Emacs Lisp macro of the same name). Restores them however the body is left: normal completion, `throw`, `panic`, `break`/`return`. **Not a per-task binding** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Runs `body` with every printer control variable at its standard value and `*read-eval*` set to `true` ([Printing](printing.md#6-controlling-how-much-is-printed)) |

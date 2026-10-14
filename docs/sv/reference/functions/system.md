@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Tid, miljö och implementation
 
 Funktioner för tid, frågor om körmiljön, implementationsverktyg, tolkning och utvärdering av text,
@@ -319,6 +319,7 @@ det som kompileras är den expanderade formen av kroppen.
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Ger panic om falskt. Utan meddelande `assertion failed: <testet som det skrevs>` (det är ett makro, så det kan namnge själva uttrycket). CL:s restarts finns inte i det här språket |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, där `T` implementerar `Eq` och `print-object` | Panic om de två inte är lika enligt `equals`, och båda sidorna skrivs ut (två rader, `  left: ...` / ` right: ...`). Första raden är `assertion failed: <uttrycket som det skrevs>` utan meddelande, och `msg` med. Används främst i `#[test]`-funktioner ([Syntax](../syntax.md)). Rusts `assert_eq!` |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Skriver en rad med prefixet `WARNING: ` till `*error-output*` och **fortsätter**. Ett sätt att rapportera något utan att returnera ett `Result` och utan att avsluta programmet |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Ersätter globaler bara under `body` och återställer dem på vägen ut. CL skriver detta som `let`, men `let` i det här språket binder alltid lexikalt, därav det separata namnet (samma roll som Emacs Lisp-makrot med samma namn). Återställer dem hur kroppen än lämnas: normalt färdigställande, `throw`, `panic`, `break`/`return`. **Inte en bindning per task** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Kör `body` med varje utskriftskontrollvariabel på sitt standardvärde och `*read-eval*` satt till `true` ([Utskrift](printing.md#6-styra-hur-mycket-som-skrivs-ut)) |

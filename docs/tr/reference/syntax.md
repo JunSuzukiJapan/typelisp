@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -78,6 +78,7 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   olur). Bir demetin 1 ile 12 arasında öğesi vardır. Her değerlendirme yeni bir demet oluşturur.
   Hesaplanmış değerlerden bir demet kurmak için `(tuple a b)` kullanılır. S-ifadesi verisi beklenen
   yerlerde, tüm öğeleri veri olan bir demettir: `Sexpr`'in `tuple` varyantı.
+- **Öznitelikler**: `#[test]`, sonraki forma bağlanan bir işarettir (Rust'taki gibi yazılır). Şimdilik tek öznitelik `test`'tir ve bir `defun` üzerine konur ([3.16 `#[test]`](#316-test--test-fonksiyonları)). `read` ile okunduğunda `(%internal::attribute (test) form)` listesi olur.
 - **Boş liste `()`**: bağlama göre `Unit` türünün değeri ya da `Option<Sexpr>`'in `none`'ı.
   **`Sexpr`'in boş liste varyantı yoktur**: `Sexpr`, "boş olmayan bir S-ifade" demektir ve S-ifade
   verisinin türü `Option<Sexpr>`'dir ([4.3 match](#43-match--örüntü-eşleme) içindeki "`Option<Sexpr>`
@@ -1132,6 +1133,58 @@ biçiminde değil. Bir `pub` tam olarak bir tanımı açık yapar (birden fazla 
 biçimidir). Lambda listesi `defmacro` ile aynıdır. Ayrıntılı kurallar ve örnekler
 [Yerel makro bağlamaları](functions/system.md#9-yerel-makro-bağlamaları-macrolet--symbol-macrolet)
 bölümündedir.
+
+### 3.16 `#[test]` — test fonksiyonları
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+`#[test]` ile işaretlenmiş bir `defun` bir test fonksiyonudur; `typl test` bunları tek tek çağırır (Rust'ın `#[test]`'i ile aynı). Argüman almamalı ve `()` ya da `Result<(), E>` döndürmelidir (tür parametresi de alamaz). `pub` gerekmez. `Result` döndüren bir test, `err` döndürdüğünde başarısız olur ve hata gösterilir; bu yüzden `E`, `Error` ya da `print-object`'i uygulamalıdır (Rust'ın bir testin hata türünden `Debug` istemesi gibi). Bir `Error`, `describe-error` ile (mesaj ve nedenler zinciri), diğer her şey `print-object` ile gösterilir. `:dyn Error` de bir `Error` olduğundan, bir test farklı hataları tek bir türde toplayıp döndürebilir.
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
+
+- **Sıradan bir çalıştırma ve `compile-file` onu atlar**; içeriğini denetlemez bile (Rust'ın testleri yalnızca `--test` altında derlemesi gibi). Programın kendisi bir test fonksiyonunu çağıramaz.
+- Bir test, fonksiyon barındıran herhangi bir dosyaya, herhangi bir `module` içine yazılabilir. Testler ayrıca projenin `tests/` klasöründe ayrı tutulabilir.
+- Bir test, `panic`, bir çalışma zamanı hatası ya da `err` döndürmesiyle başarısız olur. Denetim için `assert` ya da iki tarafı da yazdıran `assert-eq` kullanılır ([Sistem](functions/system.md)). Bir test başarısız olduğunda geri kalanlar yine çalışır.
+
+```sh
+typl test                 # bu klasördeki projenin tüm testlerini çalıştır
+typl test parse           # yalnızca adı (`tests::more::parse-int` gibi tam adı) parse içerenler
+typl test foo.typl        # foo.typl'nin (ve use ettiği dosyaların) testleri
+typl test foo.typl parse  # bunlardan adında parse geçenler
+```
+
+Bir projede (klasörlerde yukarı çıkılarak bulunan `typelisp.toml`), `typl test` kaynak klasörünün altındaki her `.typl` dosyasını ve `typelisp.toml`'un yanındaki `tests/` klasörünün altındaki her `.typl` dosyasını yükler. `tests/` altındaki bir dosyanın modülü, `typelisp.toml`'un klasöründen itibaren yoluyla belirlenir (`tests/parse.typl`, `tests::parse`'tır).
+
+`typl test`, yüklediği dosyaların **üst düzey ifadelerini çalıştırmaz**. Bu, programın kendi işidir ve bir test çalıştırması bunu yapmaz (`go test`'in `main`'i çağırmaması gibi). Tanımlar (`defun`, bir `defvar`'ın başlangıç değeri vb.) ve okuyucu makrosu kayıtları her zamanki gibi yapılır. Herhangi bir yerde tür hatası varsa hiçbir test çalışmaz.
+
+Sonuç, test başına bir satırdır; başarısızlıkların nedenleri sonda toplu olarak verilir. Tek bir test bile başarısız olursa çıkış kodu 1'dir.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Bir testin `print` ile yazdıkları doğrudan standart çıktıya gider (yakalanmaz). İnceleme amaçlı çıktı için `eprint`/`eprintln` ([Yazdırma](functions/printing.md)) standart hata çıktısına yazar ve programın çıktısıyla karışmaz.
 
 ## 4. Bağlama ve koşullar
 

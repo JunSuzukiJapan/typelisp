@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Друк
 
 `print`/`println`/`format`, друкарі з одним аргументом, pretty printer, `print-object` і змінні, що
@@ -7,7 +7,7 @@
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` — це всі **спеціальні форми, що інтерпретують директиви формату (директиви
+`print`/`println`/`eprint`/`eprintln`/`format` — це всі **спеціальні форми, що інтерпретують директиви формату (директиви
 `format` з CL)**. Перший аргумент (другий для `format`) — це **керівний рядок**, а кожна директива по
 черзі споживає наступні аргументи зі змінною кількістю.
 
@@ -15,6 +15,8 @@
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Розгортає керівний рядок і записує його в стандартний вивід без нового рядка |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Те саме, з новим рядком наприкінці |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Як `print`, але пише у стандартний потік помилок (`*error-output*`). `eprint!` з Rust. **Релізне збирання (`typl --release`) вилучає його разом з аргументами** (аргументи не обчислюються). Типи перевіряються й тоді, коли його вилучено |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Те саме, з переведенням рядка в кінці. `eprintln!` з Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` з CL. Повертає розгорнутий рядок. Якщо `dest` дорівнює `true` (`t` з CL), він також записується в стандартний вивід; якщо `false` (`nil` з CL), не записується, а лише повертається |
 | `format` (у потік) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Якщо `dest` — не `bool`, це призначення-потік з CL. Розгорнутий рядок записується в цей потік. Значення, що повертається, — `()` (`nil` з CL), і рядок не повертається |
 

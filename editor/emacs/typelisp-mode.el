@@ -116,7 +116,7 @@ session has changed.")
     "source-file"
     ;; formatted output — special forms so that each variadic argument keeps
     ;; its own type on the way into `Sexpr' (docs/ja/reference/functions/printing.md §1)
-    "print" "println" "format"
+    "print" "println" "eprint" "eprintln" "format"
     ;; pretty printer (docs/ja/reference/functions/printing.md §4)
     "pprint" "pprint-fill" "pprint-linear" "pprint-tabular"
     "pprint-logical-block")
@@ -318,11 +318,11 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "bit" "sbit" "set-bit" "set-sbit"
     "bit-ior" "bit-eqv" "bit-nand" "bit-nor"
     "bit-andc1" "bit-andc2" "bit-orc1" "bit-orc2"
-    ;; errors and dynamic rebinding (Phase 7).  `assert'/`warn'/`dlet'/
-    ;; `with-standard-io-syntax' are macros, not functions, but they read as
-    ;; ordinary calls.
+    ;; errors and dynamic rebinding (Phase 7).  `assert'/`assert-eq'/`warn'/
+    ;; `dlet'/`with-standard-io-syntax' are macros, not functions, but they
+    ;; read as ordinary calls.
     "simple-error" "wrap-error" "describe-error"
-    "assert" "warn" "dlet" "with-standard-io-syntax"
+    "assert" "assert-eq" "warn" "dlet" "with-standard-io-syntax"
     ;; the one-object printers (Phase 8a).  Macros over `format', so they
     ;; read as ordinary calls too.
     "prin1" "princ" "write"

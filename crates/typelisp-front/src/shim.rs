@@ -56,17 +56,18 @@ thread_local! {
 }
 
 /// Registers the embedded environment dump: `args` is `[ptr, len, ns_ptr,
-/// ns_len]`, the dump and the `::`-joined namespace an eval'd form is checked
-/// in (the entry file's module).
+/// ns_len, release]`, the dump, the `::`-joined namespace an eval'd form is
+/// checked in (the entry file's module), and nonzero when the executable was
+/// built as a release build ([`crate::release`]) — so is the process, then.
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s naming immortal bytes, the second pair
-/// UTF-8.
+/// `args` must point to 5 valid `i64`s, the first two pairs naming immortal
+/// bytes, the second pair UTF-8.
 #[no_mangle]
 pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_eval_state: expected 4 arguments");
+    if argc < 5 {
+        fatal("rt_eval_state: expected 5 arguments");
     }
     let bytes = std::slice::from_raw_parts(*args as usize as *const u8, *args.add(1) as usize);
     let ns_bytes = std::slice::from_raw_parts(*args.add(2) as usize as *const u8, *args.add(3) as usize);
@@ -74,6 +75,7 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
         Ok(s) => s,
         Err(e) => fatal(&format!("rt_eval_state: the namespace is not UTF-8: {}", e)),
     };
+    crate::release::set_release(*args.add(4) != 0);
     EVAL_DUMP.with(|c| c.set(Some((bytes, ns))));
     0
 }

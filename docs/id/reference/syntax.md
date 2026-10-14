@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -80,6 +80,7 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   adalah `#{string int}`). Tuple memiliki 1 sampai 12 elemen. Setiap evaluasi membuat tuple baru.
   Untuk membangunnya dari nilai yang dihitung, gunakan `(tuple a b)`. Di tempat yang mengharapkan
   data S-ekspresi, ia menjadi tuple yang semua elemennya data: varian `tuple` dari `Sexpr`.
+- **Atribut**: `#[test]` adalah tanda yang melekat pada bentuk berikutnya (ditulis seperti di Rust). Satu-satunya atribut sejauh ini adalah `test`, dan dipasang pada `defun` ([3.16 `#[test]`](#316-test--fungsi-uji)). Jika dibaca dengan `read`, ia menjadi daftar `(%internal::attribute (test) form)`.
 - **Daftar kosong `()`**: tergantung konteks, nilai tipe `Unit` atau `none` pada `Option<Sexpr>`.
   **`Sexpr` tidak memiliki varian daftar kosong**: `Sexpr` berarti "S-expression tak kosong", dan
   tipe data S-expression adalah `Option<Sexpr>` (lihat "Pola untuk `Option<Sexpr>`" pada
@@ -1182,6 +1183,58 @@ Keduanya adalah bentuk khusus **ekspresi**, dan tidak ada yang tersisa saat dija
 dikompilasi adalah bentuk ekspansi dari badan). Daftar lambda-nya sama seperti `defmacro`. Aturan
 terperinci dan contohnya ada di
 [Pengikatan makro lokal](functions/system.md#9-pengikatan-makro-lokal-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — fungsi uji
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+`defun` yang ditandai `#[test]` adalah fungsi uji, yang dipanggil `typl test` satu per satu (sama seperti `#[test]` di Rust). Fungsi ini tidak boleh menerima argumen dan harus mengembalikan `()` atau `Result<(), E>` (juga tidak bisa menerima parameter tipe). Tidak perlu `pub`. Pengujian yang mengembalikan `Result` gagal jika mengembalikan `err`, dan galatnya ditampilkan, sehingga `E` harus mengimplementasikan `Error` atau `print-object` (sama seperti Rust meminta `Debug` dari tipe galat pengujian). `Error` ditampilkan dengan `describe-error` (pesan dan rantai penyebabnya), selain itu dengan `print-object`. `:dyn Error` juga merupakan `Error`, sehingga pengujian dapat mengumpulkan berbagai galat ke dalam satu tipe lalu mengembalikannya.
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
+
+- **Eksekusi biasa dan `compile-file` melewatinya**, bahkan tanpa memeriksa isinya (sama seperti Rust hanya mengompilasi pengujian dengan `--test`). Program itu sendiri tidak dapat memanggil fungsi uji.
+- Pengujian dapat ditulis di file mana pun yang berisi fungsi, di dalam `module` mana pun. Pengujian juga bisa disimpan terpisah di folder `tests/` proyek.
+- Pengujian gagal karena `panic`, galat waktu jalan, atau mengembalikan `err`. Periksa dengan `assert`, atau dengan `assert-eq` yang mencetak kedua sisi ([Sistem](functions/system.md)). Jika satu pengujian gagal, sisanya tetap berjalan.
+
+```sh
+typl test                 # jalankan semua pengujian proyek di folder ini
+typl test parse           # hanya yang namanya (nama lengkap, seperti `tests::more::parse-int`) mengandung parse
+typl test foo.typl        # pengujian di foo.typl (dan file yang di-use-nya)
+typl test foo.typl parse  # dari itu, yang namanya mengandung parse
+```
+
+Dalam sebuah proyek (`typelisp.toml` yang ditemukan dengan menelusuri folder ke atas), `typl test` memuat setiap file `.typl` di bawah folder sumber dan setiap file `.typl` di bawah folder `tests/` di samping `typelisp.toml`. Modul sebuah file di bawah `tests/` ditentukan oleh jalurnya dari folder `typelisp.toml` (`tests/parse.typl` adalah `tests::parse`).
+
+`typl test` **tidak menjalankan ekspresi tingkat atas** dari file yang dimuatnya. Itu pekerjaan program itu sendiri, yang tidak dilakukan saat menjalankan pengujian (sama seperti `go test` tidak memanggil `main`). Definisi (`defun`, nilai awal `defvar`, dan sebagainya) serta pendaftaran makro pembaca dilakukan seperti biasa. Jika ada galat tipe di mana pun, tidak ada pengujian yang berjalan.
+
+Hasilnya satu baris per pengujian, dengan alasan kegagalan dikumpulkan di akhir. Jika satu saja pengujian gagal, kode keluarnya 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Apa yang dicetak pengujian dengan `print` langsung masuk ke keluaran standar (tidak ditangkap). Untuk keluaran yang dimaksudkan untuk menyelidiki masalah, `eprint`/`eprintln` ([Pencetakan](functions/printing.md)) menulis ke galat standar dan tidak bercampur dengan keluaran program.
 
 ## 4. Pengikatan dan percabangan
 

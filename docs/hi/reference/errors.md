@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/errors.md @ b550ae4adbf0e3f78566a6c1f79d671a5d08627e -->
 # त्रुटि संदेश
 
 `typl` के मुख्य त्रुटि संदेशों का अर्थ और उन्हें कैसे ठीक करें।

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b550ae4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -78,6 +78,7 @@ incorporados, consulta [Funciones incorporadas](functions/README.md); para la li
   `#{string int}`). Una tupla tiene de 1 a 12 elementos. Cada evaluación crea una tupla nueva. Para
   construir una a partir de valores calculados, se usa `(tuple a b)`. Donde se esperan datos de
   S-expresión, es una tupla cuyos elementos son todos datos: la variante `tuple` de `Sexpr`.
+- **Atributos**: `#[test]` es una marca que se une a la forma siguiente (escrita como en Rust). El único atributo por ahora es `test`, y va sobre un `defun` ([3.16 `#[test]`](#316-test--funciones-de-prueba)). Leído con `read`, se convierte en la lista `(%internal::attribute (test) form)`.
 - **La lista vacía `()`**: según el contexto, el valor del tipo `Unit` o el `none` de `Option<Sexpr>`.
   **`Sexpr` no tiene variante de lista vacía**: `Sexpr` significa "una expresión S no vacía", y el tipo de los
   datos de expresiones S es `Option<Sexpr>` (consulta "Patrones para `Option<Sexpr>`" en
@@ -1155,6 +1156,58 @@ Ambas son formas especiales de **expresión**, y no queda nada en tiempo de ejec
 forma expandida del cuerpo). La lista lambda es la misma que la de `defmacro`. Las reglas detalladas y los
 ejemplos están en
 [Enlaces de macros locales](functions/system.md#9-enlaces-de-macros-locales-macrolet--symbol-macrolet).
+
+### 3.16 `#[test]` — funciones de prueba
+
+```lisp
+#[test]
+(defun adds () ()
+  (assert-eq (+ 1 2) 3))
+```
+
+Un `defun` marcado con `#[test]` es una función de prueba, que `typl test` llama de una en una (igual que `#[test]` de Rust). No debe recibir argumentos y debe devolver `()` o `Result<(), E>` (tampoco puede recibir parámetros de tipo). No necesita `pub`. Una prueba que devuelve un `Result` falla al devolver un `err`, y el error se muestra, así que `E` debe implementar `Error` o `print-object` (igual que Rust pide `Debug` al tipo de error de una prueba). Un `Error` se muestra con `describe-error` (el mensaje y su cadena de causas), y cualquier otra cosa con `print-object`. `:dyn Error` también es un `Error`, así que una prueba puede reunir errores distintos en un solo tipo y devolverlo.
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
+
+- **Una ejecución normal y `compile-file` la omiten**, sin siquiera comprobar su contenido (igual que Rust compila las pruebas solo con `--test`). El propio programa no puede llamar a una función de prueba.
+- Una prueba puede escribirse en cualquier archivo que contenga funciones, dentro de cualquier `module`. También pueden guardarse aparte en la carpeta `tests/` del proyecto.
+- Una prueba falla por un `panic`, por un error en tiempo de ejecución o al devolver un `err`. Se comprueba con `assert`, o con `assert-eq`, que imprime ambos lados ([Sistema](functions/system.md)). Aunque una prueba falle, las demás siguen ejecutándose.
+
+```sh
+typl test                 # ejecuta todas las pruebas del proyecto de esta carpeta
+typl test parse           # solo aquellas cuyo nombre (el nombre completo, como `tests::more::parse-int`) contiene parse
+typl test foo.typl        # las pruebas de foo.typl (y de los archivos que usa)
+typl test foo.typl parse  # de esas, las que tienen parse en el nombre
+```
+
+En un proyecto (el `typelisp.toml` que se encuentra subiendo por las carpetas), `typl test` carga todos los archivos `.typl` bajo la carpeta de fuentes y todos los archivos `.typl` bajo la carpeta `tests/` junto a `typelisp.toml`. El módulo de un archivo bajo `tests/` lo da su ruta desde la carpeta de `typelisp.toml` (`tests/parse.typl` es `tests::parse`).
+
+`typl test` **no ejecuta las expresiones de nivel superior** de los archivos que carga. Ese es el trabajo propio del programa, que una ejecución de pruebas no hace (igual que `go test` no llama a `main`). Las definiciones (`defun`, el valor inicial de un `defvar`, etc.) y los registros de macros de lector se hacen como siempre. Si hay un error de tipos en cualquier parte, no se ejecuta ninguna prueba.
+
+El resultado es una línea por prueba, con los motivos de los fallos reunidos al final. Si falla aunque sea una prueba, el código de salida es 1.
+
+```text
+running 2 tests
+test math::adds ... ok
+test math::adds-wrong ... FAILED
+
+failures:
+
+---- math::adds-wrong ----
+src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
+  left: 3
+ right: 4
+
+test result: FAILED. 1 passed; 1 failed; 0 filtered out
+```
+
+Lo que una prueba imprime con `print` va directamente a la salida estándar (no se captura). Para la salida destinada a investigar, `eprint`/`eprintln` ([Impresión](functions/printing.md)) escriben en la salida de error estándar y no se mezclan con la salida del programa.
 
 ## 4. Enlaces y condicionales
 

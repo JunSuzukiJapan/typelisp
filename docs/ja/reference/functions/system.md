@@ -306,6 +306,7 @@ CL にあってここに無いもの: `eval-when`（`:compile-toplevel`/`:load-t
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | 偽なら panic。メッセージ省略時は `assertion failed: <テストを書かれたまま>`（マクロなので式そのものを名指せる）。CL の restart はこの言語に無い |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`、`T` は `Eq` と `print-object` を実装する | 2 つが `equals` で等しくなければ panic し、両辺を印字する（`  left: ...` / ` right: ...` の 2 行）。1 行目はメッセージ省略時 `assertion failed: <書かれたままの式>`、指定時は `msg`。主に `#[test]` 関数（[構文](../syntax.md)）の中で使う。Rust の `assert_eq!` |
 | `warn` | `(warn control args...)` | `(string,...)→()` | `*error-output*` へ `WARNING: ` 付きで 1 行書いて**続行**する。`Result` を返しもせずプログラムを終わらせもせずに報告する手段 |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | グローバルを `body` の間だけ差し替え、抜けるときに戻す。CL はこれを `let` と書くが、この言語の `let` は常に字句束縛なので別名（Emacs Lisp の同名マクロと同じ役目）。正常終了・`throw`・`panic`・`break`/`return` のどれで抜けても戻す。**タスクごとの束縛ではない** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 印字制御変数を全部標準値に、`*read-eval*` を `true` にして `body` を走らせる（[印字](printing.md#6-印字量の制御)） |

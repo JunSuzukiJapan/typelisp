@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Temps, environnement et implémentation
 
 Les fonctions de temps, les questions sur l'environnement d'exécution, les outils de l'implémentation, l'analyse et
@@ -324,6 +324,7 @@ l'exécution : ce qui est compilé, c'est la forme développée du corps.
 | Nom | Forme | Type | Description |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Panic si faux. Sans message, `assertion failed: <le test tel qu'écrit>` (c'est une macro, elle peut donc nommer l'expression elle-même). Les restarts de CL n'existent pas dans ce langage |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, où `T` implémente `Eq` et `print-object` | Panic si les deux ne sont pas égaux selon `equals`, en affichant les deux côtés (deux lignes, `  left: ...` / ` right: ...`). La première ligne est `assertion failed: <l'expression telle qu'écrite>` sans message, et `msg` avec. Sert surtout dans les fonctions `#[test]` ([Syntaxe](../syntax.md)). Le `assert_eq!` de Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Écrit une ligne préfixée par `WARNING: ` sur `*error-output*` et **continue**. Un moyen de signaler quelque chose sans renvoyer de `Result` et sans terminer le programme |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Remplace des globales seulement pendant `body` et les restaure à la sortie. CL écrit cela avec `let`, mais `let` lie toujours lexicalement dans ce langage, d'où le nom distinct (le même rôle que la macro de même nom d'Emacs Lisp). Les restaure quelle que soit la façon dont le corps est quitté : fin normale, `throw`, `panic`, `break`/`return`. **Pas une liaison par tâche** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Exécute `body` avec chaque variable de contrôle de l'affichage à sa valeur standard et `*read-eval*` à `true` ([Affichage](printing.md#6-contrôler-la-quantité-imprimée)) |

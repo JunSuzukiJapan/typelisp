@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring
@@ -317,6 +317,7 @@ lúc chạy: thứ được biên dịch là dạng đã khai triển của thâ
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Panic nếu false. Không có thông điệp, là `assertion failed: <phép kiểm tra như đã viết>` (nó là một macro, nên có thể nêu chính biểu thức). Các restart của CL không tồn tại trong ngôn ngữ này |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, trong đó `T` cài đặt `Eq` và `print-object` | Panic nếu hai giá trị không bằng nhau theo `equals`, in ra cả hai vế (hai dòng, `  left: ...` / ` right: ...`). Dòng đầu là `assertion failed: <biểu thức như đã viết>` khi không có thông điệp, và là `msg` khi có. Chủ yếu dùng bên trong các hàm `#[test]` ([Cú pháp](../syntax.md)). Tương ứng `assert_eq!` của Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Ghi một dòng có tiền tố `WARNING: ` ra `*error-output*` và **tiếp tục**. Một cách báo cáo điều gì đó mà không trả về một `Result` và không kết thúc chương trình |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Thay các biến toàn cục chỉ trong `body` và khôi phục chúng khi ra. CL viết điều này là `let`, nhưng `let` trong ngôn ngữ này luôn ràng buộc theo phạm vi từ vựng, vì vậy có tên riêng (cùng vai trò như macro cùng tên của Emacs Lisp). Khôi phục chúng dù thân được rời đi bằng cách nào: hoàn tất bình thường, `throw`, `panic`, `break`/`return`. **Không phải ràng buộc theo từng task** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Chạy `body` với mọi biến điều khiển bộ in ở giá trị chuẩn và `*read-eval*` đặt là `true` ([In](printing.md#6-điều-khiển-lượng-được-in)) |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # เวลา สภาพแวดล้อม และการ implement
 
 ฟังก์ชันสำหรับเวลา การสอบถามสภาพแวดล้อมขณะรัน เครื่องมือของการ implement การแยกวิเคราะห์และ
@@ -322,6 +322,7 @@ hover ของ language server (`typl-lsp`) แสดง docstring ด้วย
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | panic หากเป็นเท็จ หากไม่มีข้อความ จะเป็น `assertion failed: <การทดสอบตามที่เขียน>` (เป็นแมโคร จึงระบุนิพจน์เองได้) restart ของ CL ไม่มีในภาษานี้ |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()` โดย `T` อิมพลีเมนต์ `Eq` และ `print-object` | ถ้าทั้งสองไม่เท่ากันตาม `equals` จะ panic และพิมพ์ทั้งสองฝั่ง (สองบรรทัด `  left: ...` / ` right: ...`) บรรทัดแรกคือ `assertion failed: <นิพจน์ตามที่เขียน>` เมื่อไม่ระบุข้อความ และคือ `msg` เมื่อระบุ ใช้เป็นหลักภายในฟังก์ชัน `#[test]` ([ไวยากรณ์](../syntax.md)) คือ `assert_eq!` ของ Rust |
 | `warn` | `(warn control args...)` | `(string,...)→()` | เขียนหนึ่งบรรทัดที่นำหน้าด้วย `WARNING: ` ไปยัง `*error-output*` และ **ทำงานต่อ** วิธีรายงานบางอย่างโดยไม่คืน `Result` และไม่จบโปรแกรม |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | แทนที่โกลบอลเฉพาะระหว่าง `body` และคืนค่าเดิมตอนออก CL เขียนสิ่งนี้เป็น `let` แต่ `let` ในภาษานี้ผูกแบบ lexical เสมอ จึงมีชื่อแยก (บทบาทเดียวกับแมโครชื่อเดียวกันของ Emacs Lisp) คืนค่าเดิมไม่ว่าจะออกจากตัวเนื้อหาด้วยวิธีใด: จบตามปกติ, `throw`, `panic`, `break`/`return` **ไม่ใช่การผูกต่อ task** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | รัน `body` โดยให้ตัวแปรควบคุมตัวพิมพ์ทุกตัวอยู่ที่ค่ามาตรฐานและ `*read-eval*` เป็น `true` ([การพิมพ์](printing.md#6-การควบคุมปริมาณที่พิมพ์)) |

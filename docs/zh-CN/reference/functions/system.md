@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。
@@ -278,6 +278,7 @@ CL 中有而这里没有的：`eval-when`（`:compile-toplevel`/`:load-toplevel`
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | 为假时 panic。省略消息时为 `assertion failed: <测试的原文>`（因为是宏，所以能指出表达式本身）。没有 CL 的 restart |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`，`T` 实现 `Eq` 和 `print-object` | 两者按 `equals` 不相等时 panic，并打印两边（`  left: ...` / ` right: ...` 两行）。第一行在省略消息时为 `assertion failed: <按原样书写的表达式>`，指定时为 `msg`。主要在 `#[test]` 函数（[语法](../syntax.md)）中使用。Rust 的 `assert_eq!` |
 | `warn` | `(warn control args...)` | `(string,...)→()` | 向 `*error-output*` 写一行带 `WARNING: ` 的内容并**继续**。既不返回 `Result` 也不结束程序的报告手段 |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | 只在 `body` 期间替换全局变量，退出时恢复。CL 把它写成 `let`，但本语言的 `let` 总是词法绑定，所以用别的名字（与 Emacs Lisp 同名宏的作用相同）。无论以正常结束、`throw`、panic、`break`/`return` 中哪种方式退出都会恢复。**不是按任务的绑定** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 把所有打印控制变量设为标准值、把 `*read-eval*` 设为 `true`，然后执行 `body`（[打印](printing.md#6-控制打印量)） |

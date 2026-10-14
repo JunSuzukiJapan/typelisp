@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -88,6 +88,13 @@ fib(25) = 75025
 Nếu không có `-o`, tệp thực thi được đặt tên theo tệp nguồn bỏ đi `.typl` và được đặt trong cùng thư
 mục với tệp nguồn. Nếu tên tệp nguồn không kết thúc bằng `.typl`, bắt buộc phải có `-o`. Với `-c`
 (`--compile`), không thể chỉ định `--image`, `--heap-cells` và `--feature`.
+
+Với `--release`, `typl` tạo **bản dựng release**, loại bỏ `eprint`/`eprintln` (đầu ra lỗi chuẩn dùng để điều tra; [In](../reference/functions/printing.md)) cùng với các đối số của chúng. Những gì bị loại bỏ vẫn được kiểm tra kiểu, nên một lỗi kiểu ở đó làm việc biên dịch thất bại. `--release` là tùy chọn của toàn bộ `typl`: nó có tác dụng như nhau không chỉ với `-c` mà còn khi chạy một tệp, trong REPL và với `typl test`. `compile-file` được gọi bên trong một `typl` chạy với `--release` cũng tạo bản dựng release, và `eprint`/`eprintln` cũng bị loại bỏ khỏi mã chạy bằng `eval` bên trong tệp thực thi được tạo như vậy.
+
+```sh
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # viết sau -c cũng như nhau
+```
 
 Bạn có thể làm tương tự bằng cách gọi `compile-file` từ REPL hoặc từ một chương trình.
 

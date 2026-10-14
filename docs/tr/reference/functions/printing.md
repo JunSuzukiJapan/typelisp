@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Yazdırma
 
 `print`/`println`/`format`, tek bağımsız değişkenli yazıcılar, pretty printer, `print-object` ve
@@ -7,7 +7,7 @@ Akışlardan okuma ve akışlara yazma [Akışlar ve Dosyalar](streams-files.md)
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format`'ın hepsi **biçim yönergelerini yorumlayan özel formlardır (CL'nin `format`
+`print`/`println`/`eprint`/`eprintln`/`format`'ın hepsi **biçim yönergelerini yorumlayan özel formlardır (CL'nin `format`
 yönergeleri)**. İlk bağımsız değişken (`format` için ikincisi) **denetim string'idir** ve her yönerge
 sonraki değişken sayılı bağımsız değişkenleri sırayla tüketir.
 
@@ -15,6 +15,8 @@ sonraki değişken sayılı bağımsız değişkenleri sırayla tüketir.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Denetim string'ini açar ve yeni satır olmadan standart çıktıya yazar |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Aynısı, sonunda yeni satırla |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | `print` ile aynı, ancak standart hata çıktısına (`*error-output*`) yazar. Rust'ın `eprint!`'i. **Bir release derlemesi (`typl --release`) onu argümanlarıyla birlikte kaldırır** (argümanlar değerlendirilmez). Kaldırıldığında bile tür denetimi yapılır |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Aynısı, sonuna satır sonu ekler. Rust'ın `eprintln!`'i |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL'nin `format`'ı. Açılmış string'i döndürür. `dest` `true` (CL'nin `t`'si) ise ayrıca standart çıktıya yazılır; `false` (CL'nin `nil`'i) ise yazılmaz ve yalnızca döndürülür |
 | `format` (bir akışa) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` bir `bool` değilse CL'nin akış hedefidir. Açılmış string o akışa yazılır. Dönüş değeri `()`'dir (CL'nin `nil`'i) ve string döndürülmez |
 

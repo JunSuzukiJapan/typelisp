@@ -7066,6 +7066,21 @@ user-visible capacity."
       `(if ,c () (panic (format false "assertion failed: ~s" (quote ,c))))
       `(if ,c () (panic ,(sexpr-car msg)))))
 
+;; Rust's `assert_eq!`, for `#[test]` functions above all: when the two sides
+;; differ, the panic shows both. The comparison and the printing are a generic
+;; function's, so a type with no `Eq` or no `print-object` is refused where
+;; the assertion is written. The macro only supplies the first line of the
+;; message -- the assertion as written, or the second argument.
+(module %internal (pub defun check-assert-eq<T> ((left T) (right T) (header string)) ()
+  (where (Eq T) (print-object T))
+  (if (equals left right)
+      ()
+      (panic (format false "~a~%  left: ~a~% right: ~a" header (print-object left true) (print-object right true))))))
+(defmacro assert-eq (left right &rest msg)
+  (if (sexpr-null msg)
+      `(%internal::check-assert-eq ,left ,right ,(format false "assertion failed: ~s" `(assert-eq ,left ,right)))
+      `(%internal::check-assert-eq ,left ,right ,(sexpr-car msg))))
+
 ;; CL's `warn`: say something on `*error-output*` and carry on. The only
 ;; thing in this language that reports without either returning a `Result` or
 ;; ending the program. Takes a control string like `print`/`println`, and

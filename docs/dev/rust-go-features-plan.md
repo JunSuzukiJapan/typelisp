@@ -195,6 +195,45 @@ typelisp で書けるものは typelisp で書く（Rust 組み込みは Rust �
    名前の一部で絞り込める。結果の行と集計を出す。
 4. `assert-eq`: 失敗したら両辺を印字する（`Eq` と `print-object` を要求する）。
 
+**2026-10-13 完了**（ブランチ `feat/test-attribute`）。決めたこと・計画から変わった点:
+
+- リーダーは `#[ATTR...] FORM` を `(%internal::attribute (ATTR...) FORM)` に読む
+  （`typelisp_read::ATTRIBUTE_HEAD`）。well-known シンボルを足さず、チェッカーがパスの綴りで
+  見分けるので ABI 版は変わらない。属性は `test` だけで、`defun` にしか付けられない。
+- 扱いはチェッカーの `TestForms` で決まる。`Skip`（既定。普通の実行・`compile-file`・REPL。
+  中身を検査しない）、`Check`（LSP。普通の定義として検査する）、`Collect`（`typl test`。
+  定義して記録し、トップレベルの式は検査したうえで捨てる）。捨てた・読み飛ばしたフォームは
+  中身の無い `(module 今のパス)` にした（新しいタグを足すとインタプリタ・AOT・島に手が入る）。
+- `typl test` はトップレベルの式を実行しない（Go の `main` と同じ）。プロジェクトの全ファイルを
+  読むので、サーバを起動する `main.typl` のようなファイルを読んでも止まらないため。リーダマクロの
+  登録（`needs_immediate_exec`）は残す。
+- テスト関数は引数なし・型パラメータなし・戻り値 `()` か `Result<(), E>`（2026-10-14 ユーザー指示で
+  追加）。`E` には定義の時点で `Error` か `print-object` を要求する（Rust の `Debug` に当たる）。
+  `Error` なら `describe-error`、そうでなければ `print-object` で表示する（`:dyn Error` は
+  `print-object` を持たないので、`Error` を受け付けないと返せない）。ランナーは
+  `(match (NAME) ((ok _) ()) ((err e) (panic ...)))` を組み立て、`panic` の cons にテスト関数の
+  定義の位置を付ける。prelude の補助関数で `panic` すると、失敗の位置が `<prelude>:行` になるため。
+- その確認の途中で、`where` 境界の検証（`validate_where_bounds`）が名前の無い型（trait object・
+  `()`・関数型など）を `continue` で素通りさせていた不具合を見つけて直した。`:dyn Error` が
+  `(where (Eq T))` を通り、本体の `equals` が `Sexpr` の経路で動いていた。`type_implements` は
+  trait object をそのトレイトとスーパートレイトの実装とみなすようにした。
+- 同じく 2026-10-14 のユーザー指示で、`eprint`/`eprintln`（標準エラー出力）と `typl --release` を
+  足した。リリースビルドでは引数ごと `()` に置き換える（検査はする）。release フラグはプロセスに
+  1 つ（`typelisp_front::release`）で、`--release` はそれを立てるだけ、変わるもの（いまは
+  `eprint`/`eprintln` の検査）がその時点のフラグを見る（ユーザー指示）。`--release` は typl 全体の
+  オプションで、実行・REPL・`typl test`・`-c`・その中の `compile-file` のすべてに効く。実行ファイルは
+  ビルド時のフラグを `rt_eval_state` の 5 番目の引数で持ち、中の `eval` も従うので ABI 版は 0.2.10。
+- 読み込むファイルは、ソースのルートの下の全 `.typl` と、`typelisp.toml` のフォルダの `tests/` の
+  下の全 `.typl`。後者のモジュールは `typelisp.toml` のフォルダからの道筋（`tests::foo`）。
+  `typl test FILE.typl [FILTER]` で 1 ファイルだけも走らせられる。既に読んだモジュールは
+  `Loader::load_module_file` が飛ばす。
+- 各テストは、テストのモジュールを現在の名前空間にして `(NAME)` を検査・実行する（`pub` で
+  なくても呼べる）。`panic` も実行時エラーも `Interp::exec` の `Err` で返るので、REPL と同じく
+  次のテストへ進める。出力は取り込まない。
+- `assert-eq` はマクロが 1 行目の文言を作り、比較と印字は `%internal::check-assert-eq<T>`
+  （`(where (Eq T) (print-object T))`）が行う。マクロと同じ名前にすると、エディタ定義の番人が
+  内部名と区別できない。
+
 ## 4. ドキュメント
 
 利用者向けのリファレンス（`docs/ja` を原本にして、日英を先に、残り 8 言語をまとめて）を、

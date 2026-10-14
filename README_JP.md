@@ -293,6 +293,22 @@ typl foo.typl
 typl foo.typl a b c
 ```
 
+### テストを実行する
+
+`#[test]` を付けた関数（テスト関数）を走らせます。プロジェクトのフォルダ（`typelisp.toml` の
+あるフォルダか、その下）で実行すると、プロジェクトのすべてのファイルと `tests/` フォルダの
+ファイルからテスト関数を集めます。ファイル名を指定すると、そのファイルのテスト関数だけを
+走らせます。最後に文字列を書くと、名前にその文字列を含むテストだけを走らせます。
+
+```sh
+typl test
+typl test parse
+typl test foo.typl
+```
+
+書き方は[構文リファレンス](docs/ja/reference/syntax.md)の「`#[test]` — テスト関数」を
+参照してください。
+
 ### ファイルをコンパイルする
 
 `-c` または `--compile` を指定すると、そのファイルをコンパイルして実行ファイルを作ります。
@@ -301,6 +317,13 @@ typl foo.typl a b c
 ```sh
 typl -c foo.typl
 typl --compile foo.typl -o bar
+```
+
+`--release` を付けるとリリースビルドになり、調べるための出力 `eprint`/`eprintln` を取り除きます。
+`--release` は `typl` 全体のオプションで、ファイルを実行するときやテストのときにも効きます。
+
+```sh
+typl --release -c foo.typl
 ```
 
 コンパイルして作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` をリンクします。

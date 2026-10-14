@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Wypisywanie
 
 `print`/`println`/`format`, drukarki jednoargumentowe, pretty printer, `print-object` oraz
@@ -7,7 +7,7 @@ strumieni i zapis do nich opisano w [Strumieniach i plikach](streams-files.md).
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` to wszystko **formy specjalne interpretujące dyrektywy formatu (dyrektywy `format`
+`print`/`println`/`eprint`/`eprintln`/`format` to wszystko **formy specjalne interpretujące dyrektywy formatu (dyrektywy `format`
 z CL)**. Pierwszy argument (drugi dla `format`) to **łańcuch sterujący**, a każda
 dyrektywa zużywa kolejne argumenty o zmiennej liczbie po kolei.
 
@@ -15,6 +15,8 @@ dyrektywa zużywa kolejne argumenty o zmiennej liczbie po kolei.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Rozwija łańcuch sterujący i zapisuje go na standardowe wyjście bez nowej linii |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | To samo, z nową linią na końcu |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Jak `print`, ale pisze na standardowe wyjście błędów (`*error-output*`). `eprint!` z Rust. **Kompilacja release (`typl --release`) usuwa je razem z argumentami** (argumenty nie są obliczane). Typy są sprawdzane nawet wtedy, gdy jest usuwane |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | To samo, z nową linią na końcu. `eprintln!` z Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` z CL. Zwraca rozwinięty łańcuch. Jeśli `dest` to `true` (`t` z CL), jest on także zapisywany na standardowe wyjście; jeśli `false` (`nil` z CL), nie jest zapisywany i jest tylko zwracany |
 | `format` (do strumienia) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Jeśli `dest` nie jest `bool`, jest to cel będący strumieniem z CL. Rozwinięty łańcuch jest zapisywany do tego strumienia. Wartością zwracaną jest `()` (`nil` z CL) i żaden łańcuch nie jest zwracany |
 

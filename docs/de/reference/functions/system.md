@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # Zeit, Umgebung und Implementierung
 
 Funktionen für Zeit, Abfragen der Laufzeitumgebung, Werkzeuge der Implementierung, Parsen und Auswerten von
@@ -327,6 +327,7 @@ Beide sind Spezialformen, die **Namen, die keine Werte sind**, lexikalisch binde
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | Panic, wenn falsch. Ohne Meldung `assertion failed: <der Test, wie geschrieben>` (es ist ein Makro und kann daher den Ausdruck selbst nennen). CLs Restarts gibt es in dieser Sprache nicht |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, wobei `T` `Eq` und `print-object` implementiert | Panic, wenn die beiden nach `equals` nicht gleich sind; gibt beide Seiten aus (zwei Zeilen, `  left: ...` / ` right: ...`). Die erste Zeile ist ohne Meldung `assertion failed: <der Ausdruck, wie geschrieben>`, mit Meldung `msg`. Vor allem in `#[test]`-Funktionen verwendet ([Syntax](../syntax.md)). Rusts `assert_eq!` |
 | `warn` | `(warn control args...)` | `(string,...)→()` | Schreibt eine Zeile mit dem Präfix `WARNING: ` auf `*error-output*` und **läuft weiter**. Eine Möglichkeit, etwas zu melden, ohne ein `Result` zurückzugeben und ohne das Programm zu beenden |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | Ersetzt globale Variablen nur während `body` und stellt sie beim Verlassen wieder her. CL schreibt das als `let`, aber `let` bindet in dieser Sprache immer lexikalisch, daher der eigene Name (dieselbe Rolle wie das gleichnamige Makro von Emacs Lisp). Stellt sie wieder her, wie auch immer der Rumpf verlassen wird: normaler Abschluss, `throw`, `panic`, `break`/`return`. **Keine Bindung pro Task** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | Führt `body` aus, mit jeder Steuervariable der Ausgabe auf ihrem Standardwert und `*read-eval*` auf `true` ([Ausgabe](printing.md#6-steuern-wie-viel-ausgegeben-wird)) |

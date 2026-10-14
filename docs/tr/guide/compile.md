@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -91,6 +91,13 @@ fib(25) = 75025
 `-o` olmadan çalıştırılabilir dosya, kaynak dosyanın adından `.typl` çıkarılarak adlandırılır ve
 kaynak dosyayla aynı klasöre konur. Kaynak dosya adı `.typl` ile bitmiyorsa `-o` zorunludur.
 `-c` (`--compile`) ile `--image`, `--heap-cells` ve `--feature` verilemez.
+
+`--release` ile `typl` bir **release derlemesi** yapar; bu, `eprint`/`eprintln`'i (inceleme amaçlı standart hata çıktısı; [Yazdırma](../reference/functions/printing.md)) argümanlarıyla birlikte kaldırır. Kaldırılanlar yine de tür denetiminden geçer, bu yüzden oradaki bir tür hatası derlemeyi başarısız kılar. `--release`, `typl`'ın bütününe ait bir seçenektir: yalnızca `-c` için değil, bir dosyayı çalıştırırken, REPL'de ve `typl test` için de aynı şekilde etkilidir. `--release` ile başlatılan bir `typl` içinde çağrılan `compile-file` da release derlemesi yapar ve böyle yapılan çalıştırılabilir dosyanın içinde `eval` ile çalıştırılan koddan da `eprint`/`eprintln` kaldırılır.
+
+```sh
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # -c'den sonra yazılsa da aynı
+```
 
 Aynısını REPL'den ya da bir programdan `compile-file` çağırarak da yapabilirsiniz.
 

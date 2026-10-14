@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # 列印
 
 `print`/`println`/`format`、單引數列印函式、pretty printer、`print-object`，以及控制列印的變數。格式指令一覽見 [format.md](format.md)。
@@ -6,13 +6,15 @@
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` 都是**解讀格式指令（CL 的 `format` 指令）的特殊形式**。第 1 個引數（`format` 是第 2 個）是**控制字串**，各指令
+`print`/`println`/`eprint`/`eprintln`/`format` 都是**解讀格式指令（CL 的 `format` 指令）的特殊形式**。第 1 個引數（`format` 是第 2 個）是**控制字串**，各指令
 依序消耗其後的可變引數。
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | 展開控制字串，不換行寫到標準輸出 |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | 同上，最後換行 |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | 與 `print` 相同，但寫到標準錯誤輸出（`*error-output*`）。Rust 的 `eprint!`。**在發行建置（`typl --release`）中連同引數一起被移除**（引數不求值）。即使被移除也會進行型別檢查 |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | 同上，結尾加換行。Rust 的 `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL 的 `format`。回傳展開後的字串。`dest` 為 `true`（CL 的 `t`）時還會寫到標準輸出；為 `false`（CL 的 `nil`）時不寫，只回傳字串 |
 | `format`（寫到串流） | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` 不是 `bool` 時是 CL 的寫到串流。把展開的字串寫到該串流。回傳值是 `()`（相當於 CL 的 `nil`），不回傳字串 |
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # 打印
 
 `print`/`println`/`format`、单参数打印函数、pretty printer、`print-object`，以及控制打印的变量。格式指令一览见
@@ -6,13 +6,15 @@
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` 都是**解释格式指令（CL 的 `format` 指令）的特殊形式**。第 1 个参数（`format` 是第 2 个）
+`print`/`println`/`eprint`/`eprintln`/`format` 都是**解释格式指令（CL 的 `format` 指令）的特殊形式**。第 1 个参数（`format` 是第 2 个）
 是**控制字符串**，各指令依次消耗其后的可变参数。
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | 展开控制字符串，不换行写到标准输出 |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | 同上，末尾换行 |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | 与 `print` 相同，但写到标准错误输出（`*error-output*`）。Rust 的 `eprint!`。**在发布构建（`typl --release`）中连同参数一起被移除**（参数不求值）。即使被移除也会进行类型检查 |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | 同上，末尾加换行。Rust 的 `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL 的 `format`。返回展开后的字符串。`dest` 为 `true`（CL 的 `t`）时还会写到标准输出；为 `false`（CL 的 `nil`）时不写，只返回字符串 |
 | `format`（写到流） | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` 不是 `bool` 时是 CL 的写到流。把展开的字符串写到该流。返回值是 `()`（相当于 CL 的 `nil`），不返回字符串 |
 

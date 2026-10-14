@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -90,6 +90,13 @@ fib(25) = 75025
 Utan `-o` får den körbara filen namnet på källfilen utan `.typl` och läggs i samma mapp som källfilen.
 Om källfilens namn inte slutar på `.typl` krävs `-o`. Med `-c` (`--compile`) kan `--image`,
 `--heap-cells` och `--feature` inte anges.
+
+Med `--release` gör `typl` ett **release-bygge**, som tar bort `eprint`/`eprintln` (utdata till standard fel för felsökning; [Utskrift](../reference/functions/printing.md)) tillsammans med deras argument. Det som tas bort typkontrolleras ändå, så ett typfel där får kompileringen att misslyckas. `--release` är ett alternativ för `typl` som helhet: det verkar likadant inte bara för `-c` utan också när man kör en fil, i REPL:en och för `typl test`. En `compile-file` som anropas i en `typl` startad med `--release` gör också ett release-bygge, och `eprint`/`eprintln` tas bort även ur kod som körs med `eval` i den körbara fil som byggts så.
+
+```sh
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # samma sak skrivet efter -c
+```
 
 Du kan göra samma sak genom att anropa `compile-file` från REPL eller från ett program.
 

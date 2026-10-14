@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
@@ -7,7 +7,7 @@ in. Danh sách các chỉ thị định dạng nằm ở [format.md](format.md).
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` đều là **các dạng đặc biệt thông dịch các chỉ thị định dạng (các chỉ thị `format`
+`print`/`println`/`eprint`/`eprintln`/`format` đều là **các dạng đặc biệt thông dịch các chỉ thị định dạng (các chỉ thị `format`
 của CL)**. Đối số đầu tiên (thứ hai với `format`) là **chuỗi điều khiển**, và mỗi chỉ thị lần lượt tiêu thụ các
 đối số biến đổi theo sau.
 
@@ -15,6 +15,8 @@ của CL)**. Đối số đầu tiên (thứ hai với `format`) là **chuỗi �
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Khai triển chuỗi điều khiển và ghi ra đầu ra chuẩn mà không có dòng mới |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Giống vậy, với một dòng mới ở cuối |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Giống `print`, nhưng ghi ra đầu ra lỗi chuẩn (`*error-output*`). Tương ứng `eprint!` của Rust. **Bản dựng release (`typl --release`) loại bỏ nó cùng với các đối số** (các đối số không được tính). Vẫn được kiểm tra kiểu ngay cả khi bị loại bỏ |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Như trên, thêm xuống dòng ở cuối. Tương ứng `eprintln!` của Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` của CL. Trả về chuỗi đã khai triển. Nếu `dest` là `true` (`t` của CL), nó cũng được ghi ra đầu ra chuẩn; nếu là `false` (`nil` của CL), nó không được ghi và chỉ được trả về |
 | `format` (tới một stream) | `(format stream control args...)` | `(S, string, ...)→()` với `CharOutput S` | Nếu `dest` không phải `bool`, đó là đích stream của CL. Chuỗi đã khai triển được ghi vào stream đó. Giá trị trả về là `()` (`nil` của CL), và không có chuỗi nào được trả về |
 

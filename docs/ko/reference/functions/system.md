@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.
@@ -298,6 +298,7 @@ CL에 있고 이 언어에 없는 것: `eval-when`(`:compile-toplevel`/`:load-to
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
 | `assert` | `(assert test)` / `(assert test msg)` | `(bool[,string])→()` | 거짓이면 panic. 메시지가 없으면 `assertion failed: <쓴 그대로의 검사식>`(매크로이므로 식 자체를 이름 댈 수 있다). CL의 재시작은 이 언어에 없다 |
+| `assert-eq` | `(assert-eq left right)` / `(assert-eq left right msg)` | `(T,T[,string])→()`, `T`는 `Eq`와 `print-object`를 구현 | 두 값이 `equals`로 같지 않으면 panic하고 양변을 출력합니다(`  left: ...` / ` right: ...`의 2줄). 첫 줄은 메시지를 생략하면 `assertion failed: <작성된 그대로의 식>`, 지정하면 `msg`. 주로 `#[test]` 함수([구문](../syntax.md)) 안에서 사용합니다. Rust의 `assert_eq!` |
 | `warn` | `(warn control args...)` | `(string,...)→()` | `WARNING: `을 앞에 붙인 한 줄을 `*error-output*`에 쓰고 **계속한다**. `Result`를 반환하지도 프로그램을 끝내지도 않고 무언가를 알리는 방법 |
 | `dlet` | `(dlet ((*var* val)...) body...)` | — | `body` 동안만 전역 변수를 바꾸고 나갈 때 되돌린다. CL은 이것을 `let`으로 쓰지만 이 언어의 `let`은 항상 렉시컬하게 묶으므로 다른 이름이다(Emacs Lisp의 같은 이름의 매크로와 같은 역할). 정상 종료, `throw`, `panic`, `break`/`return` 중 어떻게 빠져나가든 되돌린다. **태스크마다의 바인딩이 아니다** |
 | `with-standard-io-syntax` | `(with-standard-io-syntax body...)` | — | 모든 프린터 제어 변수를 표준 값으로, `*read-eval*`을 `true`로 해서 `body`를 실행한다([출력](printing.md#6-출력량-제어)) |
