@@ -33,10 +33,10 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       # All of the history and every tag: a version is read from its tag.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -44,9 +44,11 @@ jobs:
       - run: pip install -r scripts/docs/requirements.txt
       - name: Build the site
         run: scripts/docs/build-site.py --out target/docs-site
-      - uses: actions/upload-pages-artifact@v3
+      # .nojekyll is a dotfile, which the upload leaves out unless asked.
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: target/docs-site
+          include-hidden-files: true
       - name: Deploy
         id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

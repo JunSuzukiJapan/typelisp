@@ -31,7 +31,7 @@ jobs:
     outputs:
       version: ${{ steps.read.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # The version every crate here shares ([workspace.package]).
       - name: Read the version, and match it against the tag
         id: read
@@ -60,7 +60,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
         with:
           rust-version: ${{ env.RUST_VERSION }}
@@ -99,7 +99,7 @@ jobs:
           else
             retry dnf install -y git
           fi
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-build
         with:
           rust-version: ${{ env.RUST_VERSION }}
@@ -121,7 +121,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 360
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # setup-cargo-env.sh's `.cargo/config.toml` is left in place on purpose:
       # build.sh has to win over it (on arm64 it names a different LLVM and
       # minimum macOS), and checks that it did.
@@ -131,7 +131,7 @@ jobs:
       # arm64: LLVM's release build compiled to machine code, and zstd — made
       # once per LLVM/zstd version (scripts/dist/build.sh names both).
       - name: Restore the distribution cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: target/dist/cache
           key: dist-cache-${{ matrix.arch }}-${{ hashFiles('scripts/dist/build.sh') }}
@@ -141,7 +141,7 @@ jobs:
         run: |
           name="typelisp-${{ needs.version.outputs.version }}-${{ matrix.arch }}"
           test -f "target/dist/$name.tar.gz" && test -f "target/dist/$name.tar.gz.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.arch }}
           path: |
@@ -157,7 +157,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: dist-*
           merge-multiple: true
