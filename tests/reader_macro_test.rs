@@ -380,7 +380,7 @@ fn the_readtable_builtins_work_in_a_compiled_executable() {
 "#;
     std::fs::write(&src_path, src).expect("write the aot source");
 
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
     let out = Command::new(&out_path).output().expect("failed to run the compiled executable");
     assert_eq!(

@@ -36,7 +36,7 @@ fn compile_and_capture(name: &str, source: &str) -> (i32, String) {
     let out_path = dir.join(name);
     std::fs::write(&src_path, source).expect("failed to write test source file");
 
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
 
     let out = Command::new(&out_path).output().expect("failed to run the compiled executable");
@@ -165,7 +165,7 @@ fn print_methods_as_values_print_the_same_on_every_tier() {
     let aot_src = dir.join("print_values_aot.typl");
     let aot_out = dir.join("print_values_aot");
     std::fs::write(&aot_src, format!("{}\n(main)", program)).expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(aot_src.to_str().unwrap(), aot_out.to_str().unwrap()).expect("compile_file failed");
+    typelisp::compile::aot::compile_file(aot_src.to_str().unwrap(), aot_out.to_str().unwrap(), false).expect("compile_file failed");
     let compiled = Command::new(&aot_out).output().expect("failed to run the compiled executable");
     assert_eq!(String::from_utf8_lossy(&compiled.stdout), expected, "{}", String::from_utf8_lossy(&compiled.stderr));
 }
@@ -192,7 +192,7 @@ fn printer_variables_take_effect_in_a_compiled_executable() {
              (println "~a" 1))"#,
     )
     .expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src.to_str().unwrap(), out.to_str().unwrap()).expect("compile_file failed");
+    typelisp::compile::aot::compile_file(src.to_str().unwrap(), out.to_str().unwrap(), false).expect("compile_file failed");
     let run = Command::new(&out).output().expect("failed to run the compiled executable");
     assert_eq!(String::from_utf8_lossy(&run.stdout), "ff\nHELLO\n(1 2 ...)\n");
     let stderr = String::from_utf8_lossy(&run.stderr);
@@ -230,7 +230,7 @@ fn the_entry_files_types_print_with_its_module_as_under_typl() {
     )
     .expect("failed to write test source file");
 
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
     let compiled = Command::new(&out_path).output().expect("failed to run the compiled executable");
     let interpreted = Command::new(env!("CARGO_BIN_EXE_typl")).arg(&src_path).output().expect("failed to run typl");
@@ -487,7 +487,7 @@ fn errors_without_a_zero_argument_main() {
     let out_path = dir.join("no_main");
     std::fs::write(&src_path, "(defun answer () int 42)").unwrap();
 
-    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect_err("expected a missing-entry-point error");
     assert!(err.contains("main"), "error was: {}", err);
 }
@@ -499,7 +499,7 @@ fn errors_on_a_non_defun_top_level_form() {
     let out_path = dir.join("bad_top_level");
     std::fs::write(&src_path, "(defun main () int 42)\n(+ 1 2)").unwrap();
 
-    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect_err("expected an unsupported-top-level-form error");
     assert!(err.contains("defun"), "error was: {}", err);
 }
@@ -515,7 +515,7 @@ fn a_top_level_entry_call_is_the_one_expression_allowed() {
     let src_path = dir.join("entry_call_with_args.typl");
     let out_path = dir.join("entry_call_with_args");
     std::fs::write(&src_path, "(defun main () int 7)\n(defun f ((n int)) int n)\n(f 1)").unwrap();
-    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect_err("expected an unsupported-top-level-form error");
     assert!(err.contains("defun"), "error was: {}", err);
 }
@@ -1368,7 +1368,7 @@ fn a_used_sibling_file_is_compiled_into_the_executable() {
         "#,
     )
     .expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
     let out = Command::new(&out_path).output().expect("failed to run the compiled executable");
     assert_eq!(out.status.code(), Some(105), "stderr was: {}", String::from_utf8_lossy(&out.stderr));
@@ -1392,7 +1392,7 @@ fn a_main_nested_in_a_module_in_the_entry_file_is_rejected() {
     )
     .expect("failed to write test source file");
     let out_path = dir.join("nested_main_in_entry_aot");
-    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect_err("a nested `main` must be rejected");
     assert!(err.contains("main"), "error was: {err}");
 }
@@ -1415,7 +1415,7 @@ fn a_main_in_a_used_dependency_file_is_rejected() {
     )
     .expect("failed to write test source file");
     let out_path = dir.join("dep_with_main_aot");
-    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    let err = typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect_err("a used dependency's own `main` must be rejected");
     assert!(err.contains("main"), "error was: {err}");
 }
@@ -1445,7 +1445,7 @@ fn an_evaluated_form_resolves_a_used_module() {
         "#,
     )
     .expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
     let out = Command::new(&out_path).output().expect("failed to run the compiled executable");
     assert_eq!(out.status.code(), Some(105), "stderr was: {}", String::from_utf8_lossy(&out.stderr));
@@ -1464,7 +1464,7 @@ fn the_http_example_project_compiles_and_serves_requests() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let src_path = manifest_dir.join("examples/projects/http/src/main.typl");
     let out_path = tmp_dir().join("http_example_aot");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
 
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("failed to reserve a port");
@@ -1511,7 +1511,7 @@ fn an_executable_that_never_evaluates_carries_no_interpreter() {
     let src_path = dir.join("no_eval.typl");
     let out_path = dir.join("no_eval");
     std::fs::write(&src_path, "(defun main () int 42)").expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
 
     let nm = Command::new("nm").arg(&out_path).output().expect("failed to run nm");
@@ -1704,7 +1704,7 @@ fn compile_only(name: &str, source: &str) -> PathBuf {
     let src_path = dir.join(format!("{}.typl", name));
     let out_path = dir.join(name);
     std::fs::write(&src_path, source).expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
     out_path
 }
@@ -1995,7 +1995,7 @@ fn an_eval_carrying_program_runs_main_once_and_never_at_compile_time() {
         marks_s
     );
     std::fs::write(&src_path, source).expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
         .expect("compile_file failed");
     assert!(!marks.exists(), "compile-file ran `main`");
 

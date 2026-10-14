@@ -6,13 +6,15 @@
 
 ## 1. `print` / `println` / `format`
 
-`print`/`println`/`format` はいずれも**書式指定子（CL の `format` ディレクティブ）を解釈する特殊形**。
+`print`/`println`/`eprint`/`eprintln`/`format` はいずれも**書式指定子（CL の `format` ディレクティブ）を解釈する特殊形**。
 第1引数（`format` は第2引数）が**制御文字列**で、以降の可変長引数を各ディレクティブが順に消費する。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | 制御文字列を書式展開し、改行なしで標準出力へ書く |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | 同上、末尾に改行を付ける |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | `print` と同じだが、標準エラー出力（`*error-output*`）へ書く。Rust の `eprint!`。**リリースビルド（`typl -c --release`）では引数ごと取り除かれる**（引数は評価されない）。取り除かれる場合も型検査は行う |
+| `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | 同上、末尾に改行を付ける。Rust の `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL の `format`。展開した文字列を返す。`dest` が `true`（CL の `t`）なら加えて標準出力へも書く／`false`（CL の `nil`）なら書かず文字列を返すだけ |
 | `format`（ストリーム宛） | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` が `bool` でなければ CL のストリーム宛。展開した文字列をそのストリームへ書く。戻り値は `()`（CL の `nil` に当たる）で、文字列は返らない |
 

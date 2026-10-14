@@ -915,9 +915,11 @@ pub const PROGRAM_LABEL: &str = "<program>";
 ///
 /// `ns` (`::`-joined) is the namespace a later eval'd form is checked in: the
 /// entry file's module, where `typl file.typl` places one too, so a bare name
-/// in it resolves to the program's own definition.
-pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8], ns: &str) -> Result<crate::Interp, String> {
+/// in it resolves to the program's own definition. `release` is whether the
+/// executable is a release build, which an eval'd `eprint` honours too.
+pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8], ns: &str, release: bool) -> Result<crate::Interp, String> {
     let mut chk = crate::Checker::new();
+    chk.set_release(release);
     // Before anything runs: `Interp::new` resets the runtime global table
     // (`typelisp_rt::reset_global_table`), which is why an AOT program's startup
     // calls this ahead of its own global-init sequence.

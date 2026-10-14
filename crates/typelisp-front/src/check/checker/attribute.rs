@@ -4,7 +4,7 @@
 //! decided here.
 //!
 //! There is one attribute, `test`, and it goes on a `defun`: a function that
-//! takes nothing and returns `()`, run by `typl test`. Whether such a
+//! takes nothing and returns `()` or `Result<(), E>`, run by `typl test`. Whether such a
 //! function exists at all depends on what the checker is checking for —
 //! [`TestForms`] — the way Rust compiles a `#[test]` function only under
 //! `--test`.
@@ -41,6 +41,9 @@ pub struct TestCase {
     /// The name as written, a symbol of that module: calling the test is
     /// checking `(NAME)` there.
     pub name: Value,
+    /// Whether it returns `Result<(), E>`, whose `err` is a failure, rather
+    /// than `()`.
+    pub returns_result: bool,
     pub loc: Option<Loc>,
 }
 
@@ -125,14 +128,30 @@ impl Checker {
         }
         let tl = self.check_defun(heap, interp, &elems[1..], &locs[1..], false, loc.clone())?;
         let ret = &self.cur_ns().fns.get(&name).expect("check_defun registered the function").ret;
-        if *ret != Type::Unit {
-            return Err(Error::TypeError(format!(
-                "`#[test]` function `{}` must return `()`, not `{}`",
-                name, ret
-            )));
-        }
+        let returns_result = match ret {
+            Type::Unit => false,
+            Type::Named(p, args) if crate::types::path_is_builtin(p, "result") && args.len() == 2 && args[0] == Type::Unit => {
+                // The error is printed when the test fails, as Rust asks a
+                // test's error type for `Debug`.
+                let printable = TraitBound { trait_path: Path::root("print-object"), assoc: BTreeMap::new() };
+                if !self.type_implements(&args[1], &printable, 0) {
+                    return Err(Error::TypeError(format!(
+                        "`#[test]` function `{}` returns `{}`, and `{}` does not implement `print-object`: \
+                         a failing test prints its error",
+                        name, ret, args[1]
+                    )));
+                }
+                true
+            }
+            _ => {
+                return Err(Error::TypeError(format!(
+                    "`#[test]` function `{}` must return `()` or `Result<(), E>`, not `{}`",
+                    name, ret
+                )))
+            }
+        };
         if self.test_forms == TestForms::Collect {
-            self.tests.push(TestCase { path: self.fq(&name), ns: self.ns.clone(), name: elems[1], loc });
+            self.tests.push(TestCase { path: self.fq(&name), ns: self.ns.clone(), name: elems[1], returns_result, loc });
         }
         Ok(tl)
     }

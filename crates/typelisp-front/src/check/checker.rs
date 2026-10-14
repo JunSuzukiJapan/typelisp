@@ -1164,6 +1164,9 @@ pub struct Checker {
     /// The tests recorded under [`TestForms::Collect`], drained by
     /// [`Self::take_tests`].
     tests: Vec<TestCase>,
+    /// Whether this is a release build (`typl -c --release`), which leaves
+    /// out every `eprint`/`eprintln` — see [`Self::check_eprint`].
+    release: bool,
     /// Recoverable errors accumulated while `recover` is set — mirrors
     /// `warnings`. Each carries its own innermost source location (via the
     /// `check_at`/`check_form` `Error::at` tagging that already runs before the
@@ -1341,6 +1344,7 @@ impl Checker {
             recover: false,
             test_forms: TestForms::default(),
             tests: Vec::new(),
+            release: false,
             errors: RefCell::new(Vec::new()),
             local_refs: RefCell::new(HashMap::new()),
             node_types: RefCell::new(HashMap::new()),
@@ -1554,6 +1558,12 @@ impl Checker {
     /// and keeps the strict "abort on first error" behaviour.
     pub fn set_recover(&mut self, on: bool) {
         self.recover = on;
+    }
+
+    /// Whether this is a release build (`typl -c --release`) — see
+    /// [`Self::check_eprint`].
+    pub fn set_release(&mut self, release: bool) {
+        self.release = release;
     }
 
     /// Set the namespace that subsequent `check_form`/`check_form_at` calls
@@ -3656,7 +3666,7 @@ impl Checker {
                 | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
                 | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
                 | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "task" | "thread" | "select"
-                | "quote" | "quasiquote" | "format" | "print" | "println" | "source-file"
+                | "quote" | "quasiquote" | "format" | "print" | "println" | "eprint" | "eprintln" | "source-file"
                 | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
                 | "pprint-logical-block" | "c-alloc" | "c-ref" | "c-deref"
         ) || TOPLEVEL_FORM_HEADS.contains(&name)
@@ -11166,6 +11176,7 @@ impl Checker {
             "format" => return self.check_format(heap, interp, env, args, arg_locs),
             "print" => return self.check_print_like(heap, interp, env, "print-rt", Type::Unit, args, arg_locs),
             "println" => return self.check_print_like(heap, interp, env, "println-rt", Type::Unit, args, arg_locs),
+            "eprint" | "eprintln" => return self.check_eprint(heap, interp, env, &head, args, arg_locs),
             // These two are *shadowable* special forms: a local binding named
             // `read` (a lambda called `(read)`, say) must keep winning, the
             // way it did when `read` was an ordinary built-in function. The
@@ -15764,6 +15775,49 @@ impl Checker {
         });
         heap.pop_root();
         result
+    }
+
+    /// `(eprint control args...)` / `(eprintln control args...)` — Rust's
+    /// `eprint!`/`eprintln!`: `print`/`println` to `*error-output*`, for
+    /// output that is the programmer's and not the program's.
+    ///
+    /// Checked as `(format *error-output* control args...)` (with `~%` added
+    /// to the control string for `eprintln`). In a release build the checked
+    /// form is then dropped for `()`, arguments and all: a debugging line
+    /// costs nothing there, and an error in it is still reported, so it
+    /// cannot rot unnoticed until the next debug build.
+    fn check_eprint(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        what: &str,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Checked, Error> {
+        let Some(&control) = args.first() else {
+            return Err(Error::TypeError(format!("{}: expected at least a control string", what)));
+        };
+        let mut text = self.control_string(heap, what, control)?;
+        if what == "eprintln" {
+            text.push_str("~%");
+        }
+        let mut items: Vec<(Value, Option<Loc>)> =
+            vec![(heap.intern_symbol("format"), None), (heap.intern_symbol("*error-output*"), None)];
+        let mut s = RootScope::new(heap);
+        let control = s.alloc_string(text);
+        s.push_root(control);
+        items.push((control, nth_loc(arg_locs, 0)));
+        for (i, &a) in args[1..].iter().enumerate() {
+            items.push((a, nth_loc(arg_locs, 1 + i)));
+        }
+        let form = forms::list_from_vec_locs(&mut s, &items)?;
+        s.push_root(form);
+        let checked = self.check(&mut s, interp, env, form, None)?;
+        if self.release {
+            return self.check(&mut s, interp, env, Value::Empty, Some(&Type::Unit));
+        }
+        Ok(checked)
     }
 
     /// The `(print control &rest args)` / `(println control &rest args)`

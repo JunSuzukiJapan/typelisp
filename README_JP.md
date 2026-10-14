@@ -319,6 +319,12 @@ typl -c foo.typl
 typl --compile foo.typl -o bar
 ```
 
+`--release` を付けるとリリースビルドになり、調べるための出力 `eprint`/`eprintln` を取り除きます。
+
+```sh
+typl -c foo.typl --release
+```
+
 コンパイルして作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` をリンクします。
 リリースビルドの `typl`（`cargo install` で入れたものを含む）は、このライブラリを中に持って
 いて、初めてコンパイルするときに `~/.typelisp/lib/<ビルドID>/` に書き出します。2回目からは

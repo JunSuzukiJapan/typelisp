@@ -1067,13 +1067,23 @@ docstring は書けない——末尾の文字列はそれ自体がデフォル�
 ```
 
 `#[test]` を付けた `defun` はテスト関数になり、`typl test` が 1 つずつ呼ぶ（Rust の `#[test]` と
-同じ）。引数を取らず、`()` を返す関数でなければならない（型パラメータも取れない）。`pub` は要らない。
+同じ）。引数を取らず、`()` か `Result<(), E>` を返す関数でなければならない（型パラメータも取れない）。
+`pub` は要らない。`Result` を返すテストは `err` を返すと失敗になり、そのエラーを印字する。そのため
+`E` は `print-object` を実装していなければならない（Rust がテストのエラー型に `Debug` を求めるのと同じ）。
+
+```lisp
+#[test]
+(defun parses () Result<(),ParseIntError>
+  (match (parse-int "12")
+    ((ok _) (Result::ok ()))
+    ((err e) (Result::err e))))
+```
 
 - **普通に実行したとき・`compile-file` では読み飛ばす。** 中身の検査もしない（Rust がテストを
   `--test` のときだけコンパイルするのと同じ）。プログラムの側からテスト関数は呼べない。
 - テストは、関数を置くどのファイルにも、どの `module` の中にも書ける。プロジェクトの `tests/`
   フォルダに分けて書いてもよい。
-- 失敗は `panic` と実行時エラー。`assert`、両辺を印字する `assert-eq`
+- 失敗は `panic`・実行時エラー・`err` を返すこと。`assert`、両辺を印字する `assert-eq`
   （[システム](functions/system.md)）で確かめる。1 つが失敗しても残りのテストは走る。
 
 ```sh
@@ -1110,7 +1120,8 @@ src/math.typl:9:3: panic: assertion failed: (assert-eq (add 1 2) 4)
 test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
-テストの中で `print` したものは、そのまま標準出力に出る（取り込まない）。
+テストの中で `print` したものは、そのまま標準出力に出る（取り込まない）。調べるための出力は、標準エラー出力に
+書く `eprint`/`eprintln`（[印字](functions/printing.md)）を使うと、プログラムの出力と混ざらない。
 
 ## 4. 束縛・条件分岐
 

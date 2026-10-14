@@ -116,7 +116,7 @@ session has changed.")
     "source-file"
     ;; formatted output — special forms so that each variadic argument keeps
     ;; its own type on the way into `Sexpr' (docs/ja/reference/functions/printing.md §1)
-    "print" "println" "format"
+    "print" "println" "eprint" "eprintln" "format"
     ;; pretty printer (docs/ja/reference/functions/printing.md §4)
     "pprint" "pprint-fill" "pprint-linear" "pprint-tabular"
     "pprint-logical-block")

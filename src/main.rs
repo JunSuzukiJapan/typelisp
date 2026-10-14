@@ -36,7 +36,8 @@ const HELP: &str = "\
 Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
-  typl [--lib-dir DIR] -c SOURCE [-o OUTPUT]     compile SOURCE to an executable
+  typl [--lib-dir DIR] -c SOURCE [-o OUTPUT] [--release]
+                                                 compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
                                                  name contains FILTER
@@ -44,6 +45,7 @@ Usage:
 Options:
   -c, --compile SOURCE   compile SOURCE to a native executable
   -o OUTPUT              name of the executable (default: SOURCE without .typl)
+  --release              (with -c) leave every eprint/eprintln out
   --lib-dir DIR          link DIR/libtypelisp_front.a into compiled executables
                          (default: a release typl writes the one built into
                          it to $TYPELISP_HOME/lib, ~/.typelisp/lib if unset;
@@ -174,16 +176,19 @@ fn main() -> rustyline::Result<()> {
     repl(heap_cells, features, image)
 }
 
-/// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c` (or
-/// `--compile`, which `flag` names for the diagnostics). Without `-o`, the
-/// executable is `SOURCE` with its `.typl` extension removed. Returns the
-/// process exit code.
+/// `typl -c SOURCE [-o OUTPUT] [--release]`: `args` is what follows the
+/// `-c` (or `--compile`, which `flag` names for the diagnostics). Without
+/// `-o`, the executable is `SOURCE` with its `.typl` extension removed.
+/// Returns the process exit code.
 fn compile_command(flag: &str, args: &[String]) -> i32 {
     let mut source = None;
     let mut output = None;
+    let mut release = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == "-o" {
+        if a == "--release" {
+            release = true;
+        } else if a == "-o" {
             match it.next() {
                 Some(v) => output = Some(PathBuf::from(v)),
                 None => {
@@ -194,12 +199,12 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release])", flag, a, flag);
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release])", flag, flag);
         return 1;
     };
     let output = match output {
@@ -210,7 +215,7 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
             return 1;
         }
     };
-    match typelisp::compile::aot::compile_file(&source.to_string_lossy(), &output.to_string_lossy()) {
+    match typelisp::compile::aot::compile_file(&source.to_string_lossy(), &output.to_string_lossy(), release) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {}", e);

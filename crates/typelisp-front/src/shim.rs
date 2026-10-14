@@ -42,7 +42,7 @@ thread_local! {
     /// The embedded environment dump and the namespace an eval'd form is
     /// checked in, from [`rt_eval_state`]. `'static` because both point into
     /// the executable's read-only data.
-    static EVAL_DUMP: Cell<Option<(&'static [u8], &'static str)>> = const { Cell::new(None) };
+    static EVAL_DUMP: Cell<Option<(&'static [u8], &'static str, bool)>> = const { Cell::new(None) };
 
     /// The environment [`rt_eval_init`] rebuilt, or null under JIT where the
     /// running `Interp` is used instead.
@@ -56,17 +56,18 @@ thread_local! {
 }
 
 /// Registers the embedded environment dump: `args` is `[ptr, len, ns_ptr,
-/// ns_len]`, the dump and the `::`-joined namespace an eval'd form is checked
-/// in (the entry file's module).
+/// ns_len, release]`, the dump, the `::`-joined namespace an eval'd form is
+/// checked in (the entry file's module), and nonzero for a release build
+/// (`typl -c --release`, which leaves `eprint`/`eprintln` out).
 ///
 /// # Safety
 ///
-/// `args` must point to 4 valid `i64`s naming immortal bytes, the second pair
-/// UTF-8.
+/// `args` must point to 5 valid `i64`s, the first two pairs naming immortal
+/// bytes, the second pair UTF-8.
 #[no_mangle]
 pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_eval_state: expected 4 arguments");
+    if argc < 5 {
+        fatal("rt_eval_state: expected 5 arguments");
     }
     let bytes = std::slice::from_raw_parts(*args as usize as *const u8, *args.add(1) as usize);
     let ns_bytes = std::slice::from_raw_parts(*args.add(2) as usize as *const u8, *args.add(3) as usize);
@@ -74,7 +75,8 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
         Ok(s) => s,
         Err(e) => fatal(&format!("rt_eval_state: the namespace is not UTF-8: {}", e)),
     };
-    EVAL_DUMP.with(|c| c.set(Some((bytes, ns))));
+    let release = *args.add(4) != 0;
+    EVAL_DUMP.with(|c| c.set(Some((bytes, ns, release))));
     0
 }
 
@@ -93,11 +95,11 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_eval_init(_args: *const i64, _argc: u32) -> i64 {
-    let (bytes, ns) = match EVAL_DUMP.with(|c| c.get()) {
+    let (bytes, ns, release) = match EVAL_DUMP.with(|c| c.get()) {
         Some(b) => b,
         None => fatal("rt_eval_init: the environment dump was never registered"),
     };
-    let interp = match crate::dump::restore_dump(active_heap(), bytes, ns) {
+    let interp = match crate::dump::restore_dump(active_heap(), bytes, ns, release) {
         Ok(i) => i,
         Err(e) => fatal(&format!("rt_eval_init: {}", e)),
     };

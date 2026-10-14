@@ -15,7 +15,7 @@ use std::path::{Path as FsPath, PathBuf};
 use std::rc::Rc;
 
 use crate::project::{find_project, module_segs_for, Loader};
-use crate::{Checker, Heap, Interp, Reader, TestForms, Value};
+use crate::{Checker, Heap, Interp, Reader, TestCase, TestForms, Value};
 
 /// The folder of a project whose files are loaded besides its sources.
 pub const TESTS_DIR: &str = "tests";
@@ -140,7 +140,7 @@ pub fn run(
     out.flush().map_err(io)?;
     for t in &selected {
         let mark = heap.root_count();
-        let result = run_one(heap, &checker, interp, &t.ns, t.name);
+        let result = run_one(heap, &checker, interp, t);
         while heap.root_count() > mark {
             heap.pop_root();
         }
@@ -176,15 +176,40 @@ pub fn run(
     Ok(outcome)
 }
 
-/// Check `(NAME)` inside the module `ns` and run it.
-fn run_one(heap: &mut Heap, checker: &Rc<RefCell<Checker>>, interp: &mut Interp, ns: &[String], name: Value) -> Result<(), String> {
-    let call = heap.cons(name, Value::Empty).map_err(|e| e.to_string())?;
-    heap.push_root(call);
+/// Check `(NAME)` inside the test's module and run it. A test returning
+/// `Result<(), E>` is called as
+/// `(match (NAME) ((ok _) ()) ((err e) (panic (format false "..." (print-object e true)))))`,
+/// the `panic` carrying the test's own location, so that is where a failure
+/// is reported. Roots are left for the caller to release.
+fn run_one(heap: &mut Heap, checker: &Rc<RefCell<Checker>>, interp: &mut Interp, t: &TestCase) -> Result<(), String> {
+    let err = |e: crate::Error| e.to_string();
+    let mut call = list(heap, &[t.name]).map_err(err)?;
+    if t.returns_result {
+        let sym = |heap: &mut Heap, s: &str| heap.intern_symbol(s);
+        let (e, ok, er, under) = (sym(heap, "e"), sym(heap, "ok"), sym(heap, "err"), sym(heap, "_"));
+        let print = [sym(heap, "print-object"), e, Value::Bool(true)];
+        let print = list(heap, &print).map_err(err)?;
+        let message = heap.alloc_string("the test returned an error: ~a".to_string());
+        heap.push_root(message);
+        let format = [sym(heap, "format"), Value::Bool(false), message, print];
+        let format = list(heap, &format).map_err(err)?;
+        let panic = [sym(heap, "panic"), format];
+        let panic = list(heap, &panic).map_err(err)?;
+        if let (Value::Cons(cr), Some(loc)) = (panic, t.loc.clone()) {
+            heap.set_cons_loc(cr, loc);
+        }
+        let err_pat = list(heap, &[er, e]).map_err(err)?;
+        let err_arm = list(heap, &[err_pat, panic]).map_err(err)?;
+        let ok_pat = list(heap, &[ok, under]).map_err(err)?;
+        let ok_arm = list(heap, &[ok_pat, Value::Empty]).map_err(err)?;
+        let head = sym(heap, "match");
+        call = list(heap, &[head, call, ok_arm, err_arm]).map_err(err)?;
+    }
     // The borrow ends before the call runs: an `eval` in the test borrows the
     // checker again.
     let tl = {
         let mut c = checker.borrow_mut();
-        c.set_current_ns(ns.to_vec());
+        c.set_current_ns(t.ns.clone());
         let tl = c.check_form(heap, &*interp, call);
         for w in c.take_warnings() {
             eprintln!("{}", w);
@@ -192,4 +217,14 @@ fn run_one(heap: &mut Heap, checker: &Rc<RefCell<Checker>>, interp: &mut Interp,
         tl.map_err(|e| e.to_string())?
     };
     interp.exec(heap, tl).map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// `(ITEMS...)`, rooted, as is each cell on the way.
+fn list(heap: &mut Heap, items: &[Value]) -> Result<Value, crate::Error> {
+    let mut v = Value::Empty;
+    for &item in items.iter().rev() {
+        v = heap.cons(item, v)?;
+        heap.push_root(v);
+    }
+    Ok(v)
 }

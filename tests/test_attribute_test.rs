@@ -153,7 +153,9 @@ fn a_misplaced_attribute_is_an_error() {
         ("#[test test]\n(defun f () () ())\n", "`#[test]` is given twice"),
         ("#[test]\n(defvar *x* 1)\n", "`#[test]` goes on a `defun`"),
         ("#[test]\n(defun f ((x int)) () ())\n", "cannot take parameters"),
-        ("#[test]\n(defun f () int 1)\n", "must return `()`"),
+        ("#[test]\n(defun f () int 1)\n", "must return `()` or `Result<(), E>`, not `int`"),
+        ("#[test]\n(defun f () Result<int,string> (Result::ok 1))\n", "must return `()` or `Result<(), E>`"),
+        ("(defstruct Bad (n int))\n#[test]\n(defun f () Result<(),Bad> (Result::ok ()))\n", "does not implement `print-object`"),
         ("#[test]\n(defun f<T> () () ())\n", "cannot take type parameters"),
     ] {
         let file = write(&dir, "bad.typl", src);
@@ -183,4 +185,27 @@ fn compile_file_leaves_a_test_out() {
     assert_eq!(code, 0, "{}", err);
     let out = Command::new(&exe).output().expect("running the executable");
     assert_eq!(String::from_utf8_lossy(&out.stdout), "42\n");
+}
+
+#[test]
+fn a_test_returning_result_fails_on_err_at_its_own_definition() {
+    let dir = scratch("result");
+    let file = write(
+        &dir,
+        "res.typl",
+        r#"(defun parse ((s string)) Result<int,string>
+  (if (equal s "1") (Result::ok 1) (Result::err (format false "bad: ~a" s))))
+#[test]
+(defun parses () Result<(),string>
+  (match (parse "1") ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+#[test]
+(defun rejects () Result<(),string>
+  (match (parse "x") ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+"#,
+    );
+    let (code, out, err) = typl(&dir, &["test", file.to_str().unwrap()]);
+    assert_eq!(code, 1, "stderr: {}", err);
+    assert!(out.contains("test res::parses ... ok"), "{}", out);
+    assert!(out.contains("test res::rejects ... FAILED"), "{}", out);
+    assert!(out.contains("res.typl:7:1: panic: the test returned an error: \"bad: x\""), "{}", out);
 }
