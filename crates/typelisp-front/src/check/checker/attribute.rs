@@ -30,6 +30,20 @@ pub enum TestForms {
     Collect,
 }
 
+/// What a `#[test]` function returns, and so how `typl test` tells (and
+/// reports) a failure besides a `panic`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TestReturn {
+    /// `()`: only a `panic` or a runtime error fails it.
+    Unit,
+    /// `Result<(), E>` with `E` an `Error` (a `:dyn Error` too): an `err`
+    /// fails it, reported by `describe-error` — the message and its causes.
+    ResultError,
+    /// `Result<(), E>` with `E` no `Error` but printable: an `err` fails it,
+    /// reported by `print-object`.
+    ResultPrinted,
+}
+
 /// One `#[test]` function, as [`Checker::take_tests`] reports it.
 #[derive(Clone, Debug)]
 pub struct TestCase {
@@ -41,9 +55,7 @@ pub struct TestCase {
     /// The name as written, a symbol of that module: calling the test is
     /// checking `(NAME)` there.
     pub name: Value,
-    /// Whether it returns `Result<(), E>`, whose `err` is a failure, rather
-    /// than `()`.
-    pub returns_result: bool,
+    pub returns: TestReturn,
     pub loc: Option<Loc>,
 }
 
@@ -128,20 +140,26 @@ impl Checker {
         }
         let tl = self.check_defun(heap, interp, &elems[1..], &locs[1..], false, loc.clone())?;
         let ret = &self.cur_ns().fns.get(&name).expect("check_defun registered the function").ret;
-        let returns_result = match ret {
-            Type::Unit => false,
+        let returns = match ret {
+            Type::Unit => TestReturn::Unit,
             Type::Named(p, args) if crate::types::path_is_builtin(p, "result") && args.len() == 2 && args[0] == Type::Unit => {
                 // The error is printed when the test fails, as Rust asks a
-                // test's error type for `Debug`.
-                let printable = TraitBound { trait_path: Path::root("print-object"), assoc: BTreeMap::new() };
-                if !self.type_implements(&args[1], &printable, 0) {
+                // test's error type for `Debug`. An `Error` says what went
+                // wrong in its own words, and is the only way a `:dyn Error`
+                // can be shown at all: a trait object carries its trait's
+                // methods and nothing else.
+                let bound = |name: &str| TraitBound { trait_path: Path::root(name), assoc: BTreeMap::new() };
+                if self.type_implements(&args[1], &bound("error"), 0) {
+                    TestReturn::ResultError
+                } else if self.type_implements(&args[1], &bound("print-object"), 0) {
+                    TestReturn::ResultPrinted
+                } else {
                     return Err(Error::TypeError(format!(
-                        "`#[test]` function `{}` returns `{}`, and `{}` does not implement `print-object`: \
-                         a failing test prints its error",
+                        "`#[test]` function `{}` returns `{}`, and `{}` implements neither `Error` nor \
+                         `print-object`: a failing test prints its error",
                         name, ret, args[1]
                     )));
                 }
-                true
             }
             _ => {
                 return Err(Error::TypeError(format!(
@@ -151,7 +169,7 @@ impl Checker {
             }
         };
         if self.test_forms == TestForms::Collect {
-            self.tests.push(TestCase { path: self.fq(&name), ns: self.ns.clone(), name: elems[1], returns_result, loc });
+            self.tests.push(TestCase { path: self.fq(&name), ns: self.ns.clone(), name: elems[1], returns, loc });
         }
         Ok(tl)
     }

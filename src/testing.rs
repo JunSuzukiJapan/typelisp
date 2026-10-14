@@ -15,7 +15,7 @@ use std::path::{Path as FsPath, PathBuf};
 use std::rc::Rc;
 
 use crate::project::{find_project, module_segs_for, Loader};
-use crate::{Checker, Heap, Interp, Reader, TestCase, TestForms, Value};
+use crate::{Checker, Heap, Interp, Reader, TestCase, TestForms, TestReturn, Value};
 
 /// The folder of a project whose files are loaded besides its sources.
 pub const TESTS_DIR: &str = "tests";
@@ -178,16 +178,21 @@ pub fn run(
 
 /// Check `(NAME)` inside the test's module and run it. A test returning
 /// `Result<(), E>` is called as
-/// `(match (NAME) ((ok _) ()) ((err e) (panic (format false "..." (print-object e true)))))`,
-/// the `panic` carrying the test's own location, so that is where a failure
-/// is reported. Roots are left for the caller to release.
+/// `(match (NAME) ((ok _) ()) ((err e) (panic (format false "..." SHOWN))))`,
+/// `SHOWN` being `(describe-error e)` for an `Error` and
+/// `(print-object e true)` otherwise ([`TestReturn`]), and the `panic`
+/// carrying the test's own location, so that is where a failure is reported.
+/// Roots are left for the caller to release.
 fn run_one(heap: &mut Heap, checker: &Rc<RefCell<Checker>>, interp: &mut Interp, t: &TestCase) -> Result<(), String> {
     let err = |e: crate::Error| e.to_string();
     let mut call = list(heap, &[t.name]).map_err(err)?;
-    if t.returns_result {
+    if t.returns != TestReturn::Unit {
         let sym = |heap: &mut Heap, s: &str| heap.intern_symbol(s);
         let (e, ok, er, under) = (sym(heap, "e"), sym(heap, "ok"), sym(heap, "err"), sym(heap, "_"));
-        let print = [sym(heap, "print-object"), e, Value::Bool(true)];
+        let print = match t.returns {
+            TestReturn::ResultError => vec![sym(heap, "describe-error"), e],
+            _ => vec![sym(heap, "print-object"), e, Value::Bool(true)],
+        };
         let print = list(heap, &print).map_err(err)?;
         let message = heap.alloc_string("the test returned an error: ~a".to_string());
         heap.push_root(message);

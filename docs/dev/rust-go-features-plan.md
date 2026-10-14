@@ -208,9 +208,15 @@ typelisp で書けるものは typelisp で書く（Rust 組み込みは Rust �
   読むので、サーバを起動する `main.typl` のようなファイルを読んでも止まらないため。リーダマクロの
   登録（`needs_immediate_exec`）は残す。
 - テスト関数は引数なし・型パラメータなし・戻り値 `()` か `Result<(), E>`（2026-10-14 ユーザー指示で
-  追加）。`E` には定義の時点で `print-object` を要求する（Rust の `Debug` に当たる）。ランナーは
+  追加）。`E` には定義の時点で `Error` か `print-object` を要求する（Rust の `Debug` に当たる）。
+  `Error` なら `describe-error`、そうでなければ `print-object` で表示する（`:dyn Error` は
+  `print-object` を持たないので、`Error` を受け付けないと返せない）。ランナーは
   `(match (NAME) ((ok _) ()) ((err e) (panic ...)))` を組み立て、`panic` の cons にテスト関数の
   定義の位置を付ける。prelude の補助関数で `panic` すると、失敗の位置が `<prelude>:行` になるため。
+- その確認の途中で、`where` 境界の検証（`validate_where_bounds`）が名前の無い型（trait object・
+  `()`・関数型など）を `continue` で素通りさせていた不具合を見つけて直した。`:dyn Error` が
+  `(where (Eq T))` を通り、本体の `equals` が `Sexpr` の経路で動いていた。`type_implements` は
+  trait object をそのトレイトとスーパートレイトの実装とみなすようにした。
 - 同じく 2026-10-14 のユーザー指示で、`eprint`/`eprintln`（標準エラー出力）と `typl --release` を
   足した。リリースビルドでは引数ごと `()` に置き換える（検査はする）。release フラグはプロセスに
   1 つ（`typelisp_front::release`）で、`--release` はそれを立てるだけ、変わるもの（いまは

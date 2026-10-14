@@ -155,7 +155,7 @@ fn a_misplaced_attribute_is_an_error() {
         ("#[test]\n(defun f ((x int)) () ())\n", "cannot take parameters"),
         ("#[test]\n(defun f () int 1)\n", "must return `()` or `Result<(), E>`, not `int`"),
         ("#[test]\n(defun f () Result<int,string> (Result::ok 1))\n", "must return `()` or `Result<(), E>`"),
-        ("(defstruct Bad (n int))\n#[test]\n(defun f () Result<(),Bad> (Result::ok ()))\n", "does not implement `print-object`"),
+        ("(defstruct Bad (n int))\n#[test]\n(defun f () Result<(),Bad> (Result::ok ()))\n", "implements neither `Error` nor `print-object`"),
         ("#[test]\n(defun f<T> () () ())\n", "cannot take type parameters"),
     ] {
         let file = write(&dir, "bad.typl", src);
@@ -208,4 +208,29 @@ fn a_test_returning_result_fails_on_err_at_its_own_definition() {
     assert!(out.contains("test res::parses ... ok"), "{}", out);
     assert!(out.contains("test res::rejects ... FAILED"), "{}", out);
     assert!(out.contains("res.typl:7:1: panic: the test returned an error: \"bad: x\""), "{}", out);
+}
+
+#[test]
+fn a_test_may_return_any_error_and_is_reported_by_its_message() {
+    let dir = scratch("dyn-error");
+    let file = write(
+        &dir,
+        "dyn.typl",
+        r#"#[test]
+(defun concrete () Result<(),ParseIntError>
+  (match (parse-int "x") ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+#[test]
+(defun boxed () Result<(),:dyn Error>
+  (match (as-dyn-error (parse-int "y")) ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+#[test]
+(defun boxed-ok () Result<(),:dyn Error>
+  (match (as-dyn-error (parse-int "1")) ((ok _) (Result::ok ())) ((err e) (Result::err e))))
+"#,
+    );
+    let (code, out, err) = typl(&dir, &["test", file.to_str().unwrap()]);
+    assert_eq!(code, 1, "stderr: {}", err);
+    assert!(out.contains("test dyn::boxed-ok ... ok"), "{}", out);
+    // An `Error` is shown by `describe-error`, its message, not `print-object`.
+    assert!(out.contains("dyn.typl:2:1: panic: the test returned an error: parse-int: invalid integer literal: \"x\""), "{}", out);
+    assert!(out.contains("dyn.typl:5:1: panic: the test returned an error: parse-int: invalid integer literal: \"y\""), "{}", out);
 }

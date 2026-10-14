@@ -26,7 +26,7 @@ use crate::dump::{CheckerDelta, RegistrySignature};
 mod attribute;
 mod c_struct;
 mod ffi_callback;
-pub use attribute::{TestCase, TestForms};
+pub use attribute::{TestCase, TestForms, TestReturn};
 use c_struct::type_mentions_typed_ptr;
 use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocFn, FnSig, InstImpls, MacroDef, Namespace, OptKeyParam, Registry, TraitBound, TraitDef, TraitDefault, TypeAlias, VarInfo, Variant};
 
@@ -7552,6 +7552,13 @@ impl Checker {
         // question one wrapper deeper forever.
         if depth > BLANKET_BOUND_DEPTH {
             return false;
+        }
+        // A trait object implements its trait and that trait's supertraits —
+        // what its vtable carries — besides whatever a blanket impl covers.
+        if let Type::Dyn(trait_path, _) = ty {
+            if *trait_path == tb.trait_path || self.supertrait_closure(trait_path).contains(&tb.trait_path) {
+                return true;
+            }
         }
         let type_fq = match ty {
             Type::Named(n, _) => Some(n.clone()),
@@ -16590,7 +16597,25 @@ impl Checker {
                 Type::Named(n, _) => Some(n.clone()),
                 other => prim_type_path(other),
             };
-            let Some(type_fq) = type_fq else { continue };
+            // A type with no name — a trait object, `()`, a function, a
+            // pointer — has no impls of its own, but it does implement what
+            // `type_implements` finds (a trait object its trait, a blanket
+            // impl anything). This used to `continue`, which let a
+            // `:dyn Error` through `(where (Eq T))`. `!` has no values, so
+            // nothing can be asked of one.
+            let Some(type_fq) = type_fq else {
+                if *concrete != Type::Never {
+                    for tb in trait_bounds {
+                        if !self.type_implements(concrete, tb, 0) {
+                            return Err(Error::TypeError(format!(
+                                "{}: type `{}` does not implement trait `{}` required by `where` clause on type parameter `{}`",
+                                name, concrete, tb.trait_path, tparam
+                            )));
+                        }
+                    }
+                }
+                continue;
+            };
             let def = self.reg.type_def(&type_fq).ok_or_else(|| {
                 Error::TypeError(format!(
                     "{}: type `{}` does not implement a trait required by `where` clause on type parameter `{}`",
