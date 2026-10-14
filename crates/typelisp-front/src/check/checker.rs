@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 
-use crate::{wk, parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
+use crate::{wk, nominal_path, parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
 
 use super::loop_dsl;
 use typelisp_read::name_lexer::{NameLexer, NameTok};
@@ -1307,6 +1307,23 @@ pub struct Checker {
 /// The forms [`Checker::check_form_dispatch`] matches at top level. Each one
 /// defines or declares something for the whole program, so none of them
 /// means anything inside an expression.
+/// Every name [`Checker::check_list`] dispatches on as a special form — what
+/// [`Checker::is_builtin_form_head`] keeps a macro of the same name from
+/// taking over. One list, which `editor_keyword_sync_test` compares with the
+/// dispatch itself: a second, hand-kept copy had fallen behind by twelve
+/// names, and a macro named `block` took over `(block ...)` at top level
+/// while one inside a function still meant the special form.
+pub const SPECIAL_FORM_HEADS: &[&str] = &[
+    "if", "let", "let*", "progn", "unsafe", "setf", "incf", "decf", "rotatef", "shiftf",
+    "loop", "break", "return", "block", "return-from", "catch", "throw", "unwind-protect", "list",
+    "lambda", "labels", "macrolet", "symbol-macrolet",
+    "match", "panic", "the", "as", "try-as", "compile", "task", "thread", "select",
+    "quote", "quasiquote", "format", "print", "println", "eprint", "eprintln", "source-file",
+    "pprint", "pprint-fill", "pprint-linear", "pprint-tabular",
+    "pprint-logical-block", "c-alloc", "c-ref", "c-deref", "def-c-struct", ":dyn", "apply",
+    "make-instance", "documentation", "trace", "untrace", "step", "disassemble", "ed",
+];
+
 const TOPLEVEL_FORM_HEADS: &[&str] = &[
     "pub", "defun", "defsignature", "defffi", "defvar", "defparameter", "defconstant", "defmacro", "module",
     "defmethod", "defstruct", "defenum", "deftrait", "deftype", "impl", "use", "load", "import",
@@ -2074,12 +2091,8 @@ impl Checker {
                 f.finish("pat-ctor")?
             }
             Pattern::TypeTest(ty, sub) => {
-                let path = match ty {
-                    Type::Named(p, _) => p.clone(),
-                    other => prim_type_path(other).ok_or_else(|| {
-                        Error::TypeError(format!("(the `{}` pattern): not a named type", other))
-                    })?,
-                };
+                let path = nominal_path(ty)
+                    .ok_or_else(|| Error::TypeError(format!("(the `{}` pattern): not a named type", ty)))?;
                 let mut f = Items::new(heap);
                 let tp = forms::path_form(f.heap(), &path);
                 f.push(tp);
@@ -3649,17 +3662,7 @@ impl Checker {
     /// over `resolve_macro` by being tried first; this keeps the loader's
     /// pre-expansion consistent with that order).
     fn is_builtin_form_head(name: &str) -> bool {
-        matches!(
-            name,
-            // expression special forms (`check_list`)
-            "if" | "let" | "let*" | "progn" | "unsafe" | "setf" | "incf" | "decf" | "rotatef" | "shiftf"
-                | "loop" | "break" | "return" | "catch" | "throw" | "unwind-protect" | "list"
-                | "lambda" | "labels" | "macrolet" | "symbol-macrolet"
-                | "match" | "panic" | "the" | "as" | "try-as" | "compile" | "task" | "thread" | "select"
-                | "quote" | "quasiquote" | "format" | "print" | "println" | "eprint" | "eprintln" | "source-file"
-                | "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular"
-                | "pprint-logical-block" | "c-alloc" | "c-ref" | "c-deref"
-        ) || TOPLEVEL_FORM_HEADS.contains(&name)
+        SPECIAL_FORM_HEADS.contains(&name) || TOPLEVEL_FORM_HEADS.contains(&name)
     }
 
     /// If `v` is a compound form whose head resolves to a macro — a bare
@@ -6806,13 +6809,8 @@ impl Checker {
             self.record_trait_use(&trait_fq, l.clone());
         }
         let target_ty = self.parse_type_here_at(heap, parts[1], parts_locs.get(1).and_then(|l| l.as_ref()))?;
-        let target_fq = match &target_ty {
-            Type::Named(n, _) => n.clone(),
-            other => match prim_type_path(other) {
-                Some(p) => p,
-                None => return Err(Error::TypeError("impl: target must be a data type".into())),
-            },
-        };
+        let target_fq =
+            nominal_path(&target_ty).ok_or_else(|| Error::TypeError("impl: target must be a data type".into()))?;
         if self.reg.type_def(&target_fq).is_none() {
             return Err(Error::TypeError(format!("impl: unknown type `{}`", target_fq)));
         }
@@ -7560,10 +7558,7 @@ impl Checker {
                 return true;
             }
         }
-        let type_fq = match ty {
-            Type::Named(n, _) => Some(n.clone()),
-            other => prim_type_path(other),
-        };
+        let type_fq = nominal_path(ty);
         if let Some(def) = type_fq.as_ref().and_then(|p| self.reg.type_def(p)) {
             let args = match ty {
                 Type::Named(_, args) => args.as_slice(),
@@ -7984,11 +7979,13 @@ impl Checker {
             Some(args) => args.to_vec(),
             None => def.params.iter().map(|p| Type::Named(Path::root(p), vec![])).collect(),
         };
+        let target_ty = Type::Named(target_fq.clone(), targs.clone());
         for sup in &tdef.supertraits {
-            let has = match inst_args {
-                Some(args) => def.implements_at(&sup.trait_path, args),
-                None => def.impls.contains(&sup.trait_path),
-            };
+            // The one answer to "does this type implement that trait" — its
+            // own `impl`s and a blanket impl's alike. This used to read the
+            // `impl` lists directly, so a supertrait a blanket impl supplied
+            // was reported missing.
+            let has = self.type_implements(&target_ty, &TraitBound { trait_path: sup.trait_path.clone(), assoc: BTreeMap::new() }, 0);
             if !has {
                 return Err(Error::TypeError(format!(
                     "impl {} {}: `{}` requires `{}`, but `{}` has no `impl {}` — write it before this one",
@@ -8531,29 +8528,21 @@ impl Checker {
     ) -> Result<Vec<(Path, String)>, Error> {
         self.dyn_assoc_subst(trait_path, pins)?;
         let tdef = self.check_object_safe(trait_path)?;
-        let (type_fq, targs) = match concrete {
-            Type::Named(n, args) => (n.clone(), args.clone()),
-            other => match prim_type_path(other) {
-                Some(p) => (p, Vec::new()),
-                None => {
-                    return Err(Error::TypeError(format!(
-                        "`{}` cannot be used as `:dyn {}`: it is not a nominal type",
-                        ConcreteNames::type_key(concrete),
-                        trait_path
-                    )))
-                }
-            },
+        let Some(type_fq) = nominal_path(concrete) else {
+            return Err(Error::TypeError(format!(
+                "`{}` cannot be used as `:dyn {}`: it is not a nominal type",
+                ConcreteNames::type_key(concrete),
+                trait_path
+            )));
+        };
+        let targs: Vec<Type> = match concrete {
+            Type::Named(_, args) => args.clone(),
+            _ => Vec::new(),
         };
         let Some(def) = self.reg.type_def(&type_fq) else {
             return Err(Error::TypeError(format!("dyn {}: unknown type `{}`", trait_path, type_fq)));
         };
-        if !def.implements_at(trait_path, &targs)
-            && !self.type_implements(
-                concrete,
-                &TraitBound { trait_path: trait_path.clone(), assoc: BTreeMap::new() },
-                0,
-            )
-        {
+        if !self.type_implements(concrete, &TraitBound { trait_path: trait_path.clone(), assoc: BTreeMap::new() }, 0) {
             return Err(Error::TypeError(format!(
                 "`{}` does not implement `{}`, so it cannot be used as `:dyn {}`",
                 concrete, trait_path, trait_path
@@ -9371,18 +9360,9 @@ impl Checker {
             _ => return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method))),
         };
         let recv_ty = self.parse_type_here_at(heap, type_expr, type_expr_loc.as_ref())?;
-        let type_fq = match &recv_ty {
-            Type::Named(n, _) => n.clone(),
-            other => match prim_type_path(other) {
-                Some(p) => p,
-                None => {
-                    return Err(Error::TypeError(format!(
-                        "impl: method `{}`: the receiver's type must be a data type",
-                        method
-                    )))
-                }
-            },
-        };
+        let type_fq = nominal_path(&recv_ty).ok_or_else(|| {
+            Error::TypeError(format!("impl: method `{}`: the receiver's type must be a data type", method))
+        })?;
         if !abstract_receiver && self.reg.type_def(&type_fq).is_none() {
             return Err(Error::TypeError(format!("impl: method `{}`: unknown type `{}`", method, type_fq)));
         }
@@ -11905,8 +11885,7 @@ impl Checker {
     fn assoc_receiver_path(&self, ty: &Type, method: &str) -> Option<Path> {
         match ty {
             t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::root("sexpr")),
-            Type::Named(n, _) => Some(n.clone()),
-            other => prim_type_path(other),
+            other => nominal_path(other),
         }
     }
 
@@ -13881,7 +13860,7 @@ impl Checker {
                 return r;
             }
         }
-        let Type::Named(type_fq, _) = &recv.ty else {
+        let Type::Named(type_fq, targs) = &recv.ty else {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv_name, field)));
         };
         let field = tuple_element_field(&recv.ty, field)?.unwrap_or_else(|| field.clone());
@@ -13889,7 +13868,7 @@ impl Checker {
         let is_field_setter = self
             .reg
             .type_def(type_fq)
-            .and_then(|d| d.assoc.get(&setter))
+            .and_then(|d| d.method_at(&setter, targs))
             .is_some_and(|af| af.instance && self.assoc_visible(type_fq, af));
         if !is_field_setter {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", type_fq, field)));
@@ -13962,18 +13941,20 @@ impl Checker {
             return Err(Error::TypeError(format!("setf: `({} ...)` place needs a receiver argument", accessor)));
         };
         let recv = self.check_at(heap, interp, env, *recv_form, None, None)?;
-        let Type::Named(type_fq, _) = &recv.ty else {
+        let Type::Named(type_fq, targs) = &recv.ty else {
             return Err(Error::TypeError(format!("setf: `{}` has no settable accessor `{}`", recv.ty, accessor)));
         };
-        let type_fq = type_fq.clone();
+        let (type_fq, targs) = (type_fq.clone(), targs.clone());
         let mut candidates = vec![format!("set-{}", accessor)];
         if accessor == "get" {
             candidates.push("set".to_string());
         }
+        // `method_at`, not the type's own table: a setter an `impl` for one
+        // instantiation defines is that instantiation's.
         let setter = candidates.iter().find(|name| {
             self.reg
                 .type_def(&type_fq)
-                .and_then(|d| d.assoc.get(name.as_str()))
+                .and_then(|d| d.method_at(name.as_str(), &targs))
                 .is_some_and(|af| af.instance && self.assoc_visible(&type_fq, af))
         });
         let Some(setter) = setter else {
@@ -16593,10 +16574,7 @@ impl Checker {
                     continue;
                 }
             }
-            let type_fq = match concrete {
-                Type::Named(n, _) => Some(n.clone()),
-                other => prim_type_path(other),
-            };
+            let type_fq = nominal_path(concrete);
             // A type with no name — a trait object, `()`, a function, a
             // pointer — has no impls of its own, but it does implement what
             // `type_implements` finds (a trait object its trait, a blanket
@@ -17432,25 +17410,10 @@ impl Checker {
     /// the body with `A` known. `trait_method` searches inherited methods
     /// too, so `(where (Ord A))` is equally enough.
     fn implements_eq(&self, env: &Env, ty: &Type) -> bool {
-        // The same receiver resolution the `equals` call this is clearing
-        // the way for will perform — asked here so "this type cannot be
-        // compared" is the error rather than a mismatch from deeper in.
-        let type_fq = self.assoc_receiver_path(ty, "equals");
-        let Some(type_fq) = type_fq else { return false };
-        if let Some(def) = self.reg.type_def(&type_fq) {
-            let args = match ty {
-                Type::Named(n, args) if *n == type_fq => args.as_slice(),
-                _ => &[],
-            };
-            if matches!(def.method_at("equals", args), Some(af) if af.instance) {
-                return true;
-            }
-        }
-        env.bounds.get(type_fq.last_segment()).is_some_and(|bounds| {
-            bounds.iter().any(|tb| {
-                self.reg.trait_def(&tb.trait_path).is_some_and(|t| self.reg.trait_method(t, "equals").is_some())
-            })
-        })
+        // Exactly the lookup the `equals` call will make — its own table, a
+        // blanket impl, a bounded type variable, a trait object — rather than
+        // a second copy of it, which missed the blanket impls.
+        self.receiver_method(env, ty, "equals").is_some()
     }
 
     fn check_ctor_pattern(
