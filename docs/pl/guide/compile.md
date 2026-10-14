@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Kompilacja
 
 O ile nie zrobisz nic więcej, programy typelisp działają w interpreterze. Ponadto istnieją dwa
@@ -90,10 +90,11 @@ Bez `-o` plik wykonywalny dostaje nazwę pliku źródłowego bez `.typl` i trafi
 tego samego katalogu co plik źródłowy. Jeśli nazwa pliku źródłowego nie kończy się na `.typl`, `-o` jest
 wymagane. Przy `-c` (`--compile`) nie można podawać `--image`, `--heap-cells` ani `--feature`.
 
-Z `--release` jest to **kompilacja release**, która usuwa `eprint`/`eprintln` (wyjście na standardowe wyjście błędów służące badaniu problemów; [Wypisywanie](../reference/functions/printing.md)) razem z ich argumentami. To, co usuwa, i tak jest sprawdzane pod względem typów, więc błąd typu w tym miejscu powoduje niepowodzenie kompilacji. Bez `--release` oraz przy bezpośrednim uruchamianiu przez `typl` `eprint`/`eprintln` piszą na standardowe wyjście błędów. `compile-file` nie ma sposobu, by zażądać kompilacji release, i kompiluje tak jak bez `--release`.
+Z `--release` `typl` tworzy **kompilację release**, która usuwa `eprint`/`eprintln` (wyjście na standardowe wyjście błędów służące badaniu problemów; [Wypisywanie](../reference/functions/printing.md)) razem z ich argumentami. To, co usuwa, i tak jest sprawdzane pod względem typów, więc błąd typu w tym miejscu powoduje niepowodzenie kompilacji. `--release` to opcja całego `typl`: działa tak samo nie tylko przy `-c`, ale też przy uruchamianiu pliku, w REPL i w `typl test`. `compile-file` wywołane w `typl` uruchomionym z `--release` również tworzy kompilację release, a `eprint`/`eprintln` są usuwane także z kodu wykonywanego przez `eval` w tak utworzonym pliku wykonywalnym.
 
 ```sh
-$ typl -c hello.typl --release
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # to samo, gdy zapisane po -c
 ```
 
 To samo można zrobić, wywołując `compile-file` z REPL lub z programu.

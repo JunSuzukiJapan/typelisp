@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -82,10 +82,11 @@ fib(25) = 75025
 省略 `-o` 时，会在源文件所在文件夹生成以源文件名去掉 `.typl` 命名的可执行文件。源文件名不以 `.typl` 结尾时需要
 `-o`。使用 `-c`（`--compile`）时，不能指定 `--image`、`--heap-cells`、`--feature`。
 
-加上 `--release` 就是**发布构建**，会连同参数一起移除 `eprint`/`eprintln`（用于调查的标准错误输出。[打印](../reference/functions/printing.md)）。被移除的部分也会进行类型检查，所以其中有类型错误时编译会失败。不加 `--release` 时，以及直接用 `typl` 运行时，`eprint`/`eprintln` 会写到标准错误输出。`compile-file` 没有指定发布构建的方式，与不加 `--release` 时相同。
+给 `typl` 加上 `--release` 就是**发布构建**，会连同参数一起移除 `eprint`/`eprintln`（用于调查的标准错误输出。[打印](../reference/functions/printing.md)）。被移除的部分也会进行类型检查，所以其中有类型错误时编译会失败。`--release` 是整个 `typl` 的选项，不仅对 `-c`，对运行文件、REPL 和 `typl test` 也同样有效。在加了 `--release` 的 `typl` 中调用的 `compile-file` 也会是发布构建，在这样生成的可执行文件中用 `eval` 执行的代码里，`eprint`/`eprintln` 也会被移除。
 
 ```sh
-$ typl -c hello.typl --release
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # 写在 -c 之后也一样
 ```
 
 在 REPL 或程序中调用 `compile-file` 也能做同样的事。

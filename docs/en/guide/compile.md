@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -91,10 +91,11 @@ Without `-o`, the executable is named after the source file with `.typl` removed
 the same folder as the source file. If the source file name does not end in `.typl`, `-o` is
 required. With `-c` (`--compile`), `--image`, `--heap-cells` and `--feature` cannot be given.
 
-With `--release` it is a **release build**, which removes `eprint`/`eprintln` (standard error output for investigating; [Printing](../reference/functions/printing.md)) together with their arguments. What it removes is still type-checked, so a type error there makes the compilation fail. Without `--release`, and when running with `typl` directly, `eprint`/`eprintln` write to standard error. `compile-file` has no way to ask for a release build, and builds as without `--release`.
+With `--release`, `typl` makes a **release build**, which removes `eprint`/`eprintln` (standard error output for investigating; [Printing](../reference/functions/printing.md)) together with their arguments. What it removes is still type-checked, so a type error there makes the compilation fail. `--release` is an option of `typl` as a whole: it works the same not only for `-c` but also when running a file, in the REPL, and for `typl test`. A `compile-file` called inside a `typl` given `--release` also makes a release build, and `eprint`/`eprintln` are removed from code `eval`ed inside the executable made that way too.
 
 ```sh
-$ typl -c hello.typl --release
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # the same when written after -c
 ```
 
 You can do the same by calling `compile-file` from the REPL or from a program.

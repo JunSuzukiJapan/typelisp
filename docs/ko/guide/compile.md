@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -86,10 +86,11 @@ fib(25) = 75025
 이름이 `.typl`로 끝나지 않으면 `-o`가 필요하다. `-c`(`--compile`)와 함께 `--image`, `--heap-cells`, `--feature`는 줄
 수 없다.
 
-`--release`를 붙이면 **릴리스 빌드**가 되어 `eprint`/`eprintln`(조사를 위한 표준 오류 출력. [출력](../reference/functions/printing.md))을 인수째 제거합니다. 제거하는 것도 타입 검사는 하므로, 거기에 타입 오류가 있으면 컴파일이 실패합니다. `--release`를 붙이지 않을 때와 `typl`로 직접 실행할 때는 `eprint`/`eprintln`이 표준 오류 출력에 씁니다.`compile-file`에는 릴리스 빌드 지정이 없으며, `--release`를 붙이지 않을 때와 같습니다.
+`typl`에 `--release`를 붙이면 **릴리스 빌드**가 되어 `eprint`/`eprintln`(조사를 위한 표준 오류 출력. [출력](../reference/functions/printing.md))을 인수째 제거합니다. 제거하는 것도 타입 검사는 하므로, 거기에 타입 오류가 있으면 컴파일이 실패합니다. `--release`는 `typl` 전체의 옵션으로, `-c`뿐 아니라 파일 실행, REPL, `typl test`에서도 똑같이 적용됩니다. `--release`를 붙인 `typl` 안에서 호출한 `compile-file`도 릴리스 빌드가 되며, 그렇게 만든 실행 파일 안에서 `eval`한 코드에서도 `eprint`/`eprintln`은 제거됩니다.
 
 ```sh
-$ typl -c hello.typl --release
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # -c 뒤에 써도 같음
 ```
 
 REPL이나 프로그램에서 `compile-file`을 호출해도 같은 일을 할 수 있다.

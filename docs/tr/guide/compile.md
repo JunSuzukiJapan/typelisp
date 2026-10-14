@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -92,10 +92,11 @@ fib(25) = 75025
 kaynak dosyayla aynı klasöre konur. Kaynak dosya adı `.typl` ile bitmiyorsa `-o` zorunludur.
 `-c` (`--compile`) ile `--image`, `--heap-cells` ve `--feature` verilemez.
 
-`--release` ile bir **release derlemesi** olur; bu, `eprint`/`eprintln`'i (inceleme amaçlı standart hata çıktısı; [Yazdırma](../reference/functions/printing.md)) argümanlarıyla birlikte kaldırır. Kaldırılanlar yine de tür denetiminden geçer, bu yüzden oradaki bir tür hatası derlemeyi başarısız kılar. `--release` olmadan ve doğrudan `typl` ile çalıştırırken `eprint`/`eprintln` standart hata çıktısına yazar. `compile-file`'ın release derlemesi istemenin bir yolu yoktur; `--release` olmadan derlenmiş gibi derler.
+`--release` ile `typl` bir **release derlemesi** yapar; bu, `eprint`/`eprintln`'i (inceleme amaçlı standart hata çıktısı; [Yazdırma](../reference/functions/printing.md)) argümanlarıyla birlikte kaldırır. Kaldırılanlar yine de tür denetiminden geçer, bu yüzden oradaki bir tür hatası derlemeyi başarısız kılar. `--release`, `typl`'ın bütününe ait bir seçenektir: yalnızca `-c` için değil, bir dosyayı çalıştırırken, REPL'de ve `typl test` için de aynı şekilde etkilidir. `--release` ile başlatılan bir `typl` içinde çağrılan `compile-file` da release derlemesi yapar ve böyle yapılan çalıştırılabilir dosyanın içinde `eval` ile çalıştırılan koddan da `eprint`/`eprintln` kaldırılır.
 
 ```sh
-$ typl -c hello.typl --release
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # -c'den sonra yazılsa da aynı
 ```
 
 Aynısını REPL'den ya da bir programdan `compile-file` çağırarak da yapabilirsiniz.

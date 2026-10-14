@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Pencetakan
 
 `print`/`println`/`format`, pencetak satu argumen, pretty printer, `print-object`, dan variabel yang
@@ -15,7 +15,7 @@ setiap direktif mengonsumsi argumen variadik berikutnya secara berurutan.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Mengekspansi string kendali dan menulisnya ke keluaran standar tanpa baris baru |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Sama, dengan baris baru di akhir |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Sama seperti `print`, tetapi menulis ke galat standar (`*error-output*`). `eprint!` milik Rust. **Build rilis (`typl -c --release`) menghapusnya beserta argumennya** (argumen tidak dievaluasi). Tipenya tetap diperiksa meskipun dihapus |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Sama seperti `print`, tetapi menulis ke galat standar (`*error-output*`). `eprint!` milik Rust. **Build rilis (`typl --release`) menghapusnya beserta argumennya** (argumen tidak dievaluasi). Tipenya tetap diperiksa meskipun dihapus |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Sama, dengan baris baru di akhir. `eprintln!` milik Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` pada CL. Mengembalikan string hasil ekspansi. Jika `dest` adalah `true` (`t` pada CL), string juga ditulis ke keluaran standar; jika `false` (`nil` pada CL), tidak ditulis dan hanya dikembalikan |
 | `format` (ke stream) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Jika `dest` bukan `bool`, ia adalah tujuan stream pada CL. String hasil ekspansi ditulis ke stream itu. Nilai kembaliannya `()` (`nil` pada CL), dan tidak ada string yang dikembalikan |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # الطباعة
 
 `print`/`println`/`format` وطابعات الوسيط الواحد والطابعة المنسَّقة (pretty printer) و`print-object` والمتغيرات
@@ -14,7 +14,7 @@
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | يوسّع سلسلة التحكم ويكتبها إلى الخرج القياسي بلا سطر جديد |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | المثل، مع سطر جديد في النهاية |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | مثل `print` لكنه يكتب إلى مخرج الأخطاء القياسي (`*error-output*`). مقابل `eprint!` في Rust. **يُزال في بناء الإصدار (`typl -c --release`) مع وسائطه** (لا تُقيَّم الوسائط). ويُفحص نوعه حتى عند إزالته |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | مثل `print` لكنه يكتب إلى مخرج الأخطاء القياسي (`*error-output*`). مقابل `eprint!` في Rust. **يُزال في بناء الإصدار (`typl --release`) مع وسائطه** (لا تُقيَّم الوسائط). ويُفحص نوعه حتى عند إزالته |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | مثله، مع سطر جديد في النهاية. مقابل `eprintln!` في Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` في CL. تعيد السلسلة الموسَّعة. وإذا كانت `dest` هي `true` (`t` في CL) كُتبت أيضًا إلى الخرج القياسي؛ وإذا كانت `false` (`nil` في CL) فلا تُكتب بل تُعاد فقط |
 | `format` (إلى تدفق) | `(format stream control args...)` | `(S, string, ...)→()` حيث `CharOutput S` | إذا لم تكن `dest` من النوع `bool` فهي وجهة التدفق في CL. تُكتب السلسلة الموسَّعة إلى ذلك التدفق. والقيمة الراجعة `()` (`nil` في CL)، ولا تُعاد سلسلة |

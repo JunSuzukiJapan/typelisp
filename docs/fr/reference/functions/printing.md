@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Affichage
 
 `print`/`println`/`format`, les fonctions d'affichage à un argument, le pretty printer, `print-object` et les
@@ -15,7 +15,7 @@ directive consomme tour à tour les arguments variadiques qui suivent.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Développe la chaîne de contrôle et l'écrit sur la sortie standard sans saut de ligne |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Idem, avec un saut de ligne à la fin |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Comme `print`, mais écrit sur la sortie d'erreur standard (`*error-output*`). Le `eprint!` de Rust. **Une compilation release (`typl -c --release`) le retire, arguments compris** (les arguments ne sont pas évalués). Ses types sont vérifiés même quand il est retiré |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Comme `print`, mais écrit sur la sortie d'erreur standard (`*error-output*`). Le `eprint!` de Rust. **Une compilation release (`typl --release`) le retire, arguments compris** (les arguments ne sont pas évalués). Ses types sont vérifiés même quand il est retiré |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Idem, avec un saut de ligne final. Le `eprintln!` de Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | Le `format` de CL. Renvoie la chaîne développée. Si `dest` est `true` (le `t` de CL), elle est aussi écrite sur la sortie standard ; si `false` (le `nil` de CL), elle n'est pas écrite et seulement renvoyée |
 | `format` (vers un flux) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Si `dest` n'est pas un `bool`, c'est la destination flux de CL. La chaîne développée est écrite dans ce flux. La valeur de retour est `()` (le `nil` de CL), et aucune chaîne n'est renvoyée |

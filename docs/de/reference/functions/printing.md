@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Ausgabe
 
 `print`/`println`/`format`, die einstelligen Ausgabefunktionen, der Pretty Printer, `print-object` und die
@@ -15,7 +15,7 @@ Direktive verbraucht der Reihe nach die folgenden variadischen Argumente.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Expandiert die Steuerzeichenkette und schreibt sie ohne Zeilenumbruch auf die Standardausgabe |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Dasselbe, mit einem Zeilenumbruch am Ende |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Wie `print`, schreibt aber auf die Standardfehlerausgabe (`*error-output*`). Rusts `eprint!`. **Ein Release-Build (`typl -c --release`) entfernt es samt Argumenten** (die Argumente werden nicht ausgewertet). Auch wenn es entfernt wird, wird es typgeprüft |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Wie `print`, schreibt aber auf die Standardfehlerausgabe (`*error-output*`). Rusts `eprint!`. **Ein Release-Build (`typl --release`) entfernt es samt Argumenten** (die Argumente werden nicht ausgewertet). Auch wenn es entfernt wird, wird es typgeprüft |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Ebenso, mit einem Zeilenumbruch am Ende. Rusts `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CLs `format`. Gibt die expandierte Zeichenkette zurück. Ist `dest` `true` (CLs `t`), wird sie zusätzlich auf die Standardausgabe geschrieben; ist es `false` (CLs `nil`), wird sie nicht geschrieben, sondern nur zurückgegeben |
 | `format` (in einen Stream) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Ist `dest` kein `bool`, ist es CLs Stream-Ziel. Die expandierte Zeichenkette wird in diesen Stream geschrieben. Der Rückgabewert ist `()` (CLs `nil`), und es wird keine Zeichenkette zurückgegeben |

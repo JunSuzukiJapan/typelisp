@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Afdrukken
 
 `print`/`println`/`format`, de printers met één argument, de pretty printer, `print-object` en de
@@ -15,7 +15,7 @@ elke directief verbruikt achtereenvolgens de volgende variadische argumenten.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Expandeert de stuurstring en schrijft hem zonder nieuwe regel naar standaarduitvoer |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Hetzelfde, met aan het einde een nieuwe regel |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Zoals `print`, maar schrijft naar standaardfout (`*error-output*`). Rusts `eprint!`. **Een release-build (`typl -c --release`) verwijdert het, inclusief de argumenten** (de argumenten worden niet geëvalueerd). Ook als het wordt verwijderd, worden de types gecontroleerd |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Zoals `print`, maar schrijft naar standaardfout (`*error-output*`). Rusts `eprint!`. **Een release-build (`typl --release`) verwijdert het, inclusief de argumenten** (de argumenten worden niet geëvalueerd). Ook als het wordt verwijderd, worden de types gecontroleerd |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Hetzelfde, met een regeleinde aan het eind. Rusts `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` van CL. Geeft de geëxpandeerde string terug. Als `dest` `true` is (`t` van CL), wordt hij ook naar standaarduitvoer geschreven; bij `false` (`nil` van CL) wordt hij niet geschreven en alleen teruggegeven |
 | `format` (naar een stream) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Als `dest` geen `bool` is, is het de streambestemming van CL. De geëxpandeerde string wordt naar die stream geschreven. De returnwaarde is `()` (`nil` van CL), en er wordt geen string teruggegeven |

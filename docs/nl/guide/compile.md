@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -96,10 +96,11 @@ dezelfde map als het bronbestand geplaatst. Eindigt de naam van het bronbestand 
 is `-o` verplicht. Bij `-c` (`--compile`) kunnen `--image`, `--heap-cells` en `--feature` niet worden
 opgegeven.
 
-Met `--release` is het een **release-build**, die `eprint`/`eprintln` (uitvoer naar standaardfout om iets te onderzoeken; [Afdrukken](../reference/functions/printing.md)) samen met hun argumenten verwijdert. Wat wordt verwijderd, wordt toch op types gecontroleerd, dus een typefout daarin laat de compilatie mislukken. Zonder `--release`, en bij direct uitvoeren met `typl`, schrijven `eprint`/`eprintln` naar standaardfout. `compile-file` kan niet om een release-build vragen en bouwt zoals zonder `--release`.
+Met `--release` maakt `typl` een **release-build**, die `eprint`/`eprintln` (uitvoer naar standaardfout om iets te onderzoeken; [Afdrukken](../reference/functions/printing.md)) samen met hun argumenten verwijdert. Wat wordt verwijderd, wordt toch op types gecontroleerd, dus een typefout daarin laat de compilatie mislukken. `--release` is een optie van `typl` als geheel: ze werkt niet alleen bij `-c`, maar ook bij het uitvoeren van een bestand, in de REPL en bij `typl test`. Een `compile-file` dat wordt aangeroepen in een `typl` met `--release` maakt ook een release-build, en ook uit code die met `eval` wordt uitgevoerd in een zo gemaakt uitvoerbaar bestand worden `eprint`/`eprintln` verwijderd.
 
 ```sh
-$ typl -c hello.typl --release
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # hetzelfde als het na -c staat
 ```
 
 Hetzelfde kun je doen door `compile-file` aan te roepen vanuit de REPL of vanuit een programma.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Printing
 
 `print`/`println`/`format`, the one-argument printers, the pretty printer, `print-object`, and the
@@ -15,7 +15,7 @@ directive consumes the following variadic arguments in turn.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Expands the control string and writes it to standard output without a newline |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | The same, with a newline at the end |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Same as `print`, but writes to standard error (`*error-output*`). Rust's `eprint!`. **A release build (`typl -c --release`) removes it, arguments and all** (the arguments are not evaluated). It is type-checked even when removed |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Same as `print`, but writes to standard error (`*error-output*`). Rust's `eprint!`. **A release build (`typl --release`) removes it, arguments and all** (the arguments are not evaluated). It is type-checked even when removed |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Same, with a newline at the end. Rust's `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL's `format`. Returns the expanded string. If `dest` is `true` (CL's `t`), it is also written to standard output; if `false` (CL's `nil`), it is not written and only returned |
 | `format` (to a stream) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | If `dest` is not a `bool`, it is CL's stream destination. The expanded string is written to that stream. The return value is `()` (CL's `nil`), and no string is returned |

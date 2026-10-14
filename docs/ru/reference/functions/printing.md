@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Печать
 
 `print`/`println`/`format`, функции печати с одним аргументом, красивая печать, `print-object` и переменные,
@@ -15,7 +15,7 @@ CL)**. Первый аргумент (у `format` — второй) — **упр
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Раскрывает управляющую строку и пишет её в стандартный вывод без перевода строки |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | То же, с переводом строки в конце |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Как `print`, но пишет в стандартный поток ошибок (`*error-output*`). `eprint!` из Rust. **Релизная сборка (`typl -c --release`) удаляет его вместе с аргументами** (аргументы не вычисляются). Типы проверяются и тогда, когда он удаляется |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Как `print`, но пишет в стандартный поток ошибок (`*error-output*`). `eprint!` из Rust. **Релизная сборка (`typl --release`) удаляет его вместе с аргументами** (аргументы не вычисляются). Типы проверяются и тогда, когда он удаляется |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | То же самое, с переводом строки в конце. `eprintln!` из Rust |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | `format` из CL. Возвращает раскрытую строку. Если `dest` — `true` (`t` из CL), она также пишется в стандартный вывод; если `false` (`nil` из CL), не пишется, а только возвращается |
 | `format` (в поток) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Если `dest` — не `bool`, это назначение-поток из CL. Раскрытая строка пишется в этот поток. Результат — `()` (`nil` из CL), строка не возвращается |

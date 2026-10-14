@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Utskrift
 
 `print`/`println`/`format`, utskriftsfunktionerna med ett argument, den snygga skrivaren (pretty printer),
@@ -16,7 +16,7 @@ följande variadiska argumenten i tur och ordning.
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | Expanderar kontrollsträngen och skriver den till standard ut utan radbyte |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | Detsamma, med ett radbyte på slutet |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Som `print`, men skriver till standard fel (`*error-output*`). Rusts `eprint!`. **Ett release-bygge (`typl -c --release`) tar bort det, argument och allt** (argumenten evalueras inte). Typerna kontrolleras även när det tas bort |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | Som `print`, men skriver till standard fel (`*error-output*`). Rusts `eprint!`. **Ett release-bygge (`typl --release`) tar bort det, argument och allt** (argumenten evalueras inte). Typerna kontrolleras även när det tas bort |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | Samma sak, med radbrytning på slutet. Rusts `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL:s `format`. Returnerar den expanderade strängen. Om `dest` är `true` (CL:s `t`) skrivs den också till standard ut; om `false` (CL:s `nil`) skrivs den inte utan bara returneras |
 | `format` (till en ström) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | Om `dest` inte är en `bool` är det CL:s strömmål. Den expanderade strängen skrivs till den strömmen. Returvärdet är `()` (CL:s `nil`), och ingen sträng returneras |

@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ 4dc176172ffd645238a3f543fe0e1e9ce8ddd776 -->
+<!-- translated-from: README_JP.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -320,9 +320,10 @@ typl --compile foo.typl -o bar
 ```
 
 With `--release` it is a release build, which removes the output for investigating, `eprint`/`eprintln`.
+`--release` is an option of `typl` as a whole, and works when running a file and for tests too.
 
 ```sh
-typl -c foo.typl --release
+typl --release -c foo.typl
 ```
 
 The executables are linked against the static library `libtypelisp_front.a`. A release build of

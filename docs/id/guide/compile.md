@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ e646a8f6db98c447702c03fb4efe7743cc64b5a0 -->
+<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -92,10 +92,11 @@ Tanpa `-o`, berkas eksekusi dinamai sesuai berkas sumber tanpa `.typl` dan ditar
 sama dengan berkas sumber. Jika nama berkas sumber tidak berakhiran `.typl`, `-o` wajib diberikan.
 Bersama `-c` (`--compile`), `--image`, `--heap-cells`, dan `--feature` tidak dapat diberikan.
 
-Dengan `--release`, hasilnya adalah **build rilis**, yang menghapus `eprint`/`eprintln` (keluaran galat standar untuk menyelidiki masalah; [Pencetakan](../reference/functions/printing.md)) beserta argumennya. Yang dihapus tetap diperiksa tipenya, sehingga galat tipe di sana membuat kompilasi gagal. Tanpa `--release`, dan saat dijalankan langsung dengan `typl`, `eprint`/`eprintln` menulis ke galat standar. `compile-file` tidak punya cara untuk meminta build rilis, dan membangun seperti tanpa `--release`.
+Dengan `--release`, `typl` membuat **build rilis**, yang menghapus `eprint`/`eprintln` (keluaran galat standar untuk menyelidiki masalah; [Pencetakan](../reference/functions/printing.md)) beserta argumennya. Yang dihapus tetap diperiksa tipenya, sehingga galat tipe di sana membuat kompilasi gagal. `--release` adalah opsi `typl` secara keseluruhan: berlaku sama bukan hanya untuk `-c`, tetapi juga saat menjalankan file, di REPL, dan untuk `typl test`. `compile-file` yang dipanggil di dalam `typl` yang dijalankan dengan `--release` juga membuat build rilis, dan `eprint`/`eprintln` juga dihapus dari kode yang dijalankan dengan `eval` di dalam berkas eksekusi yang dibuat dengan cara itu.
 
 ```sh
-$ typl -c hello.typl --release
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # sama saja jika ditulis setelah -c
 ```
 
 Anda dapat melakukan hal yang sama dengan memanggil `compile-file` dari REPL atau dari program.
