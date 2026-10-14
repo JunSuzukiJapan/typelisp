@@ -267,6 +267,22 @@ fn symbol_macro_mark() -> Type {
 /// goto-definition back to the binding site.
 type PatternBindings = Vec<(String, Type, Option<Loc>)>;
 
+/// One binding of a local: its name, type, and — where known — the source
+/// position of the name in its binding form (see [`Env::get_loc`]).
+type LocalBinding = (String, Type, Option<Loc>);
+
+/// The bindings one [`Env::extended_with_locs`] added, on top of the scope it
+/// extended. A chain rather than one flat list copied at every level: a body
+/// nested `n` binding forms deep would otherwise hold `n` copies of a list
+/// that grows to `n`, all alive at once down the recursion.
+struct Scope {
+    binds: Vec<LocalBinding>,
+    parent: Option<std::rc::Rc<Scope>>,
+    /// How many bindings the scopes above this one hold — what makes a
+    /// binding's [`Env::position`] stable down the chain.
+    start: usize,
+}
+
 /// A lexical environment mapping variable names to their types.
 #[derive(Clone)]
 struct Env {
@@ -278,7 +294,7 @@ struct Env {
     /// (monomorphization's synthesized re-checks) — consulted by
     /// `Checker::check_at` to populate `DefLocs::local_refs` when a `Var`
     /// reference resolves here.
-    vars: Vec<(String, Type, Option<Loc>)>,
+    vars: Option<std::rc::Rc<Scope>>,
     /// Trait bounds on this function's own generic type parameters, declared
     /// by a `(where (Trait T (Assoc Concrete)...)...)` clause
     /// (`Checker::check_defun`) — e.g. `{"t": [TraitBound { trait_path:
@@ -297,24 +313,43 @@ struct Env {
 
 impl Env {
     fn new() -> Env {
-        Env { vars: Vec::new(), bounds: std::rc::Rc::new(BTreeMap::new()) }
+        Env { vars: None, bounds: std::rc::Rc::new(BTreeMap::new()) }
+    }
+
+    /// The nearest binding of `name`, with where it sits counted from the
+    /// outermost binding.
+    fn lookup(&self, name: &str) -> Option<(usize, &LocalBinding)> {
+        let mut scope = self.vars.as_deref();
+        while let Some(s) = scope {
+            if let Some(i) = s.binds.iter().rposition(|(n, _, _)| n == name) {
+                return Some((s.start + i, &s.binds[i]));
+            }
+            scope = s.parent.as_deref();
+        }
+        None
     }
 
     fn get(&self, name: &str) -> Option<&Type> {
-        self.vars.iter().rev().find(|(n, _, _)| n == name).map(|(_, t, _)| t)
+        self.lookup(name).map(|(_, (_, t, _))| t)
     }
 
-    /// Where the nearest binding of `name` sits in [`Self::vars`] — stable
-    /// down a chain of `extended` environments, which only ever append.
+    /// Where the nearest binding of `name` sits, counted from the outermost
+    /// binding — stable down a chain of `extended` environments, which only
+    /// ever add.
     fn position(&self, name: &str) -> Option<usize> {
-        self.vars.iter().rposition(|(n, _, _)| n == name)
+        self.lookup(name).map(|(i, _)| i)
+    }
+
+    /// How many bindings are in scope, shadowed ones included.
+    fn len(&self) -> usize {
+        self.vars.as_ref().map_or(0, |s| s.start + s.binds.len())
     }
 
     /// The nearest binding of `name`'s own recorded source position, if any —
     /// see [`Self::vars`]'s doc comment. Consulted by `Checker::check_at`
     /// alongside [`Self::get`] when a `Var` reference resolves to a local.
     fn get_loc(&self, name: &str) -> Option<Loc> {
-        self.vars.iter().rev().find(|(n, _, _)| n == name).and_then(|(_, _, l)| l.clone())
+        self.lookup(name).and_then(|(_, (_, _, l))| l.clone())
     }
 
     /// A child environment with `binds` added (later bindings shadow earlier),
@@ -341,8 +376,8 @@ impl Env {
                 return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name)));
             }
         }
-        let mut vars = self.vars.clone();
-        vars.extend(binds);
+        let start = self.len();
+        let vars = Some(std::rc::Rc::new(Scope { binds, parent: self.vars.clone(), start }));
         Ok(Env { vars, bounds: self.bounds.clone() })
     }
 
@@ -10649,6 +10684,29 @@ impl Checker {
         v: Value,
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
+        // Every nested form passes through here once per level, so this is
+        // where the stack is grown (`typelisp_mem::grow_stack`). The frame is
+        // kept small for the same reason — the atoms and the reconciliation
+        // live in functions of their own, out of the recursion's way.
+        typelisp_mem::grow_stack(|| match v {
+            Value::Cons(_) => {
+                let typed = self.check_list(heap, interp, env, v, expected)?;
+                self.reconcile_expected(heap, env, typed, expected)
+            }
+            _ => self.check_atom(heap, interp, env, v, expected),
+        })
+    }
+
+    /// [`Self::check_inner`] of anything but a cons.
+    #[inline(never)]
+    fn check_atom(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        v: Value,
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
         let typed = match v {
             Value::Int(n) => {
                 let ty = int_lit_ty(expected);
@@ -10871,7 +10929,7 @@ impl Checker {
                     }
                 }
             }
-            Value::Cons(_) => self.check_list(heap, interp, env, v, expected)?,
+            Value::Cons(_) => unreachable!("a cons is checked by `check_list`"),
             Value::Path(pid) => {
                 // A bare `::` path as an expression: a qualified global or a
                 // qualified function used as a value.
@@ -10912,10 +10970,15 @@ impl Checker {
                 }
             }
         };
-        // Reconcile synthesized types against the expectation. Literal and
-        // constructor nodes already adopted `expected`, so this only fires on a
-        // genuine mismatch. `Never` (a diverging expression) satisfies any
-        // expected type.
+        self.reconcile_expected(heap, env, typed, expected)
+    }
+
+    /// Reconcile synthesized types against the expectation. Literal and
+    /// constructor nodes already adopted `expected`, so this only fires on a
+    /// genuine mismatch. `Never` (a diverging expression) satisfies any
+    /// expected type.
+    #[inline(never)]
+    fn reconcile_expected(&self, heap: &mut Heap, env: &Env, typed: Checked, expected: Option<&Type>) -> Result<Checked, Error> {
         if let Some(e) = expected {
             if typed.ty != Type::Never && &typed.ty != e {
                 // A `Symbol` is a valid `Sexpr` datum wherever a `Sexpr` is
@@ -11612,7 +11675,7 @@ impl Checker {
         // Open while every body and the trailing body are checked, so a C
         // callback naming one of these functions can be told apart from a
         // variable — see `checker::ffi_callback`.
-        self.open_labels_scope(env.vars.len(), names.clone());
+        self.open_labels_scope(env.len(), names.clone());
         let checked = (|| -> Result<(Vec<LabelsDef>, Vec<Value>, Type), Error> {
             let mut defs = Vec::new();
             for Spec { name, params, param_locs, ret, raw_body, body_locs } in parsed {

@@ -20,3 +20,7 @@ num-rational = "0.4"
 # `Heap::type_key_name`/`path_segments`/etc. need once their storage moves
 # into `HeapShared` (`docs/dev/os-threads-design.md` §3).
 parking_lot = "0.12"
+# `grow_stack` (`stack.rs`): the reader, the checker and the compiler's passes
+# recurse once per level of nesting, and a program can nest deeper than any
+# fixed thread stack holds.
+stacker = "0.1"

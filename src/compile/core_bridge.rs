@@ -185,9 +185,9 @@ pub struct Ctx<'a> {
     /// carried one. So the uses that need it (`set`, and the `cellvar` split a
     /// captured name gets) read it back from here.
     ///
-    /// Innermost last, and searched backwards, so a shadowing binding wins the
-    /// same way it does at run time.
-    reprs: &'a [(SymRef, Repr)],
+    /// Innermost first, and searched in that order, so a shadowing binding
+    /// wins the same way it does at run time.
+    reprs: Option<&'a ReprScope<'a>>,
     /// Names that resolve to a *direct* call: the `labels` siblings in scope,
     /// this def included. Reset to empty inside a `lambda`, which never gets
     /// direct-call access to an enclosing block's siblings.
@@ -226,6 +226,15 @@ pub struct Ctx<'a> {
     outer_captured: &'a [SymRef],
 }
 
+/// The bindings one binding form adds to [`Ctx::reprs`], on top of the scope
+/// it is nested in. A chain rather than one flat list copied at every level: a
+/// body nested `n` binding forms deep would otherwise hold `n` copies of a
+/// list that grows to `n`, all alive at once down the recursion.
+pub struct ReprScope<'a> {
+    binds: Vec<(SymRef, Repr)>,
+    parent: Option<&'a ReprScope<'a>>,
+}
+
 impl<'a> Ctx<'a> {
     /// Start a translation with nothing in lexical scope.
     pub fn new(defs: &'a Definitions, globals: &'a HashMap<Path, usize>) -> Ctx<'a> {
@@ -242,7 +251,7 @@ impl<'a> Ctx<'a> {
             defs,
             globals,
             dyn_tables,
-            reprs: &[],
+            reprs: None,
             direct: empty_names(),
             cell_names: empty_names(),
             visible_siblings: empty_names(),
@@ -253,10 +262,8 @@ impl<'a> Ctx<'a> {
 
     /// This scope's bindings, plus `more` — for a caller to hold while it
     /// translates the body they are in scope for.
-    fn extended(&self, more: impl IntoIterator<Item = (SymRef, Repr)>) -> Vec<(SymRef, Repr)> {
-        let mut v = self.reprs.to_vec();
-        v.extend(more);
-        v
+    fn extended(&self, more: impl IntoIterator<Item = (SymRef, Repr)>) -> ReprScope<'a> {
+        ReprScope { binds: more.into_iter().collect(), parent: self.reprs }
     }
 
     /// Start from `names` as the cell set.
@@ -273,7 +280,14 @@ impl<'a> Ctx<'a> {
     }
 
     fn repr_of(&self, name: SymRef) -> Option<&Repr> {
-        self.reprs.iter().rev().find(|(n, _)| *n == name).map(|(_, r)| r)
+        let mut scope = self.reprs;
+        while let Some(s) = scope {
+            if let Some((_, r)) = s.binds.iter().rev().find(|(n, _)| *n == name) {
+                return Some(r);
+            }
+            scope = s.parent;
+        }
+        None
     }
 
     /// Whether `name` is one a nested closure captures, and so must be bound
@@ -360,6 +374,11 @@ fn malformed(heap: &Heap, form: Value) -> Error {
 
 /// Translate one core form.
 pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
+    typelisp_mem::grow_stack(|| to_island_here(heap, form, cx))
+}
+
+/// [`to_island`] on the stack it is given.
+fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let Some(tag) = core::op(heap, form).map(str::to_string) else {
         return Err(malformed(heap, form));
     };
@@ -883,7 +902,7 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         bound.push((name, repr));
     }
     let inner = cx.extended(bound);
-    let cx = Ctx { reprs: &inner, ..cx };
+    let cx = Ctx { reprs: Some(&inner), ..cx };
 
     let mut f = Items::new(heap);
     f.push(bindings);
@@ -1528,6 +1547,11 @@ pub fn collect_targets(heap: &Heap, body: &[Value]) -> Result<Targets, Error> {
 }
 
 fn collect_into(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> {
+    typelisp_mem::grow_stack(|| collect_into_here(heap, form, t))
+}
+
+/// [`collect_into`] on the stack it is given.
+fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Error> {
     if !matches!(form, Value::Cons(_)) {
         return Ok(());
     }
@@ -1732,7 +1756,7 @@ pub fn function_parts(
         cells.remove(n);
     }
     let reprs = cx.extended(params.iter().cloned());
-    let inner = Ctx { reprs: &reprs, ..cx }.with_cell_names(&cells);
+    let inner = Ctx { reprs: Some(&reprs), ..cx }.with_cell_names(&cells);
 
     let mut s = RootScope::new(heap);
     let param_list = name_kind_list(&mut s, params, inner)?;
@@ -2178,7 +2202,7 @@ fn translate_lambda(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     let no_direct = HashSet::new();
     let inner_reprs = cx.extended(params.iter().cloned());
     let inner = Ctx {
-        reprs: &inner_reprs,
+        reprs: Some(&inner_reprs),
         direct: &no_direct,
         cell_names: &cells,
         // A `labels` block nested in this body has no enclosing captured list
@@ -2258,7 +2282,7 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
 
     let mut f = Items::new(heap);
     let base = Ctx {
-        reprs: &sibling_reprs,
+        reprs: Some(&sibling_reprs),
         direct: &siblings,
         cell_names: &captured_cells,
         visible_siblings: &visible,
@@ -2282,7 +2306,7 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
             let mut cells: HashSet<SymRef> = captured_cells.difference(&param_names).copied().collect();
             cells.extend(names_captured_by_nested(&s, &d.body)?);
             let inner_reprs = base.extended(d.params.iter().cloned());
-            let inner = Ctx { reprs: &inner_reprs, cell_names: &cells, ..base };
+            let inner = Ctx { reprs: Some(&inner_reprs), cell_names: &cells, ..base };
 
             let def_name = s.symbol_name(d.name).to_string();
             let name_v = s.alloc_string(def_name);
@@ -2653,7 +2677,7 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             let mut binds = Vec::new();
             pattern_bindings(&s, pat_form, &scrut_repr, cx, &mut binds)?;
             let arm_reprs = cx.extended(binds.iter().cloned());
-            let arm_cx = Ctx { reprs: &arm_reprs, ..cx };
+            let arm_cx = Ctx { reprs: Some(&arm_reprs), ..cx };
             let pat = translate_pattern(&mut s, pat_form, &scrut_repr, arm_cx)?;
             s.push_root(pat);
             // The bindings a closure nested in this body captures. `pat-bind`

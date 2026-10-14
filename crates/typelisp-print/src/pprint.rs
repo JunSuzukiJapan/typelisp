@@ -693,6 +693,20 @@ fn render_at(
     depth: usize,
     out: &mut Out,
 ) -> Result<(), String> {
+    typelisp_mem::grow_stack(|| render_at_here(heap, ctx, st, v, standard, style, depth, out))
+}
+
+/// [`render_at`] on the stack it is given.
+fn render_at_here(
+    heap: &mut Heap,
+    ctx: RenderCtx<'_>,
+    st: &mut Renderer,
+    v: Value,
+    standard: bool,
+    style: Style,
+    depth: usize,
+    out: &mut Out,
+) -> Result<(), String> {
     // Anything that is not a list has no layout of its own — including a
     // struct/enum with a `print-object` method, whose own text is whatever
     // that method returns (`Renderer::render` performs the dispatch, and

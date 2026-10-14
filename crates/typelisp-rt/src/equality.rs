@@ -95,6 +95,11 @@ pub fn eql_val(heap: &Heap, a: Value, b: Value) -> bool {
 /// CL's `equal`: [`eql_val`] on every atom but `Cons` (structural recursion)
 /// and `Str` (case-sensitive content).
 pub fn equal_val(heap: &Heap, a: Value, b: Value) -> bool {
+    typelisp_mem::grow_stack(|| equal_val_here(heap, a, b))
+}
+
+/// [`equal_val`] on the stack it is given.
+fn equal_val_here(heap: &Heap, a: Value, b: Value) -> bool {
     let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
     match (a, b) {
         (Value::Cons(_), Value::Cons(_)) => {
@@ -142,6 +147,11 @@ fn numeric_as_ratio(heap: &Heap, v: Value) -> Option<BigRational> {
 /// `eql`/`equal`'s same-type requirement), and structs/enums recurse
 /// element-wise when their type keys and shapes match.
 pub fn equalp_val(heap: &Heap, a: Value, b: Value) -> bool {
+    typelisp_mem::grow_stack(|| equalp_val_here(heap, a, b))
+}
+
+/// [`equalp_val`] on the stack it is given.
+fn equalp_val_here(heap: &Heap, a: Value, b: Value) -> bool {
     let (a, b) = (strip_dyn(heap, a), strip_dyn(heap, b));
     if let (Some(x), Some(y)) = (numeric_as_ratio(heap, a), numeric_as_ratio(heap, b)) {
         return x == y;

@@ -656,7 +656,14 @@ fn skip_block_comment(cur: &mut Cursor) {
 // Datum dispatch
 // ----------------------------------------------------------------------
 
+/// Every nested datum is read through here, once per level, so this is where
+/// the stack is grown (`typelisp_mem::grow_stack`).
 fn read_datum(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
+    typelisp_mem::grow_stack(|| read_datum_here(cur, heap, ctx))
+}
+
+/// [`read_datum`] on the stack it is given.
+fn read_datum_here(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
     skip_ws_comments(cur, heap, ctx)?;
     // A registered macro character wins over everything the reader would
     // otherwise do with it — that is what registering one means. Looked up

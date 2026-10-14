@@ -92,6 +92,18 @@ fn walk(
     seen: &mut HashSet<SymRef>,
     order: &mut Vec<SymRef>,
 ) -> Result<(), Error> {
+    typelisp_mem::grow_stack(|| walk_here(heap, form, bound, siblings, seen, order))
+}
+
+/// [`walk`] on the stack it is given.
+fn walk_here(
+    heap: &Heap,
+    form: Value,
+    bound: &HashSet<SymRef>,
+    siblings: &HashSet<SymRef>,
+    seen: &mut HashSet<SymRef>,
+    order: &mut Vec<SymRef>,
+) -> Result<(), Error> {
     let Some(tag) = core::op_sym(heap, form) else { return Ok(()) };
     let walk_all = |forms: &[Value], seen: &mut HashSet<SymRef>, order: &mut Vec<SymRef>| -> Result<(), Error> {
         for f in forms {
@@ -475,6 +487,11 @@ fn pattern_guard_tests(
 /// descending past one — the free-variable walk already resolves arbitrarily
 /// deep beneath it, so a name two closures down still surfaces.
 fn walk_nested(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Result<(), Error> {
+    typelisp_mem::grow_stack(|| walk_nested_here(heap, form, out))
+}
+
+/// [`walk_nested`] on the stack it is given.
+fn walk_nested_here(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Result<(), Error> {
     let Some(tag) = core::op_sym(heap, form) else { return Ok(()) };
     match tag.well_known() {
         wk::LAMBDA => {
