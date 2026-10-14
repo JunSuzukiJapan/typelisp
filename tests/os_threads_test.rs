@@ -31,7 +31,7 @@ fn compile(name: &str, source: &str) -> PathBuf {
     let src_path = dir.join(format!("{}.typl", name));
     let out_path = dir.join(name);
     std::fs::write(&src_path, source).expect("failed to write test source file");
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
         .expect("compile_file failed");
     out_path
 }
@@ -271,7 +271,7 @@ fn a_thread_count_that_is_not_one_is_refused() {
     let src_path = dir.join("threads_bad_env.typl");
     let out_path = dir.join("threads_bad_env");
     std::fs::write(&src_path, "(defun main () int (progn (println \"ran\") 0))").unwrap();
-    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap(), false)
+    typelisp::compile::aot::compile_file(src_path.to_str().unwrap(), out_path.to_str().unwrap())
         .expect("compile_file failed");
     for bad in ["0", "four", "-1"] {
         let out = Command::new(&out_path).env("TYPELISP_THREADS", bad).output().unwrap();

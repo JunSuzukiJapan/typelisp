@@ -90,14 +90,16 @@ fib(25) = 75025
 同じフォルダにできます。ソースファイル名が `.typl` で終わらないときは `-o` が必要です。
 `-c`（`--compile`）を使うときは、`--image` `--heap-cells` `--feature` は指定できません。
 
-`--release` を付けると**リリースビルド**になり、`eprint`/`eprintln`（調べるための標準エラー出力。
-[印字](../reference/functions/printing.md)）を引数ごと取り除きます。取り除くものも型検査はするので、
-そこに型エラーがあればコンパイルは失敗します。`--release` を付けないときと、`typl` で直接実行する
-ときは、`eprint`/`eprintln` は標準エラー出力に書きます。`compile-file` にはリリースビルドの指定が無く、
-`--release` を付けないときと同じになります。
+`typl` に `--release` を付けると**リリースビルド**になり、`eprint`/`eprintln`（調べるための標準エラー
+出力。[印字](../reference/functions/printing.md)）を引数ごと取り除きます。取り除くものも型検査は
+するので、そこに型エラーがあればコンパイルは失敗します。`--release` は `typl` 全体のオプションで、
+`-c` だけでなく、ファイルの実行・REPL・`typl test` でも同じように効きます。`--release` を付けた
+`typl` の中で呼んだ `compile-file` もリリースビルドになり、そうして作った実行ファイルの中で
+`eval` したコードからも `eprint`/`eprintln` は取り除かれます。
 
 ```sh
-$ typl -c hello.typl --release
+$ typl --release -c hello.typl
+$ typl -c hello.typl --release     # -c の後ろに書いても同じ
 ```
 
 REPL やプログラムの中から `compile-file` を呼んでも同じことができます。

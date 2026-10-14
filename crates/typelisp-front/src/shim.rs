@@ -42,7 +42,7 @@ thread_local! {
     /// The embedded environment dump and the namespace an eval'd form is
     /// checked in, from [`rt_eval_state`]. `'static` because both point into
     /// the executable's read-only data.
-    static EVAL_DUMP: Cell<Option<(&'static [u8], &'static str, bool)>> = const { Cell::new(None) };
+    static EVAL_DUMP: Cell<Option<(&'static [u8], &'static str)>> = const { Cell::new(None) };
 
     /// The environment [`rt_eval_init`] rebuilt, or null under JIT where the
     /// running `Interp` is used instead.
@@ -57,8 +57,8 @@ thread_local! {
 
 /// Registers the embedded environment dump: `args` is `[ptr, len, ns_ptr,
 /// ns_len, release]`, the dump, the `::`-joined namespace an eval'd form is
-/// checked in (the entry file's module), and nonzero for a release build
-/// (`typl -c --release`, which leaves `eprint`/`eprintln` out).
+/// checked in (the entry file's module), and nonzero when the executable was
+/// built as a release build ([`crate::release`]) — so is the process, then.
 ///
 /// # Safety
 ///
@@ -75,8 +75,8 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
         Ok(s) => s,
         Err(e) => fatal(&format!("rt_eval_state: the namespace is not UTF-8: {}", e)),
     };
-    let release = *args.add(4) != 0;
-    EVAL_DUMP.with(|c| c.set(Some((bytes, ns, release))));
+    crate::release::set_release(*args.add(4) != 0);
+    EVAL_DUMP.with(|c| c.set(Some((bytes, ns))));
     0
 }
 
@@ -95,11 +95,11 @@ pub unsafe extern "C" fn rt_eval_state(args: *const i64, argc: u32) -> i64 {
 /// A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_eval_init(_args: *const i64, _argc: u32) -> i64 {
-    let (bytes, ns, release) = match EVAL_DUMP.with(|c| c.get()) {
+    let (bytes, ns) = match EVAL_DUMP.with(|c| c.get()) {
         Some(b) => b,
         None => fatal("rt_eval_init: the environment dump was never registered"),
     };
-    let interp = match crate::dump::restore_dump(active_heap(), bytes, ns, release) {
+    let interp = match crate::dump::restore_dump(active_heap(), bytes, ns) {
         Ok(i) => i,
         Err(e) => fatal(&format!("rt_eval_init: {}", e)),
     };

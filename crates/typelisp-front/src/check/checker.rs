@@ -1164,9 +1164,6 @@ pub struct Checker {
     /// The tests recorded under [`TestForms::Collect`], drained by
     /// [`Self::take_tests`].
     tests: Vec<TestCase>,
-    /// Whether this is a release build (`typl -c --release`), which leaves
-    /// out every `eprint`/`eprintln` — see [`Self::check_eprint`].
-    release: bool,
     /// Recoverable errors accumulated while `recover` is set — mirrors
     /// `warnings`. Each carries its own innermost source location (via the
     /// `check_at`/`check_form` `Error::at` tagging that already runs before the
@@ -1344,7 +1341,6 @@ impl Checker {
             recover: false,
             test_forms: TestForms::default(),
             tests: Vec::new(),
-            release: false,
             errors: RefCell::new(Vec::new()),
             local_refs: RefCell::new(HashMap::new()),
             node_types: RefCell::new(HashMap::new()),
@@ -1558,12 +1554,6 @@ impl Checker {
     /// and keeps the strict "abort on first error" behaviour.
     pub fn set_recover(&mut self, on: bool) {
         self.recover = on;
-    }
-
-    /// Whether this is a release build (`typl -c --release`) — see
-    /// [`Self::check_eprint`].
-    pub fn set_release(&mut self, release: bool) {
-        self.release = release;
     }
 
     /// Set the namespace that subsequent `check_form`/`check_form_at` calls
@@ -15782,8 +15772,9 @@ impl Checker {
     /// output that is the programmer's and not the program's.
     ///
     /// Checked as `(format *error-output* control args...)` (with `~%` added
-    /// to the control string for `eprintln`). In a release build the checked
-    /// form is then dropped for `()`, arguments and all: a debugging line
+    /// to the control string for `eprintln`). In a release build
+    /// ([`crate::release`]) the checked form is then dropped for `()`,
+    /// arguments and all: a debugging line
     /// costs nothing there, and an error in it is still reported, so it
     /// cannot rot unnoticed until the next debug build.
     fn check_eprint(
@@ -15814,7 +15805,7 @@ impl Checker {
         let form = forms::list_from_vec_locs(&mut s, &items)?;
         s.push_root(form);
         let checked = self.check(&mut s, interp, env, form, None)?;
-        if self.release {
+        if crate::release::is_release() {
             return self.check(&mut s, interp, env, Value::Empty, Some(&Type::Unit));
         }
         Ok(checked)

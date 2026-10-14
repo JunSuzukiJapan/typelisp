@@ -1,5 +1,5 @@
 //! `eprint`/`eprintln`: `print`/`println` to `*error-output*`, left out of a
-//! release build (`typl -c --release`) together with their arguments. The
+//! release build (`typl --release`) together with their arguments. The
 //! split between the two outputs, and the executables, can only be seen from
 //! outside, so this drives the `typl` binary.
 
@@ -51,17 +51,46 @@ fn eprint_writes_to_standard_error_only() {
 }
 
 #[test]
+fn a_release_run_leaves_eprint_and_its_arguments_out() {
+    let dir = scratch("run-release");
+    let file = write_program(&dir);
+    let (code, out, err) = output(Command::new(env!("CARGO_BIN_EXE_typl")).arg("--release").arg(&file));
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "out\n(ok 5)\n", ""));
+    // After the file name it is the program's own argument.
+    let (_, _, err) = output(Command::new(env!("CARGO_BIN_EXE_typl")).arg(&file).arg("--release"));
+    assert_eq!(err, "a=1 b=7\nfrom eval\n");
+}
+
+#[test]
+fn compile_file_builds_what_the_process_is() {
+    let dir = scratch("compile-file");
+    write_program(&dir);
+    std::fs::write(dir.join("build.typl"), "(compile-file \"prog.typl\" \"prog-built\")\n").unwrap();
+    let (code, _, err) =
+        output(Command::new(env!("CARGO_BIN_EXE_typl")).arg("--release").arg("build.typl").current_dir(&dir));
+    assert_eq!(code, 0, "{}", err);
+    let (code, out, err) = output(&mut Command::new(dir.join("prog-built")));
+    assert_eq!((code, out.as_str(), err.as_str()), (0, "out\n(ok 5)\n", ""));
+}
+
+#[test]
 fn a_release_build_leaves_eprint_and_its_arguments_out() {
     let dir = scratch("aot");
     let file = write_program(&dir);
-    for (release, expected_out, expected_err) in [
-        (false, "side ran\nout\n(ok 5)\n", "a=1 b=7\nfrom eval\n"),
-        (true, "out\n(ok 5)\n", ""),
+    // `--release` is typl's own option, before `-c` or among its arguments.
+    for (name, before, after, expected_out, expected_err) in [
+        ("prog-debug", false, false, "side ran\nout\n(ok 5)\n", "a=1 b=7\nfrom eval\n"),
+        ("prog-release", true, false, "out\n(ok 5)\n", ""),
+        ("prog-release-after", false, true, "out\n(ok 5)\n", ""),
     ] {
-        let exe = dir.join(if release { "prog-release" } else { "prog-debug" });
+        let release = before || after;
+        let exe = dir.join(name);
         let mut build = Command::new(env!("CARGO_BIN_EXE_typl"));
+        if before {
+            build.arg("--release");
+        }
         build.arg("-c").arg(&file).arg("-o").arg(&exe);
-        if release {
+        if after {
             build.arg("--release");
         }
         let (code, _, err) = output(&mut build);
@@ -77,7 +106,7 @@ fn a_release_build_still_checks_what_it_leaves_out() {
     let file = dir.join("bad.typl");
     std::fs::write(&file, "(defun main () () (eprintln \"~a\" (no-such-function)))\n").unwrap();
     let (code, _, err) = output(
-        Command::new(env!("CARGO_BIN_EXE_typl")).arg("-c").arg(&file).arg("-o").arg(dir.join("bad")).arg("--release"),
+        Command::new(env!("CARGO_BIN_EXE_typl")).arg("--release").arg("-c").arg(&file).arg("-o").arg(dir.join("bad")),
     );
     assert_eq!(code, 1);
     assert!(err.contains("no such function: no-such-function"), "{}", err);

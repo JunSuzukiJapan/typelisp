@@ -36,8 +36,7 @@ const HELP: &str = "\
 Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
-  typl [--lib-dir DIR] -c SOURCE [-o OUTPUT] [--release]
-                                                 compile SOURCE to an executable
+  typl [--lib-dir DIR] -c SOURCE [-o OUTPUT]     compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
                                                  name contains FILTER
@@ -45,7 +44,8 @@ Usage:
 Options:
   -c, --compile SOURCE   compile SOURCE to a native executable
   -o OUTPUT              name of the executable (default: SOURCE without .typl)
-  --release              (with -c) leave every eprint/eprintln out
+  --release              a release build: every eprint/eprintln is left out
+                         (of a run, a test, or the executable -c builds)
   --lib-dir DIR          link DIR/libtypelisp_front.a into compiled executables
                          (default: a release typl writes the one built into
                          it to $TYPELISP_HOME/lib, ~/.typelisp/lib if unset;
@@ -91,6 +91,19 @@ fn main() -> rustyline::Result<()> {
     // `--help`/`--version`/`--remove-lib` (and its `--others`/`--all`) are
     // `typl`'s only among the options before a script's name; from the name
     // on, they are the script's own arguments.
+    let own_len = args.iter().position(|a| !a.starts_with("--")).unwrap_or(args.len());
+    // `--release` only sets the process's release flag; what behaves
+    // differently in a release build asks it (`typelisp::release`).
+    let release = args[..own_len].iter().any(|a| a == "--release");
+    let args: Vec<String> = args
+        .iter()
+        .enumerate()
+        .filter(|&(i, a)| !(i < own_len && a == "--release"))
+        .map(|(_, a)| a.clone())
+        .collect();
+    if release {
+        typelisp::release::set_release(true);
+    }
     let own = &args[..args.iter().position(|a| !a.starts_with("--")).unwrap_or(args.len())];
     if own.iter().any(|a| a == "--help") {
         print!("{}", HELP);
@@ -176,18 +189,18 @@ fn main() -> rustyline::Result<()> {
     repl(heap_cells, features, image)
 }
 
-/// `typl -c SOURCE [-o OUTPUT] [--release]`: `args` is what follows the
-/// `-c` (or `--compile`, which `flag` names for the diagnostics). Without
-/// `-o`, the executable is `SOURCE` with its `.typl` extension removed.
-/// Returns the process exit code.
+/// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c` (or
+/// `--compile`, which `flag` names for the diagnostics). Without `-o`, the
+/// executable is `SOURCE` with its `.typl` extension removed. A `--release`
+/// among them is the global one, written after `-c`. Returns the process
+/// exit code.
 fn compile_command(flag: &str, args: &[String]) -> i32 {
     let mut source = None;
     let mut output = None;
-    let mut release = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         if a == "--release" {
-            release = true;
+            typelisp::release::set_release(true);
         } else if a == "-o" {
             match it.next() {
                 Some(v) => output = Some(PathBuf::from(v)),
@@ -215,7 +228,7 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
             return 1;
         }
     };
-    match typelisp::compile::aot::compile_file(&source.to_string_lossy(), &output.to_string_lossy(), release) {
+    match typelisp::compile::aot::compile_file(&source.to_string_lossy(), &output.to_string_lossy()) {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("error: {}", e);

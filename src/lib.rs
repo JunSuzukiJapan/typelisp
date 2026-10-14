@@ -12,7 +12,7 @@ pub mod compile;
 pub mod compiler;
 pub mod testing;
 
-pub use typelisp_front::{check, dump, errors, eval, mem, owned_form, prelude, project, read, sexpr_variant, type_key, types};
+pub use typelisp_front::{check, dump, errors, eval, mem, owned_form, prelude, project, read, release, sexpr_variant, type_key, types};
 
 pub use typelisp_front::errors::*;
 pub use typelisp_front::read::*;

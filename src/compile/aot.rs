@@ -253,7 +253,7 @@ pub fn compile_file_on_own_thread(source_path: &str, output_path: &str) -> Resul
     let (source_path, output_path) = (source_path.to_string(), output_path.to_string());
     let build = std::thread::Builder::new()
         .stack_size(64 * 1024 * 1024)
-        .spawn(move || compile_file(&source_path, &output_path, false))
+        .spawn(move || compile_file(&source_path, &output_path))
         .map_err(|e| format!("failed to start the build thread: {}", e))?;
     match build.join() {
         Ok(result) => result,
@@ -265,16 +265,16 @@ pub fn compile_file_on_own_thread(source_path: &str, output_path: &str) -> Resul
 /// `use`s), and links a native executable at `output_path`. See the module
 /// doc comment for scope.
 ///
-/// `release` is `typl -c --release`: every `eprint`/`eprintln` is left out,
-/// in the program and in whatever it `eval`s ([`Checker::set_release`]).
-pub fn compile_file(source_path: &str, output_path: &str, release: bool) -> Result<(), String> {
+/// A release build when the process is one ([`crate::release`]): the
+/// checker leaves `eprint`/`eprintln` out, and the executable carries the
+/// flag for whatever it `eval`s.
+pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> {
     crate::compile::driver::emitted_layout_is_runnable()?;
     let source =
         fs::read_to_string(source_path).map_err(|e| format!("failed to read \"{}\": {}", source_path, e))?;
 
     let mut heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
-    chk.set_release(release);
     let mut interp = Interp::new();
     // The prelude first, and before `load_compiler` — the same order `typl`'s
     // own startup uses, and for the same reason on both sides: the prelude's
@@ -669,7 +669,7 @@ pub fn compile_file(source_path: &str, output_path: &str, release: bool) -> Resu
             &format_calls,
             &printer_globals,
             &callback_entries,
-            eval_env.as_deref().map(|bytes| (bytes, eval_ns.as_str(), release)),
+            eval_env.as_deref().map(|bytes| (bytes, eval_ns.as_str(), crate::release::is_release())),
             main_returns_int,
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))

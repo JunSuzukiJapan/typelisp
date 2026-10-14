@@ -211,10 +211,12 @@ typelisp で書けるものは typelisp で書く（Rust 組み込みは Rust �
   追加）。`E` には定義の時点で `print-object` を要求する（Rust の `Debug` に当たる）。ランナーは
   `(match (NAME) ((ok _) ()) ((err e) (panic ...)))` を組み立て、`panic` の cons にテスト関数の
   定義の位置を付ける。prelude の補助関数で `panic` すると、失敗の位置が `<prelude>:行` になるため。
-- 同じく 2026-10-14 のユーザー指示で、`eprint`/`eprintln`（標準エラー出力）と `typl -c --release` を
-  足した。リリースビルドでは引数ごと `()` に置き換える（検査はする）。「リリースビルド」は CLI の
-  `--release` だけ（ユーザー決定。`compile-file` 関数には無い）。実行ファイルの中の `eval` にも
-  `rt_eval_state` の 5 番目の引数で伝えるので、ABI 版は 0.2.10 になった。
+- 同じく 2026-10-14 のユーザー指示で、`eprint`/`eprintln`（標準エラー出力）と `typl --release` を
+  足した。リリースビルドでは引数ごと `()` に置き換える（検査はする）。release フラグはプロセスに
+  1 つ（`typelisp_front::release`）で、`--release` はそれを立てるだけ、変わるもの（いまは
+  `eprint`/`eprintln` の検査）がその時点のフラグを見る（ユーザー指示）。`--release` は typl 全体の
+  オプションで、実行・REPL・`typl test`・`-c`・その中の `compile-file` のすべてに効く。実行ファイルは
+  ビルド時のフラグを `rt_eval_state` の 5 番目の引数で持ち、中の `eval` も従うので ABI 版は 0.2.10。
 - 読み込むファイルは、ソースのルートの下の全 `.typl` と、`typelisp.toml` のフォルダの `tests/` の
   下の全 `.typl`。後者のモジュールは `typelisp.toml` のフォルダからの道筋（`tests::foo`）。
   `typl test FILE.typl [FILTER]` で 1 ファイルだけも走らせられる。既に読んだモジュールは

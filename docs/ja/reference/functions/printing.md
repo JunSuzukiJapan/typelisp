@@ -13,7 +13,7 @@
 |---|---|---|---|
 | `print` | `(print control args...)` | `(string, ...)→Unit` | 制御文字列を書式展開し、改行なしで標準出力へ書く |
 | `println` | `(println control args...)` | `(string, ...)→Unit` | 同上、末尾に改行を付ける |
-| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | `print` と同じだが、標準エラー出力（`*error-output*`）へ書く。Rust の `eprint!`。**リリースビルド（`typl -c --release`）では引数ごと取り除かれる**（引数は評価されない）。取り除かれる場合も型検査は行う |
+| `eprint` | `(eprint control args...)` | `(string, ...)→Unit` | `print` と同じだが、標準エラー出力（`*error-output*`）へ書く。Rust の `eprint!`。**リリースビルド（`typl --release`）では引数ごと取り除かれる**（引数は評価されない）。取り除かれる場合も型検査は行う |
 | `eprintln` | `(eprintln control args...)` | `(string, ...)→Unit` | 同上、末尾に改行を付ける。Rust の `eprintln!` |
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL の `format`。展開した文字列を返す。`dest` が `true`（CL の `t`）なら加えて標準出力へも書く／`false`（CL の `nil`）なら書かず文字列を返すだけ |
 | `format`（ストリーム宛） | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` が `bool` でなければ CL のストリーム宛。展開した文字列をそのストリームへ書く。戻り値は `()`（CL の `nil` に当たる）で、文字列は返らない |

@@ -320,9 +320,10 @@ typl --compile foo.typl -o bar
 ```
 
 `--release` を付けるとリリースビルドになり、調べるための出力 `eprint`/`eprintln` を取り除きます。
+`--release` は `typl` 全体のオプションで、ファイルを実行するときやテストのときにも効きます。
 
 ```sh
-typl -c foo.typl --release
+typl --release -c foo.typl
 ```
 
 コンパイルして作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` をリンクします。
