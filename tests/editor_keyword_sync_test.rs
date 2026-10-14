@@ -35,7 +35,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path as FsPath, PathBuf};
 
 use typelisp::check::registry::Namespace;
-use typelisp::{load_prelude, Checker, Heap, Interp, INTERNAL_MODULE};
+use typelisp::{load_prelude, Checker, Heap, Interp, INTERNAL_MODULE, SPECIAL_FORM_HEADS};
 
 // ---------------------------------------------------------------- the truth
 
@@ -612,4 +612,20 @@ fn the_editor_definitions_exist_where_the_tests_expect_them() {
         let path: PathBuf = repo_root().join(rel);
         assert!(FsPath::new(&path).is_file(), "missing editor file: {}", rel);
     }
+}
+
+/// `SPECIAL_FORM_HEADS` — the names a macro may not take over — is exactly
+/// what `check_list` dispatches on. A hand-kept copy of the list had fallen
+/// twelve names behind, which let a macro named `block` take over
+/// `(block ...)` at top level.
+#[test]
+fn the_special_form_list_is_the_dispatch() {
+    let dispatched = special_forms_from_checker();
+    let listed: BTreeSet<String> = SPECIAL_FORM_HEADS.iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        listed, dispatched,
+        "SPECIAL_FORM_HEADS and Checker::check_list's dispatch differ: missing {:?}, extra {:?}",
+        dispatched.difference(&listed).collect::<Vec<_>>(),
+        listed.difference(&dispatched).collect::<Vec<_>>()
+    );
 }

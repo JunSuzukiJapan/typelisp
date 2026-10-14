@@ -264,3 +264,28 @@ fn compile_names_one_instantiations_method() {
     let msg = check_err(&format!("{}(compile box::twice)", DOCUMENTED));
     assert!(msg.contains("is written for more than one instantiation"), "{}", msg);
 }
+
+/// `(setf (ACCESSOR x) v)` finds a `set-ACCESSOR` one instantiation's `impl`
+/// defines, as a call finds that instantiation's methods.
+#[test]
+fn setf_finds_a_setter_of_one_instantiation() {
+    both(
+        r##"
+(defstruct Box<T> (v T))
+(impl Box<int>
+  (pub doubled (self) int (* 2 self::v))
+  (pub set-doubled (self (n int)) int (progn (setf self::v (/ n 2)) n)))
+"##,
+        "(let ((b (make-instance 'Box<int> :v 1))) (progn (setf (doubled b) 10) (format false \"~a\" (doubled b))))",
+        "10",
+    );
+}
+
+/// A macro cannot take over a special form's name — at top level, where the
+/// loader expands macro calls first, the same as inside a function.
+#[test]
+fn a_macro_does_not_take_over_a_special_form_at_top_level() {
+    let src = r#"(defmacro block (name &rest body) "taken over")
+(block outer "the special form")"#;
+    assert_eq!(eval_string(src), "the special form");
+}

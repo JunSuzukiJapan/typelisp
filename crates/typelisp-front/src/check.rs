@@ -18,7 +18,7 @@ pub mod semantic;
 
 pub use resolved::{CompileTarget, Pattern};
 pub use registry::{AdtDef, AdtKind, AssocFn, CField, CStructDef, DefLocs, Docs, FnSig, MacroDef, Namespace, Registry, TypeAlias, VarInfo, Variant};
-pub use checker::{Checker, MacroExpander, MacroLambda, RedefPolicy, TestCase, TestForms, TestReturn, TopLevelForm, MONO_BUNDLE_MODULE};
+pub use checker::{Checker, MacroExpander, MacroLambda, RedefPolicy, TestCase, TestForms, TestReturn, TopLevelForm, MONO_BUNDLE_MODULE, SPECIAL_FORM_HEADS};
 pub use locate::{
     completion_candidates, completion_locals, definition_target, doc_for, hover_text, locate_node, CompletionCandidate,
     CompletionKind,

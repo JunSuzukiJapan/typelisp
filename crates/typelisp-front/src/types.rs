@@ -541,6 +541,17 @@ pub fn primitive_types() -> Vec<Type> {
 /// keywords [`parse_type_name`] recognizes, so `(defmethod m ((self i32)) ...)`
 /// and this lookup agree on the same name. `None` for `Unit`/`Never`/`Named`/
 /// `Fn`, which are not primitive value types with their own method table here.
+/// The path a type's methods and `impl`s are registered under: a named
+/// type's own path, a primitive's built-in name ([`prim_type_path`]). `None`
+/// for a type with no name — a trait object, `()`, `!`, a function, a pointer
+/// — which has no table of its own.
+pub fn nominal_path(ty: &Type) -> Option<Path> {
+    match ty {
+        Type::Named(n, _) => Some(n.clone()),
+        other => prim_type_path(other),
+    }
+}
+
 pub fn prim_type_path(ty: &Type) -> Option<Path> {
     let name = match ty {
         // `ptr` is genuinely opaque — nothing to call on it. The two C words

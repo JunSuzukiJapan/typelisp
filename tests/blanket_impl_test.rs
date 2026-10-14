@@ -280,3 +280,33 @@ fn an_impl_over_a_type_constructor_is_not_a_blanket_impl() {
         (let ((v (build))) (push v 1) (size v))";
     assert_eq!(eval_ok(src), Value::Int(7));
 }
+
+/// A supertrait a blanket impl supplies is a supertrait the type has. The
+/// check used to read the type's own `impl` list and refuse this `impl`.
+#[test]
+fn a_blanket_impl_satisfies_a_supertrait() {
+    let src = "
+(deftrait Named () (name ((self Self)) int))
+(deftrait Greet (Named) (greet ((self Self)) int))
+(deftrait Tag () (tag ((self Self)) int))
+(impl<T> Named T (where (Tag T)) (name ((self Self)) int (tag self)))
+(defstruct P (x int))
+(impl Tag P (tag ((self Self)) int self::x))
+(impl Greet P (greet ((self Self)) int (* 10 (name self))))
+(greet (make-instance 'P :x 4))";
+    assert_eq!(eval_ok(src), Value::Int(40));
+}
+
+/// A value pattern `(= y)` compares with whatever `equals` the type answers
+/// to — a blanket impl's too.
+#[test]
+fn a_value_pattern_uses_a_blanket_eq() {
+    let src = "
+(deftrait Key () (key ((self Self)) int))
+(impl<T> Eq T (where (Key T)) (equals ((self Self) (other Self)) bool (= (key self) (key other))))
+(defstruct P (x int))
+(impl Key P (key ((self Self)) int self::x))
+(let ((a (make-instance 'P :x 1)) (b (make-instance 'P :x 1)))
+  (match a ((= b) 1) (_ 0)))";
+    assert_eq!(eval_ok(src), Value::Int(1));
+}
