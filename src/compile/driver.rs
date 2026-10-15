@@ -100,6 +100,64 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
             typelisp_mem::tagged::LAYOUT
         ));
     }
+    let wanted: Vec<String> = lib.items.iter().map(target_symbol_name).collect();
+    let installed = {
+        let mut cache = INSTALLED_LIBRARIES.lock().unwrap_or_else(|e| e.into_inner());
+        let hit = cache
+            .iter()
+            .find(|c| c.bitcode == lib.bitcode && c.body_abi == lib.body_abi && c.wanted == wanted)
+            .map(|c| c.bodies.iter().map(|(i, f)| (*i, f.share())).collect::<Vec<_>>());
+        match hit {
+            Some(bodies) => bodies,
+            None => {
+                let bodies = compile_library(&lib)?;
+                cache.push(InstalledLibrary {
+                    bitcode: lib.bitcode.to_vec(),
+                    body_abi: lib.body_abi,
+                    wanted,
+                    bodies: bodies.iter().map(|(i, f)| (*i, f.share())).collect(),
+                });
+                bodies
+            }
+        }
+    };
+    for (i, cf) in installed {
+        let item = &lib.items[i];
+        let def = interp.target_def(item).ok_or_else(|| {
+            format!("{}: `{}` is not registered — exec its SOURCE first", lib.label, item.link_name())
+        })?;
+        *def.compiled.borrow_mut() = Some(Rc::new(cf));
+    }
+    interp.printer_tables_changed();
+    Ok(())
+}
+
+/// A library [`install_compiled_library`] has made machine code for in this
+/// process, kept for the next session that installs the same one.
+///
+/// The bodies hold nothing of the session that first installed them: the
+/// bitcode is an artifact compiled before any process existed, so it reaches
+/// the heap, the globals and the `rt_*` shims only through what it is handed
+/// at run time. Every session made a copy of the same machine code — most of
+/// the time a test binary spends, one session per test.
+struct InstalledLibrary {
+    bitcode: Vec<u8>,
+    body_abi: u8,
+    /// The symbol of each item the library was asked for, in order.
+    wanted: Vec<String>,
+    /// The items that have a body, by their index in `wanted`.
+    bodies: Vec<(usize, crate::compile::CompiledFn)>,
+}
+
+// SAFETY: a `CompiledFn` is an address and an `Arc` of the code behind it;
+// nothing in it belongs to the thread that made it.
+unsafe impl Send for InstalledLibrary {}
+
+static INSTALLED_LIBRARIES: std::sync::Mutex<Vec<InstalledLibrary>> = std::sync::Mutex::new(Vec::new());
+
+/// Makes machine code for `lib`'s bodies: each item with one, by its index in
+/// `lib.items`.
+fn compile_library(lib: &crate::compile::CompiledLibrary) -> Result<Vec<(usize, crate::compile::CompiledFn)>, String> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let buffer = MemoryBuffer::create_from_memory_range_copy(lib.bitcode, lib.label);
     let module = Module::parse_bitcode_from_buffer(&buffer, crate::compile::llvm_context())
@@ -116,14 +174,12 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
     // Checking for a body rather than a declaration matters: `rt_*` shims
     // and any not-yet-filled forward declaration answer `get_function`
     // too.
-    let items: Vec<&CompileTarget> = lib
-        .items
-        .iter()
-        .filter(|item| {
-            module.get_function(&target_symbol_name(item)).is_some_and(|f| f.count_basic_blocks() > 0)
+    let items: Vec<usize> = (0..lib.items.len())
+        .filter(|&i| {
+            module.get_function(&target_symbol_name(&lib.items[i])).is_some_and(|f| f.count_basic_blocks() > 0)
         })
         .collect();
-    let internal_names: Vec<String> = items.iter().map(|item| target_symbol_name(item)).collect();
+    let internal_names: Vec<String> = items.iter().map(|&i| target_symbol_name(&lib.items[i])).collect();
     // Wire only the `rt_*` shims the module actually forward-declares.
     // Skipping the rest is not a leniency: a module can only *call* what
     // it declares, so a shim with no declaration here has no call site to
@@ -142,14 +198,7 @@ pub fn install_compiled_library(interp: &Interp, lib: crate::compile::CompiledLi
     let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals, lib.body_abi)
         .map_err(|e| format!("{} JIT install failed: {}", lib.label, e))?;
 
-    for (item, cf) in items.iter().zip(compiled_fns) {
-        let def = interp.target_def(item).ok_or_else(|| {
-            format!("{}: `{}` is not registered — exec its SOURCE first", lib.label, item.link_name())
-        })?;
-        *def.compiled.borrow_mut() = Some(Rc::new(cf));
-    }
-    interp.printer_tables_changed();
-    Ok(())
+    Ok(items.into_iter().zip(compiled_fns).collect())
 }
 
 /// A fresh module named `name`, holding a declaration for every `rt_*` shim

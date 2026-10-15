@@ -345,6 +345,12 @@ impl CompiledFn {
             .collect()
     }
 
+    /// Another owner of the same body: the same address, keeping the same
+    /// code alive.
+    pub(crate) fn share(&self) -> CompiledFn {
+        CompiledFn { code: self.code.clone(), addr: self.addr, body_abi: self.body_abi }
+    }
+
     /// Runs this function. A compiled `(panic ...)` unwinds out of here
     /// rather than returning, so callers that need to recover must wrap the
     /// call in [`catch_compiled_panic`].
