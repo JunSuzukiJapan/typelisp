@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 14850a6eb5e5f3e73f413fa400ec7578db39cc98 -->
 # typelisp सिंटैक्स संदर्भ
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है, जो S-एक्सप्रेशन में लिखा जाता है। बिल्ट-इन फ़ंक्शन और मेथड की सूची के लिए [बिल्ट-इन फ़ंक्शन](functions/README.md) देखें; टाइप की सूची के लिए [types.md](types.md); और त्रुटि संदेश पढ़ने के लिए [errors.md](errors.md)।

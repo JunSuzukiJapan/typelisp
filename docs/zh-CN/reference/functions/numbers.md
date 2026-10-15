@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ 14850a6eb5e5f3e73f413fa400ec7578db39cc98 -->
 # 数值
 
 整数、浮点数、有理数、复数、布尔值的运算以及与数值相关的函数。调用形式的读法见[内置函数](README.md)。
