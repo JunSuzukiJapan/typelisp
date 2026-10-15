@@ -23,7 +23,7 @@
     (while (< head (len queue))
       (let ((cur (get queue head)))
         (setf head (+ head 1))
-        (let ((cx (mod cur w)) (cy (/ cur w)) (d (unwrap (get dist cur))))
+        (let ((cx (mod cur w)) (cy (truncate cur w)) (d (unwrap (get dist cur))))
           (dotimes (dir 4)
             (let ((nx (+ cx (cond ((= dir 0) -1) ((= dir 1) 1) (else 0))))
                   (ny (+ cy (cond ((= dir 2) -1) ((= dir 3) 1) (else 0)))))

@@ -45,13 +45,13 @@ Số có các loại sau:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` trên hai số nguyên cho một số nguyên với phần thập phân bị bỏ đi (nó không tạo ra phân số như
-Common Lisp). Hãy dùng `(mod 7 2)` để lấy phần dư.
+`/` trên hai số nguyên cho ra phân số khi không chia hết, giống Common Lisp. Muốn số nguyên bỏ phần
+thập phân thì dùng `(truncate 7 2)` (`3`), còn phần dư thì dùng `(mod 7 2)`.
 
 Các giá trị boolean là `true` và `false`.
 

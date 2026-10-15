@@ -25,14 +25,15 @@ worden bij het controleren de volgende zaken gecontroleerd.
   getal waar een teken wordt verwacht enzovoort) zijn fouten. Ze worden nooit stilzwijgend genegeerd of
   afgerond.
 
-De **elementen** van een lijstargument (`~{`, `~:{`, `~<...~:>`) zijn `Sexpr`s, en noch hun aantal noch
-het type van elk element kan uit de types worden afgeleid. Eisen aan elementen (een geheel getal voor
-`~d`, enzovoort) en ontbrekende elementen worden gecontroleerd wanneer de waarden binnenkomen, en zijn
-runtimefouten (er wordt nooit in plaats daarvan naar een andere representatie overgeschakeld).
+De **elementen** van een lijstargument (`~{`, `~:{`, `~<...~:>`) zijn `Sexpr`s; noch hun aantal noch het
+type van elk element valt uit de typen af te leiden. Eisen aan elementen (een teken voor `~c` enz.) en
+ontbrekende elementen worden gecontroleerd wanneer de waarden aankomen en zijn runtimefouten (er wordt
+nooit in plaats daarvan naar een andere weergave overgeschakeld).
 
-De soepele regels van CL zijn niet overgenomen. Een niet-geheel getal aan `~d` geven en het als `~a`
-laten afdrukken, of `~:[` dat elke waarde als boolean behandelt, worden niet op die manier
-geherinterpreteerd; het zijn typefouten.
+`~d` `~b` `~o` `~x` en `~r` met een grondtal drukken een niet-geheel getal af zoals `~a` dat zou doen,
+decimaal, zoals in CL (`(format false "~5d" 1/2)` is `"  1/2"`). De andere toegeeflijke regels van CL
+worden niet overgenomen: dat `~:[` elke waarde als booleaanse waarde behandelt, wordt niet zo
+herdacht; het is een typefout.
 
 ## 2. Uitvoer (verbruikt één argument)
 
@@ -41,7 +42,7 @@ geherinterpreteerd; het zijn typefouten.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=rechts uitlijnen | Esthetisch (`princ` van CL; strings zonder aanhalingstekens). Het argument kan van elk type zijn |
 | `~s` | Idem | Standaard (`prin1` van CL; een vorm die weer kan worden ingelezen). Het argument kan van elk type zijn |
 | `~w` | — | `write` van CL. Pretty-print als `*print-pretty*` waar is, anders hetzelfde als `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=cijfergroepen, `@`=altijd een teken | Decimale/binaire/octale/hexadecimale gehele getallen. Het argument is een geheel getal |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=cijfergroepen, `@`=altijd een teken | Decimale/binaire/octale/hexadecimale gehele getallen. Het argument mag alles zijn (een niet-geheel getal wordt als met `~a` decimaal afgedrukt) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (met een grondtal) of geen | Met een grondtal dat grondtal (2 tot en met 36). Zonder: `~r`=Engels hoofdtelwoord, `~:r`=Engels rangtelwoord, `~@r`=Romeinse cijfers, `~:@r`=oude Romeinse cijfers. Het argument is een geheel getal |
 | `~p` | `:`=één terug, `@`=y/ies | Meervouden (`~p`→"s", `~@p`→"y"/"ies"). Het argument is een geheel getal |
 | `~c` | `:`=naam, `@`=`#\`-syntaxis | Een teken. Het argument is een `char` |

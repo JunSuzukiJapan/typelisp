@@ -109,7 +109,7 @@ struct Case {
 const CASES: &[Case] = &[
     Case {
         what: "int division by zero",
-        defs: "(defun f ((a int) (b int)) int (/ a b))",
+        defs: "(defun f ((a int) (b int)) int (truncate a b))",
         call: "(f 5 0)",
         message: "divide by zero",
     },
@@ -141,7 +141,7 @@ const CASES: &[Case] = &[
     },
     Case {
         what: "bignum division by zero",
-        defs: "(defun f ((a int) (b int)) int (/ a b))",
+        defs: "(defun f ((a int) (b int)) int (truncate a b))",
         call: "(f 100000000000000000000 0)",
         message: "divide by zero",
     },
@@ -328,7 +328,7 @@ fn a_compiled_cleanup_runs_when_a_zero_divisor_unwinds_through_it() {
     let mut s = Session::new();
     s.ok(r#"
         (defvar (ran int) 0)
-        (defun f ((b int)) int (unwind-protect (/ 5 b) (setf ran 1)))
+        (defun f ((b int)) int (unwind-protect (truncate 5 b) (setf ran 1)))
         (compile f)
         "#);
     assert_eq!(s.panics("(f 0)"), "divide by zero");
@@ -365,7 +365,7 @@ fn a_compiled_catch_does_not_swallow_a_runtime_failure() {
     s.ok(r#"
         (defvar (ran int) 0)
         (defun f ((b int)) int
-          (catch 'done (unwind-protect (/ 5 b) (setf ran 1))))
+          (catch 'done (unwind-protect (truncate 5 b) (setf ran 1))))
         (compile f)
         "#);
     assert_eq!(s.panics("(f 0)"), "divide by zero");
@@ -377,7 +377,7 @@ fn a_compiled_catch_does_not_swallow_a_runtime_failure() {
 #[test]
 fn a_runtime_failure_unwinds_through_intermediate_compiled_frames() {
     let src = r#"
-        (defun deep ((b int)) int (/ 5 b))
+        (defun deep ((b int)) int (truncate 5 b))
         (defun middle ((b int)) int (+ 1 (deep b)))
         (defun f ((b int)) int (middle b))
         (compile f)
@@ -394,7 +394,7 @@ fn a_runtime_failure_unwinds_through_intermediate_compiled_frames() {
 #[test]
 fn a_session_survives_a_compiled_runtime_failure_and_keeps_evaluating() {
     let mut s = Session::new();
-    s.ok("(defun f ((a int) (b int)) int (/ a b)) (compile f)");
+    s.ok("(defun f ((a int) (b int)) int (truncate a b)) (compile f)");
     assert_eq!(s.panics("(f 5 0)"), "divide by zero");
     // The same compiled function, this time with a divisor it can use.
     assert_eq!(s.ok("(f 10 2)"), Value::Int(5), "the session did not survive");

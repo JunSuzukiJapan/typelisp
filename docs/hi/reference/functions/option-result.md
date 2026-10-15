@@ -31,7 +31,7 @@
 
 ```lisp
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+  (if (= 0 (mod n 2)) (option::some (truncate n 2)) (option::none)))
 
 (-> (option::some 8)
     (and-then half)                          ; (some 4)

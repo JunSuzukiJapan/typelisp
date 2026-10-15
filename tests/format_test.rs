@@ -89,11 +89,15 @@ fn unknown_directive_is_a_type_error() {
     assert!(msg.contains("unknown directive"), "got {:?}", msg);
 }
 
-/// CL prints a non-integer `~D` argument as `~A`. This language checks it.
+/// CL prints a non-integer `~D` argument (and `~B`/`~O`/`~X`/`~nR`) as
+/// `~A` would, in decimal base, padded to `mincol` the same way.
 #[test]
-fn decimal_on_a_non_integer_is_a_type_error() {
-    let msg = check_err(r#"(format false "~d" "nope")"#);
-    assert!(msg.contains("~d needs an integer, but argument 1 is `string`"), "got {:?}", msg);
+fn decimal_on_a_non_integer_prints_as_aesthetic() {
+    assert_eq!(fmt(r#"(format false "~d" "nope")"#), "nope");
+    assert_eq!(fmt(r#"(format false "[~5d]" 1/2)"#), "[  1/2]");
+    assert_eq!(fmt(r#"(format false "~x ~b ~8r" 1.5 1/3 1/3)"#), "1.5 1/3 1/3");
+    assert_eq!(fmt(r#"(dlet ((*print-base* 16)) (format false "~d" 1/15))"#), "1/15");
+    assert_eq!(fmt(r#"(format false "~{~d~^ ~}" '(1 "a" 1/2))"#), "1 a 1/2");
 }
 
 // ---- padding / justification -------------------------------------------------
@@ -420,7 +424,6 @@ fn a_bad_arg_type_is_a_static_type_error() {
 #[test]
 fn each_directive_checks_its_argument_type() {
     let cases = [
-        (r#"(format false "~x" 1.5)"#, "~x needs an integer, but argument 1 is `f64`"),
         (r#"(format false "~r" "x")"#, "~r needs an integer, but argument 1 is `string`"),
         (r#"(format false "~c" 5)"#, "~c needs a char, but argument 1 is `int`"),
         (r#"(format false "~f" "s")"#, "~f needs a number, but argument 1 is `string`"),
@@ -448,12 +451,12 @@ fn the_argument_cursor_is_followed() {
     assert_eq!(fmt(r#"(format false "~@{~a~^,~}" 1 2 3)"#), "1,2,3");
     assert_eq!(fmt(r#"(format false "~2@*~a~0@*~a" 1 2 3)"#), "31");
     let cases = [
-        // `~*` skips the string, so `~d` lands on it only without the skip.
-        (r#"(format false "~a~:*~d" "s")"#, "~d needs an integer, but argument 1 is `string`"),
+        // `~*` skips the string, so `~r` lands on it only without the skip.
+        (r#"(format false "~a~:*~r" "s")"#, "~r needs an integer, but argument 1 is `string`"),
         // Either clause may run, so both are checked.
-        (r#"(format false "~:[~d~;~a~]" true "s")"#, "~d needs an integer, but argument 2 is `string`"),
+        (r#"(format false "~:[~r~;~a~]" true "s")"#, "~r needs an integer, but argument 2 is `string`"),
         // Each round of `~@{` lands on the next argument.
-        (r#"(format false "~@{~d~}" 1 2 "s")"#, "~d needs an integer, but argument 3 is `string`"),
+        (r#"(format false "~@{~r~}" 1 2 "s")"#, "~r needs an integer, but argument 3 is `string`"),
         (r#"(format false "~2*~a" 1)"#, "~* moves to argument 2, outside the 1 given"),
         (r#"(format false "~:*~a" 1)"#, "~* moves to argument -1, outside the 1 given"),
         (r#"(format false "~:p" 1)"#, "~:p reuses the previous argument, and there is none"),
@@ -480,7 +483,7 @@ fn an_escape_that_fires_ends_the_check_too() {
 #[test]
 fn a_list_element_of_the_wrong_type_is_a_recoverable_error() {
     for (src, want) in [
-        (r#"(format false "~{~d~}" '(1 "a"))"#, "~d requires an integer argument"),
+        (r#"(format false "~{~r~}" '(1 "a"))"#, "~r requires an integer argument"),
         (r#"(format false "~{~c~}" '(1))"#, "~c requires a character argument"),
         (r#"(format false "~:{~a~}" '(1 2))"#, "is not a proper list"),
         (r#"(format false "~{~:[a~;b~]~}" '(1))"#, "~:[ requires a bool argument"),

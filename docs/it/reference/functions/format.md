@@ -24,14 +24,14 @@ in fase di controllo vengono verificate le seguenti cose.
   (una larghezza negativa, una base diversa da 2-36, un intero dove è atteso un carattere e così via)
   sono errori. Non vengono mai ignorati o arrotondati in silenzio.
 
-Gli **elementi** di un argomento lista (`~{`, `~:{`, `~<...~:>`) sono `Sexpr`, e né il loro numero né il
-tipo di ciascun elemento si possono conoscere dai tipi. I requisiti sugli elementi (un intero per `~d`, e
-così via) e gli elementi mancanti vengono controllati quando i valori arrivano, e sono errori a runtime
-(non si passa mai a una rappresentazione diversa).
+Gli **elementi** di un argomento lista (`~{`, `~:{`, `~<...~:>`) sono `Sexpr`; né il loro numero né il
+tipo di ciascun elemento si ricavano dai tipi. I requisiti sugli elementi (un carattere per `~c`, ecc.)
+e gli elementi mancanti si controllano all'arrivo dei valori e sono errori a tempo di esecuzione (non si
+passa mai a un'altra rappresentazione al loro posto).
 
-Le regole permissive di CL non sono adottate. Passare un non intero a `~d` e farlo stampare come `~a`, o
-`~:[` che tratta qualsiasi valore come booleano, non vengono reinterpretati in quel modo; sono errori di
-tipo.
+`~d` `~b` `~o` `~x` e `~r` con base stampano un non intero come farebbe `~a`, in decimale, come in CL
+(`(format false "~5d" 1/2)` è `"  1/2"`). Le altre regole permissive di CL non sono adottate: che
+`~:[` tratti qualsiasi valore come booleano non viene reinterpretato così; è un errore di tipo.
 
 ## 2. Output (consumano un argomento)
 
@@ -40,7 +40,7 @@ tipo.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=giustifica a destra | Estetica (il `princ` di CL; stringhe senza virgolette). L'argomento può essere di qualsiasi tipo |
 | `~s` | Come sopra | Standard (il `prin1` di CL; una forma che può essere riletta). L'argomento può essere di qualsiasi tipo |
 | `~w` | — | Il `write` di CL. Fa il pretty-print se `*print-pretty*` è vero, altrimenti come `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=gruppi di cifre, `@`=sempre un segno | Interi in decimale/binario/ottale/esadecimale. L'argomento è un intero |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=gruppi di cifre, `@`=sempre un segno | Interi decimali/binari/ottali/esadecimali. L'argomento può essere qualsiasi (un non intero si stampa come con `~a`, in decimale) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (con una base) oppure nessuno | Con una base, quella base (da 2 a 36). Senza: `~r`=cardinale inglese, `~:r`=ordinale inglese, `~@r`=numeri romani, `~:@r`=numeri romani antichi. L'argomento è un intero |
 | `~p` | `:`=torna indietro di uno, `@`=y/ies | Plurali (`~p`→"s", `~@p`→"y"/"ies"). L'argomento è un intero |
 | `~c` | `:`=nome, `@`=sintassi `#\` | Un carattere. L'argomento è un `char` |

@@ -27,7 +27,7 @@ ligada por `(where (CharOutput S))`. Un `dest` que no es ni `bool` ni stream es 
 **La cadena de control debe ser un literal** (la misma restricción que el `format!` de Rust). Las directivas
 que contiene deciden cuántos argumentos se toman y de qué tipos, así que una cadena construida en tiempo de
 ejecución no se puede leer al comprobar. Como debe ser un literal, **el número y los tipos de los argumentos
-se comprueban al comprobar**: `(println "~d" "x")` y `(println "~a ~a" 1)` son errores al comprobar. Una
+se comprueban al comprobar**: `(println "~c" 1)` y `(println "~a ~a" 1)` son errores al comprobar. Una
 directiva mal escrita, un `~(` sin cerrar y un `~/name/` cuyo destino de llamada no se puede determinar también son
 errores al comprobar. Las reglas de comprobación están en [format.md](format.md#1-cómo-escribir-directivas).
 Para imprimir una cadena que construyes, créala con `(format false ...)` e imprímela con `(println "~a" s)`.

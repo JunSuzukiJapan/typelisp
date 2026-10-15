@@ -88,8 +88,10 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
   `int` が整数（CL の integer——63bit 即値と多倍長のあいだを自動で行き来する、
   [数値](functions/numbers.md#3-任意精度整数-int)）、6 つの固定幅は幅と符号を名乗る型
   （64bit 幅の整数型は無い——[数値](functions/numbers.md#1-固定幅整数)参照）。
-- **有理数型**: `ratio`（既約な有理数）。CL 準拠でヒープ確保され、`int`/`f64` 等との暗黙変換は
-  ない（`as`/`try-as` または変換メソッドで明示する。[数値](functions/numbers.md#5-有理数-ratio)参照）。
+- **有理数型**: `ratio`（既約な有理数）と `rational`（`int` か `ratio`、CL の rational）。整数どうしの
+  `/` と、`int` と `ratio` を混ぜた演算は `rational` になり、`int`/`ratio` の値は `rational` の位置に
+  そのまま渡せる。固定幅整数や `f64` との暗黙変換はない（`as`/`try-as` または変換メソッドで明示する。
+  [数値](functions/numbers.md#5-有理数-ratio)参照）。
 - **C 境界の生の語**: `ptr`（不透明ポインタ）、`c-long` / `c-ulong`。FFI 専用で、値にするには
   `(unsafe ...)` が要り、置ける場所も限られる（[3.3 defffi](#ptr--c-long--c-ulong--生の機械語)）。
   64bit 整数が欲しい場面でこれを使ってはいけない——算術は付いていない。
@@ -1572,7 +1574,8 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 拡大、`(as i32 n)` は `int` からの切り詰め。整数→`char` は範囲外で失敗しうるので `as` は panic・
 `try-as` は `None`。それ以外（拡大変換や `float->int`/`ratio->int` の切り捨て）は常に成功する。
 `float->int`/`ratio->int`/`char->int` は `int` に着地し、より狭い幅を頼まれれば `int->W` を
-続けて呼ぶ。対応する変換メソッド（[数値](functions/numbers.md)の `int->char`/`int->int`/`int->W` 等）へ
+続けて呼ぶ。`rational` からは `int`（`as` は切り捨て、`try-as` は整数のときだけ成功）・`ratio`・`f64` へ、
+`int`/`ratio` からは `rational` へ変換できる。対応する変換メソッド（[数値](functions/numbers.md)の `int->char`/`int->int`/`int->W` 等）へ
 展開される糖衣構文。
 
 `documentation` は `quote`/`compile` と同様、`name` を評価せず未評価の裸シンボル/`::`パスとして

@@ -14,6 +14,7 @@ type se trouvent dans [Fonctions intégrées](functions/README.md).
 | `u8` `u16` `u32` | Entiers non signés de largeur fixe | Idem |
 | `f32` `f64` | Nombres à virgule flottante IEEE 754. Les littéraux décimaux sont `f64` par défaut | [Nombres, chapitre 4](functions/numbers.md#4-nombres-à-virgule-flottante-f64--f32) |
 | `ratio` | Un nombre rationnel irréductible | [Nombres, chapitre 5](functions/numbers.md#5-rationnels-ratio) |
+| `rational` | Un `int` ou un `ratio` (le rational de CL). Le type de `/` sur deux entiers | [Nombres, chapitre 5](functions/numbers.md#5-rationnels-ratio) |
 | `bool` | `true` / `false` | [Nombres, chapitre 7](functions/numbers.md#7-booléens) |
 | `char` | Une valeur scalaire Unicode | [Caractères](functions/collections.md#2-caractères-char) |
 | `string` | Une chaîne immuable | [Chaînes](functions/collections.md#1-chaînes-string) |
@@ -102,10 +103,10 @@ Quels types implémentent quels traits. Les méthodes de chaque trait se trouven
 
 | Trait | Types qui l'implémentent | Détails |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparaison) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Idem |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` et tous les types d'erreur intégrés | [print-object](functions/printing.md#5-print-object-représentation-imprimée-par-type) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparaison) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Idem |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` et tous les types d'erreur intégrés | [print-object](functions/printing.md#5-print-object-représentation-imprimée-par-type) |
 
 Les traits de `cons-cell<A,B>` et des tuples `#{..}`, ainsi que le `print-object` des collections,
 sont utilisables quand les types des éléments implémentent ce trait.
@@ -114,7 +115,7 @@ sont utilisables quand les types des éléments implémentent ce trait.
 
 | Trait | Types qui l'implémentent |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Les détails se trouvent dans [Traits arithmétiques](functions/traits.md#3-traits-arithmétiques-add--sub--mul--div--rem--bits--number).

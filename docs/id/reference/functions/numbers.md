@@ -111,7 +111,9 @@ kesalahan saat dijalankan ("an integer argument does not fit a fixnum").
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | Tidak pernah overflow (dipromosikan) |
-| `/` | `(/ a b)` | `(int,int)→int` | Memotong ke arah nol. Panic pada pembagian dengan nol |
+| `/` | `(/ a b)` | `(int,int)→rational` | `/` milik CL. Bilangan bulat bila pembagian habis, pecahan bila tidak (`(/ 6 3)` adalah `2`, `(/ 7 2)` adalah `7/2`). Panic pada pembagian dengan nol |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | Hasil bagi yang dipotong ke arah nol (nilai pertama di CL). Panic pada pembagian dengan nol |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | Hasil bagi yang dibulatkan ke bawah, ke atas, atau ke bilangan bulat terdekat (ke genap pada tepat setengah). Pembagi tidak boleh dihilangkan |
 | `mod` | `(mod a b)` | `(int,int)→int` | Sisa pembagian floor (tandanya mengikuti pembagi) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -152,17 +154,17 @@ kesalahan saat dijalankan ("an integer argument does not fit a fixnum").
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | Mantisa (dalam `[1/2,1)`, tanpa tanda) dan eksponen. CL mengembalikan tiga nilai, tetapi tidak ada nilai ganda, sehingga tanda diserahkan ke `float-sign` |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | Dekomposisi yang sama dengan mantisa bilangan bulat 53 bit yang tepat. `mantissa * 2^exponent` tepat sama dengan nilai asli |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **Rasional paling sederhana yang terbaca kembali sebagai float itu** (`(rationalize 0.1)` adalah `1/10`). Untuk nilai biner yang tepat, gunakan `float->ratio` |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **Rasional paling sederhana yang terbaca kembali sebagai float itu** (`(rationalize 0.1)` adalah `1/10`). Untuk nilai biner yang tepat, gunakan `float->ratio` |
 
-**Perbedaan dari CL: cara `round` membulatkan.** `round` (dan karenanya `fround`/`round-div`)
-membulatkan **menjauhi nol** (`(round 2.5)` = `3.0`). CL membulatkan **ke genap**, menghasilkan `2`.
+`round` (dan karenanya `fround`/`round-div`) membulatkan tepat setengah **ke genap**, seperti CL
+(`(round 2.5)` adalah `2.0`, `(round 3.5)` adalah `4.0`).
 
 ## 5. Bilangan rasional `ratio`
 
-Rasional presisi sembarang yang kompatibel dengan CL. Selalu disimpan dalam bentuk paling sederhana
-dengan penyebut positif, dan dialokasikan di heap. Tidak ada konversi implisit dengan tipe bilangan
-bulat atau `f64` (gunakan metode konversi eksplisit atau `as`/`try-as`). Untuk sintaks literal
-rasio, lihat [Referensi Sintaks](../syntax.md#1-unsur-leksikal).
+Bilangan rasional berpresisi sembarang yang kompatibel dengan CL. Selalu dijaga dalam bentuk paling
+sederhana dengan penyebut positif, dan dialokasikan di heap. Aritmetika yang mencampurnya dengan `int`
+menghasilkan `rational` (5.1). Tidak ada konversi implisit dengan bilangan bulat lebar tetap atau `f64`
+(gunakan metode konversi eksplisit atau `as`/`try-as`). Untuk sintaks literal pecahan, lihat [Referensi Sintaks](../syntax.md#1-unsur-leksikal).
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
@@ -184,7 +186,7 @@ rasio, lihat [Referensi Sintaks](../syntax.md#1-unsur-leksikal).
 | `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Pembulatan yang sama, dikembalikan sebagai `f64` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | `floor` dua argumen dari CL dan lainnya. Hasil bagi bulat adalah `car`, sisa `ratio` adalah `cdr` (`(floor-div 7/2 1/3)` adalah `(10 . 1/6)`) |
 | `float` | `(float x)` | `ratio→f64` | Mengubah ke `f64` (sama dengan `ratio->float`) |
-| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Argumen itu sendiri |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | Nilai yang sama sebagai `rational` |
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Mengubah ke `f64` lalu menghitung (`(sqrt 1/4)` adalah `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Sama seperti di atas |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Sama seperti di atas |
@@ -199,9 +201,43 @@ Di CL bilangan bulat adalah bilangan rasional berpenyebut 1, jadi `int` juga pun
 `*print-base*` berlaku untuk pembilang dan penyebut, dan bila `*print-radix*` benar ditambahkan
 awalan basis, seperti `#x1/f` dan `#10r1/3`. Pembaca juga membaca `#x1/F`, `#b101/11` dan `#3r1/2`.
 
-Jalan masuk dari bilangan bulat berlebar tetap dan `f64` adalah `int->int`/`int->ratio` (bab 1) dan
-`float->int`/`float->ratio` (bab 4). `int`/`ratio` adalah tipe terpisah yang bebas dari `i32` dan
-lainnya, dan aritmetika campuran memerlukan konversi eksplisit.
+Jalan masuk dari bilangan bulat lebar tetap dan `f64` adalah `int->int`/`int->ratio` (bab 1) dan
+`float->int`/`float->ratio` (bab 4). `int`/`ratio` adalah tipe tersendiri, terlepas dari `i32` dan yang
+lain, dan aritmetika yang mencampurnya dengan tipe-tipe itu memerlukan konversi eksplisit.
+
+### 5.1 `rational` (bilangan bulat atau pecahan)
+
+Tipe yang sepadan dengan `rational` milik CL. Nilainya `int` atau `ratio`, dinormalkan seperti di CL
+(nilai yang berupa bilangan bulat selalu `int`). `/` pada dua bilangan bulat dan aritmetika yang
+mencampur `int` dengan `ratio` menghasilkan tipe ini.
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+Nilai `int` dan `ratio` dapat diteruskan apa adanya ke tempat yang mengharapkan `rational` (baik `5`
+maupun `1/2` dapat diteruskan ke `(defun f ((q rational)) ...)`). Ke arah sebaliknya, ambil nilainya
+dengan `as`/`try-as`.
+
+| Nama | Bentuk | Tipe | Deskripsi |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | Aritmetika (hasilnya dinormalkan). `/` panic pada pembagian dengan nol |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Perbandingan |
+| `numerator` `denominator` | `(op x)` | `rational→int` | Pembilang dan penyebut dalam bentuk paling sederhana |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Dipotong ke arah nol, sebagai `ratio`, ke `f64` |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` untuk bilangan bulat, selain itu `none` (`integerp` milik CL) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Sama seperti `ratio` (eksponen `expt` adalah `int`) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Sama seperti `ratio` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Sama seperti `ratio` |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` serta fungsi trigonometri dan hiperbolik | `(op x)` | | Sama seperti `ratio` |
+
+`(as int q)` adalah `rational->int` (pemotongan), `(try-as int q)` adalah `try-rational->int`,
+`(as ratio q)` dan `(as f64 q)` adalah konversi masing-masing, dan `(as rational x)` melebarkan dari
+`int`/`ratio`. `Eq`, `Ord`, `Hash`, `print-object` dan trait aritmetika juga diimplementasikan.
 
 ## 6. Bilangan kompleks `complex`
 

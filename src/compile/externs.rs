@@ -459,7 +459,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         // fast path over two fixnum words with an `rt_integer_*` slow path,
         // the rest as one `rt_integer_*` call each.
         "int" => &[
-            "+", "-", "*", "/", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
+            "+", "-", "*", "/", "truncate", "mod", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
             "max", "min", "logand", "logior", "logxor", "logtest", "lognot", "logcount", "integer-length",
             "ash", "logbitp",
             "int->float", "int->ratio", "int->int", "int->char", "try-int->char",
@@ -470,7 +470,12 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
         ],
         "ratio" => &[
             "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp",
-            "ratio->int", "ratio->float", "numerator", "denominator", "max", "min",
+            "ratio->int", "ratio->float", "numerator", "denominator", "max", "min", "ratio->rational",
+        ],
+        // `rational` (`int` ∪ `ratio`): one `rt_rational_*` call each.
+        "rational" => &[
+            "+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "eq", "eql", "equal", "equalp", "max", "min",
+            "rational->int", "try-rational->int", "rational->ratio", "rational->float", "numerator", "denominator",
         ],
         // `Sexpr` values are raw tagged `i64` handles in compiled code, and
         // interned symbols/`nil`/small atoms are handle-identical, so `eq`
@@ -553,7 +558,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 328] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 340] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -588,6 +593,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 328] {
         rt_machine_instance, rt_machine_type, rt_machine_version, rt_parse_float,
         rt_software_type, rt_software_version, rt_thread_available_parallelism, rt_thread_current_id,
         rt_timezone_daylight_p, rt_timezone_offset_seconds,
+    };
+    use typelisp_rt::rational::{
+        rt_rational_add, rt_rational_sub, rt_rational_mul, rt_rational_div, rt_rational_cmp, rt_rational_from_ratio, rt_rational_to_ratio, rt_rational_to_int, rt_rational_is_int, rt_rational_to_float, rt_rational_numerator, rt_rational_denominator,
     };
     use typelisp_rt::integer::{
         rt_integer_add, rt_integer_ash, rt_integer_cmp, rt_integer_div, rt_integer_fits, rt_integer_fits_char,
@@ -878,6 +886,18 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 328] {
         ("rt_integer_sub", rt_integer_sub as *const () as usize),
         ("rt_integer_mul", rt_integer_mul as *const () as usize),
         ("rt_integer_div", rt_integer_div as *const () as usize),
+        ("rt_rational_add", rt_rational_add as *const () as usize),
+        ("rt_rational_sub", rt_rational_sub as *const () as usize),
+        ("rt_rational_mul", rt_rational_mul as *const () as usize),
+        ("rt_rational_div", rt_rational_div as *const () as usize),
+        ("rt_rational_cmp", rt_rational_cmp as *const () as usize),
+        ("rt_rational_from_ratio", rt_rational_from_ratio as *const () as usize),
+        ("rt_rational_to_ratio", rt_rational_to_ratio as *const () as usize),
+        ("rt_rational_to_int", rt_rational_to_int as *const () as usize),
+        ("rt_rational_is_int", rt_rational_is_int as *const () as usize),
+        ("rt_rational_to_float", rt_rational_to_float as *const () as usize),
+        ("rt_rational_numerator", rt_rational_numerator as *const () as usize),
+        ("rt_rational_denominator", rt_rational_denominator as *const () as usize),
         ("rt_integer_mod", rt_integer_mod as *const () as usize),
         ("rt_integer_cmp", rt_integer_cmp as *const () as usize),
         ("rt_integer_logand", rt_integer_logand as *const () as usize),
@@ -1125,6 +1145,7 @@ mod native_method_list_tests {
         ("char", &["char"]),
         ("float", &["f64", "f32"]),
         ("ratio", &["ratio"]),
+        ("rational", &["rational"]),
         ("bool", &["bool"]),
         ("symbol", &["symbol"]),
         ("sexpr", &["sexpr"]),

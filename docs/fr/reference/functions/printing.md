@@ -27,7 +27,7 @@ la même façon avec un type de flux concret, un `:dyn CharOutput` ou une variab
 **La chaîne de contrôle doit être un littéral** (la même restriction que le `format!` de Rust). Les directives
 qu'elle contient décident combien d'arguments sont pris et de quels types ; une chaîne construite à l'exécution ne
 peut donc pas être lue à la vérification. Parce qu'elle doit être un littéral, **le nombre et les types des
-arguments sont contrôlés à la vérification** : `(println "~d" "x")` et `(println "~a ~a" 1)` sont des erreurs à la
+arguments sont contrôlés à la vérification** : `(println "~c" 1)` et `(println "~a ~a" 1)` sont des erreurs à la
 vérification. Une directive mal orthographiée, un `~(` non fermé et un `~/name/` dont la cible de
 l'appel ne peut pas être déterminée sont aussi des erreurs à la vérification. Les règles de contrôle se trouvent dans
 [format.md](format.md#1-comment-écrire-les-directives). Pour afficher une chaîne que vous construisez, créez-la avec

@@ -129,6 +129,9 @@ pub enum Repr {
     Str,
     Sym,
     Ratio,
+    /// `rational` — the word of the `int` or `ratio` the value is (a fixnum,
+    /// a bignum box or a ratio box), tagged and collectable like both.
+    Rational,
     /// `random-state` — a boxed seed cell, tagged like [`Repr::Int`] and
     /// [`Repr::Ratio`] and collectable like both. It has no `Type::Named`
     /// spelling, which is why it needs a variant of its own rather than
@@ -252,6 +255,7 @@ impl Repr {
             Type::Str => Repr::Str,
             Type::Symbol => Repr::Sym,
             Type::Ratio => Repr::Ratio,
+            Type::Rational => Repr::Rational,
             Type::RandomState => Repr::RandomState,
             Type::Named(p, _) if *p == Path::root("sexpr") => Repr::Sexpr,
             // `Option<T>` is a niche whenever `T`'s values can be told from
@@ -324,6 +328,7 @@ impl Repr {
             Repr::Str => "str",
             Repr::Sym => "sym",
             Repr::Ratio => "ratio",
+            Repr::Rational => "rational",
             Repr::RandomState => "random-state",
             Repr::Sexpr => "sexpr",
             Repr::Struct => "struct",
@@ -340,7 +345,7 @@ impl Repr {
 
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
-    pub const SIMPLE: [Repr; 19] = [
+    pub const SIMPLE: [Repr; 20] = [
         Repr::Narrow,
         Repr::Int,
         Repr::RawWord,
@@ -353,6 +358,7 @@ impl Repr {
         Repr::Str,
         Repr::Sym,
         Repr::Ratio,
+        Repr::Rational,
         Repr::RandomState,
         Repr::Sexpr,
         Repr::Struct,
@@ -484,6 +490,7 @@ impl Repr {
             Repr::Str
             | Repr::Int
             | Repr::Ratio
+            | Repr::Rational
             | Repr::RandomState
             | Repr::Sexpr
             | Repr::Struct
@@ -793,6 +800,7 @@ mod tests {
         let reclaimable = [
             Repr::Str,
             Repr::Ratio,
+            Repr::Rational,
             Repr::Sexpr,
             Repr::Struct,
             Repr::Vector(Box::new(Repr::Narrow)),

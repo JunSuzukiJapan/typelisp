@@ -98,7 +98,9 @@ fixnum に入らない値を渡すと実行時エラー（「an integer argument
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | 溢れない（昇格する） |
-| `/` | `(/ a b)` | `(int,int)→int` | ゼロ方向切り捨て。ゼロ除算で panic |
+| `/` | `(/ a b)` | `(int,int)→rational` | CL の `/`。割り切れれば整数、割り切れなければ分数（`(/ 6 3)` は `2`、`(/ 7 2)` は `7/2`）。ゼロ除算で panic |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | ゼロ方向に切り捨てた商（CL の第 1 値）。ゼロ除算で panic |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | 床・天井・最も近い整数（ちょうど半分なら偶数）への商。除数は省略できない |
 | `mod` | `(mod a b)` | `(int,int)→int` | 床除算の剰余（符号は除数側） |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -139,16 +141,16 @@ fixnum に入らない値を渡すと実行時エラー（「an integer argument
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | 仮数（`[1/2,1)`、符号なし）と指数。CL は3値返しだが多値は無いので、符号は `float-sign` が担う |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | 同じ分解を厳密な 53 ビット整数の仮数で。`仮数 * 2^指数` がちょうど元の値 |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **その float に読み戻る最も簡単な**有理数（`(rationalize 0.1)` は `1/10`）。厳密な二進値が要るなら `float->ratio` |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **その float に読み戻る最も簡単な**有理数（`(rationalize 0.1)` は `1/10`）。厳密な二進値が要るなら `float->ratio` |
 
-**CL との違い: `round` の丸め方**。`round`（したがって `fround`/`round-div`）は
-**0 から遠い方へ**丸める（`(round 2.5)` = `3.0`）。CL は**偶数側へ**丸めるので `2` になる。
+`round`（したがって `fround`/`round-div`）は CL と同じく、ちょうど半分なら**偶数側へ**丸める
+（`(round 2.5)` は `2.0`、`(round 3.5)` は `4.0`）。
 
 ## 5. 有理数 `ratio`
 
-CL 準拠の任意精度有理数。常に既約・正の分母で保たれ、ヒープ確保される。整数型や `f64` との
-暗黙変換はない（明示的な変換メソッドまたは `as`/`try-as` を使う）。比リテラル構文は
-[構文リファレンス](../syntax.md#1-字句要素)を参照。
+CL 準拠の任意精度有理数。常に既約・正の分母で保たれ、ヒープ確保される。`int` と混ぜた演算は
+`rational`（5.1）になる。固定幅整数や `f64` との暗黙変換はない（明示的な変換メソッドまたは
+`as`/`try-as` を使う）。比リテラル構文は [構文リファレンス](../syntax.md#1-字句要素)を参照。
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
@@ -170,7 +172,7 @@ CL 準拠の任意精度有理数。常に既約・正の分母で保たれ、�
 | `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | 同じ丸めの結果を `f64` で返す |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL の 2 引数 `floor` 等。商（整数）が `car`、余り（`ratio`）が `cdr`（`(floor-div 7/2 1/3)` は `(10 . 1/6)`） |
 | `float` | `(float x)` | `ratio→f64` | `f64` へ変換（`ratio->float` と同じ） |
-| `rational` `rationalize` | `(op x)` | `ratio→ratio` | 引数そのもの |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | 同じ値を `rational` として返す |
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64` に変換して計算（`(sqrt 1/4)` は `0.5`） |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 同上 |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 同上 |
@@ -185,7 +187,39 @@ CL の整数は分母 1 の有理数なので、`int` にも `numerator`（自�
 ように基数の接頭辞が付く。リーダも `#x1/F`・`#b101/11`・`#3r1/2` を読む。
 
 固定幅整数・`f64` からの入口は `int->int`/`int->ratio`（1 章）と `float->int`/`float->ratio`
-（4 章）。`int`/`ratio` は `i32` 等とは独立した別型で、混在した算術には明示変換が必要。
+（4 章）。`int`/`ratio` は `i32` 等とは独立した別型で、それらと混ぜた算術には明示変換が必要。
+
+### 5.1 `rational`（整数または分数）
+
+CL の `rational` にあたる型。値は `int` か `ratio` のどちらかで、CL と同じく正規化されている
+（整数になる値は必ず `int`）。整数どうしの `/` と、`int` と `ratio` を混ぜた演算の結果がこの型になる。
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+`int` と `ratio` の値は `rational` を期待する位置にそのまま渡せる（`(defun f ((q rational)) ...)` に
+`5` も `1/2` も渡せる）。逆向きは `as`/`try-as` で取り出す。
+
+| 名前 | 形式 | 型 | 説明 |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | 四則（結果は正規化される）。`/` はゼロ除算で panic |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | 比較 |
+| `numerator` `denominator` | `(op x)` | `rational→int` | 既約分子・分母 |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | ゼロ方向切り捨て・`ratio` として・`f64` へ |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 整数なら `(some n)`、そうでなければ `none`（CL の `integerp`） |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | `ratio` と同じ（`expt` の指数は `int`） |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | `ratio` と同じ |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | `ratio` と同じ |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` と三角・双曲線関数 | `(op x)` | | `ratio` と同じ |
+
+`(as int q)` は `rational->int`（切り捨て）、`(try-as int q)` は `try-rational->int`、
+`(as ratio q)`・`(as f64 q)` はそれぞれの変換、`(as rational x)` は `int`/`ratio` からの拡大。
+`Eq`・`Ord`・`Hash`・`print-object` と算術トレイトも実装している。
 
 ## 6. 複素数 `complex`
 

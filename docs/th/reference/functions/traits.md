@@ -78,7 +78,7 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; the distance is always int (as with ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; no methods; a combination of six
+(deftrait Number (Add Sub Mul Rem Ord))                   ; ไม่มีเมธอด เป็นการรวมห้าตัว
 ```
 
 **ภายใน bound คุณเขียนตัวดำเนินการได้** เมื่อตัวรับเป็นตัวแปรชนิดที่ถูกผูกด้วย `where`
@@ -104,3 +104,10 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 
 ถูก implement สำหรับ: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` บนชนิดตัวเลขทั้งหมด (ยกเว้น `complex`) และ
 `Bits` บนชนิดจำนวนเต็มทั้งหมดและ `int`
+
+
+**`Div` ระบุชนิดของผลลัพธ์ด้วยชนิดที่เกี่ยวข้อง `Output`** เหมือน CL `/` ระหว่างจำนวนเต็มสองตัวเป็น
+`rational` ดังนั้น `Output` ของ `int` คือ `rational` ส่วนชนิดตัวเลขอื่นคือชนิดของตัวเอง เพราะ `Output`
+ต่างกันตามชนิด `Number` จึงไม่รวม `Div` (รายการ supertrait ต้องตรึงชนิดที่เกี่ยวข้องทุกตัว)
+ฟังก์ชันเจเนอริกที่หารจะรับชนิดผลลัพธ์ด้วย `(where (Div T (Output R)))` หรือขอการหารที่ปิดใน `T` ด้วย
+`(where (Div T (Output T)))` (กรณีนี้ส่ง `int` ไม่ได้)

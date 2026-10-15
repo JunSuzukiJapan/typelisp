@@ -27,7 +27,7 @@ giống nhau với một kiểu stream cụ thể, một `:dyn CharOutput`, ho�
 **Chuỗi điều khiển phải là một literal** (cùng hạn chế như `format!` của Rust). Các chỉ thị trong đó quyết
 định có bao nhiêu đối số được lấy và thuộc kiểu nào, nên một chuỗi dựng lúc chạy không thể đọc được lúc
 kiểm tra. Vì nó phải là literal, **số lượng và kiểu của các đối số được kiểm tra lúc kiểm tra**:
-`(println "~d" "x")` và `(println "~a ~a" 1)` là các lỗi lúc kiểm tra. Một chỉ thị viết sai chính tả, một
+`(println "~c" 1)` và `(println "~a ~a" 1)` là các lỗi lúc kiểm tra. Một chỉ thị viết sai chính tả, một
 `~(` không đóng, và một `~/name/` không xác định được đích gọi cũng là các lỗi lúc kiểm tra. Các quy tắc
 kiểm tra nằm ở [format.md](format.md#1-cách-viết-chỉ-thị). Để in một chuỗi bạn dựng, hãy tạo nó bằng
 `(format false ...)` và in bằng `(println "~a" s)`.

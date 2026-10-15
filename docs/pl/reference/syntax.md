@@ -99,9 +99,11 @@ W kodzie źródłowym typy zapisuje się jako zwykłe symbole lub listy.
   bignum; [Liczby](functions/numbers.md#3-liczby-całkowite-o-dowolnej-precyzji-int)), a sześć typów o stałej szerokości
   nazwano od ich szerokości i znakowości (nie ma 64-bitowego typu całkowitego; zobacz
   [Liczby](functions/numbers.md#1-liczby-całkowite-o-stałej-szerokości)).
-- **Typ wymierny**: `ratio` (liczby wymierne w postaci nieskracalnej). Alokowany na stercie jak w CL, bez niejawnej
-  konwersji z `int`/`f64` i podobnymi (konwertuj jawnie za pomocą `as`/`try-as` lub metody konwersji; zobacz
-  [Liczby](functions/numbers.md#5-liczby-wymierne-ratio)).
+- **Typy wymierne**: `ratio` (skrócone liczby wymierne) i `rational` (`int` albo `ratio`, rational z
+  CL). `/` na dwóch liczbach całkowitych i arytmetyka mieszająca `int` z `ratio` dają `rational`, a
+  wartości `int`/`ratio` można przekazać bez zmian tam, gdzie oczekiwany jest `rational`. Brak niejawnej
+  konwersji z liczbami całkowitymi o stałej szerokości i z `f64` (jawnie przez `as`/`try-as` lub metodę
+  konwersji; zob. [Liczby](functions/numbers.md#5-liczby-wymierne-ratio)).
 - **Surowe słowa na granicy z C**: `ptr` (nieprzezroczysty wskaźnik), `c-long` / `c-ulong`. Tylko dla FFI:
   uczynienie któregoś wartością wymaga `(unsafe ...)`, a miejsca ich występowania są ograniczone
   ([3.3 defffi](#ptr--c-long--c-ulong--surowe-słowa-maszynowe)). Nie używaj ich tam, gdzie chcesz 64-bitową
@@ -1659,6 +1661,9 @@ a `(as i32 n)` to obcięcie z `int`. Liczba całkowita → `char` może się nie
 się udaje. `float->int`/`ratio->int`/`char->int` lądują na `int`, a jeśli żądana jest węższa szerokość,
 po nich wywoływane jest `int->W`. Jest to lukier rozwijający się do odpowiednich metod konwersji
 (`int->char`/`int->int`/`int->W` i tak dalej w [Liczbach](functions/numbers.md)).
+
+Z `rational` `as`/`try-as` konwertują do `int` (`as` obcina, `try-as` udaje się tylko dla liczby
+całkowitej), `ratio` i `f64`; z `int`/`ratio` do `rational`.
 
 `documentation`, jak `quote`/`compile`, jest formą specjalną, która czyta `name` bez obliczania, jako
 nieobliczony goły symbol / ścieżkę `::`. W przeciwieństwie do `(documentation 'name 'function)` z CL nie przyjmuje argumentu

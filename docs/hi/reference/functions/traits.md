@@ -54,7 +54,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -62,7 +62,7 @@
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; दूरी हमेशा int है (ash की तरह)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; कोई मेथड नहीं; छह का संयोजन
+(deftrait Number (Add Sub Mul Rem Ord))                   ; कोई मेथड नहीं; पाँच का संयोजन
 ```
 
 **बाउंड के भीतर, आप ऑपरेटर लिख सकते हैं।** जब रिसीवर `where` से बँधा टाइप वेरिएबल हो, तो ऑपरेटर trait मेथड के रूप में पढ़े जाते हैं (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
@@ -75,3 +75,10 @@
 trait मेथड का नाम `+` नहीं है क्योंकि `+` बिल्ट-इन मेथड का नाम है और `impl` उसे दोबारा परिभाषित करने से इनकार करता है (`cannot redefine built-in method`)। `Neg` नहीं है: `(- x)` `(- (- x x) x)` में विस्तारित होता है, इसलिए `Sub` पर्याप्त है।
 
 इनके लिए लागू: सभी संख्यात्मक टाइप (`complex` को छोड़कर) पर `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number`, और सभी पूर्णांक टाइप तथा `int` पर `Bits`।
+
+
+**`Div` अपने परिणाम के प्रकार को संबद्ध प्रकार `Output` से नाम देता है।** CL की तरह दो पूर्णांकों पर `/`
+`rational` है, इसलिए `int` का `Output` `rational` है, और हर दूसरे संख्यात्मक प्रकार का वह प्रकार स्वयं।
+चूँकि `Output` प्रकार के अनुसार अलग है, `Number` में `Div` शामिल नहीं है (supertrait सूची को हर संबद्ध
+प्रकार स्थिर करना होता है)। भाग करने वाला जेनेरिक फ़ंक्शन परिणाम का प्रकार `(where (Div T (Output R)))` से
+लेता है, या `(where (Div T (Output T)))` से `T` के भीतर बंद भाग माँगता है (तब `int` नहीं दिया जा सकता)।

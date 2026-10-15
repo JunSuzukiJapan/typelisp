@@ -112,7 +112,9 @@ fixnum past is een runtimefout ("an integer argument does not fit a fixnum").
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | Lopen nooit over (ze promoveren) |
-| `/` | `(/ a b)` | `(int,int)→int` | Kapt af richting nul. Geeft een panic bij deling door nul |
+| `/` | `(/ a b)` | `(int,int)→rational` | De `/` van CL. Een geheel getal als de deling opgaat, anders een breuk (`(/ 6 3)` is `2`, `(/ 7 2)` is `7/2`). Panic bij deling door nul |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | Het quotiënt afgekapt naar nul (de eerste waarde in CL). Panic bij deling door nul |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | Het quotiënt naar beneden, naar boven of naar het dichtstbijzijnde gehele getal afgerond (naar even bij precies een half). De deler kan niet worden weggelaten |
 | `mod` | `(mod a b)` | `(int,int)→int` | Rest van deling met naar beneden afronden (het teken volgt de deler) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -153,17 +155,18 @@ fixnum past is een runtimefout ("an integer argument does not fit a fixnum").
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | De mantisse (in `[1/2,1)`, zonder teken) en de exponent. CL geeft drie waarden terug, maar er zijn geen meervoudige waarden, dus het teken wordt aan `float-sign` overgelaten |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | Dezelfde ontbinding met een exacte geheel getalmantisse van 53 bits. `mantissa * 2^exponent` is precies de oorspronkelijke waarde |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **Het eenvoudigste rationale getal dat als die float terug wordt gelezen** (`(rationalize 0.1)` is `1/10`). Gebruik `float->ratio` voor de exacte binaire waarde |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **Het eenvoudigste rationale getal dat als die float terug wordt gelezen** (`(rationalize 0.1)` is `1/10`). Gebruik `float->ratio` voor de exacte binaire waarde |
 
-**Verschil met CL: hoe `round` afrondt.** `round` (en dus `fround`/`round-div`) rondt **van nul weg**
-af (`(round 2.5)` = `3.0`). CL rondt **naar even** af en geeft `2`.
+`round` (en dus `fround`/`round-div`) rondt precies een half **naar even** af, zoals CL
+(`(round 2.5)` is `2.0`, `(round 3.5)` is `4.0`).
 
 ## 5. Rationale getallen `ratio`
 
-Met CL compatibele rationale getallen met willekeurige precisie. Ze worden altijd in laagste termen met
-een positieve noemer bewaard en op de heap gealloceerd. Er is geen impliciete conversie met de gehele
-types of `f64` (gebruik een expliciete conversiemethode of `as`/`try-as`). Voor de syntaxis van
-ratio-literals zie de [Syntaxreferentie](../syntax.md#1-lexicale-elementen).
+CL-compatibele rationale getallen van willekeurige precisie. Ze worden altijd vereenvoudigd met een
+positieve noemer bewaard en op de heap gealloceerd. Rekenen dat ze met `int` mengt geeft een
+`rational` (5.1). Er is geen impliciete conversie met de gehele getallen met vaste breedte of `f64`
+(gebruik een expliciete conversiemethode of `as`/`try-as`). Voor de syntaxis van breukliteralen, zie
+[Syntaxreferentie](../syntax.md#1-lexicale-elementen).
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
@@ -185,7 +188,7 @@ ratio-literals zie de [Syntaxreferentie](../syntax.md#1-lexicale-elementen).
 | `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Dezelfde afronding, teruggegeven als `f64` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | De `floor` met twee argumenten uit CL en de rest. Het gehele quotiënt is de `car`, de `ratio`-rest de `cdr` (`(floor-div 7/2 1/3)` is `(10 . 1/6)`) |
 | `float` | `(float x)` | `ratio→f64` | Zet om naar `f64` (hetzelfde als `ratio->float`) |
-| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Het argument zelf |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | Dezelfde waarde als `rational` |
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Zet om naar `f64` en rekent (`(sqrt 1/4)` is `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Als hierboven |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Als hierboven |
@@ -202,8 +205,43 @@ grondtal-voorvoegsel bij, zoals `#x1/f` en `#10r1/3`. De reader leest ook `#x1/F
 `#3r1/2`.
 
 De wegen naar binnen vanuit gehele getallen met vaste breedte en `f64` zijn `int->int`/`int->ratio`
-(hoofdstuk 1) en `float->int`/`float->ratio` (hoofdstuk 4). `int`/`ratio` zijn aparte types die
-onafhankelijk zijn van `i32` en de andere, en gemengde rekenkunde vereist expliciete conversies.
+(hoofdstuk 1) en `float->int`/`float->ratio` (hoofdstuk 4). `int`/`ratio` zijn aparte typen,
+onafhankelijk van `i32` en de andere, en rekenen dat ze met die typen mengt vraagt expliciete
+conversies.
+
+### 5.1 `rational` (een geheel getal of een breuk)
+
+Het type van CL's `rational`. Een waarde is een `int` of een `ratio`, genormaliseerd zoals in CL (een
+geheeltallige waarde is altijd de `int`). `/` op twee gehele getallen en rekenen dat een `int` met een
+`ratio` mengt geven dit type.
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+Waarden van `int` en `ratio` kunnen ongewijzigd worden doorgegeven waar een `rational` verwacht wordt
+(aan `(defun f ((q rational)) ...)` kan zowel `5` als `1/2` worden doorgegeven). Andersom haalt u de
+waarde eruit met `as`/`try-as`.
+
+| Naam | Vorm | Type | Beschrijving |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | Rekenkunde (het resultaat wordt genormaliseerd). `/` geeft een panic bij deling door nul |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Vergelijking |
+| `numerator` `denominator` | `(op x)` | `rational→int` | De teller en noemer in vereenvoudigde vorm |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Afgekapt naar nul, als `ratio`, naar `f64` |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` voor een geheel getal, anders `none` (CL's `integerp`) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Als bij `ratio` (de exponent van `expt` is een `int`) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Als bij `ratio` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Als bij `ratio` |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` en de goniometrische en hyperbolische functies | `(op x)` | | Als bij `ratio` |
+
+`(as int q)` is `rational->int` (afkappen), `(try-as int q)` is `try-rational->int`, `(as ratio q)` en
+`(as f64 q)` zijn de betreffende conversies, en `(as rational x)` verbreedt vanuit `int`/`ratio`. `Eq`,
+`Ord`, `Hash`, `print-object` en de rekenkundige traits zijn ook geïmplementeerd.
 
 ## 6. Complexe getallen `complex`
 

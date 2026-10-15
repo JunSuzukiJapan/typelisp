@@ -50,7 +50,7 @@ typelisp 沒有 `nil`。「可能沒有值」以 `Option<T>` 型別表示。`Opt
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

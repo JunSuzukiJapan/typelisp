@@ -28,7 +28,7 @@ ist, ist ein Typfehler.
 **Die Steuerzeichenkette muss ein Literal sein** (dieselbe Einschränkung wie bei Rusts `format!`). Die
 Direktiven darin bestimmen, wie viele Argumente welcher Typen genommen werden, daher lässt sich eine zur
 Laufzeit gebaute Zeichenkette bei der Prüfung nicht lesen. Weil sie ein Literal sein muss, **werden Anzahl und
-Typen der Argumente bei der Prüfung kontrolliert**: `(println "~d" "x")` und `(println "~a ~a" 1)` sind Fehler
+Typen der Argumente bei der Prüfung kontrolliert**: `(println "~c" 1)` und `(println "~a ~a" 1)` sind Fehler
 bei der Prüfung. Eine falsch geschriebene Direktive, ein nicht geschlossenes `~(` und ein `~/name/`, dessen
 Aufrufziel sich nicht bestimmen lässt, sind ebenfalls Fehler bei der Prüfung. Die Prüfregeln stehen in
 [format.md](format.md#1-wie-man-direktiven-schreibt). Um eine selbst gebaute Zeichenkette auszugeben, erzeugt

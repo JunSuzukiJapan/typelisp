@@ -46,13 +46,13 @@ Liczby występują w następujących rodzajach:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` na dwóch liczbach całkowitych daje liczbę całkowitą z odrzuconą częścią ułamkową (nie tworzy
-ułamka, jak robi to Common Lisp). Do obliczenia reszty użyj `(mod 7 2)`.
+`/` na dwóch liczbach całkowitych daje ułamek, gdy dzielenie nie jest dokładne, jak w Common Lisp.
+Liczbę całkowitą bez części ułamkowej daje `(truncate 7 2)` (`3`), a resztę `(mod 7 2)`.
 
 Wartościami logicznymi są `true` i `false`.
 

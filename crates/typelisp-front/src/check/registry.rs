@@ -750,6 +750,7 @@ impl Registry {
                 Type::Char => char_assoc(),
                 Type::Int => integer_assoc(),
                 Type::Ratio => ratio_assoc(),
+                Type::Rational => rational_assoc(),
                 Type::Bool => bool_assoc(),
                 Type::Symbol => symbol_assoc(),
                 // Every integer width and both float widths get the same
@@ -2937,9 +2938,14 @@ fn integer_assoc() -> BTreeMap<String, AssocFn> {
     let unary = || AssocFn { sig: FnSig::builtin(vec![ty.clone()], ty.clone()), instance: true, builtin: true };
     let conv = |ret: Type| AssocFn { sig: FnSig::builtin(vec![ty.clone()], ret), instance: true, builtin: true };
     let mut m = BTreeMap::new();
-    for op in ["+", "-", "*", "/", "mod", "max", "min", "logand", "logior", "logxor"] {
+    for op in ["+", "-", "*", "mod", "max", "min", "logand", "logior", "logxor"] {
         m.insert(op.to_string(), binop());
     }
+    // CL's `/` on two integers is a `rational`: `(/ 6 3)` is `2`, `(/ 7 2)` is
+    // `7/2`. The integer quotient is `truncate` (and `floor`/`ceiling`/
+    // `round`, built on it in the prelude), CL's first value.
+    m.insert("/".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Rational), instance: true, builtin: true });
+    m.insert("truncate".to_string(), binop());
     m.insert("ash".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], ty.clone()), instance: true, builtin: true });
     m.insert("logbitp".to_string(), AssocFn { sig: FnSig::builtin(vec![ty.clone(), Type::Int], Type::Bool), instance: true, builtin: true });
     for op in ["<", "<=", ">", ">=", "=", "/="] {
@@ -2990,6 +2996,41 @@ fn ratio_assoc() -> BTreeMap<String, AssocFn> {
     m.insert("ratio->float".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::F64), instance: true, builtin: true });
     m.insert("numerator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
     m.insert("denominator".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Int), instance: true, builtin: true });
+    // Widening into `rational`, normalizing: an integer-valued `ratio` becomes
+    // the `int`. `Checker::reconcile_expected` inserts it wherever a `ratio`
+    // reaches a `rational` position.
+    m.insert("ratio->rational".to_string(), AssocFn { sig: FnSig::builtin(vec![Type::Ratio], Type::Rational), instance: true, builtin: true });
+    m
+}
+
+/// Built-in arithmetic/comparison instance methods for `rational` (CL's
+/// rational: an `int` or a `ratio`, normalized). Every result is normalized
+/// the same way, so a `rational` that is an integer is always the `int`.
+/// The rest of CL's rational catalog is written in `prelude.rs` on these.
+fn rational_assoc() -> BTreeMap<String, AssocFn> {
+    let ty = Type::Rational;
+    let binop = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], ty.clone()), instance: true, builtin: true };
+    let cmp = || AssocFn { sig: FnSig::builtin(vec![ty.clone(), ty.clone()], Type::Bool), instance: true, builtin: true };
+    let conv = |ret: Type| AssocFn { sig: FnSig::builtin(vec![Type::Rational], ret), instance: true, builtin: true };
+    let mut m = BTreeMap::new();
+    for op in ["+", "-", "*", "/", "max", "min"] {
+        m.insert(op.to_string(), binop());
+    }
+    for op in ["<", "<=", ">", ">=", "=", "/="] {
+        m.insert(op.to_string(), cmp());
+    }
+    for name in ["eq", "eql", "equal", "equalp"] {
+        m.insert(name.to_string(), cmp());
+    }
+    // `rational->int` truncates toward zero, as `ratio->int` does;
+    // `try-rational->int` is the question whether the value is an integer at
+    // all (CL's `integerp`), answered with the `int` it is.
+    m.insert("rational->int".to_string(), conv(Type::Int));
+    m.insert("try-rational->int".to_string(), conv(option_of(Type::Int)));
+    m.insert("rational->ratio".to_string(), conv(Type::Ratio));
+    m.insert("rational->float".to_string(), conv(Type::F64));
+    m.insert("numerator".to_string(), conv(Type::Int));
+    m.insert("denominator".to_string(), conv(Type::Int));
     m
 }
 

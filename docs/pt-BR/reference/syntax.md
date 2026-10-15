@@ -99,9 +99,11 @@ No código-fonte, os tipos são escritos como símbolos ou listas comuns.
   [Números](functions/numbers.md#3-inteiros-de-precisão-arbitrária-int)), e os seis tipos de largura fixa são
   nomeados pela largura e pelo sinal (não há tipo inteiro de 64 bits; veja
   [Números](functions/numbers.md#1-inteiros-de-largura-fixa)).
-- **O tipo racional**: `ratio` (racionais na forma irredutível). Alocados no heap como no CL, sem conversão
-  implícita com `int`/`f64` e afins (converta explicitamente com `as`/`try-as` ou com um método de conversão;
-  veja [Números](functions/numbers.md#5-racionais-ratio)).
+- **Os tipos racionais**: `ratio` (racionais reduzidos) e `rational` (um `int` ou um `ratio`, o rational
+  do CL). `/` sobre dois inteiros e a aritmética que mistura um `int` com um `ratio` dão um `rational`, e
+  valores `int`/`ratio` são passados como estão onde se espera um `rational`. Não há conversão
+  implícita com os inteiros de largura fixa nem com `f64` (torne-a explícita com `as`/`try-as` ou um
+  método de conversão; veja [Números](functions/numbers.md#5-racionais-ratio)).
 - **Palavras brutas na fronteira com C**: `ptr` (um ponteiro opaco), `c-long` / `c-ulong`. Só para o FFI:
   tornar uma delas um valor exige `(unsafe ...)`, e os lugares onde podem aparecer são limitados
   ([3.3 defffi](#ptr--c-long--c-ulong--palavras-de-máquina-brutas)). Não as use onde você quer um inteiro de
@@ -1652,6 +1654,9 @@ Todo o resto (as ampliações, e o truncamento de `float->int`/`ratio->int`) sem
 `float->int`/`ratio->int`/`char->int` chegam em `int`, e se for pedida uma largura mais estreita, `int->W` é
 chamado depois. É uma facilidade de escrita que se expande para os métodos de conversão correspondentes
 (`int->char`/`int->int`/`int->W` etc. em [Números](functions/numbers.md)).
+
+A partir de `rational`, `as`/`try-as` convertem para `int` (`as` trunca, `try-as` só tem sucesso para um
+inteiro), `ratio` e `f64`; a partir de `int`/`ratio`, para `rational`.
 
 `documentation`, como `quote`/`compile`, é uma forma especial que lê `name` sem avaliá-lo, como um símbolo simples
 / caminho `::` não avaliado. Ao contrário do `(documentation 'name 'function)` do CL, não recebe argumento de

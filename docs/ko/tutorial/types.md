@@ -52,7 +52,7 @@ typelisp에는 `nil`이 없다. "값이 없을 수도 있다"는 것은 `Option<
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

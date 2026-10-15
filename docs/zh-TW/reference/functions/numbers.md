@@ -83,7 +83,9 @@ CL 的 `integer`，也就是這個語言的**整數**——未註記的整數字
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | 不會溢位（會提升） |
-| `/` | `(/ a b)` | `(int,int)→int` | 朝零截斷。除以零時 panic |
+| `/` | `(/ a b)` | `(int,int)→rational` | CL 的 `/`。整除時為整數，否則為分數（`(/ 6 3)` 為 `2`，`(/ 7 2)` 為 `7/2`）。除以零時 panic |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | 向零截斷的商（CL 的第一個值）。除以零時 panic |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | 向下、向上或向最近整數（恰好一半時取偶數）取整的商。除數不能省略 |
 | `mod` | `(mod a b)` | `(int,int)→int` | 下取整除法的餘數（正負號隨除數） |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -124,15 +126,16 @@ CL 的 `integer`，也就是這個語言的**整數**——未註記的整數字
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | 尾數（在 `[1/2,1)` 中，無正負號）與指數。CL 回傳 3 個值，但沒有多值，所以正負號交給 `float-sign` |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | 以精確的 53 位元整數尾數做同樣的分解。`尾數 * 2^指數` 恰好是原值 |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **讀回時恰為該浮點數的最簡單的**有理數（`(rationalize 0.1)` 是 `1/10`）。需要精確的二進位值時用 `float->ratio` |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **讀回時恰為該浮點數的最簡單的**有理數（`(rationalize 0.1)` 是 `1/10`）。需要精確的二進位值時用 `float->ratio` |
 
-**與 CL 的差異：`round` 的捨入方式。** `round`（因而還有 `fround`/`round-div`）**遠離零**捨入（`(round 2.5)` = `3.0`）。CL **捨入到
-偶數**，得到 `2`。
+`round`（因而 `fround`/`round-div`）與 CL 一樣，恰好一半時**向偶數**捨入
+（`(round 2.5)` 為 `2.0`，`(round 3.5)` 為 `4.0`）。
 
 ## 5. 有理數 `ratio`
 
-依 CL 的任意精度有理數。一律保持既約且分母為正，在堆積上配置。與整數型別及 `f64` 之間沒有隱式轉換（請使用明確的轉換方法或
-`as`/`try-as`）。比例字面值的語法見[語法參考](../syntax.md#1-詞法元素)。
+遵循 CL 的任意精度有理數。始終保持既約、分母為正，並在堆積上配置。與 `int` 混合的運算得到
+`rational`（5.1）。與固定寬度整數或 `f64` 之間沒有隱式轉換（使用顯式轉換方法或 `as`/`try-as`）。
+比例字面值語法參見[語法參考](../syntax.md#1-詞法元素)。
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
@@ -154,7 +157,7 @@ CL 的 `integer`，也就是這個語言的**整數**——未註記的整數字
 | `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | 同樣的捨入，以 `f64` 傳回 |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL 的雙引數 `floor` 等。整數商是 `car`，`ratio` 餘數是 `cdr`（`(floor-div 7/2 1/3)` 為 `(10 . 1/6)`） |
 | `float` | `(float x)` | `ratio→f64` | 轉換為 `f64`（與 `ratio->float` 相同） |
-| `rational` `rationalize` | `(op x)` | `ratio→ratio` | 引數本身 |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | 以 `rational` 傳回同一個值 |
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | 轉換為 `f64` 後計算（`(sqrt 1/4)` 為 `0.5`） |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 同上 |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 同上 |
@@ -168,8 +171,40 @@ CL 的整數是分母為 1 的有理數，因此 `int` 也有 `numerator`（自�
 分子和分母，`*print-radix*` 為真時加上基數前綴，如 `#x1/f`、`#10r1/3`。讀取器也能讀
 `#x1/F`、`#b101/11`、`#3r1/2`。
 
-從固定寬度整數與 `f64` 進入的途徑是 `int->int`/`int->ratio`（第 1 章）與 `float->int`/`float->ratio`（第 4 章）。`int`/`ratio` 是與
-`i32` 等彼此獨立的型別，混合運算需要明確轉換。
+從固定寬度整數、`f64` 進入的途徑是 `int->int`/`int->ratio`（第 1 章）和 `float->int`/`float->ratio`
+（第 4 章）。`int`/`ratio` 是獨立於 `i32` 等的型別，與它們混合的算術需要顯式轉換。
+
+### 5.1 `rational`（整數或分數）
+
+對應 CL 的 `rational` 的型別。值是 `int` 或 `ratio`，與 CL 一樣經過正規化（整數值一定是 `int`）。
+整數之間的 `/` 以及混合 `int` 與 `ratio` 的運算結果都是這個型別。
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+`int` 和 `ratio` 的值可以原樣傳給期望 `rational` 的位置（`5` 和 `1/2` 都可以傳給
+`(defun f ((q rational)) ...)`）。反方向用 `as`/`try-as` 取出。
+
+| 名稱 | 形式 | 型別 | 說明 |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | 四則運算（結果會正規化）。`/` 除以零時 panic |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | 比較 |
+| `numerator` `denominator` | `(op x)` | `rational→int` | 既約的分子和分母 |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | 向零截斷、作為 `ratio`、轉為 `f64` |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 是整數時為 `(some n)`，否則為 `none`（CL 的 `integerp`） |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | 與 `ratio` 相同（`expt` 的指數為 `int`） |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | 與 `ratio` 相同 |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | 與 `ratio` 相同 |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` 以及三角函式和雙曲函式 | `(op x)` | | 與 `ratio` 相同 |
+
+`(as int q)` 是 `rational->int`（截斷），`(try-as int q)` 是 `try-rational->int`，`(as ratio q)` 和
+`(as f64 q)` 是相應的轉換，`(as rational x)` 是從 `int`/`ratio` 的擴展。也實作了 `Eq`、`Ord`、`Hash`、
+`print-object` 和算術 trait。
 
 ## 6. 複數 `complex`
 

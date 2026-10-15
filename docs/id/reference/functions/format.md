@@ -25,14 +25,15 @@ hal-hal berikut diperiksa saat pemeriksaan.
   diharapkan, dan sebagainya) adalah kesalahan. Semuanya tidak pernah diabaikan atau dibulatkan
   secara diam-diam.
 
-**Elemen** argumen daftar (`~{`, `~:{`, `~<...~:>`) adalah `Sexpr`, dan baik jumlahnya maupun tipe
-tiap elemennya tidak dapat diketahui dari tipe. Persyaratan pada elemen (bilangan bulat untuk `~d`,
-dan sebagainya) dan elemen yang hilang diperiksa ketika nilainya tiba, dan merupakan kesalahan saat
-dijalankan (ia tidak pernah beralih ke representasi lain sebagai gantinya).
+**Elemen** argumen daftar (`~{`, `~:{`, `~<...~:>`) adalah `Sexpr`; baik jumlahnya maupun tipe tiap elemen
+tidak dapat diketahui dari tipe. Persyaratan pada elemen (karakter untuk `~c`, dan seterusnya) dan
+elemen yang kurang diperiksa saat nilainya tiba, dan merupakan galat waktu jalan (tidak pernah beralih ke
+representasi lain sebagai gantinya).
 
-Aturan longgar CL tidak diadopsi. Memberikan non-bilangan-bulat ke `~d` lalu mencetaknya sebagai
-`~a`, atau `~:[` yang memperlakukan nilai apa pun sebagai boolean, tidak diinterpretasikan ulang
-dengan cara itu; semuanya adalah kesalahan tipe.
+`~d` `~b` `~o` `~x` dan `~r` dengan basis mencetak nilai bukan bilangan bulat seperti yang akan dilakukan
+`~a`, dalam desimal, seperti di CL (`(format false "~5d" 1/2)` adalah `"  1/2"`). Aturan longgar CL
+lainnya tidak diadopsi: `~:[` yang memperlakukan nilai apa pun sebagai boolean tidak ditafsirkan ulang
+begitu; itu galat tipe.
 
 ## 2. Keluaran (mengonsumsi satu argumen)
 
@@ -41,7 +42,7 @@ dengan cara itu; semuanya adalah kesalahan tipe.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=rata kanan | Estetis (`princ` pada CL; string tanpa tanda kutip). Argumen dapat bertipe apa pun |
 | `~s` | Sama seperti di atas | Standar (`prin1` pada CL; bentuk yang dapat dibaca kembali). Argumen dapat bertipe apa pun |
 | `~w` | — | `write` pada CL. Mencetak secara pretty jika `*print-pretty*` benar, jika tidak sama dengan `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=kelompok digit, `@`=selalu tanda | Bilangan bulat desimal/biner/oktal/heksadesimal. Argumen adalah bilangan bulat |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=kelompok digit, `@`=selalu tanda | Bilangan bulat desimal/biner/oktal/heksadesimal. Argumen boleh apa saja (bukan bilangan bulat dicetak seperti dengan `~a`, dalam desimal) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (dengan radix) atau tanpa | Dengan radix, basis itu (2 sampai 36). Tanpa radix: `~r`=bilangan kardinal Inggris, `~:r`=bilangan ordinal Inggris, `~@r`=angka Romawi, `~:@r`=angka Romawi kuno. Argumen adalah bilangan bulat |
 | `~p` | `:`=mundur satu, `@`=y/ies | Bentuk jamak (`~p`→"s", `~@p`→"y"/"ies"). Argumen adalah bilangan bulat |
 | `~c` | `:`=nama, `@`=sintaks `#\` | Sebuah karakter. Argumen adalah `char` |

@@ -41,12 +41,10 @@ fn the_f_prefixed_rounding_names_stay_floats() {
     assert_eq!(show("(fceiling 2.1)"), "3.0");
     assert_eq!(show("(ftruncate -2.7)"), "-2.0");
     assert_eq!(show("(ffloor -2.1)"), "-3.0");
-    // Ties round *away from zero*, not to even. CL specifies to-even, so
-    // `(fround 2.5)` is 2 there and 3.0 here — a divergence inherited from the
-    // existing `round` builtin, recorded in `docs/ja/reference/functions/numbers.md` §4 rather than
-    // silently fixed in the alias (which would leave `fround` and `round`
-    // disagreeing with each other).
-    assert_eq!(show("(fround 2.5)"), "3.0");
+    // Ties round to even, as CL's `round` does.
+    assert_eq!(show("(fround 2.5)"), "2.0");
+    assert_eq!(show("(fround 3.5)"), "4.0");
+    assert_eq!(show("(fround -2.5)"), "-2.0");
     assert_eq!(show("(fround 2.4)"), "2.0");
 }
 

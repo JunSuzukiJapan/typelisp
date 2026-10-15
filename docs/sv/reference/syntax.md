@@ -99,8 +99,10 @@ I källkod skrivs typer som vanliga symboler eller listor.
   och bignums; [Tal](functions/numbers.md#3-heltal-med-godtycklig-precision-int)), och de sex typerna med
   fast bredd är uppkallade efter sin bredd och teckenhantering (det finns ingen 64-bitars heltalstyp; se
   [Tal](functions/numbers.md#1-heltal-med-fast-bredd)).
-- **Den rationella typen**: `ratio` (rationella tal i enklaste form). Heapallokerade som i CL, utan
-  implicit konvertering med `int`/`f64` och liknande (konvertera explicit med `as`/`try-as` eller en
+- **De rationella typerna**: `ratio` (förkortade rationella tal) och `rational` (en `int` eller en
+  `ratio`, CL:s rational). `/` på två heltal och aritmetik som blandar en `int` med en `ratio` ger en
+  `rational`, och `int`/`ratio`-värden kan skickas som de är där en `rational` förväntas. Ingen implicit
+  konvertering med heltalen med fast bredd eller `f64` (gör den explicit med `as`/`try-as` eller en
   konverteringsmetod; se [Tal](functions/numbers.md#5-kvoter-ratio)).
 - **Råa ord vid C-gränsen**: `ptr` (en ogenomskinlig pekare), `c-long` / `c-ulong`. Bara för FFI: att
   göra en till ett värde kräver `(unsafe ...)`, och de platser där de kan förekomma är begränsade
@@ -1659,6 +1661,9 @@ utanför intervallet, så `as` ger panic och `try-as` ger `None`. Allt annat (vi
 `float->int`/`ratio->int`) lyckas alltid. `float->int`/`ratio->int`/`char->int` landar på `int`, och om en
 smalare bredd efterfrågas anropas `int->W` efter dem. Detta är socker som expanderar till motsvarande
 konverteringsmetoder (`int->char`/`int->int`/`int->W` och så vidare i [Tal](functions/numbers.md)).
+
+Från `rational` konverterar `as`/`try-as` till `int` (`as` avkortar, `try-as` lyckas bara för ett
+heltal), `ratio` och `f64`; från `int`/`ratio` till `rational`.
 
 `documentation` är, liksom `quote`/`compile`, en specialform som läser `name` utan att utvärdera den, som
 en onekvaliserad bar symbol / `::`-sökväg. Till skillnad från CL:s `(documentation 'name 'function)` tar den

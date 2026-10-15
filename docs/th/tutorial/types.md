@@ -54,7 +54,7 @@ typelisp ไม่มี `nil` "อาจไม่มีค่า" แสดง�
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

@@ -8,4 +8,4 @@
     ((add a b) (+ (eval a) (eval b)))
     ((sub a b) (- (eval a) (eval b)))
     ((mul a b) (* (eval a) (eval b)))
-    ((div a b) (/ (eval a) (eval b)))))
+    ((div a b) (truncate (eval a) (eval b)))))

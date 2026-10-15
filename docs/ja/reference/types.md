@@ -12,6 +12,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 | `u8` `u16` `u32` | 符号なし固定幅整数 | 同上 |
 | `f32` `f64` | IEEE-754 浮動小数点数。小数リテラルの既定は `f64` | [数値 4 章](functions/numbers.md#4-浮動小数点数f64--f32) |
 | `ratio` | 既約な有理数 | [数値 5 章](functions/numbers.md#5-有理数-ratio) |
+| `rational` | `int` か `ratio`（CL の rational）。整数どうしの `/` の結果の型 | [数値 5.1 節](functions/numbers.md#51-rational整数または分数) |
 | `bool` | `true` / `false` | [数値 7 章](functions/numbers.md#7-真偽値) |
 | `char` | Unicode スカラ値 | [文字](functions/collections.md#2-文字-char) |
 | `string` | 不変の文字列 | [文字列](functions/collections.md#1-文字列-string) |
@@ -99,10 +100,10 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 
 | トレイト | 実装している型 | 詳細 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 組み込みのエラー型すべて | [print-object](functions/printing.md#5-print-object型ごとの印字表現) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 組み込みのエラー型すべて | [print-object](functions/printing.md#5-print-object型ごとの印字表現) |
 
 `cons-cell<A,B>` とタプル `#{..}` のトレイト、コレクションの `print-object` は、要素の型がそのトレイトを実装しているときに使える。
 
@@ -110,7 +111,7 @@ typelisp にある型と、各型が実装している標準トレイトの一�
 
 | トレイト | 実装している型 |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 詳細は [算術トレイト](functions/traits.md#3-算術トレイトadd--sub--mul--div--rem--bits--number)。

@@ -28,7 +28,7 @@ adalah kesalahan tipe.
 **String kendali harus berupa literal** (batasan yang sama seperti `format!` pada Rust). Direktif di
 dalamnya menentukan berapa banyak argumen yang diambil dan bertipe apa, sehingga string yang dibangun
 saat dijalankan tidak dapat dibaca saat pemeriksaan. Karena harus berupa literal, **jumlah dan tipe
-argumen diperiksa saat pemeriksaan**: `(println "~d" "x")` dan `(println "~a ~a" 1)` adalah kesalahan
+argumen diperiksa saat pemeriksaan**: `(println "~c" 1)` dan `(println "~a ~a" 1)` adalah kesalahan
 saat pemeriksaan. Direktif yang salah eja, `~(` yang tidak tertutup, dan `~/name/` yang tujuan
 panggilannya tidak dapat ditentukan juga merupakan kesalahan saat pemeriksaan. Aturan pemeriksaan ada di
 [format.md](format.md#1-cara-menulis-direktif). Untuk mencetak string yang Anda bangun, buatlah

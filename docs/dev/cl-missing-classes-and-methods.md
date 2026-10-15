@@ -62,9 +62,9 @@ CLHS Figure 4-8（standardized atomic type specifiers）と 4.3.7（クラス階
 
 | CL のクラス | typelisp | 備考 |
 |---|---|---|
-| `number` | ⚠️ | 数値型を束ねる**型**は無い（固定幅整数・`int`・`f32`/`f64`・`ratio` は互いに独立で暗黙変換もない (D1)）。ジェネリックコードの境界としては `Number` トレイト（2026-08-21、Phase 1a。`Add`/`Sub`/`Mul`/`Div`/`Rem`/`Ord` の合成）が相当する |
+| `number` | ⚠️ | 数値型を束ねる**型**は無い（固定幅整数・`int`・`f32`/`f64`・`ratio` は互いに独立で暗黙変換もない (D1)）。ジェネリックコードの境界としては `Number` トレイト（2026-08-21、Phase 1a。`Add`/`Sub`/`Mul`/`Rem`/`Ord` の合成。2026-10-16 に `Div` は関連型 `Output` を持って外れた——`int` の `Output` は `rational`）が相当する |
 | `real` | ⚠️ | 同上 |
-| `rational` | ⚠️ | 同上（`int` と `ratio` を束ねる型は無い） |
+| `rational` | ✅ | `rational`（2026-10-16）。値は `int` か `ratio` で CL どおり正規化される。整数どうしの `/`、`int` と `ratio` を混ぜた演算の結果の型で、`int`/`ratio` の値はそのまま渡せる（`Checker::reconcile_expected` の拡大、`Checker::rational_contagion`） |
 | `integer` | ✅ | `int`（2026-09-17）。任意精度で、63bit の即値に入らなくなると自動で多倍長になる——CL の fixnum→bignum 昇格そのもの。未注釈の整数リテラルの既定型。固定幅の `i8`/`i16`/`i32`/`u8`/`u16`/`u32` は別の型として並ぶ |
 | `fixnum` | ✅ | 型としては無く、`int` の即値の側（63bit、タグは 1bit）が相当する。固定幅の 6 型も全演算を持つ（2026-08-21、Phase 1a）。64bit 幅の整数型は無い——即値の整数には 63bit しか残らない |
 | `bignum` | ✅ | `int` の多倍長の側。型名 `bignum` は 2026-09-17 に `int` へ統合して退役した |

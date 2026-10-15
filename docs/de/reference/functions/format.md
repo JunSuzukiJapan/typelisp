@@ -24,14 +24,15 @@ wird bei der Prüfung Folgendes kontrolliert.
   des Bereichs (eine negative Breite, eine Basis außer 2 bis 36, eine Ganzzahl, wo ein Zeichen erwartet wird,
   usw.) sind Fehler. Sie werden nie stillschweigend ignoriert oder gerundet.
 
-Die **Elemente** eines Listenarguments (`~{`, `~:{`, `~<...~:>`) sind `Sexpr`s, und weder ihre Anzahl noch der
-Typ jedes Elements lässt sich aus den Typen ablesen. Anforderungen an Elemente (eine Ganzzahl für `~d` usw.)
-und fehlende Elemente werden geprüft, wenn die Werte ankommen, und sind Laufzeitfehler (es wird nie
-stattdessen auf eine andere Darstellung ausgewichen).
+Die **Elemente** eines Listenarguments (`~{`, `~:{`, `~<...~:>`) sind `Sexpr`s; weder ihre Anzahl noch
+der Typ jedes Elements ist aus den Typen ersichtlich. Anforderungen an Elemente (ein Zeichen für `~c`
+usw.) und fehlende Elemente werden geprüft, wenn die Werte ankommen, und sind Laufzeitfehler (es wird
+nie stattdessen auf eine andere Darstellung umgeschaltet).
 
-CLs nachsichtige Regeln werden nicht übernommen. Eine Nicht-Ganzzahl an `~d` zu übergeben und sie wie `~a`
-ausgeben zu lassen oder dass `~:[` jeden Wert als Wahrheitswert behandelt, wird nicht so umgedeutet; es sind
-Typfehler.
+`~d` `~b` `~o` `~x` und `~r` mit Basis geben wie in CL eine Nicht-Ganzzahl so aus, wie `~a` es täte,
+dezimal (`(format false "~5d" 1/2)` ist `"  1/2"`). Die übrigen nachsichtigen Regeln von CL werden
+nicht übernommen: dass `~:[` jeden Wert als Wahrheitswert behandelt, wird nicht so umgedeutet, sondern
+ist ein Typfehler.
 
 ## 2. Ausgabe (verbraucht ein Argument)
 
@@ -40,7 +41,7 @@ Typfehler.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=rechtsbündig | Ästhetisch (CLs `princ`; Zeichenketten ohne Anführungszeichen). Das Argument kann beliebigen Typs sein |
 | `~s` | Wie oben | Standard (CLs `prin1`; eine Form, die sich zurücklesen lässt). Das Argument kann beliebigen Typs sein |
 | `~w` | — | CLs `write`. Formatiert schön, wenn `*print-pretty*` wahr ist, sonst dasselbe wie `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=Zifferngruppen, `@`=immer ein Vorzeichen | Dezimale/binäre/oktale/hexadezimale Ganzzahlen. Das Argument ist eine Ganzzahl |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=Zifferngruppen, `@`=immer ein Vorzeichen | Dezimale/binäre/oktale/hexadezimale ganze Zahlen. Das Argument darf alles sein (eine Nicht-Ganzzahl wird wie mit `~a` dezimal ausgegeben) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (mit Basis) oder keine | Mit Basis in dieser Basis (2 bis 36). Ohne: `~r`=englische Grundzahl, `~:r`=englische Ordnungszahl, `~@r`=römische Zahlen, `~:@r`=alte römische Zahlen. Das Argument ist eine Ganzzahl |
 | `~p` | `:`=eins zurück, `@`=y/ies | Plurale (`~p`→"s", `~@p`→"y"/"ies"). Das Argument ist eine Ganzzahl |
 | `~c` | `:`=Name, `@`=Syntax `#\` | Ein Zeichen. Das Argument ist ein `char` |

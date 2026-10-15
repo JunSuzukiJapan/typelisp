@@ -51,6 +51,7 @@ pub mod c_mem;
 pub mod ffi_callback;
 pub mod integer;
 pub mod net;
+pub mod rational;
 pub mod net_builtin;
 pub mod x509;
 pub mod os;

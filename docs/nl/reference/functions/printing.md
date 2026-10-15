@@ -28,7 +28,7 @@ is, is een typefout.
 **De stuurstring moet een literal zijn** (dezelfde beperking als `format!` van Rust). De directieven
 daarin bepalen hoeveel argumenten van welke types worden genomen, dus een string die tijdens runtime
 wordt opgebouwd kan niet bij het controleren worden gelezen. Omdat hij een literal moet zijn, worden
-**het aantal en de types van de argumenten bij het controleren gecontroleerd**: `(println "~d" "x")` en
+**het aantal en de types van de argumenten bij het controleren gecontroleerd**: `(println "~c" 1)` en
 `(println "~a ~a" 1)` zijn fouten bij het controleren. Een verkeerd gespelde directief, een niet
 gesloten `~(` en een `~/name/` waarvan niet vast te stellen is wat hij aanroept zijn ook fouten bij het
 controleren. De controleregels staan in [format.md](format.md#1-hoe-je-directieven-schrijft). Om een

@@ -72,7 +72,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -80,7 +80,7 @@
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; расстояние всегда int (как у ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; без методов; сочетание шести
+(deftrait Number (Add Sub Mul Rem Ord))                   ; методов нет; сочетание пяти
 ```
 
 **Внутри ограничения можно писать операторы.** Когда получатель — переменная типа, связанная `where`, операторы
@@ -97,3 +97,11 @@
 
 Реализованы для: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` — для всех числовых типов (кроме `complex`), `Bits` — для всех
 целых типов и `int`.
+
+
+**`Div` называет тип результата ассоциированным типом `Output`.** Как в CL, `/` на двух целых — это
+`rational`, поэтому `Output` у `int` — `rational`, а у любого другого числового типа — сам этот тип.
+Поскольку `Output` у типов разный, `Number` не включает `Div` (список супертрейтов должен закреплять
+каждый ассоциированный тип). Обобщённая функция, которая делит, принимает тип результата через
+`(where (Div T (Output R)))` или требует деления, замкнутого в `T`, через `(where (Div T (Output T)))`
+(тогда `int` передать нельзя).

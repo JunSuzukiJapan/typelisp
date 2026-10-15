@@ -22,14 +22,14 @@ sau được kiểm tra lúc kiểm tra.
   ngoài phạm vi (độ rộng âm, cơ số khác 2 đến 36, một số nguyên ở chỗ cần ký tự, v.v.) là lỗi. Chúng không
   bao giờ bị bỏ qua hay làm tròn một cách im lặng.
 
-Các **phần tử** của một đối số danh sách (`~{`, `~:{`, `~<...~:>`) là các `Sexpr`, và cả số lượng lẫn kiểu
-của từng phần tử đều không thể biết từ các kiểu. Các yêu cầu đối với phần tử (một số nguyên cho `~d`, v.v.)
-và phần tử bị thiếu được kiểm tra khi các giá trị đến, và là lỗi lúc chạy (nó không bao giờ chuyển sang một
-biểu diễn khác để thay thế).
+Các **phần tử** của đối số danh sách (`~{`, `~:{`, `~<...~:>`) là `Sexpr`; không thể biết số lượng lẫn kiểu
+của từng phần tử từ các kiểu. Yêu cầu đối với phần tử (ký tự cho `~c`, v.v.) và việc thiếu phần tử được
+kiểm tra khi giá trị đến và là lỗi thời gian chạy (không bao giờ chuyển sang cách biểu diễn khác thay
+thế).
 
-Các quy tắc dễ dãi của CL không được áp dụng. Truyền một giá trị không phải số nguyên cho `~d` và để nó
-được in như `~a`, hay `~:[` coi mọi giá trị là boolean, đều không được diễn giải lại như vậy; chúng là lỗi
-kiểu.
+`~d` `~b` `~o` `~x` và `~r` có cơ số in giá trị không nguyên như `~a` sẽ in, ở hệ thập phân, giống CL
+(`(format false "~5d" 1/2)` là `"  1/2"`). Các quy tắc dễ dãi khác của CL không được áp dụng: việc
+`~:[` coi mọi giá trị là giá trị logic không được diễn giải lại như vậy; đó là lỗi kiểu.
 
 ## 2. Đầu ra (tiêu thụ một đối số)
 
@@ -38,7 +38,7 @@ kiểu.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=căn phải | Dạng thẩm mỹ (`princ` của CL; chuỗi không có dấu nháy). Đối số có thể thuộc kiểu bất kỳ |
 | `~s` | Như trên | Dạng chuẩn (`prin1` của CL; dạng có thể đọc ngược lại). Đối số có thể thuộc kiểu bất kỳ |
 | `~w` | — | `write` của CL. In đẹp nếu `*print-pretty*` là true, nếu không thì giống `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=nhóm chữ số, `@`=luôn có dấu | Số nguyên thập phân/nhị phân/bát phân/thập lục phân. Đối số là một số nguyên |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=nhóm chữ số, `@`=luôn có dấu | Số nguyên thập phân/nhị phân/bát phân/thập lục phân. Đối số có thể là bất kỳ (giá trị không nguyên được in như với `~a`, ở hệ thập phân) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (với một cơ số) hoặc không có | Với cơ số, dùng cơ số đó (2 đến 36). Không có cơ số: `~r`=số đếm tiếng Anh, `~:r`=số thứ tự tiếng Anh, `~@r`=chữ số La Mã, `~:@r`=chữ số La Mã cổ. Đối số là một số nguyên |
 | `~p` | `:`=lùi lại một, `@`=y/ies | Số nhiều (`~p`→"s", `~@p`→"y"/"ies"). Đối số là một số nguyên |
 | `~c` | `:`=tên, `@`=cú pháp `#\` | Một ký tự. Đối số là một `char` |

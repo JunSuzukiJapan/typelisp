@@ -24,14 +24,15 @@ Denetim string'i bir sabit olmalıdır ([Yazdırma](printing.md#1-print--println
   dışı değerler (negatif bir genişlik, 2 ile 36 dışında bir taban, bir karakter beklenen yerde bir
   tamsayı vb.) hatadır. Asla sessizce yok sayılmaz ya da yuvarlanmaz.
 
-Bir liste bağımsız değişkeninin (`~{`, `~:{`, `~<...~:>`) **elemanları** `Sexpr`'dir ve ne sayıları ne de
-her elemanın türü türlerden bilinebilir. Elemanlara ilişkin gereksinimler (`~d` için bir tamsayı vb.) ve
-eksik elemanlar, değerler geldiğinde denetlenir ve çalışma zamanı hatalarıdır (bunun yerine asla farklı
-bir gösterime geçmez).
+Liste argümanının (`~{`, `~:{`, `~<...~:>`) **elemanları** `Sexpr`'dir; ne sayıları ne de her elemanın
+tipi tiplerden bilinebilir. Elemanlara ilişkin gereksinimler (`~c` için bir karakter vb.) ve eksik
+elemanlar değerler geldiğinde denetlenir ve çalışma zamanı hatasıdır (bunun yerine asla başka bir
+gösterime geçilmez).
 
-CL'nin esnek kuralları benimsenmemiştir. `~d`'ye tamsayı olmayan bir değer geçirip `~a` gibi
-yazdırılmasını sağlamak ya da `~:[`'nin her değeri bir boolean saymasının bu şekilde yeniden
-yorumlanmaz; bunlar tür hatalarıdır.
+`~d` `~b` `~o` `~x` ve tabanlı `~r`, CL'deki gibi tam sayı olmayan bir değeri `~a`'nın yapacağı gibi,
+onluk tabanda yazdırır (`(format false "~5d" 1/2)` `"  1/2"` olur). CL'nin diğer hoşgörülü kuralları
+benimsenmez: `~:[`'nin her değeri mantıksal değer saymasına böyle bir yeniden yorum yapılmaz; bu bir
+tip hatasıdır.
 
 ## 2. Çıktı (bir bağımsız değişken tüketen)
 
@@ -40,7 +41,7 @@ yorumlanmaz; bunlar tür hatalarıdır.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=sağa yasla | Estetik (CL'nin `princ`'i; string'ler tırnaksız). Bağımsız değişken herhangi bir türde olabilir |
 | `~s` | Yukarıdakiyle aynı | Standart (CL'nin `prin1`'i; geri okunabilen bir biçim). Bağımsız değişken herhangi bir türde olabilir |
 | `~w` | — | CL'nin `write`'ı. `*print-pretty*` true ise pretty-print yapar, aksi halde `~s` ile aynı |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=basamak grupları, `@`=her zaman işaret | Onlu/ikili/sekizli/onaltılı tamsayılar. Bağımsız değişken bir tamsayıdır |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=basamak grupları, `@`=her zaman işaret | Onluk/ikilik/sekizlik/onaltılık tam sayılar. Argüman herhangi bir şey olabilir (tam sayı olmayan `~a` ile olduğu gibi onluk tabanda yazdırılır) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (bir tabanla) ya da yok | Bir tabanla o taban (2 ile 36). Tabansız: `~r`=İngilizce asal sayı sözcükleri, `~:r`=İngilizce sıra sayıları, `~@r`=Roma rakamları, `~:@r`=eski Roma rakamları. Bağımsız değişken bir tamsayıdır |
 | `~p` | `:`=bir geri git, `@`=y/ies | Çoğullar (`~p`→"s", `~@p`→"y"/"ies"). Bağımsız değişken bir tamsayıdır |
 | `~c` | `:`=ad, `@`=`#\` sözdizimi | Bir karakter. Bağımsız değişken bir `char`'dır |

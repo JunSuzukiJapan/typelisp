@@ -24,13 +24,14 @@ verificação são conferidos os pontos a seguir.
   largura negativa, uma base fora de 2 a 36, um inteiro onde se espera um caractere etc.) são erros. Nunca são
   ignorados nem arredondados silenciosamente.
 
-Os **elementos** de um argumento lista (`~{`, `~:{`, `~<...~:>`) são `Sexpr`, e nem seu número nem o tipo de
-cada elemento podem ser conhecidos a partir dos tipos. As exigências sobre os elementos (um inteiro para
-`~d` etc.) e os elementos que faltam são verificados quando os valores chegam, e são erros em tempo de
-execução (nunca se troca por uma representação diferente no lugar).
+Os **elementos** de um argumento lista (`~{`, `~:{`, `~<...~:>`) são `Sexpr`s; nem a quantidade nem o
+tipo de cada elemento podem ser conhecidos pelos tipos. Exigências sobre os elementos (um caractere
+para `~c` etc.) e elementos faltantes são verificados quando os valores chegam, e são erros em tempo de
+execução (nunca se troca para outra representação no lugar).
 
-As regras tolerantes do CL não são adotadas. Passar um não inteiro para `~d` e tê-lo impresso como `~a`, ou
-`~:[` tratar qualquer valor como booleano, não são reinterpretados assim; são erros de tipo.
+`~d` `~b` `~o` `~x` e `~r` com base imprimem um não inteiro como `~a` faria, em decimal, como no CL
+(`(format false "~5d" 1/2)` é `"  1/2"`). As outras regras permissivas do CL não são adotadas: `~:[`
+tratar qualquer valor como booleano não é reinterpretado assim; é um erro de tipo.
 
 ## 2. Saída (consome um argumento)
 
@@ -39,7 +40,7 @@ As regras tolerantes do CL não são adotadas. Passar um não inteiro para `~d` 
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=alinhar à direita | Estética (o `princ` do CL; strings sem aspas). O argumento pode ser de qualquer tipo |
 | `~s` | Igual ao acima | Padrão (o `prin1` do CL; uma forma que pode ser lida de volta). O argumento pode ser de qualquer tipo |
 | `~w` | — | O `write` do CL. Faz impressão bonita se `*print-pretty*` for verdadeiro; senão, o mesmo que `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=grupos de dígitos, `@`=sempre com sinal | Inteiros em decimal/binário/octal/hexadecimal. O argumento é um inteiro |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=grupos de dígitos, `@`=sempre com sinal | Inteiros decimais/binários/octais/hexadecimais. O argumento pode ser qualquer um (um não inteiro é impresso como com `~a`, em decimal) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (com base) ou nenhum | Com base, essa base (2 a 36). Sem ela: `~r`=cardinal em inglês, `~:r`=ordinal em inglês, `~@r`=algarismos romanos, `~:@r`=algarismos romanos antigos. O argumento é um inteiro |
 | `~p` | `:`=voltar um, `@`=y/ies | Plurais (`~p`→"s", `~@p`→"y"/"ies"). O argumento é um inteiro |
 | `~c` | `:`=nome, `@`=sintaxe `#\` | Um caractere. O argumento é um `char` |

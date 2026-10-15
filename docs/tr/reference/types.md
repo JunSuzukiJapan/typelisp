@@ -14,6 +14,7 @@ typelisp'in sahip olduğu türler ve her türün gerçekleştirdiği standart tr
 | `u8` `u16` `u32` | İşaretsiz sabit genişlikli tamsayılar | Yukarıdakiyle aynı |
 | `f32` `f64` | IEEE-754 kayan noktalı sayılar. Ondalıklı sabitler varsayılan olarak `f64`'tür | [Sayılar 4. bölüm](functions/numbers.md#4-kayan-noktalı-sayılar-f64--f32) |
 | `ratio` | En sade biçimde bir rasyonel sayı | [Sayılar 5. bölüm](functions/numbers.md#5-rasyonel-sayılar-ratio) |
+| `rational` | Bir `int` ya da `ratio` (CL'nin rational'ı). İki tam sayı üzerinde `/`'in tipi | [Sayılar 5. bölüm](functions/numbers.md#5-rasyonel-sayılar-ratio) |
 | `bool` | `true` / `false` | [Sayılar 7. bölüm](functions/numbers.md#7-mantıksal-değerler) |
 | `char` | Bir Unicode skaler değeri | [Karakterler](functions/collections.md#2-karakterler-char) |
 | `string` | Değiştirilemez bir string | [String'ler](functions/collections.md#1-stringler-string) |
@@ -103,10 +104,10 @@ Hangi türlerin hangi trait'leri gerçekleştirdiği. Her trait'in metotları
 
 | Trait | Gerçekleştiren türler | Ayrıntılar |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-karşılaştırma) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Yukarıdakiyle aynı |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` ve tüm yerleşik hata türleri | [print-object](functions/printing.md#5-print-object-türe-göre-yazdırılan-gösterim) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-karşılaştırma) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Yukarıdakiyle aynı |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` ve tüm yerleşik hata türleri | [print-object](functions/printing.md#5-print-object-türe-göre-yazdırılan-gösterim) |
 
 `cons-cell<A,B>` ve demetler `#{..}` için trait'ler ile koleksiyonların `print-object`'i, öğe
 türleri o trait'i uyguladığında kullanılabilir.
@@ -115,7 +116,7 @@ türleri o trait'i uyguladığında kullanılabilir.
 
 | Trait | Gerçekleştiren türler |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Ayrıntılar [Aritmetik trait'ler](functions/traits.md#3-aritmetik-traitler-add--sub--mul--div--rem--bits--number)

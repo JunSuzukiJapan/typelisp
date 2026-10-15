@@ -49,7 +49,7 @@ typelisp में `nil` नहीं है। "हो सकता है क�
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

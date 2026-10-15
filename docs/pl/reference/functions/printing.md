@@ -27,7 +27,7 @@ związaną przez `(where (CharOutput S))`. `dest`, które nie jest ani `bool`, a
 **Łańcuch sterujący musi być literałem** (to samo ograniczenie co w `format!` z Rust). Dyrektywy
 w nim zawarte decydują o tym, ile argumentów jest branych i jakich typów, więc łańcuch zbudowany w czasie działania nie może być
 odczytany w czasie sprawdzania. Ponieważ musi być literałem, **liczba i typy argumentów są sprawdzane
-w czasie sprawdzania**: `(println "~d" "x")` i `(println "~a ~a" 1)` są błędami czasu sprawdzania. Błędnie zapisana
+w czasie sprawdzania**: `(println "~c" 1)` i `(println "~a ~a" 1)` są błędami czasu sprawdzania. Błędnie zapisana
 dyrektywa, niezamknięte `~(` oraz `~/name/`, dla którego nie da się ustalić, co wywołać, też są błędami czasu sprawdzania.
 Reguły sprawdzania opisano w [format.md](format.md#1-jak-zapisywać-dyrektywy). Aby wypisać łańcuch, który
 budujesz, utwórz go za pomocą `(format false ...)` i wypisz za pomocą `(println "~a" s)`.

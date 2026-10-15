@@ -78,7 +78,7 @@ konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lap
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@ konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lap
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; the distance is always int (as with ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; no methods; a combination of six
+(deftrait Number (Add Sub Mul Rem Ord))                   ; tanpa metode; gabungan lima
 ```
 
 **Di dalam batas, Anda dapat menulis operator.** Ketika penerimanya adalah variabel tipe yang
@@ -104,3 +104,11 @@ menjadi `(- (- x x) x)`, sehingga `Sub` sudah cukup.
 
 Diimplementasikan untuk: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` pada semua tipe numerik (kecuali
 `complex`), dan `Bits` pada semua tipe bilangan bulat dan `int`.
+
+
+**`Div` menamai tipe hasilnya dengan tipe terkait `Output`.** Seperti di CL, `/` pada dua bilangan bulat
+adalah `rational`, sehingga `Output` milik `int` adalah `rational`, dan milik tipe numerik lain adalah
+tipe itu sendiri. Karena `Output` berbeda antar tipe, `Number` tidak menyertakan `Div` (daftar supertrait
+harus menetapkan setiap tipe terkait). Fungsi generik yang membagi menerima tipe hasil dengan
+`(where (Div T (Output R)))`, atau meminta pembagian yang tertutup dalam `T` dengan
+`(where (Div T (Output T)))` (maka `int` tidak dapat diteruskan).

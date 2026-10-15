@@ -58,8 +58,9 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **基本型別**：`int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string` `symbol`。
   `int` 是整數（CL 的 integer——在 63 位元立即值與多倍精度之間自動轉換，[數值](functions/numbers.md#3-任意精度整數-int)），6 種固定寬度
   型別以寬度與正負號命名（沒有 64 位元整數型別——見[數值](functions/numbers.md#1-固定寬度整數)）。
-- **有理數型別**：`ratio`（既約有理數）。依 CL 在堆積上配置，與 `int`/`f64` 等之間沒有隱式轉換（以 `as`/`try-as` 或轉換方法明確轉換。見
-  [數值](functions/numbers.md#5-有理數-ratio)）。
+- **有理數型別**：`ratio`（既約有理數）和 `rational`（`int` 或 `ratio`，CL 的 rational）。整數之間的
+  `/` 以及混合 `int` 與 `ratio` 的運算得到 `rational`，`int`/`ratio` 的值可以原樣傳給 `rational` 的
+  位置。與固定寬度整數或 `f64` 之間沒有隱式轉換（用 `as`/`try-as` 或轉換方法顯式進行。參見[數值](functions/numbers.md#5-有理數-ratio)）。
 - **C 邊界上的原始字**：`ptr`（不透明指標）、`c-long` / `c-ulong`。只用於 FFI，成為值需要 `(unsafe ...)`，可以出現的位置也有限
   （[3.3 defffi](#ptr--c-long--c-ulong--原始機器字)）。想要 64 位元整數時不要用它們——它們沒有算術。
 - **不透明的可變型別**：`random-state`（亂數產生器的狀態）。不能放進 `Vector<T>`/`HashTable<K,V>`/`Sexpr`（可以放進 `Option<T>`/
@@ -1316,6 +1317,9 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 `(as i32 n)` 是從 `int` 的截斷。整數→`char` 可能因超出範圍而失敗，所以 `as` 會 panic，`try-as` 為 `None`。其他（擴大轉換以及
 `float->int`/`ratio->int` 的截斷）一律成功。`float->int`/`ratio->int`/`char->int` 落在 `int`，要求更窄的寬度時接著呼叫 `int->W`。是展開為
 對應轉換方法（[數值](functions/numbers.md)的 `int->char`/`int->int`/`int->W` 等）的語法糖。
+
+從 `rational` 可以轉換為 `int`（`as` 截斷，`try-as` 僅在為整數時成功）、`ratio` 和 `f64`；從
+`int`/`ratio` 可以轉換為 `rational`。
 
 `documentation` 與 `quote`/`compile` 一樣是不對 `name` 求值、以未求值的裸符號/`::` 路徑讀取的特殊形式。與 CL 的 `(documentation 'name 'function)`
 不同，不接受型別引數——依變數→函式→型別→trait→巨集的順序（與把裸識別字作為運算式求值時的優先順序相同）解析 `name`，回傳找到的定義的文件

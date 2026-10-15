@@ -46,13 +46,13 @@ Sayılar şu türlerde gelir:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-İki tamsayı üzerinde `/`, kesirli kısmı atılmış bir tamsayı verir (Common Lisp'teki gibi bir kesir
-üretmez). Kalan için `(mod 7 2)` kullanın.
+İki tam sayı üzerinde `/`, bölme tam değilse Common Lisp'teki gibi kesir verir. Kesir kısmı atılmış
+tam sayı için `(truncate 7 2)` (`3`), kalan için `(mod 7 2)` kullanın.
 
 Mantıksal değerler `true` ve `false`'tur.
 

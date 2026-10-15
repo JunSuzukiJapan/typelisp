@@ -103,10 +103,11 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
   langsung 63 bit dan bignum; [Bilangan](functions/numbers.md#3-bilangan-bulat-presisi-sembarang-int)),
   dan enam tipe berlebar tetap dinamai menurut lebar dan tandanya (tidak ada tipe bilangan bulat 64
   bit; lihat [Bilangan](functions/numbers.md#1-bilangan-bulat-berlebar-tetap)).
-- **Tipe rasional**: `ratio` (rasional dalam bentuk paling sederhana). Dialokasikan di heap seperti
-  di CL, tanpa konversi implisit dengan `int`/`f64` dan sejenisnya (konversikan secara eksplisit
-  dengan `as`/`try-as` atau metode konversi; lihat
-  [Bilangan](functions/numbers.md#5-bilangan-rasional-ratio)).
+- **Tipe rasional**: `ratio` (bilangan rasional paling sederhana) dan `rational` (`int` atau `ratio`,
+  rational milik CL). `/` pada dua bilangan bulat dan aritmetika yang mencampur `int` dengan `ratio`
+  menghasilkan `rational`, dan nilai `int`/`ratio` dapat diteruskan apa adanya ke tempat yang
+  mengharapkan `rational`. Tidak ada konversi implisit dengan bilangan bulat lebar tetap atau `f64`
+  (buat eksplisit dengan `as`/`try-as` atau metode konversi; lihat [Bilangan](functions/numbers.md#5-bilangan-rasional-ratio)).
 - **Word mentah pada batas dengan C**: `ptr` (pointer buram), `c-long` / `c-ulong`. Hanya untuk FFI:
   menjadikannya sebuah nilai memerlukan `(unsafe ...)`, dan tempat kemunculannya terbatas
   ([3.3 defffi](#ptr--c-long--c-ulong--word-mesin-mentah)). Jangan pakai ini di tempat Anda
@@ -1723,6 +1724,9 @@ luar rentang, sehingga `as` melakukan panic dan `try-as` menghasilkan `None`. Se
 `char->int` mendarat pada `int`, dan jika lebar yang lebih sempit diminta, `int->W` dipanggil
 setelahnya. Ini adalah gula sintaks yang diekspansi menjadi metode konversi yang sesuai
 (`int->char`/`int->int`/`int->W` dan sebagainya di [Bilangan](functions/numbers.md)).
+
+Dari `rational`, `as`/`try-as` mengonversi ke `int` (`as` memotong, `try-as` hanya berhasil untuk
+bilangan bulat), `ratio`, dan `f64`; dari `int`/`ratio` ke `rational`.
 
 `documentation`, seperti `quote`/`compile`, adalah bentuk khusus yang membaca `name` tanpa
 mengevaluasinya, sebagai simbol polos / path `::` yang tidak dievaluasi. Tidak seperti

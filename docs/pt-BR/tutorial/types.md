@@ -54,7 +54,7 @@ ou `some`, que contém um valor de `T`, ou `none`, que não contém nada.
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

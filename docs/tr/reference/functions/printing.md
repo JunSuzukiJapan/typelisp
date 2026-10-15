@@ -27,7 +27,7 @@ değişkeniyle aynı şekilde yazılabilir. Ne `bool` ne de akış olan bir `des
 **Denetim string'i bir sabit olmalıdır** (Rust'ın `format!`'ıyla aynı kısıtlama). İçindeki yönergeler
 kaç bağımsız değişkenin ve hangi türlerde alınacağını belirler; bu yüzden çalışma zamanında oluşturulan
 bir string denetim zamanında okunamaz. Sabit olmak zorunda olduğundan **bağımsız değişkenlerin sayısı ve
-türleri denetim zamanında kontrol edilir**: `(println "~d" "x")` ve `(println "~a ~a" 1)` denetim zamanı
+türleri denetim zamanında kontrol edilir**: `(println "~c" 1)` ve `(println "~a ~a" 1)` denetim zamanı
 hatalarıdır. Yanlış yazılmış bir yönerge, kapatılmamış bir `~(` ve neyi çağıracağı
 belirlenemeyen bir `~/name/` de denetim zamanı hatalarıdır. Denetim kuralları
 [format.md](format.md#1-yönergeler-nasıl-yazılır) belgesindedir. Oluşturduğunuz bir string'i yazdırmak

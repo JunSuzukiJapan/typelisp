@@ -98,9 +98,11 @@ In source, types are written as ordinary symbols or lists.
   bignums; [Numbers](functions/numbers.md#3-arbitrary-precision-integers-int)), and the six fixed-width
   types are named for their width and signedness (there is no 64-bit integer type; see
   [Numbers](functions/numbers.md#1-fixed-width-integers)).
-- **The rational type**: `ratio` (rationals in lowest terms). Heap-allocated as in CL, with no implicit
-  conversion with `int`/`f64` and the like (convert explicitly with `as`/`try-as` or a conversion
-  method; see [Numbers](functions/numbers.md#5-rationals-ratio)).
+- **The rational types**: `ratio` (rationals in lowest terms) and `rational` (an `int` or a `ratio`, CL's
+  rational). `/` on two integers and arithmetic mixing an `int` with a `ratio` give a `rational`, and
+  `int`/`ratio` values can be passed as they are where a `rational` is expected. There is no implicit
+  conversion with the fixed-width integers or `f64` (make it explicit with `as`/`try-as` or a
+  conversion method; see [Numbers](functions/numbers.md#5-rationals-ratio)).
 - **Raw words at the C boundary**: `ptr` (an opaque pointer), `c-long` / `c-ulong`. For the FFI only:
   making one a value requires `(unsafe ...)`, and the places they can appear are limited
   ([3.3 defffi](#ptr--c-long--c-ulong--raw-machine-words)). Do not use these where you want a 64-bit
@@ -1660,6 +1662,9 @@ and `(as i32 n)` the truncation from `int`. Integer → `char` can fail out of r
 succeeds. `float->int`/`ratio->int`/`char->int` land on `int`, and if a narrower width is asked for,
 `int->W` is called after them. This is sugar that expands to the corresponding conversion methods
 (`int->char`/`int->int`/`int->W` and so on in [Numbers](functions/numbers.md)).
+
+From `rational`, `as`/`try-as` convert to `int` (`as` truncates, `try-as` succeeds only for an
+integer), `ratio` and `f64`; from `int`/`ratio`, to `rational`.
 
 `documentation`, like `quote`/`compile`, is a special form that reads `name` without evaluating it, as an
 unevaluated bare symbol / `::` path. Unlike CL's `(documentation 'name 'function)`, it takes no type

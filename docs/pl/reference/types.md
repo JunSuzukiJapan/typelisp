@@ -14,6 +14,7 @@ Typy, które ma typelisp, oraz standardowe traity implementowane przez każdy ty
 | `u8` `u16` `u32` | Liczby całkowite bez znaku o stałej szerokości | Jak wyżej |
 | `f32` `f64` | Liczby zmiennoprzecinkowe IEEE-754. Literały dziesiętne domyślnie mają typ `f64` | [Liczby, rozdział 4](functions/numbers.md#4-liczby-zmiennoprzecinkowe-f64--f32) |
 | `ratio` | Liczba wymierna w postaci nieskracalnej | [Liczby, rozdział 5](functions/numbers.md#5-liczby-wymierne-ratio) |
+| `rational` | `int` albo `ratio` (rational z CL). Typ `/` na dwóch liczbach całkowitych | [Liczby, rozdział 5](functions/numbers.md#5-liczby-wymierne-ratio) |
 | `bool` | `true` / `false` | [Liczby, rozdział 7](functions/numbers.md#7-wartości-logiczne) |
 | `char` | Skalarna wartość Unicode | [Znaki](functions/collections.md#2-znaki-char) |
 | `string` | Niezmienny łańcuch znaków | [Łańcuchy znaków](functions/collections.md#1-łańcuchy-znaków-string) |
@@ -102,10 +103,10 @@ Które typy implementują które traity. Metody każdego traitu znajdują się w
 
 | Trait | Typy implementujące | Szczegóły |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-porównywanie) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Jak wyżej |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` oraz wszystkie wbudowane typy błędów | [print-object](functions/printing.md#5-print-object-reprezentacja-wypisywana-według-typu) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-porównywanie) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Jak wyżej |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` oraz wszystkie wbudowane typy błędów | [print-object](functions/printing.md#5-print-object-reprezentacja-wypisywana-według-typu) |
 
 Traity `cons-cell<A,B>` i krotek `#{..}` oraz `print-object` kolekcji są dostępne, gdy typy
 elementów implementują dany trait.
@@ -114,7 +115,7 @@ elementów implementują dany trait.
 
 | Trait | Typy implementujące |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Szczegóły znajdują się w [Traitach arytmetycznych](functions/traits.md#3-traity-arytmetyczne-add--sub--mul--div--rem--bits--number).

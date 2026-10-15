@@ -101,9 +101,11 @@ En el código fuente, los tipos se escriben como símbolos o listas normales.
   bignums; [Números](functions/numbers.md#3-enteros-de-precisión-arbitraria-int)), y los seis tipos de ancho
   fijo se nombran por su ancho y su signo (no hay tipo entero de 64 bits; consulta
   [Números](functions/numbers.md#1-enteros-de-ancho-fijo)).
-- **El tipo racional**: `ratio` (racionales en forma irreducible). Se reservan en el montículo como en CL, sin
-  conversión implícita con `int`/`f64` y similares (convierte explícitamente con `as`/`try-as` o con un
-  método de conversión; consulta [Números](functions/numbers.md#5-racionales-ratio)).
+- **Los tipos racionales**: `ratio` (racionales reducidos) y `rational` (un `int` o un `ratio`, el
+  rational de CL). `/` sobre dos enteros y la aritmética que mezcla un `int` con un `ratio` dan un
+  `rational`, y los valores `int`/`ratio` se pasan tal cual donde se espera un `rational`. No hay
+  conversión implícita con los enteros de ancho fijo ni con `f64` (hágala explícita con `as`/`try-as` o
+  un método de conversión; vea [Números](functions/numbers.md#5-racionales-ratio)).
 - **Palabras en bruto en la frontera con C**: `ptr` (un puntero opaco), `c-long` / `c-ulong`. Solo para el
   FFI: convertir una en valor requiere `(unsafe ...)`, y los lugares donde pueden aparecer están limitados
   ([3.3 defffi](#ptr--c-long--c-ulong--palabras-de-máquina-en-bruto)). No las uses donde quieras un entero de
@@ -1685,6 +1687,9 @@ da `None`. Todo lo demás (las ampliaciones, y el truncamiento de `float->int`/`
 `float->int`/`ratio->int`/`char->int` llegan a `int`, y si se pide un ancho más estrecho, se llama después a
 `int->W`. Es una facilidad de escritura que se expande a los métodos de conversión correspondientes
 (`int->char`/`int->int`/`int->W`, etc. en [Números](functions/numbers.md)).
+
+Desde `rational`, `as`/`try-as` convierten a `int` (`as` trunca, `try-as` solo tiene éxito con un
+entero), a `ratio` y a `f64`; desde `int`/`ratio`, a `rational`.
 
 `documentation`, como `quote`/`compile`, es una forma especial que lee `name` sin evaluarlo, como un símbolo
 simple / ruta `::` sin evaluar. A diferencia del `(documentation 'name 'function)` de CL, no recibe argumento de

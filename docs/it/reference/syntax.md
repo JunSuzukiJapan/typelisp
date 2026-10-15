@@ -106,9 +106,11 @@ Nel sorgente, i tipi si scrivono come normali simboli o liste.
   e bignum; [Numeri](functions/numbers.md#3-interi-a-precisione-arbitraria-int)), e i sei tipi a
   larghezza fissa prendono il nome dalla loro larghezza e dal loro segno (non esiste un tipo intero a
   64 bit; si veda [Numeri](functions/numbers.md#1-interi-a-larghezza-fissa)).
-- **Il tipo razionale**: `ratio` (razionali ai minimi termini). Allocato nello heap come in CL, senza
-  conversione implicita con `int`/`f64` e simili (converti esplicitamente con `as`/`try-as` o un metodo
-  di conversione; si veda [Numeri](functions/numbers.md#5-razionali-ratio)).
+- **I tipi razionali**: `ratio` (razionali ridotti) e `rational` (un `int` o un `ratio`, il rational di
+  CL). `/` su due interi e l'aritmetica che mescola un `int` con un `ratio` danno un `rational`, e i
+  valori `int`/`ratio` si passano così come sono dove è atteso un `rational`. Nessuna conversione
+  implicita con gli interi a larghezza fissa né con `f64` (renderla esplicita con `as`/`try-as` o un
+  metodo di conversione; vedere [Numeri](functions/numbers.md#5-razionali-ratio)).
 - **Parole grezze al confine con C**: `ptr` (un puntatore opaco), `c-long` / `c-ulong`. Solo per la FFI:
   per renderne uno un valore serve `(unsafe ...)`, e i punti in cui possono comparire sono limitati
   ([3.3 defffi](#ptr--c-long--c-ulong--parole-macchina-grezze)). Non usarli dove vuoi un intero a 64 bit:
@@ -1728,6 +1730,9 @@ va in panic e `try-as` dà `None`. Tutto il resto (allargamento, e il troncament
 chiede una larghezza più stretta, dopo di esse viene chiamato `int->W`. Questo è zucchero che si espande
 nei corrispondenti metodi di conversione (`int->char`/`int->int`/`int->W` e così via in
 [Numeri](functions/numbers.md)).
+
+Da `rational`, `as`/`try-as` convertono in `int` (`as` tronca, `try-as` riesce solo per un intero), in
+`ratio` e in `f64`; da `int`/`ratio`, in `rational`.
 
 `documentation`, come `quote`/`compile`, è una forma speciale che legge `name` senza valutarlo, come
 simbolo semplice non valutato / percorso `::`. A differenza del `(documentation 'name 'function)` di CL,

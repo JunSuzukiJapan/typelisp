@@ -56,7 +56,7 @@ extern "C" {
     fn floor(x: f64) -> f64;
     fn ceil(x: f64) -> f64;
     fn trunc(x: f64) -> f64;
-    fn round(x: f64) -> f64;
+    fn rint(x: f64) -> f64;
     fn sqrt(x: f64) -> f64;
     fn sin(x: f64) -> f64;
     fn cos(x: f64) -> f64;
@@ -89,7 +89,7 @@ fn codegen_helpers() -> [(&'static str, usize); 15] {
         ("floor", floor as *const () as usize),
         ("ceil", ceil as *const () as usize),
         ("trunc", trunc as *const () as usize),
-        ("round", round as *const () as usize),
+        ("rint", rint as *const () as usize),
         ("sqrt", sqrt as *const () as usize),
         ("sin", sin as *const () as usize),
         ("cos", cos as *const () as usize),

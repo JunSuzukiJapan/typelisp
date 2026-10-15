@@ -78,7 +78,7 @@ yerleşik işleçleri kullanır** ([Sayılar](numbers.md)) ve bu katmandan geçm
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@ yerleşik işleçleri kullanır** ([Sayılar](numbers.md)) ve bu katmandan geçm
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; the distance is always int (as with ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; no methods; a combination of six
+(deftrait Number (Add Sub Mul Rem Ord))                   ; metot yok; beşinin birleşimi
 ```
 
 **Bir sınırın içinde işleç yazabilirsiniz.** Alıcı, `where` ile bağlanmış bir tür değişkeni olduğunda
@@ -104,3 +104,11 @@ bu yüzden `Sub` yeterlidir.
 
 Şunlar için gerçekleştirilmiştir: tüm sayısal türlerde (`complex` hariç) `Add`/`Sub`/`Mul`/`Div`/`Rem`/
 `Number` ve tüm tamsayı türlerinde ve `int`'te `Bits`.
+
+
+**`Div`, sonuç tipini ilişkili tip `Output` ile adlandırır.** CL'deki gibi iki tam sayı üzerinde `/`
+bir `rational`'dır; bu yüzden `int`'in `Output`'u `rational`, diğer her sayısal tipinki tipin
+kendisidir. `Output` tipten tipe değiştiği için `Number`, `Div`'i içermez (üst trait listesi her
+ilişkili tipi sabitlemelidir). Bölme yapan genel bir fonksiyon sonuç tipini
+`(where (Div T (Output R)))` ile alır ya da `(where (Div T (Output T)))` ile `T` içinde kapalı bir
+bölme ister (o zaman `int` geçirilemez).

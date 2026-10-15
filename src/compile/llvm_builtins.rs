@@ -110,7 +110,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "build-fsqrt" => Some(llvm_builder_build_float_unary_intrinsic(args, "fsqrt", "llvm.sqrt.f64")),
             "build-ffloor" => Some(llvm_builder_build_float_unary_intrinsic(args, "ffloor", "llvm.floor.f64")),
             "build-fceil" => Some(llvm_builder_build_float_unary_intrinsic(args, "fceil", "llvm.ceil.f64")),
-            "build-fround" => Some(llvm_builder_build_float_unary_intrinsic(args, "fround", "llvm.round.f64")),
+            "build-fround" => Some(llvm_builder_build_float_unary_intrinsic(args, "fround", "llvm.rint.f64")),
             "build-ftrunc" => Some(llvm_builder_build_float_unary_intrinsic(args, "ftrunc", "llvm.trunc.f64")),
             "build-fpow" => Some(llvm_builder_build_fpow(args)),
             "build-fmaxnum" => Some(llvm_builder_build_float_binary_intrinsic(args, "fmaxnum", "llvm.maxnum.f64")),
@@ -560,16 +560,19 @@ fn llvm_builder_build_fcmp(args: &[Value], name: &str, predicate: inkwell::Float
 /// The unary transcendental/rounding counterpart of
 /// [`llvm_builder_build_float_op`]: `bitcast` the single `i64`-carried
 /// operand to `double`, call the named LLVM intrinsic (`llvm.sqrt.f64`/
-/// `llvm.floor.f64`/`llvm.ceil.f64`/`llvm.round.f64`/`llvm.trunc.f64`), then
+/// `llvm.floor.f64`/`llvm.ceil.f64`/`llvm.rint.f64`/`llvm.trunc.f64`), then
 /// `bitcast` the `double` result back. Unlike `build-fadd`/... (plain LLVM
 /// instructions), these have no dedicated IR opcode, so they go through
 /// `module`'s intrinsic declaration (`Intrinsic::get_declaration`, itself
 /// idempotent — safe to call again for a later use of the same op in the
 /// same module, same as `get-function` finding an already-declared `rt_*`
 /// shim) rather than `get-function`'s fixed-ABI `rt_*` lookup. `round`
-/// matches Rust's `f64::round` (`float-native-method?`'s uncompiled
+/// matches Rust's `f64::round_ties_even` (`float-native-method?`'s uncompiled
 /// fallback, kept in sync by `tests/compile_test.rs`): both round halfway
-/// cases away from zero, not to even. `sqrt`/`floor`/`ceil`/`trunc` are
+/// cases to even, as CL's `round` does. `round` is `llvm.rint` in the
+/// default rounding mode (nearest, ties to even) rather than
+/// `llvm.roundeven`, which some targets lower to a `roundeven` libcall that
+/// macOS's libm does not have. `sqrt`/`floor`/`ceil`/`trunc` are
 /// exact IEEE-754 operations with no rounding-mode ambiguity to begin with.
 fn llvm_builder_build_float_unary_intrinsic(args: &[Value], name: &str, intrinsic_name: &str) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;

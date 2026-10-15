@@ -147,7 +147,7 @@ fn recursive_fibonacci() {
 
 #[test]
 fn divide_by_zero_panics() {
-    let src = "(defun d ((a int) (b int)) int (/ a b)) (d 6 0)";
+    let src = "(defun d ((a int) (b int)) int (truncate a b)) (d 6 0)";
     assert!(matches!(run(src), Err(EvalError::Panic(_))));
 }
 

@@ -95,9 +95,10 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
   [Số](functions/numbers.md#3-số-nguyên-độ-chính-xác-tùy-ý-int)), và sáu kiểu độ rộng cố định được đặt tên
   theo độ rộng và tính có dấu của chúng (không có kiểu số nguyên 64 bit; xem
   [Số](functions/numbers.md#1-số-nguyên-độ-rộng-cố-định)).
-- **Kiểu số hữu tỉ**: `ratio` (số hữu tỉ ở dạng tối giản). Được cấp phát trên heap như trong CL, không có
-  chuyển đổi ngầm với `int`/`f64` và tương tự (hãy chuyển đổi tường minh bằng `as`/`try-as` hoặc một phương
-  thức chuyển đổi; xem [Số](functions/numbers.md#5-số-hữu-tỉ-ratio)).
+- **Các kiểu hữu tỉ**: `ratio` (số hữu tỉ tối giản) và `rational` (một `int` hoặc `ratio`, rational của
+  CL). `/` trên hai số nguyên và phép toán trộn `int` với `ratio` cho ra `rational`, và giá trị
+  `int`/`ratio` có thể truyền nguyên vẹn vào chỗ cần `rational`. Không có chuyển đổi ngầm với số nguyên
+  độ rộng cố định hay `f64` (làm tường minh bằng `as`/`try-as` hoặc phương thức chuyển đổi; xem [Số](functions/numbers.md#5-số-hữu-tỉ-ratio)).
 - **Các từ thô ở ranh giới C**: `ptr` (một con trỏ mờ), `c-long` / `c-ulong`. Chỉ cho FFI: để biến một thứ
   thành giá trị cần `(unsafe ...)`, và các chỗ chúng có thể xuất hiện bị giới hạn
   ([3.3 defffi](#ptr--c-long--c-ulong--các-từ-máy-thô)). Đừng dùng chúng ở nơi bạn muốn một số nguyên 64
@@ -1614,6 +1615,9 @@ và `(as i32 n)` là phép cắt cụt từ `int`. Số nguyên → `char` có t
 `float->int`/`ratio->int`/`char->int` hạ xuống `int`, và nếu cần độ rộng hẹp hơn, `int->W` được gọi sau chúng.
 Đây là đường cú pháp khai triển thành các phương thức chuyển đổi tương ứng (`int->char`/`int->int`/`int->W`, v.v.
 trong [Số](functions/numbers.md)).
+
+Từ `rational`, `as`/`try-as` chuyển sang `int` (`as` cắt bớt, `try-as` chỉ thành công với số nguyên),
+`ratio` và `f64`; từ `int`/`ratio` sang `rational`.
 
 `documentation`, như `quote`/`compile`, là một dạng đặc biệt đọc `name` mà không đánh giá, như một symbol trần /
 đường dẫn `::` không được đánh giá. Khác `(documentation 'name 'function)` của CL, nó không nhận đối số kiểu: nó

@@ -41,7 +41,10 @@ fn int_arithmetic_folds_to_a_literal() {
     assert_eq!(lowered("(+ 1 2)"), "(expr (int 3))");
     assert_eq!(lowered("(- 10 4)"), "(expr (int 6))");
     assert_eq!(lowered("(* 6 7)"), "(expr (int 42))");
-    assert_eq!(lowered("(/ 7 2)"), "(expr (int 3))");
+    assert_eq!(lowered("(truncate 7 2)"), "(expr (int 3))");
+    // CL's `/` on two integers is a `rational`, spelled as what it is.
+    assert_eq!(lowered("(/ 7 2)"), "(expr (ratio 7/2))");
+    assert_eq!(lowered("(/ 6 3)"), "(expr (int 2))");
     assert_eq!(lowered("(mod -7 2)"), "(expr (int 1))");
     assert_eq!(lowered("(max 1 2)"), "(expr (int 2))");
     assert_eq!(lowered("(logand 12 10)"), "(expr (int 8))");
@@ -131,7 +134,7 @@ fn a_dead_branch_is_still_checked() {
 fn a_call_that_would_raise_is_left_to_raise_at_runtime() {
     assert_eq!(
         lowered("(/ 1 0)"),
-        "(expr (assoc int / true int (int int) \"int\" (int 1) (int 0)))"
+        "(expr (assoc int / true rational (int int) \"rational\" (int 1) (int 0)))"
     );
     assert_eq!(
         lowered("(mod (the i32 1) 0)"),
@@ -268,8 +271,11 @@ fn folding_survives_gc_stress() {
     let _ = tl;
     let mut s = Session::with_capacity(Load::Bare, 1 << 12);
     s.heap.set_gc_stress(true);
-    let tl = s.check_one("(+ (* 4611686018427387904 2) (- 1/2 1/2))").expect_err("int + ratio is a type error");
-    let _ = tl;
+    // An `int` and a `ratio` meet in a `rational` (CL's contagion): the
+    // receiver is widened while the other operand is checked, so both stay
+    // rooted through it.
+    let tl = s.check_one("(+ (* 4611686018427387904 2) (- 1/2 1/3))").expect("check");
+    assert_eq!(core::print(&s.heap, tl), "(expr (ratio 55340232221128654849/6))");
     let mut s = Session::with_capacity(Load::Bare, 1 << 12);
     s.heap.set_gc_stress(true);
     let tl = s.check_one("(* (* 4611686018427387904 2) (* 4611686018427387904 2))").expect("check");

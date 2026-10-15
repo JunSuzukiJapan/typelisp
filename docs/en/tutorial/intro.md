@@ -46,13 +46,13 @@ Numbers come in these kinds:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` on two integers gives an integer with the fractional part dropped (it does not produce a
-fraction as Common Lisp does). Use `(mod 7 2)` for the remainder.
+`/` on two integers gives a fraction when the division is not exact, as in Common Lisp. For the
+integer with the fractional part dropped use `(truncate 7 2)` (`3`), and `(mod 7 2)` for the remainder.
 
 The boolean values are `true` and `false`.
 

@@ -78,7 +78,7 @@ built-in operators** ([Numbers](numbers.md)) and does not go through this layer.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@ built-in operators** ([Numbers](numbers.md)) and does not go through this layer.
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; the distance is always int (as with ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; no methods; a combination of six
+(deftrait Number (Add Sub Mul Rem Ord))                   ; no methods; a combination of five
 ```
 
 **Inside a bound, you can write operators.** When the receiver is a type variable bound by `where`,
@@ -104,3 +104,11 @@ redefine it (`cannot redefine built-in method`). There is no `Neg`: `(- x)` expa
 
 Implemented for: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` on all numeric types (except `complex`), and
 `Bits` on all integer types and `int`.
+
+
+**`Div` names its result type with the associated type `Output`.** As in CL, `/` on two integers is a
+`rational`, so the `Output` of `int` is `rational`, and that of every other numeric type is the type
+itself. Because `Output` differs between the types, `Number` does not include `Div` (a supertrait list
+must pin every associated type). A generic function that divides takes the result type with
+`(where (Div T (Output R)))`, or asks for division closed in `T` with `(where (Div T (Output T)))` (an
+`int` cannot be passed then).

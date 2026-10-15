@@ -1125,7 +1125,12 @@ impl Sim {
         let (cur, vals) = self.params(frame, cur, head, &what)?;
         let need = match ch {
             'a' | 's' | 'w' => Need::Any,
-            'd' | 'b' | 'o' | 'x' | 'r' => Need::Integer,
+            // CL prints a non-integer argument to these as `~a` would, in
+            // decimal, so any value is accepted. `~r` without a radix (the
+            // English and Roman spellings) has no such fallback.
+            'd' | 'b' | 'o' | 'x' => Need::Any,
+            'r' if !head.params.is_empty() => Need::Any,
+            'r' => Need::Integer,
             'c' => Need::Char,
             'f' | 'e' | 'g' | '$' => Need::Number,
             'p' => {
@@ -1719,7 +1724,7 @@ impl State<'_> {
                     'x' => 16,
                     _ => 10,
                 };
-                self.emit_integer(head, ch, Some(radix), out)?;
+                self.emit_integer(head, Some(radix), out)?;
             }
             'r' => self.emit_r(head, out)?,
             'c' => {
@@ -1843,7 +1848,7 @@ impl State<'_> {
     /// `~D ~B ~O ~X`, and `~R` with a radix. `radix` is the directive's own,
     /// or `None` for `~R`, which reads it from its first parameter; the
     /// mincol, padchar, commachar and interval parameters follow.
-    fn emit_integer(&mut self, head: &Head, ch: char, radix: Option<u32>, out: &mut Out) -> Result<(), String> {
+    fn emit_integer(&mut self, head: &Head, radix: Option<u32>, out: &mut Out) -> Result<(), String> {
         let at = usize::from(radix.is_none());
         let defaults: &[Option<i64>] = if radix.is_none() {
             &[None, Some(0), None, None, Some(3)]
@@ -1860,9 +1865,17 @@ impl State<'_> {
         let commachar = Self::char_param(&vals, at + 2, ',');
         let comma_interval = Self::int_param(&vals, at + 3, 3) as usize;
         let arg = self.next_arg()?;
-        let digits = self
-            .integer_in_radix(arg, radix)
-            .ok_or_else(|| format!("format: ~{} requires an integer argument", ch))?;
+        let Some(digits) = self.integer_in_radix(arg, radix) else {
+            // CL: a non-integer argument is printed as `~a` would print it,
+            // in decimal base, padded to `mincol` the same way.
+            let mut ctx = self.ctx;
+            ctx.print_vars.base = 10;
+            ctx.print_vars.radix = false;
+            let mut s = String::new();
+            render_value(self.heap, ctx, arg, false, &mut s)?;
+            out.push_str(&pad(&s, mincol, 1, 0, padchar, true));
+            return Ok(());
+        };
         let body = decorate_integer(&digits, head.colon, head.at, commachar, comma_interval);
         out.push_str(&pad(&body, mincol, 1, 0, padchar, true));
         Ok(())
@@ -1889,7 +1902,7 @@ impl State<'_> {
         // A parse-time check made sure the first parameter, when there is
         // any, is the radix.
         if !head.params.is_empty() {
-            return self.emit_integer(head, 'r', None, out);
+            return self.emit_integer(head, None, out);
         }
         // No radix parameter: English/Roman spellings.
         let arg = self.next_arg()?;

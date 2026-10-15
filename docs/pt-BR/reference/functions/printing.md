@@ -27,7 +27,7 @@ vinculada por `(where (CharOutput S))`. Um `dest` que não é nem `bool` nem str
 **A string de controle deve ser um literal** (a mesma restrição do `format!` do Rust). As diretivas que ela
 contém decidem quantos argumentos são tomados e de que tipos, então uma string construída em tempo de execução
 não pode ser lida na verificação. Por ser obrigatoriamente um literal, **o número e os tipos dos argumentos são
-verificados na verificação**: `(println "~d" "x")` e `(println "~a ~a" 1)` são erros na verificação. Uma diretiva
+verificados na verificação**: `(println "~c" 1)` e `(println "~a ~a" 1)` são erros na verificação. Uma diretiva
 digitada errado, um `~(` não fechado e um `~/name/` cujo destino da chamada não pode ser determinado também são erros na
 verificação. As regras de verificação estão em [format.md](format.md#1-como-escrever-diretivas). Para imprimir
 uma string que você constrói, crie-a com `(format false ...)` e imprima-a com `(println "~a" s)`.

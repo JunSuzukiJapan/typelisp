@@ -54,7 +54,7 @@ typelisp non ha `nil`. "Può non esserci un valore" si esprime con il tipo `Opti
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

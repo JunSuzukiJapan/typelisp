@@ -14,6 +14,7 @@
 | `u8` `u16` `u32` | จำนวนเต็มความกว้างคงที่แบบไม่มีเครื่องหมาย | เหมือนข้างบน |
 | `f32` `f64` | จำนวนทศนิยมตาม IEEE-754 literal ทศนิยมมีค่าเริ่มต้นเป็น `f64` | [ตัวเลข บทที่ 4](functions/numbers.md#4-จำนวนทศนิยม-f64--f32) |
 | `ratio` | จำนวนตรรกยะในรูปต่ำสุด | [ตัวเลข บทที่ 5](functions/numbers.md#5-จำนวนตรรกยะ-ratio) |
+| `rational` | `int` หรือ `ratio` (rational ของ CL) ชนิดของ `/` ระหว่างจำนวนเต็มสองตัว | [ตัวเลข บทที่ 5](functions/numbers.md#5-จำนวนตรรกยะ-ratio) |
 | `bool` | `true` / `false` | [ตัวเลข บทที่ 7](functions/numbers.md#7-บูลีน) |
 | `char` | Unicode scalar value | [อักขระ](functions/collections.md#2-อักขระ-char) |
 | `string` | สตริงที่เปลี่ยนแปลงไม่ได้ | [สตริง](functions/collections.md#1-สตริง-string) |
@@ -102,10 +103,10 @@
 
 | Trait | ชนิดที่ implement | รายละเอียด |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-การเปรียบเทียบ) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | เหมือนข้างบน |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` และชนิดข้อผิดพลาดที่มีให้ในตัวทั้งหมด | [print-object](functions/printing.md#5-print-object-การแสดงผลของแต่ละชนิด) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-การเปรียบเทียบ) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | เหมือนข้างบน |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` และชนิดข้อผิดพลาดที่มีให้ในตัวทั้งหมด | [print-object](functions/printing.md#5-print-object-การแสดงผลของแต่ละชนิด) |
 
 trait ของ `cons-cell<A,B>` และทูเพิล `#{..}` รวมทั้ง `print-object` ของคอลเลกชัน ใช้ได้เมื่อชนิดของสมาชิก implement trait นั้น
 
@@ -113,7 +114,7 @@ trait ของ `cons-cell<A,B>` และทูเพิล `#{..}` รวม�
 
 | Trait | ชนิดที่ implement |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 รายละเอียดอยู่ใน[trait การคำนวณ](functions/traits.md#3-trait-การคำนวณ-add--sub--mul--div--rem--bits--number)

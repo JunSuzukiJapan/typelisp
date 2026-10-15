@@ -1131,7 +1131,7 @@ fn a_cleanup_runs_when_a_zero_divisor_unwinds_in_an_aot_executable() {
         r#"
         (defvar (ran int) 0)
         (defun zero () int 0)
-        (defun body () int (unwind-protect (/ 5 (zero)) (setf ran 1)))
+        (defun body () int (unwind-protect (truncate 5 (zero)) (setf ran 1)))
         (defun main () int (as int (+ (body) ran)))
         "#,
     );

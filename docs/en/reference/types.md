@@ -14,6 +14,7 @@ The types typelisp has, and the standard traits each type implements. How to wri
 | `u8` `u16` `u32` | Unsigned fixed-width integers | Same as above |
 | `f32` `f64` | IEEE-754 floating-point numbers. Decimal literals default to `f64` | [Numbers chapter 4](functions/numbers.md#4-floating-point-numbers-f64--f32) |
 | `ratio` | A rational number in lowest terms | [Numbers chapter 5](functions/numbers.md#5-rationals-ratio) |
+| `rational` | An `int` or a `ratio` (CL's rational). The type of `/` on two integers | [Numbers chapter 5](functions/numbers.md#5-rationals-ratio) |
 | `bool` | `true` / `false` | [Numbers chapter 7](functions/numbers.md#7-booleans) |
 | `char` | A Unicode scalar value | [Characters](functions/collections.md#2-characters-char) |
 | `string` | An immutable string | [Strings](functions/collections.md#1-strings-string) |
@@ -102,10 +103,10 @@ Which types implement which traits. The methods of each trait are in
 
 | Trait | Implementing types | Details |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparison) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Same as above |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` and all the built-in error types | [print-object](functions/printing.md#5-print-object-per-type-printed-representation) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparison) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Same as above |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` and all the built-in error types | [print-object](functions/printing.md#5-print-object-per-type-printed-representation) |
 
 The traits of `cons-cell<A,B>` and of tuples `#{..}`, and the collections' `print-object`, are
 available when the element types implement that trait.
@@ -114,7 +115,7 @@ available when the element types implement that trait.
 
 | Trait | Implementing types |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Details are in [Arithmetic traits](functions/traits.md#3-arithmetic-traits-add--sub--mul--div--rem--bits--number).

@@ -24,14 +24,15 @@ suivants sont contrôlés à la vérification.
   largeur négative, une base hors de 2 à 36, un entier là où un caractère est attendu, etc.) sont des erreurs. Ils
   ne sont jamais ignorés ni arrondis silencieusement.
 
-Les **éléments** d'un argument liste (`~{`, `~:{`, `~<...~:>`) sont des `Sexpr`, et ni leur nombre ni le type de
-chaque élément ne peuvent se déduire des types. Les exigences sur les éléments (un entier pour `~d`, etc.) et les
-éléments manquants sont contrôlés à l'arrivée des valeurs et sont des erreurs d'exécution (on ne bascule jamais
-vers une autre représentation à la place).
+Les **éléments** d'un argument liste (`~{`, `~:{`, `~<...~:>`) sont des `Sexpr` ; ni leur nombre ni le
+type de chaque élément ne se déduisent des types. Les exigences sur les éléments (un caractère pour
+`~c`, etc.) et les éléments manquants sont vérifiés à l'arrivée des valeurs et sont des erreurs
+d'exécution (on ne bascule jamais vers une autre représentation à la place).
 
-Les règles indulgentes de CL ne sont pas adoptées. Passer un non-entier à `~d` et le faire afficher comme `~a`, ou
-que `~:[` traite n'importe quelle valeur comme un booléen, n'est pas réinterprété ainsi ; ce sont des erreurs de
-type.
+`~d` `~b` `~o` `~x` et `~r` avec une base impriment un non-entier comme le ferait `~a`, en décimal,
+comme en CL (`(format false "~5d" 1/2)` vaut `"  1/2"`). Les autres règles permissives de CL ne sont
+pas adoptées : `~:[` traitant n'importe quelle valeur comme un booléen n'est pas réinterprété ainsi,
+c'est une erreur de type.
 
 ## 2. Sortie (consomme un argument)
 
@@ -40,7 +41,7 @@ type.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=justification à droite | Esthétique (le `princ` de CL ; chaînes sans guillemets). L'argument peut être de n'importe quel type |
 | `~s` | Idem | Standard (le `prin1` de CL ; une forme relisible). L'argument peut être de n'importe quel type |
 | `~w` | — | Le `write` de CL. Affiche joliment si `*print-pretty*` est vrai, sinon identique à `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=groupes de chiffres, `@`=toujours un signe | Entiers décimaux/binaires/octaux/hexadécimaux. L'argument est un entier |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=groupes de chiffres, `@`=toujours un signe | Entiers décimaux/binaires/octaux/hexadécimaux. L'argument peut être quelconque (un non-entier s'imprime comme avec `~a`, en décimal) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (avec une base) ou aucun | Avec une base, dans cette base (2 à 36). Sans : `~r`=cardinal anglais, `~:r`=ordinal anglais, `~@r`=chiffres romains, `~:@r`=anciens chiffres romains. L'argument est un entier |
 | `~p` | `:`=reculer d'un, `@`=y/ies | Pluriels (`~p`→"s", `~@p`→"y"/"ies"). L'argument est un entier |
 | `~c` | `:`=nom, `@`=syntaxe `#\` | Un caractère. L'argument est un `char` |

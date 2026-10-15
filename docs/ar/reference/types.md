@@ -14,6 +14,7 @@
 | `u8` `u16` `u32` | أعداد صحيحة بلا إشارة بعرض ثابت | مثل ما سبق |
 | `f32` `f64` | أعداد IEEE-754 ذات الفاصلة العائمة. والثوابت العشرية افتراضيًا `f64` | [الفصل 4 من الأعداد](functions/numbers.md#4-الأعداد-ذات-الفاصلة-العائمة-f64--f32) |
 | `ratio` | عدد كسري (نسبي) في أبسط صورة | [الفصل 5 من الأعداد](functions/numbers.md#5-الأعداد-الكسرية-ratio) |
+| `rational` | `int` أو `ratio` (rational في CL). نوع `/` على عددين صحيحين | [الفصل 5 من الأعداد](functions/numbers.md#5-الأعداد-الكسرية-ratio) |
 | `bool` | `true` / `false` | [الفصل 7 من الأعداد](functions/numbers.md#7-القيم-المنطقية) |
 | `char` | قيمة عددية Unicode (scalar value) | [المحارف](functions/collections.md#2-المحارف-char) |
 | `string` | سلسلة نصية غير قابلة للتعديل | [السلاسل النصية](functions/collections.md#1-السلاسل-النصية-string) |
@@ -101,10 +102,10 @@
 
 | السمة | الأنواع المنفِّذة | التفاصيل |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-المقارنة) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | مثل ما سبق |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` وكل أنواع الأخطاء المضمنة | [print-object](functions/printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-المقارنة) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | مثل ما سبق |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` وكل أنواع الأخطاء المضمنة | [print-object](functions/printing.md#5-print-object-التمثيل-المطبوع-لكل-نوع) |
 
 سمات `cons-cell<A,B>` والصفوف `#{..}`، و`print-object` الخاص بالمجموعات، متاحة حين تنفّذ أنواع
 العناصر تلك السمة.
@@ -113,7 +114,7 @@
 
 | السمة | الأنواع المنفِّذة |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 التفاصيل في [سمات الحساب](functions/traits.md#3-سمات-الحساب-add--sub--mul--div--rem--bits--number).

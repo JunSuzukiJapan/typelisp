@@ -14,6 +14,7 @@
 | `u8` `u16` `u32` | Беззнакові цілі числа фіксованої ширини | Те саме |
 | `f32` `f64` | Числа з рухомою комою IEEE-754. Десяткові літерали типово мають тип `f64` | [Числа, розділ 4](functions/numbers.md#4-числа-з-рухомою-комою-f64--f32) |
 | `ratio` | Раціональне число в нескоротному вигляді | [Числа, розділ 5](functions/numbers.md#5-раціональні-числа-ratio) |
+| `rational` | `int` або `ratio` (rational з CL). Тип `/` на двох цілих | [Числа, розділ 5](functions/numbers.md#5-раціональні-числа-ratio) |
 | `bool` | `true` / `false` | [Числа, розділ 7](functions/numbers.md#7-булеві-значення) |
 | `char` | Скалярне значення Unicode | [Знаки](functions/collections.md#2-знаки-char) |
 | `string` | Незмінний рядок | [Рядки](functions/collections.md#1-рядки-string) |
@@ -102,10 +103,10 @@
 
 | Трейт | Типи, що реалізують | Подробиці |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-порівняння) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Те саме |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` і всі вбудовані типи помилок | [print-object](functions/printing.md#5-print-object-представлення-для-друку-для-кожного-типу) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-порівняння) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Те саме |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` і всі вбудовані типи помилок | [print-object](functions/printing.md#5-print-object-представлення-для-друку-для-кожного-типу) |
 
 Трейти `cons-cell<A,B>` і кортежів `#{..}`, а також `print-object` колекцій доступні, коли типи
 елементів реалізують цей трейт.
@@ -114,7 +115,7 @@
 
 | Трейт | Типи, що реалізують |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Подробиці наведено в розділі [Арифметичні трейти](functions/traits.md#3-арифметичні-трейти-add--sub--mul--div--rem--bits--number).

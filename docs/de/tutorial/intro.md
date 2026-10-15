@@ -46,13 +46,14 @@ Zahlen gibt es in diesen Arten:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` auf zwei Ganzzahlen ergibt eine Ganzzahl, bei der der Nachkommateil wegfällt (es entsteht kein Bruch wie
-in Common Lisp). Für den Rest verwendet man `(mod 7 2)`.
+`/` auf zwei ganzen Zahlen ergibt wie in Common Lisp einen Bruch, wenn die Division nicht aufgeht.
+Für die ganze Zahl ohne Nachkommaanteil verwenden Sie `(truncate 7 2)` (`3`), für den Rest
+`(mod 7 2)`.
 
 Die Wahrheitswerte sind `true` und `false`.
 

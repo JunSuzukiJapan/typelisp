@@ -24,13 +24,14 @@ comprobar se verifica lo siguiente.
   (un ancho negativo, una base distinta de 2 a 36, un entero donde se espera un carácter, etc.) son errores.
   Nunca se ignoran ni se redondean en silencio.
 
-Los **elementos** de un argumento lista (`~{`, `~:{`, `~<...~:>`) son `Sexpr`, y ni su número ni el tipo de
-cada elemento se pueden saber a partir de los tipos. Las exigencias sobre los elementos (un entero para
-`~d`, etc.) y los elementos que faltan se comprueban cuando llegan los valores, y son errores en tiempo de
-ejecución (nunca se pasa a una representación distinta en su lugar).
+Los **elementos** de un argumento lista (`~{`, `~:{`, `~<...~:>`) son `Sexpr`; ni su número ni el tipo
+de cada elemento se conocen por los tipos. Los requisitos sobre los elementos (un carácter para `~c`,
+etc.) y la falta de elementos se comprueban al llegar los valores y son errores en tiempo de ejecución
+(nunca se cambia a otra representación en su lugar).
 
-No se adoptan las reglas permisivas de CL. Pasar un no entero a `~d` y que se imprima como `~a`, o que `~:[`
-trate cualquier valor como booleano, no se reinterpretan así; son errores de tipos.
+`~d` `~b` `~o` `~x` y `~r` con base imprimen un no entero como lo haría `~a`, en decimal, como en CL
+(`(format false "~5d" 1/2)` es `"  1/2"`). Las demás reglas permisivas de CL no se adoptan: que `~:[`
+trate cualquier valor como booleano no se reinterpreta así; es un error de tipo.
 
 ## 2. Salida (consume un argumento)
 
@@ -39,7 +40,7 @@ trate cualquier valor como booleano, no se reinterpretan así; son errores de ti
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=justificar a la derecha | Estética (el `princ` de CL; cadenas sin comillas). El argumento puede ser de cualquier tipo |
 | `~s` | Igual que arriba | Estándar (el `prin1` de CL; una forma que se puede volver a leer). El argumento puede ser de cualquier tipo |
 | `~w` | — | El `write` de CL. Hace impresión bonita si `*print-pretty*` es verdadero; si no, lo mismo que `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=grupos de dígitos, `@`=signo siempre | Enteros en decimal/binario/octal/hexadecimal. El argumento es un entero |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=grupos de dígitos, `@`=signo siempre | Enteros decimales/binarios/octales/hexadecimales. El argumento puede ser cualquiera (un no entero se imprime como con `~a`, en decimal) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (con base) o ninguno | Con base, esa base (2 a 36). Sin ella: `~r`=cardinal en inglés, `~:r`=ordinal en inglés, `~@r`=números romanos, `~:@r`=números romanos antiguos. El argumento es un entero |
 | `~p` | `:`=retroceder uno, `@`=y/ies | Plurales (`~p`→"s", `~@p`→"y"/"ies"). El argumento es un entero |
 | `~c` | `:`=nombre, `@`=sintaxis `#\` | Un carácter. El argumento es un `char` |

@@ -13,6 +13,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 | `u8` `u16` `u32` | 無號固定寬度整數 | 同上 |
 | `f32` `f64` | IEEE-754 浮點數。小數字面值預設為 `f64` | [數值第 4 章](functions/numbers.md#4-浮點數f64--f32) |
 | `ratio` | 既約有理數 | [數值第 5 章](functions/numbers.md#5-有理數-ratio) |
+| `rational` | `int` 或 `ratio`（CL 的 rational）。整數之間 `/` 的結果型別 | [數值第 5 章](functions/numbers.md#5-有理數-ratio) |
 | `bool` | `true` / `false` | [數值第 7 章](functions/numbers.md#7-布林值) |
 | `char` | Unicode 純量值 | [字元](functions/collections.md#2-字元-char) |
 | `string` | 不可變的字串 | [字串](functions/collections.md#1-字串-string) |
@@ -97,10 +98,10 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 
 | trait | 實作的型別 | 詳情 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 以及所有內建錯誤型別 | [print-object](functions/printing.md#5-print-object依型別的列印表示) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比較) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 以及所有內建錯誤型別 | [print-object](functions/printing.md#5-print-object依型別的列印表示) |
 
 `cons-cell<A,B>` 與元組 `#{..}` 的 trait，以及集合的 `print-object`，在元素型別實作了該 trait 時可用。
 
@@ -108,7 +109,7 @@ typelisp 中的型別，以及各型別實作的標準 trait 一覽。型別的�
 
 | trait | 實作的型別 |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 詳情見[算術 trait](functions/traits.md#3-算術-traitadd--sub--mul--div--rem--bits--number)。

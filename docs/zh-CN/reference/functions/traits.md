@@ -66,7 +66,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -74,7 +74,7 @@
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; 距离总是 int（与 ash 相同）
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; 没有方法，6 个的组合
+(deftrait Number (Add Sub Mul Rem Ord))                   ; 没有方法，五个的组合
 ```
 
 **在约束内可以用运算符书写。** 当接收者是由 `where` 约束的类型变量时，运算符被解读为 trait 方法（`+`→`add`、
@@ -89,3 +89,9 @@ trait 一侧的方法名不是 `+`，是因为 `+` 是内置方法名，`impl` �
 `Neg`——`(- x)` 展开为 `(- (- x x) x)`，所以只需 `Sub`。
 
 已实现：`Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` 用于所有数值类型（除 `complex` 外），`Bits` 用于所有整数类型和 `int`。
+
+
+**`Div` 用关联类型 `Output` 表明结果类型。** 与 CL 一样，整数之间的 `/` 是 `rational`，因此 `int` 的
+`Output` 是 `rational`，其他数值类型则是自身。由于 `Output` 因类型而异，`Number` 不包含 `Div`（继承
+列表必须固定所有关联类型）。做除法的泛型函数用 `(where (Div T (Output R)))` 接收结果类型，或者用
+`(where (Div T (Output T)))` 要求在 `T` 内封闭的除法（此时不能传 `int`）。

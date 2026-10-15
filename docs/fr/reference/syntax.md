@@ -101,9 +101,11 @@ Dans le source, les types s'écrivent comme des symboles ou des listes ordinaire
   [Nombres](functions/numbers.md#3-entiers-en-précision-arbitraire-int)), et les six types de largeur fixe sont
   nommés d'après leur largeur et leur signe (il n'y a pas de type entier sur 64 bits ; voir
   [Nombres](functions/numbers.md#1-entiers-de-largeur-fixe)).
-- **Le type rationnel** : `ratio` (rationnels irréductibles). Alloué sur le tas comme en CL, sans conversion
-  implicite avec `int`/`f64` et semblables (convertissez explicitement avec `as`/`try-as` ou une méthode de
-  conversion ; voir [Nombres](functions/numbers.md#5-rationnels-ratio)).
+- **Les types rationnels** : `ratio` (rationnels réduits) et `rational` (un `int` ou un `ratio`, le
+  rational de CL). `/` sur deux entiers et l'arithmétique qui mélange un `int` et un `ratio` donnent un
+  `rational`, et les valeurs `int`/`ratio` se passent telles quelles là où un `rational` est attendu.
+  Pas de conversion implicite avec les entiers de largeur fixe ni `f64` (la rendre explicite avec
+  `as`/`try-as` ou une méthode de conversion ; voir [Nombres](functions/numbers.md#5-rationnels-ratio)).
 - **Mots bruts à la frontière C** : `ptr` (un pointeur opaque), `c-long` / `c-ulong`. Uniquement pour le FFI : en
   faire une valeur exige `(unsafe ...)`, et les endroits où ils peuvent apparaître sont limités
   ([3.3 defffi](#ptr--c-long--c-ulong--mots-machine-bruts)). Ne les utilisez pas là où vous voulez un entier de
@@ -1677,6 +1679,9 @@ la troncature depuis `int`. Entier → `char` peut échouer hors limites ; `as` 
 `float->int`/`ratio->int`/`char->int` aboutissent à `int`, et si une largeur plus étroite est demandée, `int->W` est
 appelé ensuite. C'est du sucre qui s'expanse vers les méthodes de conversion correspondantes
 (`int->char`/`int->int`/`int->W`, etc. dans [Nombres](functions/numbers.md)).
+
+Depuis `rational`, `as`/`try-as` convertissent vers `int` (`as` tronque, `try-as` ne réussit que pour
+un entier), `ratio` et `f64` ; depuis `int`/`ratio`, vers `rational`.
 
 `documentation`, comme `quote`/`compile`, est une forme spéciale qui lit `name` sans l'évaluer, comme un symbole nu /
 chemin `::` non évalué. Contrairement au `(documentation 'name 'function)` de CL, elle ne prend pas d'argument de

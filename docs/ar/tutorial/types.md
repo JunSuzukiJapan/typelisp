@@ -54,7 +54,7 @@ error: main.typl:5:25: type error: type mismatch: expected `int`, found `string`
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

@@ -54,7 +54,7 @@ Een waarde van `Option<T>` is ofwel `some`, met één waarde van `T`, ofwel `non
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

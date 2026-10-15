@@ -105,7 +105,9 @@ argument does not fit a fixnum")
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | ไม่เคยล้น (เลื่อนขั้น) |
-| `/` | `(/ a b)` | `(int,int)→int` | ตัดไปทางศูนย์ panic เมื่อหารด้วยศูนย์ |
+| `/` | `(/ a b)` | `(int,int)→rational` | `/` ของ CL ได้จำนวนเต็มเมื่อหารลงตัว มิฉะนั้นได้เศษส่วน (`(/ 6 3)` คือ `2` และ `(/ 7 2)` คือ `7/2`) panic เมื่อหารด้วยศูนย์ |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | ผลหารที่ตัดเข้าหาศูนย์ (ค่าแรกใน CL) panic เมื่อหารด้วยศูนย์ |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | ผลหารที่ปัดลง ปัดขึ้น หรือปัดไปยังจำนวนเต็มที่ใกล้ที่สุด (ไปทางเลขคู่เมื่อเป็นครึ่งพอดี) ละตัวหารไม่ได้ |
 | `mod` | `(mod a b)` | `(int,int)→int` | เศษที่เหลือของการหารแบบปัดลง (เครื่องหมายตามตัวหาร) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -146,17 +148,16 @@ argument does not fit a fixnum")
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | แมนทิสซา (ใน `[1/2,1)` ไม่มีเครื่องหมาย) และเลขชี้กำลัง CL คืนสามค่า แต่ไม่มีค่าหลายค่า จึงปล่อยเครื่องหมายให้ `float-sign` |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | การแยกส่วนเดียวกันด้วยแมนทิสซาจำนวนเต็ม 53 บิตที่ถูกต้องแม่นยำ `mantissa * 2^exponent` เท่ากับค่าเดิมพอดี |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **จำนวนตรรกยะที่ง่ายที่สุดที่อ่านกลับเป็นทศนิยมนั้น** (`(rationalize 0.1)` คือ `1/10`) สำหรับค่าฐานสองที่ถูกต้องแม่นยำ ใช้ `float->ratio` |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **จำนวนตรรกยะที่ง่ายที่สุดที่อ่านกลับเป็นทศนิยมนั้น** (`(rationalize 0.1)` คือ `1/10`) สำหรับค่าฐานสองที่ถูกต้องแม่นยำ ใช้ `float->ratio` |
 
-**ความแตกต่างจาก CL: `round` ปัดอย่างไร** `round` (และ `fround`/`round-div` ด้วย) ปัด **ออกจาก
-ศูนย์** (`(round 2.5)` = `3.0`) CL ปัด **ไปหาเลขคู่** ให้ `2`
+`round` (จึงรวมถึง `fround`/`round-div`) ปัดค่าครึ่งพอดี **ไปทางเลขคู่** เหมือน CL
+(`(round 2.5)` คือ `2.0` และ `(round 3.5)` คือ `4.0`)
 
 ## 5. จำนวนตรรกยะ `ratio`
 
-จำนวนตรรกยะความแม่นยำไม่จำกัดที่เข้ากันได้กับ CL ถูกเก็บในรูปต่ำสุดที่ตัวส่วนเป็นบวกเสมอ
-และจัดสรรบนฮีป ไม่มีการแปลงโดยปริยายกับชนิดจำนวนเต็มหรือ
-`f64` (ใช้เมทอดแปลงอย่างชัดเจนหรือ `as`/`try-as`) สำหรับไวยากรณ์ literal ของ ratio ดู
-[เอกสารอ้างอิงไวยากรณ์](../syntax.md#1-องค์ประกอบทางศัพท์)
+จำนวนตรรกยะความแม่นยำไม่จำกัดตาม CL เก็บในรูปอย่างต่ำโดยมีตัวส่วนเป็นบวกเสมอ และจัดสรรบน heap
+การคำนวณที่ผสมกับ `int` ได้ `rational` (5.1) ไม่มีการแปลงโดยนัยกับจำนวนเต็มความกว้างคงที่หรือ `f64`
+(ใช้เมธอดแปลงแบบชัดแจ้งหรือ `as`/`try-as`) ไวยากรณ์ของลิเทอรัลเศษส่วนดูที่ [เอกสารอ้างอิงไวยากรณ์](../syntax.md#1-องค์ประกอบทางศัพท์)
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
@@ -178,7 +179,7 @@ argument does not fit a fixnum")
 | `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | การปัดแบบเดียวกัน คืนค่าเป็น `f64` |
 | `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | `floor` แบบสองอาร์กิวเมนต์ของ CL และตัวอื่น ผลหารจำนวนเต็มคือ `car` เศษ `ratio` คือ `cdr` (`(floor-div 7/2 1/3)` คือ `(10 . 1/6)`) |
 | `float` | `(float x)` | `ratio→f64` | แปลงเป็น `f64` (เหมือน `ratio->float`) |
-| `rational` `rationalize` | `(op x)` | `ratio→ratio` | ตัวอาร์กิวเมนต์เอง |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | ค่าเดิมในรูป `rational` |
 | `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | แปลงเป็น `f64` แล้วคำนวณ (`(sqrt 1/4)` คือ `0.5`) |
 | `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | เช่นเดียวกับข้างบน |
 | `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | เช่นเดียวกับข้างบน |
@@ -193,8 +194,41 @@ argument does not fit a fixnum")
 ตัวอ่านก็อ่าน `#x1/F` `#b101/11` และ `#3r1/2` ได้
 
 ทางเข้าจากจำนวนเต็มความกว้างคงที่และ `f64` คือ `int->int`/`int->ratio` (บทที่ 1) และ
-`float->int`/`float->ratio` (บทที่ 4) `int`/`ratio` เป็นชนิดแยกที่อิสระจาก `i32` และ
-ชนิดอื่น และการคำนวณแบบผสมต้องมีการแปลงอย่างชัดเจน
+`float->int`/`float->ratio` (บทที่ 4) `int`/`ratio` เป็นชนิดแยกที่เป็นอิสระจาก `i32` และชนิดอื่น
+การคำนวณที่ผสมกับชนิดเหล่านั้นต้องแปลงแบบชัดแจ้ง
+
+### 5.1 `rational` (จำนวนเต็มหรือเศษส่วน)
+
+ชนิดที่ตรงกับ `rational` ของ CL ค่าเป็น `int` หรือ `ratio` ซึ่งถูกทำให้เป็นรูปมาตรฐานเหมือน CL (ค่าที่เป็น
+จำนวนเต็มจะเป็น `int` เสมอ) ผลของ `/` ระหว่างจำนวนเต็มสองตัวและการคำนวณที่ผสม `int` กับ `ratio`
+เป็นชนิดนี้
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+ค่า `int` และ `ratio` ส่งไปยังตำแหน่งที่ต้องการ `rational` ได้โดยตรง (ส่งได้ทั้ง `5` และ `1/2` ให้
+`(defun f ((q rational)) ...)`) ทิศทางกลับกันให้ดึงค่าออกด้วย `as`/`try-as`
+
+| ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | การคำนวณ (ผลลัพธ์ถูกทำให้เป็นรูปมาตรฐาน) `/` panic เมื่อหารด้วยศูนย์ |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | การเปรียบเทียบ |
+| `numerator` `denominator` | `(op x)` | `rational→int` | เศษและส่วนในรูปอย่างต่ำ |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | ตัดเข้าหาศูนย์ ในรูป `ratio` และแปลงเป็น `f64` |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` เมื่อเป็นจำนวนเต็ม มิฉะนั้น `none` (`integerp` ของ CL) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | เหมือน `ratio` (เลขชี้กำลังของ `expt` เป็น `int`) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | เหมือน `ratio` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | เหมือน `ratio` |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` และฟังก์ชันตรีโกณมิติและไฮเพอร์โบลิก | `(op x)` | | เหมือน `ratio` |
+
+`(as int q)` คือ `rational->int` (ตัดทิ้ง) `(try-as int q)` คือ `try-rational->int` `(as ratio q)` และ
+`(as f64 q)` คือการแปลงตามชนิดนั้น และ `(as rational x)` ขยายจาก `int`/`ratio` นอกจากนี้ยัง implement
+`Eq` `Ord` `Hash` `print-object` และ trait ทางเลขคณิตด้วย
 
 ## 6. จำนวนเชิงซ้อน `complex`
 

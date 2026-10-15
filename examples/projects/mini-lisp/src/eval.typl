@@ -15,7 +15,7 @@
            ((equal op "+") (+ x y))
            ((equal op "-") (- x y))
            ((equal op "*") (* x y))
-           ((equal op "/") (/ x y))
+           ((equal op "/") (truncate x y))
            ((equal op "<") (if (< x y) 1 0))
            ((equal op ">") (if (> x y) 1 0))
            ((equal op "=") (if (= x y) 1 0))

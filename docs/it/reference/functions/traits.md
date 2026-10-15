@@ -78,7 +78,7 @@ sui tipi concreti usa gli operatori predefiniti** ([Numeri](numbers.md)) e non p
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@ sui tipi concreti usa gli operatori predefiniti** ([Numeri](numbers.md)) e non p
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; the distance is always int (as with ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; no methods; a combination of six
+(deftrait Number (Add Sub Mul Rem Ord))                   ; nessun metodo; una combinazione di cinque
 ```
 
 **All'interno di un vincolo, puoi scrivere gli operatori.** Quando il ricevitore è una variabile di tipo
@@ -104,3 +104,11 @@ ridefinirlo (`cannot redefine built-in method`). Non esiste `Neg`: `(- x)` si es
 
 Implementato per: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` su tutti i tipi numerici (tranne `complex`), e
 `Bits` su tutti i tipi interi e su `int`.
+
+
+**`Div` nomina il proprio tipo di risultato con il tipo associato `Output`.** Come in CL, `/` su due
+interi è un `rational`, quindi l'`Output` di `int` è `rational` e quello di ogni altro tipo numerico è il
+tipo stesso. Poiché `Output` differisce tra i tipi, `Number` non include `Div` (una lista di supertrait
+deve fissare ogni tipo associato). Una funzione generica che divide riceve il tipo del risultato con
+`(where (Div T (Output R)))`, oppure chiede una divisione chiusa in `T` con `(where (Div T (Output T)))`
+(in tal caso non si può passare un `int`).
