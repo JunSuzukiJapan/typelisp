@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -37,7 +37,7 @@ incorporados, consulta [Funciones incorporadas](functions/README.md); para la li
   especial (como en CL).
 - **Números de coma flotante**: los que contienen un punto decimal o un exponente (`e`/`E`) (`1.5`,
   `3.0e10`). `f64` por defecto (`f32` si ese es el tipo esperado).
-- **Ratios**: `numerador/denominador` (solo decimal, por ejemplo `1/3`). Se reducen al leerse, como especifica
+- **Ratios**: `numerador/denominador` (por ejemplo `1/3`; también con prefijo de base, como `#x1/F`). Se reducen al leerse, como especifica
   CL (`2/4` es `1/2`). Los que tienen valor entero (`4/2`, etc.) se leen como `int`, no como `ratio`. Un
   denominador cero (`1/0`) es un error de lectura.
 - **Caracteres**: `#\` seguido de un carácter o de un nombre de carácter. Por ejemplo `#\a` `#\Space`
@@ -101,9 +101,11 @@ En el código fuente, los tipos se escriben como símbolos o listas normales.
   bignums; [Números](functions/numbers.md#3-enteros-de-precisión-arbitraria-int)), y los seis tipos de ancho
   fijo se nombran por su ancho y su signo (no hay tipo entero de 64 bits; consulta
   [Números](functions/numbers.md#1-enteros-de-ancho-fijo)).
-- **El tipo racional**: `ratio` (racionales en forma irreducible). Se reservan en el montículo como en CL, sin
-  conversión implícita con `int`/`f64` y similares (convierte explícitamente con `as`/`try-as` o con un
-  método de conversión; consulta [Números](functions/numbers.md#5-racionales-ratio)).
+- **Los tipos racionales**: `ratio` (racionales reducidos) y `rational` (un `int` o un `ratio`, el
+  rational de CL). `/` sobre dos enteros y la aritmética que mezcla un `int` con un `ratio` dan un
+  `rational`, y los valores `int`/`ratio` se pasan tal cual donde se espera un `rational`. No hay
+  conversión implícita con los enteros de ancho fijo ni con `f64` (hágala explícita con `as`/`try-as` o
+  un método de conversión; vea [Números](functions/numbers.md#5-racionales-ratio)).
 - **Palabras en bruto en la frontera con C**: `ptr` (un puntero opaco), `c-long` / `c-ulong`. Solo para el
   FFI: convertir una en valor requiere `(unsafe ...)`, y los lugares donde pueden aparecer están limitados
   ([3.3 defffi](#ptr--c-long--c-ulong--palabras-de-máquina-en-bruto)). No las uses donde quieras un entero de
@@ -1685,6 +1687,9 @@ da `None`. Todo lo demás (las ampliaciones, y el truncamiento de `float->int`/`
 `float->int`/`ratio->int`/`char->int` llegan a `int`, y si se pide un ancho más estrecho, se llama después a
 `int->W`. Es una facilidad de escritura que se expande a los métodos de conversión correspondientes
 (`int->char`/`int->int`/`int->W`, etc. en [Números](functions/numbers.md)).
+
+Desde `rational`, `as`/`try-as` convierten a `int` (`as` trunca, `try-as` solo tiene éxito con un
+entero), a `ratio` y a `f64`; desde `int`/`ratio`, a `rational`.
 
 `documentation`, como `quote`/`compile`, es una forma especial que lee `name` sin evaluarlo, como un símbolo
 simple / ruta `::` sin evaluar. A diferencia del `(documentation 'name 'function)` de CL, no recibe argumento de

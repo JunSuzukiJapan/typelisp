@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -37,7 +37,7 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
   besondere Syntax (wie in CL).
 - **Gleitkommazahlen**: solche mit Dezimalpunkt oder Exponent (`e`/`E`) (`1.5`, `3.0e10`). Standardmäßig `f64`
   (`f32`, wenn das der erwartete Typ ist).
-- **Brüche**: `Zähler/Nenner` (nur dezimal, zum Beispiel `1/3`). Beim Lesen gekürzt, wie CL es vorschreibt
+- **Brüche**: `Zähler/Nenner` (zum Beispiel `1/3`; auch mit Basispräfix wie `#x1/F`). Beim Lesen gekürzt, wie CL es vorschreibt
   (`2/4` ist `1/2`). Solche mit ganzzahligem Wert (`4/2` usw.) werden als `int` gelesen, nicht als `ratio`. Ein
   Nenner null (`1/0`) ist ein Lesefehler.
 - **Zeichen**: `#\` gefolgt von einem Zeichen oder einem Zeichennamen. Zum Beispiel `#\a` `#\Space`
@@ -103,9 +103,11 @@ Im Quelltext werden Typen als gewöhnliche Symbole oder Listen geschrieben.
   [Zahlen](functions/numbers.md#3-ganzzahlen-beliebiger-genauigkeit-int)), und die sechs Typen fester Breite
   sind nach Breite und Vorzeichenbehaftung benannt (einen 64-Bit-Ganzzahltyp gibt es nicht; siehe
   [Zahlen](functions/numbers.md#1-ganzzahlen-fester-breite)).
-- **Der rationale Typ**: `ratio` (gekürzte rationale Zahlen). Wie in CL auf dem Heap angelegt, ohne implizite
-  Umwandlung mit `int`/`f64` und Ähnlichem (ausdrücklich mit `as`/`try-as` oder einer Umwandlungsmethode
-  umwandeln; siehe [Zahlen](functions/numbers.md#5-rationale-zahlen-ratio)).
+- **Die rationalen Typen**: `ratio` (gekürzte rationale Zahlen) und `rational` (ein `int` oder ein
+  `ratio`, CLs rational). `/` auf zwei ganzen Zahlen und Arithmetik, die ein `int` mit einem `ratio`
+  mischt, ergeben ein `rational`, und `int`/`ratio`-Werte können unverändert übergeben werden, wo ein
+  `rational` erwartet wird. Es gibt keine implizite Umwandlung mit den Ganzzahlen fester Breite oder
+  `f64` (explizit mit `as`/`try-as` oder einer Umwandlungsmethode; siehe [Zahlen](functions/numbers.md#5-rationale-zahlen-ratio)).
 - **Rohe Wörter an der C-Grenze**: `ptr` (ein undurchsichtiger Zeiger), `c-long` / `c-ulong`. Nur für das FFI:
   Um einen davon zu einem Wert zu machen, braucht es `(unsafe ...)`, und die Stellen, an denen sie vorkommen
   dürfen, sind begrenzt ([3.3 defffi](#ptr--c-long--c-ulong--rohe-maschinenwörter)). Man verwendet sie nicht,
@@ -1705,6 +1707,9 @@ und das Abschneiden von `float->int`/`ratio->int`) gelingt immer. `float->int`/`
 bei `int`, und wird eine schmalere Breite verlangt, wird danach `int->W` aufgerufen. Das ist Zucker, der zu den
 entsprechenden Umwandlungsmethoden expandiert (`int->char`/`int->int`/`int->W` usw. unter
 [Zahlen](functions/numbers.md)).
+
+Von `rational` wandeln `as`/`try-as` nach `int` um (`as` schneidet ab, `try-as` gelingt nur bei einer
+ganzen Zahl), nach `ratio` und `f64`; von `int`/`ratio` nach `rational`.
 
 `documentation` ist wie `quote`/`compile` eine Spezialform, die `name` unausgewertet liest, als bloßes Symbol /
 `::`-Pfad. Anders als CLs `(documentation 'name 'function)` nimmt es kein Typargument: Es löst `name` in der

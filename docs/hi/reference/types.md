@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # टाइप
 
 typelisp में मौजूद टाइप, और हर टाइप द्वारा लागू किए गए स्टैंडर्ड trait। टाइप कैसे लिखें यह [सिंटैक्स संदर्भ अध्याय 2](syntax.md#2-टाइप-लिखना) में है; हर टाइप के फ़ंक्शन और मेथड [बिल्ट-इन फ़ंक्शन](functions/README.md) में हैं।
@@ -12,6 +12,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 | `u8` `u16` `u32` | अचिह्नित निश्चित चौड़ाई वाले पूर्णांक | ऊपर जैसा |
 | `f32` `f64` | IEEE-754 फ़्लोटिंग-पॉइंट संख्याएँ। दशमलव लिटरल का डिफ़ॉल्ट `f64` है | [संख्याएँ अध्याय 4](functions/numbers.md#4-फ़्लोटिंग-पॉइंट-संख्याएँ-f64--f32) |
 | `ratio` | न्यूनतम रूप में एक परिमेय संख्या | [संख्याएँ अध्याय 5](functions/numbers.md#5-परिमेय-संख्याएँ-ratio) |
+| `rational` | एक `int` या `ratio` (CL का rational)। दो पूर्णांकों पर `/` का प्रकार | [संख्याएँ अध्याय 5](functions/numbers.md#5-परिमेय-संख्याएँ-ratio) |
 | `bool` | `true` / `false` | [संख्याएँ अध्याय 7](functions/numbers.md#7-बूलियन) |
 | `char` | एक Unicode स्केलर मान | [कैरेक्टर](functions/collections.md#2-कैरेक्टर-char) |
 | `string` | एक अपरिवर्तनीय स्ट्रिंग | [स्ट्रिंग](functions/collections.md#1-स्ट्रिंग-string) |
@@ -96,10 +97,10 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 | Trait | लागू करने वाले टाइप | विवरण |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-तुलना) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | ऊपर जैसा |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` और सभी बिल्ट-इन त्रुटि टाइप | [print-object](functions/printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-तुलना) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | ऊपर जैसा |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` और सभी बिल्ट-इन त्रुटि टाइप | [print-object](functions/printing.md#5-print-object-प्रति-टाइप-प्रिंट-किया-गया-प्रतिनिधित्व) |
 
 `cons-cell<A,B>` और टपल `#{..}` के trait, और संग्रहों का `print-object`, तब उपलब्ध हैं जब तत्वों के टाइप वह trait लागू करते हों।
 
@@ -107,7 +108,7 @@ typelisp में मौजूद टाइप, और हर टाइप द�
 
 | Trait | लागू करने वाले टाइप |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 विवरण [अंकगणितीय trait](functions/traits.md#3-अंकगणितीय-trait-add--sub--mul--div--rem--bits--number) में हैं।

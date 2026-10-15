@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Printing
 
 `print`/`println`/`format`, the one-argument printers, the pretty printer, `print-object`, and the
@@ -27,7 +27,7 @@ bound by `(where (CharOutput S))`. A `dest` that is neither a `bool` nor a strea
 **The control string must be a literal** (the same restriction as Rust's `format!`). The directives in
 it decide how many arguments are taken and of which types, so a string built at run time cannot be
 read at check time. Because it must be a literal, **the number and types of the arguments are checked
-at check time**: `(println "~d" "x")` and `(println "~a ~a" 1)` are check-time errors. A misspelled
+at check time**: `(println "~c" 1)` and `(println "~a ~a" 1)` are check-time errors. A misspelled
 directive, an unclosed `~(`, and a `~/name/` whose callee cannot be settled are check-time errors too.
 The checking rules are in [format.md](format.md#1-how-to-write-directives). To print a string you
 build, make it with `(format false ...)` and print it with `(println "~a" s)`.

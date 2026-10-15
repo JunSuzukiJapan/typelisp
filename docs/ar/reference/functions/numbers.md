@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # الأعداد
 
 العمليات على الأعداد الصحيحة والأعداد ذات الفاصلة العائمة والأعداد الكسرية والمركبة والقيم المنطقية، ودوال
@@ -99,7 +99,9 @@
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | لا تفيض أبدًا (تُرقّي) |
-| `/` | `(/ a b)` | `(int,int)→int` | تقتطع نحو الصفر. ويحدث `panic` عند القسمة على صفر |
+| `/` | `(/ a b)` | `(int,int)→rational` | `/` في CL. عدد صحيح إذا كانت القسمة تامة، وإلا فكسر (`(/ 6 3)` يساوي `2`، و`(/ 7 2)` يساوي `7/2`). يحدث panic عند القسمة على صفر |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | خارج القسمة مقتطعًا نحو الصفر (القيمة الأولى في CL). يحدث panic عند القسمة على صفر |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | خارج القسمة مقرّبًا إلى الأسفل أو إلى الأعلى أو إلى أقرب عدد صحيح (إلى الزوجي عند النصف تمامًا). لا يمكن حذف المقسوم عليه |
 | `mod` | `(mod a b)` | `(int,int)→int` | باقي القسمة بالأرضية (الإشارة تتبع المقسوم عليه) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -140,16 +142,16 @@
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | الجزء العشري (mantissa) (في `[1/2,1)`، بلا إشارة) والأس. وتعيد CL ثلاث قيم، لكن لا قيم متعددة هنا، فتُترك الإشارة لـ `float-sign` |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | التحليل نفسه بجزء عشري عدد صحيح دقيق بـ 53 بتًا. و`mantissa * 2^exponent` هي القيمة الأصلية بالضبط |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **أبسط عدد كسري يُقرأ من جديد على أنه ذلك العدد العائم** (`(rationalize 0.1)` هي `1/10`). وللقيمة الثنائية الدقيقة استخدم `float->ratio` |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **أبسط عدد كسري يُقرأ من جديد على أنه ذلك العدد العائم** (`(rationalize 0.1)` هي `1/10`). وللقيمة الثنائية الدقيقة استخدم `float->ratio` |
 
-**فرق عن CL: كيف تقرّب `round`.** تقرّب `round` (ومعها `fround`/`round-div`) **بعيدًا عن الصفر**
-(`(round 2.5)` = `3.0`). أما CL فتقرّب **إلى الزوجي** فتعطي `2`.
+`round` (ومن ثم `fround`/`round-div`) يقرّب النصف تمامًا **إلى الزوجي** كما في CL
+(`(round 2.5)` يساوي `2.0`، و`(round 3.5)` يساوي `4.0`).
 
 ## 5. الأعداد الكسرية `ratio`
 
-أعداد كسرية (نسبية) اعتباطية الدقة متوافقة مع CL. وتُحفَظ دائمًا في أبسط صورة بمقام موجب، وتُحجز في
-الكومة (heap). ولا يوجد تحويل ضمني مع الأنواع الصحيحة ولا `f64` (استخدم تابع تحويل صريحًا أو
-`as`/`try-as`). ولصياغة ثوابت النسبة انظر [مرجع الصياغة](../syntax.md#1-العناصر-المعجمية).
+أعداد نسبية بدقة اعتباطية متوافقة مع CL. تُحفظ دائمًا في أبسط صورة بمقام موجب، وتُخصّص في الكومة.
+الحساب الذي يمزجها مع `int` يعطي `rational` (5.1). لا يوجد تحويل ضمني مع الأعداد الصحيحة ذات العرض
+الثابت أو `f64` (استخدم طريقة تحويل صريحة أو `as`/`try-as`). لصياغة القيم الحرفية الكسرية انظر [مرجع الصياغة](../syntax.md#1-العناصر-المعجمية).
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
@@ -158,7 +160,7 @@
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | باقي القسمة بالاقتطاع (كما في CL؛ الإشارة تتبع المقسوم) |
 | `abs` | `(abs x)` | `ratio→ratio` | القيمة المطلقة |
 | `signum` | `(signum x)` | `ratio→ratio` | الإشارة (تعيد `1`/`-1`/`0` على أنها `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | الأس. ويجب أن يكون الأس `ratio` قيمته عددًا صحيحًا (وإلا حدث `panic`). والأس السالب يعطي المقلوب |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | الأس (بالتربيع المتكرر). الأس السالب يعطي المقلوب (`(expt 2/3 -2)` يساوي `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | الأكبر / الأصغر |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. وليس لـ `ratio` عمليات بتات (ففي CL هي للأعداد الصحيحة فقط) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | المقارنة |
@@ -167,10 +169,59 @@
 | `denominator` | `(denominator x)` | `ratio→int` | المقام في أبسط صورة (موجب دائمًا) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | الجزء الصحيح (مقتطع نحو الصفر) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | يحوّل إلى `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | التقريب إلى عدد صحيح (القيمة الأولى في CL). عند النصف تمامًا يختار `round` الجهة الزوجية (`(round 5/2)` يساوي `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | التقريب نفسه، مُعادًا بصيغة `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | `floor` ذو الوسيطين في CL وأخواته. حاصل القسمة الصحيح هو `car` والباقي من نوع `ratio` هو `cdr` (`(floor-div 7/2 1/3)` يساوي `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | يحوّل إلى `f64` (مثل `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | القيمة نفسها بوصفها `rational` |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | يحوّل إلى `f64` ثم يحسب (`(sqrt 1/4)` يساوي `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | كما سبق |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | كما سبق |
+| `sxhash` | `(sxhash x)` | `ratio→int` | تنفيذ `Hash`. يمكن أن يكون `ratio` مفتاحًا في `HashTable` |
 
-وطرق الدخول من الأعداد الصحيحة ذات العرض الثابت و`f64` هي `int->int`/`int->ratio` (الفصل 1) و
-`float->int`/`float->ratio` (الفصل 4). و`int`/`ratio` نوعان منفصلان مستقلان عن `i32` وغيره، والحساب
-المختلط يحتاج إلى تحويلات صريحة.
+العدد الصحيح في CL عدد نسبي مقامه 1، لذا لدى `int` أيضًا `numerator` (نفسه) و`denominator` (`1`)
+و`float` و`rational` و`rationalize` والدوال الخمس عشرة من `sqrt` إلى `atanh` أعلاه (`(sqrt 4)` يساوي
+`2.0`). ولدى `f64`/`f32` أيضًا `float` (نفسه) و`rational` (مثل `float->ratio`).
+
+يُطبع `ratio` الذي مقامه 1 (مثل `(+ 1/3 2/3)`) عددًا صحيحًا (`1`) كما في CL. ينطبق `*print-base*`
+على البسط والمقام معًا، وعندما يكون `*print-radix*` صحيحًا تُضاف بادئة الأساس مثل `#x1/f` و`#10r1/3`.
+ويقرأ القارئ أيضًا `#x1/F` و`#b101/11` و`#3r1/2`.
+
+طرق الدخول من الأعداد الصحيحة ذات العرض الثابت ومن `f64` هي `int->int`/`int->ratio` (الفصل 1)
+و`float->int`/`float->ratio` (الفصل 4). `int`/`ratio` نوعان مستقلان عن `i32` وغيره، والحساب الذي
+يمزجهما معها يحتاج إلى تحويلات صريحة.
+
+### 5.1 `rational` (عدد صحيح أو كسر)
+
+النوع المقابل لـ`rational` في CL. القيمة `int` أو `ratio`، مطبّعة كما في CL (القيمة الصحيحة هي
+دائمًا `int`). نتيجة `/` على عددين صحيحين والحساب الذي يمزج `int` مع `ratio` من هذا النوع.
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+يمكن تمرير قيم `int` و`ratio` كما هي حيث يُتوقَّع `rational` (يمكن تمرير `5` و`1/2` كليهما إلى
+`(defun f ((q rational)) ...)`). وفي الاتجاه المعاكس تُستخرج القيمة بـ`as`/`try-as`.
+
+| الاسم | الصيغة | النوع | الوصف |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | الحساب (النتيجة مطبّعة). `/` يُحدث panic عند القسمة على صفر |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | المقارنة |
+| `numerator` `denominator` | `(op x)` | `rational→int` | البسط والمقام في أبسط صورة |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | مقتطعًا نحو الصفر، بوصفه `ratio`، إلى `f64` |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` للعدد الصحيح، وإلا `none` (`integerp` في CL) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | كما في `ratio` (أُس `expt` من النوع `int`) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | كما في `ratio` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | كما في `ratio` |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` والدوال المثلثية والزائدية | `(op x)` | | كما في `ratio` |
+
+`(as int q)` هو `rational->int` (اقتطاع)، و`(try-as int q)` هو `try-rational->int`، و`(as ratio q)`
+و`(as f64 q)` هما التحويلان المقابلان، و`(as rational x)` توسيع من `int`/`ratio`. كما يطبّق
+`Eq` و`Ord` و`Hash` و`print-object` والسمات الحسابية.
 
 ## 6. الأعداد المركبة `complex`
 

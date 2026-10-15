@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Pencetakan
 
 `print`/`println`/`format`, pencetak satu argumen, pretty printer, `print-object`, dan variabel yang
@@ -28,7 +28,7 @@ adalah kesalahan tipe.
 **String kendali harus berupa literal** (batasan yang sama seperti `format!` pada Rust). Direktif di
 dalamnya menentukan berapa banyak argumen yang diambil dan bertipe apa, sehingga string yang dibangun
 saat dijalankan tidak dapat dibaca saat pemeriksaan. Karena harus berupa literal, **jumlah dan tipe
-argumen diperiksa saat pemeriksaan**: `(println "~d" "x")` dan `(println "~a ~a" 1)` adalah kesalahan
+argumen diperiksa saat pemeriksaan**: `(println "~c" 1)` dan `(println "~a ~a" 1)` adalah kesalahan
 saat pemeriksaan. Direktif yang salah eja, `~(` yang tidak tertutup, dan `~/name/` yang tujuan
 panggilannya tidak dapat ditentukan juga merupakan kesalahan saat pemeriksaan. Aturan pemeriksaan ada di
 [format.md](format.md#1-cara-menulis-direktif). Untuk mencetak string yang Anda bangun, buatlah

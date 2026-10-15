@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Các trait chuẩn
 
 Các trait cho việc lặp, so sánh và số học. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`
@@ -77,7 +77,7 @@ tử dựng sẵn** ([Số](numbers.md)) và không đi qua tầng này.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -85,7 +85,7 @@ tử dựng sẵn** ([Số](numbers.md)) và không đi qua tầng này.
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; khoảng dịch luôn là int (như với ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; không có phương thức; tổ hợp của sáu trait
+(deftrait Number (Add Sub Mul Rem Ord))                   ; không có phương thức; tổ hợp của năm trait
 ```
 
 **Bên trong một ràng buộc, bạn có thể viết toán tử.** Khi bên nhận là một biến kiểu bị ràng buộc bởi
@@ -103,3 +103,10 @@ chối định nghĩa lại nó (`cannot redefine built-in method`). Không có 
 
 Được triển khai cho: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` trên mọi kiểu số (trừ `complex`), và `Bits`
 trên mọi kiểu số nguyên và `int`.
+
+
+**`Div` đặt tên kiểu kết quả bằng kiểu liên kết `Output`.** Như CL, `/` trên hai số nguyên là
+`rational`, nên `Output` của `int` là `rational`, còn của mọi kiểu số khác là chính kiểu đó. Vì `Output`
+khác nhau giữa các kiểu, `Number` không chứa `Div` (danh sách supertrait phải cố định mọi kiểu liên
+kết). Hàm tổng quát có phép chia nhận kiểu kết quả bằng `(where (Div T (Output R)))`, hoặc yêu cầu phép
+chia khép kín trong `T` bằng `(where (Div T (Output T)))` (khi đó không truyền được `int`).

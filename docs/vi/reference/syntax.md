@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -34,7 +34,7 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   đặc biệt (như trong CL).
 - **Số dấu phẩy động**: những số chứa dấu thập phân hoặc số mũ (`e`/`E`) (`1.5`, `3.0e10`). Mặc định là
   `f64` (`f32` nếu đó là kiểu mong đợi).
-- **Số hữu tỉ (ratio)**: `tử/mẫu` (chỉ thập phân, ví dụ `1/3`). Được rút gọn khi đọc, như CL quy định (`2/4`
+- **Số hữu tỉ (ratio)**: `tử/mẫu` (ví dụ `1/3`; cũng dùng được tiền tố cơ số, như `#x1/F`). Được rút gọn khi đọc, như CL quy định (`2/4`
   là `1/2`). Những số có giá trị nguyên (`4/2`, v.v.) được đọc là `int`, không phải `ratio`. Mẫu số bằng
   không (`1/0`) là lỗi đọc.
 - **Ký tự**: `#\` theo sau bởi một ký tự hoặc một tên ký tự. Ví dụ `#\a` `#\Space` `#\Newline` `#\Tab`
@@ -95,9 +95,10 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
   [Số](functions/numbers.md#3-số-nguyên-độ-chính-xác-tùy-ý-int)), và sáu kiểu độ rộng cố định được đặt tên
   theo độ rộng và tính có dấu của chúng (không có kiểu số nguyên 64 bit; xem
   [Số](functions/numbers.md#1-số-nguyên-độ-rộng-cố-định)).
-- **Kiểu số hữu tỉ**: `ratio` (số hữu tỉ ở dạng tối giản). Được cấp phát trên heap như trong CL, không có
-  chuyển đổi ngầm với `int`/`f64` và tương tự (hãy chuyển đổi tường minh bằng `as`/`try-as` hoặc một phương
-  thức chuyển đổi; xem [Số](functions/numbers.md#5-số-hữu-tỉ-ratio)).
+- **Các kiểu hữu tỉ**: `ratio` (số hữu tỉ tối giản) và `rational` (một `int` hoặc `ratio`, rational của
+  CL). `/` trên hai số nguyên và phép toán trộn `int` với `ratio` cho ra `rational`, và giá trị
+  `int`/`ratio` có thể truyền nguyên vẹn vào chỗ cần `rational`. Không có chuyển đổi ngầm với số nguyên
+  độ rộng cố định hay `f64` (làm tường minh bằng `as`/`try-as` hoặc phương thức chuyển đổi; xem [Số](functions/numbers.md#5-số-hữu-tỉ-ratio)).
 - **Các từ thô ở ranh giới C**: `ptr` (một con trỏ mờ), `c-long` / `c-ulong`. Chỉ cho FFI: để biến một thứ
   thành giá trị cần `(unsafe ...)`, và các chỗ chúng có thể xuất hiện bị giới hạn
   ([3.3 defffi](#ptr--c-long--c-ulong--các-từ-máy-thô)). Đừng dùng chúng ở nơi bạn muốn một số nguyên 64
@@ -1614,6 +1615,9 @@ và `(as i32 n)` là phép cắt cụt từ `int`. Số nguyên → `char` có t
 `float->int`/`ratio->int`/`char->int` hạ xuống `int`, và nếu cần độ rộng hẹp hơn, `int->W` được gọi sau chúng.
 Đây là đường cú pháp khai triển thành các phương thức chuyển đổi tương ứng (`int->char`/`int->int`/`int->W`, v.v.
 trong [Số](functions/numbers.md)).
+
+Từ `rational`, `as`/`try-as` chuyển sang `int` (`as` cắt bớt, `try-as` chỉ thành công với số nguyên),
+`ratio` và `f64`; từ `int`/`ratio` sang `rational`.
 
 `documentation`, như `quote`/`compile`, là một dạng đặc biệt đọc `name` mà không đánh giá, như một symbol trần /
 đường dẫn `::` không được đánh giá. Khác `(documentation 'name 'function)` của CL, nó không nhận đối số kiểu: nó

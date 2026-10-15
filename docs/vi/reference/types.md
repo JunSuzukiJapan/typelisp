@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Kiểu
 
 Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển khai. Cách viết kiểu nằm ở
@@ -14,6 +14,7 @@ Các kiểu mà typelisp có, và các trait chuẩn mà mỗi kiểu triển kh
 | `u8` `u16` `u32` | Số nguyên không dấu độ rộng cố định | Như trên |
 | `f32` `f64` | Số dấu phẩy động IEEE-754. Literal thập phân mặc định là `f64` | [Số chương 4](functions/numbers.md#4-số-dấu-phẩy-động-f64--f32) |
 | `ratio` | Số hữu tỉ ở dạng tối giản | [Số chương 5](functions/numbers.md#5-số-hữu-tỉ-ratio) |
+| `rational` | Một `int` hoặc `ratio` (rational của CL). Kiểu của `/` trên hai số nguyên | [Số chương 5](functions/numbers.md#5-số-hữu-tỉ-ratio) |
 | `bool` | `true` / `false` | [Số chương 7](functions/numbers.md#7-boolean) |
 | `char` | Một giá trị vô hướng Unicode | [Ký tự](functions/collections.md#2-ký-tự-char) |
 | `string` | Một chuỗi bất biến | [Chuỗi](functions/collections.md#1-chuỗi-string) |
@@ -102,10 +103,10 @@ và ở các chương được liệt kê trong cột ngoài cùng bên phải.
 
 | Trait | Các kiểu triển khai | Chi tiết |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-so-sánh) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Như trên |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` và mọi kiểu lỗi dựng sẵn | [print-object](functions/printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-so-sánh) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Như trên |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` và mọi kiểu lỗi dựng sẵn | [print-object](functions/printing.md#5-print-object-biểu-diễn-in-theo-từng-kiểu) |
 
 Các trait của `cons-cell<A,B>` và của tuple `#{..}`, cùng `print-object` của các collection, dùng
 được khi kiểu phần tử cài đặt trait đó.
@@ -114,7 +115,7 @@ Các trait của `cons-cell<A,B>` và của tuple `#{..}`, cùng `print-object` 
 
 | Trait | Các kiểu triển khai |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Chi tiết nằm ở [Các trait số học](functions/traits.md#3-các-trait-số-học-add--sub--mul--div--rem--bits--number).

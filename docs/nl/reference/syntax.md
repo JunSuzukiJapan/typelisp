@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -38,7 +38,7 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   wordt, wordt door haar grootte bepaald, zonder speciale syntaxis (zoals in CL).
 - **Drijvendekommagetallen**: die welke een decimaalteken of een exponent (`e`/`E`) bevatten (`1.5`,
   `3.0e10`). Standaard `f64` (`f32` als dat het verwachte type is).
-- **Ratio's**: `teller/noemer` (alleen decimaal, bijvoorbeeld `1/3`). Bij het lezen vereenvoudigd, zoals
+- **Ratio's**: `teller/noemer` (bijvoorbeeld `1/3`; een grondtal-voorvoegsel kan ook, zoals `#x1/F`). Bij het lezen vereenvoudigd, zoals
   CL voorschrijft (`2/4` is `1/2`). Die met een geheel getalwaarde (`4/2` enzovoort) worden als `int`
   gelezen, niet als `ratio`. Een noemer van nul (`1/0`) is een leesfout.
 - **Tekens**: `#\` gevolgd door één teken of een tekennaam. Bijvoorbeeld `#\a` `#\Space` `#\Newline`
@@ -103,9 +103,11 @@ In de broncode worden types als gewone symbolen of lijsten geschreven.
   en bignums beweegt; [Getallen](functions/numbers.md#3-gehele-getallen-met-willekeurige-precisie-int)),
   en de zes types met vaste breedte zijn genoemd naar hun breedte en tekenstatus (er is geen geheel type
   van 64 bits; zie [Getallen](functions/numbers.md#1-gehele-getallen-met-vaste-breedte)).
-- **Het rationale type**: `ratio` (rationale getallen in laagste termen). Op de heap gealloceerd zoals in
-  CL, zonder impliciete conversie met `int`/`f64` en dergelijke (converteer expliciet met `as`/`try-as` of
-  een conversiemethode; zie [Getallen](functions/numbers.md#5-rationale-getallen-ratio)).
+- **De rationale typen**: `ratio` (vereenvoudigde rationale getallen) en `rational` (een `int` of een
+  `ratio`, CL's rational). `/` op twee gehele getallen en rekenen dat een `int` met een `ratio` mengt
+  geven een `rational`, en `int`/`ratio`-waarden kunnen ongewijzigd worden doorgegeven waar een
+  `rational` verwacht wordt. Geen impliciete conversie met de gehele getallen met vaste breedte of
+  `f64` (expliciet met `as`/`try-as` of een conversiemethode; zie [Getallen](functions/numbers.md#5-rationale-getallen-ratio)).
 - **Ruwe woorden aan de C-grens**: `ptr` (een ondoorzichtige pointer), `c-long` / `c-ulong`. Alleen voor de
   FFI: er een tot waarde maken vereist `(unsafe ...)`, en de plekken waar ze mogen voorkomen zijn beperkt
   ([3.3 defffi](#ptr--c-long--c-ulong--ruwe-machinewoorden)). Gebruik deze niet waar je een geheel getal van
@@ -1723,6 +1725,9 @@ mislukken, dus `as` geeft een panic en `try-as` geeft `None`. Al het andere (ver
 smallere breedte wordt gevraagd, wordt daarna `int->W` aangeroepen. Dit is suiker die naar de
 overeenkomstige conversiemethoden expandeert (`int->char`/`int->int`/`int->W` enzovoort in
 [Getallen](functions/numbers.md)).
+
+Vanuit `rational` converteren `as`/`try-as` naar `int` (`as` kapt af, `try-as` slaagt alleen voor een
+geheel getal), `ratio` en `f64`; vanuit `int`/`ratio` naar `rational`.
 
 `documentation` is, net als `quote`/`compile`, een speciale vorm die `name` zonder evaluatie leest, als een
 ongeëvalueerd kaal symbool / `::`-pad. Anders dan `(documentation 'name 'function)` van CL neemt het geen

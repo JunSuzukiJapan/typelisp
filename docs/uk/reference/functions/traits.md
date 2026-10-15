@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Стандартні трейти
 
 Трейти для ітерації, порівняння та арифметики. Інші стандартні трейти описано у власних розділах: `Hash`
@@ -78,7 +78,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; the distance is always int (as with ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; no methods; a combination of six
+(deftrait Number (Add Sub Mul Rem Ord))                   ; методів немає; поєднання п'яти
 ```
 
 **Всередині обмеження можна писати оператори.** Коли одержувач — змінна типу, обмежена через `where`,
@@ -104,3 +104,11 @@
 
 Реалізовано для: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` для всіх числових типів (крім `complex`) і
 `Bits` для всіх цілих типів та `int`.
+
+
+**`Div` називає тип результату асоційованим типом `Output`.** Як у CL, `/` на двох цілих — це
+`rational`, тому `Output` у `int` — `rational`, а в будь-якого іншого числового типу — сам цей тип.
+Оскільки `Output` у типів різний, `Number` не містить `Div` (список супертрейтів має закріплювати кожен
+асоційований тип). Узагальнена функція, що ділить, приймає тип результату через
+`(where (Div T (Output R)))` або вимагає ділення, замкненого в `T`, через `(where (Div T (Output T)))`
+(тоді `int` передати не можна).

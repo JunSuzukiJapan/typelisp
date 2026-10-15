@@ -179,9 +179,9 @@ pub const LLVM_METHOD_RECEIVER_TYPES: [&str; 4] =
 /// LLVM instructions or `rt_*` calls rather than function calls
 /// (`Interp::is_native_lowered_primitive_method` says *which* methods; this
 /// says which receivers can have them).
-pub const NATIVE_LOWERED_PRIMITIVES: [&str; 17] = [
+pub const NATIVE_LOWERED_PRIMITIVES: [&str; 18] = [
     "i32", "i8", "i16", "u8", "u16", "u32", "int",
-    "char", "string", "f64", "f32", "ratio", "sexpr", "bool", "symbol",
+    "char", "string", "f64", "f32", "ratio", "rational", "sexpr", "bool", "symbol",
     // The two C-boundary words are integer receivers to `compile-assoc`
     // (`int-receiver-type?`), so their conversions are lowered the same way.
     // Listing the *methods* is not enough: a receiver missing from here makes
@@ -217,6 +217,14 @@ pub enum Type {
     /// positive denominator. Like `Bignum`, its own static type with
     /// explicit conversions (`int->ratio`/`ratio->float`/...).
     Ratio,
+    /// The `rational` type: CL's `rational` — an `int` or a `ratio`. Its
+    /// values are those two types' own values, kept normalized as CL's
+    /// arithmetic leaves them (an integer-valued result is the `int`), so an
+    /// `int` reaches a `rational` position as it stands and a `ratio` through
+    /// `ratio->rational`, which normalizes (`Checker::reconcile_expected`).
+    /// It is what `int`'s `/` answers, and what arithmetic mixing an `int`
+    /// with a `ratio` answers.
+    Rational,
     /// The `random-state` type (CL's `random-state`): an opaque, mutable PRNG
     /// stream. Has no reader syntax and no arithmetic — only ever produced by
     /// `make-random-state-fresh`/`random-state-copy` and consumed by
@@ -528,7 +536,7 @@ pub fn primitive_types() -> Vec<Type> {
         Type::I8, Type::I16, Type::I32,
         Type::U8, Type::U16, Type::U32,
         Type::Int,
-        Type::F32, Type::F64, Type::Ratio, Type::RandomState,
+        Type::F32, Type::F64, Type::Ratio, Type::Rational, Type::RandomState,
         Type::Bool, Type::Char, Type::Str, Type::Symbol,
         // Registered so their conversions have somewhere to live. What they
         // get is `c_word_assoc`, not `int_assoc` — see that function.
@@ -570,6 +578,7 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::F64 => "f64",
         Type::Int => "int",
         Type::Ratio => "ratio",
+        Type::Rational => "rational",
         Type::RandomState => "random-state",
         Type::Bool => "bool",
         Type::Char => "char",
@@ -1076,6 +1085,7 @@ pub fn primitive_by_name(name: &str) -> Option<Type> {
         "f64" => Type::F64,
         "int" => Type::Int,
         "ratio" => Type::Ratio,
+        "rational" => Type::Rational,
         "random-state" => Type::RandomState,
         "bool" => Type::Bool,
         "char" => Type::Char,

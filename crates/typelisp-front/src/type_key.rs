@@ -243,6 +243,7 @@ impl TypeKey for Type {
             Type::F64 => "f64".into(),
             Type::Int => "int".into(),
             Type::Ratio => "ratio".into(),
+            Type::Rational => "rational".into(),
             Type::RandomState => "random-state".into(),
             Type::Bool => "bool".into(),
             Type::Char => "char".into(),

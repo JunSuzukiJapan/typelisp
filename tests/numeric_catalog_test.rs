@@ -41,12 +41,10 @@ fn the_f_prefixed_rounding_names_stay_floats() {
     assert_eq!(show("(fceiling 2.1)"), "3.0");
     assert_eq!(show("(ftruncate -2.7)"), "-2.0");
     assert_eq!(show("(ffloor -2.1)"), "-3.0");
-    // Ties round *away from zero*, not to even. CL specifies to-even, so
-    // `(fround 2.5)` is 2 there and 3.0 here — a divergence inherited from the
-    // existing `round` builtin, recorded in `docs/ja/reference/functions/numbers.md` §4 rather than
-    // silently fixed in the alias (which would leave `fround` and `round`
-    // disagreeing with each other).
-    assert_eq!(show("(fround 2.5)"), "3.0");
+    // Ties round to even, as CL's `round` does.
+    assert_eq!(show("(fround 2.5)"), "2.0");
+    assert_eq!(show("(fround 3.5)"), "4.0");
+    assert_eq!(show("(fround -2.5)"), "-2.0");
     assert_eq!(show("(fround 2.4)"), "2.0");
 }
 
@@ -114,7 +112,7 @@ fn rationalize_finds_the_simplest_rational_not_the_exact_one() {
     assert_eq!(show("(rationalize 0.5)"), "1/2");
     assert_eq!(show("(rationalize 0.25)"), "1/4");
     assert_eq!(show("(rationalize 1.5)"), "3/2");
-    assert_eq!(show("(rationalize 3.0)"), "3/1");
+    assert_eq!(show("(rationalize 3.0)"), "3");
     assert_eq!(show("(float->ratio 0.1)"), "3602879701896397/36028797018963968");
 }
 
@@ -243,4 +241,78 @@ fn an_int_shifts_by_a_bit_count() {
     // Right past every bit: the sign, as CL's infinite two's complement says.
     assert_eq!(show("(ash (as int 255) -1000)"), "0");
     assert_eq!(show("(ash (as int -255) -1000)"), "-1");
+}
+
+/// CL's rounding of a rational: the integer quotient, exact, with `round`
+/// breaking a tie toward the even integer.
+#[test]
+fn ratio_rounds_to_an_integer_as_cl_does() {
+    assert_eq!(show("(floor 7/2)"), "3");
+    assert_eq!(show("(floor -7/2)"), "-4");
+    assert_eq!(show("(ceiling 7/2)"), "4");
+    assert_eq!(show("(ceiling -7/2)"), "-3");
+    assert_eq!(show("(truncate -7/2)"), "-3");
+    assert_eq!(show("(round 5/2)"), "2");
+    assert_eq!(show("(round 7/2)"), "4");
+    assert_eq!(show("(round -5/2)"), "-2");
+    assert_eq!(show("(round 5/3)"), "2");
+    assert_eq!(show("(ffloor 7/2)"), "3.0");
+    assert_eq!(show("(fround 5/2)"), "2.0");
+    assert_eq!(show("(floor 100000000000000000000001/2)"), "50000000000000000000000");
+}
+
+/// CL's two-argument `floor`/... on rationals: an integer quotient and a
+/// rational remainder, `(= a (+ (* q b) r))`.
+#[test]
+fn ratio_div_forms_return_quotient_and_remainder() {
+    let pair = |op: &str| format!("(let ((d ({} 7/2 1/3))) (format false \"~a ~a\" (car d) (cdr d)))", op);
+    assert_eq!(show(&pair("floor-div")), "10 1/6");
+    assert_eq!(show(&pair("ceiling-div")), "11 -1/6");
+    assert_eq!(show(&pair("truncate-div")), "10 1/6");
+    assert_eq!(show(&pair("round-div")), "10 1/6");
+    assert_eq!(show("(let ((d (floor-div -7/2 1/3))) (format false \"~a ~a\" (car d) (cdr d)))"), "-11 1/6");
+}
+
+/// The irrational functions and `float` take a rational to a float; an
+/// integer is a rational with denominator 1.
+#[test]
+fn ratio_converts_for_irrational_functions_and_float() {
+    assert_eq!(show("(sqrt 1/4)"), "0.5");
+    assert_eq!(show("(exp 0)"), "1.0");
+    assert_eq!(show("(log 1)"), "0.0");
+    assert_eq!(show("(sqrt 4)"), "2.0");
+    assert_eq!(show("(atan -1/2)"), "-0.46364760900080615");
+    assert_eq!(show("(float 1/4)"), "0.25");
+    assert_eq!(show("(float 3)"), "3.0");
+    assert_eq!(show("(rational 0.5)"), "1/2");
+    assert_eq!(show("(rational 7)"), "7");
+    assert_eq!(show("(numerator 5)"), "5");
+    assert_eq!(show("(denominator 5)"), "1");
+    assert_eq!(show("(expt 2/3 3)"), "8/27");
+    assert_eq!(show("(expt 2/3 -2)"), "9/4");
+}
+
+/// An integer-valued ratio prints as the integer; the others print in
+/// `*print-base*`, with CL's radix prefix under `*print-radix*`. The reader
+/// takes the same prefixes back.
+#[test]
+fn ratio_prints_and_reads_in_any_base() {
+    assert_eq!(show("(+ 1/3 2/3)"), "1");
+    assert_eq!(show("(signum -3/4)"), "-1");
+    assert_eq!(show("(dlet ((*print-base* 16) (*print-radix* true)) (format false \"~a\" 1/15))"), "#x1/f");
+    assert_eq!(show("(dlet ((*print-radix* true)) (format false \"~a\" 1/3))"), "#10r1/3");
+    assert_eq!(show("(dlet ((*print-base* 2)) (format false \"~a\" 5/3))"), "101/11");
+    assert_eq!(show("#x1/F"), "1/15");
+    assert_eq!(show("#b-101/11"), "-5/3");
+    assert_eq!(show("#3r1/2"), "1/2");
+    assert_eq!(show("#x10/8"), "2");
+}
+
+/// A ratio is a hash key: equal ratios hash equally.
+#[test]
+fn ratio_is_a_hash_table_key() {
+    assert_eq!(
+        show("(let ((h (the HashTable<ratio,int> (HashTable::new)))) (set h 1/2 1) (get h 2/4))"),
+        "(some 1)"
+    );
 }

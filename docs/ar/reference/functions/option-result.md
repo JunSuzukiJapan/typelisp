@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/option-result.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/option-result.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Option وResult وأنواع الأخطاء
 
 ## 1. `Option<T>` / `Result<T,E>`
@@ -38,7 +38,7 @@
 
 ```lisp
 (defun half ((n int)) Option<int>
-  (if (= 0 (mod n 2)) (option::some (/ n 2)) (option::none)))
+  (if (= 0 (mod n 2)) (option::some (truncate n 2)) (option::none)))
 
 (-> (option::some 8)
     (and-then half)                          ; (some 4)

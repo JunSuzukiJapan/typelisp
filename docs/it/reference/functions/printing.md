@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Stampa
 
 `print`/`println`/`format`, i printer a un argomento, il pretty printer, `print-object` e le variabili che
@@ -28,7 +28,7 @@ variabile di tipo vincolata da `(where (CharOutput S))`. Un `dest` che non è n�
 **La stringa di controllo deve essere un letterale** (la stessa restrizione di `format!` di Rust). Le
 direttive al suo interno decidono quanti argomenti vengono presi e di quali tipi, quindi una stringa
 costruita a runtime non può essere letta in fase di controllo. Poiché deve essere un letterale, **il
-numero e i tipi degli argomenti vengono controllati in fase di controllo**: `(println "~d" "x")` e
+numero e i tipi degli argomenti vengono controllati in fase di controllo**: `(println "~c" 1)` e
 `(println "~a ~a" 1)` sono errori in fase di controllo. Anche una direttiva scritta male, un `~(` non
 chiuso e un `~/name/` di cui non si può stabilire che cosa chiamare sono errori in fase di controllo. Le regole di
 controllo si trovano in [format.md](format.md#1-come-si-scrivono-le-direttive). Per stampare una stringa

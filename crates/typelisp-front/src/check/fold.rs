@@ -70,7 +70,7 @@ pub(super) fn literal_bool(heap: &Heap, form: Value) -> Option<bool> {
 /// else — `Unit`, `Str`, an `Option`, the C words — has either no literal
 /// node or an identity the fold would erase.
 fn has_literal_node(ty: &Type) -> bool {
-    ty.is_int_family() || ty.is_float() || matches!(ty, Type::Ratio | Type::Char | Type::Bool)
+    ty.is_int_family() || ty.is_float() || matches!(ty, Type::Ratio | Type::Rational | Type::Char | Type::Bool)
 }
 
 /// Whether `type_name` is a receiver whose builtin methods are pure functions
@@ -80,7 +80,7 @@ fn foldable_receiver(type_name: &Path) -> bool {
     crate::types::INT_TYPE_NAMES
         .iter()
         .chain(crate::types::FLOAT_TYPE_NAMES.iter())
-        .chain(["int", "ratio", "char", "bool"].iter())
+        .chain(["int", "ratio", "rational", "char", "bool"].iter())
         .any(|n| *type_name == Path::root(n))
 }
 
@@ -146,6 +146,10 @@ fn literal_node(heap: &mut Heap, value: Value, ret: &Type) -> Result<Value, Erro
         (Type::F32, Value::Boxed(id)) if heap.is_f32(id) => "float-any-width",
         (Type::F64, Value::Boxed(id)) if heap.is_f64(id) => "float-any-width",
         (Type::Ratio, Value::Boxed(id)) if heap.is_ratio(id) => "ratio",
+        // A `rational` is spelled as the `int` or `ratio` it is.
+        (Type::Rational, Value::Int(_)) => "int",
+        (Type::Rational, Value::Boxed(id)) if heap.is_bignum(id) => "bignum",
+        (Type::Rational, Value::Boxed(id)) if heap.is_ratio(id) => "ratio",
         (Type::Char, Value::Char(_)) => "char",
         (Type::Bool, Value::Bool(_)) => "bool",
         (t, v) => unreachable!("constant folding produced {:?} for a `{:?}`-typed builtin", v, t),

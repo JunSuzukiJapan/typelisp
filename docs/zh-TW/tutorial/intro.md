@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 入門
 
 本章從在 REPL 中對運算式求值開始，依序介紹函式、變數、條件分支、迴圈，以及串列與 `Vector`。`typl` 的建置方法請參閱
@@ -42,12 +42,13 @@ typl> (upcase "hello")
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-兩個整數之間的 `/` 會得到捨去小數部分的整數（不會像 Common Lisp 那樣得到分數）。餘數用 `(mod 7 2)` 求得。
+整數之間的 `/` 與 Common Lisp 一樣，不能整除時得到分數。需要捨去小數部分的整數時用
+`(truncate 7 2)`（`3`），餘數用 `(mod 7 2)` 求得。
 
 布林值是 `true` 與 `false`。
 

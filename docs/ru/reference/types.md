@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Типы
 
 Типы typelisp и стандартные трейты, которые реализует каждый тип. Как записывать типы, описано в
@@ -14,6 +14,7 @@
 | `u8` `u16` `u32` | Беззнаковые целые фиксированной ширины | То же |
 | `f32` `f64` | Числа с плавающей точкой IEEE 754. Десятичные литералы по умолчанию `f64` | [Числа, глава 4](functions/numbers.md#4-числа-с-плавающей-точкой-f64--f32) |
 | `ratio` | Несократимое рациональное число | [Числа, глава 5](functions/numbers.md#5-рациональные-числа-ratio) |
+| `rational` | `int` или `ratio` (rational из CL). Тип `/` на двух целых | [Числа, глава 5](functions/numbers.md#5-рациональные-числа-ratio) |
 | `bool` | `true` / `false` | [Числа, глава 7](functions/numbers.md#7-логические-значения) |
 | `char` | Скалярное значение Unicode | [Символы](functions/collections.md#2-символы-char) |
 | `string` | Неизменяемая строка | [Строки](functions/collections.md#1-строки-string) |
@@ -102,10 +103,10 @@
 
 | Трейт | Реализующие типы | Подробности |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-сравнение) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | То же |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` и все встроенные типы ошибок | [print-object](functions/printing.md#5-print-object-печатное-представление-по-типу) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-сравнение) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | То же |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` и все встроенные типы ошибок | [print-object](functions/printing.md#5-print-object-печатное-представление-по-типу) |
 
 Трейты `cons-cell<A,B>` и кортежей `#{..}`, а также `print-object` коллекций доступны, когда типы
 элементов реализуют этот трейт.
@@ -114,7 +115,7 @@
 
 | Трейт | Реализующие типы |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Подробности — в [Арифметических трейтах](functions/traits.md#3-арифметические-трейты-add--sub--mul--div--rem--bits--number).

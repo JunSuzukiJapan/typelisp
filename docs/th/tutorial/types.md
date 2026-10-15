@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # พื้นฐานของชนิด
 
 typelisp เป็นภาษาที่มีระบบชนิดแบบสถิต บทนี้อธิบายสิ่งที่ตัวตรวจสอบชนิดทำให้คุณ
@@ -54,7 +54,7 @@ typelisp ไม่มี `nil` "อาจไม่มีค่า" แสดง�
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

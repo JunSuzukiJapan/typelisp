@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 시작하기
 
 REPL에서 식을 평가하는 것부터 시작해 함수, 변수, 조건 분기, 반복, 리스트와 `Vector`를 차례로 다룬다. `typl`을
@@ -44,13 +44,13 @@ typl> (upcase "hello")
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-정수끼리의 `/`는 소수점 이하를 버린 정수가 된다(Common Lisp처럼 분수가 되지는 않는다). 나머지는 `(mod 7 2)`를
-쓴다.
+정수끼리의 `/`는 Common Lisp와 마찬가지로 나누어떨어지지 않으면 분수가 됩니다. 소수점 이하를 버린
+정수가 필요하면 `(truncate 7 2)`(`3`), 나머지는 `(mod 7 2)`로 구합니다.
 
 진리값은 `true`와 `false`이다.
 

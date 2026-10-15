@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # संख्याएँ
 
 पूर्णांक, फ़्लोटिंग-पॉइंट संख्याओं, परिमेय संख्याओं, कॉम्प्लेक्स संख्याओं और बूलियन पर ऑपरेशन, और अन्य संख्या-संबंधित फ़ंक्शन। कॉल के रूप कैसे पढ़ें इसके लिए [बिल्ट-इन फ़ंक्शन](README.md) देखें।
@@ -68,7 +68,9 @@ CL का `integer`, और इस भाषा का **पूर्णां�
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | कभी ओवरफ़्लो नहीं करते (वे प्रमोट करते हैं) |
-| `/` | `(/ a b)` | `(int,int)→int` | शून्य की ओर काटता है। शून्य से भाग पर panic करता है |
+| `/` | `(/ a b)` | `(int,int)→rational` | CL का `/`. भाग पूरा जाए तो पूर्णांक, वरना भिन्न (`(/ 6 3)` `2` है, `(/ 7 2)` `7/2` है)। शून्य से भाग पर panic |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | शून्य की ओर काटा गया भागफल (CL का पहला मान)। शून्य से भाग पर panic |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | नीचे, ऊपर या निकटतम पूर्णांक (ठीक आधे पर सम) की ओर पूर्णांकित भागफल। भाजक छोड़ा नहीं जा सकता |
 | `mod` | `(mod a b)` | `(int,int)→int` | फ़्लोर भाग का शेषफल (चिह्न भाजक का अनुसरण करता है) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -109,13 +111,17 @@ CL का `integer`, और इस भाषा का **पूर्णां�
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | मेंटिसा (`[1/2,1)` में, चिह्न के बिना) और घातांक। CL तीन मान लौटाता है, लेकिन कई मान नहीं हैं, इसलिए चिह्न `float-sign` पर छोड़ा गया है |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | सटीक 53-बिट पूर्णांक मेंटिसा के साथ वही विघटन। `mantissa * 2^exponent` ठीक मूल मान है |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **सबसे सरल परिमेय जो उस फ़्लोट के रूप में वापस पढ़ा जाता है** (`(rationalize 0.1)` `1/10` है)। सटीक द्विआधारी मान के लिए `float->ratio` का उपयोग करें |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **सबसे सरल परिमेय जो उस फ़्लोट के रूप में वापस पढ़ा जाता है** (`(rationalize 0.1)` `1/10` है)। सटीक द्विआधारी मान के लिए `float->ratio` का उपयोग करें |
 
-**CL से अंतर: `round` कैसे पूर्णांकित करता है।** `round` (और इसलिए `fround`/`round-div`) **शून्य से दूर** पूर्णांकित करता है (`(round 2.5)` = `3.0`)। CL **सम की ओर** पूर्णांकित करता है, `2` देते हुए।
+`round` (और इसलिए `fround`/`round-div`) CL की तरह ठीक आधे को **सम की ओर** पूर्णांकित करता है
+(`(round 2.5)` `2.0` है, `(round 3.5)` `4.0` है)।
 
 ## 5. परिमेय संख्याएँ `ratio`
 
-CL-संगत मनमानी सटीकता वाली परिमेय संख्याएँ। वे हमेशा धनात्मक हर के साथ न्यूनतम रूप में रखी जाती हैं, और हीप में आवंटित होती हैं। पूर्णांक टाइप या `f64` के साथ कोई अंतर्निहित रूपांतरण नहीं है (स्पष्ट रूपांतरण मेथड या `as`/`try-as` का उपयोग करें)। ratio लिटरल सिंटैक्स के लिए [सिंटैक्स संदर्भ](../syntax.md#1-लेक्सिकल-तत्व) देखें।
+CL-अनुरूप मनमानी परिशुद्धता वाली परिमेय संख्याएँ। ये हमेशा न्यूनतम रूप में धनात्मक हर के साथ रखी जाती हैं
+और heap पर आवंटित होती हैं। इन्हें `int` के साथ मिलाने वाला अंकगणित `rational` (5.1) देता है।
+स्थिर-चौड़ाई पूर्णांकों या `f64` के साथ अंतर्निहित रूपांतरण नहीं है (स्पष्ट रूपांतरण मेथड या
+`as`/`try-as` का उपयोग करें)। भिन्न लिटरल के सिंटैक्स के लिए [सिंटैक्स संदर्भ](../syntax.md#1-लेक्सिकल-तत्व) देखें।
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
@@ -124,7 +130,7 @@ CL-संगत मनमानी सटीकता वाली परिम�
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | ट्रंकेटिंग भाग का शेषफल (CL की तरह; चिह्न भाज्य का अनुसरण करता है) |
 | `abs` | `(abs x)` | `ratio→ratio` | निरपेक्ष मान |
 | `signum` | `(signum x)` | `ratio→ratio` | चिह्न (`1`/`-1`/`0` को `ratio` के रूप में लौटाता है) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | घात। घातांक पूर्णांक-मान वाला `ratio` होना चाहिए (अन्यथा panic)। ऋणात्मक घातांक व्युत्क्रम देता है |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | घात (वर्ग करने की विधि से)। ऋणात्मक घातांक व्युत्क्रम देता है (`(expt 2/3 -2)` `9/4` है) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | बड़ा / छोटा |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`। `ratio` में बिट ऑपरेशन नहीं हैं (CL में वे केवल पूर्णांकों के लिए हैं) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | तुलना |
@@ -133,8 +139,60 @@ CL-संगत मनमानी सटीकता वाली परिम�
 | `denominator` | `(denominator x)` | `ratio→int` | न्यूनतम रूप में हर (हमेशा धनात्मक) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | पूर्णांक भाग (शून्य की ओर कटा हुआ) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64` में बदलता है |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | पूर्णांक में पूर्णन (CL का पहला मान)। ठीक आधे पर `round` सम पक्ष चुनता है (`(round 5/2)` `2` है) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | वही पूर्णन, `f64` के रूप में लौटाया जाता है |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL का दो-आर्ग्युमेंट `floor` आदि। पूर्णांक भागफल `car` है और `ratio` शेषफल `cdr` (`(floor-div 7/2 1/3)` `(10 . 1/6)` है) |
+| `float` | `(float x)` | `ratio→f64` | `f64` में बदलता है (`ratio->float` जैसा) |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | वही मान `rational` के रूप में |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64` में बदलकर गणना करता है (`(sqrt 1/4)` `0.5` है) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | ऊपर जैसा |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | ऊपर जैसा |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` का कार्यान्वयन। `ratio` को `HashTable` की कुंजी बनाया जा सकता है |
 
-निश्चित चौड़ाई वाले पूर्णांकों और `f64` से भीतर आने के रास्ते `int->int`/`int->ratio` (अध्याय 1) और `float->int`/`float->ratio` (अध्याय 4) हैं। `int`/`ratio` `i32` और बाकी से स्वतंत्र अलग टाइप हैं, और मिश्रित अंकगणित को स्पष्ट रूपांतरण चाहिए।
+CL में पूर्णांक वह परिमेय संख्या है जिसका हर 1 है, इसलिए `int` में भी `numerator` (स्वयं),
+`denominator` (`1`), `float`, `rational`, `rationalize` और ऊपर के `sqrt` से `atanh` तक के 15 फ़ंक्शन
+हैं (`(sqrt 4)` `2.0` है)। `f64`/`f32` में भी `float` (स्वयं) और `rational` (`float->ratio` जैसा) हैं।
+
+जिस `ratio` का हर 1 है (जैसे `(+ 1/3 2/3)`) वह CL की तरह पूर्णांक के रूप में छपता है (`1`)।
+`*print-base*` अंश और हर दोनों पर लागू होता है, और `*print-radix*` सत्य होने पर `#x1/f` और
+`#10r1/3` जैसा आधार-उपसर्ग जुड़ता है। रीडर भी `#x1/F`, `#b101/11` और `#3r1/2` पढ़ता है।
+
+स्थिर-चौड़ाई पूर्णांकों और `f64` से आने के रास्ते `int->int`/`int->ratio` (अध्याय 1) और
+`float->int`/`float->ratio` (अध्याय 4) हैं। `int`/`ratio` `i32` आदि से स्वतंत्र अलग प्रकार हैं, और उनके
+साथ मिलाए गए अंकगणित के लिए स्पष्ट रूपांतरण चाहिए।
+
+### 5.1 `rational` (पूर्णांक या भिन्न)
+
+CL के `rational` के अनुरूप प्रकार। मान `int` या `ratio` होता है, CL की तरह सामान्यीकृत (पूर्णांक मान हमेशा
+`int` होता है)। दो पूर्णांकों पर `/` और `int` तथा `ratio` को मिलाने वाले अंकगणित का परिणाम यही प्रकार है।
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+`int` और `ratio` के मान वहाँ जैसे के तैसे दिए जा सकते हैं जहाँ `rational` अपेक्षित हो
+(`(defun f ((q rational)) ...)` को `5` और `1/2` दोनों दिए जा सकते हैं)। उलटी दिशा में मान
+`as`/`try-as` से निकालें।
+
+| नाम | फ़ॉर्म | टाइप | विवरण |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | अंकगणित (परिणाम सामान्यीकृत होता है)। शून्य से भाग पर `/` panic करता है |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | तुलना |
+| `numerator` `denominator` | `(op x)` | `rational→int` | न्यूनतम रूप का अंश और हर |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | शून्य की ओर काटा गया, `ratio` के रूप में, `f64` में |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | पूर्णांक हो तो `(some n)`, वरना `none` (CL का `integerp`) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | `ratio` जैसा (`expt` का घातांक `int` है) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | `ratio` जैसा |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | `ratio` जैसा |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` और त्रिकोणमितीय व अतिपरवलयिक फ़ंक्शन | `(op x)` | | `ratio` जैसा |
+
+`(as int q)` `rational->int` (काटना) है, `(try-as int q)` `try-rational->int` है, `(as ratio q)` और
+`(as f64 q)` संबंधित रूपांतरण हैं, और `(as rational x)` `int`/`ratio` से विस्तार करता है। `Eq`, `Ord`,
+`Hash`, `print-object` और अंकगणितीय trait भी लागू हैं।
 
 ## 6. कॉम्प्लेक्स संख्याएँ `complex`
 

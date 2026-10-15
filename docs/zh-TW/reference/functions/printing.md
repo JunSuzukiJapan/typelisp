@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 列印
 
 `print`/`println`/`format`、單引數列印函式、pretty printer、`print-object`，以及控制列印的變數。格式指令一覽見 [format.md](format.md)。
@@ -22,7 +22,7 @@
 都可以同樣書寫。既不是 `bool` 也不是串流的 `dest` 是型別錯誤。
 
 **控制字串必須是字面值**（與 Rust 的 `format!` 同樣的限制）。其中的指令決定取幾個引數、什麼型別，所以執行期組出的字串在檢查時無法讀取。
-限定為字面值後，**引數的個數與型別在檢查時就會被檢查**——`(println "~d" "x")` 與 `(println "~a ~a" 1)` 都是檢查時的錯誤。拼錯的指令、未
+限定為字面值後，**引數的個數與型別在檢查時就會被檢查**——`(println "~c" 1)` 與 `(println "~a ~a" 1)` 都是檢查時的錯誤。拼錯的指令、未
 閉合的 `~(`、無法決定呼叫對象的 `~/name/` 也同樣是檢查時的錯誤。檢查規則見 [format.md](format.md#1-寫法)。想輸出組出來的字串時，以
 `(format false ...)` 建立，再以 `(println "~a" s)` 列印。
 

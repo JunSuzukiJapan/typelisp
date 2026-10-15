@@ -254,6 +254,12 @@ pub(crate) fn decode_crossing_return(heap: &mut Heap, raw: i64, ret: &Repr) -> R
             v @ Value::Boxed(id) if heap.is_ratio(id) => v,
             other => return Err(crossing_mismatch("a ratio", other)),
         },
+        // A `rational` is the word of the `int` or `ratio` it is.
+        Repr::Rational => match typelisp_rt::decode(raw) {
+            v @ Value::Int(_) => v,
+            v @ Value::Boxed(id) if heap.is_bignum(id) || heap.is_ratio(id) => v,
+            other => return Err(crossing_mismatch("a rational (int or ratio)", other)),
+        },
         // An `int` is its tagged word: a fixnum, or a bignum box for the
         // values a fixnum cannot hold — and never a box for one it can
         // (`Heap::canonical_int`'s invariant, checked here so that a
@@ -3288,9 +3294,10 @@ fn int_rt(heap: &mut Heap, n: BigInt) -> Value {
 /// (`registry::integer_assoc`). CL's `integer`: `+ - *` never wrap — two
 /// fixnums compute in `i128` and the result is boxed only if it outgrew
 /// 63 bits (`Heap::canonical_int`); anything involving a bignum computes as
-/// one and demotes when it fits. `/` truncates toward zero and `mod` floors,
-/// both panicking on a zero divisor like every other numeric type here; the
-/// fixed-width types' `MIN / -1` overflow simply promotes.
+/// one and demotes when it fits. `truncate` (the integer quotient) truncates
+/// toward zero and `mod` floors, both panicking on a zero divisor like every
+/// other numeric type here; the fixed-width types' `MIN / -1` overflow simply
+/// promotes. `/` is CL's, a `rational` (`eval_rational_builtin`).
 fn eval_integer_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
     use num_integer::Integer;
     if name == "ash" || name == "logbitp" {
@@ -3310,7 +3317,7 @@ fn eval_integer_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<R
             "+" => wide(heap, i128::from(x) + i128::from(y)),
             "-" => wide(heap, i128::from(x) - i128::from(y)),
             "*" => wide(heap, i128::from(x) * i128::from(y)),
-            "/" => {
+            "truncate" => {
                 if y == 0 {
                     return Some(Err(EvalError::Panic("divide by zero".into())));
                 }
@@ -3347,7 +3354,7 @@ fn eval_integer_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<R
         "+" => int_rt(heap, &a + &b),
         "-" => int_rt(heap, &a - &b),
         "*" => int_rt(heap, &a * &b),
-        "/" => {
+        "truncate" => {
             if b.is_zero() {
                 return Some(Err(EvalError::Panic("divide by zero".into())));
             }
@@ -3525,6 +3532,61 @@ fn eval_ratio_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
         _ => unreachable!(),
     };
     Some(Ok(v))
+}
+
+/// `rational`'s arithmetic and comparisons (`registry::rational_assoc`), and
+/// `int`'s `/`: the operands read as rationals whichever of `int`/`ratio`
+/// they are, and an arithmetic result comes back normalized
+/// (`typelisp_rt::rational::rational_result`).
+fn eval_rational_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
+    use typelisp_rt::rational::{rational_of, rational_result};
+    let (a, b) = match (args.first().and_then(|v| rational_of(heap, *v)), args.get(1).and_then(|v| rational_of(heap, *v))) {
+        (Some(a), Some(b)) => (a, b),
+        _ => return Some(Err(EvalError::Internal(format!("{}: expected two rationals", name)))),
+    };
+    let v = match name {
+        "+" => rational_result(heap, a + b),
+        "-" => rational_result(heap, a - b),
+        "*" => rational_result(heap, a * b),
+        "/" => {
+            if b.is_zero() {
+                return Some(Err(EvalError::Panic("divide by zero".into())));
+            }
+            rational_result(heap, a / b)
+        }
+        "<" => Value::Bool(a < b),
+        "<=" => Value::Bool(a <= b),
+        ">" => Value::Bool(a > b),
+        ">=" => Value::Bool(a >= b),
+        "=" => Value::Bool(a == b),
+        "/=" => Value::Bool(a != b),
+        "max" => rational_result(heap, if a >= b { a } else { b }),
+        "min" => rational_result(heap, if a <= b { a } else { b }),
+        _ => unreachable!("eval_rational_builtin: {}", name),
+    };
+    Some(Ok(v))
+}
+
+/// `rational`'s one-argument conversions, and `ratio->rational`.
+fn rational_unary(heap: &mut Heap, name: &str, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+    use typelisp_rt::rational::{rational_of, rational_result};
+    let r = args
+        .first()
+        .and_then(|v| rational_of(heap, *v))
+        .ok_or_else(|| EvalError::Internal(format!("{}: expected a rational", name)))?;
+    Ok(match name {
+        "ratio->rational" => rational_result(heap, r),
+        "rational->int" => heap.int_from_bigint(r.to_integer()),
+        "try-rational->int" => {
+            let inner = if r.is_integer() { Some(heap.int_from_bigint(r.to_integer())) } else { None };
+            option_value(heap, ret_key, inner)
+        }
+        "rational->ratio" => heap.alloc_ratio(r),
+        "rational->float" => heap.alloc_f64(r.to_f64().ok_or_else(|| EvalError::Internal("rational->float: conversion failed".into()))?),
+        "numerator" => heap.int_from_bigint(r.numer().clone()),
+        "denominator" => heap.int_from_bigint(r.denom().clone()),
+        _ => unreachable!("rational_unary: {}", name),
+    })
 }
 
 /// `int->ratio` (`registry::int_assoc`): always-exact widening.
@@ -3930,7 +3992,7 @@ pub(crate) fn eval_builtin_method(
             "sqrt" => Some(float_unary(heap, args, f64::sqrt, single)),
             "floor" => Some(float_unary(heap, args, f64::floor, single)),
             "ceiling" => Some(float_unary(heap, args, f64::ceil, single)),
-            "round" => Some(float_unary(heap, args, f64::round, single)),
+            "round" => Some(float_unary(heap, args, f64::round_ties_even, single)),
             "truncate" => Some(float_unary(heap, args, f64::trunc, single)),
             "sin" => Some(float_unary(heap, args, f64::sin, single)),
             "cos" => Some(float_unary(heap, args, f64::cos, single)),
@@ -3953,8 +4015,10 @@ pub(crate) fn eval_builtin_method(
     }
     if *type_name == Path::root("int") {
         return match method {
-            "+" | "-" | "*" | "/" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
+            "+" | "-" | "*" | "truncate" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
             | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_integer_builtin(heap, method, args),
+            // CL's `/`: the `rational` quotient.
+            "/" => eval_rational_builtin(heap, method, args),
             "lognot" | "logcount" | "integer-length" => Some(integer_unary(heap, args, method)),
             "eq" | "eql" | "equal" | "equalp" => eval_integer_builtin(heap, "=", args),
             "int->float" | "int->ratio" | "int->char" | "try-int->char" | "int->int" => {
@@ -3981,6 +4045,18 @@ pub(crate) fn eval_builtin_method(
             "ratio->float" => Some(ratio_to_float(heap, args)),
             "numerator" => Some(ratio_numerator(heap, args)),
             "denominator" => Some(ratio_denominator(heap, args)),
+            "ratio->rational" => Some(rational_unary(heap, method, args, ret_key)),
+            _ => None,
+        };
+    }
+    if *type_name == Path::root("rational") {
+        return match method {
+            "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
+                eval_rational_builtin(heap, method, args)
+            }
+            "eq" | "eql" | "equal" | "equalp" => eval_rational_builtin(heap, "=", args),
+            "rational->int" | "try-rational->int" | "rational->ratio" | "rational->float" | "numerator"
+            | "denominator" => Some(rational_unary(heap, method, args, ret_key)),
             _ => None,
         };
     }

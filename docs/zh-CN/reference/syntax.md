@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # typelisp 语法参考
 
 typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数和方法的一览见[内置函数](functions/README.md)，类型一览见
@@ -24,7 +24,7 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
   `(as u8 300)`）。`(the u32 4294967295)` 和 `(the u32 #xFFFFFFFF)` 正是借助这条规则才能写出。`int` 的值是放进 63 位立即值
   还是成为多精度，由值的大小决定，没有专门的语法（与 CL 相同）。
 - **浮点数**：包含小数点或指数记号（`e`/`E`）的数（`1.5`、`3.0e10`）。默认为 `f64`（期望类型是 `f32` 时为该类型）。
-- **比例 (ratio)**：`分子/分母`（只有十进制，例如 `1/3`）。读取时按 CL 规范约分（`2/4` 为 `1/2`）。值为整数的（`4/2` 等）读作
+- **比例 (ratio)**：`分子/分母`（例如 `1/3`；也可以带基数前缀，如 `#x1/F`）。读取时按 CL 规范约分（`2/4` 为 `1/2`）。值为整数的（`4/2` 等）读作
   `int` 而不是 `ratio`。分母为 `0`（`1/0`）是读取错误。
 - **字符**：`#\` 后跟一个字符或命名字符。例如 `#\a` `#\Space` `#\Newline` `#\Tab` `#\Return` `#\Page` `#\Nul`（也可写
   `#\Null`）`#\Backspace`。名称不区分大小写。
@@ -58,8 +58,9 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **基本类型**：`int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `bool` `char` `string` `symbol`。
   `int` 是整数（CL 的 integer——在 63 位立即值与多精度之间自动转换，[数值](functions/numbers.md#3-任意精度整数-int)），6 种
   固定宽度类型以宽度和符号命名（没有 64 位整数类型——见[数值](functions/numbers.md#1-固定宽度整数)）。
-- **有理数类型**：`ratio`（既约有理数）。遵循 CL 在堆上分配，与 `int`/`f64` 等之间没有隐式转换（用 `as`/`try-as` 或转换方法
-  显式转换。见[数值](functions/numbers.md#5-有理数-ratio)）。
+- **有理数类型**：`ratio`（既约有理数）和 `rational`（`int` 或 `ratio`，CL 的 rational）。整数之间的
+  `/` 以及混合 `int` 与 `ratio` 的运算得到 `rational`，`int`/`ratio` 的值可以原样传给 `rational` 的
+  位置。与固定宽度整数或 `f64` 之间没有隐式转换（用 `as`/`try-as` 或转换方法显式进行。参见[数值](functions/numbers.md#5-有理数-ratio)）。
 - **C 边界上的原始字**：`ptr`（不透明指针）、`c-long` / `c-ulong`。只用于 FFI，成为值需要 `(unsafe ...)`，可以出现的位置也
   有限（[3.3 defffi](#ptr--c-long--c-ulong--原始机器字)）。想要 64 位整数时不要用它们——它们没有算术。
 - **不透明的可变类型**：`random-state`（随机数生成器的状态）。不能放进 `Vector<T>`/`HashTable<K,V>`/`Sexpr`（可以放进
@@ -1342,6 +1343,9 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 从固定宽度的精确扩展，`(as i32 n)` 是从 `int` 的截断。整数→`char` 可能因超出范围而失败，所以 `as` 会 panic，`try-as` 为 `None`。
 其他（扩展转换以及 `float->int`/`ratio->int` 的截断）总是成功。`float->int`/`ratio->int`/`char->int` 落到 `int`，要求更窄的宽度
 时接着调用 `int->W`。是展开为相应转换方法（[数值](functions/numbers.md)的 `int->char`/`int->int`/`int->W` 等）的语法糖。
+
+从 `rational` 可以转换为 `int`（`as` 截断，`try-as` 仅在为整数时成功）、`ratio` 和 `f64`；从
+`int`/`ratio` 可以转换为 `rational`。
 
 `documentation` 与 `quote`/`compile` 一样是不求值 `name`、作为未求值的裸符号/`::` 路径读取的特殊形式。与 CL 的
 `(documentation 'name 'function)` 不同，不接受类型参数——按变量→函数→类型→trait→宏的顺序（与把裸标识符作为表达式求值时的优先级

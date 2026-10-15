@@ -39,7 +39,7 @@ const ARITH: &str = r#"
     (defun iadd ((a int) (b int)) int (+ a b))
     (defun isub ((a int) (b int)) int (- a b))
     (defun imul ((a int) (b int)) int (* a b))
-    (defun idiv ((a int) (b int)) int (/ a b))
+    (defun idiv ((a int) (b int)) int (truncate a b))
     (defun irem ((a int) (b int)) int (mod a b))
     (defun big () int (the int 4611686018427387903))
 "#;

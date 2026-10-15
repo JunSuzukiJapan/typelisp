@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -35,7 +35,7 @@ and for reading error messages, [errors.md](errors.md).
   special syntax (as in CL).
 - **Floating-point numbers**: those containing a decimal point or an exponent (`e`/`E`) (`1.5`,
   `3.0e10`). `f64` by default (`f32` if that is the expected type).
-- **Ratios**: `numerator/denominator` (decimal only, for example `1/3`). Reduced when read, as CL
+- **Ratios**: `numerator/denominator` (for example `1/3`; a radix prefix works too, as in `#x1/F`). Reduced when read, as CL
   specifies (`2/4` is `1/2`). Those with an integer value (`4/2` and so on) are read as `int`, not
   `ratio`. A zero denominator (`1/0`) is a read error.
 - **Characters**: `#\` followed by one character or a character name. For example `#\a` `#\Space`
@@ -98,9 +98,11 @@ In source, types are written as ordinary symbols or lists.
   bignums; [Numbers](functions/numbers.md#3-arbitrary-precision-integers-int)), and the six fixed-width
   types are named for their width and signedness (there is no 64-bit integer type; see
   [Numbers](functions/numbers.md#1-fixed-width-integers)).
-- **The rational type**: `ratio` (rationals in lowest terms). Heap-allocated as in CL, with no implicit
-  conversion with `int`/`f64` and the like (convert explicitly with `as`/`try-as` or a conversion
-  method; see [Numbers](functions/numbers.md#5-rationals-ratio)).
+- **The rational types**: `ratio` (rationals in lowest terms) and `rational` (an `int` or a `ratio`, CL's
+  rational). `/` on two integers and arithmetic mixing an `int` with a `ratio` give a `rational`, and
+  `int`/`ratio` values can be passed as they are where a `rational` is expected. There is no implicit
+  conversion with the fixed-width integers or `f64` (make it explicit with `as`/`try-as` or a
+  conversion method; see [Numbers](functions/numbers.md#5-rationals-ratio)).
 - **Raw words at the C boundary**: `ptr` (an opaque pointer), `c-long` / `c-ulong`. For the FFI only:
   making one a value requires `(unsafe ...)`, and the places they can appear are limited
   ([3.3 defffi](#ptr--c-long--c-ulong--raw-machine-words)). Do not use these where you want a 64-bit
@@ -1660,6 +1662,9 @@ and `(as i32 n)` the truncation from `int`. Integer → `char` can fail out of r
 succeeds. `float->int`/`ratio->int`/`char->int` land on `int`, and if a narrower width is asked for,
 `int->W` is called after them. This is sugar that expands to the corresponding conversion methods
 (`int->char`/`int->int`/`int->W` and so on in [Numbers](functions/numbers.md)).
+
+From `rational`, `as`/`try-as` convert to `int` (`as` truncates, `try-as` succeeds only for an
+integer), `ratio` and `f64`; from `int`/`ratio`, to `rational`.
 
 `documentation`, like `quote`/`compile`, is a special form that reads `name` without evaluating it, as an
 unevaluated bare symbol / `::` path. Unlike CL's `(documentation 'name 'function)`, it takes no type

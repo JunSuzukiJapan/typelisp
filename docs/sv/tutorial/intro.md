@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Komma igång
 
 Kapitlet utgår från att utvärdera uttryck i REPL och går sedan igenom funktioner, variabler, villkor,
@@ -46,13 +46,13 @@ Tal finns i dessa slag:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` på två heltal ger ett heltal där bråkdelen har tagits bort (det ger inget bråk, som i Common
-Lisp). Använd `(mod 7 2)` för resten.
+`/` på två heltal ger ett bråk när divisionen inte går jämnt upp, som i Common Lisp. För heltalet
+utan decimaldelen använder du `(truncate 7 2)` (`3`), och `(mod 7 2)` för resten.
 
 De booleska värdena är `true` och `false`.
 

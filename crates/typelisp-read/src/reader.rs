@@ -1341,11 +1341,25 @@ fn int_or_bignum(heap: &mut Heap, n: BigInt) -> Value {
     heap.int_from_bigint(n)
 }
 
-/// The integer after a radix macro (`#x-1f`, `#b101`, `#36rZZ`). The sign
-/// comes *after* the marker, which is where CL's printer puts it.
+/// The rational `numer/denom` (`numer` already signed), normalized on read
+/// exactly as CL specifies: `4/2` *is* the integer `2` (and `2/4` is `1/2`) —
+/// an integer-valued ratio reads as an `int`, never a denominator-1 `ratio`.
+fn ratio_value(heap: &mut Heap, numer: BigInt, denom: BigInt, tok: &str) -> Result<Value, Error> {
+    if denom == BigInt::from(0) {
+        return Err(Error::ReadError(format!("ratio literal with zero denominator: {}", tok)));
+    }
+    let r = BigRational::new(numer, denom);
+    if r.is_integer() {
+        return Ok(int_or_bignum(heap, r.to_integer()));
+    }
+    Ok(heap.alloc_ratio(r))
+}
+
+/// The rational after a radix macro (`#x-1f`, `#b101`, `#36rZZ`, `#x1/F`).
+/// The sign comes *after* the marker, which is where CL's printer puts it.
 ///
-/// Past `i32`'s range it reads as a `bignum`, the same fixnum-or-bignum split
-/// [`parse_number`] makes for decimal tokens.
+/// Past `i32`'s range an integer reads as a `bignum`, the same
+/// fixnum-or-bignum split [`parse_number`] makes for decimal tokens.
 fn read_radix(cur: &mut Cursor, heap: &mut Heap, radix: u32) -> Result<Value, Error> {
     let mut tok = String::new();
     while let Some(c) = cur.peek() {
@@ -1359,13 +1373,22 @@ fn read_radix(cur: &mut Cursor, heap: &mut Heap, radix: u32) -> Result<Value, Er
         Some(rest) => (true, rest),
         None => (false, tok.strip_prefix('+').unwrap_or(&tok)),
     };
-    if body.is_empty() || !body.chars().all(|c| c.is_digit(radix)) {
+    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_digit(radix));
+    let parse = |s: &str| BigInt::parse_bytes(s.as_bytes(), radix).expect("digits of this radix parse as BigInt");
+    if let Some((numer, denom)) = body.split_once('/') {
+        if !digits(numer) || !digits(denom) {
+            return Err(Error::ReadError(format!("`{}` is not a base-{} rational", tok, radix)));
+        }
+        let n = parse(numer);
+        return ratio_value(heap, if neg { -n } else { n }, parse(denom), &tok);
+    }
+    if !digits(body) {
         return Err(Error::ReadError(format!(
             "`{}` is not a base-{} integer",
             tok, radix
         )));
     }
-    let n = BigInt::parse_bytes(body.as_bytes(), radix).expect("digits of this radix parse as BigInt");
+    let n = parse(body);
     Ok(int_or_bignum(heap, if neg { -n } else { n }))
 }
 
@@ -1669,10 +1692,8 @@ fn parse_number(heap: &mut Heap, tok: &str) -> Result<Option<Value>, Error> {
         return Ok(Some(int_or_bignum(heap, if neg { -n } else { n })));
     }
 
-    // ratio: `numer/denom`, both all-digit (CL ratio syntax, decimal only).
-    // Normalized on read exactly as CL specifies: `4/2` *is* the integer `2`
-    // (and `2/4` is `1/2`) — an integer-valued ratio literal reads as an
-    // `Int`/`bignum`, never a denominator-1 `ratio` value.
+    // ratio: `numer/denom`, both all-digit (CL ratio syntax; the other
+    // bases are `read_radix`'s), normalized by `ratio_value`.
     if let Some((numer, denom)) = body.split_once('/') {
         if !numer.is_empty()
             && !denom.is_empty()
@@ -1681,15 +1702,7 @@ fn parse_number(heap: &mut Heap, tok: &str) -> Result<Option<Value>, Error> {
         {
             let n = BigInt::parse_bytes(numer.as_bytes(), 10).expect("all-digit numerator parses as BigInt");
             let d = BigInt::parse_bytes(denom.as_bytes(), 10).expect("all-digit denominator parses as BigInt");
-            if d == BigInt::from(0) {
-                return Err(Error::ReadError(format!("ratio literal with zero denominator: {}", tok)));
-            }
-            let r = BigRational::new(if neg { -n } else { n }, d);
-            if r.is_integer() {
-                let i = r.to_integer();
-                return Ok(Some(int_or_bignum(heap, i)));
-            }
-            return Ok(Some(heap.alloc_ratio(r)));
+            return ratio_value(heap, if neg { -n } else { n }, d, tok).map(Some);
         }
         return Ok(None);
     }

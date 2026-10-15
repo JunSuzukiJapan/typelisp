@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Standard-Traits
 
 Die Traits für Iteration, Vergleich und Arithmetik. Die anderen Standard-Traits stehen in ihren eigenen
@@ -78,7 +78,7 @@ Schicht.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@ Schicht.
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; die Distanz ist immer int (wie bei ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; keine Methoden; eine Kombination von sechs
+(deftrait Number (Add Sub Mul Rem Ord))                   ; keine Methoden; eine Kombination aus fünf
 ```
 
 **Innerhalb einer Schranke kann man Operatoren schreiben.** Ist der Empfänger eine durch `where` gebundene
@@ -104,3 +104,11 @@ neu zu definieren (`cannot redefine built-in method`). Es gibt kein `Neg`: `(- x
 
 Implementiert für: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` auf allen numerischen Typen (außer `complex`) und
 `Bits` auf allen Ganzzahltypen und `int`.
+
+
+**`Div` benennt seinen Ergebnistyp mit dem assoziierten Typ `Output`.** Wie in CL ist `/` auf zwei
+ganzen Zahlen ein `rational`, daher ist das `Output` von `int` `rational` und das jedes anderen
+Zahlentyps der Typ selbst. Weil `Output` je nach Typ verschieden ist, enthält `Number` kein `Div` (eine
+Supertrait-Liste muss jeden assoziierten Typ festlegen). Eine generische Funktion, die dividiert, nimmt
+den Ergebnistyp mit `(where (Div T (Output R)))` entgegen oder verlangt mit `(where (Div T (Output T)))`
+eine in `T` geschlossene Division (dann kann kein `int` übergeben werden).

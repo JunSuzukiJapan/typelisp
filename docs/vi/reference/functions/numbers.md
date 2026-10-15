@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Số
 
 Các phép toán trên số nguyên, số dấu phẩy động, số hữu tỉ, số phức và boolean, cùng các hàm khác liên quan
@@ -104,7 +104,9 @@ not fit a fixnum").
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | Không bao giờ tràn (chúng thăng cấp) |
-| `/` | `(/ a b)` | `(int,int)→int` | Cắt về phía không. Panic khi chia cho không |
+| `/` | `(/ a b)` | `(int,int)→rational` | `/` của CL. Là số nguyên khi chia hết, ngược lại là phân số (`(/ 6 3)` là `2`, `(/ 7 2)` là `7/2`). Panic khi chia cho không |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | Thương cắt về phía không (giá trị thứ nhất trong CL). Panic khi chia cho không |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | Thương làm tròn xuống, lên hoặc về số nguyên gần nhất (về số chẵn khi đúng một nửa). Không được bỏ số chia |
 | `mod` | `(mod a b)` | `(int,int)→int` | Phần dư của phép chia làm tròn xuống (dấu theo số chia) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -145,17 +147,17 @@ not fit a fixnum").
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | Phần định trị (trong `[1/2,1)`, không có dấu) và số mũ. CL trả về ba giá trị, nhưng không có đa giá trị, nên dấu được giao cho `float-sign` |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | Cùng phép phân rã với phần định trị là số nguyên 53 bit chính xác. `mantissa * 2^exponent` chính xác bằng giá trị gốc |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **Số hữu tỉ đơn giản nhất mà đọc ngược lại ra số thực đó** (`(rationalize 0.1)` là `1/10`). Với giá trị nhị phân chính xác, hãy dùng `float->ratio` |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **Số hữu tỉ đơn giản nhất mà đọc ngược lại ra số thực đó** (`(rationalize 0.1)` là `1/10`). Với giá trị nhị phân chính xác, hãy dùng `float->ratio` |
 
-**Khác biệt so với CL: cách `round` làm tròn.** `round` (và do đó `fround`/`round-div`) làm tròn **ra xa không**
-(`(round 2.5)` = `3.0`). CL làm tròn **về số chẵn**, cho `2`.
+`round` (và do đó `fround`/`round-div`) làm tròn đúng một nửa **về số chẵn**, giống CL
+(`(round 2.5)` là `2.0`, `(round 3.5)` là `4.0`).
 
 ## 5. Số hữu tỉ `ratio`
 
-Số hữu tỉ độ chính xác tùy ý tương thích CL. Chúng luôn được giữ ở dạng tối giản với mẫu số dương, và được
-cấp phát trên heap. Không có chuyển đổi ngầm với các kiểu số nguyên hay `f64` (hãy dùng một phương thức
-chuyển đổi tường minh hoặc `as`/`try-as`). Về cú pháp literal ratio, xem
-[Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-vựng).
+Số hữu tỉ độ chính xác tùy ý tương thích CL. Luôn được giữ ở dạng tối giản với mẫu dương và cấp phát
+trên heap. Phép toán trộn chúng với `int` cho ra `rational` (5.1). Không có chuyển đổi ngầm với số
+nguyên độ rộng cố định hay `f64` (dùng phương thức chuyển đổi tường minh hoặc `as`/`try-as`). Cú pháp
+literal phân số xem [Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-vựng).
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
@@ -164,7 +166,7 @@ chuyển đổi tường minh hoặc `as`/`try-as`). Về cú pháp literal rati
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Phần dư của phép chia cắt cụt (như trong CL; dấu theo số bị chia) |
 | `abs` | `(abs x)` | `ratio→ratio` | Giá trị tuyệt đối |
 | `signum` | `(signum x)` | `ratio→ratio` | Dấu (trả về `1`/`-1`/`0` dưới dạng `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Lũy thừa. Số mũ phải là một `ratio` có giá trị nguyên (nếu không thì panic). Số mũ âm cho nghịch đảo |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Lũy thừa (bằng bình phương liên tiếp). Số mũ âm cho nghịch đảo (`(expt 2/3 -2)` là `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | Lớn hơn / nhỏ hơn |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` không có phép toán bit (trong CL chúng chỉ dành cho số nguyên) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | So sánh |
@@ -173,10 +175,59 @@ chuyển đổi tường minh hoặc `as`/`try-as`). Về cú pháp literal rati
 | `denominator` | `(denominator x)` | `ratio→int` | Mẫu số ở dạng tối giản (luôn dương) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Phần nguyên (cắt về phía không) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Chuyển thành `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Làm tròn thành số nguyên (giá trị thứ nhất trong CL). Khi đúng một nửa, `round` chọn phía chẵn (`(round 5/2)` là `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Cùng cách làm tròn, trả về dạng `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | `floor` hai đối số của CL và các hàm cùng loại. Thương nguyên là `car`, phần dư `ratio` là `cdr` (`(floor-div 7/2 1/3)` là `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Chuyển sang `f64` (giống `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | Cùng giá trị đó dưới dạng `rational` |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Chuyển sang `f64` rồi tính (`(sqrt 1/4)` là `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Như trên |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Như trên |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Cài đặt `Hash`. `ratio` có thể làm khóa của `HashTable` |
 
-Các đường vào từ số nguyên độ rộng cố định và `f64` là `int->int`/`int->ratio` (chương 1) và
+Trong CL, số nguyên là số hữu tỉ có mẫu bằng 1, nên `int` cũng có `numerator` (chính nó),
+`denominator` (`1`), `float`, `rational`, `rationalize` và 15 hàm từ `sqrt` đến `atanh` ở trên
+(`(sqrt 4)` là `2.0`). `f64`/`f32` cũng có `float` (chính nó) và `rational` (giống `float->ratio`).
+
+Một `ratio` có mẫu bằng 1 (như `(+ 1/3 2/3)`) được in thành số nguyên (`1`), giống CL.
+`*print-base*` áp dụng cho cả tử và mẫu, và khi `*print-radix*` đúng thì thêm tiền tố cơ số, như
+`#x1/f` và `#10r1/3`. Bộ đọc cũng đọc được `#x1/F`, `#b101/11` và `#3r1/2`.
+
+Đường vào từ số nguyên độ rộng cố định và `f64` là `int->int`/`int->ratio` (chương 1) và
 `float->int`/`float->ratio` (chương 4). `int`/`ratio` là các kiểu riêng, độc lập với `i32` và các kiểu
-khác, và số học hỗn hợp cần các chuyển đổi tường minh.
+khác, và phép toán trộn chúng với các kiểu đó cần chuyển đổi tường minh.
+
+### 5.1 `rational` (số nguyên hoặc phân số)
+
+Kiểu tương ứng với `rational` của CL. Giá trị là `int` hoặc `ratio`, được chuẩn hóa như CL (giá trị là
+số nguyên luôn là `int`). `/` trên hai số nguyên và phép toán trộn `int` với `ratio` cho ra kiểu này.
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+Giá trị `int` và `ratio` có thể truyền nguyên vẹn vào chỗ cần `rational` (có thể truyền cả `5` lẫn `1/2`
+cho `(defun f ((q rational)) ...)`). Chiều ngược lại, lấy giá trị ra bằng `as`/`try-as`.
+
+| Tên | Dạng | Kiểu | Mô tả |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | Số học (kết quả được chuẩn hóa). `/` panic khi chia cho không |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | So sánh |
+| `numerator` `denominator` | `(op x)` | `rational→int` | Tử số và mẫu số tối giản |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Cắt về phía không, dưới dạng `ratio`, sang `f64` |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` với số nguyên, ngược lại `none` (`integerp` của CL) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Như với `ratio` (số mũ của `expt` là `int`) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Như với `ratio` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Như với `ratio` |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` và các hàm lượng giác, hyperbolic | `(op x)` | | Như với `ratio` |
+
+`(as int q)` là `rational->int` (cắt bớt), `(try-as int q)` là `try-rational->int`, `(as ratio q)` và
+`(as f64 q)` là các chuyển đổi tương ứng, còn `(as rational x)` mở rộng từ `int`/`ratio`. `Eq`, `Ord`,
+`Hash`, `print-object` và các trait số học cũng được cài đặt.
 
 ## 6. Số phức `complex`
 

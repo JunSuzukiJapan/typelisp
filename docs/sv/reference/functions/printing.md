@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Utskrift
 
 `print`/`println`/`format`, utskriftsfunktionerna med ett argument, den snygga skrivaren (pretty printer),
@@ -28,7 +28,7 @@ samma sätt med en konkret strömtyp, en `:dyn CharOutput` eller en typvariabel 
 **Kontrollsträngen måste vara en literal** (samma begränsning som Rusts `format!`). Direktiven i den avgör
 hur många argument som tas och av vilka typer, så en sträng som byggs vid körning kan inte läsas vid
 kontrolltillfället. Eftersom den måste vara en literal **kontrolleras antalet och typerna på argumenten
-vid kontrolltillfället**: `(println "~d" "x")` och `(println "~a ~a" 1)` är fel vid kontrolltillfället.
+vid kontrolltillfället**: `(println "~c" 1)` och `(println "~a ~a" 1)` är fel vid kontrolltillfället.
 Ett felstavat direktiv, ett oavslutat `~(` och ett `~/name/` vars anropsmål inte kan avgöras är också fel
 vid kontrolltillfället. Kontrollreglerna finns i
 [format.md](format.md#1-hur-direktiv-skrivs). För att skriva ut en sträng du bygger, gör den med

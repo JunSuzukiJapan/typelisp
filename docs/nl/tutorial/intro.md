@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Aan de slag
 
 Beginnend met het evalueren van expressies in de REPL behandelt dit hoofdstuk achtereenvolgens
@@ -46,13 +46,14 @@ Getallen zijn er in deze soorten:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` op twee gehele getallen geeft een geheel getal waarvan het gebroken deel is weggelaten (het
-levert geen breuk op zoals in Common Lisp). Gebruik `(mod 7 2)` voor de rest.
+`/` op twee gehele getallen geeft een breuk als de deling niet opgaat, zoals in Common Lisp. Voor het
+gehele getal zonder het deel achter de komma gebruikt u `(truncate 7 2)` (`3`), en `(mod 7 2)` voor de
+rest.
 
 De booleaanse waarden zijn `true` en `false`.
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Typen
 
 Die Typen, die typelisp hat, und die Standard-Traits, die jeder Typ implementiert. Wie man Typen schreibt,
@@ -14,6 +14,7 @@ stehen unter [Eingebaute Funktionen](functions/README.md).
 | `u8` `u16` `u32` | Vorzeichenlose Ganzzahlen fester Breite | Wie oben |
 | `f32` `f64` | Gleitkommazahlen nach IEEE 754. Dezimalliterale sind standardmäßig `f64` | [Zahlen, Kapitel 4](functions/numbers.md#4-gleitkommazahlen-f64--f32) |
 | `ratio` | Eine rationale Zahl in gekürzter Form | [Zahlen, Kapitel 5](functions/numbers.md#5-rationale-zahlen-ratio) |
+| `rational` | Ein `int` oder ein `ratio` (CLs rational). Der Typ von `/` auf zwei ganzen Zahlen | [Zahlen, Kapitel 5](functions/numbers.md#5-rationale-zahlen-ratio) |
 | `bool` | `true` / `false` | [Zahlen, Kapitel 7](functions/numbers.md#7-wahrheitswerte) |
 | `char` | Ein Unicode-Skalarwert | [Zeichen](functions/collections.md#2-zeichen-char) |
 | `string` | Eine unveränderliche Zeichenkette | [Zeichenketten](functions/collections.md#1-zeichenketten-string) |
@@ -102,10 +103,10 @@ Welche Typen welche Traits implementieren. Die Methoden jedes Traits stehen unte
 
 | Trait | Implementierende Typen | Details |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-vergleich) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Wie oben |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` und alle eingebauten Fehlertypen | [print-object](functions/printing.md#5-print-object-typabhängige-druckdarstellung) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-vergleich) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Wie oben |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` und alle eingebauten Fehlertypen | [print-object](functions/printing.md#5-print-object-typabhängige-druckdarstellung) |
 
 Die Traits von `cons-cell<A,B>` und von Tupeln `#{..}` sowie das `print-object` der Sammlungen sind
 verwendbar, wenn die Elementtypen den jeweiligen Trait implementieren.
@@ -114,7 +115,7 @@ verwendbar, wenn die Elementtypen den jeweiligen Trait implementieren.
 
 | Trait | Implementierende Typen |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Details stehen unter [Arithmetische Traits](functions/traits.md#3-arithmetische-traits-add--sub--mul--div--rem--bits--number).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Tipe
 
 Tipe yang dimiliki typelisp, dan trait standar yang diimplementasikan setiap tipe. Cara menulis tipe
@@ -14,6 +14,7 @@ ada di [Referensi Sintaks bab 2](syntax.md#2-menulis-tipe); fungsi dan metode ti
 | `u8` `u16` `u32` | Bilangan bulat tak bertanda berlebar tetap | Sama seperti di atas |
 | `f32` `f64` | Bilangan floating-point IEEE-754. Literal desimal bawaannya `f64` | [Bilangan bab 4](functions/numbers.md#4-bilangan-floating-point-f64--f32) |
 | `ratio` | Bilangan rasional dalam bentuk paling sederhana | [Bilangan bab 5](functions/numbers.md#5-bilangan-rasional-ratio) |
+| `rational` | Sebuah `int` atau `ratio` (rational milik CL). Tipe dari `/` pada dua bilangan bulat | [Bilangan bab 5](functions/numbers.md#5-bilangan-rasional-ratio) |
 | `bool` | `true` / `false` | [Bilangan bab 7](functions/numbers.md#7-boolean) |
 | `char` | Nilai skalar Unicode | [Karakter](functions/collections.md#2-karakter-char) |
 | `string` | String yang tidak dapat diubah | [String](functions/collections.md#1-string-string) |
@@ -104,10 +105,10 @@ Tipe mana yang mengimplementasikan trait mana. Metode tiap trait ada di
 
 | Trait | Tipe yang mengimplementasikan | Rincian |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-perbandingan) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Sama seperti di atas |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` dan semua tipe kesalahan bawaan | [print-object](functions/printing.md#5-print-object-representasi-cetak-per-tipe) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-perbandingan) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Sama seperti di atas |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` dan semua tipe kesalahan bawaan | [print-object](functions/printing.md#5-print-object-representasi-cetak-per-tipe) |
 
 Trait milik `cons-cell<A,B>` dan tuple `#{..}`, serta `print-object` milik koleksi, dapat dipakai
 bila tipe elemennya mengimplementasikan trait tersebut.
@@ -116,7 +117,7 @@ bila tipe elemennya mengimplementasikan trait tersebut.
 
 | Trait | Tipe yang mengimplementasikan |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Rinciannya ada di [Trait aritmetika](functions/traits.md#3-trait-aritmetika-add--sub--mul--div--rem--bits--number).

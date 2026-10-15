@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Traits standard
 
 Les traits d'itération, de comparaison et d'arithmétique. Les autres traits standard se trouvent dans leurs propres
@@ -76,7 +76,7 @@ concrets utilise les opérateurs intégrés** ([Nombres](numbers.md)) et ne pass
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -84,7 +84,7 @@ concrets utilise les opérateurs intégrés** ([Nombres](numbers.md)) et ne pass
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; la distance est toujours int (comme pour ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; pas de méthodes ; une combinaison de six
+(deftrait Number (Add Sub Mul Rem Ord))                   ; aucune méthode ; une combinaison de cinq
 ```
 
 **À l'intérieur d'une borne, on peut écrire des opérateurs.** Quand le receveur est une variable de type liée par
@@ -102,3 +102,11 @@ redéfinir (`cannot redefine built-in method`). Il n'y a pas de `Neg` : `(- x)` 
 
 Implémentés pour : `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` sur tous les types numériques (sauf `complex`), et
 `Bits` sur tous les types entiers et `int`.
+
+
+**`Div` nomme son type de résultat par le type associé `Output`.** Comme en CL, `/` sur deux entiers
+est un `rational` : l'`Output` de `int` est donc `rational`, et celui de tout autre type numérique est
+le type lui-même. Comme `Output` diffère selon le type, `Number` n'inclut pas `Div` (une liste de
+supertraits doit fixer chaque type associé). Une fonction générique qui divise reçoit le type du
+résultat avec `(where (Div T (Output R)))`, ou exige une division fermée dans `T` avec
+`(where (Div T (Output T)))` (un `int` ne peut alors pas être passé).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 수
 
 정수, 부동소수점 수, 유리수, 복소수, 진리값의 연산과 그 밖의 수 관련 함수. 호출 형식 읽는 법은
@@ -91,7 +91,9 @@ CL의 `integer`이며 이 언어의 **정수**이다. 주석 없는 정수 리�
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | 넘치지 않는다(승격한다) |
-| `/` | `(/ a b)` | `(int,int)→int` | 0 쪽으로 버린다. 0으로 나누면 panic |
+| `/` | `(/ a b)` | `(int,int)→rational` | CL의 `/`. 나누어떨어지면 정수, 아니면 분수(`(/ 6 3)`은 `2`, `(/ 7 2)`는 `7/2`). 0으로 나누면 panic |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | 0 방향으로 버린 몫(CL의 첫 번째 값). 0으로 나누면 panic |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | 내림·올림·가장 가까운 정수(정확히 절반이면 짝수)로 맞춘 몫. 나누는 수는 생략할 수 없다 |
 | `mod` | `(mod a b)` | `(int,int)→int` | 바닥 나눗셈의 나머지(부호는 나누는 수를 따른다) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -132,16 +134,16 @@ CL의 `integer`이며 이 언어의 **정수**이다. 주석 없는 정수 리�
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | 가수(`[1/2,1)`, 부호 없음)와 지수. CL은 세 값을 반환하지만 다중 값이 없으므로 부호는 `float-sign`에 맡긴다 |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | 같은 분해를 53비트의 정확한 정수 가수로. `가수 * 2^지수`가 정확히 원래 값이다 |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **그 부동소수점 수로 다시 읽히는 가장 간단한 유리수**(`(rationalize 0.1)`은 `1/10`). 정확한 2진 값은 `float->ratio` |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **그 부동소수점 수로 다시 읽히는 가장 간단한 유리수**(`(rationalize 0.1)`은 `1/10`). 정확한 2진 값은 `float->ratio` |
 
-**CL과의 차이: `round`의 반올림 방식.** `round`(따라서 `fround`/`round-div`)는 **0에서 멀어지는 쪽으로** 반올림한다
-(`(round 2.5)` = `3.0`). CL은 **짝수 쪽으로** 반올림해 `2`가 된다.
+`round`(따라서 `fround`/`round-div`)는 CL과 마찬가지로 정확히 절반이면 **짝수 쪽으로** 반올림한다
+(`(round 2.5)`는 `2.0`, `(round 3.5)`는 `4.0`).
 
 ## 5. 유리수 `ratio`
 
-CL 호환의 임의 정밀도 유리수. 항상 기약 분수이며 분모는 양수이고, 힙에 할당된다. 정수 타입이나 `f64`와의 암묵적 변환은
-없다(명시적인 변환 메서드나 `as`/`try-as`를 쓴다). 비 리터럴의 구문은 [문법 레퍼런스](../syntax.md#1-어휘-요소)를
-참고한다.
+CL 준수 임의 정밀도 유리수. 항상 기약·양의 분모로 유지되며 힙에 할당된다. `int`와 섞은 연산은
+`rational`(5.1)이 된다. 고정 폭 정수나 `f64`와의 암묵 변환은 없다(명시적 변환 메서드나
+`as`/`try-as`를 쓴다). 비 리터럴 구문은 [문법 레퍼런스](../syntax.md#1-어휘-요소)를 참조.
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
@@ -150,7 +152,7 @@ CL 호환의 임의 정밀도 유리수. 항상 기약 분수이며 분모는 �
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | 버림 나눗셈의 나머지(CL과 같다. 부호는 나뉘는 수를 따른다) |
 | `abs` | `(abs x)` | `ratio→ratio` | 절댓값 |
 | `signum` | `(signum x)` | `ratio→ratio` | 부호(`1`/`-1`/`0`을 `ratio`로 반환한다) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | 거듭제곱. 지수는 정수 값의 `ratio`여야 한다(아니면 panic). 음의 지수는 역수가 된다 |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | 거듭제곱(제곱을 반복하는 방식). 음의 지수는 역수를 준다(`(expt 2/3 -2)`는 `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | 큰 쪽 / 작은 쪽 |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio`에는 비트 연산이 없다(CL에서도 정수 전용) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | 비교 |
@@ -159,9 +161,59 @@ CL 호환의 임의 정밀도 유리수. 항상 기약 분수이며 분모는 �
 | `denominator` | `(denominator x)` | `ratio→int` | 기약 분수의 분모(항상 양수) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | 정수 부분(0 쪽으로 버림) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64`로 바꾼다 |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | 정수로 반올림(CL의 첫 번째 값). 정확히 절반이면 `round`는 짝수 쪽으로 간다(`(round 5/2)`는 `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | 같은 반올림 결과를 `f64`로 돌려준다 |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL의 두 인수 `floor` 등. 정수 몫이 `car`, `ratio` 나머지가 `cdr`(`(floor-div 7/2 1/3)`는 `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | `f64`로 변환(`ratio->float`와 같다) |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | 같은 값을 `rational`로 돌려준다 |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64`로 변환해서 계산(`(sqrt 1/4)`는 `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 위와 같다 |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 위와 같다 |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` 구현. `ratio`를 `HashTable`의 키로 쓸 수 있다 |
 
-고정 폭 정수와 `f64`에서 들어오는 길은 `int->int`/`int->ratio`(1장)와 `float->int`/`float->ratio`(4장)이다.
-`int`/`ratio`는 `i32` 등과 독립된 별개의 타입이며, 섞인 산술에는 명시적 변환이 필요하다.
+CL의 정수는 분모가 1인 유리수이므로 `int`에도 `numerator`(자기 자신), `denominator`(`1`),
+`float`, `rational`, `rationalize`와 위의 `sqrt`부터 `atanh`까지 15개 함수가 있다(`(sqrt 4)`는
+`2.0`). `f64`/`f32`에도 `float`(자기 자신)와 `rational`(`float->ratio`와 같다)이 있다.
+
+분모가 1인 `ratio`(`(+ 1/3 2/3)` 등)는 CL과 마찬가지로 정수로 출력된다(`1`). `*print-base*`는
+분자와 분모 모두에 적용되고, `*print-radix*`가 참이면 `#x1/f`, `#10r1/3`처럼 기수 접두사가 붙는다.
+리더도 `#x1/F`, `#b101/11`, `#3r1/2`를 읽는다.
+
+고정 폭 정수·`f64`에서 들어오는 길은 `int->int`/`int->ratio`(1장)와 `float->int`/`float->ratio`
+(4장). `int`/`ratio`는 `i32` 등과 독립된 별개의 타입이며, 그것들과 섞은 산술에는 명시적 변환이
+필요하다.
+
+### 5.1 `rational`(정수 또는 분수)
+
+CL의 `rational`에 해당하는 타입. 값은 `int` 또는 `ratio`이며 CL과 마찬가지로 정규화되어 있다(정수가
+되는 값은 반드시 `int`). 정수끼리의 `/`와 `int`와 `ratio`를 섞은 연산의 결과가 이 타입이 된다.
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+`int`와 `ratio` 값은 `rational`을 기대하는 위치에 그대로 넘길 수 있다(`(defun f ((q rational)) ...)`에
+`5`도 `1/2`도 넘길 수 있다). 반대 방향은 `as`/`try-as`로 꺼낸다.
+
+| 이름 | 형식 | 타입 | 설명 |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | 사칙연산(결과는 정규화된다). `/`는 0으로 나누면 panic |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | 비교 |
+| `numerator` `denominator` | `(op x)` | `rational→int` | 기약 분자·분모 |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | 0 방향 버림·`ratio`로·`f64`로 |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | 정수면 `(some n)`, 아니면 `none`(CL의 `integerp`) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | `ratio`와 같다(`expt`의 지수는 `int`) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | `ratio`와 같다 |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | `ratio`와 같다 |
+| `float` `rational` `rationalize` `sqrt` `exp` `log`와 삼각·쌍곡선 함수 | `(op x)` | | `ratio`와 같다 |
+
+`(as int q)`는 `rational->int`(버림), `(try-as int q)`는 `try-rational->int`, `(as ratio q)`·`(as f64 q)`는
+각각의 변환, `(as rational x)`는 `int`/`ratio`에서의 확대. `Eq`·`Ord`·`Hash`·`print-object`와 산술
+트레이트도 구현되어 있다.
 
 ## 6. 복소수 `complex`
 

@@ -4970,7 +4970,14 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
         ("(defun f ((a int) (b int)) int (gcd a b))", "(f 480000000000000000000 36)"),
         ("(defun f ((a int) (b int)) int (expt a b))", "(f 2 64)"),
         ("(defun f ((a ratio) (b ratio)) ratio (mod a b))", "(f -7/2 3/2)"),
-        ("(defun f ((a ratio) (b ratio)) ratio (expt a b))", "(f 2/3 (int->ratio 3))"),
+        ("(defun f ((a ratio) (b int)) ratio (expt a b))", "(f 2/3 -3)"),
+        ("(defun f ((a ratio)) int (round a))", "(f -5/2)"),
+        ("(defun f ((a f64)) f64 (round a))", "(f 2.5)"),
+        ("(defun f ((a f64)) f64 (round a))", "(f -0.5)"),
+        ("(defun f ((a f32)) f32 (round a))", "(f 3.5)"),
+        ("(defun f ((a ratio) (b ratio)) ratio (cdr (floor-div a b)))", "(f 7/2 1/3)"),
+        ("(defun f ((a ratio)) f64 (sqrt a))", "(f 1/4)"),
+        ("(defun f ((a int)) int (denominator a))", "(f 5)"),
     ];
     for (src, call) in cases {
         let interpreted = run_readback(&format!("{src}\n{call}")).unwrap_or_else(|e| panic!("interp {}: {:?}", call, e));
@@ -5310,17 +5317,20 @@ fn compile_dispatches_bignum_arithmetic_and_agrees_with_the_interpreter() {
     assert_eq!(compiled, interpreted, "compiled bignum arithmetic agrees with the interpreter");
 }
 
-/// `int` division with a bignum-range dividend. Division by zero is covered
-/// by `runtime_error_parity_test`; this is the ordinary path.
+/// `int` division with a bignum-range dividend — CL's `/`, a `rational` —
+/// and the integer quotient `truncate`. Division by zero is covered by
+/// `runtime_error_parity_test`; this is the ordinary path.
 #[test]
 fn compile_dispatches_bignum_division_and_agrees_with_the_interpreter() {
     let src = r#"
-        (defun quotient ((a int) (b int)) int (/ a b))
+        (defun quotient ((a int) (b int)) rational (/ a b))
+        (defun whole ((a int) (b int)) int (truncate a b))
     "#;
-    let call = "(quotient 100000000000000000000 3)";
-    let interpreted = run_readback(&format!("{src}\n{call}")).expect("interpreted failed");
-    let compiled = run_readback(&format!("{src}\n(compile quotient)\n{call}")).expect("compiled failed");
-    assert_eq!(compiled, interpreted, "compiled bignum division agrees with the interpreter");
+    for call in ["(quotient 100000000000000000000 3)", "(quotient 100000000000000000000 4)", "(whole 100000000000000000000 3)"] {
+        let interpreted = run_readback(&format!("{src}\n{call}")).expect("interpreted failed");
+        let compiled = run_readback(&format!("{src}\n(compile quotient)\n(compile whole)\n{call}")).expect("compiled failed");
+        assert_eq!(compiled, interpreted, "compiled {call} agrees with the interpreter");
+    }
 }
 
 /// The six `int` comparisons (`<`/`<=`/`>`/`>=`/`=`/`/=`) on bignum-range

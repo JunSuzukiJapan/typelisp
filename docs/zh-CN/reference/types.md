@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 类型一览
 
 typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的写法见[语法参考第 2 章](syntax.md#2-类型的写法)，各类型的
@@ -13,6 +13,7 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 | `u8` `u16` `u32` | 无符号固定宽度整数 | 同上 |
 | `f32` `f64` | IEEE-754 浮点数。小数字面量默认为 `f64` | [数值第 4 章](functions/numbers.md#4-浮点数f64--f32) |
 | `ratio` | 既约有理数 | [数值第 5 章](functions/numbers.md#5-有理数-ratio) |
+| `rational` | `int` 或 `ratio`（CL 的 rational）。整数之间 `/` 的结果类型 | [数值第 5 章](functions/numbers.md#5-有理数-ratio) |
 | `bool` | `true` / `false` | [数值第 7 章](functions/numbers.md#7-布尔值) |
 | `char` | Unicode 标量值 | [字符](functions/collections.md#2-字符-char) |
 | `string` | 不可变字符串 | [字符串](functions/collections.md#1-字符串-string) |
@@ -97,10 +98,10 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 | trait | 实现的类型 | 详情 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比较) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 以及所有内置错误类型 | [print-object](functions/printing.md#5-print-object按类型的打印表示) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord比较) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | 同上 |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` 以及所有内置错误类型 | [print-object](functions/printing.md#5-print-object按类型的打印表示) |
 
 `cons-cell<A,B>` 与元组 `#{..}` 的 trait，以及集合的 `print-object`，在元素类型实现了该 trait 时可用。
 
@@ -108,7 +109,7 @@ typelisp 中的类型，以及各类型实现的标准 trait 一览。类型的�
 
 | trait | 实现的类型 |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 详情见[算术 trait](functions/traits.md#3-算术-traitadd--sub--mul--div--rem--bits--number)。

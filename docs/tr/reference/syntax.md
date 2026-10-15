@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -37,7 +37,7 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   belirlenir ve özel bir sözdizimi yoktur (CL'deki gibi).
 - **Kayan noktalı sayılar**: ondalık nokta ya da üs (`e`/`E`) içerenler (`1.5`, `3.0e10`). Varsayılan
   olarak `f64` (beklenen tür buysa `f32`).
-- **Oranlar**: `pay/payda` (yalnızca onluk, örneğin `1/3`). CL'nin belirttiği gibi okunurken sadeleştirilir
+- **Oranlar**: `pay/payda` (örneğin `1/3`; `#x1/F` gibi taban öneki de olur). CL'nin belirttiği gibi okunurken sadeleştirilir
   (`2/4`, `1/2`'dir). Tamsayı değerli olanlar (`4/2` vb.) `ratio` değil, `int` olarak okunur. Sıfır
   payda (`1/0`) bir okuma hatasıdır.
 - **Karakterler**: `#\` ve ardından bir karakter ya da bir karakter adı. Örneğin `#\a` `#\Space`
@@ -101,9 +101,11 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
   otomatik geçiş yapar; [Sayılar](functions/numbers.md#3-keyfi-duyarlıklı-tamsayılar-int)) ve altı sabit
   genişlikli tür genişliklerinden ve işaretliliklerinden adlandırılır (64 bitlik bir tamsayı türü yoktur;
   [Sayılar](functions/numbers.md#1-sabit-genişlikli-tamsayılar)'a bakın).
-- **Rasyonel tür**: `ratio` (en sade biçimdeki rasyonel sayılar). CL'deki gibi heap'te ayrılır;
-  `int`/`f64` ve benzerleriyle örtük dönüşüm yoktur (`as`/`try-as` ya da bir dönüşüm metoduyla açıkça
-  dönüştürün; [Sayılar](functions/numbers.md#5-rasyonel-sayılar-ratio)'a bakın).
+- **Rasyonel tipler**: `ratio` (sadeleştirilmiş rasyoneller) ve `rational` (bir `int` ya da `ratio`, CL'nin
+  rational'ı). İki tam sayı üzerinde `/` ve bir `int` ile bir `ratio`'yu karıştıran aritmetik `rational`
+  verir; `int`/`ratio` değerleri `rational` beklenen yere olduğu gibi geçirilebilir. Sabit genişlikli
+  tam sayılarla ve `f64` ile örtük dönüşüm yoktur (`as`/`try-as` ya da bir dönüşüm metoduyla açıkça
+  yapın; bkz. [Sayılar](functions/numbers.md#5-rasyonel-sayılar-ratio)).
 - **C sınırındaki ham sözcükler**: `ptr` (opak bir işaretçi), `c-long` / `c-ulong`. Yalnızca FFI için:
   birini değer yapmak `(unsafe ...)` gerektirir ve görünebilecekleri yerler sınırlıdır
   ([3.3 defffi](#ptr--c-long--c-ulong--ham-makine-sözcükleri)). Bunları 64 bitlik bir tamsayı
@@ -1661,6 +1663,9 @@ başarısız olabilir; bu yüzden `as` panic olur ve `try-as` `None` verir. Geri
 `int`'e iner ve daha dar bir genişlik istenirse onlardan sonra `int->W` çağrılır. Bu, karşılık gelen
 dönüşüm metotlarına açılan bir şekerdir ([Sayılar](functions/numbers.md)'daki
 `int->char`/`int->int`/`int->W` vb.).
+
+`rational`'dan `as`/`try-as`, `int`'e (`as` kırpar, `try-as` yalnızca tam sayıda başarılı olur), `ratio`'ya
+ve `f64`'e dönüştürür; `int`/`ratio`'dan `rational`'a dönüştürür.
 
 `documentation`, `quote`/`compile` gibi, `name`'i değerlendirmeden, değerlendirilmemiş çıplak bir sembol /
 `::` yolu olarak okuyan bir özel formdur. CL'nin `(documentation 'name 'function)`'ından farklı olarak bir

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 打印
 
 `print`/`println`/`format`、单参数打印函数、pretty printer、`print-object`，以及控制打印的变量。格式指令一览见
@@ -22,7 +22,7 @@
 `(where (CharOutput S))` 的类型变量都可以同样书写。既不是 `bool` 也不是流的 `dest` 是类型错误。
 
 **控制字符串必须是字面量**（与 Rust 的 `format!` 同样的限制）。其中的指令决定取多少个参数、什么类型，所以运行时拼出的
-字符串在检查时无法读取。限定为字面量后，**参数的个数和类型在检查时就会被检查**——`(println "~d" "x")` 和
+字符串在检查时无法读取。限定为字面量后，**参数的个数和类型在检查时就会被检查**——`(println "~c" 1)` 和
 `(println "~a ~a" 1)` 都是检查时的错误。拼错的指令、未闭合的 `~(`、无法确定调用目标的 `~/name/` 也同样是检查时的
 错误。检查规则见 [format.md](format.md#1-写法)。想输出拼出来的字符串时，用 `(format false ...)` 创建，再用
 `(println "~a" s)` 打印。

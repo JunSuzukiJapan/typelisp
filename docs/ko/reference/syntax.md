@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 999cef440e586aa9dba2528893947d26e1743284 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # typelisp 문법 레퍼런스
 
 typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서드의 목록은 [내장 함수](functions/README.md), 타입 목록은
@@ -27,7 +27,7 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   쓸 수 있는 것은 이 규칙 덕분이다. `int`의 값이 63비트 즉시값에 들어갈지 다배정도가 될지는 값의 크기가 정하며 전용 구문은
   없다(CL과 같다).
 - **부동소수점 수**: 소수점이나 지수(`e`/`E`)를 포함하는 수(`1.5`, `3.0e10`). 기본은 `f64`(기대 타입이 `f32`이면 그 타입).
-- **비(ratio)**: `분자/분모`(10진수만. 예: `1/3`). CL이 정한 대로 읽을 때 약분된다(`2/4`는 `1/2`). 값이 정수인 것(`4/2` 등)은
+- **비(ratio)**: `분자/분모`(예: `1/3`. `#x1/F`처럼 기수 접두사도 쓸 수 있다). CL이 정한 대로 읽을 때 약분된다(`2/4`는 `1/2`). 값이 정수인 것(`4/2` 등)은
   `ratio`가 아니라 `int`로 읽힌다. 분모가 0(`1/0`)이면 읽기 오류이다.
 - **문자**: `#\` 뒤에 한 글자 또는 문자 이름. 예: `#\a` `#\Space` `#\Newline` `#\Tab` `#\Return` `#\Page` `#\Nul`(`#\Null`도
   된다) `#\Backspace`. 이름은 대소문자를 구별하지 않는다.
@@ -75,8 +75,10 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
   `int`는 정수(CL의 integer. 63비트 즉시값과 다배정도 사이를 자동으로 오간다. [수](functions/numbers.md#3-임의-정밀도-정수-int))이고,
   고정 폭 6가지 타입은 폭과 부호 유무로 이름 지어져 있다(64비트 정수 타입은 없다.
   [수](functions/numbers.md#1-고정-폭-정수) 참고).
-- **유리수 타입**: `ratio`(기약 분수인 유리수). CL처럼 힙에 할당되며 `int`/`f64` 등과의 암묵적 변환은 없다(`as`/`try-as`나
-  변환 메서드로 명시적으로 변환한다. [수](functions/numbers.md#5-유리수-ratio) 참고).
+- **유리수 타입**: `ratio`(기약 유리수)와 `rational`(`int` 또는 `ratio`, CL의 rational). 정수끼리의
+  `/`와 `int`와 `ratio`를 섞은 연산은 `rational`이 되고, `int`/`ratio` 값은 `rational`의 위치에 그대로
+  넘길 수 있다. 고정 폭 정수나 `f64`와의 암묵 변환은 없다(`as`/`try-as` 또는 변환 메서드로
+  명시한다. [수](functions/numbers.md#5-유리수-ratio) 참조).
 - **C 경계의 원시 워드**: `ptr`(불투명 포인터), `c-long` / `c-ulong`. FFI 전용이며, 값으로 만들려면 `(unsafe ...)`가 필요하고
   나올 수 있는 곳도 제한된다([3.3 defffi](#ptr--c-long--c-ulong--원시-워드)). 64비트 정수를 원하는 곳에 쓰지 않는다. 산술이
   없다.
@@ -1458,6 +1460,9 @@ CL의 이름 없는 `loop`는 `block nil`을 세우지만, 여기에는 `nil`이
 `float->int`/`ratio->int`의 절단)은 항상 성공한다. `float->int`/`ratio->int`/`char->int`는 `int`에 내려앉으며, 더 좁은 폭을
 요구하면 그 뒤에 `int->W`를 호출한다. 대응하는 변환 메서드([수](functions/numbers.md)의 `int->char`/`int->int`/`int->W` 등)로
 전개되는 편의 표기이다.
+
+`rational`에서는 `int`(`as`는 버림, `try-as`는 정수일 때만 성공)·`ratio`·`f64`로, `int`/`ratio`에서는
+`rational`로 변환할 수 있다.
 
 `documentation`은 `quote`/`compile`처럼 `name`을 평가하지 않고 평가되지 않은 맨 심볼 / `::` 경로로 읽는 특수 형식이다. CL의
 `(documentation 'name 'function)`과 달리 타입 인수를 받지 않는다. `name`을 변수 → 함수 → 타입 → 트레이트 → 매크로 순서로

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Traits padrão
 
 Os traits para iteração, comparação e aritmética. Os outros traits padrão estão nos seus próprios capítulos:
@@ -75,7 +75,7 @@ concretos usa os operadores embutidos** ([Números](numbers.md)) e não passa po
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -83,7 +83,7 @@ concretos usa os operadores embutidos** ([Números](numbers.md)) e não passa po
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; a distância é sempre int (como em ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; sem métodos; uma combinação de seis
+(deftrait Number (Add Sub Mul Rem Ord))                   ; sem métodos; uma combinação de cinco
 ```
 
 **Dentro de uma restrição, você pode escrever operadores.** Quando o receptor é uma variável de tipo vinculada
@@ -100,3 +100,11 @@ O método do trait não se chama `+` porque `+` é o nome de um método embutido
 
 Implementados para: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` em todos os tipos numéricos (exceto `complex`), e
 `Bits` em todos os tipos inteiros e em `int`.
+
+
+**`Div` nomeia seu tipo de resultado com o tipo associado `Output`.** Como no CL, `/` sobre dois
+inteiros é um `rational`, então o `Output` de `int` é `rational`, e o de qualquer outro tipo numérico é
+o próprio tipo. Como `Output` difere entre os tipos, `Number` não inclui `Div` (uma lista de
+supertraits precisa fixar cada tipo associado). Uma função genérica que divide recebe o tipo do
+resultado com `(where (Div T (Output R)))`, ou exige uma divisão fechada em `T` com
+`(where (Div T (Output T)))` (então não se pode passar um `int`).

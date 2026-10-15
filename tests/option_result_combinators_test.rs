@@ -6,7 +6,7 @@ mod common;
 use common::{check_err, eval_err, eval_string, eval_string_compiled};
 
 const DEFS: &str = r##"
-(defun half ((n int)) Option<int> (if (= 0 (mod n 2)) (Option::some (/ n 2)) (Option::none)))
+(defun half ((n int)) Option<int> (if (= 0 (mod n 2)) (Option::some (truncate n 2)) (Option::none)))
 (defun parse ((s string)) Result<int,string>
   (if (equal s "1") (Result::ok 1) (Result::err (format false "bad: ~a" s))))
 (defun none-int () Option<int> (Option::none))

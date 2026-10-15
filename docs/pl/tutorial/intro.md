@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Pierwsze kroki
 
 Zaczynając od obliczania wyrażeń w REPL, ten rozdział omawia po kolei funkcje, zmienne,
@@ -46,13 +46,13 @@ Liczby występują w następujących rodzajach:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` na dwóch liczbach całkowitych daje liczbę całkowitą z odrzuconą częścią ułamkową (nie tworzy
-ułamka, jak robi to Common Lisp). Do obliczenia reszty użyj `(mod 7 2)`.
+`/` na dwóch liczbach całkowitych daje ułamek, gdy dzielenie nie jest dokładne, jak w Common Lisp.
+Liczbę całkowitą bez części ułamkowej daje `(truncate 7 2)` (`3`), a resztę `(mod 7 2)`.
 
 Wartościami logicznymi są `true` i `false`.
 

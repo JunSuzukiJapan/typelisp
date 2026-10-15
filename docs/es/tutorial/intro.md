@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Primeros pasos
 
 Empezando por evaluar expresiones en el REPL, este capítulo recorre, por orden, funciones, variables,
@@ -46,13 +46,13 @@ Los números son de estas clases:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` entre dos enteros da un entero descartando la parte fraccionaria (no produce una fracción como en
-Common Lisp). Para el resto, usa `(mod 7 2)`.
+`/` sobre dos enteros da una fracción cuando la división no es exacta, como en Common Lisp. Para el
+entero sin la parte fraccionaria use `(truncate 7 2)` (`3`), y `(mod 7 2)` para el resto.
 
 Los valores booleanos son `true` y `false`.
 

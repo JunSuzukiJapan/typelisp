@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Typer
 
 De typer typelisp har, och de standardtraits som varje typ implementerar. Hur typer skrivs finns i
@@ -14,6 +14,7 @@ De typer typelisp har, och de standardtraits som varje typ implementerar. Hur ty
 | `u8` `u16` `u32` | Heltal utan tecken och med fast bredd | Som ovan |
 | `f32` `f64` | IEEE-754-flyttal. Decimalliteraler får som standard `f64` | [Tal kapitel 4](functions/numbers.md#4-flyttal-f64--f32) |
 | `ratio` | Ett rationellt tal i enklaste form | [Tal kapitel 5](functions/numbers.md#5-kvoter-ratio) |
+| `rational` | En `int` eller en `ratio` (CL:s rational). Typen för `/` på två heltal | [Tal kapitel 5](functions/numbers.md#5-kvoter-ratio) |
 | `bool` | `true` / `false` | [Tal kapitel 7](functions/numbers.md#7-booleska-värden) |
 | `char` | Ett skalärt Unicode-värde | [Tecken](functions/collections.md#2-tecken-char) |
 | `string` | En oföränderlig sträng | [Strängar](functions/collections.md#1-strängar-string) |
@@ -102,10 +103,10 @@ Vilka typer som implementerar vilka traits. Metoderna för varje trait finns i
 
 | Trait | Implementerande typer | Detaljer |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-jämförelse) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Som ovan |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` och alla inbyggda feltyper | [print-object](functions/printing.md#5-print-object-utskriftsform-per-typ) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-jämförelse) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Som ovan |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` och alla inbyggda feltyper | [print-object](functions/printing.md#5-print-object-utskriftsform-per-typ) |
 
 Traitsen för `cons-cell<A,B>` och för tupler `#{..}`, och samlingarnas `print-object`, kan användas
 när elementtyperna implementerar den traiten.
@@ -114,7 +115,7 @@ när elementtyperna implementerar den traiten.
 
 | Trait | Implementerande typer |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Detaljer finns i [Aritmetiska traits](functions/traits.md#3-aritmetiska-traits-add--sub--mul--div--rem--bits--number).

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # السمات القياسية
 
 سمات التكرار والمقارنة والحساب. أما السمات القياسية الأخرى ففي فصولها الخاصة: `Hash`
@@ -72,7 +72,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -80,7 +80,7 @@
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; المسافة دائمًا int (كما في ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; بلا توابع؛ تجميع للست
+(deftrait Number (Add Sub Mul Rem Ord))                   ; بلا طرق؛ تركيب من خمس
 ```
 
 **داخل القيد يمكنك كتابة المعامِلات.** عندما يكون المستقبِل متغير نوع مقيّدًا بـ `where` تُقرأ المعامِلات
@@ -97,3 +97,10 @@
 
 تُنفَّذ: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` لكل الأنواع العددية (عدا `complex`)، و`Bits` لكل أنواع
 الأعداد الصحيحة و`int`.
+
+
+**`Div` يسمّي نوع نتيجته بالنوع المرتبط `Output`.** كما في CL، `/` على عددين صحيحين هو `rational`،
+لذا فإن `Output` لـ`int` هو `rational`، ولكل نوع عددي آخر هو النوع نفسه. ولأن `Output` يختلف من نوع
+لآخر، لا يتضمن `Number` السمة `Div` (يجب أن تثبّت قائمة السمات الأعلى كل نوع مرتبط). الدالة العامة
+التي تقسم تستقبل نوع النتيجة بـ`(where (Div T (Output R)))`، أو تطلب قسمة مغلقة في `T`
+بـ`(where (Div T (Output T)))` (وحينها لا يمكن تمرير `int`).

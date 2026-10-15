@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Números
 
 Operações sobre inteiros, números de ponto flutuante, racionais, números complexos e booleanos, e outras
@@ -107,7 +107,9 @@ execução ("an integer argument does not fit a fixnum").
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | Nunca transbordam (promovem) |
-| `/` | `(/ a b)` | `(int,int)→int` | Trunca em direção a zero. Panic na divisão por zero |
+| `/` | `(/ a b)` | `(int,int)→rational` | O `/` do CL. Um inteiro quando a divisão é exata, uma fração caso contrário (`(/ 6 3)` é `2`, `(/ 7 2)` é `7/2`). Panic na divisão por zero |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | O quociente truncado em direção a zero (o primeiro valor no CL). Panic na divisão por zero |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | O quociente arredondado para baixo, para cima ou para o inteiro mais próximo (para o par numa metade exata). O divisor não pode ser omitido |
 | `mod` | `(mod a b)` | `(int,int)→int` | Resto da divisão por piso (o sinal segue o divisor) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -148,17 +150,17 @@ execução ("an integer argument does not fit a fixnum").
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | A mantissa (em `[1/2,1)`, sem sinal) e o expoente. O CL devolve três valores, mas não há valores múltiplos, então o sinal fica a cargo de `float-sign` |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | A mesma decomposição com uma mantissa inteira exata de 53 bits. `mantissa * 2^expoente` é exatamente o valor original |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **O racional mais simples que é lido de volta como esse número de ponto flutuante** (`(rationalize 0.1)` é `1/10`). Para o valor binário exato, use `float->ratio` |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **O racional mais simples que é lido de volta como esse número de ponto flutuante** (`(rationalize 0.1)` é `1/10`). Para o valor binário exato, use `float->ratio` |
 
-**Diferença em relação ao CL: como `round` arredonda.** `round` (e portanto `fround`/`round-div`) arredonda
-**afastando-se de zero** (`(round 2.5)` = `3.0`). O CL arredonda **para o par**, dando `2`.
+`round` (e portanto `fround`/`round-div`) arredonda uma metade exata **para o par**, como o CL
+(`(round 2.5)` é `2.0`, `(round 3.5)` é `4.0`).
 
 ## 5. Racionais `ratio`
 
-Racionais de precisão arbitrária compatíveis com o CL. São sempre mantidos na forma irredutível com
-denominador positivo, e alocados no heap. Não há conversão implícita com os tipos inteiros nem com `f64` (use
-um método de conversão explícito ou `as`/`try-as`). Para a sintaxe dos literais de ratio, consulte a
-[Referência de sintaxe](../syntax.md#1-elementos-léxicos).
+Racionais de precisão arbitrária compatíveis com o CL. São sempre mantidos reduzidos com denominador
+positivo e alocados no heap. A aritmética que os mistura com `int` dá um `rational` (5.1). Não há
+conversão implícita com os inteiros de largura fixa nem com `f64` (use um método de conversão explícito
+ou `as`/`try-as`). Para a sintaxe dos literais racionais, veja [Referência de sintaxe](../syntax.md#1-elementos-léxicos).
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
@@ -167,7 +169,7 @@ um método de conversão explícito ou `as`/`try-as`). Para a sintaxe dos litera
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Resto da divisão truncada (como no CL; o sinal segue o dividendo) |
 | `abs` | `(abs x)` | `ratio→ratio` | Valor absoluto |
 | `signum` | `(signum x)` | `ratio→ratio` | Sinal (devolve `1`/`-1`/`0` como `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Potência. O expoente deve ser um `ratio` de valor inteiro (senão, panic). Um expoente negativo dá o recíproco |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Potência (por quadrados sucessivos). Um expoente negativo dá o recíproco (`(expt 2/3 -2)` é `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | O maior / o menor |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` não tem operações de bits (no CL elas são só para inteiros) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Comparação |
@@ -176,10 +178,62 @@ um método de conversão explícito ou `as`/`try-as`). Para a sintaxe dos litera
 | `denominator` | `(denominator x)` | `ratio→int` | Denominador na forma irredutível (sempre positivo) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Parte inteira (truncada em direção a zero) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Converte para `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Arredondamento para inteiro (o primeiro valor em CL). Numa metade exata, `round` vai para o lado par (`(round 5/2)` é `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | O mesmo arredondamento, devolvido como `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | O `floor` de dois argumentos do CL e os demais. O quociente inteiro é o `car` e o resto `ratio` é o `cdr` (`(floor-div 7/2 1/3)` é `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Converte para `f64` (o mesmo que `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | O mesmo valor como `rational` |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Converte para `f64` e calcula (`(sqrt 1/4)` é `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Idem |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Idem |
+| `sxhash` | `(sxhash x)` | `ratio→int` | A implementação de `Hash`. Um `ratio` pode ser chave de uma `HashTable` |
 
-Os caminhos de entrada a partir dos inteiros de largura fixa e de `f64` são `int->int`/`int->ratio`
-(capítulo 1) e `float->int`/`float->ratio` (capítulo 4). `int`/`ratio` são tipos separados, independentes de
-`i32` e dos outros, e a aritmética mista precisa de conversões explícitas.
+No CL um inteiro é um racional de denominador 1, então `int` também tem `numerator` (ele mesmo),
+`denominator` (`1`), `float`, `rational`, `rationalize` e as 15 funções de `sqrt` a `atanh` acima
+(`(sqrt 4)` é `2.0`). `f64`/`f32` também têm `float` (ele mesmo) e `rational` (o mesmo que
+`float->ratio`).
+
+Um `ratio` de denominador 1 (como `(+ 1/3 2/3)`) é impresso como inteiro (`1`), como no CL.
+`*print-base*` vale para numerador e denominador, e quando `*print-radix*` é verdadeiro um prefixo de
+base é acrescentado, como `#x1/f` e `#10r1/3`. O leitor também lê `#x1/F`, `#b101/11` e `#3r1/2`.
+
+As entradas a partir dos inteiros de largura fixa e de `f64` são `int->int`/`int->ratio` (capítulo 1) e
+`float->int`/`float->ratio` (capítulo 4). `int`/`ratio` são tipos independentes de `i32` e dos demais,
+e a aritmética que os mistura com estes precisa de conversões explícitas.
+
+### 5.1 `rational` (um inteiro ou uma fração)
+
+O tipo do `rational` do CL. Um valor é um `int` ou um `ratio`, normalizado como no CL (um valor
+inteiro é sempre o `int`). `/` sobre dois inteiros e a aritmética que mistura um `int` com um `ratio`
+dão este tipo.
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+Valores `int` e `ratio` são passados como estão onde se espera um `rational` (tanto `5` quanto `1/2`
+podem ser passados para `(defun f ((q rational)) ...)`). No sentido inverso, retire o valor com
+`as`/`try-as`.
+
+| Nome | Forma | Tipo | Descrição |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | Aritmética (o resultado é normalizado). `/` dá panic na divisão por zero |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Comparação |
+| `numerator` `denominator` | `(op x)` | `rational→int` | O numerador e o denominador reduzidos |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Truncado em direção a zero, como `ratio`, para `f64` |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | `(some n)` para um inteiro, `none` caso contrário (o `integerp` do CL) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | Como em `ratio` (o expoente de `expt` é um `int`) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | Como em `ratio` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | Como em `ratio` |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` e as funções trigonométricas e hiperbólicas | `(op x)` | | Como em `ratio` |
+
+`(as int q)` é `rational->int` (truncamento), `(try-as int q)` é `try-rational->int`, `(as ratio q)` e
+`(as f64 q)` são as conversões correspondentes, e `(as rational x)` amplia a partir de `int`/`ratio`.
+`Eq`, `Ord`, `Hash`, `print-object` e os traits aritméticos também são implementados.
 
 ## 6. Números complexos `complex`
 

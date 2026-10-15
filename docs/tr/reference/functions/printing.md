@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Yazdırma
 
 `print`/`println`/`format`, tek bağımsız değişkenli yazıcılar, pretty printer, `print-object` ve
@@ -27,7 +27,7 @@ değişkeniyle aynı şekilde yazılabilir. Ne `bool` ne de akış olan bir `des
 **Denetim string'i bir sabit olmalıdır** (Rust'ın `format!`'ıyla aynı kısıtlama). İçindeki yönergeler
 kaç bağımsız değişkenin ve hangi türlerde alınacağını belirler; bu yüzden çalışma zamanında oluşturulan
 bir string denetim zamanında okunamaz. Sabit olmak zorunda olduğundan **bağımsız değişkenlerin sayısı ve
-türleri denetim zamanında kontrol edilir**: `(println "~d" "x")` ve `(println "~a ~a" 1)` denetim zamanı
+türleri denetim zamanında kontrol edilir**: `(println "~c" 1)` ve `(println "~a ~a" 1)` denetim zamanı
 hatalarıdır. Yanlış yazılmış bir yönerge, kapatılmamış bir `~(` ve neyi çağıracağı
 belirlenemeyen bir `~/name/` de denetim zamanı hatalarıdır. Denetim kuralları
 [format.md](format.md#1-yönergeler-nasıl-yazılır) belgesindedir. Oluşturduğunuz bir string'i yazdırmak

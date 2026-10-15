@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 入门
 
 本章从在 REPL 中求值表达式开始，依次介绍函数、变量、条件分支、循环，以及列表和 `Vector`。
@@ -44,12 +44,13 @@ typl> (upcase "hello")
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-两个整数之间的 `/` 得到舍去小数部分的整数（不会像 Common Lisp 那样得到分数）。余数用 `(mod 7 2)` 求。
+整数之间的 `/` 与 Common Lisp 一样，不能整除时得到分数。需要舍去小数部分的整数时用
+`(truncate 7 2)`（`3`），余数用 `(mod 7 2)` 求得。
 
 布尔值是 `true` 和 `false`。
 

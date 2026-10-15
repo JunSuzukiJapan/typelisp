@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Format Directives
 
 The directives written in the control strings of `print`/`println`/`format`. They cover nearly all of
@@ -25,12 +25,13 @@ that, the following are checked at check time.
   on) are errors. They are never silently ignored or rounded.
 
 The **elements** of a list argument (`~{`, `~:{`, `~<...~:>`) are `Sexpr`s, and neither their number nor
-the type of each element can be known from the types. Requirements on elements (an integer for `~d`,
+the type of each element can be known from the types. Requirements on elements (a character for `~c`,
 and so on) and missing elements are checked when the values arrive, and are run-time errors (it never
 switches to a different representation instead).
 
-CL's lenient rules are not adopted. Passing a non-integer to `~d` and having it printed as `~a`, or
-`~:[` treating any value as a boolean, are not reinterpreted that way; they are type errors.
+`~d` `~b` `~o` `~x` and `~r` with a radix print a non-integer as `~a` would, in decimal, as in CL
+(`(format false "~5d" 1/2)` is `"  1/2"`). CL's other lenient rules are not adopted: `~:[` treating
+any value as a boolean is not reinterpreted that way; it is a type error.
 
 ## 2. Output (consuming one argument)
 
@@ -39,7 +40,7 @@ CL's lenient rules are not adopted. Passing a non-integer to `~d` and having it 
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=right-justify | Aesthetic (CL's `princ`; strings without quotes). The argument can be of any type |
 | `~s` | Same as above | Standard (CL's `prin1`; a form that can be read back). The argument can be of any type |
 | `~w` | — | CL's `write`. Pretty-prints if `*print-pretty*` is true, otherwise the same as `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=digit groups, `@`=always a sign | Decimal/binary/octal/hexadecimal integers. The argument is an integer |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=digit groups, `@`=always a sign | Decimal/binary/octal/hexadecimal integers. The argument may be anything (a non-integer prints as with `~a`, in decimal) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (with a radix) or none | With a radix, that base (2 to 36). Without one: `~r`=English cardinal, `~:r`=English ordinal, `~@r`=Roman numerals, `~:@r`=old Roman numerals. The argument is an integer |
 | `~p` | `:`=back up one, `@`=y/ies | Plurals (`~p`→"s", `~@p`→"y"/"ies"). The argument is an integer |
 | `~c` | `:`=name, `@`=`#\` syntax | A character. The argument is a `char` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Tipos
 
 Los tipos que tiene typelisp y los traits estándar que implementa cada uno. Cómo escribir tipos está en el
@@ -14,6 +14,7 @@ tipo, en [Funciones incorporadas](functions/README.md).
 | `u8` `u16` `u32` | Enteros de ancho fijo sin signo | Igual que arriba |
 | `f32` `f64` | Números de coma flotante IEEE-754. Los literales decimales son `f64` por defecto | [Números, capítulo 4](functions/numbers.md#4-números-de-coma-flotante-f64--f32) |
 | `ratio` | Un número racional en su forma irreducible | [Números, capítulo 5](functions/numbers.md#5-racionales-ratio) |
+| `rational` | Un `int` o un `ratio` (el rational de CL). El tipo de `/` sobre dos enteros | [Números, capítulo 5](functions/numbers.md#5-racionales-ratio) |
 | `bool` | `true` / `false` | [Números, capítulo 7](functions/numbers.md#7-booleanos) |
 | `char` | Un valor escalar Unicode | [Caracteres](functions/collections.md#2-caracteres-char) |
 | `string` | Una cadena inmutable | [Cadenas](functions/collections.md#1-cadenas-string) |
@@ -102,10 +103,10 @@ y en los capítulos indicados en la columna de la derecha.
 
 | Trait | Tipos que lo implementan | Detalles |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparación) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Igual que arriba |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` y todos los tipos de error incorporados | [print-object](functions/printing.md#5-print-object-representación-impresa-por-tipo) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-comparación) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Igual que arriba |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` y todos los tipos de error incorporados | [print-object](functions/printing.md#5-print-object-representación-impresa-por-tipo) |
 
 Los traits de `cons-cell<A,B>` y de las tuplas `#{..}`, y el `print-object` de las colecciones, se
 pueden usar cuando los tipos de los elementos implementan ese trait.
@@ -114,7 +115,7 @@ pueden usar cuando los tipos de los elementos implementan ese trait.
 
 | Trait | Tipos que lo implementan |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Los detalles están en [Traits aritméticos](functions/traits.md#3-traits-aritméticos-add--sub--mul--div--rem--bits--number).

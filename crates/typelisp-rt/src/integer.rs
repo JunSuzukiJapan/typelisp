@@ -147,7 +147,8 @@ binop!(
     rt_integer_logxor, "rt_integer_logxor", |a, b| a ^ b, |x, y| x ^ y
 );
 
-/// `int::/` — truncating (CL `truncate`), like every integer `/` here. A
+/// `int::truncate` — the integer quotient, truncating (CL `truncate`). `int`'s
+/// `/` is CL's rational one (`rational::rt_rational_div`). A
 /// zero divisor [`raise`]s the interpreter's own `"divide by zero"`; the
 /// most-negative-over-`-1` quotient the fixed widths cannot hold simply
 /// promotes.

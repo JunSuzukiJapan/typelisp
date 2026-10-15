@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Traity standardowe
 
 Traity do iteracji, porównywania i arytmetyki. Pozostałe traity standardowe znajdują się we własnych
@@ -78,7 +78,7 @@ wbudowanych operatorów** ([Liczby](numbers.md)) i nie przechodzi przez tę wars
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@ wbudowanych operatorów** ([Liczby](numbers.md)) i nie przechodzi przez tę wars
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; odległość jest zawsze int (jak w ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; bez metod; połączenie sześciu
+(deftrait Number (Add Sub Mul Rem Ord))                   ; bez metod; połączenie pięciu
 ```
 
 **Wewnątrz ograniczenia można pisać operatory.** Gdy odbiorcą jest zmienna typowa związana przez `where`,
@@ -104,3 +104,11 @@ redefinicji (`cannot redefine built-in method`). Nie ma `Neg`: `(- x)` rozwija s
 
 Zaimplementowane dla: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` na wszystkich typach liczbowych (poza `complex`) oraz
 `Bits` na wszystkich typach całkowitych i `int`.
+
+
+**`Div` nazywa swój typ wyniku typem powiązanym `Output`.** Jak w CL, `/` na dwóch liczbach
+całkowitych daje `rational`, więc `Output` dla `int` to `rational`, a dla każdego innego typu
+liczbowego sam ten typ. Ponieważ `Output` różni się między typami, `Number` nie zawiera `Div` (lista
+nadcech musi ustalić każdy typ powiązany). Funkcja generyczna, która dzieli, przyjmuje typ wyniku przez
+`(where (Div T (Output R)))` albo wymaga dzielenia zamkniętego w `T` przez `(where (Div T (Output T)))`
+(wtedy nie można przekazać `int`).

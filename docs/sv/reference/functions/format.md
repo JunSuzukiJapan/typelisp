@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Formatdirektiv
 
 De direktiv som skrivs i kontrollsträngarna för `print`/`println`/`format`. De täcker nästan alla av CL:s
@@ -23,14 +23,14 @@ kontrolleras följande vid kontrolltillfället.
   utanför intervallet (en negativ bredd, en bas som inte är 2 till 36, ett heltal där ett tecken
   förväntas och så vidare) är fel. De ignoreras eller avrundas aldrig tyst.
 
-**Elementen** i ett listargument (`~{`, `~:{`, `~<...~:>`) är `Sexpr`s, och varken deras antal eller
-typen på varje element kan avgöras från typerna. Krav på element (ett heltal för `~d` och så vidare)
-och saknade element kontrolleras när värdena kommer, och är fel vid körning (det byter aldrig till en
-annan representation i stället).
+**Elementen** i ett listargument (`~{`, `~:{`, `~<...~:>`) är `Sexpr`; varken antalet eller typen för
+varje element går att veta från typerna. Krav på elementen (ett tecken för `~c` osv.) och saknade
+element kontrolleras när värdena anländer och är körtidsfel (det byts aldrig till en annan
+representation i stället).
 
-CL:s tillåtande regler är inte antagna. Att skicka ett icke-heltal till `~d` och få det utskrivet som
-`~a`, eller att `~:[` behandlar vilket värde som helst som ett booleskt, tolkas inte om på det sättet;
-de är typfel.
+`~d` `~b` `~o` `~x` och `~r` med bas skriver ut ett icke-heltal som `~a` skulle, decimalt, som i CL
+(`(format false "~5d" 1/2)` är `"  1/2"`). CL:s övriga tillåtande regler används inte: att `~:[`
+behandlar vilket värde som helst som ett booleskt värde tolkas inte om så; det är ett typfel.
 
 ## 2. Utdata (förbrukar ett argument)
 
@@ -39,7 +39,7 @@ de är typfel.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=högerjustera | Estetisk (CL:s `princ`; strängar utan citattecken). Argumentet kan ha vilken typ som helst |
 | `~s` | Som ovan | Standard (CL:s `prin1`; en form som kan läsas tillbaka). Argumentet kan ha vilken typ som helst |
 | `~w` | — | CL:s `write`. Skriver snyggt (pretty) om `*print-pretty*` är sant, annars samma som `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=siffergrupper, `@`=alltid ett tecken | Decimala/binära/oktala/hexadecimala heltal. Argumentet är ett heltal |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=siffergrupper, `@`=alltid ett tecken | Decimala/binära/oktala/hexadecimala heltal. Argumentet får vara vad som helst (ett icke-heltal skrivs ut som med `~a`, decimalt) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (med en bas) eller ingen | Med en bas, den basen (2 till 36). Utan: `~r`=engelskt kardinaltal, `~:r`=engelskt ordningstal, `~@r`=romerska siffror, `~:@r`=gamla romerska siffror. Argumentet är ett heltal |
 | `~p` | `:`=backa ett, `@`=y/ies | Pluralis (`~p`→"s", `~@p`→"y"/"ies"). Argumentet är ett heltal |
 | `~c` | `:`=namn, `@`=syntaxen `#\` | Ett tecken. Argumentet är ett `char` |

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Standardtraits
 
 Traits för iteration, jämförelse och aritmetik. De andra standardtraits finns i sina egna kapitel: `Hash`
@@ -77,7 +77,7 @@ inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -85,7 +85,7 @@ inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; avståndet är alltid int (som med ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; inga metoder; en kombination av sex
+(deftrait Number (Add Sub Mul Rem Ord))                   ; inga metoder; en kombination av fem
 ```
 
 **Inuti en gräns kan man skriva operatorer.** När mottagaren är en typvariabel bunden av `where` läses
@@ -103,3 +103,11 @@ den (`cannot redefine built-in method`). Det finns ingen `Neg`: `(- x)` expander
 
 Implementerat för: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` på alla numeriska typer (utom `complex`), och
 `Bits` på alla heltalstyper och `int`.
+
+
+**`Div` namnger sin resultattyp med den associerade typen `Output`.** Som i CL är `/` på två heltal en
+`rational`, så `Output` för `int` är `rational` och för varje annan numerisk typ typen själv. Eftersom
+`Output` skiljer sig mellan typerna innehåller `Number` inte `Div` (en supertrait-lista måste fästa
+varje associerad typ). En generisk funktion som dividerar tar emot resultattypen med
+`(where (Div T (Output R)))`, eller kräver en division sluten i `T` med `(where (Div T (Output T)))` (då
+kan en `int` inte skickas).

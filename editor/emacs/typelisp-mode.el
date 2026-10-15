@@ -220,6 +220,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "float->f32" "float->f64" "try-float->f32" "try-float->f64"
     "int->int" "ratio->int" "int->ratio"
     "float->ratio" "ratio->float" "numerator" "denominator"
+    "ratio->rational" "rational->int" "try-rational->int" "rational->ratio" "rational->float"
     "symbol->string" "string->symbol"
     ;; generic pair (cons-cell<A,B>); set-car/set-cdr were removed, mutate
     ;; via (setf p::car v)/(setf p::cdr v) instead
@@ -258,7 +259,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     ;; string / char methods
     "upcase" "downcase" "ref" "substring" "alphap" "digitp" "lt"
     ;; the rest of CL's numeric catalog (Phase 1c, §2/§4.3)
-    "ffloor" "fceiling" "fround" "ftruncate" "isqrt" "rationalize"
+    "ffloor" "fceiling" "fround" "ftruncate" "isqrt" "rationalize" "float" "rational"
     "float-radix" "float-digits" "float-precision" "float-sign"
     "scale-float" "decode-float" "integer-decode-float"
     ;; the CL character/string catalog (cl-parity-plan.md Phase 2a/2b, §8/§9):

@@ -437,6 +437,11 @@ struct AssocCall<'a> {
     /// learning `K`/`V` the same way a field-less constructor like `None`
     /// learns its type argument from `expected`).
     expected: Option<&'a Type>,
+    /// The first argument after the receiver, when the caller already
+    /// checked it (with no expected type) to decide which method this is.
+    /// It is reconciled with its parameter type instead of checked again: a
+    /// second check would double the work at every level of a nested call.
+    first_arg: Option<Checked>,
 }
 
 /// What happens when a `defun`/`defmethod`/`defmacro`/`defvar`/`defstruct`
@@ -858,7 +863,7 @@ fn is_retired_bignum(adt: &Path, variant: usize) -> bool {
 ///
 /// The exceptions are the builtins whose native lowering already speaks
 /// tagged ints, because their answer can be a bignum: every method of `int`
-/// itself, the conversions *into* `int` (`float->int`, `ratio->int`,
+/// and of `rational`, the conversions *into* `int` (`float->int`, `ratio->int`,
 /// `numerator`, `denominator`, `int->int`), and `Chan`'s `len`/`cap`, whose
 /// answers arrive through the suspension driver tagged like every wake value.
 /// `ash`/`logbitp` on the fixed widths are exceptions too, the other way
@@ -868,7 +873,9 @@ fn is_retired_bignum(adt: &Path, variant: usize) -> bool {
 /// them in both tiers.
 fn int_boundary_raw(type_name: &Path, method: &str) -> bool {
     use crate::types::path_is_builtin;
-    if path_is_builtin(type_name, "int") {
+    // `rational`'s shims (`typelisp_rt::rational`) speak tagged words
+    // throughout, the `int` answers included.
+    if path_is_builtin(type_name, "int") || path_is_builtin(type_name, "rational") {
         return false;
     }
     if path_is_builtin(type_name, "chan") && matches!(method, "len" | "cap") {
@@ -4282,7 +4289,7 @@ impl Checker {
             heap,
             interp,
             env,
-            AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
+            AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None, first_arg: None },
             &[],
             &[],
         ))
@@ -5569,7 +5576,8 @@ impl Checker {
             // correctness requirement rather than a choice.
             // `int` too: its word is a `Sexpr` `int`'s word already, fixnum
             // or bignum box, so it shares the shortcut `string`/`ratio` take.
-            Type::RandomState | Type::Int | Type::Ratio | Type::F64 | Type::Str => true,
+            // `rational` is the word of the `int` or `ratio` it is.
+            Type::RandomState | Type::Int | Type::Ratio | Type::Rational | Type::F64 | Type::Str => true,
             _ => false,
         }
     }
@@ -11081,6 +11089,31 @@ impl Checker {
                 if let Type::Dyn(trait_path, pins) = e {
                     return self.coerce_to_dyn(heap, env, typed, trait_path, pins);
                 }
+                // An `int` or a `ratio` is a `rational`. The `int`'s word
+                // already is one; a `ratio` is normalized on the way in
+                // (`ratio->rational`), so that a `rational` that is an
+                // integer is always the `int`.
+                if *e == Type::Rational {
+                    if typed.ty == Type::Int {
+                        return Ok(Checked::new(typed.form, Type::Rational));
+                    }
+                    if typed.ty == Type::Ratio {
+                        // `assoc_form` allocates before it roots its
+                        // arguments, and `typed` may be a node nothing roots
+                        // yet (a folded literal).
+                        let typed = Checked::new(forms::rooted(heap, typed.form), typed.ty);
+                        let owner = Path::root("ratio");
+                        // A literal widens to the literal it normalizes to,
+                        // so arithmetic over it folds on.
+                        if let Some(folded) =
+                            fold::fold_builtin_method(heap, &owner, "ratio->rational", std::slice::from_ref(&typed), &Type::Rational)?
+                        {
+                            return Ok(Checked::new(forms::rooted(heap, folded), Type::Rational));
+                        }
+                        let form = self.assoc_form(heap, &owner, "ratio->rational", true, &Type::Rational, &[typed])?;
+                        return Ok(Checked::new(forms::rooted(heap, form), Type::Rational));
+                    }
+                }
                 if is_sexpr_expectation(e) {
                     if let Some(ctor) = sexpr_ctor_for(&typed.ty) {
                         let (type_name, variant) =
@@ -11313,13 +11346,16 @@ impl Checker {
                 heap,
                 interp,
                 env,
-                AssocCall { type_fq: &type_fq, method: &method, receiver: None, expected },
+                AssocCall { type_fq: &type_fq, method: &method, receiver: None, expected, first_arg: None },
                 args,
                 arg_locs,
             ),
             Some(Resolved::Method(target)) => {
                 let recv = peeked.expect("a method is found only through the receiver's type, which checked the receiver");
-                self.check_method_call(heap, interp, env, target, recv, &head, &args[1..], &arg_locs[1..])
+                match self.rational_contagion(heap, interp, env, &head, &target, &recv, &args[1..], &arg_locs[1..])? {
+                    Some(call) => Ok(call),
+                    None => self.check_method_call(heap, interp, env, target, recv, &head, &args[1..], &arg_locs[1..]),
+                }
             }
             Some(Resolved::Value(ModuleValue::Fn(fq))) => {
                 self.check_call(heap, interp, env, &fq, args, arg_locs)
@@ -11889,7 +11925,7 @@ impl Checker {
                     heap,
                     interp,
                     env,
-                    AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected },
+                    AssocCall { type_fq: &type_fq, method: member.as_str(), receiver: None, expected, first_arg: None },
                     args,
                     arg_locs,
                 )
@@ -12012,6 +12048,60 @@ impl Checker {
             .map(|tb| (tb.clone(), method.to_string()))
     }
 
+    /// CL's contagion between the two kinds of rational: an arithmetic or
+    /// comparison operator whose two operands are an `int` and a `ratio` (in
+    /// either order, or one of them already a `rational`) is `rational`'s
+    /// operator, with the receiver widened to a `rational` and the other
+    /// operand widened by its parameter type. `(+ 1/2 1)` is `3/2`, as in CL.
+    ///
+    /// Deciding this checks the other operand, so whenever that operand is a
+    /// rational of some kind this finishes the call itself with the operand
+    /// it checked (`Some`), whether or not the method changed. `None` — the
+    /// operand did not check, or is no rational — leaves the call to the
+    /// method the receiver's type selected.
+    #[allow(clippy::too_many_arguments)]
+    fn rational_contagion(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        op: &str,
+        target: &MethodTarget,
+        recv: &Checked,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+    ) -> Result<Option<Checked>, Error> {
+        const OPERATORS: [&str; 12] = ["+", "-", "*", "/", "<", "<=", ">", ">=", "=", "/=", "max", "min"];
+        let rational_kind = |t: &Type| matches!(t, Type::Int | Type::Ratio | Type::Rational);
+        if !OPERATORS.contains(&op) || !matches!(recv.ty, Type::Int | Type::Ratio) || args.len() != 1 {
+            return Ok(None);
+        }
+        let MethodTarget::Assoc(own) = target else {
+            return Ok(None);
+        };
+        let Ok(other) = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0)) else {
+            return Ok(None);
+        };
+        if !rational_kind(&other.ty) {
+            return Ok(None);
+        }
+        let (owner, recv) = if other.ty == recv.ty {
+            (own.clone(), recv.clone())
+        } else {
+            let owner = crate::types::prim_type_path(&Type::Rational).expect("rational is a primitive type");
+            (owner, self.reconcile_expected(heap, env, recv.clone(), Some(&Type::Rational))?)
+        };
+        self.check_assoc_call(
+            heap,
+            interp,
+            env,
+            AssocCall { type_fq: &owner, method: op, receiver: Some(recv), expected: None, first_arg: Some(other) },
+            args,
+            arg_locs,
+        )
+        .map(Some)
+    }
+
     /// Check `(method recv args...)` against the method `target` that
     /// [`Self::receiver_method`] found for the receiver's type. `recv` is the
     /// receiver, already checked; `args` are the arguments after it.
@@ -12039,7 +12129,7 @@ impl Checker {
                     heap,
                     interp,
                     env,
-                    AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
+                    AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None, first_arg: None },
                     args,
                     arg_locs,
                 )
@@ -12048,7 +12138,7 @@ impl Checker {
                 heap,
                 interp,
                 env,
-                AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None },
+                AssocCall { type_fq: &type_fq, method, receiver: Some(recv), expected: None, first_arg: None },
                 args,
                 arg_locs,
             ),
@@ -12327,7 +12417,7 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
-        let AssocCall { type_fq, method, receiver, expected } = call;
+        let AssocCall { type_fq, method, receiver, expected, mut first_arg } = call;
         let instance = receiver.is_some();
         let def = self.reg.type_def(type_fq).expect("assoc type exists").clone();
         let (af, inst) = self.select_method(&def, method, receiver.as_ref().map(|r| &r.ty), expected)?;
@@ -12359,6 +12449,9 @@ impl Checker {
         // call has no receiver to fix them) and the method's own (`map<U>`),
         // which only the arguments can.
         let tparams: HashSet<String> = def.params.iter().chain(&af.sig.type_params).cloned().collect();
+        if first_arg.is_some() && !(af.sig.optionals.is_empty() && af.sig.keys.is_empty() && af.sig.rest.is_none()) {
+            unimplemented!("{}::{}: a checked first argument for a method with optional, key or rest parameters", type_fq, method);
+        }
         if af.sig.optionals.is_empty() && af.sig.keys.is_empty() && af.sig.rest.is_none() {
             let declared = &af.sig.params[offset..];
             if args.len() != declared.len() {
@@ -12381,7 +12474,10 @@ impl Checker {
             for (i, (arg, pty)) in args.iter().zip(declared.iter()).enumerate() {
                 let st = subst_apply(pty, &subst);
                 let exp = if type_has_param(&st, &tparams) { None } else { Some(st) };
-                let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
+                let ta = match first_arg.take() {
+                    Some(checked) => self.reconcile_expected(heap, env, checked, exp.as_ref())?,
+                    None => self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?,
+                };
                 unify(&tparams, pty, &ta.ty, &mut subst)?;
                 typed.push(ta);
             }
@@ -12973,6 +13069,11 @@ impl Checker {
         if src.ty == target {
             return if try_variant { wrap_some(heap, self, src, target) } else { Ok(src) };
         }
+        // An `int` *is* a `rational`, word for word.
+        if src.ty == Type::Int && target == Type::Rational {
+            let widened = Checked::new(src.form, Type::Rational);
+            return if try_variant { wrap_some(heap, self, widened, target) } else { Ok(widened) };
+        }
         // A typed pointer forgets its pointee, to be handed to a C function
         // declared with `ptr` (`qsort`'s `void *`). The same word; there is
         // no way back.
@@ -13023,7 +13124,7 @@ impl Checker {
             heap,
             interp,
             env,
-            AssocCall { type_fq: &owner, method, receiver: Some(src), expected: None },
+            AssocCall { type_fq: &owner, method, receiver: Some(src), expected: None, first_arg: None },
             &[],
             &[],
         )?;
@@ -13084,7 +13185,7 @@ impl Checker {
             heap,
             interp,
             env,
-            AssocCall { type_fq: &owner, method: &method, receiver: Some(src), expected: None },
+            AssocCall { type_fq: &owner, method: &method, receiver: Some(src), expected: None, first_arg: None },
             &[],
             &[],
         )
@@ -13941,7 +14042,7 @@ impl Checker {
             heap,
             interp,
             env,
-            AssocCall { type_fq: &type_fq, method: &setter, receiver: Some(recv), expected: None },
+            AssocCall { type_fq: &type_fq, method: &setter, receiver: Some(recv), expected: None, first_arg: None },
             std::slice::from_ref(&value),
             &[value_loc],
         )
@@ -14031,7 +14132,7 @@ impl Checker {
             heap,
             interp,
             env,
-            AssocCall { type_fq: &type_fq, method: setter, receiver: Some(recv), expected: None },
+            AssocCall { type_fq: &type_fq, method: setter, receiver: Some(recv), expected: None, first_arg: None },
             &call_args,
             &arg_locs,
         )
@@ -15506,7 +15607,7 @@ impl Checker {
             .map(|item| {
                 let kind = match &item.ty {
                     t if t.is_int_family() => ArgKind::Integer,
-                    Type::Ratio | Type::F32 | Type::F64 => ArgKind::Real,
+                    Type::Ratio | Type::Rational | Type::F32 | Type::F64 => ArgKind::Real,
                     Type::Char => ArgKind::Char,
                     Type::Bool => ArgKind::Bool,
                     Type::Str => ArgKind::Str,
@@ -18147,6 +18248,12 @@ fn as_conversion(from: &Type, to: &Type) -> Option<(&'static str, Option<&'stati
         (Char, Int) => Some(("char->int", None)),
         (Ratio, F64) => Some(("ratio->float", None)),
         (Ratio, Int) => Some(("ratio->int", None)),
+        (Ratio, Rational) => Some(("ratio->rational", None)),
+        // `as int` truncates, as `ratio`'s does; `try-as int` answers whether
+        // the value is an integer (CL's `integerp`).
+        (Rational, Int) => Some(("rational->int", Some("try-rational->int"))),
+        (Rational, Ratio) => Some(("rational->ratio", None)),
+        (Rational, F64) => Some(("rational->float", None)),
         _ => None,
     }
 }

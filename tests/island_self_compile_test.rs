@@ -111,6 +111,7 @@ const ISLAND_DEFUNS: &[&str] = &[
     "ratio-cmp-call",
     "ratio-binop-call",
     "ratio-unary-call",
+    "rational-native-method?",
     "raising-binop-call",
     "raising-int-binop-call",
     "sexpr-list-length",

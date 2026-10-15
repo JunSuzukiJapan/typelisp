@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Premiers pas
 
 En partant de l'évaluation d'expressions dans la REPL, ce chapitre aborde dans l'ordre les fonctions, les
@@ -46,13 +46,14 @@ Les nombres sont de ces sortes :
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` sur deux entiers donne un entier dont la partie fractionnaire est supprimée (il ne produit pas de fraction
-comme le fait Common Lisp). Pour le reste, utilisez `(mod 7 2)`.
+`/` sur deux entiers donne une fraction quand la division ne tombe pas juste, comme en Common Lisp.
+Pour l'entier sans la partie fractionnaire, utilisez `(truncate 7 2)` (`3`), et `(mod 7 2)` pour le
+reste.
 
 Les valeurs booléennes sont `true` et `false`.
 

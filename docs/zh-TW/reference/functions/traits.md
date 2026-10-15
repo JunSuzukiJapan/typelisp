@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 標準 trait
 
 用於迭代、比較與算術的 trait。其他標準 trait 在各自的章節中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`
@@ -62,7 +62,7 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -70,7 +70,7 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; 距離一律是 int（與 ash 相同）
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; 沒有方法，6 個的組合
+(deftrait Number (Add Sub Mul Rem Ord))                   ; 沒有方法，五個的組合
 ```
 
 **在約束內可以用運算子書寫。** 當接收者是由 `where` 約束的型別變數時，運算子會被解讀為 trait 方法（`+`→`add`、`-`→`sub`、`*`→`mul`、
@@ -85,3 +85,9 @@ trait 端的方法名稱不是 `+`，是因為 `+` 是內建方法名稱，`impl
 為 `(- (- x x) x)`，所以只需 `Sub`。
 
 已實作：`Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` 用於所有數值型別（`complex` 除外），`Bits` 用於所有整數型別與 `int`。
+
+
+**`Div` 用關聯型別 `Output` 表明結果型別。** 與 CL 一樣，整數之間的 `/` 是 `rational`，因此 `int` 的
+`Output` 是 `rational`，其他數值型別則是自身。由於 `Output` 因型別而異，`Number` 不包含 `Div`（繼承
+列表必須固定所有關聯型別）。做除法的泛型函式用 `(where (Div T (Output R)))` 接收結果型別，或者用
+`(where (Div T (Output T)))` 要求在 `T` 內封閉的除法（此時不能傳 `int`）。

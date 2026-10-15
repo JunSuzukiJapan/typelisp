@@ -220,8 +220,8 @@ fn a_blanket_impls_body_may_call_a_sibling_method_on_self() {
            (halved ((self Self)) int)
            (twice-halved ((self Self)) int))
          (impl<T> Halved T (where (Ranked T))
-           (halved ((self Self)) int (/ (rank self) 2))
-           (twice-halved ((self Self)) int (/ (halved self) 2)))
+           (halved ((self Self)) int (truncate (rank self) 2))
+           (twice-halved ((self Self)) int (truncate (halved self) 2)))
          (twice-halved (make-instance 'cell :n 20))"
     );
     assert_eq!(eval_ok(&src), Value::Int(5));

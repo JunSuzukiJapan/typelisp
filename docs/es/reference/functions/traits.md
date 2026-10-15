@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Traits estándar
 
 Los traits para la iteración, la comparación y la aritmética. Los demás traits estándar están en sus propios
@@ -78,7 +78,7 @@ concretos usa los operadores incorporados** ([Números](numbers.md)) y no pasa p
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -86,7 +86,7 @@ concretos usa los operadores incorporados** ([Números](numbers.md)) y no pasa p
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; la distancia es siempre int (como en ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; sin métodos; una combinación de seis
+(deftrait Number (Add Sub Mul Rem Ord))                   ; sin métodos; una combinación de cinco
 ```
 
 **Dentro de una restricción se pueden escribir operadores.** Cuando el receptor es una variable de tipo
@@ -104,3 +104,11 @@ que basta con `Sub`.
 
 Implementados para: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` en todos los tipos numéricos (excepto
 `complex`), y `Bits` en todos los tipos enteros y en `int`.
+
+
+**`Div` nombra su tipo de resultado con el tipo asociado `Output`.** Como en CL, `/` sobre dos enteros
+es un `rational`, así que el `Output` de `int` es `rational` y el de cualquier otro tipo numérico es el
+propio tipo. Como `Output` difiere según el tipo, `Number` no incluye `Div` (una lista de supertraits
+debe fijar cada tipo asociado). Una función genérica que divide recibe el tipo del resultado con
+`(where (Div T (Output R)))`, o pide una división cerrada en `T` con `(where (Div T (Output T)))`
+(entonces no se puede pasar un `int`).

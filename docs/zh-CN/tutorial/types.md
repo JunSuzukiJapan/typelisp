@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/types.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 类型基础
 
 typelisp 是静态类型语言。本章介绍类型检查能为你做什么、常用的类型（`Option`、`Result`、结构体、枚举）以及
@@ -50,7 +50,7 @@ typelisp 中没有 `nil`。"可能没有值"用 `Option<T>` 类型表示。`Opti
 (defun safe-div ((a int) (b int)) Option<int>
   (if (= b 0)
       (Option::none)
-      (Option::some (/ a b))))
+      (Option::some (truncate a b))))
 ```
 
 ```

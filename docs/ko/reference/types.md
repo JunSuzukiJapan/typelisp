@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 타입 목록
 
 typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타입 쓰는 법은
@@ -13,6 +13,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 | `u8` `u16` `u32` | 부호 없는 고정 폭 정수 | 위와 같음 |
 | `f32` `f64` | IEEE-754 부동소수점 수. 소수 리터럴의 기본은 `f64` | [수 4장](functions/numbers.md#4-부동소수점-수f64--f32) |
 | `ratio` | 기약 분수인 유리수 | [수 5장](functions/numbers.md#5-유리수-ratio) |
+| `rational` | `int` 또는 `ratio`(CL의 rational). 정수끼리의 `/`의 결과 타입 | [수 5장](functions/numbers.md#5-유리수-ratio) |
 | `bool` | `true` / `false` | [수 7장](functions/numbers.md#7-진리값) |
 | `char` | Unicode 스칼라 값 | [문자](functions/collections.md#2-문자-char) |
 | `string` | 변경할 수 없는 문자열 | [문자열](functions/collections.md#1-문자열-string) |
@@ -100,10 +101,10 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 트레이트 | 구현하는 타입 | 자세히 |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord비교) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | 위와 같음 |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time`와 모든 내장 오류 타입 | [print-object](functions/printing.md#5-print-object타입별-출력-표현) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord비교) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | 위와 같음 |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time`와 모든 내장 오류 타입 | [print-object](functions/printing.md#5-print-object타입별-출력-표현) |
 
 `cons-cell<A,B>`와 튜플 `#{..}`의 트레이트, 컬렉션의 `print-object`는 요소 타입이 그 트레이트를 구현할 때 쓸 수 있다.
 
@@ -111,7 +112,7 @@ typelisp에 있는 타입과 각 타입이 구현하는 표준 트레이트. 타
 
 | 트레이트 | 구현하는 타입 |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 자세한 내용은 [산술 트레이트](functions/traits.md#3-산술-트레이트add--sub--mul--div--rem--bits--number)에 있다.

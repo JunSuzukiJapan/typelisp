@@ -274,7 +274,7 @@ fn setf_finds_a_setter_of_one_instantiation() {
 (defstruct Box<T> (v T))
 (impl Box<int>
   (pub doubled (self) int (* 2 self::v))
-  (pub set-doubled (self (n int)) int (progn (setf self::v (/ n 2)) n)))
+  (pub set-doubled (self (n int)) int (progn (setf self::v (truncate n 2)) n)))
 "##,
         "(let ((b (make-instance 'Box<int> :v 1))) (progn (setf (doubled b) 10) (format false \"~a\" (doubled b))))",
         "10",

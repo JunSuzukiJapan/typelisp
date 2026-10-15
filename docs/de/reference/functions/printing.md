@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Ausgabe
 
 `print`/`println`/`format`, die einstelligen Ausgabefunktionen, der Pretty Printer, `print-object` und die
@@ -28,7 +28,7 @@ ist, ist ein Typfehler.
 **Die Steuerzeichenkette muss ein Literal sein** (dieselbe Einschränkung wie bei Rusts `format!`). Die
 Direktiven darin bestimmen, wie viele Argumente welcher Typen genommen werden, daher lässt sich eine zur
 Laufzeit gebaute Zeichenkette bei der Prüfung nicht lesen. Weil sie ein Literal sein muss, **werden Anzahl und
-Typen der Argumente bei der Prüfung kontrolliert**: `(println "~d" "x")` und `(println "~a ~a" 1)` sind Fehler
+Typen der Argumente bei der Prüfung kontrolliert**: `(println "~c" 1)` und `(println "~a ~a" 1)` sind Fehler
 bei der Prüfung. Eine falsch geschriebene Direktive, ein nicht geschlossenes `~(` und ein `~/name/`, dessen
 Aufrufziel sich nicht bestimmen lässt, sind ebenfalls Fehler bei der Prüfung. Die Prüfregeln stehen in
 [format.md](format.md#1-wie-man-direktiven-schreibt). Um eine selbst gebaute Zeichenkette auszugeben, erzeugt

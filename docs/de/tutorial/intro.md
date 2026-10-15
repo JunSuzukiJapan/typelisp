@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Erste Schritte
 
 Ausgehend vom Auswerten von Ausdrücken in der REPL behandelt dieses Kapitel der Reihe nach Funktionen,
@@ -46,13 +46,14 @@ Zahlen gibt es in diesen Arten:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` auf zwei Ganzzahlen ergibt eine Ganzzahl, bei der der Nachkommateil wegfällt (es entsteht kein Bruch wie
-in Common Lisp). Für den Rest verwendet man `(mod 7 2)`.
+`/` auf zwei ganzen Zahlen ergibt wie in Common Lisp einen Bruch, wenn die Division nicht aufgeht.
+Für die ganze Zahl ohne Nachkommaanteil verwenden Sie `(truncate 7 2)` (`3`), für den Rest
+`(mod 7 2)`.
 
 Die Wahrheitswerte sind `true` und `false`.
 

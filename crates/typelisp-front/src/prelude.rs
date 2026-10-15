@@ -573,6 +573,9 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (impl ratio
   (print (self) () (print "~a" self))
   (println (self) () (println "~a" self)))
+(impl rational
+  (print (self) () (print "~a" self))
+  (println (self) () (println "~a" self)))
 
 ;; CL's numeric catalog beyond the primitive machine operations
 ;; (`+`/`-`/`*`/`/`/`mod`/comparisons/conversions, which are Rust builtins in
@@ -584,8 +587,9 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; the same `abs`/`signum`/... name overloads across `i32`/`int`/`f64`/
 ;; `ratio`; each is built only from that type's primitives. `mod`/`rem` follow
 ;; CL: `mod` is floored (integer `mod` is a builtin; `f64`/`ratio` `mod` here
-;; is `a - b*floor(a/b)`), `rem` truncated (`a - b*truncate(a/b)`, i.e.
-;; `a - b*(a/b)` where `/` already truncates toward zero for integers).
+;; is `a - b*floor(a/b)`), `rem` truncated (`a - b*truncate(a/b)` — for the
+;; fixed widths `a - b*(a/b)`, whose `/` truncates toward zero, and for `int`
+;; the builtin `truncate`, since its `/` is CL's rational one).
 ;;
 ;; Two checker quirks shape how these are spelled: (1) a binary op dispatches on
 ;; its *first* argument's type, and a bare integer literal there defaults to
@@ -620,13 +624,13 @@ pub const SOURCE_TEMPLATE: &str = r##"
   (abs (self) int
     (if (< self 0) (- 0 self) self))
   (signum (self) int
-    (if (= self 0) self (/ self (abs self))))
-  (rem (self (b int)) int (- self (* b (/ self b))))
+    (if (= self 0) self (truncate self (abs self))))
+  (rem (self (b int)) int (- self (* b (truncate self b))))
   (gcd (self (b int)) int
     (if (= b 0) (abs self) (gcd b (mod self b))))
   (lcm (self (b int)) int
     (if (or (= self 0) (= b 0)) 0
-        (/ (abs (* self b)) (gcd self b)))))
+        (truncate (abs (* self b)) (gcd self b)))))
 ;; Exponentiation by squaring (log-depth recursion — a linear `e`-deep
 ;; recursion overflows the interpreter's tree-walking stack for large `e`).
 (impl int
@@ -635,7 +639,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
         (panic "expt: negative exponent has no int result (it would be a ratio)")
         (if (= e 0) 1
             (if (= (mod e 2) 0)
-                (let ((h (expt self (/ e 2)))) (* h h))
+                (let ((h (expt self (truncate e 2)))) (* h h))
                 (* self (expt self (- e 1))))))))
 
 ;; --- ratio --- (`ratio->int` truncates toward zero, so `(int->ratio
@@ -654,16 +658,17 @@ pub const SOURCE_TEMPLATE: &str = r##"
               (and (> r (int->ratio 0)) (< b (int->ratio 0))))
           (+ r b)
           r))))
+;; `expt` takes an `int` exponent, as `int`'s does: CL's `(expt 2/3 3)`.
+;; An integer exponent is the case CL answers exactly; a negative one takes
+;; the reciprocal. By squaring, for the same reason as `int`'s above.
 (module %internal (pub defun ratio-expt-int ((base ratio) (n int)) ratio
   (if (< n 0)
       (%internal::ratio-expt-int (/ (int->ratio 1) base) (- 0 n))
       (if (= n 0) (int->ratio 1)
-          (* base (%internal::ratio-expt-int base (- n 1)))))))
+          (let ((h (%internal::ratio-expt-int base (truncate n 2))))
+            (if (= (mod n 2) 0) (* h h) (* base (* h h))))))))
 (impl ratio
-  (expt (self (e ratio)) ratio
-    (if (= e (int->ratio (ratio->int e)))
-        (%internal::ratio-expt-int self (ratio->int e))
-        (panic "expt: ratio exponent must be integer-valued"))))
+  (expt (self (e int)) ratio (%internal::ratio-expt-int self e)))
 
 ;; CL's numeric predicates (`zerop`/`plusp`/`minusp`/`evenp`/`oddp`) and
 ;; increment/decrement shorthands (`1+`/`1-`), built from the primitives
@@ -708,6 +713,22 @@ pub const SOURCE_TEMPLATE: &str = r##"
   (minusp (self) bool (< self (int->ratio 0)))
   (1+ (self) ratio (+ self (int->ratio 1)))
   (1- (self) ratio (- self (int->ratio 1))))
+;; --- rational --- CL's `rational`: an `int` or a `ratio`. A method that is
+;; more than a comparison is `ratio`'s on the value as a `ratio`
+;; (`rational->ratio`), and the `rational` return type normalizes the answer
+;; back (an integer-valued one becomes the `int`). A bare `0`/`1` needs no
+;; spelling here: an `int` reaches a `rational` parameter as it is.
+(impl rational
+  (abs (self) rational (abs (rational->ratio self)))
+  (signum (self) rational (signum (rational->ratio self)))
+  (rem (self (b rational)) rational (rem (rational->ratio self) (rational->ratio b)))
+  (mod (self (b rational)) rational (mod (rational->ratio self) (rational->ratio b)))
+  (expt (self (e int)) rational (expt (rational->ratio self) e))
+  (zerop (self) bool (= self 0))
+  (plusp (self) bool (> self 0))
+  (minusp (self) bool (< self 0))
+  (1+ (self) rational (+ self 1))
+  (1- (self) rational (- self 1)))
 
 ;; `pi`: CL's `long-float` circle-ratio constant, `f64`-valued here (this
 ;; language's only floating-point type).
@@ -1802,17 +1823,16 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `fq+1` is always the correct other candidate); `round-div` picks whichever
 ;; of `fq`/`fq+1` is nearer by comparing `|2*remainder|` to `|b|` (sign-
 ;; agnostic since `floor-div`'s remainder always shares `b`'s sign), breaking
-;; an exact tie toward the even quotient (CL's round-half-to-even — unlike
-;; this file's unary `round`, whose tie-breaking rides on Rust's `f64::round`
-;; and isn't relied on here); `truncate-div` doesn't share `floor-div`'s
+;; an exact tie toward the even quotient (CL's round-half-to-even, as the
+;; unary `round` also does); `truncate-div` doesn't share `floor-div`'s
 ;; helper since it needs the opposite (truncated) remainder, already
 ;; available as `rem`.
 ;; --- int ---
 (impl int
   (floor-div (self (b int)) cons-cell<int,int>
-    (let ((r (mod self b))) (cons (/ (- self r) b) r)))
+    (let ((r (mod self b))) (cons (truncate (- self r) b) r)))
   (truncate-div (self (b int)) cons-cell<int,int>
-    (cons (/ self b) (rem self b)))
+    (cons (truncate self b) (rem self b)))
   (ceiling-div (self (b int)) cons-cell<int,int>
     (let ((fd (floor-div self b)))
       (if (= (cdr fd) 0) fd
@@ -1863,6 +1883,70 @@ pub const SOURCE_TEMPLATE: &str = r##"
               (if (> afr2 ab) (let ((q (+ fq 1.0))) (cons q (- self (* q b))))
                   (if (= (mod fq 2.0) 0.0) fd
                       (let ((q (+ fq 1.0))) (cons q (- self (* q b))))))))))))
+
+;; --- ratio --- CL's rounding of a rational: the unary `floor`/`ceiling`/
+;; `truncate`/`round` answer the integer (CL's first value), the `*-div`
+;; forms the integer quotient and the `ratio` remainder, and the `f`-prefixed
+;; ones the same integer as an `f64`. Every one is exact: the quotient comes
+;; from `ratio->int` (truncation toward zero), never from a float, and
+;; `round` breaks a tie toward the even integer as CL does.
+(impl ratio
+  (truncate (self) int (ratio->int self))
+  (floor (self) int
+    (let ((q (ratio->int self))) (if (< self (int->ratio q)) (- q 1) q)))
+  (ceiling (self) int
+    (let ((q (ratio->int self))) (if (> self (int->ratio q)) (+ q 1) q)))
+  (round (self) int
+    (let* ((q (floor self)) (twice (* (- self (int->ratio q)) (int->ratio 2))))
+      (if (< twice (int->ratio 1)) q
+          (if (> twice (int->ratio 1)) (+ q 1)
+              (if (= (mod q 2) 0) q (+ q 1))))))
+  (ffloor (self) f64 (int->float (floor self)))
+  (fceiling (self) f64 (int->float (ceiling self)))
+  (ftruncate (self) f64 (int->float (truncate self)))
+  (fround (self) f64 (int->float (round self)))
+  (floor-div (self (b ratio)) cons-cell<int,ratio>
+    (let ((q (floor (/ self b)))) (cons q (- self (* b (int->ratio q))))))
+  (ceiling-div (self (b ratio)) cons-cell<int,ratio>
+    (let ((q (ceiling (/ self b)))) (cons q (- self (* b (int->ratio q))))))
+  (truncate-div (self (b ratio)) cons-cell<int,ratio>
+    (let ((q (truncate (/ self b)))) (cons q (- self (* b (int->ratio q))))))
+  (round-div (self (b ratio)) cons-cell<int,ratio>
+    (let ((q (round (/ self b)))) (cons q (- self (* b (int->ratio q)))))))
+;; --- rational --- the same, on the value as a `ratio`.
+(impl rational
+  (truncate (self) int (rational->int self))
+  (floor (self) int (floor (rational->ratio self)))
+  (ceiling (self) int (ceiling (rational->ratio self)))
+  (round (self) int (round (rational->ratio self)))
+  (ffloor (self) f64 (ffloor (rational->ratio self)))
+  (fceiling (self) f64 (fceiling (rational->ratio self)))
+  (ftruncate (self) f64 (ftruncate (rational->ratio self)))
+  (fround (self) f64 (fround (rational->ratio self)))
+  (floor-div (self (b rational)) cons-cell<int,rational>
+    (let ((q (floor (/ self b)))) (cons q (- self (* b q)))))
+  (ceiling-div (self (b rational)) cons-cell<int,rational>
+    (let ((q (ceiling (/ self b)))) (cons q (- self (* b q)))))
+  (truncate-div (self (b rational)) cons-cell<int,rational>
+    (let ((q (truncate (/ self b)))) (cons q (- self (* b q)))))
+  (round-div (self (b rational)) cons-cell<int,rational>
+    (let ((q (round (/ self b)))) (cons q (- self (* b q))))))
+;; --- int --- CL's two-argument `floor`/`ceiling`/`round` (and `truncate`,
+;; the builtin they are built on): the integer quotient, CL's first value.
+;; `/` on two `int`s is CL's `/`, a `rational`. The divisor is required — a
+;; method's name is one signature, and `truncate`'s is the builtin's.
+;; `floor` subtracts the floored remainder first, so the division is exact;
+;; `ceiling` is one more unless that division was exact; `round` takes the
+;; nearer of the two, the even one on a tie, as CL does.
+(impl int
+  (floor (self (b int)) int (truncate (- self (mod self b)) b))
+  (ceiling (self (b int)) int
+    (let ((f (floor self b))) (if (= (* f b) self) f (+ f 1))))
+  (round (self (b int)) int
+    (let* ((f (floor self b)) (r2 (abs (* (- self (* f b)) 2))) (ab (abs b)))
+      (if (< r2 ab) f
+          (if (> r2 ab) (+ f 1)
+              (if (= (mod f 2) 0) f (+ f 1)))))))
 
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
@@ -1967,6 +2051,7 @@ user-visible capacity."
 (impl Eq f64    (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq int (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq ratio  (equals ((self Self) (other Self)) bool (= self other)))
+(impl Eq rational (equals ((self Self) (other Self)) bool (= self other)))
 (impl Eq bool   (equals ((self Self) (other Self)) bool (equal self other)))
 (impl Eq char   (equals ((self Self) (other Self)) bool (equal self other)))
 (impl Eq string (equals ((self Self) (other Self)) bool (equal self other)))
@@ -2004,6 +2089,7 @@ user-visible capacity."
 (impl Ord f64    (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord int (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord ratio  (less ((self Self) (other Self)) bool (< self other)))
+(impl Ord rational (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord char   (less ((self Self) (other Self)) bool (< self other)))
 (impl Ord string (less ((self Self) (other Self)) bool (< self other)))
 
@@ -2084,6 +2170,10 @@ user-visible capacity."
 (impl Hash char   (sxhash ((self Self)) int (char->int self)))
 (impl Hash string (sxhash ((self Self)) int (sxhash-string self)))
 (impl Hash symbol (sxhash ((self Self)) int (sxhash-string (symbol->string self))))
+(impl Hash ratio  (sxhash ((self Self)) int
+  (logand (+ (* 31 (sxhash (numerator self))) (sxhash (denominator self))) *sxhash-mask*)))
+(impl Hash rational (sxhash ((self Self)) int
+  (logand (+ (* 31 (sxhash (numerator self))) (sxhash (denominator self))) *sxhash-mask*)))
 
 ;; ---------------------------------------------------------------------------
 ;; `HashTable<K,V>`'s lookup, insert and delete — cl-parity-plan.md Phase 6a.
@@ -2163,8 +2253,12 @@ user-visible capacity."
   (sub ((self Self) (other Self)) Self))
 (deftrait Mul ()
   (mul ((self Self) (other Self)) Self))
+;; `Div` names its result type: CL's `/` on two integers is a `rational`, so
+;; `int`'s `Output` is `rational` while every other number divides into
+;; itself. The others name it `Self`'s own type.
 (deftrait Div ()
-  (div ((self Self) (other Self)) Self))
+  (type Output)
+  (div ((self Self) (other Self)) Output))
 ;; `remainder`, not `rem`: `rem` is already a method on every numeric type
 ;; (above), and a trait may not declare a name its implementors already
 ;; define. The impls delegate to it, and `(rem a b)` on a bounded type
@@ -2188,8 +2282,11 @@ user-visible capacity."
   (shift ((self Self) (count int)) Self))
 ;; What "a number" means as a bound: arithmetic and an ordering, with no
 ;; methods of its own — a name for the conjunction, so `(where (Number T))`
-;; says in one bound what six would.
-(deftrait Number (Add Sub Mul Div Rem Ord))
+;; says in one bound what five would. `Div` is not among them: its `Output`
+;; differs between the numbers (an `int` divides into a `rational`), and a
+;; supertrait must pin every associated type. Generic code that divides adds
+;; `(Div T)`, or `(Div T (Output T))` to divide within `T`.
+(deftrait Number (Add Sub Mul Rem Ord))
 
 ;; `mod`/`rem` for the widths that did not have them. Same bodies the
 ;; `i32` (integer) and `f64` (float) methods above carry — floored for
@@ -2220,6 +2317,7 @@ user-visible capacity."
 (impl Add f32    (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add int (add ((self Self) (other Self)) Self (+ self other)))
 (impl Add ratio  (add ((self Self) (other Self)) Self (+ self other)))
+(impl Add rational (add ((self Self) (other Self)) Self (+ self other)))
 
 (impl Sub i32    (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub i8     (sub ((self Self) (other Self)) Self (- self other)))
@@ -2231,6 +2329,7 @@ user-visible capacity."
 (impl Sub f32    (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub int (sub ((self Self) (other Self)) Self (- self other)))
 (impl Sub ratio  (sub ((self Self) (other Self)) Self (- self other)))
+(impl Sub rational (sub ((self Self) (other Self)) Self (- self other)))
 
 (impl Mul i32    (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul i8     (mul ((self Self) (other Self)) Self (* self other)))
@@ -2242,17 +2341,19 @@ user-visible capacity."
 (impl Mul f32    (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul int (mul ((self Self) (other Self)) Self (* self other)))
 (impl Mul ratio  (mul ((self Self) (other Self)) Self (* self other)))
+(impl Mul rational (mul ((self Self) (other Self)) Self (* self other)))
 
-(impl Div i32    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div i8     (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div i16    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div u8     (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div u16    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div u32    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div f64    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div f32    (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div int (div ((self Self) (other Self)) Self (/ self other)))
-(impl Div ratio  (div ((self Self) (other Self)) Self (/ self other)))
+(impl Div i32    (type Output i32) (div ((self Self) (other Self)) i32 (/ self other)))
+(impl Div i8     (type Output i8) (div ((self Self) (other Self)) i8 (/ self other)))
+(impl Div i16    (type Output i16) (div ((self Self) (other Self)) i16 (/ self other)))
+(impl Div u8     (type Output u8) (div ((self Self) (other Self)) u8 (/ self other)))
+(impl Div u16    (type Output u16) (div ((self Self) (other Self)) u16 (/ self other)))
+(impl Div u32    (type Output u32) (div ((self Self) (other Self)) u32 (/ self other)))
+(impl Div f64    (type Output f64) (div ((self Self) (other Self)) f64 (/ self other)))
+(impl Div f32    (type Output f32) (div ((self Self) (other Self)) f32 (/ self other)))
+(impl Div int    (type Output rational) (div ((self Self) (other Self)) rational (/ self other)))
+(impl Div ratio  (type Output ratio) (div ((self Self) (other Self)) ratio (/ self other)))
+(impl Div rational (type Output rational) (div ((self Self) (other Self)) rational (/ self other)))
 
 (impl Rem i32    (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem i8     (remainder ((self Self) (other Self)) Self (rem self other)))
@@ -2264,6 +2365,7 @@ user-visible capacity."
 (impl Rem f32    (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem int (remainder ((self Self) (other Self)) Self (rem self other)))
 (impl Rem ratio  (remainder ((self Self) (other Self)) Self (rem self other)))
+(impl Rem rational (remainder ((self Self) (other Self)) Self (rem self other)))
 
 (impl Bits i32
   (bit-and ((self Self) (other Self)) Self (logand self other))
@@ -2309,7 +2411,7 @@ user-visible capacity."
   (shift ((self Self) (count int)) Self (ash self count)))
 
 ;; `Number` has no methods, so its impls are the bare conjunction: this
-;; type has all six.
+;; type has all five.
 (impl Number i32)
 (impl Number i8)
 (impl Number i16)
@@ -2320,6 +2422,7 @@ user-visible capacity."
 (impl Number f32)
 (impl Number int)
 (impl Number ratio)
+(impl Number rational)
 
 ;; CL's byte-specifier mini-API (CLHS 22.1.3): `(byte size position)` builds
 ;; an opaque specifier consumed by `ldb`/`dpb`/`mask-field`/`deposit-field`/
@@ -3398,6 +3501,85 @@ user-visible capacity."
   (fround (self) f64 (round self))
   (ftruncate (self) f64 (truncate self)))
 
+;; CL's `float`/`rational`, and `numerator`/`denominator` on an integer (CL's
+;; integer is a rational whose denominator is 1). `float` answers `f64` for a
+;; rational and the float itself for a float; `rational` answers a `rational`
+;; — exactly (`float->ratio`) for a float, the value itself for a rational —
+;; and so does `rationalize` of a rational.
+(impl int
+  (numerator (self) int self)
+  (denominator (self) int 1)
+  (float (self) f64 (int->float self))
+  (rational (self) rational self)
+  (rationalize (self) rational self))
+(impl ratio
+  (float (self) f64 (ratio->float self))
+  (rational (self) rational self)
+  (rationalize (self) rational self))
+(impl rational
+  (float (self) f64 (rational->float self))
+  (rational (self) rational self)
+  (rationalize (self) rational self))
+(impl f64
+  (float (self) f64 self)
+  (rational (self) rational (float->ratio self)))
+(impl f32
+  (float (self) f32 self)
+  (rational (self) rational (float->ratio self)))
+
+;; The irrational functions of a rational (an `int` included) answer a
+;; float, as in CL (whose `(sqrt 1/4)` is `0.5` and `(sqrt 4)` is `2.0`): the
+;; argument is converted to `f64` and the `f64` function does the rest, so a
+;; negative argument to `sqrt`/`log` gives what the `f64` one gives.
+(impl int
+  (sqrt (self) f64 (sqrt (int->float self)))
+  (exp (self) f64 (exp (int->float self)))
+  (log (self) f64 (log (int->float self)))
+  (sin (self) f64 (sin (int->float self)))
+  (cos (self) f64 (cos (int->float self)))
+  (tan (self) f64 (tan (int->float self)))
+  (asin (self) f64 (asin (int->float self)))
+  (acos (self) f64 (acos (int->float self)))
+  (atan (self) f64 (atan (int->float self)))
+  (sinh (self) f64 (sinh (int->float self)))
+  (cosh (self) f64 (cosh (int->float self)))
+  (tanh (self) f64 (tanh (int->float self)))
+  (asinh (self) f64 (asinh (int->float self)))
+  (acosh (self) f64 (acosh (int->float self)))
+  (atanh (self) f64 (atanh (int->float self))))
+(impl ratio
+  (sqrt (self) f64 (sqrt (ratio->float self)))
+  (exp (self) f64 (exp (ratio->float self)))
+  (log (self) f64 (log (ratio->float self)))
+  (sin (self) f64 (sin (ratio->float self)))
+  (cos (self) f64 (cos (ratio->float self)))
+  (tan (self) f64 (tan (ratio->float self)))
+  (asin (self) f64 (asin (ratio->float self)))
+  (acos (self) f64 (acos (ratio->float self)))
+  (atan (self) f64 (atan (ratio->float self)))
+  (sinh (self) f64 (sinh (ratio->float self)))
+  (cosh (self) f64 (cosh (ratio->float self)))
+  (tanh (self) f64 (tanh (ratio->float self)))
+  (asinh (self) f64 (asinh (ratio->float self)))
+  (acosh (self) f64 (acosh (ratio->float self)))
+  (atanh (self) f64 (atanh (ratio->float self))))
+(impl rational
+  (sqrt (self) f64 (sqrt (rational->float self)))
+  (exp (self) f64 (exp (rational->float self)))
+  (log (self) f64 (log (rational->float self)))
+  (sin (self) f64 (sin (rational->float self)))
+  (cos (self) f64 (cos (rational->float self)))
+  (tan (self) f64 (tan (rational->float self)))
+  (asin (self) f64 (asin (rational->float self)))
+  (acos (self) f64 (acos (rational->float self)))
+  (atan (self) f64 (atan (rational->float self)))
+  (sinh (self) f64 (sinh (rational->float self)))
+  (cosh (self) f64 (cosh (rational->float self)))
+  (tanh (self) f64 (tanh (rational->float self)))
+  (asinh (self) f64 (asinh (rational->float self)))
+  (acosh (self) f64 (acosh (rational->float self)))
+  (atanh (self) f64 (atanh (rational->float self))))
+
 ;; CL's `isqrt`: the greatest integer whose square does not exceed `self`.
 ;; Integer Newton, keeping the *previous* estimate and stopping when the next
 ;; one stops decreasing — testing "unchanged" instead loops forever on the
@@ -3408,9 +3590,9 @@ user-visible capacity."
         (panic "isqrt: negative argument")
         (if (< self 2)
             self
-            (let ((g self) (k (/ (+ self 1) 2)))
+            (let ((g self) (k (truncate (+ self 1) 2)))
               (progn
-                (while (< k g) (progn (setf g k) (setf k (/ (+ g (/ self g)) 2)) ()))
+                (while (< k g) (progn (setf g k) (setf k (truncate (+ g (truncate self g)) 2)) ()))
                 g))))))
 (impl i32
   (isqrt (self) i32
@@ -3497,7 +3679,7 @@ user-visible capacity."
 ;; integers are exact, and `float->ratio` on an integral float is that integer
 ;; over 1 — which is how the answer is assembled at the end.
 (impl f64
-  (rationalize (self) ratio
+  (rationalize (self) rational
     (let ((h1 1.0) (h0 0.0) (k1 0.0) (k0 1.0) (b self)
           (out (int->ratio 0)) (going true) (guard 0))
       (progn
@@ -3697,6 +3879,7 @@ user-visible capacity."
 (impl print-object f64     (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object int  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object ratio   (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
+(impl print-object rational (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object bool    (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object char    (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
 (impl print-object string  (print-object ((self Self) (escape bool)) string (if escape (format false "~s" self) (format false "~a" self))))
@@ -3894,7 +4077,7 @@ user-visible capacity."
 (module %internal (pub defun sorted-position<K> ((ks Vector<K>) (k K)) int (where (Ord K))
   (let ((lo 0) (hi (len ks)))
     (while (< lo hi)
-      (let ((mid (/ (+ lo hi) 2)))
+      (let ((mid (truncate (+ lo hi) 2)))
         (if (less (get ks mid) k) (setf lo (+ mid 1)) (setf hi mid))))
     lo)))
 (module %internal (pub defun vector-insert-at<T> ((v Vector<T>) (i int) (x T)) ()
@@ -3963,7 +4146,7 @@ user-visible capacity."
   (pub push-front (self (x T)) () (push self::before x))
   (pub push-back (self (x T)) () (push self::after x)))
 (module %internal (pub defun deque-refill<T> ((into Vector<T>) (from Vector<T>)) ()
-  (let ((n (len from)) (h (/ (+ (len from) 1) 2)) (rest (the Vector<T> (Vector::new))))
+  (let ((n (len from)) (h (truncate (+ (len from) 1) 2)) (rest (the Vector<T> (Vector::new))))
     (let ((i (- h 1)))
       (while (>= i 0) (push into (get from i)) (setf i (- i 1))))
     (let ((i h)) (while (< i n) (push rest (get from i)) (setf i (+ i 1))))
@@ -6272,7 +6455,7 @@ user-visible capacity."
   (print-object ((self Self) (escape bool)) string
     (format false "#<heap-info ~d of ~d cells live (~d%), ~d free, ~d symbols, ~d strings, ~d boxes, ~d collections, ~a>"
             self::live self::capacity
-            (if (= self::capacity 0) 0 (/ (* self::live 100) self::capacity))
+            (if (= self::capacity 0) 0 (truncate (* self::live 100) self::capacity))
             self::free self::symbols self::strings self::boxes self::gc-count
             (if self::growable "growable" "fixed size"))))
 
@@ -6352,7 +6535,7 @@ user-visible capacity."
            (mag (abs offset)))
       (format false "#<decoded-time ~4,'0d-~2,'0d-~2,'0d ~2,'0d:~2,'0d:~2,'0d ~a~2,'0d:~2,'0d ~a~a>"
               self::year self::month self::date self::hour self::minute self::second
-              sign (/ mag 60) (mod mag 60)
+              sign (truncate mag 60) (mod mag 60)
               (ecase self::day-of-week
                 (0 "Mon") (1 "Tue") (2 "Wed") (3 "Thu") (4 "Fri") (5 "Sat") (6 "Sun"))
               (if self::daylight-p " dst" "")))))
@@ -6371,10 +6554,10 @@ user-visible capacity."
   (let ((y (if (<= month 2) (- year 1) year))
         (era 0) (yoe 0) (doy 0) (doe 0))
     (progn
-      (setf era (/ y 400))
+      (setf era (truncate y 400))
       (setf yoe (- y (* era 400)))
-      (setf doy (+ (/ (+ (* 153 (+ month (if (> month 2) -3 9))) 2) 5) (- day 1)))
-      (setf doe (- (+ (* yoe 365) (/ yoe 4) doy) (/ yoe 100)))
+      (setf doy (+ (truncate (+ (* 153 (+ month (if (> month 2) -3 9))) 2) 5) (- day 1)))
+      (setf doe (- (+ (* yoe 365) (truncate yoe 4) doy) (truncate yoe 100)))
       ;; `- 719468` lands on the Unix epoch; `+ 25567` moves from there to
       ;; CL's, which is 25567 days earlier.
       (+ (- (+ (* era 146097) doe) 719468) 25567)))))
@@ -6390,7 +6573,7 @@ user-visible capacity."
    disagree."
   (let ((s (+ second by)))
     (let ((sec (mod s 86400)))
-      (make-instance 'universal-time :day (+ day (/ (- s sec) 86400)) :second sec)))))
+      (make-instance 'universal-time :day (+ day (truncate (- s sec) 86400)) :second sec)))))
 
 (module %internal (pub defun local-zone-west ((day int) (second int)) int
   "Seconds west of Greenwich in the local zone, at that universal time.
@@ -6451,20 +6634,20 @@ user-visible capacity."
           ;; can fall outside `0..86400` in either direction and carry into
           ;; the day count -- the same flooring `ut-shift` explains.
           (setf secs (mod local 86400))
-          (setf days (+ ut::day (/ (- local secs) 86400)))
+          (setf days (+ ut::day (truncate (- local secs) 86400)))
           ;; `z` is days since 1970-01-01 shifted by 719468, which restarts
           ;; the era arithmetic below from a March-based year 0000-03-01.
           (setf z (+ (- days 25567) 719468))
-          (setf era (/ z 146097))
+          (setf era (truncate z 146097))
           (setf doe (- z (* era 146097)))
-          (setf yoe (/ (- (+ (- doe (/ doe 1460)) (/ doe 36524)) (/ doe 146096)) 365))
+          (setf yoe (truncate (- (+ (- doe (truncate doe 1460)) (truncate doe 36524)) (truncate doe 146096)) 365))
           (setf y (+ yoe (* era 400)))
-          (setf doy (- doe (- (+ (* 365 yoe) (/ yoe 4)) (/ yoe 100))))
-          (setf mp (/ (+ (* 5 doy) 2) 153))
-          (setf d (+ (- doy (/ (+ (* 153 mp) 2) 5)) 1))
+          (setf doy (- doe (- (+ (* 365 yoe) (truncate yoe 4)) (truncate yoe 100))))
+          (setf mp (truncate (+ (* 5 doy) 2) 153))
+          (setf d (+ (- doy (truncate (+ (* 153 mp) 2) 5)) 1))
           (setf m (+ mp (if (< mp 10) 3 -9)))
           (if (<= m 2) (progn (setf y (+ y 1)) ()) ())
-          (make-instance 'decoded-time :second (mod secs 60) :minute (mod (/ secs 60) 60) :hour (/ secs 3600)
+          (make-instance 'decoded-time :second (mod secs 60) :minute (mod (truncate secs 60) 60) :hour (truncate secs 3600)
                              :date d :month m :year y :day-of-week (mod days 7)
                              :daylight-p daylight
                              :zone (/ (int->float west) (int->float 3600))))))))
@@ -6721,7 +6904,7 @@ user-visible capacity."
         (let ((d (get dims k)))
           (progn
             (set out k (mod rest d))
-            (setf rest (/ rest d))))
+            (setf rest (truncate rest d))))
         (setf k (- k 1)))))))
 
 (module %internal (pub defun array-subs-in-bounds ((sub Vector<int>) (dims Vector<int>)) bool
@@ -6881,7 +7064,7 @@ user-visible capacity."
   (pub new ((n int)) BitVector
     (if (< n 0)
         (panic (format false "BitVector::new: length ~a is negative" n))
-        (make-instance 'BitVector :words (Vector::filled (/ (+ n 30) 31) (the int 0)) :nbits n)))
+        (make-instance 'BitVector :words (Vector::filled (truncate (+ n 30) 31) (the int 0)) :nbits n)))
   (pub len (self) int self::nbits))
 
 ;; CL's `bit` / `sbit` and their `setf`s are `get`/`set` here, the way every
@@ -6891,11 +7074,11 @@ user-visible capacity."
   (pub get (self (i int)) bool
     (if (or (< i 0) (>= i self::nbits))
         (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
-        (logbitp (get self::words (/ i 31)) (mod i 31))))
+        (logbitp (get self::words (truncate i 31)) (mod i 31))))
   (pub set (self (i int) (b bool)) ()
     (if (or (< i 0) (>= i self::nbits))
         (panic (format false "bit: index ~a is out of range for a bit vector of ~a" i self::nbits))
-        (let ((w (/ i 31)) (mask (ash (the int 1) (mod i 31))))
+        (let ((w (truncate i 31)) (mask (ash (the int 1) (mod i 31))))
           (set self::words w
                (if b
                    (logior (get self::words w) mask)

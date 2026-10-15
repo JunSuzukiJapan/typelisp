@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/numbers.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/numbers.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Sayılar
 
 Tamsayılar, kayan noktalı sayılar, rasyonel sayılar, karmaşık sayılar ve mantıksal değerler üzerindeki
@@ -109,7 +109,9 @@ sayısı vb.) `int` kabul eder, ancak bir fixnum'a sığmayan bir değer geçirm
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
 | `+` `-` `*` | `(op a b)` | `(int,int)→int` | Asla taşmaz (yükseltirler) |
-| `/` | `(/ a b)` | `(int,int)→int` | Sıfıra doğru keser. Sıfıra bölmede panic olur |
+| `/` | `(/ a b)` | `(int,int)→rational` | CL'nin `/`'i. Bölme tam ise tam sayı, değilse kesir (`(/ 6 3)` `2`, `(/ 7 2)` `7/2` olur). Sıfıra bölmede panic |
+| `truncate` | `(truncate a b)` | `(int,int)→int` | Sıfıra doğru kırpılmış bölüm (CL'deki ilk değer). Sıfıra bölmede panic |
+| `floor` `ceiling` `round` | `(op a b)` | `(int,int)→int` | Aşağı, yukarı ya da en yakın tam sayıya yuvarlanmış bölüm (tam yarıda çift tarafa). Bölen atlanamaz |
 | `mod` | `(mod a b)` | `(int,int)→int` | Taban bölmenin kalanı (işaret böleni izler) |
 | `max` `min` | `(op a b)` | `(int,int)→int` | |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(int,int)→bool` | |
@@ -150,17 +152,17 @@ sayısı vb.) `int` kabul eder, ancak bir fixnum'a sığmayan bir değer geçirm
 | `scale-float` | `(scale-float x n)` | `(f64,int)→f64` | `x * 2^n` |
 | `decode-float` | `(decode-float x)` | `f64→cons-cell<f64,int>` | Mantis (`[1/2,1)` aralığında, işaretsiz) ve üs. CL üç değer döndürür, ancak çoklu değerler yoktur; bu yüzden işaret `float-sign`'a bırakılmıştır |
 | `integer-decode-float` | `(integer-decode-float x)` | `f64→cons-cell<int,int>` | Tam 53 bitlik tamsayı mantisli aynı ayrıştırma. `mantissa * 2^exponent` tam olarak özgün değerdir |
-| `rationalize` | `(rationalize x)` | `f64→ratio` | **O kayan noktalı sayı olarak geri okunan en yalın rasyonel** (`(rationalize 0.1)`, `1/10`'dur). Tam ikili değer için `float->ratio` kullanın |
+| `rationalize` | `(rationalize x)` | `f64→rational` | **O kayan noktalı sayı olarak geri okunan en yalın rasyonel** (`(rationalize 0.1)`, `1/10`'dur). Tam ikili değer için `float->ratio` kullanın |
 
-**CL'den fark: `round` nasıl yuvarlar.** `round` (ve dolayısıyla `fround`/`round-div`) **sıfırdan
-uzağa** yuvarlar (`(round 2.5)` = `3.0`). CL **çifte** yuvarlar ve `2` verir.
+`round` (dolayısıyla `fround`/`round-div`) tam yarıyı CL gibi **çift tarafa** yuvarlar
+(`(round 2.5)` `2.0`, `(round 3.5)` `4.0` olur).
 
 ## 5. Rasyonel sayılar `ratio`
 
-CL uyumlu keyfi duyarlıklı rasyonel sayılar. Her zaman en sade biçimde ve pozitif paydayla tutulurlar ve
-heap'te ayrılırlar. Tamsayı türleri ya da `f64` ile örtük dönüşüm yoktur (açık bir dönüşüm metodu ya da
-`as`/`try-as` kullanın). Oran sabiti sözdizimi için
-[Sözdizimi Başvurusu](../syntax.md#1-sözcüksel-öğeler)'na bakın.
+CL uyumlu, keyfi hassasiyetli rasyonel sayılar. Her zaman sadeleştirilmiş ve pozitif paydalı tutulur,
+heap'te ayrılır. Bunları `int` ile karıştıran aritmetik `rational` verir (5.1). Sabit genişlikli tam
+sayılarla ve `f64` ile örtük dönüşüm yoktur (açık bir dönüşüm metodu ya da `as`/`try-as` kullanın).
+Kesir literallerinin sözdizimi için [Sözdizimi Başvurusu](../syntax.md#1-sözcüksel-öğeler).
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
@@ -169,7 +171,7 @@ heap'te ayrılırlar. Tamsayı türleri ya da `f64` ile örtük dönüşüm yokt
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Kesen bölmenin kalanı (CL'deki gibi; işaret bölüneni izler) |
 | `abs` | `(abs x)` | `ratio→ratio` | Mutlak değer |
 | `signum` | `(signum x)` | `ratio→ratio` | İşaret (`1`/`-1`/`0`'ı bir `ratio` olarak döndürür) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Üs alma. Üs, tamsayı değerli bir `ratio` olmalıdır (aksi halde panic olur). Negatif bir üs çarpmaya göre tersi verir |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Üs alma (kare alarak). Negatif üs tersini verir (`(expt 2/3 -2)` `9/4` olur) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | Büyük olan / küçük olan |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio`'nun bit işlemleri yoktur (CL'de bunlar yalnızca tamsayılar içindir) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Karşılaştırma |
@@ -178,10 +180,62 @@ heap'te ayrılırlar. Tamsayı türleri ya da `f64` ile örtük dönüşüm yokt
 | `denominator` | `(denominator x)` | `ratio→int` | En sade biçimdeki payda (her zaman pozitif) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Tamsayı kısmı (sıfıra doğru kesilmiş) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64`'e çevirir |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Tam sayıya yuvarlama (CL'deki ilk değer). Tam yarıda `round` çift tarafa gider (`(round 5/2)` `2` olur) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Aynı yuvarlama, `f64` olarak döner |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL'nin iki argümanlı `floor` vb. Tam sayı bölüm `car`, `ratio` kalan `cdr` (`(floor-div 7/2 1/3)` `(10 . 1/6)` olur) |
+| `float` | `(float x)` | `ratio→f64` | `f64`'e dönüştürür (`ratio->float` ile aynı) |
+| `rational` `rationalize` | `(op x)` | `ratio→rational` | Aynı değer, `rational` olarak |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64`'e dönüştürüp hesaplar (`(sqrt 1/4)` `0.5` olur) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Yukarıdaki gibi |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Yukarıdaki gibi |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` uygulaması. Bir `ratio`, `HashTable` anahtarı olabilir |
 
-Sabit genişlikli tamsayılardan ve `f64`'ten giriş yolları `int->int`/`int->ratio` (1. bölüm) ve
-`float->int`/`float->ratio`'dur (4. bölüm). `int`/`ratio`, `i32` ve diğerlerinden bağımsız ayrı
-türlerdir ve karışık aritmetik açık dönüşümler gerektirir.
+CL'de tam sayı paydası 1 olan bir rasyonel sayıdır; bu yüzden `int` de `numerator` (kendisi),
+`denominator` (`1`), `float`, `rational`, `rationalize` ve yukarıdaki `sqrt`'ten `atanh`'a 15
+fonksiyona sahiptir (`(sqrt 4)` `2.0` olur). `f64`/`f32` da `float` (kendisi) ve `rational`
+(`float->ratio` ile aynı) içerir.
+
+Paydası 1 olan bir `ratio` (örneğin `(+ 1/3 2/3)`) CL'deki gibi tam sayı olarak yazdırılır (`1`).
+`*print-base*` hem paya hem paydaya uygulanır; `*print-radix*` doğruysa `#x1/f` ve `#10r1/3` gibi bir
+taban öneki eklenir. Okuyucu da `#x1/F`, `#b101/11` ve `#3r1/2` okur.
+
+Sabit genişlikli tam sayılardan ve `f64`'ten giriş yolları `int->int`/`int->ratio` (bölüm 1) ve
+`float->int`/`float->ratio` (bölüm 4)'tür. `int`/`ratio`, `i32` ve diğerlerinden bağımsız ayrı
+tiplerdir; bunlarla karıştıran aritmetik açık dönüşüm gerektirir.
+
+### 5.1 `rational` (bir tam sayı ya da bir kesir)
+
+CL'nin `rational`'ına karşılık gelen tip. Bir değer `int` ya da `ratio`'dur ve CL'deki gibi
+normalleştirilir (tam sayı olan değer her zaman `int`'tir). İki tam sayı üzerinde `/` ve bir `int` ile
+bir `ratio`'yu karıştıran aritmetik bu tipi verir.
+
+```lisp
+(/ 7 2)         ; => 7/2
+(/ 6 3)         ; => 2
+(+ 1/2 1)       ; => 3/2
+(* 2 1/2)       ; => 1
+(< 1/2 1)       ; => true
+```
+
+`int` ve `ratio` değerleri, `rational` beklenen yere olduğu gibi geçirilebilir
+(`(defun f ((q rational)) ...)`'a hem `5` hem `1/2` geçirilebilir). Ters yönde değer `as`/`try-as` ile
+alınır.
+
+| Ad | Biçim | Tür | Açıklama |
+|---|---|---|---|
+| `+` `-` `*` `/` `max` `min` | `(op a b)` | `(rational,rational)→rational` | Aritmetik (sonuç normalleştirilir). `/` sıfıra bölmede panic verir |
+| `<` `<=` `>` `>=` `=` `/=` `eq` `eql` `equal` `equalp` | `(op a b)` | `(rational,rational)→bool` | Karşılaştırma |
+| `numerator` `denominator` | `(op x)` | `rational→int` | Sadeleştirilmiş pay ve payda |
+| `rational->int` `rational->ratio` `rational->float` | `(op x)` | | Sıfıra doğru kırpılmış, `ratio` olarak, `f64`'e |
+| `try-rational->int` | `(try-rational->int x)` | `rational→Option<int>` | Tam sayıysa `(some n)`, değilse `none` (CL'nin `integerp`'i) |
+| `abs` `signum` `rem` `mod` `expt` `zerop` `plusp` `minusp` `1+` `1-` | | | `ratio` ile aynı (`expt`'in üssü `int`'tir) |
+| `floor` `ceiling` `truncate` `round` `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | | `ratio` ile aynı |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(rational,rational)→cons-cell<int,rational>` | `ratio` ile aynı |
+| `float` `rational` `rationalize` `sqrt` `exp` `log` ile trigonometrik ve hiperbolik fonksiyonlar | `(op x)` | | `ratio` ile aynı |
+
+`(as int q)` `rational->int`'tir (kırpma), `(try-as int q)` `try-rational->int`'tir, `(as ratio q)` ve
+`(as f64 q)` ilgili dönüşümlerdir, `(as rational x)` ise `int`/`ratio`'dan genişletir. `Eq`, `Ord`,
+`Hash`, `print-object` ve aritmetik trait'ler de uygulanmıştır.
 
 ## 6. Karmaşık sayılar `complex`
 

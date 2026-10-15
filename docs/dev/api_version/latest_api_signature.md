@@ -1,11 +1,11 @@
-# ABI バージョン 0.2.11
+# ABI バージョン 0.2.12
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.2.11 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.2.12 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `1daaf88e07a7ac12`
+内容ハッシュ (FNV-1a 64): `28a9278a8d15ff8c`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -484,6 +484,7 @@
 | `llvm-value` | `llvm-value` | handle | 1 | 0 |
 | `random-state` | `random-state` | random-state | 6 | 2 |
 | `ratio` | `ratio` | ratio | 6 | 2 |
+| `rational` | `rational` | rational | 6 | 2 |
 | `scope<v>` | `scope<v>` | scope | 6 | 2 |
 | `string` | `string` | str | 6 | 2 |
 | `symbol` | `symbol` | sym | 6 | 0 |
@@ -734,6 +735,18 @@
 | `rt_ratio_sub` | `i64 (ptr, i32)` |
 | `rt_ratio_to_float` | `i64 (ptr, i32)` |
 | `rt_ratio_to_int` | `i64 (ptr, i32)` |
+| `rt_rational_add` | `i64 (ptr, i32)` |
+| `rt_rational_cmp` | `i64 (ptr, i32)` |
+| `rt_rational_denominator` | `i64 (ptr, i32)` |
+| `rt_rational_div` | `i64 (ptr, i32)` |
+| `rt_rational_from_ratio` | `i64 (ptr, i32)` |
+| `rt_rational_is_int` | `i64 (ptr, i32)` |
+| `rt_rational_mul` | `i64 (ptr, i32)` |
+| `rt_rational_numerator` | `i64 (ptr, i32)` |
+| `rt_rational_sub` | `i64 (ptr, i32)` |
+| `rt_rational_to_float` | `i64 (ptr, i32)` |
+| `rt_rational_to_int` | `i64 (ptr, i32)` |
+| `rt_rational_to_ratio` | `i64 (ptr, i32)` |
 | `rt_read` | `i64 (ptr, i32)` |
 | `rt_read_datum_at` | `i64 (ptr, i32)` |
 | `rt_root_count` | `i64 (ptr, i32)` |
@@ -1173,7 +1186,7 @@
 - インスタンス `*`: `(int, int) -> int`
 - インスタンス `+`: `(int, int) -> int`
 - インスタンス `-`: `(int, int) -> int`
-- インスタンス `/`: `(int, int) -> int`
+- インスタンス `/`: `(int, int) -> rational`
 - インスタンス `/=`: `(int, int) -> bool`
 - インスタンス `<`: `(int, int) -> bool`
 - インスタンス `<=`: `(int, int) -> bool`
@@ -1208,6 +1221,7 @@
 - インスタンス `max`: `(int, int) -> int`
 - インスタンス `min`: `(int, int) -> int`
 - インスタンス `mod`: `(int, int) -> int`
+- インスタンス `truncate`: `(int, int) -> int`
 - インスタンス `try-int->c-long`: `(int) -> Option<c-long>`
 - インスタンス `try-int->c-ulong`: `(int) -> Option<c-ulong>`
 - インスタンス `try-int->char`: `(int) -> Option<char>`
@@ -1366,6 +1380,32 @@
 - インスタンス `numerator`: `(ratio) -> int`
 - インスタンス `ratio->float`: `(ratio) -> f64`
 - インスタンス `ratio->int`: `(ratio) -> int`
+- インスタンス `ratio->rational`: `(ratio) -> rational`
+
+### `rational` (sum, 型引数 [])
+
+- インスタンス `*`: `(rational, rational) -> rational`
+- インスタンス `+`: `(rational, rational) -> rational`
+- インスタンス `-`: `(rational, rational) -> rational`
+- インスタンス `/`: `(rational, rational) -> rational`
+- インスタンス `/=`: `(rational, rational) -> bool`
+- インスタンス `<`: `(rational, rational) -> bool`
+- インスタンス `<=`: `(rational, rational) -> bool`
+- インスタンス `=`: `(rational, rational) -> bool`
+- インスタンス `>`: `(rational, rational) -> bool`
+- インスタンス `>=`: `(rational, rational) -> bool`
+- インスタンス `denominator`: `(rational) -> int`
+- インスタンス `eq`: `(rational, rational) -> bool`
+- インスタンス `eql`: `(rational, rational) -> bool`
+- インスタンス `equal`: `(rational, rational) -> bool`
+- インスタンス `equalp`: `(rational, rational) -> bool`
+- インスタンス `max`: `(rational, rational) -> rational`
+- インスタンス `min`: `(rational, rational) -> rational`
+- インスタンス `numerator`: `(rational) -> int`
+- インスタンス `rational->float`: `(rational) -> f64`
+- インスタンス `rational->int`: `(rational) -> int`
+- インスタンス `rational->ratio`: `(rational) -> ratio`
+- インスタンス `try-rational->int`: `(rational) -> Option<int>`
 
 ### `readerror` (sum, 型引数 [])
 

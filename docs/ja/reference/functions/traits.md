@@ -71,7 +71,7 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -79,7 +79,7 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; 距離は常に int（ash と同じ）
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; メソッド無し・6つの合成
+(deftrait Number (Add Sub Mul Rem Ord))                   ; メソッド無し・5つの合成
 ```
 
 **境界内では演算子で書ける。** `where` で束縛された型変数が受け手のとき、演算子は
@@ -96,3 +96,9 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 `(- (- x x) x)` へ展開されるので `Sub` だけで足りる。
 
 実装済み: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` は全数値型（`complex` を除く）、`Bits` は全整数型と `int`。
+
+**`Div` は結果の型を関連型 `Output` で名乗る。** CL と同じく整数どうしの `/` は `rational` なので、
+`int` の `Output` は `rational`、ほかの数値型は自分自身。`Output` が型ごとに違うため `Number` には
+`Div` を含めない（継承リストでは関連型をすべて固定する必要がある）。割り算をするジェネリック関数は
+`(where (Div T (Output R)))` で結果の型を受け取るか、`(where (Div T (Output T)))` で `T` の中に
+閉じた割り算を要求する（この場合 `int` は渡せない）。

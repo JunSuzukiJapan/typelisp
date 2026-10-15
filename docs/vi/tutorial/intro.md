@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Bắt đầu
 
 Bắt đầu từ việc đánh giá biểu thức trong REPL, chương này lần lượt trình bày hàm, biến, rẽ nhánh,
@@ -45,13 +45,13 @@ Số có các loại sau:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` trên hai số nguyên cho một số nguyên với phần thập phân bị bỏ đi (nó không tạo ra phân số như
-Common Lisp). Hãy dùng `(mod 7 2)` để lấy phần dư.
+`/` trên hai số nguyên cho ra phân số khi không chia hết, giống Common Lisp. Muốn số nguyên bỏ phần
+thập phân thì dùng `(truncate 7 2)` (`3`), còn phần dư thì dùng `(mod 7 2)`.
 
 Các giá trị boolean là `true` và `false`.
 

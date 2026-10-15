@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 표준 트레이트
 
 반복, 비교, 산술을 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),
@@ -69,7 +69,7 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -77,7 +77,7 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; 거리는 항상 int(ash와 같다)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; 메서드 없음. 여섯 가지의 조합
+(deftrait Number (Add Sub Mul Rem Ord))                   ; 메서드 없음·5개의 합성
 ```
 
 **경계 안에서는 연산자를 쓸 수 있다.** 받는 쪽이 `where`로 묶인 타입 변수이면 연산자는 트레이트 메서드로 읽힌다
@@ -92,3 +92,10 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 (`cannot redefine built-in method`). `Neg`는 없다. `(- x)`는 `(- (- x x) x)`로 전개되므로 `Sub`로 충분하다.
 
 구현하는 타입: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number`는 모든 수 타입(`complex` 제외), `Bits`는 모든 정수 타입과 `int`.
+
+
+**`Div`는 결과 타입을 연관 타입 `Output`으로 밝힌다.** CL과 마찬가지로 정수끼리의 `/`는 `rational`이므로
+`int`의 `Output`은 `rational`, 다른 수치 타입은 자기 자신이다. `Output`이 타입마다 다르므로 `Number`에는
+`Div`를 포함하지 않는다(상속 목록에서는 연관 타입을 모두 고정해야 한다). 나눗셈을 하는 제네릭 함수는
+`(where (Div T (Output R)))`로 결과 타입을 받거나, `(where (Div T (Output T)))`로 `T` 안에서 닫힌
+나눗셈을 요구한다(이 경우 `int`는 넘길 수 없다).

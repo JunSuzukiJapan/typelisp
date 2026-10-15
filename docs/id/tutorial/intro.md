@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Memulai
 
 Dimulai dari mengevaluasi ekspresi di REPL, bab ini membahas fungsi, variabel, percabangan,
@@ -46,13 +46,14 @@ Bilangan terdiri dari jenis berikut:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` pada dua bilangan bulat menghasilkan bilangan bulat dengan bagian pecahan dibuang (tidak
-menghasilkan pecahan seperti pada Common Lisp). Gunakan `(mod 7 2)` untuk sisa bagi.
+`/` pada dua bilangan bulat menghasilkan pecahan bila pembagian tidak habis, seperti di Common Lisp.
+Untuk bilangan bulat tanpa bagian pecahan gunakan `(truncate 7 2)` (`3`), dan `(mod 7 2)` untuk
+sisanya.
 
 Nilai boolean adalah `true` dan `false`.
 

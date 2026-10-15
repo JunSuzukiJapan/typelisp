@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Primi passi
 
 Partendo dalla valutazione di espressioni nel REPL, questo capitolo tratta nell'ordine funzioni,
@@ -46,13 +46,13 @@ I numeri sono di questi tipi:
 typl> (* 123456789012345 123456789012345)
 15241578753238669120562399025
 typl> (/ 7 2)
-3
+7/2
 typl> (/ 7.0 2.0)
 3.5
 ```
 
-`/` su due interi dà un intero con la parte frazionaria scartata (non produce una frazione come fa
-Common Lisp). Usa `(mod 7 2)` per il resto.
+`/` su due interi dà una frazione quando la divisione non è esatta, come in Common Lisp. Per l'intero
+senza la parte frazionaria usate `(truncate 7 2)` (`3`), e `(mod 7 2)` per il resto.
 
 I valori booleani sono `true` e `false`.
 

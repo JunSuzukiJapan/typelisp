@@ -1347,7 +1347,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; the type does not have; the comparisons, `/`, `mod` and `and`/`or`/`xor`
 ;; need none, because operands arrive normalized and those preserve it.
 (defun build-normalize-int ((builder llvm-builder) (v llvm-value) (wsig int)) llvm-value
-  (let ((shift (const-word builder (- 64 (/ wsig 2)))))
+  (let ((shift (const-word builder (- 64 (truncate wsig 2)))))
     (if (eq (mod wsig 2) 1)
         (build-ashr builder (build-shl builder v shift) shift)
         (build-lshr builder (build-shl builder v shift) shift))))
@@ -1585,7 +1585,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; shim otherwise; everything else is one shim call.
 (defun integer-native-method? ((method string)) bool
   (case method
-    (("+" "-" "*" "/" "mod" "<" "<=" ">" ">=" "=" "/=" "eq" "eql" "equal" "equalp") true)
+    (("+" "-" "*" "/" "truncate" "mod" "<" "<=" ">" ">=" "=" "/=" "eq" "eql" "equal" "equalp") true)
     (("max" "min" "logand" "logior" "logxor" "logtest" "lognot" "logcount" "integer-length") true)
     (("ash" "logbitp") true)
     (("int->float" "int->ratio" "int->int" "int->char" "try-int->char") true)
@@ -1600,9 +1600,18 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun ratio-native-method? ((method string)) bool
   (case method
     (("+" "-" "*" "/" "<" "<=" ">" ">=" "=" "/=" "eq" "eql" "equal" "equalp"
-      "ratio->int" "ratio->float" "numerator" "denominator") true)
+      "ratio->int" "ratio->float" "numerator" "denominator" "ratio->rational") true)
     ;; `max`/`min`: `rt_ratio_cmp` + `build-select`, same shape as `bignum`'s.
     (("max" "min") true)
+    (else false)))
+
+;; `rational` (`registry::rational_assoc`)'s methods: every one a
+;; `typelisp_rt::rational` shim over tagged words, the comparisons derived
+;; from `rt_rational_cmp` the way `ratio`'s are from `rt_ratio_cmp`.
+(defun rational-native-method? ((method string)) bool
+  (case method
+    (("+" "-" "*" "/" "<" "<=" ">" ">=" "=" "/=" "eq" "eql" "equal" "equalp" "max" "min") true)
+    (("rational->int" "try-rational->int" "rational->ratio" "rational->float" "numerator" "denominator") true)
     (else false)))
 
 ;; `ratio` counterpart of [`bignum-cmp-call`] (`rt_ratio_cmp`).
@@ -3012,7 +3021,10 @@ const SOURCE_TEMPLATE: &str = r#"
                        ("+" (integer-arith builder m cur-fn "rt_integer_add" 0 a b2))
                        ("-" (integer-arith builder m cur-fn "rt_integer_sub" 1 a b2))
                        ("*" (integer-arith builder m cur-fn "rt_integer_mul" 2 a b2))
-                       ("/" (raising-binop-call builder m "rt_integer_div" a b2))
+                       ;; CL's `/`: a `rational`, whose shim reads an `int`
+                       ;; word as one. The integer quotient is `truncate`.
+                       ("/" (raising-binop-call builder m "rt_rational_div" a b2))
+                       ("truncate" (raising-binop-call builder m "rt_integer_div" a b2))
                        ("mod" (raising-binop-call builder m "rt_integer_mod" a b2))
                        ("<" (build-icmp-lt builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)))
                        ("<=" (build-icmp-le builder (integer-cmp builder m cur-fn a b2) (const-word builder 0)))
@@ -3043,6 +3055,8 @@ const SOURCE_TEMPLATE: &str = r#"
               (ratio-unary-call builder m "rt_ratio_numerator" a))
              ("denominator"
               (ratio-unary-call builder m "rt_ratio_denominator" a))
+             ("ratio->rational"
+              (ratio-unary-call builder m "rt_rational_from_ratio" a))
              (else (let ((b2 (load-raw builder ops 1)))
                       (case method
                         ("+"
@@ -3070,6 +3084,32 @@ const SOURCE_TEMPLATE: &str = r#"
                         ("min"
                          (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-word builder 0)) a b2))
                         (else (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-word builder 0)))))))))
+        ((if (equal type-name "rational") (rational-native-method? method) false)
+         (let ((a (load-raw builder ops 0)))
+           (case method
+             ("rational->int" (ratio-unary-call builder m "rt_rational_to_int" a))
+             ;; A normalized `rational` that is an integer *is* the `int`'s
+             ;; word, so the `some` carries `a` itself.
+             ("try-rational->int"
+              (build-try-option builder m cur-fn (ratio-unary-call builder m "rt_rational_is_int" a) a #%kind-tagged))
+             ("rational->ratio" (ratio-unary-call builder m "rt_rational_to_ratio" a))
+             ("rational->float" (ratio-unary-call builder m "rt_rational_to_float" a))
+             ("numerator" (ratio-unary-call builder m "rt_rational_numerator" a))
+             ("denominator" (ratio-unary-call builder m "rt_rational_denominator" a))
+             (else (let ((b2 (load-raw builder ops 1)))
+                     (case method
+                       ("+" (ratio-binop-call builder m "rt_rational_add" a b2))
+                       ("-" (ratio-binop-call builder m "rt_rational_sub" a b2))
+                       ("*" (ratio-binop-call builder m "rt_rational_mul" a b2))
+                       ("/" (raising-binop-call builder m "rt_rational_div" a b2))
+                       ("<" (build-icmp-lt builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))
+                       ("<=" (build-icmp-le builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))
+                       (">" (build-icmp-gt builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))
+                       (">=" (build-icmp-ge builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))
+                       ("/=" (build-icmp-ne builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))
+                       ("max" (build-select builder (build-icmp-ge builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)) a b2))
+                       ("min" (build-select builder (build-icmp-le builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)) a b2))
+                       (else (build-icmp-eq builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))))))))
         (else (compile-assoc-user m builder cur-fn protect callee ops (sexpr-list-length rest)))))))
 
 ;; The user-defined-method leg of `compile-assoc`'s

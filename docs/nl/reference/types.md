@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/types.md @ 1a01065673fd9d568c138bb444c88c5345552937 -->
+<!-- translated-from: docs/ja/reference/types.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Types
 
 De types die typelisp heeft en de standaardtraits die elk type implementeert. Hoe je types schrijft
@@ -14,6 +14,7 @@ type staan in [Ingebouwde functies](functions/README.md).
 | `u8` `u16` `u32` | Gehele getallen zonder teken en met vaste breedte | Idem |
 | `f32` `f64` | IEEE-754-drijvendekommagetallen. Decimale literals zijn standaard `f64` | [Getallen hoofdstuk 4](functions/numbers.md#4-drijvendekommagetallen-f64--f32) |
 | `ratio` | Een rationaal getal in laagste termen | [Getallen hoofdstuk 5](functions/numbers.md#5-rationale-getallen-ratio) |
+| `rational` | Een `int` of een `ratio` (CL's rational). Het type van `/` op twee gehele getallen | [Getallen hoofdstuk 5](functions/numbers.md#5-rationale-getallen-ratio) |
 | `bool` | `true` / `false` | [Getallen hoofdstuk 7](functions/numbers.md#7-booleans) |
 | `char` | Een Unicode-scalarwaarde | [Tekens](functions/collections.md#2-tekens-char) |
 | `string` | Een onveranderlijke string | [Strings](functions/collections.md#1-strings-string) |
@@ -105,10 +106,10 @@ genoemd.
 
 | Trait | Implementerende types | Details |
 |---|---|---|
-| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-vergelijking) |
-| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `char` `string` `cons-cell<A,B>` `#{..}` | Idem |
-| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
-| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` en alle ingebouwde foutentypes | [print-object](functions/printing.md#5-print-object-afgedrukte-weergave-per-type) |
+| `Eq` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `Sexpr` `cons-cell<A,B>` `#{..}` | [Eq / Ord](functions/traits.md#2-eq--ord-vergelijking) |
+| `Ord` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `char` `string` `cons-cell<A,B>` `#{..}` | Idem |
+| `Hash` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `ratio` `rational` `bool` `char` `string` `symbol` `#{..}` | [HashTable](functions/collections.md#4-hashtablekv) |
+| `print-object` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` `complex` `bool` `char` `string` `symbol` `#{..}` `Array<T>` `HashSet<T>` `SortedTable<K,V>` `Deque<T>` `Context` `pathname` `universal-time` `internal-time` en alle ingebouwde foutentypes | [print-object](functions/printing.md#5-print-object-afgedrukte-weergave-per-type) |
 
 De traits van `cons-cell<A,B>` en van tupels `#{..}`, en de `print-object` van de verzamelingen,
 zijn bruikbaar als de elementtypen die trait implementeren.
@@ -117,7 +118,7 @@ zijn bruikbaar als de elementtypen die trait implementeren.
 
 | Trait | Implementerende types |
 |---|---|
-| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` |
+| `Add` `Sub` `Mul` `Div` `Rem` `Number` | `int` `i8` `i16` `i32` `u8` `u16` `u32` `f32` `f64` `ratio` `rational` |
 | `Bits` | `int` `i8` `i16` `i32` `u8` `u16` `u32` |
 
 Details staan in [Rekenkundige traits](functions/traits.md#3-rekenkundige-traits-add--sub--mul--div--rem--bits--number).

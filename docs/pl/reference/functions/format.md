@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Dyrektywy formatu
 
 Dyrektywy zapisywane w łańcuchach sterujących `print`/`println`/`format`. Obejmują niemal wszystkie
@@ -24,14 +24,15 @@ tym w czasie sprawdzania weryfikowane jest następujące.
   (ujemna szerokość, podstawa inna niż od 2 do 36, liczba całkowita tam, gdzie oczekiwany jest znak, i tak
   dalej) są błędami. Nigdy nie są po cichu ignorowane ani zaokrąglane.
 
-**Elementy** argumentu będącego listą (`~{`, `~:{`, `~<...~:>`) to `Sexpr`, a ani ich liczba, ani
-typ każdego elementu nie mogą być znane z typów. Wymagania wobec elementów (liczba całkowita dla `~d`
-i tak dalej) oraz brakujące elementy są sprawdzane w chwili nadejścia wartości i są błędami czasu działania (nigdy
-nie następuje przełączenie na inną reprezentację).
+**Elementy** argumentu listowego (`~{`, `~:{`, `~<...~:>`) to `Sexpr`; ani ich liczby, ani typu każdego
+elementu nie da się poznać z typów. Wymagania wobec elementów (znak dla `~c` itd.) i brakujące elementy
+są sprawdzane, gdy wartości docierają, i są błędami wykonania (nigdy nie przełącza się zamiast tego na
+inną reprezentację).
 
-Łagodne reguły CL nie zostały przyjęte. Przekazanie nieliczby całkowitej do `~d` i wypisanie jej jak `~a`
-albo traktowanie przez `~:[` dowolnej wartości jako wartości logicznej nie są reinterpretowane w ten sposób; są
-błędami typu.
+`~d` `~b` `~o` `~x` i `~r` z podstawą drukują liczbę niecałkowitą tak, jak zrobiłoby to `~a`,
+dziesiętnie, jak w CL (`(format false "~5d" 1/2)` to `"  1/2"`). Pozostałe pobłażliwe reguły CL nie
+są przyjęte: traktowanie przez `~:[` dowolnej wartości jako logicznej nie jest tak reinterpretowane; to
+błąd typu.
 
 ## 2. Wyjście (zużywające jeden argument)
 
@@ -40,7 +41,7 @@ błędami typu.
 | `~a` | `~mincol,colinc,minpad,padchar` / `@`=wyrównanie do prawej | Estetyczne (`princ` z CL; łańcuchy bez cudzysłowów). Argument może być dowolnego typu |
 | `~s` | Jak wyżej | Standardowe (`prin1` z CL; postać możliwa do wczytania z powrotem). Argument może być dowolnego typu |
 | `~w` | — | `write` z CL. Wypisuje w sposób ozdobny (pretty), jeśli `*print-pretty*` jest prawdą, w przeciwnym razie tak samo jak `~s` |
-| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=grupy cyfr, `@`=zawsze ze znakiem | Liczby całkowite dziesiętne/dwójkowe/ósemkowe/szesnastkowe. Argument jest liczbą całkowitą |
+| `~d` `~b` `~o` `~x` | `~mincol,padchar,commachar,interval` / `:`=grupy cyfr, `@`=zawsze ze znakiem | Liczby całkowite dziesiętne/dwójkowe/ósemkowe/szesnastkowe. Argument może być dowolny (liczba niecałkowita jest drukowana jak przez `~a`, dziesiętnie) |
 | `~r` | `~radix,mincol,padchar,commachar,interval` (z podstawą) lub brak | Z podstawą w tej podstawie (od 2 do 36). Bez niej: `~r`=angielskie liczebniki główne, `~:r`=angielskie liczebniki porządkowe, `~@r`=cyfry rzymskie, `~:@r`=stare cyfry rzymskie. Argument jest liczbą całkowitą |
 | `~p` | `:`=cofnij o jeden, `@`=y/ies | Liczba mnoga (`~p`→"s", `~@p`→"y"/"ies"). Argument jest liczbą całkowitą |
 | `~c` | `:`=nazwa, `@`=składnia `#\` | Znak. Argument jest typu `char` |

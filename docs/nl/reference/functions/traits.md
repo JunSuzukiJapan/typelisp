@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Standaardtraits
 
 De traits voor iteratie, vergelijking en rekenkunde. De overige standaardtraits staan in hun eigen
@@ -81,7 +81,7 @@ laag.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (div ((self Self) (other Self)) Self))
+(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -89,7 +89,7 @@ laag.
   (bit-xor ((self Self) (other Self)) Self)
   (bit-not ((self Self)) Self)
   (shift ((self Self) (count int)) Self))                 ; the distance is always int (as with ash)
-(deftrait Number (Add Sub Mul Div Rem Ord))               ; no methods; a combination of six
+(deftrait Number (Add Sub Mul Rem Ord))                   ; geen methoden; een combinatie van vijf
 ```
 
 **Binnen een bound kun je operatoren schrijven.** Wanneer de ontvanger een typevariabele is die door
@@ -107,3 +107,11 @@ opnieuw te definiëren (`cannot redefine built-in method`). Er is geen `Neg`: `(
 
 Geïmplementeerd voor: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` op alle numerieke types (behalve
 `complex`), en `Bits` op alle gehele types en `int`.
+
+
+**`Div` noemt zijn resultaattype met het geassocieerde type `Output`.** Zoals in CL is `/` op twee
+gehele getallen een `rational`, dus het `Output` van `int` is `rational` en dat van elk ander
+numeriek type het type zelf. Omdat `Output` per type verschilt, bevat `Number` geen `Div` (een
+supertraitlijst moet elk geassocieerd type vastleggen). Een generieke functie die deelt, ontvangt het
+resultaattype met `(where (Div T (Output R)))`, of vraagt een in `T` gesloten deling met
+`(where (Div T (Output T)))` (dan kan geen `int` worden doorgegeven).
