@@ -35,7 +35,7 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
   utan särskild syntax (som i CL).
 - **Flyttal**: de som innehåller en decimalpunkt eller en exponent (`e`/`E`) (`1.5`, `3.0e10`). `f64` som
   standard (`f32` om det är den förväntade typen).
-- **Kvoter (ratio)**: `täljare/nämnare` (bara decimala, till exempel `1/3`). Förkortas vid läsning, som CL
+- **Kvoter (ratio)**: `täljare/nämnare` (till exempel `1/3`; ett basprefix går också, som `#x1/F`). Förkortas vid läsning, som CL
   specificerar (`2/4` är `1/2`). De med heltalsvärde (`4/2` och så vidare) läses som `int`, inte
   `ratio`. En nämnare noll (`1/0`) är ett läsfel.
 - **Tecken**: `#\` följt av ett tecken eller ett teckennamn. Till exempel `#\a` `#\Space`

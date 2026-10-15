@@ -38,7 +38,7 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   wordt, wordt door haar grootte bepaald, zonder speciale syntaxis (zoals in CL).
 - **Drijvendekommagetallen**: die welke een decimaalteken of een exponent (`e`/`E`) bevatten (`1.5`,
   `3.0e10`). Standaard `f64` (`f32` als dat het verwachte type is).
-- **Ratio's**: `teller/noemer` (alleen decimaal, bijvoorbeeld `1/3`). Bij het lezen vereenvoudigd, zoals
+- **Ratio's**: `teller/noemer` (bijvoorbeeld `1/3`; een grondtal-voorvoegsel kan ook, zoals `#x1/F`). Bij het lezen vereenvoudigd, zoals
   CL voorschrijft (`2/4` is `1/2`). Die met een geheel getalwaarde (`4/2` enzovoort) worden als `int`
   gelezen, niet als `ratio`. Een noemer van nul (`1/0`) is een leesfout.
 - **Tekens**: `#\` gevolgd door één teken of een tekennaam. Bijvoorbeeld `#\a` `#\Space` `#\Newline`

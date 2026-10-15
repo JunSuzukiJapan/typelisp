@@ -37,7 +37,7 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   belirlenir ve özel bir sözdizimi yoktur (CL'deki gibi).
 - **Kayan noktalı sayılar**: ondalık nokta ya da üs (`e`/`E`) içerenler (`1.5`, `3.0e10`). Varsayılan
   olarak `f64` (beklenen tür buysa `f32`).
-- **Oranlar**: `pay/payda` (yalnızca onluk, örneğin `1/3`). CL'nin belirttiği gibi okunurken sadeleştirilir
+- **Oranlar**: `pay/payda` (örneğin `1/3`; `#x1/F` gibi taban öneki de olur). CL'nin belirttiği gibi okunurken sadeleştirilir
   (`2/4`, `1/2`'dir). Tamsayı değerli olanlar (`4/2` vb.) `ratio` değil, `int` olarak okunur. Sıfır
   payda (`1/0`) bir okuma hatasıdır.
 - **Karakterler**: `#\` ve ardından bir karakter ya da bir karakter adı. Örneğin `#\a` `#\Space`

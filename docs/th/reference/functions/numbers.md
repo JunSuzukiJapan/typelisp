@@ -165,7 +165,7 @@ argument does not fit a fixnum")
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | เศษที่เหลือของการหารแบบตัดทอน (เหมือนใน CL; เครื่องหมายตามตัวตั้ง) |
 | `abs` | `(abs x)` | `ratio→ratio` | ค่าสัมบูรณ์ |
 | `signum` | `(signum x)` | `ratio→ratio` | เครื่องหมาย (คืน `1`/`-1`/`0` เป็น `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | เลขยกกำลัง เลขชี้กำลังต้องเป็น `ratio` ที่มีค่าเป็นจำนวนเต็ม (มิฉะนั้น panic) เลขชี้กำลังติดลบให้ส่วนกลับ |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | ยกกำลัง (ด้วยการยกกำลังสองซ้ำ) เลขชี้กำลังติดลบให้ส่วนกลับ (`(expt 2/3 -2)` คือ `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | ตัวที่มากกว่า / น้อยกว่า |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1` `ratio` ไม่มีการดำเนินการระดับบิต (ใน CL ใช้กับจำนวนเต็มเท่านั้น) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | การเปรียบเทียบ |
@@ -174,6 +174,23 @@ argument does not fit a fixnum")
 | `denominator` | `(denominator x)` | `ratio→int` | ตัวส่วนในรูปต่ำสุด (เป็นบวกเสมอ) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | ส่วนจำนวนเต็ม (ตัดไปทางศูนย์) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | แปลงเป็น `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | ปัดเป็นจำนวนเต็ม (ค่าแรกใน CL) ถ้าเศษเป็นครึ่งพอดี `round` จะปัดไปทางเลขคู่ (`(round 5/2)` คือ `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | การปัดแบบเดียวกัน คืนค่าเป็น `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | `floor` แบบสองอาร์กิวเมนต์ของ CL และตัวอื่น ผลหารจำนวนเต็มคือ `car` เศษ `ratio` คือ `cdr` (`(floor-div 7/2 1/3)` คือ `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | แปลงเป็น `f64` (เหมือน `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | ตัวอาร์กิวเมนต์เอง |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | แปลงเป็น `f64` แล้วคำนวณ (`(sqrt 1/4)` คือ `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | เช่นเดียวกับข้างบน |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | เช่นเดียวกับข้างบน |
+| `sxhash` | `(sxhash x)` | `ratio→int` | การ implement `Hash` ใช้ `ratio` เป็นคีย์ของ `HashTable` ได้ |
+
+ใน CL จำนวนเต็มคือจำนวนตรรกยะที่ส่วนเป็น 1 ดังนั้น `int` ก็มี `numerator` (ตัวเอง)
+`denominator` (`1`) `float` `rational` `rationalize` และฟังก์ชัน 15 ตัวตั้งแต่ `sqrt` ถึง `atanh`
+ข้างบน (`(sqrt 4)` คือ `2.0`) `f64`/`f32` ก็มี `float` (ตัวเอง) และ `rational` (เหมือน `float->ratio`)
+
+`ratio` ที่ส่วนเป็น 1 (เช่น `(+ 1/3 2/3)`) พิมพ์เป็นจำนวนเต็ม (`1`) เหมือน CL `*print-base*`
+มีผลทั้งกับเศษและส่วน และเมื่อ `*print-radix*` เป็นจริงจะมีคำนำหน้าฐาน เช่น `#x1/f` และ `#10r1/3`
+ตัวอ่านก็อ่าน `#x1/F` `#b101/11` และ `#3r1/2` ได้
 
 ทางเข้าจากจำนวนเต็มความกว้างคงที่และ `f64` คือ `int->int`/`int->ratio` (บทที่ 1) และ
 `float->int`/`float->ratio` (บทที่ 4) `int`/`ratio` เป็นชนิดแยกที่อิสระจาก `i32` และ

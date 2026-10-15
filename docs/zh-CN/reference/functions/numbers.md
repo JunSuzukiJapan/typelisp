@@ -145,7 +145,7 @@ CL 的 `integer`，也就是这门语言的**整数**——未注解的整数字
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | 截断除法的余数（遵循 CL，符号随被除数） |
 | `abs` | `(abs x)` | `ratio→ratio` | 绝对值 |
 | `signum` | `(signum x)` | `ratio→ratio` | 符号（以 `ratio` 返回 `1`/`-1`/`0`） |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | 幂。指数只能是整数值的 `ratio`（否则 panic）。负指数得到倒数 |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | 幂（平方求幂）。负指数给出倒数（`(expt 2/3 -2)` 为 `9/4`） |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | 较大者／较小者 |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`。`ratio` 没有位运算（CL 中位运算也只用于整数） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | 比较 |
@@ -154,6 +154,23 @@ CL 的 `integer`，也就是这门语言的**整数**——未注解的整数字
 | `denominator` | `(denominator x)` | `ratio→int` | 既约分母（总是正数） |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | 整数部分（向零截断） |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | 转换为 `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | 舍入为整数（CL 的第一个值）。恰好一半时 `round` 取偶数一侧（`(round 5/2)` 为 `2`） |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | 同样的舍入，以 `f64` 返回 |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL 的双参数 `floor` 等。整数商是 `car`，`ratio` 余数是 `cdr`（`(floor-div 7/2 1/3)` 为 `(10 . 1/6)`） |
+| `float` | `(float x)` | `ratio→f64` | 转换为 `f64`（与 `ratio->float` 相同） |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | 参数本身 |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | 转换为 `f64` 后计算（`(sqrt 1/4)` 为 `0.5`） |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 同上 |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 同上 |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` 的实现。`ratio` 可以作为 `HashTable` 的键 |
+
+CL 的整数是分母为 1 的有理数，因此 `int` 也有 `numerator`（自身）、`denominator`（`1`）、
+`float`、`rational`、`rationalize`，以及上面从 `sqrt` 到 `atanh` 的 15 个函数（`(sqrt 4)` 为
+`2.0`）。`f64`/`f32` 也有 `float`（自身）和 `rational`（与 `float->ratio` 相同）。
+
+分母为 1 的 `ratio`（如 `(+ 1/3 2/3)`）与 CL 一样打印为整数（`1`）。`*print-base*` 同时作用于
+分子和分母，`*print-radix*` 为真时加上基数前缀，如 `#x1/f`、`#10r1/3`。读取器也能读
+`#x1/F`、`#b101/11`、`#3r1/2`。
 
 从固定宽度整数和 `f64` 进入的途径是 `int->int`/`int->ratio`（第 1 章）和 `float->int`/`float->ratio`（第 4 章）。
 `int`/`ratio` 是与 `i32` 等相互独立的类型，混合运算需要显式转换。

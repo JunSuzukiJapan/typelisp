@@ -157,7 +157,7 @@ CL 準拠の任意精度有理数。常に既約・正の分母で保たれ、�
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | 切り捨て除算の剰余（CL 準拠、符号は被除数側） |
 | `abs` | `(abs x)` | `ratio→ratio` | 絶対値 |
 | `signum` | `(signum x)` | `ratio→ratio` | 符号（`1`/`-1`/`0` を `ratio` で返す） |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | 冪乗。指数は整数値の `ratio` のみ（非整数なら panic）。負指数は逆数 |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | 冪乗（二乗法）。負指数は逆数（`(expt 2/3 -2)` は `9/4`） |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | 大きい方／小さい方 |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`。`ratio` にビット演算は無い（CL も整数専用） |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | 比較 |
@@ -166,6 +166,23 @@ CL 準拠の任意精度有理数。常に既約・正の分母で保たれ、�
 | `denominator` | `(denominator x)` | `ratio→int` | 既約分母（常に正） |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | 整数部（ゼロ方向切り捨て） |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64` へ変換 |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | 整数への丸め（CL の第 1 値）。`round` は端数がちょうど半分なら偶数側（`(round 5/2)` は `2`） |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | 同じ丸めの結果を `f64` で返す |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL の 2 引数 `floor` 等。商（整数）が `car`、余り（`ratio`）が `cdr`（`(floor-div 7/2 1/3)` は `(10 . 1/6)`） |
+| `float` | `(float x)` | `ratio→f64` | `f64` へ変換（`ratio->float` と同じ） |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | 引数そのもの |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64` に変換して計算（`(sqrt 1/4)` は `0.5`） |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 同上 |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 同上 |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` の実装。`ratio` を `HashTable` のキーにできる |
+
+CL の整数は分母 1 の有理数なので、`int` にも `numerator`（自身）・`denominator`（`1`）・
+`float`・`rational`・`rationalize` と、上の `sqrt` から `atanh` までの 15 関数がある
+（`(sqrt 4)` は `2.0`）。`f64`/`f32` にも `float`（自身）と `rational`（`float->ratio` と同じ）がある。
+
+分母が 1 の `ratio`（`(+ 1/3 2/3)` など）は、CL と同じく整数として印字される（`1`）。
+`*print-base*` は分子と分母の両方に効き、`*print-radix*` が真なら `#x1/f`・`#10r1/3` の
+ように基数の接頭辞が付く。リーダも `#x1/F`・`#b101/11`・`#3r1/2` を読む。
 
 固定幅整数・`f64` からの入口は `int->int`/`int->ratio`（1 章）と `float->int`/`float->ratio`
 （4 章）。`int`/`ratio` は `i32` 等とは独立した別型で、混在した算術には明示変換が必要。

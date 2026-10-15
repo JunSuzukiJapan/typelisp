@@ -36,7 +36,7 @@ mensagens de erro, [errors.md](errors.md).
   (como no CL).
 - **Números de ponto flutuante**: os que contêm um ponto decimal ou um expoente (`e`/`E`) (`1.5`, `3.0e10`).
   `f64` por padrão (`f32` se esse for o tipo esperado).
-- **Ratios**: `numerador/denominador` (só decimal, por exemplo `1/3`). Reduzidos ao serem lidos, como o CL
+- **Ratios**: `numerador/denominador` (por exemplo `1/3`; prefixo de base também vale, como `#x1/F`). Reduzidos ao serem lidos, como o CL
   especifica (`2/4` é `1/2`). Os que têm valor inteiro (`4/2` etc.) são lidos como `int`, não como `ratio`. Um
   denominador zero (`1/0`) é um erro de leitura.
 - **Caracteres**: `#\` seguido de um caractere ou de um nome de caractere. Por exemplo `#\a` `#\Space`

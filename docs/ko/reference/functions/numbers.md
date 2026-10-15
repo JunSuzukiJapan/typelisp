@@ -150,7 +150,7 @@ CL 호환의 임의 정밀도 유리수. 항상 기약 분수이며 분모는 �
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | 버림 나눗셈의 나머지(CL과 같다. 부호는 나뉘는 수를 따른다) |
 | `abs` | `(abs x)` | `ratio→ratio` | 절댓값 |
 | `signum` | `(signum x)` | `ratio→ratio` | 부호(`1`/`-1`/`0`을 `ratio`로 반환한다) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | 거듭제곱. 지수는 정수 값의 `ratio`여야 한다(아니면 panic). 음의 지수는 역수가 된다 |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | 거듭제곱(제곱을 반복하는 방식). 음의 지수는 역수를 준다(`(expt 2/3 -2)`는 `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | 큰 쪽 / 작은 쪽 |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio`에는 비트 연산이 없다(CL에서도 정수 전용) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | 비교 |
@@ -159,6 +159,23 @@ CL 호환의 임의 정밀도 유리수. 항상 기약 분수이며 분모는 �
 | `denominator` | `(denominator x)` | `ratio→int` | 기약 분수의 분모(항상 양수) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | 정수 부분(0 쪽으로 버림) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64`로 바꾼다 |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | 정수로 반올림(CL의 첫 번째 값). 정확히 절반이면 `round`는 짝수 쪽으로 간다(`(round 5/2)`는 `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | 같은 반올림 결과를 `f64`로 돌려준다 |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL의 두 인수 `floor` 등. 정수 몫이 `car`, `ratio` 나머지가 `cdr`(`(floor-div 7/2 1/3)`는 `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | `f64`로 변환(`ratio->float`와 같다) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | 인수 그 자체 |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64`로 변환해서 계산(`(sqrt 1/4)`는 `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | 위와 같다 |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | 위와 같다 |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` 구현. `ratio`를 `HashTable`의 키로 쓸 수 있다 |
+
+CL의 정수는 분모가 1인 유리수이므로 `int`에도 `numerator`(자기 자신), `denominator`(`1`),
+`float`, `rational`, `rationalize`와 위의 `sqrt`부터 `atanh`까지 15개 함수가 있다(`(sqrt 4)`는
+`2.0`). `f64`/`f32`에도 `float`(자기 자신)와 `rational`(`float->ratio`와 같다)이 있다.
+
+분모가 1인 `ratio`(`(+ 1/3 2/3)` 등)는 CL과 마찬가지로 정수로 출력된다(`1`). `*print-base*`는
+분자와 분모 모두에 적용되고, `*print-radix*`가 참이면 `#x1/f`, `#10r1/3`처럼 기수 접두사가 붙는다.
+리더도 `#x1/F`, `#b101/11`, `#3r1/2`를 읽는다.
 
 고정 폭 정수와 `f64`에서 들어오는 길은 `int->int`/`int->ratio`(1장)와 `float->int`/`float->ratio`(4장)이다.
 `int`/`ratio`는 `i32` 등과 독립된 별개의 타입이며, 섞인 산술에는 명시적 변환이 필요하다.

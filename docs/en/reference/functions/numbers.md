@@ -169,7 +169,7 @@ denominator, and are heap-allocated. There is no implicit conversion with the in
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Remainder of truncating division (as in CL; the sign follows the dividend) |
 | `abs` | `(abs x)` | `ratio→ratio` | Absolute value |
 | `signum` | `(signum x)` | `ratio→ratio` | Sign (returns `1`/`-1`/`0` as a `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Power. The exponent must be an integer-valued `ratio` (panics otherwise). A negative exponent gives the reciprocal |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Power (by squaring). A negative exponent gives the reciprocal (`(expt 2/3 -2)` is `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | The larger / smaller |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` has no bit operations (in CL they are for integers only) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Comparison |
@@ -178,6 +178,25 @@ denominator, and are heap-allocated. There is no implicit conversion with the in
 | `denominator` | `(denominator x)` | `ratio→int` | Denominator in lowest terms (always positive) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Integer part (truncated toward zero) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Converts to `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Rounding to an integer (CL's first value). On an exact half `round` goes to the even side (`(round 5/2)` is `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | The same rounding, returned as `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL's two-argument `floor` and the rest. The integer quotient is the `car`, the `ratio` remainder the `cdr` (`(floor-div 7/2 1/3)` is `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Converts to `f64` (the same as `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | The argument itself |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Converts to `f64` and computes (`(sqrt 1/4)` is `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | As above |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | As above |
+| `sxhash` | `(sxhash x)` | `ratio→int` | The `Hash` implementation. A `ratio` can be a `HashTable` key |
+
+A CL integer is a rational whose denominator is 1, so `int` also has `numerator` (itself),
+`denominator` (`1`), `float`, `rational`, `rationalize` and the 15 functions from `sqrt` to `atanh`
+above (`(sqrt 4)` is `2.0`). `f64`/`f32` also have `float` (itself) and `rational` (the same as
+`float->ratio`).
+
+A `ratio` whose denominator is 1 (such as `(+ 1/3 2/3)`) prints as an integer (`1`), as in CL.
+`*print-base*` applies to both the numerator and the denominator, and when `*print-radix*` is true a
+radix prefix is added, as in `#x1/f` and `#10r1/3`. The reader also reads `#x1/F`, `#b101/11` and
+`#3r1/2`.
 
 The ways in from fixed-width integers and `f64` are `int->int`/`int->ratio` (chapter 1) and
 `float->int`/`float->ratio` (chapter 4). `int`/`ratio` are separate types independent of `i32` and the

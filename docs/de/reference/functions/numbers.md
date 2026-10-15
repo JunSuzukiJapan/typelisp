@@ -170,7 +170,7 @@ eine ausdrückliche Umwandlungsmethode oder `as`/`try-as`). Zur Syntax der Bruch
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Rest der abschneidenden Division (wie in CL; das Vorzeichen folgt dem Dividenden) |
 | `abs` | `(abs x)` | `ratio→ratio` | Absolutbetrag |
 | `signum` | `(signum x)` | `ratio→ratio` | Vorzeichen (gibt `1`/`-1`/`0` als `ratio` zurück) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Potenz. Der Exponent muss ein ganzzahliges `ratio` sein (sonst Panic). Ein negativer Exponent ergibt den Kehrwert |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Potenz (durch Quadrieren). Ein negativer Exponent ergibt den Kehrwert (`(expt 2/3 -2)` ist `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | Das größere / kleinere |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` hat keine Bitoperationen (in CL gibt es sie nur für Ganzzahlen) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Vergleich |
@@ -179,6 +179,24 @@ eine ausdrückliche Umwandlungsmethode oder `as`/`try-as`). Zur Syntax der Bruch
 | `denominator` | `(denominator x)` | `ratio→int` | Nenner in gekürzter Form (immer positiv) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Ganzzahliger Teil (gegen null abgeschnitten) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Wandelt in `f64` um |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Rundung auf eine ganze Zahl (der erste Wert in CL). Bei genau einer Hälfte rundet `round` zur geraden Seite (`(round 5/2)` ist `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Dieselbe Rundung, als `f64` zurückgegeben |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | Das zweistellige `floor` usw. aus CL. Der ganzzahlige Quotient ist das `car`, der `ratio`-Rest das `cdr` (`(floor-div 7/2 1/3)` ist `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Umwandlung in `f64` (wie `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Das Argument selbst |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Wandelt in `f64` um und rechnet (`(sqrt 1/4)` ist `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Wie oben |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Wie oben |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Die `Hash`-Implementierung. Ein `ratio` kann Schlüssel einer `HashTable` sein |
+
+Eine ganze Zahl ist in CL eine rationale Zahl mit Nenner 1, daher hat auch `int` `numerator`
+(sich selbst), `denominator` (`1`), `float`, `rational`, `rationalize` und die 15 Funktionen von
+`sqrt` bis `atanh` oben (`(sqrt 4)` ist `2.0`). Auch `f64`/`f32` haben `float` (sich selbst) und
+`rational` (wie `float->ratio`).
+
+Ein `ratio` mit Nenner 1 (etwa `(+ 1/3 2/3)`) wird wie in CL als ganze Zahl ausgegeben (`1`).
+`*print-base*` gilt für Zähler und Nenner, und ist `*print-radix*` wahr, kommt ein Basispräfix hinzu,
+etwa `#x1/f` und `#10r1/3`. Der Reader liest auch `#x1/F`, `#b101/11` und `#3r1/2`.
 
 Die Wege hinein von Ganzzahlen fester Breite und `f64` sind `int->int`/`int->ratio` (Kapitel 1) und
 `float->int`/`float->ratio` (Kapitel 4). `int`/`ratio` sind eigene Typen, unabhängig von `i32` und den

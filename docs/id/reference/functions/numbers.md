@@ -171,7 +171,7 @@ rasio, lihat [Referensi Sintaks](../syntax.md#1-unsur-leksikal).
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Sisa pembagian pemotongan (seperti di CL; tandanya mengikuti yang dibagi) |
 | `abs` | `(abs x)` | `ratio→ratio` | Nilai mutlak |
 | `signum` | `(signum x)` | `ratio→ratio` | Tanda (mengembalikan `1`/`-1`/`0` sebagai `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Pangkat. Eksponen harus berupa `ratio` bernilai bilangan bulat (jika tidak, panic). Eksponen negatif menghasilkan kebalikan |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Pangkat (dengan pengkuadratan). Eksponen negatif memberi kebalikannya (`(expt 2/3 -2)` adalah `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | Yang lebih besar / lebih kecil |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` tidak memiliki operasi bit (di CL hanya untuk bilangan bulat) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Perbandingan |
@@ -180,6 +180,24 @@ rasio, lihat [Referensi Sintaks](../syntax.md#1-unsur-leksikal).
 | `denominator` | `(denominator x)` | `ratio→int` | Penyebut dalam bentuk paling sederhana (selalu positif) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Bagian bilangan bulat (dipotong ke arah nol) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Mengubah menjadi `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Pembulatan ke bilangan bulat (nilai pertama di CL). Tepat di setengah, `round` memilih sisi genap (`(round 5/2)` adalah `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Pembulatan yang sama, dikembalikan sebagai `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | `floor` dua argumen dari CL dan lainnya. Hasil bagi bulat adalah `car`, sisa `ratio` adalah `cdr` (`(floor-div 7/2 1/3)` adalah `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Mengubah ke `f64` (sama dengan `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Argumen itu sendiri |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Mengubah ke `f64` lalu menghitung (`(sqrt 1/4)` adalah `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Sama seperti di atas |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Sama seperti di atas |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Implementasi `Hash`. `ratio` dapat menjadi kunci `HashTable` |
+
+Di CL bilangan bulat adalah bilangan rasional berpenyebut 1, jadi `int` juga punya `numerator`
+(dirinya), `denominator` (`1`), `float`, `rational`, `rationalize` dan 15 fungsi dari `sqrt` sampai
+`atanh` di atas (`(sqrt 4)` adalah `2.0`). `f64`/`f32` juga punya `float` (dirinya) dan `rational`
+(sama dengan `float->ratio`).
+
+`ratio` berpenyebut 1 (seperti `(+ 1/3 2/3)`) dicetak sebagai bilangan bulat (`1`), seperti di CL.
+`*print-base*` berlaku untuk pembilang dan penyebut, dan bila `*print-radix*` benar ditambahkan
+awalan basis, seperti `#x1/f` dan `#10r1/3`. Pembaca juga membaca `#x1/F`, `#b101/11` dan `#3r1/2`.
 
 Jalan masuk dari bilangan bulat berlebar tetap dan `f64` adalah `int->int`/`int->ratio` (bab 1) dan
 `float->int`/`float->ratio` (bab 4). `int`/`ratio` adalah tipe terpisah yang bebas dari `i32` dan

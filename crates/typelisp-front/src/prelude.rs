@@ -654,16 +654,17 @@ pub const SOURCE_TEMPLATE: &str = r##"
               (and (> r (int->ratio 0)) (< b (int->ratio 0))))
           (+ r b)
           r))))
+;; `expt` takes an `int` exponent, as `int`'s does: CL's `(expt 2/3 3)`.
+;; An integer exponent is the case CL answers exactly; a negative one takes
+;; the reciprocal. By squaring, for the same reason as `int`'s above.
 (module %internal (pub defun ratio-expt-int ((base ratio) (n int)) ratio
   (if (< n 0)
       (%internal::ratio-expt-int (/ (int->ratio 1) base) (- 0 n))
       (if (= n 0) (int->ratio 1)
-          (* base (%internal::ratio-expt-int base (- n 1)))))))
+          (let ((h (%internal::ratio-expt-int base (/ n 2))))
+            (if (= (mod n 2) 0) (* h h) (* base (* h h))))))))
 (impl ratio
-  (expt (self (e ratio)) ratio
-    (if (= e (int->ratio (ratio->int e)))
-        (%internal::ratio-expt-int self (ratio->int e))
-        (panic "expt: ratio exponent must be integer-valued"))))
+  (expt (self (e int)) ratio (%internal::ratio-expt-int self e)))
 
 ;; CL's numeric predicates (`zerop`/`plusp`/`minusp`/`evenp`/`oddp`) and
 ;; increment/decrement shorthands (`1+`/`1-`), built from the primitives
@@ -1864,6 +1865,36 @@ pub const SOURCE_TEMPLATE: &str = r##"
                   (if (= (mod fq 2.0) 0.0) fd
                       (let ((q (+ fq 1.0))) (cons q (- self (* q b))))))))))))
 
+;; --- ratio --- CL's rounding of a rational: the unary `floor`/`ceiling`/
+;; `truncate`/`round` answer the integer (CL's first value), the `*-div`
+;; forms the integer quotient and the `ratio` remainder, and the `f`-prefixed
+;; ones the same integer as an `f64`. Every one is exact: the quotient comes
+;; from `ratio->int` (truncation toward zero), never from a float, and
+;; `round` breaks a tie toward the even integer as CL does.
+(impl ratio
+  (truncate (self) int (ratio->int self))
+  (floor (self) int
+    (let ((q (ratio->int self))) (if (< self (int->ratio q)) (- q 1) q)))
+  (ceiling (self) int
+    (let ((q (ratio->int self))) (if (> self (int->ratio q)) (+ q 1) q)))
+  (round (self) int
+    (let* ((q (floor self)) (twice (* (- self (int->ratio q)) (int->ratio 2))))
+      (if (< twice (int->ratio 1)) q
+          (if (> twice (int->ratio 1)) (+ q 1)
+              (if (= (mod q 2) 0) q (+ q 1))))))
+  (ffloor (self) f64 (int->float (floor self)))
+  (fceiling (self) f64 (int->float (ceiling self)))
+  (ftruncate (self) f64 (int->float (truncate self)))
+  (fround (self) f64 (int->float (round self)))
+  (floor-div (self (b ratio)) cons-cell<int,ratio>
+    (let ((q (floor (/ self b)))) (cons q (- self (* b (int->ratio q))))))
+  (ceiling-div (self (b ratio)) cons-cell<int,ratio>
+    (let ((q (ceiling (/ self b)))) (cons q (- self (* b (int->ratio q))))))
+  (truncate-div (self (b ratio)) cons-cell<int,ratio>
+    (let ((q (truncate (/ self b)))) (cons q (- self (* b (int->ratio q))))))
+  (round-div (self (b ratio)) cons-cell<int,ratio>
+    (let ((q (round (/ self b)))) (cons q (- self (* b (int->ratio q)))))))
+
 ;; `Sexpr` deliberately has **no** `Iter` impl: `Iter`'s `Item` must be one
 ;; fixed type per impl (`vector-iter<T>`'s `Item` is `T`, `hashtable-
 ;; iter<K,V>`'s is `cons-cell<K,V>`, both parameters fixed once per
@@ -2084,6 +2115,8 @@ user-visible capacity."
 (impl Hash char   (sxhash ((self Self)) int (char->int self)))
 (impl Hash string (sxhash ((self Self)) int (sxhash-string self)))
 (impl Hash symbol (sxhash ((self Self)) int (sxhash-string (symbol->string self))))
+(impl Hash ratio  (sxhash ((self Self)) int
+  (logand (+ (* 31 (sxhash (numerator self))) (sxhash (denominator self))) *sxhash-mask*)))
 
 ;; ---------------------------------------------------------------------------
 ;; `HashTable<K,V>`'s lookup, insert and delete — cl-parity-plan.md Phase 6a.
@@ -3397,6 +3430,64 @@ user-visible capacity."
   (fceiling (self) f64 (ceiling self))
   (fround (self) f64 (round self))
   (ftruncate (self) f64 (truncate self)))
+
+;; CL's `float`/`rational`, and `numerator`/`denominator` on an integer (CL's
+;; integer is a rational whose denominator is 1). `float` answers `f64` for a
+;; rational and the float itself for a float; `rational` is exact
+;; (`float->ratio`), `rationalize` of a rational is the rational itself.
+(impl int
+  (numerator (self) int self)
+  (denominator (self) int 1)
+  (float (self) f64 (int->float self))
+  (rational (self) ratio (int->ratio self))
+  (rationalize (self) ratio (int->ratio self)))
+(impl ratio
+  (float (self) f64 (ratio->float self))
+  (rational (self) ratio self)
+  (rationalize (self) ratio self))
+(impl f64
+  (float (self) f64 self)
+  (rational (self) ratio (float->ratio self)))
+(impl f32
+  (float (self) f32 self)
+  (rational (self) ratio (float->ratio self)))
+
+;; The irrational functions of a rational (an `int` included) answer a
+;; float, as in CL (whose `(sqrt 1/4)` is `0.5` and `(sqrt 4)` is `2.0`): the
+;; argument is converted to `f64` and the `f64` function does the rest, so a
+;; negative argument to `sqrt`/`log` gives what the `f64` one gives.
+(impl int
+  (sqrt (self) f64 (sqrt (int->float self)))
+  (exp (self) f64 (exp (int->float self)))
+  (log (self) f64 (log (int->float self)))
+  (sin (self) f64 (sin (int->float self)))
+  (cos (self) f64 (cos (int->float self)))
+  (tan (self) f64 (tan (int->float self)))
+  (asin (self) f64 (asin (int->float self)))
+  (acos (self) f64 (acos (int->float self)))
+  (atan (self) f64 (atan (int->float self)))
+  (sinh (self) f64 (sinh (int->float self)))
+  (cosh (self) f64 (cosh (int->float self)))
+  (tanh (self) f64 (tanh (int->float self)))
+  (asinh (self) f64 (asinh (int->float self)))
+  (acosh (self) f64 (acosh (int->float self)))
+  (atanh (self) f64 (atanh (int->float self))))
+(impl ratio
+  (sqrt (self) f64 (sqrt (ratio->float self)))
+  (exp (self) f64 (exp (ratio->float self)))
+  (log (self) f64 (log (ratio->float self)))
+  (sin (self) f64 (sin (ratio->float self)))
+  (cos (self) f64 (cos (ratio->float self)))
+  (tan (self) f64 (tan (ratio->float self)))
+  (asin (self) f64 (asin (ratio->float self)))
+  (acos (self) f64 (acos (ratio->float self)))
+  (atan (self) f64 (atan (ratio->float self)))
+  (sinh (self) f64 (sinh (ratio->float self)))
+  (cosh (self) f64 (cosh (ratio->float self)))
+  (tanh (self) f64 (tanh (ratio->float self)))
+  (asinh (self) f64 (asinh (ratio->float self)))
+  (acosh (self) f64 (acosh (ratio->float self)))
+  (atanh (self) f64 (atanh (ratio->float self))))
 
 ;; CL's `isqrt`: the greatest integer whose square does not exceed `self`.
 ;; Integer Newton, keeping the *previous* estimate and stopping when the next

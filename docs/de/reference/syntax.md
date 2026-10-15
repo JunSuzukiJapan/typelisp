@@ -37,7 +37,7 @@ und Methoden steht unter [Eingebaute Funktionen](functions/README.md), die Liste
   besondere Syntax (wie in CL).
 - **Gleitkommazahlen**: solche mit Dezimalpunkt oder Exponent (`e`/`E`) (`1.5`, `3.0e10`). Standardmäßig `f64`
   (`f32`, wenn das der erwartete Typ ist).
-- **Brüche**: `Zähler/Nenner` (nur dezimal, zum Beispiel `1/3`). Beim Lesen gekürzt, wie CL es vorschreibt
+- **Brüche**: `Zähler/Nenner` (zum Beispiel `1/3`; auch mit Basispräfix wie `#x1/F`). Beim Lesen gekürzt, wie CL es vorschreibt
   (`2/4` ist `1/2`). Solche mit ganzzahligem Wert (`4/2` usw.) werden als `int` gelesen, nicht als `ratio`. Ein
   Nenner null (`1/0`) ist ein Lesefehler.
 - **Zeichen**: `#\` gefolgt von einem Zeichen oder einem Zeichennamen. Zum Beispiel `#\a` `#\Space`

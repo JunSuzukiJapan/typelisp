@@ -4970,7 +4970,11 @@ fn compile_dispatches_numeric_helpers_and_agrees_with_the_interpreter() {
         ("(defun f ((a int) (b int)) int (gcd a b))", "(f 480000000000000000000 36)"),
         ("(defun f ((a int) (b int)) int (expt a b))", "(f 2 64)"),
         ("(defun f ((a ratio) (b ratio)) ratio (mod a b))", "(f -7/2 3/2)"),
-        ("(defun f ((a ratio) (b ratio)) ratio (expt a b))", "(f 2/3 (int->ratio 3))"),
+        ("(defun f ((a ratio) (b int)) ratio (expt a b))", "(f 2/3 -3)"),
+        ("(defun f ((a ratio)) int (round a))", "(f -5/2)"),
+        ("(defun f ((a ratio) (b ratio)) ratio (cdr (floor-div a b)))", "(f 7/2 1/3)"),
+        ("(defun f ((a ratio)) f64 (sqrt a))", "(f 1/4)"),
+        ("(defun f ((a int)) int (denominator a))", "(f 5)"),
     ];
     for (src, call) in cases {
         let interpreted = run_readback(&format!("{src}\n{call}")).unwrap_or_else(|e| panic!("interp {}: {:?}", call, e));

@@ -36,7 +36,7 @@ a informacje o czytaniu komunikatów o błędach w [errors.md](errors.md).
   specjalnej składni (jak w CL).
 - **Liczby zmiennoprzecinkowe**: te zawierające kropkę dziesiętną lub wykładnik (`e`/`E`) (`1.5`,
   `3.0e10`). Domyślnie `f64` (`f32`, jeśli to oczekiwany typ).
-- **Ułamki**: `licznik/mianownik` (tylko dziesiętne, na przykład `1/3`). Skracane przy wczytaniu, jak określa CL
+- **Ułamki**: `licznik/mianownik` (na przykład `1/3`; działa też przedrostek podstawy, np. `#x1/F`). Skracane przy wczytaniu, jak określa CL
   (`2/4` to `1/2`). Te o wartości całkowitej (`4/2` i tak dalej) są wczytywane jako `int`, a nie
   `ratio`. Zerowy mianownik (`1/0`) jest błędem odczytu.
 - **Znaki**: `#\` po którym następuje jeden znak lub nazwa znaku. Na przykład `#\a` `#\Space`

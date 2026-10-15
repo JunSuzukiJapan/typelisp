@@ -37,7 +37,7 @@ messages d'erreur, [errors.md](errors.md).
   (comme en CL).
 - **Nombres à virgule flottante** : ceux qui contiennent un point décimal ou un exposant (`e`/`E`) (`1.5`,
   `3.0e10`). `f64` par défaut (`f32` si c'est le type attendu).
-- **Fractions** : `numérateur/dénominateur` (décimal uniquement, par exemple `1/3`). Réduites à la lecture, comme le
+- **Fractions** : `numérateur/dénominateur` (par exemple `1/3` ; un préfixe de base fonctionne aussi, comme `#x1/F`). Réduites à la lecture, comme le
   spécifie CL (`2/4` est `1/2`). Celles qui ont une valeur entière (`4/2`, etc.) se lisent comme `int`, pas comme
   `ratio`. Un dénominateur nul (`1/0`) est une erreur de lecture.
 - **Caractères** : `#\` suivi d'un caractère ou d'un nom de caractère. Par exemple `#\a` `#\Space` `#\Newline`

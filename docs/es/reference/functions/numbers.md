@@ -169,7 +169,7 @@ ratio, consulta la [Referencia de sintaxis](../syntax.md#1-elementos-léxicos).
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Resto de la división truncada (como en CL; el signo sigue al dividendo) |
 | `abs` | `(abs x)` | `ratio→ratio` | Valor absoluto |
 | `signum` | `(signum x)` | `ratio→ratio` | Signo (devuelve `1`/`-1`/`0` como `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Potencia. El exponente debe ser un `ratio` de valor entero (si no, panic). Un exponente negativo da el recíproco |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Potencia (por elevación al cuadrado). Un exponente negativo da el recíproco (`(expt 2/3 -2)` es `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | El mayor / el menor |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` no tiene operaciones de bits (en CL son solo para enteros) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Comparación |
@@ -178,6 +178,24 @@ ratio, consulta la [Referencia de sintaxis](../syntax.md#1-elementos-léxicos).
 | `denominator` | `(denominator x)` | `ratio→int` | Denominador en forma irreducible (siempre positivo) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Parte entera (truncada hacia cero) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Convierte a `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Redondeo a un entero (el primer valor en CL). Ante una mitad exacta, `round` va al lado par (`(round 5/2)` es `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | El mismo redondeo, devuelto como `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | El `floor` de dos argumentos de CL y los demás. El cociente entero es el `car` y el resto `ratio` el `cdr` (`(floor-div 7/2 1/3)` es `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Convierte a `f64` (igual que `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | El propio argumento |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Convierte a `f64` y calcula (`(sqrt 1/4)` es `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Igual que arriba |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Igual que arriba |
+| `sxhash` | `(sxhash x)` | `ratio→int` | La implementación de `Hash`. Un `ratio` puede ser clave de una `HashTable` |
+
+En CL un entero es un racional de denominador 1, así que `int` también tiene `numerator` (él
+mismo), `denominator` (`1`), `float`, `rational`, `rationalize` y las 15 funciones de `sqrt` a
+`atanh` de arriba (`(sqrt 4)` es `2.0`). `f64`/`f32` también tienen `float` (él mismo) y `rational`
+(igual que `float->ratio`).
+
+Un `ratio` de denominador 1 (como `(+ 1/3 2/3)`) se imprime como entero (`1`), igual que en CL.
+`*print-base*` se aplica al numerador y al denominador, y si `*print-radix*` es verdadero se añade un
+prefijo de base, como `#x1/f` y `#10r1/3`. El lector también lee `#x1/F`, `#b101/11` y `#3r1/2`.
 
 Las vías de entrada desde los enteros de ancho fijo y `f64` son `int->int`/`int->ratio` (capítulo 1) y
 `float->int`/`float->ratio` (capítulo 4). `int`/`ratio` son tipos separados, independientes de `i32` y los

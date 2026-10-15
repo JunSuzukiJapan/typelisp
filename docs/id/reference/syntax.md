@@ -38,7 +38,7 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   bignum ditentukan oleh ukurannya, tanpa sintaks khusus (seperti di CL).
 - **Bilangan floating-point**: yang mengandung titik desimal atau eksponen (`e`/`E`) (`1.5`,
   `3.0e10`). `f64` secara bawaan (`f32` jika itu tipe yang diharapkan).
-- **Rasio**: `pembilang/penyebut` (hanya desimal, misalnya `1/3`). Disederhanakan saat dibaca,
+- **Rasio**: `pembilang/penyebut` (misalnya `1/3`; awalan basis juga bisa, seperti `#x1/F`). Disederhanakan saat dibaca,
   sebagaimana ditetapkan CL (`2/4` adalah `1/2`). Yang bernilai bilangan bulat (`4/2` dan sebagainya)
   dibaca sebagai `int`, bukan `ratio`. Penyebut nol (`1/0`) adalah kesalahan pembacaan.
 - **Karakter**: `#\` diikuti satu karakter atau nama karakter. Misalnya `#\a` `#\Space` `#\Newline`

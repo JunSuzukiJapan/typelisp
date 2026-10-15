@@ -170,7 +170,7 @@ nämnare och är heapallokerade. Det finns ingen implicit konvertering med helta
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Rest av trunkerande division (som i CL; tecknet följer dividenden) |
 | `abs` | `(abs x)` | `ratio→ratio` | Absolutbelopp |
 | `signum` | `(signum x)` | `ratio→ratio` | Tecken (returnerar `1`/`-1`/`0` som en `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Potens. Exponenten måste vara en `ratio` med heltalsvärde (annars panic). En negativ exponent ger inversen |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Potens (genom kvadrering). En negativ exponent ger inversen (`(expt 2/3 -2)` är `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | Det större / mindre |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` har inga bitoperationer (i CL är de bara för heltal) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Jämförelse |
@@ -179,6 +179,24 @@ nämnare och är heapallokerade. Det finns ingen implicit konvertering med helta
 | `denominator` | `(denominator x)` | `ratio→int` | Nämnare i enklaste form (alltid positiv) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Heltalsdel (trunkerad mot noll) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Konverterar till `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Avrundning till heltal (det första värdet i CL). Vid exakt en halv går `round` till den jämna sidan (`(round 5/2)` är `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Samma avrundning, returnerad som `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL:s tvåargumentiga `floor` med flera. Heltalskvoten är `car` och `ratio`-resten `cdr` (`(floor-div 7/2 1/3)` är `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Konverterar till `f64` (samma som `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Argumentet självt |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Konverterar till `f64` och räknar (`(sqrt 1/4)` är `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Som ovan |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Som ovan |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash`-implementationen. En `ratio` kan vara nyckel i en `HashTable` |
+
+I CL är ett heltal ett rationellt tal med nämnaren 1, så även `int` har `numerator` (sig själv),
+`denominator` (`1`), `float`, `rational`, `rationalize` och de 15 funktionerna från `sqrt` till
+`atanh` ovan (`(sqrt 4)` är `2.0`). Även `f64`/`f32` har `float` (sig själv) och `rational` (samma som
+`float->ratio`).
+
+En `ratio` med nämnaren 1 (som `(+ 1/3 2/3)`) skrivs ut som ett heltal (`1`), precis som i CL.
+`*print-base*` gäller både täljare och nämnare, och när `*print-radix*` är sant läggs ett
+basprefix till, som `#x1/f` och `#10r1/3`. Läsaren läser också `#x1/F`, `#b101/11` och `#3r1/2`.
 
 Vägarna in från heltal med fast bredd och `f64` är `int->int`/`int->ratio` (kapitel 1) och
 `float->int`/`float->ratio` (kapitel 4). `int`/`ratio` är separata typer oberoende av `i32` och de andra,

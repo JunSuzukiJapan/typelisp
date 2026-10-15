@@ -169,7 +169,7 @@ mianownikiem i alokowane na stercie. Nie ma niejawnej konwersji z typami całkow
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Reszta z dzielenia z obcięciem (jak w CL; znak zgodny z dzielną) |
 | `abs` | `(abs x)` | `ratio→ratio` | Wartość bezwzględna |
 | `signum` | `(signum x)` | `ratio→ratio` | Znak (zwraca `1`/`-1`/`0` jako `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Potęga. Wykładnik musi być `ratio` o wartości całkowitej (w przeciwnym razie panic). Ujemny wykładnik daje odwrotność |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Potęga (przez podnoszenie do kwadratu). Ujemny wykładnik daje odwrotność (`(expt 2/3 -2)` to `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | Większa / mniejsza |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` nie ma operacji bitowych (w CL są tylko dla liczb całkowitych) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Porównanie |
@@ -178,6 +178,24 @@ mianownikiem i alokowane na stercie. Nie ma niejawnej konwersji z typami całkow
 | `denominator` | `(denominator x)` | `ratio→int` | Mianownik w postaci nieskracalnej (zawsze dodatni) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Część całkowita (obcięta w stronę zera) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Konwertuje na `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Zaokrąglenie do liczby całkowitej (pierwsza wartość w CL). Przy dokładnej połowie `round` wybiera stronę parzystą (`(round 5/2)` to `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | To samo zaokrąglenie, zwracane jako `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | Dwuargumentowe `floor` i pozostałe z CL. Całkowity iloraz to `car`, reszta `ratio` to `cdr` (`(floor-div 7/2 1/3)` to `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Konwersja do `f64` (to samo co `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Sam argument |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Konwertuje do `f64` i oblicza (`(sqrt 1/4)` to `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Jak wyżej |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Jak wyżej |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Implementacja `Hash`. `ratio` może być kluczem `HashTable` |
+
+W CL liczba całkowita jest liczbą wymierną o mianowniku 1, więc `int` także ma `numerator`
+(siebie), `denominator` (`1`), `float`, `rational`, `rationalize` oraz 15 funkcji od `sqrt` do
+`atanh` powyżej (`(sqrt 4)` to `2.0`). `f64`/`f32` również mają `float` (siebie) i `rational` (to samo
+co `float->ratio`).
+
+`ratio` o mianowniku 1 (np. `(+ 1/3 2/3)`) drukuje się jak liczba całkowita (`1`), tak jak w CL.
+`*print-base*` dotyczy licznika i mianownika, a gdy `*print-radix*` jest prawdą, dodawany jest
+przedrostek podstawy, np. `#x1/f` i `#10r1/3`. Czytnik czyta też `#x1/F`, `#b101/11` i `#3r1/2`.
 
 Drogami wejścia z liczb całkowitych o stałej szerokości i z `f64` są `int->int`/`int->ratio` (rozdział 1) oraz
 `float->int`/`float->ratio` (rozdział 4). `int`/`ratio` to osobne typy niezależne od `i32` i

@@ -179,8 +179,9 @@ fn every_width_converts_across_the_numeric_families() {
     assert_eq!(show(r#"(format false "~a" (as f32 (the u8 42)))"#), "42.0");
     assert_eq!(show(r#"(format false "~a" (as u8 (the f64 42.9)))"#), "42");
     assert_eq!(show(r#"(format false "~a" (as int (the u32 42)))"#), "42");
-    // `ratio` prints as a ratio whatever it was made from — `42/1`, not `42`.
-    assert_eq!(show(r#"(format false "~a" (as ratio (the i8 42)))"#), "42/1");
+    // An integer-valued `ratio` prints as the integer, as CL's printer does
+    // (CL has no denominator-1 ratio to print otherwise).
+    assert_eq!(show(r#"(format false "~a" (as ratio (the i8 42)))"#), "42");
     assert_eq!(show(r#"(format false "~a" (as char (the u32 65)))"#), "A");
     assert_eq!(show(r#"(format false "~a" (as f64 (the f32 1.5)))"#), "1.5");
 }

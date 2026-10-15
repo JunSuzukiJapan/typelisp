@@ -124,7 +124,7 @@ CL-संगत मनमानी सटीकता वाली परिम�
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | ट्रंकेटिंग भाग का शेषफल (CL की तरह; चिह्न भाज्य का अनुसरण करता है) |
 | `abs` | `(abs x)` | `ratio→ratio` | निरपेक्ष मान |
 | `signum` | `(signum x)` | `ratio→ratio` | चिह्न (`1`/`-1`/`0` को `ratio` के रूप में लौटाता है) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | घात। घातांक पूर्णांक-मान वाला `ratio` होना चाहिए (अन्यथा panic)। ऋणात्मक घातांक व्युत्क्रम देता है |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | घात (वर्ग करने की विधि से)। ऋणात्मक घातांक व्युत्क्रम देता है (`(expt 2/3 -2)` `9/4` है) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | बड़ा / छोटा |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`। `ratio` में बिट ऑपरेशन नहीं हैं (CL में वे केवल पूर्णांकों के लिए हैं) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | तुलना |
@@ -133,6 +133,23 @@ CL-संगत मनमानी सटीकता वाली परिम�
 | `denominator` | `(denominator x)` | `ratio→int` | न्यूनतम रूप में हर (हमेशा धनात्मक) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | पूर्णांक भाग (शून्य की ओर कटा हुआ) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64` में बदलता है |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | पूर्णांक में पूर्णन (CL का पहला मान)। ठीक आधे पर `round` सम पक्ष चुनता है (`(round 5/2)` `2` है) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | वही पूर्णन, `f64` के रूप में लौटाया जाता है |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL का दो-आर्ग्युमेंट `floor` आदि। पूर्णांक भागफल `car` है और `ratio` शेषफल `cdr` (`(floor-div 7/2 1/3)` `(10 . 1/6)` है) |
+| `float` | `(float x)` | `ratio→f64` | `f64` में बदलता है (`ratio->float` जैसा) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | स्वयं आर्ग्युमेंट |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64` में बदलकर गणना करता है (`(sqrt 1/4)` `0.5` है) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | ऊपर जैसा |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | ऊपर जैसा |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` का कार्यान्वयन। `ratio` को `HashTable` की कुंजी बनाया जा सकता है |
+
+CL में पूर्णांक वह परिमेय संख्या है जिसका हर 1 है, इसलिए `int` में भी `numerator` (स्वयं),
+`denominator` (`1`), `float`, `rational`, `rationalize` और ऊपर के `sqrt` से `atanh` तक के 15 फ़ंक्शन
+हैं (`(sqrt 4)` `2.0` है)। `f64`/`f32` में भी `float` (स्वयं) और `rational` (`float->ratio` जैसा) हैं।
+
+जिस `ratio` का हर 1 है (जैसे `(+ 1/3 2/3)`) वह CL की तरह पूर्णांक के रूप में छपता है (`1`)।
+`*print-base*` अंश और हर दोनों पर लागू होता है, और `*print-radix*` सत्य होने पर `#x1/f` और
+`#10r1/3` जैसा आधार-उपसर्ग जुड़ता है। रीडर भी `#x1/F`, `#b101/11` और `#3r1/2` पढ़ता है।
 
 निश्चित चौड़ाई वाले पूर्णांकों और `f64` से भीतर आने के रास्ते `int->int`/`int->ratio` (अध्याय 1) और `float->int`/`float->ratio` (अध्याय 4) हैं। `int`/`ratio` `i32` और बाकी से स्वतंत्र अलग टाइप हैं, और मिश्रित अंकगणित को स्पष्ट रूपांतरण चाहिए।
 

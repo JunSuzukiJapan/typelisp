@@ -158,7 +158,7 @@
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | باقي القسمة بالاقتطاع (كما في CL؛ الإشارة تتبع المقسوم) |
 | `abs` | `(abs x)` | `ratio→ratio` | القيمة المطلقة |
 | `signum` | `(signum x)` | `ratio→ratio` | الإشارة (تعيد `1`/`-1`/`0` على أنها `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | الأس. ويجب أن يكون الأس `ratio` قيمته عددًا صحيحًا (وإلا حدث `panic`). والأس السالب يعطي المقلوب |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | الأس (بالتربيع المتكرر). الأس السالب يعطي المقلوب (`(expt 2/3 -2)` يساوي `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | الأكبر / الأصغر |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. وليس لـ `ratio` عمليات بتات (ففي CL هي للأعداد الصحيحة فقط) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | المقارنة |
@@ -167,6 +167,23 @@
 | `denominator` | `(denominator x)` | `ratio→int` | المقام في أبسط صورة (موجب دائمًا) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | الجزء الصحيح (مقتطع نحو الصفر) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | يحوّل إلى `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | التقريب إلى عدد صحيح (القيمة الأولى في CL). عند النصف تمامًا يختار `round` الجهة الزوجية (`(round 5/2)` يساوي `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | التقريب نفسه، مُعادًا بصيغة `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | `floor` ذو الوسيطين في CL وأخواته. حاصل القسمة الصحيح هو `car` والباقي من نوع `ratio` هو `cdr` (`(floor-div 7/2 1/3)` يساوي `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | يحوّل إلى `f64` (مثل `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | الوسيط نفسه |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | يحوّل إلى `f64` ثم يحسب (`(sqrt 1/4)` يساوي `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | كما سبق |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | كما سبق |
+| `sxhash` | `(sxhash x)` | `ratio→int` | تنفيذ `Hash`. يمكن أن يكون `ratio` مفتاحًا في `HashTable` |
+
+العدد الصحيح في CL عدد نسبي مقامه 1، لذا لدى `int` أيضًا `numerator` (نفسه) و`denominator` (`1`)
+و`float` و`rational` و`rationalize` والدوال الخمس عشرة من `sqrt` إلى `atanh` أعلاه (`(sqrt 4)` يساوي
+`2.0`). ولدى `f64`/`f32` أيضًا `float` (نفسه) و`rational` (مثل `float->ratio`).
+
+يُطبع `ratio` الذي مقامه 1 (مثل `(+ 1/3 2/3)`) عددًا صحيحًا (`1`) كما في CL. ينطبق `*print-base*`
+على البسط والمقام معًا، وعندما يكون `*print-radix*` صحيحًا تُضاف بادئة الأساس مثل `#x1/f` و`#10r1/3`.
+ويقرأ القارئ أيضًا `#x1/F` و`#b101/11` و`#3r1/2`.
 
 وطرق الدخول من الأعداد الصحيحة ذات العرض الثابت و`f64` هي `int->int`/`int->ratio` (الفصل 1) و
 `float->int`/`float->ratio` (الفصل 4). و`int`/`ratio` نوعان منفصلان مستقلان عن `i32` وغيره، والحساب

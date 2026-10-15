@@ -34,7 +34,7 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   đặc biệt (như trong CL).
 - **Số dấu phẩy động**: những số chứa dấu thập phân hoặc số mũ (`e`/`E`) (`1.5`, `3.0e10`). Mặc định là
   `f64` (`f32` nếu đó là kiểu mong đợi).
-- **Số hữu tỉ (ratio)**: `tử/mẫu` (chỉ thập phân, ví dụ `1/3`). Được rút gọn khi đọc, như CL quy định (`2/4`
+- **Số hữu tỉ (ratio)**: `tử/mẫu` (ví dụ `1/3`; cũng dùng được tiền tố cơ số, như `#x1/F`). Được rút gọn khi đọc, như CL quy định (`2/4`
   là `1/2`). Những số có giá trị nguyên (`4/2`, v.v.) được đọc là `int`, không phải `ratio`. Mẫu số bằng
   không (`1/0`) là lỗi đọc.
 - **Ký tự**: `#\` theo sau bởi một ký tự hoặc một tên ký tự. Ví dụ `#\a` `#\Space` `#\Newline` `#\Tab`

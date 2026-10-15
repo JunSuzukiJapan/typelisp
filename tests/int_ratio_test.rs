@@ -273,14 +273,9 @@ fn ratio_abs_and_signum() {
 #[test]
 fn ratio_expt_with_integer_exponent() {
     // (expt 2/3 3) = 8/27; a negative exponent takes the reciprocal.
-    assert_ratio(eval_ok("(defun f ((a ratio) (b ratio)) ratio (expt a b)) (f 2/3 (int->ratio 3))"), "8", "27");
-    assert_ratio(eval_ok("(defun f ((a ratio) (b ratio)) ratio (expt a b)) (f 2/3 (int->ratio -2))"), "9", "4");
-}
-
-#[test]
-fn ratio_expt_with_a_non_integer_exponent_panics() {
-    let src = "(defun f ((a ratio) (b ratio)) ratio (expt a b)) (f 2/3 1/2)";
-    assert!(matches!(run(src), Err(EvalError::Panic(_))));
+    assert_ratio(eval_ok("(defun f ((a ratio) (b int)) ratio (expt a b)) (f 2/3 3)"), "8", "27");
+    assert_ratio(eval_ok("(defun f ((a ratio) (b int)) ratio (expt a b)) (f 2/3 -2)"), "9", "4");
+    assert_ratio(eval_ok("(defun f ((a ratio) (b int)) ratio (expt a b)) (f 1/2 65)"), "1", "36893488147419103232");
 }
 
 // ---- conversions --------------------------------------------------------------

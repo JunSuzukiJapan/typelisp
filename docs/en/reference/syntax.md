@@ -35,7 +35,7 @@ and for reading error messages, [errors.md](errors.md).
   special syntax (as in CL).
 - **Floating-point numbers**: those containing a decimal point or an exponent (`e`/`E`) (`1.5`,
   `3.0e10`). `f64` by default (`f32` if that is the expected type).
-- **Ratios**: `numerator/denominator` (decimal only, for example `1/3`). Reduced when read, as CL
+- **Ratios**: `numerator/denominator` (for example `1/3`; a radix prefix works too, as in `#x1/F`). Reduced when read, as CL
   specifies (`2/4` is `1/2`). Those with an integer value (`4/2` and so on) are read as `int`, not
   `ratio`. A zero denominator (`1/0`) is a read error.
 - **Characters**: `#\` followed by one character or a character name. For example `#\a` `#\Space`

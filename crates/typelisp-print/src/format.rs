@@ -2908,8 +2908,26 @@ impl Renderer {
                 out.push_str(&text);
             }
             Value::Boxed(id) if heap.is_ratio(id) => {
-                let r = heap.ratio_value(id);
-                out.push_str(&format!("{}/{}", r.numer(), r.denom()));
+                // A `ratio` whose denominator is 1 is an integer to CL's
+                // printer (`(+ 1/3 2/3)` prints `1`). Otherwise both parts
+                // go in `*print-base*`; under `*print-radix*` a decimal ratio
+                // takes `#10r`, since the trailing `.` is integer-only syntax.
+                let r = heap.ratio_value(id).clone();
+                let (n, d) = (r.numer(), r.denom());
+                let text = if num_traits::One::is_one(d) {
+                    Self::integer_text(ctx, || n.to_string(), |b| n.to_str_radix(b))?
+                } else {
+                    let base = ctx.print_vars.base;
+                    let body = format!("{}/{}", n.to_str_radix(base), d.to_str_radix(base));
+                    match (ctx.print_vars.radix, base) {
+                        (false, _) => body,
+                        (true, 2) => format!("#b{}", body),
+                        (true, 8) => format!("#o{}", body),
+                        (true, 16) => format!("#x{}", body),
+                        (true, b) => format!("#{}r{}", b, body),
+                    }
+                };
+                out.push_str(&text);
             }
             Value::Boxed(id) if heap.is_struct(id) => {
                 let key = crate::stored_type_key(heap, id)

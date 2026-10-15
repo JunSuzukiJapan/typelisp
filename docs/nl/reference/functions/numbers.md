@@ -172,7 +172,7 @@ ratio-literals zie de [Syntaxreferentie](../syntax.md#1-lexicale-elementen).
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Rest van deling met afkappen (zoals in CL; het teken volgt het deeltal) |
 | `abs` | `(abs x)` | `ratio→ratio` | Absolute waarde |
 | `signum` | `(signum x)` | `ratio→ratio` | Teken (geeft `1`/`-1`/`0` als `ratio` terug) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Macht. De exponent moet een `ratio` met een geheel getalwaarde zijn (anders een panic). Een negatieve exponent geeft het omgekeerde |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Macht (door kwadrateren). Een negatieve exponent geeft het omgekeerde (`(expt 2/3 -2)` is `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | De grootste / kleinste |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` heeft geen bitbewerkingen (in CL zijn die alleen voor gehele getallen) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Vergelijking |
@@ -181,6 +181,25 @@ ratio-literals zie de [Syntaxreferentie](../syntax.md#1-lexicale-elementen).
 | `denominator` | `(denominator x)` | `ratio→int` | Noemer in laagste termen (altijd positief) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Geheel deel (afgekapt richting nul) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Converteert naar `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Afronden op een geheel getal (de eerste waarde in CL). Bij precies een half gaat `round` naar de even kant (`(round 5/2)` is `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Dezelfde afronding, teruggegeven als `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | De `floor` met twee argumenten uit CL en de rest. Het gehele quotiënt is de `car`, de `ratio`-rest de `cdr` (`(floor-div 7/2 1/3)` is `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Zet om naar `f64` (hetzelfde als `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Het argument zelf |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Zet om naar `f64` en rekent (`(sqrt 1/4)` is `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Als hierboven |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Als hierboven |
+| `sxhash` | `(sxhash x)` | `ratio→int` | De `Hash`-implementatie. Een `ratio` kan een sleutel van een `HashTable` zijn |
+
+In CL is een geheel getal een rationaal getal met noemer 1, dus `int` heeft ook `numerator`
+(zichzelf), `denominator` (`1`), `float`, `rational`, `rationalize` en de 15 functies van `sqrt` tot
+`atanh` hierboven (`(sqrt 4)` is `2.0`). Ook `f64`/`f32` hebben `float` (zichzelf) en `rational`
+(hetzelfde als `float->ratio`).
+
+Een `ratio` met noemer 1 (zoals `(+ 1/3 2/3)`) wordt net als in CL als geheel getal afgedrukt
+(`1`). `*print-base*` geldt voor teller en noemer, en als `*print-radix*` waar is komt er een
+grondtal-voorvoegsel bij, zoals `#x1/f` en `#10r1/3`. De reader leest ook `#x1/F`, `#b101/11` en
+`#3r1/2`.
 
 De wegen naar binnen vanuit gehele getallen met vaste breedte en `f64` zijn `int->int`/`int->ratio`
 (hoofdstuk 1) en `float->int`/`float->ratio` (hoofdstuk 4). `int`/`ratio` zijn aparte types die

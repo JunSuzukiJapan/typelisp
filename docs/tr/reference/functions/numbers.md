@@ -169,7 +169,7 @@ heap'te ayrılırlar. Tamsayı türleri ya da `f64` ile örtük dönüşüm yokt
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Kesen bölmenin kalanı (CL'deki gibi; işaret bölüneni izler) |
 | `abs` | `(abs x)` | `ratio→ratio` | Mutlak değer |
 | `signum` | `(signum x)` | `ratio→ratio` | İşaret (`1`/`-1`/`0`'ı bir `ratio` olarak döndürür) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Üs alma. Üs, tamsayı değerli bir `ratio` olmalıdır (aksi halde panic olur). Negatif bir üs çarpmaya göre tersi verir |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Üs alma (kare alarak). Negatif üs tersini verir (`(expt 2/3 -2)` `9/4` olur) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | Büyük olan / küçük olan |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio`'nun bit işlemleri yoktur (CL'de bunlar yalnızca tamsayılar içindir) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Karşılaştırma |
@@ -178,6 +178,24 @@ heap'te ayrılırlar. Tamsayı türleri ya da `f64` ile örtük dönüşüm yokt
 | `denominator` | `(denominator x)` | `ratio→int` | En sade biçimdeki payda (her zaman pozitif) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Tamsayı kısmı (sıfıra doğru kesilmiş) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | `f64`'e çevirir |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Tam sayıya yuvarlama (CL'deki ilk değer). Tam yarıda `round` çift tarafa gider (`(round 5/2)` `2` olur) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | Aynı yuvarlama, `f64` olarak döner |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | CL'nin iki argümanlı `floor` vb. Tam sayı bölüm `car`, `ratio` kalan `cdr` (`(floor-div 7/2 1/3)` `(10 . 1/6)` olur) |
+| `float` | `(float x)` | `ratio→f64` | `f64`'e dönüştürür (`ratio->float` ile aynı) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Argümanın kendisi |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | `f64`'e dönüştürüp hesaplar (`(sqrt 1/4)` `0.5` olur) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Yukarıdaki gibi |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Yukarıdaki gibi |
+| `sxhash` | `(sxhash x)` | `ratio→int` | `Hash` uygulaması. Bir `ratio`, `HashTable` anahtarı olabilir |
+
+CL'de tam sayı paydası 1 olan bir rasyonel sayıdır; bu yüzden `int` de `numerator` (kendisi),
+`denominator` (`1`), `float`, `rational`, `rationalize` ve yukarıdaki `sqrt`'ten `atanh`'a 15
+fonksiyona sahiptir (`(sqrt 4)` `2.0` olur). `f64`/`f32` da `float` (kendisi) ve `rational`
+(`float->ratio` ile aynı) içerir.
+
+Paydası 1 olan bir `ratio` (örneğin `(+ 1/3 2/3)`) CL'deki gibi tam sayı olarak yazdırılır (`1`).
+`*print-base*` hem paya hem paydaya uygulanır; `*print-radix*` doğruysa `#x1/f` ve `#10r1/3` gibi bir
+taban öneki eklenir. Okuyucu da `#x1/F`, `#b101/11` ve `#3r1/2` okur.
 
 Sabit genişlikli tamsayılardan ve `f64`'ten giriş yolları `int->int`/`int->ratio` (1. bölüm) ve
 `float->int`/`float->ratio`'dur (4. bölüm). `int`/`ratio`, `i32` ve diğerlerinden bağımsız ayrı

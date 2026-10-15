@@ -290,13 +290,13 @@ CLOS 全体が ⛔（`deftrait`/`impl`/`:dyn` と `defstruct`/`defenum` で置�
 | `max` / `min` | ✅ | 型ごとの2引数ビルトイン(`icmp`+`select`、`bignum`/`ratio`は`rt_*_cmp`+`select`) + 可変長糖衣展開で3引数以上にも対応 |
 | `1+` / `1-` | ✅ | 型ごとの `defmethod`（`prelude.rs`） |
 | `abs` `signum` `gcd` `lcm` `mod` `rem` `expt` | ✅ | 型ごとのメソッド。`gcd`/`lcm` は 0/1/n 引数すべて（チェッカー糖衣、`(gcd)`=0・`(lcm)`=1・1引数は `abs`）、整数の `expt` も `i32` に（2026-08-20、Phase 1c） |
-| `floor` `ceiling` `round` `truncate` | ⚠️ | 1引数版（`f64→f64`）はCL相当。~~除数を取る2引数版も商・剰余の多値も無い~~ → **2026-07-29 `floor-div`/`ceiling-div`/`round-div`/`truncate-div` として実装済み**（`i32`/`f64`、商・剰余を`cons-cell`で返す。多値そのものは非採用、§3.4参照）。CL と同名の2引数オーバーロードにしなかったのは `defmethod` が受け手の型でのみ解決しアリティでは解決しないため |
+| `floor` `ceiling` `round` `truncate` | ⚠️ | 1引数版（`f64→f64`）はCL相当。~~除数を取る2引数版も商・剰余の多値も無い~~ → **2026-07-29 `floor-div`/`ceiling-div`/`round-div`/`truncate-div` として実装済み**（`i32`/`f64`、商・剰余を`cons-cell`で返す。多値そのものは非採用、§3.4参照）。CL と同名の2引数オーバーロードにしなかったのは `defmethod` が受け手の型でのみ解決しアリティでは解決しないため。2026-10-15、`ratio` に CL どおり整数を返す1引数版（`round` は偶数丸め）と `*-div`（商 `int`・剰余 `ratio`）を追加 |
 | `ffloor` `fceiling` `fround` `ftruncate` | ✅ | 既存の `f64` `floor` 等の別名（CL では無印が整数を返すので `f` 付きの方が一致する）（2026-08-20、Phase 1c）。**丸め方だけ CL と違う**——0 から遠い方へ丸める |
-| `sqrt` | ✅ | `f64` の `sqrt` と、整数の `isqrt`（`i32`）（2026-08-20、Phase 1c） |
-| `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | ✅ | **2026-07-31実装**（`f64`、`registry.rs`/`interp.rs`）。`log` は自然対数のみ（1引数）に加え、`(log number base)` の2引数版は `Checker::check_log_with_base` が `(/ (log number) (log base))` へアリティ展開して対応 |
+| `sqrt` | ✅ | `f64` の `sqrt` と、整数の `isqrt`（`i32`）（2026-08-20、Phase 1c）。2026-10-15、`ratio`/`int` にも（`f64` へ変換して計算） |
+| `exp` `log` `sin` `cos` `tan` `asin` `acos` `atan` `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | ✅ | **2026-07-31実装**（`f64`、`registry.rs`/`interp.rs`）。`log` は自然対数のみ（1引数）に加え、`(log number base)` の2引数版は `Checker::check_log_with_base` が `(/ (log number) (log base))` へアリティ展開して対応。2026-10-15、`ratio`/`int` にも（`f64` を返す） |
 | `pi` | ✅ | **2026-07-31実装**。`f64` 定数（`prelude.rs` の `defconstant`） |
-| `float` `rational` `rationalize` | ✅ | `int->float`/`float->ratio`（CL の `rational`）に加え `rationalize`（読み戻せる最も簡単な有理数。`(rationalize 0.1)`=`1/10`）（2026-08-20、Phase 1c） |
-| `numerator` / `denominator` | ✅ | |
+| `float` `rational` `rationalize` | ✅ | `int->float`/`float->ratio`（CL の `rational`）に加え `rationalize`（読み戻せる最も簡単な有理数。`(rationalize 0.1)`=`1/10`）（2026-08-20、Phase 1c）。2026-10-15、CL の名前の `float`（`int`/`ratio`/`f64`/`f32`）と `rational`（同）もメソッドとして追加 |
+| `numerator` / `denominator` | ✅ | `ratio` と `int`（`int` は自身と `1`、2026-10-15） |
 | `complex` `realpart` `imagpart` `conjugate` `phase` `cis` | ✅ | 2026-08-21（Phase 1d）。`realpart`/`imagpart`/`conjugate`/`phase` は `f64` にも定義されている（CL と同じく実数は虚部 0 の複素数として振る舞う） |
 | `float-sign` `float-digits` `float-precision` `decode-float` `integer-decode-float` `scale-float` `float-radix` | ✅ | 7つとも（2026-08-20、Phase 1c）。`decode-float` は CL の3値返しのうち仮数と指数を `cons-cell` で返し、符号は `float-sign` が担う |
 | `random` | ✅ | `(random n &optional state)`／`make-random-state`／`random-state-p`／`*random-state*`（(D5) のため動的束縛でなく代入可能なグローバル）。状態は xorshift64、interpreted と compiled で同じ列を返す。**シードを外から与える `seed-random-state`**（SBCL の `sb-ext:seed-random-state` に倣った）が 2026-09-03 に入り、実行を跨いで列を再現できる |

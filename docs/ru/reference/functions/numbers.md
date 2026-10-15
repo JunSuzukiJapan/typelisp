@@ -163,7 +163,7 @@ does not fit a fixnum»).
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Остаток деления с усечением (как в CL; знак следует за делимым) |
 | `abs` | `(abs x)` | `ratio→ratio` | Модуль |
 | `signum` | `(signum x)` | `ratio→ratio` | Знак (возвращает `1`/`-1`/`0` как `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Степень. Показатель должен быть `ratio` с целым значением (иначе panic). Отрицательный показатель даёт обратное число |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Степень (возведением в квадрат). Отрицательный показатель даёт обратное число (`(expt 2/3 -2)` равно `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | Большее / меньшее |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. У `ratio` нет битовых операций (в CL они только для целых) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Сравнение |
@@ -172,6 +172,25 @@ does not fit a fixnum»).
 | `denominator` | `(denominator x)` | `ratio→int` | Знаменатель несократимой дроби (всегда положителен) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Целая часть (усечённая к нулю) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Преобразует в `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Округление до целого (первое значение в CL). При ровно половине `round` выбирает чётную сторону (`(round 5/2)` равно `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | То же округление, результат в `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | Двухаргументный `floor` и прочие из CL. Целое частное — `car`, остаток `ratio` — `cdr` (`(floor-div 7/2 1/3)` равно `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Преобразует в `f64` (то же, что `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | Сам аргумент |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Преобразует в `f64` и вычисляет (`(sqrt 1/4)` равно `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | То же |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | То же |
+| `sxhash` | `(sxhash x)` | `ratio→int` | Реализация `Hash`. `ratio` может быть ключом `HashTable` |
+
+В CL целое число — это рациональное число со знаменателем 1, поэтому у `int` тоже есть
+`numerator` (само число), `denominator` (`1`), `float`, `rational`, `rationalize` и 15 функций от
+`sqrt` до `atanh` выше (`(sqrt 4)` равно `2.0`). У `f64`/`f32` тоже есть `float` (само число) и
+`rational` (то же, что `float->ratio`).
+
+`ratio` со знаменателем 1 (например, `(+ 1/3 2/3)`) печатается как целое (`1`), как в CL.
+`*print-base*` действует на числитель и знаменатель, а при истинном `*print-radix*` добавляется
+префикс основания, например `#x1/f` и `#10r1/3`. Читатель также читает `#x1/F`, `#b101/11` и
+`#3r1/2`.
 
 Пути внутрь от целых фиксированной ширины и `f64` — это `int->int`/`int->ratio` (глава 1) и
 `float->int`/`float->ratio` (глава 4). `int`/`ratio` — отдельные типы, независимые от `i32` и прочих, и смешанная

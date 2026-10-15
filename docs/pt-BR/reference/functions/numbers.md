@@ -167,7 +167,7 @@ um método de conversão explícito ou `as`/`try-as`). Para a sintaxe dos litera
 | `rem` | `(rem a b)` | `(ratio,ratio)→ratio` | Resto da divisão truncada (como no CL; o sinal segue o dividendo) |
 | `abs` | `(abs x)` | `ratio→ratio` | Valor absoluto |
 | `signum` | `(signum x)` | `ratio→ratio` | Sinal (devolve `1`/`-1`/`0` como `ratio`) |
-| `expt` | `(expt a b)` | `(ratio,ratio)→ratio` | Potência. O expoente deve ser um `ratio` de valor inteiro (senão, panic). Um expoente negativo dá o recíproco |
+| `expt` | `(expt a n)` | `(ratio,int)→ratio` | Potência (por quadrados sucessivos). Um expoente negativo dá o recíproco (`(expt 2/3 -2)` é `9/4`) |
 | `max` `min` | `(op a b)` | `(ratio,ratio)→ratio` | O maior / o menor |
 | `1+` `1-` | `(op x)` | `ratio→ratio` | `x±1`. `ratio` não tem operações de bits (no CL elas são só para inteiros) |
 | `<` `<=` `>` `>=` `=` `/=` | `(op a b)` | `(ratio,ratio)→bool` | Comparação |
@@ -176,6 +176,24 @@ um método de conversão explícito ou `as`/`try-as`). Para a sintaxe dos litera
 | `denominator` | `(denominator x)` | `ratio→int` | Denominador na forma irredutível (sempre positivo) |
 | `ratio->int` | `(ratio->int x)` | `ratio→int` | Parte inteira (truncada em direção a zero) |
 | `ratio->float` | `(ratio->float x)` | `ratio→f64` | Converte para `f64` |
+| `floor` `ceiling` `truncate` `round` | `(op x)` | `ratio→int` | Arredondamento para inteiro (o primeiro valor em CL). Numa metade exata, `round` vai para o lado par (`(round 5/2)` é `2`) |
+| `ffloor` `fceiling` `ftruncate` `fround` | `(op x)` | `ratio→f64` | O mesmo arredondamento, devolvido como `f64` |
+| `floor-div` `ceiling-div` `truncate-div` `round-div` | `(op a b)` | `(ratio,ratio)→cons-cell<int,ratio>` | O `floor` de dois argumentos do CL e os demais. O quociente inteiro é o `car` e o resto `ratio` é o `cdr` (`(floor-div 7/2 1/3)` é `(10 . 1/6)`) |
+| `float` | `(float x)` | `ratio→f64` | Converte para `f64` (o mesmo que `ratio->float`) |
+| `rational` `rationalize` | `(op x)` | `ratio→ratio` | O próprio argumento |
+| `sqrt` `exp` `log` | `(op x)` | `ratio→f64` | Converte para `f64` e calcula (`(sqrt 1/4)` é `0.5`) |
+| `sin` `cos` `tan` `asin` `acos` `atan` | `(op x)` | `ratio→f64` | Idem |
+| `sinh` `cosh` `tanh` `asinh` `acosh` `atanh` | `(op x)` | `ratio→f64` | Idem |
+| `sxhash` | `(sxhash x)` | `ratio→int` | A implementação de `Hash`. Um `ratio` pode ser chave de uma `HashTable` |
+
+No CL um inteiro é um racional de denominador 1, então `int` também tem `numerator` (ele mesmo),
+`denominator` (`1`), `float`, `rational`, `rationalize` e as 15 funções de `sqrt` a `atanh` acima
+(`(sqrt 4)` é `2.0`). `f64`/`f32` também têm `float` (ele mesmo) e `rational` (o mesmo que
+`float->ratio`).
+
+Um `ratio` de denominador 1 (como `(+ 1/3 2/3)`) é impresso como inteiro (`1`), como no CL.
+`*print-base*` vale para numerador e denominador, e quando `*print-radix*` é verdadeiro um prefixo de
+base é acrescentado, como `#x1/f` e `#10r1/3`. O leitor também lê `#x1/F`, `#b101/11` e `#3r1/2`.
 
 Os caminhos de entrada a partir dos inteiros de largura fixa e de `f64` são `int->int`/`int->ratio`
 (capítulo 1) e `float->int`/`float->ratio` (capítulo 4). `int`/`ratio` são tipos separados, independentes de

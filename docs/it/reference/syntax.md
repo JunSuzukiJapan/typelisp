@@ -40,7 +40,7 @@ metodi predefiniti, si veda [Funzioni predefinite](functions/README.md); per l'e
   senza sintassi speciale (come in CL).
 - **Numeri in virgola mobile**: quelli che contengono un punto decimale o un esponente (`e`/`E`) (`1.5`,
   `3.0e10`). `f64` per impostazione predefinita (`f32` se è il tipo atteso).
-- **Rapporti**: `numeratore/denominatore` (solo decimale, per esempio `1/3`). Ridotti in lettura, come
+- **Rapporti**: `numeratore/denominatore` (per esempio `1/3`; vale anche un prefisso di base, come `#x1/F`). Ridotti in lettura, come
   specifica CL (`2/4` è `1/2`). Quelli con valore intero (`4/2` e così via) vengono letti come `int`,
   non `ratio`. Un denominatore zero (`1/0`) è un errore di lettura.
 - **Caratteri**: `#\` seguito da un carattere o da un nome di carattere. Per esempio `#\a` `#\Space`

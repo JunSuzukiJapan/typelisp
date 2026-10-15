@@ -37,7 +37,7 @@ incorporados, consulta [Funciones incorporadas](functions/README.md); para la li
   especial (como en CL).
 - **Números de coma flotante**: los que contienen un punto decimal o un exponente (`e`/`E`) (`1.5`,
   `3.0e10`). `f64` por defecto (`f32` si ese es el tipo esperado).
-- **Ratios**: `numerador/denominador` (solo decimal, por ejemplo `1/3`). Se reducen al leerse, como especifica
+- **Ratios**: `numerador/denominador` (por ejemplo `1/3`; también con prefijo de base, como `#x1/F`). Se reducen al leerse, como especifica
   CL (`2/4` es `1/2`). Los que tienen valor entero (`4/2`, etc.) se leen como `int`, no como `ratio`. Un
   denominador cero (`1/0`) es un error de lectura.
 - **Caracteres**: `#\` seguido de un carácter o de un nombre de carácter. Por ejemplo `#\a` `#\Space`
