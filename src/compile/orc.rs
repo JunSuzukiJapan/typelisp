@@ -418,10 +418,14 @@ impl JitCode {
         let jit = jit()?;
         module.set_triple(&jit.triple);
         module.set_data_layout(&TargetData::create(&jit.layout).get_data_layout());
+        super::codegen_prep::prepare(module)?;
         if jit.mach_o {
             end_unwind_table(module)?;
         }
         let object = jit.machine.write_to_memory_buffer(module, FileType::Object).map_err(|e| e.to_string())?;
+        for warning in super::codegen_prep::take_frame_warnings() {
+            eprintln!("{}", warning);
+        }
         let defined: Vec<String> = module
             .get_functions()
             .filter(|f| f.count_basic_blocks() > 0)

@@ -440,6 +440,8 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         module
             .link_in_module(prelude_module)
             .map_err(|e| format!("linking the prelude into the compiled file failed: {}", e))?;
+        // The link left a handler of inkwell's behind — see the function.
+        crate::compile::codegen_prep::install_diagnostic_handler();
         Rc::new(RefCell::new(module))
     };
 
@@ -1460,7 +1462,8 @@ pub fn set_lib_dir(dir: std::path::PathBuf) -> Result<(), String> {
 /// a person. One target machine and one set of options, so what
 /// `disassemble` prints is the code `compile-file` would actually emit —
 /// including `OptimizationLevel::None`, which is why the assembly reads the
-/// way the IR does.
+/// way the IR does. Its callers prepare the module first
+/// ([`crate::compile::codegen_prep::prepare`]), as the JIT does.
 fn host_target_machine() -> Result<TargetMachine, String> {
     Target::initialize_native(&InitializationConfig::default())
         .map_err(|e| format!("failed to initialize native target: {}", e))?;
@@ -1542,10 +1545,14 @@ fn macos_version_min() -> Option<&'static str> {
 /// for. Must be called with [`crate::compile::COMPILE_LOCK`] held, like every
 /// other use of the shared LLVM context.
 pub(crate) fn assembly_of(module: &Module<'static>) -> Result<String, String> {
+    crate::compile::codegen_prep::prepare(module)?;
     let tm = host_target_machine()?;
     let buf = tm
         .write_to_memory_buffer(module, FileType::Assembly)
         .map_err(|e| format!("failed to emit assembly: {}", e))?;
+    // Already said when the function was compiled; showing its code is not a
+    // second occasion to.
+    crate::compile::codegen_prep::take_frame_warnings();
     String::from_utf8(buf.as_slice().to_vec()).map_err(|e| format!("the assembler emitted invalid UTF-8: {}", e))
 }
 
@@ -1633,6 +1640,7 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
         std::fs::write(&path, module.print_to_string().to_string())
             .map_err(|e| format!("failed to write {}: {}", path, e))?;
     }
+    crate::compile::codegen_prep::prepare(module)?;
     let target_machine = host_target_machine()?;
 
     // Named from `output_path` (not e.g. the process id) so it can't
@@ -1643,6 +1651,9 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
     target_machine
         .write_to_file(module, FileType::Object, std::path::Path::new(&object_path))
         .map_err(|e| format!("failed to emit object file: {}", e))?;
+    for warning in crate::compile::codegen_prep::take_frame_warnings() {
+        eprintln!("{}", warning);
+    }
 
     // `-l` for every library a `defffi` named. Nothing is needed for a
     // declaration without one: what it reaches is already linked (libc comes

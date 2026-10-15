@@ -47,6 +47,7 @@ pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Re
 pub mod abi_signature;
 pub mod aot;
 pub mod bootstrap;
+pub mod codegen_prep;
 pub mod core_bridge;
 pub mod driver;
 pub mod dump;
