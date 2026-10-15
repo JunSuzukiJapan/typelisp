@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Directives de format
 
 Les directives qu'on écrit dans les chaînes de contrôle de `print`/`println`/`format`. Elles couvrent presque toutes

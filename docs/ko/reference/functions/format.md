@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 서식 지시자
 
 `print`/`println`/`format`의 제어 문자열에 쓰는 지시자. CL `format`의 지시자를 거의 모두 다룬다. 함수 자체는

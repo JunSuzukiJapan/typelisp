@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ 5a8204d1f6a60c462be82bf95b46e9dc1987d572 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # Các trait chuẩn
 
 Các trait cho việc lặp, so sánh và số học. Các trait chuẩn khác nằm ở các chương riêng của chúng: `Hash`

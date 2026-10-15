@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/format.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/format.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
 # 格式指令
 
 寫在 `print`/`println`/`format` 的控制字串中的指令。幾乎涵蓋了 CL 的全部 `format` 指令。函式本身的說明見
