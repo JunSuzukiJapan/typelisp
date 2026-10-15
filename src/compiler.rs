@@ -1670,6 +1670,33 @@ const SOURCE_TEMPLATE: &str = r#"
     (store-arg builder args-ptr 1 (const-word builder w))
     (build-call builder (get-function m fname) args-ptr 2)))
 
+;; The role of an arithmetic operation's merge slot (`scratch-slot`): filled
+;; on the fast and the slow branch, read where they meet, and never asked for
+;; again before that read — which is what lets every one of them in a
+;; function be the same slot.
+(defun merge-slot-role () int 0)
+
+;; The roles of its two operands' slots: written before it branches, read on
+;; each branch. A value used on another block than the one computing it gets
+;; a stack slot of its own from the unoptimized register allocator, so
+;; operands read straight across the branch grew the frame with every
+;; operation in the function.
+(defun left-operand-role () int 1)
+(defun right-operand-role () int 2)
+
+;; Writes `a` and `b` to their slots and branches on whether both are
+;; fixnums; each branch reads them back with `left-operand`/`right-operand`.
+(defun branch-on-fixnums ((builder llvm-builder) (a llvm-value) (b llvm-value) (fast-block llvm-basic-block) (slow-block llvm-basic-block)) ()
+  (store-arg builder (scratch-slot builder (left-operand-role)) 0 a)
+  (store-arg builder (scratch-slot builder (right-operand-role)) 0 b)
+  (build-cond-br builder (both-fixnum-test builder a b) fast-block slow-block))
+
+(defun left-operand ((builder llvm-builder)) llvm-value
+  (load-raw builder (scratch-slot builder (left-operand-role)) 0))
+
+(defun right-operand ((builder llvm-builder)) llvm-value
+  (load-raw builder (scratch-slot builder (right-operand-role)) 0))
+
 ;; `int`'s `+`/`-`/`*` (`op` 0/1/2): two fixnums compute as one
 ;; overflow-checked instruction on the tagged words themselves — `n << 1`
 ;; plus `m << 1` is `(n + m) << 1`, and it overflows the `i64` exactly when
@@ -1682,20 +1709,20 @@ const SOURCE_TEMPLATE: &str = r#"
   (let* ((fast-block (append-block cur-fn "int-fast"))
          (slow-block (append-block cur-fn "int-slow"))
          (merge-block (append-block cur-fn "int-merge"))
-         (slot (alloca-args builder 1))
+         (slot (scratch-slot builder (merge-slot-role)))
          (flag-slot (alloca-args builder 1)))
-    (build-cond-br builder (both-fixnum-test builder a b) fast-block slow-block)
+    (branch-on-fixnums builder a b fast-block slow-block)
     (position-at-end builder fast-block)
     (let ((r (case op
-               (0 (build-sadd-overflow builder m a b flag-slot))
-               (1 (build-ssub-overflow builder m a b flag-slot))
-               (else (build-smul-overflow builder m a (untag-fixnum builder b) flag-slot)))))
+               (0 (build-sadd-overflow builder m (left-operand builder) (right-operand builder) flag-slot))
+               (1 (build-ssub-overflow builder m (left-operand builder) (right-operand builder) flag-slot))
+               (else (build-smul-overflow builder m (left-operand builder) (untag-fixnum builder (right-operand builder)) flag-slot)))))
       (store-arg builder slot 0 r)
       (build-cond-br builder (load-raw builder flag-slot 0) slow-block merge-block))
     (position-at-end builder slow-block)
     (let ((args-ptr (alloca-args builder 2)))
-      (store-arg builder args-ptr 0 a)
-      (store-arg builder args-ptr 1 b)
+      (store-arg builder args-ptr 0 (left-operand builder))
+      (store-arg builder args-ptr 1 (right-operand builder))
       (store-arg builder slot 0 (build-call builder (get-function m fname) args-ptr 2)))
     (build-br builder merge-block)
     (position-at-end builder merge-block)
@@ -1709,16 +1736,17 @@ const SOURCE_TEMPLATE: &str = r#"
   (let* ((fast-block (append-block cur-fn "cmp-fast"))
          (slow-block (append-block cur-fn "cmp-slow"))
          (merge-block (append-block cur-fn "cmp-merge"))
-         (slot (alloca-args builder 1)))
-    (build-cond-br builder (both-fixnum-test builder a b) fast-block slow-block)
+         (slot (scratch-slot builder (merge-slot-role))))
+    (branch-on-fixnums builder a b fast-block slow-block)
     (position-at-end builder fast-block)
     (store-arg builder slot 0
-      (build-sub builder (build-icmp-gt builder a b) (build-icmp-lt builder a b)))
+      (let ((a (left-operand builder)) (b (right-operand builder)))
+        (build-sub builder (build-icmp-gt builder a b) (build-icmp-lt builder a b))))
     (build-br builder merge-block)
     (position-at-end builder slow-block)
     (let ((args-ptr (alloca-args builder 2)))
-      (store-arg builder args-ptr 0 a)
-      (store-arg builder args-ptr 1 b)
+      (store-arg builder args-ptr 0 (left-operand builder))
+      (store-arg builder args-ptr 1 (right-operand builder))
       (store-arg builder slot 0 (build-call builder (get-function m "rt_integer_cmp") args-ptr 2)))
     (build-br builder merge-block)
     (position-at-end builder merge-block)
@@ -1731,19 +1759,20 @@ const SOURCE_TEMPLATE: &str = r#"
   (let* ((fast-block (append-block cur-fn "bit-fast"))
          (slow-block (append-block cur-fn "bit-slow"))
          (merge-block (append-block cur-fn "bit-merge"))
-         (slot (alloca-args builder 1)))
-    (build-cond-br builder (both-fixnum-test builder a b) fast-block slow-block)
+         (slot (scratch-slot builder (merge-slot-role))))
+    (branch-on-fixnums builder a b fast-block slow-block)
     (position-at-end builder fast-block)
     (store-arg builder slot 0
-      (case op
-        (0 (build-and builder a b))
-        (1 (build-or builder a b))
-        (else (build-xor builder a b))))
+      (let ((a (left-operand builder)) (b (right-operand builder)))
+        (case op
+          (0 (build-and builder a b))
+          (1 (build-or builder a b))
+          (else (build-xor builder a b)))))
     (build-br builder merge-block)
     (position-at-end builder slow-block)
     (let ((args-ptr (alloca-args builder 2)))
-      (store-arg builder args-ptr 0 a)
-      (store-arg builder args-ptr 1 b)
+      (store-arg builder args-ptr 0 (left-operand builder))
+      (store-arg builder args-ptr 1 (right-operand builder))
       (store-arg builder slot 0 (build-call builder (get-function m fname) args-ptr 2)))
     (build-br builder merge-block)
     (position-at-end builder merge-block)

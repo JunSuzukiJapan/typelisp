@@ -2323,6 +2323,9 @@ pub fn llvm_builder_def() -> AdtDef {
     // Rust (`compile::CompiledFn::call`) or from another compiled function.
     assoc.insert("alloca-args".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::Int], llvm_value_ty(), true));
     assoc.insert("store-arg".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::Int, llvm_value_ty()], Type::Unit, true));
+    // The one-word slot a function uses for a role — see
+    // `llvm_builtins::llvm_builder_scratch_slot`.
+    assoc.insert("scratch-slot".to_string(), assoc_fn(vec![llvm_builder_ty(), Type::Int], llvm_value_ty(), true));
     assoc.insert("build-call".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty(), llvm_value_ty(), Type::Int], llvm_value_ty(), true));
     // `load-env`/`build-call-with-env`: the captures counterpart of
     // `load-arg`/`build-call`, for functions declared via

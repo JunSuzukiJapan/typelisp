@@ -127,6 +127,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "build-smul-overflow" => Some(llvm_builder_build_int_overflow(args, "smul", "llvm.smul.with.overflow")),
             "alloca-args" => Some(llvm_builder_alloca_args(args)),
             "store-arg" => Some(llvm_builder_store_arg(args)),
+            "scratch-slot" => Some(llvm_builder_scratch_slot(args)),
             "build-call" => Some(llvm_builder_build_call(args)),
             "load-env" => Some(llvm_builder_load_env(args)),
             "build-call-with-env" => Some(llvm_builder_build_call_with_env(args)),
@@ -792,6 +793,17 @@ fn llvm_builder_alloca_args(args: &[Value]) -> Result<Value, EvalError> {
     let ctx = crate::compile::llvm_context();
     let array_ty = ctx.i64_type().array_type(count);
     let b = builder.borrow();
+    let ptr = entry_alloca(&b, array_ty, "call_args").map_err(|e| EvalError::Internal(format!("alloca-args: {}", e)))?;
+    Ok(llvm_value_value(ptr.into()))
+}
+
+/// An `alloca` of `ty` in the entry block of the function `b` is building,
+/// with `b` left where it was.
+fn entry_alloca(
+    b: &Builder<'static>,
+    ty: inkwell::types::ArrayType<'static>,
+    name: &str,
+) -> Result<PointerValue<'static>, String> {
     // The array is emitted in the **entry block**, not where the island asked
     // for it.
     //
@@ -804,28 +816,66 @@ fn llvm_builder_alloca_args(args: &[Value]) -> Result<Value, EvalError> {
     //
     // This is also where an `alloca` belongs anyway — one per activation
     // rather than one per time round a loop, which is what LLVM's own
-    // stack-slot handling expects.
+    // stack-slot handling expects. Anywhere else it is a *dynamic* `alloca`:
+    // the stack pointer moves every time the block runs, and nothing moves it
+    // back until the function returns.
     //
     // What it does *not* buy is survival across a suspension. The machine
     // frame is torn down when the function hands control back, so an `alloca`
     // holds nothing on the way in again. Only a value that is stored and read
     // without a call in between may live here; anything that has to outlive a
     // call belongs in a frame slot.
-    let here = b.get_insert_block();
-    let entry = here
+    //
+    // Built with a builder of its own: `b` may stand in the middle of a block
+    // (before its terminator, say), and a position there cannot be read back
+    // to return to.
+    let entry = b
+        .get_insert_block()
         .and_then(|blk| blk.get_parent())
         .and_then(|f| f.get_first_basic_block())
-        .ok_or_else(|| EvalError::Internal("alloca-args: the builder is not inside a function".to_string()))?;
+        .ok_or_else(|| "the builder is not inside a function".to_string())?;
+    let at_entry = crate::compile::llvm_context().create_builder();
     match entry.get_terminator() {
-        Some(term) => b.position_before(&term),
-        None => b.position_at_end(entry),
+        Some(term) => at_entry.position_before(&term),
+        None => at_entry.position_at_end(entry),
     }
-    let ptr =
-        b.build_alloca(array_ty, "call_args").map_err(|e| EvalError::Internal(format!("alloca-args: {}", e)))?;
-    if let Some(blk) = here {
-        b.position_at_end(blk);
+    at_entry.build_alloca(ty, name).map_err(|e| e.to_string())
+}
+
+/// `(scratch-slot builder role)` — the one-word stack slot this function uses
+/// for `role`, the same slot every time it is asked for.
+///
+/// A slot of its own per request (`alloca-args`) is a slot of its own in the
+/// machine frame, so a body with a merge slot per arithmetic operation had a
+/// frame as long as the body: `(+ 1 (+ 1 ... a))` a hundred thousand deep
+/// needed 8.3MB. What the island asks for here instead is one slot per role,
+/// on its word that no two uses of one role are ever in progress at once —
+/// true of a merge slot, which is filled on each branch and read where they
+/// meet before anything else asks for that role.
+///
+/// Only inside a frame (`frame-begin` .. `frame-end`), which is what keeps the
+/// answer to one function.
+fn llvm_builder_scratch_slot(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let role = expect_int(&args[1])?;
+    let key = builder_key(&builder);
+    let known = FRAME_CTXS.with(|c| {
+        c.borrow()
+            .get(&key)
+            .map(|f| f.scratch.get(&role).copied())
+            .ok_or_else(|| EvalError::Internal("scratch-slot: no frame is open on this builder".to_string()))
+    })?;
+    if let Some(slot) = known {
+        return Ok(llvm_value_value(slot.into()));
     }
-    Ok(llvm_value_value(ptr.into()))
+    let slot = entry_alloca(&builder.borrow(), crate::compile::llvm_context().i64_type().array_type(1), &format!("scratch{}", role))
+        .map_err(|e| EvalError::Internal(format!("scratch-slot: {}", e)))?;
+    FRAME_CTXS.with(|c| {
+        if let Some(f) = c.borrow_mut().get_mut(&key) {
+            f.scratch.insert(role, slot);
+        }
+    });
+    Ok(llvm_value_value(slot.into()))
 }
 
 /// Writes `value` into slot `index` of an `alloca-args` array — the same
@@ -905,6 +955,8 @@ struct FrameCtx {
     next: u64,
     /// The coroutine prologue's parts, absent under the original ABI.
     coro: Option<CoroCtx>,
+    /// The `scratch-slot` handed out for each role, made on first request.
+    scratch: HashMap<i64, PointerValue<'static>>,
 }
 
 /// What the coroutine prologue leaves behind for the rest of the function.
@@ -932,12 +984,15 @@ struct CoroCtx {
     /// install the same handler (its entry, its exits, each cleanup copy) all
     /// name one id.
     handlers: Vec<(BasicBlock<'static>, u64)>,
-    /// The `br` ending `coro.fresh`, to insert once-per-activation setup
-    /// before — a slot's mask bit is a fact about the frame, so it belongs on
-    /// the path that makes the frame, not on every resume.
+    /// The `br` ending `coro.fresh`, where the frame's mask bits are set — a
+    /// slot's mask bit is a fact about the frame, so it belongs on the path
+    /// that makes the frame, not on every resume.
     fresh_end: InstructionValue<'static>,
-    /// The frame as `coro.fresh` knows it, for those mask-bit calls.
+    /// The frame as `coro.fresh` knows it, for those mask bits.
     fresh_frame: BasicValueEnum<'static>,
+    /// The slots handed out marked (`frame-slot-rooted`), whose bits
+    /// `coroutine-end` sets once every slot is known.
+    rooted: Vec<u64>,
     /// The `br` ending `coro.prologue`, to insert slot *addresses* before.
     ///
     /// A slot address is a GEP off the frame's data pointer, and the resume
@@ -1030,9 +1085,7 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
 
     let b = builder.borrow();
     // rt_frame_new(&[0])
-    let size_args = b
-        .build_alloca(i64t.array_type(1), "frame_size_args")
-        .map_err(|e| err("alloca", e.to_string()))?;
+    let size_args = entry_alloca(&b, i64t.array_type(1), "frame_size_args").map_err(|e| err("alloca", e))?;
     let size_slot = unsafe {
         b.build_gep(i64t, size_args, &[i64t.const_int(0, false)], "frame_size_slot")
             .map_err(|e| err("gep", e.to_string()))?
@@ -1052,9 +1105,7 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
     };
 
     // rt_frame_data(&[frame])
-    let data_args = b
-        .build_alloca(i64t.array_type(1), "frame_data_args")
-        .map_err(|e| err("alloca", e.to_string()))?;
+    let data_args = entry_alloca(&b, i64t.array_type(1), "frame_data_args").map_err(|e| err("alloca", e))?;
     let data_slot = unsafe {
         b.build_gep(i64t, data_args, &[i64t.const_int(0, false)], "frame_data_slot")
             .map_err(|e| err("gep", e.to_string()))?
@@ -1077,7 +1128,7 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
     // rt_push_sexpr_root(frame) — the frame holds every collectable local, so
     // nothing in the function is reachable until the frame itself is. One push
     // per activation, where there used to be one per binding.
-    let root_args = b.build_alloca(i64t.array_type(1), "frame_root_args").map_err(|e| err("alloca", e.to_string()))?;
+    let root_args = entry_alloca(&b, i64t.array_type(1), "frame_root_args").map_err(|e| err("alloca", e))?;
     let root_slot = unsafe {
         b.build_gep(i64t, root_args, &[i64t.const_int(0, false)], "frame_root_slot")
             .map_err(|e| err("gep", e.to_string()))?
@@ -1093,7 +1144,7 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
         // call it is waiting on arrives through it: from the resuming
         // function's side those are the same thing, the answer it was waiting
         // for.
-        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next: 1, coro: None });
+        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next: 1, coro: None, scratch: HashMap::new() });
     });
     Ok(Value::Empty)
 }
@@ -1147,30 +1198,22 @@ fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
             .ok_or_else(|| EvalError::Internal("frame-slot: no frame is open on this builder".to_string()))?;
         let idx = f.next;
         f.next += 1;
-        let coro = f.coro.as_ref().map(|c| (c.fresh_end, c.fresh_frame, c.prologue_end));
+        if let (Some(c), true) = (f.coro.as_mut(), rooted) {
+            c.rooted.push(idx);
+        }
+        let coro = f.coro.as_ref().map(|c| c.prologue_end);
         Ok::<_, EvalError>((f.frame, f.data, idx, coro))
     })?;
 
     // Under the coroutine ABI a slot's address and its mask bit both move out
     // of the block that asked for them. The address goes to `coro.prologue`,
     // the one block every entry falls into, because the resume blocks use it
-    // and nothing in the body dominates them. The mask bit goes to
-    // `coro.fresh`, because marking a slot is a fact about the frame and the
-    // frame is made exactly once.
-    //
-    // Setting the bit before the slot is written is safe by construction: an
-    // untouched slot reads as a raw `0`, whose low bits are `TAG_FIXNUM`, so
-    // the collector follows nothing.
-    if let Some((fresh_end, fresh_frame, prologue_end)) = coro {
+    // and nothing in the body dominates them. The mask bit is only recorded
+    // here (`CoroCtx::rooted`); `coroutine-end` sets them all in `coro.fresh`.
+    if let Some(prologue_end) = coro {
         {
             let b = builder.borrow();
             let here = b.get_insert_block();
-            if rooted {
-                let module = expect_llvm_module(&args[1])?;
-                let mask_fn = ensure_declared(&module, "rt_frame_mask_bit");
-                b.position_before(&fresh_end);
-                emit_rt_call(&b, mask_fn, &[fresh_frame, i64t.const_int(idx, false).into()], "mask", "frame-slot")?;
-            }
             b.position_before(&prologue_end);
             let elem_ptr = unsafe {
                 b.build_gep(i64t, data, &[i64t.const_int(idx, false)], "frame_slot")
@@ -1188,7 +1231,7 @@ fn frame_slot_impl(args: &[Value], rooted: bool) -> Result<Value, EvalError> {
         let module = expect_llvm_module(&args[1])?;
         let mask_fn = ensure_declared(&module, "rt_frame_mask_bit");
         let err = |what: &str, e: String| EvalError::Internal(format!("frame-slot-rooted: {}: {}", what, e));
-        let mask_args = b.build_alloca(i64t.array_type(2), "mask_args").map_err(|e| err("alloca", e.to_string()))?;
+        let mask_args = entry_alloca(&b, i64t.array_type(2), "mask_args").map_err(|e| err("alloca", e))?;
         let a0 = unsafe {
             b.build_gep(i64t, mask_args, &[i64t.const_int(0, false)], "mask_a0").map_err(|e| err("gep", e.to_string()))?
         };
@@ -1226,13 +1269,17 @@ fn llvm_builder_frame_end(args: &[Value]) -> Result<Value, EvalError> {
             .remove(&key)
             .ok_or_else(|| EvalError::Internal("frame-end: no frame is open on this builder".to_string()))
     })?;
+    // A coroutine's frame is closed by `coroutine-end`, which also sets the
+    // mask bits its rooted slots only recorded.
+    if f.coro.is_some() {
+        return Err(EvalError::Internal("frame-end: this frame is a coroutine's; close it with coroutine-end".to_string()));
+    }
     if !f.size_store.set_operand(0, ctx.i64_type().const_int(f.next, false)) {
         return Err(EvalError::Internal("frame-end: could not write the slot count into the prologue".to_string()));
     }
     let pop_root = ensure_declared(&module, "rt_pop_sexpr_root");
     let b = builder.borrow();
-    let empty = b
-        .build_alloca(ctx.i64_type().array_type(0), "frame_unroot_args")
+    let empty = entry_alloca(&b, ctx.i64_type().array_type(0), "frame_unroot_args")
         .map_err(|e| EvalError::Internal(format!("frame-end: alloca: {}", e)))?;
     b.build_call(pop_root, &[empty.into(), ctx.i32_type().const_int(0, false).into()], "")
         .map_err(|e| EvalError::Internal(format!("frame-end: call rt_pop_sexpr_root: {}", e)))?;
@@ -1279,9 +1326,8 @@ fn emit_rt_call(
     let ctx = crate::compile::llvm_context();
     let i64t = ctx.i64_type();
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
-    let arr = b
-        .build_alloca(i64t.array_type(vals.len().max(1) as u32), &format!("{}_args", name))
-        .map_err(|e| err("alloca", e.to_string()))?;
+    let arr = entry_alloca(b, i64t.array_type(vals.len().max(1) as u32), &format!("{}_args", name))
+        .map_err(|e| err("alloca", e))?;
     for (i, v) in vals.iter().enumerate() {
         let slot = unsafe {
             b.build_gep(i64t, arr, &[i64t.const_int(i as u64, false)], &format!("{}_a{}", name, i))
@@ -1386,7 +1432,7 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
     // fresh — make the frame this activation runs in. The size is a
     // placeholder; `coroutine-end` writes the true count in.
     b.position_at_end(fresh);
-    let size_args = b.build_alloca(i64t.array_type(1), "frame_size_args").map_err(|e| err("alloca", e.to_string()))?;
+    let size_args = entry_alloca(&b, i64t.array_type(1), "frame_size_args").map_err(|e| err("alloca", e))?;
     let size_slot = unsafe {
         b.build_gep(i64t, size_args, &[i64t.const_int(0, false)], "frame_size_slot")
             .map_err(|e| err("gep", e.to_string()))?
@@ -1440,6 +1486,7 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
                 // The driver protocol's own slots — the value in flight and
                 // the unwind handler — are never handed out as locals.
                 next: typelisp_abi::FRAME_RESERVED_SLOTS as u64,
+                scratch: HashMap::new(),
                 coro: Some(CoroCtx {
                     function,
                     body,
@@ -1449,6 +1496,7 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
                     handlers: Vec::new(),
                     fresh_end,
                     fresh_frame: made,
+                    rooted: Vec::new(),
                     prologue_end,
                 }),
             },
@@ -1780,6 +1828,7 @@ fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
     if !f.size_store.set_operand(0, i64t.const_int(f.next, false)) {
         return Err(EvalError::Internal(format!("{}: could not write the slot count into the prologue", what)));
     }
+    set_mask_bits(&b, &module, &coro).map_err(|e| err("mask bits", e))?;
 
     // The dispatch chain: `pc == 0` is a fresh entry, anything else names a
     // call site. The last arm is unconditional — `pc` is only ever written by
@@ -1800,6 +1849,66 @@ fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
         b.position_at_end(next);
     }
     Ok(Value::Empty)
+}
+
+/// Sets the mask bit of every slot in `coro.rooted`, on the way out of
+/// `coro.fresh`: a loop over a constant table of the slot numbers, one
+/// `rt_frame_mask_bit` call per turn.
+///
+/// A loop rather than a call per slot, because a long body has a rooted slot
+/// for nearly every value it keeps in the frame, and a straight line of that
+/// many calls is one block that code generation's scheduler and register
+/// allocator take time to the square of. The table grows with the body; the
+/// code does not.
+///
+/// Setting a bit before the slot is written is safe by construction: an
+/// untouched slot reads as a raw `0`, whose low bits are `TAG_FIXNUM`, so the
+/// collector follows nothing.
+fn set_mask_bits(b: &Builder<'static>, module: &Rc<RefCell<Module<'static>>>, coro: &CoroCtx) -> Result<(), String> {
+    if coro.rooted.is_empty() {
+        return Ok(());
+    }
+    let ctx = crate::compile::llvm_context();
+    let i64t = ctx.i64_type();
+    let m = module.borrow();
+    let table_ty = i64t.array_type(coro.rooted.len() as u32);
+    let name = format!("{}.rooted_slots", coro.function.get_name().to_string_lossy());
+    let table = m.add_global(table_ty, None, &name);
+    let words: Vec<_> = coro.rooted.iter().map(|n| i64t.const_int(*n, false)).collect();
+    table.set_initializer(&i64t.const_array(&words));
+    table.set_constant(true);
+    table.set_linkage(inkwell::module::Linkage::Private);
+    table.set_unnamed_addr(true);
+    drop(m);
+    let mask_fn = ensure_declared(module, "rt_frame_mask_bit");
+
+    // `coro.fresh` ends `br coro.prologue`; the loop goes in between.
+    let fresh = coro.fresh_end.get_parent().ok_or("coro.fresh has no block")?;
+    let prologue = coro.fresh_end.get_operand(0).and_then(|o| o.block()).ok_or("coro.fresh does not end in a branch")?;
+    let turn = ctx.insert_basic_block_after(fresh, "coro.mask");
+    let done = ctx.insert_basic_block_after(turn, "coro.mask_done");
+    coro.fresh_end.erase_from_basic_block();
+    b.position_at_end(fresh);
+    b.build_unconditional_branch(turn).map_err(|e| e.to_string())?;
+
+    b.position_at_end(turn);
+    let i = b.build_phi(i64t, "mask_i").map_err(|e| e.to_string())?;
+    let i_val = i.as_basic_value().into_int_value();
+    let at = unsafe {
+        b.build_gep(table_ty, table.as_pointer_value(), &[i64t.const_zero(), i_val], "mask_entry").map_err(|e| e.to_string())?
+    };
+    let slot = b.build_load(i64t, at, "mask_slot").map_err(|e| e.to_string())?;
+    emit_rt_call(b, mask_fn, &[coro.fresh_frame, slot], "mask", "coroutine-end").map_err(|e| format!("{:?}", e))?;
+    let next = b.build_int_add(i_val, i64t.const_int(1, false), "mask_next").map_err(|e| e.to_string())?;
+    let more = b
+        .build_int_compare(inkwell::IntPredicate::ULT, next, i64t.const_int(coro.rooted.len() as u64, false), "mask_more")
+        .map_err(|e| e.to_string())?;
+    b.build_conditional_branch(more, turn, done).map_err(|e| e.to_string())?;
+    i.add_incoming(&[(&i64t.const_zero(), fresh), (&next, turn)]);
+
+    b.position_at_end(done);
+    b.build_unconditional_branch(prologue).map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 /// Shared by every `build-icmp-*` builtin (if/let/comparisons, labels/closures
@@ -1961,8 +2070,7 @@ fn llvm_builder_build_make_closure(args: &[Value]) -> Result<Value, EvalError> {
 
     let i64_ty = ctx.i64_type();
     let argc = 2 + env_len;
-    let ctor_args_ptr = b
-        .build_alloca(i64_ty.array_type(argc as u32), "closure_ctor_args")
+    let ctor_args_ptr = entry_alloca(&b, i64_ty.array_type(argc as u32), "closure_ctor_args")
         .map_err(|e| EvalError::Internal(format!("build-make-closure: {}", e)))?;
     let store_slot = |idx: u64, v: BasicValueEnum<'static>| -> Result<(), EvalError> {
         let idx_val = i64_ty.const_int(idx, false);

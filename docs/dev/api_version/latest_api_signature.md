@@ -1,11 +1,11 @@
-# ABI バージョン 0.2.10
+# ABI バージョン 0.2.11
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.2.10 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.2.11 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `b35ee2bf68895de2`
+内容ハッシュ (FNV-1a 64): `1daaf88e07a7ac12`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1303,6 +1303,7 @@
 - インスタンス `load-env`: `(llvm-builder, llvm-function, int) -> llvm-value`
 - インスタンス `load-raw`: `(llvm-builder, llvm-value, int) -> llvm-value`
 - インスタンス `position-at-end`: `(llvm-builder, llvm-basic-block) -> ()`
+- インスタンス `scratch-slot`: `(llvm-builder, int) -> llvm-value`
 - インスタンス `store-arg`: `(llvm-builder, llvm-value, int, llvm-value) -> ()`
 
 ### `llvm-function` (sum, 型引数 [])

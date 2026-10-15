@@ -77,17 +77,18 @@ fn deeply_nested_data_compares_equal() {
     is_true(&format!("(equalp {} {})", nested_data(DEPTH), nested_data(DEPTH)));
 }
 
+/// Compiled, the body is one function, and its frame is what has to stay
+/// small: it used to keep a stack slot for every intermediate value, and at
+/// this depth needed more than the test thread has.
 #[test]
-fn a_deeply_nested_function_body_compiles() {
-    // Compiled code keeps a slot per intermediate value in its own frame, so
-    // this depth is kept to what that frame fits on a test thread; the walks
-    // that translate it are what is under test.
+fn a_deeply_nested_function_body_compiles_and_runs() {
+    let src = format!("(defun f ((a int)) int {}) (compile f) (f 0)", nested_sum(DEPTH, "a"));
+    assert_eq!(eval_ok_compiled(&src), Value::Int(DEPTH as i64));
+}
+
+#[test]
+fn deeply_nested_lets_compile() {
     let depth = DEPTH / 4;
-    let src = format!(
-        "(defun f ((a int)) int {}) (compile f) (f 0)",
-        nested_sum(depth, "a")
-    );
-    assert_eq!(eval_ok_compiled(&src), Value::Int(depth as i64));
     let src = format!(
         "(defun g ((a int)) int {}x{}) (compile g) (g 7)",
         "(let ((x a)) ".repeat(depth),
