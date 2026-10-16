@@ -1,11 +1,11 @@
-# ABI バージョン 0.2.13
+# ABI バージョン 0.2.14
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.2.13 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.2.14 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `126a9ab17f0f9f93`
+内容ハッシュ (FNV-1a 64): `0ac514779832020c`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -19,7 +19,9 @@
 | BODY_ABI_COROUTINE | 1 |
 | FRAME_VALUE_SLOT | 0 |
 | FRAME_HANDLER_SLOT | 1 |
-| FRAME_RESERVED_SLOTS | 2 |
+| FRAME_PC_SLOT | 2 |
+| FRAME_SELF_SLOT | 3 |
+| FRAME_RESERVED_SLOTS | 4 |
 
 ## 中断の種類 (typelisp_abi::call_state)
 
@@ -590,9 +592,6 @@
 | `rt_frame_mask_bit` | `i64 (ptr, i32)` |
 | `rt_frame_new` | `i64 (ptr, i32)` |
 | `rt_frame_open` | `i64 (ptr, i32)` |
-| `rt_frame_pc` | `i64 (ptr, i32)` |
-| `rt_frame_reopen` | `i64 (ptr, i32)` |
-| `rt_frame_set_pc` | `i64 (ptr, i32)` |
 | `rt_get_dispatch_macro_character` | `i64 (ptr, i32)` |
 | `rt_get_internal_real_time` | `i64 (ptr, i32)` |
 | `rt_get_internal_run_time` | `i64 (ptr, i32)` |

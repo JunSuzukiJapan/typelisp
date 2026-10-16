@@ -30,7 +30,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 2, 13) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 2, 14) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -54,7 +54,7 @@ pub const ABI_SYMBOL: &str = with_abi_version!(marker_symbol);
 #[export_name = with_abi_version!(marker_symbol)]
 pub static ABI_MARKER: u8 = 0;
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use typelisp_mem::{Heap, Value};
 
@@ -76,7 +76,18 @@ use typelisp_mem::{Heap, Value};
 // just has the one thread's slot — behaves identically to a plain global
 // there.
 thread_local! {
-    static ACTIVE_HEAP: Cell<*mut Heap> = const { Cell::new(std::ptr::null_mut()) };
+    static THREAD: ThreadState = const {
+        ThreadState { heap: Cell::new(std::ptr::null_mut()), call: RefCell::new(call_state::State::new()) }
+    };
+}
+
+/// Everything compiled code reaches implicitly on this thread: the active
+/// heap, and what crosses the coroutine ABI ([`call_state`]). One
+/// thread-local for both, so the paths every call takes reach them in one
+/// access (see `call_state`'s doc).
+struct ThreadState {
+    heap: Cell<*mut Heap>,
+    call: RefCell<call_state::State>,
 }
 
 /// Registers `heap` as this thread's active `Heap` for any `rt_*` call that
@@ -92,14 +103,14 @@ thread_local! {
 /// this one and has to call this directly — there is no "visible to one
 /// specific dependent crate" visibility in Rust narrower than plain `pub`.
 pub fn set_active_heap(heap: *mut Heap) {
-    ACTIVE_HEAP.with(|cell| cell.set(heap));
+    THREAD.with(|t| t.heap.set(heap));
 }
 
 /// Whether this thread has an active `Heap` registered — asked by the one
 /// entry point that can be reached from a thread typelisp never ran on (a C
 /// callback), where [`active_heap`] would dereference nothing.
 pub fn heap_registered() -> bool {
-    !ACTIVE_HEAP.with(|cell| cell.get()).is_null()
+    !THREAD.with(|t| t.heap.get()).is_null()
 }
 
 /// Dereferences the current thread's active `Heap`.
@@ -113,7 +124,7 @@ pub fn heap_registered() -> bool {
 /// exactly once per invocation and lets the borrow end with the call, so
 /// two `rt_*` calls never alias each other's borrow.
 pub unsafe fn active_heap() -> &'static mut Heap {
-    let ptr = ACTIVE_HEAP.with(|cell| cell.get());
+    let ptr = THREAD.with(|t| t.heap.get());
     debug_assert!(!ptr.is_null(), "rt_* function called with no active Heap registered on this thread");
     &mut *ptr
 }
@@ -245,7 +256,10 @@ pub fn unwind_interpreted_error() -> ! {
 //
 // A compiled function under the coroutine ABI is `i64 f(i64 frame)`, and what
 // it returns is not its value but a **status word** saying why it stopped.
-// Its value, when it has one, is in the frame.
+// Its value, when it has one, is in the frame. The argument is `0` on first
+// entry and, on every later one, the address of the frame's words — not the
+// frame itself, so a resuming body loads what it needs
+// ([`FRAME_PC_SLOT`], [`FRAME_SELF_SLOT`]) without calling anything.
 //
 // The status is what makes suspension possible at all. Under the old ABI a
 // function could only stop by returning, so "stop here and come back later"
@@ -281,7 +295,7 @@ pub const BODY_ABI_COROUTINE: u8 = 1;
 
 /// The frame slot the driver protocol reserves for the value in flight —
 /// a function's result, and the result of a call it is waiting on. The
-/// island's slot allocator hands out 2 upward.
+/// island's slot allocator hands out [`FRAME_RESERVED_SLOTS`] upward.
 pub const FRAME_VALUE_SLOT: usize = 0;
 
 /// The frame slot that says where an unwind reaching this frame resumes: the
@@ -300,8 +314,25 @@ pub const FRAME_VALUE_SLOT: usize = 0;
 /// Never masked: a `pc` is a raw integer, not a tagged value.
 pub const FRAME_HANDLER_SLOT: usize = 1;
 
+/// The frame slot holding where the function resumes: 0 on entry, a call
+/// site's id afterwards.
+///
+/// A slot rather than a field the runtime keeps beside the words, so that
+/// compiled code sets it with a plain store before handing control back, and
+/// reads it with a plain load on resuming — no call either way. Never masked.
+pub const FRAME_PC_SLOT: usize = 2;
+
+/// The frame slot holding the frame's own tagged reference, written by
+/// `rt_frame_open`.
+///
+/// A resumed body is handed the address of its frame's words, not the frame,
+/// so that resuming needs no call; the body reads the frame back from here.
+/// Never masked: the frame is rooted by its prologue, not by itself.
+pub const FRAME_SELF_SLOT: usize = 3;
+
 /// How many slots at the bottom of a frame the driver protocol owns:
-/// [`FRAME_VALUE_SLOT`] and [`FRAME_HANDLER_SLOT`].
+/// [`FRAME_VALUE_SLOT`], [`FRAME_HANDLER_SLOT`], [`FRAME_PC_SLOT`] and
+/// [`FRAME_SELF_SLOT`].
 ///
 /// **Every frame a driver drives must have at least this many**, whoever
 /// built it — the island's prologue hands locals out from here upward, and a
@@ -309,78 +340,229 @@ pub const FRAME_HANDLER_SLOT: usize = 1;
 /// `FrameStack::unwind` reads the handler slot of every frame it walks, so a
 /// frame one word short is a frame the driver cannot ask; it says so rather
 /// than reading past the end.
-pub const FRAME_RESERVED_SLOTS: usize = 2;
+pub const FRAME_RESERVED_SLOTS: usize = 4;
 
 /// The state one coroutine-ABI call is in flight through.
 ///
-/// Three thread-locals, for the same reason [`ACTIVE_HEAP`](set_active_heap)
-/// is one: the ABI has exactly **one** parameter — a frame, or `0` on first
-/// entry — and it must, so that entering a function and resuming it are the
-/// same call. Anything else that has to cross that boundary has nowhere to
-/// ride but here.
+/// Thread-local, for the same reason the active heap is: the ABI has exactly
+/// **one** parameter — `0` on first entry, the frame's words afterwards — and
+/// it must, so that entering a function and resuming it are the same call.
+/// Anything else that has to cross that boundary has nowhere to ride but here.
 ///
-/// Each is live across exactly one call, between adjacent statements on the
-/// two sides. Nothing may allocate in those windows: the words are raw and
+/// **One thread-local, with the active heap beside it** ([`THREAD`]). On
+/// macOS every access to a thread-local is a call into the dynamic linker
+/// (`_tlv_get_addr`), and a compiled call used to make some twenty of them,
+/// one per field touched. The paths every call takes ([`with`], and
+/// [`with_heap`] for the one that also allocates) touch everything they need
+/// in one access.
+///
+/// Each piece is live across exactly one call, between adjacent statements on
+/// the two sides. Nothing may allocate in those windows: the words are raw and
 /// tagged, sitting in Rust `Vec`s the collector does not trace.
 pub mod call_state {
-    use std::cell::RefCell;
+    use typelisp_mem::{FrameRaw, Heap};
 
-    thread_local! {
+    /// How many emptied argument vectors [`State`] keeps.
+    const SPARE_ARGS_LEN: usize = 8;
+
+    /// What crosses the coroutine ABI on this thread. See the module doc.
+    pub struct State {
         /// The arguments a not-yet-entered function will copy into its own
-        /// frame. Written by the driver, read by that function's prologue.
+        /// frame. Handed over by the driver ([`State::enter`]), read by that
+        /// function's prologue.
         ///
         /// The callee allocates its own frame, not the caller: only the callee
         /// knows how many slots it needs, and under mutual recursion the
         /// caller may be compiled before the callee exists at all.
-        static PENDING_ARGS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
-        /// The frames prologues have allocated on their way in, innermost
-        /// last. The driver cannot learn one any other way — it is made
-        /// inside the callee, after the call has started.
-        ///
-        /// **A stack, not a slot.** The driver takes the frame only once the
-        /// entering call has *returned*, and a callee can start a driver of
-        /// its own before then: `rt_drive_body`, the C FFI thunk and a body
-        /// the interpreter calls from a Rust frame all run a nested
-        /// `FrameStack` on the machine stack (C4
-        /// retired `rt_protected_drive` and C5 retired `rt_apply_any` and
-        /// `rt_dyn_call`, which were three more).
-        /// Every one of those publishes and takes in balanced
-        /// pairs within the outer callee's own activation, so LIFO hands each
-        /// driver back exactly the frame its own entry made. A single slot
-        /// let the innermost driver consume the outermost's, which surfaced
-        /// as "a coroutine function did not publish its frame on entry" —
-        /// blamed on the callee, whose prologue had in fact published.
-        static CURRENT_FRAME: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+        pending_args: Vec<i64>,
         /// The captured values a not-yet-entered closure body will copy into
-        /// its own frame, alongside `PENDING_ARGS`.
+        /// its own frame, alongside `pending_args`.
         ///
         /// Separate from the arguments because the callee reads the two by
         /// separate indices — a capture and a parameter are different names in
         /// different lists, and concatenating them would make every prologue
         /// know how long the other list was.
-        static PENDING_ENV: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+        pending_env: Vec<i64>,
+        /// The frames prologues have allocated on their way in, innermost
+        /// last, with where their parts are. The driver cannot learn one any
+        /// other way — it is made inside the callee, after the call has
+        /// started.
+        ///
+        /// **A stack, not a slot.** The driver takes the frame only once the
+        /// entering call has *returned*, and a callee can start a driver of
+        /// its own before then: `rt_drive_body`, the C FFI thunk and a body
+        /// the interpreter calls from a Rust frame all run a nested
+        /// `FrameStack` on the machine stack. Every one of those publishes and
+        /// takes in balanced pairs within the outer callee's own activation,
+        /// so LIFO hands each driver back exactly the frame its own entry
+        /// made. A single slot let the innermost driver consume the
+        /// outermost's, which surfaced as "a coroutine function did not
+        /// publish its frame on entry" — blamed on the callee, whose prologue
+        /// had in fact published.
+        current_frames: Vec<(i64, FrameRaw)>,
         /// What a frame is asking the driver to call, set immediately before
         /// it returns `STATUS_CALL`.
-        static PENDING_CALL: RefCell<Option<Pending>> = const { RefCell::new(None) };
-        /// An emptied argument vector of a call already made, for the next
-        /// call's ([`args_buffer`], [`recycle_args`]) — a call that does not
-        /// allocate one of its own.
-        static SPARE_ARGS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
-        /// What a frame is asking to wait for, set immediately before it
-        /// returns `STATUS_SUSPEND`: a `SUSPEND_*` kind and one payload word.
+        pending_call: Option<Pending>,
+        /// Emptied argument vectors of calls already made, for the next
+        /// calls' ([`State::args_buffer`]) — a call that does not allocate
+        /// one of its own.
         ///
-        /// **Two raw words, not a `Waiting`.** The scheduler's own type names
-        /// a `TaskId` and an `Instant`, both of which live in the front end;
+        /// More than one, because a callee usually names its own first call
+        /// before its entry has returned to the driver, and so before its
+        /// arguments' vector has come back here.
+        spare_args: Vec<Vec<i64>>,
+        /// What a frame is asking to wait for, set immediately before it
+        /// returns `STATUS_SUSPEND`: a `SUSPEND_*` kind and up to two payload
+        /// words.
+        ///
+        /// **Raw words, not a `Waiting`.** The scheduler's own type names a
+        /// `TaskId` and an `Instant`, both of which live in the front end;
         /// this crate is below it and below `typelisp-rt` (see this module's
         /// doc comment), and a compiled body has nothing but words to hand
-        /// over anyway. The front end turns the pair back into a `Waiting`,
-        /// which is the same division `PENDING_CALL` makes between an address
-        /// and a `CoroutineFn`.
-        static PENDING_SUSPEND: RefCell<Option<(i64, i64, i64)>> = const { RefCell::new(None) };
+        /// over anyway. The front end turns them back into a `Waiting`, which
+        /// is the same division `pending_call` makes between an address and a
+        /// `CoroutineFn`.
+        pending_suspend: Option<(i64, i64, i64)>,
         /// The arms a `select` is waiting on, when the kind is
-        /// [`SUSPEND_CHAN_SELECT`]. Its own slot because the number of them
-        /// is the program's, and the pair above has room for two words.
-        static PENDING_SELECT: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
+        /// [`SUSPEND_CHAN_SELECT`]. Its own field because the number of them
+        /// is the program's, and the payload has room for two words.
+        pending_select: Vec<i64>,
+        /// The frame the activation on this thread is running, and where its
+        /// parts are — so that the frame operations its code makes
+        /// (`rt_frame_*`) need not look it up in the box table, under its
+        /// lock, every time.
+        ///
+        /// Set only where the frame is known to be live and running here:
+        /// when it is made and when the driver resumes it. A frame being freed
+        /// is forgotten here. An entry can still go stale — the frame of a
+        /// task that was dropped, then collected, its box handed out again —
+        /// but the only frame whose code runs on this thread is one of those
+        /// two, each of which replaces the entry first; a lookup that does
+        /// not match goes to the box table.
+        running: Option<(i64, FrameRaw)>,
+    }
+
+    impl State {
+        pub(crate) const fn new() -> State {
+            State {
+                pending_args: Vec::new(),
+                pending_env: Vec::new(),
+                current_frames: Vec::new(),
+                pending_call: None,
+                spare_args: Vec::new(),
+                pending_suspend: None,
+                pending_select: Vec::new(),
+                running: None,
+            }
+        }
+
+        /// Hands a callee about to be entered its arguments and captures,
+        /// and answers how many frames are published, for
+        /// [`entered`](Self::entered). The vectors are moved in, not copied.
+        pub fn enter(&mut self, args: Vec<i64>, env: Vec<i64>) -> usize {
+            self.pending_args = args;
+            self.pending_env = env;
+            self.current_frames.len()
+        }
+
+        /// After an entry: the frame it published, if it published one above
+        /// `published` ([`enter`](Self::enter)'s answer), with everything a
+        /// nested entry left above that dropped — an unwind travels between
+        /// a publish and its take, so such entries are owned by nobody. The
+        /// argument vector, read by now, goes back for the next call.
+        pub fn entered(&mut self, published: usize) -> Option<(i64, FrameRaw)> {
+            let frame = if self.current_frames.len() > published { self.current_frames.pop() } else { None };
+            self.current_frames.truncate(published);
+            if self.spare_args.len() < SPARE_ARGS_LEN {
+                self.spare_args.push(std::mem::take(&mut self.pending_args));
+            }
+            frame
+        }
+
+        /// Publishes a frame a prologue just made, as the frame its driver
+        /// takes and as the one running here.
+        pub fn publish_frame(&mut self, word: i64, raw: FrameRaw) {
+            self.current_frames.push((word, raw));
+            self.running = Some((word, raw));
+        }
+
+        /// Records `word` as the frame running on this thread.
+        pub fn set_running(&mut self, word: i64, raw: FrameRaw) {
+            self.running = Some((word, raw));
+        }
+
+        /// Where frame `word`'s parts are, when it is the one running here.
+        pub fn running(&self, word: i64) -> Option<FrameRaw> {
+            match self.running {
+                Some((running, raw)) if running == word => Some(raw),
+                _ => None,
+            }
+        }
+
+        /// Forgets `word` as the running frame, when it is — it is being
+        /// freed.
+        pub fn forget_running(&mut self, word: i64) {
+            if self.running.is_some_and(|(running, _)| running == word) {
+                self.running = None;
+            }
+        }
+
+        /// The `i`th pending argument, or `Err` with how many there are. A
+        /// prologue reads exactly as many as it has parameters, so a miss is
+        /// a broken calling convention rather than a case to paper over — the
+        /// caller turns it into a fatal error rather than a zero.
+        pub fn pending_arg(&self, i: usize) -> Result<i64, usize> {
+            self.pending_args.get(i).copied().ok_or(self.pending_args.len())
+        }
+
+        pub fn pending_argc(&self) -> usize {
+            self.pending_args.len()
+        }
+
+        pub fn pending_envc(&self) -> usize {
+            self.pending_env.len()
+        }
+
+        /// The `i`th pending capture — same contract as
+        /// [`pending_arg`](Self::pending_arg).
+        pub fn pending_env(&self, i: usize) -> Result<i64, usize> {
+            self.pending_env.get(i).copied().ok_or(self.pending_env.len())
+        }
+
+        /// An empty vector to gather a call's arguments in, reusing the last
+        /// one [`entered`](Self::entered) gave back.
+        pub fn args_buffer(&mut self, capacity: usize) -> Vec<i64> {
+            let mut v = self.spare_args.pop().unwrap_or_default();
+            v.clear();
+            v.reserve(capacity);
+            v
+        }
+
+        pub fn set_pending_call(&mut self, call: Pending) {
+            self.pending_call = Some(call);
+        }
+    }
+
+    /// Runs `f` on this thread's state, in one thread-local access.
+    ///
+    /// Panics if `f` reaches this thread's state again — nothing that runs
+    /// inside it may.
+    pub fn with<R>(f: impl FnOnce(&mut State) -> R) -> R {
+        crate::THREAD.with(|t| f(&mut t.call.borrow_mut()))
+    }
+
+    /// [`with`], also handing over the active heap — for the prologue, which
+    /// allocates its frame and publishes it in the same access.
+    ///
+    /// # Safety
+    ///
+    /// As for [`crate::active_heap`].
+    pub unsafe fn with_heap<R>(f: impl FnOnce(&mut Heap, &mut State) -> R) -> R {
+        crate::THREAD.with(|t| {
+            let heap = t.heap.get();
+            debug_assert!(!heap.is_null(), "rt_* function called with no active Heap registered on this thread");
+            f(&mut *heap, &mut t.call.borrow_mut())
+        })
     }
 
     /// `(yield)` — nothing to wait for; the task gives up the rest of its
@@ -468,21 +650,20 @@ pub mod call_state {
     /// which the collector walks, so a raw integer in one would be read as a
     /// pointer.
     pub fn set_pending_select(words: &[i64]) {
-        PENDING_SELECT.with(|p| {
-            let mut v = p.borrow_mut();
-            v.clear();
-            v.extend_from_slice(words);
+        with(|s| {
+            s.pending_select.clear();
+            s.pending_select.extend_from_slice(words);
         });
     }
 
     /// Takes them back out.
     pub fn take_pending_select() -> Vec<i64> {
-        PENDING_SELECT.with(|p| std::mem::take(&mut *p.borrow_mut()))
+        with(|s| std::mem::take(&mut s.pending_select))
     }
 
     /// Records what the frame about to return `STATUS_SUSPEND` is waiting for.
     pub fn set_pending_suspend(kind: i64, payload: i64) {
-        PENDING_SUSPEND.with(|p| *p.borrow_mut() = Some((kind, payload, 0)));
+        with(|s| s.pending_suspend = Some((kind, payload, 0)));
     }
 
     /// [`set_pending_suspend`] for the kinds that need two words.
@@ -492,66 +673,20 @@ pub mod call_state {
     /// that must not — the shim runs with a compiled frame's arguments in
     /// slots the collector is not looking at.
     pub fn set_pending_suspend_2(kind: i64, first: i64, second: i64) {
-        PENDING_SUSPEND.with(|p| *p.borrow_mut() = Some((kind, first, second)));
+        with(|s| s.pending_suspend = Some((kind, first, second)));
     }
 
     /// Takes it back out. `None` means a frame returned `STATUS_SUSPEND`
     /// without saying what it was waiting for, which is a broken convention
     /// rather than "waiting for nothing" — the caller says so and stops.
     pub fn take_pending_suspend() -> Option<(i64, i64, i64)> {
-        PENDING_SUSPEND.with(|p| p.borrow_mut().take())
-    }
-
-    pub fn set_pending_args(args: &[i64]) {
-        PENDING_ARGS.with(|a| {
-            let mut v = a.borrow_mut();
-            v.clear();
-            v.extend_from_slice(args);
-        });
-    }
-
-    /// The `i`th pending argument, or `None` if the caller passed fewer than
-    /// that. A prologue reads exactly as many as it has parameters, so a miss
-    /// is a broken calling convention rather than a case to paper over — the
-    /// caller turns it into a fatal error rather than a zero.
-    pub fn pending_arg(i: usize) -> Option<i64> {
-        PENDING_ARGS.with(|a| a.borrow().get(i).copied())
-    }
-
-    pub fn pending_argc() -> usize {
-        PENDING_ARGS.with(|a| a.borrow().len())
-    }
-
-    pub fn set_pending_env(env: &[i64]) {
-        PENDING_ENV.with(|e| {
-            let mut v = e.borrow_mut();
-            v.clear();
-            v.extend_from_slice(env);
-        });
-    }
-
-    /// The `i`th pending capture, or `None` — same contract as
-    /// [`pending_arg`].
-    pub fn pending_env(i: usize) -> Option<i64> {
-        PENDING_ENV.with(|e| e.borrow().get(i).copied())
-    }
-
-    pub fn pending_envc() -> usize {
-        PENDING_ENV.with(|e| e.borrow().len())
-    }
-
-    pub fn set_current_frame(f: i64) {
-        CURRENT_FRAME.with(|c| c.borrow_mut().push(f));
-    }
-
-    pub fn take_current_frame() -> Option<i64> {
-        CURRENT_FRAME.with(|c| c.borrow_mut().pop())
+        with(|s| s.pending_suspend.take())
     }
 
     /// How many entering calls have published a frame that nobody has taken
     /// yet — the depth a catcher records so it can put the stack back.
     pub fn current_frame_depth() -> usize {
-        CURRENT_FRAME.with(|c| c.borrow().len())
+        with(|s| s.current_frames.len())
     }
 
     /// Drops everything published above `depth`.
@@ -564,12 +699,13 @@ pub mod call_state {
     /// belonging to a call that has already left, and the value read out of
     /// it is whatever that frame happened to hold.
     pub fn truncate_current_frames(depth: usize) {
-        CURRENT_FRAME.with(|c| {
-            let mut c = c.borrow_mut();
-            if c.len() > depth {
-                c.truncate(depth);
-            }
-        });
+        with(|s| s.current_frames.truncate(depth));
+    }
+
+    /// Takes the innermost published frame, for a caller driving an entry by
+    /// hand.
+    pub fn take_current_frame() -> Option<i64> {
+        with(|s| s.current_frames.pop().map(|(word, _)| word))
     }
 
     /// What one `STATUS_CALL` is asking for.
@@ -598,37 +734,8 @@ pub mod call_state {
         Dyn { vtable: u32, slot: u32, args: Vec<i64> },
     }
 
-    pub fn set_pending_call(target: usize, args: Vec<i64>, env: Vec<i64>) {
-        PENDING_CALL.with(|c| *c.borrow_mut() = Some(Pending::Direct { target, args, env }));
-    }
-
-    /// [`set_pending_call`] for an `apply`: the callee is a value rather than
-    /// an address, so the driver resolves it.
-    pub fn set_pending_apply(closure: i64, args: Vec<i64>) {
-        PENDING_CALL.with(|c| *c.borrow_mut() = Some(Pending::Apply { closure, args }));
-    }
-
-    /// [`set_pending_call`] for a `:dyn` method call.
-    pub fn set_pending_dyn(vtable: u32, slot: u32, args: Vec<i64>) {
-        PENDING_CALL.with(|c| *c.borrow_mut() = Some(Pending::Dyn { vtable, slot, args }));
-    }
-
-    /// An empty vector to gather a call's arguments in, reusing the last one
-    /// [`recycle_args`] gave back.
-    pub fn args_buffer(capacity: usize) -> Vec<i64> {
-        let mut v = SPARE_ARGS.with(|s| std::mem::take(&mut *s.borrow_mut()));
-        v.clear();
-        v.reserve(capacity);
-        v
-    }
-
-    /// Gives a made call's argument vector back for [`args_buffer`].
-    pub fn recycle_args(args: Vec<i64>) {
-        SPARE_ARGS.with(|s| *s.borrow_mut() = args);
-    }
-
     pub fn take_pending_call() -> Option<Pending> {
-        PENDING_CALL.with(|c| c.borrow_mut().take())
+        with(|s| s.pending_call.take())
     }
 }
 

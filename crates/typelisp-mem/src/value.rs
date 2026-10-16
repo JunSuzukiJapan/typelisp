@@ -336,6 +336,40 @@ pub struct NarrowInt {
     pub value: i64,
 }
 
+/// Which of a frame's slots hold tagged words: bit `i` of word `i / 64` for
+/// slot `i`. See [`BoxedObj::Frame`].
+#[derive(Clone, Debug)]
+pub(crate) enum FrameMask {
+    /// Bits the frame owns, set one at a time.
+    Owned(Vec<u64>),
+    /// The function's table, a constant the compiler emitted beside its code
+    /// with as many words as the frame's slots need. Null when the function
+    /// roots no slot. It lives as long as the code does, and a frame of a
+    /// function cannot outlive the function's code.
+    Static(StaticMask),
+}
+
+/// The address of a compiled function's mask table ([`FrameMask::Static`]).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct StaticMask(pub(crate) *const u64);
+
+// SAFETY: the table is an immutable constant in loaded code.
+unsafe impl Send for StaticMask {}
+unsafe impl Sync for StaticMask {}
+
+impl FrameMask {
+    /// Whether slot `idx` holds a tagged word.
+    pub(crate) fn is_set(&self, idx: usize) -> bool {
+        let word = match self {
+            FrameMask::Owned(bits) => bits[idx / 64],
+            FrameMask::Static(StaticMask(table)) if table.is_null() => return false,
+            // SAFETY: the table covers every slot of the frames that point at it.
+            FrameMask::Static(StaticMask(table)) => unsafe { *table.add(idx / 64) },
+        };
+        word & (1u64 << (idx % 64)) != 0
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) enum BoxedObj {
     /// A `f32`, stored as a `f32`: the type says binary32, so the box holds
@@ -452,19 +486,18 @@ pub(crate) enum BoxedObj {
     /// still needs the tag checked — a `Sexpr`-repr local may hold a fixnum
     /// — which is `tagged::references_heap`'s job.
     ///
-    /// The mask starts empty and is filled in one bit at a time, at each
-    /// binding, by [`Heap::set_frame_mask_bit`]. That is not a concession to
-    /// the `Vec`: it is what lets the frame be allocated knowing only how
-    /// many slots the function needs, with no second pass over the body to
-    /// classify them first. It also costs nothing — the call that sets the
-    /// bit stands exactly where the `rt_push_sexpr_root` for that binding
-    /// used to.
+    /// Which slots are masked is a fact about the function, not the
+    /// activation, so a coroutine body's frame points at the table the
+    /// compiler emitted beside its code ([`FrameMask::Static`]) and making
+    /// one copies nothing. A frame built slot by slot
+    /// ([`Heap::alloc_frame`]) owns its bits instead and has them set one
+    /// at a time, at each binding, by [`Heap::set_frame_mask_bit`].
     ///
-    /// `pc` is where to resume: 0 on entry, and the id of a call site
-    /// afterwards. The frame is what makes a compiled call suspendable —
-    /// everything the function still needs is in here rather than on the
-    /// machine stack, so the driver can put it down and pick it up later.
-    Frame { words: Vec<i64>, mask: Vec<u64>, pc: u32 },
+    /// Where to resume is a word too (`typelisp_abi::FRAME_PC_SLOT`). The
+    /// frame is what makes a compiled call suspendable — everything the
+    /// function still needs is in here rather than on the machine stack, so
+    /// the driver can put it down and pick it up later.
+    Frame { words: Vec<i64>, mask: FrameMask },
     /// An *interpreted* closure: a `lambda` or a `labels` sibling the
     /// evaluator walks rather than a native entry point it jumps to.
     ///

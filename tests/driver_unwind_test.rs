@@ -36,7 +36,7 @@
 //!    down from where the throw was raised, and can claim the value.
 //! 4. A handler that declines keeps the throw travelling.
 
-use typelisp_abi::{call_state, encode, set_active_heap, FRAME_HANDLER_SLOT, FRAME_VALUE_SLOT};
+use typelisp_abi::{call_state, encode, set_active_heap, FRAME_HANDLER_SLOT, FRAME_PC_SLOT, FRAME_RESERVED_SLOTS, FRAME_SELF_SLOT, FRAME_VALUE_SLOT};
 use typelisp_abi::{STATUS_CALL, STATUS_RETURN, STATUS_UNWIND};
 use typelisp_mem::{Heap, Value};
 use typelisp_rt::coroutine::{CoroutineFn, FrameStack, Paused};
@@ -57,34 +57,35 @@ unsafe fn rt1(f: unsafe extern "C" fn(*const i64, u32) -> i64, a: i64) -> i64 {
     f([a].as_ptr(), 1)
 }
 
-/// The prologue every compiled body emits: on first entry make a frame, tell
-/// the driver about it (it is made *inside* the callee, so there is no other
-/// moment), and root it; on a later entry the driver hands the same frame
-/// back. Answers with the frame and where to resume.
-unsafe fn prologue(param: i64, nslots: i64) -> (i64, i64) {
+/// The prologue every compiled body emits: on first entry make a frame, which
+/// `rt_frame_open` also roots and tells the driver about (it is made *inside*
+/// the callee, so there is no other moment); on a later entry the driver hands
+/// back the address of the same frame's words. Answers with that address and
+/// where to resume.
+unsafe fn prologue(param: i64, nslots: usize) -> (*mut i64, i64) {
     if param != 0 {
-        return (param, rt1(typelisp_rt::rt_frame_pc, param));
+        let data = param as usize as *mut i64;
+        return (data, *data.add(FRAME_PC_SLOT));
     }
-    let frame = rt1(typelisp_rt::rt_frame_new, nslots);
-    rt1(typelisp_rt::rt_frame_entered, frame);
-    rt1(typelisp_rt::rt_push_sexpr_root, frame);
-    (frame, 0)
+    let mut open = [nslots as i64, 0, 0];
+    let frame = typelisp_rt::rt_frame_open(open.as_mut_ptr(), 3);
+    let data = open[2] as usize as *mut i64;
+    assert_eq!(*data.add(FRAME_SELF_SLOT), frame, "the frame knows itself");
+    (data, 0)
 }
 
 /// Writes one slot of a frame, the way `store-arg` on a slot pointer does.
-unsafe fn set_slot(frame: i64, idx: usize, word: i64) {
-    let data = rt1(typelisp_rt::rt_frame_data, frame) as usize as *mut i64;
+unsafe fn set_slot(data: *mut i64, idx: usize, word: i64) {
     *data.add(idx) = word;
 }
 
-unsafe fn slot(frame: i64, idx: usize) -> i64 {
-    let data = rt1(typelisp_rt::rt_frame_data, frame) as usize as *mut i64;
+unsafe fn slot(data: *mut i64, idx: usize) -> i64 {
     *data.add(idx)
 }
 
-/// A body that just answers. Two slots, because the protocol owns both.
+/// A body that just answers, with only the slots the protocol owns.
 unsafe extern "C-unwind" fn plain(param: i64) -> i64 {
-    let (frame, _) = prologue(param, 2);
+    let (frame, _) = prologue(param, FRAME_RESERVED_SLOTS);
     set_slot(frame, FRAME_VALUE_SLOT, NO_THROW_RESULT);
     typelisp_rt::rt_pop_sexpr_root(std::ptr::null(), 0);
     STATUS_RETURN
@@ -93,8 +94,8 @@ unsafe extern "C-unwind" fn plain(param: i64) -> i64 {
 /// A body that throws the tag it was passed. Declares no handler, so the
 /// driver has nothing to ask it.
 unsafe extern "C-unwind" fn raiser(param: i64) -> i64 {
-    let (_frame, _) = prologue(param, 2);
-    let tag = call_state::pending_arg(0).expect("raiser was passed a tag");
+    let (_frame, _) = prologue(param, FRAME_RESERVED_SLOTS);
+    let tag = call_state::with(|s| s.pending_arg(0)).expect("raiser was passed a tag");
     let args = [tag, encode(Value::Int(THROWN))];
     typelisp_rt::rt_throw(args.as_ptr(), 2);
     unreachable!("rt_throw does not return")
@@ -103,27 +104,26 @@ unsafe extern "C-unwind" fn raiser(param: i64) -> i64 {
 /// A body with a region: it calls [`raiser`] with its handler slot naming its
 /// own pad, and the pad decides whether the throw in flight is its.
 ///
-/// Slot 2 holds the tag the pad claims. It has to be a frame slot rather than
-/// a local: the pad runs in a *later activation* than the code that read the
-/// argument.
+/// The first slot past the protocol's holds the tag the pad claims. It has to
+/// be a frame slot rather than a local: the pad runs in a *later activation*
+/// than the code that read the argument.
 unsafe extern "C-unwind" fn guarded(param: i64) -> i64 {
-    let (frame, pc) = prologue(param, 3);
+    let (frame, pc) = prologue(param, FRAME_RESERVED_SLOTS + 1);
     if pc == 0 {
-        let caught = call_state::pending_arg(0).expect("guarded was passed a tag to claim");
-        let thrown = call_state::pending_arg(1).expect("guarded was passed a tag to throw");
-        set_slot(frame, 2, caught);
+        let caught = call_state::with(|s| s.pending_arg(0)).expect("guarded was passed a tag to claim");
+        let thrown = call_state::with(|s| s.pending_arg(1)).expect("guarded was passed a tag to throw");
+        set_slot(frame, FRAME_RESERVED_SLOTS, caught);
         // From here an unwind reaching this frame lands at `PAD_PC`.
         set_slot(frame, FRAME_HANDLER_SLOT, PAD_PC);
         let call = [raiser as *const () as usize as i64, thrown];
         typelisp_rt::rt_frame_call(call.as_ptr(), 2);
-        let set_pc = [frame, AFTER_CALL_PC];
-        typelisp_rt::rt_frame_set_pc(set_pc.as_ptr(), 2);
+        set_slot(frame, FRAME_PC_SLOT, AFTER_CALL_PC);
         return STATUS_CALL;
     }
     if pc == PAD_PC {
         // The region is over the moment its pad runs, either way it goes.
         set_slot(frame, FRAME_HANDLER_SLOT, 0);
-        if rt1(typelisp_rt::rt_throw_matches, slot(frame, 2)) != 0 {
+        if rt1(typelisp_rt::rt_throw_matches, slot(frame, FRAME_RESERVED_SLOTS)) != 0 {
             let claimed = typelisp_rt::rt_throw_take_value(std::ptr::null(), 0);
             set_slot(frame, FRAME_VALUE_SLOT, claimed);
             typelisp_rt::rt_pop_sexpr_root(std::ptr::null(), 0);

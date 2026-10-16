@@ -49,8 +49,8 @@ use typelisp_mem::{BoxId, FrameRaw, Heap, Value};
 // hands the word straight through and lets the caller, who knows the type,
 // decode it (`decode_compiled_return`).
 
-/// A coroutine-ABI compiled function: takes a frame (or `0` on first entry),
-/// returns a status word.
+/// A coroutine-ABI compiled function: takes the address of its frame's words
+/// (or `0` on first entry), returns a status word.
 ///
 /// `"C-unwind"`, like every other compiled-body pointer type in the tree
 /// (`CompiledSignature`, `ApplyInterpretedFn`, `DynSlotClosureFn`): a body
@@ -182,35 +182,28 @@ impl FrameStack {
     }
 
     /// Begin a call: the function is entered with no frame, so its prologue
-    /// makes one and copies `args` out of `typelisp_abi::call_state`, and
-    /// publishes it through `rt_frame_entered` — the only moment the driver
-    /// can learn of a frame that is made inside the callee.
+    /// makes one, copies `args` out of `typelisp_abi::call_state`, and
+    /// publishes the frame there (`rt_frame_open`) — the only moment the
+    /// driver can learn of a frame that is made inside the callee.
     ///
     /// Pushes the frame it published, including when the entry ends in an
     /// unwind: a function that raises inside its own `catch` published its
     /// frame first, and that frame is the one that catches. Only an entry
     /// that unwound *before* publishing leaves nothing to record.
-    fn begin(&mut self, heap: &mut Heap, f: CoroutineFn, args: &[i64], env: &[i64]) -> i64 {
+    fn begin(&mut self, heap: &mut Heap, f: CoroutineFn, args: Vec<i64>, env: Vec<i64>) -> i64 {
         // Counted before the entry runs: its code is in use from here, and a
         // nested evaluation inside it may compile.
         self.note_live(true);
         let roots = heap.root_count();
-        let published = call_state::current_frame_depth();
-        call_state::set_pending_args(args);
-        call_state::set_pending_env(env);
+        let published = call_state::with(|s| s.enter(args, env));
         // Nothing may allocate between here and the prologue's copy — see
         // `call_state`'s doc comment.
         let status = unsafe { activation(f, 0) };
-        if call_state::current_frame_depth() > published {
-            let frame = take_current_frame();
-            let raw = frame_raw(heap, typelisp_abi::encode(frame));
-            self.frames.push(Entry { body: f, frame, raw, roots });
-        } else if status & 0b11 != STATUS_UNWIND {
-            panic!("a coroutine function did not publish its frame on entry");
+        match call_state::with(|s| s.entered(published)) {
+            Some((word, raw)) => self.frames.push(Entry { body: f, frame: decode(word), raw, roots }),
+            None if status & 0b11 != STATUS_UNWIND => panic!("a coroutine function did not publish its frame on entry"),
+            None => {}
         }
-        // An unwind travels between the publish and the take, so anything a
-        // nested entry left above this point is owned by nobody.
-        call_state::truncate_current_frames(published);
         status
     }
 
@@ -424,7 +417,7 @@ impl FrameStack {
         env: &[i64],
     ) -> Result<i64, Paused> {
         let base = self.frames.len();
-        let status = self.begin(heap, f, args, env);
+        let status = self.begin(heap, f, args.to_vec(), env.to_vec());
         self.drive(heap, base, status)
     }
 
@@ -489,15 +482,13 @@ impl FrameStack {
                         // the provenance every indirect compiled call relies
                         // on.
                         let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(target) };
-                        status = self.begin(heap, f, &args, &env);
-                        call_state::recycle_args(args);
+                        status = self.begin(heap, f, args, env);
                     }
                     // SAFETY: the word came from a compiled `apply` site,
                     // whose callee the checker typed as an `Fn`.
                     Pending::Apply { closure, args } => match unsafe { crate::resolve_closure(closure) } {
                         crate::Callee::Coroutine { f, env } => {
-                            status = self.begin(heap, f, &args, &env);
-                            call_state::recycle_args(args);
+                            status = self.begin(heap, f, args, env);
                         }
                         // Runs to completion by construction, so there is no
                         // frame to push — only an answer to hand back. The
@@ -532,7 +523,7 @@ impl FrameStack {
                             // `coroutine_fn_type`, which is what the slot's
                             // recorded ABI says.
                             let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(ptr) };
-                            status = self.begin(heap, f, &args, &[]);
+                            status = self.begin(heap, f, args, Vec::new());
                         } else {
                             // SAFETY: as above, under the plain
                             // `compiled_fn_type` signature.
@@ -591,7 +582,7 @@ impl FrameStack {
             if handler != 0 {
                 // SAFETY: a frame on the chain is live.
                 return Some(unsafe {
-                    raw.set_pc(handler as u32);
+                    raw.set_word(typelisp_abi::FRAME_PC_SLOT, handler);
                     activation_on(body, frame, raw)
                 });
             }
@@ -635,41 +626,20 @@ fn frame_handler(raw: FrameRaw) -> i64 {
 /// runtime or in generated code must not come back as a plausible-looking
 /// typelisp condition.
 /// [`activation`] resuming `frame`, which is published as this thread's
-/// running frame ([`RUNNING`]) first.
+/// running frame first. The body is handed the address of the frame's words,
+/// as the coroutine ABI says a resumed one is.
 unsafe fn activation_on(f: CoroutineFn, frame: Value, raw: FrameRaw) -> i64 {
     let word = typelisp_abi::encode(frame);
-    RUNNING.set(Some((word, raw)));
-    activation(f, word)
+    call_state::with(|s| s.set_running(word, raw));
+    activation(f, raw.data() as i64)
 }
 
-thread_local! {
-    /// The frame the activation on this thread is running, and where its
-    /// parts are — so that the frame operations its code makes (`rt_frame_*`)
-    /// need not look it up in the box table, under its lock, every time.
-    ///
-    /// Set only where the frame is known to be live and running here: when
-    /// it is made (`rt_frame_new`) and when the driver resumes it
-    /// ([`activation_on`]). A frame being freed is forgotten here
-    /// ([`free_frame`]). An entry can still go stale — the frame of a task
-    /// that was dropped, then collected, its box handed out again — but the
-    /// only frame whose code runs on this thread is one of those two, each of
-    /// which replaces the entry first; a lookup that does not match falls back
-    /// to the box table.
-    static RUNNING: std::cell::Cell<Option<(i64, FrameRaw)>> = const { std::cell::Cell::new(None) };
-}
-
-/// Publishes a frame just made on this thread as its running one.
-pub(crate) fn note_new_frame(word: i64, raw: FrameRaw) {
-    RUNNING.set(Some((word, raw)));
-}
-
-/// Where frame `word`'s parts are: from [`RUNNING`] when it is the running
-/// frame, from the box table otherwise. Fatal if `word` is not a frame.
+/// Where frame `word`'s parts are: from the call state when it is the frame
+/// running on this thread, from the box table otherwise. Fatal if `word` is
+/// not a frame.
 pub(crate) fn frame_raw(heap: &mut Heap, word: i64) -> FrameRaw {
-    if let Some((running, raw)) = RUNNING.get() {
-        if running == word {
-            return raw;
-        }
+    if let Some(raw) = call_state::with(|s| s.running(word)) {
+        return raw;
     }
     match decode(word) {
         Value::Boxed(id) if heap.is_frame(id) => heap.frame_raw(id),
@@ -680,9 +650,7 @@ pub(crate) fn frame_raw(heap: &mut Heap, word: i64) -> FrameRaw {
 /// [`Heap::free_frame`], forgetting the frame as this thread's running one.
 fn free_frame(heap: &mut Heap, frame: Value) {
     let word = typelisp_abi::encode(frame);
-    if RUNNING.get().is_some_and(|(running, _)| running == word) {
-        RUNNING.set(None);
-    }
+    call_state::with(|s| s.forget_running(word));
     heap.free_frame(frame_id(frame));
 }
 
@@ -704,14 +672,6 @@ unsafe fn activation(f: CoroutineFn, arg: i64) -> i64 {
 /// own hook — is the one that knows where it goes next.
 pub fn resume_unwinding() -> ! {
     crate::resume_activation_unwind()
-}
-
-/// The frame a just-entered function allocated for itself, as the prologue
-/// published it through `rt_frame_entered`.
-fn take_current_frame() -> Value {
-    let word = call_state::take_current_frame()
-        .unwrap_or_else(|| panic!("a coroutine function did not publish its frame on entry"));
-    decode(word)
 }
 
 fn take_pending_call() -> Pending {
