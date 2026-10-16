@@ -976,8 +976,9 @@ struct CoroCtx {
     body: BasicBlock<'static>,
     /// Left empty by `coroutine-begin`, filled by `coroutine-end`.
     dispatch: BasicBlock<'static>,
-    /// `rt_frame_pc(frame)`, read once in the prologue so it dominates the
-    /// whole chain.
+    /// Where to resume — 0 on a fresh entry, the frame's
+    /// `FRAME_PC_SLOT` on a later one — merged in the prologue so it
+    /// dominates the whole chain.
     pc: IntValue<'static>,
     /// Every call site's id and the block it resumes into, in the order they
     /// were claimed. A region's dispatch block is in here too: the driver
@@ -987,14 +988,13 @@ struct CoroCtx {
     /// install the same handler (its entry, its exits, each cleanup copy) all
     /// name one id.
     handlers: Vec<(BasicBlock<'static>, u64)>,
-    /// The `store`s of `rt_frame_open`'s rooted-slot table address and its
-    /// length, in `coro.fresh` — zero until `coroutine-end` knows the table. A
-    /// slot's mask bit is a fact about the frame, so it is set where the frame
-    /// is made, not on every resume.
+    /// The `store` of `rt_frame_open`'s mask table address, in `coro.fresh` —
+    /// null until `coroutine-end` knows the table. Which slots are rooted is a
+    /// fact about the function, so it is given where the frame is made, not on
+    /// every resume.
     rooted_table_store: InstructionValue<'static>,
-    rooted_len_store: InstructionValue<'static>,
-    /// The slots handed out marked (`frame-slot-rooted`), whose bits
-    /// `coroutine-end` has `rt_frame_open` set once every slot is known.
+    /// The slots handed out marked (`frame-slot-rooted`), which `coroutine-end`
+    /// turns into the mask table once every slot is known.
     rooted: Vec<u64>,
     /// The `br` ending `coro.prologue`, to insert slot *addresses* before.
     ///
@@ -1141,13 +1141,13 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
         .map_err(|e| err("call rt_push_sexpr_root", e.to_string()))?;
 
     FRAME_CTXS.with(|c| {
-        // `next: 1` — slot 0 is the driver protocol's value slot
-        // (`typelisp_abi::FRAME_VALUE_SLOT`) and is never handed out as a
-        // local. A function's result leaves through it, and the result of a
-        // call it is waiting on arrives through it: from the resuming
-        // function's side those are the same thing, the answer it was waiting
-        // for.
-        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next: 1, coro: None, scratch: HashMap::new() });
+        // The driver protocol's own slots (`typelisp_abi::FRAME_RESERVED_SLOTS`)
+        // are never handed out as locals. A function's result leaves through
+        // the value slot, and the result of a call it is waiting on arrives
+        // through it: from the resuming function's side those are the same
+        // thing, the answer it was waiting for.
+        let next = typelisp_abi::FRAME_RESERVED_SLOTS as u64;
+        c.borrow_mut().insert(builder_key(&builder), FrameCtx { data, frame, size_store, next, coro: None, scratch: HashMap::new() });
     });
     Ok(Value::Empty)
 }
@@ -1156,7 +1156,7 @@ fn llvm_builder_frame_begin(args: &[Value]) -> Result<Value, EvalError> {
 ///
 /// [`llvm_builder_frame_begin`] returns `()` because most of what a prologue
 /// needs is already keyed on the builder, but the driver protocol has to name
-/// the frame itself: `rt_frame_set_pc` and `rt_frame_entered` both take it.
+/// the frame itself: `rt_frame_entered` takes it.
 fn llvm_builder_frame_value(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
     let key = builder_key(&builder);
@@ -1313,6 +1313,20 @@ fn llvm_builder_frame_end(args: &[Value]) -> Result<Value, EvalError> {
 // `alloca-args` already plays for every other value that has to outlive a
 // branch.
 
+/// Records resume point `id` in the frame whose words are at `data`, before
+/// the activation hands control back: a plain store into its
+/// [`FRAME_PC_SLOT`](typelisp_abi::FRAME_PC_SLOT).
+fn store_resume_point(b: &Builder<'static>, data: PointerValue<'static>, id: u64, what: &str) -> Result<(), EvalError> {
+    let i64t = crate::compile::llvm_context().i64_type();
+    let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
+    let slot = unsafe {
+        b.build_gep(i64t, data, &[i64t.const_int(typelisp_abi::FRAME_PC_SLOT as u64, false)], "frame_pc_slot")
+            .map_err(|e| err("gep", e.to_string()))?
+    };
+    b.build_store(slot, i64t.const_int(id, false)).map_err(|e| err("store", e.to_string()))?;
+    Ok(())
+}
+
 /// Emits a call to an `rt_*` entry point with `vals` as its argument array.
 ///
 /// Every one of them takes `(const i64 *args, u32 argc)`, so the array is an
@@ -1351,26 +1365,24 @@ fn emit_rt_call(
 /// function and leave the builder at the start of its body.
 ///
 /// ```text
-/// entry:      %cell = alloca i64;  br (%param == 0), fresh, resumed
-/// fresh:      %f = rt_frame_open(N, ROOTED, K, out %d0);  store %f -> %cell
-///             br prologue
-/// resumed:    store %param -> %cell;  %d1 = rt_frame_reopen(%param, out %pc1)
+/// entry:      br (%param == 0), fresh, resumed
+/// fresh:      %f0 = rt_frame_open(N, MASK, out %d0);  br prologue
+/// resumed:    %d1 = inttoptr %param;  %pc1 = load %d1[PC];  %f1 = load %d1[SELF]
 ///             br prologue
 /// prologue:   %data = phi [%d0, fresh], [%d1, resumed]
-///             %pc = phi [0, fresh], [%pc1, resumed];  %frame = load %cell
-///             br dispatch
+///             %pc = phi [0, fresh], [%pc1, resumed]
+///             %frame = phi [%f0, fresh], [%f1, resumed];  br dispatch
 /// dispatch:   (empty — `coroutine-end` writes the chain)
 /// body:       ...
 /// ```
 ///
-/// `rt_frame_open` makes the frame with its rooted slots' mask bits set (`N`,
-/// `ROOTED` and `K` are written in by `coroutine-end`, once every slot is
+/// `rt_frame_open` makes the frame with the function's mask table as its mask
+/// (`N` and `MASK` are written in by `coroutine-end`, once every slot is
 /// known), roots it, and publishes it — which is how the driver learns the
 /// frame at all: it is made *inside* the callee, after the call has begun, so
-/// there is no other moment the caller could have been told. It is one call
-/// where there were six (`rt_frame_new`, `rt_push_sexpr_root`,
-/// `rt_frame_entered`, `rt_frame_mask_bit`s, `rt_frame_data`, `rt_frame_pc`),
-/// on the path every call takes.
+/// there is no other moment the caller could have been told. It is the one
+/// runtime call on the way in, on the path every call takes; a resumed entry
+/// makes none.
 ///
 /// The root push has no pop here and its pop is not on this path — one push
 /// on first entry, one pop at the single return. Between them the function may
@@ -1400,9 +1412,7 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
     // The prologue owns its declarations for the same reason `frame-begin`
     // does: a module can reach here without having been through the driver.
     let frame_open = ensure_declared(&module, "rt_frame_open");
-    let frame_reopen = ensure_declared(&module, "rt_frame_reopen");
     ensure_declared(&module, "rt_pop_sexpr_root");
-    ensure_declared(&module, "rt_frame_set_pc");
     ensure_declared(&module, "rt_frame_call");
     ensure_declared(&module, "rt_pending_arg");
     ensure_declared(&module, "rt_pending_argc");
@@ -1429,29 +1439,26 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
     let b = builder.borrow();
 
     // entry — the block the caller positioned us at.
-    let cell = b.build_alloca(i64t, "coro_frame_cell").map_err(|e| err("alloca", e.to_string()))?;
     let is_first = b
         .build_int_compare(inkwell::IntPredicate::EQ, param, i64t.const_int(0, false), "coro_first")
         .map_err(|e| err("icmp", e.to_string()))?;
     b.build_conditional_branch(is_first, fresh, resumed).map_err(|e| err("br", e.to_string()))?;
 
     // fresh — make the frame this activation runs in, in one call
-    // (`rt_frame_open`). The size and the rooted-slot table are placeholders;
-    // `coroutine-end` writes them in. The fourth word comes back holding the
+    // (`rt_frame_open`). The size and the mask table are placeholders;
+    // `coroutine-end` writes them in. The third word comes back holding the
     // address of the frame's words.
     b.position_at_end(fresh);
-    let open_args = entry_alloca(&b, i64t.array_type(4), "frame_open_args").map_err(|e| err("alloca", e))?;
+    let open_args = entry_alloca(&b, i64t.array_type(3), "frame_open_args").map_err(|e| err("alloca", e))?;
     let open_word = |n: u64, name: &str| unsafe {
         b.build_gep(i64t, open_args, &[i64t.const_int(n, false)], name).map_err(|e| err("gep", e.to_string()))
     };
     let size_store =
         b.build_store(open_word(0, "frame_size_slot")?, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
     let rooted_table_store =
-        b.build_store(open_word(1, "frame_rooted_slot")?, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
-    let rooted_len_store =
-        b.build_store(open_word(2, "frame_nrooted_slot")?, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
+        b.build_store(open_word(1, "frame_mask_slot")?, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
     let made = match b
-        .build_call(frame_open, &[open_args.into(), ctx.i32_type().const_int(4, false).into()], "frame")
+        .build_call(frame_open, &[open_args.into(), ctx.i32_type().const_int(3, false).into()], "frame")
         .map_err(|e| err("call rt_frame_open", e.to_string()))?
         .try_as_basic_value()
     {
@@ -1460,36 +1467,26 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
             return Err(EvalError::Internal(format!("{}: rt_frame_open returned no value", what)))
         }
     };
-    b.build_store(cell, made).map_err(|e| err("store", e.to_string()))?;
     let fresh_data = b
-        .build_load(i64t, open_word(3, "frame_data_out")?, "fresh_data")
+        .build_load(i64t, open_word(2, "frame_data_out")?, "fresh_data")
         .map_err(|e| err("load", e.to_string()))?
         .into_int_value();
     b.build_unconditional_branch(prologue).map_err(|e| err("br", e.to_string()))?;
 
-    // resumed — the driver handed back the frame we made last time: where its
-    // words are and where to resume, in one call (`rt_frame_reopen`).
+    // resumed — the driver handed back the address of the words of the frame
+    // we made last time; where to resume and the frame itself are in them.
     b.position_at_end(resumed);
-    b.build_store(cell, param).map_err(|e| err("store", e.to_string()))?;
-    let reopen_args = entry_alloca(&b, i64t.array_type(2), "frame_reopen_args").map_err(|e| err("alloca", e))?;
-    let reopen_word = |n: u64, name: &str| unsafe {
-        b.build_gep(i64t, reopen_args, &[i64t.const_int(n, false)], name).map_err(|e| err("gep", e.to_string()))
+    let resumed_ptr = b
+        .build_int_to_ptr(param, ctx.ptr_type(inkwell::AddressSpace::default()), "resumed_ptr")
+        .map_err(|e| err("inttoptr", e.to_string()))?;
+    let resumed_word = |n: usize, name: &str| -> Result<IntValue<'static>, EvalError> {
+        let slot = unsafe {
+            b.build_gep(i64t, resumed_ptr, &[i64t.const_int(n as u64, false)], name).map_err(|e| err("gep", e.to_string()))?
+        };
+        Ok(b.build_load(i64t, slot, name).map_err(|e| err("load", e.to_string()))?.into_int_value())
     };
-    b.build_store(reopen_word(0, "frame_reopen_frame")?, param).map_err(|e| err("store", e.to_string()))?;
-    let resumed_data = match b
-        .build_call(frame_reopen, &[reopen_args.into(), ctx.i32_type().const_int(2, false).into()], "resumed_data")
-        .map_err(|e| err("call rt_frame_reopen", e.to_string()))?
-        .try_as_basic_value()
-    {
-        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
-        inkwell::values::ValueKind::Instruction(_) => {
-            return Err(EvalError::Internal(format!("{}: rt_frame_reopen returned no value", what)))
-        }
-    };
-    let resumed_pc = b
-        .build_load(i64t, reopen_word(1, "frame_pc_out")?, "resumed_pc")
-        .map_err(|e| err("load", e.to_string()))?
-        .into_int_value();
+    let resumed_pc = resumed_word(typelisp_abi::FRAME_PC_SLOT, "resumed_pc")?;
+    let resumed_frame = resumed_word(typelisp_abi::FRAME_SELF_SLOT, "resumed_frame")?;
     b.build_unconditional_branch(prologue).map_err(|e| err("br", e.to_string()))?;
 
     // prologue — the one block both entries reach, so the only place the
@@ -1497,11 +1494,13 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
     // top (`pc` 0).
     b.position_at_end(prologue);
     let data_word = b.build_phi(i64t, "frame_data").map_err(|e| err("phi", e.to_string()))?;
-    data_word.add_incoming(&[(&fresh_data, fresh), (&resumed_data, resumed)]);
+    data_word.add_incoming(&[(&fresh_data, fresh), (&param, resumed)]);
     let pc_phi = b.build_phi(i64t, "frame_pc").map_err(|e| err("phi", e.to_string()))?;
     pc_phi.add_incoming(&[(&i64t.const_int(0, false), fresh), (&resumed_pc, resumed)]);
     let pc = pc_phi.as_basic_value().into_int_value();
-    let frame = b.build_load(i64t, cell, "coro_frame").map_err(|e| err("load", e.to_string()))?;
+    let frame_phi = b.build_phi(i64t, "coro_frame").map_err(|e| err("phi", e.to_string()))?;
+    frame_phi.add_incoming(&[(&made, fresh), (&resumed_frame, resumed)]);
+    let frame = frame_phi.as_basic_value();
     let data = b
         .build_int_to_ptr(
             data_word.as_basic_value().into_int_value(),
@@ -1533,7 +1532,6 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
                     resumes: Vec::new(),
                     handlers: Vec::new(),
                     rooted_table_store,
-                    rooted_len_store,
                     rooted: Vec::new(),
                     prologue_end,
                 }),
@@ -1598,18 +1596,17 @@ fn llvm_builder_coroutine_apply(args: &[Value]) -> Result<Value, EvalError> {
 /// the resuming function's side those are the same thing.
 fn llvm_builder_coroutine_suspend(args: &[Value]) -> Result<Value, EvalError> {
     let builder = expect_llvm_builder(&args[0])?;
-    let module = expect_llvm_module(&args[1])?;
+    expect_llvm_module(&args[1])?;
     let ctx = crate::compile::llvm_context();
     let i64t = ctx.i64_type();
     let what = "coroutine-suspend";
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
     let key = builder_key(&builder);
-    let (frame, data, function, id) = open_coroutine_frame(&builder, what)?;
+    let (_frame, data, function, id) = open_coroutine_frame(&builder, what)?;
 
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
-    let set_pc = ensure_declared(&module, "rt_frame_set_pc");
     let b = builder.borrow();
-    emit_rt_call(&b, set_pc, &[frame, i64t.const_int(id, false).into()], "frame_set_pc", what)?;
+    store_resume_point(&b, data, id, what)?;
     b.build_return(Some(&i64t.const_int(typelisp_abi::STATUS_SUSPEND as u64, false)))
         .map_err(|e| err("ret", e.to_string()))?;
 
@@ -1773,11 +1770,10 @@ fn coroutine_call_impl(
     let i64t = ctx.i64_type();
     let err = |step: &str, e: String| EvalError::Internal(format!("{}: {}: {}", what, step, e));
     let key = builder_key(&builder);
-    let (frame, data, function, id) = open_coroutine_frame(&builder, what)?;
+    let (_frame, data, function, id) = open_coroutine_frame(&builder, what)?;
 
     let resume = ctx.append_basic_block(function, &format!("coro.resume{}", id));
     let frame_call = ensure_declared(&module, shim);
-    let set_pc = ensure_declared(&module, "rt_frame_set_pc");
 
     let b = builder.borrow();
     // rt_frame_call(callee, arg...) — one array, the callee first; the
@@ -1798,7 +1794,7 @@ fn coroutine_call_impl(
         call_args.push(b.build_load(i64t, slot, "coro_arg_val").map_err(|e| err("load", e.to_string()))?);
     }
     emit_rt_call(&b, frame_call, &call_args, "frame_call", what)?;
-    emit_rt_call(&b, set_pc, &[frame, i64t.const_int(id, false).into()], "frame_set_pc", what)?;
+    store_resume_point(&b, data, id, what)?;
     b.build_return(Some(&i64t.const_int(typelisp_abi::STATUS_CALL as u64, false)))
         .map_err(|e| err("ret", e.to_string()))?;
 
@@ -1866,12 +1862,13 @@ fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
     if !f.size_store.set_operand(0, i64t.const_int(f.next, false)) {
         return Err(EvalError::Internal(format!("{}: could not write the slot count into the prologue", what)));
     }
-    set_rooted_table(&module, &coro).map_err(|e| err("rooted slots", e))?;
+    set_rooted_table(&module, &coro, f.next).map_err(|e| err("rooted slots", e))?;
 
     // The dispatch chain: `pc == 0` is a fresh entry, anything else names a
     // call site. The last arm is unconditional — `pc` is only ever written by
-    // `coroutine-call`'s own `rt_frame_set_pc`, so past the final comparison
-    // there is exactly one place left it can mean.
+    // a resume point's own store (`store_resume_point`) or, for a handler, by
+    // the driver, so past the final comparison there is exactly one place
+    // left it can mean.
     b.position_at_end(coro.dispatch);
     let mut arms = std::iter::once((0u64, coro.body)).chain(coro.resumes.iter().copied()).peekable();
     while let Some((id, target)) = arms.next() {
@@ -1889,8 +1886,11 @@ fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Empty)
 }
 
-/// Hands `rt_frame_open` the slots in `coro.rooted`, as a constant table of
-/// their numbers: the frame is made with their mask bits already set.
+/// Hands `rt_frame_open` the slots in `coro.rooted`, as the function's mask:
+/// a constant table of bit words, bit `i` of word `i / 64` for slot `i`, one
+/// word per 64 of the frame's `nslots`. The frame points at it rather than
+/// copying it, so making a frame costs the same however many slots are
+/// rooted. A function that roots none passes null.
 ///
 /// A table rather than a call per slot, because a long body has a rooted slot
 /// for nearly every value it keeps in the frame, and a straight line of that
@@ -1898,29 +1898,30 @@ fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
 /// allocator take time to the square of. The table grows with the body; the
 /// code does not.
 ///
-/// Setting a bit before the slot is written is safe by construction: an
+/// A bit set before the slot is written is safe by construction: an
 /// untouched slot reads as a raw `0`, whose low bits are `TAG_FIXNUM`, so the
 /// collector follows nothing.
-fn set_rooted_table(module: &Rc<RefCell<Module<'static>>>, coro: &CoroCtx) -> Result<(), String> {
+fn set_rooted_table(module: &Rc<RefCell<Module<'static>>>, coro: &CoroCtx, nslots: u64) -> Result<(), String> {
     if coro.rooted.is_empty() {
         return Ok(());
     }
     let ctx = crate::compile::llvm_context();
     let i64t = ctx.i64_type();
     let m = module.borrow();
-    let table_ty = i64t.array_type(coro.rooted.len() as u32);
+    let mut bits = vec![0u64; nslots.div_ceil(64) as usize];
+    for &slot in &coro.rooted {
+        bits[(slot / 64) as usize] |= 1u64 << (slot % 64);
+    }
+    let table_ty = i64t.array_type(bits.len() as u32);
     let name = format!("{}.rooted_slots", coro.function.get_name().to_string_lossy());
     let table = m.add_global(table_ty, None, &name);
-    let words: Vec<_> = coro.rooted.iter().map(|n| i64t.const_int(*n, false)).collect();
+    let words: Vec<_> = bits.iter().map(|w| i64t.const_int(*w, false)).collect();
     table.set_initializer(&i64t.const_array(&words));
     table.set_constant(true);
     table.set_linkage(inkwell::module::Linkage::Private);
     table.set_unnamed_addr(true);
     if !coro.rooted_table_store.set_operand(0, table.as_pointer_value().const_to_int(i64t)) {
         return Err("could not write the table's address into the prologue".to_string());
-    }
-    if !coro.rooted_len_store.set_operand(0, i64t.const_int(coro.rooted.len() as u64, false)) {
-        return Err("could not write the table's length into the prologue".to_string());
     }
     Ok(())
 }

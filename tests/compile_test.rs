@@ -6890,17 +6890,17 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
     let src = r#"
         (defun build-suspending-module () llvm-module
           (let* ((m (llvm-module::create "mod"))
-                 ;; The two protocol shims this body calls directly. The rest
+                 ;; The protocol shim this body calls directly. The rest
                  ;; (`rt_frame_new` and friends) `frame-begin` declares itself.
                  (ignored-entered (add-function m "rt_frame_entered"))
-                 (ignored-setpc (add-function m "rt_frame_set_pc"))
                  (f (add-coroutine-function m "two_halves"))
                  (entry (append-block f "entry"))
                  (first (append-block f "first"))
                  (resumed (append-block f "resumed"))
                  (builder (llvm-builder::create))
                  (param (function-param f 0)))
-            ;; entry: a zero frame means first entry; anything else is a resume.
+            ;; entry: zero means first entry; anything else is a resume, handed
+            ;; the address of the frame's words.
             (position-at-end builder entry)
             (build-cond-br builder (build-icmp-eq builder param (const-word builder 0)) first resumed)
 
@@ -6911,27 +6911,24 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
             (let* ((frame (frame-value builder))
                    (slot (frame-slot builder))
                    (pub-args (alloca-args builder 1))
-                   (setpc-args (alloca-args builder 2)))
+                   (data-args (alloca-args builder 1)))
               (store-arg builder slot 0 (const-word builder 40))
               (store-arg builder pub-args 0 frame)
               (build-call builder (get-function m "rt_frame_entered") pub-args 1)
-              (store-arg builder setpc-args 0 frame)
-              (store-arg builder setpc-args 1 (const-word builder 1))
-              (build-call builder (get-function m "rt_frame_set_pc") setpc-args 2)
+              (store-arg builder data-args 0 frame)
+              (let ((first-base (build-int-to-ptr builder (build-call builder (get-function m "rt_frame_data") data-args 1))))
+                (store-arg builder (build-slot-ptr builder first-base 2) 0 (const-word builder 1)))
               (build-ret builder (const-word builder 2))
 
-              ;; resumed: read the local back out of the frame we were handed,
-              ;; add 2, and leave it in the protocol's value slot.
+              ;; resumed: read the local back out of the frame whose words we
+              ;; were handed, add 2, and leave it in the protocol's value slot.
               (position-at-end builder resumed)
-              (let ((data-args (alloca-args builder 1)))
-                (store-arg builder data-args 0 param)
-                (let* ((data (build-call builder (get-function m "rt_frame_data") data-args 1))
-                       (base (build-int-to-ptr builder data))
-                       (stashed (load-raw builder (build-slot-ptr builder base 1) 0))
-                       (sum (build-add builder stashed (const-word builder 2))))
-                  (store-arg builder (build-slot-ptr builder base 0) 0 sum)
-                  (frame-end builder m)
-                  (build-ret builder (const-word builder 0)))))
+              (let* ((base (build-int-to-ptr builder param))
+                     (stashed (load-raw builder (build-slot-ptr builder base 4) 0))
+                     (sum (build-add builder stashed (const-word builder 2))))
+                (store-arg builder (build-slot-ptr builder base 0) 0 sum)
+                (frame-end builder m)
+                (build-ret builder (const-word builder 0))))
             m))
         (build-suspending-module)
     "#;
@@ -6949,11 +6946,12 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
         Value::Boxed(id) => id,
         other => panic!("expected a frame, got {:?}", other),
     };
-    assert_eq!(heap.frame_pc(id), 1, "and recorded where to resume");
-    assert_eq!(heap.frame_word(id, 1), 40, "with the local it wrote still in the frame");
+    assert_eq!(heap.frame_word(id, typelisp_abi::FRAME_PC_SLOT), 1, "and recorded where to resume");
+    assert_eq!(heap.frame_word(id, typelisp_abi::FRAME_RESERVED_SLOTS), 40, "with the local it wrote still in the frame");
 
-    // Resume with the same frame.
-    assert_eq!(unsafe { two_halves(frame) }, typelisp_abi::STATUS_RETURN, "the second half returns");
+    // Resume on the same frame.
+    let data = heap.frame_data_ptr(id) as i64;
+    assert_eq!(unsafe { two_halves(data) }, typelisp_abi::STATUS_RETURN, "the second half returns");
     assert_eq!(heap.frame_word(id, typelisp_abi::FRAME_VALUE_SLOT), 42, "40 survived the suspension");
 }
 
@@ -6973,7 +6971,6 @@ fn the_driver_runs_a_two_frame_call_chain() {
         (defun build-chain-module () llvm-module
           (let* ((m (llvm-module::create "mod"))
                  (ignored-entered (add-function m "rt_frame_entered"))
-                 (ignored-setpc (add-function m "rt_frame_set_pc"))
                  (ignored-call (add-function m "rt_frame_call"))
                  (inner (add-coroutine-function m "inner"))
                  (outer (add-coroutine-function m "outer")))
@@ -7006,26 +7003,23 @@ fn the_driver_runs_a_two_frame_call_chain() {
               (let* ((oframe (frame-value obuilder))
                      (opub (alloca-args obuilder 1))
                      (ocall (alloca-args obuilder 1))
-                     (osetpc (alloca-args obuilder 2)))
+                     (odata-args (alloca-args obuilder 1)))
                 (store-arg obuilder opub 0 oframe)
                 (build-call obuilder (get-function m "rt_frame_entered") opub 1)
                 (store-arg obuilder ocall 0 (build-fn-address obuilder inner))
                 (build-call obuilder (get-function m "rt_frame_call") ocall 1)
-                (store-arg obuilder osetpc 0 oframe)
-                (store-arg obuilder osetpc 1 (const-word obuilder 1))
-                (build-call obuilder (get-function m "rt_frame_set_pc") osetpc 2)
+                (store-arg obuilder odata-args 0 oframe)
+                (let ((ofirst-base (build-int-to-ptr obuilder (build-call obuilder (get-function m "rt_frame_data") odata-args 1))))
+                  (store-arg obuilder (build-slot-ptr obuilder ofirst-base 2) 0 (const-word obuilder 1)))
                 (build-ret obuilder (const-word obuilder 1))
 
                 (position-at-end obuilder oresumed)
-                (let ((odata-args (alloca-args obuilder 1)))
-                  (store-arg obuilder odata-args 0 oparam)
-                  (let* ((odata (build-call obuilder (get-function m "rt_frame_data") odata-args 1))
-                         (obase (build-int-to-ptr obuilder odata))
-                         (got (load-raw obuilder (build-slot-ptr obuilder obase 0) 0))
-                         (sum (build-add obuilder got (const-word obuilder 37))))
-                    (store-arg obuilder (build-slot-ptr obuilder obase 0) 0 sum)
-                    (frame-end obuilder m)
-                    (build-ret obuilder (const-word obuilder 0))))))
+                (let* ((obase (build-int-to-ptr obuilder oparam))
+                       (got (load-raw obuilder (build-slot-ptr obuilder obase 0) 0))
+                       (sum (build-add obuilder got (const-word obuilder 37))))
+                  (store-arg obuilder (build-slot-ptr obuilder obase 0) 0 sum)
+                  (frame-end obuilder m)
+                  (build-ret obuilder (const-word obuilder 0)))))
             m))
         (build-chain-module)
     "#;
@@ -7185,15 +7179,15 @@ fn a_frames_size_is_patched_in_once_the_body_is_emitted() {
 
     let id = typelisp::BoxId::from_u32(0);
     assert!(heap.is_frame(id));
-    // Four, not three: slot 0 is the driver protocol's value slot, reserved by
-    // the prologue and never handed out, so the three the body asked for are
-    // 1, 2 and 3.
-    assert_eq!(heap.frame_len(id), 4, "the placeholder was patched with what was handed out");
-    assert!(!heap.frame_mask_bit(id, 0), "the reserved value slot is not a local");
-    assert!(!heap.frame_mask_bit(id, 1) && heap.frame_mask_bit(id, 2) && !heap.frame_mask_bit(id, 3));
-    assert_eq!(heap.frame_word(id, 1), 100);
-    assert_eq!(typelisp::decode(heap.frame_word(id, 2)), Value::Int(7));
-    assert_eq!(heap.frame_word(id, 3), 300);
+    // The driver protocol's own slots come first, reserved by the prologue and
+    // never handed out, so the three the body asked for follow them.
+    let r = typelisp_abi::FRAME_RESERVED_SLOTS;
+    assert_eq!(heap.frame_len(id), r + 3, "the placeholder was patched with what was handed out");
+    assert!((0..r).all(|i| !heap.frame_mask_bit(id, i)), "the reserved slots are not locals");
+    assert!(!heap.frame_mask_bit(id, r) && heap.frame_mask_bit(id, r + 1) && !heap.frame_mask_bit(id, r + 2));
+    assert_eq!(heap.frame_word(id, r), 100);
+    assert_eq!(typelisp::decode(heap.frame_word(id, r + 1)), Value::Int(7));
+    assert_eq!(heap.frame_word(id, r + 2), 300);
 }
 
 /// Built by hand, so the three `rt_*` shims are declared bodyless and resolved

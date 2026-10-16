@@ -166,7 +166,7 @@ fn constants(out: &mut String) {
     const_table!(out, "呼び出し規約 (typelisp_abi)", typelisp_abi, [
         STATUS_RETURN, STATUS_CALL, STATUS_SUSPEND, STATUS_UNWIND,
         BODY_ABI_CLASSIC, BODY_ABI_COROUTINE,
-        FRAME_VALUE_SLOT, FRAME_HANDLER_SLOT, FRAME_RESERVED_SLOTS,
+        FRAME_VALUE_SLOT, FRAME_HANDLER_SLOT, FRAME_PC_SLOT, FRAME_SELF_SLOT, FRAME_RESERVED_SLOTS,
     ]);
     const_table!(out, "中断の種類 (typelisp_abi::call_state)", typelisp_abi::call_state, [
         SUSPEND_YIELD, SUSPEND_SLEEP, SUSPEND_WAIT, SUSPEND_SAFEPOINT,

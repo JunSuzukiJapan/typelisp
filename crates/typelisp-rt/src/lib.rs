@@ -146,6 +146,7 @@ pub unsafe extern "C" fn rt_heap_live_count(_args: *const i64, _argc: u32) -> i6
 // ---- Stage 2/3: the tagged `Sexpr` representation ----------------------
 
 use typelisp_mem::{BoxId, TypeKeyId, Value};
+use typelisp_abi::call_state::{Pending, State};
 
 /// `(cons car cdr)` for compiled code.
 ///
@@ -1647,66 +1648,52 @@ pub unsafe extern "C" fn rt_frame_new(args: *const i64, argc: u32) -> i64 {
     if nslots < 0 {
         fatal(&format!("rt_frame_new: {} is not a slot count a frame can hold", nslots));
     }
-    let (frame, raw) = active_heap().alloc_frame_raw(nslots as usize);
+    let heap = active_heap();
+    let frame = heap.alloc_frame(nslots as usize);
+    let Value::Boxed(id) = frame else { unreachable!("alloc_frame made {:?}", frame) };
+    let raw = heap.frame_raw(id);
     let word = encode(frame);
-    crate::coroutine::note_new_frame(word, raw);
+    typelisp_abi::call_state::with(|s| s.set_running(word, raw));
     word
 }
 
-/// `rt_frame_open(nslots, rooted, nrooted, out)` — everything a coroutine body
-/// does with the frame it makes on entry, in one call: allocate it with `nslots`
-/// slots, mark the `nrooted` slots listed at address `rooted` as holding
-/// tagged values, root it, and publish it to the driver. Returns the frame and
-/// writes the address of its words into `args[3]`.
+/// `rt_frame_open(nslots, mask, out)` — everything a coroutine body does with
+/// the frame it makes on entry, in one call: allocate it with `nslots` slots
+/// and the function's mask table at address `mask` (null when no slot is
+/// rooted), root it, and publish it to the driver. Writes the frame into its
+/// own [`FRAME_SELF_SLOT`](typelisp_abi::FRAME_SELF_SLOT), for the body's later
+/// activations, which are handed only the address of the words. Returns the
+/// frame and writes that address into `args[2]`.
 ///
-/// One call where there were `rt_frame_new`, `rt_push_sexpr_root`,
-/// `rt_frame_entered`, an `rt_frame_mask_bit` per rooted slot, `rt_frame_data`
-/// and `rt_frame_pc` — on every call a program makes. Each of those is what
-/// the shim of the same name does; see them for why.
+/// One call on every call a program makes: what `rt_frame_new`,
+/// `rt_push_sexpr_root`, `rt_frame_entered` and `rt_frame_data` each do, for
+/// the reasons those shims give. The mask is not copied:
+/// which slots are rooted is the same for every activation of the function.
 ///
 /// # Safety
 ///
-/// `argc` must be `>= 4` and `args` must point to 4 writable `i64`s; `rooted`
-/// must point to `nrooted` slot numbers below `nslots`. A `Heap` must be
-/// registered on this thread.
+/// `argc` must be `>= 3` and `args` must point to 3 writable `i64`s; a
+/// non-null `mask` must point to `nslots.div_ceil(64)` words that outlive the
+/// frame. A `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_frame_open(args: *const i64, argc: u32) -> i64 {
-    if argc < 4 {
-        fatal("rt_frame_open: expected 4 arguments (slot count, rooted slots, their count, out)");
+    if argc < 3 {
+        fatal("rt_frame_open: expected 3 arguments (slot count, mask table, out)");
     }
-    let (nslots, rooted, nrooted) = (*args, *args.add(1) as usize as *const i64, *args.add(2));
-    if nslots < 0 || nrooted < 0 {
-        fatal(&format!("rt_frame_open: {} slots, {} of them rooted, is not a frame", nslots, nrooted));
+    let (nslots, mask) = (*args, *args.add(1) as usize as *const u64);
+    if nslots < typelisp_abi::FRAME_RESERVED_SLOTS as i64 {
+        fatal(&format!("rt_frame_open: {} slots leave no room for the driver protocol's own", nslots));
     }
-    let heap = active_heap();
-    let (frame, raw) = heap.alloc_frame_raw(nslots as usize);
-    for i in 0..nrooted as usize {
-        raw.set_mask_bit(*rooted.add(i) as usize);
-    }
-    heap.push_root(frame);
-    let word = encode(frame);
-    crate::coroutine::note_new_frame(word, raw);
-    typelisp_abi::call_state::set_current_frame(word);
-    *(args.add(3) as *mut i64) = raw.data() as i64;
+    let (word, raw) = typelisp_abi::call_state::with_heap(|heap, s| {
+        let (frame, raw) = heap.alloc_frame_raw(nslots as usize, mask);
+        heap.push_root(frame);
+        let word = encode(frame);
+        s.publish_frame(word, raw);
+        (word, raw)
+    });
+    raw.set_word(typelisp_abi::FRAME_SELF_SLOT, word);
+    *(args.add(2) as *mut i64) = raw.data() as i64;
     word
-}
-
-/// `rt_frame_reopen(frame, out)` — what a coroutine body resumed on `frame`
-/// needs of it: returns the address of its words and writes its resume point
-/// into `args[1]`. `rt_frame_data` and `rt_frame_pc` in one call.
-///
-/// # Safety
-///
-/// `argc` must be `>= 2` and `args` must point to 2 writable `i64`s, the first
-/// the body's own frame; a `Heap` must be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C" fn rt_frame_reopen(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_frame_reopen: expected 2 arguments (frame, out)");
-    }
-    let raw = crate::coroutine::frame_raw(active_heap(), *args);
-    *(args.add(1) as *mut i64) = raw.pc() as i64;
-    raw.data() as i64
 }
 
 /// `(rt-frame-mask-bit f idx)` for compiled code — marks slot `idx` of frame
@@ -1778,7 +1765,9 @@ pub unsafe extern "C" fn rt_frame_entered(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_frame_entered: expected 1 argument");
     }
-    typelisp_abi::call_state::set_current_frame(*args);
+    let word = *args;
+    let raw = crate::coroutine::frame_raw(active_heap(), word);
+    typelisp_abi::call_state::with(|s| s.publish_frame(word, raw));
     0
 }
 
@@ -1790,7 +1779,7 @@ pub unsafe extern "C" fn rt_frame_entered(args: *const i64, argc: u32) -> i64 {
 /// Takes no arguments; `args`/`argc` are ignored.
 #[no_mangle]
 pub unsafe extern "C" fn rt_pending_argc(_args: *const i64, _argc: u32) -> i64 {
-    typelisp_abi::call_state::pending_argc() as i64
+    typelisp_abi::call_state::with(|s| s.pending_argc()) as i64
 }
 
 /// `(rt-pending-arg i)` for compiled code — one of the arguments the driver
@@ -1803,8 +1792,7 @@ pub unsafe extern "C" fn rt_pending_argc(_args: *const i64, _argc: u32) -> i64 {
 /// `argc` must be `>= 1`.
 #[no_mangle]
 pub unsafe extern "C" fn rt_pending_arg(args: *const i64, argc: u32) -> i64 {
-    use typelisp_abi::call_state::{pending_arg, pending_argc};
-    pending_word(args, argc, "rt_pending_arg", "argument", "an argument", pending_arg, pending_argc)
+    pending_word(args, argc, "rt_pending_arg", "argument", "an argument", State::pending_arg)
 }
 
 /// `(rt-pending-envc)` for compiled code — how many captures the driver left.
@@ -1814,7 +1802,7 @@ pub unsafe extern "C" fn rt_pending_arg(args: *const i64, argc: u32) -> i64 {
 /// Takes no arguments; `args`/`argc` are ignored.
 #[no_mangle]
 pub unsafe extern "C" fn rt_pending_envc(_args: *const i64, _argc: u32) -> i64 {
-    typelisp_abi::call_state::pending_envc() as i64
+    typelisp_abi::call_state::with(|s| s.pending_envc()) as i64
 }
 
 /// `(rt-pending-env i)` for compiled code — one of the captures the driver
@@ -1829,22 +1817,20 @@ pub unsafe extern "C" fn rt_pending_envc(_args: *const i64, _argc: u32) -> i64 {
 /// `argc` must be `>= 1`.
 #[no_mangle]
 pub unsafe extern "C" fn rt_pending_env(args: *const i64, argc: u32) -> i64 {
-    use typelisp_abi::call_state::{pending_env, pending_envc};
-    pending_word(args, argc, "rt_pending_env", "capture", "a capture", pending_env, pending_envc)
+    pending_word(args, argc, "rt_pending_env", "capture", "a capture", State::pending_env)
 }
 
 /// The body of [`rt_pending_arg`] and [`rt_pending_env`]: word `args[0]` of
-/// one of the driver's two lists, read by `get`, where `count` says how many
-/// the driver left. `what` names an entry of that list in the messages, and
-/// `a_what` is the same name with its article.
+/// one of the driver's two lists, read by `get`, which says on a miss how
+/// many the driver left. `what` names an entry of that list in the messages,
+/// and `a_what` is the same name with its article.
 unsafe fn pending_word(
     args: *const i64,
     argc: u32,
     who: &str,
     what: &str,
     a_what: &str,
-    get: fn(usize) -> Option<i64>,
-    count: fn() -> usize,
+    get: fn(&State, usize) -> Result<i64, usize>,
 ) -> i64 {
     if argc < 1 {
         fatal(&format!("{}: expected 1 argument", who));
@@ -1853,9 +1839,9 @@ unsafe fn pending_word(
     if i < 0 {
         fatal(&format!("{}: {} is not {} index", who, i, a_what));
     }
-    match get(i as usize) {
-        Some(w) => w,
-        None => fatal(&format!("{}: {} {} was not passed (the driver left {})", who, what, i, count())),
+    match typelisp_abi::call_state::with(|s| get(s, i as usize)) {
+        Ok(w) => w,
+        Err(count) => fatal(&format!("{}: {} {} was not passed (the driver left {})", who, what, i, count)),
     }
 }
 
@@ -1874,12 +1860,24 @@ pub unsafe extern "C" fn rt_frame_call(args: *const i64, argc: u32) -> i64 {
         fatal("rt_frame_call: expected at least 1 argument (the callee)");
     }
     let target = *args as usize;
-    let mut passed = typelisp_abi::call_state::args_buffer(argc as usize - 1);
-    for i in 1..argc as usize {
-        passed.push(*args.add(i));
-    }
-    typelisp_abi::call_state::set_pending_call(target, passed, Vec::new());
+    name_call(args, argc, 1, |args| Pending::Direct { target, args, env: Vec::new() });
     0
+}
+
+/// Names a call to the driver: `args[from..argc]`, gathered into a reused
+/// vector, become the arguments of the call `make` builds — in one access to
+/// the thread's call state.
+///
+/// # Safety
+///
+/// `args` must point to `argc >= from` valid `i64`s.
+unsafe fn name_call(args: *const i64, argc: u32, from: usize, make: impl FnOnce(Vec<i64>) -> Pending) {
+    let words = std::slice::from_raw_parts(args.add(from), argc as usize - from);
+    typelisp_abi::call_state::with(|s| {
+        let mut passed = s.args_buffer(words.len());
+        passed.extend_from_slice(words);
+        s.set_pending_call(make(passed));
+    });
 }
 
 /// `rt_frame_apply(closure, arg...)` — name a function *value* to the driver.
@@ -1901,11 +1899,7 @@ pub unsafe extern "C" fn rt_frame_apply(args: *const i64, argc: u32) -> i64 {
         fatal("rt_frame_apply: expected at least 1 argument (the callee)");
     }
     let closure = *args;
-    let mut passed = typelisp_abi::call_state::args_buffer(argc as usize - 1);
-    for i in 1..argc as usize {
-        passed.push(*args.add(i));
-    }
-    typelisp_abi::call_state::set_pending_apply(closure, passed);
+    name_call(args, argc, 1, |args| Pending::Apply { closure, args });
     0
 }
 
@@ -1928,11 +1922,7 @@ pub unsafe extern "C" fn rt_frame_dyn_call(args: *const i64, argc: u32) -> i64 {
     }
     let vtable = *args as u32;
     let slot = *args.add(1) as u32;
-    let mut passed = Vec::with_capacity(argc as usize - 2);
-    for i in 2..argc as usize {
-        passed.push(*args.add(i));
-    }
-    typelisp_abi::call_state::set_pending_dyn(vtable, slot, passed);
+    name_call(args, argc, 2, |args| Pending::Dyn { vtable, slot, args });
     0
 }
 
@@ -1963,56 +1953,7 @@ pub unsafe extern "C" fn rt_frame_call_env(args: *const i64, argc: u32) -> i64 {
     for i in 0..env_len as usize {
         env.push(*env_ptr.add(i));
     }
-    let mut passed = Vec::with_capacity(argc as usize - 3);
-    for i in 3..argc as usize {
-        passed.push(*args.add(i));
-    }
-    typelisp_abi::call_state::set_pending_call(target, passed, env);
-    0
-}
-
-/// `(rt-frame-pc f)` for compiled code — where frame `args[0]` should resume,
-/// as a raw `i64`.
-///
-/// The prologue of every coroutine-ABI function reads this and branches on it:
-/// `0` is "start at the top", anything else names a call site this frame was
-/// waiting at. That branch is the whole of what makes a compiled function
-/// resumable — everything else it needs is already in the frame.
-///
-/// # Safety
-///
-/// `argc` must be `>= 1` and `args` must point to a valid `i64` decoding to a
-/// frame; a `Heap` must be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C" fn rt_frame_pc(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_frame_pc: expected 1 argument");
-    }
-    // SAFETY: the frame is the caller's own, so live.
-    crate::coroutine::frame_raw(active_heap(), *args).pc() as i64
-}
-
-/// `(rt-frame-set-pc f n)` for compiled code — records where frame `args[0]`
-/// resumes, immediately before the function hands control back to the driver.
-///
-/// `args[1]` is a raw `i64`: a compile-time constant naming a call site, not a
-/// value in the program.
-///
-/// # Safety
-///
-/// `argc` must be `>= 2` and `args` must point to 2 valid `i64`s, the first
-/// decoding to a frame; a `Heap` must be registered on this thread.
-#[no_mangle]
-pub unsafe extern "C" fn rt_frame_set_pc(args: *const i64, argc: u32) -> i64 {
-    if argc < 2 {
-        fatal("rt_frame_set_pc: expected 2 arguments (frame, resume point)");
-    }
-    let pc = *args.add(1);
-    if !(0..=(u32::MAX as i64)).contains(&pc) {
-        fatal(&format!("rt_frame_set_pc: {} is not a resume point", pc));
-    }
-    // SAFETY: the frame is the caller's own, so live.
-    crate::coroutine::frame_raw(active_heap(), *args).set_pc(pc as u32);
+    name_call(args, argc, 3, |args| Pending::Direct { target, args, env });
     0
 }
 
