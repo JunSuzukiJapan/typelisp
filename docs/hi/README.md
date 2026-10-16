@@ -1,8 +1,83 @@
-<!-- translated-from: docs/ja/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
 # typelisp दस्तावेज़ (हिन्दी)
 
 typelisp एक स्टैटिक रूप से टाइप किया गया Lisp है। इसे इंस्टॉल और बिल्ड करने के लिए रिपॉज़िटरी के शीर्ष स्तर पर मौजूद
 [README.md](../../README.md) (अंग्रेज़ी में) देखें।
+
+## विशेषताएँ
+
+### टास्क और चैनल
+
+टास्क (हल्के थ्रेड) शुरू किए जाते हैं, और वे चैनलों के ज़रिए एक-दूसरे को मान भेजते हैं। विस्तार के लिए [कंकरेंसी](tutorial/concurrency.md) देखें।
+
+```lisp
+(defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
+  (doiter (n jobs)
+    (sleep 0.1)
+    (send results (format false "~a: ~d * ~d = ~d" name n n (* n n)))))
+
+(defun main () ()
+  (let ((jobs (the Chan<int> (Chan::new 0)))
+        (results (the Chan<string> (Chan::new 10))))
+    (task (worker "A" jobs results))
+    (task (worker "B" jobs results))
+    (dotimes (i 4)
+      (send jobs (+ i 1)))
+    (close jobs)
+    (dotimes (i 4)
+      (println "~a" (unwrap (recv results))))))
+
+(main)
+```
+
+### nil की जगह Option और Result
+
+`nil` नहीं है। जिस फ़ंक्शन का मान न हो सकता है वह `Option<T>` लौटाता है, और जो विफल हो सकता है वह `Result<T,E>` लौटाता है; अंदर का मान `match` से निकाला जाता है। `Option<string>` को `string` की तरह इस्तेमाल करना, या `match` में `none` वाला मामला छोड़ देना, प्रोग्राम चलने से पहले ही टाइप त्रुटि है। विस्तार के लिए [टाइप की बुनियादी बातें](tutorial/types.md) और [त्रुटि प्रबंधन](tutorial/errors.md) देखें।
+
+```lisp
+(defun find-user ((id int)) Option<string>
+  (case id
+    (1 (Option::some "alice"))
+    (2 (Option::some "bob"))
+    (else (Option::none))))
+
+(defun parse-port ((s string)) Result<int,string>
+  (match (parse-int s)
+    ((ok n) (if (<= 1 n 65535)
+                (Result::ok n)
+                (Result::err (format false "port out of range: ~a" n))))
+    ((err e) (Result::err (message e)))))
+
+(match (find-user 3)
+  ((some name) (println "user: ~a" name))
+  ((none) (println "not found")))        ; not found
+
+(match (parse-port "99999")
+  ((ok p) (println "port ~a" p))
+  ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### टाइप-जाँच वाले मैक्रो
+
+मैक्रो Common Lisp की तरह `defmacro`, quasiquote और `gensym` से लिखे जाते हैं। विस्तार के बाद बना कोड भी हाथ से लिखे कोड की तरह टाइप-जाँच से गुज़रता है, और टाइप न मिलने पर त्रुटि उसी जगह बताई जाती है जहाँ मैक्रो बुलाया गया था। विस्तार के लिए [Macro](tutorial/macros.md) देखें।
+
+```lisp
+(defmacro swap (a b)
+  (let ((tmp (gensym "tmp")))
+    `(let ((,tmp ,a))
+       (setf ,a ,b)
+       (setf ,b ,tmp))))
+
+(let ((x 1) (y 2))
+  (swap x y)
+  (println "x=~a y=~a" x y))             ; x=2 y=1
+```
+
+```lisp
+(defmacro add-a (x) `(+ ,x "a"))
+(add-a 1)
+;; error: type error: type mismatch: expected `int`, found `string`
+```
 
 ## ट्यूटोरियल
 

@@ -1,8 +1,91 @@
-<!-- translated-from: docs/ja/README.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
 # Documentation de typelisp (français)
 
 typelisp est un Lisp à typage statique. Pour l'installer et le compiler, voir le
 [README.md](../../README.md) (en anglais) à la racine du dépôt.
+
+## Caractéristiques
+
+### Tâches et canaux
+
+On lance des tâches (des threads légers) qui se passent des valeurs par des canaux. Voir
+[Concurrence](tutorial/concurrency.md) pour plus de détails.
+
+```lisp
+(defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
+  (doiter (n jobs)
+    (sleep 0.1)
+    (send results (format false "~a: ~d * ~d = ~d" name n n (* n n)))))
+
+(defun main () ()
+  (let ((jobs (the Chan<int> (Chan::new 0)))
+        (results (the Chan<string> (Chan::new 10))))
+    (task (worker "A" jobs results))
+    (task (worker "B" jobs results))
+    (dotimes (i 4)
+      (send jobs (+ i 1)))
+    (close jobs)
+    (dotimes (i 4)
+      (println "~a" (unwrap (recv results))))))
+
+(main)
+```
+
+### Option et Result au lieu de nil
+
+Il n'y a pas de `nil`. Une fonction qui peut ne pas avoir de valeur renvoie `Option<T>`, et une
+fonction qui peut échouer renvoie `Result<T,E>` ; on en extrait le contenu avec `match`. Utiliser un
+`Option<string>` comme un `string`, ou oublier le cas `none` dans un `match`, est une erreur de type
+avant même l'exécution du programme. Voir [Bases des types](tutorial/types.md) et [Gestion des
+erreurs](tutorial/errors.md) pour plus de détails.
+
+```lisp
+(defun find-user ((id int)) Option<string>
+  (case id
+    (1 (Option::some "alice"))
+    (2 (Option::some "bob"))
+    (else (Option::none))))
+
+(defun parse-port ((s string)) Result<int,string>
+  (match (parse-int s)
+    ((ok n) (if (<= 1 n 65535)
+                (Result::ok n)
+                (Result::err (format false "port out of range: ~a" n))))
+    ((err e) (Result::err (message e)))))
+
+(match (find-user 3)
+  ((some name) (println "user: ~a" name))
+  ((none) (println "not found")))        ; not found
+
+(match (parse-port "99999")
+  ((ok p) (println "port ~a" p))
+  ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### Macros vérifiées par les types
+
+Les macros s'écrivent avec `defmacro`, la quasi-citation et `gensym`, comme en Common Lisp. Le code
+développé est vérifié comme du code écrit à la main ; s'il ne respecte pas les types, l'erreur est
+signalée à l'endroit où la macro a été appelée. Voir [Macros](tutorial/macros.md) pour plus de
+détails.
+
+```lisp
+(defmacro swap (a b)
+  (let ((tmp (gensym "tmp")))
+    `(let ((,tmp ,a))
+       (setf ,a ,b)
+       (setf ,b ,tmp))))
+
+(let ((x 1) (y 2))
+  (swap x y)
+  (println "x=~a y=~a" x y))             ; x=2 y=1
+```
+
+```lisp
+(defmacro add-a (x) `(+ ,x "a"))
+(add-a 1)
+;; error: type error: type mismatch: expected `int`, found `string`
+```
 
 ## Tutoriel
 

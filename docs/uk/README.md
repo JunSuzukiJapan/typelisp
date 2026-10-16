@@ -1,8 +1,90 @@
-<!-- translated-from: docs/ja/README.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
 # Документація typelisp (українська)
 
 typelisp — це Лісп зі статичною типізацією. Про встановлення та збирання див.
 [README.md](../../README.md) (англійською) у корені репозиторію.
+
+## Особливості
+
+### Задачі та канали
+
+Запускайте задачі (легкі потоки) і передавайте між ними значення через канали. Докладніше — у
+розділі [Конкурентність](tutorial/concurrency.md).
+
+```lisp
+(defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
+  (doiter (n jobs)
+    (sleep 0.1)
+    (send results (format false "~a: ~d * ~d = ~d" name n n (* n n)))))
+
+(defun main () ()
+  (let ((jobs (the Chan<int> (Chan::new 0)))
+        (results (the Chan<string> (Chan::new 10))))
+    (task (worker "A" jobs results))
+    (task (worker "B" jobs results))
+    (dotimes (i 4)
+      (send jobs (+ i 1)))
+    (close jobs)
+    (dotimes (i 4)
+      (println "~a" (unwrap (recv results))))))
+
+(main)
+```
+
+### Option і Result замість nil
+
+`nil` немає. Функція, яка може не мати значення, повертає `Option<T>`, а функція, яка може
+завершитися невдачею, — `Result<T,E>`; вміст дістають за допомогою `match`. Якщо використати
+`Option<string>` як `string` або пропустити випадок `none` у `match`, буде помилка типів ще до
+запуску програми. Докладніше — у розділах [Основи типів](tutorial/types.md) і [Обробка
+помилок](tutorial/errors.md).
+
+```lisp
+(defun find-user ((id int)) Option<string>
+  (case id
+    (1 (Option::some "alice"))
+    (2 (Option::some "bob"))
+    (else (Option::none))))
+
+(defun parse-port ((s string)) Result<int,string>
+  (match (parse-int s)
+    ((ok n) (if (<= 1 n 65535)
+                (Result::ok n)
+                (Result::err (format false "port out of range: ~a" n))))
+    ((err e) (Result::err (message e)))))
+
+(match (find-user 3)
+  ((some name) (println "user: ~a" name))
+  ((none) (println "not found")))        ; not found
+
+(match (parse-port "99999")
+  ((ok p) (println "port ~a" p))
+  ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### Макроси з перевіркою типів
+
+Макроси пишуть так само, як у Common Lisp: з `defmacro`, квазіцитуванням і `gensym`. Розгорнутий код
+перевіряється так само, як написаний вручну, і якщо він не відповідає типам, помилку вказують у
+місці виклику макросу. Докладніше — у розділі [Макроси](tutorial/macros.md).
+
+```lisp
+(defmacro swap (a b)
+  (let ((tmp (gensym "tmp")))
+    `(let ((,tmp ,a))
+       (setf ,a ,b)
+       (setf ,b ,tmp))))
+
+(let ((x 1) (y 2))
+  (swap x y)
+  (println "x=~a y=~a" x y))             ; x=2 y=1
+```
+
+```lisp
+(defmacro add-a (x) `(+ ,x "a"))
+(add-a 1)
+;; error: type error: type mismatch: expected `int`, found `string`
+```
 
 ## Підручник
 

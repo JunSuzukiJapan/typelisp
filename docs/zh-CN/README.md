@@ -1,7 +1,82 @@
-<!-- translated-from: docs/ja/README.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
 # typelisp 文档（简体中文）
 
 typelisp 是一种静态类型的 Lisp。安装和构建方法请参阅仓库根目录的 [README.md](../../README.md)（英文）。
+
+## 特性
+
+### 任务与通道
+
+启动任务（轻量级线程），通过通道在任务之间传递值。详见[并发](tutorial/concurrency.md)。
+
+```lisp
+(defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
+  (doiter (n jobs)
+    (sleep 0.1)
+    (send results (format false "~a: ~d * ~d = ~d" name n n (* n n)))))
+
+(defun main () ()
+  (let ((jobs (the Chan<int> (Chan::new 0)))
+        (results (the Chan<string> (Chan::new 10))))
+    (task (worker "A" jobs results))
+    (task (worker "B" jobs results))
+    (dotimes (i 4)
+      (send jobs (+ i 1)))
+    (close jobs)
+    (dotimes (i 4)
+      (println "~a" (unwrap (recv results))))))
+
+(main)
+```
+
+### 用 Option 和 Result 代替 nil
+
+没有 `nil`。可能没有值时返回 `Option<T>`，可能失败时返回 `Result<T,E>`，再用 `match` 取出其中的内容。如果把 `Option<string>` 当作 `string` 使用，或者在 `match` 中漏写 `none` 的情况，程序运行之前就会出现类型错误。详见[类型基础](tutorial/types.md)和[错误处理](tutorial/errors.md)。
+
+```lisp
+(defun find-user ((id int)) Option<string>
+  (case id
+    (1 (Option::some "alice"))
+    (2 (Option::some "bob"))
+    (else (Option::none))))
+
+(defun parse-port ((s string)) Result<int,string>
+  (match (parse-int s)
+    ((ok n) (if (<= 1 n 65535)
+                (Result::ok n)
+                (Result::err (format false "port out of range: ~a" n))))
+    ((err e) (Result::err (message e)))))
+
+(match (find-user 3)
+  ((some name) (println "user: ~a" name))
+  ((none) (println "not found")))        ; not found
+
+(match (parse-port "99999")
+  ((ok p) (println "port ~a" p))
+  ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### 经过类型检查的宏
+
+宏的写法与 Common Lisp 相同，使用 `defmacro`、准引用和 `gensym`。展开后的代码也会像普通代码一样接受类型检查，类型不符时会在调用宏的位置报错。详见[宏](tutorial/macros.md)。
+
+```lisp
+(defmacro swap (a b)
+  (let ((tmp (gensym "tmp")))
+    `(let ((,tmp ,a))
+       (setf ,a ,b)
+       (setf ,b ,tmp))))
+
+(let ((x 1) (y 2))
+  (swap x y)
+  (println "x=~a y=~a" x y))             ; x=2 y=1
+```
+
+```lisp
+(defmacro add-a (x) `(+ ,x "a"))
+(add-a 1)
+;; error: type error: type mismatch: expected `int`, found `string`
+```
 
 ## 教程
 
