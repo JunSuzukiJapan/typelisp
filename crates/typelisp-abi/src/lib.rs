@@ -30,7 +30,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 2, 14) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 2, 15) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -257,9 +257,9 @@ pub fn unwind_interpreted_error() -> ! {
 // A compiled function under the coroutine ABI is `i64 f(i64 frame)`, and what
 // it returns is not its value but a **status word** saying why it stopped.
 // Its value, when it has one, is in the frame. The argument is `0` on first
-// entry and, on every later one, the address of the frame's words — not the
-// frame itself, so a resuming body loads what it needs
-// ([`FRAME_PC_SLOT`], [`FRAME_SELF_SLOT`]) without calling anything.
+// entry and, on every later one, the address of the frame's words — which is
+// what names a frame — so a resuming body loads where to resume
+// ([`FRAME_PC_SLOT`]) without calling anything.
 //
 // The status is what makes suspension possible at all. Under the old ABI a
 // function could only stop by returning, so "stop here and come back later"
@@ -309,7 +309,7 @@ pub const FRAME_VALUE_SLOT: usize = 0;
 /// is at every point it emits. Written on entering and leaving a region, and
 /// on entering any block that leaves one (a loop's exit, a named block's
 /// exit, a cleanup copy), which is the whole discipline: a frame with no
-/// region never touches it, and `rt_frame_new` zero-fills.
+/// region never touches it, and `rt_frame_open` zero-fills.
 ///
 /// Never masked: a `pc` is a raw integer, not a tagged value.
 pub const FRAME_HANDLER_SLOT: usize = 1;
@@ -322,17 +322,8 @@ pub const FRAME_HANDLER_SLOT: usize = 1;
 /// reads it with a plain load on resuming — no call either way. Never masked.
 pub const FRAME_PC_SLOT: usize = 2;
 
-/// The frame slot holding the frame's own tagged reference, written by
-/// `rt_frame_open`.
-///
-/// A resumed body is handed the address of its frame's words, not the frame,
-/// so that resuming needs no call; the body reads the frame back from here.
-/// Never masked: the frame is rooted by its prologue, not by itself.
-pub const FRAME_SELF_SLOT: usize = 3;
-
 /// How many slots at the bottom of a frame the driver protocol owns:
-/// [`FRAME_VALUE_SLOT`], [`FRAME_HANDLER_SLOT`], [`FRAME_PC_SLOT`] and
-/// [`FRAME_SELF_SLOT`].
+/// [`FRAME_VALUE_SLOT`], [`FRAME_HANDLER_SLOT`] and [`FRAME_PC_SLOT`].
 ///
 /// **Every frame a driver drives must have at least this many**, whoever
 /// built it — the island's prologue hands locals out from here upward, and a
@@ -340,7 +331,7 @@ pub const FRAME_SELF_SLOT: usize = 3;
 /// `FrameStack::unwind` reads the handler slot of every frame it walks, so a
 /// frame one word short is a frame the driver cannot ask; it says so rather
 /// than reading past the end.
-pub const FRAME_RESERVED_SLOTS: usize = 4;
+pub const FRAME_RESERVED_SLOTS: usize = 3;
 
 /// The state one coroutine-ABI call is in flight through.
 ///
@@ -360,7 +351,7 @@ pub const FRAME_RESERVED_SLOTS: usize = 4;
 /// the two sides. Nothing may allocate in those windows: the words are raw and
 /// tagged, sitting in Rust `Vec`s the collector does not trace.
 pub mod call_state {
-    use typelisp_mem::{FrameRaw, Heap};
+    use typelisp_mem::Heap;
 
     /// How many emptied argument vectors [`State`] keeps.
     const SPARE_ARGS_LEN: usize = 8;
@@ -383,8 +374,8 @@ pub mod call_state {
         /// different lists, and concatenating them would make every prologue
         /// know how long the other list was.
         pending_env: Vec<i64>,
-        /// The frames prologues have allocated on their way in, innermost
-        /// last, with where their parts are. The driver cannot learn one any
+        /// The frames prologues have opened on their way in, innermost last,
+        /// by the address of their words. The driver cannot learn one any
         /// other way — it is made inside the callee, after the call has
         /// started.
         ///
@@ -399,7 +390,7 @@ pub mod call_state {
         /// outermost's, which surfaced as "a coroutine function did not
         /// publish its frame on entry" — blamed on the callee, whose prologue
         /// had in fact published.
-        current_frames: Vec<(i64, FrameRaw)>,
+        current_frames: Vec<i64>,
         /// What a frame is asking the driver to call, set immediately before
         /// it returns `STATUS_CALL`.
         pending_call: Option<Pending>,
@@ -427,19 +418,6 @@ pub mod call_state {
         /// [`SUSPEND_CHAN_SELECT`]. Its own field because the number of them
         /// is the program's, and the payload has room for two words.
         pending_select: Vec<i64>,
-        /// The frame the activation on this thread is running, and where its
-        /// parts are — so that the frame operations its code makes
-        /// (`rt_frame_*`) need not look it up in the box table, under its
-        /// lock, every time.
-        ///
-        /// Set only where the frame is known to be live and running here:
-        /// when it is made and when the driver resumes it. A frame being freed
-        /// is forgotten here. An entry can still go stale — the frame of a
-        /// task that was dropped, then collected, its box handed out again —
-        /// but the only frame whose code runs on this thread is one of those
-        /// two, each of which replaces the entry first; a lookup that does
-        /// not match goes to the box table.
-        running: Option<(i64, FrameRaw)>,
     }
 
     impl State {
@@ -452,7 +430,6 @@ pub mod call_state {
                 spare_args: Vec::new(),
                 pending_suspend: None,
                 pending_select: Vec::new(),
-                running: None,
             }
         }
 
@@ -470,7 +447,7 @@ pub mod call_state {
         /// nested entry left above that dropped — an unwind travels between
         /// a publish and its take, so such entries are owned by nobody. The
         /// argument vector, read by now, goes back for the next call.
-        pub fn entered(&mut self, published: usize) -> Option<(i64, FrameRaw)> {
+        pub fn entered(&mut self, published: usize) -> Option<i64> {
             let frame = if self.current_frames.len() > published { self.current_frames.pop() } else { None };
             self.current_frames.truncate(published);
             if self.spare_args.len() < SPARE_ARGS_LEN {
@@ -479,32 +456,10 @@ pub mod call_state {
             frame
         }
 
-        /// Publishes a frame a prologue just made, as the frame its driver
-        /// takes and as the one running here.
-        pub fn publish_frame(&mut self, word: i64, raw: FrameRaw) {
-            self.current_frames.push((word, raw));
-            self.running = Some((word, raw));
-        }
-
-        /// Records `word` as the frame running on this thread.
-        pub fn set_running(&mut self, word: i64, raw: FrameRaw) {
-            self.running = Some((word, raw));
-        }
-
-        /// Where frame `word`'s parts are, when it is the one running here.
-        pub fn running(&self, word: i64) -> Option<FrameRaw> {
-            match self.running {
-                Some((running, raw)) if running == word => Some(raw),
-                _ => None,
-            }
-        }
-
-        /// Forgets `word` as the running frame, when it is — it is being
-        /// freed.
-        pub fn forget_running(&mut self, word: i64) {
-            if self.running.is_some_and(|(running, _)| running == word) {
-                self.running = None;
-            }
+        /// Publishes the frame a prologue just opened, by the address of its
+        /// words, for its driver to take.
+        pub fn publish_frame(&mut self, data: i64) {
+            self.current_frames.push(data);
         }
 
         /// The `i`th pending argument, or `Err` with how many there are. A
@@ -705,7 +660,7 @@ pub mod call_state {
     /// Takes the innermost published frame, for a caller driving an entry by
     /// hand.
     pub fn take_current_frame() -> Option<i64> {
-        with(|s| s.current_frames.pop().map(|(word, _)| word))
+        with(|s| s.current_frames.pop())
     }
 
     /// What one `STATUS_CALL` is asking for.

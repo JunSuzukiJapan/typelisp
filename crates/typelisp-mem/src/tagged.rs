@@ -3,7 +3,7 @@
 //! **Why this lives in `typelisp-mem` and not in `typelisp-abi`.** It was in
 //! `typelisp-abi` until the compiled-CPS work (Phase C): the encoding is
 //! about `Value`, which is defined here, and the *collector* needs it. A
-//! compiled frame ([`crate::value::BoxedObj::Frame`]) holds tagged words
+//! compiled frame ([`crate::FrameRaw`]) holds tagged words
 //! rather than `Value`s — compiled code loads and stores its locals through
 //! a raw pointer, so they have to be machine words — and the mark phase has
 //! to be able to say which of those words reference the heap. `typelisp-abi`

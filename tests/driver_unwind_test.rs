@@ -36,7 +36,7 @@
 //!    down from where the throw was raised, and can claim the value.
 //! 4. A handler that declines keeps the throw travelling.
 
-use typelisp_abi::{call_state, encode, set_active_heap, FRAME_HANDLER_SLOT, FRAME_PC_SLOT, FRAME_RESERVED_SLOTS, FRAME_SELF_SLOT, FRAME_VALUE_SLOT};
+use typelisp_abi::{call_state, encode, set_active_heap, FRAME_HANDLER_SLOT, FRAME_PC_SLOT, FRAME_RESERVED_SLOTS, FRAME_VALUE_SLOT};
 use typelisp_abi::{STATUS_CALL, STATUS_RETURN, STATUS_UNWIND};
 use typelisp_mem::{Heap, Value};
 use typelisp_rt::coroutine::{CoroutineFn, FrameStack, Paused};
@@ -57,9 +57,9 @@ unsafe fn rt1(f: unsafe extern "C" fn(*const i64, u32) -> i64, a: i64) -> i64 {
     f([a].as_ptr(), 1)
 }
 
-/// The prologue every compiled body emits: on first entry make a frame, which
-/// `rt_frame_open` also roots and tells the driver about (it is made *inside*
-/// the callee, so there is no other moment); on a later entry the driver hands
+/// The prologue every compiled body emits: on first entry open a frame, which
+/// `rt_frame_open` also tells the driver about (it is made *inside* the
+/// callee, so there is no other moment); on a later entry the driver hands
 /// back the address of the same frame's words. Answers with that address and
 /// where to resume.
 unsafe fn prologue(param: i64, nslots: usize) -> (*mut i64, i64) {
@@ -67,10 +67,8 @@ unsafe fn prologue(param: i64, nslots: usize) -> (*mut i64, i64) {
         let data = param as usize as *mut i64;
         return (data, *data.add(FRAME_PC_SLOT));
     }
-    let mut open = [nslots as i64, 0, 0];
-    let frame = typelisp_rt::rt_frame_open(open.as_mut_ptr(), 3);
-    let data = open[2] as usize as *mut i64;
-    assert_eq!(*data.add(FRAME_SELF_SLOT), frame, "the frame knows itself");
+    let open = [nslots as i64, 0];
+    let data = typelisp_rt::rt_frame_open(open.as_ptr(), 2) as usize as *mut i64;
     (data, 0)
 }
 
@@ -87,7 +85,6 @@ unsafe fn slot(data: *mut i64, idx: usize) -> i64 {
 unsafe extern "C-unwind" fn plain(param: i64) -> i64 {
     let (frame, _) = prologue(param, FRAME_RESERVED_SLOTS);
     set_slot(frame, FRAME_VALUE_SLOT, NO_THROW_RESULT);
-    typelisp_rt::rt_pop_sexpr_root(std::ptr::null(), 0);
     STATUS_RETURN
 }
 
@@ -126,11 +123,10 @@ unsafe extern "C-unwind" fn guarded(param: i64) -> i64 {
         if rt1(typelisp_rt::rt_throw_matches, slot(frame, FRAME_RESERVED_SLOTS)) != 0 {
             let claimed = typelisp_rt::rt_throw_take_value(std::ptr::null(), 0);
             set_slot(frame, FRAME_VALUE_SLOT, claimed);
-            typelisp_rt::rt_pop_sexpr_root(std::ptr::null(), 0);
             return STATUS_RETURN;
         }
         // Not ours. The driver goes on looking below; it cuts this frame's
-        // roots back itself, so there is no pop here.
+        // roots back itself, closing it.
         return STATUS_UNWIND;
     }
     panic!("guarded was resumed at {}, which only a returning callee reaches and none does", pc)

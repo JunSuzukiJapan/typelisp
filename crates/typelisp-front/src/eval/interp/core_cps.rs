@@ -124,11 +124,10 @@ enum State {
 /// before the first entry and the decoding happens after the last return, and
 /// any number of suspensions can sit between them.
 ///
-/// It holds no `Value`, deliberately — the chain's frames are rooted by the
-/// prologues that made them (`frame-begin`'s `rt_push_sexpr_root`), on *this
-/// task's* root stack, and `Heap::gc` marks every root stack rather than only
-/// the running one. So a suspended chain stays alive with nothing extra to
-/// register.
+/// It holds no `Value`, deliberately — the chain's frames are open on *this
+/// task's* root stack (`Heap::open_frame`), and `Heap::gc` walks every root
+/// stack rather than only the running one. So a suspended chain stays alive
+/// with nothing extra to register.
 struct DriveCtx {
     /// What the crossing was set up with, kept because the trace line and the
     /// return representation are still owed after the last resume.
