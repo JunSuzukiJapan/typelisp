@@ -30,6 +30,7 @@ pub mod ffi_callback;
 pub mod core_macros;
 pub mod prelude;
 pub mod project;
+pub mod opt_level;
 pub mod release;
 pub mod shim;
 pub mod dump;

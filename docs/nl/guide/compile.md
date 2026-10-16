@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # Compileren
 
 Tenzij je iets anders doet, draaien typelisp-programma's in de interpreter. Daarnaast zijn er twee
@@ -101,6 +101,13 @@ Met `--release` maakt `typl` een **release-build**, die `eprint`/`eprintln` (uit
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # hetzelfde als het na -c staat
+```
+
+`-O0`, `-O1`, `-O2` en `-O3` stellen het **optimalisatieniveau** in. De standaard is `-O0`, dat niet optimaliseert. Vanaf `-O1` voert de compiler eerst eenvoudige optimalisaties uit, zoals een variabele die alleen aan een literal gebonden is door zijn waarde vervangen of gehele-getallenrekenkunde op constanten vooraf uitrekenen, en laat de rest over aan de optimalisatie van LLVM op het niveau met dezelfde naam. Op elk niveau zijn de uitkomsten van de berekening hetzelfde. Net als `--release` is het een optie van `typl` als geheel: behalve voor het uitvoerbare bestand dat `-c` maakt, werkt het op de code die gecompileerd wordt bij het uitvoeren van een bestand, in de REPL en in `typl test`, en op een `compile-file` die daar wordt aangeroepen. Code die de interpreter uitvoert, wordt niet geoptimaliseerd.
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # hetzelfde als het na -c staat
 ```
 
 Hetzelfde kun je doen door `compile-file` aan te roepen vanuit de REPL of vanuit een programma.

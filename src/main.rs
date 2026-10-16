@@ -36,7 +36,8 @@ const HELP: &str = "\
 Usage:
   typl [OPTIONS]                                 start the REPL
   typl [OPTIONS] FILE [ARGS...]                  run FILE; ARGS are its (command-line-args)
-  typl [--lib-dir DIR] -c SOURCE [-o OUTPUT]     compile SOURCE to an executable
+  typl [--lib-dir DIR] [-O<N>] -c SOURCE [-o OUTPUT]
+                                                 compile SOURCE to an executable
   typl [OPTIONS] test [FILE.typl] [FILTER]       run the #[test] functions of the
                                                  project here (or of FILE) whose
                                                  name contains FILTER
@@ -46,6 +47,9 @@ Options:
   -o OUTPUT              name of the executable (default: SOURCE without .typl)
   --release              a release build: every eprint/eprintln is left out
                          (of a run, a test, or the executable -c builds)
+  -O0, -O1, -O2, -O3     how much compiled code is optimized (default -O0):
+                         the executable -c builds, and what is compiled
+                         while running or testing (the interpreter is not)
   --lib-dir DIR          link DIR/libtypelisp_front.a into compiled executables
                          (default: a release typl writes the one built into
                          it to $TYPELISP_HOME/lib, ~/.typelisp/lib if unset;
@@ -91,14 +95,29 @@ fn main() -> rustyline::Result<()> {
     // `--help`/`--version`/`--remove-lib` (and its `--others`/`--all`) are
     // `typl`'s only among the options before a script's name; from the name
     // on, they are the script's own arguments.
-    let own_len = args.iter().position(|a| !a.starts_with("--")).unwrap_or(args.len());
+    let own_len = args
+        .iter()
+        .position(|a| !a.starts_with("--") && typelisp::opt_level::parse_flag(a).is_none())
+        .unwrap_or(args.len());
     // `--release` only sets the process's release flag; what behaves
     // differently in a release build asks it (`typelisp::release`).
     let release = args[..own_len].iter().any(|a| a == "--release");
+    // `-O<N>` likewise only records the level (`typelisp::opt_level`); the
+    // last one given counts.
+    for a in &args[..own_len] {
+        match typelisp::opt_level::parse_flag(a) {
+            Some(Ok(level)) => typelisp::opt_level::set_opt_level(level),
+            Some(Err(e)) => {
+                eprintln!("{}", e);
+                std::process::exit(1);
+            }
+            None => {}
+        }
+    }
     let args: Vec<String> = args
         .iter()
         .enumerate()
-        .filter(|&(i, a)| !(i < own_len && a == "--release"))
+        .filter(|&(i, a)| !(i < own_len && (a == "--release" || typelisp::opt_level::parse_flag(a).is_some())))
         .map(|(_, a)| a.clone())
         .collect();
     if release {
@@ -192,8 +211,8 @@ fn main() -> rustyline::Result<()> {
 /// `typl -c SOURCE [-o OUTPUT]`: `args` is what follows the `-c` (or
 /// `--compile`, which `flag` names for the diagnostics). Without `-o`, the
 /// executable is `SOURCE` with its `.typl` extension removed. A `--release`
-/// among them is the global one, written after `-c`. Returns the process
-/// exit code.
+/// or `-O<N>` among them is the global one, written after `-c`. Returns the
+/// process exit code.
 fn compile_command(flag: &str, args: &[String]) -> i32 {
     let mut source = None;
     let mut output = None;
@@ -201,6 +220,14 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
     while let Some(a) = it.next() {
         if a == "--release" {
             typelisp::release::set_release(true);
+        } else if let Some(level) = typelisp::opt_level::parse_flag(a) {
+            match level {
+                Ok(level) => typelisp::opt_level::set_opt_level(level),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    return 1;
+                }
+            }
         } else if a == "-o" {
             match it.next() {
                 Some(v) => output = Some(PathBuf::from(v)),
@@ -212,12 +239,12 @@ fn compile_command(flag: &str, args: &[String]) -> i32 {
         } else if source.is_none() && !a.starts_with('-') {
             source = Some(PathBuf::from(a));
         } else {
-            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release])", flag, a, flag);
+            eprintln!("{}: unexpected argument `{}` (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>])", flag, a, flag);
             return 1;
         }
     }
     let Some(source) = source else {
-        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release])", flag, flag);
+        eprintln!("{}: needs a source file (usage: typl {} SOURCE [-o OUTPUT] [--release] [-O<N>])", flag, flag);
         return 1;
     };
     let output = match output {

@@ -326,6 +326,13 @@ typl --compile foo.typl -o bar
 typl --release -c foo.typl
 ```
 
+`-O0` 〜 `-O3` で最適化のレベルを指定します（既定は `-O0` で、最適化しません）。これも `typl` 全体の
+オプションです。
+
+```sh
+typl -O2 -c foo.typl
+```
+
 コンパイルして作る実行ファイルには、静的ライブラリ `libtypelisp_front.a` をリンクします。
 リリースビルドの `typl`（`cargo install` で入れたものを含む）は、このライブラリを中に持って
 いて、初めてコンパイルするときに `~/.typelisp/lib/<ビルドID>/` に書き出します。2回目からは

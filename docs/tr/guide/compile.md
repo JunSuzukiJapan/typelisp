@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # Derleme
 
 Başka bir şey yapmazsanız typelisp programları yorumlayıcıda çalışır. Buna ek olarak yerel koda
@@ -97,6 +97,13 @@ kaynak dosyayla aynı klasöre konur. Kaynak dosya adı `.typl` ile bitmiyorsa `
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # -c'den sonra yazılsa da aynı
+```
+
+`-O0`, `-O1`, `-O2` ve `-O3` **optimizasyon düzeyini** belirler. Varsayılan `-O0`'dır ve optimizasyon yapmaz. `-O1` ve üstünde derleyici önce basit optimizasyonlar yapar; örneğin yalnızca bir değişmeze bağlanmış bir değişkeni değeriyle değiştirir ya da sabitler üzerindeki tamsayı aritmetiğini önceden hesaplar; geri kalanı ise LLVM'nin aynı adlı düzeydeki optimizasyonuna bırakır. Her düzeyde hesaplamanın sonuçları aynıdır. `--release` gibi bu da `typl`'nin bütününe ait bir seçenektir: `-c`'nin oluşturduğu çalıştırılabilir dosyanın yanı sıra bir dosya çalıştırılırken, REPL'de ve `typl test` içinde derlenen koda ve orada çağrılan `compile-file`'a da etki eder. Yorumlayıcının çalıştırdığı kod optimize edilmez.
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # -c'den sonra yazılsa da aynı
 ```
 
 Aynısını REPL'den ya da bir programdan `compile-file` çağırarak da yapabilirsiniz.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # Biên dịch
 
 Nếu bạn không làm gì thêm, chương trình typelisp chạy trong trình thông dịch. Ngoài ra còn có hai
@@ -94,6 +94,13 @@ Với `--release`, `typl` tạo **bản dựng release**, loại bỏ `eprint`/`
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # viết sau -c cũng như nhau
+```
+
+`-O0`, `-O1`, `-O2` và `-O3` đặt **mức tối ưu hóa**. Mặc định là `-O0`, không tối ưu hóa. Từ `-O1` trở lên, trình biên dịch trước hết thực hiện các tối ưu hóa đơn giản, như thay một biến chỉ được gắn với một literal bằng giá trị của nó hoặc tính trước phép toán số nguyên trên các hằng, rồi để phần còn lại cho tối ưu hóa của LLVM ở mức cùng tên. Ở mọi mức, kết quả tính toán đều như nhau. Giống như `--release`, đây là tùy chọn của `typl` nói chung: ngoài tệp thực thi mà `-c` tạo ra, nó còn có hiệu lực với mã được biên dịch khi chạy một tệp, trong REPL và trong `typl test`, cũng như với `compile-file` được gọi ở đó. Mã do trình thông dịch chạy không được tối ưu hóa.
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # viết sau -c cũng như nhau
 ```
 
 Bạn có thể làm tương tự bằng cách gọi `compile-file` từ REPL hoặc từ một chương trình.

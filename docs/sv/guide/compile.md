@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # Kompilering
 
 Om du inte gör något annat körs typelisp-program i tolken. Dessutom finns två sätt att kompilera till
@@ -96,6 +96,13 @@ Med `--release` gör `typl` ett **release-bygge**, som tar bort `eprint`/`eprint
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # samma sak skrivet efter -c
+```
+
+`-O0`, `-O1`, `-O2` och `-O3` anger **optimeringsnivån**. Standard är `-O0`, som inte optimerar. Från `-O1` gör kompilatorn först enkla optimeringar, som att ersätta en variabel som bara är bunden till en literal med dess värde eller att räkna ut heltalsaritmetik på konstanter i förväg, och lämnar resten åt LLVM:s optimering på nivån med samma namn. På varje nivå blir resultaten av beräkningen desamma. Precis som `--release` är det ett alternativ för `typl` som helhet: utöver den körbara fil som `-c` skapar gäller det koden som kompileras när en fil körs, i REPL:en och i `typl test`, samt en `compile-file` som anropas där. Kod som tolken kör optimeras inte.
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # samma sak skrivet efter -c
 ```
 
 Du kan göra samma sak genom att anropa `compile-file` från REPL eller från ett program.

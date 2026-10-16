@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # Kompilasi
 
 Jika Anda tidak melakukan apa-apa lagi, program typelisp berjalan di interpreter. Selain itu ada dua
@@ -97,6 +97,13 @@ Dengan `--release`, `typl` membuat **build rilis**, yang menghapus `eprint`/`epr
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # sama saja jika ditulis setelah -c
+```
+
+`-O0`, `-O1`, `-O2`, dan `-O3` menetapkan **tingkat optimasi**. Bawaannya `-O0`, yang tidak mengoptimasi. Mulai `-O1`, kompiler lebih dulu melakukan optimasi sederhana, seperti mengganti variabel yang hanya diikat ke sebuah literal dengan nilainya atau menghitung lebih awal aritmetika bilangan bulat pada konstanta, lalu menyerahkan sisanya ke optimasi LLVM pada tingkat dengan nama yang sama. Di setiap tingkat hasil perhitungannya sama. Seperti `--release`, ini adalah opsi `typl` secara keseluruhan: selain untuk file eksekusi yang dibuat `-c`, opsi ini berlaku untuk kode yang dikompilasi saat menjalankan file, di REPL, dan di `typl test`, serta untuk `compile-file` yang dipanggil di sana. Kode yang dijalankan interpreter tidak dioptimasi.
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # sama saja jika ditulis setelah -c
 ```
 
 Anda dapat melakukan hal yang sama dengan memanggil `compile-file` dari REPL atau dari program.

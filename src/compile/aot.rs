@@ -65,7 +65,6 @@ use inkwell::module::Module;
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 use inkwell::values::{CallSiteValue, InstructionOpcode, Operand};
 use inkwell::AddressSpace;
-use inkwell::OptimizationLevel;
 
 use crate::check::core;
 use crate::compile::symbols::target_symbol_name;
@@ -1461,9 +1460,10 @@ pub fn set_lib_dir(dir: std::path::PathBuf) -> Result<(), String> {
 /// `driver::disassemble_function`, which writes assembly text and shows it to
 /// a person. One target machine and one set of options, so what
 /// `disassemble` prints is the code `compile-file` would actually emit —
-/// including `OptimizationLevel::None`, which is why the assembly reads the
-/// way the IR does. Its callers prepare the module first
-/// ([`crate::compile::codegen_prep::prepare`]), as the JIT does.
+/// including the optimization level ([`crate::compile::optimize`]), which at
+/// `0` is why the assembly reads the way the IR does. Its callers prepare the
+/// module first ([`crate::compile::codegen_prep::prepare`]) and then run the
+/// level's passes over it, as the JIT does.
 fn host_target_machine() -> Result<TargetMachine, String> {
     Target::initialize_native(&InitializationConfig::default())
         .map_err(|e| format!("failed to initialize native target: {}", e))?;
@@ -1474,7 +1474,7 @@ fn host_target_machine() -> Result<TargetMachine, String> {
             &triple,
             &TargetMachine::get_host_cpu_name().to_string(),
             &TargetMachine::get_host_cpu_features().to_string(),
-            OptimizationLevel::None,
+            crate::compile::optimize::codegen_level(),
             reloc_mode(),
             CodeModel::Default,
         )
@@ -1547,6 +1547,7 @@ fn macos_version_min() -> Option<&'static str> {
 pub(crate) fn assembly_of(module: &Module<'static>) -> Result<String, String> {
     crate::compile::codegen_prep::prepare(module)?;
     let tm = host_target_machine()?;
+    crate::compile::optimize::run_llvm_passes(module, &tm)?;
     let buf = tm
         .write_to_memory_buffer(module, FileType::Assembly)
         .map_err(|e| format!("failed to emit assembly: {}", e))?;
@@ -1642,6 +1643,7 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
     }
     crate::compile::codegen_prep::prepare(module)?;
     let target_machine = host_target_machine()?;
+    crate::compile::optimize::run_llvm_passes(module, &target_machine)?;
 
     // Named from `output_path` (not e.g. the process id) so it can't
     // collide across concurrently-running `cargo test` threads in the same

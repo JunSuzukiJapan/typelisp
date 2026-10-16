@@ -54,6 +54,7 @@ pub mod dump;
 pub mod externs;
 pub mod ffi;
 pub mod llvm_builtins;
+pub mod optimize;
 pub mod orc;
 
 /// Registers this crate's `llvm-*` builtin implementations with the
