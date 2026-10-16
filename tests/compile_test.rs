@@ -20,7 +20,7 @@ use typelisp::{load_compiler, load_prelude, Checker, Error, EvalError, Heap, Int
 /// returns a *status word*, and its arguments arrive through
 /// `typelisp_abi::call_state` — so calling one as `f(args, argc)` hands the
 /// argument pointer over where the frame belongs, and the prologue reads it as
-/// one (`rt_frame_data: ... is not a frame`). `FrameStack` is the driver that
+/// a frame's words. `FrameStack` is the driver that
 /// turns the protocol back into "call it and get an answer"; every non-test
 /// caller reaches it through `Interp::call_compiled`.
 ///
@@ -403,7 +403,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -426,7 +426,7 @@ fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -461,7 +461,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -893,7 +893,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -1833,7 +1833,7 @@ fn the_compiler_body_compiles_an_integer_comparison() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -1875,7 +1875,7 @@ fn the_compiler_body_compiles_an_if_expression() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -1899,7 +1899,7 @@ fn let_shadowing_is_correctly_restored_after_the_let_ends() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -6211,7 +6211,7 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -6236,7 +6236,7 @@ fn the_island_compiles_a_bridged_let_and_if() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -6361,7 +6361,7 @@ fn the_island_runs_a_bridged_labels_block() {
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
     // now (Phase C1), so running one needs a heap registered — a compiled
-    // local lives in a `BoxedObj::Frame`, not on the machine stack.
+    // local lives in a compiled frame, not on the machine stack.
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
     let engine = jit(&module);
@@ -6855,32 +6855,18 @@ fn a_specialization_at_a_module_qualified_type_resolves() {
     assert_eq!(run_with_compiler_and_prelude(src).expect("run failed"), Value::Int(7));
 }
 
-// ---- compiled frames (Phase C0) ------------------------------------------
+// ---- compiled frames ----------------------------------------------------
 
-/// `rt_frame_new`/`rt_frame_data`/`build-slot-ptr`: a compiled function
-/// allocating its own activation record on the GC heap and reaching a local
-/// through it.
-///
-/// This is Phase C's whole toolkit in one module, exercised before anything
-/// depends on it — the same order Phase 0/1's raw-builtin tests preceded the
-/// self-hosted compiler body. What it pins down is that a frame slot is
-/// reachable by exactly the pair a local has always been read and written
-/// with (`store-arg`/`load-raw` against a pointer), so moving a local off the
-/// machine stack and into a frame is a change of *where the slot lives* and
-/// nothing else.
-///
 /// **A compiled function can stop in the middle and be resumed** (Phase C2).
 ///
-/// This is the claim the whole phase rests on, and nothing before it could be
-/// stated at all: under the old ABI a function's only way to stop was to
-/// return, because the rest of its work lived on the machine stack and nothing
-/// could pick that up again.
+/// This is the claim the whole phase rests on: under the old ABI a function's
+/// only way to stop was to return, because the rest of its work lived on the
+/// machine stack and nothing could pick that up again.
 ///
-/// The function here runs in two halves. On first entry it makes its frame,
-/// writes 40 into a local, records where to resume, and hands back
-/// `STATUS_SUSPEND`. The driver calls it again with the same frame; it
-/// branches on `pc`, reads the local back, adds 2, and returns 42 in the
-/// protocol's value slot.
+/// The function here runs in two halves. On first entry it opens its frame,
+/// writes 40 into a local and suspends. The driver puts it down; given 2 as
+/// the answer to what it waited for, it picks the frame up again, and the
+/// second half reads the local back and returns the sum.
 ///
 /// The 40 is the point. It is written before the suspension and read after,
 /// with the machine stack torn down and rebuilt in between — so the only way
@@ -6890,154 +6876,41 @@ fn a_compiled_function_suspends_and_resumes_with_its_local_intact() {
     let src = r#"
         (defun build-suspending-module () llvm-module
           (let* ((m (llvm-module::create "mod"))
-                 ;; The protocol shim this body calls directly. The rest
-                 ;; (`rt_frame_new` and friends) `frame-begin` declares itself.
-                 (ignored-entered (add-function m "rt_frame_entered"))
                  (f (add-coroutine-function m "two_halves"))
                  (entry (append-block f "entry"))
-                 (first (append-block f "first"))
-                 (resumed (append-block f "resumed"))
-                 (builder (llvm-builder::create))
-                 (param (function-param f 0)))
-            ;; entry: zero means first entry; anything else is a resume, handed
-            ;; the address of the frame's words.
+                 (builder (llvm-builder::create)))
             (position-at-end builder entry)
-            (build-cond-br builder (build-icmp-eq builder param (const-word builder 0)) first resumed)
-
-            ;; first: make the frame, publish it, stash 40 in a local, record
-            ;; where to resume, and hand control back.
-            (position-at-end builder first)
-            (frame-begin builder m)
-            (let* ((frame (frame-value builder))
-                   (slot (frame-slot builder))
-                   (pub-args (alloca-args builder 1))
-                   (data-args (alloca-args builder 1)))
+            (coroutine-begin builder m f)
+            (let ((slot (frame-slot builder)))
               (store-arg builder slot 0 (const-word builder 40))
-              (store-arg builder pub-args 0 frame)
-              (build-call builder (get-function m "rt_frame_entered") pub-args 1)
-              (store-arg builder data-args 0 frame)
-              (let ((first-base (build-int-to-ptr builder (build-call builder (get-function m "rt_frame_data") data-args 1))))
-                (store-arg builder (build-slot-ptr builder first-base 2) 0 (const-word builder 1)))
-              (build-ret builder (const-word builder 2))
-
-              ;; resumed: read the local back out of the frame whose words we
-              ;; were handed, add 2, and leave it in the protocol's value slot.
-              (position-at-end builder resumed)
-              (let* ((base (build-int-to-ptr builder param))
-                     (stashed (load-raw builder (build-slot-ptr builder base 4) 0))
-                     (sum (build-add builder stashed (const-word builder 2))))
-                (store-arg builder (build-slot-ptr builder base 0) 0 sum)
-                (frame-end builder m)
-                (build-ret builder (const-word builder 0))))
+              (let ((woken (coroutine-suspend builder m)))
+                (coroutine-end builder m (build-add builder (load-raw builder slot 0) woken))))
             m))
         (build-suspending-module)
     "#;
     let module = expect_llvm_module(eval_ok(src));
     let _guard = COMPILE_LOCK.lock().unwrap();
+    module.borrow().verify().expect("the emitted module verifies");
     let engine = jit(&module);
     let two_halves = unsafe { function::<unsafe extern "C" fn(i64) -> i64>(&engine, "two_halves") };
     let mut heap = Heap::with_capacity(1 << 12);
     typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
 
-    // First entry: no frame yet.
-    assert_eq!(unsafe { two_halves(0) }, typelisp_abi::STATUS_SUSPEND, "the first half suspends");
-    let frame = typelisp_abi::call_state::take_current_frame().expect("the prologue published its frame");
-    let id = match typelisp::decode(frame) {
-        Value::Boxed(id) => id,
-        other => panic!("expected a frame, got {:?}", other),
-    };
-    assert_eq!(heap.frame_word(id, typelisp_abi::FRAME_PC_SLOT), 1, "and recorded where to resume");
-    assert_eq!(heap.frame_word(id, typelisp_abi::FRAME_RESERVED_SLOTS), 40, "with the local it wrote still in the frame");
-
-    // Resume on the same frame.
-    let data = heap.frame_data_ptr(id) as i64;
-    assert_eq!(unsafe { two_halves(data) }, typelisp_abi::STATUS_RETURN, "the second half returns");
-    assert_eq!(heap.frame_word(id, typelisp_abi::FRAME_VALUE_SLOT), 42, "40 survived the suspension");
-}
-
-/// **The driver runs a call chain that never touches the machine stack.**
-///
-/// `outer` asks the driver to call `inner`, which returns a value; the driver
-/// hands it back and resumes `outer`, which adds to it and returns. Two frames
-/// exist at once on [`FrameStack`], and neither call is an LLVM `call`
-/// instruction — `outer` *returns* `STATUS_CALL` and is entered again later.
-///
-/// That is what makes the depth limit the heap rather than the OS stack, and
-/// it is the same move Phase A made for the interpreter: the stack becomes
-/// data.
-#[test]
-fn the_driver_runs_a_two_frame_call_chain() {
-    let src = r#"
-        (defun build-chain-module () llvm-module
-          (let* ((m (llvm-module::create "mod"))
-                 (ignored-entered (add-function m "rt_frame_entered"))
-                 (ignored-call (add-function m "rt_frame_call"))
-                 (inner (add-coroutine-function m "inner"))
-                 (outer (add-coroutine-function m "outer")))
-            ;; inner: make a frame, leave 5 in the value slot, return.
-            (let* ((ib (append-block inner "entry"))
-                   (ibuilder (llvm-builder::create)))
-              (position-at-end ibuilder ib)
-              (frame-begin ibuilder m)
-              (let* ((iframe (frame-value ibuilder))
-                     (ipub (alloca-args ibuilder 1))
-                     (idata-args (alloca-args ibuilder 1)))
-                (store-arg ibuilder ipub 0 iframe)
-                (build-call ibuilder (get-function m "rt_frame_entered") ipub 1)
-                (store-arg ibuilder idata-args 0 iframe)
-                (let* ((idata (build-call ibuilder (get-function m "rt_frame_data") idata-args 1))
-                       (ibase (build-int-to-ptr ibuilder idata)))
-                  (store-arg ibuilder (build-slot-ptr ibuilder ibase 0) 0 (const-word ibuilder 5))
-                  (frame-end ibuilder m)
-                  (build-ret ibuilder (const-word ibuilder 0)))))
-            ;; outer: ask the driver for `inner`, then add 37 to what comes back.
-            (let* ((oentry (append-block outer "entry"))
-                   (ofirst (append-block outer "first"))
-                   (oresumed (append-block outer "resumed"))
-                   (obuilder (llvm-builder::create))
-                   (oparam (function-param outer 0)))
-              (position-at-end obuilder oentry)
-              (build-cond-br obuilder (build-icmp-eq obuilder oparam (const-word obuilder 0)) ofirst oresumed)
-              (position-at-end obuilder ofirst)
-              (frame-begin obuilder m)
-              (let* ((oframe (frame-value obuilder))
-                     (opub (alloca-args obuilder 1))
-                     (ocall (alloca-args obuilder 1))
-                     (odata-args (alloca-args obuilder 1)))
-                (store-arg obuilder opub 0 oframe)
-                (build-call obuilder (get-function m "rt_frame_entered") opub 1)
-                (store-arg obuilder ocall 0 (build-fn-address obuilder inner))
-                (build-call obuilder (get-function m "rt_frame_call") ocall 1)
-                (store-arg obuilder odata-args 0 oframe)
-                (let ((ofirst-base (build-int-to-ptr obuilder (build-call obuilder (get-function m "rt_frame_data") odata-args 1))))
-                  (store-arg obuilder (build-slot-ptr obuilder ofirst-base 2) 0 (const-word obuilder 1)))
-                (build-ret obuilder (const-word obuilder 1))
-
-                (position-at-end obuilder oresumed)
-                (let* ((obase (build-int-to-ptr obuilder oparam))
-                       (got (load-raw obuilder (build-slot-ptr obuilder obase 0) 0))
-                       (sum (build-add obuilder got (const-word obuilder 37))))
-                  (store-arg obuilder (build-slot-ptr obuilder obase 0) 0 sum)
-                  (frame-end obuilder m)
-                  (build-ret obuilder (const-word obuilder 0)))))
-            m))
-        (build-chain-module)
-    "#;
-    let module = expect_llvm_module(eval_ok(src));
-    let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = jit(&module);
-    let outer = unsafe { function::<unsafe extern "C" fn(i64) -> i64>(&engine, "outer") };
-    let mut heap = Heap::with_capacity(1 << 12);
-    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-
     let mut stack = typelisp::compile::coroutine::FrameStack::new();
-    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(outer as *const ()) };
-    // The word is raw, not tagged: what the value slot means is the function's
-    // declared return representation, which the driver deliberately does not
-    // read. `inner` left 5; `outer` added 37 after being resumed with it.
-    let answer = stack.run(&mut heap, entry, &[]).expect("the chain ran to an answer");
-    assert_eq!(answer, 42, "the callee's value came back and the caller went on with it");
-    assert_eq!(stack.depth(), 0, "both frames were popped");
+    let entry: typelisp::compile::coroutine::CoroutineFn = unsafe { std::mem::transmute(two_halves as *const ()) };
+    let roots = heap.root_count();
+    assert_eq!(
+        stack.run(&mut heap, entry, &[]),
+        Err(typelisp::compile::coroutine::Paused::Suspended),
+        "the first half suspends"
+    );
+    assert_eq!(stack.depth(), 1, "leaving its frame on the chain");
+    assert_eq!(heap.open_frame_count(), 1, "and open on the task's root stack");
+
+    stack.set_top_value(&mut heap, 2);
+    assert_eq!(stack.resume(&mut heap, 0), Ok(42), "40 survived the suspension");
+    assert_eq!(heap.open_frame_count(), 0, "the frame closed when the answer was taken");
+    assert_eq!(heap.root_count(), roots, "with its placeholder root");
 }
 
 /// **A compiled recursion 200,000 deep, on a machine stack that never grows.**
@@ -7126,117 +6999,3 @@ fn a_compiled_recursion_runs_two_hundred_thousand_frames_deep() {
     assert_eq!(stack.depth(), 0, "and every frame was popped");
 }
 
-/// **The frame's size is written after the body decides it.**
-///
-/// `frame-begin` emits `rt_frame_new(0)` because the count cannot be known
-/// yet — the body is what allocates the slots. `frame-end` replaces that zero
-/// with the number actually handed out. This test is the proof that the
-/// placeholder really is patched: the function asks for three slots, and the
-/// frame the call leaves on the heap has three, not zero.
-///
-/// A zero here would not be a silent wrong answer for long — `frame_word`
-/// asserts the index is in range — but it would fail at the first local
-/// rather than at the mechanism, so this pins the mechanism itself.
-///
-/// The count is read back off the heap rather than returned by `frame-end`,
-/// which yields `()`: `rt_llvm_call` marshals only handles, `()`, `bool` and
-/// `string` back from an `llvm-*` builtin, and the island has no use for the
-/// number anyway.
-#[test]
-fn a_frames_size_is_patched_in_once_the_body_is_emitted() {
-    let src = r#"
-        (defun build-sized-frame-module () llvm-module
-          (let* ((m (llvm-module::create "mod"))
-                 (ignored-new (add-function m "rt_frame_new"))
-                 (ignored-data (add-function m "rt_frame_data"))
-                 (ignored-mask (add-function m "rt_frame_mask_bit"))
-                 (f (add-function m "sized_frame"))
-                 (b (append-block f "entry"))
-                 (builder (llvm-builder::create)))
-            (position-at-end builder b)
-            ;; Three slots: raw, collectable, raw. Only the middle is masked,
-            ;; so the mask has to track the index rather than the call order.
-            (frame-begin builder m)
-            (let* ((s0 (frame-slot builder))
-                   (s1 (frame-slot-rooted builder m))
-                   (s2 (frame-slot builder)))
-              (store-arg builder s0 0 (const-word builder 100))
-              (store-arg builder s1 0 (load-arg builder f 0))
-              (store-arg builder s2 0 (const-word builder 300))
-              (frame-end builder m)
-              (build-ret builder (const-word builder 0)))
-            m))
-        (build-sized-frame-module)
-    "#;
-    let module = expect_llvm_module(eval_ok(src));
-    let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = jit(&module);
-    let sized = unsafe { function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&engine, "sized_frame") };
-    let mut heap = Heap::with_capacity(1 << 12);
-    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let argv: [i64; 1] = [typelisp::encode(Value::Int(7))];
-    assert_eq!(unsafe { sized(argv.as_ptr(), argv.len() as u32) }, 0);
-
-    let id = typelisp::BoxId::from_u32(0);
-    assert!(heap.is_frame(id));
-    // The driver protocol's own slots come first, reserved by the prologue and
-    // never handed out, so the three the body asked for follow them.
-    let r = typelisp_abi::FRAME_RESERVED_SLOTS;
-    assert_eq!(heap.frame_len(id), r + 3, "the placeholder was patched with what was handed out");
-    assert!((0..r).all(|i| !heap.frame_mask_bit(id, i)), "the reserved slots are not locals");
-    assert!(!heap.frame_mask_bit(id, r) && heap.frame_mask_bit(id, r + 1) && !heap.frame_mask_bit(id, r + 2));
-    assert_eq!(heap.frame_word(id, r), 100);
-    assert_eq!(typelisp::decode(heap.frame_word(id, r + 1)), Value::Int(7));
-    assert_eq!(heap.frame_word(id, r + 2), 300);
-}
-
-/// Built by hand, so the three `rt_*` shims are declared bodyless and resolved
-/// by LLVM's process-symbol lookup, and a `Heap` is registered active for the
-/// call because `rt_frame_new` allocates on it — the same idiom the closure
-/// test above needs.
-#[test]
-fn a_compiled_function_can_carry_a_local_in_a_heap_frame() {
-    let src = r#"
-        (defun build-frame-module () llvm-module
-          (let ((m (llvm-module::create "mod")))
-            (let ((ignored-new (add-function m "rt_frame_new"))) ())
-            (let ((ignored-data (add-function m "rt_frame_data"))) ())
-            (let ((ignored-mask (add-function m "rt_frame_mask_bit"))) ())
-            (let ((f (add-function m "frame_roundtrip")))
-              (let ((b (append-block f "entry")))
-                (let ((builder (llvm-builder::create)))
-                  (position-at-end builder b)
-                  (let ((new-args (alloca-args builder 1)))
-                    (store-arg builder new-args 0 (const-word builder 3))
-                    (let ((frame (build-call builder (get-function m "rt_frame_new") new-args 1)))
-                      (let ((mask-args (alloca-args builder 2)))
-                        (store-arg builder mask-args 0 frame)
-                        (store-arg builder mask-args 1 (const-word builder 1))
-                        (let ((ignored-bit (build-call builder (get-function m "rt_frame_mask_bit") mask-args 2)))
-                          (let ((data-args (alloca-args builder 1)))
-                            (store-arg builder data-args 0 frame)
-                            (let ((data (build-call builder (get-function m "rt_frame_data") data-args 1)))
-                              (let ((slot (build-slot-ptr builder (build-int-to-ptr builder data) 1)))
-                                (store-arg builder slot 0 (load-arg builder f 0))
-                                (build-ret builder (load-raw builder slot 0))))))))))) 
-              m)))
-        (build-frame-module)
-    "#;
-    let module = expect_llvm_module(eval_ok(src));
-    let _guard = COMPILE_LOCK.lock().unwrap();
-    let engine = jit(&module);
-    let roundtrip = unsafe { function::<unsafe extern "C" fn(*const i64, u32) -> i64>(&engine, "frame_roundtrip") };
-    let mut heap = Heap::with_capacity(1 << 12);
-    typelisp::compile::runtime::set_active_heap(&mut heap as *mut Heap);
-    let argv: [i64; 1] = [4242];
-    assert_eq!(unsafe { roundtrip(argv.as_ptr(), argv.len() as u32) }, 4242);
-    // One frame, and it is the shape the collector was told about. The call
-    // allocates nothing else, so it is box 0.
-    assert_eq!(heap.box_count(), 1, "the call allocated exactly one box");
-    let id = typelisp::BoxId::from_u32(0);
-    assert!(heap.is_frame(id), "and that box is the frame");
-    assert_eq!(heap.frame_len(id), 3);
-    assert!(heap.frame_mask_bit(id, 1), "the slot the function marked is masked");
-    assert!(!heap.frame_mask_bit(id, 0) && !heap.frame_mask_bit(id, 2), "and no other is");
-    assert_eq!(heap.frame_word(id, 1), 4242, "the local is in the slot it was written to");
-}

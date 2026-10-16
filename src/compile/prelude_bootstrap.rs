@@ -538,8 +538,7 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         // was classic too: the moment the island flipped, a regenerated
         // prelude was coroutine code labelled classic, and an interpreted
         // caller entered it as `f(args, argc)` -- the argument pointer
-        // arriving where the frame belongs, decoded as a fixnum by
-        // `rt_frame_data` ("... is not a frame").
+        // arriving where the frame belongs.
         //
         // The prelude emits no code of its own, so `emits_abi` has nothing to
         // say -- and `UnitState`'s doc comment spells out what a unit with

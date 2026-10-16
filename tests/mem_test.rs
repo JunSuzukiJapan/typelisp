@@ -1934,27 +1934,34 @@ fn switching_to_a_dropped_root_stack_is_refused() {
 // compiled code loads and stores them as, plus a mask saying which of them are
 // tagged at all. Both halves matter to the collector, and these pin down both:
 // a masked slot roots what it points at, an unmasked one is arithmetic and
-// must never be read as a reference.
+// must never be read as a reference. A frame lives on its task's root stack
+// and is closed with the root its opening pushed.
+
+/// A function's mask table: bit `i` of word `i / 64` for each rooted slot.
+fn mask_table(nslots: usize, rooted: &[usize]) -> Vec<u64> {
+    let mut bits = vec![0u64; nslots.div_ceil(64)];
+    for &i in rooted {
+        bits[i / 64] |= 1 << (i % 64);
+    }
+    bits
+}
 
 /// A masked slot keeps what it points at alive, exactly as a root does.
 #[test]
 fn a_frame_slot_roots_what_it_holds() {
     let mut h = Heap::with_capacity(64);
     let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1), Value::Int(2)]);
-    let f = h.alloc_frame(4);
-    h.push_root(f);
-    let Value::Boxed(fid) = f else { panic!("expected a boxed frame") };
-    h.set_frame_mask_bit(fid, 1);
-    h.set_frame_word(fid, 1, typelisp::encode(s));
+    let mask = mask_table(4, &[1]);
+    let f = unsafe { h.open_frame(4, mask.as_ptr()) };
+    unsafe { f.set_word(1, typelisp::encode(s)) };
 
     let _ = alloc_named_struct(&mut h, "garbage", vec![Value::Int(0)]);
     h.gc();
 
     let Value::Boxed(sid) = s else { panic!("expected a boxed struct") };
-    assert!(h.is_frame(fid), "the frame itself is rooted");
-    assert!(h.is_struct(sid), "and the struct its slot points at survived");
+    assert!(h.is_struct(sid), "the struct the slot points at survived");
     assert_eq!(h.struct_field(sid, 1), Value::Int(2));
-    assert_eq!(h.box_count(), 2, "the frame and the struct; the garbage went");
+    assert_eq!(h.box_count(), 1, "the struct; the garbage went");
     assert_accounting(&h);
 }
 
@@ -1968,17 +1975,16 @@ fn a_frame_slot_roots_what_it_holds() {
 #[test]
 fn an_unmasked_frame_slot_is_never_read_as_a_reference() {
     let mut h = Heap::with_capacity(64);
-    let f = h.alloc_frame(2);
-    h.push_root(f);
-    let Value::Boxed(fid) = f else { panic!("expected a boxed frame") };
-    h.set_frame_word(fid, 0, ((9_999_i64) << 3) | 0b101);
-    h.set_frame_word(fid, 1, i64::MIN);
+    let f = unsafe { h.open_frame(2, std::ptr::null()) };
+    unsafe {
+        f.set_word(0, ((9_999_i64) << 3) | 0b101);
+        f.set_word(1, i64::MIN);
+    }
 
     h.gc();
 
-    assert!(h.is_frame(fid));
-    assert_eq!(h.frame_word(fid, 0), ((9_999_i64) << 3) | 0b101, "the raw word is untouched");
-    assert_eq!(h.box_count(), 1, "only the frame");
+    assert_eq!(unsafe { f.word(0) }, ((9_999_i64) << 3) | 0b101, "the raw word is untouched");
+    assert_eq!(h.box_count(), 0);
     assert_accounting(&h);
 }
 
@@ -1987,81 +1993,119 @@ fn an_unmasked_frame_slot_is_never_read_as_a_reference() {
 #[test]
 fn a_masked_frame_slot_holding_a_fixnum_traces_nothing() {
     let mut h = Heap::with_capacity(64);
-    let f = h.alloc_frame(1);
-    h.push_root(f);
-    let Value::Boxed(fid) = f else { panic!("expected a boxed frame") };
-    h.set_frame_mask_bit(fid, 0);
-    h.set_frame_word(fid, 0, typelisp::encode(Value::Int(42)));
+    let mask = mask_table(1, &[0]);
+    let f = unsafe { h.open_frame(1, mask.as_ptr()) };
+    unsafe { f.set_word(0, typelisp::encode(Value::Int(42))) };
     h.gc();
-    assert_eq!(typelisp::decode(h.frame_word(fid, 0)), Value::Int(42));
-    assert_eq!(h.box_count(), 1);
+    assert_eq!(typelisp::decode(unsafe { f.word(0) }), Value::Int(42));
+    assert_eq!(h.box_count(), 0);
     assert_accounting(&h);
 }
 
-/// A frame nobody roots is collected, and takes its slots' claim with it.
+/// **Truncating the roots to where a frame was opened closes it**, and takes
+/// its slots' claim with it — how a driver leaves a frame, on a return or an
+/// unwind alike.
 #[test]
-fn an_unrooted_frame_and_what_it_held_are_both_reclaimed() {
+fn truncating_to_a_frames_depth_closes_it_and_what_it_held_goes() {
     let mut h = Heap::with_capacity(64);
     let s = alloc_named_struct(&mut h, "point", vec![Value::Int(1)]);
-    let f = h.alloc_frame(1);
-    let Value::Boxed(fid) = f else { panic!("expected a boxed frame") };
-    h.set_frame_mask_bit(fid, 0);
-    h.set_frame_word(fid, 0, typelisp::encode(s));
-    h.push_root(f);
+    let depth = h.root_count();
+    let mask = mask_table(1, &[0]);
+    let f = unsafe { h.open_frame(1, mask.as_ptr()) };
+    unsafe { f.set_word(0, typelisp::encode(s)) };
+    assert_eq!(h.root_count(), depth + 1, "opening pushed the frame's placeholder root");
     h.gc();
-    assert_eq!(h.box_count(), 2);
-    h.pop_root();
+    assert_eq!(h.box_count(), 1);
+    h.truncate_roots(depth);
+    assert_eq!(h.open_frame_count(), 0, "the frame closed with its root");
     h.gc();
-    assert_eq!(h.box_count(), 0, "the frame and the struct only it held");
+    assert_eq!(h.box_count(), 0, "and the struct only it held went");
     assert_accounting(&h);
 }
 
-/// A frame reached only through *another* frame's slot survives — frames nest,
-/// which is what a call chain is.
+/// **What the activation does to its own roots cannot close its frame.** A
+/// `break` out of nested scopes truncates to a depth it recorded inside the
+/// activation, which is at least one past where the frame was opened — the
+/// placeholder root is what guarantees that.
 #[test]
-fn a_frame_reachable_only_through_another_frame_survives() {
+fn truncating_above_a_frame_leaves_it_open() {
     let mut h = Heap::with_capacity(64);
-    let inner = h.alloc_frame(1);
-    let Value::Boxed(inner_id) = inner else { panic!("expected a boxed frame") };
-    h.set_frame_mask_bit(inner_id, 0);
-    let s = alloc_named_struct(&mut h, "deep", vec![Value::Int(7)]);
-    h.set_frame_word(inner_id, 0, typelisp::encode(s));
+    let depth = h.root_count();
+    let outer = unsafe { h.open_frame(1, std::ptr::null()) };
+    let inside = h.root_count();
+    h.push_root(Value::Int(1));
+    let inner = unsafe { h.open_frame(1, std::ptr::null()) };
+    h.truncate_roots(inside);
+    assert_eq!(h.open_frame_count(), 1, "the inner frame went, the outer stayed");
+    unsafe { outer.set_word(0, 5) };
+    assert_eq!(unsafe { outer.word(0) }, 5);
+    let _ = inner;
+    h.truncate_roots(depth);
+    assert_eq!(h.open_frame_count(), 0);
+}
 
-    let outer = h.alloc_frame(2);
-    let Value::Boxed(outer_id) = outer else { panic!("expected a boxed frame") };
-    h.set_frame_mask_bit(outer_id, 0);
-    h.set_frame_word(outer_id, 0, typelisp::encode(inner));
-    h.push_root(outer);
+/// Every open frame of a chain is traced, not only the innermost — frames
+/// nest, which is what a call chain is.
+#[test]
+fn every_open_frame_of_a_chain_is_traced() {
+    let mut h = Heap::with_capacity(64);
+    let mask = mask_table(1, &[0]);
+    let outer = unsafe { h.open_frame(1, mask.as_ptr()) };
+    let a = alloc_named_struct(&mut h, "outer", vec![Value::Int(1)]);
+    unsafe { outer.set_word(0, typelisp::encode(a)) };
+    let inner = unsafe { h.open_frame(1, mask.as_ptr()) };
+    let b = alloc_named_struct(&mut h, "inner", vec![Value::Int(2)]);
+    unsafe { inner.set_word(0, typelisp::encode(b)) };
 
     h.gc();
 
-    assert_eq!(h.box_count(), 3, "outer frame, inner frame, and the struct at the bottom");
-    let Value::Boxed(sid) = s else { panic!("expected a boxed struct") };
-    assert_eq!(h.struct_field(sid, 0), Value::Int(7));
+    assert_eq!(h.box_count(), 2, "both frames' structs survived");
     assert_accounting(&h);
 }
 
-/// The address handed to compiled code stays valid across allocations and
-/// collections — the property that lets a `load`/`store` reach a local at all.
+/// A frame of a task that is not running is traced too: the task resumes
+/// into it.
+#[test]
+fn a_waiting_tasks_frames_are_traced() {
+    let mut h = Heap::with_capacity(64);
+    let main = h.current_root_stack();
+    let t = h.new_root_stack();
+    h.switch_to_root_stack(t);
+    let mask = mask_table(1, &[0]);
+    let f = unsafe { h.open_frame(1, mask.as_ptr()) };
+    let s = alloc_named_struct(&mut h, "waiting", vec![Value::Int(3)]);
+    unsafe { f.set_word(0, typelisp::encode(s)) };
+    h.switch_to_root_stack(main);
+
+    h.gc();
+
+    assert_eq!(h.box_count(), 1, "the waiting task's frame kept its struct");
+    h.switch_to_root_stack(t);
+    h.truncate_roots(0);
+    h.switch_to_root_stack(main);
+    h.drop_root_stack(t);
+}
+
+/// The address handed to compiled code stays valid across more frames being
+/// opened and collections — the property that lets a `load`/`store` reach a
+/// local at all, and lets the address name the frame.
 #[test]
 fn a_frames_data_pointer_survives_growth_and_collection() {
     let mut h = Heap::with_capacity(64);
-    let f = h.alloc_frame(3);
-    h.push_root(f);
-    let Value::Boxed(fid) = f else { panic!("expected a boxed frame") };
-    h.set_frame_mask_bit(fid, 2);
-    let before = h.frame_data_ptr(fid);
+    let mask = mask_table(3, &[2]);
+    let f = unsafe { h.open_frame(3, mask.as_ptr()) };
+    let before = f.data();
     unsafe { *before.add(2) = typelisp::encode(Value::Int(11)) };
 
-    // Enough boxes to reallocate the slot table, then a collection.
-    for i in 0..200 {
-        let _ = alloc_named_struct(&mut h, "churn", vec![Value::Int(i)]);
+    // Enough frames to need more chunks than the first, then a collection.
+    for _ in 0..2000 {
+        let _ = unsafe { h.open_frame(10, std::ptr::null()) };
     }
     h.gc();
 
-    let after = h.frame_data_ptr(fid);
-    assert_eq!(before, after, "the word array does not move when the box table grows");
-    assert_eq!(unsafe { *after.add(2) }, typelisp::encode(Value::Int(11)));
+    assert_eq!(h.open_frame_count(), 2001);
+    assert_eq!(unsafe { *before.add(2) }, typelisp::encode(Value::Int(11)));
+    assert_eq!(unsafe { typelisp::FrameRaw::from_data(before) }.data(), before, "the frame is named by its words");
     assert_accounting(&h);
 }
 
@@ -2077,38 +2121,38 @@ fn a_frames_data_pointer_survives_growth_and_collection() {
 #[test]
 fn a_frame_can_hold_more_than_sixty_four_slots() {
     let mut h = Heap::with_capacity(256);
-    let f = h.alloc_frame(120);
-    h.push_root(f);
-    let Value::Boxed(fid) = f else { panic!("expected a boxed frame") };
-    assert_eq!(h.frame_len(fid), 120);
+    let mask = mask_table(120, &[64, 100]);
+    let f = unsafe { h.open_frame(120, mask.as_ptr()) };
+    assert_eq!(f.len(), 120);
 
     // Two collectable slots, both past the first mask word.
     for &i in &[64usize, 100] {
-        h.set_frame_mask_bit(fid, i);
         let s = alloc_named_struct(&mut h, "high", vec![Value::Int(i as i64)]);
-        h.set_frame_word(fid, i, typelisp::encode(s));
+        unsafe { f.set_word(i, typelisp::encode(s)) };
     }
     // And the slots those would alias to if the word index were dropped hold
     // raw words that must never be traced.
-    h.set_frame_word(fid, 0, ((7_777_i64) << 3) | 0b101);
-    h.set_frame_word(fid, 36, ((8_888_i64) << 3) | 0b101);
-    assert!(!h.frame_mask_bit(fid, 0), "slot 0 stayed unmasked");
-    assert!(!h.frame_mask_bit(fid, 36), "slot 36 stayed unmasked");
-    assert!(h.frame_mask_bit(fid, 64) && h.frame_mask_bit(fid, 100));
+    unsafe {
+        f.set_word(0, ((7_777_i64) << 3) | 0b101);
+        f.set_word(36, ((8_888_i64) << 3) | 0b101);
+        assert!(!f.is_rooted(0), "slot 0 stayed unmasked");
+        assert!(!f.is_rooted(36), "slot 36 stayed unmasked");
+        assert!(f.is_rooted(64) && f.is_rooted(100));
+    }
 
     for i in 0..30 {
         let _ = alloc_named_struct(&mut h, "churn", vec![Value::Int(i)]);
     }
     h.gc();
 
-    assert_eq!(h.box_count(), 3, "the frame and the two boxes its high slots hold");
+    assert_eq!(h.box_count(), 2, "the two boxes the frame's high slots hold");
     for &i in &[64usize, 100] {
-        let Value::Boxed(sid) = typelisp::decode(h.frame_word(fid, i)) else {
+        let Value::Boxed(sid) = typelisp::decode(unsafe { f.word(i) }) else {
             panic!("slot {} stopped being a box", i)
         };
         assert_eq!(h.struct_field(sid, 0), Value::Int(i as i64));
     }
-    assert_eq!(h.frame_word(fid, 0), ((7_777_i64) << 3) | 0b101, "the raw word is untouched");
+    assert_eq!(unsafe { f.word(0) }, ((7_777_i64) << 3) | 0b101, "the raw word is untouched");
     assert_accounting(&h);
 }
 
@@ -2118,21 +2162,17 @@ fn a_frame_can_hold_more_than_sixty_four_slots() {
 fn frames_hold_their_slots_under_gc_stress() {
     let mut h = Heap::with_capacity(256);
     h.set_gc_stress(true);
-    let f = h.alloc_frame(8);
-    h.push_root(f);
-    let Value::Boxed(fid) = f else { panic!("expected a boxed frame") };
-    for i in 0..8 {
-        h.set_frame_mask_bit(fid, i as usize);
-    }
+    let mask = mask_table(8, &[0, 1, 2, 3, 4, 5, 6, 7]);
+    let f = unsafe { h.open_frame(8, mask.as_ptr()) };
     for i in 0..8 {
         let s = alloc_named_struct(&mut h, "slot", vec![Value::Int(i)]);
-        h.set_frame_word(fid, i as usize, typelisp::encode(s));
+        unsafe { f.set_word(i as usize, typelisp::encode(s)) };
     }
     for _ in 0..50 {
         let _ = alloc_named_struct(&mut h, "churn", vec![Value::Int(0)]);
     }
     for i in 0..8 {
-        let Value::Boxed(sid) = typelisp::decode(h.frame_word(fid, i as usize)) else {
+        let Value::Boxed(sid) = typelisp::decode(unsafe { f.word(i as usize) }) else {
             panic!("slot {} stopped being a box", i)
         };
         assert_eq!(h.struct_field(sid, 0), Value::Int(i), "slot {} lost its value", i);

@@ -39,8 +39,8 @@
 
 use typelisp_abi::call_state;
 use typelisp_abi::call_state::Pending;
-use typelisp_abi::{decode, STATUS_CALL, STATUS_RETURN, STATUS_SUSPEND, STATUS_UNWIND};
-use typelisp_mem::{BoxId, FrameRaw, Heap, Value};
+use typelisp_abi::{STATUS_CALL, STATUS_RETURN, STATUS_SUSPEND, STATUS_UNWIND};
+use typelisp_mem::{FrameRaw, Heap};
 
 // The value slot holds a **raw word**, and the driver never looks inside it.
 // Whether those bits are a tagged reference or a native `i32`/`f64` is decided
@@ -134,18 +134,16 @@ impl Drop for FrameStack {
 struct Entry {
     /// The body to re-enter to run this frame on.
     body: CoroutineFn,
-    /// The frame object.
-    frame: Value,
-    /// Where the frame's parts are, so that the driver reads and writes them
-    /// without the box table's lock.
+    /// The frame.
     raw: FrameRaw,
-    /// How deep the GC root stack was when this frame was entered.
+    /// How deep the GC root stack was when this frame was entered — the depth
+    /// its prologue opened it at.
     ///
-    /// Read only on the unwinding path. A frame pushes roots as it runs — its
-    /// own frame object in the prologue, temporaries around calls — and an
-    /// unwind skips every matching pop, so popping the frame means cutting
-    /// the root stack back to here. On the ordinary path there is nothing to
-    /// repair: the single `return` pops what the prologue pushed.
+    /// Leaving the frame is cutting the root stack back to here, which closes
+    /// the frame with its placeholder root (`Heap::open_frame`). On a return
+    /// that drops nothing else: the frame popped every root it pushed on the
+    /// way. On an unwind it drops what the frame and its callees still held —
+    /// an unwind skips every matching pop.
     roots: usize,
 }
 
@@ -163,22 +161,6 @@ impl FrameStack {
     /// How deep the chain is. Zero means finished or not yet started.
     pub fn depth(&self) -> usize {
         self.frames.len()
-    }
-
-    /// Every frame in the chain, for the collector to trace.
-    ///
-    /// A frame reached only from here is reachable from nowhere else — the
-    /// caller's frame does not point at the callee's.
-    ///
-    /// **Not what keeps a suspended chain alive today.** Each frame is rooted
-    /// by the prologue that made it (`coroutine-begin`'s
-    /// `rt_push_sexpr_root`), on the root stack of the task that owns the
-    /// chain, and `Heap::gc` marks every root stack rather than only the
-    /// running one — so a chain put down mid-call stays alive with nothing
-    /// extra registered. This exists for a driver that has no task behind it
-    /// to ask, which is what C5's boundaries will need.
-    pub fn roots(&self) -> impl Iterator<Item = Value> + '_ {
-        self.frames.iter().map(|e| e.frame)
     }
 
     /// Begin a call: the function is entered with no frame, so its prologue
@@ -200,7 +182,8 @@ impl FrameStack {
         // `call_state`'s doc comment.
         let status = unsafe { activation(f, 0) };
         match call_state::with(|s| s.entered(published)) {
-            Some((word, raw)) => self.frames.push(Entry { body: f, frame: decode(word), raw, roots }),
+            // SAFETY: the word is the address a prologue just published.
+            Some(data) => self.frames.push(Entry { body: f, raw: unsafe { FrameRaw::from_data(data as *mut i64) }, roots }),
             None if status & 0b11 != STATUS_UNWIND => panic!("a coroutine function did not publish its frame on entry"),
             None => {}
         }
@@ -237,14 +220,14 @@ impl FrameStack {
     /// returning callee's answer does, for a callee that had no frame of its
     /// own to pop.
     fn hand_back(&mut self, value: i64) -> i64 {
-        let (body, frame, raw) = {
+        let (body, raw) = {
             let caller = self.frames.last().expect("a frame is waiting for the answer");
-            (caller.body, caller.frame, caller.raw)
+            (caller.body, caller.raw)
         };
         // SAFETY: a frame on the chain is live.
         unsafe {
             raw.set_word(typelisp_abi::FRAME_VALUE_SLOT, value);
-            activation_on(body, frame, raw)
+            activation_on(body, raw)
         }
     }
 
@@ -374,10 +357,10 @@ impl FrameStack {
     /// same thing.
     pub fn resume(&mut self, heap: &mut Heap, base: usize) -> Result<i64, Paused> {
         let top = match self.frames.last() {
-            Some(top) => (top.body, top.frame, top.raw),
+            Some(top) => (top.body, top.raw),
             None => panic!("resume: there is no suspended chain to resume"),
         };
-        let status = unsafe { activation_on(top.0, top.1, top.2) };
+        let status = unsafe { activation_on(top.0, top.1) };
         self.drive(heap, base, status)
     }
 
@@ -460,19 +443,24 @@ impl FrameStack {
             match status & 0b11 {
                 STATUS_RETURN => {
                     let done = self.frames.pop().expect("a returning frame is on the stack");
-                    // SAFETY: freed only below.
+                    // SAFETY: closed only below.
                     let value = unsafe { done.raw.word(typelisp_abi::FRAME_VALUE_SLOT) };
-                    free_frame(heap, done.frame);
+                    debug_assert_eq!(
+                        heap.root_count(),
+                        done.roots + 1,
+                        "a returning frame left roots other than its placeholder"
+                    );
+                    heap.truncate_roots(done.roots);
                     if self.frames.len() == base {
                         return Ok(value);
                     }
                     // Hand the answer to the waiting frame and resume it.
                     let caller = self.frames.last().expect("a waiting frame");
-                    let (caller_body, caller_frame, caller_raw) = (caller.body, caller.frame, caller.raw);
+                    let (caller_body, caller_raw) = (caller.body, caller.raw);
                     // SAFETY: a frame on the chain is live.
                     status = unsafe {
                         caller_raw.set_word(typelisp_abi::FRAME_VALUE_SLOT, value);
-                        activation_on(caller_body, caller_frame, caller_raw)
+                        activation_on(caller_body, caller_raw)
                     };
                 }
                 STATUS_CALL => match take_pending_call() {
@@ -574,21 +562,20 @@ impl FrameStack {
     /// `install-handler`), exactly as it does on the ordinary way out.
     fn unwind(&mut self, heap: &mut Heap, base: usize) -> Option<i64> {
         loop {
-            let (body, frame, raw) = {
+            let (body, raw) = {
                 let top = self.frames.last().expect("an unwinding frame is on the stack");
-                (top.body, top.frame, top.raw)
+                (top.body, top.raw)
             };
             let handler = frame_handler(raw);
             if handler != 0 {
                 // SAFETY: a frame on the chain is live.
                 return Some(unsafe {
                     raw.set_word(typelisp_abi::FRAME_PC_SLOT, handler);
-                    activation_on(body, frame, raw)
+                    activation_on(body, raw)
                 });
             }
             let leaving = self.frames.pop().expect("a frame above the base");
             heap.truncate_roots(leaving.roots);
-            free_frame(heap, leaving.frame);
             if self.frames.len() == base {
                 return None;
             }
@@ -625,33 +612,10 @@ fn frame_handler(raw: FrameRaw) -> i64 {
 /// unwinding untouched (`park_activation_unwind`): a genuine bug in the
 /// runtime or in generated code must not come back as a plausible-looking
 /// typelisp condition.
-/// [`activation`] resuming `frame`, which is published as this thread's
-/// running frame first. The body is handed the address of the frame's words,
-/// as the coroutine ABI says a resumed one is.
-unsafe fn activation_on(f: CoroutineFn, frame: Value, raw: FrameRaw) -> i64 {
-    let word = typelisp_abi::encode(frame);
-    call_state::with(|s| s.set_running(word, raw));
+/// [`activation`] resuming the frame `raw`: the body is handed the address of
+/// the frame's words, as the coroutine ABI says a resumed one is.
+unsafe fn activation_on(f: CoroutineFn, raw: FrameRaw) -> i64 {
     activation(f, raw.data() as i64)
-}
-
-/// Where frame `word`'s parts are: from the call state when it is the frame
-/// running on this thread, from the box table otherwise. Fatal if `word` is
-/// not a frame.
-pub(crate) fn frame_raw(heap: &mut Heap, word: i64) -> FrameRaw {
-    if let Some(raw) = call_state::with(|s| s.running(word)) {
-        return raw;
-    }
-    match decode(word) {
-        Value::Boxed(id) if heap.is_frame(id) => heap.frame_raw(id),
-        other => typelisp_abi::fatal(&format!("{:?} is not a frame", other)),
-    }
-}
-
-/// [`Heap::free_frame`], forgetting the frame as this thread's running one.
-fn free_frame(heap: &mut Heap, frame: Value) {
-    let word = typelisp_abi::encode(frame);
-    call_state::with(|s| s.forget_running(word));
-    heap.free_frame(frame_id(frame));
 }
 
 unsafe fn activation(f: CoroutineFn, arg: i64) -> i64 {
@@ -678,14 +642,6 @@ fn take_pending_call() -> Pending {
     call_state::take_pending_call()
         .unwrap_or_else(|| panic!("a frame returned STATUS_CALL without naming a callee"))
 }
-
-fn frame_id(f: Value) -> BoxId {
-    match f {
-        Value::Boxed(id) => id,
-        other => panic!("expected a frame, got {:?}", other),
-    }
-}
-
 
 // ---- asking to be put down ------------------------------------------------
 //

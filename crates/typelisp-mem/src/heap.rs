@@ -66,7 +66,7 @@ use parking_lot::RwLock;
 
 use crate::Error;
 use super::symbols::{self, SymRef};
-use super::value::{BoxId, BoxedObj, Cell, FrameMask, StaticMask, ConsRef, FloatBox, LocId, NarrowInt, PathId, StrId, StructPayload, TypeKeyId, Value};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, NarrowInt, PathId, StrId, StructPayload, TypeKeyId, Value};
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -111,46 +111,50 @@ struct RootStack {
     /// `sleep`s) cannot overwrite it: `Heap::current` points at whichever
     /// stack is running, and each stack carries its own copy.
     in_flight_throw: Option<Value>,
+    /// The task's compiled frames. See [`FrameArena`].
+    frames: FrameArena,
 }
 
-/// Where a compiled frame's parts are: its words, its mask and its resume
-/// point — for reading and writing them without taking the box table's lock,
-/// which the frame operations of every call used to take a dozen times.
+/// Where a compiled frame's parts are: its words and its mask — for reading
+/// and writing them with no lookup at all.
 ///
-/// Valid for as long as the frame is: a frame's slot never moves (the box
-/// table's chunks are never relocated) and its arrays are never resized. Only
-/// the activation running a frame touches it, and a collection reads it only
-/// while every thread is stopped — so these are as exclusive as the lock
-/// would have made them. Using one after its frame was freed
-/// ([`Heap::free_frame`]) is the caller's bug.
+/// A frame is named by the address of its words (what compiled code is handed
+/// on resuming, and what the driver keeps), and its length and mask sit in the
+/// header just below them ([`FrameArena`]), so this is rebuilt from that
+/// address alone ([`FrameRaw::from_data`]).
+///
+/// Valid for as long as the frame is: a frame never moves (the arena's chunks
+/// are never relocated). Only the activation running a frame touches it, and a
+/// collection reads it only while every thread is stopped. Using one after its
+/// frame was closed is the caller's bug.
 #[derive(Clone, Copy, Debug)]
 pub struct FrameRaw {
     words: *mut i64,
     len: usize,
-    mask: *mut u64,
+    mask: *const u64,
 }
 
-// SAFETY: the pointers are into the shared heap, which every thread may use;
-// see the type's documentation for who may use them when.
+// SAFETY: the pointers are into a root stack's arena, which every thread may
+// use; see the type's documentation for who may use them when.
 unsafe impl Send for FrameRaw {}
 unsafe impl Sync for FrameRaw {}
 
 impl FrameRaw {
-    fn of(slot: &mut Option<BoxedObj>) -> FrameRaw {
-        match slot {
-            Some(BoxedObj::Frame { words, mask }) => FrameRaw {
-                words: words.as_mut_ptr(),
-                len: words.len(),
-                mask: match mask {
-                    FrameMask::Owned(bits) => bits.as_mut_ptr(),
-                    FrameMask::Static(_) => std::ptr::null_mut(),
-                },
-            },
-            _ => panic!("BoxId does not hold a Frame"),
+    /// The frame whose words start at `data`.
+    ///
+    /// # Safety
+    ///
+    /// `data` must be the address of a live frame's words, as
+    /// [`Heap::open_frame`] handed it out.
+    pub unsafe fn from_data(data: *mut i64) -> FrameRaw {
+        FrameRaw {
+            words: data,
+            len: *data.sub(FRAME_HEADER - FRAME_HEADER_LEN) as usize,
+            mask: *data.sub(FRAME_HEADER - FRAME_HEADER_MASK) as usize as *const u64,
         }
     }
 
-    /// The address of the word array.
+    /// The address of the word array — the frame's name.
     pub fn data(self) -> *mut i64 {
         self.words
     }
@@ -179,21 +183,116 @@ impl FrameRaw {
         *self.words.add(idx) = w;
     }
 
-    /// [`Heap::set_frame_mask_bit`] without the lock. Panics, as it does, on
-    /// a frame whose mask is its function's table.
+    /// Whether slot `idx` holds a tagged word the collector traces.
     ///
     /// # Safety
     ///
     /// The frame must still be live.
-    pub unsafe fn set_mask_bit(self, idx: usize) {
+    pub unsafe fn is_rooted(self, idx: usize) -> bool {
         assert!(idx < self.len, "frame slot {} out of range", idx);
-        assert!(!self.mask.is_null(), "frame slot {}: the frame's mask is its function's table", idx);
-        *self.mask.add(idx / 64) |= 1u64 << (idx % 64);
+        !self.mask.is_null() && *self.mask.add(idx / 64) & (1u64 << (idx % 64)) != 0
     }
 }
 
-/// How many freed frames' arrays a view keeps for reuse ([`Heap::free_frame`]).
-const FRAME_POOL_LEN: usize = 64;
+/// The words in front of each frame's own, in a [`FrameArena`]: the root
+/// stack depth the frame was opened at, its length, and its mask table.
+const FRAME_HEADER: usize = 3;
+const FRAME_HEADER_DEPTH: usize = 0;
+const FRAME_HEADER_LEN: usize = 1;
+const FRAME_HEADER_MASK: usize = 2;
+
+/// How many words a root stack's first frame chunk holds; each later one
+/// doubles, up to [`FRAME_CHUNK_MAX`].
+const FRAME_CHUNK_MIN: usize = 256;
+const FRAME_CHUNK_MAX: usize = 1 << 16;
+
+/// The compiled frames of one root stack — one task's — in the order they were
+/// opened.
+///
+/// **A stack, because a task's frames are.** A frame is opened by a prologue
+/// and closed when its activation is over (a return, or an unwind leaving
+/// it), and the frames of one task nest: the driver pushes on a call and pops
+/// on a return, and a nested driver on a machine frame finishes before the
+/// activation that started it goes on. So opening is a bump and closing a
+/// pop, where a box in the shared table cost a lock, a slot and an allocation
+/// each way.
+///
+/// **Per root stack, because a task moves.** A task can be put down on one
+/// worker thread and picked up on another, and its frames go with it — as its
+/// root stack does. The collector walks every root stack, so it walks these
+/// with them ([`Heap::trace_frames`]).
+///
+/// **Closed by depth.** Each frame records the root stack depth it was opened
+/// at, where its prologue pushed a placeholder root. Truncating the root
+/// stack to a depth at or below it — the driver leaving the frame, or anyone
+/// abandoning everything above a point they recorded — closes it too, so a
+/// chain abandoned with its roots cannot leave frames behind.
+///
+/// Chunks are never moved or resized once made, which is what keeps a frame's
+/// address its name for as long as it is open.
+#[derive(Default)]
+struct FrameArena {
+    chunks: Vec<Box<[i64]>>,
+    /// How much of each chunk is in use, from its start.
+    used: Vec<usize>,
+    /// The chunk the next frame goes in, or the last one when it is full.
+    cur: usize,
+    /// The open frames' word addresses, innermost last.
+    open: Vec<*mut i64>,
+}
+
+// SAFETY: `open` points into `chunks`, which the arena owns; the root stack it
+// belongs to is used by one thread at a time, as the rest of it is.
+unsafe impl Send for FrameArena {}
+
+impl FrameArena {
+    /// A new frame of `nslots` zeroed words with mask table `mask`, opened at
+    /// root stack depth `depth`.
+    fn open(&mut self, nslots: usize, mask: *const u64, depth: usize) -> FrameRaw {
+        let need = FRAME_HEADER + nslots;
+        if self.chunks.is_empty() || self.used[self.cur] + need > self.chunks[self.cur].len() {
+            if !self.chunks.is_empty() && self.used[self.cur] > 0 {
+                self.cur += 1;
+            }
+            if self.cur < self.chunks.len() && self.chunks[self.cur].len() < need {
+                self.chunks.truncate(self.cur);
+                self.used.truncate(self.cur);
+            }
+            if self.cur == self.chunks.len() {
+                let size = self.chunks.last().map_or(FRAME_CHUNK_MIN, |c| (c.len() * 2).min(FRAME_CHUNK_MAX));
+                self.chunks.push(vec![0i64; size.max(need)].into_boxed_slice());
+                self.used.push(0);
+            }
+        }
+        let at = self.used[self.cur];
+        self.used[self.cur] = at + need;
+        let block = &mut self.chunks[self.cur][at..at + need];
+        block[FRAME_HEADER_DEPTH] = depth as i64;
+        block[FRAME_HEADER_LEN] = nslots as i64;
+        block[FRAME_HEADER_MASK] = mask as usize as i64;
+        block[FRAME_HEADER..].fill(0);
+        let data = block[FRAME_HEADER..].as_mut_ptr();
+        self.open.push(data);
+        FrameRaw { words: data, len: nslots, mask }
+    }
+
+    /// Closes every frame opened at depth `depth` or deeper, innermost first.
+    fn close_from(&mut self, depth: usize) {
+        while let Some(&data) = self.open.last() {
+            // SAFETY: an open frame's header is in its chunk.
+            let opened_at = unsafe { *data.sub(FRAME_HEADER - FRAME_HEADER_DEPTH) } as usize;
+            if opened_at < depth {
+                break;
+            }
+            self.open.pop();
+            let len = unsafe { *data.sub(FRAME_HEADER - FRAME_HEADER_LEN) } as usize;
+            self.used[self.cur] -= FRAME_HEADER + len;
+            if self.used[self.cur] == 0 && self.cur > 0 {
+                self.cur -= 1;
+            }
+        }
+    }
+}
 
 /// Entries per [`Slab`] chunk — a power of two so the chunk/offset split is a
 /// shift and a mask rather than a division.
@@ -634,10 +733,6 @@ pub struct Heap {
     // `shared.root_stacks` keeps this valid across that `Vec` reallocating —
     // the same reasoning applies whether the `Vec` sits behind a lock or not.
     current: *mut RootStack,
-    // The arrays of frames this view freed ([`Heap::free_frame`]), for the
-    // next frames it allocates: a call makes a frame and a return frees it,
-    // so without these every call went to the allocator twice and back twice.
-    frame_pool: Vec<Vec<i64>>,
     // Symbols are *not* here: they live in one process-global, permanent
     // table (`super::symbols`), so a symbol means the same thing in every
     // heap and compiled code can reach one without an active `Heap` at all.
@@ -721,7 +816,6 @@ impl Heap {
             home_stack: 0,
             current_stack: 0,
             current,
-            frame_pool: Vec::new(),
         };
         for key in crate::value::BUILTIN_TYPE_KEYS {
             heap.intern_type_key(key);
@@ -757,7 +851,6 @@ impl Heap {
             home_stack: 0,
             current_stack: 0,
             current: ptr::null_mut(),
-            frame_pool: Vec::new(),
         };
         let home = heap.new_root_stack();
         heap.home_stack = home.0;
@@ -968,8 +1061,15 @@ impl Heap {
     /// jumping out of) — same "truncating to at-or-past the current length
     /// does nothing" behavior as [`Vec::truncate`], which this delegates to
     /// directly.
+    ///
+    /// Closes every compiled frame opened at `len` or deeper with them (see
+    /// [`open_frame`](Self::open_frame)).
     pub fn truncate_roots(&mut self, len: usize) {
-        self.roots_mut().truncate(len);
+        let stack = unsafe { &mut *self.current };
+        stack.roots.truncate(len);
+        if stack.frames.open.last().is_some() {
+            stack.frames.close_from(len);
+        }
     }
 
     /// Overwrites the root at absolute stack position `idx` in place — unlike
@@ -1054,7 +1154,7 @@ impl Heap {
         assert_ne!(id.0, self.current_stack, "drop_root_stack: that stack is running");
         let stack = self.shared.root_stacks.lock().unwrap()[id.0].take();
         debug_assert!(
-            stack.map(|s| s.roots.is_empty()).unwrap_or(true),
+            stack.map(|s| s.roots.is_empty() && s.frames.open.is_empty()).unwrap_or(true),
             "drop_root_stack: {:?} still holds roots",
             id
         );
@@ -2005,178 +2105,37 @@ impl Heap {
 
     // ---- compiled frames --------------------------------------------------
 
-    /// A compiled function's activation record whose mask is the function's
-    /// own table — `table`, `nslots.div_ceil(64)` words the compiler emitted
-    /// beside its code, or null for a function that roots no slot — also
-    /// handing back where the new frame's parts are ([`FrameRaw`]), taken
-    /// under the same lock. The words start at zero, as
-    /// [`alloc_frame`](Self::alloc_frame)'s do.
+    /// Opens a compiled function's activation record on the running task's
+    /// root stack: `nslots` words, all zero, whose mask is the function's
+    /// table — `mask`, `nslots.div_ceil(64)` words the compiler emitted beside
+    /// its code, or null for a function that roots no slot. See
+    /// [`FrameArena`].
+    ///
+    /// Pushes a placeholder root first and records the frame at its depth, so
+    /// that the frame is closed exactly when that root goes:
+    /// [`truncate_roots`](Self::truncate_roots) to the depth it was opened at
+    /// closes it, and nothing the activation does to its own roots above can.
+    /// The placeholder is a fixnum, which the collector follows nowhere.
+    ///
+    /// Zero, not `Value::Empty`'s encoding: an unmasked slot is a raw word and
+    /// zero is a fine raw word, while a masked slot reads as a fixnum 0 until
+    /// the prologue writes it — so a collection between opening and the first
+    /// store traces nothing bogus. Never itself triggers a collection.
     ///
     /// # Safety
     ///
-    /// A non-null `table` must hold `nslots.div_ceil(64)` words and outlive
-    /// the frame.
-    pub unsafe fn alloc_frame_raw(&mut self, nslots: usize, table: *const u64) -> (Value, FrameRaw) {
-        self.debug_assert_not_native("alloc_frame_raw");
-        let mut words = self.frame_pool.pop().unwrap_or_default();
-        words.clear();
-        words.resize(nslots, 0);
-        let mut boxes = self.shared.boxes.write();
-        let idx = boxes.alloc(BoxedObj::Frame { words, mask: FrameMask::Static(StaticMask(table)) });
-        let raw = FrameRaw::of(&mut boxes.slots[idx as usize]);
-        (Value::Boxed(BoxId(idx)), raw)
+    /// A non-null `mask` must hold `nslots.div_ceil(64)` words and outlive the
+    /// frame.
+    pub unsafe fn open_frame(&mut self, nslots: usize, mask: *const u64) -> FrameRaw {
+        self.debug_assert_not_native("open_frame");
+        let depth = self.root_count();
+        self.roots_mut().push(Value::Int(0));
+        (*self.current).frames.open(nslots, mask, depth)
     }
 
-    /// Where frame `id`'s parts are ([`FrameRaw`]). Panics if `id` does not
-    /// hold a frame.
-    pub fn frame_raw(&mut self, id: BoxId) -> FrameRaw {
-        FrameRaw::of(&mut self.shared.boxes.write().slots[id.0 as usize])
-    }
-
-    /// Allocate a compiled function's activation record: `nslots` words, all
-    /// zero, and an all-clear mask. See [`BoxedObj::Frame`].
-    ///
-    /// **The mask is not an argument.** Which slots hold tagged values is
-    /// settled one binding at a time by
-    /// [`set_frame_mask_bit`](Self::set_frame_mask_bit), so allocating a
-    /// frame needs only the slot count — which the compiler knows from
-    /// counting binding sites, without classifying them. An all-clear mask
-    /// is also the safe starting point: a slot nothing has bound yet is not
-    /// traced, and cannot be mistaken for a reference.
-    ///
-    /// Zero, not `Value::Empty`'s encoding: an unmasked slot is a raw word and
-    /// zero is a fine raw word, while a masked slot reads as `TAG_FIXNUM` 0
-    /// until the prologue writes it — a fixnum references nothing, so a
-    /// collection between the allocation and the first store traces nothing
-    /// bogus.
-    ///
-    /// Like [`alloc_cell`](Self::alloc_cell), never itself triggers a
-    /// collection.
-    pub fn alloc_frame(&mut self, nslots: usize) -> Value {
-        let words = nslots.div_ceil(64);
-        self.alloc_boxed(BoxedObj::Frame { words: vec![0; nslots], mask: FrameMask::Owned(vec![0; words]) })
-    }
-
-    /// Gives back the box of a frame whose activation is over — popped by
-    /// the driver on return, or left on an unwind.
-    ///
-    /// A frame is referred to by nothing but its own chain: the caller's frame
-    /// does not point at the callee's, a closure captures cells rather than
-    /// the frame, and the prologue's root is popped by the single return (an
-    /// unwind cuts the root stack back past it first). So once the driver has
-    /// read the answer out of it, nothing can reach it — and waiting for a
-    /// collection to find that out kept every frame of a call-heavy program
-    /// that allocates no cons cells alive at once: `fib` of 32 held 1.4GB.
-    ///
-    /// Panics if `id` does not hold a frame.
-    pub fn free_frame(&mut self, id: BoxId) {
-        let freed = {
-            let mut boxes = self.shared.boxes.write();
-            let freed = match boxes.slots[id.0 as usize].take() {
-                Some(BoxedObj::Frame { words, .. }) => words,
-                _ => panic!("BoxId does not hold a Frame"),
-            };
-            boxes.free.push(id.0);
-            freed
-        };
-        // As many as a chain this deep needs at once; a deeper one's are
-        // given back to the allocator.
-        if self.frame_pool.len() < FRAME_POOL_LEN {
-            self.frame_pool.push(freed);
-        }
-    }
-
-    /// True if `id` holds a [`BoxedObj::Frame`].
-    pub fn is_frame(&self, id: BoxId) -> bool {
-        matches!(self.shared.boxes.read_recursive().slots[id.0 as usize], Some(BoxedObj::Frame { .. }))
-    }
-
-    /// The address of a frame's word array, for compiled code to load and
-    /// store its locals through.
-    ///
-    /// # Stability
-    ///
-    /// The address stays valid for as long as the frame is *live*. Growing
-    /// `shared.boxes`'s `Slab` never moves an already-issued slot (see
-    /// `Slab`'s doc comment) and the sweep writes `None` in place rather
-    /// than compacting — so the only way to invalidate this pointer is to
-    /// let the frame be collected, which is the caller's job to prevent by
-    /// keeping it reachable (the task's stack does).
-    ///
-    /// Panics if `id` does not hold a frame — the compiler's own bookkeeping,
-    /// so an internal invariant.
-    pub fn frame_data_ptr(&mut self, id: BoxId) -> *mut i64 {
-        match &mut self.shared.boxes.write().slots[id.0 as usize] {
-            Some(BoxedObj::Frame { words, .. }) => words.as_mut_ptr(),
-            _ => panic!("BoxId does not hold a Frame"),
-        }
-    }
-
-    /// How many slots a frame holds. Panics like [`frame_data_ptr`](Self::frame_data_ptr).
-    pub fn frame_len(&self, id: BoxId) -> usize {
-        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Frame { words, .. }) => words.len(),
-            _ => panic!("BoxId does not hold a Frame"),
-        }
-    }
-
-    /// One slot, as the raw word it is stored as. Panics like
-    /// [`frame_data_ptr`](Self::frame_data_ptr), and on an out-of-range slot —
-    /// the compiler's layout guarantee makes that an internal invariant too.
-    pub fn frame_word(&self, id: BoxId, idx: usize) -> i64 {
-        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Frame { words, .. }) => {
-                *words.get(idx).unwrap_or_else(|| panic!("frame slot {} out of range", idx))
-            }
-            _ => panic!("BoxId does not hold a Frame"),
-        }
-    }
-
-    /// Writes one slot. Panics like [`frame_word`](Self::frame_word).
-    pub fn set_frame_word(&mut self, id: BoxId, idx: usize, w: i64) {
-        match &mut self.shared.boxes.write().slots[id.0 as usize] {
-            Some(BoxedObj::Frame { words, .. }) => match words.get_mut(idx) {
-                Some(slot) => *slot = w,
-                None => panic!("frame slot {} out of range", idx),
-            },
-            _ => panic!("BoxId does not hold a Frame"),
-        }
-    }
-
-    /// Whether slot `idx` holds a tagged value the collector should trace.
-    /// Panics like [`frame_word`](Self::frame_word).
-    pub fn frame_mask_bit(&self, id: BoxId, idx: usize) -> bool {
-        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Frame { words, mask, .. }) => {
-                assert!(idx < words.len(), "frame slot {} out of range", idx);
-                mask.is_set(idx)
-            }
-            _ => panic!("BoxId does not hold a Frame"),
-        }
-    }
-
-    /// Marks slot `idx` as holding a tagged value, so the collector traces
-    /// it from here on. Called once per collectable binding, where that
-    /// binding's `rt_push_sexpr_root` used to stand.
-    ///
-    /// There is deliberately no way to *clear* a bit. A slot belongs to one
-    /// binding for the whole activation — the compiler gives each binding
-    /// site its own slot rather than reusing one across disjoint scopes —
-    /// so a bit that could be cleared would mean a slot whose kind changes
-    /// under it, and then neither setting nor clearing is safe at the right
-    /// moment. Panics like [`frame_word`](Self::frame_word), and on a frame
-    /// whose mask is its function's table ([`alloc_frame_raw`](Self::alloc_frame_raw)).
-    pub fn set_frame_mask_bit(&mut self, id: BoxId, idx: usize) {
-        match &mut self.shared.boxes.write().slots[id.0 as usize] {
-            Some(BoxedObj::Frame { words, mask: FrameMask::Owned(bits), .. }) => {
-                assert!(idx < words.len(), "frame slot {} out of range", idx);
-                bits[idx / 64] |= 1u64 << (idx % 64);
-            }
-            Some(BoxedObj::Frame { mask: FrameMask::Static(_), .. }) => {
-                panic!("frame slot {}: the frame's mask is its function's table", idx)
-            }
-            _ => panic!("BoxId does not hold a Frame"),
-        }
+    /// How many frames are open on the running task's root stack.
+    pub fn open_frame_count(&self) -> usize {
+        unsafe { &*self.current }.frames.open.len()
     }
 
     /// Store an *interpreted* closure — parameter list, return
@@ -2955,19 +2914,6 @@ impl Heap {
                     stack.push(v);
                 }
             }
-            // Two filters, both needed. `mask` says the slot holds a *tagged*
-            // word at all — an unmasked slot is a raw `i32`/`f64` bit pattern
-            // whose low three bits are not a tag, and reading one as a tag
-            // would invent a heap reference out of arithmetic. The tag test
-            // then says whether that tagged word points at anything: a
-            // `Sexpr`-repr local legitimately holds fixnums and immediates.
-            BoxedObj::Frame { words, mask, .. } => {
-                for (i, &w) in words.iter().enumerate() {
-                    if mask.is_set(i) && crate::tagged::references_heap(w) {
-                        stack.push(crate::tagged::decode(w));
-                    }
-                }
-            }
         }
     }
 
@@ -3077,6 +3023,31 @@ impl Heap {
     /// cell the sweep then refuses to hand back, which is what drives `gc`'s
     /// reclaim count below zero. Panics naming the root set and index — the
     /// fact the underflow itself never reveals.
+    /// Pushes what a root stack's open frames reference.
+    ///
+    /// Two filters, both needed. The mask says the slot holds a *tagged* word
+    /// at all — an unmasked slot is a raw `i32`/`f64` bit pattern whose low
+    /// three bits are not a tag, and reading one as a tag would invent a heap
+    /// reference out of arithmetic. The tag test then says whether that tagged
+    /// word points at anything: a `Sexpr`-repr local legitimately holds
+    /// fixnums and immediates.
+    fn trace_frames(frames: &FrameArena, stack: &mut Vec<Value>) {
+        for &data in &frames.open {
+            // SAFETY: an open frame is live, and every thread is stopped.
+            unsafe {
+                let raw = FrameRaw::from_data(data);
+                for i in 0..raw.len() {
+                    if raw.is_rooted(i) {
+                        let w = raw.word(i);
+                        if crate::tagged::references_heap(w) {
+                            stack.push(crate::tagged::decode(w));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn audit_roots_against_free_list(&self, session_roots: &[Value]) {
         use std::collections::HashSet;
         let mut freed: HashSet<usize> = HashSet::new();
@@ -3224,6 +3195,7 @@ impl Heap {
             if let Some(v) = roots.in_flight_throw {
                 stack.push(v);
             }
+            Self::trace_frames(&roots.frames, &mut stack);
         }
         {
             let permanent_roots = self.shared.permanent_roots.lock().unwrap();

@@ -892,14 +892,16 @@ impl Interp {
     /// Called by [`Self::exec`] after a successful top-level form. Each
     /// recorded node is rooted for the rest of the session: `exec` permanently
     /// roots a definition's *body*, not the top-level node, and `(dump ...)`
-    /// reads these nodes long afterwards.
+    /// reads these nodes long afterwards. Permanently, not on the root stack:
+    /// the form may be an `eval` inside a running task, whose stack is cut
+    /// back when its frames are left.
     pub(crate) fn note_definitions(&self, heap: &mut Heap, tl: Value) {
         let mut recording = self.recording.borrow_mut();
         let Some(recording) = recording.as_mut() else { return };
         let mut found = Vec::new();
         crate::dump::record_definitions(heap, tl, &mut found);
         for v in found {
-            heap.push_root(v);
+            heap.push_permanent_root(v);
             recording.forms.push(v);
         }
     }

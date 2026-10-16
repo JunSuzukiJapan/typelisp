@@ -2409,40 +2409,31 @@ pub fn llvm_builder_def() -> AdtDef {
         assoc_fn(vec![llvm_builder_ty(), llvm_value_ty(), Type::Int], llvm_value_ty(), true),
     );
     // The frame under construction (Phase C1). A function's locals live in a
-    // `BoxedObj::Frame`, and two things about it cannot be held in the island:
-    // a slot counter, and the frame's size — which is only known once the body
+    // compiled frame, and two things about it cannot be held in the island: a
+    // slot counter, and the frame's size — which is only known once the body
     // has been emitted, since the body is what allocates the slots.
     //
-    // All four are keyed on the *builder*, which is one-to-one with the
-    // function being built (each of `compile-function`/`compile-lambda`/
+    // Both are keyed on the *builder*, which is one-to-one with the function
+    // being built (each of `compile-function`/`compile-lambda`/
     // `compile-labels-bodies` makes its own). That is why none of the island's
     // signatures grows an argument to carry the frame around — `compile-value`
     // already has 16, and this phase exists partly to shorten that list.
     //
-    // `frame-begin` emits the prologue and hands back the tagged frame (the
-    // island roots it); `frame-slot` and `frame-slot-rooted` carve out the
-    // next slot, the second marking it for the collector; `frame-end` writes
-    // the final count into the prologue's placeholder. The count is therefore
-    // by construction the number of slots handed out — there is no separate
-    // counting pass to drift from the emitting one.
-    //
-    // `frame-end` returns `()` rather than the count: the island has no use
-    // for it, and `rt_llvm_call` marshals only handles, `()`, `bool` and
-    // `string` back from an `llvm-*` builtin (`llvm_ret_kind`). Tests read the
-    // count from the frame itself, which is the number that matters.
-    assoc.insert("frame-begin".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit, true));
-    assoc.insert("frame-value".to_string(), assoc_fn(vec![llvm_builder_ty()], llvm_value_ty(), true));
+    // `frame-slot` and `frame-slot-rooted` carve out the next slot of the frame
+    // `coroutine-begin` opened, the second marking it for the collector;
+    // `coroutine-end` writes the final count into the prologue's placeholder.
+    // The count is therefore by construction the number of slots handed out —
+    // there is no separate counting pass to drift from the emitting one.
     assoc.insert("frame-slot".to_string(), assoc_fn(vec![llvm_builder_ty()], llvm_value_ty(), true));
     assoc.insert(
         "frame-slot-rooted".to_string(),
         assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], llvm_value_ty(), true),
     );
-    assoc.insert("frame-end".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty()], Type::Unit, true));
-    // The coroutine prologue (Phase C2). Separate names rather than a wider
-    // `frame-begin`, because the island that compiles the *next* island is the
-    // one already committed: it calls these builtins through `rt_llvm_call`
-    // with the arity it was built against, so changing an existing signature
-    // breaks the bootstrap at the one moment it cannot be repaired from.
+    // The coroutine prologue (Phase C2). The island that compiles the *next*
+    // island is the one already committed: it calls these builtins through
+    // `rt_llvm_call` with the arity it was built against, so changing an
+    // existing signature breaks the bootstrap at the one moment it cannot be
+    // repaired from.
     //
     // `coroutine-begin` takes the function as well as the builder — it appends
     // the prologue's blocks — and leaves the builder at the start of the body.

@@ -558,7 +558,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 339] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 335] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -646,8 +646,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 339] {
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
         rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
         rt_throw, rt_throw_matches, rt_throw_take_value,
-        rt_frame_new, rt_frame_data, rt_frame_mask_bit,
-        rt_frame_entered, rt_frame_call, rt_frame_open, rt_frame_call_env, rt_frame_apply, rt_frame_dyn_call, rt_pending_arg, rt_pending_argc,
+        rt_frame_call, rt_frame_open, rt_frame_call_env, rt_frame_apply, rt_frame_dyn_call, rt_pending_arg, rt_pending_argc,
         rt_pending_env, rt_pending_envc,
     };
     [
@@ -762,10 +761,6 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 339] {
         ("rt_set_cdr", rt_set_cdr as *const () as usize),
         ("rt_match_fail", rt_match_fail as *const () as usize),
         ("rt_panic", rt_panic as *const () as usize),
-        ("rt_frame_new", rt_frame_new as *const () as usize),
-        ("rt_frame_data", rt_frame_data as *const () as usize),
-        ("rt_frame_mask_bit", rt_frame_mask_bit as *const () as usize),
-        ("rt_frame_entered", rt_frame_entered as *const () as usize),
         ("rt_frame_call", rt_frame_call as *const () as usize),
         ("rt_frame_open", rt_frame_open as *const () as usize),
         ("rt_frame_apply", rt_frame_apply as *const () as usize),

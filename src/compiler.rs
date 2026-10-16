@@ -3815,7 +3815,7 @@ const SOURCE_TEMPLATE: &str = r#"
           ;; correct and root-neutral.
           ;; Both lists bind into this nested
           ;; function's own frame, which
-          ;; `frame-begin` opened just above —
+          ;; `coroutine-begin` opens just below —
           ;; a captured name and a parameter
           ;; are the same kind of slot.
           (coroutine-begin nested-builder m nested-fn)

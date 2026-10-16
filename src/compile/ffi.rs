@@ -317,9 +317,10 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
 /// frame's value slot and returns `STATUS_RETURN`.
 ///
 /// There is no `pc` dispatch and no resume block, because there is nothing to
-/// resume: the body runs to completion by construction. `rt_frame_entered` is
-/// still required — the driver takes the frame it publishes on the way back,
-/// and a caller that never published one is a protocol break, not a shortcut.
+/// resume: the body runs to completion by construction. The frame is still
+/// required — the driver takes the frame `rt_frame_open` publishes on the way
+/// back, and a caller that never published one is a protocol break, not a
+/// shortcut.
 fn emit_coroutine_entry(
     module: &Module<'static>,
     name: &str,
@@ -343,18 +344,27 @@ fn emit_coroutine_entry(
 
     // The driver protocol's own slots, and nothing else: this entry has no
     // locals, but a frame the driver cannot read the handler slot of is a
-    // frame it cannot ask about an unwind. It asked with one slot here until
-    // C4 reserved the second, and the two FFI tests that *raise* are what
-    // said so.
-    let frame = call_shim(
-        &builder,
-        shim("rt_frame_new"),
-        scratch,
-        one,
-        i64_ty.const_int(typelisp_abi::FRAME_RESERVED_SLOTS as u64, false),
-        "ffi_frame",
-    )?;
-    call_shim(&builder, shim("rt_frame_entered"), scratch, one, frame, "ffi_entered")?;
+    // frame it cannot ask about an unwind. No slot is rooted, so no mask.
+    let open_args = builder
+        .build_alloca(i64_ty.array_type(2), "ffi_frame_open_args")
+        .map_err(|e| format!("ffi: failed to reserve the frame's arguments: {}", e))?;
+    for (i, word) in [typelisp_abi::FRAME_RESERVED_SLOTS as u64, 0].into_iter().enumerate() {
+        let slot = unsafe {
+            builder
+                .build_gep(i64_ty, open_args, &[i64_ty.const_int(i as u64, false)], "ffi_frame_open_arg")
+                .map_err(|e| format!("ffi: failed to index the frame's arguments: {}", e))?
+        };
+        builder
+            .build_store(slot, i64_ty.const_int(word, false))
+            .map_err(|e| format!("ffi: failed to store a frame argument: {}", e))?;
+    }
+    let data = builder
+        .build_call(shim("rt_frame_open"), &[open_args.into(), ctx.i32_type().const_int(2, false).into()], "ffi_frame")
+        .map_err(|e| format!("ffi: failed to open the frame: {}", e))?;
+    let data = match data.try_as_basic_value() {
+        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+        inkwell::values::ValueKind::Instruction(_) => return Err("internal error: rt_frame_open produced no value".to_string()),
+    };
 
     let args = builder
         .build_alloca(i64_ty.array_type(argc.max(1) as u32), "ffi_entry_args")
@@ -386,7 +396,6 @@ fn emit_coroutine_entry(
         }
     };
 
-    let data = call_shim(&builder, shim("rt_frame_data"), scratch, one, frame, "ffi_frame_data")?;
     let data = builder
         .build_int_to_ptr(data, ctx.ptr_type(inkwell::AddressSpace::default()), "ffi_frame_ptr")
         .map_err(|e| format!("ffi: failed to take the frame's data pointer: {}", e))?;
