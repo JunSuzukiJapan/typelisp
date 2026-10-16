@@ -1,11 +1,11 @@
-# ABI バージョン 0.2.12
+# ABI バージョン 0.2.13
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.2.12 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.2.13 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `28a9278a8d15ff8c`
+内容ハッシュ (FNV-1a 64): `126a9ab17f0f9f93`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -589,7 +589,9 @@
 | `rt_frame_entered` | `i64 (ptr, i32)` |
 | `rt_frame_mask_bit` | `i64 (ptr, i32)` |
 | `rt_frame_new` | `i64 (ptr, i32)` |
+| `rt_frame_open` | `i64 (ptr, i32)` |
 | `rt_frame_pc` | `i64 (ptr, i32)` |
+| `rt_frame_reopen` | `i64 (ptr, i32)` |
 | `rt_frame_set_pc` | `i64 (ptr, i32)` |
 | `rt_get_dispatch_macro_character` | `i64 (ptr, i32)` |
 | `rt_get_internal_real_time` | `i64 (ptr, i32)` |

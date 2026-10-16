@@ -1926,6 +1926,15 @@ impl Heap {
     /// True if `id` holds a `BoxedObj::Cell` — the peer of
     /// [`is_struct`](Self::is_struct)/[`is_hashtable`](Self::is_hashtable)
     /// for callers that decode a `Value::Boxed` without knowing its kind.
+    /// [`cell_get`](Self::cell_get), or `None` when `id` does not hold a cell
+    /// — the check and the read under one lock.
+    pub fn try_cell_get(&self, id: BoxId) -> Option<Value> {
+        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
+            Some(BoxedObj::Cell(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
     pub fn is_cell(&self, id: BoxId) -> bool {
         matches!(self.shared.boxes.read_recursive().slots[id.0 as usize], Some(BoxedObj::Cell(_)))
     }
@@ -2323,6 +2332,19 @@ impl Heap {
     /// A compiled closure's capture mask — bit `i` set means env slot `i`
     /// holds a real tagged value (see [`BoxedObj::CompiledClosure`]).
     /// Panics like [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
+    /// A compiled closure's function, its body ABI, its capture mask and its
+    /// captures (appended to `env`) — or `None` when `id` does not hold one.
+    /// What applying it needs, under one lock rather than one per part.
+    pub fn compiled_closure_parts(&self, id: BoxId, env: &mut Vec<Value>) -> Option<(usize, u8, u64)> {
+        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
+            Some(BoxedObj::CompiledClosure { fn_ptr, env: captured, sexpr_mask, body_abi }) => {
+                env.extend_from_slice(captured);
+                Some((*fn_ptr, *body_abi, *sexpr_mask))
+            }
+            _ => None,
+        }
+    }
+
     pub fn compiled_closure_mask(&self, id: BoxId) -> u64 {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { sexpr_mask, .. }) => *sexpr_mask,

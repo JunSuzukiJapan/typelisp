@@ -490,11 +490,15 @@ impl FrameStack {
                         // on.
                         let f: CoroutineFn = unsafe { std::mem::transmute::<usize, CoroutineFn>(target) };
                         status = self.begin(heap, f, &args, &env);
+                        call_state::recycle_args(args);
                     }
                     // SAFETY: the word came from a compiled `apply` site,
                     // whose callee the checker typed as an `Fn`.
                     Pending::Apply { closure, args } => match unsafe { crate::resolve_closure(closure) } {
-                        crate::Callee::Coroutine { f, env } => status = self.begin(heap, f, &args, &env),
+                        crate::Callee::Coroutine { f, env } => {
+                            status = self.begin(heap, f, &args, &env);
+                            call_state::recycle_args(args);
+                        }
                         // Runs to completion by construction, so there is no
                         // frame to push — only an answer to hand back. The
                         // catch is `activation`'s, for its reason: this is a

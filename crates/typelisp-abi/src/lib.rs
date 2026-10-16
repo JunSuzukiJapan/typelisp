@@ -30,7 +30,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 2, 12) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 2, 13) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -362,6 +362,10 @@ pub mod call_state {
         /// What a frame is asking the driver to call, set immediately before
         /// it returns `STATUS_CALL`.
         static PENDING_CALL: RefCell<Option<Pending>> = const { RefCell::new(None) };
+        /// An emptied argument vector of a call already made, for the next
+        /// call's ([`args_buffer`], [`recycle_args`]) — a call that does not
+        /// allocate one of its own.
+        static SPARE_ARGS: RefCell<Vec<i64>> = const { RefCell::new(Vec::new()) };
         /// What a frame is asking to wait for, set immediately before it
         /// returns `STATUS_SUSPEND`: a `SUSPEND_*` kind and one payload word.
         ///
@@ -607,6 +611,20 @@ pub mod call_state {
     /// [`set_pending_call`] for a `:dyn` method call.
     pub fn set_pending_dyn(vtable: u32, slot: u32, args: Vec<i64>) {
         PENDING_CALL.with(|c| *c.borrow_mut() = Some(Pending::Dyn { vtable, slot, args }));
+    }
+
+    /// An empty vector to gather a call's arguments in, reusing the last one
+    /// [`recycle_args`] gave back.
+    pub fn args_buffer(capacity: usize) -> Vec<i64> {
+        let mut v = SPARE_ARGS.with(|s| std::mem::take(&mut *s.borrow_mut()));
+        v.clear();
+        v.reserve(capacity);
+        v
+    }
+
+    /// Gives a made call's argument vector back for [`args_buffer`].
+    pub fn recycle_args(args: Vec<i64>) {
+        SPARE_ARGS.with(|s| *s.borrow_mut() = args);
     }
 
     pub fn take_pending_call() -> Option<Pending> {
