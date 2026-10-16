@@ -1429,6 +1429,13 @@ impl<B: TaskBody> SchedShared<B> {
         Locked { guard, shared: self }
     }
 
+    /// Whether no task is ready and waiting to be run, and the program is
+    /// going on — so that a running task offering its turn may keep it.
+    fn nobody_waits(&self, heap: &mut Heap) -> bool {
+        let s = self.lock(heap);
+        !s.guard.stopped && s.ready.is_empty() && s.pinned_ready.is_empty()
+    }
+
     /// Stops the workers: each one returns from [`drive_worker`] the next
     /// time it looks for a task. A task one of them is stepping runs until
     /// it next stops.
@@ -1776,6 +1783,17 @@ fn run_one<B: TaskBody>(
             // Between steps the task's state is all in its frames and root
             // stack, so another thread's collection may run here.
             Progress::Running => heap.safepoint(),
+            // A turn offered — a loop's safepoint, a `(yield)` — that nobody
+            // is waiting for is declined here, without the task going back
+            // on the queue. Going back would mark the scheduler changed and
+            // wake every idle thread to find nothing to do, every few hundred
+            // iterations of a loop. A task that becomes ready meanwhile is an
+            // idle thread's to take; one that is due on the clock wakes the
+            // thread waiting for it.
+            Progress::Blocked(Waiting::Yield) if !every_step && shared.nobody_waits(heap) => {
+                deliver_to(heap, &mut slot, Ok(Value::Empty));
+                heap.safepoint();
+            }
             done => break done,
         }
     };

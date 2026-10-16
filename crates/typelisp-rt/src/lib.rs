@@ -1647,7 +1647,66 @@ pub unsafe extern "C" fn rt_frame_new(args: *const i64, argc: u32) -> i64 {
     if nslots < 0 {
         fatal(&format!("rt_frame_new: {} is not a slot count a frame can hold", nslots));
     }
-    encode(active_heap().alloc_frame(nslots as usize))
+    let (frame, raw) = active_heap().alloc_frame_raw(nslots as usize);
+    let word = encode(frame);
+    crate::coroutine::note_new_frame(word, raw);
+    word
+}
+
+/// `rt_frame_open(nslots, rooted, nrooted, out)` — everything a coroutine body
+/// does with the frame it makes on entry, in one call: allocate it with `nslots`
+/// slots, mark the `nrooted` slots listed at address `rooted` as holding
+/// tagged values, root it, and publish it to the driver. Returns the frame and
+/// writes the address of its words into `args[3]`.
+///
+/// One call where there were `rt_frame_new`, `rt_push_sexpr_root`,
+/// `rt_frame_entered`, an `rt_frame_mask_bit` per rooted slot, `rt_frame_data`
+/// and `rt_frame_pc` — on every call a program makes. Each of those is what
+/// the shim of the same name does; see them for why.
+///
+/// # Safety
+///
+/// `argc` must be `>= 4` and `args` must point to 4 writable `i64`s; `rooted`
+/// must point to `nrooted` slot numbers below `nslots`. A `Heap` must be
+/// registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_open(args: *const i64, argc: u32) -> i64 {
+    if argc < 4 {
+        fatal("rt_frame_open: expected 4 arguments (slot count, rooted slots, their count, out)");
+    }
+    let (nslots, rooted, nrooted) = (*args, *args.add(1) as usize as *const i64, *args.add(2));
+    if nslots < 0 || nrooted < 0 {
+        fatal(&format!("rt_frame_open: {} slots, {} of them rooted, is not a frame", nslots, nrooted));
+    }
+    let heap = active_heap();
+    let (frame, raw) = heap.alloc_frame_raw(nslots as usize);
+    for i in 0..nrooted as usize {
+        raw.set_mask_bit(*rooted.add(i) as usize);
+    }
+    heap.push_root(frame);
+    let word = encode(frame);
+    crate::coroutine::note_new_frame(word, raw);
+    typelisp_abi::call_state::set_current_frame(word);
+    *(args.add(3) as *mut i64) = raw.data() as i64;
+    word
+}
+
+/// `rt_frame_reopen(frame, out)` — what a coroutine body resumed on `frame`
+/// needs of it: returns the address of its words and writes its resume point
+/// into `args[1]`. `rt_frame_data` and `rt_frame_pc` in one call.
+///
+/// # Safety
+///
+/// `argc` must be `>= 2` and `args` must point to 2 writable `i64`s, the first
+/// the body's own frame; a `Heap` must be registered on this thread.
+#[no_mangle]
+pub unsafe extern "C" fn rt_frame_reopen(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_frame_reopen: expected 2 arguments (frame, out)");
+    }
+    let raw = crate::coroutine::frame_raw(active_heap(), *args);
+    *(args.add(1) as *mut i64) = raw.pc() as i64;
+    raw.data() as i64
 }
 
 /// `(rt-frame-mask-bit f idx)` for compiled code — marks slot `idx` of frame
@@ -1675,14 +1734,9 @@ pub unsafe extern "C" fn rt_frame_mask_bit(args: *const i64, argc: u32) -> i64 {
     if idx < 0 {
         fatal(&format!("rt_frame_mask_bit: {} is not a slot index", idx));
     }
-    let heap = active_heap();
-    match decode(*args) {
-        Value::Boxed(id) if heap.is_frame(id) => {
-            heap.set_frame_mask_bit(id, idx as usize);
-            0
-        }
-        other => fatal(&format!("rt_frame_mask_bit: {:?} is not a frame", other)),
-    }
+    // SAFETY: the frame is the caller's own, so live.
+    crate::coroutine::frame_raw(active_heap(), *args).set_mask_bit(idx as usize);
+    0
 }
 
 /// `(rt-frame-data f)` for compiled code — the address of frame `args[0]`'s
@@ -1706,11 +1760,7 @@ pub unsafe extern "C" fn rt_frame_data(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_frame_data: expected 1 argument");
     }
-    let heap = active_heap();
-    match decode(*args) {
-        Value::Boxed(id) if heap.is_frame(id) => heap.frame_data_ptr(id) as i64,
-        other => fatal(&format!("rt_frame_data: {:?} is not a frame", other)),
-    }
+    crate::coroutine::frame_raw(active_heap(), *args).data() as i64
 }
 
 /// `(rt-frame-entered f)` for compiled code — publishes the frame a prologue
@@ -1824,7 +1874,7 @@ pub unsafe extern "C" fn rt_frame_call(args: *const i64, argc: u32) -> i64 {
         fatal("rt_frame_call: expected at least 1 argument (the callee)");
     }
     let target = *args as usize;
-    let mut passed = Vec::with_capacity(argc as usize - 1);
+    let mut passed = typelisp_abi::call_state::args_buffer(argc as usize - 1);
     for i in 1..argc as usize {
         passed.push(*args.add(i));
     }
@@ -1851,7 +1901,7 @@ pub unsafe extern "C" fn rt_frame_apply(args: *const i64, argc: u32) -> i64 {
         fatal("rt_frame_apply: expected at least 1 argument (the callee)");
     }
     let closure = *args;
-    let mut passed = Vec::with_capacity(argc as usize - 1);
+    let mut passed = typelisp_abi::call_state::args_buffer(argc as usize - 1);
     for i in 1..argc as usize {
         passed.push(*args.add(i));
     }
@@ -1938,11 +1988,8 @@ pub unsafe extern "C" fn rt_frame_pc(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_frame_pc: expected 1 argument");
     }
-    let heap = active_heap();
-    match decode(*args) {
-        Value::Boxed(id) if heap.is_frame(id) => heap.frame_pc(id) as i64,
-        other => fatal(&format!("rt_frame_pc: {:?} is not a frame", other)),
-    }
+    // SAFETY: the frame is the caller's own, so live.
+    crate::coroutine::frame_raw(active_heap(), *args).pc() as i64
 }
 
 /// `(rt-frame-set-pc f n)` for compiled code — records where frame `args[0]`
@@ -1964,14 +2011,9 @@ pub unsafe extern "C" fn rt_frame_set_pc(args: *const i64, argc: u32) -> i64 {
     if !(0..=(u32::MAX as i64)).contains(&pc) {
         fatal(&format!("rt_frame_set_pc: {} is not a resume point", pc));
     }
-    let heap = active_heap();
-    match decode(*args) {
-        Value::Boxed(id) if heap.is_frame(id) => {
-            heap.set_frame_pc(id, pc as u32);
-            0
-        }
-        other => fatal(&format!("rt_frame_set_pc: {:?} is not a frame", other)),
-    }
+    // SAFETY: the frame is the caller's own, so live.
+    crate::coroutine::frame_raw(active_heap(), *args).set_pc(pc as u32);
+    0
 }
 
 /// `(rt-cell-get c)` for compiled code — the current contents of binding
@@ -1990,11 +2032,13 @@ pub unsafe extern "C" fn rt_cell_get(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_cell_get: expected 1 argument");
     }
-    let id = match decode(*args) {
-        Value::Boxed(id) if active_heap().is_cell(id) => id,
+    match decode(*args) {
+        Value::Boxed(id) => match active_heap().try_cell_get(id) {
+            Some(v) => encode(v),
+            None => fatal("rt_cell_get: argument is not a boxed cell"),
+        },
         _ => fatal("rt_cell_get: argument is not a boxed cell"),
-    };
-    encode(active_heap().cell_get(id))
+    }
 }
 
 /// `(rt-cell-set! c v)` for compiled code — overwrites binding cell
@@ -4984,15 +5028,14 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
         Value::Boxed(id) => id,
         other => fatal(&format!("apply: callee is not a function value: {:?}", other)),
     };
-    let heap = active_heap();
-    if !heap.is_compiled_closure(id) {
+    let mut captured = Vec::new();
+    let Some((fn_ptr, body_abi, mask)) = active_heap().compiled_closure_parts(id, &mut captured) else {
         return Callee::Interpreted;
-    }
-    let env_len = heap.compiled_closure_env_len(id);
-    let mask = heap.compiled_closure_mask(id);
-    let env: Vec<i64> = (0..env_len)
-        .map(|i| {
-            let v = heap.compiled_closure_env_get(id, i);
+    };
+    let env: Vec<i64> = captured
+        .into_iter()
+        .enumerate()
+        .map(|(i, v)| {
             if mask & (1 << i) != 0 {
                 encode(v)
             } else {
@@ -5003,8 +5046,7 @@ pub(crate) unsafe fn resolve_closure(closure: i64) -> Callee {
             }
         })
         .collect();
-    let fn_ptr = heap.compiled_closure_fnptr(id);
-    if heap.compiled_closure_body_abi(id) == typelisp_abi::BODY_ABI_COROUTINE {
+    if body_abi == typelisp_abi::BODY_ABI_COROUTINE {
         // SAFETY: `build-make-closure` only ever names a function it declared
         // under `coroutine_fn_type`, which is what `rt_coroutine_closure_new`
         // records by being the entry point that was called.

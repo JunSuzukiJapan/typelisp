@@ -987,14 +987,14 @@ struct CoroCtx {
     /// install the same handler (its entry, its exits, each cleanup copy) all
     /// name one id.
     handlers: Vec<(BasicBlock<'static>, u64)>,
-    /// The `br` ending `coro.fresh`, where the frame's mask bits are set — a
-    /// slot's mask bit is a fact about the frame, so it belongs on the path
-    /// that makes the frame, not on every resume.
-    fresh_end: InstructionValue<'static>,
-    /// The frame as `coro.fresh` knows it, for those mask bits.
-    fresh_frame: BasicValueEnum<'static>,
+    /// The `store`s of `rt_frame_open`'s rooted-slot table address and its
+    /// length, in `coro.fresh` — zero until `coroutine-end` knows the table. A
+    /// slot's mask bit is a fact about the frame, so it is set where the frame
+    /// is made, not on every resume.
+    rooted_table_store: InstructionValue<'static>,
+    rooted_len_store: InstructionValue<'static>,
     /// The slots handed out marked (`frame-slot-rooted`), whose bits
-    /// `coroutine-end` sets once every slot is known.
+    /// `coroutine-end` has `rt_frame_open` set once every slot is known.
     rooted: Vec<u64>,
     /// The `br` ending `coro.prologue`, to insert slot *addresses* before.
     ///
@@ -1352,18 +1352,25 @@ fn emit_rt_call(
 ///
 /// ```text
 /// entry:      %cell = alloca i64;  br (%param == 0), fresh, resumed
-/// fresh:      %f = rt_frame_new(0);  store %f -> %cell
-///             rt_push_sexpr_root(%f);  rt_frame_entered(%f);  br prologue
-/// resumed:    store %param -> %cell;  br prologue
-/// prologue:   %frame = load %cell;  %data = rt_frame_data(%frame)
-///             %pc = rt_frame_pc(%frame);  br dispatch
+/// fresh:      %f = rt_frame_open(N, ROOTED, K, out %d0);  store %f -> %cell
+///             br prologue
+/// resumed:    store %param -> %cell;  %d1 = rt_frame_reopen(%param, out %pc1)
+///             br prologue
+/// prologue:   %data = phi [%d0, fresh], [%d1, resumed]
+///             %pc = phi [0, fresh], [%pc1, resumed];  %frame = load %cell
+///             br dispatch
 /// dispatch:   (empty — `coroutine-end` writes the chain)
 /// body:       ...
 /// ```
 ///
-/// `rt_frame_entered` is how the driver learns the frame at all: it is made
-/// *inside* the callee, after the call has begun, so there is no other moment
-/// the caller could have been told.
+/// `rt_frame_open` makes the frame with its rooted slots' mask bits set (`N`,
+/// `ROOTED` and `K` are written in by `coroutine-end`, once every slot is
+/// known), roots it, and publishes it — which is how the driver learns the
+/// frame at all: it is made *inside* the callee, after the call has begun, so
+/// there is no other moment the caller could have been told. It is one call
+/// where there were six (`rt_frame_new`, `rt_push_sexpr_root`,
+/// `rt_frame_entered`, `rt_frame_mask_bit`s, `rt_frame_data`, `rt_frame_pc`),
+/// on the path every call takes.
 ///
 /// The root push has no pop here and its pop is not on this path — one push
 /// on first entry, one pop at the single return. Between them the function may
@@ -1392,13 +1399,9 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
 
     // The prologue owns its declarations for the same reason `frame-begin`
     // does: a module can reach here without having been through the driver.
-    let frame_new = ensure_declared(&module, "rt_frame_new");
-    let frame_data = ensure_declared(&module, "rt_frame_data");
-    let frame_pc = ensure_declared(&module, "rt_frame_pc");
-    let entered = ensure_declared(&module, "rt_frame_entered");
-    let push_root = ensure_declared(&module, "rt_push_sexpr_root");
+    let frame_open = ensure_declared(&module, "rt_frame_open");
+    let frame_reopen = ensure_declared(&module, "rt_frame_reopen");
     ensure_declared(&module, "rt_pop_sexpr_root");
-    ensure_declared(&module, "rt_frame_mask_bit");
     ensure_declared(&module, "rt_frame_set_pc");
     ensure_declared(&module, "rt_frame_call");
     ensure_declared(&module, "rt_pending_arg");
@@ -1432,48 +1435,80 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
         .map_err(|e| err("icmp", e.to_string()))?;
     b.build_conditional_branch(is_first, fresh, resumed).map_err(|e| err("br", e.to_string()))?;
 
-    // fresh — make the frame this activation runs in. The size is a
-    // placeholder; `coroutine-end` writes the true count in.
+    // fresh — make the frame this activation runs in, in one call
+    // (`rt_frame_open`). The size and the rooted-slot table are placeholders;
+    // `coroutine-end` writes them in. The fourth word comes back holding the
+    // address of the frame's words.
     b.position_at_end(fresh);
-    let size_args = entry_alloca(&b, i64t.array_type(1), "frame_size_args").map_err(|e| err("alloca", e))?;
-    let size_slot = unsafe {
-        b.build_gep(i64t, size_args, &[i64t.const_int(0, false)], "frame_size_slot")
-            .map_err(|e| err("gep", e.to_string()))?
+    let open_args = entry_alloca(&b, i64t.array_type(4), "frame_open_args").map_err(|e| err("alloca", e))?;
+    let open_word = |n: u64, name: &str| unsafe {
+        b.build_gep(i64t, open_args, &[i64t.const_int(n, false)], name).map_err(|e| err("gep", e.to_string()))
     };
     let size_store =
-        b.build_store(size_slot, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
+        b.build_store(open_word(0, "frame_size_slot")?, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
+    let rooted_table_store =
+        b.build_store(open_word(1, "frame_rooted_slot")?, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
+    let rooted_len_store =
+        b.build_store(open_word(2, "frame_nrooted_slot")?, i64t.const_int(0, false)).map_err(|e| err("store", e.to_string()))?;
     let made = match b
-        .build_call(frame_new, &[size_args.into(), ctx.i32_type().const_int(1, false).into()], "frame")
-        .map_err(|e| err("call rt_frame_new", e.to_string()))?
+        .build_call(frame_open, &[open_args.into(), ctx.i32_type().const_int(4, false).into()], "frame")
+        .map_err(|e| err("call rt_frame_open", e.to_string()))?
         .try_as_basic_value()
     {
         inkwell::values::ValueKind::Basic(v) => v,
         inkwell::values::ValueKind::Instruction(_) => {
-            return Err(EvalError::Internal(format!("{}: rt_frame_new returned no value", what)))
+            return Err(EvalError::Internal(format!("{}: rt_frame_open returned no value", what)))
         }
     };
     b.build_store(cell, made).map_err(|e| err("store", e.to_string()))?;
-    emit_rt_call(&b, push_root, &[made], "frame_root", what)?;
-    emit_rt_call(&b, entered, &[made], "frame_entered", what)?;
-    let fresh_end = b.build_unconditional_branch(prologue).map_err(|e| err("br", e.to_string()))?;
+    let fresh_data = b
+        .build_load(i64t, open_word(3, "frame_data_out")?, "fresh_data")
+        .map_err(|e| err("load", e.to_string()))?
+        .into_int_value();
+    b.build_unconditional_branch(prologue).map_err(|e| err("br", e.to_string()))?;
 
-    // resumed — the driver handed back the frame we made last time.
+    // resumed — the driver handed back the frame we made last time: where its
+    // words are and where to resume, in one call (`rt_frame_reopen`).
     b.position_at_end(resumed);
     b.build_store(cell, param).map_err(|e| err("store", e.to_string()))?;
+    let reopen_args = entry_alloca(&b, i64t.array_type(2), "frame_reopen_args").map_err(|e| err("alloca", e))?;
+    let reopen_word = |n: u64, name: &str| unsafe {
+        b.build_gep(i64t, reopen_args, &[i64t.const_int(n, false)], name).map_err(|e| err("gep", e.to_string()))
+    };
+    b.build_store(reopen_word(0, "frame_reopen_frame")?, param).map_err(|e| err("store", e.to_string()))?;
+    let resumed_data = match b
+        .build_call(frame_reopen, &[reopen_args.into(), ctx.i32_type().const_int(2, false).into()], "resumed_data")
+        .map_err(|e| err("call rt_frame_reopen", e.to_string()))?
+        .try_as_basic_value()
+    {
+        inkwell::values::ValueKind::Basic(v) => v.into_int_value(),
+        inkwell::values::ValueKind::Instruction(_) => {
+            return Err(EvalError::Internal(format!("{}: rt_frame_reopen returned no value", what)))
+        }
+    };
+    let resumed_pc = b
+        .build_load(i64t, reopen_word(1, "frame_pc_out")?, "resumed_pc")
+        .map_err(|e| err("load", e.to_string()))?
+        .into_int_value();
     b.build_unconditional_branch(prologue).map_err(|e| err("br", e.to_string()))?;
 
     // prologue — the one block both entries reach, so the only place the
-    // frame and its data pointer can be defined.
+    // frame and its data pointer can be defined. A fresh entry starts at the
+    // top (`pc` 0).
     b.position_at_end(prologue);
+    let data_word = b.build_phi(i64t, "frame_data").map_err(|e| err("phi", e.to_string()))?;
+    data_word.add_incoming(&[(&fresh_data, fresh), (&resumed_data, resumed)]);
+    let pc_phi = b.build_phi(i64t, "frame_pc").map_err(|e| err("phi", e.to_string()))?;
+    pc_phi.add_incoming(&[(&i64t.const_int(0, false), fresh), (&resumed_pc, resumed)]);
+    let pc = pc_phi.as_basic_value().into_int_value();
     let frame = b.build_load(i64t, cell, "coro_frame").map_err(|e| err("load", e.to_string()))?;
-    let data_word = emit_rt_call(&b, frame_data, &[frame], "frame_data", what)?
-        .ok_or_else(|| EvalError::Internal(format!("{}: rt_frame_data returned no value", what)))?;
     let data = b
-        .build_int_to_ptr(data_word.into_int_value(), ctx.ptr_type(inkwell::AddressSpace::default()), "frame_ptr")
+        .build_int_to_ptr(
+            data_word.as_basic_value().into_int_value(),
+            ctx.ptr_type(inkwell::AddressSpace::default()),
+            "frame_ptr",
+        )
         .map_err(|e| err("inttoptr", e.to_string()))?;
-    let pc = emit_rt_call(&b, frame_pc, &[frame], "frame_pc", what)?
-        .ok_or_else(|| EvalError::Internal(format!("{}: rt_frame_pc returned no value", what)))?
-        .into_int_value();
     let prologue_end = b.build_unconditional_branch(dispatch).map_err(|e| err("br", e.to_string()))?;
 
     // dispatch stays empty until every call site has claimed its id.
@@ -1497,8 +1532,8 @@ fn llvm_builder_coroutine_begin(args: &[Value]) -> Result<Value, EvalError> {
                     pc,
                     resumes: Vec::new(),
                     handlers: Vec::new(),
-                    fresh_end,
-                    fresh_frame: made,
+                    rooted_table_store,
+                    rooted_len_store,
                     rooted: Vec::new(),
                     prologue_end,
                 }),
@@ -1831,7 +1866,7 @@ fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
     if !f.size_store.set_operand(0, i64t.const_int(f.next, false)) {
         return Err(EvalError::Internal(format!("{}: could not write the slot count into the prologue", what)));
     }
-    set_mask_bits(&b, &module, &coro).map_err(|e| err("mask bits", e))?;
+    set_rooted_table(&module, &coro).map_err(|e| err("rooted slots", e))?;
 
     // The dispatch chain: `pc == 0` is a fresh entry, anything else names a
     // call site. The last arm is unconditional — `pc` is only ever written by
@@ -1854,11 +1889,10 @@ fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
     Ok(Value::Empty)
 }
 
-/// Sets the mask bit of every slot in `coro.rooted`, on the way out of
-/// `coro.fresh`: a loop over a constant table of the slot numbers, one
-/// `rt_frame_mask_bit` call per turn.
+/// Hands `rt_frame_open` the slots in `coro.rooted`, as a constant table of
+/// their numbers: the frame is made with their mask bits already set.
 ///
-/// A loop rather than a call per slot, because a long body has a rooted slot
+/// A table rather than a call per slot, because a long body has a rooted slot
 /// for nearly every value it keeps in the frame, and a straight line of that
 /// many calls is one block that code generation's scheduler and register
 /// allocator take time to the square of. The table grows with the body; the
@@ -1867,7 +1901,7 @@ fn llvm_builder_coroutine_end(args: &[Value]) -> Result<Value, EvalError> {
 /// Setting a bit before the slot is written is safe by construction: an
 /// untouched slot reads as a raw `0`, whose low bits are `TAG_FIXNUM`, so the
 /// collector follows nothing.
-fn set_mask_bits(b: &Builder<'static>, module: &Rc<RefCell<Module<'static>>>, coro: &CoroCtx) -> Result<(), String> {
+fn set_rooted_table(module: &Rc<RefCell<Module<'static>>>, coro: &CoroCtx) -> Result<(), String> {
     if coro.rooted.is_empty() {
         return Ok(());
     }
@@ -1882,35 +1916,12 @@ fn set_mask_bits(b: &Builder<'static>, module: &Rc<RefCell<Module<'static>>>, co
     table.set_constant(true);
     table.set_linkage(inkwell::module::Linkage::Private);
     table.set_unnamed_addr(true);
-    drop(m);
-    let mask_fn = ensure_declared(module, "rt_frame_mask_bit");
-
-    // `coro.fresh` ends `br coro.prologue`; the loop goes in between.
-    let fresh = coro.fresh_end.get_parent().ok_or("coro.fresh has no block")?;
-    let prologue = coro.fresh_end.get_operand(0).and_then(|o| o.block()).ok_or("coro.fresh does not end in a branch")?;
-    let turn = ctx.insert_basic_block_after(fresh, "coro.mask");
-    let done = ctx.insert_basic_block_after(turn, "coro.mask_done");
-    coro.fresh_end.erase_from_basic_block();
-    b.position_at_end(fresh);
-    b.build_unconditional_branch(turn).map_err(|e| e.to_string())?;
-
-    b.position_at_end(turn);
-    let i = b.build_phi(i64t, "mask_i").map_err(|e| e.to_string())?;
-    let i_val = i.as_basic_value().into_int_value();
-    let at = unsafe {
-        b.build_gep(table_ty, table.as_pointer_value(), &[i64t.const_zero(), i_val], "mask_entry").map_err(|e| e.to_string())?
-    };
-    let slot = b.build_load(i64t, at, "mask_slot").map_err(|e| e.to_string())?;
-    emit_rt_call(b, mask_fn, &[coro.fresh_frame, slot], "mask", "coroutine-end").map_err(|e| format!("{:?}", e))?;
-    let next = b.build_int_add(i_val, i64t.const_int(1, false), "mask_next").map_err(|e| e.to_string())?;
-    let more = b
-        .build_int_compare(inkwell::IntPredicate::ULT, next, i64t.const_int(coro.rooted.len() as u64, false), "mask_more")
-        .map_err(|e| e.to_string())?;
-    b.build_conditional_branch(more, turn, done).map_err(|e| e.to_string())?;
-    i.add_incoming(&[(&i64t.const_zero(), fresh), (&next, turn)]);
-
-    b.position_at_end(done);
-    b.build_unconditional_branch(prologue).map_err(|e| e.to_string())?;
+    if !coro.rooted_table_store.set_operand(0, table.as_pointer_value().const_to_int(i64t)) {
+        return Err("could not write the table's address into the prologue".to_string());
+    }
+    if !coro.rooted_len_store.set_operand(0, i64t.const_int(coro.rooted.len() as u64, false)) {
+        return Err("could not write the table's length into the prologue".to_string());
+    }
     Ok(())
 }
 

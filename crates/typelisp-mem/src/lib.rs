@@ -20,7 +20,7 @@ pub mod tuple;
 pub mod value;
 
 pub use errors::{Error, Loc, LIBRARY_FILE};
-pub use heap::{Heap, RootScope, RootStackId};
+pub use heap::{FrameRaw, Heap, RootScope, RootStackId};
 pub use names::{ConcreteNames, TypeKey};
 pub use stack::grow_stack;
 pub use option::{is_niched_option_key, option_payload_niches, option_prints_wrapped};

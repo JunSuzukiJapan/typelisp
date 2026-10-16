@@ -113,6 +113,99 @@ struct RootStack {
     in_flight_throw: Option<Value>,
 }
 
+/// Where a compiled frame's parts are: its words, its mask and its resume
+/// point — for reading and writing them without taking the box table's lock,
+/// which the frame operations of every call used to take a dozen times.
+///
+/// Valid for as long as the frame is: a frame's slot never moves (the box
+/// table's chunks are never relocated) and its arrays are never resized. Only
+/// the activation running a frame touches it, and a collection reads it only
+/// while every thread is stopped — so these are as exclusive as the lock
+/// would have made them. Using one after its frame was freed
+/// ([`Heap::free_frame`]) is the caller's bug.
+#[derive(Clone, Copy, Debug)]
+pub struct FrameRaw {
+    words: *mut i64,
+    len: usize,
+    mask: *mut u64,
+    pc: *mut u32,
+}
+
+// SAFETY: the pointers are into the shared heap, which every thread may use;
+// see the type's documentation for who may use them when.
+unsafe impl Send for FrameRaw {}
+unsafe impl Sync for FrameRaw {}
+
+impl FrameRaw {
+    fn of(slot: &mut Option<BoxedObj>) -> FrameRaw {
+        match slot {
+            Some(BoxedObj::Frame { words, mask, pc }) => FrameRaw {
+                words: words.as_mut_ptr(),
+                len: words.len(),
+                mask: mask.as_mut_ptr(),
+                pc: pc as *mut u32,
+            },
+            _ => panic!("BoxId does not hold a Frame"),
+        }
+    }
+
+    /// The address of the word array.
+    pub fn data(self) -> *mut i64 {
+        self.words
+    }
+
+    pub fn len(self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    /// # Safety
+    ///
+    /// The frame must still be live.
+    pub unsafe fn word(self, idx: usize) -> i64 {
+        assert!(idx < self.len, "frame slot {} out of range", idx);
+        *self.words.add(idx)
+    }
+
+    /// # Safety
+    ///
+    /// The frame must still be live.
+    pub unsafe fn set_word(self, idx: usize, w: i64) {
+        assert!(idx < self.len, "frame slot {} out of range", idx);
+        *self.words.add(idx) = w;
+    }
+
+    /// [`Heap::set_frame_mask_bit`] without the lock.
+    ///
+    /// # Safety
+    ///
+    /// The frame must still be live.
+    pub unsafe fn set_mask_bit(self, idx: usize) {
+        assert!(idx < self.len, "frame slot {} out of range", idx);
+        *self.mask.add(idx / 64) |= 1u64 << (idx % 64);
+    }
+
+    /// # Safety
+    ///
+    /// The frame must still be live.
+    pub unsafe fn pc(self) -> u32 {
+        *self.pc
+    }
+
+    /// # Safety
+    ///
+    /// The frame must still be live.
+    pub unsafe fn set_pc(self, pc: u32) {
+        *self.pc = pc;
+    }
+}
+
+/// How many freed frames' arrays a view keeps for reuse ([`Heap::free_frame`]).
+const FRAME_POOL_LEN: usize = 64;
+
 /// Entries per [`Slab`] chunk — a power of two so the chunk/offset split is a
 /// shift and a mask rather than a division.
 const SLAB_CHUNK_SHIFT: u32 = 10;
@@ -552,6 +645,10 @@ pub struct Heap {
     // `shared.root_stacks` keeps this valid across that `Vec` reallocating —
     // the same reasoning applies whether the `Vec` sits behind a lock or not.
     current: *mut RootStack,
+    // The arrays of frames this view freed ([`Heap::free_frame`]), for the
+    // next frames it allocates: a call makes a frame and a return frees it,
+    // so without these every call went to the allocator twice and back twice.
+    frame_pool: Vec<(Vec<i64>, Vec<u64>)>,
     // Symbols are *not* here: they live in one process-global, permanent
     // table (`super::symbols`), so a symbol means the same thing in every
     // heap and compiled code can reach one without an active `Heap` at all.
@@ -635,6 +732,7 @@ impl Heap {
             home_stack: 0,
             current_stack: 0,
             current,
+            frame_pool: Vec::new(),
         };
         for key in crate::value::BUILTIN_TYPE_KEYS {
             heap.intern_type_key(key);
@@ -670,6 +768,7 @@ impl Heap {
             home_stack: 0,
             current_stack: 0,
             current: ptr::null_mut(),
+            frame_pool: Vec::new(),
         };
         let home = heap.new_root_stack();
         heap.home_stack = home.0;
@@ -1827,6 +1926,15 @@ impl Heap {
     /// True if `id` holds a `BoxedObj::Cell` — the peer of
     /// [`is_struct`](Self::is_struct)/[`is_hashtable`](Self::is_hashtable)
     /// for callers that decode a `Value::Boxed` without knowing its kind.
+    /// [`cell_get`](Self::cell_get), or `None` when `id` does not hold a cell
+    /// — the check and the read under one lock.
+    pub fn try_cell_get(&self, id: BoxId) -> Option<Value> {
+        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
+            Some(BoxedObj::Cell(v)) => Some(*v),
+            _ => None,
+        }
+    }
+
     pub fn is_cell(&self, id: BoxId) -> bool {
         matches!(self.shared.boxes.read_recursive().slots[id.0 as usize], Some(BoxedObj::Cell(_)))
     }
@@ -1908,6 +2016,27 @@ impl Heap {
 
     // ---- compiled frames --------------------------------------------------
 
+    /// [`alloc_frame`](Self::alloc_frame), also handing back where the new
+    /// frame's parts are ([`FrameRaw`]) — taken under the same lock.
+    pub fn alloc_frame_raw(&mut self, nslots: usize) -> (Value, FrameRaw) {
+        self.debug_assert_not_native("alloc_frame_raw");
+        let (mut words, mut mask) = self.frame_pool.pop().unwrap_or_default();
+        words.clear();
+        words.resize(nslots, 0);
+        mask.clear();
+        mask.resize(nslots.div_ceil(64), 0);
+        let mut boxes = self.shared.boxes.write();
+        let idx = boxes.alloc(BoxedObj::Frame { words, mask, pc: 0 });
+        let raw = FrameRaw::of(&mut boxes.slots[idx as usize]);
+        (Value::Boxed(BoxId(idx)), raw)
+    }
+
+    /// Where frame `id`'s parts are ([`FrameRaw`]). Panics if `id` does not
+    /// hold a frame.
+    pub fn frame_raw(&mut self, id: BoxId) -> FrameRaw {
+        FrameRaw::of(&mut self.shared.boxes.write().slots[id.0 as usize])
+    }
+
     /// Allocate a compiled function's activation record: `nslots` words, all
     /// zero, and an all-clear mask. See [`BoxedObj::Frame`].
     ///
@@ -1930,6 +2059,35 @@ impl Heap {
     pub fn alloc_frame(&mut self, nslots: usize) -> Value {
         let words = nslots.div_ceil(64);
         self.alloc_boxed(BoxedObj::Frame { words: vec![0; nslots], mask: vec![0; words], pc: 0 })
+    }
+
+    /// Gives back the box of a frame whose activation is over — popped by
+    /// the driver on return, or left on an unwind.
+    ///
+    /// A frame is referred to by nothing but its own chain: the caller's frame
+    /// does not point at the callee's, a closure captures cells rather than
+    /// the frame, and the prologue's root is popped by the single return (an
+    /// unwind cuts the root stack back past it first). So once the driver has
+    /// read the answer out of it, nothing can reach it — and waiting for a
+    /// collection to find that out kept every frame of a call-heavy program
+    /// that allocates no cons cells alive at once: `fib` of 32 held 1.4GB.
+    ///
+    /// Panics if `id` does not hold a frame.
+    pub fn free_frame(&mut self, id: BoxId) {
+        let freed = {
+            let mut boxes = self.shared.boxes.write();
+            let freed = match boxes.slots[id.0 as usize].take() {
+                Some(BoxedObj::Frame { words, mask, .. }) => (words, mask),
+                _ => panic!("BoxId does not hold a Frame"),
+            };
+            boxes.free.push(id.0);
+            freed
+        };
+        // As many as a chain this deep needs at once; a deeper one's are
+        // given back to the allocator.
+        if self.frame_pool.len() < FRAME_POOL_LEN {
+            self.frame_pool.push(freed);
+        }
     }
 
     /// True if `id` holds a [`BoxedObj::Frame`].
@@ -2026,14 +2184,6 @@ impl Heap {
     pub fn frame_pc(&self, id: BoxId) -> u32 {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::Frame { pc, .. }) => *pc,
-            _ => panic!("BoxId does not hold a Frame"),
-        }
-    }
-
-    /// Sets the resume point. Panics like [`frame_word`](Self::frame_word).
-    pub fn set_frame_pc(&mut self, id: BoxId, pc: u32) {
-        match &mut self.shared.boxes.write().slots[id.0 as usize] {
-            Some(BoxedObj::Frame { pc: slot, .. }) => *slot = pc,
             _ => panic!("BoxId does not hold a Frame"),
         }
     }
@@ -2182,6 +2332,19 @@ impl Heap {
     /// A compiled closure's capture mask — bit `i` set means env slot `i`
     /// holds a real tagged value (see [`BoxedObj::CompiledClosure`]).
     /// Panics like [`compiled_closure_fnptr`](Self::compiled_closure_fnptr).
+    /// A compiled closure's function, its body ABI, its capture mask and its
+    /// captures (appended to `env`) — or `None` when `id` does not hold one.
+    /// What applying it needs, under one lock rather than one per part.
+    pub fn compiled_closure_parts(&self, id: BoxId, env: &mut Vec<Value>) -> Option<(usize, u8, u64)> {
+        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
+            Some(BoxedObj::CompiledClosure { fn_ptr, env: captured, sexpr_mask, body_abi }) => {
+                env.extend_from_slice(captured);
+                Some((*fn_ptr, *body_abi, *sexpr_mask))
+            }
+            _ => None,
+        }
+    }
+
     pub fn compiled_closure_mask(&self, id: BoxId) -> u64 {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::CompiledClosure { sexpr_mask, .. }) => *sexpr_mask,
