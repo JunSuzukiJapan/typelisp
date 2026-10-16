@@ -118,10 +118,88 @@ TypeLisp は静的型付きの Lisp です。
 (main)
 ```
 
+### Task
+
+```
+(defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
+  (doiter (n jobs)
+    (sleep 0.1)
+    (send results (format false "~a: ~d * ~d = ~d" name n n (* n n)))))
+
+(defun main () ()
+  (let ((jobs (the Chan<int> (Chan::new 0)))
+        (results (the Chan<string> (Chan::new 10))))
+    (task (worker "A" jobs results))
+    (task (worker "B" jobs results))
+    (dotimes (i 4)
+      (send jobs (+ i 1)))
+    (close jobs)
+    (dotimes (i 4)
+      (println "~a" (unwrap (recv results))))))
+
+(main)
+```
+
+### nil の代わりに Option と Result
+
+`nil` はありません。値が無いかもしれないときは `Option<T>`、失敗するかもしれないときは
+`Result<T,E>` を返し、`match` で中身を取り出します。
+
+```
+(defun find-user ((id int)) Option<string>
+  (case id
+    (1 (Option::some "alice"))
+    (2 (Option::some "bob"))
+    (else (Option::none))))
+
+(defun parse-port ((s string)) Result<int,string>
+  (match (parse-int s)
+    ((ok n) (if (<= 1 n 65535)
+                (Result::ok n)
+                (Result::err (format false "port out of range: ~a" n))))
+    ((err e) (Result::err (message e)))))
+
+(match (find-user 3)
+  ((some name) (println "user: ~a" name))
+  ((none) (println "not found")))        ; not found
+
+(match (parse-port "99999")
+  ((ok p) (println "port ~a" p))
+  ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+`Option<string>` を `string` として使ったり、`match` で `none` の場合を書き忘れたりすると、
+実行する前に型エラーになります。
+
+### 型検査されるマクロ
+
+マクロは Common Lisp と同じ `defmacro`、準クオート、`gensym` で書けます。展開した結果も
+普通のコードと同じように型検査されます。
+
+```
+(defmacro swap (a b)
+  (let ((tmp (gensym "tmp")))
+    `(let ((,tmp ,a))
+       (setf ,a ,b)
+       (setf ,b ,tmp))))
+
+(let ((x 1) (y 2))
+  (swap x y)
+  (println "x=~a y=~a" x y))             ; x=2 y=1
+```
+
+展開した結果が型に合わなければ、マクロを呼んだ場所でエラーになります。
+
+```
+(defmacro add-a (x) `(+ ,x "a"))
+(add-a 1)
+;; error: type error: type mismatch: expected `int`, found `string`
+```
+
 ### そのほかの例
 
-[examples/](examples/) にあるプログラムは、ファイル名を指定して実行できます。上の wc と Trait の例も
-[examples/wc.typl](examples/wc.typl) と [examples/animals.typl](examples/animals.typl) にあります。
+[examples/](examples/) にあるプログラムは、ファイル名を指定して実行できます。上の wc、Trait、Task の例も
+[examples/wc.typl](examples/wc.typl)、[examples/animals.typl](examples/animals.typl)、[examples/tasks.typl](examples/tasks.typl) にあります。
 
 ```sh
 typl examples/fizzbuzz.typl
@@ -137,6 +215,7 @@ typl examples/wc.typl README_JP.md
 | [game_of_life.typl](examples/game_of_life.typl) | ライフゲーム |
 | [maze_bfs.typl](examples/maze_bfs.typl) | 迷路の最短経路（幅優先探索） |
 | [primes.typl](examples/primes.typl) | エラトステネスの篩 |
+| [tasks.typl](examples/tasks.typl) | タスクとチャネルで仕事を分ける |
 
 [examples/projects/](examples/projects/) には、複数のファイルに分かれたプログラムがあります。
 `src/main.typl` を指定して実行します（例: `typl examples/projects/todo-cli/src/main.typl`）。
