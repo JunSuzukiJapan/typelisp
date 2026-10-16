@@ -326,6 +326,13 @@ With `--release` it is a release build, which removes the output for investigati
 typl --release -c foo.typl
 ```
 
+`-O0` to `-O3` set the optimization level (the default is `-O0`, which does not optimize). This too is
+an option of `typl` as a whole.
+
+```sh
+typl -O2 -c foo.typl
+```
+
 The executables are linked against the static library `libtypelisp_front.a`. A release build of
 `typl` (including one installed with `cargo install`) carries this library inside itself and writes
 it out to `~/.typelisp/lib/<build ID>/` the first time it compiles; from then on it uses the copy it

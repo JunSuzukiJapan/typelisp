@@ -31,7 +31,6 @@ use std::sync::{Condvar, Mutex, OnceLock};
 use inkwell::llvm_sys;
 use inkwell::module::Module;
 use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetData, TargetMachine, TargetTriple};
-use inkwell::OptimizationLevel;
 
 use llvm_sys::error::{LLVMDisposeErrorMessage, LLVMErrorRef, LLVMGetErrorMessage};
 use llvm_sys::orc2::lljit::{
@@ -105,7 +104,11 @@ fn codegen_helpers() -> [(&'static str, usize); 15] {
 /// The process's `LLJIT`, and the `TargetMachine` that makes its objects.
 struct Jit {
     jit: LLVMOrcLLJITRef,
-    machine: TargetMachine,
+    /// A target machine per optimization level ([`crate::opt_level`]), made
+    /// the first time a module is emitted at that level — the level is a
+    /// property of the machine, and the process may ask for any of them.
+    machines: [OnceLock<TargetMachine>; crate::opt_level::MAX as usize + 1],
+    target: Target,
     /// The `LLJIT`'s data layout, set on every module before it is emitted.
     layout: String,
     triple: TargetTriple,
@@ -113,8 +116,8 @@ struct Jit {
     mach_o: bool,
 }
 
-// SAFETY: `LLJIT` is safe to use from any thread. The `TargetMachine` is used
-// only by `JitCode::new`, whose callers hold `COMPILE_LOCK`.
+// SAFETY: `LLJIT` is safe to use from any thread. The `TargetMachine`s are
+// made and used only by `JitCode::new`, whose callers hold `COMPILE_LOCK`.
 unsafe impl Send for Jit {}
 unsafe impl Sync for Jit {}
 
@@ -183,9 +186,7 @@ fn jit() -> Result<&'static Jit, String> {
         };
         let triple = TargetTriple::create(&triple);
         let target = Target::from_triple(&triple).map_err(|e| e.to_string())?;
-        let machine = target
-            .create_target_machine(&triple, "", "", OptimizationLevel::None, RelocMode::PIC, CodeModel::Default)
-            .ok_or_else(|| format!("failed to create a target machine for `{}`", triple))?;
+        let machine = create_machine(&target, &triple, 0)?;
         let ours = machine.get_target_data().get_data_layout().as_str().to_string_lossy().into_owned();
         if ours != layout {
             return Err(format!(
@@ -194,13 +195,31 @@ fn jit() -> Result<&'static Jit, String> {
             ));
         }
         let mach_o = triple.as_str().to_string_lossy().contains("-apple-");
-        Ok(Jit { jit, machine, layout, triple, mach_o })
+        let machines: [OnceLock<TargetMachine>; crate::opt_level::MAX as usize + 1] = Default::default();
+        let _ = machines[0].set(machine);
+        Ok(Jit { jit, machines, target, layout, triple, mach_o })
     })
     .as_ref()
     .map_err(|e| e.clone())
 }
 
+fn create_machine(target: &Target, triple: &TargetTriple, level: u8) -> Result<TargetMachine, String> {
+    target
+        .create_target_machine(triple, "", "", super::optimize::level_of(level), RelocMode::PIC, CodeModel::Default)
+        .ok_or_else(|| format!("failed to create a target machine for `{}`", triple))
+}
+
 impl Jit {
+    /// The target machine for the recorded optimization level.
+    fn machine(&self) -> Result<&TargetMachine, String> {
+        let level = crate::opt_level::opt_level();
+        let cell = &self.machines[level as usize];
+        if cell.get().is_none() {
+            let _ = cell.set(create_machine(&self.target, &self.triple, level)?);
+        }
+        Ok(cell.get().expect("set just above"))
+    }
+
     /// `name` as the object file spells it (Mach-O prefixes `_`), interned.
     /// The caller owns the returned reference.
     fn intern(&self, name: &str) -> Result<LLVMOrcSymbolStringPoolEntryRef, String> {
@@ -419,10 +438,12 @@ impl JitCode {
         module.set_triple(&jit.triple);
         module.set_data_layout(&TargetData::create(&jit.layout).get_data_layout());
         super::codegen_prep::prepare(module)?;
+        let machine = jit.machine()?;
+        super::optimize::run_llvm_passes(module, machine)?;
         if jit.mach_o {
             end_unwind_table(module)?;
         }
-        let object = jit.machine.write_to_memory_buffer(module, FileType::Object).map_err(|e| e.to_string())?;
+        let object = machine.write_to_memory_buffer(module, FileType::Object).map_err(|e| e.to_string())?;
         for warning in super::codegen_prep::take_frame_warnings() {
             eprintln!("{}", warning);
         }

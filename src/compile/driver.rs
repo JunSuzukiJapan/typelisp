@@ -412,6 +412,12 @@ pub fn run_compile_function(
     // waiting for the method to move to the backend; the move happened, and
     // this file is the backend.)
     crate::compile::install_llvm_backend();
+    let mut heap = RootScope::new(heap);
+    heap.push_root(param_list);
+    heap.push_root(body_sexpr);
+    let body_sexpr = optimize_ir(interp, &mut heap, body_sexpr)?;
+    heap.push_root(body_sexpr);
+    let heap = &mut *heap;
     let compiler_path = Path::root("compile-function");
     let argv = vec![
         crate::compile::llvm_builtins::llvm_module_value_rc(module),
@@ -441,6 +447,32 @@ pub fn run_compile_function(
     }
     interp.enter(heap, &compiler_def, argv)?;
     Ok(())
+}
+
+/// `body_sexpr` after the island's IR passes (`optimize-ir` in
+/// `compiler.rs`) at the recorded optimization level ([`crate::opt_level`]);
+/// `body_sexpr` itself at `0`, where there are none.
+///
+/// Run like `compile-function`: natively once the island is installed, and
+/// interpreted only by the bootstrap that builds it — which runs at `0`, so
+/// that what it builds does not depend on the level of whoever ran it.
+fn optimize_ir(interp: &Interp, heap: &mut Heap, body_sexpr: Value) -> Result<Value, EvalError> {
+    let level = crate::opt_level::opt_level();
+    if level == 0 {
+        return Ok(body_sexpr);
+    }
+    let def = interp.root.borrow().get_fn(&Path::root("optimize-ir")).ok_or_else(|| {
+        EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
+    })?;
+    let argv = vec![Value::Int(level as i64), body_sexpr];
+    let compiled = def.compiled.borrow().clone();
+    match compiled {
+        Some(cf) => {
+            let (param_reprs, ret) = def.sig.as_ref().expect("the compiler body always has a signature");
+            interp.call_compiled(heap, cf.as_ref(), &argv, param_reprs, ret)
+        }
+        None => interp.enter(heap, &def, argv),
+    }
 }
 
 /// AOT-only counterpart of [`crate::eval::interp::Interp::add_compiled_function`]: compiles a

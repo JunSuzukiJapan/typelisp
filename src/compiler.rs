@@ -5932,6 +5932,250 @@ const SOURCE_TEMPLATE: &str = r#"
             (position-at-end builder merge-block)
             (load-raw builder slot 0))))))
 
+;; ---------------------------------------------------------------------------
+;; The IR passes: `-O1` and up.
+;;
+;; `optimize-ir` rewrites a function's body before `compile-function` sees
+;; it. The driver hands it the process's optimization level
+;; (`typelisp::opt_level`) and calls it only from `1` on. What is done here is
+;; what LLVM cannot do for itself, because what it looks at is gone by the
+;; time the code is LLVM's: an `int` operation is a call into the runtime
+;; there, and a `let` binding a slot the GC reads.
+;;
+;; - A `let` binding of a literal whose name the body only reads is dropped,
+;;   and every read becomes the literal.
+;; - `int` `+`/`-`/`*` and comparisons on two literals are computed, when the
+;;   result is a fixnum.
+;; - An `if` on a literal `bool` becomes the branch it takes -- unless that
+;;   branch can leave its block (`break`, `return`, ...): only `if` itself
+;;   compiles such a branch in every position.
+;;
+;; The walk is over every cell rather than node by node -- a node can be the
+;; tail of a cell, as in a call's `(KIND . NODE)` arguments -- and a rewrite
+;; recognizes its node by the tag *and* the whole shape. A name is replaced
+;; only when every atom spelling it in the body is the name of a `var` read:
+;; anything else (a `set`, a shadowing binding, a closure capturing it, a
+;; pattern) leaves the binding as it is.
+
+(defsignature opt-node (Option<Sexpr>) Option<Sexpr>)
+
+;; Whether `xs` is a list of exactly `n` elements.
+(defun opt-length-p ((xs Option<Sexpr>) (n int)) bool
+  (if (= n 0)
+      (sexpr-null xs)
+      (and (sexpr-consp xs) (opt-length-p (sexpr-cdr xs) (- n 1)))))
+
+;; Whether `xs` is a list of exactly `n` atoms, none of them a symbol.
+(defun opt-atoms-p ((xs Option<Sexpr>) (n int)) bool
+  (if (= n 0)
+      (sexpr-null xs)
+      (and (sexpr-consp xs)
+           (sexpr-atom (sexpr-car xs))
+           (if (sexpr-null (sexpr-car xs)) false true)
+           (if (sexpr-symp (sexpr-car xs)) false true)
+           (opt-atoms-p (sexpr-cdr xs) (- n 1)))))
+
+;; Whether the atom `a` spells `name`, as a symbol or as a string.
+(defun opt-spells-p ((a Option<Sexpr>) (name string)) bool
+  (if (sexpr-symp a)
+      (equal (sexpr-sym-name a) name)
+      (match a
+        ((str s) (equal s name))
+        (_ false))))
+
+;; Whether anything in `e` spells `name`.
+(defun opt-mentions-p ((e Option<Sexpr>) (name string)) bool
+  (if (sexpr-consp e)
+      (or (opt-mentions-p (sexpr-car e) name) (opt-mentions-p (sexpr-cdr e) name))
+      (opt-spells-p e name)))
+
+;; Whether `a` is the `bool` atom `b`.
+(defun opt-bool-is-p ((a Option<Sexpr>) (b bool)) bool
+  (match a
+    ((bool x) (eq x b))
+    (_ false)))
+
+;; Whether `e` is a literal node: one that compiles to a constant, reads
+;; nothing and allocates nothing.
+(defun opt-literal-p ((e Option<Sexpr>)) bool
+  (and (sexpr-consp e)
+       (case (sexpr-car e)
+         ((int int-any-width float-any-width) (opt-atoms-p (sexpr-cdr e) 2))
+         ((bool char) (opt-atoms-p (sexpr-cdr e) 1))
+         (unit (sexpr-null (sexpr-cdr e)))
+         (else false))))
+
+(defun opt-int-literal-p ((e Option<Sexpr>)) bool
+  (and (sexpr-consp e) (equal (sexpr-car e) (quote int)) (opt-atoms-p (sexpr-cdr e) 2)))
+
+(defun opt-bool-literal-p ((e Option<Sexpr>)) bool
+  (and (sexpr-consp e)
+       (equal (sexpr-car e) (quote bool))
+       (opt-length-p (sexpr-cdr e) 1)
+       (or (opt-bool-is-p (sexpr-car (sexpr-cdr e)) true) (opt-bool-is-p (sexpr-car (sexpr-cdr e)) false))))
+
+;; `(int HI LO)`'s value: two 32-bit halves, the low one's bits read back as
+;; a signed `i32` (`compile-int-any-width`).
+(defun opt-int-value ((e Option<Sexpr>)) int
+  (let ((hi (sexpr-int (sexpr-car (sexpr-cdr e))))
+        (lo (sexpr-int (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
+    (+ (* hi 4294967296) (if (< lo 0) (+ lo 4294967296) lo))))
+
+;; `v` as `(int HI LO)`, the halves split as `core_bridge` splits them.
+(defun opt-int-literal ((v int)) Option<Sexpr>
+  (let* ((hi (ash v -32))
+         (lo (- v (* hi 4294967296))))
+    `(int ,hi ,(if (< lo 2147483648) lo (- lo 4294967296)))))
+
+;; `v` as an `int` literal if it is a fixnum -- a literal past that is a
+;; bignum box, which is not a constant -- and otherwise `e`, unfolded.
+(defun opt-fixnum-or ((v int) (e Option<Sexpr>)) Option<Sexpr>
+  (if (and (<= -4611686018427387904 v) (<= v 4611686018427387903))
+      (opt-int-literal v)
+      e))
+
+;; `(int-method x y)` computed, for the `assoc` node `e` calling it.
+(defun opt-int-op ((method string) (x int) (y int) (e Option<Sexpr>)) Option<Sexpr>
+  (cond ((equal method "+") (opt-fixnum-or (+ x y) e))
+        ((equal method "-") (opt-fixnum-or (- x y) e))
+        ((equal method "*") (opt-fixnum-or (* x y) e))
+        ((equal method "=") `(bool ,(= x y)))
+        ((equal method "/=") `(bool ,(/= x y)))
+        ((equal method "<") `(bool ,(< x y)))
+        ((equal method "<=") `(bool ,(<= x y)))
+        ((equal method ">") `(bool ,(> x y)))
+        ((equal method ">=") `(bool ,(>= x y)))
+        (else e)))
+
+;; The node of an `(KIND . NODE)` argument, or `none` when `arg` is not one.
+(defun opt-arg-node ((arg Option<Sexpr>)) Option<Sexpr>
+  (if (sexpr-consp arg) (sexpr-cdr arg) ()))
+
+;; `(assoc "int" METHOD INSTANCE SYMBOL (KIND . A) (KIND . B))` with two
+;; literal operands, computed.
+(defun opt-fold-int ((e Option<Sexpr>)) Option<Sexpr>
+  (let ((rest (sexpr-cdr e)))
+    (if (and (opt-length-p rest 6)
+             (match (sexpr-car rest) ((str s) (equal s "int")) (_ false)))
+        (let* ((args (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr rest)))))
+               (a (opt-arg-node (sexpr-car args)))
+               (b (opt-arg-node (sexpr-car (sexpr-cdr args)))))
+          (if (and (opt-int-literal-p a) (opt-int-literal-p b))
+              (match (sexpr-car (sexpr-cdr rest))
+                ((str method) (opt-int-op method (opt-int-value a) (opt-int-value b) e))
+                (_ e))
+              e))
+        e)))
+
+;; Whether `e` holds a node that leaves its block.
+(defun opt-may-leave-p ((e Option<Sexpr>)) bool
+  (if (sexpr-consp e)
+      (or (opt-may-leave-p (sexpr-car e)) (opt-may-leave-p (sexpr-cdr e)))
+      (case e
+        ((break return return-from panic throw) true)
+        (else false))))
+
+;; `(if IS-FN (bool B) THEN ELSE)` as the branch `B` takes.
+(defun opt-fold-if ((e Option<Sexpr>)) Option<Sexpr>
+  (let ((rest (sexpr-cdr e)))
+    (if (and (opt-length-p rest 4) (opt-bool-literal-p (sexpr-car (sexpr-cdr rest))))
+        (let ((taken (if (opt-bool-is-p (sexpr-car (sexpr-cdr (sexpr-car (sexpr-cdr rest)))) true)
+                         (sexpr-car (sexpr-cdr (sexpr-cdr rest)))
+                         (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr rest)))))))
+          (if (opt-may-leave-p taken) e taken))
+        e)))
+
+;; Whether `e` is `(var NAME false)`: a read of the local `name`.
+(defun opt-read-of-p ((e Option<Sexpr>) (name string)) bool
+  (and (equal (sexpr-car e) (quote var))
+       (opt-length-p (sexpr-cdr e) 2)
+       (opt-spells-p (sexpr-car (sexpr-cdr e)) name)
+       (opt-bool-is-p (sexpr-car (sexpr-cdr (sexpr-cdr e))) false)))
+
+;; Whether every atom in `e` spelling `name` is the name of a read of it.
+(defun opt-only-read-p ((e Option<Sexpr>) (name string)) bool
+  (if (sexpr-consp e)
+      (or (opt-read-of-p e name)
+          (and (opt-only-read-p (sexpr-car e) name) (opt-only-read-p (sexpr-cdr e) name)))
+      (if (opt-spells-p e name) false true)))
+
+;; `e` with every read of `name` replaced by `lit`.
+(defun opt-subst ((e Option<Sexpr>) (name string) (lit Option<Sexpr>)) Option<Sexpr>
+  (if (sexpr-consp e)
+      (if (opt-read-of-p e name)
+          lit
+          (sexpr-cons (opt-subst (sexpr-car e) name lit) (opt-subst (sexpr-cdr e) name lit)))
+      e))
+
+;; Whether `(let ((NAME . KIND) . FORM)...)`'s bindings `bs` bind `name`
+;; exactly once (`seen`: already once) and none of their forms mention it --
+;; a form that does reads an outer `name`, which the body's reads are not.
+(defun opt-bound-once-p ((bs Option<Sexpr>) (name string) (seen bool)) bool
+  (if (sexpr-consp bs)
+      (let ((b (sexpr-car bs)))
+        (if (opt-mentions-p (sexpr-cdr b) name)
+            false
+            (if (opt-spells-p (sexpr-car (sexpr-car b)) name)
+                (if seen false (opt-bound-once-p (sexpr-cdr bs) name true))
+                (opt-bound-once-p (sexpr-cdr bs) name seen))))
+      seen))
+
+;; Whether `bs` is a `let`'s binding list.
+(defun opt-bindings-p ((bs Option<Sexpr>)) bool
+  (if (sexpr-consp bs)
+      (let ((b (sexpr-car bs)))
+        (and (sexpr-consp b)
+             (sexpr-consp (sexpr-car b))
+             (sexpr-symp (sexpr-car (sexpr-car b)))
+             (sexpr-consp (sexpr-cdr b))
+             (opt-bindings-p (sexpr-cdr bs))))
+      (sexpr-null bs)))
+
+;; The bindings `bs` with every form rewritten.
+(defun opt-binding-forms ((bs Option<Sexpr>)) Option<Sexpr>
+  (if (sexpr-consp bs)
+      (let ((b (sexpr-car bs)))
+        (sexpr-cons (sexpr-cons (sexpr-car b) (opt-node (sexpr-cdr b))) (opt-binding-forms (sexpr-cdr bs))))
+      ()))
+
+;; `(KEPT . BODY)`: the bindings of `bs` that stay, and `body` with the
+;; others' reads replaced by their literals. `all` is the whole binding list.
+(defun opt-propagate ((all Option<Sexpr>) (bs Option<Sexpr>) (body Option<Sexpr>)) Option<Sexpr>
+  (if (sexpr-consp bs)
+      (let* ((b (sexpr-car bs))
+             (name (sexpr-sym-name (sexpr-car (sexpr-car b))))
+             (form (sexpr-cdr b)))
+        (if (and (opt-literal-p form) (opt-bound-once-p all name false) (opt-only-read-p body name))
+            (opt-propagate all (sexpr-cdr bs) (opt-subst body name form))
+            (let ((r (opt-propagate all (sexpr-cdr bs) body)))
+              (sexpr-cons (sexpr-cons b (sexpr-car r)) (sexpr-cdr r)))))
+      (sexpr-cons () body)))
+
+;; `(let BINDINGS BODY...)`: the forms first, so that a binding folded to a
+;; literal is propagated too; the body last, so that what propagating made
+;; foldable is folded.
+(defun opt-let ((e Option<Sexpr>)) Option<Sexpr>
+  (let* ((bindings (opt-binding-forms (sexpr-car (sexpr-cdr e))))
+         (r (opt-propagate bindings bindings (sexpr-cdr (sexpr-cdr e)))))
+    (sexpr-cons (sexpr-car e) (sexpr-cons (sexpr-car r) (opt-node (sexpr-cdr r))))))
+
+(defun opt-node ((e Option<Sexpr>)) Option<Sexpr>
+  (if (sexpr-consp e)
+      (if (and (equal (sexpr-car e) (quote let))
+               (sexpr-consp (sexpr-cdr e))
+               (opt-bindings-p (sexpr-car (sexpr-cdr e))))
+          (opt-let e)
+          (let ((e (sexpr-cons (opt-node (sexpr-car e)) (opt-node (sexpr-cdr e)))))
+            (case (sexpr-car e)
+              (assoc (opt-fold-int e))
+              (if (opt-fold-if e))
+              (else e))))
+      e))
+
+;; A function body (`compile-function`'s `body`) optimized at `level`.
+(defun optimize-ir ((level int) (body Option<Sexpr>)) Option<Sexpr>
+  (if (< level 1) body (opt-node body)))
+
 (defun compile-function ((m llvm-module) (name string) (param-names Option<Sexpr>) (body Option<Sexpr>)) llvm-module
     (let* ((f (add-coroutine-function m name))
            (b (append-block f "entry"))
