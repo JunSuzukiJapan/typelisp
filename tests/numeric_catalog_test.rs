@@ -281,7 +281,8 @@ fn ratio_converts_for_irrational_functions_and_float() {
     assert_eq!(show("(exp 0)"), "1.0");
     assert_eq!(show("(log 1)"), "0.0");
     assert_eq!(show("(sqrt 4)"), "2.0");
-    assert_eq!(show("(atan -1/2)"), "-0.46364760900080615");
+    // The last digit of atan comes from the platform libm, so compare with the float argument.
+    assert_eq!(show("(atan -1/2)"), show("(atan -0.5)"));
     assert_eq!(show("(float 1/4)"), "0.25");
     assert_eq!(show("(float 3)"), "3.0");
     assert_eq!(show("(rational 0.5)"), "1/2");
