@@ -1647,7 +1647,10 @@ pub unsafe extern "C" fn rt_frame_new(args: *const i64, argc: u32) -> i64 {
     if nslots < 0 {
         fatal(&format!("rt_frame_new: {} is not a slot count a frame can hold", nslots));
     }
-    encode(active_heap().alloc_frame(nslots as usize))
+    let (frame, raw) = active_heap().alloc_frame_raw(nslots as usize);
+    let word = encode(frame);
+    crate::coroutine::note_new_frame(word, raw);
+    word
 }
 
 /// `(rt-frame-mask-bit f idx)` for compiled code — marks slot `idx` of frame
@@ -1675,14 +1678,9 @@ pub unsafe extern "C" fn rt_frame_mask_bit(args: *const i64, argc: u32) -> i64 {
     if idx < 0 {
         fatal(&format!("rt_frame_mask_bit: {} is not a slot index", idx));
     }
-    let heap = active_heap();
-    match decode(*args) {
-        Value::Boxed(id) if heap.is_frame(id) => {
-            heap.set_frame_mask_bit(id, idx as usize);
-            0
-        }
-        other => fatal(&format!("rt_frame_mask_bit: {:?} is not a frame", other)),
-    }
+    // SAFETY: the frame is the caller's own, so live.
+    crate::coroutine::frame_raw(active_heap(), *args).set_mask_bit(idx as usize);
+    0
 }
 
 /// `(rt-frame-data f)` for compiled code — the address of frame `args[0]`'s
@@ -1706,11 +1704,7 @@ pub unsafe extern "C" fn rt_frame_data(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_frame_data: expected 1 argument");
     }
-    let heap = active_heap();
-    match decode(*args) {
-        Value::Boxed(id) if heap.is_frame(id) => heap.frame_data_ptr(id) as i64,
-        other => fatal(&format!("rt_frame_data: {:?} is not a frame", other)),
-    }
+    crate::coroutine::frame_raw(active_heap(), *args).data() as i64
 }
 
 /// `(rt-frame-entered f)` for compiled code — publishes the frame a prologue
@@ -1938,11 +1932,8 @@ pub unsafe extern "C" fn rt_frame_pc(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_frame_pc: expected 1 argument");
     }
-    let heap = active_heap();
-    match decode(*args) {
-        Value::Boxed(id) if heap.is_frame(id) => heap.frame_pc(id) as i64,
-        other => fatal(&format!("rt_frame_pc: {:?} is not a frame", other)),
-    }
+    // SAFETY: the frame is the caller's own, so live.
+    crate::coroutine::frame_raw(active_heap(), *args).pc() as i64
 }
 
 /// `(rt-frame-set-pc f n)` for compiled code — records where frame `args[0]`
@@ -1964,14 +1955,9 @@ pub unsafe extern "C" fn rt_frame_set_pc(args: *const i64, argc: u32) -> i64 {
     if !(0..=(u32::MAX as i64)).contains(&pc) {
         fatal(&format!("rt_frame_set_pc: {} is not a resume point", pc));
     }
-    let heap = active_heap();
-    match decode(*args) {
-        Value::Boxed(id) if heap.is_frame(id) => {
-            heap.set_frame_pc(id, pc as u32);
-            0
-        }
-        other => fatal(&format!("rt_frame_set_pc: {:?} is not a frame", other)),
-    }
+    // SAFETY: the frame is the caller's own, so live.
+    crate::coroutine::frame_raw(active_heap(), *args).set_pc(pc as u32);
+    0
 }
 
 /// `(rt-cell-get c)` for compiled code — the current contents of binding
