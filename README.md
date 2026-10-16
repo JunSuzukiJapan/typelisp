@@ -1,4 +1,4 @@
-<!-- translated-from: README_JP.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
+<!-- translated-from: README_JP.md @ 8982bf15255c6838187a91c4b6b62bc2cf0f0af1 -->
 # TypeLisp
 
 English | [日本語](README_JP.md) | [简体中文](docs/zh-CN/README.md) | [繁體中文](docs/zh-TW/README.md) | [한국어](docs/ko/README.md) | [Español](docs/es/README.md) | [Português (Brasil)](docs/pt-BR/README.md) | [Deutsch](docs/de/README.md) | [Français](docs/fr/README.md) | [Русский](docs/ru/README.md) | [العربية](docs/ar/README.md) | [Italiano](docs/it/README.md) | [हिन्दी](docs/hi/README.md) | [Türkçe](docs/tr/README.md) | [Tiếng Việt](docs/vi/README.md) | [Bahasa Indonesia](docs/id/README.md) | [Polski](docs/pl/README.md) | [ภาษาไทย](docs/th/README.md) | [Українська](docs/uk/README.md) | [Nederlands](docs/nl/README.md) | [Svenska](docs/sv/README.md)
@@ -119,11 +119,89 @@ It looks like this:
 (main)
 ```
 
+### Tasks
+
+```
+(defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
+  (doiter (n jobs)
+    (sleep 0.1)
+    (send results (format false "~a: ~d * ~d = ~d" name n n (* n n)))))
+
+(defun main () ()
+  (let ((jobs (the Chan<int> (Chan::new 0)))
+        (results (the Chan<string> (Chan::new 10))))
+    (task (worker "A" jobs results))
+    (task (worker "B" jobs results))
+    (dotimes (i 4)
+      (send jobs (+ i 1)))
+    (close jobs)
+    (dotimes (i 4)
+      (println "~a" (unwrap (recv results))))))
+
+(main)
+```
+
+### Option and Result instead of nil
+
+There is no `nil`. A function that may have no value returns `Option<T>`, and one that may fail
+returns `Result<T,E>`; `match` takes the contents out.
+
+```
+(defun find-user ((id int)) Option<string>
+  (case id
+    (1 (Option::some "alice"))
+    (2 (Option::some "bob"))
+    (else (Option::none))))
+
+(defun parse-port ((s string)) Result<int,string>
+  (match (parse-int s)
+    ((ok n) (if (<= 1 n 65535)
+                (Result::ok n)
+                (Result::err (format false "port out of range: ~a" n))))
+    ((err e) (Result::err (message e)))))
+
+(match (find-user 3)
+  ((some name) (println "user: ~a" name))
+  ((none) (println "not found")))        ; not found
+
+(match (parse-port "99999")
+  ((ok p) (println "port ~a" p))
+  ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+Using an `Option<string>` as a `string`, or leaving out the `none` case in a `match`, is a type
+error before the program runs.
+
+### Type-checked macros
+
+Macros are written with `defmacro`, quasiquote and `gensym`, as in Common Lisp. The expanded code
+is type-checked just like code written by hand.
+
+```
+(defmacro swap (a b)
+  (let ((tmp (gensym "tmp")))
+    `(let ((,tmp ,a))
+       (setf ,a ,b)
+       (setf ,b ,tmp))))
+
+(let ((x 1) (y 2))
+  (swap x y)
+  (println "x=~a y=~a" x y))             ; x=2 y=1
+```
+
+If the expansion does not fit the types, the error is reported where the macro was called.
+
+```
+(defmacro add-a (x) `(+ ,x "a"))
+(add-a 1)
+;; error: type error: type mismatch: expected `int`, found `string`
+```
+
 ### More examples
 
-The programs in [examples/](examples/) can be run by passing the file name to `typl`. The wc and
-trait examples above are also there, as [examples/wc.typl](examples/wc.typl) and
-[examples/animals.typl](examples/animals.typl).
+The programs in [examples/](examples/) can be run by passing the file name to `typl`. The wc,
+trait and task examples above are also there, as [examples/wc.typl](examples/wc.typl),
+[examples/animals.typl](examples/animals.typl) and [examples/tasks.typl](examples/tasks.typl).
 
 ```sh
 typl examples/fizzbuzz.typl
@@ -139,6 +217,7 @@ typl examples/wc.typl README.md
 | [game_of_life.typl](examples/game_of_life.typl) | Conway's Game of Life |
 | [maze_bfs.typl](examples/maze_bfs.typl) | Shortest path through a maze (breadth-first search) |
 | [primes.typl](examples/primes.typl) | Sieve of Eratosthenes |
+| [tasks.typl](examples/tasks.typl) | Splitting work across tasks with channels |
 
 [examples/projects/](examples/projects/) holds programs split across several files.
 Run one by passing its `src/main.typl` (for example, `typl examples/projects/todo-cli/src/main.typl`).

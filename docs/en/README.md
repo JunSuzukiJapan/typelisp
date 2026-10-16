@@ -1,8 +1,89 @@
-<!-- translated-from: docs/ja/README.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
 # typelisp Documentation (English)
 
 typelisp is a statically typed Lisp. For installing and building it, see [README.md](../../README.md)
 at the top of the repository.
+
+## Features
+
+### Tasks and channels
+
+Start tasks (lightweight threads) and pass values between them through channels. See
+[Concurrency](tutorial/concurrency.md) for details.
+
+```lisp
+(defun worker ((name string) (jobs Chan<int>) (results Chan<string>)) ()
+  (doiter (n jobs)
+    (sleep 0.1)
+    (send results (format false "~a: ~d * ~d = ~d" name n n (* n n)))))
+
+(defun main () ()
+  (let ((jobs (the Chan<int> (Chan::new 0)))
+        (results (the Chan<string> (Chan::new 10))))
+    (task (worker "A" jobs results))
+    (task (worker "B" jobs results))
+    (dotimes (i 4)
+      (send jobs (+ i 1)))
+    (close jobs)
+    (dotimes (i 4)
+      (println "~a" (unwrap (recv results))))))
+
+(main)
+```
+
+### Option and Result instead of nil
+
+There is no `nil`. A function that may have no value returns `Option<T>`, and one that may fail
+returns `Result<T,E>`; `match` takes the contents out. Using an `Option<string>` as a `string`, or
+leaving out the `none` case in a `match`, is a type error before the program runs. See [Type
+Basics](tutorial/types.md) and [Error Handling](tutorial/errors.md) for details.
+
+```lisp
+(defun find-user ((id int)) Option<string>
+  (case id
+    (1 (Option::some "alice"))
+    (2 (Option::some "bob"))
+    (else (Option::none))))
+
+(defun parse-port ((s string)) Result<int,string>
+  (match (parse-int s)
+    ((ok n) (if (<= 1 n 65535)
+                (Result::ok n)
+                (Result::err (format false "port out of range: ~a" n))))
+    ((err e) (Result::err (message e)))))
+
+(match (find-user 3)
+  ((some name) (println "user: ~a" name))
+  ((none) (println "not found")))        ; not found
+
+(match (parse-port "99999")
+  ((ok p) (println "port ~a" p))
+  ((err m) (println "error: ~a" m)))     ; error: port out of range: 99999
+```
+
+### Type-checked macros
+
+Macros are written with `defmacro`, quasiquote and `gensym`, as in Common Lisp. The expanded code is
+type-checked just like code written by hand, and if it does not fit the types, the error is reported
+where the macro was called. See [Macros](tutorial/macros.md) for details.
+
+```lisp
+(defmacro swap (a b)
+  (let ((tmp (gensym "tmp")))
+    `(let ((,tmp ,a))
+       (setf ,a ,b)
+       (setf ,b ,tmp))))
+
+(let ((x 1) (y 2))
+  (swap x y)
+  (println "x=~a y=~a" x y))             ; x=2 y=1
+```
+
+```lisp
+(defmacro add-a (x) `(+ ,x "a"))
+(add-a 1)
+;; error: type error: type mismatch: expected `int`, found `string`
+```
 
 ## Tutorial
 
