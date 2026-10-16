@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # 컴파일
 
 아무것도 하지 않으면 typelisp 프로그램은 인터프리터에서 실행된다. 그 밖에 네이티브 코드로 컴파일하는 방법이 두 가지,
@@ -91,6 +91,13 @@ fib(25) = 75025
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # -c 뒤에 써도 같음
+```
+
+`-O0` `-O1` `-O2` `-O3`으로 **최적화 수준**을 지정한다. 기본값은 `-O0`이며 최적화하지 않는다. `-O1` 이상에서는 리터럴만 바인딩한 변수를 그 값으로 바꾸거나 상수끼리의 정수 연산을 미리 계산해 두는 등의 간단한 최적화를 한 뒤, 나머지는 LLVM의 같은 이름 수준의 최적화에 맡긴다. 어느 수준에서도 계산 결과는 달라지지 않는다. `--release`와 마찬가지로 `typl` 전체의 옵션이어서, `-c`로 만드는 실행 파일 외에 파일 실행·REPL·`typl test` 안에서 컴파일되는 코드와 그곳에서 호출한 `compile-file`에도 적용된다. 인터프리터가 실행하는 코드는 최적화하지 않는다.
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # -c 뒤에 써도 같음
 ```
 
 REPL이나 프로그램에서 `compile-file`을 호출해도 같은 일을 할 수 있다.

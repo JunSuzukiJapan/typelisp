@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # Kompilierung
 
 Ohne weiteres Zutun laufen typelisp-Programme im Interpreter. Darüber hinaus gibt es zwei Wege, in nativen
@@ -98,6 +98,13 @@ Mit `--release` erzeugt `typl` einen **Release-Build**, der `eprint`/`eprintln` 
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # nach -c geschrieben ist es dasselbe
+```
+
+`-O0`, `-O1`, `-O2` und `-O3` legen die **Optimierungsstufe** fest. Voreingestellt ist `-O0`, das nicht optimiert. Ab `-O1` führt der Compiler zuerst einfache Optimierungen durch, etwa eine Variable, die nur an ein Literal gebunden ist, durch ihren Wert zu ersetzen oder Ganzzahlarithmetik auf Konstanten im Voraus zu berechnen, und überlässt den Rest der Optimierung von LLVM auf der gleichnamigen Stufe. Auf jeder Stufe sind die Ergebnisse der Berechnung dieselben. Wie `--release` ist es eine Option von `typl` als Ganzem: Außer für die ausführbare Datei, die `-c` erzeugt, wirkt sie auf den Code, der beim Ausführen einer Datei, in der REPL und in `typl test` kompiliert wird, sowie auf ein dort aufgerufenes `compile-file`. Code, den der Interpreter ausführt, wird nicht optimiert.
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # nach -c geschrieben ist es dasselbe
 ```
 
 Dasselbe lässt sich erreichen, indem man `compile-file` aus der REPL oder aus einem Programm aufruft.

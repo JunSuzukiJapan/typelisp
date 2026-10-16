@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # 编译
 
 如果不做任何处理，typelisp 程序由解释器执行。除此之外，还有两种编译为本机代码的方法，以及一种保存环境的方法。
@@ -87,6 +87,13 @@ fib(25) = 75025
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # 写在 -c 之后也一样
+```
+
+用 `-O0` `-O1` `-O2` `-O3` 指定**优化级别**。默认是 `-O0`，不做优化。从 `-O1` 起，编译器先做一些简单的优化，例如把只绑定了字面量的变量替换为它的值、预先算好常量之间的整数运算，其余交给 LLVM 同名级别的优化。无论哪个级别，计算结果都不变。与 `--release` 一样，这是整个 `typl` 的选项：除了 `-c` 生成的可执行文件，也作用于运行文件、REPL 和 `typl test` 中编译的代码，以及在那里调用的 `compile-file`。解释器执行的代码不做优化。
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # 写在 -c 之后也一样
 ```
 
 在 REPL 或程序中调用 `compile-file` 也能做同样的事。

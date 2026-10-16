@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/compile.md @ f1741c893f2b2a7b78dc591fee0cbd3273e4654b -->
+<!-- translated-from: docs/ja/guide/compile.md @ fa5bc59231cd8ef7b97c6e8774b58ad354f3c0d0 -->
 # Compiling
 
 Unless you do anything else, typelisp programs run in the interpreter. In addition there are two
@@ -96,6 +96,13 @@ With `--release`, `typl` makes a **release build**, which removes `eprint`/`epri
 ```sh
 $ typl --release -c hello.typl
 $ typl -c hello.typl --release     # the same when written after -c
+```
+
+`-O0`, `-O1`, `-O2` and `-O3` set the **optimization level**. The default is `-O0`, which does not optimize. From `-O1` on, the compiler first does simple optimizations, such as replacing a variable bound only to a literal with its value and computing integer arithmetic on constants in advance, and leaves the rest to LLVM's optimization at the level of the same name. At every level the results of the computation are the same. Like `--release`, it is an option of `typl` as a whole: besides the executable `-c` makes, it works on the code compiled while running a file, in the REPL and in `typl test`, and on a `compile-file` called there. Code the interpreter runs is not optimized.
+
+```sh
+$ typl -O2 -c hello.typl
+$ typl -c hello.typl -O2     # the same when written after -c
 ```
 
 You can do the same by calling `compile-file` from the REPL or from a program.
