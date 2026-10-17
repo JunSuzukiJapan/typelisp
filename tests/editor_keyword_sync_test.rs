@@ -35,7 +35,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path as FsPath, PathBuf};
 
 use typelisp::check::registry::Namespace;
-use typelisp::{load_prelude, Checker, Heap, Interp, INTERNAL_MODULE, SPECIAL_FORM_HEADS};
+use typelisp::{load_prelude, Checker, Heap, Interp, BUILTIN_SYMBOLS, INTERNAL_MODULE, SPECIAL_FORM_HEADS};
 
 // ---------------------------------------------------------------- the truth
 
@@ -314,9 +314,26 @@ fn special_forms_from_checker() -> BTreeSet<String> {
             continue;
         }
         let head = &trimmed[..trimmed.find("=>").unwrap()];
-        out.extend(string_literals(head));
+        for konst in head.split('|').filter_map(|alt| alt.trim().strip_prefix("wk::")) {
+            out.insert(vocabulary_name(konst));
+        }
     }
     out
+}
+
+/// The vocabulary entry the `wk` constant `konst` names, read from the
+/// `well_known_symbols!` table that declares both.
+fn vocabulary_name(konst: &str) -> String {
+    let konst: String = konst.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_').collect();
+    let path = repo_root().join("crates/typelisp-mem/src/symbols.rs");
+    let src = std::fs::read_to_string(&path).expect("the symbol table is readable");
+    let prefix = format!("{} => ", konst);
+    let line = src
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with(&prefix))
+        .unwrap_or_else(|| panic!("`wk::{}` is not declared in the vocabulary", konst));
+    string_literals(&line[prefix.len()..]).into_iter().next().expect("a vocabulary entry names its symbol")
 }
 
 // ---------------------------------------------------------------- helpers
@@ -622,7 +639,7 @@ fn the_editor_definitions_exist_where_the_tests_expect_them() {
 #[test]
 fn the_special_form_list_is_the_dispatch() {
     let dispatched = special_forms_from_checker();
-    let listed: BTreeSet<String> = SPECIAL_FORM_HEADS.iter().map(|s| s.to_string()).collect();
+    let listed: BTreeSet<String> = SPECIAL_FORM_HEADS.iter().map(|&i| BUILTIN_SYMBOLS[i as usize].to_string()).collect();
     assert_eq!(
         listed, dispatched,
         "SPECIAL_FORM_HEADS and Checker::check_list's dispatch differ: missing {:?}, extra {:?}",

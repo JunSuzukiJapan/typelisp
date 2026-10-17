@@ -694,7 +694,7 @@ fn read_datum_here(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Va
         // datum starts means its opener is missing (or it is a typo for `)`).
         Some(c @ (']' | '}')) => Err(Error::ReadError(format!("unexpected `{}`: nothing open for it to close", c))),
         Some('\'') => read_wrapped(cur, heap, ctx, symbols::well_known_symbol(wk::QUOTE)),
-        Some('`') => read_wrapped(cur, heap, ctx, symbols::intern("quasiquote")),
+        Some('`') => read_wrapped(cur, heap, ctx, symbols::well_known_symbol(wk::QUASIQUOTE)),
         Some(',') => {
             let start = cur.loc(); // before the prefix, like read_wrapped
             cur.next(); // the ','
@@ -1142,7 +1142,7 @@ fn read_tuple(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
 /// The head of the form `#[ATTR...] FORM` reads as:
 /// `(%internal::attribute (ATTR...) FORM)`. Which attributes exist, and what
 /// they do to `FORM`, is the checker's business.
-pub const ATTRIBUTE_HEAD: [&str; 2] = ["%internal", "attribute"];
+pub const ATTRIBUTE_HEAD: [u32; 2] = [wk::INTERNAL_MODULE_NAME, wk::ATTRIBUTE];
 
 /// `#[ATTR...] FORM` -> `(%internal::attribute (ATTR...) FORM)`. The cursor
 /// is on the `[`. The attributes are data, and so is `FORM`: an attribute
@@ -1167,13 +1167,7 @@ fn read_attribute(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Val
             list = heap.cons(a, list)?;
             heap.push_root(list);
         }
-        let segs: Vec<SymRef> = ATTRIBUTE_HEAD
-            .iter()
-            .map(|s| match heap.intern_symbol(s) {
-                Value::Symbol(id) => id,
-                _ => unreachable!("intern_symbol always makes a symbol"),
-            })
-            .collect();
+        let segs: Vec<SymRef> = ATTRIBUTE_HEAD.iter().map(|&i| symbols::well_known_symbol(i)).collect();
         let head = heap.intern_path(&segs);
         let tail = heap.cons(form, Value::Empty)?;
         heap.push_root(tail);

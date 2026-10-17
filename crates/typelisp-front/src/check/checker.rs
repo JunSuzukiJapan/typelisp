@@ -1355,21 +1355,24 @@ pub struct Checker {
 /// dispatch itself: a second, hand-kept copy had fallen behind by twelve
 /// names, and a macro named `block` took over `(block ...)` at top level
 /// while one inside a function still meant the special form.
-pub const SPECIAL_FORM_HEADS: &[&str] = &[
-    "if", "let", "let*", "progn", "unsafe", "setf", "incf", "decf", "rotatef", "shiftf",
-    "loop", "break", "return", "block", "return-from", "catch", "throw", "unwind-protect", "list",
-    "lambda", "labels", "macrolet", "symbol-macrolet",
-    "match", "panic", "the", "as", "try-as", "compile", "task", "thread", "select",
-    "quote", "quasiquote", "format", "print", "println", "eprint", "eprintln", "source-file",
-    "pprint", "pprint-fill", "pprint-linear", "pprint-tabular",
-    "pprint-logical-block", "c-alloc", "c-ref", "c-deref", "def-c-struct", ":dyn", "apply",
-    "make-instance", "documentation", "trace", "untrace", "step", "disassemble", "ed",
+pub const SPECIAL_FORM_HEADS: &[u32] = &[
+    wk::IF, wk::LET, wk::LET_STAR, wk::PROGN, wk::UNSAFE, wk::SETF,
+    wk::INCF, wk::DECF, wk::ROTATEF, wk::SHIFTF, wk::LOOP, wk::BREAK,
+    wk::RETURN, wk::BLOCK, wk::RETURN_FROM, wk::CATCH, wk::THROW, wk::UNWIND_PROTECT,
+    wk::LIST, wk::LAMBDA, wk::LABELS, wk::MACROLET, wk::SYMBOL_MACROLET, wk::MATCH,
+    wk::PANIC, wk::THE, wk::AS, wk::TRY_AS, wk::COMPILE, wk::TASK,
+    wk::THREAD, wk::SELECT, wk::QUOTE, wk::QUASIQUOTE, wk::FORMAT, wk::PRINT,
+    wk::PRINTLN, wk::EPRINT, wk::EPRINTLN, wk::SOURCE_FILE, wk::PPRINT, wk::PPRINT_FILL,
+    wk::PPRINT_LINEAR, wk::PPRINT_TABULAR, wk::PPRINT_LOGICAL_BLOCK, wk::C_ALLOC, wk::C_REF, wk::C_DEREF,
+    wk::DEF_C_STRUCT, wk::DYN, wk::APPLY, wk::MAKE_INSTANCE, wk::DOCUMENTATION, wk::TRACE,
+    wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
 ];
 
-const TOPLEVEL_FORM_HEADS: &[&str] = &[
-    "pub", "defun", "defsignature", "defffi", "defvar", "defparameter", "defconstant", "defmacro", "module",
-    "defmethod", "defstruct", "defenum", "deftrait", "deftype", "impl", "use", "load", "import",
-    "shadowing-import", "in-module", "def-c-struct",
+const TOPLEVEL_FORM_HEADS: &[u32] = &[
+    wk::PUB, wk::DEFUN, wk::DEFSIGNATURE, wk::DEFFFI, wk::DEFVAR, wk::DEFPARAMETER,
+    wk::DEFCONSTANT, wk::DEFMACRO, wk::MODULE, wk::DEFMETHOD, wk::DEFSTRUCT, wk::DEFENUM,
+    wk::DEFTRAIT, wk::DEFTYPE, wk::IMPL, wk::USE, wk::LOAD, wk::IMPORT,
+    wk::SHADOWING_IMPORT, wk::IN_MODULE, wk::DEF_C_STRUCT,
 ];
 
 impl Checker {
@@ -3254,7 +3257,7 @@ impl Checker {
             let elem_locs: Vec<Option<Loc>> = heap.list_to_vec_locs(v)?.into_iter().map(|(_, l)| l).collect();
             let parts_locs = &elem_locs[1..];
             if let Some(Value::Path(pid)) = elems.first() {
-                let is_attribute = heap.path_segments(*pid).iter().map(|s| heap.symbol_spelling(*s)).eq(typelisp_read::ATTRIBUTE_HEAD);
+                let is_attribute = heap.path_segments(*pid).iter().map(|s| s.well_known()).eq(typelisp_read::ATTRIBUTE_HEAD);
                 if is_attribute {
                     return self.check_attribute(heap, interp, &elems[1..], def_loc);
                 }
@@ -3703,8 +3706,8 @@ impl Checker {
     /// never hijack the built-in form (both existing `match`es already win
     /// over `resolve_macro` by being tried first; this keeps the loader's
     /// pre-expansion consistent with that order).
-    fn is_builtin_form_head(name: &str) -> bool {
-        SPECIAL_FORM_HEADS.contains(&name) || TOPLEVEL_FORM_HEADS.contains(&name)
+    fn is_builtin_form_head(id: typelisp_mem::SymRef) -> bool {
+        SPECIAL_FORM_HEADS.contains(&id.well_known()) || TOPLEVEL_FORM_HEADS.contains(&id.well_known())
     }
 
     /// If `v` is a compound form whose head resolves to a macro — a bare
@@ -3730,10 +3733,10 @@ impl Checker {
         let elems = heap.list_to_vec(v)?;
         let (macro_path, shape, display) = match elems.first() {
             Some(Value::Symbol(id)) => {
-                let head = heap.symbol_spelling(*id).to_string();
-                if Self::is_builtin_form_head(&head) {
+                if Self::is_builtin_form_head(*id) {
                     return Ok(None);
                 }
+                let head = heap.symbol_spelling(*id).to_string();
                 match self.resolve_macro(&head) {
                     Some((p, shape)) => (p, shape, head),
                     None => return Ok(None),
@@ -11165,23 +11168,24 @@ impl Checker {
 
         // A non-symbol head (e.g. a `lambda` literal or any expression) is
         // evaluated and applied as a function value.
-        let head = match elems[0] {
-            Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
+        let head_sym = match elems[0] {
+            Value::Symbol(id) => id,
             _ => {
                 let callee = self.check_at(heap, interp, env, elems[0], None, nth_loc(&elem_locs, 0))?;
                 return self.check_apply(heap, interp, env, callee, args, arg_locs);
             }
         };
+        let head = heap.symbol_spelling(head_sym).to_string();
         // A top-level-only form reaching expression position — written in a
         // function body, or produced there by a macro. Without this it would
         // be read as a call, and the first complaint would be about its
         // arguments (the name being defined is not a bound variable) rather
         // than about where it was written.
-        if TOPLEVEL_FORM_HEADS.contains(&head.as_str()) {
-            let hint = match head.as_str() {
-                "defvar" | "defparameter" | "defconstant" => " — bind a local value with `let`",
-                "defun" => " — define a local function with `labels`",
-                "defmacro" => " — define a local macro with `macrolet`",
+        if TOPLEVEL_FORM_HEADS.contains(&head_sym.well_known()) {
+            let hint = match head_sym.well_known() {
+                wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT => " — bind a local value with `let`",
+                wk::DEFUN => " — define a local function with `labels`",
+                wk::DEFMACRO => " — define a local macro with `macrolet`",
                 _ => "",
             };
             return Err(Error::TypeError(format!(
@@ -11194,7 +11198,7 @@ impl Checker {
         // no runtime representation to enumerate, so `tests/editor_keyword_sync_test.rs`
         // reads them out of this file between these two sentinels to check that
         // both editor definitions know every one. Keep the sentinels in place.
-        match head.as_str() {
+        match head_sym.well_known() {
             // The reader joins `:dyn Trait` into the list `(:dyn Trait)`
             // wherever it appears, so a `:dyn` written outside a type
             // position lands here as a call. Reject it by name rather than
@@ -11202,16 +11206,16 @@ impl Checker {
             // point of spelling trait objects with a reserved keyword is
             // that a misplaced one is diagnosed as such (and that an editor
             // can highlight it unambiguously).
-            ":dyn" => {
+            wk::DYN => {
                 return Err(Error::TypeError(
                     "`:dyn` may only appear in a type position (a parameter/field/return type, or a type argument)"
                         .to_string(),
                 ))
             }
-            "if" => return self.check_if(heap, interp, env, args, arg_locs, expected),
-            "let" => return self.check_let(heap, interp, env, args, arg_locs, expected),
-            "let*" => return self.check_let_star(heap, interp, env, args, arg_locs, expected),
-            "progn" => {
+            wk::IF => return self.check_if(heap, interp, env, args, arg_locs, expected),
+            wk::LET => return self.check_let(heap, interp, env, args, arg_locs, expected),
+            wk::LET_STAR => return self.check_let_star(heap, interp, env, args, arg_locs, expected),
+            wk::PROGN => {
                 let (body, ty) = self.check_seq(heap, interp, env, args, arg_locs, expected)?;
                 // Represent progn as a let with no bindings.
                 let form = self.let_form(heap, &[], &body)?;
@@ -11227,65 +11231,65 @@ impl Checker {
             // source, and it is answered here. The one exception is the
             // `unsafe` that owns `c-alloc`s: it frees them when it is left,
             // which does need a node (`checker::c_struct`).
-            "unsafe" => return self.check_unsafe(heap, interp, env, args, arg_locs, expected),
+            wk::UNSAFE => return self.check_unsafe(heap, interp, env, args, arg_locs, expected),
             // The typed-pointer forms — `checker::c_struct`.
-            "c-alloc" => return self.check_c_alloc(heap, interp, env, args, arg_locs),
-            "c-ref" => return self.check_c_ref(heap, interp, env, args, arg_locs),
-            "c-deref" => return self.check_c_deref(heap, interp, env, args, arg_locs),
-            "def-c-struct" => return Err(Error::TypeError(DEF_C_STRUCT_PLACE.into())),
-            "setf" => return self.check_setf(heap, interp, env, args, arg_locs),
-            "incf" => return self.check_incf_decf(heap, interp, env, args, "+"),
-            "decf" => return self.check_incf_decf(heap, interp, env, args, "-"),
-            "rotatef" => return self.check_rotatef_shiftf(heap, interp, env, args, false),
-            "shiftf" => return self.check_rotatef_shiftf(heap, interp, env, args, true),
-            "loop" => return self.check_loop(heap, interp, env, args, arg_locs, expected),
-            "block" => return self.check_block(heap, interp, env, args, arg_locs, expected),
-            "return-from" => return self.check_return_from(heap, interp, env, args, arg_locs),
-            "catch" => return self.check_catch(heap, interp, env, args, arg_locs, expected),
-            "throw" => return self.check_throw(heap, interp, env, args, arg_locs),
-            "unwind-protect" => return self.check_unwind_protect(heap, interp, env, args, arg_locs, expected),
-            "break" => return self.check_break(heap, args),
-            "return" => return self.check_return(heap, interp, env, args, arg_locs),
-            "list" => return self.check_list_lit(heap, interp, env, args, arg_locs),
-            "format" => return self.check_format(heap, interp, env, args, arg_locs),
-            "print" => return self.check_print_like(heap, interp, env, "print-rt", Type::Unit, args, arg_locs),
-            "println" => return self.check_print_like(heap, interp, env, "println-rt", Type::Unit, args, arg_locs),
-            "eprint" | "eprintln" => return self.check_eprint(heap, interp, env, &head, args, arg_locs),
+            wk::C_ALLOC => return self.check_c_alloc(heap, interp, env, args, arg_locs),
+            wk::C_REF => return self.check_c_ref(heap, interp, env, args, arg_locs),
+            wk::C_DEREF => return self.check_c_deref(heap, interp, env, args, arg_locs),
+            wk::DEF_C_STRUCT => return Err(Error::TypeError(DEF_C_STRUCT_PLACE.into())),
+            wk::SETF => return self.check_setf(heap, interp, env, args, arg_locs),
+            wk::INCF => return self.check_incf_decf(heap, interp, env, args, "+"),
+            wk::DECF => return self.check_incf_decf(heap, interp, env, args, "-"),
+            wk::ROTATEF => return self.check_rotatef_shiftf(heap, interp, env, args, false),
+            wk::SHIFTF => return self.check_rotatef_shiftf(heap, interp, env, args, true),
+            wk::LOOP => return self.check_loop(heap, interp, env, args, arg_locs, expected),
+            wk::BLOCK => return self.check_block(heap, interp, env, args, arg_locs, expected),
+            wk::RETURN_FROM => return self.check_return_from(heap, interp, env, args, arg_locs),
+            wk::CATCH => return self.check_catch(heap, interp, env, args, arg_locs, expected),
+            wk::THROW => return self.check_throw(heap, interp, env, args, arg_locs),
+            wk::UNWIND_PROTECT => return self.check_unwind_protect(heap, interp, env, args, arg_locs, expected),
+            wk::BREAK => return self.check_break(heap, args),
+            wk::RETURN => return self.check_return(heap, interp, env, args, arg_locs),
+            wk::LIST => return self.check_list_lit(heap, interp, env, args, arg_locs),
+            wk::FORMAT => return self.check_format(heap, interp, env, args, arg_locs),
+            wk::PRINT => return self.check_print_like(heap, interp, env, "print-rt", Type::Unit, args, arg_locs),
+            wk::PRINTLN => return self.check_print_like(heap, interp, env, "println-rt", Type::Unit, args, arg_locs),
+            wk::EPRINT | wk::EPRINTLN => return self.check_eprint(heap, interp, env, head_sym, args, arg_locs),
             // These two are *shadowable* special forms: a local binding named
             // `read` (a lambda called `(read)`, say) must keep winning, the
             // way it did when `read` was an ordinary built-in function. The
             // dispatch here runs before the local-variable lookup further
             // down, so the guard has to be explicit — unlike `if`/`let`/
             // `format`, which `is_builtin_form_head` reserves outright.
-            "pprint" | "pprint-fill" | "pprint-linear" | "pprint-tabular" => {
-                return self.check_pprint(heap, interp, env, head.as_str(), args, arg_locs)
+            wk::PPRINT | wk::PPRINT_FILL | wk::PPRINT_LINEAR | wk::PPRINT_TABULAR => {
+                return self.check_pprint(heap, interp, env, head_sym, args, arg_locs)
             }
-            "pprint-logical-block" => return self.check_pprint_logical_block(heap, interp, env, args, arg_locs),
-            "lambda" => return self.check_lambda(heap, interp, env, args, arg_locs),
-            "labels" => return self.check_labels(heap, interp, env, args, arg_locs, expected),
-            "macrolet" => return self.check_macrolet(heap, interp, env, args, arg_locs, expected),
-            "symbol-macrolet" => {
+            wk::PPRINT_LOGICAL_BLOCK => return self.check_pprint_logical_block(heap, interp, env, args, arg_locs),
+            wk::LAMBDA => return self.check_lambda(heap, interp, env, args, arg_locs),
+            wk::LABELS => return self.check_labels(heap, interp, env, args, arg_locs, expected),
+            wk::MACROLET => return self.check_macrolet(heap, interp, env, args, arg_locs, expected),
+            wk::SYMBOL_MACROLET => {
                 return self.check_symbol_macrolet(heap, interp, env, args, arg_locs, expected)
             }
-            "apply" => return self.check_apply_form(heap, interp, env, args, arg_locs),
-            "match" => return self.check_match(heap, interp, env, args, arg_locs, expected),
-            "panic" => return self.check_panic(heap, interp, env, args, arg_locs),
-            "the" => return self.check_the(heap, interp, env, args, arg_locs),
-            "make-instance" => return self.check_make_instance(heap, interp, env, args, expected),
-            "task" => return self.check_spawn(heap, interp, env, args, arg_locs, SpawnKind::Task),
-            "thread" => return self.check_spawn(heap, interp, env, args, arg_locs, SpawnKind::Thread),
-            "select" => return self.check_select(heap, interp, env, args, arg_locs, expected),
-            "as" => return self.check_as(heap, interp, env, args, arg_locs, false),
-            "try-as" => return self.check_as(heap, interp, env, args, arg_locs, true),
-            "compile" => return self.check_compile(heap, args),
-            "documentation" => return self.check_documentation(heap, args),
-            "ed" => return self.check_ed(heap, args),
-            "trace" | "untrace" => return self.check_trace(heap, head.as_str(), args),
-            "step" => return self.check_step(heap, interp, env, args, arg_locs, expected),
-            "disassemble" => return self.check_disassemble(heap, args),
-            "source-file" => return self.check_source_file(heap, v, args),
-            "quote" => return self.check_quote(heap, args),
-            "quasiquote" => return self.check_quasiquote(heap, interp, env, args),
+            wk::APPLY => return self.check_apply_form(heap, interp, env, args, arg_locs),
+            wk::MATCH => return self.check_match(heap, interp, env, args, arg_locs, expected),
+            wk::PANIC => return self.check_panic(heap, interp, env, args, arg_locs),
+            wk::THE => return self.check_the(heap, interp, env, args, arg_locs),
+            wk::MAKE_INSTANCE => return self.check_make_instance(heap, interp, env, args, expected),
+            wk::TASK => return self.check_spawn(heap, interp, env, args, arg_locs, SpawnKind::Task),
+            wk::THREAD => return self.check_spawn(heap, interp, env, args, arg_locs, SpawnKind::Thread),
+            wk::SELECT => return self.check_select(heap, interp, env, args, arg_locs, expected),
+            wk::AS => return self.check_as(heap, interp, env, args, arg_locs, false),
+            wk::TRY_AS => return self.check_as(heap, interp, env, args, arg_locs, true),
+            wk::COMPILE => return self.check_compile(heap, args),
+            wk::DOCUMENTATION => return self.check_documentation(heap, args),
+            wk::ED => return self.check_ed(heap, args),
+            wk::TRACE | wk::UNTRACE => return self.check_trace(heap, head_sym.name(), args),
+            wk::STEP => return self.check_step(heap, interp, env, args, arg_locs, expected),
+            wk::DISASSEMBLE => return self.check_disassemble(heap, args),
+            wk::SOURCE_FILE => return self.check_source_file(heap, v, args),
+            wk::QUOTE => return self.check_quote(heap, args),
+            wk::QUASIQUOTE => return self.check_quasiquote(heap, interp, env, args),
             _ => {}
         }
         // SPECIAL-FORM DISPATCH END
@@ -12824,9 +12828,8 @@ impl Checker {
             return Err(Error::TypeError(shape));
         };
         if let Value::Symbol(id) = head {
-            let name = heap.symbol_spelling(id).to_string();
-            if Self::is_builtin_form_head(&name) {
-                return Err(Error::TypeError(format!("`{}` cannot start `{}`. {}", form_name, name, shape)));
+            if Self::is_builtin_form_head(id) {
+                return Err(Error::TypeError(format!("`{}` cannot start `{}`. {}", form_name, id.spelling(), shape)));
             }
         }
         // Checked as an ordinary call, so the callee resolves, the arguments
@@ -15946,15 +15949,16 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        what: &str,
+        head: typelisp_mem::SymRef,
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
+        let what = head.name();
         let Some(&control) = args.first() else {
             return Err(Error::TypeError(format!("{}: expected at least a control string", what)));
         };
         let mut text = self.control_string(heap, what, control)?;
-        if what == "eprintln" {
+        if head.is(wk::EPRINTLN) {
             text.push_str("~%");
         }
         let mut items: Vec<(Value, Option<Loc>)> =
@@ -16027,11 +16031,12 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        form: &str,
+        head: typelisp_mem::SymRef,
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
-        let takes_colinc = form == "pprint-tabular";
+        let form = head.name();
+        let takes_colinc = head.is(wk::PPRINT_TABULAR);
         let max = if takes_colinc { 2 } else { 1 };
         if args.is_empty() || args.len() > max {
             return Err(Error::TypeError(if takes_colinc {

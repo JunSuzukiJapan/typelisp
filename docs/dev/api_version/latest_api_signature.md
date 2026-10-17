@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.1
+# ABI バージョン 0.3.2
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.1 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.2 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `e609e74f661ea17b`
+内容ハッシュ (FNV-1a 64): `cdb840bbaf65bfee`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -328,6 +328,35 @@
 | 209 | `:section-relative` |
 | 210 | `intern` |
 | 211 | `_` |
+| 212 | `incf` |
+| 213 | `decf` |
+| 214 | `rotatef` |
+| 215 | `shiftf` |
+| 216 | `macrolet` |
+| 217 | `symbol-macrolet` |
+| 218 | `try-as` |
+| 219 | `compile` |
+| 220 | `quasiquote` |
+| 221 | `format` |
+| 222 | `print` |
+| 223 | `println` |
+| 224 | `eprint` |
+| 225 | `eprintln` |
+| 226 | `source-file` |
+| 227 | `pprint` |
+| 228 | `pprint-fill` |
+| 229 | `pprint-linear` |
+| 230 | `pprint-tabular` |
+| 231 | `pprint-logical-block` |
+| 232 | `c-alloc` |
+| 233 | `c-ref` |
+| 234 | `c-deref` |
+| 235 | `make-instance` |
+| 236 | `documentation` |
+| 237 | `disassemble` |
+| 238 | `ed` |
+| 239 | `%internal` |
+| 240 | `attribute` |
 
 ## 組み込み型キー (typelisp_mem::BUILTIN_TYPE_KEYS)
 
