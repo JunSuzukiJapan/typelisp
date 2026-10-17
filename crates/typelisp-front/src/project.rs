@@ -340,6 +340,9 @@ impl Loader {
         let mut body = Vec::new();
         let mut check_err = None;
         loop {
+            // Each form is read in the module the checker is in by now — an
+            // `(in-module ...)` above it moved there.
+            forms.set_module(checker.current_module());
             let read = {
                 let hook = crate::read::DriverReadEval::new(checker, interp);
                 forms.next_form_with(heap, Some(&hook))
@@ -700,9 +703,10 @@ fn load_source_flat(
     let dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
     // Read, check and run one form before the next is read — see
     // `load_source_inner`'s loop for why the read is interleaved.
-    let mut forms = reader.forms_in(&file_name, src);
+    let mut forms = reader.forms_within(&file_name, src, checker.current_module());
     let mut result = Ok(());
     loop {
+        forms.set_module(checker.current_module());
         let next = {
             let hook = crate::read::DriverReadEval::new(checker, interp);
             forms.next_form_with(heap, Some(&hook))
@@ -801,10 +805,9 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
 /// have to be evaluated to be found, which is the thing being decided.
 fn is_readtable_registration(heap: &Heap, form: Value) -> bool {
     core::op_sym(heap, form).map(|s| s.well_known()) == Some(wk::CALL)
-        && matches!(
-            core::path_field(heap, form, 0).as_ref().map(|p| p.to_string()).as_deref(),
-            Some("set-macro-character") | Some("set-dispatch-macro-character")
-        )
+        && core::path_field(heap, form, 0).is_some_and(|p| {
+            p == crate::types::Path::std("set-macro-character") || p == crate::types::Path::std("set-dispatch-macro-character")
+        })
 }
 
 /// The path string a `(load "PATH")` form names, or `None` for any other form.

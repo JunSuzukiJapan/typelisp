@@ -148,7 +148,7 @@ impl Checker {
                 // wrong in its own words, and is the only way a `:dyn Error`
                 // can be shown at all: a trait object carries its trait's
                 // methods and nothing else.
-                let bound = |name: &str| TraitBound { trait_path: Path::root(name), assoc: BTreeMap::new() };
+                let bound = |name: &str| TraitBound { trait_path: Path::std(name), assoc: BTreeMap::new() };
                 if self.type_implements(&args[1], &bound("error"), 0) {
                     TestReturn::ResultError
                 } else if self.type_implements(&args[1], &bound("print-object"), 0) {

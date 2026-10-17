@@ -182,7 +182,7 @@ pub const BUILTIN_TYPE_KEYS: &[&str] = &[
     "option",
     "result",
     "vector",
-    "cons-cell",
+    "std::cons-cell",
     "hashtable",
     "scope",
     "scope-frame",
@@ -190,12 +190,12 @@ pub const BUILTIN_TYPE_KEYS: &[&str] = &[
     "fileerror",
     "parseinterror",
     "parsefloaterror",
-    "universal-time",
-    "internal-time",
-    "heap-info",
+    "std::universal-time",
+    "std::internal-time",
+    "std::heap-info",
     "neterror",
     "vector<option<sexpr>>",
-    "array<option<sexpr>>",
+    "std::array<option<sexpr>>",
 ];
 
 impl TypeKeyId {

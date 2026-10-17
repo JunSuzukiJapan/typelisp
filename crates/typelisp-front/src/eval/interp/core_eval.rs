@@ -944,7 +944,7 @@ impl Interp {
     /// prelude defines every such global with that type, so a missing one
     /// means there is no prelude, and any other shape is a broken invariant.
     fn stream_global(&self, heap: &mut Heap, name: &str) -> Result<i64, EvalError> {
-        let v = self.global_value(heap, &crate::Path::root(name)).ok_or_else(|| {
+        let v = self.global_value(heap, &crate::Path::std(name)).ok_or_else(|| {
             EvalError::Internal(format!("{} is not defined: writing to it needs the prelude that defines it", name))
         })?;
         let malformed = || EvalError::Internal(format!("{} holds {:?}, not a standard-stream", name, v));
@@ -2508,9 +2508,9 @@ mod tests {
         let v = eval_ok(
             &mut h,
             "(let ((x int-any-width (int-any-width 7)) (y int-any-width (int-any-width 8)))
-               (call sexpr-cons (sexpr sexpr)
-                 (call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
-                 (call sexpr-cons (sexpr sexpr) (var x) (var y))))",
+               (call std::sexpr-cons (sexpr sexpr)
+                 (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
+                 (call std::sexpr-cons (sexpr sexpr) (var x) (var y))))",
         );
         let tail = h.cdr(v).unwrap();
         assert_eq!(h.car(tail).unwrap(), Value::Int(7));
@@ -2525,7 +2525,7 @@ mod tests {
         let v = eval_ok(
             &mut h,
             "(let ((x int-any-width (int-any-width 7)))
-               (call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
+               (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
                (var x))",
         );
         assert_eq!(v, Value::Int(7));
@@ -2624,14 +2624,14 @@ mod tests {
     #[test]
     fn a_builtin_call_evaluates_its_arguments_and_applies() {
         let mut h = stress_heap();
-        let v = eval_ok(&mut h, "(call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))");
+        let v = eval_ok(&mut h, "(call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))");
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
         // Arguments are themselves core forms, evaluated left to right.
         let v = eval_ok(
             &mut h,
-            "(let ((a int-any-width (int-any-width 5))) (call sexpr-cons (sexpr sexpr) (var a) (call sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))))",
+            "(let ((a int-any-width (int-any-width 5))) (call std::sexpr-cons (sexpr sexpr) (var a) (call std::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(5));
         let rest = h.cdr(v).unwrap();
@@ -2742,8 +2742,8 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(let ((p sexpr (construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))))
-                   (field-set (var p) 0 sexpr (call sexpr-cons (sexpr sexpr) (int-any-width 8) (unit)))
-                   (call sexpr-car (sexpr) (field-get (var p) 0 int-any-width)))",
+                   (field-set (var p) 0 sexpr (call std::sexpr-cons (sexpr sexpr) (int-any-width 8) (unit)))
+                   (call std::sexpr-car (sexpr) (field-get (var p) 0 int-any-width)))",
             ),
             Value::Int(8)
         );
@@ -2784,7 +2784,7 @@ mod tests {
         // datum is `eq` to the string it was built from.
         let v = eval_ok(
             &mut h,
-            &format!(r#"(let ((s sexpr (str "hi"))) (call sexpr-cons (sexpr sexpr) (var s) (construct sexpr "sexpr" {STR} false (str) (var s))))"#),
+            &format!(r#"(let ((s sexpr (str "hi"))) (call std::sexpr-cons (sexpr sexpr) (var s) (construct sexpr "sexpr" {STR} false (str) (var s))))"#),
         );
         assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
     }
@@ -2886,7 +2886,7 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                &format!("(match (call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)) sexpr
+                &format!("(match (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)) sexpr
                    ((pat-ctor sexpr \"sexpr\" {NIL} false ()) (int-any-width 100))
                    ((pat-ctor sexpr \"sexpr\" {CONS} false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))"),
             ),
@@ -2930,7 +2930,7 @@ mod tests {
         let form = read1(
             &mut h,
             &format!("(match (var p) sexpr ((pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind segs))
-               (call sexpr-cons (sexpr sexpr) (int-any-width 0) (var segs))))"),
+               (call std::sexpr-cons (sexpr sexpr) (int-any-width 0) (var segs))))"),
         );
         h.push_root(form);
 
@@ -2956,7 +2956,9 @@ mod tests {
     #[test]
     fn two_path_patterns_in_one_arm_both_keep_their_bindings() {
         let mut h = stress_heap();
-        let sym = |h: &mut Heap, n: &str| match core_symbol(n) {
+        // Path segments are the reader's root names; the binding name is the
+        // core IR's, like the `(var v)` read below.
+        let sym = |h: &mut Heap, n: &str| match h.intern_symbol(n) {
             Value::Symbol(id) => id,
             _ => unreachable!(),
         };
@@ -2967,7 +2969,7 @@ mod tests {
         h.push_root(p2);
         let pair = h.cons(p1, p2).unwrap();
         h.push_root(pair);
-        let name = sym(&mut h, "v");
+        let Value::Symbol(name) = core_symbol("v") else { unreachable!() };
         let env = extend_env(&mut h, &[(name, pair)], Value::Empty).unwrap();
         h.push_root(env);
 
@@ -2977,7 +2979,7 @@ mod tests {
                ((pat-ctor sexpr \"sexpr\" {CONS} false (sexpr sexpr)
                   (pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind l))
                   (pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind r)))
-                 (call sexpr-cons (sexpr sexpr) (var l) (var r))))"),
+                 (call std::sexpr-cons (sexpr sexpr) (var l) (var r))))"),
         );
         h.push_root(form);
 
@@ -3001,8 +3003,8 @@ mod tests {
             &mut h,
             "(match (construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 7) (int-any-width 8)) struct
                ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-bind b))
-                 (call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
-                 (call sexpr-cons (sexpr sexpr) (var a) (var b))))",
+                 (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
+                 (call std::sexpr-cons (sexpr sexpr) (var a) (var b))))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(7));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(8));
@@ -3081,14 +3083,14 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((xs sexpr (call sexpr-cons (sexpr sexpr) (int-any-width 1)
-                                   (call sexpr-cons (sexpr sexpr) (int-any-width 2)
-                                     (call sexpr-cons (sexpr sexpr) (int-any-width 3) (unit)))))
+                "(let ((xs sexpr (call std::sexpr-cons (sexpr sexpr) (int-any-width 1)
+                                   (call std::sexpr-cons (sexpr sexpr) (int-any-width 2)
+                                     (call std::sexpr-cons (sexpr sexpr) (int-any-width 3) (unit)))))
                        (last sexpr (unit)))
                    (loop unit
-                     (if (call sexpr-null (sexpr) (var xs)) (break) (unit))
-                     (set last (call sexpr-car (sexpr) (var xs)))
-                     (set xs (call sexpr-cdr (sexpr) (var xs))))
+                     (if (call std::sexpr-null (sexpr) (var xs)) (break) (unit))
+                     (set last (call std::sexpr-car (sexpr) (var xs)))
+                     (set xs (call std::sexpr-cdr (sexpr) (var xs))))
                    (var last))",
             ),
             Value::Int(3)
@@ -3139,9 +3141,9 @@ mod tests {
             &mut h,
             "(let ((xs sexpr (unit)) (n sexpr (unit)))
                (loop unit
-                 (if (call sexpr-null (sexpr) (var n)) (unit) (break))
-                 (set xs (call sexpr-cons (sexpr sexpr) (int-any-width 1) (unit)))
-                 (set n (call sexpr-car (sexpr) (var xs)))))",
+                 (if (call std::sexpr-null (sexpr) (var n)) (unit) (break))
+                 (set xs (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (unit)))
+                 (set n (call std::sexpr-car (sexpr) (var xs)))))",
         );
         h.push_root(form);
         let before = h.root_count();
@@ -3242,11 +3244,11 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(labels ((f ((xs sexpr)) sexpr
-                            (if (call sexpr-null (sexpr) (var xs))
+                            (if (call std::sexpr-null (sexpr) (var xs))
                                 (int-any-width 0)
-                                (apply (var f) sexpr (sexpr) (call sexpr-cdr (sexpr) (var xs))))))
-                   (apply (var f) sexpr (sexpr) (call sexpr-cons (sexpr sexpr) (int-any-width 1)
-                                    (call sexpr-cons (sexpr sexpr) (int-any-width 2) (unit)))))",
+                                (apply (var f) sexpr (sexpr) (call std::sexpr-cdr (sexpr) (var xs))))))
+                   (apply (var f) sexpr (sexpr) (call std::sexpr-cons (sexpr sexpr) (int-any-width 1)
+                                    (call std::sexpr-cons (sexpr sexpr) (int-any-width 2) (unit)))))",
             ),
             Value::Int(0)
         );
@@ -3282,9 +3284,9 @@ mod tests {
         let form = read1(
             &mut h,
             "(labels ((walk ((l sexpr)) sexpr
-                        (if (call sexpr-null (sexpr) (var l))
+                        (if (call std::sexpr-null (sexpr) (var l))
                             (int-any-width 0)
-                            (apply (var walk) sexpr (sexpr) (call sexpr-cdr (sexpr) (var l))))))
+                            (apply (var walk) sexpr (sexpr) (call std::sexpr-cdr (sexpr) (var l))))))
                (apply (var walk) sexpr (sexpr) (var xs)))",
         );
         h.push_root(form);
@@ -3476,7 +3478,7 @@ mod tests {
             &mut h,
             r#"(let ((b sexpr (dyn-new "point" shape ((point area)) ((named ((point name))))
                                 struct (construct point "point" 0 true (int-any-width int-any-width) (int-any-width 3)))))
-                 (call sexpr-cons (sexpr sexpr) (var b) (dyn-upcast shape (var b))))"#,
+                 (call std::sexpr-cons (sexpr sexpr) (var b) (dyn-upcast shape (var b))))"#,
         );
         h.push_root(form);
         let interp = Interp::new();

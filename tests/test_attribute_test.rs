@@ -168,7 +168,7 @@ fn a_misplaced_attribute_is_an_error() {
 #[test]
 fn assert_eq_wants_eq_and_print_object() {
     let err = check_err("(defstruct P (x int))\n(assert-eq (make-instance 'P :x 1) (make-instance 'P :x 1))");
-    assert!(err.contains("does not implement trait `eq`"), "{}", err);
+    assert!(err.contains("does not implement trait `std::eq`"), "{}", err);
     assert_eq!(eval_string("(progn (assert-eq #{1 \"a\"} #{1 \"a\"}) \"same\")"), "same");
 }
 

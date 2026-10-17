@@ -841,7 +841,7 @@ impl Registry {
         // name of its own because the CL one is the prelude's.
         internal_ns(&mut root).fns.insert(
             "read-datum-at".to_string(),
-            FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::root("cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(READ_ERROR), )),
+            FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::std("cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(READ_ERROR), )),
         );
         // `eval`: type-checks and runs a runtime `Sexpr` against the current
         // global environment, CL-style (`Interp::eval_form`). Sees all globals
@@ -1017,6 +1017,19 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
+        // Everything registered above as a function or a global, and the
+        // internal module, belongs to the standard library's module. Built at
+        // the root and moved, so each registration above names its builtin
+        // the way a call to it is written.
+        let fns = std::mem::take(&mut root.fns);
+        let vars = std::mem::take(&mut root.vars);
+        let internal = root.modules.remove(crate::INTERNAL_MODULE);
+        let std_ns = root.module_mut(&[crate::types::STD_MODULE.to_string()]);
+        std_ns.fns = fns;
+        std_ns.vars = vars;
+        if let Some(internal) = internal {
+            std_ns.modules.insert(crate::INTERNAL_MODULE.to_string(), internal);
+        }
         Registry { root, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
     }
 
@@ -1535,7 +1548,7 @@ fn register_system_builtins(root: &mut Namespace) {
 /// per call.
 pub fn reader_macro_fn_type() -> Type {
     Type::Fn(
-        vec![Type::Named(Path::root("string-input-stream"), vec![]), Type::Char],
+        vec![Type::Named(Path::std("string-input-stream"), vec![]), Type::Char],
         None,
         Box::new(option_of(sexpr())),
     )
@@ -1689,7 +1702,7 @@ fn sexpr_variant_fields(v: usize) -> Vec<Type> {
         // `#(..)` and `#nA(..)`. The payload is the collection box itself,
         // so construction and extraction are both the identity, like `str`.
         sv::VECTOR => vec![Type::Named(Path::root("vector"), vec![option_of(sexpr())])],
-        sv::ARRAY => vec![Type::Named(Path::root("array"), vec![option_of(sexpr())])],
+        sv::ARRAY => vec![Type::Named(Path::std("array"), vec![option_of(sexpr())])],
         // `#{..}`. A tuple's type depends on its arity, so the payload is a
         // fresh vector of the elements rather than the box itself.
         sv::TUPLE => vec![Type::Named(Path::root("vector"), vec![option_of(sexpr())])],
@@ -1758,21 +1771,21 @@ fn sexpr() -> Type {
 /// of `get-universal-time`/`file-modified-date` — see the comment at
 /// `get-universal-time`'s registration for why a struct and not a number.
 pub fn universal_time() -> Type {
-    Type::Named(Path::root("universal-time"), vec![])
+    Type::Named(Path::std("universal-time"), vec![])
 }
 
 /// `internal-time` (a prelude `defstruct`): `get-internal-real-time`'s
 /// reading, as whole seconds plus microseconds within that second.
 /// [`universal_time`]'s monotonic counterpart.
 pub fn internal_time() -> Type {
-    Type::Named(Path::root("internal-time"), vec![])
+    Type::Named(Path::std("internal-time"), vec![])
 }
 
 /// `heap-info` (a prelude `defstruct`): what `(heap-info)` reports and what
 /// `room` prints — [`universal_time`]'s shape, for the same reason (the
 /// runtime builds it, so the checker only has to name it).
 pub fn heap_info() -> Type {
-    Type::Named(Path::root("heap-info"), vec![])
+    Type::Named(Path::std("heap-info"), vec![])
 }
 
 fn hashtable_ty() -> Type {
@@ -1868,7 +1881,7 @@ fn hashtable_def() -> AdtDef {
     assoc.insert(
         "entries".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::root("vector"), vec![Type::Named(Path::root("cons-cell"), vec![tvar("k"), tvar("v")])])),
+            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::root("vector"), vec![Type::Named(Path::std("cons-cell"), vec![tvar("k"), tvar("v")])])),
             instance: true,
             builtin: true,
         },

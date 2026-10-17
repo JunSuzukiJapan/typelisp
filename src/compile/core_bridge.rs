@@ -1996,7 +1996,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         Value::Boxed(id) => {
             // Only a struct or enum box carries a type name to report.
             let what = match crate::type_key::heap_type_key(heap, id) {
-                Some(key) => format!("a `{}` object", key),
+                Some(key) => format!("a `{}` object", typelisp_print::shared::name_view().type_key(&key)),
                 None => "an object".to_string(),
             };
             Err(Error::TypeError(format!(
@@ -3435,13 +3435,13 @@ mod tests {
         // here, so the island has nothing to re-derive
         // (`interp::rt_builtin_symbol`).
         assert_eq!(
-            bridged("(call sexpr-car (sexpr) (var xs))"),
+            bridged("(call std::sexpr-car (sexpr) (var xs))"),
             r#"(call "rt_car" (2 var "xs" false))"#
         );
         // (`sym`'s kind is `0`: an interned symbol is a tagged word the
         // collector never reclaims, so it needs no root — `Repr::class`.)
         assert_eq!(
-            bridged("(call symbol->string (sym) (var s))"),
+            bridged("(call std::symbol->string (sym) (var s))"),
             r#"(call "rt_sym_name" (0 var "s" false))"#
         );
     }

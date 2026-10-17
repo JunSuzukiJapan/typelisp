@@ -37,7 +37,9 @@ fn redefining_a_builtin_function_is_always_an_error() {
     // them wouldn't conflict with what this test checks. `sexpr-car` is a
     // genuine `Registry::with_builtins` free function (direct cons-heap access —
     // can't be written in typelisp itself), so it still exercises this rule.
-    let src = "(defun sexpr-car ((x Sexpr)) Sexpr x)";
+    // In `std`, where the built-in functions are registered: a definition
+    // anywhere else is another module's name.
+    let src = "(module std (defun sexpr-car ((x Sexpr)) Sexpr x))";
     for policy in [RedefPolicy::Warn, RedefPolicy::Error, RedefPolicy::Silent] {
         let (_, result) = run(src, policy);
         assert!(result.is_err(), "policy {:?} should still reject redefining a builtin function", policy);

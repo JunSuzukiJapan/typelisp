@@ -194,8 +194,11 @@ impl Interp {
         let executable_printer = self.executable_printer.get();
         sched::install_crew(&self.scheduler, heap, threads - 1, &WORKER_CX, move || {
             typelisp_rt::shared::set_rt_shared(std::sync::Arc::clone(&rt));
+            // Shared either way: besides the executable's tables it holds how
+            // type names are written (`PrintShared::name_view`), which the
+            // snapshot's hooks print with too.
+            typelisp_print::shared::set_print_shared(std::sync::Arc::clone(&print));
             if executable_printer {
-                typelisp_print::shared::set_print_shared(std::sync::Arc::clone(&print));
                 typelisp_print::aot::install();
             } else {
                 super::worker_print::install(std::sync::Arc::clone(&snapshot));

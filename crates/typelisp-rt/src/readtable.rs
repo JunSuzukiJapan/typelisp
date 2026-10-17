@@ -18,7 +18,7 @@ use typelisp_mem::{Heap, Value};
 /// it from a `Type`; `tests/type_identity_guard_test.rs` checks the spelling
 /// against what the registry's own declaration produces, for the reason that
 /// file gives: a box built under a key nobody else spells is unmatchable.
-pub const READER_MACRO_OPTION_KEY: &str = "option<(fn (string-input-stream,char) option<sexpr>)>";
+pub const READER_MACRO_OPTION_KEY: &str = "option<(fn (std::string-input-stream,char) option<sexpr>)>";
 
 fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
     match args.get(i) {

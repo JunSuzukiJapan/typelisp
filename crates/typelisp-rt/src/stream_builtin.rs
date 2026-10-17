@@ -72,7 +72,7 @@ pub const RESULT_KEYS: &[(&str, &str)] = &[
     ("stream-take-output-string", "result<string,fileerror>"),
     ("file-delete", "result<(),fileerror>"),
     ("file-truename", "result<string,fileerror>"),
-    ("file-modified-date", "result<universal-time,fileerror>"),
+    ("file-modified-date", "result<std::universal-time,fileerror>"),
     ("file-owner-name", "result<option<string>,fileerror>"),
     ("file-list-directory", "result<vector<string>,fileerror>"),
     ("file-create-directories", "result<(),fileerror>"),

@@ -349,6 +349,12 @@ pub struct Forms<'a> {
 }
 
 impl Forms<'_> {
+    /// Read the forms after this point in module `ns` — for a driver whose
+    /// program moved into another module (`(in-module ...)`) between forms.
+    pub fn set_module(&mut self, ns: NsId) {
+        self.ns = ns;
+    }
+
     /// The next top-level datum and its span, or `Ok(None)` at end of input.
     ///
     /// Each datum is registered as a GC root before it is returned, exactly

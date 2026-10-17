@@ -598,7 +598,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         .iter()
         .map(|name| {
             let id = interp
-                .compiled_global_id(&Path::root(name))
+                .compiled_global_id(&Path::std(name))
                 .ok_or_else(|| format!("internal error: printer variable {} was never promoted", name))?;
             Ok((*name, id))
         })
@@ -952,6 +952,17 @@ fn build_main_wrapper(
         for (name, id) in printer_globals {
             let (name_ptr, name_len) = literal(&builder, name)?;
             call(&builder, "rt_print_global", &[name_ptr, name_len, i64_ty.const_int(*id as u64, false)])?;
+        }
+        // Type names are written for the module the program was checked in,
+        // as the interpreter writes them — the view the checker left behind.
+        let view = typelisp_print::shared::name_view();
+        let (module_ptr, module_len) = literal(&builder, &view.module().join("::"))?;
+        call(&builder, "rt_print_name_module", &[module_ptr, module_len])?;
+        let imports: std::collections::BTreeMap<&String, &String> = view.imports().iter().collect();
+        for (name, path) in imports {
+            let (name_ptr, name_len) = literal(&builder, name)?;
+            let (path_ptr, path_len) = literal(&builder, path)?;
+            call(&builder, "rt_print_name_import", &[name_ptr, name_len, path_ptr, path_len])?;
         }
     }
     // The environment `eval` needs, as one immutable blob. Registration only —

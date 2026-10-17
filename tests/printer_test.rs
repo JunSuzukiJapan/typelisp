@@ -552,3 +552,47 @@ fn a_bound_method_is_not_re_read_with_swapped_arguments() {
            (equal (render 7) "7")"##,
     );
 }
+
+// ---- type names are written from the current module ------------------------
+
+/// A struct's name is printed the way the module the program is in can write
+/// it: its own definitions by the last segment, a module below it by the path
+/// from it, anything else from the root.
+#[test]
+fn a_type_name_is_printed_from_the_current_module() {
+    is_true(
+        r##"(module m (pub defstruct p (pub n int)) (module k (pub defstruct q (pub n int))))
+           (module r (pub defun show () string
+                       (format false "~a ~a" (make-instance 'm::p :n 1) (make-instance 'm::k::q :n 2))))
+           (equal (r::show) "#<m::p n: 1> #<m::k::q n: 2>")"##,
+    );
+    is_true(
+        r##"(module m (pub defstruct p (pub n int))
+                     (module k (pub defstruct q (pub n int)))
+                     (pub defun show () string
+                       (format false "~a ~a" (make-instance 'p :n 1) (make-instance 'k::q :n 2))))
+           (in-module m)
+           (equal (show) "#<p n: 1> #<k::q n: 2>")"##,
+    );
+}
+
+/// A type the current module has brought in with `use` is written by its last
+/// segment, as the module writes it.
+#[test]
+fn a_type_brought_in_is_printed_by_its_last_segment() {
+    is_true(
+        r##"(module m (pub defstruct p (pub n int)))
+           (use m::p)
+           (equal (format false "~a" (make-instance 'p :n 1)) "#<p n: 1>")"##,
+    );
+}
+
+/// An error message writes a type the same way.
+#[test]
+fn an_error_message_writes_a_type_from_the_current_module() {
+    let e = check_err(
+        r##"(module m (pub defstruct p (pub n int)) (module k (pub defstruct q (pub n int))))
+           (module m (defun f () int (make-instance 'k::q :n 1)))"##,
+    );
+    assert!(e.contains("k::q") && !e.contains("m::k::q"), "{}", e);
+}

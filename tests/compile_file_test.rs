@@ -209,10 +209,9 @@ fn printer_variables_take_effect_in_a_compiled_executable() {
 /// gets a test of its own.
 /// The entry file is the module its name derives to in an executable, as it
 /// is under `typl file.typl`, so a value of one of its types prints the same
-/// either way. The executable used to keep the entry file at the root and
-/// print `#<point ...>` where `typl` printed `#<entry_module::point ...>`.
-/// The `eval` is checked in that same module, so a bare name still reaches
-/// the program's own type.
+/// either way: written from that module, which the program runs in, so by its
+/// last segment. The `eval` is checked in that same module, so a bare name
+/// still reaches the program's own type.
 #[test]
 fn the_entry_files_types_print_with_its_module_as_under_typl() {
     let dir = tmp_dir();
@@ -235,7 +234,7 @@ fn the_entry_files_types_print_with_its_module_as_under_typl() {
     let compiled = Command::new(&out_path).output().expect("failed to run the compiled executable");
     let interpreted = Command::new(env!("CARGO_BIN_EXE_typl")).arg(&src_path).output().expect("failed to run typl");
 
-    let expected = "#<entry_module::point x: 1 y: 2>\n#<entry_module::point x: 3 y: 4>\n";
+    let expected = "#<point x: 1 y: 2>\n#<point x: 3 y: 4>\n";
     assert_eq!(String::from_utf8_lossy(&interpreted.stdout), expected);
     assert_eq!(String::from_utf8_lossy(&compiled.stdout), expected);
 }

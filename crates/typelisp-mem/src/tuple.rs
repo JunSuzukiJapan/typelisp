@@ -2,7 +2,7 @@
 //! reader builds for a `#{..}` datum, and what a `Sexpr`'s `tuple` variant
 //! is.
 //!
-//! A tuple type is the prelude's `%internal::tupleN<T0,...>` struct (see the
+//! A tuple type is the prelude's `std::%internal::tupleN<T0,...>` struct (see the
 //! front end's `types::tuple_path`), so these keys are the keys the checker
 //! gives those instantiations. They are spelled here because the reader and
 //! the runtime build and test such boxes with no checker in hand;
@@ -14,7 +14,7 @@ pub const TUPLE_MAX_ARITY: usize = 12;
 
 use crate::ConcreteNames;
 
-const PREFIX: &str = "%internal::tuple";
+const PREFIX: &str = "std::%internal::tuple";
 const ELEMENT: &str = "option<sexpr>";
 
 /// The key of the `#{..}` datum of `arity` elements.
@@ -54,17 +54,17 @@ mod tests {
 
     #[test]
     fn other_keys_are_not_data_tuples() {
-        assert_eq!(sexpr_tuple_arity("%internal::tuple2<int,option<sexpr>>"), None);
-        assert_eq!(sexpr_tuple_arity("%internal::tuple13<option<sexpr>>"), None);
+        assert_eq!(sexpr_tuple_arity("std::%internal::tuple2<int,option<sexpr>>"), None);
+        assert_eq!(sexpr_tuple_arity("std::%internal::tuple13<option<sexpr>>"), None);
         assert_eq!(sexpr_tuple_arity("vector<option<sexpr>>"), None);
     }
 
     #[test]
     fn every_arity_is_a_tuple_base() {
-        assert!(is_tuple_base_key("%internal::tuple1"));
-        assert!(is_tuple_base_key("%internal::tuple12"));
-        assert!(!is_tuple_base_key("%internal::tuple13"));
-        assert!(!is_tuple_base_key("%internal::tuplex"));
+        assert!(is_tuple_base_key("std::%internal::tuple1"));
+        assert!(is_tuple_base_key("std::%internal::tuple12"));
+        assert!(!is_tuple_base_key("std::%internal::tuple13"));
+        assert!(!is_tuple_base_key("std::%internal::tuplex"));
         assert!(!is_tuple_base_key("vector"));
     }
 }

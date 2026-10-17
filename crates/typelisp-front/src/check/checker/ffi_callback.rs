@@ -116,7 +116,7 @@ impl Checker {
     /// address, as a raw word.
     fn callback_address_form(&self, heap: &mut Heap, key: &str) -> Result<Value, Error> {
         let arg = Checked::new(forms::str_lit_form(heap, key)?, Type::Str);
-        let form = self.call_form(heap, &Path::root(ADDRESS_BUILTIN), &[arg])?;
+        let form = self.call_form(heap, &Path::std(ADDRESS_BUILTIN), &[arg])?;
         Ok(forms::rooted(heap, form))
     }
 

@@ -211,37 +211,38 @@ fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
     use typelisp::{TypeKeyId, BUILTIN_TYPE_KEYS};
 
     for (key, path) in [
-        (TypeKeyId::OPTION, "option"),
-        (TypeKeyId::RESULT, "result"),
-        (TypeKeyId::FILE_ERROR, typelisp::check::registry::FILE_ERROR),
-        (TypeKeyId::READ_ERROR, typelisp::check::registry::READ_ERROR),
-        (TypeKeyId::PARSE_INT_ERROR, typelisp::check::registry::PARSE_INT_ERROR),
-        (TypeKeyId::PARSE_FLOAT_ERROR, typelisp::check::registry::PARSE_FLOAT_ERROR),
+        (TypeKeyId::OPTION, Path::root("option")),
+        (TypeKeyId::RESULT, Path::root("result")),
+        (TypeKeyId::FILE_ERROR, Path::root(typelisp::check::registry::FILE_ERROR)),
+        (TypeKeyId::READ_ERROR, Path::root(typelisp::check::registry::READ_ERROR)),
+        (TypeKeyId::PARSE_INT_ERROR, Path::root(typelisp::check::registry::PARSE_INT_ERROR)),
+        (TypeKeyId::PARSE_FLOAT_ERROR, Path::root(typelisp::check::registry::PARSE_FLOAT_ERROR)),
         // `file-list-directory` builds a `Vector<string>` box directly, and
         // `read-datum-at` pairs its datum with its end index in a
         // `cons-cell<Sexpr, int>` box (CL's second return value, which this
         // language has no multiple values to carry) — both on the runtime's
         // own side of the boundary, so both need the identity too.
-        (TypeKeyId::VECTOR, "vector"),
-        (TypeKeyId::CONS_CELL, "cons-cell"),
+        (TypeKeyId::VECTOR, Path::root("vector")),
+        (TypeKeyId::CONS_CELL, Path::std("cons-cell")),
         // The heap's own machinery: a `HashTable<K,V>` box, and the frames a
         // `Scope<V>` is made of.
-        (TypeKeyId::HASHTABLE, "hashtable"),
-        (TypeKeyId::SCOPE, "scope"),
-        (TypeKeyId::SCOPE_FRAME, "scope-frame"),
-        // Three prelude `defstruct`s the runtime builds itself, because the
+        (TypeKeyId::HASHTABLE, Path::root("hashtable")),
+        (TypeKeyId::SCOPE, Path::root("scope")),
+        (TypeKeyId::SCOPE_FRAME, Path::root("scope-frame")),
+        // Three prelude `defstruct`s the runtime builds itself (in `std`, as
+        // the whole prelude is, like `cons-cell` above), because the
         // facts in them belong to the runtime and not to the checker: two
         // clocks (`get-universal-time` / `get-internal-real-time`) and the
         // heap's own statistics (`heap-info`, which `room` prints).
-        (TypeKeyId::UNIVERSAL_TIME, "universal-time"),
-        (TypeKeyId::INTERNAL_TIME, "internal-time"),
-        (TypeKeyId::HEAP_INFO, "heap-info"),
+        (TypeKeyId::UNIVERSAL_TIME, Path::std("universal-time")),
+        (TypeKeyId::INTERNAL_TIME, Path::std("internal-time")),
+        (TypeKeyId::HEAP_INFO, Path::std("heap-info")),
         // The socket layer's error type, built by `net_builtin`.
-        (TypeKeyId::NET_ERROR, "neterror"),
+        (TypeKeyId::NET_ERROR, Path::root("neterror")),
     ] {
         assert_eq!(
             BUILTIN_TYPE_KEYS[key.as_u32() as usize],
-            typelisp::type_key::type_key_of(&Path::root(path)),
+            typelisp::type_key::type_key_of(&path),
             "the pre-interned key at index {} is not the one `type_key_of` produces for `{}`",
             key.as_u32(),
             path
@@ -269,18 +270,18 @@ fn the_runtime_result_keys_match_the_registry() {
     use typelisp::types::Path;
 
     let reg = Registry::with_builtins();
-    // A builtin is registered at the root or in the library's internal
-    // module, and the shims key it by its bare name — so the name has to
-    // pick out exactly one of the two.
+    // A builtin is registered in `std` or in the library's internal module,
+    // and the shims key it by its bare name — so the name has to pick out
+    // exactly one of the two.
     let sig_of = |name: &str| {
-        let found: Vec<_> = [Path::root(name), Path::internal(name)]
+        let found: Vec<_> = [Path::std(name), Path::internal(name)]
             .iter()
             .filter_map(|p| reg.fn_sig(p))
             .collect();
         match found.as_slice() {
             [sig] => (*sig).clone(),
             [] => panic!("`{}` has a result-key row but no registry entry", name),
-            _ => panic!("`{}` is registered both at the root and in the internal module", name),
+            _ => panic!("`{}` is registered both in `std` and in the internal module", name),
         }
     };
     let expected = |name: &str| -> String { typelisp_mem::ConcreteNames::type_key(&sig_of(name).ret) };

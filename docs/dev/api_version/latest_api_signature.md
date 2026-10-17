@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.4
+# ABI バージョン 0.3.8
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.4 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.8 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `11bd6095062f7885`
+内容ハッシュ (FNV-1a 64): `20b2b2a08ab9990d`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -386,7 +386,7 @@
 | 0 | `option` |
 | 1 | `result` |
 | 2 | `vector` |
-| 3 | `cons-cell` |
+| 3 | `std::cons-cell` |
 | 4 | `hashtable` |
 | 5 | `scope` |
 | 6 | `scope-frame` |
@@ -394,12 +394,12 @@
 | 8 | `fileerror` |
 | 9 | `parseinterror` |
 | 10 | `parsefloaterror` |
-| 11 | `universal-time` |
-| 12 | `internal-time` |
-| 13 | `heap-info` |
+| 11 | `std::universal-time` |
+| 12 | `std::internal-time` |
+| 13 | `std::heap-info` |
 | 14 | `neterror` |
 | 15 | `vector<option<sexpr>>` |
-| 16 | `array<option<sexpr>>` |
+| 16 | `std::array<option<sexpr>>` |
 
 ## 実行時が組み立てる値の型キー (typelisp_rt)
 
@@ -433,7 +433,7 @@
 | stream_builtin::RESULT_KEYS | `stream-take-output-string` | `result<string,fileerror>` |
 | stream_builtin::RESULT_KEYS | `file-delete` | `result<(),fileerror>` |
 | stream_builtin::RESULT_KEYS | `file-truename` | `result<string,fileerror>` |
-| stream_builtin::RESULT_KEYS | `file-modified-date` | `result<universal-time,fileerror>` |
+| stream_builtin::RESULT_KEYS | `file-modified-date` | `result<std::universal-time,fileerror>` |
 | stream_builtin::RESULT_KEYS | `file-owner-name` | `result<option<string>,fileerror>` |
 | stream_builtin::RESULT_KEYS | `file-list-directory` | `result<vector<string>,fileerror>` |
 | stream_builtin::RESULT_KEYS | `file-create-directories` | `result<(),fileerror>` |
@@ -485,7 +485,7 @@
 | net_builtin::INNER_KEYS | `net-server-name` | `option<string>` |
 | net_builtin::INNER_KEYS | `net-pop-byte` | `option<int>` |
 | net_builtin::INNER_KEYS | `net-pop-char` | `option<char>` |
-| readtable::READER_MACRO_OPTION_KEY | | `option<(fn (string-input-stream,char) option<sexpr>)>` |
+| readtable::READER_MACRO_OPTION_KEY | | `option<(fn (std::string-input-stream,char) option<sexpr>)>` |
 
 ## 型ごとの表現 (Repr)
 
@@ -493,10 +493,10 @@
 |---|---|---|---|---|
 | `!` | `!` | none | 0 | 0 |
 | `()` | `()` | unit | 100 | 0 |
-| `(fn (string-input-stream char) Option<Sexpr>)` | `(fn (string-input-stream,char) option<sexpr>)` | fn | 6 | 2 |
+| `(fn (std::string-input-stream char) Option<Sexpr>)` | `(fn (std::string-input-stream,char) option<sexpr>)` | fn | 6 | 2 |
 | `Chan<t>` | `chan<t>` | struct | 6 | 2 |
 | `HashTable<k,v>` | `hashtable<k,v>` | hashtable | 6 | 2 |
-| `Option<(fn (string-input-stream char) Option<Sexpr>)>` | `option<(fn (string-input-stream,char) option<sexpr>)>` | niche | 101 | 2 |
+| `Option<(fn (std::string-input-stream char) Option<Sexpr>)>` | `option<(fn (std::string-input-stream,char) option<sexpr>)>` | niche | 101 | 2 |
 | `Option<Sexpr>` | `option<sexpr>` | niche | 101 | 2 |
 | `Option<bool>` | `option<bool>` | niche | 101 | 0 |
 | `Option<c-long>` | `option<c-long>` | enum | 6 | 2 |
@@ -530,24 +530,23 @@
 | `Result<Vector<string>,fileerror>` | `result<vector<string>,fileerror>` | enum | 6 | 2 |
 | `Result<bool,fileerror>` | `result<bool,fileerror>` | enum | 6 | 2 |
 | `Result<bool,neterror>` | `result<bool,neterror>` | enum | 6 | 2 |
-| `Result<cons-cell<Option<Sexpr>,int>,readerror>` | `result<cons-cell<option<sexpr>,int>,readerror>` | enum | 6 | 2 |
 | `Result<f64,parsefloaterror>` | `result<f64,parsefloaterror>` | enum | 6 | 2 |
 | `Result<i32,fileerror>` | `result<i32,fileerror>` | enum | 6 | 2 |
 | `Result<i32,neterror>` | `result<i32,neterror>` | enum | 6 | 2 |
 | `Result<int,fileerror>` | `result<int,fileerror>` | enum | 6 | 2 |
+| `Result<std::cons-cell<Option<Sexpr>,int>,readerror>` | `result<std::cons-cell<option<sexpr>,int>,readerror>` | enum | 6 | 2 |
+| `Result<std::universal-time,fileerror>` | `result<std::universal-time,fileerror>` | enum | 6 | 2 |
 | `Result<string,fileerror>` | `result<string,fileerror>` | enum | 6 | 2 |
 | `Result<string,neterror>` | `result<string,neterror>` | enum | 6 | 2 |
-| `Result<universal-time,fileerror>` | `result<universal-time,fileerror>` | enum | 6 | 2 |
 | `Task<t>` | `task<t>` | struct | 6 | 2 |
 | `Thread<t>` | `thread<t>` | struct | 6 | 2 |
 | `Vector<Option<Sexpr>>` | `vector<option<sexpr>>` | vector | 6 | 2 |
-| `Vector<cons-cell<k,v>>` | `vector<cons-cell<k,v>>` | vector | 6 | 2 |
 | `Vector<int>` | `vector<int>` | vector | 6 | 2 |
 | `Vector<k>` | `vector<k>` | vector | 6 | 2 |
+| `Vector<std::cons-cell<k,v>>` | `vector<std::cons-cell<k,v>>` | vector | 6 | 2 |
 | `Vector<string>` | `vector<string>` | vector | 6 | 2 |
 | `Vector<t>` | `vector<t>` | vector | 6 | 2 |
 | `Vector<v>` | `vector<v>` | vector | 6 | 2 |
-| `array<Option<Sexpr>>` | `array<option<sexpr>>` | none | 0 | 0 |
 | `bool` | `bool` | bool | 4 | 0 |
 | `c-long` | `c-long` | raw-word | 0 | 0 |
 | `c-ulong` | `c-ulong` | raw-word | 0 | 0 |
@@ -555,12 +554,10 @@
 | `e` | `e` | none | 0 | 0 |
 | `f32` | `f32` | f32 | 11 | 0 |
 | `f64` | `f64` | f64 | 2 | 0 |
-| `heap-info` | `heap-info` | none | 0 | 0 |
 | `i16` | `i16` | int-any-width | 1 | 0 |
 | `i32` | `i32` | int-any-width | 1 | 0 |
 | `i8` | `i8` | int-any-width | 1 | 0 |
 | `int` | `int` | int | 6 | 2 |
-| `internal-time` | `internal-time` | none | 0 | 0 |
 | `k` | `k` | none | 0 | 0 |
 | `llvm-basic-block` | `llvm-basic-block` | handle | 1 | 0 |
 | `llvm-builder` | `llvm-builder` | handle | 1 | 0 |
@@ -571,13 +568,16 @@
 | `ratio` | `ratio` | ratio | 6 | 2 |
 | `rational` | `rational` | rational | 6 | 2 |
 | `scope<v>` | `scope<v>` | scope | 6 | 2 |
+| `std::array<Option<Sexpr>>` | `std::array<option<sexpr>>` | none | 0 | 0 |
+| `std::heap-info` | `std::heap-info` | none | 0 | 0 |
+| `std::internal-time` | `std::internal-time` | none | 0 | 0 |
+| `std::universal-time` | `std::universal-time` | none | 0 | 0 |
 | `string` | `string` | str | 6 | 2 |
 | `symbol` | `symbol` | sym | 6 | 0 |
 | `t` | `t` | none | 0 | 0 |
 | `u16` | `u16` | int-any-width | 1 | 0 |
 | `u32` | `u32` | int-any-width | 1 | 0 |
 | `u8` | `u8` | int-any-width | 1 | 0 |
-| `universal-time` | `universal-time` | none | 0 | 0 |
 | `v` | `v` | none | 0 | 0 |
 
 ## ランタイム関数
@@ -801,6 +801,8 @@
 | `rt_print_field_name` | `i64 (ptr, i32)` |
 | `rt_print_field_template` | `i64 (ptr, i32)` |
 | `rt_print_global` | `i64 (ptr, i32)` |
+| `rt_print_name_import` | `i64 (ptr, i32)` |
+| `rt_print_name_module` | `i64 (ptr, i32)` |
 | `rt_print_object_method` | `i64 (ptr, i32)` |
 | `rt_println` | `i64 (ptr, i32)` |
 | `rt_push_permanent_sexpr_root` | `i64 (ptr, i32)` |
@@ -1108,7 +1110,7 @@
 - インスタンス `bucket-value`: `(HashTable<k,v>, int, int) -> v`
 - インスタンス `clear`: `(HashTable<k,v>) -> ()`
 - インスタンス `count`: `(HashTable<k,v>) -> int`
-- インスタンス `entries`: `(HashTable<k,v>) -> Vector<cons-cell<k,v>>`
+- インスタンス `entries`: `(HashTable<k,v>) -> Vector<std::cons-cell<k,v>>`
 - インスタンス `keys`: `(HashTable<k,v>) -> Vector<k>`
 - 関連関数 `new`: `() -> HashTable<k,v>`
 - インスタンス `values`: `(HashTable<k,v>) -> Vector<v>`
@@ -1525,7 +1527,7 @@
 - 変種 16 `u32`: `u32`
 - 変種 17 `i32`: `i32`
 - 変種 18 `vector`: `Vector<Option<Sexpr>>`
-- 変種 19 `array`: `array<Option<Sexpr>>`
+- 変種 19 `array`: `std::array<Option<Sexpr>>`
 - 変種 20 `tuple`: `Vector<Option<Sexpr>>`
 - インスタンス `eq`: `(Option<Sexpr>, Option<Sexpr>) -> bool`
 - インスタンス `eql`: `(Option<Sexpr>, Option<Sexpr>) -> bool`
@@ -1726,136 +1728,136 @@
 
 | 関数 | シム | シグネチャ |
 |---|---|---|
-| `%internal::dribble-start` | `rt_dribble_start` | `(string) -> Result<(),fileerror>` |
-| `%internal::dribble-stop` | `rt_dribble_stop` | `() -> Result<(),fileerror>` |
-| `%internal::ed-open` | `rt_ed_open` | `(string, int) -> Result<(),fileerror>` |
-| `%internal::file-create-directories` | `rt_file_create_directories` | `(string) -> Result<(),fileerror>` |
-| `%internal::file-delete` | `rt_file_delete` | `(string) -> Result<(),fileerror>` |
-| `%internal::file-directory-p` | `rt_file_directory_p` | `(string) -> bool` |
-| `%internal::file-exists-p` | `rt_file_exists_p` | `(string) -> bool` |
-| `%internal::file-list-directory` | `rt_file_list_directory` | `(string) -> Result<Vector<string>,fileerror>` |
-| `%internal::file-modified-date` | `rt_file_modified_date` | `(string) -> Result<universal-time,fileerror>` |
-| `%internal::file-owner-name` | `rt_file_owner_name` | `(string) -> Result<Option<string>,fileerror>` |
-| `%internal::file-rename` | `rt_file_rename` | `(string, string) -> Result<(),fileerror>` |
-| `%internal::file-truename` | `rt_file_truename` | `(string) -> Result<string,fileerror>` |
-| `%internal::make-random-state-fresh` | `rt_make_random_state_fresh` | `() -> random-state` |
-| `%internal::net-accept` | `rt_net_accept` | `(i32) -> Result<Option<i32>,neterror>` |
-| `%internal::net-buffered-p` | `rt_net_buffered_p` | `(i32) -> Result<bool,neterror>` |
-| `%internal::net-connect-begin` | `rt_net_connect_begin` | `(string) -> Result<i32,neterror>` |
-| `%internal::net-connect-finish` | `rt_net_connect_finish` | `(i32) -> Result<(),neterror>` |
-| `%internal::net-fill` | `rt_net_fill` | `(i32) -> Result<Option<int>,neterror>` |
-| `%internal::net-flush` | `rt_net_flush` | `(i32) -> Result<Option<int>,neterror>` |
-| `%internal::net-listen` | `rt_net_listen` | `(string, int) -> Result<i32,neterror>` |
-| `%internal::net-local-address` | `rt_net_local_address` | `(i32) -> Result<string,neterror>` |
-| `%internal::net-peer-address` | `rt_net_peer_address` | `(i32) -> Result<string,neterror>` |
-| `%internal::net-peer-subject` | `rt_net_peer_subject` | `(i32) -> Result<Option<string>,neterror>` |
-| `%internal::net-pop-byte` | `rt_net_pop_byte` | `(i32) -> Result<Option<int>,neterror>` |
-| `%internal::net-pop-char` | `rt_net_pop_char` | `(i32) -> Result<Option<char>,neterror>` |
-| `%internal::net-push-byte` | `rt_net_push_byte` | `(i32, int) -> Result<(),neterror>` |
-| `%internal::net-push-string` | `rt_net_push_string` | `(i32, string) -> Result<(),neterror>` |
-| `%internal::net-resolve-begin` | `rt_net_resolve_begin` | `(string, int) -> Result<i32,neterror>` |
-| `%internal::net-resolve-finish` | `rt_net_resolve_finish` | `(i32) -> Result<Option<Vector<string>>,neterror>` |
-| `%internal::net-server-name` | `rt_net_server_name` | `(i32) -> Result<Option<string>,neterror>` |
-| `%internal::net-set-keepalive` | `rt_net_set_keepalive` | `(i32, bool) -> Result<(),neterror>` |
-| `%internal::net-set-keepalive-period` | `rt_net_set_keepalive_period` | `(i32, int) -> Result<(),neterror>` |
-| `%internal::net-set-nodelay` | `rt_net_set_nodelay` | `(i32, bool) -> Result<(),neterror>` |
-| `%internal::net-shutdown-write` | `rt_net_shutdown_write` | `(i32) -> Result<(),neterror>` |
-| `%internal::net-socket-error` | `rt_net_socket_error` | `(i32) -> Result<Option<string>,neterror>` |
-| `%internal::net-tls-add-certificate` | `rt_net_tls_add_certificate` | `(i32, string, string, string) -> Result<(),neterror>` |
-| `%internal::net-tls-handshake` | `rt_net_tls_handshake` | `(i32) -> Result<Option<int>,neterror>` |
-| `%internal::net-tls-listen` | `rt_net_tls_listen` | `(string, int, string, string, Option<string>) -> Result<i32,neterror>` |
-| `%internal::net-tls-start` | `rt_net_tls_start` | `(i32, string, Option<string>, Option<string>, Option<string>) -> Result<(),neterror>` |
-| `%internal::net-udp-bind` | `rt_net_udp_bind` | `(string, int) -> Result<i32,neterror>` |
-| `%internal::net-udp-last-sender` | `rt_net_udp_last_sender` | `(i32) -> Result<string,neterror>` |
-| `%internal::net-udp-recv` | `rt_net_udp_recv` | `(i32) -> Result<Option<Vector<int>>,neterror>` |
-| `%internal::net-udp-send-to` | `rt_net_udp_send_to` | `(i32, string, Vector<int>) -> Result<bool,neterror>` |
-| `%internal::net-unix-connect` | `rt_net_unix_connect` | `(string) -> Result<i32,neterror>` |
-| `%internal::net-unix-listen` | `rt_net_unix_listen` | `(string) -> Result<i32,neterror>` |
-| `%internal::net-wait` | `rt_suspend_io` | `(i32, int) -> ()` |
-| `%internal::net-wait-for` | `rt_suspend_io_for` | `(i32, int, f64) -> bool` |
-| `%internal::random-state-copy` | `rt_random_state_copy` | `(random-state) -> random-state` |
-| `%internal::random-state-next` | `rt_random_state_next` | `(random-state, int) -> int` |
-| `%internal::read-datum-at` | `rt_read_datum_at` | `(string, int, bool) -> Result<cons-cell<Option<Sexpr>,int>,readerror>` |
-| `%internal::stream-at-line-start` | `rt_stream_at_line_start` | `(i32) -> Result<bool,fileerror>` |
-| `%internal::stream-close` | `rt_stream_close` | `(i32) -> Result<(),fileerror>` |
-| `%internal::stream-describe` | `rt_stream_describe` | `(i32) -> string` |
-| `%internal::stream-finish-output` | `rt_stream_finish_output` | `(i32) -> Result<(),fileerror>` |
-| `%internal::stream-input-p` | `rt_stream_input_p` | `(i32) -> Result<bool,fileerror>` |
-| `%internal::stream-listen` | `rt_stream_listen` | `(i32) -> Result<bool,fileerror>` |
-| `%internal::stream-open-file` | `rt_stream_open_file` | `(string, int) -> Result<i32,fileerror>` |
-| `%internal::stream-open-p` | `rt_stream_open_p` | `(i32) -> bool` |
-| `%internal::stream-output-p` | `rt_stream_output_p` | `(i32) -> Result<bool,fileerror>` |
-| `%internal::stream-position` | `rt_stream_position` | `(i32) -> Result<int,fileerror>` |
-| `%internal::stream-read-byte` | `rt_stream_read_byte` | `(i32) -> Result<Option<int>,fileerror>` |
-| `%internal::stream-read-char` | `rt_stream_read_char` | `(i32) -> Result<Option<char>,fileerror>` |
-| `%internal::stream-stderr` | `rt_stream_stderr` | `() -> i32` |
-| `%internal::stream-stdin` | `rt_stream_stdin` | `() -> i32` |
-| `%internal::stream-stdout` | `rt_stream_stdout` | `() -> i32` |
-| `%internal::stream-string-input` | `rt_stream_string_input` | `(string) -> i32` |
-| `%internal::stream-string-output` | `rt_stream_string_output` | `() -> i32` |
-| `%internal::stream-take-output-string` | `rt_stream_take_output_string` | `(i32) -> Result<string,fileerror>` |
-| `%internal::stream-unread-char` | `rt_stream_unread_char` | `(i32, char) -> Result<(),fileerror>` |
-| `%internal::stream-write-byte` | `rt_stream_write_byte` | `(i32, int) -> Result<(),fileerror>` |
-| `%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> Result<(),fileerror>` |
-| `command-line-args` | `rt_command_line_args` | `() -> Vector<string>` |
-| `compile-file` |  | `(string, string) -> bool` |
-| `dump` |  | `(string) -> bool` |
-| `equal` | `rt_sexpr_equal` | `<t> (t, t) -> bool` |
-| `equalp` | `rt_sexpr_equalp` | `<t> (t, t) -> bool` |
-| `eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
-| `exit` | `rt_exit` | `(int) -> !` |
-| `get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (string-input-stream char) Option<Sexpr>)>` |
-| `get-internal-real-time` | `rt_get_internal_real_time` | `() -> internal-time` |
-| `get-internal-run-time` | `rt_get_internal_run_time` | `() -> internal-time` |
-| `get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (string-input-stream char) Option<Sexpr>)>` |
-| `get-universal-time` | `rt_get_universal_time` | `() -> universal-time` |
-| `getenv` | `rt_getenv` | `(string) -> Option<string>` |
-| `heap-info` | `rt_heap_info` | `() -> heap-info` |
-| `home-directory` | `rt_home_directory` | `() -> Option<string>` |
-| `intern` | `rt_intern` | `(string, string) -> symbol` |
-| `keywordp` | `rt_keywordp` | `(symbol) -> bool` |
-| `lisp-implementation-version` | `rt_lisp_implementation_version` | `() -> string` |
-| `machine-instance` | `rt_machine_instance` | `() -> Option<string>` |
-| `machine-type` | `rt_machine_type` | `() -> string` |
-| `machine-version` | `rt_machine_version` | `() -> Option<string>` |
-| `macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
-| `macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
-| `parse-float` | `rt_parse_float` | `(string) -> Result<f64,parsefloaterror>` |
-| `pprint-indent` | `rt_pprint_indent` | `(symbol, int) -> ()` |
-| `pprint-list-exhausted` | `rt_pprint_list_exhausted` | `() -> bool` |
-| `pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |
-| `pprint-pop` | `rt_pprint_pop` | `() -> Option<Sexpr>` |
-| `pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
-| `read` | `rt_read` | `(string) -> Result<Option<Sexpr>,readerror>` |
-| `seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
-| `set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (string-input-stream char) Option<Sexpr>)) -> ()` |
-| `set-macro-character` | `rt_set_macro_character` | `(char, (fn (string-input-stream char) Option<Sexpr>)) -> ()` |
-| `sexpr-atom` | `rt_atom` | `(Option<Sexpr>) -> bool` |
-| `sexpr-bool` | `rt_sexpr_bool` | `(Option<Sexpr>) -> bool` |
-| `sexpr-car` | `rt_car` | `(Option<Sexpr>) -> Option<Sexpr>` |
-| `sexpr-cdr` | `rt_cdr` | `(Option<Sexpr>) -> Option<Sexpr>` |
-| `sexpr-char` | `rt_sexpr_char` | `(Option<Sexpr>) -> char` |
-| `sexpr-cons` | `rt_cons` | `(Option<Sexpr>, Option<Sexpr>) -> Option<Sexpr>` |
-| `sexpr-consp` | `rt_consp` | `(Option<Sexpr>) -> bool` |
-| `sexpr-f32` | `rt_sexpr_f32` | `(Option<Sexpr>) -> f32` |
-| `sexpr-f64` | `rt_sexpr_f64` | `(Option<Sexpr>) -> f64` |
-| `sexpr-i16` | `rt_sexpr_i16` | `(Option<Sexpr>) -> i16` |
-| `sexpr-i32` | `rt_sexpr_i32` | `(Option<Sexpr>) -> i32` |
-| `sexpr-i8` | `rt_sexpr_i8` | `(Option<Sexpr>) -> i8` |
-| `sexpr-int` | `rt_sexpr_int` | `(Option<Sexpr>) -> int` |
-| `sexpr-null` | `rt_null` | `(Option<Sexpr>) -> bool` |
-| `sexpr-str` | `rt_sexpr_str` | `(Option<Sexpr>) -> string` |
-| `sexpr-sym-name` | `rt_sym_name` | `(Option<Sexpr>) -> string` |
-| `sexpr-symp` | `rt_symp` | `(Option<Sexpr>) -> bool` |
-| `sexpr-u16` | `rt_sexpr_u16` | `(Option<Sexpr>) -> u16` |
-| `sexpr-u32` | `rt_sexpr_u32` | `(Option<Sexpr>) -> u32` |
-| `sexpr-u8` | `rt_sexpr_u8` | `(Option<Sexpr>) -> u8` |
-| `sleep` | `rt_suspend_sleep` | `(f64) -> ()` |
-| `software-type` | `rt_software_type` | `() -> string` |
-| `software-version` | `rt_software_version` | `() -> Option<string>` |
-| `string->symbol` | `rt_intern_symbol` | `(string) -> symbol` |
-| `symbol->string` | `rt_sym_name` | `(symbol) -> string` |
-| `timezone-daylight-p` | `rt_timezone_daylight_p` | `(int, int) -> Option<bool>` |
-| `timezone-offset-seconds` | `rt_timezone_offset_seconds` | `(int, int) -> Option<int>` |
-| `yield` | `rt_suspend_yield` | `() -> ()` |
+| `std::%internal::dribble-start` | `rt_dribble_start` | `(string) -> Result<(),fileerror>` |
+| `std::%internal::dribble-stop` | `rt_dribble_stop` | `() -> Result<(),fileerror>` |
+| `std::%internal::ed-open` | `rt_ed_open` | `(string, int) -> Result<(),fileerror>` |
+| `std::%internal::file-create-directories` | `rt_file_create_directories` | `(string) -> Result<(),fileerror>` |
+| `std::%internal::file-delete` | `rt_file_delete` | `(string) -> Result<(),fileerror>` |
+| `std::%internal::file-directory-p` | `rt_file_directory_p` | `(string) -> bool` |
+| `std::%internal::file-exists-p` | `rt_file_exists_p` | `(string) -> bool` |
+| `std::%internal::file-list-directory` | `rt_file_list_directory` | `(string) -> Result<Vector<string>,fileerror>` |
+| `std::%internal::file-modified-date` | `rt_file_modified_date` | `(string) -> Result<std::universal-time,fileerror>` |
+| `std::%internal::file-owner-name` | `rt_file_owner_name` | `(string) -> Result<Option<string>,fileerror>` |
+| `std::%internal::file-rename` | `rt_file_rename` | `(string, string) -> Result<(),fileerror>` |
+| `std::%internal::file-truename` | `rt_file_truename` | `(string) -> Result<string,fileerror>` |
+| `std::%internal::make-random-state-fresh` | `rt_make_random_state_fresh` | `() -> random-state` |
+| `std::%internal::net-accept` | `rt_net_accept` | `(i32) -> Result<Option<i32>,neterror>` |
+| `std::%internal::net-buffered-p` | `rt_net_buffered_p` | `(i32) -> Result<bool,neterror>` |
+| `std::%internal::net-connect-begin` | `rt_net_connect_begin` | `(string) -> Result<i32,neterror>` |
+| `std::%internal::net-connect-finish` | `rt_net_connect_finish` | `(i32) -> Result<(),neterror>` |
+| `std::%internal::net-fill` | `rt_net_fill` | `(i32) -> Result<Option<int>,neterror>` |
+| `std::%internal::net-flush` | `rt_net_flush` | `(i32) -> Result<Option<int>,neterror>` |
+| `std::%internal::net-listen` | `rt_net_listen` | `(string, int) -> Result<i32,neterror>` |
+| `std::%internal::net-local-address` | `rt_net_local_address` | `(i32) -> Result<string,neterror>` |
+| `std::%internal::net-peer-address` | `rt_net_peer_address` | `(i32) -> Result<string,neterror>` |
+| `std::%internal::net-peer-subject` | `rt_net_peer_subject` | `(i32) -> Result<Option<string>,neterror>` |
+| `std::%internal::net-pop-byte` | `rt_net_pop_byte` | `(i32) -> Result<Option<int>,neterror>` |
+| `std::%internal::net-pop-char` | `rt_net_pop_char` | `(i32) -> Result<Option<char>,neterror>` |
+| `std::%internal::net-push-byte` | `rt_net_push_byte` | `(i32, int) -> Result<(),neterror>` |
+| `std::%internal::net-push-string` | `rt_net_push_string` | `(i32, string) -> Result<(),neterror>` |
+| `std::%internal::net-resolve-begin` | `rt_net_resolve_begin` | `(string, int) -> Result<i32,neterror>` |
+| `std::%internal::net-resolve-finish` | `rt_net_resolve_finish` | `(i32) -> Result<Option<Vector<string>>,neterror>` |
+| `std::%internal::net-server-name` | `rt_net_server_name` | `(i32) -> Result<Option<string>,neterror>` |
+| `std::%internal::net-set-keepalive` | `rt_net_set_keepalive` | `(i32, bool) -> Result<(),neterror>` |
+| `std::%internal::net-set-keepalive-period` | `rt_net_set_keepalive_period` | `(i32, int) -> Result<(),neterror>` |
+| `std::%internal::net-set-nodelay` | `rt_net_set_nodelay` | `(i32, bool) -> Result<(),neterror>` |
+| `std::%internal::net-shutdown-write` | `rt_net_shutdown_write` | `(i32) -> Result<(),neterror>` |
+| `std::%internal::net-socket-error` | `rt_net_socket_error` | `(i32) -> Result<Option<string>,neterror>` |
+| `std::%internal::net-tls-add-certificate` | `rt_net_tls_add_certificate` | `(i32, string, string, string) -> Result<(),neterror>` |
+| `std::%internal::net-tls-handshake` | `rt_net_tls_handshake` | `(i32) -> Result<Option<int>,neterror>` |
+| `std::%internal::net-tls-listen` | `rt_net_tls_listen` | `(string, int, string, string, Option<string>) -> Result<i32,neterror>` |
+| `std::%internal::net-tls-start` | `rt_net_tls_start` | `(i32, string, Option<string>, Option<string>, Option<string>) -> Result<(),neterror>` |
+| `std::%internal::net-udp-bind` | `rt_net_udp_bind` | `(string, int) -> Result<i32,neterror>` |
+| `std::%internal::net-udp-last-sender` | `rt_net_udp_last_sender` | `(i32) -> Result<string,neterror>` |
+| `std::%internal::net-udp-recv` | `rt_net_udp_recv` | `(i32) -> Result<Option<Vector<int>>,neterror>` |
+| `std::%internal::net-udp-send-to` | `rt_net_udp_send_to` | `(i32, string, Vector<int>) -> Result<bool,neterror>` |
+| `std::%internal::net-unix-connect` | `rt_net_unix_connect` | `(string) -> Result<i32,neterror>` |
+| `std::%internal::net-unix-listen` | `rt_net_unix_listen` | `(string) -> Result<i32,neterror>` |
+| `std::%internal::net-wait` | `rt_suspend_io` | `(i32, int) -> ()` |
+| `std::%internal::net-wait-for` | `rt_suspend_io_for` | `(i32, int, f64) -> bool` |
+| `std::%internal::random-state-copy` | `rt_random_state_copy` | `(random-state) -> random-state` |
+| `std::%internal::random-state-next` | `rt_random_state_next` | `(random-state, int) -> int` |
+| `std::%internal::read-datum-at` | `rt_read_datum_at` | `(string, int, bool) -> Result<std::cons-cell<Option<Sexpr>,int>,readerror>` |
+| `std::%internal::stream-at-line-start` | `rt_stream_at_line_start` | `(i32) -> Result<bool,fileerror>` |
+| `std::%internal::stream-close` | `rt_stream_close` | `(i32) -> Result<(),fileerror>` |
+| `std::%internal::stream-describe` | `rt_stream_describe` | `(i32) -> string` |
+| `std::%internal::stream-finish-output` | `rt_stream_finish_output` | `(i32) -> Result<(),fileerror>` |
+| `std::%internal::stream-input-p` | `rt_stream_input_p` | `(i32) -> Result<bool,fileerror>` |
+| `std::%internal::stream-listen` | `rt_stream_listen` | `(i32) -> Result<bool,fileerror>` |
+| `std::%internal::stream-open-file` | `rt_stream_open_file` | `(string, int) -> Result<i32,fileerror>` |
+| `std::%internal::stream-open-p` | `rt_stream_open_p` | `(i32) -> bool` |
+| `std::%internal::stream-output-p` | `rt_stream_output_p` | `(i32) -> Result<bool,fileerror>` |
+| `std::%internal::stream-position` | `rt_stream_position` | `(i32) -> Result<int,fileerror>` |
+| `std::%internal::stream-read-byte` | `rt_stream_read_byte` | `(i32) -> Result<Option<int>,fileerror>` |
+| `std::%internal::stream-read-char` | `rt_stream_read_char` | `(i32) -> Result<Option<char>,fileerror>` |
+| `std::%internal::stream-stderr` | `rt_stream_stderr` | `() -> i32` |
+| `std::%internal::stream-stdin` | `rt_stream_stdin` | `() -> i32` |
+| `std::%internal::stream-stdout` | `rt_stream_stdout` | `() -> i32` |
+| `std::%internal::stream-string-input` | `rt_stream_string_input` | `(string) -> i32` |
+| `std::%internal::stream-string-output` | `rt_stream_string_output` | `() -> i32` |
+| `std::%internal::stream-take-output-string` | `rt_stream_take_output_string` | `(i32) -> Result<string,fileerror>` |
+| `std::%internal::stream-unread-char` | `rt_stream_unread_char` | `(i32, char) -> Result<(),fileerror>` |
+| `std::%internal::stream-write-byte` | `rt_stream_write_byte` | `(i32, int) -> Result<(),fileerror>` |
+| `std::%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> Result<(),fileerror>` |
+| `std::command-line-args` | `rt_command_line_args` | `() -> Vector<string>` |
+| `std::compile-file` |  | `(string, string) -> bool` |
+| `std::dump` |  | `(string) -> bool` |
+| `std::equal` | `rt_sexpr_equal` | `<t> (t, t) -> bool` |
+| `std::equalp` | `rt_sexpr_equalp` | `<t> (t, t) -> bool` |
+| `std::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
+| `std::exit` | `rt_exit` | `(int) -> !` |
+| `std::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
+| `std::get-internal-real-time` | `rt_get_internal_real_time` | `() -> std::internal-time` |
+| `std::get-internal-run-time` | `rt_get_internal_run_time` | `() -> std::internal-time` |
+| `std::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
+| `std::get-universal-time` | `rt_get_universal_time` | `() -> std::universal-time` |
+| `std::getenv` | `rt_getenv` | `(string) -> Option<string>` |
+| `std::heap-info` | `rt_heap_info` | `() -> std::heap-info` |
+| `std::home-directory` | `rt_home_directory` | `() -> Option<string>` |
+| `std::intern` | `rt_intern` | `(string, string) -> symbol` |
+| `std::keywordp` | `rt_keywordp` | `(symbol) -> bool` |
+| `std::lisp-implementation-version` | `rt_lisp_implementation_version` | `() -> string` |
+| `std::machine-instance` | `rt_machine_instance` | `() -> Option<string>` |
+| `std::machine-type` | `rt_machine_type` | `() -> string` |
+| `std::machine-version` | `rt_machine_version` | `() -> Option<string>` |
+| `std::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
+| `std::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
+| `std::parse-float` | `rt_parse_float` | `(string) -> Result<f64,parsefloaterror>` |
+| `std::pprint-indent` | `rt_pprint_indent` | `(symbol, int) -> ()` |
+| `std::pprint-list-exhausted` | `rt_pprint_list_exhausted` | `() -> bool` |
+| `std::pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |
+| `std::pprint-pop` | `rt_pprint_pop` | `() -> Option<Sexpr>` |
+| `std::pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
+| `std::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,readerror>` |
+| `std::seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
+| `std::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
+| `std::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
+| `std::sexpr-atom` | `rt_atom` | `(Option<Sexpr>) -> bool` |
+| `std::sexpr-bool` | `rt_sexpr_bool` | `(Option<Sexpr>) -> bool` |
+| `std::sexpr-car` | `rt_car` | `(Option<Sexpr>) -> Option<Sexpr>` |
+| `std::sexpr-cdr` | `rt_cdr` | `(Option<Sexpr>) -> Option<Sexpr>` |
+| `std::sexpr-char` | `rt_sexpr_char` | `(Option<Sexpr>) -> char` |
+| `std::sexpr-cons` | `rt_cons` | `(Option<Sexpr>, Option<Sexpr>) -> Option<Sexpr>` |
+| `std::sexpr-consp` | `rt_consp` | `(Option<Sexpr>) -> bool` |
+| `std::sexpr-f32` | `rt_sexpr_f32` | `(Option<Sexpr>) -> f32` |
+| `std::sexpr-f64` | `rt_sexpr_f64` | `(Option<Sexpr>) -> f64` |
+| `std::sexpr-i16` | `rt_sexpr_i16` | `(Option<Sexpr>) -> i16` |
+| `std::sexpr-i32` | `rt_sexpr_i32` | `(Option<Sexpr>) -> i32` |
+| `std::sexpr-i8` | `rt_sexpr_i8` | `(Option<Sexpr>) -> i8` |
+| `std::sexpr-int` | `rt_sexpr_int` | `(Option<Sexpr>) -> int` |
+| `std::sexpr-null` | `rt_null` | `(Option<Sexpr>) -> bool` |
+| `std::sexpr-str` | `rt_sexpr_str` | `(Option<Sexpr>) -> string` |
+| `std::sexpr-sym-name` | `rt_sym_name` | `(Option<Sexpr>) -> string` |
+| `std::sexpr-symp` | `rt_symp` | `(Option<Sexpr>) -> bool` |
+| `std::sexpr-u16` | `rt_sexpr_u16` | `(Option<Sexpr>) -> u16` |
+| `std::sexpr-u32` | `rt_sexpr_u32` | `(Option<Sexpr>) -> u32` |
+| `std::sexpr-u8` | `rt_sexpr_u8` | `(Option<Sexpr>) -> u8` |
+| `std::sleep` | `rt_suspend_sleep` | `(f64) -> ()` |
+| `std::software-type` | `rt_software_type` | `() -> string` |
+| `std::software-version` | `rt_software_version` | `() -> Option<string>` |
+| `std::string->symbol` | `rt_intern_symbol` | `(string) -> symbol` |
+| `std::symbol->string` | `rt_sym_name` | `(symbol) -> string` |
+| `std::timezone-daylight-p` | `rt_timezone_daylight_p` | `(int, int) -> Option<bool>` |
+| `std::timezone-offset-seconds` | `rt_timezone_offset_seconds` | `(int, int) -> Option<int>` |
+| `std::yield` | `rt_suspend_yield` | `() -> ()` |
 

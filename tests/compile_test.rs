@@ -6227,7 +6227,6 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
     use std::collections::HashMap;
     let mut h = Heap::with_capacity(1 << 16);
     h.set_gc_stress(true);
-    let r = Reader::new();
     let mut definitions = Definitions::new();
     for d in defs {
         for v in read_core(&mut h, d).expect("read failed") {
@@ -6506,7 +6505,6 @@ fn the_island_runs_a_whole_bridged_defun() {
 
     let mut h = Heap::with_capacity(1 << 16);
     h.set_gc_stress(true);
-    let r = Reader::new();
     let definitions = Definitions::new();
     let globals = HashMap::new();
     let form = read_core_result(

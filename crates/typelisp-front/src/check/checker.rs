@@ -298,7 +298,7 @@ struct Env {
     /// Trait bounds on this function's own generic type parameters, declared
     /// by a `(:where (Trait T (Assoc Concrete)...)...)` clause
     /// (`Checker::check_defun`) — e.g. `{"t": [TraitBound { trait_path:
-    /// Path::root("iter"), assoc: {} }]}`. Fixed for the lifetime of one
+    /// Path::std("iter"), assoc: {} }]}`. Fixed for the lifetime of one
     /// function body (a nested `let`/`lambda` never introduces new type
     /// parameters), so `extended` just carries the same `Rc` forward instead
     /// of letting it vary per-binding the way `vars` does. Consulted only by
@@ -755,9 +755,9 @@ const VECTOR_LITERAL_VAR: &str = "$vector-literal";
 /// `T` of an expected `Vector<T>`/`Array<T>` (`collection` names which), or
 /// `Option<Sexpr>` when the literal is expected as S-expression data. `None`
 /// when the context says nothing, and the first element decides.
-fn literal_element_type(expected: Option<&Type>, collection: &str) -> Option<Type> {
+fn literal_element_type(expected: Option<&Type>, collection: &Path) -> Option<Type> {
     match expected {
-        Some(Type::Named(p, args)) if crate::types::path_is_builtin(p, collection) && args.len() == 1 => {
+        Some(Type::Named(p, args)) if p == collection && args.len() == 1 => {
             Some(args[0].clone())
         }
         Some(t) if is_sexpr_expectation(t) => Some(option_of_sexpr()),
@@ -1376,6 +1376,11 @@ pub const SPECIAL_FORM_HEADS: &[u32] = &[
     wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
 ];
 
+/// The standard library's module, as the segments [`Checker::ns_ancestors`]
+/// and [`Checker::find_module`] search it under.
+static STD_SEGMENTS: std::sync::LazyLock<Vec<String>> =
+    std::sync::LazyLock::new(|| vec![crate::types::STD_MODULE.to_string()]);
+
 const TOPLEVEL_FORM_HEADS: &[u32] = &[
     wk::PUB, wk::DEFUN, wk::DEFSIGNATURE, wk::DEFFFI, wk::DEFVAR, wk::DEFPARAMETER,
     wk::DEFCONSTANT, wk::DEFMACRO, wk::MODULE, wk::DEFMETHOD, wk::DEFSTRUCT, wk::DEFENUM,
@@ -1636,6 +1641,7 @@ impl Checker {
     /// environment unchanged.
     pub fn set_current_ns(&mut self, ns: Vec<String>) {
         self.ns = ns;
+        self.publish_name_view();
     }
 
     /// Drains and returns every error accumulated at a recovery boundary while
@@ -2765,6 +2771,7 @@ impl Checker {
         self.expr_ty = None;
         self.typed_ptr_nodes.borrow_mut().clear();
         self.c_arena.set(None);
+        self.publish_name_view();
         let primary = self.check_form_dispatch(heap, interp, v, loc.clone());
         // Rooted before the drain below, not after: `drain_specializations`
         // re-checks a whole template per instantiation, so it allocates heavily,
@@ -3430,7 +3437,10 @@ impl Checker {
     /// submodule sees not just its own definitions but every enclosing
     /// module's too (including root's, however deeply nested the caller is).
     fn ns_ancestors(&self) -> impl Iterator<Item = &[String]> {
-        (0..=self.ns.len()).rev().map(move |k| &self.ns[..k])
+        // The standard library's module comes last: while its definitions are
+        // still resolved by name, this is what keeps them in scope from a
+        // module that is not inside it.
+        (0..=self.ns.len()).rev().map(move |k| &self.ns[..k]).chain(std::iter::once(STD_SEGMENTS.as_slice()))
     }
 
     /// The first hit `lookup` finds walking the ancestor chain, nearest module
@@ -3465,7 +3475,11 @@ impl Checker {
     /// root (`item_ns == []`) is always an ancestor, so this also subsumes
     /// the former "literal root caller" special case.
     fn in_scope(&self, item_ns: &[String]) -> bool {
-        self.ns.len() >= item_ns.len() && self.ns[..item_ns.len()] == *item_ns
+        // The standard library's module is in scope everywhere, as the root
+        // it was moved out of was, while its names are still resolved by
+        // name.
+        item_ns.first().map(String::as_str) == Some(crate::types::STD_MODULE)
+            || (self.ns.len() >= item_ns.len() && self.ns[..item_ns.len()] == *item_ns)
     }
 
     /// Whether an associated function/method `af` of `type_fq` is reachable
@@ -3502,6 +3516,13 @@ impl Checker {
         // 2. Child of root.
         if let Some(m) = self.reg.root.module(eff) {
             return Some((eff.to_vec(), m));
+        }
+        // 2b. Child of the standard library's module — a library macro's
+        // expansion spells its helpers `%internal::name` wherever it lands.
+        let mut in_std = STD_SEGMENTS.clone();
+        in_std.extend_from_slice(eff);
+        if let Some(m) = self.reg.root.module(&in_std) {
+            return Some((in_std, m));
         }
         // 3. Module alias: expand the first segment via mod_aliases.
         if !eff.is_empty() {
@@ -3914,7 +3935,7 @@ impl Checker {
         // `sexpr-cons`, not the free `cons` (which is the `cons<T,U>` pair
         // builder now — Symbol/Sexpr redesign Phase 4b): a `&rest` list is a
         // `Sexpr`, built through the island cons layer.
-        let cons_path = Path::root("sexpr-cons");
+        let cons_path = Path::std("sexpr-cons");
         let r = cons_path;
         let nil = forms::quote_nil(heap)?;
         let mut acc = Checked::new(nil, option_of_sexpr());
@@ -8094,6 +8115,10 @@ impl Checker {
             }
             ns.pop();
         }
+        // The standard library's module last, as `Self::ns_ancestors` has it.
+        if let Some(td) = self.reg.root.module(&STD_SEGMENTS).and_then(|m| m.traits.get(name)) {
+            return Ok(td.name.clone());
+        }
         Err(Error::TypeError(format!("impl: unknown trait `{}`", name)))
     }
 
@@ -8859,6 +8884,7 @@ impl Checker {
             }
         }
         self.ns.truncate(base);
+        self.publish_name_view();
         result?;
         forms::module_form(heap, &path, &body)
     }
@@ -8888,6 +8914,7 @@ impl Checker {
             self.ns.push(s.clone());
         }
         self.reg.root.module_mut(&self.ns);
+        self.publish_name_view();
         Ok(Path::from_segments(self.ns.clone()))
     }
 
@@ -8896,6 +8923,36 @@ impl Checker {
         for _ in 0..depth {
             self.ns.pop();
         }
+        self.publish_name_view();
+    }
+
+    /// Makes the printer write paths for the module being checked now
+    /// (`typelisp_mem::NameView`): its own types, and the ones it has brought
+    /// in, by their last segment. Called wherever the current module changes,
+    /// and before each form, since a form can bring a type in.
+    fn publish_name_view(&self) {
+        let mut imports = std::collections::HashMap::new();
+        let own = self.reg.root.module(&self.ns);
+        if let Some(m) = own {
+            for (bare, segs) in &m.aliases {
+                if let Some(target) = self.resolve_type_path(segs) {
+                    imports.insert(bare.clone(), target.to_string());
+                }
+            }
+        }
+        // While the standard library's names are still resolved by name, its
+        // types are in scope everywhere (`Self::in_scope`), so they are
+        // written as if brought in — except where this module's own
+        // definition or import takes the name.
+        if let Some(std_ns) = self.reg.root.module(&STD_SEGMENTS) {
+            for name in std_ns.types.keys().chain(std_ns.traits.keys()) {
+                if own.is_some_and(|m| m.types.contains_key(name) || m.traits.contains_key(name)) {
+                    continue;
+                }
+                imports.entry(name.clone()).or_insert_with(|| item_path(&STD_SEGMENTS, name).to_string());
+            }
+        }
+        typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(self.ns.clone(), imports));
     }
 
     /// [`Self::enter_module`], plus recording `segs` as the file currently
@@ -8904,6 +8961,13 @@ impl Checker {
     /// wrapping a file's whole content in the module its location derives
     /// to; a nested `(module ...)` form inside that file still goes through
     /// plain [`Self::enter_module`] via [`Self::check_module`].
+    /// The symbol table's module for the namespace forms are checked in now —
+    /// the one the next form has to be read in for its names to be this
+    /// module's.
+    pub fn current_module(&self) -> typelisp_mem::NsId {
+        typelisp_mem::symbols::ns_of(&self.ns)
+    }
+
     pub fn enter_file_module(&mut self, segs: &[String]) -> Result<Path, Error> {
         let path = self.enter_module(segs)?;
         self.ns_base.push(self.ns.len() - segs.len());
@@ -8930,6 +8994,7 @@ impl Checker {
         );
         self.ns.truncate(base);
         self.file_ns.pop();
+        self.publish_name_view();
     }
 
     /// Temporarily clear the namespace context (`ns` and `file_ns`) so the
@@ -8957,6 +9022,7 @@ impl Checker {
         );
         self.ns = saved.ns;
         self.file_ns = saved.file_ns;
+        self.publish_name_view();
     }
 
     /// [`Self::check_defmethod_in_form`] with the method's type variables in
@@ -10491,7 +10557,7 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
         let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
-        let elem_ty = match literal_element_type(expected, "vector") {
+        let elem_ty = match literal_element_type(expected, &Path::root("vector")) {
             Some(t) => t,
             None => self.first_element_type(heap, interp, env, &elems, "#(..)", "Vector<T>")?,
         };
@@ -10559,7 +10625,7 @@ impl Checker {
         };
         let dims: Vec<Value> = (0..heap.struct_field_count(dims_id)).map(|i| heap.struct_field(dims_id, i)).collect();
         let data: Vec<Value> = (0..heap.struct_field_count(data_id)).map(|i| heap.struct_field(data_id, i)).collect();
-        let elem_ty = match literal_element_type(expected, "array") {
+        let elem_ty = match literal_element_type(expected, &Path::std("array")) {
             Some(t) => t,
             None => self.first_element_type(heap, interp, env, &data, "#nA(..)", "Array<T>")?,
         };
@@ -14526,7 +14592,7 @@ impl Checker {
         let Ok(recv_ty) = self.check_at(heap, interp, env, recv, None, None).map(|c| c.ty) else {
             return Err(err);
         };
-        if matches!(&recv_ty, Type::Named(p, _) if crate::types::path_is_builtin(p, "array")) {
+        if matches!(&recv_ty, Type::Named(p, _) if *p == Path::std("array")) {
             return Err(err);
         }
         Err(Error::TypeError(format!(
@@ -15575,7 +15641,7 @@ impl Checker {
     /// value whose type has no `Sexpr` encoding is the same clear `TypeError`
     /// a bad `&rest` element gets), then `sexpr-cons`-ed together back-to-front.
     fn cons_hetero_sexpr(&self, heap: &mut Heap, items: Vec<Checked>) -> Result<Checked, Error> {
-        let r = Path::root("sexpr-cons");
+        let r = Path::std("sexpr-cons");
         let nil = forms::quote_nil(heap)?;
         let mut acc = Checked::new(nil, option_of_sexpr());
         for item in items.into_iter().rev() {
@@ -15869,7 +15935,7 @@ impl Checker {
         let control =
             self.resolve_format_calls(heap, interp, env, "format", &control_text, control, &items, nth_loc(arg_locs, 1))?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        let r = Path::root("format-rt");
+        let r = Path::std("format-rt");
         let form = self.call_form(heap, &r, &[dest, control, list])?;
         Ok(Checked::new(form, Type::Str))
     }
@@ -15913,7 +15979,7 @@ impl Checker {
         if concrete
             // Lowercase: symbol names are interned case-folded, so that is how
             // the prelude's `CharOutput` is spelled in the registry.
-            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::root("charoutput"), assoc: BTreeMap::new() }, 0)
+            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::std("charoutput"), assoc: BTreeMap::new() }, 0)
         {
             return Err(Error::TypeError(format!(
                 "format: the destination must be `true` (stdout), `false` (build the string only), \
@@ -16019,7 +16085,7 @@ impl Checker {
         let control =
             self.resolve_format_calls(heap, interp, env, what, &control_text, control, &items, nth_loc(arg_locs, 0))?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        let r = Path::root(builtin);
+        let r = Path::std(builtin);
         let form = self.call_form(heap, &r, &[control, list])?;
         Ok(Checked::new(form, ret))
     }
@@ -16065,7 +16131,7 @@ impl Checker {
             None => Checked::new(core::tagged(heap, wk::INT_ANY_WIDTH, &[Value::Int(16)])?, Type::I32),
         };
         let which = Checked::new(forms::str_lit_form(heap, form)?, Type::Str);
-        let r = Path::root("pprint-rt");
+        let r = Path::std("pprint-rt");
         let node = self.call_form(heap, &r, &[which, value, colinc])?;
         Ok(Checked::new(node, Type::Unit))
     }
@@ -16145,7 +16211,7 @@ impl Checker {
         // is run for its printing effect.
         let flag = Checked::new(core::tagged(&mut s, wk::BOOL, &[Value::Bool(per_line)])?, Type::Bool);
         s.push_root(flag.form);
-        let start_r = Path::root("pprint-block-start-rt");
+        let start_r = Path::std("pprint-block-start-rt");
         let start = self.call_form(&mut s, &start_r, &[obj, prefix, flag, suffix])?;
         s.push_root(start);
         let mut seq = vec![start];
@@ -16153,7 +16219,7 @@ impl Checker {
             let e = self.check_at(&mut s, interp, env, form, None, nth_loc(arg_locs, 1 + i))?;
             seq.push(e.form);
         }
-        let end_r = Path::root("pprint-block-end-rt");
+        let end_r = Path::std("pprint-block-end-rt");
         let end = self.call_form(&mut s, &end_r, &[])?;
         s.push_root(end);
         seq.push(end);
@@ -16321,7 +16387,7 @@ impl Checker {
         // `(intern NAME)`: CL's current package is the module the call is
         // written in, which only the checker knows, so it becomes the second
         // argument here — the module's path as `intern` reads one.
-        if sig.builtin && args.len() == 1 && *name == Path::root("intern") {
+        if sig.builtin && args.len() == 1 && *name == Path::std("intern") {
             let ns = heap.alloc_string(self.ns.join("::"));
             heap.push_root(ns);
             let r = self.check_call(heap, interp, env, name, &[args[0], ns], &[arg_locs[0].clone(), None]);

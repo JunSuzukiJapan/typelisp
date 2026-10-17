@@ -267,7 +267,7 @@ impl Interp {
             snapshot.defs.insert(target, entry);
         }
         for name in typelisp_print::runtime::PRINTER_GLOBALS {
-            let path = Path::root(name);
+            let path = Path::std(name);
             let place = match self.compiled_global_id(&path) {
                 Some(id) => Some(GlobalRef::Compiled(id)),
                 None => self.root.borrow().get_global(&path).map(GlobalRef::Cell),

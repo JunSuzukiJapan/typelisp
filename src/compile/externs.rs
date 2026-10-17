@@ -329,18 +329,15 @@ pub(crate) const RT_SUSPEND_BOOL_ANSWER: &str = "rt_suspend_io_for";
 /// The shim a call to `path` lowers to, when `path` is a free builtin.
 ///
 /// [`rt_builtin_symbol`] answers for a bare name, and a name is not a
-/// function: a builtin lives at the root or in the library's internal module
-/// ([`typelisp_front::INTERNAL_MODULE`]), and the same last segment anywhere
-/// else — or an internal builtin's name at the root — is a user's own
-/// function, which has to reach its own compiled body.
+/// function: a builtin lives in the standard library's module or its internal
+/// module ([`typelisp_front::types::Path::std_builtin_name`]), and the same
+/// last segment anywhere else — or an internal builtin's name directly in
+/// `std` — is somebody's own function, which has to reach its own compiled
+/// body.
 pub(crate) fn builtin_shim(path: &crate::Path) -> Option<&'static str> {
-    let name = path.last_segment();
+    let name = path.std_builtin_name()?;
     let shim = rt_builtin_symbol(name)?;
-    let at_home = if internal_builtins().contains(name) {
-        path.parent() == [typelisp_front::INTERNAL_MODULE]
-    } else {
-        path.is_simple()
-    };
+    let at_home = internal_builtins().contains(name) == path.is_internal();
     at_home.then_some(shim)
 }
 
@@ -355,7 +352,7 @@ fn internal_builtins() -> &'static std::collections::HashSet<String> {
         let reg = typelisp_front::check::Registry::with_builtins();
         let ns = reg
             .root
-            .module(&[typelisp_front::INTERNAL_MODULE.to_string()])
+            .module(&typelisp_front::types::internal_module_segments())
             .expect("the registry keeps its internal builtins in their own module");
         ns.fns.iter().filter(|(_, sig)| sig.builtin).map(|(name, _)| name.clone()).collect()
     })
@@ -560,7 +557,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 337] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 339] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -578,7 +575,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 337] {
     };
     use typelisp_print::aot::{
         rt_format_call_method, rt_print_enum_variant, rt_print_field_name, rt_print_field_template, rt_print_global,
-        rt_print_object_method,
+        rt_print_name_import, rt_print_name_module, rt_print_object_method,
     };
     use typelisp_front::shim::{rt_eval, rt_eval_init, rt_eval_state, rt_macroexpand, rt_macroexpand_1};
     use typelisp_read::shim::{rt_read, rt_read_datum_at};
@@ -739,6 +736,11 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 337] {
         // executable's printer reads the value the program `setf`'d. AOT-only:
         // the interpreter reads its own globals.
         ("rt_print_global", rt_print_global as *const () as usize),
+        // The module the executable's type names are written for, and the
+        // types it has brought in. AOT-only: the interpreter's checker sets
+        // them as it moves between modules.
+        ("rt_print_name_module", rt_print_name_module as *const () as usize),
+        ("rt_print_name_import", rt_print_name_import as *const () as usize),
         ("rt_car", rt_car as *const () as usize),
         ("rt_cdr", rt_cdr as *const () as usize),
         ("rt_cons", rt_cons as *const () as usize),

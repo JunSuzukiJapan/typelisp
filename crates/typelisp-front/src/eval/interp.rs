@@ -2483,7 +2483,7 @@ impl Interp {
     /// The prelude defines every one of them, so a missing one means there is
     /// no prelude to print under.
     fn printer_global(&self, heap: &Heap, name: &str) -> Result<Value, String> {
-        self.global_value(heap, &crate::Path::root(name))
+        self.global_value(heap, &crate::Path::std(name))
             .ok_or_else(|| format!("{} is not defined: printing needs the prelude that defines it", name))
     }
 
@@ -2601,7 +2601,7 @@ impl Interp {
     /// anything runs. A session without the prelude has no such global, and
     /// `#.` is allowed, CL's default.
     pub(crate) fn read_eval_allowed(&self, heap: &Heap) -> Result<(), String> {
-        match self.global_value(heap, &crate::Path::root("*read-eval*")) {
+        match self.global_value(heap, &crate::Path::std("*read-eval*")) {
             Some(Value::Bool(false)) => Err("`#.` is switched off: `*read-eval*` is false".to_string()),
             _ => Ok(()),
         }

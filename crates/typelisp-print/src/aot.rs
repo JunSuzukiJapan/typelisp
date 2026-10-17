@@ -358,6 +358,46 @@ pub unsafe extern "C" fn rt_print_global(args: *const i64, argc: u32) -> i64 {
     0
 }
 
+/// Registers the module the executable's type names are written for:
+/// `args` is `[path_ptr, path_len]`, the `::`-joined module path (empty for
+/// the root). See [`crate::shared::PrintShared::name_view`].
+///
+/// # Safety
+///
+/// `args` must point to 2 valid `i64`s in those representations.
+#[no_mangle]
+pub unsafe extern "C" fn rt_print_name_module(args: *const i64, argc: u32) -> i64 {
+    if argc < 2 {
+        fatal("rt_print_name_module: expected 2 arguments");
+    }
+    let path = static_str(args, 0, "rt_print_name_module");
+    let module: Vec<String> = if path.is_empty() { Vec::new() } else { path.split("::").map(str::to_string).collect() };
+    let view = crate::shared::name_view();
+    crate::shared::set_name_view(typelisp_mem::NameView::new(module, view.imports().clone()));
+    0
+}
+
+/// Registers one type the module of [`rt_print_name_module`] has brought
+/// in: `args` is `[name_ptr, name_len, path_ptr, path_len]`, the bare name
+/// and the `::`-joined path of the definition.
+///
+/// # Safety
+///
+/// `args` must point to 4 valid `i64`s in those representations.
+#[no_mangle]
+pub unsafe extern "C" fn rt_print_name_import(args: *const i64, argc: u32) -> i64 {
+    if argc < 4 {
+        fatal("rt_print_name_import: expected 4 arguments");
+    }
+    let name = static_str(args, 0, "rt_print_name_import");
+    let path = static_str(args, 2, "rt_print_name_import");
+    let view = crate::shared::name_view();
+    let mut imports = view.imports().clone();
+    imports.insert(name.to_string(), path.to_string());
+    crate::shared::set_name_view(typelisp_mem::NameView::new(view.module().to_vec(), imports));
+    0
+}
+
 /// Installs [`AOT_HOOKS`] once. Idempotent, so each registration shim can
 /// call it without the startup sequence needing an ordering rule.
 ///

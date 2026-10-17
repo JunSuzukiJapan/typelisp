@@ -186,7 +186,7 @@ pub fn load_with(
     on_checked: &mut dyn FnMut(&mut Heap, crate::Value),
 ) {
     let r = Reader::new();
-    let mut forms = r.forms_in(crate::LIBRARY_FILE, SOURCE);
+    let mut forms = r.forms_within(crate::LIBRARY_FILE, SOURCE, crate::NsId::STD);
     while let Some((v, _)) = forms.next_form(heap).expect("core macros: read failed") {
         let tl = chk.check_form(heap, &*interp, v).expect("core macros: check failed");
         for w in chk.take_warnings() {

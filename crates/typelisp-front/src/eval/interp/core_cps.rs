@@ -2305,14 +2305,14 @@ impl Interp {
         // `(yield)` gives up the rest of this turn — not a builtin, for the
         // same reason `wait` is not: a builtin answers with a value, and this
         // has to say "stop here" instead.
-        if path == crate::Path::root("yield") {
+        if path == crate::Path::std("yield") {
             return Ok((State::Blocked(Waiting::Yield), None));
         }
         // `(sleep secs)` is the same shape: it has to say "not before then",
         // which no builtin's return value can. Intercepted here rather than
         // left to `eval_builtin`, whose implementation stops the whole OS
         // thread — with tasks, that would stop every one of them.
-        if path == crate::Path::root("sleep") {
+        if path == crate::Path::std("sleep") {
             return self.sleep_until(heap, &argv);
         }
         // `(net-wait h interest)` — "not before this socket is ready" — is
@@ -2328,7 +2328,7 @@ impl Interp {
         // A C callback's entry address — the checker's lowering of a callback
         // argument (`checker::ffi_callback`). The answer is a raw word, which
         // is how the interpreter carries a `ptr`.
-        if path == crate::Path::root(crate::ffi_callback::ADDRESS_BUILTIN) {
+        if path == crate::Path::std(crate::ffi_callback::ADDRESS_BUILTIN) {
             let key = match argv.first() {
                 Some(Value::Str(id)) => heap.string(*id).to_string(),
                 _ => return Err(EvalError::Internal("ffi: a callback address without its key".to_string())),
@@ -2338,8 +2338,8 @@ impl Interp {
         }
         // The memory behind `def-c-struct`s and typed pointers
         // (`checker::c_struct`'s lowering).
-        if path.is_simple() {
-            if let Some(result) = crate::c_struct::eval(heap, path.last_segment(), &argv) {
+        if let Some(name) = path.std_builtin_name() {
+            if let Some(result) = crate::c_struct::eval(heap, name, &argv) {
                 return Ok((State::Apply(result?), None));
             }
         }
@@ -2347,12 +2347,11 @@ impl Interp {
         if let Some(f) = f {
             return self.enter_fn(heap, form, &f, argv);
         }
-        // Otherwise a built-in operator, which lives at the root or in the
-        // library's internal module. Dispatched on the resolved path, not on
-        // the name as written: a library macro's expansion spells an internal
-        // one `%internal::name`.
-        if path.is_simple() || path.parent() == [crate::INTERNAL_MODULE] {
-            if let Some(result) = self.eval_builtin(heap, path.last_segment(), &argv) {
+        // Otherwise a built-in operator, which lives in the standard
+        // library's module or its internal module. Dispatched on the resolved
+        // path, not on the name as written.
+        if let Some(name) = path.std_builtin_name() {
+            if let Some(result) = self.eval_builtin(heap, name, &argv) {
                 return Ok((State::Apply(result?), None));
             }
         }
@@ -3314,7 +3313,7 @@ mod tests {
         let mut h = stress_heap();
         let v = agrees(
             &mut h,
-            "(call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
+            "(call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
@@ -3327,7 +3326,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(call %internal::make-random-state-fresh ())",
+            "(call std::%internal::make-random-state-fresh ())",
         );
         assert!(matches!(v, Value::Boxed(_)), "expected a random-state box, got {:?}", v);
     }
@@ -3337,9 +3336,9 @@ mod tests {
     #[test]
     fn an_argument_that_is_itself_a_call_suspends_the_outer_one() {
         let mut h = stress_heap();
-        let src = "(call sexpr-cons (sexpr sexpr) \
+        let src = "(call std::sexpr-cons (sexpr sexpr) \
                      (str \"first\") \
-                     (call sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
+                     (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
         let v = agrees(&mut h, src);
         match h.car(v).unwrap() {
             Value::Str(id) => assert_eq!(&*h.string(id), "first"),
@@ -3356,7 +3355,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..30).rev() {
             src = format!(
-                "(call sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
+                "(call std::sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
                 i, src
             );
         }
@@ -3453,7 +3452,7 @@ mod tests {
     #[test]
     fn a_builtin_can_be_applied_as_a_value() {
         let mut h = stress_heap();
-        let src = "(apply (fnref sexpr-cons (sexpr sexpr)) sexpr (sexpr sexpr) \
+        let src = "(apply (fnref std::sexpr-cons (sexpr sexpr)) sexpr (sexpr sexpr) \
                      (int-any-width 1) (int-any-width 2))";
         let v = agrees(&mut h, src);
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
@@ -3481,12 +3480,12 @@ mod tests {
         let mut h = Heap::with_capacity(1 << 20);
 
         let src = "(labels ((build ((n int-any-width)) sexpr
-                        (if (call sexpr-null (sexpr) (var n))
+                        (if (call std::sexpr-null (sexpr) (var n))
                             (unit)
-                            (call sexpr-cons (sexpr sexpr)
+                            (call std::sexpr-cons (sexpr sexpr)
                               (int-any-width 1)
                               (apply (var build) sexpr (sexpr)
-                                (call sexpr-cdr (sexpr) (var n)))))))
+                                (call std::sexpr-cdr (sexpr) (var n)))))))
                (apply (var build) sexpr (sexpr) (var xs)))".to_string();
 
         // `xs` is a list of DEPTH elements, built on the Rust side so the
@@ -3626,7 +3625,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..n).rev() {
             src = format!(
-                "(call sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
+                "(call std::sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
                 i, src
             );
         }
@@ -3639,9 +3638,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call sexpr-car (sexpr) (var lst)))
-                     (set lst (call sexpr-cdr (sexpr) (var lst))))
+                     (if (call std::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call std::sexpr-car (sexpr) (var lst)))
+                     (set lst (call std::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(5)
         );
@@ -3671,9 +3670,9 @@ mod tests {
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
                      (loop unit (break))
-                     (if (call sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call sexpr-car (sexpr) (var lst)))
-                     (set lst (call sexpr-cdr (sexpr) (var lst))))
+                     (if (call std::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call std::sexpr-car (sexpr) (var lst)))
+                     (set lst (call std::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(3)
         );
@@ -3688,9 +3687,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call sexpr-car (sexpr) (var lst)))
-                     (set lst (call sexpr-cdr (sexpr) (var lst))))
+                     (if (call std::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call std::sexpr-car (sexpr) (var lst)))
+                     (set lst (call std::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(300)
         );
@@ -3816,8 +3815,8 @@ mod tests {
                          (unwind-protect
                            (unwind-protect
                              (throw (quote done) (int-any-width 0))
-                             (set trail (call sexpr-cons (sexpr sexpr) (str "i") (var trail))))
-                           (set trail (call sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
+                             (set trail (call std::sexpr-cons (sexpr sexpr) (str "i") (var trail))))
+                           (set trail (call std::sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
                        (var trail))"#;
         let v = eval_ok(&mut h, src);
         let head = h.car(v).unwrap();
@@ -3934,8 +3933,8 @@ mod tests {
         let mut h = stress_heap();
         let build = |tag: i64| {
             format!(
-                "(call sexpr-cons (sexpr sexpr) (int-any-width {}) \
-                   (call sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
+                "(call std::sexpr-cons (sexpr sexpr) (int-any-width {}) \
+                   (call std::sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
                 tag,
                 tag + 1
             )
@@ -3975,8 +3974,8 @@ mod tests {
             &mut h,
             &[
                 "(throw (quote escaped) \
-                   (call sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
-                "(call sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
+                   (call std::sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
+                "(call std::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
             ],
         );
         // Allocating now would collect an unrooted carried value.

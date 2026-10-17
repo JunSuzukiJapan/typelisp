@@ -522,6 +522,12 @@ fn repl(heap_cells: usize, features: Vec<String>, image: Option<PathBuf>) -> rus
     // Wire the interpreter to the checker now that loading is done, so
     // `(eval ...)` at the REPL type-checks against the live environment.
     interp.set_checker(Rc::clone(&checker));
+    // The session's own definitions go in the module `user`, not in the root
+    // or the standard library's module.
+    if let Err(e) = checker.borrow_mut().enter_file_module(&[typelisp::types::USER_MODULE.to_string()]) {
+        eprintln!("error: {}", e);
+        std::process::exit(1);
+    }
     // `use` in the REPL resolves files against the current directory (or the
     // project root if a manifest is found above it).
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -624,7 +630,7 @@ fn try_run_pending(
     pending: &mut String,
 ) {
     let mark = heap.root_count();
-    let mut forms = reader.forms_in("<stdin>", pending);
+    let mut forms = reader.forms_within("<stdin>", pending, checker.borrow().current_module());
     // Where the reader stopped after the last *completed* form, in characters.
     // Only used on the "need more input" path, to decide what is left over.
     let mut consumed = 0usize;
@@ -683,6 +689,9 @@ fn try_run_pending(
                 break;
             }
         };
+        // An `(in-module ...)` moves the session, and the next form is read
+        // where it moved to.
+        forms.set_module(checker.borrow().current_module());
         // `(load "path")` loads inline, fasl-preferred, into the current
         // (root) environment — resolved relative to the process cwd.
         // (A `(load)`ed file whose *own* top-level contains `(eval ...)`

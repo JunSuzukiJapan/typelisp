@@ -15,12 +15,24 @@ use std::fmt;
 use typelisp_read::name_lexer::{NameLexer, NameTok};
 use crate::{wk, Error, Heap, Loc, PathId, SymRef, Value};
 
-/// The root child module the standard library keeps its internal helpers in:
-/// the prelude's own `defun`s a user never writes, the natives under them, and
-/// what a library macro's expansion calls. At the root they would be in scope
-/// everywhere, and a user's definition of the same name would replace the
-/// library's. The `%` keeps the name out of the way of a user's own modules.
+/// The standard library's module, the root's child `std`: the prelude, the
+/// natives and the core macro layer are defined in it.
+pub const STD_MODULE: &str = typelisp_mem::symbols::STD_MODULE;
+
+/// The module the REPL's top level is written in — CL's `CL-USER`.
+pub const USER_MODULE: &str = "user";
+
+/// The child of [`STD_MODULE`] the standard library keeps its internal
+/// helpers in: the prelude's own `defun`s a user never writes, the natives
+/// under them, and what a library macro's expansion calls. The `%` keeps the
+/// name out of the way of a user's own modules.
 pub const INTERNAL_MODULE: &str = "%internal";
+
+/// The segments of the module the library's internal helpers live in:
+/// `std::%internal`.
+pub fn internal_module_segments() -> Vec<String> {
+    vec![STD_MODULE.to_string(), INTERNAL_MODULE.to_string()]
+}
 
 /// A structured, fully-qualified path identifying a type, free function, or
 /// module — a sequence of lowercase segments (e.g. `geo::point` is
@@ -47,9 +59,30 @@ impl Path {
         Path(vec![name.to_string()])
     }
 
-    /// `name` inside [`INTERNAL_MODULE`].
+    /// `name` inside the library's internal module (`std::%internal`).
     pub fn internal(name: &str) -> Path {
-        Path(vec![INTERNAL_MODULE.to_string(), name.to_string()])
+        Path(vec![STD_MODULE.to_string(), INTERNAL_MODULE.to_string(), name.to_string()])
+    }
+
+    /// `name` inside the standard library's module, `std::name`.
+    pub fn std(name: &str) -> Path {
+        Path(vec![STD_MODULE.to_string(), name.to_string()])
+    }
+
+    /// The name of the free builtin this path names, if it names one where
+    /// builtins are registered: `std::name` or `std::%internal::name`. The
+    /// same last segment anywhere else is somebody's own definition.
+    pub fn std_builtin_name(&self) -> Option<&str> {
+        match self.0.as_slice() {
+            [s, name] if s == STD_MODULE => Some(name),
+            [s, i, name] if s == STD_MODULE && i == INTERNAL_MODULE => Some(name),
+            _ => None,
+        }
+    }
+
+    /// Whether this path is directly inside the library's internal module.
+    pub fn is_internal(&self) -> bool {
+        matches!(self.0.as_slice(), [s, i, _] if s == STD_MODULE && i == INTERNAL_MODULE)
     }
 
     /// Build a path from owned segments (must be non-empty).
@@ -324,7 +357,9 @@ pub enum Type {
 /// ([`typelisp_mem::ConcreteNames::type_key`]) is the runtime's spelling and
 /// writes a trait object as `dyn Trait`, which is not what the reader
 /// accepts. The reader lowercases every name, so the built-in generic types
-/// are given back the capitals the documentation spells them with.
+/// are given back the capitals the documentation spells them with. A path is
+/// written the way the module being read can write it
+/// ([`typelisp_mem::NameView`]), so this is never a type's identity.
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fn args(f: &mut fmt::Formatter, ts: &[Type]) -> fmt::Result {
@@ -337,6 +372,8 @@ impl fmt::Display for Type {
             }
             write!(f, ">")
         }
+        // Written for the module the reader is in (`typelisp_mem::NameView`).
+        let view = typelisp_print::shared::name_view();
         match self {
             // A tuple is written the way its values are, `#{int string}`.
             Type::Named(p, ts) if tuple_arity(p).is_some() => {
@@ -353,12 +390,12 @@ impl fmt::Display for Type {
                 let written = if p.is_simple() { builtin_spelling(p.last_segment()) } else { None };
                 match written {
                     Some(w) => write!(f, "{}", w)?,
-                    None => write!(f, "{}", p)?,
+                    None => write!(f, "{}", view.path(&p.to_string()))?,
                 }
                 if ts.is_empty() { Ok(()) } else { args(f, ts) }
             }
             Type::Dyn(p, pins) => {
-                write!(f, ":dyn {}", p)?;
+                write!(f, ":dyn {}", view.path(&p.to_string()))?;
                 if pins.is_empty() { Ok(()) } else { args(f, pins) }
             }
             Type::Fn(ps, rest, r) => {
@@ -377,7 +414,7 @@ impl fmt::Display for Type {
                 }
                 write!(f, ") {})", r)
             }
-            other => write!(f, "{}", typelisp_mem::ConcreteNames::type_key(other)),
+            other => write!(f, "{}", view.type_key(&typelisp_mem::ConcreteNames::type_key(other))),
         }
     }
 }
@@ -386,22 +423,24 @@ impl fmt::Display for Type {
 /// lowercased, or `None` for every other name.
 /// The type behind the tuple type `#{T0 T1 ...}` of `arity` elements (at most
 /// [`typelisp_mem::TUPLE_MAX_ARITY`]): the
-/// prelude's `%internal::tupleN<T0,...>`, a `defstruct` whose fields are
+/// prelude's `std::%internal::tupleN<T0,...>`, a `defstruct` whose fields are
 /// [`tuple_field`]`(0)`, `(1)`, .... Built on a struct so that everything a
 /// generic struct already has — monomorphization, representations, `setf`,
 /// trait impls — is a tuple's too.
 pub fn tuple_path(arity: usize) -> Path {
     debug_assert!((1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&arity), "no tuple type of arity {}", arity);
-    Path::from_segments(vec!["%internal".to_string(), format!("tuple{}", arity)])
+    let mut segs = internal_module_segments();
+    segs.push(format!("tuple{}", arity));
+    Path::from_segments(segs)
 }
 
 /// The arity of the tuple type `path` names, or `None` when it names some
 /// other type.
 pub fn tuple_arity(path: &Path) -> Option<usize> {
-    let [module, name] = path.segments() else { return None };
-    if module != "%internal" {
+    if !path.is_internal() {
         return None;
     }
+    let name = path.last_segment();
     let n: usize = name.strip_prefix("tuple")?.parse().ok()?;
     (1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&n).then_some(n)
 }

@@ -11,6 +11,7 @@
 
 pub mod errors;
 pub mod heap;
+pub mod name_view;
 pub mod names;
 pub mod option;
 pub mod stack;
@@ -21,6 +22,7 @@ pub mod value;
 
 pub use errors::{Error, Loc, LIBRARY_FILE};
 pub use heap::{FrameRaw, Heap, RootScope, RootStackId};
+pub use name_view::NameView;
 pub use names::{ConcreteNames, TypeKey};
 pub use stack::grow_stack;
 pub use option::{is_niched_option_key, option_payload_niches, option_prints_wrapped};

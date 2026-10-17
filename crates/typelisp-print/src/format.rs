@@ -2976,7 +2976,7 @@ impl Renderer {
                 if typelisp_mem::ConcreteNames::base_type(&key) == "vector" {
                     let n = heap.struct_field_count(id);
                     if !ctx.print_vars.array {
-                        out.push_str(&format!("#<{} {}>", key, n));
+                        out.push_str(&format!("#<{} {}>", crate::shared::name_view().type_key(&key), n));
                         return Ok(());
                     }
                     out.push_str("#(");
@@ -3022,7 +3022,7 @@ impl Renderer {
                 if key == typelisp_mem::BUILTIN_TYPE_KEYS[typelisp_mem::TypeKeyId::SEXPR_ARRAY.as_u32() as usize] {
                     return self.render_data_array(heap, ctx, id, standard, depth, out);
                 }
-                out.push_str(&format!("#<{}", key));
+                out.push_str(&format!("#<{}", crate::shared::name_view().type_key(&key)));
                 for i in 0..heap.struct_field_count(id) {
                     if Self::length_reached(ctx, i) {
                         out.push_str(" ...");
@@ -3077,7 +3077,7 @@ impl Renderer {
             // its instantiation (`hashtable<string,int>`) from `HashTable::new`.
             Value::Boxed(id) if heap.is_hashtable(id) => out.push_str(&format!(
                 "#<{} count={}>",
-                heap.struct_type_name(id),
+                crate::shared::name_view().type_key(&heap.struct_type_name(id)),
                 heap.hashtable_count(id)
             )),
             Value::Boxed(id) if heap.is_scope(id) => {
@@ -3102,7 +3102,7 @@ impl Renderer {
                         // no `Path` to borrow it from.
                         let segs: Vec<&str> =
                             heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s)).collect();
-                        format!("#<builtin {}::{}>", segs.join("::"), heap.builtin_fn_name(id))
+                        format!("#<builtin {}::{}>", crate::shared::name_view().path(&segs.join("::")), heap.builtin_fn_name(id))
                     }
                 };
                 out.push_str(&text);

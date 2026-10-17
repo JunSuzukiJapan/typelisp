@@ -1,12 +1,10 @@
-//! Every free function, macro and global the standard library leaves at the
-//! root is named in the reference (`docs/ja/reference/`).
+//! Every free function, macro and global the standard library defines in its
+//! module `std` is named in the reference (`docs/ja/reference/`).
 //!
-//! The root is an ancestor of every module, so whatever sits there is in every
-//! program's scope, and a user's own definition of the same name at the REPL
-//! replaces it. A helper the library needs but a user never writes belongs in
-//! the internal module (`typelisp::INTERNAL_MODULE`) instead. This test is
-//! what notices a new one left at the root: it either gets documented or
-//! moves.
+//! What sits there is in every program's scope. A helper the library needs
+//! but a user never writes belongs in the internal module (`std::%internal`)
+//! instead. This test is what notices a new one left in `std`: it either gets
+//! documented or moves.
 
 extern crate typelisp;
 
@@ -18,13 +16,13 @@ use std::path::Path as FsPath;
 
 use typelisp::{load_prelude, Checker, Heap, Interp};
 
-/// The root's own free functions, macros and globals once the prelude is in.
+/// `std`'s own free functions, macros and globals once the prelude is in.
 fn root_names() -> BTreeSet<String> {
     let mut heap = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
-    let root = &chk.registry().root;
+    let root = chk.registry().root.module(&[typelisp::STD_MODULE.to_string()]).expect("the standard library's module");
     root.fns.keys().chain(root.macros.keys()).chain(root.vars.keys()).cloned().collect()
 }
 
@@ -81,11 +79,11 @@ fn every_root_name_is_in_the_reference() {
     let documented: BTreeSet<String> = words(&text).into_iter().chain(ranges(&text)).collect();
 
     let names = root_names();
-    assert!(names.len() > 300, "expected the prelude's root catalog, found {} names", names.len());
+    assert!(names.len() > 300, "expected the standard library's catalog, found {} names", names.len());
     let missing: Vec<String> = names.into_iter().filter(|n| !documented.contains(n)).collect();
     assert!(
         missing.is_empty(),
-        "names at the root that docs/ja/reference/ never mentions -- document each one, or move it into `{}` \
+        "names in `std` that docs/ja/reference/ never mentions -- document each one, or move it into `std::{}` \
          if no user writes it:\n  {}",
         typelisp::INTERNAL_MODULE,
         missing.join(" ")

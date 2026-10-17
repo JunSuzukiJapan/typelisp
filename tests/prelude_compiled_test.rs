@@ -9,9 +9,9 @@
 use typelisp::check::core;
 use typelisp::{Checker, CompileTarget, Heap, Interp, Path, Reader, Value};
 
-/// A function at the root.
+/// A function of the standard library's module.
 fn f(name: &str) -> CompileTarget {
-    CompileTarget::Fn(Path::root(name))
+    CompileTarget::Fn(Path::std(name))
 }
 
 /// A method of a root-level type.
@@ -79,8 +79,8 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
     let (_heap, _chk, interp) = env(true);
     for target in [
         // was: `stream-read-char` / `stream-write-string`
-        m("file-stream", "read-char"),
-        m("string-output-stream", "write-string"),
+        CompileTarget::Method(Path::std("file-stream"), "read-char".to_string()),
+        CompileTarget::Method(Path::std("string-output-stream"), "write-string".to_string()),
         // was: `char::char->string`
         CompileTarget::Fn(Path::internal("reader-whitespacep")),
         // was: `random-state-next` / `make-random-state-fresh`

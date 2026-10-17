@@ -8,10 +8,11 @@
   関数名の解決、ローカル変数、チェッカーより後ろの core IR の変数も含む。
 - モジュールの中で書いた名前は、そのモジュールのシンボルである。外のシンボルになるのは、
   明示的に取り込んだときだけ。
-- 標準ライブラリ専用のモジュール `std` を置く。`std` に定義して公開（`pub`）したものは、
-  取り込まずにどのモジュールからでも使える。
+- 標準ライブラリ専用のモジュール `std` を置く。`std::prelude` が公開するものだけは、
+  取り込まずにどのモジュールからでも使える（Rust の prelude と同じ。2026-10-17 に (b) を選択）。
+  それ以外の `std` の定義は `use` で取り込むか、パスで書く。
 - 公開されていない定義は、ほかのモジュールからは見えない。祖先のモジュールも同じ。
-- `std` が公開している名前と同じ名前をモジュールで定義するには、モジュールの先頭で
+- `std::prelude` が公開している名前と同じ名前をモジュールで定義するには、モジュールの先頭で
   明示的に宣言する（CL の `shadow`）。宣言せずに定義するとエラー。
 - `use` は、取り込む側のモジュールの定義の表に「このモジュールのシンボル → 取り込む定義」を
   登録する。シンボル表は書き換えない。
@@ -38,11 +39,11 @@
 
 1. `m` の表にあれば、それ（`m` のシンボル、または `shadow` で作ったもの）
 2. 予約語なら、その予約語（全モジュール共通）
-3. `std` が公開している名前なら、`std` のシンボル
+3. `std::prelude` が公開している名前なら、その定義のシンボル（定義したモジュールのもの）
 4. どれでもなければ、`m` に作る
 
-予約語は 2 を表の写しで済ませる（今の SYSTEM の写しと同じ）。3 は `std` の公開表を 1 回引く。
-`std` の公開表は prelude を読み込み終えた時点で固まるので、利用者のコードを読む間に変わらない。
+予約語は 2 を表の写しで済ませる（今の SYSTEM の写しと同じ）。3 は prelude の公開表を 1 回引く。
+公開表は標準ライブラリを読み込み終えた時点で固まるので、利用者のコードを読む間に変わらない。
 
 キーワードは keyword モジュール、`(intern NAME NS)` は `NS` で同じ手順を踏む。ダンプ・fasl・
 コンパイル済みコードからシンボルを作り直すときは、所属モジュールにそのまま作る入口を使う
@@ -94,6 +95,26 @@
 キーワードは今までどおり keyword モジュール。語彙表は位置で番号が決まるので、分割しても
 番号は変えない（所属だけ変える）。
 
+### 3.6 表示（2026-10-17、ユーザー決定）
+
+型の名前などのパスを人に見せるときは、今のモジュール（カレントパス）から書ける形にする。
+
+- 今のモジュールの定義と、今のモジュールに取り込んだ定義は、最後のセグメントだけ。
+- 今のモジュールの子孫のモジュールの定義は、今のモジュールからの相対パス。
+- それ以外はルートからのパス。
+
+決めるのは `typelisp_mem::NameView` の 1 か所。チェッカーはモジュールを移るたびとフォームごとに
+今のモジュールの見え方を印字の共有表（`typelisp_print::shared`）に置き、エラー文の型（`Type` の
+`Display`）と実行時の印字（`#<...>`）はそれを使う。実行ファイルは起動時に、検査したモジュールの
+見え方を登録する（`rt_print_name_module` / `rt_print_name_import`）。型キーなど、識別に使う
+パスは短くしない。
+
+短くするのは型の名前だけ。エラー文の中で定義を名指しするパス（`make-instance m::k::q` など）は
+ルートからのまま。祖先のモジュールの定義も、ルートからのパスで書く（どちらも 2026-10-17、ユーザー決定）。
+
+段階 2 の間は、`std` の型をすべて取り込んだものとして扱う（`Checker::publish_name_view`）。
+段階 3 で `std::prelude` の公開表と `use` の表に置き換える。
+
 ## 4. 性能
 
 - 読むとき: 名前のハッシュ 1 回、表の参照は多くて 2 回（自分の表、`std` の公開表）。
@@ -102,17 +123,76 @@
 - ローカル変数: ポインタの比較。
 - コンパイル済みコードはリンク名で呼ぶので、実行時に名前を引くことはない。
 
+## 4.5 `std` の構成（2026-10-17、ユーザー決定と分類案）
+
+決定:
+
+- `std` はルートの子モジュール。prelude・組み込み関数・組み込み型をそこへ移す。
+- `std` の中を項目ごとの子モジュールに分ける。分け方は Rust の標準ライブラリを参考にする。
+- REPL のトップレベルはモジュール `user`。
+
+- 基本型（`int` `f64` `bool` `char` `string` `symbol` など）は `std::primitive`。
+- 島だけが使う型（`llvm-module` などの LLVM の型）は `%core`。
+- 取り込みなしで使えるのは `std::prelude` が公開するものだけ（下の表）。
+
+分類（2026-10-17 確定）:
+
+| モジュール | 中身 |
+|---|---|
+| `std::option` / `std::result` | `Option<T>`、`Result<T,E>` とそのメソッド |
+| `std::ops` | 算術のトレイト（`Add` `Sub` `Mul` `Div` `Rem` `Bits` `Number`） |
+| `std::num` | 数値の関数（整数・浮動小数点・bignum・ratio・超越関数・ビット演算・複素数） |
+| `std::cmp` | 比較（`Eq` などのトレイト、`equal` `equalp`） |
+| `std::hash` | `Hash`、`sxhash` |
+| `std::iter` | `Iter` と、それに対する `map` `filter` `collect` `fold` `length` `find-if` など |
+| `std::seq` | CL の列の関数（`first`〜`tenth` `rest` `copy-seq` など） |
+| `std::sexpr` | `Sexpr` と cons セルの操作（`sexpr-car` など） |
+| `std::vec` | `Vector<T>` |
+| `std::collections` | `HashTable` `HashSet` `SortedTable` `Deque` |
+| `std::array` | `Array<T>`、`BitVector` |
+| `std::string` / `std::char` | 文字列と文字 |
+| `std::symbol` | `gensym` `intern` `symbol->string` `keywordp` |
+| `std::fmt` | `format`、`print-object`、印字の制御、`prin1` `princ` `write` |
+| `std::io` | ストリーム、`with-open-file` など、`y-or-n-p` |
+| `std::fs` / `std::path` | ファイルとディレクトリ、パス名 |
+| `std::net` | TCP・UDP・Unix ソケット・DNS |
+| `std::thread` / `std::sync` | `Thread<T>` `sleep` `yield`、`Chan` `WaitGroup` `Mutex` `Context` |
+| `std::time` / `std::random` | 時刻、乱数 |
+| `std::env` / `std::process` | 環境（`command-line-args` `getenv` など）、`exit` |
+| `std::error` | `SimpleError` `WrappedError` `wrap-error` `assert` |
+| `std::reader` / `std::eval` | `read` とリーダーマクロ、`eval` `macroexpand` |
+| `std::control` | 制御のマクロ（`cond` `case` `when` `dolist` `dotimes` `destructuring-bind` `prog1` `dlet` など） |
+| `std::repl` | `room` `dribble` |
+| `std::primitive` | 基本型 |
+
+`std::prelude` が公開するもの（2026-10-17 確定）:
+
+- `std::primitive` の全部、`Option` `Result` とその構成子、`Vector<T>`、文字列の基本の関数
+- `Iter` と反復の関数（`map` `filter` `collect` `fold` `length` など）
+- `Sexpr` と cons・リストの操作
+- `std::control` の制御マクロ全部
+- 比較（`equal` など）、算術のトレイト、`Error` と `assert`、`print-object`
+
+それ以外（`std::collections` `std::array` `std::io` `std::fs` `std::path` `std::net`
+`std::thread` `std::sync` `std::time` `std::random` `std::env` `std::process` `std::reader`
+`std::eval` `std::repl` `std::symbol` `std::hash` `std::seq`、`std::num` の自由関数）は `use` が要る。
+メソッドは第 1 引数の型から引くので、取り込みに関係なく呼べる。
+
 ## 5. 段階
 
 各段階で全テストを通してからコミットする。
 
-1. 語彙表の 3 分割と、モジュール `std`・内部用モジュールの追加。島の振り分けを `eq` に。
-2. prelude・組み込み関数・コアマクロを `std` へ移し、公開するものに `pub` を付ける。
-   リーダーの 3.1 の手順、`shadow`、ダンプのシンボル復元。
-3. レジストリの値の表（関数・変数・マクロ）と `use` の別名を `SymRef` キーにし、祖先を
-   たどる解決と文字列による解決を消す。パスは 3.2 の手順で引く。例・テストを新しい規則に直す。
-4. `Env` と IR の変数を `SymRef` にし、インタプリタと島を `eq` に（島の再生成は 2 回）。
-5. 利用者向け文書（日本語の原本、翻訳）。
+1. 完了（`ff8354c`）: 語彙表の 3 分割、`std`・`%core` の追加、IR のタグを番号で扱う、島を `%core` へ。
+2. prelude・組み込み関数・組み込み型を `std` へ移す（まだ子モジュールに分けない）。
+   REPL のトップレベルを `user` に。表示を今のモジュールから見た形に（3.6）。
+3. レジストリの値の表と `use` の別名を `SymRef` キーにし、祖先をたどる解決と文字列による解決を
+   消す。`std::prelude` の公開表と読むときの規則 3.1、`shadow`。
+   テストに足すもの: `shadow` なしの `(defstruct Error ...)` がエラーになること（段階 2 で
+   `Error` が `std` に移り、同じモジュールの衝突ではなくなったため、error_test から外した）。
+4. `std` を子モジュールに分け、`std::prelude` を作る。テスト・例に `use` を足す。
+5. `Env` と IR の変数を `SymRef` にし、インタプリタと島を `eq` に（島の再生成は 2 回）。
+6. ダンプのシンボルの所属をモジュール番号の表で書く（大きさを戻す）。
+7. 利用者向け文書（日本語の原本、翻訳）。
 
 残すもの: 型の表（`types`）とモジュールの木のキー、定義を指す `Path(Vec<String>)` は文字列の
 まま。シンボルどうしの比較ではなく、定義の識別に使っているため。段階 3 のあとで改めて扱いを決める。

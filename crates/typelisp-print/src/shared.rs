@@ -51,6 +51,28 @@ pub struct PrintShared {
     /// runtime owns that table and installs this before the program runs
     /// (`typelisp_print::aot::set_global_slots`); this crate sits below it.
     pub(crate) global_slot: RwLock<Option<fn(usize) -> Option<usize>>>,
+    /// The module whose reader type names are written for, and what it has
+    /// brought in — CL's `*package*` as the printer sees it. The checker
+    /// sets it as it moves between modules; an AOT executable's startup
+    /// registers its entry module's (`rt_print_name_module`,
+    /// `rt_print_name_import`). Shared with the workers like the rest, so a
+    /// task prints names the way the thread that started it does.
+    pub(crate) name_view: RwLock<Arc<typelisp_mem::NameView>>,
+}
+
+/// How this thread writes paths now — see [`PrintShared::name_view`].
+pub fn name_view() -> Arc<typelisp_mem::NameView> {
+    Arc::clone(&print_shared().name_view.read())
+}
+
+/// Makes `view` how this thread (and the workers sharing its tables) write
+/// paths.
+pub fn set_name_view(view: typelisp_mem::NameView) {
+    let shared = print_shared();
+    let mut slot = shared.name_view.write();
+    if **slot != view {
+        *slot = Arc::new(view);
+    }
 }
 
 thread_local! {

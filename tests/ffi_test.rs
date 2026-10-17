@@ -515,9 +515,9 @@ fn rest_cannot_be_declared() {
 }
 
 #[test]
-fn a_builtin_s_name_is_refused_at_the_root() {
-    // The root is where `sexpr-car` lives, so this would replace it.
-    let e = err(r#"(defffi (sexpr-car "abs") (i32) i32)"#);
+fn a_builtin_s_name_is_refused_in_its_module() {
+    // `std` is where `sexpr-car` lives, so this would replace it.
+    let e = err(r#"(module std (defffi (sexpr-car "abs") (i32) i32))"#);
     assert!(e.contains("built-in"), "unexpected error: {}", e);
 }
 

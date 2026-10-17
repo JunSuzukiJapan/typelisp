@@ -310,8 +310,8 @@ fn a_trait_written_in_type_position_is_rejected() {
 fn a_type_may_not_take_a_traits_name() {
     // Types and traits share one name space per module (Rust's rule), which
     // is why the built-in error types could not also be called `Error`.
-    assert_prelude_type_error("(defstruct Error (msg string))");
-    assert_prelude_type_error("(defenum Error (boom string))");
+    assert_prelude_type_error("(module m (deftrait Fault () (m ((self Self)) int)) (defstruct Fault (msg string)))");
+    assert_prelude_type_error("(module m (deftrait Fault () (m ((self Self)) int)) (defenum Fault (boom string)))");
 }
 
 #[test]

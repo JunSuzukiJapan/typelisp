@@ -7610,11 +7610,14 @@ pub fn load_interpreted_with(
     // It is a separate layer rather than the top of this file because the
     // compiler island needs the same macros without taking the prelude with
     // them — see `crate::core_macros`'s module comment.
+    // Both are written in, and define into, the standard library's module.
     chk.set_stdlib(true);
+    let std_segments = vec![crate::types::STD_MODULE.to_string()];
+    chk.enter_file_module(&std_segments).expect("prelude: the standard library's module");
     crate::core_macros::load_with(heap, chk, interp, on_checked);
 
     let r = Reader::new();
-    let mut forms = r.forms_in(crate::LIBRARY_FILE, &SOURCE);
+    let mut forms = r.forms_within(crate::LIBRARY_FILE, &SOURCE, crate::NsId::STD);
     while let Some((v, _)) = forms.next_form(heap).expect("prelude: read failed") {
         on_read(heap, v);
         let tl = chk.check_form(heap, &*interp, v).expect("prelude: check failed");
@@ -7624,5 +7627,6 @@ pub fn load_interpreted_with(
         on_checked(heap, tl);
         interp.exec(heap, tl).expect("prelude: eval failed");
     }
+    chk.exit_file_module(std_segments.len());
     chk.set_stdlib(false);
 }
