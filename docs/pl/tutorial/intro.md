@@ -166,7 +166,7 @@ Gdy w przypadku fałszu nic nie ma się dziać, użyj `when` (a `unless` dla prz
 
 ### cond
 
-Przy trzech lub więcej warunkach lepiej czyta się `cond`. Końcowe `else` jest wybierane, gdy żaden
+Przy trzech lub więcej warunkach lepiej czyta się `cond`. Końcowe `:else` jest wybierane, gdy żaden
 z warunków nie jest spełniony.
 
 ```lisp
@@ -174,7 +174,7 @@ z warunków nie jest spełniony.
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

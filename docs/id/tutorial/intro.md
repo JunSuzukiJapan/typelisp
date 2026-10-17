@@ -167,7 +167,7 @@ kebalikannya).
 
 ### cond
 
-Dengan tiga kondisi atau lebih, `cond` lebih mudah dibaca. `else` terakhir dipakai ketika tidak ada
+Dengan tiga kondisi atau lebih, `cond` lebih mudah dibaca. `:else` terakhir dipakai ketika tidak ada
 kondisi yang terpenuhi.
 
 ```lisp
@@ -175,7 +175,7 @@ kondisi yang terpenuhi.
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

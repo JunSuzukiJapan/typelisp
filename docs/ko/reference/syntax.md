@@ -35,11 +35,12 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
 - **심볼**: 영숫자와 기호를 포함하는 아무 토큰(`+` `<=` `my-func` 등).
   `]`와 `}`는 토큰을 끝내므로 심볼 안에 쓸 수 없고, 데이터의 시작에 나오면 읽기 오류다. `[`와 `{`는 심볼 안에 쓸 수 있다. CL과 마찬가지로 프로그래머가 [리더
   매크로](#11-리더-매크로readtable)에 쓸 수 있도록 비워 두었다.
-- **키워드**: `:name`처럼 콜론으로 시작하는 심볼(CL과 같다). 자기 평가된다. 바인딩을 찾지 않고 값은 자기 자신이며 정적
-  타입은 `symbol`이다. 같은 이름의 키워드는 항상 같은 객체이다(`(eq :foo :FOO)`는 참. 다른 심볼처럼 소문자가 된다). 콜론
-  자체가 이름의 일부이므로 `(symbol->string :foo)`는 `":foo"`이다(typelisp에는 패키지 체계가 없으므로 CL의 `symbol-name`과
-  다르다). 홀로 있는 `:`나 `:a:b`처럼 콜론이 더 있는 것은 읽기 오류이다. `keywordp`로 판정한다. `::`로 시작하는 것은
-  키워드가 아니라 절대 경로이다(아래).
+  `|`와 `|` 사이는 쓴 그대로 읽으며, 구분 문자와 콜론도 이름에 넣을 수 있다(CL의 다중 이스케이프). `|:foo|`는 이름이 `:foo`인 보통 심볼이며 키워드가 아니다.
+- **키워드**: `:name`처럼 콜론으로 시작하는 심볼(CL과 같다). 어느 모듈에서 쓰든 키워드용 이름공간 `keyword`(CL의 `KEYWORD` 패키지)에 속하는 같은 이름의 단 하나의
+  심볼이 된다. 자기 평가된다. 바인딩을 찾지 않고 값은 자기 자신이며 정적 타입은 `symbol`이다. 같은 이름의 키워드는 항상 같은 객체이다(`(eq :foo :FOO)`는 참. 다른 심볼처럼
+  소문자가 된다). 콜론은 이름의 일부가 아니며 `(symbol->string :foo)`는 `"foo"`이다. `~s`는 `:foo`, `~a`는 `foo`로 인쇄한다. 키워드는 자기 자신을 값으로
+  가지는 상수이므로 변수로 바인딩하거나 대입할 수 없고 정의의 이름으로도 쓸 수 없다(타입 오류). 문자열로부터는 `(intern "foo" "keyword")`로 만든다. `keywordp`로
+  판정한다(키워드용 이름공간에 속하는지). 홀로 있는 `:`나 `:a:b`처럼 콜론이 더 있는 것은 읽기 오류이다. `::`로 시작하는 것은 키워드가 아니라 절대 경로이다(아래).
   또한 `:dyn`은 타입 위치 전용의 예약 키워드이며, 다른 곳에 쓰면 오류이다([2장](#2-타입-표기) 참고).
 - **리스트**: `(a b c)`. 점 쌍 `(a . b)`도 읽을 수 있다.
 - **벡터**: `#(1 2 3)`(CL과 같다). 내용은 모두 리터럴이며 평가하지 않는다. `#(a b)`의 `a`는 변수가 아니라 심볼이다. 요소의 타입은 문맥에서
@@ -185,10 +186,10 @@ typelisp는 S 식으로 쓰는 정적 타입 Lisp이다. 내장 함수와 메서
     두 lambda"가 다른 타입이 되어 버린다. `&rest`는 타입의 문제에 머무르므로 함수 타입에 쓸 수 있다.
 - **전방 참조는 `defsignature`로 선언한다**(아래). 선언하지 않은 이름은 정의보다 앞에서 호출할 수 없다. 최상위는 소스
   순서대로 형식 하나씩 검사되고 실행되기 때문이다.
-- 트레이트 경계를 요구하려면 본체 바로 앞에 `where` 절을 쓴다:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- 트레이트 경계를 요구하려면 본체 바로 앞에 `:where` 절을 쓴다:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   (`(AssocName ConcreteType)`으로 연관 타입을 고정하는 것은 생략할 수 있다).
-- **문서 문자열**: `where` 절(있다면) 바로 뒤, 본체 맨 앞의 문자열 리터럴은 문서 문자열이 된다(CL과 같다). 다만 그 뒤에
+- **문서 문자열**: `:where` 절(있다면) 바로 뒤, 본체 맨 앞의 문자열 리터럴은 문서 문자열이 된다(CL과 같다). 다만 그 뒤에
   본체 형식이 하나 이상 있을 때만이다. 홀로 있는 문자열은 반환값으로 남고 문서 문자열로 보지 않는다:
   `(defun f () string "doc" "value")`는 문서 문자열을 가지고 `"value"`를 반환하며, `(defun f () string "value")`는 문서
   문자열 없이 `"value"`를 반환한다. `(documentation name)`으로 꺼낼 수 있다
@@ -522,7 +523,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
   (pub name ...))                                      ; 타입을 정의한 모듈 밖에도 공개한다
 
 ; 제네릭 타입
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 `defstruct`(3.6)·`defenum`(3.7)으로 정의한 타입에 메서드를 준다. Rust의 고유 impl
@@ -543,7 +544,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
 - 쓸 수 있는 것은 자기 프로그램의 타입뿐이다. `Vector`·`Option`·`int` 같은 표준 라이브러리의 타입에는
   쓸 수 없다(`... is a standard library type` 오류). 표준 타입에 연산을 더하고 싶으면 트레이트를
   정의하고 그 타입에 `impl`한다.
-- `(impl X ...)`에서 `X` 다음이 항목(리스트)이나 `where`이거나 아무것도 없으면 이 고유 impl이고,
+- `(impl X ...)`에서 `X` 다음이 항목(리스트)이나 `:where`이거나 아무것도 없으면 이 고유 impl이고,
   이름이면 트레이트의 `impl`(`(impl Trait Type ...)`, 3.9)이다.
 
 ```lisp
@@ -633,7 +634,7 @@ C와 같은 배치의 구조체를 선언한다. 최상위의 `unsafe` 안에만
   `the`에서도 같은 `unknown type` 오류가 된다. 그래서 서로를 참조하는 두 타입은 쓸 수 없다.
 - **타입 변수는 선언 위치에 쓴 것뿐이다.** `defun`/`defstruct`/`defenum`/`deftype`은 이름의 `<T>`, 고유
   `impl`은 대상 타입(`(impl box<T> ...)`)과 각 메서드 이름의 `<U>`, 트레이트의 `impl`은 대상 타입과
-  `impl<T>`, `deftrait`는 `Self`와 `(type Item)`의 연관 타입이다. 그 밖의 곳(인수, 반환값, 본체의
+  `impl<T>`, `deftrait`는 `Self`와 `(:type Item)`의 연관 타입이다. 그 밖의 곳(인수, 반환값, 본체의
   `the`/`lambda`)에서 처음 나오는 이름은 타입 변수가 되지 않고 `unknown type`이 된다.
 - **문서 문자열**: 이름 바로 뒤, 필드 앞의 문자열 리터럴은 문서 문자열이 된다(`(defstruct Name "doc" (field Type)...)`. CL의
   `defstruct`와 같은 위치). 필드는 항상 `(name Type ...)` 형태이며 맨 문자열일 수 없으므로 모호함이 없다.
@@ -761,19 +762,19 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 상위 트레이트 목록은 필수. 없으면 ()
-  (type AssocName)                       ; 연관 타입(여러 개 가능, 생략 가능)
+  (:type AssocName)                       ; 연관 타입(여러 개 가능, 생략 가능)
   (method-name ((self Self) params...) RetType)          ; 본체 없음 = 구현 필수
   (method-name ((self Self) params...) RetType body...)) ; 본체 있음 = 기본 구현
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; impl 전체에 걸리는 경계(생략 가능)
-  (type AssocName ConcreteType)          ; 연관 타입을 구체화한다
+  (:where (Trait A)...)                   ; impl 전체에 걸리는 경계(생략 가능)
+  (:type AssocName ConcreteType)          ; 연관 타입을 구체화한다
   (method-name (recv params...) RetType body...))
 ```
 
 `impl`을 거쳐 각 메서드는 `TargetType`의 메서드로 등록되며, 고유 `impl`(3.5)의 메서드와 같은 방식으로
 호출할 수 있다. 트레이트의 `impl`의 메서드는 `pub`을 쓰지 않아도 항상 공개된다. 트레이트는 제네릭
-함수의 `where` 절에서 트레이트 경계로 참조한다([3.1 defun](#31-defun--함수-정의) 참고). 트레이트 이름에는 `m::Trait` 같은
+함수의 `:where` 절에서 트레이트 경계로 참조한다([3.1 defun](#31-defun--함수-정의) 참고). 트레이트 이름에는 `m::Trait` 같은
 `::` 경로도 쓸 수 있다.
 
 **상위 트레이트 목록(필수)**: 항상 트레이트 이름 바로 뒤에 쓴다. 요소는 맨 트레이트 이름, 또는 그 트레이트에 연관 타입이
@@ -787,20 +788,20 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 ```
 
 상속에는 세 가지 효과가 있다. (1) `impl Ord X`는 `impl Eq X`가 **먼저** 쓰여 있기를 요구한다(쓰는 순서에 관한 규칙. REPL과
-하나씩 하는 `load`에서 결정적으로 판단할 수 있는 유일한 형태이며 Rust보다 엄격하다). (2) `(where (Ord T))`만으로 `Eq`의
+하나씩 하는 `load`에서 결정적으로 판단할 수 있는 유일한 형태이며 Rust보다 엄격하다). (2) `(:where (Ord T))`만으로 `Eq`의
 메서드도 호출할 수 있다. (3) `:dyn Ord`에서 `Eq`의 메서드를 호출할 수 있고, `:dyn Ord`의 값은 `:dyn Eq`가 요구되는 곳에 그대로
 넘길 수 있다(업캐스트). 하위 트레이트가 부모와 같은 이름의 메서드를 다시 선언하는 것과, 두 부모에서 같은 이름의 메서드를
 상속하는 것은 모두 오류이다(vtable의 슬롯은 이름마다 하나). 다이아몬드 상속은 하나의 슬롯으로 합쳐진다.
 
 **기본 구현**: 시그니처 뒤에 본체를 쓰면 `impl`이 그 메서드를 생략했을 때 쓰인다. 본체는 트레이트를 쓴 **모듈의
-이름공간**에서 해석되므로 그 모듈의 공개되지 않은 함수도 호출할 수 있다. 본체가 있는 메서드에는 `where` 절과 문서 문자열도
+이름공간**에서 해석되므로 그 모듈의 공개되지 않은 함수도 호출할 수 있다. 본체가 있는 메서드에는 `:where` 절과 문서 문자열도
 쓸 수 있다. 본체의 타입 검사는 **선언한 시점에 한 번**, `Self`를 타입 변수로 둔 채(`Self: 그 트레이트`를 경계로) 이루어진다
 (Rust와 같다). 어떤 `impl`도 생략하지 않는 기본 구현이라도, 어느 구현 타입에 대해서도 통과하지 못할 실수는 거기서 걸러진다.
 `self`에 대해 그 트레이트 자신과 상속원의 메서드를 호출하는 것은 이 경계로 통과하며, 연관 타입은 자기 자신으로 고정되므로
 `Item`을 반환하는 시그니처와 본체가 구체 타입을 모른 채 대조된다.
 
 **구체 타입마다의 구현**: 제네릭 타입에는 구체 타입마다 별도의 `impl`을 쓸 수 있다(`(impl Show Box<int> ...)`와
-`(impl Show Box<string> ...)`). `:dyn`, `where` 경계, 연관 타입, `print-object`도 구체 타입마다 적용되며, `impl`이
+`(impl Show Box<string> ...)`). `:dyn`, `:where` 경계, 연관 타입, `print-object`도 구체 타입마다 적용되며, `impl`이
 없는 구체 타입(`Box<f64>`)은 그 트레이트를 구현하지 않는다. 같은 트레이트를 `Box<T>`와 `Box<int>` 양쪽에
 `impl`할 수는 없다(3.5의 메서드와 같은 규칙). 상위 트레이트는 그 구체 타입에서 구현되어 있으면 된다(`Box<int>`
 또는 `Box<T>`의 `impl`).
@@ -811,17 +812,17 @@ CL의 `deftype`을 정적 타입 언어에서 의미가 있는 범위로 좁힌 
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; 본체 없음. 모두 기본 구현
+(impl<T> Clamp T (:where (Ord T)))          ; 본체 없음. 모두 기본 구현
 ```
 
 **구체 타입이 실제로 쓰기 전까지는 코드를 만들지 않는다**(타입마다 한 번, 보통의 단형화와 같은 구조). 하나의 트레이트에
 블랭킷 구현은 최대 하나이다. 같은 타입에 명시적인 `impl`이 있으면 그것이 우선한다. 본체의 타입 검사는 생성과 별개로, 선언한
 시점에 **대상을 타입 변수로 둔 채** 한 번 이루어진다(Rust와 같다). 한 번도 쓰이지 않는 구현이라도, 선언한 경계 아래에서
-어떤 대상에 대해서도 통과하지 못할 실수는 거기서 걸러진다. 경계가 허락하는 호출(`(where (Ord T))` 아래의 `(less self other)`
+어떤 대상에 대해서도 통과하지 못할 실수는 거기서 걸러진다. 경계가 허락하는 호출(`(:where (Ord T))` 아래의 `(less self other)`
 등)은 제네릭 `defun`의 본체처럼 통과한다.
 
 **문서 문자열**: `deftrait`는 상위 트레이트 목록 바로 뒤, 항목 앞에 문자열 리터럴을 두면 트레이트 전체에 문서 문자열을 하나
-가질 수 있다(`(deftrait Name () "doc" (type ...) (method ...)...)`). 본체가 없는 시그니처는 문서 문자열을 가질 수 없다. 끝의
+가질 수 있다(`(deftrait Name () "doc" (:type ...) (method ...)...)`). 본체가 없는 시그니처는 문서 문자열을 가질 수 없다. 끝의
 문자열 자체가 기본 구현의 반환값이 되어 둘을 구별할 수 없기 때문이다.
 
 표준 라이브러리가 제공하는 트레이트: **`Iter`**(`next` / 연관 타입 `Item`. `doiter`와 시퀀스 함수의 바탕), **`Eq`**(`equals`.
@@ -1043,11 +1044,11 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 (if cond then else)                 ; else는 필수(항상 세 요소)
 (when cond body...)                 ; else가 없는 if(Unit 타입). defmacro
 (unless cond body...)               ; when의 부정판. defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; 키 목록: 어느 것과든 맞으면
-  (else body...))                   ; expr은 한 번만 평가된다. key는 equal로 비교한다.
+  (:else body...))                   ; expr은 한 번만 평가된다. key는 equal로 비교한다.
                                      ; key는 "리터럴"이며 평가되지 않는다(CL과 같다).
                                      ; 맨 심볼 a는 심볼 'a를 뜻한다.
                                      ; 'a라고 쓰면 오류(맨 a를 쓴다). defmacro
@@ -1137,7 +1138,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - **즉시값 리터럴**: 정수 / `true`/`false` / 문자 — 워드로 비교한다
 - **값 리터럴**: 문자열 / 부동소수점 수 / 심볼(`'foo`) / 다배정도 정수 / ratio — 그 타입의 `Eq::equals`
   ([표준 트레이트](functions/traits.md#2-eq--ord비교))로 값을 비교한다. 문자열은 동일성이 아니라 내용을 비교한다
-- `(= expr)` — 아무 식이나 평가해 `Eq::equals`로 비교한다. 리터럴 구문이 없는 타입(`defstruct` 인스턴스, 전역 변수, 계산
+- `(:= expr)` — 아무 식이나 평가해 `Eq::equals`로 비교한다. 리터럴 구문이 없는 타입(`defstruct` 인스턴스, 전역 변수, 계산
   결과)을 비교하는 유일한 방법이며, 사용자 정의 `Eq` 구현이 그대로 비교 규칙이 된다. `expr`은 그 갈래 위치에서 보이는
   모든 것(인수, 바깥 바인딩, 전역 변수)을 참조할 수 있다
 - `(Ctor sub-pattern...)` — 생성자 패턴(`Some x` `None` `Cons a d` `Ok v` 등)
@@ -1157,7 +1158,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `(:or p1 p2 ...)` — or 패턴. 선택지 중 하나라도 맞으면 맞는다. 본체가 하나뿐이므로 모든 선택지가 같은 이름의 변수를 같은 타입으로 묶어야 한다. 생성자
   패턴 안에도 쓸 수 있다(`(some (:or (circle r) (rect r _)))`)
 
-`Eq`를 구현하지 않은 타입을 값 리터럴 / `(= expr)`로 비교하면 타입 오류이다(조용히 맞지 않는 갈래를 남기는 대신 비교할 수
+`Eq`를 구현하지 않은 타입을 값 리터럴 / `(:= expr)`로 비교하면 타입 오류이다(조용히 맞지 않는 갈래를 남기는 대신 비교할 수
 없다고 말하는 쪽을 택한다).
 
 **가드**: 패턴 뒤에 `:when 조건`을 쓰면 패턴이 맞고 조건도 참일 때만 그 갈래를 고른다. 조건이 거짓이면 다음 갈래를 시도한다. 조건은 패턴이 묶은 변수를 읽을 수
@@ -1184,7 +1185,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 
 즉시값이 아닌 리터럴(문자열 / 부동소수점 수 / 다배정도 정수 / ratio)은 `Sexpr`에 대해 **쓸 수 없다**. 그 `eq`는 객체의
 동일성을 비교하므로 "타입은 통과하지만 결코 맞지 않는 갈래"가 되기 때문에, 변형 패턴을 가리키는 오류로 한다.
-`(str "hi")`라고 쓰면 `string`으로 분해해 내용으로 비교한다. `(= expr)`는 명시적으로 `equals`를 요구하므로 이 제한을 받지
+`(str "hi")`라고 쓰면 `string`으로 분해해 내용으로 비교한다. `(:= expr)`는 명시적으로 `equals`를 요구하므로 이 제한을 받지
 않는다.
 
 **검사 대상이 ADT일 필요는 없다.** `string`/`symbol`/`i32`/`f64` 등을 바로 `match`할 수 있다(문자열 리터럴 패턴이 쓰이는
@@ -1324,13 +1325,12 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 바뀌지 않는다(CL 자체의 simple loop 규칙과 같다).
 
 CL은 절 단어를 맨 심볼로 쓰지만(`(loop for i from 1 to 3 collect i)`) 여기서는 **모두 키워드**이다. 맨 `for`는 변수 참조가 될
-뿐이며, 키워드인지가 단순 루프와의 경계이기도 하다. 예외는 변수와 값을 나누는 `=`로, 위치가 하나로 정해지므로 맨 것과
-키워드(`:=`) 어느 쪽으로든 읽는다.
+뿐이며, 키워드인지가 단순 루프와의 경계이기도 하다. 변수와 값을 나누는 단어도 예외가 아니며 `:=`로 쓴다.
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1338,11 +1338,11 @@ CL은 절 단어를 맨 심볼로 쓰지만(`(loop for i from 1 to 3 collect i)`
 
 | 절 | 의미 |
 |---|---|
-| `:with v = e` | 한 번만 묶는다. 앞 절의 변수를 읽을 수 있다 |
+| `:with v := e` | 한 번만 묶는다. 앞 절의 변수를 읽을 수 있다 |
 | `:for v :in s` / `:for v :across s` | `Iter`의 요소를 차례로. 여기에는 CL의 리스트/벡터 구별이 없으므로 같은 절의 두 표기이다 |
 | `:for v :on s` | 차례로 이어지는 **접미사**. CL은 공유하는 꼬리 cons를 넘기지만 `Iter`에는 공유할 꼬리가 없으므로 매번 새 `Vector` |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | 세기. `:downfrom`/`:upfrom`도 된다 |
-| `:for v = e [:then f]` | `e`에서 시작해 두 번째부터는 `f`(`:then`이 없으면 매번 `e`) |
+| `:for v := e [:then f]` | `e`에서 시작해 두 번째부터는 `f`(`:then`이 없으면 매번 `e`) |
 | `:repeat n` | 그 횟수만큼 반복한다 |
 
 `:for`가 여러 개이면 **병렬로** 나아가고, 어느 하나가 다하면 끝난다.
@@ -1628,7 +1628,7 @@ AOT 컴파일할 수 있다. 시작점 파일 자신의 정의도 `typl file.typ
 `f`의 타입은 `(fn (string-input-stream char) Option<Sexpr>)`이다. 첫 번째 인수는 **아직 읽지 않은 텍스트를 내용으로 하는
 스트림**, 두 번째 인수는 **발동한 문자**(디스패치이면 두 번째 문자)이다. 반환값이 그 자리에서 읽은 데이터가 된다. 스트림이
 `:dyn PeekInput`이 아니라 구체 타입인 것은 리더가 넘기는 것이 항상 이 한 종류이기 때문이다. `read-sexpr` / `read-char` /
-`peek-char` / `unread-char` / `read-delimited-list`는 모두 `(where (PeekInput S))`이므로 구체 타입에 그대로 모두 쓸 수 있다.
+`peek-char` / `unread-char` / `read-delimited-list`는 모두 `(:where (PeekInput S))`이므로 구체 타입에 그대로 모두 쓸 수 있다.
 
 ```lisp
 (set-macro-character #\!
@@ -1727,14 +1727,14 @@ Go의 `go f(x)`와 같은 규칙이며, thunk가 아니라 호출 형식을 받�
 (select
   ((v (recv ch1)) body...)          ; 받기 갈래. v는 Option<T>에 묶인다
   ((send ch2 x) body...)            ; 보내기 갈래
-  (else body...))                   ; 생략할 수 있다. **쓴다면 마지막에**
+  (:else body...))                   ; 생략할 수 있다. **쓴다면 마지막에**
 ```
 
-- **`else`가 있으면 블로킹하지 않는다**(Go의 `default`). 없으면 어느 갈래가 가능해질 때까지 기다린다.
+- **`:else`가 있으면 블로킹하지 않는다**(Go의 `default`). 없으면 어느 갈래가 가능해질 때까지 기다린다.
 - **동시에 여럿이 가능하면 무작위로 하나를 고른다**(쓴 순서대로라면 뒤의 갈래가 굶는다).
 - 받기 갈래의 `v`는 **`Option<T>`**이다. 닫힌 채널은 갈래를 건너뛸 이유가 아니라 "답"이므로 갈래 안에서 `match`한다.
 - 타입은 **모든 갈래 본체의 타입을 합친 타입**이다(`match` 갈래와 같은 규칙).
-- 갈래가 0개인 `(select)`는 타입 오류이다(Go의 `select{}` = 영원히 블로킹은 채택하지 않는다). `else`만 있는 `select`도
+- 갈래가 0개인 `(select)`는 타입 오류이다(Go의 `select{}` = 영원히 블로킹은 채택하지 않는다). `:else`만 있는 `select`도
   마찬가지이다. 본체를 그대로 쓰는 것과 같기 때문이다.
 
 **어느 갈래가 선택되든 채널 식과 보낼 값은 왼쪽에서 오른쪽으로 각각 한 번 평가된다**(`case`가 키에 대해 가진 규율과 같다).

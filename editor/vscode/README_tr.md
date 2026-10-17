@@ -14,7 +14,7 @@ denetler (aşağıya bakın).
   - Tanımlanan adlar (`(defun NAME ...)` bir fonksiyon olarak, `(defstruct NAME ...)` bir tür olarak,
     `(defvar (NAME ...))` bir değişken olarak; `(pub defun NAME ...)` gibi `pub` ile de aynı) ve
     `(impl Trait Type)`'ın her iki adı
-  - Ad alanı ve bildirim anahtar sözcükleri (`pub` `module` `use` `load` `impl` `where`) ve lambda
+  - Ad alanı ve bildirim anahtar sözcükleri (`pub` `module` `use` `load` `impl`) ve lambda
     listesi işaretçileri (`&rest` `&optional` `&key`)
   - Yerleşik fonksiyonlar, ilkel türler (`bignum` / `ratio` dahil), yerleşik hata türleri,
     `Capitalized` kullanıcı türleri ve `:dyn Trait` trait nesnesi türü (jenerik bağımsız değişkenlerin

@@ -44,7 +44,7 @@ erreurs](tutorial/errors.md) pour plus de détails.
   (case id
     (1 (Option::some "alice"))
     (2 (Option::some "bob"))
-    (else (Option::none))))
+    (:else (Option::none))))
 
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)

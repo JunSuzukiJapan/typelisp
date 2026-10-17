@@ -546,7 +546,7 @@ fn an_impl_for_one_instantiation_covers_only_that_instantiation() {
     assert!(e.contains("box<string>` does not implement `show`, so it cannot be used as `:dyn show`"), "{}", e);
     // A `where` bound asks the same question.
     let e = eval_err(&format!(
-        "{}(defun g<T> ((b T)) string (where (Show T)) (show b))\n(g (make-instance 'Box :v \"s\"))",
+        "{}(defun g<T> ((b T)) string (:where (Show T)) (show b))\n(g (make-instance 'Box :v \"s\"))",
         defs
     ));
     assert!(e.contains("box<string>` does not implement trait `show`"), "{}", e);
@@ -555,10 +555,10 @@ fn an_impl_for_one_instantiation_covers_only_that_instantiation() {
 /// A `where` bound is checked against a trait object too: it implements its
 /// trait and that trait's supertraits, and nothing else. The bound used to be
 /// skipped for any type without a name, which let a `:dyn Error` through
-/// `(where (Eq T))`.
+/// `(:where (Eq T))`.
 #[test]
 fn a_where_bound_is_checked_against_a_trait_object() {
-    let same = "(defun same<T> ((a T) (b T)) bool (where (Eq T)) (equals a b))\n";
+    let same = "(defun same<T> ((a T) (b T)) bool (:where (Eq T)) (equals a b))\n";
     let err = common::check_err(&format!(
         "{}(match (as-dyn-error (parse-int \"x\")) ((ok _) false) ((err e) (same e e)))",
         same

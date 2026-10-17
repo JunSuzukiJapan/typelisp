@@ -219,8 +219,9 @@ Không có `defclass`, `defgeneric` hay kết hợp phương thức.
 Không có package. Không gian tên là module, và mỗi tệp tự nó là một module. Thay vì `pkg:symbol`, hãy
 viết `module::name`, và đưa tên vào bằng `use` ([Module và cách bố trí tệp](modules.md)).
 
-Keyword `:foo` có tồn tại và là các symbol tự đánh giá thành chính chúng. Vì không có package, dấu hai
-chấm là một phần của tên: `(symbol->string :foo)` trả về `":foo"`.
+Keyword `:foo` có tồn tại và, như trong CL, tự đánh giá thành chính chúng và thuộc không gian tên keyword
+`keyword`. `(symbol->string :foo)` trả về `"foo"`, còn `(intern "foo" "keyword")` trả về `:foo`. Đối số
+thứ hai của `intern` là đường dẫn module thay cho tên package.
 
 ## 10. Khác biệt về cách đọc và cú pháp
 

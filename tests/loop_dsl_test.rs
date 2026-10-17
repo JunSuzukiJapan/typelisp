@@ -72,7 +72,7 @@ fn a_sequence_clause_walks_any_iter_and_on_gives_the_suffixes() {
 #[test]
 fn repeat_counts_passes_and_equals_then_walks_its_own_recurrence() {
     assert_eq!(show("(loop :repeat 3 :collect 7)"), "#(7 7 7)");
-    assert_eq!(show("(loop :repeat 4 :for x = 1 :then (* x 2) :collect x)"), "#(1 2 4 8)");
+    assert_eq!(show("(loop :repeat 4 :for x := 1 :then (* x 2) :collect x)"), "#(1 2 4 8)");
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn parallel_for_clauses_stop_with_the_shortest() {
 
 #[test]
 fn with_binds_once_and_can_read_an_earlier_clause() {
-    assert_eq!(show("(loop :for i :from 1 :to 3 :with k = 10 :collect (+ i k))"),
+    assert_eq!(show("(loop :for i :from 1 :to 3 :with k := 10 :collect (+ i k))"),
                "#(11 12 13)");
 }
 
@@ -166,7 +166,7 @@ fn always_never_and_thereis_leave_early_with_their_verdict() {
 #[test]
 fn initially_runs_before_the_loop_and_finally_after_it() {
     assert_eq!(
-        show("(loop :with acc = 0 :for i :from 1 :to 3 :initially (setf acc 100) \
+        show("(loop :with acc := 0 :for i :from 1 :to 3 :initially (setf acc 100) \
                :do (setf acc (+ acc i)) :finally (return acc))"),
         "106"
     );

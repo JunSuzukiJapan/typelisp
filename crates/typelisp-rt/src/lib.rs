@@ -449,7 +449,7 @@ pub unsafe extern "C-unwind" fn rt_sym_name(args: *const i64, argc: u32) -> i64 
     match decode(*args) {
         Value::Symbol(id) => {
             let heap = active_heap();
-            let name = heap.symbol_name(id).to_string();
+            let name = id.name().to_string();
             encode(heap.alloc_string(name))
         }
         _ => raise("sexpr-sym-name: expected a Sym Sexpr node".to_string()),
@@ -2787,7 +2787,7 @@ pub unsafe fn run_entry_payload(outcome: std::thread::Result<i64>) -> i64 {
                 Ok(_) => {
                     let (tag, _) =
                         take_throw().unwrap_or_else(|| fatal("a compiled throw unwound with no throw in flight"));
-                    eprintln!("throw: no enclosing (catch '{}) for this throw", tag);
+                    eprintln!("throw: no enclosing (catch '{}) for this throw", tag.spelling());
                     EXIT_CODE_PANIC
                 }
                 Err(other) => std::panic::resume_unwind(other),
@@ -2842,7 +2842,7 @@ thread_local! {
     /// task itself before returning and restores it before running again
     /// ([`take_parked_unwind`]/[`restore_parked_unwind`]), the same way a
     /// task's continuation stack is put down and picked back up.
-    static IN_FLIGHT_TAG: RefCell<Option<String>> = const { RefCell::new(None) };
+    static IN_FLIGHT_TAG: RefCell<Option<typelisp_mem::SymRef>> = const { RefCell::new(None) };
     /// The panic payload the driver caught and has not yet handed on: to a
     /// `catch` that claims it ([`rt_throw_take_value`], which drops it), to
     /// the interpreter as an `EvalError` ([`take_activation_unwind`]), or back
@@ -2866,7 +2866,7 @@ thread_local! {
 /// also made that task's own root stack the current one first.
 #[derive(Default)]
 pub struct ParkedUnwind {
-    tag: Option<String>,
+    tag: Option<typelisp_mem::SymRef>,
     caught: Option<Box<dyn std::any::Any + Send>>,
 }
 
@@ -2915,7 +2915,7 @@ pub fn restore_parked_unwind(p: ParkedUnwind) {
 ///
 /// A `Heap` must be registered on this thread, and it must be the heap `value`
 /// belongs to.
-pub unsafe fn park_throw(tag: String, value: Value) {
+pub unsafe fn park_throw(tag: typelisp_mem::SymRef, value: Value) {
     IN_FLIGHT_TAG.with(|cell| *cell.borrow_mut() = Some(tag));
     active_heap().set_in_flight_throw(Some(value));
 }
@@ -2933,13 +2933,13 @@ pub unsafe fn park_throw(tag: String, value: Value) {
 /// # Safety
 ///
 /// A `Heap` must be registered on this thread.
-pub unsafe fn take_throw() -> Option<(String, Value)> {
+pub unsafe fn take_throw() -> Option<(typelisp_mem::SymRef, Value)> {
     let tag = IN_FLIGHT_TAG.with(|cell| cell.borrow_mut().take())?;
     // `park_throw` sets the two together, and every path that clears the
     // value clears the tag with it.
     let value = active_heap()
         .in_flight_throw()
-        .unwrap_or_else(|| fatal(&format!("a throw to '{} is in flight without its value", tag)));
+        .unwrap_or_else(|| fatal(&format!("a throw to '{} is in flight without its value", tag.spelling())));
     Some((tag, value))
 }
 
@@ -2970,7 +2970,7 @@ pub unsafe fn clear_throw() {
 ///
 /// A `Heap` must be registered on this thread, and it must be the heap
 /// `value` belongs to.
-pub unsafe fn park_throw_for_chain(tag: String, value: Value) {
+pub unsafe fn park_throw_for_chain(tag: typelisp_mem::SymRef, value: Value) {
     park_throw(tag, value);
     CAUGHT_UNWIND.with(|cell| *cell.borrow_mut() = Some(Box::new(CompiledThrow)));
 }
@@ -3018,7 +3018,7 @@ pub unsafe extern "C-unwind" fn rt_throw(args: *const i64, argc: u32) -> i64 {
         fatal("rt_throw: expected 2 arguments (tag, value)");
     }
     let tag = match decode(*args) {
-        Value::Symbol(id) => active_heap().symbol_name(id).to_string(),
+        Value::Symbol(id) => id,
         _ => fatal("rt_throw: tag is not a symbol"),
     };
     let value = decode(*args.add(1));
@@ -3044,10 +3044,10 @@ pub unsafe extern "C" fn rt_throw_matches(args: *const i64, argc: u32) -> i64 {
         fatal("rt_throw_matches: expected 1 argument");
     }
     let tag = match decode(*args) {
-        Value::Symbol(id) => active_heap().symbol_name(id).to_string(),
+        Value::Symbol(id) => id,
         _ => fatal("rt_throw_matches: tag is not a symbol"),
     };
-    IN_FLIGHT_TAG.with(|cell| i64::from(cell.borrow().as_deref() == Some(tag.as_str())))
+    IN_FLIGHT_TAG.with(|cell| i64::from(*cell.borrow() == Some(tag)))
 }
 
 /// Consumes the in-flight throw, returning its value in tagged form — the
@@ -3419,6 +3419,47 @@ pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
     let name = str_arg(0);
     let home: Vec<String> = (1..argc).map(str_arg).collect();
     encode(Value::Symbol(typelisp_mem::symbols::intern_in_path(&home, &name)))
+}
+
+/// `(intern NAME NAMESPACE)`: the symbol `NAME` in the module the string
+/// `NAMESPACE` names (`symbols::ns_named`) — `"keyword"` for a keyword. The
+/// checker supplies `NAMESPACE` when a call leaves it out, so here it is
+/// always present.
+///
+/// # Safety
+///
+/// Same as [`rt_intern_symbol`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_intern(args: *const i64, argc: u32) -> i64 {
+    if argc != 2 {
+        fatal("rt_intern: expected 2 arguments");
+    }
+    let str_arg = |i: usize| -> String {
+        match decode(*args.add(i)) {
+            Value::Str(id) => active_heap().string(id).to_string(),
+            _ => fatal("rt_intern: argument is not a Str"),
+        }
+    };
+    let (name, ns) = (str_arg(0), str_arg(1));
+    let ns = typelisp_mem::symbols::ns_named(&ns);
+    encode(Value::Symbol(typelisp_mem::symbols::intern_in(ns, &name)))
+}
+
+/// `(keywordp s)`: `1` if the symbol is a keyword — owned by the keyword
+/// module, which is the whole of what being a keyword is.
+///
+/// # Safety
+///
+/// Same as [`rt_consp`].
+#[no_mangle]
+pub unsafe extern "C" fn rt_keywordp(args: *const i64, argc: u32) -> i64 {
+    if argc < 1 {
+        fatal("rt_keywordp: expected 1 argument");
+    }
+    match decode(*args) {
+        Value::Symbol(id) => i64::from(id.is_keyword()),
+        _ => fatal("rt_keywordp: argument is not a Symbol"),
+    }
 }
 
 /// The system module's symbol at index `args[0]` (a raw `i64`, not a tagged

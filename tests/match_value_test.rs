@@ -7,7 +7,7 @@
 //!   `pat-lit` word comparison that serves `int`/`char`/`bool` is *identity*
 //!   for them, and identity would mean `"a"` never matching a separately
 //!   built `"a"`.
-//! * **`(= expr)`** — an arbitrary expression, for the types with no literal
+//! * **`(:= expr)`** — an arbitrary expression, for the types with no literal
 //!   syntax at all (a `defstruct` instance, a global, a computed value).
 //! * **A bare variant name** — `(match c (red 1) (blue 2))`, which used to
 //!   bind a variable called `red` that matched everything.
@@ -167,14 +167,14 @@ fn a_by_identity_literal_against_a_sexpr_scrutinee_is_refused() {
     );
 }
 
-/// `(= expr)` against a `Sexpr` scrutinee is *not* refused: identity is what
+/// `(:= expr)` against a `Sexpr` scrutinee is *not* refused: identity is what
 /// `eq` means, and an author who wrote `equals` in as many words is asking
 /// for exactly that.
 #[test]
 fn an_equals_pattern_against_a_sexpr_scrutinee_is_allowed() {
     both(
         "(defvar (target Sexpr) 42)\
-         \n(defun f ((s Sexpr)) int (match s ((= target) 1) (_ 0)))",
+         \n(defun f ((s Sexpr)) int (match s ((:= target) 1) (_ 0)))",
         "(+ (* 10 (f 42)) (f 1))",
         10,
     );
@@ -203,7 +203,7 @@ fn bignum_and_ratio_literal_patterns_compare_by_value() {
     );
 }
 
-// ---- (= expr) -------------------------------------------------------------
+// ---- (:= expr) -------------------------------------------------------------
 
 /// The escape into ordinary evaluation, and the answer for every type with no
 /// literal syntax. The comparison is the type's own `Eq` impl: `point`'s says
@@ -217,7 +217,7 @@ fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
          \n  (and (= self::x other::x) (= self::y other::y))))\
          \n(defvar (origin point) (make-instance 'point :x 0 :y 0))\
          \n(defun f ((p point)) int\
-         \n  (match p ((= origin) 1) ((= (make-instance 'point :x 1 :y 2)) 2) (_ 0)))",
+         \n  (match p ((:= origin) 1) ((:= (make-instance 'point :x 1 :y 2)) 2) (_ 0)))",
         "(+ (* 100 (f (make-instance 'point :x 0 :y 0))) (+ (* 10 (f (make-instance 'point :x 1 :y 2))) (f (make-instance 'point :x 9 :y 9))))",
         digits(1, 2, 0),
     );
@@ -233,8 +233,8 @@ fn an_equals_pattern_compares_a_user_type_through_its_own_eq_impl() {
 #[test]
 fn a_value_pattern_works_in_a_generic_body_under_an_eq_bound() {
     both(
-        "(defun same<A> ((x A) (y A)) int (where (Eq A))\
-         \n  (match x ((= y) 1) (_ 0)))\
+        "(defun same<A> ((x A) (y A)) int (:where (Eq A))\
+         \n  (match x ((:= y) 1) (_ 0)))\
          \n(defun f ((a string) (b string)) int (same a b))",
         r#"(+ (* 10 (f "a" "a")) (f "a" "b"))"#,
         10,
@@ -248,7 +248,7 @@ fn a_type_without_eq_is_refused_at_the_pattern() {
     let e = err(
         "(defstruct opaque (x int))\
          \n(defvar (o opaque) (make-instance 'opaque :x 1))\
-         \n(defun f ((p opaque)) int (match p ((= o) 1) (_ 0)))\
+         \n(defun f ((p opaque)) int (match p ((:= o) 1) (_ 0)))\
          \n(f o)",
     );
     assert!(e.contains("does not implement `Eq`"), "{}", e);
@@ -376,7 +376,7 @@ fn two_value_patterns_in_one_pattern_do_not_read_each_others_value() {
 #[test]
 fn a_value_pattern_can_read_the_enclosing_scope() {
     both(
-        "(defun f ((s string) (want string)) int (match s ((= want) 1) (_ 0)))",
+        "(defun f ((s string) (want string)) int (match s ((:= want) 1) (_ 0)))",
         r#"(+ (* 10 (f "a" "a")) (f "a" "b"))"#,
         10,
     );

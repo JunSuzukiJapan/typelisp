@@ -12,7 +12,7 @@
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -24,7 +24,7 @@
 
 ## 2. `Eq` / `Ord` (المقارنة)
 
-تقابل `PartialEq`/`PartialOrd` في Rust (وتُسمّى `Eq`/`Ord`). وتُستخدم في قيود `where` للدوال العامة
+تقابل `PartialEq`/`PartialOrd` في Rust (وتُسمّى `Eq`/`Ord`). وتُستخدم في قيود `:where` للدوال العامة
 لاشتراط أن تكون أنواع العناصر قابلة للمقارنة (`sort`/`member`/`assoc` وهكذا).
 
 ```lisp
@@ -72,7 +72,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -83,12 +83,12 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; بلا طرق؛ تركيب من خمس
 ```
 
-**داخل القيد يمكنك كتابة المعامِلات.** عندما يكون المستقبِل متغير نوع مقيّدًا بـ `where` تُقرأ المعامِلات
+**داخل القيد يمكنك كتابة المعامِلات.** عندما يكون المستقبِل متغير نوع مقيّدًا بـ `:where` تُقرأ المعامِلات
 على أنها توابع السمة (`+`→`add` و`-`→`sub` و`*`→`mul` و`/`→`div` و`rem`→`remainder` و
 `logand`→`bit-and` و`=`→`equals` و`<`→`less` ...):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -102,5 +102,5 @@
 **`Div` يسمّي نوع نتيجته بالنوع المرتبط `Output`.** كما في CL، `/` على عددين صحيحين هو `rational`،
 لذا فإن `Output` لـ`int` هو `rational`، ولكل نوع عددي آخر هو النوع نفسه. ولأن `Output` يختلف من نوع
 لآخر، لا يتضمن `Number` السمة `Div` (يجب أن تثبّت قائمة السمات الأعلى كل نوع مرتبط). الدالة العامة
-التي تقسم تستقبل نوع النتيجة بـ`(where (Div T (Output R)))`، أو تطلب قسمة مغلقة في `T`
-بـ`(where (Div T (Output T)))` (وحينها لا يمكن تمرير `int`).
+التي تقسم تستقبل نوع النتيجة بـ`(:where (Div T (Output R)))`، أو تطلب قسمة مغلقة في `T`
+بـ`(:where (Div T (Output T)))` (وحينها لا يمكن تمرير `int`).

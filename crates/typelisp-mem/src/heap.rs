@@ -1342,7 +1342,7 @@ impl Heap {
     ///
     /// typelisp symbols are **case-insensitive**, so names are folded to a
     /// canonical lowercase form: `Foo`, `FOO`, `foo` all intern to the same
-    /// [`SymRef`], and [`symbol_name`](Self::symbol_name) returns the canonical
+    /// [`SymRef`], and [`symbol_spelling`](Self::symbol_spelling) returns the canonical
     /// (lowercase) spelling.
     pub fn intern_symbol(&mut self, name: &str) -> Value {
         Value::Symbol(symbols::intern(name))
@@ -1355,13 +1355,20 @@ impl Heap {
         Value::Symbol(symbols::intern_in(ns, name))
     }
 
-    /// The name of an interned symbol.
+    /// The keyword named `name` (no colon) — [`symbols::intern_keyword`].
+    pub fn intern_keyword(&mut self, name: &str) -> Value {
+        Value::Symbol(symbols::intern_keyword(name))
+    }
+
+    /// How an interned symbol is written — [`SymRef::spelling`]: the name,
+    /// with a keyword's colon in front. The compiler keys symbols by this
+    /// when it needs a string, so a keyword is never mistaken for the plain
+    /// symbol of the same name. CL's `symbol-name` is [`SymRef::name`].
     ///
     /// Takes `&self` only for call-site compatibility: a symbol carries its
-    /// own name, so this needs no heap at all — [`SymRef::name`] is the
-    /// heap-free way to ask.
-    pub fn symbol_name(&self, id: SymRef) -> &'static str {
-        id.name()
+    /// own spelling, so this needs no heap at all.
+    pub fn symbol_spelling(&self, id: SymRef) -> &'static str {
+        id.spelling()
     }
 
 

@@ -12,8 +12,8 @@ di chiedersi a runtime "questo stream può essere letto?".
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; character input
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; character output
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; input that can push back one character
@@ -22,7 +22,7 @@ di chiedersi a runtime "questo stream può essere letto?".
 ```
 
 Una funzione che legge caratteri accetta qualsiasi tipo di stream, predefinito o definito dall'utente,
-se prende `(where (CharInput S))` o `:dyn CharInput`.
+se prende `(:where (CharInput S))` o `:dyn CharInput`.
 
 ## 2. Metodi
 
@@ -175,7 +175,7 @@ negli stream compositi.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
@@ -243,7 +243,7 @@ finché passi una stringa, non avviene alcuna analisi.
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Riempie i componenti mancanti di `p` da `default`. Un `p` relativo va sotto la directory di `default`; un `p` assoluto mantiene la propria directory |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | La forma relativa a `default`. Tutto `p` se non è sotto la base |
 
-Gli argomenti di tipo portano tutti `(where (Pathish P))`.
+Gli argomenti di tipo portano tutti `(:where (Pathish P))`.
 
 ## 10. Differenze rispetto a CL
 

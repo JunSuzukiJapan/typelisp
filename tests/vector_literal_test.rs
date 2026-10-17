@@ -37,7 +37,7 @@ fn strings_and_characters_are_elements_as_written() {
 /// As in CL, a symbol in a literal is the symbol, not a variable.
 #[test]
 fn a_symbol_in_a_literal_is_quoted() {
-    both(r##"(let ((foo 1)) (format false "~a ~a" (get #(foo :bar) 0) (get #(foo :bar) 1)))"##, "foo :bar");
+    both(r##"(let ((foo 1)) (format false "~s ~s" (get #(foo :bar) 0) (get #(foo :bar) 1)))"##, "foo :bar");
 }
 
 #[test]

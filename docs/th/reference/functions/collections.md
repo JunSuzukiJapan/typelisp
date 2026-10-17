@@ -101,7 +101,7 @@
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` ของ CL ในตารางนี้คือจำนวนรายการที่ถูกใช้ (เท่ากับ `count`) |
 
 **ชนิดใดก็ตามที่ implement `Hash` เป็นคีย์ได้** รวมถึงชนิด `defstruct`/`defenum` `get`/`set`/
-`remove` มี `(where (Hash K))` ดังนั้นตารางที่ใช้ชนิดซึ่งไม่ได้ implement เป็นคีย์เป็น **ข้อผิดพลาด
+`remove` มี `(:where (Hash K))` ดังนั้นตารางที่ใช้ชนิดซึ่งไม่ได้ implement เป็นคีย์เป็น **ข้อผิดพลาด
 ของชนิด** (`f64` ไม่มี `Hash` เพราะ `NaN`)
 
 ```lisp

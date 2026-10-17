@@ -12,8 +12,8 @@ at run time "can this stream be read?".
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; character input
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; character output
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; input that can push back one character
@@ -22,7 +22,7 @@ at run time "can this stream be read?".
 ```
 
 A function that reads characters accepts any stream type, built-in or user-defined, if it takes
-`(where (CharInput S))` or `:dyn CharInput`.
+`(:where (CharInput S))` or `:dyn CharInput`.
 
 ## 2. Methods
 
@@ -173,7 +173,7 @@ composite streams.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
@@ -239,7 +239,7 @@ The `namestring` of a string just returns itself, so as long as you pass a strin
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Fills the components missing from `p` from `default`. A relative `p` goes under the directory of `default`; an absolute `p` keeps its own directory |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | The form relative to `default`. All of `p` if it is not under the base |
 
-The type arguments all carry `(where (Pathish P))`.
+The type arguments all carry `(:where (Pathish P))`.
 
 ## 10. Differences from CL
 

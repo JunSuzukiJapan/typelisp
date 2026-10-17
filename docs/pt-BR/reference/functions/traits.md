@@ -12,7 +12,7 @@ definir traits está na [Referência de sintaxe](../syntax.md#39-deftrait--impl-
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -25,7 +25,7 @@ ele pode ser percorrido com `doiter` como está e passado às
 
 ## 2. `Eq` / `Ord` (comparação)
 
-Correspondem a `PartialEq`/`PartialOrd` do Rust (com os nomes `Eq`/`Ord`). São usados nas restrições `where` das
+Correspondem a `PartialEq`/`PartialOrd` do Rust (com os nomes `Eq`/`Ord`). São usados nas restrições `:where` das
 funções genéricas para exigir que os tipos dos elementos possam ser comparados (`sort`/`member`/`assoc` etc.).
 
 ```lisp
@@ -75,7 +75,7 @@ concretos usa os operadores embutidos** ([Números](numbers.md)) e não passa po
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -87,11 +87,11 @@ concretos usa os operadores embutidos** ([Números](numbers.md)) e não passa po
 ```
 
 **Dentro de uma restrição, você pode escrever operadores.** Quando o receptor é uma variável de tipo vinculada
-por `where`, os operadores são lidos como métodos de trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
+por `:where`, os operadores são lidos como métodos de trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
 `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -106,5 +106,5 @@ Implementados para: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` em todos os tipos num
 inteiros é um `rational`, então o `Output` de `int` é `rational`, e o de qualquer outro tipo numérico é
 o próprio tipo. Como `Output` difere entre os tipos, `Number` não inclui `Div` (uma lista de
 supertraits precisa fixar cada tipo associado). Uma função genérica que divide recebe o tipo do
-resultado com `(where (Div T (Output R)))`, ou exige uma divisão fechada em `T` com
-`(where (Div T (Output T)))` (então não se pode passar um `int`).
+resultado com `(:where (Div T (Output R)))`, ou exige uma divisão fechada em `T` com
+`(:where (Div T (Output T)))` (então não se pode passar um `int`).

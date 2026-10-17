@@ -49,13 +49,18 @@ functies en methoden zie [Ingebouwde functies](functions/README.md); voor de lij
   begin van een datum, dan is dat een leesfout. `[` en `{` kunnen wel in een symbool staan: net als
   in CL blijven ze vrij, zodat programmeurs ze in [leesmacro's](#11-readermacros-readtable) kunnen
   gebruiken.
-- **Keywords**: symbolen die met een dubbele punt beginnen, zoals `:name` (zoals in CL). Ze evalueren naar
-  zichzelf: ze zoeken geen binding op en hun waarde is zijzelf, met statisch type `symbol`. Keywords met
-  dezelfde naam zijn altijd hetzelfde object (`(eq :foo :FOO)` is waar; net als andere symbolen worden ze
-  in kleine letters gezet). De dubbele punt zelf maakt deel uit van de naam, dus `(symbol->string :foo)`
-  is `":foo"` (typelisp heeft geen packagesysteem, dus dit verschilt van `symbol-name` van CL). Een
-  losse `:` of een met extra dubbele punten zoals `:a:b` is een leesfout. Test met `keywordp`. Die welke
-  met `::` beginnen zijn geen keywords maar absolute paden (hieronder).
+  Wat tussen `|` en `|` staat, wordt gelezen zoals het geschreven is, scheidingstekens en dubbele punten
+  inbegrepen (de meervoudige escape van CL): `|:foo|` is een gewoon symbool met de naam `:foo`, geen keyword.
+- **Keywords**: symbolen die met een dubbele punt beginnen, zoals `:name` (zoals in CL). In welke module ze ook
+  geschreven worden, ze zijn het ene symbool met die naam in de keyword-naamruimte `keyword` (het package
+  `KEYWORD` van CL). Ze evalueren naar zichzelf: ze zoeken geen binding op en hun waarde is zijzelf, met
+  statisch type `symbol`. Keywords met dezelfde naam zijn altijd hetzelfde object (`(eq :foo :FOO)` is waar; net
+  als andere symbolen worden ze in kleine letters gezet). De dubbele punt maakt geen deel uit van de naam:
+  `(symbol->string :foo)` is `"foo"`. `~s` drukt `:foo` af en `~a` drukt `foo` af. Een keyword is een constante
+  met zichzelf als waarde, dus het kan niet als variabele worden gebonden of toegewezen, en ook niet de naam van
+  een definitie zijn (een typefout). Uit een string maak je er een met `(intern "foo" "keyword")`. Test met
+  `keywordp` (of het tot de keyword-naamruimte behoort). Een losse `:` of een met extra dubbele punten zoals
+  `:a:b` is een leesfout. Die welke met `::` beginnen zijn geen keywords maar absolute paden (hieronder).
   Merk op dat `:dyn` een gereserveerd keyword is, alleen voor typeposities; het ergens anders schrijven is
   een fout (zie [hoofdstuk 2](#2-types-schrijven)).
 - **Lijsten**: `(a b c)`. Gestippelde paren `(a . b)` kunnen ook worden gelezen.
@@ -247,10 +252,10 @@ In de broncode worden types als gewone symbolen of lijsten geschreven.
 - **Voorwaartse verwijzingen worden met `defsignature` gedeclareerd** (hieronder). Een naam die niet is
   gedeclareerd kan niet vóór zijn definitie worden aangeroepen, omdat het hoogste niveau één vorm per
   keer wordt gecontroleerd en uitgevoerd, in bronvolgorde.
-- Om trait bounds te eisen, schrijf je direct vóór de body een `where`-clausule:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- Om trait bounds te eisen, schrijf je direct vóór de body een `:where`-clausule:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   (een geassocieerd type vastleggen met `(AssocName ConcreteType)` is optioneel).
-- **Docstrings**: een stringliteral aan het begin van de body, direct na de `where`-clausule (als die er
+- **Docstrings**: een stringliteral aan het begin van de body, direct na de `:where`-clausule (als die er
   is), wordt de docstring (zoals in CL). Alleen wanneer er minstens één bodyvorm op volgt: een losse
   string blijft de returnwaarde en wordt niet als docstring genomen: `(defun f () string "doc" "value")`
   heeft een docstring en geeft `"value"` terug, terwijl `(defun f () string "value")` geen docstring heeft
@@ -651,7 +656,7 @@ De typeannotatie is verplicht (ze wordt niet uit de initializer afgeleid). `defv
   (pub name ...))                                      ; ook buiten de module van het type publiek
 
 ; een generiek type
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 Geeft methoden aan een type dat met `defstruct` (3.6) of `defenum` (3.7) is gedefinieerd. Komt overeen met
@@ -677,7 +682,7 @@ de inherente impl van Rust (`impl Point { ... }`).
 - Alleen de eigen types van het programma kunnen er een hebben. Een type uit de standaardbibliotheek zoals
   `Vector`, `Option` of `int` niet (de fout zegt `... is a standard library type`). Om een bewerking aan
   een standaardtype toe te voegen, definieer je een trait en schrijf je de `impl` ervan voor dat type.
-- Als in `(impl X ...)` op `X` een item (een lijst), een `where` of niets volgt, is dit de inherente impl;
+- Als in `(impl X ...)` op `X` een item (een lijst), een `:where` of niets volgt, is dit de inherente impl;
   volgt er een naam, dan is het de `impl` van een trait (`(impl Trait Type ...)`, 3.9).
 
 ```lisp
@@ -774,7 +779,7 @@ met dezelfde naam hebben.
 - **Typevariabelen zijn alleen die op declarerende posities.** Voor `defun`/`defstruct`/`defenum`/`deftype`
   de `<T>` van de naam; voor een inherente `impl` het doeltype (`(impl box<T> ...)`) en de `<U>` in de naam
   van elke methode; voor de `impl` van een trait het doeltype en `impl<T>`; voor `deftrait` `Self` en de
-  geassocieerde types van `(type Item)`. Een naam die voor het eerst ergens anders opduikt (argumenten,
+  geassocieerde types van `(:type Item)`. Een naam die voor het eerst ergens anders opduikt (argumenten,
   teruggeefwaarde, `the`/`lambda` in de romp), wordt geen typevariabele; het is `unknown type`.
 - **Docstrings**: een stringliteral direct na de naam, vóór de velden, wordt de docstring
   (`(defstruct Name "doc" (field Type)...)`, dezelfde positie als `defstruct` van CL). Een veld heeft altijd
@@ -916,19 +921,19 @@ een type, geen type**.
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
-  (type AssocName)                       ; associated types (any number, optional)
+  (:type AssocName)                       ; associated types (any number, optional)
   (method-name ((self Self) params...) RetType)          ; no body = must be implemented
   (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; bounds applying to the whole impl (optional)
-  (type AssocName ConcreteType)          ; makes an associated type concrete
+  (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
+  (:type AssocName ConcreteType)          ; makes an associated type concrete
   (method-name (recv params...) RetType body...))
 ```
 
 Via `impl` wordt elke methode geregistreerd als methode van `TargetType` en aangeroepen zoals een methode
 van een inherente `impl` (3.5). De methoden van de `impl` van een trait zijn altijd publiek, zonder `pub`.
-Naar traits wordt verwezen als traitgrenzen in de `where`-clausules van generieke functies (zie
+Naar traits wordt verwezen als traitgrenzen in de `:where`-clausules van generieke functies (zie
 [3.1 defun](#31-defun--functiedefinities)). Een traitnaam kan ook een `::`-pad zijn zoals `m::Trait`.
 
 **De supertraitlijst (verplicht)**: altijd direct na de traitnaam geschreven. Elk element is een kale
@@ -944,7 +949,7 @@ types vastgelegd**.
 
 Overerving heeft drie effecten. (1) `impl Ord X` vereist dat `impl Eq X` **eerst** wordt geschreven (een
 regel over de volgorde van schrijven: de enige vorm die in de REPL en bij stapsgewijs `load` deterministisch
-kan worden bepaald, en strenger dan Rust). (2) `(where (Ord T))` alleen laat je ook de methoden van `Eq`
+kan worden bepaald, en strenger dan Rust). (2) `(:where (Ord T))` alleen laat je ook de methoden van `Eq`
 aanroepen. (3) De methoden van `Eq` kunnen via een `:dyn Ord` worden aangeroepen, en een `:dyn Ord`-waarde
 kan zoals ze is worden doorgegeven waar een `:dyn Eq` wordt vereist (upcasting). Een subtrait die een
 methode met dezelfde naam als zijn ouder opnieuw declareert, en het erven van methoden met dezelfde naam
@@ -953,7 +958,7 @@ van twee ouders, zijn beide fouten (een vtable heeft één slot per naam). Ruitv
 
 **Standaardimplementaties**: een body na de signatuur wordt gebruikt wanneer een `impl` de methode
 weglaat. De body wordt opgelost in **de namespace van de module** waar de trait is geschreven, dus ze kan
-niet-openbare functies van die module aanroepen. Methoden met bodies kunnen ook `where`-clausules en
+niet-openbare functies van die module aanroepen. Methoden met bodies kunnen ook `:where`-clausules en
 docstrings hebben. De body wordt **één keer, op het punt van declaratie**, getypechecked, met `Self` als
 typevariabele (begrensd door `Self: de trait zelf`), zoals in Rust: fouten die voor elke `impl` en elk
 implementerend type zouden mislukken, zelfs in standaardwaarden die geen enkele `impl` ooit weglaat,
@@ -962,7 +967,7 @@ deze bound, en geassocieerde types staan vast op zichzelf, dus een signatuur die
 tegen de body gematcht zonder het concrete type te kennen.
 
 **Implementaties per instantiatie**: een generiek type kan voor elke instantiatie een eigen `impl` hebben
-(`(impl Show Box<int> ...)` en `(impl Show Box<string> ...)`). `:dyn`, `where`-grenzen, geassocieerde types
+(`(impl Show Box<int> ...)` en `(impl Show Box<string> ...)`). `:dyn`, `:where`-grenzen, geassocieerde types
 en `print-object` werken per instantiatie, en een instantiatie zonder `impl` (`Box<f64>`) implementeert de
 trait niet. Dezelfde trait kan niet tegelijk voor `Box<T>` en voor `Box<int>` worden geïmplementeerd (dezelfde
 regel als voor methoden in 3.5). Een supertrait hoeft alleen bij die instantiatie geïmplementeerd te zijn (door
@@ -975,7 +980,7 @@ type dat aan de bounds voldoet.
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; no body at all; everything is the default
+(impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
 **Er wordt geen code gegenereerd totdat een concreet type hem daadwerkelijk gebruikt** (één keer per type,
@@ -984,11 +989,11 @@ hebben. Als een type een expliciete `impl` heeft, gaat die voor. Het typechecken
 het genereren: het gebeurt één keer op het punt van declaratie, **met de target als typevariabele** (zoals
 in Rust), dus zelfs een implementatie die nooit wordt gebruikt heeft haar fouten daar gevangen als ze voor
 elke target onder de gedeclareerde bounds zouden mislukken. Aanroepen die door de bounds worden
-gerechtvaardigd (`(less self other)` onder `(where (Ord T))` enzovoort) slagen, zoals in de body van een
+gerechtvaardigd (`(less self other)` onder `(:where (Ord T))` enzovoort) slagen, zoals in de body van een
 generieke `defun`.
 
 **Docstrings**: een `deftrait` kan één docstring voor de hele trait hebben, als stringliteral direct na de
-supertraitlijst, vóór de onderdelen (`(deftrait Name () "doc" (type ...) (method ...)...)`). Een signatuur
+supertraitlijst, vóór de onderdelen (`(deftrait Name () "doc" (:type ...) (method ...)...)`). Een signatuur
 zonder body kan geen docstring hebben: een afsluitende string zou zelf de returnwaarde van een
 standaardimplementatie zijn, dus de twee zouden niet te onderscheiden zijn.
 
@@ -1249,11 +1254,11 @@ Wat een test met `print` afdrukt, gaat direct naar standaarduitvoer (het wordt n
 (if cond then else)                 ; else is required (always three elements)
 (when cond body...)                 ; an if without else (Unit type). defmacro
 (unless cond body...)               ; the negation of when. defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; a list of keys: matches if any of them does
-  (else body...))                   ; expr is evaluated once. keys are compared with equal.
+  (:else body...))                   ; expr is evaluated once. keys are compared with equal.
                                      ; keys are "literals" and are not evaluated (as in CL).
                                      ; a bare symbol a means the symbol 'a.
                                      ; writing 'a is an error (use the bare a). defmacro
@@ -1356,7 +1361,7 @@ Soorten patronen:
   ratio's — op waarde vergeleken met de `Eq::equals` van dat type
   ([Standaardtraits](functions/traits.md#2-eq--ord-vergelijking)). Strings worden op inhoud vergeleken,
   niet op identiteit
-- `(= expr)` — evalueert een willekeurige expressie en vergelijkt met `Eq::equals`. De enige manier om
+- `(:= expr)` — evalueert een willekeurige expressie en vergelijkt met `Eq::equals`. De enige manier om
   types te vergelijken die geen literalsyntaxis hebben (`defstruct`-instanties, globale variabelen,
   berekende resultaten), en een door de gebruiker gedefinieerde `Eq`-implementatie wordt zoals ze is de
   vergelijkingsregel. `expr` kan naar alles verwijzen wat zichtbaar is vanaf de positie van de tak
@@ -1381,7 +1386,7 @@ Soorten patronen:
   dus elk alternatief moet dezelfde variabelen met dezelfde typen binden. Het kan ook binnen een
   constructorpatroon staan (`(some (:or (circle r) (rect r _)))`)
 
-Een type dat `Eq` niet implementeert vergelijken met een waardeliteral / `(= expr)` is een typefout (deze
+Een type dat `Eq` niet implementeert vergelijken met een waardeliteral / `(:= expr)` is een typefout (deze
 taal kiest ervoor te zeggen "deze kunnen niet worden vergeleken" in plaats van een tak achter te laten die
 stilzwijgend nooit overeenkomt).
 
@@ -1414,7 +1419,7 @@ worden geschreven en komen op inhoud overeen:
 Niet-directe literals (strings / drijvendekommagetallen / bignum-gehele getallen / ratio's) **kunnen niet
 worden geschreven** tegen een `Sexpr`. Hun `eq` vergelijkt objectidentiteit, wat een "tak die typecheckt
 maar nooit overeenkomt" zou opleveren, dus het is een fout die het variantpatroon noemt: schrijf
-`(str "hi")` en het wordt in een `string` uit elkaar gehaald en op inhoud vergeleken. `(= expr)` vraagt
+`(str "hi")` en het wordt in een `string` uit elkaar gehaald en op inhoud vergeleken. `(:= expr)` vraagt
 expliciet om `equals`, dus deze beperking is er niet op van toepassing.
 
 **De scrutinee hoeft geen ADT te zijn.** `string`/`symbol`/`i32`/`f64` en dergelijke kunnen direct worden
@@ -1577,13 +1582,12 @@ regel als de eenvoudige lus van CL zelf).
 
 CL schrijft de clausulewoorden als kale symbolen (`(loop for i from 1 to 3 collect i)`), maar hier zijn
 **ze allemaal keywords**: een kale `for` zou gewoon een variabeleverwijzing zijn, en een keyword zijn is
-ook wat het van een eenvoudige lus onderscheidt. De uitzondering is `=`, dat een variabele van een waarde
-scheidt: zijn positie is ondubbelzinnig, dus het wordt kaal of als keyword (`:=`) gelezen.
+ook wat het van een eenvoudige lus onderscheidt. Ook het woord dat een variabele van haar waarde scheidt is geen uitzondering: het wordt `:=` geschreven.
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1592,11 +1596,11 @@ kunnen worden gelezen als "itereer alleen vanaf daar", dus het is een fout):
 
 | Clausule | Betekenis |
 |---|---|
-| `:with v = e` | Bindt één keer. Mag de variabelen van eerdere clausules lezen |
+| `:with v := e` | Bindt één keer. Mag de variabelen van eerdere clausules lezen |
 | `:for v :in s` / `:for v :across s` | De elementen van een `Iter` in volgorde. Het onderscheid tussen lijst/vector van CL bestaat hier niet, dus dit zijn twee schrijfwijzen van dezelfde clausule |
 | `:for v :on s` | De opeenvolgende **suffixen**. CL geeft de gedeelde staart-cons door, maar een `Iter` heeft geen staart om te delen, dus elk is een nieuwe `Vector` |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | Tellen. `:downfrom`/`:upfrom` werken ook |
-| `:for v = e [:then f]` | Begint met `e`, en gebruikt vanaf de tweede keer `f` (zonder `:then` elke keer `e`) |
+| `:for v := e [:then f]` | Begint met `e`, en gebruikt vanaf de tweede keer `f` (zonder `:then` elke keer `e`) |
 | `:repeat n` | Itereert zoveel keer |
 
 Met meerdere `:for`s gaan ze **parallel** vooruit, en de lus eindigt zodra er één is uitgeput.
@@ -1930,7 +1934,7 @@ over de nog niet gelezen tekst**, en het tweede is **het teken dat het veroorzaa
 een dispatch). De returnwaarde wordt de data die op dat punt is gelezen. De stream is een concreet type in
 plaats van `:dyn PeekInput` omdat de reader altijd deze ene soort doorgeeft:
 `read-sexpr` / `read-char` / `peek-char` / `unread-char` / `read-delimited-list` nemen allemaal
-`(where (PeekInput S))`, dus ze werken allemaal zoals ze zijn op het concrete type.
+`(:where (PeekInput S))`, dus ze werken allemaal zoals ze zijn op het concrete type.
 
 ```lisp
 (set-macro-character #\!
@@ -2045,10 +2049,10 @@ gebruikt.
 (select
   ((v (recv ch1)) body...)          ; a receive arm. v is bound to an Option<T>
   ((send ch2 x) body...)            ; a send arm
-  (else body...))                   ; optional. **if written, it goes last**
+  (:else body...))                   ; optional. **if written, it goes last**
 ```
 
-- **Met `else` blokkeert het niet** (`default` van Go). Zonder wacht het totdat er een mogelijk wordt.
+- **Met `:else` blokkeert het niet** (`default` van Go). Zonder wacht het totdat er een mogelijk wordt.
 - **Als er meerdere tegelijk mogelijk zijn, wordt er willekeurig een gekozen** (in geschreven volgorde
   zouden latere takken uitgehongerd raken).
 - De `v` van een ontvangsttak is een **`Option<T>`**. Een gesloten kanaal is "een antwoord", geen reden
@@ -2056,7 +2060,7 @@ gebruikt.
 - Het type is **de join van de types van de bodies van alle takken** (dezelfde regel als bij
   `match`-takken).
 - `(select)` met nul takken is een typefout (`select{}` van Go, dat eeuwig blokkeert, is niet
-  overgenomen). Een `select` met alleen `else` ook, aangezien het hetzelfde is als de body rechtstreeks
+  overgenomen). Een `select` met alleen `:else` ook, aangezien het hetzelfde is als de body rechtstreeks
   schrijven.
 
 **De kanaalexpressies en de te verzenden waarden worden elk één keer geëvalueerd, van links naar rechts,

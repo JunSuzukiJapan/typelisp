@@ -86,11 +86,11 @@ Anche `*standard-input*`, `*standard-output*` e `*error-output*` sono stream.
 ### Rendere generiche le funzioni di lettura e scrittura
 
 Ogni tipo di stream è un tipo a sé, ma le operazioni comuni sono raccolte in trait. Una funzione che
-prende il proprio argomento con `(where (CharInput S))` può leggere da un file, da una stringa o da un
+prende il proprio argomento con `(:where (CharInput S))` può leggere da un file, da una stringa o da un
 socket.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

@@ -22,7 +22,7 @@ Direktive verbraucht der Reihe nach die folgenden variadischen Argumente.
 
 Der Typ von `dest` teilt die Bedeutung in zwei (welche gilt, wird statisch entschieden). Die Stream-Form lässt
 sich gleichermaßen mit einem konkreten Stream-Typ, einem `:dyn CharOutput` oder einer durch
-`(where (CharOutput S))` gebundenen Typvariable schreiben. Ein `dest`, das weder ein `bool` noch ein Stream
+`(:where (CharOutput S))` gebundenen Typvariable schreiben. Ein `dest`, das weder ein `bool` noch ein Stream
 ist, ist ein Typfehler.
 
 **Die Steuerzeichenkette muss ein Literal sein** (dieselbe Einschränkung wie bei Rusts `format!`). Die
@@ -252,7 +252,7 @@ Regeln:
 
 - **Die Registrierung ist statisch.** Ein `impl` wird als gewöhnliche Methodendefinition typgeprüft, daher ist
   ein falsch geschriebener Typname oder eine falsche Signatur ein Kompilierfehler.
-- **Es funktioniert auch für generische Typen.** `(impl print-object box<T> (where (print-object T)) ...)` geht
+- **Es funktioniert auch für generische Typen.** `(impl print-object box<T> (:where (print-object T)) ...)` geht
   für jedes Typargument an einen eigenen Rumpf: Ein Wert merkt sich seinen Typ einschließlich der Typargumente
   (`box<i32>`). Eingebaute generische Typen wie `Vector<T>` funktionieren genauso.
 - **Die Wahl fällt beim Ausgeben.** Welche Direktive welches Argument verbraucht, hängt vom Laufzeitinhalt der
@@ -269,7 +269,7 @@ Regeln:
   einzige Möglichkeit für generischen Code zu sagen „Werte eines unbekannten Typs dürfen dargestellt werden“
   (dieselbe Form wie Rusts `T: Display`). Das `print-object` von `Array<T>` ist ein Beispiel.
 - **Bei Typargumenten, die die Schranke nicht erfüllen, wird stillschweigend die eingebaute Darstellung
-  verwendet.** `(impl print-object Array<T> (where (print-object T)))` gilt für `Array<i32>`, aber nicht für
+  verwendet.** `(impl print-object Array<T> (:where (print-object T)))` gilt für `Array<i32>`, aber nicht für
   ein `Array`, dessen Elemente ein `defstruct` ohne `print-object` sind. Es wäre unsinnig, wenn schon das
   Anlegen eines Arrays ein Fehler wäre, daher ist es kein Fehler.
 - CLs anderer Mechanismus, `set-pprint-dispatch` / `*print-pprint-dispatch*` (ein Laufzeitregister mit

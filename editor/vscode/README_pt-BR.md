@@ -14,7 +14,7 @@ tabelas de palavras-chave e as mesmas regras de indentação, e
   - Nomes definidos (`(defun NAME ...)` como função, `(defstruct NAME ...)` como tipo,
     `(defvar (NAME ...))` como variável; o mesmo com `pub`, como em `(pub defun NAME ...)`) e os
     dois nomes de `(impl Trait Type)`
-  - Palavras-chave de namespaces e declarações (`pub` `module` `use` `load` `impl` `where`) e
+  - Palavras-chave de namespaces e declarações (`pub` `module` `use` `load` `impl`) e
     marcadores de lista lambda (`&rest` `&optional` `&key`)
   - Funções embutidas, tipos primitivos (incluindo `bignum` / `ratio`), tipos de erro embutidos,
     tipos de usuário `Capitalized` e o tipo de objeto trait `:dyn Trait` (também dentro de

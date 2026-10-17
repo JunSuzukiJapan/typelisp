@@ -386,7 +386,7 @@ fn each_instantiation_reaches_its_own_print_object() {
            (impl print-object ws (print-object ((self Self) (escape bool)) string "STR"))
            (defstruct gen<T> (v T))
            (impl print-object gen<T>
-             (where (print-object T))
+             (:where (print-object T))
              (print-object ((self Self) (escape bool)) string
                (append "gen-of-" (print-object (v self) escape))))
            (and (equal (format false "~a" (make-instance 'gen :v (make-instance 'wi :n 1))) "gen-of-INT")
@@ -403,7 +403,7 @@ fn print_object_reaches_a_builtin_generic_type() {
     is_true(
         r#"(defstruct point (x int) (y int))
            (impl print-object point (print-object ((self Self) (escape bool)) string "P"))
-           (impl print-object Vector<T> (where (print-object T))
+           (impl print-object Vector<T> (:where (print-object T))
              (print-object ((self Self) (escape bool)) string "V"))
            (equal (format false "~a" (the Vector<point> (Vector::new))) "V")"#,
     );
@@ -432,7 +432,7 @@ fn an_enum_variant_name_survives_an_instantiated_key() {
 //
 // The remainder of Phase 8a, deferred until a generic type's `print-object`
 // could be reached at all. What makes an array printable in generic code is
-// the trait used as a *bound*: `(impl print-object Array<T> (where
+// the trait used as a *bound*: `(impl print-object Array<T> (:where
 // (print-object T)))` needs its elements renderable, so the scalar types
 // implement the trait for that purpose alone (the printer never consults it
 // for them — a scalar carries no type key).
@@ -543,12 +543,12 @@ fn the_scalar_impls_render_what_the_printer_renders() {
 /// A `where`-bounded receiver keeps its method even when some *other* type
 /// implements the same trait with a matching argument in the second position:
 /// the method comes from the first argument's type only, so
-/// `(print-object x true)` under `(where (print-object T))` never resolves
+/// `(print-object x true)` under `(:where (print-object T))` never resolves
 /// against `bool`'s impl.
 #[test]
 fn a_bound_method_is_not_re_read_with_swapped_arguments() {
     is_true(
-        r##"(defun render<T> ((x T)) string (where (print-object T)) (print-object x true))
+        r##"(defun render<T> ((x T)) string (:where (print-object T)) (print-object x true))
            (equal (render 7) "7")"##,
     );
 }

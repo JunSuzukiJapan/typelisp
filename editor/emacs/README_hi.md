@@ -9,7 +9,7 @@ VS Code संस्करण [../vscode/](../vscode/README_hi.md) में ह
 - सिंटैक्स हाइलाइटिंग
   - विशेष फ़ॉर्म और नियंत्रण संरचनाएँ (`defun` `let` `if` `match` `loop` `lambda` `setf` `as` `apply`, `print`/`println`/`format`, `pprint` परिवार, आदि)
   - परिभाषित नाम (`(defun NAME ...)` का `NAME` फ़ंक्शन नाम के रूप में, `(defstruct NAME ...)` का टाइप नाम के रूप में, और `(defvar (NAME ...))` का वेरिएबल नाम के रूप में; `(pub defun NAME ...)` की तरह `pub` के साथ भी यही)
-  - नेमस्पेस और घोषणा कीवर्ड (`pub` `module` `use` `load` `impl` `where`) और लैम्ब्डा सूची मार्कर (`&rest` `&optional` `&key`)
+  - नेमस्पेस और घोषणा कीवर्ड (`pub` `module` `use` `load` `impl`) और लैम्ब्डा सूची मार्कर (`&rest` `&optional` `&key`)
   - बिल्ट-इन फ़ंक्शन (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` आदि)
   - आदिम टाइप (`bignum` / `ratio` सहित), बिल्ट-इन टाइप, बिल्ट-इन त्रुटि टाइप (`ParseIntError` आदि), `Capitalized` उपयोगकर्ता टाइप, और trait ऑब्जेक्ट टाइप `:dyn Trait`
   - **उपयोगकर्ता-परिभाषित टाइप के उपयोग** (`defstruct`/`defenum`/`deftrait` के नाम आमतौर पर छोटे अक्षरों में होते हैं (`rect` `todo-item` `board`), इसलिए `Capitalized` नियम उन्हें नहीं पकड़ता)। `typl-lsp` से जुड़े होने पर, वे सर्वर के सिमैंटिक टोकन से रंगे जाते हैं (यह `eglot` के साथ भी काम करता है; नीचे देखें)। जुड़े न होने पर, मोड बफ़र में परिभाषित टाइप नाम इकट्ठा करने वाले फ़ॉलबैक पर लौट जाता है

@@ -86,10 +86,10 @@
 ### Узагальнення функцій читання й запису
 
 Кожен вид потоку — окремий тип, але спільні операції зібрано в трейти. Функція, що приймає аргумент
-з `(where (CharInput S))`, може читати з файлу, рядка або сокета.
+з `(:where (CharInput S))`, може читати з файлу, рядка або сокета.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

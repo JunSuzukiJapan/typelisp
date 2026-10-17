@@ -135,7 +135,7 @@ fn an_inner_catch_passes_on_a_tag_that_is_not_its_own() {
 #[test]
 fn an_uncaught_throw_is_an_error() {
     match run("(throw 'nobody 1)") {
-        Err(EvalError::Throw(tag, _)) => assert_eq!(tag, "nobody"),
+        Err(EvalError::Throw(tag, _)) => assert_eq!(tag, typelisp::mem::symbols::intern("nobody")),
         other => panic!("expected an uncaught throw, got {:?}", other),
     }
 }
@@ -341,7 +341,7 @@ fn an_uncaught_compiled_throw_is_an_error() {
         (thrower)
         "#,
     ) {
-        Err(EvalError::Throw(tag, _)) => assert_eq!(tag, "nobody"),
+        Err(EvalError::Throw(tag, _)) => assert_eq!(tag, typelisp::mem::symbols::intern("nobody")),
         other => panic!("expected an uncaught throw, got {:?}", other),
     }
 }

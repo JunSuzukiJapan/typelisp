@@ -84,9 +84,10 @@ nie automatycznie w drugą stronę.
 
 | Nazwa | Forma | Typ | Opis |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Wyjmuje nazwę symbolu |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Tworzy symbol z łańcucha znaków (internuje go) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Czy jest słowem kluczowym (`:name`). Dwukropek jest częścią nazwy, więc test patrzy na pierwszy znak ([Referencja składni](../syntax.md#1-elementy-leksykalne)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Wyjmuje nazwę symbolu. Nazwa słowa kluczowego nie zawiera dwukropka (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Tworzy symbol z łańcucha znaków (internuje go w module głównym) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Tworzy symbol `name` w przestrzeni nazw `namespace` (`intern` z CL). `namespace` to ścieżka modułu od korzenia (`"geometry::shapes"`); `"keyword"` to przestrzeń słów kluczowych, a `""` korzeń. Pominięty oznacza moduł, w którym zapisano wywołanie |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Czy jest słowem kluczowym, czyli czy należy do przestrzeni nazw słów kluczowych ([Referencja składni](../syntax.md#1-elementy-leksykalne)) |
 
 Informacje o `gensym` znajdziesz w [Makrach](system.md#8-makra).
 

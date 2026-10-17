@@ -224,8 +224,9 @@ There are no packages. Namespaces are modules, and a file is a module by itself.
 `pkg:symbol`, write `module::name`, and bring names in with `use`
 ([Modules and File Layout](modules.md)).
 
-Keywords `:foo` exist and are symbols that evaluate to themselves. Since there are no packages, the
-colon is part of the name: `(symbol->string :foo)` returns `":foo"`.
+Keywords `:foo` exist and, as in CL, evaluate to themselves and belong to the keyword namespace `keyword`.
+`(symbol->string :foo)` returns `"foo"`, and `(intern "foo" "keyword")` returns `:foo`. The second
+argument of `intern` is a module path in place of a package name.
 
 ## 10. Differences in reading and syntax
 

@@ -170,7 +170,7 @@ Wenn im falschen Fall nichts geschehen soll, verwendet man `when` (und `unless` 
 
 ### cond
 
-Ab drei Bedingungen liest sich `cond` besser. Das abschließende `else` wird genommen, wenn keine der
+Ab drei Bedingungen liest sich `cond` besser. Das abschließende `:else` wird genommen, wenn keine der
 Bedingungen zutrifft.
 
 ```lisp
@@ -178,7 +178,7 @@ Bedingungen zutrifft.
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

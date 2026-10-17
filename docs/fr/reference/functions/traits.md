@@ -13,7 +13,7 @@ chapitres : `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -26,7 +26,7 @@ propre type, il peut être parcouru tel quel avec `doiter` et passé aux
 
 ## 2. `Eq` / `Ord` (comparaison)
 
-Ils correspondent aux `PartialEq`/`PartialOrd` de Rust (nommés `Eq`/`Ord`). On les utilise dans les bornes `where`
+Ils correspondent aux `PartialEq`/`PartialOrd` de Rust (nommés `Eq`/`Ord`). On les utilise dans les bornes `:where`
 des fonctions génériques pour exiger que les types d'éléments soient comparables (`sort`/`member`/`assoc`, etc.).
 
 ```lisp
@@ -76,7 +76,7 @@ concrets utilise les opérateurs intégrés** ([Nombres](numbers.md)) et ne pass
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -88,11 +88,11 @@ concrets utilise les opérateurs intégrés** ([Nombres](numbers.md)) et ne pass
 ```
 
 **À l'intérieur d'une borne, on peut écrire des opérateurs.** Quand le receveur est une variable de type liée par
-`where`, les opérateurs sont lus comme des méthodes de trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
+`:where`, les opérateurs sont lus comme des méthodes de trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
 `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …) :
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -108,5 +108,5 @@ Implémentés pour : `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` sur tous les types n
 est un `rational` : l'`Output` de `int` est donc `rational`, et celui de tout autre type numérique est
 le type lui-même. Comme `Output` diffère selon le type, `Number` n'inclut pas `Div` (une liste de
 supertraits doit fixer chaque type associé). Une fonction générique qui divise reçoit le type du
-résultat avec `(where (Div T (Output R)))`, ou exige une division fermée dans `T` avec
-`(where (Div T (Output T)))` (un `int` ne peut alors pas être passé).
+résultat avec `(:where (Div T (Output R)))`, ou exige une division fermée dans `T` avec
+`(:where (Div T (Output T)))` (un `int` ne peut alors pas être passé).

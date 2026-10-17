@@ -100,7 +100,7 @@
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL의 `hash-table-size`. 이 테이블에서는 차 있는 항목 수(`count`와 같다) |
 
 **`Hash`를 구현한 타입이라면 무엇이든 키가 될 수 있다.** `defstruct`/`defenum`의 타입도 포함한다. `get`/`set`/`remove`는
-`(where (Hash K))`를 가지므로, 그것을 구현하지 않은 타입을 키로 하는 테이블은 **타입 오류**이다(`f64`는 `NaN` 때문에
+`(:where (Hash K))`를 가지므로, 그것을 구현하지 않은 타입을 키로 하는 테이블은 **타입 오류**이다(`f64`는 `NaN` 때문에
 `Hash`가 없다).
 
 ```lisp

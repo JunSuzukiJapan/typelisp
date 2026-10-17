@@ -67,7 +67,7 @@ fn bundled_specs(h: &Heap, tl: TopLevelForm) -> Vec<TopLevelForm> {
     let fields = core::fields(h, tl).expect("a module's fields are a proper list");
     let is_bundle = match fields[0] {
         Value::Path(id) => typelisp::path_from_id(h, id) == Path::root(MONO_BUNDLE_MODULE),
-        Value::Symbol(id) => h.symbol_name(id) == MONO_BUNDLE_MODULE,
+        Value::Symbol(id) => h.symbol_spelling(id) == MONO_BUNDLE_MODULE,
         _ => false,
     };
     if !is_bundle {
@@ -82,7 +82,7 @@ fn defun_name(h: &Heap, tl: TopLevelForm) -> Path {
     assert_eq!(core::op(h, tl), Some("defun"), "expected a defun form");
     match core::field(h, tl, 0).expect("a defun always names itself") {
         Value::Path(id) => typelisp::path_from_id(h, id),
-        Value::Symbol(id) => Path::root(h.symbol_name(id)),
+        Value::Symbol(id) => Path::root(h.symbol_spelling(id)),
         other => panic!("a defun's name is a path or symbol, got {:?}", other),
     }
 }
@@ -93,7 +93,7 @@ fn defmethod_name(h: &Heap, tl: TopLevelForm) -> Option<String> {
         return None;
     }
     match core::field(h, tl, 1).expect("a defmethod always names its method") {
-        Value::Symbol(id) => Some(h.symbol_name(id).to_string()),
+        Value::Symbol(id) => Some(h.symbol_spelling(id).to_string()),
         other => panic!("a defmethod's method name is a symbol, got {:?}", other),
     }
 }

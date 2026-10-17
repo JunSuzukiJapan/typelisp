@@ -104,7 +104,7 @@ etc.) están en [Operaciones destructivas](sequences.md#7-operaciones-destructiv
 | `size` | `(size h)` | `HashTable<K,V>→int` | El `hash-table-size` de CL. En esta tabla es el número de entradas ocupadas (igual a `count`) |
 
 **Cualquier tipo que implemente `Hash` puede ser clave**, incluidos los tipos `defstruct`/`defenum`.
-`get`/`set`/`remove` llevan `(where (Hash K))`, así que una tabla cuya clave es un tipo que no lo implementa
+`get`/`set`/`remove` llevan `(:where (Hash K))`, así que una tabla cuya clave es un tipo que no lo implementa
 es un **error de tipos** (`f64` no tiene `Hash` por culpa de `NaN`).
 
 ```lisp

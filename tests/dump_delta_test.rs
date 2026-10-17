@@ -72,7 +72,7 @@ fn a_restored_prelude_unit_can_check_and_run_a_program() {
     let mut interp = Interp::new();
     dump::apply_types(&mut heap, &mut chk, &mut interp, unit).expect("applying the prelude unit");
 
-    // `length<I,A> (where (Iter I (Item A)))` is one of the 61 generic prelude
+    // `length<I,A> (:where (Iter I (Item A)))` is one of the 61 generic prelude
     // `defun`s the checker retains as a *template* rather than a signature, so
     // this call can only check if the restored template came back — and with
     // it `string`'s `impl Iter`, which is what pins `A` to `char`.

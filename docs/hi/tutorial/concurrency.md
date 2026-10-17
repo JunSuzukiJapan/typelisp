@@ -127,13 +127,13 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - `((v (recv ch)) body...)` एक प्राप्त करने वाली शाखा है। `v` को `Option<T>` मिलता है।
 - `((send ch x) body...)` एक भेजने वाली शाखा है।
 - जब कई शाखाएँ एक ही समय आगे बढ़ सकती हों, तो उनमें से एक यादृच्छिक रूप से चुनी जाती है।
-- अंत में `(else body...)` होने पर, जब कोई शाखा तुरंत आगे न बढ़ सके तब `else` चलता है, और `select` प्रतीक्षा नहीं करता।
+- अंत में `(:else body...)` होने पर, जब कोई शाखा तुरंत आगे न बढ़ सके तब `:else` चलता है, और `select` प्रतीक्षा नहीं करता।
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

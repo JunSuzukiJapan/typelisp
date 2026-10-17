@@ -84,9 +84,10 @@ automatiquement dans l'autre sens.
 
 | Nom | Forme | Type | Description |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Extrait le nom du symbole |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Crée un symbole à partir d'une chaîne (l'interne) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Si c'est un mot-clé (`:name`). Le deux-points fait partie du nom ; le test regarde donc le premier caractère ([Référence de la syntaxe](../syntax.md#1-éléments-lexicaux)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Extrait le nom du symbole. Le nom d'un mot-clé ne contient pas le deux-points (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Crée un symbole à partir d'une chaîne (l'interne dans le module racine) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Crée le symbole `name` dans l'espace de noms `namespace` (l'`intern` de CL). `namespace` est un chemin de module depuis la racine (`"geometry::shapes"`) ; `"keyword"` est celui des mots-clés et `""` la racine. Omis, c'est le module où l'appel est écrit |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Si c'est un mot-clé, c'est-à-dire s'il appartient à l'espace de noms des mots-clés ([Référence de la syntaxe](../syntax.md#1-éléments-lexicaux)) |
 
 Pour `gensym`, voir [Macros](system.md#8-macros).
 

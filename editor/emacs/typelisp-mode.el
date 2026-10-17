@@ -122,12 +122,8 @@ session has changed.")
     "pprint-logical-block")
   "Control-flow and other special forms.")
 
-(defconst typelisp-clause-keywords
-  '("else")
-  "Clause markers recognized inside `cond' / `case' forms.")
-
 (defconst typelisp-declaration-keywords
-  '("pub" "module" "in-module" "use" "import" "shadowing-import" "load" "impl" "where")
+  '("pub" "module" "in-module" "use" "import" "shadowing-import" "load" "impl")
   "Declaration / namespace keywords.
 `in-module' is the flat form of `module'; `import' is CL's spelling of `use',
 and `shadowing-import' the one that means to take a bare name something else
@@ -221,7 +217,7 @@ function types; `&optional' and `&key' are `defmacro'-only.")
     "int->int" "ratio->int" "int->ratio"
     "float->ratio" "ratio->float" "numerator" "denominator"
     "ratio->rational" "rational->int" "try-rational->int" "rational->ratio" "rational->float"
-    "symbol->string" "string->symbol"
+    "symbol->string" "string->symbol" "intern"
     ;; generic pair (cons-cell<A,B>); set-car/set-cdr were removed, mutate
     ;; via (setf p::car v)/(setf p::cdr v) instead
     "cons" "car" "cdr"
@@ -851,10 +847,6 @@ has already claimed it for `font-lock-string-face'."
 
     ;; Special forms
     (,(regexp-opt typelisp-special-forms 'symbols)
-     . font-lock-keyword-face)
-
-    ;; `cond'/`case' clause markers
-    (,(regexp-opt typelisp-clause-keywords 'symbols)
      . font-lock-keyword-face)
 
     ;; Builtin functions

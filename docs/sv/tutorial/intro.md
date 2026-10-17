@@ -165,7 +165,7 @@ När ingenting ska hända i falskt fall används `when` (och `unless` för det m
 
 ### cond
 
-Med tre eller fler villkor är `cond` lättare att läsa. Det avslutande `else` väljs när inget av
+Med tre eller fler villkor är `cond` lättare att läsa. Det avslutande `:else` väljs när inget av
 villkoren gäller.
 
 ```lisp
@@ -173,7 +173,7 @@ villkoren gäller.
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

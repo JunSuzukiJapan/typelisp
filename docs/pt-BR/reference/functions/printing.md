@@ -22,7 +22,7 @@ consome por vez os argumentos variádicos que se seguem.
 
 O tipo de `dest` divide o significado em dois (qual se aplica é decidido estaticamente). A forma com stream
 pode ser escrita do mesmo jeito com um tipo de stream concreto, um `:dyn CharOutput` ou uma variável de tipo
-vinculada por `(where (CharOutput S))`. Um `dest` que não é nem `bool` nem stream é um erro de tipo.
+vinculada por `(:where (CharOutput S))`. Um `dest` que não é nem `bool` nem stream é um erro de tipo.
 
 **A string de controle deve ser um literal** (a mesma restrição do `format!` do Rust). As diretivas que ela
 contém decidem quantos argumentos são tomados e de que tipos, então uma string construída em tempo de execução
@@ -248,7 +248,7 @@ Regras:
 
 - **O registro é estático.** Um `impl` tem o tipo verificado como uma definição de método comum, então um nome
   de tipo digitado errado ou uma assinatura errada é um erro de compilação.
-- **Também funciona para tipos genéricos.** `(impl print-object box<T> (where (print-object T)) ...)` vai para
+- **Também funciona para tipos genéricos.** `(impl print-object box<T> (:where (print-object T)) ...)` vai para
   um corpo separado para cada argumento de tipo: um valor lembra seu tipo incluindo seus argumentos de tipo
   (`box<i32>`). Os tipos genéricos embutidos como `Vector<T>` funcionam do mesmo jeito.
 - **A escolha é feita na hora de imprimir.** Qual diretiva consome qual argumento depende do conteúdo em tempo
@@ -264,7 +264,7 @@ Regras:
   de o código genérico dizer "valores de um tipo desconhecido podem ser representados" (a mesma forma do
   `T: Display` do Rust). O `print-object` de `Array<T>` é um exemplo.
 - **Com argumentos de tipo que não atendem à restrição, a representação embutida é usada silenciosamente.**
-  `(impl print-object Array<T> (where (print-object T)))` se aplica a `Array<i32>`, mas não a um `Array` cujos
+  `(impl print-object Array<T> (:where (print-object T)))` se aplica a `Array<i32>`, mas não a um `Array` cujos
   elementos são um `defstruct` sem `print-object`. Não faria sentido que simplesmente criar um array fosse um
   erro, então não é um erro.
 - O outro mecanismo do CL, `set-pprint-dispatch` / `*print-pprint-dispatch*` (um registro em tempo de execução

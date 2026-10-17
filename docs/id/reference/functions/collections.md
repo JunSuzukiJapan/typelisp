@@ -104,7 +104,7 @@ dan sebagainya) ada di [Operasi destruktif](sequences.md#7-operasi-destruktif).
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` pada CL. Pada tabel ini ia adalah jumlah entri yang terisi (sama dengan `count`) |
 
 **Tipe apa pun yang mengimplementasikan `Hash` dapat menjadi kunci**, termasuk tipe `defstruct`/
-`defenum`. `get`/`set`/`remove` membawa `(where (Hash K))`, sehingga tabel dengan kunci bertipe yang
+`defenum`. `get`/`set`/`remove` membawa `(:where (Hash K))`, sehingga tabel dengan kunci bertipe yang
 tidak mengimplementasikannya adalah **kesalahan tipe** (`f64` tidak memiliki `Hash` karena `NaN`).
 
 ```lisp

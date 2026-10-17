@@ -4,7 +4,7 @@
 //! (`docs/dev/symbol-sexpr-redesign.md`) these replaced both the `Sexpr`-list
 //! versions and the Phase-3 `vector-`-prefixed ones: each now takes an
 //! *iterator* (`(map (iter v) f)`), so a single generic `defun` — bounded
-//! `(where (Iter I (Item A)))` — serves `Vector<T>`, `HashTable<K,V>`, and any
+//! `(:where (Iter I (Item A)))` — serves `Vector<T>`, `HashTable<K,V>`, and any
 //! `Iter` type, monomorphized at its call site. Results materialize into a
 //! fresh `Vector`. In Phase 6.5 `vector-append` became the generic two-iterator
 //! `append` (`(append (iter a) (iter b))`, two `Iter` bounds pinned to one

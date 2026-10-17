@@ -14,7 +14,7 @@ mechanisch (zie hieronder).
   - Gedefinieerde namen (`(defun NAME ...)` als functie, `(defstruct NAME ...)` als type,
     `(defvar (NAME ...))` als variabele; hetzelfde met `pub`, zoals in `(pub defun NAME ...)`) en
     beide namen van `(impl Trait Type)`
-  - Namespace- en declaratiesleutelwoorden (`pub` `module` `use` `load` `impl` `where`) en
+  - Namespace- en declaratiesleutelwoorden (`pub` `module` `use` `load` `impl`) en
     markeringen van lambdalijsten (`&rest` `&optional` `&key`)
   - Ingebouwde functies, primitieve types (inclusief `bignum` / `ratio`), ingebouwde foutentypes,
     door de gebruiker gedefinieerde types met hoofdletter (`Capitalized`), en het trait-objecttype

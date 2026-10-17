@@ -44,13 +44,18 @@ dựng sẵn, xem [Hàm dựng sẵn](functions/README.md); về danh sách các
   `]` và `}` kết thúc một token, nên không thể xuất hiện bên trong ký hiệu, và gặp một trong hai ở
   đầu một datum là lỗi đọc. `[` và `{` thì có thể xuất hiện trong ký hiệu: giống CL, chúng được để
   trống để lập trình viên dùng trong [macro đọc](#11-reader-macro-readtable).
-- **Keyword**: các symbol bắt đầu bằng dấu hai chấm, như `:name` (như trong CL). Chúng tự đánh giá: chúng
-  không tra ràng buộc nào và giá trị của chúng là chính chúng, với kiểu tĩnh `symbol`. Các keyword cùng tên
-  luôn là cùng một đối tượng (`(eq :foo :FOO)` là true; như các symbol khác chúng được chuyển thành chữ
-  thường). Bản thân dấu hai chấm là một phần của tên, nên `(symbol->string :foo)` là `":foo"` (typelisp không
-  có hệ thống package, nên điều này khác `symbol-name` của CL). Một dấu `:` đơn lẻ hoặc một keyword có thêm
-  dấu hai chấm như `:a:b` là lỗi đọc. Kiểm tra bằng `keywordp`. Những cái bắt đầu bằng `::` không phải
-  keyword mà là đường dẫn tuyệt đối (bên dưới).
+  Phần nằm giữa `|` và `|` được đọc đúng như đã viết, kể cả ký tự phân cách và dấu hai chấm (multiple escape của
+  CL): `|:foo|` là một symbol thông thường có tên `:foo`, không phải keyword.
+- **Keyword**: các symbol bắt đầu bằng dấu hai chấm, như `:name` (như trong CL). Dù được viết trong module nào,
+  chúng là symbol duy nhất mang tên đó trong không gian tên keyword `keyword` (package `KEYWORD` của CL). Chúng
+  tự đánh giá: chúng không tra ràng buộc nào và giá trị của chúng là chính chúng, với kiểu tĩnh `symbol`. Các
+  keyword cùng tên luôn là cùng một đối tượng (`(eq :foo :FOO)` là true; như các symbol khác chúng được chuyển
+  thành chữ thường). Dấu hai chấm không phải là một phần của tên: `(symbol->string :foo)` là `"foo"`. `~s` in ra
+  `:foo` và `~a` in ra `foo`. Keyword là một hằng có giá trị là chính nó, nên không thể ràng buộc hay gán như
+  một biến, cũng không thể làm tên của một định nghĩa (lỗi kiểu). Để tạo một keyword từ chuỗi, viết
+  `(intern "foo" "keyword")`. Kiểm tra bằng `keywordp` (có thuộc không gian tên keyword không). Một dấu `:` đơn
+  lẻ hoặc một keyword có thêm dấu hai chấm như `:a:b` là lỗi đọc. Những cái bắt đầu bằng `::` không phải keyword
+  mà là đường dẫn tuyệt đối (bên dưới).
   Lưu ý rằng `:dyn` là một keyword dành riêng chỉ cho vị trí kiểu; viết nó ở bất kỳ chỗ nào khác là lỗi
   (xem [chương 2](#2-cách-viết-kiểu)).
 - **Danh sách**: `(a b c)`. Cặp có dấu chấm `(a . b)` cũng đọc được.
@@ -226,10 +231,10 @@ Trong mã nguồn, kiểu được viết là các symbol hoặc danh sách thô
     trong một kiểu hàm.
 - **Tham chiếu tiến được khai báo bằng `defsignature`** (bên dưới). Một tên chưa được khai báo không thể được
   gọi trước định nghĩa của nó, vì cấp cao nhất được kiểm tra và chạy từng dạng một, theo thứ tự mã nguồn.
-- Để yêu cầu các ràng buộc trait, hãy viết một mệnh đề `where` ngay trước thân:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- Để yêu cầu các ràng buộc trait, hãy viết một mệnh đề `:where` ngay trước thân:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   (cố định một kiểu liên kết bằng `(AssocName ConcreteType)` là tùy chọn).
-- **Docstring**: một literal chuỗi ở đầu thân, ngay sau mệnh đề `where` (nếu có), trở thành docstring (như
+- **Docstring**: một literal chuỗi ở đầu thân, ngay sau mệnh đề `:where` (nếu có), trở thành docstring (như
   trong CL). Tuy nhiên chỉ khi có ít nhất một dạng của thân theo sau nó: một chuỗi đứng một mình vẫn là giá trị
   trả về và không được coi là docstring: `(defun f () string "doc" "value")` có một docstring và trả về
   `"value"`, còn `(defun f () string "value")` không có docstring và trả về `"value"`. Có thể lấy nó bằng
@@ -598,7 +603,7 @@ Chú thích kiểu là bắt buộc (nó không được suy ra từ biểu th�
   (pub name ...))                                      ; công khai cả bên ngoài module của kiểu
 
 ; một kiểu generic
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 Cho một kiểu định nghĩa bằng `defstruct` (3.6) hoặc `defenum` (3.7) các phương thức. Tương ứng với impl
@@ -620,7 +625,7 @@ cố hữu của Rust (`impl Point { ... }`).
 - Chỉ các kiểu của chính chương trình mới viết được. Không viết được cho kiểu của thư viện chuẩn như
   `Vector`, `Option` hay `int` (lỗi báo `... is a standard library type`). Để thêm một thao tác cho kiểu
   chuẩn, hãy định nghĩa một trait rồi viết `impl` của nó cho kiểu đó.
-- Trong `(impl X ...)`, nếu theo sau `X` là một mục (một danh sách), một `where` hoặc không có gì, đó là
+- Trong `(impl X ...)`, nếu theo sau `X` là một mục (một danh sách), một `:where` hoặc không có gì, đó là
   impl cố hữu này; nếu là một tên, đó là `impl` của một trait (`(impl Trait Type ...)`, 3.9).
 
 ```lisp
@@ -715,7 +720,7 @@ nhau là những cài đặt riêng biệt, nên `Box<int>` và `Box<string>` c�
 - **Biến kiểu chỉ là những gì được viết ở vị trí khai báo.** Với `defun`/`defstruct`/`defenum`/`deftype`,
   là `<T>` của tên; với `impl` cố hữu, là kiểu đích (`(impl box<T> ...)`) và `<U>` trong tên của mỗi
   phương thức; với `impl` của trait, là kiểu đích và `impl<T>`; với `deftrait`, là `Self` và các kiểu
-  liên kết của `(type Item)`. Một tên xuất hiện lần đầu ở bất kỳ chỗ nào khác (đối số, giá trị trả về,
+  liên kết của `(:type Item)`. Một tên xuất hiện lần đầu ở bất kỳ chỗ nào khác (đối số, giá trị trả về,
   `the`/`lambda` trong thân) không trở thành biến kiểu; nó là `unknown type`.
 - **Docstring**: một literal chuỗi ngay sau tên, trước các trường, trở thành docstring
   (`(defstruct Name "doc" (field Type)...)`, cùng vị trí như `defstruct` của CL). Một trường luôn có dạng
@@ -854,19 +859,19 @@ kiểu, không phải một kiểu**.
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; danh sách supertrait là bắt buộc; () nếu không có
-  (type AssocName)                       ; các kiểu liên kết (số lượng bất kỳ, tùy chọn)
+  (:type AssocName)                       ; các kiểu liên kết (số lượng bất kỳ, tùy chọn)
   (method-name ((self Self) params...) RetType)          ; không có thân = phải được triển khai
   (method-name ((self Self) params...) RetType body...)) ; có thân = triển khai mặc định
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; các ràng buộc áp dụng cho cả impl (tùy chọn)
-  (type AssocName ConcreteType)          ; làm cho một kiểu liên kết trở nên cụ thể
+  (:where (Trait A)...)                   ; các ràng buộc áp dụng cho cả impl (tùy chọn)
+  (:type AssocName ConcreteType)          ; làm cho một kiểu liên kết trở nên cụ thể
   (method-name (recv params...) RetType body...))
 ```
 
 Thông qua `impl`, mỗi phương thức được đăng ký như một phương thức của `TargetType` và được gọi như phương
 thức của một `impl` cố hữu (3.5). Các phương thức trong `impl` của một trait luôn công khai, không cần
-`pub`. Trait được tham chiếu như ràng buộc trait trong mệnh đề `where` của hàm generic (xem [3.1 defun](#31-defun--định-nghĩa-hàm)). Tên
+`pub`. Trait được tham chiếu như ràng buộc trait trong mệnh đề `:where` của hàm generic (xem [3.1 defun](#31-defun--định-nghĩa-hàm)). Tên
 trait cũng có thể là một đường dẫn `::` như `m::Trait`.
 
 **Danh sách supertrait (bắt buộc)**: luôn được viết ngay sau tên trait. Mỗi phần tử là một tên trait trần,
@@ -881,7 +886,7 @@ hoặc, nếu trait đó có kiểu liên kết, là `(Trait (Assoc Type))` vớ
 
 Kế thừa có ba tác dụng. (1) `impl Ord X` yêu cầu `impl Eq X` phải được viết **trước** (một quy tắc về thứ tự
 viết: dạng duy nhất có thể được quyết định một cách xác định trong REPL và với `load` từng bước, và nghiêm
-ngặt hơn Rust). (2) Chỉ riêng `(where (Ord T))` đã cho phép bạn gọi cả các phương thức của `Eq`. (3) Các phương
+ngặt hơn Rust). (2) Chỉ riêng `(:where (Ord T))` đã cho phép bạn gọi cả các phương thức của `Eq`. (3) Các phương
 thức của `Eq` có thể được gọi qua một `:dyn Ord`, và một giá trị `:dyn Ord` có thể được truyền nguyên trạng ở
 nơi cần một `:dyn Eq` (upcasting). Một subtrait khai báo lại một phương thức cùng tên với cha của nó, và kế
 thừa các phương thức cùng tên từ hai cha, đều là lỗi (một vtable có một ô cho mỗi tên). Kế thừa kim cương gộp
@@ -889,7 +894,7 @@ thành một ô.
 
 **Triển khai mặc định**: một thân sau chữ ký được dùng khi một `impl` bỏ phương thức ra. Thân được phân giải
 trong **không gian tên của module** nơi trait được viết, nên nó có thể gọi các hàm không công khai của module
-đó. Các phương thức có thân cũng có thể có mệnh đề `where` và docstring. Thân được kiểm tra kiểu **một lần,
+đó. Các phương thức có thân cũng có thể có mệnh đề `:where` và docstring. Thân được kiểm tra kiểu **một lần,
 tại điểm khai báo**, với `Self` để lại là một biến kiểu (bị ràng buộc bởi `Self: chính trait đó`), như trong
 Rust: các sai sót sẽ thất bại với mọi `impl` và mọi kiểu triển khai, ngay cả trong các mặc định mà không `impl`
 nào bỏ ra, đều bị bắt ở đó. Các lời gọi trên `self` tới các phương thức của chính trait hoặc các supertrait của
@@ -897,7 +902,7 @@ nó đi qua ràng buộc này, và các kiểu liên kết được cố định
 khớp với thân mà không cần biết kiểu cụ thể.
 
 **Cài đặt theo từng thể hiện**: một kiểu generic có thể có `impl` riêng cho từng thể hiện
-(`(impl Show Box<int> ...)` và `(impl Show Box<string> ...)`). `:dyn`, ràng buộc `where`, kiểu liên kết và
+(`(impl Show Box<int> ...)` và `(impl Show Box<string> ...)`). `:dyn`, ràng buộc `:where`, kiểu liên kết và
 `print-object` đều có hiệu lực theo từng thể hiện, và thể hiện không có `impl` (`Box<f64>`) không cài đặt
 trait đó. Không thể cài đặt cùng một trait cho cả `Box<T>` lẫn `Box<int>` (cùng quy tắc với phương thức ở
 3.5). Trait cha chỉ cần được cài đặt ở thể hiện đó (bằng `impl` của `Box<int>` hoặc của `Box<T>`).
@@ -909,7 +914,7 @@ các ràng buộc.
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; hoàn toàn không có thân; mọi thứ là mặc định
+(impl<T> Clamp T (:where (Ord T)))          ; hoàn toàn không có thân; mọi thứ là mặc định
 ```
 
 **Không có mã nào được sinh ra cho đến khi một kiểu cụ thể thực sự dùng nó** (một lần cho mỗi kiểu, bằng cùng
@@ -917,11 +922,11 @@ cơ chế như đơn hình hóa thông thường). Một trait có nhiều nhấ
 `impl` tường minh, cái đó được ưu tiên. Việc kiểm tra kiểu thân tách biệt với việc sinh mã: nó được thực hiện
 một lần tại điểm khai báo, **với đích để lại là một biến kiểu** (như trong Rust), nên ngay cả một triển khai
 không bao giờ được dùng cũng có sai sót bị bắt ở đó nếu chúng sẽ thất bại với mọi đích dưới các ràng buộc đã
-khai báo. Các lời gọi được biện minh bởi các ràng buộc (`(less self other)` dưới `(where (Ord T))`, v.v.) qua
+khai báo. Các lời gọi được biện minh bởi các ràng buộc (`(less self other)` dưới `(:where (Ord T))`, v.v.) qua
 được, như trong thân của một `defun` generic.
 
 **Docstring**: một `deftrait` có thể có một docstring cho cả trait, dưới dạng một literal chuỗi ngay sau danh
-sách supertrait, trước các mục (`(deftrait Name () "doc" (type ...) (method ...)...)`). Một chữ ký không có
+sách supertrait, trước các mục (`(deftrait Name () "doc" (:type ...) (method ...)...)`). Một chữ ký không có
 thân không thể có docstring: một chuỗi ở cuối sẽ tự nó là giá trị trả về của một triển khai mặc định, nên không
 thể phân biệt hai trường hợp.
 
@@ -1167,11 +1172,11 @@ Những gì kiểm thử in ra bằng `print` đi thẳng ra đầu ra chuẩn (
 (if cond then else)                 ; else là bắt buộc (luôn có ba phần tử)
 (when cond body...)                 ; một if không có else (kiểu Unit). defmacro
 (unless cond body...)               ; phủ định của when. defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; một danh sách khóa: khớp nếu bất kỳ khóa nào khớp
-  (else body...))                   ; expr được đánh giá một lần. các khóa được so sánh bằng equal.
+  (:else body...))                   ; expr được đánh giá một lần. các khóa được so sánh bằng equal.
                                      ; các khóa là "literal" và không được đánh giá (như trong CL).
                                      ; một symbol trần a nghĩa là symbol 'a.
                                      ; viết 'a là lỗi (hãy dùng a trần). defmacro
@@ -1265,7 +1270,7 @@ Các loại mẫu:
 - **Literal giá trị**: chuỗi / số dấu phẩy động / symbol (`'foo`) / số nguyên bignum / ratio — được so sánh theo
   giá trị bằng `Eq::equals` của kiểu đó ([Các trait chuẩn](functions/traits.md#2-eq--ord-so-sánh)). Chuỗi so
   sánh theo nội dung, không theo đồng nhất
-- `(= expr)` — đánh giá một biểu thức bất kỳ và so sánh bằng `Eq::equals`. Cách duy nhất để so sánh các kiểu
+- `(:= expr)` — đánh giá một biểu thức bất kỳ và so sánh bằng `Eq::equals`. Cách duy nhất để so sánh các kiểu
   không có cú pháp literal (các thể hiện `defstruct`, biến toàn cục, kết quả được tính), và một triển khai `Eq`
   do người dùng định nghĩa trở thành quy tắc so sánh nguyên trạng. `expr` có thể tham chiếu mọi thứ nhìn thấy
   được từ vị trí của nhánh (đối số, ràng buộc bên ngoài, biến toàn cục)
@@ -1289,7 +1294,7 @@ Các loại mẫu:
   phải gắn cùng các biến với cùng kiểu. Cũng có thể viết bên trong một mẫu hàm khởi tạo
   (`(some (:or (circle r) (rect r _)))`)
 
-So sánh một kiểu không triển khai `Eq` với một literal giá trị / `(= expr)` là lỗi kiểu (ngôn ngữ này chọn nói
+So sánh một kiểu không triển khai `Eq` với một literal giá trị / `(:= expr)` là lỗi kiểu (ngôn ngữ này chọn nói
 "những thứ này không thể so sánh" thay vì để lại một nhánh âm thầm không bao giờ khớp).
 
 **Điều kiện canh**: viết `:when điều-kiện` sau mẫu sẽ chọn nhánh chỉ khi mẫu khớp và điều kiện cũng
@@ -1320,7 +1325,7 @@ dung:
 Các literal không tức thời (chuỗi / số dấu phẩy động / số nguyên bignum / ratio) **không thể được viết** với một
 `Sexpr`. `eq` của chúng so sánh đồng nhất đối tượng, điều này sẽ tạo ra một "nhánh qua được kiểm tra kiểu nhưng
 không bao giờ khớp", nên nó là một lỗi nêu tên mẫu variant: hãy viết `(str "hi")` và nó được tách thành một
-`string` và so sánh theo nội dung. `(= expr)` yêu cầu `equals` tường minh, nên hạn chế này không áp dụng cho nó.
+`string` và so sánh theo nội dung. `(:= expr)` yêu cầu `equals` tường minh, nên hạn chế này không áp dụng cho nó.
 
 **Đối tượng được so khớp không nhất thiết phải là một ADT.** `string`/`symbol`/`i32`/`f64` và các kiểu tương tự
 có thể được so khớp trực tiếp (đó là nơi các mẫu literal chuỗi đi vào). Tuy nhiên, một kiểu không có variant
@@ -1472,13 +1477,12 @@ Nếu bạn không bao giờ viết `return-from`, block ngầm không tốn gì
 
 CL viết các từ mệnh đề là các symbol trần (`(loop for i from 1 to 3 collect i)`), nhưng ở đây **tất cả chúng là
 keyword**: một `for` trần chỉ là một tham chiếu biến, và việc là keyword cũng là điều phân biệt nó với một vòng
-lặp đơn giản. Ngoại lệ là `=`, vốn phân tách một biến với một giá trị: vị trí của nó không mơ hồ, nên nó được
-đọc hoặc trần hoặc dưới dạng keyword (`:=`).
+lặp đơn giản. Từ phân tách một biến với giá trị của nó cũng không phải ngoại lệ: nó được viết là `:=`.
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1487,11 +1491,11 @@ lặp đơn giản. Ngoại lệ là `=`, vốn phân tách một biến với m
 
 | Mệnh đề | Ý nghĩa |
 |---|---|
-| `:with v = e` | Gán một lần. Có thể đọc các biến của mệnh đề trước |
+| `:with v := e` | Gán một lần. Có thể đọc các biến của mệnh đề trước |
 | `:for v :in s` / `:for v :across s` | Các phần tử của một `Iter` theo thứ tự. Sự phân biệt list/vector của CL không tồn tại ở đây, nên đây là hai cách viết của cùng một mệnh đề |
 | `:for v :on s` | Các **hậu tố** liên tiếp. CL truyền đuôi cons dùng chung, nhưng một `Iter` không có đuôi để chia sẻ, nên mỗi cái là một `Vector` mới |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | Đếm. `:downfrom`/`:upfrom` cũng dùng được |
-| `:for v = e [:then f]` | Bắt đầu với `e`, và từ lần thứ hai dùng `f` (không có `:then`, là `e` mỗi lần) |
+| `:for v := e [:then f]` | Bắt đầu với `e`, và từ lần thứ hai dùng `f` (không có `:then`, là `e` mỗi lần) |
 | `:repeat n` | Lặp chừng đó lần |
 
 Với nhiều `:for`, chúng tiến **song song**, và vòng lặp kết thúc ngay khi bất kỳ cái nào cạn.
@@ -1803,7 +1807,7 @@ Kiểu của `f` là `(fn (string-input-stream char) Option<Sexpr>)`. Đối s�
 bản chưa đọc**, và đối số thứ hai là **ký tự đã kích hoạt nó** (ký tự thứ hai với một dispatch). Giá trị trả về
 trở thành dữ liệu được đọc tại điểm đó. Stream là một kiểu cụ thể thay vì `:dyn PeekInput` vì reader luôn truyền
 đúng loại này: `read-sexpr` / `read-char` / `peek-char` / `unread-char` / `read-delimited-list` đều nhận
-`(where (PeekInput S))`, nên tất cả đều hoạt động trên kiểu cụ thể nguyên trạng.
+`(:where (PeekInput S))`, nên tất cả đều hoạt động trên kiểu cụ thể nguyên trạng.
 
 ```lisp
 (set-macro-character #\!
@@ -1909,17 +1913,17 @@ task khác tiếp tục tiến triển. Bên trong nó, `task`, `send`, `recv` v
 (select
   ((v (recv ch1)) body...)          ; một nhánh nhận. v được gán là một Option<T>
   ((send ch2 x) body...)            ; một nhánh gửi
-  (else body...))                   ; tùy chọn. **nếu viết, nó đứng cuối**
+  (:else body...))                   ; tùy chọn. **nếu viết, nó đứng cuối**
 ```
 
-- **Với `else`, nó không chặn** (`default` của Go). Không có nó, nó chờ cho đến khi một nhánh trở nên khả thi.
+- **Với `:else`, nó không chặn** (`default` của Go). Không có nó, nó chờ cho đến khi một nhánh trở nên khả thi.
 - **Nếu nhiều nhánh khả thi cùng lúc, một nhánh được chọn ngẫu nhiên** (theo thứ tự đã viết, các nhánh sau sẽ
   bị bỏ đói).
 - `v` của một nhánh nhận là một **`Option<T>`**. Một kênh đã đóng là "một đáp án", không phải lý do để bỏ qua
   nhánh, nên hãy `match` nó bên trong nhánh.
 - Kiểu là **phép hợp của các kiểu của thân mọi nhánh** (cùng quy tắc như các nhánh `match`).
 - `(select)` với không nhánh nào là lỗi kiểu (`select{}` của Go, chặn mãi mãi, không được áp dụng). Một
-  `select` chỉ có `else` cũng vậy, vì nó giống việc viết thân trực tiếp.
+  `select` chỉ có `:else` cũng vậy, vì nó giống việc viết thân trực tiếp.
 
 **Các biểu thức kênh và các giá trị cần gửi được đánh giá mỗi cái một lần, từ trái sang phải, dù nhánh nào được
 chọn** (cùng kỷ luật mà `case` có cho các khóa của nó).

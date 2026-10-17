@@ -10,7 +10,7 @@
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -21,7 +21,7 @@
 
 ## 2. `Eq` / `Ord`（比较）
 
-相当于 Rust 的 `PartialEq`/`PartialOrd`（名称为 `Eq`/`Ord`）。在泛型函数的 `where` 约束中用来要求元素类型可比较
+相当于 Rust 的 `PartialEq`/`PartialOrd`（名称为 `Eq`/`Ord`）。在泛型函数的 `:where` 约束中用来要求元素类型可比较
 （`sort`/`member`/`assoc` 等）。
 
 ```lisp
@@ -66,7 +66,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -77,11 +77,11 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 没有方法，五个的组合
 ```
 
-**在约束内可以用运算符书写。** 当接收者是由 `where` 约束的类型变量时，运算符被解读为 trait 方法（`+`→`add`、
+**在约束内可以用运算符书写。** 当接收者是由 `:where` 约束的类型变量时，运算符被解读为 trait 方法（`+`→`add`、
 `-`→`sub`、`*`→`mul`、`/`→`div`、`rem`→`remainder`、`logand`→`bit-and`、`=`→`equals`、`<`→`less` …）：
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -93,5 +93,5 @@ trait 一侧的方法名不是 `+`，是因为 `+` 是内置方法名，`impl` �
 
 **`Div` 用关联类型 `Output` 表明结果类型。** 与 CL 一样，整数之间的 `/` 是 `rational`，因此 `int` 的
 `Output` 是 `rational`，其他数值类型则是自身。由于 `Output` 因类型而异，`Number` 不包含 `Div`（继承
-列表必须固定所有关联类型）。做除法的泛型函数用 `(where (Div T (Output R)))` 接收结果类型，或者用
-`(where (Div T (Output T)))` 要求在 `T` 内封闭的除法（此时不能传 `int`）。
+列表必须固定所有关联类型）。做除法的泛型函数用 `(:where (Div T (Output R)))` 接收结果类型，或者用
+`(:where (Div T (Output T)))` 要求在 `T` 内封闭的除法（此时不能传 `int`）。

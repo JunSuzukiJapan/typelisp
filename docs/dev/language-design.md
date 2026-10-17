@@ -355,11 +355,11 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
 `doiter`（§3末尾）が「Iterトレイトを実装した型すべてで使える」ことを要求したため2026-06-30に導入。
 `defmethod`の単一静的ディスパッチをそのまま再利用する設計（trait専用の新しいディスパッチ機構は作らない）。
 
-- **trait定義**: `(deftrait Name (Super...) (type AssocName)... (method-name ((self Self) params...) Ret [body...])...)`。
+- **trait定義**: `(deftrait Name (Super...) (:type AssocName)... (method-name ((self Self) params...) Ret [body...])...)`。
   `Self`・宣言した関連型名はメソッドシグネチャの中で型変数として使える。
   ```lisp
   (deftrait Iter ()
-    (type Item)
+    (:type Item)
     (next ((self Self)) Option<Item>))
   ```
 - **スーパトレイト**（2026-08-01追加）: 名前の直後の**必須**リスト。Rust の `trait Ord: Eq` は
@@ -382,22 +382,22 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   vtable・`Expr::DynCall`・AOT・島はどれも変更不要。本体はトレイトを書いたモジュールの
   名前空間で再チェックする（`check_defmethod_in`）——ヘッダは `impl` 側の名前空間で
   `Self` 置換済みなので、切り替えるのは本体だけ。
-- **trait実装**: `(impl TraitName TargetType (type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`。
-  `Self`/関連型名は`TargetType`/`(type ...)`の具体型へ構文木レベルで置換されてから`defmethod`相当の
+- **trait実装**: `(impl TraitName TargetType (:type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`。
+  `Self`/関連型名は`TargetType`/`(:type ...)`の具体型へ構文木レベルで置換されてから`defmethod`相当の
   処理に通る——実装後、各メソッドは`TargetType`の通常の`assoc`テーブルに**普通の`defmethod`として**
   挿入される（trait用の別テーブルは持たない）。`TargetType`の`AdtDef.impls`に`TraitName`が記録され、
   以後「型T が trait X を実装しているか」はこの一覧を見るだけで判定できる。
   ```lisp
   (impl Iter vector-iter<T>
-    (type Item T)
+    (:type Item T)
     (next ((self Self)) Option<T> ...))
   ```
   具体型に対する呼び出し（`(next concrete-vec-iter)`）は、register済みの`assoc`テーブルを引く
   既存の`Expr::Assoc`機構がそのまま動く——trait導入前と挙動・コードパスとも変わらない。
-- **ジェネリック関数のtrait境界**: `(defun name<T> (params...) Ret (where (Trait T (Assoc
+- **ジェネリック関数のtrait境界**: `(defun name<T> (params...) Ret (:where (Trait T (Assoc
   Concrete)...)...) body...)`。`(Assoc Concrete)...`は省略可能で、trait の関連型を具体型に
   pinする（2026-06-30追加）——例えば`Iter`の関連型`Item`を`i32`に固定したい場合
-  `(where (Iter T (Item i32)))`と書く。本体チェック時にのみ「型変数Tはこのtraitのメソッドを
+  `(:where (Iter T (Item i32)))`と書く。本体チェック時にのみ「型変数Tはこのtraitのメソッドを
   呼べ、pinした関連型は具体型として扱える」という情報を与える。本体内で型変数Tの値に対する
   traitメソッド呼び出しは、新設の`Expr::TraitCall`ノードになる——`Expr::Assoc`と違い実装型の
   Pathをチェック時には持たず、実行時にレシーバの値自身が持つ型タグ（`RtValue::Struct`の
@@ -407,9 +407,9 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   `subst_apply`してから使う——pin無しなら`Option<Item>`のまま（`Item`未解決）、pin有りなら
   `Option<Item>`が`Option<i32>`に解決され、ループ変数への算術演算等が型チェックを通る。
   ```lisp
-  (defun count-iter<T> ((it T)) i32 (where (Iter T))
+  (defun count-iter<T> ((it T)) i32 (:where (Iter T))
     (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
-  (defun sum-iter<T> ((it T)) i32 (where (Iter T (Item i32)))
+  (defun sum-iter<T> ((it T)) i32 (:where (Iter T (Item i32)))
     (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))  ; x: i32（pin済み）
   ```
   `where`節は**呼び出し側シグネチャにも反映される**（2026-06-30追加、`FnSig.bounds`）——
@@ -428,7 +428,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   （要素型が固定されないリストにジェネリックな`Iter<Item>`を被せるのは型システム上不適切、という
   ユーザー判断）。
 
-- **impl レベル `where`**（2026-08-01追加）: `(impl Ord cons-cell<A,B> (where (Ord A) (Ord B)) ...)`。
+- **impl レベル `where`**（2026-08-01追加）: `(impl Ord cons-cell<A,B> (:where (Ord A) (Ord B)) ...)`。
   各メソッドの `where` へ**構文的に**合流させる（`merge_where_clauses`）ので、
   ジェネリック所有者が retain する `MethodTemplate::Form` にもそのまま入り、単型化側に
   引数を追加で通す必要がない。
@@ -438,7 +438,7 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
   メソッド・重複・関連型の欠落・メソッドの欠落・シグネチャ不一致を `impl` の時点で弾く。
   `Self` の比較には**パース済みの**対象型を使う——プリミティブは `Type::I32` であって
   `Named("i32")` ではなく、両者は表示が同じでも等しくない。
-- **ブランケット実装**（2026-08-01追加）: `(impl<T> Clamp T (where (Ord T)) ...)`。
+- **ブランケット実装**（2026-08-01追加）: `(impl<T> Clamp T (:where (Ord T)) ...)`。
   リーダは `impl<T>` を単一シンボルとして返す（`defstruct vector-iter<T>` の名前と同じ字句化）ので、
   `check_form_dispatch` は `match` の前に `parse_generic_name_header` を通す。
   対象が**裸の型変数**のときだけブランケットで、型構築子（`Vector<T>`）なら所有 `AdtDef` が1つに
@@ -457,11 +457,11 @@ CLOS の汎関数に相当する独自機構（CLOS とは別物）。**型は R
     Rust の重なり解析より粗く、重ならないプログラムの一部を拒否する。明示 vs ブランケットの
     重なりを Rust は硬いエラーにするが、ここでは明示優先の黙認とする——ブランケットが
     ある型を覆うかは後から確立され得る境界に依存し、「重なるか」に単一時点の答えが無いため。
-  - 相互再帰的な境界（`impl<T> A T (where (B T))` + `impl<T> B T (where (A T))`）は
+  - 相互再帰的な境界（`impl<T> A T (:where (B T))` + `impl<T> B T (:where (A T))`）は
     `BLANKET_BOUND_DEPTH` で打ち切る。
   - **宣言時の本体検査**（2026-08-04追加、`precheck_blanket_impl`）: 対象を未解決の
     `Type::Named`（型変数）のまま、ジェネリック `defun` の本体とまったく同じ扱いで検査する。
-    スコープに入る境界は impl の `(where ...)` と**実装中のトレイト自身**（`impl<T> Clamp T` の
+    スコープに入る境界は impl の `(:where ...)` と**実装中のトレイト自身**（`impl<T> Clamp T` の
     中では `T` は `Clamp` を実装しているので、`self` に対する兄弟メソッド呼び出しが通る）。
     検査結果は捨てる——登録先の型が無いので何も登録できない。**どの対象でも誤り**であるものだけを
     捕まえる位置づけで、対象ごとの検査は従来どおり実体化が行う。
@@ -690,7 +690,7 @@ supers は「接頭辞にならない相手だけ」ではなく**閉包すべ�
   トレイト名を書けば「`Error` はトレイトである、`:dyn Error` と書け」と報告される。
   組み込みの具象エラー型を `Error` と呼べないのはこの規則ゆえで、Rust と同じ結論
   （`std` でも `Error` はトレイト、具象型は `ParseIntError`/`io::Error`）になっている。
-- **境界付き型変数の箱詰め**: ジェネリック関数の中で `(where (Error E))` の `E` を
+- **境界付き型変数の箱詰め**: ジェネリック関数の中で `(:where (Error E))` の `E` を
   `:dyn Error` へ箱詰めできる。vtable は `E` が具象化する単型化時に確定するので、
   定義時の本体検査には消去済みプレースホルダ（`Expr::TraitCall`）が残るだけになる。
 

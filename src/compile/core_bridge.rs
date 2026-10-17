@@ -313,7 +313,7 @@ impl<'a> Ctx<'a> {
                     "compile: `{}` is a `{}` captured by a nested function, which stores it in a \
                      cell — and a cell tags what it holds, which a raw C word has no room for. \
                      Keep it in the function that obtained it, or convert it (`as i32`, `as bignum`).",
-                    heap.symbol_name(name),
+                    heap.symbol_spelling(name),
                     repr.tag()
                 )));
             }
@@ -364,7 +364,7 @@ fn untranslated(tag: &str) -> Error {
 fn unbound(heap: &Heap, name: SymRef) -> Error {
     Error::TypeError(format!(
         "compile: `{}` is referenced but no binder in scope states its representation (internal error)",
-        heap.symbol_name(name)
+        heap.symbol_spelling(name)
     ))
 }
 
@@ -472,7 +472,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             // per this kind — the same decoder a struct field read uses.
             let cell_kind =
                 if is_cell { Some(cx.repr_of(name).ok_or_else(|| unbound(heap, name))?.field_kind()) } else { None };
-            let name_v = heap.alloc_string(heap.symbol_name(name).to_string());
+            let name_v = heap.alloc_string(heap.symbol_spelling(name).to_string());
             let mut f = Items::new(heap);
             f.push(name_v);
             if let Some(kind) = cell_kind {
@@ -1426,7 +1426,7 @@ fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
     let repr = cx.repr_of(name).ok_or_else(|| {
         Error::TypeError(format!(
             "compile: assignment to `{}`, which is not in scope here (internal error)",
-            heap.symbol_name(name)
+            heap.symbol_spelling(name)
         ))
     })?;
     let is_cell = cx.cell_names.contains(&name);
@@ -1435,7 +1435,7 @@ fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
     // the cell reference — the binding's permanent root for its whole
     // activation — never moves, so there is no root index to fix up.
     let kind = if is_cell { repr.field_kind() } else { repr.binding_kind() };
-    let name_v = heap.alloc_string(heap.symbol_name(name).to_string());
+    let name_v = heap.alloc_string(heap.symbol_spelling(name).to_string());
     let mut f = Items::new(heap);
     f.push(name_v);
     f.push(Value::Int(kind));
@@ -1664,11 +1664,11 @@ fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, String)>, Error> {
         if let [ty, m] = parts.as_slice() {
             let path = match ty {
                 Value::Path(id) => crate::types::path_from_id(heap, *id),
-                Value::Symbol(id) => Path::root(heap.symbol_name(*id)),
+                Value::Symbol(id) => Path::root(heap.symbol_spelling(*id)),
                 _ => continue,
             };
             if let Value::Symbol(id) = m {
-                out.push((path, heap.symbol_name(*id).to_string()));
+                out.push((path, heap.symbol_spelling(*id).to_string()));
             }
         }
     }
@@ -1685,7 +1685,7 @@ fn supers_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, Vec<(Path,
         if let [ty, slots] = parts.as_slice() {
             let path = match ty {
                 Value::Path(id) => crate::types::path_from_id(heap, *id),
-                Value::Symbol(id) => Path::root(heap.symbol_name(*id)),
+                Value::Symbol(id) => Path::root(heap.symbol_spelling(*id)),
                 _ => continue,
             };
             // The already-destructured element, not `core::field(entry, 1)` —
@@ -1897,7 +1897,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         // a path at run time.
         Value::Path(id) => {
             let segs: Vec<String> =
-                heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
+                heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
             let mut f = Items::new(heap);
             for seg in &segs {
                 let v = str_form(f.heap(), seg)?;
@@ -2308,7 +2308,7 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
             let inner_reprs = base.extended(d.params.iter().cloned());
             let inner = Ctx { reprs: Some(&inner_reprs), cell_names: &cells, ..base };
 
-            let def_name = s.symbol_name(d.name).to_string();
+            let def_name = s.symbol_spelling(d.name).to_string();
             let name_v = s.alloc_string(def_name);
             let mut one = Items::new(&mut s);
             one.push(name_v);
@@ -2355,7 +2355,7 @@ fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
 
     match (core::op(heap, callee), core::field(heap, callee, 0)) {
         (Some("var"), Some(Value::Symbol(name))) if cx.direct.contains(&name) => {
-            let name_v = heap.alloc_string(heap.symbol_name(name).to_string());
+            let name_v = heap.alloc_string(heap.symbol_spelling(name).to_string());
             let mut f = Items::new(heap);
             f.push(name_v);
             arg_pairs(&mut f, &reprs, &args, cx)?;
@@ -2508,7 +2508,7 @@ fn forwarding_lambda(
         let mut s = RootScope::new(f.heap());
         let mut pairs = Vec::with_capacity(params.len());
         for (name, repr) in &params {
-            let text = s.symbol_name(*name).to_string();
+            let text = s.symbol_spelling(*name).to_string();
             let name_v = s.alloc_string(text);
             s.push_root(name_v);
             let var = core::tagged(&mut s, "var", &[name_v, Value::Bool(false)])?;
@@ -2738,7 +2738,7 @@ fn cell_bindings(heap: &mut Heap, cells: &[(SymRef, Repr)], cx: Ctx) -> Result<V
         let bk = cx.binding_kind(&s, *name, repr)?;
         let name_pair = core::pair(&mut s, Value::Symbol(*name), Value::Int(bk))?;
         s.push_root(name_pair);
-        let text = s.symbol_name(*name).to_string();
+        let text = s.symbol_spelling(*name).to_string();
         let name_v = s.alloc_string(text);
         s.push_root(name_v);
         // `is-fn`, which `compile-var` does not read — the same trailing
@@ -3106,7 +3106,7 @@ fn repr_list(heap: &Heap, list: Value) -> Result<Vec<Repr>, Error> {
 fn as_path(heap: &Heap, v: Value) -> Option<Path> {
     match v {
         Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
-        Value::Symbol(id) => Some(Path::root(heap.symbol_name(id))),
+        Value::Symbol(id) => Some(Path::root(heap.symbol_spelling(id))),
         _ => None,
     }
 }
@@ -3123,7 +3123,7 @@ fn block_name(heap: &Heap, form: Value) -> Result<String, Error> {
 /// A field holding a symbol, as its name.
 fn symbol_field(heap: &Heap, form: Value, i: usize, ) -> Result<String, Error> {
     match core::field(heap, form, i) {
-        Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
+        Some(Value::Symbol(id)) => Ok(heap.symbol_spelling(id).to_string()),
         _ => Err(malformed(heap, form)),
     }
 }

@@ -13,7 +13,7 @@ trait สำหรับการวนซ้ำ การเปรียบเ�
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -26,7 +26,7 @@ trait สำหรับการวนซ้ำ การเปรียบเ�
 
 ## 2. `Eq` / `Ord` (การเปรียบเทียบ)
 
-สอดคล้องกับ `PartialEq`/`PartialOrd` ของ Rust (ตั้งชื่อเป็น `Eq`/`Ord`) ใช้ใน `where`
+สอดคล้องกับ `PartialEq`/`PartialOrd` ของ Rust (ตั้งชื่อเป็น `Eq`/`Ord`) ใช้ใน `:where`
 bound ของฟังก์ชัน generic เพื่อกำหนดให้ชนิดของสมาชิกเปรียบเทียบได้ (`sort`/`member`/`assoc`
 และอื่น ๆ)
 
@@ -78,7 +78,7 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -89,12 +89,12 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 (deftrait Number (Add Sub Mul Rem Ord))                   ; ไม่มีเมธอด เป็นการรวมห้าตัว
 ```
 
-**ภายใน bound คุณเขียนตัวดำเนินการได้** เมื่อตัวรับเป็นตัวแปรชนิดที่ถูกผูกด้วย `where`
+**ภายใน bound คุณเขียนตัวดำเนินการได้** เมื่อตัวรับเป็นตัวแปรชนิดที่ถูกผูกด้วย `:where`
 ตัวดำเนินการจะถูกอ่านเป็นเมทอดของ trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
 `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -109,5 +109,5 @@ bound ของฟังก์ชัน generic เพื่อกำหนด�
 **`Div` ระบุชนิดของผลลัพธ์ด้วยชนิดที่เกี่ยวข้อง `Output`** เหมือน CL `/` ระหว่างจำนวนเต็มสองตัวเป็น
 `rational` ดังนั้น `Output` ของ `int` คือ `rational` ส่วนชนิดตัวเลขอื่นคือชนิดของตัวเอง เพราะ `Output`
 ต่างกันตามชนิด `Number` จึงไม่รวม `Div` (รายการ supertrait ต้องตรึงชนิดที่เกี่ยวข้องทุกตัว)
-ฟังก์ชันเจเนอริกที่หารจะรับชนิดผลลัพธ์ด้วย `(where (Div T (Output R)))` หรือขอการหารที่ปิดใน `T` ด้วย
-`(where (Div T (Output T)))` (กรณีนี้ส่ง `int` ไม่ได้)
+ฟังก์ชันเจเนอริกที่หารจะรับชนิดผลลัพธ์ด้วย `(:where (Div T (Output R)))` หรือขอการหารที่ปิดใน `T` ด้วย
+`(:where (Div T (Output T)))` (กรณีนี้ส่ง `int` ไม่ได้)

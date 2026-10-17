@@ -420,7 +420,12 @@ fn the_builtin_symbols_report_their_own_wk_constant() {
     let mut heap = typelisp::Heap::with_capacity(64);
     for (i, name) in BUILTIN_SYMBOLS.iter().enumerate() {
         assert_eq!(*name, name.to_lowercase(), "`{}` is not the canonical form it interns under", name);
-        let Value::Symbol(sym) = heap.intern_symbol(name) else {
+        // A vocabulary entry spelled with a colon is the keyword of that name.
+        let interned = match name.strip_prefix(':') {
+            Some(kw) => heap.intern_keyword(kw),
+            None => heap.intern_symbol(name),
+        };
+        let Value::Symbol(sym) = interned else {
             panic!("intern_symbol always returns a symbol");
         };
         assert_eq!(
@@ -430,7 +435,7 @@ fn the_builtin_symbols_report_their_own_wk_constant() {
              constants it generates have drifted apart",
             name
         );
-        assert_eq!(sym.name(), *name);
+        assert_eq!(sym.spelling(), *name);
     }
 }
 

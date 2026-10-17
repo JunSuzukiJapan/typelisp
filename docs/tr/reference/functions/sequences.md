@@ -84,9 +84,10 @@ yönde otomatik olarak dönüşmez.
 
 | Ad | Biçim | Tür | Açıklama |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Sembolün adını çıkarır |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Bir string'den sembol yapar (intern eder) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Bir anahtar sözcük (`:name`) olup olmadığı. İki nokta adın bir parçasıdır; bu yüzden sınama ilk karaktere bakar ([Sözdizimi Başvurusu](../syntax.md#1-sözcüksel-öğeler)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Sembolün adını çıkarır. Bir anahtar sözcüğün adında iki nokta yoktur (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Bir string'den sembol yapar (kök modülde intern eder) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | `namespace` ad alanında `name` sembolünü yapar (CL'nin `intern`'i). `namespace`, kökten bir modül yoludur (`"geometry::shapes"`); `"keyword"` anahtar sözcüklerinki, `""` köktür. Verilmezse çağrının yazıldığı modüldür |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Bir anahtar sözcük olup olmadığı, yani anahtar sözcük ad alanına ait olup olmadığı ([Sözdizimi Başvurusu](../syntax.md#1-sözcüksel-öğeler)) |
 
 `gensym` için [Makrolar](system.md#8-makrolar) bölümüne bakın.
 

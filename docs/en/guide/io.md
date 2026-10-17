@@ -86,10 +86,10 @@ read bytes from a character stream is a type error.
 ### Making reading and writing functions generic
 
 Each kind of stream is its own type, but the shared operations are gathered into traits. A function
-that takes its argument with `(where (CharInput S))` can read from a file, a string or a socket.
+that takes its argument with `(:where (CharInput S))` can read from a file, a string or a socket.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

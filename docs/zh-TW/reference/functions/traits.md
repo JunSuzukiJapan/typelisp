@@ -10,7 +10,7 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -20,7 +20,7 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 
 ## 2. `Eq` / `Ord`（比較）
 
-相當於 Rust 的 `PartialEq`/`PartialOrd`（名稱為 `Eq`/`Ord`）。在泛型函式的 `where` 約束中用來要求元素型別可以比較（`sort`/`member`/`assoc` 等）。
+相當於 Rust 的 `PartialEq`/`PartialOrd`（名稱為 `Eq`/`Ord`）。在泛型函式的 `:where` 約束中用來要求元素型別可以比較（`sort`/`member`/`assoc` 等）。
 
 ```lisp
 (deftrait Eq ()
@@ -62,7 +62,7 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -73,11 +73,11 @@ trait 群與 `Pathish`（[串流與檔案](streams-files.md)）。哪些型別�
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 沒有方法，五個的組合
 ```
 
-**在約束內可以用運算子書寫。** 當接收者是由 `where` 約束的型別變數時，運算子會被解讀為 trait 方法（`+`→`add`、`-`→`sub`、`*`→`mul`、
+**在約束內可以用運算子書寫。** 當接收者是由 `:where` 約束的型別變數時，運算子會被解讀為 trait 方法（`+`→`add`、`-`→`sub`、`*`→`mul`、
 `/`→`div`、`rem`→`remainder`、`logand`→`bit-and`、`=`→`equals`、`<`→`less` …）：
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -89,5 +89,5 @@ trait 端的方法名稱不是 `+`，是因為 `+` 是內建方法名稱，`impl
 
 **`Div` 用關聯型別 `Output` 表明結果型別。** 與 CL 一樣，整數之間的 `/` 是 `rational`，因此 `int` 的
 `Output` 是 `rational`，其他數值型別則是自身。由於 `Output` 因型別而異，`Number` 不包含 `Div`（繼承
-列表必須固定所有關聯型別）。做除法的泛型函式用 `(where (Div T (Output R)))` 接收結果型別，或者用
-`(where (Div T (Output T)))` 要求在 `T` 內封閉的除法（此時不能傳 `int`）。
+列表必須固定所有關聯型別）。做除法的泛型函式用 `(:where (Div T (Output R)))` 接收結果型別，或者用
+`(:where (Div T (Output T)))` 要求在 `T` 內封閉的除法（此時不能傳 `int`）。

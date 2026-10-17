@@ -196,7 +196,9 @@ typelisp 不区分函数与变量的命名空间。函数名可以直接作为�
 没有包。命名空间是模块，文件本身就是模块。用 `module::name` 代替 `pkg:symbol`，用 `use` 引入
 （[模块与文件结构](modules.md)）。
 
-关键字 `:foo` 是存在的，它是求值为自身的符号。因为没有包，冒号也是名字的一部分：`(symbol->string :foo)` 返回 `":foo"`。
+关键字 `:foo` 是存在的，与 CL 一样求值为自身，并属于关键字专用命名空间 `keyword`。
+`(symbol->string :foo)` 返回 `"foo"`，`(intern "foo" "keyword")` 返回 `:foo`。
+`intern` 的第 2 个参数是模块路径，而不是包名。
 
 ## 10. 读取与语法的区别
 

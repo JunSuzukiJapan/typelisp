@@ -39,7 +39,7 @@ typelisp एक स्टैटिक रूप से टाइप किया
   (case id
     (1 (Option::some "alice"))
     (2 (Option::some "bob"))
-    (else (Option::none))))
+    (:else (Option::none))))
 
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)

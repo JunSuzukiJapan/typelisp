@@ -90,11 +90,8 @@ impl Checker {
     pub(super) fn unsafe_declares_c_structs(heap: &Heap, forms: &[Value]) -> Result<bool, Error> {
         let is_decl = |v: &Value| -> bool {
             let Ok(items) = heap.list_to_vec(*v) else { return false };
-            let head = |i: usize| match items.get(i) {
-                Some(Value::Symbol(id)) => Some(heap.symbol_name(*id)),
-                _ => None,
-            };
-            head(0) == Some("def-c-struct") || (head(0) == Some("pub") && head(1) == Some("def-c-struct"))
+            let head = |i: usize, konst: u32| matches!(items.get(i), Some(Value::Symbol(id)) if id.is(konst));
+            head(0, wk::DEF_C_STRUCT) || (head(0, wk::PUB) && head(1, wk::DEF_C_STRUCT))
         };
         let n = forms.iter().filter(|v| is_decl(v)).count();
         if n > 0 && n != forms.len() {
@@ -121,7 +118,7 @@ impl Checker {
         for (i, form) in forms.iter().enumerate() {
             let items = heap.list_to_vec_locs(*form)?;
             let (public, at) = match items.first() {
-                Some((Value::Symbol(id), _)) if heap.symbol_name(*id) == "pub" => (true, 2),
+                Some((Value::Symbol(id), _)) if id.is(wk::PUB) => (true, 2),
                 _ => (false, 1),
             };
             let parts: Vec<Value> = items[at..].iter().map(|(v, _)| *v).collect();
@@ -144,7 +141,7 @@ impl Checker {
     ) -> Result<Path, Error> {
         let usage = "def-c-struct: (def-c-struct name (field type)...)";
         let name = match parts.first() {
-            Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+            Some(Value::Symbol(id)) => heap.symbol_spelling(*id).to_string(),
             _ => return Err(Error::TypeError(usage.into())),
         };
         let (doc, fields_at) = match parts.get(1) {
@@ -210,7 +207,7 @@ impl Checker {
             let (Some((Value::Symbol(fid), _)), Some((tv, tloc)), 2) = (items.first(), items.get(1), items.len()) else {
                 return Err(Error::TypeError(format!("def-c-struct {}: each field is (name type)", name)));
             };
-            let fname = heap.symbol_name(*fid).to_string();
+            let fname = heap.symbol_spelling(*fid).to_string();
             if fields.iter().any(|f| f.name == fname) {
                 return Err(Error::TypeError(format!("def-c-struct {}: field `{}` is declared twice", name, fname)));
             }

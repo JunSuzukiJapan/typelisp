@@ -221,8 +221,9 @@ Hur `defstruct` skiljer sig:
 Det finns inga paket. Namnrymder är moduler, och en fil är en modul i sig. I stället för `pkg:symbol`
 skriver man `module::name`, och hämtar in namn med `use` ([Moduler och filuppdelning](modules.md)).
 
-Keywords `:foo` finns och är symboler som utvärderas till sig själva. Eftersom det inte finns paket är
-kolonet en del av namnet: `(symbol->string :foo)` returnerar `":foo"`.
+Keywords `:foo` finns och, liksom i CL, utvärderas de till sig själva och hör till keyword-namnrymden
+`keyword`. `(symbol->string :foo)` returnerar `"foo"` och `(intern "foo" "keyword")` returnerar `:foo`.
+Det andra argumentet till `intern` är en modulsökväg i stället för ett paketnamn.
 
 ## 10. Skillnader i läsning och syntax
 

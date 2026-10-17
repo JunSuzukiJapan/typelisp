@@ -147,14 +147,14 @@ is een kanaal dat één waarde aflevert zodra de opgegeven tijd is verstreken. G
 - `((v (recv ch)) body...)` is een ontvangsttak. `v` krijgt een `Option<T>`.
 - `((send ch x) body...)` is een verzendtak.
 - Wanneer meerdere takken tegelijk kunnen doorgaan, wordt er willekeurig een gekozen.
-- Met `(else body...)` aan het einde wordt `else` uitgevoerd wanneer geen tak direct kan doorgaan, en
+- Met `(:else body...)` aan het einde wordt `:else` uitgevoerd wanneer geen tak direct kan doorgaan, en
   wacht `select` niet.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

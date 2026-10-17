@@ -11,8 +11,8 @@
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; دخل محارف
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; خرج محارف
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; دخل يمكنه إرجاع محرف واحد
@@ -21,7 +21,7 @@
 ```
 
 الدالة التي تقرأ محارف تقبل أي نوع تدفق، مضمنًا كان أو معرَّفًا من المستخدم، إذا أخذت
-`(where (CharInput S))` أو `:dyn CharInput`.
+`(:where (CharInput S))` أو `:dyn CharInput`.
 
 ## 2. التوابع
 
@@ -168,7 +168,7 @@
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; كل التوابع المتبقية افتراضية
 
@@ -233,7 +233,7 @@
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | يملأ المكونات الناقصة من `p` من `default`. و`p` النسبي يوضع تحت مجلد `default`؛ و`p` المطلق يحتفظ بمجلده |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | الصورة النسبية إلى `default`. وكل `p` إذا لم يكن تحت الأساس |
 
-وكل وسائط الأنواع تحمل `(where (Pathish P))`.
+وكل وسائط الأنواع تحمل `(:where (Pathish P))`.
 
 ## 10. الفروق عن CL
 

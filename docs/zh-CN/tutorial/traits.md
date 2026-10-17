@@ -43,24 +43,24 @@ trait 是"这个类型支持这些操作"的约定。它让多个类型拥有同
 
 ## 2. trait 约束："实现了这个 trait 的任何类型"
 
-可以用 `where` 给泛型函数的类型参数加条件。这称为 **trait 约束**。
+可以用 `:where` 给泛型函数的类型参数加条件。这称为 **trait 约束**。
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-因为有 `(where (Shape T))`，函数体中可以对 `T` 的值使用 `name` 和 `area`。没有约束时对 `T` 一无所知，就无法调用。
+因为有 `(:where (Shape T))`，函数体中可以对 `T` 的值使用 `name` 和 `area`。没有约束时对 `T` 一无所知，就无法调用。
 
 传入没有实现 `Shape` 的类型时，会在调用处报类型错误。
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 泛型函数会为每个被调用的类型生成专用的函数。不会在运行时检查类型并分支。
@@ -92,7 +92,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | trait | 要实现的方法 | 可以使用的功能 |
 |---|---|---|
-| `Eq` | `equals` | `member`、`find`、`position`、`match` 的 `(= 式)` 模式等 |
+| `Eq` | `equals` | `member`、`find`、`position`、`match` 的 `(:= 式)` 模式等 |
 | `Ord` | `less` | `less-equal`、`greater` 等。`Ord` 继承 `Eq` |
 | `print-object` | `print-object` | `println` 等显示时的形式 |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` 等 |
@@ -126,7 +126,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -169,7 +169,7 @@ total 9
 
 第 2 节的 trait 约束与 `:dyn` 的选择：
 
-| | trait 约束（`where`） | `:dyn Trait` |
+| | trait 约束（`:where`） | `:dyn Trait` |
 |---|---|---|
 | 调用目标何时确定 | 运行前 | 运行时 |
 | 在一个 `Vector` 中混合不同类型 | 不可以 | 可以 |

@@ -13,7 +13,7 @@ rozdziałach: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -26,7 +26,7 @@ dla własnego typu, można go przejść za pomocą `doiter` bez zmian i przekaza
 
 ## 2. `Eq` / `Ord` (porównywanie)
 
-Odpowiadają one `PartialEq`/`PartialOrd` z Rust (nazwane `Eq`/`Ord`). Używa się ich w ograniczeniach `where`
+Odpowiadają one `PartialEq`/`PartialOrd` z Rust (nazwane `Eq`/`Ord`). Używa się ich w ograniczeniach `:where`
 funkcji generycznych, aby wymagać, by typy elementów dało się porównywać (`sort`/`member`/`assoc`
 i tak dalej).
 
@@ -78,7 +78,7 @@ wbudowanych operatorów** ([Liczby](numbers.md)) i nie przechodzi przez tę wars
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -89,12 +89,12 @@ wbudowanych operatorów** ([Liczby](numbers.md)) i nie przechodzi przez tę wars
 (deftrait Number (Add Sub Mul Rem Ord))                   ; bez metod; połączenie pięciu
 ```
 
-**Wewnątrz ograniczenia można pisać operatory.** Gdy odbiorcą jest zmienna typowa związana przez `where`,
+**Wewnątrz ograniczenia można pisać operatory.** Gdy odbiorcą jest zmienna typowa związana przez `:where`,
 operatory są odczytywane jako metody traitu (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
 `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -110,5 +110,5 @@ Zaimplementowane dla: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` na wszystkich typac
 całkowitych daje `rational`, więc `Output` dla `int` to `rational`, a dla każdego innego typu
 liczbowego sam ten typ. Ponieważ `Output` różni się między typami, `Number` nie zawiera `Div` (lista
 nadcech musi ustalić każdy typ powiązany). Funkcja generyczna, która dzieli, przyjmuje typ wyniku przez
-`(where (Div T (Output R)))` albo wymaga dzielenia zamkniętego w `T` przez `(where (Div T (Output T)))`
+`(:where (Div T (Output R)))` albo wymaga dzielenia zamkniętego w `T` przez `(:where (Div T (Output T)))`
 (wtedy nie można przekazać `int`).

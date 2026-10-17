@@ -61,9 +61,10 @@
 
 | नाम | फ़ॉर्म | टाइप | विवरण |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | सिंबल का नाम निकालता है |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | स्ट्रिंग से सिंबल बनाता है (इंटर्न करता है) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | क्या यह कीवर्ड (`:name`) है। कोलन नाम का हिस्सा है, इसलिए जाँच पहला कैरेक्टर देखती है ([सिंटैक्स संदर्भ](../syntax.md#1-लेक्सिकल-तत्व)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | सिंबल का नाम निकालता है। कीवर्ड के नाम में कोलन नहीं होता (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | स्ट्रिंग से सिंबल बनाता है (रूट मॉड्यूल में इंटर्न करता है) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | नेमस्पेस `namespace` में `name` सिंबल बनाता है (CL का `intern`)। `namespace` रूट से मॉड्यूल पाथ है (`"geometry::shapes"`); `"keyword"` कीवर्ड का और `""` रूट है। छोड़ने पर वह मॉड्यूल जिसमें कॉल लिखी है |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | क्या यह कीवर्ड है, अर्थात क्या यह कीवर्ड नेमस्पेस का है ([सिंटैक्स संदर्भ](../syntax.md#1-लेक्सिकल-तत्व)) |
 
 `gensym` के लिए [Macro](system.md#8-macro) देखें।
 

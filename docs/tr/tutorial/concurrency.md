@@ -146,14 +146,14 @@ bir zaman aşımı verir.
 - `((v (recv ch)) gövde...)` bir alma koludur. `v`, bir `Option<T>` alır.
 - `((send ch x) gövde...)` bir gönderme koludur.
 - Birkaç kol aynı anda ilerleyebiliyorsa bunlardan biri rastgele seçilir.
-- Sonda `(else gövde...)` varsa, hiçbir kol hemen ilerleyemediğinde `else` çalışır ve `select`
+- Sonda `(:else gövde...)` varsa, hiçbir kol hemen ilerleyemediğinde `:else` çalışır ve `select`
   beklemez.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

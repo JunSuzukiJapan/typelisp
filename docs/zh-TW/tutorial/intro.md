@@ -155,14 +155,14 @@ error: <stdin>:1:22: type error: type mismatch: expected `int`, found `string`
 
 ### cond
 
-條件有三個以上時，`cond` 比較好讀。最後的 `else` 在所有條件都不成立時執行。
+條件有三個以上時，`cond` 比較好讀。最後的 `:else` 在所有條件都不成立時執行。
 
 ```lisp
 (defun describe-number ((n int)) string
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

@@ -81,6 +81,8 @@ pub(crate) fn rt_builtin_symbol(name: &str) -> Option<&'static str> {
         // symbol literal already goes through, and interning a `Str` is the
         // whole of this builtin.
         "string->symbol" => "rt_intern_symbol",
+        "intern" => "rt_intern",
+        "keywordp" => "rt_keywordp",
         // The small system builtins (`sys_builtin`): parsing, the clock, and
         // process exit. Each is a thin edge over one shared implementation
         // the interpreter calls too.
@@ -558,7 +560,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 335] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 337] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -637,7 +639,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 335] {
         rt_hashtable_bucket_value,
         rt_hashtable_clear, rt_hashtable_count, rt_hashtable_entries, rt_hashtable_keys,
         rt_hashtable_new, rt_hashtable_values, rt_int_to_ratio,
-        rt_intern_path, rt_intern_symbol, rt_wk_symbol, rt_list_to_path, rt_list_to_sexpr_vector, rt_lists_to_sexpr_array, rt_list_to_sexpr_tuple, rt_vector_to_sexpr_tuple, rt_sexpr_tuple_items, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
+        rt_intern, rt_intern_path, rt_intern_symbol, rt_keywordp, rt_wk_symbol, rt_list_to_path, rt_list_to_sexpr_vector, rt_lists_to_sexpr_array, rt_list_to_sexpr_tuple, rt_vector_to_sexpr_tuple, rt_sexpr_tuple_items, rt_match_fail, rt_null, rt_panic, rt_path_to_list, rt_pop_sexpr_root, rt_push_permanent_sexpr_root,
         rt_push_sexpr_root, rt_ratio_add, rt_ratio_cmp, rt_ratio_denominator, rt_ratio_div, rt_ratio_from_bignums, rt_ratio_mul,
         rt_ratio_numerator, rt_ratio_sub, rt_ratio_to_int, rt_ratio_to_float, rt_root_count, rt_set_car, rt_set_cdr,
         rt_set_sexpr_root, rt_sexpr_bool, rt_sexpr_char, rt_sexpr_f32, rt_sexpr_f64, rt_sexpr_instance_test, rt_sexpr_int, rt_sexpr_i32, rt_sexpr_i8, rt_sexpr_i16, rt_sexpr_u8, rt_sexpr_u16, rt_sexpr_u32, rt_sexpr_str, rt_str_append, rt_str_eq, rt_str_equalp,
@@ -1028,6 +1030,8 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 335] {
         ("rt_ratio_numerator", rt_ratio_numerator as *const () as usize),
         ("rt_ratio_denominator", rt_ratio_denominator as *const () as usize),
         ("rt_intern_symbol", rt_intern_symbol as *const () as usize),
+        ("rt_intern", rt_intern as *const () as usize),
+        ("rt_keywordp", rt_keywordp as *const () as usize),
         ("rt_wk_symbol", rt_wk_symbol as *const () as usize),
         ("rt_intern_path", rt_intern_path as *const () as usize),
         ("rt_path_to_list", rt_path_to_list as *const () as usize),

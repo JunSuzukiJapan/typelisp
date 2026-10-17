@@ -103,7 +103,7 @@ dalej) znajdują się w [Operacjach destrukcyjnych](sequences.md#7-operacje-dest
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` z CL. W tej tablicy jest to liczba zajętych wpisów (równa `count`) |
 
 **Kluczem może być dowolny typ implementujący `Hash`**, w tym typy `defstruct`/`defenum`. `get`/`set`/
-`remove` mają `(where (Hash K))`, więc tablica z kluczem typu, który go nie implementuje, jest **błędem
+`remove` mają `(:where (Hash K))`, więc tablica z kluczem typu, który go nie implementuje, jest **błędem
 typu** (`f64` nie ma `Hash` z powodu `NaN`).
 
 ```lisp

@@ -14,7 +14,7 @@ mechanically (see below).
   - Defined names (`(defun NAME ...)` as a function, `(defstruct NAME ...)` as a type,
     `(defvar (NAME ...))` as a variable; the same with `pub`, as in `(pub defun NAME ...)`) and
     both names of `(impl Trait Type)`
-  - Namespace and declaration keywords (`pub` `module` `use` `load` `impl` `where`) and lambda
+  - Namespace and declaration keywords (`pub` `module` `use` `load` `impl`) and lambda
     list markers (`&rest` `&optional` `&key`)
   - Built-in functions, primitive types (including `bignum` / `ratio`), built-in error types,
     `Capitalized` user types, and the trait object type `:dyn Trait` (also inside generic

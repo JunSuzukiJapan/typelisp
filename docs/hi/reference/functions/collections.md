@@ -99,7 +99,7 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL का `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL का `hash-table-size`। इस तालिका में यह भरी हुई प्रविष्टियों की संख्या है (`count` के बराबर) |
 
-**कोई भी टाइप जो `Hash` लागू करता है कुंजी हो सकता है**, `defstruct`/`defenum` टाइप सहित। `get`/`set`/`remove` में `(where (Hash K))` है, इसलिए ऐसे टाइप की कुंजी वाली तालिका जो इसे लागू नहीं करता **टाइप त्रुटि** है (`NaN` के कारण `f64` में `Hash` नहीं है)।
+**कोई भी टाइप जो `Hash` लागू करता है कुंजी हो सकता है**, `defstruct`/`defenum` टाइप सहित। `get`/`set`/`remove` में `(:where (Hash K))` है, इसलिए ऐसे टाइप की कुंजी वाली तालिका जो इसे लागू नहीं करता **टाइप त्रुटि** है (`NaN` के कारण `f64` में `Hash` नहीं है)।
 
 ```lisp
 (deftrait Hash (Eq)

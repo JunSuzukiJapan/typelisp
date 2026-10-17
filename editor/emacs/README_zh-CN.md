@@ -12,7 +12,7 @@ VS Code 版见 [../vscode/](../vscode/README_zh-CN.md)。两者使用相同的�
     `print`/`println`/`format`、`pprint` 系列等）
   - 定义名（`(defun NAME ...)` 的 `NAME` 作为函数名，`(defstruct NAME ...)` 作为类型名，
     `(defvar (NAME ...))` 作为变量名。带 `pub` 的 `(pub defun NAME ...)` 也一样）
-  - 命名空间和声明关键字（`pub` `module` `use` `load` `impl` `where`）以及 lambda 列表标记
+  - 命名空间和声明关键字（`pub` `module` `use` `load` `impl`）以及 lambda 列表标记
     （`&rest` `&optional` `&key`）
   - 内置函数（`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` 等）
   - 基本类型（包括 `bignum` / `ratio`）、内置类型、内置错误类型（`ParseIntError` 等）、

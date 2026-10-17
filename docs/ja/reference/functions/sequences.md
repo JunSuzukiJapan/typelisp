@@ -78,9 +78,10 @@ S 式のセルを扱うのは、1 章の汎用 `cons`/`car`/`cdr` ではなく `
 
 | 名前 | 形式 | 型 | 説明 |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | シンボル名を取り出す |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | 文字列からシンボルを作る（intern） |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | キーワード（`:name`）か。コロンは名前の一部なので判定は先頭文字（[構文リファレンス](../syntax.md#1-字句要素)） |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | シンボル名を取り出す。キーワードの名前にコロンは含まれない（`:foo` → `"foo"`） |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | 文字列からシンボルを作る（ルートのモジュールに intern） |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 名前空間 `namespace` に `name` のシンボルを作る（CL の `intern`）。`namespace` はルートからのモジュールパス（`"geometry::shapes"`）で、`"keyword"` はキーワード、`""` はルート。省略すると呼び出しを書いたモジュール |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | キーワードか——キーワード用の名前空間に属するか（[構文リファレンス](../syntax.md#1-字句要素)） |
 
 `gensym` は [マクロ](system.md#8-マクロ) を参照。
 

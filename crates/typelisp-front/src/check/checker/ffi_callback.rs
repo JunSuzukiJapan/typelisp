@@ -91,7 +91,7 @@ impl Checker {
             }
             Some("var") => {
                 let name = match core::field(heap, checked.form, 0) {
-                    Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+                    Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
                     _ => return Err(Error::TypeError("internal error: a var node without a name".into())),
                 };
                 self.pend_labels_callback(env, &name, loc.as_ref(), callee)?

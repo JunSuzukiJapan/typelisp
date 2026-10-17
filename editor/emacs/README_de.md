@@ -14,7 +14,7 @@ prüft das maschinell (siehe Ende dieses Dokuments).
   - Definierte Namen (das `NAME` von `(defun NAME ...)` als Funktionsname, das von
     `(defstruct NAME ...)` als Typname und das von `(defvar (NAME ...))` als Variablenname;
     ebenso mit `pub`, wie in `(pub defun NAME ...)`)
-  - Schlüsselwörter für Namensräume und Deklarationen (`pub` `module` `use` `load` `impl` `where`)
+  - Schlüsselwörter für Namensräume und Deklarationen (`pub` `module` `use` `load` `impl`)
     und Lambda-Listen-Marker (`&rest` `&optional` `&key`)
   - Eingebaute Funktionen (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` usw.)
   - Primitive Typen (einschließlich `bignum` / `ratio`), eingebaute Typen, eingebaute Fehlertypen

@@ -12,8 +12,8 @@ l'exécution « peut-on lire ce flux ? ».
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; entrée de caractères
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; sortie de caractères
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; entrée qui peut remettre un caractère
@@ -22,7 +22,7 @@ l'exécution « peut-on lire ce flux ? ».
 ```
 
 Une fonction qui lit des caractères accepte n'importe quel type de flux, intégré ou défini par l'utilisateur, si elle
-prend `(where (CharInput S))` ou `:dyn CharInput`.
+prend `(:where (CharInput S))` ou `:dyn CharInput`.
 
 ## 2. Méthodes
 
@@ -172,7 +172,7 @@ composites.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; toutes les autres méthodes sont celles par défaut
 
@@ -239,7 +239,7 @@ aucune analyse n'a lieu.
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Complète les composants manquants de `p` à partir de `default`. Un `p` relatif va sous le répertoire de `default` ; un `p` absolu garde son propre répertoire |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | La forme relative à `default`. Tout `p` s'il n'est pas sous la base |
 
-Les arguments de type portent tous `(where (Pathish P))`.
+Les arguments de type portent tous `(:where (Pathish P))`.
 
 ## 10. Différences avec CL
 

@@ -13,7 +13,7 @@ Traits för iteration, jämförelse och aritmetik. De andra standardtraits finns
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -27,7 +27,7 @@ Listor av `Sexpr` implementerar inte `Iter` (deras elementtyper är inte enhetli
 ## 2. `Eq` / `Ord` (jämförelse)
 
 Dessa motsvarar Rusts `PartialEq`/`PartialOrd` (här kallade `Eq`/`Ord`). De används i
-`where`-gränser för generiska funktioner för att kräva att elementtyper kan jämföras
+`:where`-gränser för generiska funktioner för att kräva att elementtyper kan jämföras
 (`sort`/`member`/`assoc` och så vidare).
 
 ```lisp
@@ -77,7 +77,7 @@ inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -88,12 +88,12 @@ inbyggda operatorerna** ([Tal](numbers.md)) och går inte genom det här lagret.
 (deftrait Number (Add Sub Mul Rem Ord))                   ; inga metoder; en kombination av fem
 ```
 
-**Inuti en gräns kan man skriva operatorer.** När mottagaren är en typvariabel bunden av `where` läses
+**Inuti en gräns kan man skriva operatorer.** När mottagaren är en typvariabel bunden av `:where` läses
 operatorer som trait-metoder (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
 `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -109,5 +109,5 @@ Implementerat för: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` på alla numeriska ty
 `rational`, så `Output` för `int` är `rational` och för varje annan numerisk typ typen själv. Eftersom
 `Output` skiljer sig mellan typerna innehåller `Number` inte `Div` (en supertrait-lista måste fästa
 varje associerad typ). En generisk funktion som dividerar tar emot resultattypen med
-`(where (Div T (Output R)))`, eller kräver en division sluten i `T` med `(where (Div T (Output T)))` (då
+`(:where (Div T (Output R)))`, eller kräver en division sluten i `T` med `(:where (Div T (Output T)))` (då
 kan en `int` inte skickas).

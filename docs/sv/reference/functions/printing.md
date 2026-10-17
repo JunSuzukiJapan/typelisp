@@ -23,7 +23,7 @@ följande variadiska argumenten i tur och ordning.
 
 Typen på `dest` delar betydelsen i två (vilken som gäller avgörs statiskt). Strömformen kan skrivas på
 samma sätt med en konkret strömtyp, en `:dyn CharOutput` eller en typvariabel bunden av
-`(where (CharOutput S))`. Ett `dest` som varken är en `bool` eller en ström är ett typfel.
+`(:where (CharOutput S))`. Ett `dest` som varken är en `bool` eller en ström är ett typfel.
 
 **Kontrollsträngen måste vara en literal** (samma begränsning som Rusts `format!`). Direktiven i den avgör
 hur många argument som tas och av vilka typer, så en sträng som byggs vid körning kan inte läsas vid
@@ -248,7 +248,7 @@ Regler:
 
 - **Registreringen är statisk.** En `impl` typkontrolleras som en vanlig metoddefinition, så ett
   felstavat typnamn eller en felaktig signatur är ett kompileringsfel.
-- **Det fungerar också för generiska typer.** `(impl print-object box<T> (where (print-object T)) ...)`
+- **Det fungerar också för generiska typer.** `(impl print-object box<T> (:where (print-object T)) ...)`
   går till en separat kropp för varje typargument: ett värde kommer ihåg sin typ inklusive typargumenten
   (`box<i32>`). Inbyggda generiska typer som `Vector<T>` fungerar på samma sätt.
 - **Valet görs vid utskrift.** Vilket direktiv som förbrukar vilket argument beror på kontrollsträngens
@@ -264,7 +264,7 @@ Regler:
   sättet generisk kod kan säga "värden av en okänd typ får renderas" (samma form som Rusts `T: Display`).
   `print-object` för `Array<T>` är ett exempel.
 - **Med typargument som inte uppfyller gränsen används den inbyggda representationen tyst.**
-  `(impl print-object Array<T> (where (print-object T)))` gäller `Array<i32>`, men inte en `Array` vars
+  `(impl print-object Array<T> (:where (print-object T)))` gäller `Array<i32>`, men inte en `Array` vars
   element är en `defstruct` utan `print-object`. Det vore meningslöst om det att bara skapa en array vore ett
   fel, så det är inte ett fel.
 - CL:s andra mekanism, `set-pprint-dispatch` / `*print-pprint-dispatch*` (ett register vid körning med

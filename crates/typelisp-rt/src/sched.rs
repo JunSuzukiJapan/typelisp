@@ -2259,7 +2259,7 @@ pub enum TaskFailure {
     /// A `(panic ...)`, a runtime error, or a scheduler refusal: `panic: msg`.
     Panic(String),
     /// A `throw` no `catch` in the task claimed. Carries the tag.
-    Throw(String),
+    Throw(typelisp_mem::SymRef),
     /// The runtime disagreeing with itself — every task blocked, a handle of
     /// the wrong shape.
     Internal(String),
@@ -2280,7 +2280,7 @@ impl std::fmt::Display for TaskFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TaskFailure::Panic(m) => write!(f, "panic: {}", m),
-            TaskFailure::Throw(tag) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag),
+            TaskFailure::Throw(tag) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag.spelling()),
             TaskFailure::Internal(m) => write!(f, "error: {}", m),
         }
     }
@@ -2702,7 +2702,7 @@ impl TaskBody for CompiledTask {
 
     fn failure_left_task(e: TaskFailure) -> TaskFailure {
         match e {
-            TaskFailure::Throw(tag) => TaskFailure::Panic(format!("`throw` of `{}` left its task", tag)),
+            TaskFailure::Throw(tag) => TaskFailure::Panic(format!("`throw` of `{}` left its task", tag.spelling())),
             other => other,
         }
     }

@@ -104,7 +104,7 @@ vidare) finns i [Destruktiva operationer](sequences.md#7-destruktiva-operationer
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL:s `hash-table-size`. I den här tabellen är det antalet upptagna poster (lika med `count`) |
 
 **Vilken typ som helst som implementerar `Hash` kan vara nyckel**, inklusive `defstruct`/`defenum`-typer.
-`get`/`set`/`remove` har `(where (Hash K))`, så en tabell med en nyckeltyp som inte implementerar det är
+`get`/`set`/`remove` har `(:where (Hash K))`, så en tabell med en nyckeltyp som inte implementerar det är
 ett **typfel** (`f64` har inget `Hash` på grund av `NaN`).
 
 ```lisp

@@ -46,26 +46,26 @@ Omettere anche uno solo dei metodi dichiarati dal trait è un errore di tipo nel
 
 ## 2. Vincoli di trait: "qualsiasi tipo che implementi questo trait"
 
-Puoi porre una condizione sul parametro di tipo di una funzione generica con `where`. Questo si chiama
+Puoi porre una condizione sul parametro di tipo di una funzione generica con `:where`. Questo si chiama
 **vincolo di trait**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Grazie a `(where (Shape T))`, il corpo può usare `name` e `area` sui valori di `T`. Senza il vincolo non
+Grazie a `(:where (Shape T))`, il corpo può usare `name` e `area` sui valori di `T`. Senza il vincolo non
 si sa nulla di `T`, quindi non si potrebbero chiamare.
 
 Passare un tipo che non implementa `Shape` è un errore di tipo nella chiamata.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Una funzione generica ottiene una propria copia per ciascun tipo con cui viene chiamata. Non sono
@@ -99,7 +99,7 @@ standard che lo usano.
 
 | Trait | Metodi da implementare | Che cosa abilita |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, il pattern `(= expr)` di `match` e così via |
+| `Eq` | `equals` | `member`, `find`, `position`, il pattern `(:= expr)` di `match` e così via |
 | `Ord` | `less` | `less-equal`, `greater` e così via. `Ord` eredita da `Eq` |
 | `print-object` | `print-object` | Come i valori vengono mostrati da `println` e simili |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` e così via |
@@ -136,7 +136,7 @@ implementi `Ord`.
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -182,7 +182,7 @@ total 9
 
 Scegliere tra i vincoli di trait della sezione 2 e `:dyn`:
 
-| | Vincolo di trait (`where`) | `:dyn Trait` |
+| | Vincolo di trait (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Quando viene deciso il metodo chiamato | Prima dell'esecuzione | A runtime |
 | Mescolare tipi in un unico `Vector` | Non possibile | Possibile |

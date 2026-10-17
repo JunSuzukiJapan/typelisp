@@ -50,7 +50,7 @@
          (println "commands: add <text> / list / done <id> / remove <id> / quit")
          true)
         ((equal cmd "quit") false)
-        (else (println "unknown command (try `help`)") true)))))
+        (:else (println "unknown command (try `help`)") true)))))
 
 (defun repl () ()
   (println "todo-cli. type `help` for commands.")

@@ -192,7 +192,9 @@ typelisp 不區分函式與變數的命名空間。函式名稱可以直接作�
 
 沒有套件。命名空間是模組，檔案本身就是模組。以 `module::name` 取代 `pkg:symbol`，以 `use` 引入（[模組與檔案結構](modules.md)）。
 
-關鍵字 `:foo` 是有的，它是求值為自身的符號。因為沒有套件，冒號也是名稱的一部分：`(symbol->string :foo)` 回傳 `":foo"`。
+關鍵字 `:foo` 是存在的，與 CL 一樣求值為自身，並屬於關鍵字專用命名空間 `keyword`。
+`(symbol->string :foo)` 回傳 `"foo"`，`(intern "foo" "keyword")` 回傳 `:foo`。
+`intern` 的第 2 個參數是模組路徑，而不是套件名稱。
 
 ## 10. 讀取與語法的差異
 

@@ -99,7 +99,7 @@
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL 的 `hash-table-size`。在本表中是占用数（等于 `count`） |
 
 **只要实现了 `Hash`，任何类型都可以作为键**——包括 `defstruct`/`defenum`。`get`/`set`/`remove` 带有
-`(where (Hash K))`，所以以没有实现它的类型为键的表是**类型错误**（`f64` 没有 `Hash` 是因为 `NaN`）。
+`(:where (Hash K))`，所以以没有实现它的类型为键的表是**类型错误**（`f64` 没有 `Hash` 是因为 `NaN`）。
 
 ```lisp
 (deftrait Hash (Eq)

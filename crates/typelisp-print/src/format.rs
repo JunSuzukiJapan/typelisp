@@ -2838,6 +2838,33 @@ impl Renderer {
         self.render_builtin(heap, ctx, v, standard, depth, out)
     }
 
+    /// A symbol as CL's printer writes it. With escaping (`~s`, `prin1`), a
+    /// keyword gets its colon and a name the reader would take for something
+    /// else goes between `|`s; without (`~a`, `princ`), the name alone. Only
+    /// what is outside the bars follows `*print-case*`.
+    fn symbol_text(ctx: RenderCtx<'_>, id: typelisp_mem::SymRef, standard: bool) -> String {
+        let name = id.name();
+        if id.is_keyword() {
+            let name = ctx.print_vars.render_symbol(name);
+            return if standard { format!(":{}", name) } else { name };
+        }
+        if standard && Self::name_needs_bars(name) {
+            return format!("|{}|", name);
+        }
+        ctx.print_vars.render_symbol(name)
+    }
+
+    /// Whether `name`, written bare, would read back as something other than
+    /// the plain symbol: a keyword (leading colon), a number, a boolean, more
+    /// than one token, or nothing at all.
+    fn name_needs_bars(name: &str) -> bool {
+        name.is_empty()
+            || name.starts_with(':')
+            || name.chars().any(|c| c.is_whitespace() || "()[]{}\"'`;|".contains(c))
+            || matches!(name, "true" | "false")
+            || name.parse::<f64>().is_ok()
+    }
+
     /// One integer under `*print-base*`/`*print-radix*`. `decimal` and
     /// `digits` are two ways of writing the same number — the caller supplies
     /// both because `i64` and `BigInt` spell them differently, and base 10
@@ -2903,15 +2930,12 @@ impl Renderer {
                     out.push_str(&heap.string(id));
                 }
             }
-            Value::Symbol(id) => {
-                let text = ctx.print_vars.render_symbol(heap.symbol_name(id));
-                out.push_str(&text);
-            }
+            Value::Symbol(id) => out.push_str(&Self::symbol_text(ctx, id, standard)),
             Value::Path(id) => {
                 let segs: Vec<String> = heap
                     .path_segments(id)
                     .iter()
-                    .map(|s| ctx.print_vars.render_symbol(heap.symbol_name(*s)))
+                    .map(|s| Self::symbol_text(ctx, *s, standard))
                     .collect();
                 out.push_str(&segs.join("::"));
             }
@@ -3077,7 +3101,7 @@ impl Renderer {
                         // `Display` is the same `::` join, and this crate has
                         // no `Path` to borrow it from.
                         let segs: Vec<&str> =
-                            heap.path_segments(pid).iter().map(|s| heap.symbol_name(*s)).collect();
+                            heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s)).collect();
                         format!("#<builtin {}::{}>", segs.join("::"), heap.builtin_fn_name(id))
                     }
                 };

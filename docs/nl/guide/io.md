@@ -86,11 +86,11 @@ verschillende types, dus proberen bytes uit een tekenstream te lezen is een type
 ### Lees- en schrijffuncties generiek maken
 
 Elk soort stream is een eigen type, maar de gedeelde bewerkingen zijn in traits samengebracht. Een
-functie die haar argument met `(where (CharInput S))` neemt, kan uit een bestand, een string of een
+functie die haar argument met `(:where (CharInput S))` neemt, kan uit een bestand, een string of een
 socket lezen.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

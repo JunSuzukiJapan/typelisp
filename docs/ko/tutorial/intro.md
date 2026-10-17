@@ -159,14 +159,14 @@ error: <stdin>:1:22: type error: type mismatch: expected `int`, found `string`
 
 ### cond
 
-조건이 세 개 이상이면 `cond`가 읽기 쉽다. 마지막의 `else`는 어느 조건에도 해당하지 않을 때 선택된다.
+조건이 세 개 이상이면 `cond`가 읽기 쉽다. 마지막의 `:else`는 어느 조건에도 해당하지 않을 때 선택된다.
 
 ```lisp
 (defun describe-number ((n int)) string
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

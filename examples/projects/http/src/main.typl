@@ -34,7 +34,7 @@
     ((equal (target r) "/") (text-response 200 "OK" "hello from typelisp\n"))
     ((equal (target r) "/time")
      (text-response 200 "OK" (format false "~a\n" (get-universal-time))))
-    (else (text-response 404 "Not Found" (format false "no route for ~a\n" (target r))))))
+    (:else (text-response 404 "Not Found" (format false "no route for ~a\n" (target r))))))
 
 (defun serve-connection ((c socket-stream)) ()
   (match (read-request c)
@@ -83,6 +83,6 @@
                   (if (> (len args) 4) (unwrap-or (parse-int (get args 4)) 8443) 8443)))
       ((and (> (len args) 2) (equal (get args 1) "get"))
        (fetch (get args 2)))
-      (else (println "usage: main.typl serve [port] | serve-tls <cert.pem> <key.pem> [port] | get <url>")))))
+      (:else (println "usage: main.typl serve [port] | serve-tls <cert.pem> <key.pem> [port] | get <url>")))))
 
 (main)

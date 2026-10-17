@@ -74,9 +74,10 @@ S 식의 셀은 1장의 일반적인 `cons`/`car`/`cdr`가 아니라 `sexpr-*` �
 
 | 이름 | 형식 | 타입 | 설명 |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | 심볼의 이름을 꺼낸다 |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | 문자열에서 심볼을 만든다(인턴한다) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | 키워드(`:name`)인지. 콜론은 이름의 일부이므로 첫 글자를 보고 판단한다([문법 레퍼런스](../syntax.md#1-어휘-요소)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | 심볼의 이름을 꺼낸다. 키워드의 이름에는 콜론이 들어가지 않는다(`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | 문자열에서 심볼을 만든다(루트 모듈에 인턴한다) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 이름공간 `namespace`에 `name` 심볼을 만든다(CL의 `intern`). `namespace`는 루트로부터의 모듈 경로(`"geometry::shapes"`)이며 `"keyword"`는 키워드, `""`는 루트이다. 생략하면 호출을 쓴 모듈 |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | 키워드인지, 즉 키워드용 이름공간에 속하는지 ([문법 레퍼런스](../syntax.md#1-어휘-요소)) |
 
 `gensym`은 [매크로](system.md#8-매크로)를 참고한다.
 

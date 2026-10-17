@@ -21,7 +21,7 @@ sonraki değişken sayılı bağımsız değişkenleri sırayla tüketir.
 | `format` (bir akışa) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` bir `bool` değilse CL'nin akış hedefidir. Açılmış string o akışa yazılır. Dönüş değeri `()`'dir (CL'nin `nil`'i) ve string döndürülmez |
 
 `dest`'in türü anlamı ikiye böler (hangisinin geçerli olduğu statik olarak belirlenir). Akış biçimi;
-somut bir akış türüyle, bir `:dyn CharOutput` ile ya da `(where (CharOutput S))` ile bağlanmış bir tür
+somut bir akış türüyle, bir `:dyn CharOutput` ile ya da `(:where (CharOutput S))` ile bağlanmış bir tür
 değişkeniyle aynı şekilde yazılabilir. Ne `bool` ne de akış olan bir `dest` tür hatasıdır.
 
 **Denetim string'i bir sabit olmalıdır** (Rust'ın `format!`'ıyla aynı kısıtlama). İçindeki yönergeler
@@ -249,7 +249,7 @@ Kurallar:
 
 - **Kayıt statiktir.** Bir `impl`, sıradan bir metot tanımı gibi tür denetiminden geçer; bu yüzden yanlış
   yazılmış bir tür adı ya da yanlış bir imza derleme hatasıdır.
-- **Jenerik türler için de çalışır.** `(impl print-object box<T> (where (print-object T)) ...)`, her tür
+- **Jenerik türler için de çalışır.** `(impl print-object box<T> (:where (print-object T)) ...)`, her tür
   bağımsız değişkeni için ayrı bir gövdeye gider: bir değer türünü tür bağımsız değişkenleri dahil
   hatırlar (`box<i32>`). `Vector<T>` gibi yerleşik jenerik türler de aynı şekilde çalışır.
 - **Seçim yazdırma zamanında yapılır.** Hangi yönergenin hangi bağımsız değişkeni tükettiği, denetim
@@ -265,7 +265,7 @@ Kurallar:
   "bilinmeyen türdeki değerler görüntülenebilir" demesinin tek yolu bu sınırdır (Rust'ın `T: Display`'i
   ile aynı biçim). `Array<T>`'nin `print-object`'i bir örnektir.
 - **Sınırı karşılamayan tür bağımsız değişkenleriyle yerleşik gösterim sessizce kullanılır.**
-  `(impl print-object Array<T> (where (print-object T)))`, `Array<i32>` için geçerlidir, ancak elemanları
+  `(impl print-object Array<T> (:where (print-object T)))`, `Array<i32>` için geçerlidir, ancak elemanları
   `print-object`'siz bir `defstruct` olan bir `Array` için geçerli değildir. Yalnızca bir dizi oluşturmanın
   hata olması anlamsız olurdu; bu yüzden hata değildir.
 - CL'nin diğer mekanizması olan `set-pprint-dispatch` / `*print-pprint-dispatch*` (tür belirleyicileriyle

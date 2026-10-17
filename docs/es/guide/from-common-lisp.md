@@ -223,8 +223,10 @@ No hay paquetes. Los espacios de nombres son módulos, y un archivo es un módul
 `pkg:symbol`, se escribe `module::name`, y los nombres se traen con `use`
 ([Módulos y organización de archivos](modules.md)).
 
-Existen las palabras clave `:foo`, que son símbolos que se evalúan a sí mismos. Como no hay paquetes, los
-dos puntos forman parte del nombre: `(symbol->string :foo)` devuelve `":foo"`.
+Existen las palabras clave `:foo`, que, como en CL, se evalúan a sí mismas y pertenecen al espacio de
+nombres de las palabras clave, `keyword`. `(symbol->string :foo)` devuelve `"foo"` y
+`(intern "foo" "keyword")` devuelve `:foo`. El segundo argumento de `intern` es una ruta de módulo en
+lugar de un nombre de paquete.
 
 ## 10. Diferencias de lectura y sintaxis
 

@@ -143,14 +143,14 @@ que entrega um valor depois que o tempo dado passa. Combinado com `select`, ele 
 - `((v (recv ch)) corpo...)` é um ramo de recepção. `v` recebe um `Option<T>`.
 - `((send ch x) corpo...)` é um ramo de envio.
 - Quando vários ramos podem avançar ao mesmo tempo, um deles é escolhido ao acaso.
-- Com `(else corpo...)` no final, `else` é executado quando nenhum ramo pode avançar imediatamente, e `select`
+- Com `(:else corpo...)` no final, `:else` é executado quando nenhum ramo pode avançar imediatamente, e `select`
   não espera.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

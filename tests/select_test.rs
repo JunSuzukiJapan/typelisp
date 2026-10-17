@@ -141,7 +141,7 @@ fn else_runs_when_nothing_is_ready() {
                    (select
                      ((v (recv a)) "a")
                      ((send b 1) "b")
-                     (else "nothing"))))
+                     (:else "nothing"))))
                (main)"#
         ),
         "nothing"
@@ -274,7 +274,7 @@ fn a_select_with_no_arms_is_refused() {
 /// `else` alone is just its body written the long way.
 #[test]
 fn else_alone_is_refused() {
-    let e = check_err(r#"(defun main () int (select (else 1)))"#);
+    let e = check_err(r#"(defun main () int (select (:else 1)))"#);
     assert!(e.contains("at least one channel arm"), "got: {}", e);
 }
 
@@ -284,7 +284,7 @@ fn else_must_be_last() {
     let e = check_err(
         r#"(defun main () int
              (let ((a (the Chan<int> (Chan::new 0))))
-               (select (else 1) ((v (recv a)) 2))))"#,
+               (select (:else 1) ((v (recv a)) 2))))"#,
     );
     assert!(e.contains("last arm"), "got: {}", e);
 }
@@ -351,7 +351,7 @@ fn compiled_select_agrees_with_the_interpreter() {
                    (select
                      ((v (recv a)) (format false "a=~a" v))
                      ((send b "x") "sent")
-                     (else "nothing")))
+                     (:else "nothing")))
                  (defun waited ((a Chan<int>)) int
                    (select ((v (recv a)) (unwrap v))))
                  (defun main () string

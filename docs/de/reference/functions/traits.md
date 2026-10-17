@@ -13,7 +13,7 @@ Kapiteln: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -26,7 +26,7 @@ eigenen Typ, lässt er sich unverändert mit `doiter` durchlaufen und an die
 
 ## 2. `Eq` / `Ord` (Vergleich)
 
-Diese entsprechen Rusts `PartialEq`/`PartialOrd` (benannt `Eq`/`Ord`). Sie werden in den `where`-Schranken
+Diese entsprechen Rusts `PartialEq`/`PartialOrd` (benannt `Eq`/`Ord`). Sie werden in den `:where`-Schranken
 generischer Funktionen verwendet, um zu verlangen, dass Elementtypen vergleichbar sind
 (`sort`/`member`/`assoc` usw.).
 
@@ -78,7 +78,7 @@ Schicht.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -89,12 +89,12 @@ Schicht.
 (deftrait Number (Add Sub Mul Rem Ord))                   ; keine Methoden; eine Kombination aus fünf
 ```
 
-**Innerhalb einer Schranke kann man Operatoren schreiben.** Ist der Empfänger eine durch `where` gebundene
+**Innerhalb einer Schranke kann man Operatoren schreiben.** Ist der Empfänger eine durch `:where` gebundene
 Typvariable, werden Operatoren als Trait-Methoden gelesen (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
 `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -110,5 +110,5 @@ Implementiert für: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` auf allen numerischen
 ganzen Zahlen ein `rational`, daher ist das `Output` von `int` `rational` und das jedes anderen
 Zahlentyps der Typ selbst. Weil `Output` je nach Typ verschieden ist, enthält `Number` kein `Div` (eine
 Supertrait-Liste muss jeden assoziierten Typ festlegen). Eine generische Funktion, die dividiert, nimmt
-den Ergebnistyp mit `(where (Div T (Output R)))` entgegen oder verlangt mit `(where (Div T (Output T)))`
+den Ergebnistyp mit `(:where (Div T (Output R)))` entgegen oder verlangt mit `(:where (Div T (Output T)))`
 eine in `T` geschlossene Division (dann kann kein `int` übergeben werden).

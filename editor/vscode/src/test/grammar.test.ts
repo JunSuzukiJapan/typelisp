@@ -126,12 +126,12 @@ test(":dyn is a keyword in every type position, including inside generics", () =
   assert.equal(scopeOf(src, "Error"), "entity.name.type.typelisp");
 });
 
-test("special forms, declarations, clause keywords and lambda-list markers", () => {
+test("special forms, declarations and lambda-list markers", () => {
   const src = [
     "(module m)",
     "(use tree)",
     "(load \"x\")",
-    "(defmacro k (a &optional b &rest c) `(cond ((< a 0) -1) (else (as i64 a))))",
+    "(defmacro k (a &optional b &rest c) `(cond ((< a 0) -1) (:else (as i64 a))))",
     "(println \"~a\" x)",
     "(pprint-logical-block (o :prefix \"[\") (pprint-newline :fill))",
   ].join("\n");
@@ -141,7 +141,7 @@ test("special forms, declarations, clause keywords and lambda-list markers", () 
   assert.equal(scopeOf(src, "&optional"), "storage.modifier.lambda-list.typelisp");
   assert.equal(scopeOf(src, "&rest"), "storage.modifier.lambda-list.typelisp");
   assert.equal(scopeOf(src, "cond"), "keyword.control.typelisp");
-  assert.equal(scopeOf(src, "else"), "keyword.control.conditional.typelisp");
+  assert.equal(scopeOf(src, ":else"), "constant.other.symbol.typelisp");
   assert.equal(scopeOf(src, "as"), "keyword.control.typelisp");
   assert.equal(scopeOf(src, "println"), "keyword.control.typelisp");
   assert.equal(scopeOf(src, "pprint-logical-block"), "keyword.control.typelisp");

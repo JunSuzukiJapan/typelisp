@@ -44,7 +44,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``unknown type `foo`: no type of that name is visible here. ...`` | उस नाम का कोई टाइप नहीं है। टाइप को उसका उपयोग करने वाले पहले फ़ॉर्म से पहले परिभाषित करें (टाइप की फ़ॉरवर्ड घोषणा नहीं होती)। यदि आपका आशय टाइप वेरिएबल था, तो उसे फ़ंक्शन के नाम के बाद `<foo>` जैसी घोषित करने वाली स्थिति में लिखें ([सिंटैक्स संदर्भ 3.6](syntax.md#36-defstruct--struct-उपयोगकर्ता-परिभाषित-टाइप)) |
 | ``cannot infer type argument `t` for `vector::new` `` | टाइप आर्ग्युमेंट निर्धारित नहीं किया जा सकता। टाइप को `the` से लिखें, जैसे `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` हर variant को नहीं संभालता। छूटे हुए variant के लिए शाखाएँ, या `_` शाखा जोड़ें |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | फ़ंक्शन को ऐसा trait चाहिए जिसे आपका पास किया हुआ टाइप लागू नहीं करता। `(impl Eq pt ...)` लिखें ([स्टैंडर्ड trait](functions/traits.md)) |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | फ़ंक्शन को ऐसा trait चाहिए जिसे आपका पास किया हुआ टाइप लागू नहीं करता। `(impl Eq pt ...)` लिखें ([स्टैंडर्ड trait](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | जहाँ `:dyn` अपेक्षित था वहाँ ऐसे टाइप का मान पास किया गया जो trait को लागू नहीं करता। `impl` लिखें |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | जहाँ टाइप आता है वहाँ trait का नाम लिखा गया। `:dyn Error` लिखें |
 | ``if: (if cond then else)`` | `if` का आकार गलत है। `if` को else शाखा चाहिए। जब ज़रूरत न हो, तो `when` का उपयोग करें |

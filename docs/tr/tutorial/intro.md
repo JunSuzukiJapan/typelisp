@@ -165,14 +165,14 @@ Yanlış durumda hiçbir şey olmaması gerektiğinde `when` kullanın (tersi i�
 
 ### cond
 
-Üç ya da daha fazla koşulda `cond` daha okunaklıdır. Hiçbir koşul sağlanmadığında son `else` alınır.
+Üç ya da daha fazla koşulda `cond` daha okunaklıdır. Hiçbir koşul sağlanmadığında son `:else` alınır.
 
 ```lisp
 (defun describe-number ((n int)) string
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

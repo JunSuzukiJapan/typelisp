@@ -86,10 +86,10 @@ odczytu bajtów ze strumienia znakowego jest błędem typu.
 ### Uogólnianie funkcji odczytu i zapisu
 
 Każdy rodzaj strumienia jest osobnym typem, ale wspólne operacje są zebrane w traity. Funkcja,
-która przyjmuje argument z `(where (CharInput S))`, może czytać z pliku, z łańcucha znaków lub z gniazda.
+która przyjmuje argument z `(:where (CharInput S))`, może czytać z pliku, z łańcucha znaków lub z gniazda.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

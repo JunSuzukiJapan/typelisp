@@ -161,7 +161,7 @@ error: <stdin>:1:22: type error: type mismatch: expected `int`, found `string`
 
 ### cond
 
-При трёх и более условиях `cond` читается лучше. Завершающий `else` выбирается, когда ни одно из условий не
+При трёх и более условиях `cond` читается лучше. Завершающий `:else` выбирается, когда ни одно из условий не
 выполнено.
 
 ```lisp
@@ -169,7 +169,7 @@ error: <stdin>:1:22: type error: type mismatch: expected `int`, found `string`
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

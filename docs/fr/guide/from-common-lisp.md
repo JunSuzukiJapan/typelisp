@@ -224,8 +224,9 @@ Il n'y a pas de paquetages. Les espaces de noms sont des modules, et un fichier 
 de `pkg:symbol`, écrivez `module::name`, et importez les noms avec `use`
 ([Modules et découpage en fichiers](modules.md)).
 
-Les mots-clés `:foo` existent ; ce sont des symboles qui s'évaluent en eux-mêmes. Comme il n'y a pas de
-paquetages, le deux-points fait partie du nom : `(symbol->string :foo)` renvoie `":foo"`.
+Les mots-clés `:foo` existent ; comme en CL, ils s'évaluent en eux-mêmes et appartiennent à l'espace de
+noms des mots-clés, `keyword`. `(symbol->string :foo)` renvoie `"foo"` et `(intern "foo" "keyword")`
+renvoie `:foo`. Le second argument d'`intern` est un chemin de module à la place d'un nom de paquetage.
 
 ## 10. Différences de lecture et de syntaxe
 

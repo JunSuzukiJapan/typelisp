@@ -229,8 +229,9 @@ Er zijn geen packages. Namespaces zijn modules, en een bestand is zelf een modul
 van `pkg:symbol` `module::name`, en haal namen binnen met `use`
 ([Modules en bestandsindeling](modules.md)).
 
-Keywords `:foo` bestaan en zijn symbolen die naar zichzelf evalueren. Omdat er geen packages zijn,
-maakt de dubbele punt deel uit van de naam: `(symbol->string :foo)` geeft `":foo"` terug.
+Keywords `:foo` bestaan; zoals in CL evalueren ze naar zichzelf en behoren ze tot de keyword-naamruimte
+`keyword`. `(symbol->string :foo)` geeft `"foo"` terug en `(intern "foo" "keyword")` geeft `:foo` terug.
+Het tweede argument van `intern` is een modulepad in plaats van een packagenaam.
 
 ## 10. Verschillen in lezen en syntaxis
 

@@ -103,7 +103,7 @@ on) are in [Destructive operations](sequences.md#7-destructive-operations).
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL's `hash-table-size`. In this table it is the number of occupied entries (equal to `count`) |
 
 **Any type that implements `Hash` can be a key**, including `defstruct`/`defenum` types. `get`/`set`/
-`remove` carry `(where (Hash K))`, so a table keyed by a type that does not implement it is a **type
+`remove` carry `(:where (Hash K))`, so a table keyed by a type that does not implement it is a **type
 error** (`f64` has no `Hash` because of `NaN`).
 
 ```lisp

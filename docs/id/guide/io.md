@@ -86,11 +86,11 @@ mencoba membaca byte dari stream karakter adalah kesalahan tipe.
 ### Membuat fungsi baca dan tulis menjadi generik
 
 Setiap jenis stream adalah tipenya sendiri, tetapi operasi bersamanya dikumpulkan ke dalam trait.
-Fungsi yang menerima argumennya dengan `(where (CharInput S))` dapat membaca dari berkas, string,
+Fungsi yang menerima argumennya dengan `(:where (CharInput S))` dapat membaca dari berkas, string,
 atau socket.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

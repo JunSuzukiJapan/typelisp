@@ -64,7 +64,7 @@ const TAG_ENUM: &str = "(defenum tag (named Symbol) (anon)) \
 
 fn assert_named(h: &Heap, v: &Value, expected: &str) {
     match v {
-        typelisp::Value::Symbol(id) => assert_eq!(h.symbol_name(*id), expected),
+        typelisp::Value::Symbol(id) => assert_eq!(h.symbol_spelling(*id), expected),
         other => panic!("expected the symbol `{}`, got {:?}", expected, other),
     }
 }
@@ -81,7 +81,7 @@ fn an_interpreted_enum_with_a_symbol_field_is_a_heap_box() {
             assert!(h.is_enum(id), "expected a heap enum box");
             assert_eq!(h.enum_field_count(id), 1);
             match h.enum_field(id, 0) {
-                typelisp::Value::Symbol(s) => assert_eq!(h.symbol_name(s), ":hello"),
+                typelisp::Value::Symbol(s) => assert_eq!(h.symbol_spelling(s), ":hello"),
                 other => panic!("expected a Value::Symbol field, got {:?}", other),
             }
         }
@@ -137,7 +137,7 @@ fn a_compiled_function_returning_the_enum_decodes_it_as_an_enum() {
         typelisp::Value::Boxed(id) => {
             assert!(h.is_enum(id), "expected a heap enum box");
             match h.enum_field(id, 0) {
-                typelisp::Value::Symbol(s) => assert_eq!(h.symbol_name(s), ":hello"),
+                typelisp::Value::Symbol(s) => assert_eq!(h.symbol_spelling(s), ":hello"),
                 other => panic!("expected a Value::Symbol field, got {:?}", other),
             }
         }

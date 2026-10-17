@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.0
+# ABI バージョン 0.3.1
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.0 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.1 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `44b2889eaf4d8a27`
+内容ハッシュ (FNV-1a 64): `e609e74f661ea17b`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -109,7 +109,7 @@
 
 | 名前 | 値 |
 |---|---|
-| FORMAT_VERSION | 20 |
+| FORMAT_VERSION | 21 |
 | CONTAINER_VERSION | 1 |
 
 ## well-known シンボル (typelisp_mem::BUILTIN_SYMBOLS)
@@ -294,6 +294,40 @@
 | 175 | `task` |
 | 176 | `&body` |
 | 177 | `pat-when` |
+| 178 | `not` |
+| 179 | `unsafe` |
+| 180 | `def-c-struct` |
+| 181 | `self` |
+| 182 | `test` |
+| 183 | `ptr` |
+| 184 | `recv` |
+| 185 | `send` |
+| 186 | `:type` |
+| 187 | `:where` |
+| 188 | `:or` |
+| 189 | `:constructor` |
+| 190 | `:copier` |
+| 191 | `:include` |
+| 192 | `:conc-name` |
+| 193 | `:predicate` |
+| 194 | `:initial-offset` |
+| 195 | `:library` |
+| 196 | `:prefix` |
+| 197 | `:per-line-prefix` |
+| 198 | `:suffix` |
+| 199 | `:downcase` |
+| 200 | `:linear` |
+| 201 | `:fill` |
+| 202 | `:miser` |
+| 203 | `:mandatory` |
+| 204 | `:block` |
+| 205 | `:current` |
+| 206 | `:line` |
+| 207 | `:section` |
+| 208 | `:line-relative` |
+| 209 | `:section-relative` |
+| 210 | `intern` |
+| 211 | `_` |
 
 ## 組み込み型キー (typelisp_mem::BUILTIN_TYPE_KEYS)
 
@@ -643,8 +677,10 @@
 | `rt_integer_to_char` | `i64 (ptr, i32)` |
 | `rt_integer_to_float` | `i64 (ptr, i32)` |
 | `rt_integer_to_ratio` | `i64 (ptr, i32)` |
+| `rt_intern` | `i64 (ptr, i32)` |
 | `rt_intern_path` | `i64 (ptr, i32)` |
 | `rt_intern_symbol` | `i64 (ptr, i32)` |
+| `rt_keywordp` | `i64 (ptr, i32)` |
 | `rt_lisp_implementation_version` | `i64 (ptr, i32)` |
 | `rt_list_to_path` | `i64 (ptr, i32)` |
 | `rt_list_to_sexpr_tuple` | `i64 (ptr, i32)` |
@@ -1726,6 +1762,8 @@
 | `getenv` | `rt_getenv` | `(string) -> Option<string>` |
 | `heap-info` | `rt_heap_info` | `() -> heap-info` |
 | `home-directory` | `rt_home_directory` | `() -> Option<string>` |
+| `intern` | `rt_intern` | `(string, string) -> symbol` |
+| `keywordp` | `rt_keywordp` | `(symbol) -> bool` |
 | `lisp-implementation-version` | `rt_lisp_implementation_version` | `() -> string` |
 | `machine-instance` | `rt_machine_instance` | `() -> Option<string>` |
 | `machine-type` | `rt_machine_type` | `() -> string` |

@@ -105,18 +105,18 @@ fn rational_is_a_hash_key() {
 fn div_names_its_output() {
     assert_eq!(
         eval_string(
-            "(defun quot<T,R> ((a T) (b T)) R (where (Div T (Output R))) (/ a b))
+            "(defun quot<T,R> ((a T) (b T)) R (:where (Div T (Output R))) (/ a b))
              (format false \"~a ~a\" (the rational (quot 7 2)) (the f64 (quot 7.0 2.0)))"
         ),
         "7/2 3.5"
     );
     let msg = check_err(
-        "(defun halve<T> ((a T) (b T)) T (where (Number T) (Div T (Output T))) (/ a b))
+        "(defun halve<T> ((a T) (b T)) T (:where (Number T) (Div T (Output T))) (/ a b))
          (halve 7 2)",
     );
     assert!(msg.contains("associated type `output` is `rational`"), "{}", msg);
     assert_eq!(
-        eval_string("(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T)) (+ a b c)) (format false \"~a\" (sum3 (/ 1 2) (/ 1 3) 1))"),
+        eval_string("(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T)) (+ a b c)) (format false \"~a\" (sum3 (/ 1 2) (/ 1 3) 1))"),
         "11/6"
     );
 }

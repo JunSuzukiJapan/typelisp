@@ -19,7 +19,7 @@
 | `format`（ストリーム宛） | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` が `bool` でなければ CL のストリーム宛。展開した文字列をそのストリームへ書く。戻り値は `()`（CL の `nil` に当たる）で、文字列は返らない |
 
 `dest` の型で2つの意味に分かれる（どちらになるかは静的に決まる）。ストリーム宛は
-具象ストリーム型・`:dyn CharOutput`・`(where (CharOutput S))` の型変数のいずれでも同じように書ける。
+具象ストリーム型・`:dyn CharOutput`・`(:where (CharOutput S))` の型変数のいずれでも同じように書ける。
 `bool` でもストリームでもない `dest` は型エラー。
 
 **制御文字列はリテラルでなければならない**（Rust の `format!` と同じ制約）。中のディレクティブが
@@ -241,7 +241,7 @@ pretty printer とも合成される（4 章）。`*print-pretty*` が真なら�
 
 - **登録は静的**。`impl` はふつうのメソッド定義として型検査されるので、型名の打ち間違いも
   シグネチャ違いもコンパイルエラーになる。
-- **ジェネリック型にも効く**。`(impl print-object box<T> (where (print-object T)) ...)` は
+- **ジェネリック型にも効く**。`(impl print-object box<T> (:where (print-object T)) ...)` は
   型引数ごとに別の本体へ飛ぶ——値は自分の型引数まで含めた型を覚えている（`box<i32>`）。
   `Vector<T>` のような組み込みのジェネリック型も同じ。
 - **選択は印字時**。どのディレクティブがどの引数を消費するかは制御文字列の実行時の中身で
@@ -254,7 +254,7 @@ pretty printer とも合成される（4 章）。`*print-pretty*` が真なら�
   可変長引数は型変数を受け取れないので、「知らない型の値を描画してよい」とジェネリックなコードが
   言う手段はこの境界しかない（Rust の `T: Display` と同じ形）。`Array<T>` の `print-object` が
   その例。
-- **境界を満たさない型引数では黙って組み込み表現になる**。`(impl print-object Array<T> (where
+- **境界を満たさない型引数では黙って組み込み表現になる**。`(impl print-object Array<T> (:where
   (print-object T)))` は `Array<i32>` には効くが、`print-object` を書いていない `defstruct` を
   要素にした `Array` には効かない。配列を作っただけでエラーになるのは筋が通らないので、
   エラーにはしない。

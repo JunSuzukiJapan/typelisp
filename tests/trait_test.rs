@@ -118,13 +118,13 @@ fn calling_an_unimplemented_trait_method_on_a_concrete_type_is_a_type_error() {
 
 #[test]
 fn generic_function_calls_a_trait_method_via_where_bound() {
-    // `it: T`, `(where (Counted T))` — `describe`'s own generic body checks
+    // `it: T`, `(:where (Counted T))` — `describe`'s own generic body checks
     // `count` as `Expr::TraitCall` (no concrete `AdtDef` for `t`), but this
     // call site is `describe(box::new 7)`: monomorphization re-checks the
     // specialization with `T = box` concrete, so `count` resolves statically
     // to `Expr::Assoc` there — `TraitCall` itself never executes.
     let src = format!(
-        "{} (defun describe<T> ((it T)) int (where (Counted T)) (count it))
+        "{} (defun describe<T> ((it T)) int (:where (Counted T)) (count it))
             (describe (make-instance 'box :n 7))",
         COUNTER_PRELUDE
     );
@@ -134,7 +134,7 @@ fn generic_function_calls_a_trait_method_via_where_bound() {
 #[test]
 fn where_bound_function_rejects_a_method_the_trait_does_not_declare() {
     let src = format!(
-        "{} (defun describe<T> ((it T)) int (where (Counted T)) (nope it))
+        "{} (defun describe<T> ((it T)) int (:where (Counted T)) (nope it))
             (describe (make-instance 'box :n 7))",
         COUNTER_PRELUDE
     );
@@ -149,7 +149,7 @@ fn two_types_implementing_the_same_trait_dispatch_independently() {
         (defstruct box-b (n int))
         (impl Counted box-a (count ((self Self)) int self::n))
         (impl Counted box-b (count ((self Self)) int (* 2 self::n)))
-        (defun describe<T> ((it T)) int (where (Counted T)) (count it))
+        (defun describe<T> ((it T)) int (:where (Counted T)) (count it))
         (+ (describe (make-instance 'box-a :n 3)) (describe (make-instance 'box-b :n 3)))";
     assert_eq!(eval_ok(src), Value::Int(3 + 6));
 }
@@ -164,7 +164,7 @@ fn a_method_on_a_generic_owner_can_carry_a_where_clause() {
     let src = format!(
         "{} (defstruct pair<A> (x A) (y A))
             (impl pair<A>
-              (count-both (self) int (where (Counted A))
+              (count-both (self) int (:where (Counted A))
                 (+ (count self::x) (count self::y))))
             (count-both (make-instance 'pair :x (make-instance 'box :n 20) :y (make-instance 'box :n 22)))",
         COUNTER_PRELUDE
@@ -182,7 +182,7 @@ fn impl_method_with_a_where_clause_supports_recursive_structural_dispatch() {
         (impl Eq2 int (same ((self Self) (other Self)) bool (= self other)))
         (defstruct pr<A,B> (a A) (b B))
         (impl Eq2 pr<A,B>
-          (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
+          (same ((self Self) (other Self)) bool (:where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
         (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3))
             (if (same (make-instance 'pr :a (make-instance 'pr :a 1 :b 2) :b 3) (make-instance 'pr :a (make-instance 'pr :a 1 :b 9) :b 3)) 0 1)
@@ -202,7 +202,7 @@ fn bounded_method_call_rejects_an_owner_argument_lacking_the_impl() {
         (defstruct no-eq (n int))
         (defstruct pr<A,B> (a A) (b B))
         (impl Eq2 pr<A,B>
-          (same ((self Self) (other Self)) bool (where (Eq2 A) (Eq2 B))
+          (same ((self Self) (other Self)) bool (:where (Eq2 A) (Eq2 B))
             (if (same self::a other::a) (same self::b other::b) false)))
         (same (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2) (make-instance 'pr :a (make-instance 'no-eq :n 1) :b 2))";
     let err = check(src).expect_err("must fail to check");
@@ -223,7 +223,7 @@ fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
     // runtime fallback.
     let src = format!(
         "{} (defstruct box2 (n int))
-            (defun describe<T> ((it T)) int (where (Counted T)) (count it))
+            (defun describe<T> ((it T)) int (:where (Counted T)) (count it))
             (describe (make-instance 'box2 :n 5))",
         COUNTER_PRELUDE
     );
@@ -245,7 +245,7 @@ fn call_site_rejects_a_type_that_does_not_implement_the_required_trait() {
 #[test]
 fn forwarding_a_bare_type_parameter_without_a_matching_where_bound_is_a_type_error() {
     let src = format!(
-        "{} (defun describe<T> ((it T)) int (where (Counted T)) (count it))
+        "{} (defun describe<T> ((it T)) int (:where (Counted T)) (count it))
             (defun broken<T> ((it T)) int (describe it))",
         COUNTER_PRELUDE
     );
@@ -261,8 +261,8 @@ fn forwarding_a_bare_type_parameter_without_a_matching_where_bound_is_a_type_err
 #[test]
 fn forwarding_a_bare_type_parameter_with_a_matching_where_bound_type_checks_and_runs() {
     let src = format!(
-        "{} (defun describe<T> ((it T)) int (where (Counted T)) (count it))
-            (defun forwards<T> ((it T)) int (where (Counted T)) (describe it))
+        "{} (defun describe<T> ((it T)) int (:where (Counted T)) (count it))
+            (defun forwards<T> ((it T)) int (:where (Counted T)) (describe it))
             (forwards (make-instance 'box :n 7))",
         COUNTER_PRELUDE
     );
@@ -277,13 +277,13 @@ fn forwarding_a_bare_type_parameter_with_a_matching_where_bound_type_checks_and_
 /// shape `Checker::validate_where_bounds`'s second case exists for.
 const BOXED_PRELUDE: &str = "
 (deftrait Boxed ()
-  (type Item)
+  (:type Item)
   (unbox ((self Self)) Item))
 (defstruct wrap<T> (v T))
 (impl Boxed wrap<T>
-  (type Item T)
+  (:type Item T)
   (unbox ((self Self)) T self::v))
-(defun get-int<T> ((b T)) int (where (Boxed T (Item int))) (unbox b))
+(defun get-int<T> ((b T)) int (:where (Boxed T (Item int))) (unbox b))
 ";
 
 /// A type parameter *wrapped* in a concrete generic type (not bare) forwarded
@@ -360,7 +360,7 @@ fn a_supertrait_method_is_callable_on_a_bound_type_parameter() {
     // The bound names `Derived` only; `base-tag` comes from `Base`.
     let src = format!(
         "{}
-         (defun both<T> ((x T)) int (where (Derived T)) (+ (base-tag x) (derived-tag x)))
+         (defun both<T> ((x T)) int (:where (Derived T)) (+ (base-tag x) (derived-tag x)))
          (both (make-instance 'cell :n 3))",
         SUPER_PRELUDE
     );
@@ -373,8 +373,8 @@ fn a_supertrait_bound_discharges_a_callees_bound_on_the_base_trait() {
     // `(Base T)` — the subtrait bound has to satisfy it.
     let src = format!(
         "{}
-         (defun inner<T> ((x T)) int (where (Base T)) (base-tag x))
-         (defun outer<T> ((x T)) int (where (Derived T)) (inner x))
+         (defun inner<T> ((x T)) int (:where (Base T)) (base-tag x))
+         (defun outer<T> ((x T)) int (:where (Derived T)) (inner x))
          (outer (make-instance 'cell :n 7))",
         SUPER_PRELUDE
     );
@@ -456,7 +456,7 @@ fn a_diamond_inherits_the_shared_method_once() {
         (impl B cell (b-tag ((self Self)) int 2))
         (impl C cell (c-tag ((self Self)) int 3))
         (impl D cell (d-tag ((self Self)) int 4))
-        (defun sum<T> ((x T)) int (where (D T))
+        (defun sum<T> ((x T)) int (:where (D T))
           (+ (tag x) (+ (b-tag x) (+ (c-tag x) (d-tag x)))))
         (sum (make-instance 'cell :n 1))";
     assert_eq!(eval_ok(src), Value::Int(10));
@@ -474,7 +474,7 @@ fn a_supertrait_listed_twice_is_rejected() {
 #[test]
 fn a_supertrait_with_an_associated_type_must_pin_it() {
     let m = check_err(
-        "(deftrait Src () (type Item) (next ((self Self)) Item))
+        "(deftrait Src () (:type Item) (next ((self Self)) Item))
          (deftrait CharSrc (Src) (rewind ((self Self)) ()))",
     );
     assert!(m.contains("must be pinned"), "{}", m);
@@ -485,12 +485,12 @@ fn a_supertrait_associated_type_pin_resolves_an_inherited_method() {
     // `CharSrc` pins `Src`'s `Item` to `int`, so the inherited `next`
     // returns `int` — a `bool` context must be a type error.
     let src = "
-        (deftrait Src () (type Item) (next ((self Self)) Item))
+        (deftrait Src () (:type Item) (next ((self Self)) Item))
         (deftrait CharSrc ((Src (Item int))) (rewind ((self Self)) ()))
         (defstruct counter (n int))
-        (impl Src counter (type Item int) (next ((self Self)) int self::n))
+        (impl Src counter (:type Item int) (next ((self Self)) int self::n))
         (impl CharSrc counter (rewind ((self Self)) () ()))
-        (defun peek<T> ((x T)) int (where (CharSrc T)) (next x))
+        (defun peek<T> ((x T)) int (:where (CharSrc T)) (next x))
         (peek (make-instance 'counter :n 5))";
     assert_eq!(eval_ok(src), Value::Int(5));
 }
@@ -649,14 +649,14 @@ fn a_default_body_is_checked_against_the_traits_associated_types() {
     // the sibling returns fits, and one returning an `int` does not.
     assert!(check(
         "(deftrait Boxed ()
-           (type Item)
+           (:type Item)
            (unwrap ((self Self)) Item)
            (unwrap-again ((self Self)) Item (unwrap self)))"
     )
     .is_ok());
     let m = check_err(
         "(deftrait Boxed ()
-           (type Item)
+           (:type Item)
            (unwrap ((self Self)) Item)
            (unwrap-again ((self Self)) Item 1))",
     );
@@ -745,7 +745,7 @@ fn an_impl_with_the_wrong_parameter_type_is_rejected() {
 #[test]
 fn an_impl_omitting_an_associated_type_is_rejected() {
     let m = check_err(
-        "(deftrait Src () (type Item) (next ((self Self)) Item))
+        "(deftrait Src () (:type Item) (next ((self Self)) Item))
          (defstruct s (n int))
          (impl Src s (next ((self Self)) int self::n))",
     );
@@ -758,7 +758,7 @@ fn an_impl_omitting_an_associated_type_is_rejected() {
 ///
 /// The bounds branch of `Checker::receiver_method` used to substitute
 /// only the trait's associated types into the method's return type, so
-/// `(add a b)` under `(where (Add T))` yielded `self` and the enclosing
+/// `(add a b)` under `(:where (Add T))` yielded `self` and the enclosing
 /// generic's `T` return position rejected it. Nothing in the prelude caught
 /// it because no prelude trait method returns `Self` — `Eq`/`Ord` return
 /// `bool`, `Iter` returns an associated type — and it only surfaced when the
@@ -770,7 +770,7 @@ fn a_self_returning_trait_method_resolves_to_the_bounded_type_variable() {
         eval_ok(
             "(deftrait Add () (add ((self Self) (other Self)) Self))
              (impl Add int (add ((self Self) (other Self)) Self (+ self other)))
-             (defun sum3<T> ((a T) (b T) (c T)) T (where (Add T)) (add (add a b) c))
+             (defun sum3<T> ((a T) (b T) (c T)) T (:where (Add T)) (add (add a b) c))
              (sum3 1 2 3)"
         ),
         Value::Int(6)
@@ -787,7 +787,7 @@ fn an_inherited_self_returning_trait_method_resolves_to_the_bounded_type_variabl
              (deftrait Double (Add) (twice ((self Self)) Self (add self self)))
              (impl Add int (add ((self Self) (other Self)) Self (+ self other)))
              (impl Double int)
-             (defun quad<T> ((a T)) T (where (Double T)) (twice (twice a)))
+             (defun quad<T> ((a T)) T (:where (Double T)) (twice (twice a)))
              (quad 3)"
         ),
         Value::Int(12)
@@ -810,7 +810,7 @@ fn an_inherited_self_returning_trait_method_resolves_to_the_bounded_type_variabl
 const SINK: &str = "
 (defstruct holder (n int))
 (deftrait Sink ()
-  (type Item)
+  (:type Item)
   (size ((self Self)) int)
   (put-all ((self Self) (vs Vector<Item>)) int (size self)))
 ";
@@ -823,7 +823,7 @@ fn an_associated_type_inside_a_generic_is_substituted() {
         eval_ok(&format!(
             "{}
              (impl Sink holder
-               (type Item char)
+               (:type Item char)
                (size ((self Self)) int self::n))
              (defun empty-chars () Vector<char> (Vector::new))
              (defun two () Vector<char>
@@ -845,12 +845,12 @@ fn substitution_reaches_a_nested_argument_and_self() {
     check(
         "(defstruct holder (n int))
          (deftrait Sink ()
-           (type Item)
+           (:type Item)
            (size ((self Self)) int)
            (nested ((self Self) (vs Vector<Option<Item>>)) int (size self))
            (selves ((self Self) (vs Vector<Self>)) int (size self)))
          (impl Sink holder
-           (type Item char)
+           (:type Item char)
            (size ((self Self)) int self::n))",
     )
     .expect("check failed");
@@ -866,11 +866,11 @@ fn an_associated_type_may_be_bound_to_a_type_no_name_can_spell() {
     check(
         "(defstruct holder (n int))
          (deftrait Sink ()
-           (type Item)
+           (:type Item)
            (size ((self Self)) int)
            (put-all ((self Self) (vs Vector<Item>)) int (size self)))
          (impl Sink holder
-           (type Item (fn (int) int))
+           (:type Item (fn (int) int))
            (size ((self Self)) int self::n))",
     )
     .expect("check failed");
@@ -884,11 +884,11 @@ fn an_associated_type_may_be_bound_to_a_trait_object() {
         "(defstruct holder (n int))
          (deftrait Drawable () (draw ((self Self)) ()))
          (deftrait Sink ()
-           (type Item)
+           (:type Item)
            (size ((self Self)) int)
            (put-all ((self Self) (vs Vector<Item>)) int (size self)))
          (impl Sink holder
-           (type Item :dyn Drawable)
+           (:type Item :dyn Drawable)
            (size ((self Self)) int self::n))",
     )
     .expect("check failed");

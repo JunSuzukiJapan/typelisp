@@ -210,7 +210,7 @@ fn the_new_widths_are_eq_and_ord() {
 #[test]
 fn a_generic_function_can_add_its_own_arguments() {
     let src = r#"
-        (defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+        (defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
           (+ a b c))
         (format false "~a ~a ~a"
           (sum3 (the u8 1) (the u8 2) (the u8 3))
@@ -224,7 +224,7 @@ fn a_generic_function_can_add_its_own_arguments() {
 #[test]
 fn the_operators_reach_the_trait_methods_through_a_bound() {
     let src = r#"
-        (defun mix<T> ((a T) (b T)) T (where (Number T))
+        (defun mix<T> ((a T) (b T)) T (:where (Number T))
           (if (< a b) (- b a) (rem a b)))
         (format false "~a ~a" (mix 3 10) (mix 10 3))
     "#;
@@ -234,7 +234,7 @@ fn the_operators_reach_the_trait_methods_through_a_bound() {
 #[test]
 fn the_bitwise_trait_is_reachable_through_a_bound_too() {
     let src = r#"
-        (defun mask<T> ((a T) (b T)) T (where (Bits T))
+        (defun mask<T> ((a T) (b T)) T (:where (Bits T))
           (logand a b))
         (format false "~a" (mask 63 42))
     "#;
@@ -248,7 +248,7 @@ fn the_bitwise_trait_is_reachable_through_a_bound_too() {
 fn an_operator_without_the_bound_is_still_an_error() {
     let msg = check_error(
         r#"
-        (defun bad<T> ((a T) (b T)) T (where (Eq T))
+        (defun bad<T> ((a T) (b T)) T (:where (Eq T))
           (+ a b))
         "#,
     );

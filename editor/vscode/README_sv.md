@@ -14,7 +14,7 @@ nedan).
   - Definierade namn (`(defun NAME ...)` som en funktion, `(defstruct NAME ...)` som en typ,
     `(defvar (NAME ...))` som en variabel; detsamma med `pub`, som i `(pub defun NAME ...)`) och
     båda namnen i `(impl Trait Type)`
-  - Nyckelord för namnrymder och deklarationer (`pub` `module` `use` `load` `impl` `where`) och
+  - Nyckelord för namnrymder och deklarationer (`pub` `module` `use` `load` `impl`) och
     markörer i lambdalistor (`&rest` `&optional` `&key`)
   - Inbyggda funktioner, primitiva typer (inklusive `bignum` / `ratio`), inbyggda feltyper,
     användartyper med `Stor begynnelsebokstav` och trait-objekttypen `:dyn Trait` (även inuti

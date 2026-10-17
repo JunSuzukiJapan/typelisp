@@ -134,7 +134,7 @@ fn collect_aot_item(
         "defmethod" => {
             let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
-                Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+                Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
                 _ => return Err("compile-file: defmethod without a name".to_string()),
             };
             items.push(CompileTarget::Method(type_path, method));
@@ -308,7 +308,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     // the file an AOT build reads is the same file the interpreter reads, so
     // it has to be read the same way — its symbols interned in its module.
     let mut forms = reader.forms_within(source_path, &source, typelisp_front::mem::symbols::ns_of(&entry_segs));
-    chk.enter_file_module(&entry_segs);
+    chk.enter_file_module(&entry_segs).map_err(|e| e.to_string())?;
 
     // Every top-level form in an AOT source file must be something with a
     // compiled body or none at all: `defun`/`defmethod` (bodies),

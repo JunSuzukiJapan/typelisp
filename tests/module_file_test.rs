@@ -425,7 +425,7 @@ fn sibling_modules_still_cannot_see_each_others_private_items() {
 
 /// `cond`'s and `case`'s `else` are recognised by symbol identity in the core
 /// macros, and a file module reads its own symbols: unless `else` is in the
-/// vocabulary every module imports, a script's `(else ...)` is a different
+/// vocabulary every module imports, a script's `(:else ...)` is a different
 /// symbol from the macro's and the clause is checked as a variable
 /// reference. This used to fail with `unbound variable: else` in every
 /// `typl file.typl` run while working at the REPL.
@@ -434,7 +434,7 @@ fn cond_and_case_else_work_inside_a_file_module() {
     let result = run_project(
         "cond-else",
         &[
-            ("util.typl", "(pub defun pick ((n int)) int (cond ((< n 0) -1) (else (case n (0 0) (else 1)))))"),
+            ("util.typl", "(pub defun pick ((n int)) int (cond ((< n 0) -1) (:else (case n (0 0) (:else 1)))))"),
             ("main.typl", "(use util::pick)\n(+ (pick -5) (pick 0) (pick 7))"),
         ],
         "main.typl",

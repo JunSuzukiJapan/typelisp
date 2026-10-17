@@ -102,10 +102,10 @@ fn doiter_works_inside_a_where_bounded_generic_function() {
     // because this `where` clause has no associated-type pin, so `x` is only
     // usable as an opaque value (bound, never operated on); this is
     // intentionally a `count`, not a `sum`, to keep this test exercising the
-    // *un-pinned* `(where (Iter T))` form as a regression check — see
+    // *un-pinned* `(:where (Iter T))` form as a regression check — see
     // `doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item`
     // for the pinned/`sum` sibling.
-    let src = "(defun count-iter<T> ((it T)) int (where (Iter T))
+    let src = "(defun count-iter<T> ((it T)) int (:where (Iter T))
                  (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
                (defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (count-iter (iter v)))";
@@ -115,10 +115,10 @@ fn doiter_works_inside_a_where_bounded_generic_function() {
 #[test]
 fn doiter_sums_inside_a_where_bounded_generic_function_with_a_pinned_item() {
     // Sibling of `doiter_works_inside_a_where_bounded_generic_function`, now
-    // pinning `Item` to `int` via `(where (Iter T (Item int)))` — `x`'s type
+    // pinning `Item` to `int` via `(:where (Iter T (Item int)))` — `x`'s type
     // resolves to a concrete `int` (not an opaque type variable), so
     // arithmetic (`+`) on it type-checks and runs.
-    let src = "(defun sum-iter<T> ((it T)) int (where (Iter T (Item int)))
+    let src = "(defun sum-iter<T> ((it T)) int (:where (Iter T (Item int)))
                  (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
                (defun make-v () Vector<int> (Vector::new))
                (let ((v (make-v))) (push v 10) (push v 20) (sum-iter (iter v)))";
@@ -130,7 +130,7 @@ fn call_site_rejects_a_pinned_item_that_does_not_match_the_real_associated_type(
     // `vector-iter<bool>`'s real `Item` is `bool`, but `sum-iter`'s `where`
     // clause pins `Item` to `int` — the call site must reject this, not
     // type-check the body's `(+ n x)` against a wrong assumption.
-    let src = "(defun sum-iter<T> ((it T)) int (where (Iter T (Item int)))
+    let src = "(defun sum-iter<T> ((it T)) int (:where (Iter T (Item int)))
                  (let ((n 0)) (doiter (x it) (setf n (+ n x))) n))
                (defun make-bv () Vector<bool> (Vector::new))
                (let ((v (make-bv))) (push v true) (sum-iter (iter v)))";
@@ -140,14 +140,14 @@ fn call_site_rejects_a_pinned_item_that_does_not_match_the_real_associated_type(
 #[test]
 fn a_where_pin_to_a_type_variable_is_inferred_from_the_iterator_alone() {
     // The Phase-4 combinators' key move: `A` is one of the function's own
-    // type parameters, pinned via `(where (Iter I (Item A)))` and appearing in
+    // type parameters, pinned via `(:where (Iter I (Item A)))` and appearing in
     // *no* ordinary argument — so it can only be inferred by resolving the
     // concrete iterator's real `Item`. `Checker::check_call`'s pin-inference
     // pass binds `A = int` from `vector-iter<int>`, letting `(the Vector<A> …)`
     // and the returned element type resolve. `last-of` returns the final
     // element, exercising exactly this "element type known only through the
     // iterator" path.
-    let src = "(defun last-of<I,A> ((it I)) Option<A> (where (Iter I (Item A)))
+    let src = "(defun last-of<I,A> ((it I)) Option<A> (:where (Iter I (Item A)))
                  (let ((r (the Option<A> (Option::none))))
                    (doiter (x it) (setf r (Option::some x)))
                    r))
@@ -180,7 +180,7 @@ fn an_argument_waiting_with_a_pinned_one_also_reads_a_generic_callers_parameter(
     // The same inside a generic function, where `B` is the caller's own
     // `Option<T>` — the tutorial's `largest`.
     let src = "(defun largest<T> ((v Vector<T>)) Option<T>
-                 (where (Ord T))
+                 (:where (Ord T))
                  (foldl (iter v)
                         (lambda ((best Option<T>) (x T)) Option<T>
                           (match best

@@ -12,7 +12,7 @@ Emacs 版见 [../emacs/](../emacs/README_zh-CN.md)。两者使用相同的关键
     `print`/`println`/`format`、`pprint` 系列）
   - 定义名（`(defun NAME ...)` 为函数，`(defstruct NAME ...)` 为类型，`(defvar (NAME ...))` 为变量。
     带 `pub` 的 `(pub defun NAME ...)` 也一样）以及 `(impl Trait Type)` 的两个名字
-  - 命名空间和声明关键字（`pub` `module` `use` `load` `impl` `where`）、
+  - 命名空间和声明关键字（`pub` `module` `use` `load` `impl`）、
     lambda 列表标记（`&rest` `&optional` `&key`）
   - 内置函数、基本类型（包括 `bignum` / `ratio`）、内置错误类型、
     `Capitalized` 的用户类型、trait 对象类型 `:dyn Trait`（泛型参数内部也是）

@@ -50,10 +50,10 @@ pub enum Pattern {
     /// something the checker could not reduce to an immediate word.
     ///
     /// This is what a `string`/`f64`/`symbol`/`bignum`/`ratio` literal
-    /// pattern and the `(= expr)` escape both lower to. All five literal
+    /// pattern and the `(:= expr)` escape both lower to. All five literal
     /// kinds are heap values whose machine word is a pointer or a box id, so
     /// `Pattern::Int`'s "compare the word" is not equality for any of them;
-    /// and `(= expr)` is an arbitrary expression, which has no word until it
+    /// and `(:= expr)` is an arbitrary expression, which has no word until it
     /// is evaluated. Both therefore become the same thing: *run a test*.
     ///
     /// `form` is an already-checked `bool`-typed expression — `(equals NAME

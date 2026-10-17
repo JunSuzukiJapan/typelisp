@@ -39,7 +39,7 @@ typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최�
   (case id
     (1 (Option::some "alice"))
     (2 (Option::some "bob"))
-    (else (Option::none))))
+    (:else (Option::none))))
 
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)

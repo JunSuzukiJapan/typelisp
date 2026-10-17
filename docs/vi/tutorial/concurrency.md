@@ -146,14 +146,14 @@ timeout.
 - `((v (recv ch)) body...)` là một nhánh nhận. `v` nhận một `Option<T>`.
 - `((send ch x) body...)` là một nhánh gửi.
 - Khi nhiều nhánh có thể tiến hành cùng lúc, một trong số chúng được chọn ngẫu nhiên.
-- Với `(else body...)` ở cuối, `else` chạy khi không nhánh nào có thể tiến hành ngay, và `select` không
+- Với `(:else body...)` ở cuối, `:else` chạy khi không nhánh nào có thể tiến hành ngay, và `select` không
   chờ.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

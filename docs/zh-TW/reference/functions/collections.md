@@ -98,7 +98,7 @@
 | `maphash` | `(maphash h f)` | `(HashTable<K,V>,(fn (K V) ()))→Unit` | CL 的 `maphash` |
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL 的 `hash-table-size`。在這個表中是占用數（等於 `count`） |
 
-**只要實作了 `Hash`，任何型別都可以當作鍵**——包括 `defstruct`/`defenum`。`get`/`set`/`remove` 帶有 `(where (Hash K))`，所以以沒有實作它的
+**只要實作了 `Hash`，任何型別都可以當作鍵**——包括 `defstruct`/`defenum`。`get`/`set`/`remove` 帶有 `(:where (Hash K))`，所以以沒有實作它的
 型別為鍵的表是**型別錯誤**（`f64` 沒有 `Hash` 是因為 `NaN`）。
 
 ```lisp

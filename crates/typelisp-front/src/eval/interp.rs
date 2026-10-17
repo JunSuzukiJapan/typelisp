@@ -1944,13 +1944,13 @@ impl Interp {
         let mut map: HashMap<String, Value> = HashMap::new();
         let mut i = 0;
         while i < tail.len() {
-            let name = match tail[i] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            let stripped = match tail[i] {
+                Value::Symbol(id) if id.is_keyword() => id.name(),
+                Value::Symbol(id) => {
+                    return Err(EvalError::Panic(format!("expected a keyword like :name, got `{}`", heap.symbol_spelling(id))))
+                }
                 _ => return Err(EvalError::Panic("&key argument name must be a keyword symbol like :name".into())),
             };
-            let stripped = name
-                .strip_prefix(':')
-                .ok_or_else(|| EvalError::Panic(format!("expected a keyword like :name, got `{}`", name)))?;
             if !keys.iter().any(|(k, _)| k == stripped) {
                 return Err(EvalError::Panic(format!("unknown &key argument `:{}`", stripped)));
             }
@@ -2154,7 +2154,7 @@ impl Interp {
             // interns a fresh one — the same intern table `gensym`/`read` use.
             "symbol->string" => Some(match args[0] {
                 Value::Symbol(id) => {
-                    let name = heap.symbol_name(id).to_string();
+                    let name = id.name().to_string();
                     Ok(str_rt(heap, name))
                 }
                 _ => Err(EvalError::Panic("symbol->string: not a symbol".into())),
@@ -2162,6 +2162,15 @@ impl Interp {
             "string->symbol" => Some(match rt_str(heap, &args[0]) {
                 Ok(s) => Ok(heap.intern_symbol(&s)),
                 Err(e) => Err(e),
+            }),
+            "intern" => Some((|| {
+                let name = rt_str(heap, &args[0])?;
+                let ns = typelisp_mem::symbols::ns_named(&rt_str(heap, &args[1])?);
+                Ok(heap.intern_symbol_in(ns, &name))
+            })()),
+            "keywordp" => Some(match args[0] {
+                Value::Symbol(id) => Ok(Value::Bool(id.is_keyword())),
+                _ => Err(EvalError::Panic("keywordp: not a symbol".into())),
             }),
             // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr`
             // builtins (Symbol/Sexpr redesign Phase 4b): `cons`/`car`/`cdr` are
@@ -2305,7 +2314,7 @@ impl Interp {
             // this fuses the two, matching the old defun `(symbol->string v)`.
             "sexpr-sym-name" => match args.first() {
                 Some(Value::Symbol(id)) => {
-                    let name = heap.symbol_name(*id).to_string();
+                    let name = id.name().to_string();
                     Some(Ok(str_rt(heap, name)))
                 }
                 Some(_) => Some(Err(EvalError::Panic("sexpr-sym-name: expected a Sym Sexpr node".into()))),
@@ -2711,12 +2720,12 @@ impl Interp {
                     Some(Value::Path(id)) => {
                         Some(crate::types::path_from_id(heap, id).last_segment().to_string())
                     }
-                    Some(Value::Symbol(id)) => Some(heap.symbol_name(id).to_string()),
+                    Some(Value::Symbol(id)) => Some(heap.symbol_spelling(id).to_string()),
                     _ => None,
                 }
             }
             Some(wk::DEFMETHOD) => match core::field(heap, tl, 1) {
-                Some(Value::Symbol(id)) => Some(heap.symbol_name(id).to_string()),
+                Some(Value::Symbol(id)) => Some(heap.symbol_spelling(id).to_string()),
                 _ => None,
             },
             _ => None,

@@ -44,25 +44,25 @@
 
 ## 2. 트레이트 경계: "이 트레이트를 구현한 타입이라면 무엇이든"
 
-제네릭 함수의 타입 매개변수에 `where`로 조건을 붙일 수 있다. 이것을 **트레이트 경계**라고 한다.
+제네릭 함수의 타입 매개변수에 `:where`로 조건을 붙일 수 있다. 이것을 **트레이트 경계**라고 한다.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-`(where (Shape T))`가 있으므로 본체에서 `T`의 값에 `name`과 `area`를 쓸 수 있다. 경계가 없으면 `T`에 대해 아무것도
+`(:where (Shape T))`가 있으므로 본체에서 `T`의 값에 `name`과 `area`를 쓸 수 있다. 경계가 없으면 `T`에 대해 아무것도
 알 수 없으므로 호출할 수 없다.
 
 `Shape`를 구현하지 않은 타입을 넘기면 호출하는 곳에서 타입 오류가 된다.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 제네릭 함수는 호출된 타입마다 따로 사본이 만들어진다. 실행 중에 타입을 검사하거나 분기하는 일은 없다.
@@ -94,7 +94,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | 트레이트 | 구현할 메서드 | 쓸 수 있게 되는 것 |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, `match`의 `(= expr)` 패턴 등 |
+| `Eq` | `equals` | `member`, `find`, `position`, `match`의 `(:= expr)` 패턴 등 |
 | `Ord` | `less` | `less-equal`, `greater` 등. `Ord`는 `Eq`를 상속한다 |
 | `print-object` | `print-object` | `println` 등에서 값이 표시되는 방식 |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` 등 |
@@ -129,7 +129,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -172,7 +172,7 @@ total 9
 
 2절의 트레이트 경계와 `:dyn` 중에서 고르는 기준:
 
-| | 트레이트 경계(`where`) | `:dyn Trait` |
+| | 트레이트 경계(`:where`) | `:dyn Trait` |
 |---|---|---|
 | 호출할 메서드가 정해지는 때 | 실행 전 | 실행 중 |
 | 하나의 `Vector`에 타입 섞기 | 불가능 | 가능 |

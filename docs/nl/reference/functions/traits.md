@@ -13,7 +13,7 @@ hoofdstukken: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -28,7 +28,7 @@ worden doorgegeven.
 ## 2. `Eq` / `Ord` (vergelijking)
 
 Deze komen overeen met `PartialEq`/`PartialOrd` van Rust (hier `Eq`/`Ord` genoemd). Ze worden
-gebruikt in de `where`-bounds van generieke functies om te eisen dat elementtypes kunnen worden
+gebruikt in de `:where`-bounds van generieke functies om te eisen dat elementtypes kunnen worden
 vergeleken (`sort`/`member`/`assoc` enzovoort).
 
 ```lisp
@@ -81,7 +81,7 @@ laag.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -93,11 +93,11 @@ laag.
 ```
 
 **Binnen een bound kun je operatoren schrijven.** Wanneer de ontvanger een typevariabele is die door
-`where` is gebonden, worden operatoren als traitmethoden gelezen (`+`→`add`, `-`→`sub`, `*`→`mul`,
+`:where` is gebonden, worden operatoren als traitmethoden gelezen (`+`→`add`, `-`→`sub`, `*`→`mul`,
 `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -113,5 +113,5 @@ Geïmplementeerd voor: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` op alle numerieke 
 gehele getallen een `rational`, dus het `Output` van `int` is `rational` en dat van elk ander
 numeriek type het type zelf. Omdat `Output` per type verschilt, bevat `Number` geen `Div` (een
 supertraitlijst moet elk geassocieerd type vastleggen). Een generieke functie die deelt, ontvangt het
-resultaattype met `(where (Div T (Output R)))`, of vraagt een in `T` gesloten deling met
-`(where (Div T (Output T)))` (dan kan geen `int` worden doorgegeven).
+resultaattype met `(:where (Div T (Output R)))`, of vraagt een in `T` gesloten deling met
+`(:where (Div T (Output T)))` (dan kan geen `int` worden doorgegeven).

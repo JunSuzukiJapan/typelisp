@@ -12,7 +12,7 @@ VS Code 版見 [../vscode/](../vscode/README_zh-TW.md)。兩者使用相同的�
     `print`/`println`/`format`、`pprint` 系列等）
   - 定義名（`(defun NAME ...)` 的 `NAME` 作為函式名，`(defstruct NAME ...)` 作為型別名，
     `(defvar (NAME ...))` 作為變數名。帶 `pub` 的 `(pub defun NAME ...)` 也一樣）
-  - 命名空間與宣告關鍵字（`pub` `module` `use` `load` `impl` `where`）以及 lambda 串列標記
+  - 命名空間與宣告關鍵字（`pub` `module` `use` `load` `impl`）以及 lambda 串列標記
     （`&rest` `&optional` `&key`）
   - 內建函式（`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` 等）
   - 基本型別（包含 `bignum` / `ratio`）、內建型別、內建錯誤型別（`ParseIntError` 等）、

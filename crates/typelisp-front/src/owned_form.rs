@@ -46,6 +46,10 @@ pub enum OwnedForm {
     Bool(bool),
     /// An interned symbol, by name (re-interned on load).
     Sym(String),
+    /// A keyword, by name — without the colon that spells it (re-interned in
+    /// the keyword module on load). Its own variant because being a keyword
+    /// is where a symbol belongs, which a name does not say.
+    Keyword(String),
     /// A string, by content (re-allocated on load).
     Str(String),
     /// A `::`-path, by segment names (re-interned on load).
@@ -184,10 +188,11 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Int(n) => OwnedForm::Int(n),
         Value::Char(c) => OwnedForm::Char(c),
         Value::Bool(b) => OwnedForm::Bool(b),
-        Value::Symbol(id) => OwnedForm::Sym(heap.symbol_name(id).to_string()),
+        Value::Symbol(id) if id.is_keyword() => OwnedForm::Keyword(id.name().to_string()),
+        Value::Symbol(id) => OwnedForm::Sym(id.name().to_string()),
         Value::Str(id) => OwnedForm::Str(heap.string(id).to_string()),
         Value::Path(id) => OwnedForm::Path(
-            heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect(),
+            heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
         ),
         Value::Cons(_) => {
             // The spine iteratively; only the elements recurse.
@@ -260,6 +265,7 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         OwnedForm::Char(c) => Value::Char(*c),
         OwnedForm::Bool(b) => Value::Bool(*b),
         OwnedForm::Sym(name) => heap.intern_symbol(name),
+        OwnedForm::Keyword(name) => heap.intern_keyword(name),
         OwnedForm::Str(s) => heap.alloc_string(s.clone()),
         OwnedForm::Path(segs) => {
             // Symbols are permanent (never collected), so the intermediate

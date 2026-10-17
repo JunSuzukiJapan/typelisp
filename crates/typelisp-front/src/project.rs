@@ -315,7 +315,7 @@ impl Loader {
         // `(module ...)` inside nests further, handled while reading.
         let ns = crate::mem::symbols::ns_of(segs);
         let file_dir = file.parent().unwrap_or_else(|| FsPath::new(".")).to_path_buf();
-        let path = checker.enter_file_module(segs);
+        let path = checker.enter_file_module(segs)?;
         // One form at a time: read, resolve that form's dependencies, check
         // it, and run it, before the next form is read at all
         // (`Reader::forms_within`). The file used to be read to the end first
@@ -487,7 +487,7 @@ impl Loader {
         }
         let head = heap.car(v)?;
         let name = match head {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
             _ => return Ok(()),
         };
         match name.as_str() {
@@ -747,9 +747,9 @@ fn load_source_flat(
 /// for `check_use` to report.
 fn value_path_segs(heap: &Heap, v: Value) -> Option<Vec<String>> {
     match v {
-        Value::Symbol(id) => Some(vec![heap.symbol_name(id).to_string()]),
+        Value::Symbol(id) => Some(vec![heap.symbol_spelling(id).to_string()]),
         Value::Path(id) => {
-            Some(heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect())
+            Some(heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect())
         }
         _ => None,
     }

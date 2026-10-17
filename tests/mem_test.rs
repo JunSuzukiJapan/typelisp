@@ -849,7 +849,7 @@ fn symbols_intern_by_name() {
     assert_eq!(a, b, "equal names must intern to the same symbol");
     assert_ne!(a, c);
     if let Value::Symbol(id) = a {
-        assert_eq!(h.symbol_name(id), "foo");
+        assert_eq!(h.symbol_spelling(id), "foo");
     } else {
         panic!("expected a symbol");
     }
@@ -864,7 +864,7 @@ fn symbols_are_case_insensitive() {
     assert_eq!(lower, upper);
     assert_eq!(lower, mixed);
     if let Value::Symbol(id) = mixed {
-        assert_eq!(h.symbol_name(id), "foo"); // canonical lowercase
+        assert_eq!(h.symbol_spelling(id), "foo"); // canonical lowercase
     } else {
         panic!("expected a symbol");
     }

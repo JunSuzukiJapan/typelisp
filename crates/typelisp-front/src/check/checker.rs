@@ -94,7 +94,7 @@ fn is_unsafe_form(heap: &Heap, v: Value) -> bool {
     match v {
         Value::Cons(_) => matches!(
             heap.car(v),
-            Ok(Value::Symbol(id)) if heap.symbol_name(id) == "unsafe"
+            Ok(Value::Symbol(id)) if id.is(wk::UNSAFE)
         ),
         _ => false,
     }
@@ -296,7 +296,7 @@ struct Env {
     /// reference resolves here.
     vars: Option<std::rc::Rc<Scope>>,
     /// Trait bounds on this function's own generic type parameters, declared
-    /// by a `(where (Trait T (Assoc Concrete)...)...)` clause
+    /// by a `(:where (Trait T (Assoc Concrete)...)...)` clause
     /// (`Checker::check_defun`) — e.g. `{"t": [TraitBound { trait_path:
     /// Path::root("iter"), assoc: {} }]}`. Fixed for the lifetime of one
     /// function body (a nested `let`/`lambda` never introduces new type
@@ -666,11 +666,11 @@ struct MethodSig {
     /// The `&key` items as written — see `optionals`.
     keys: Vec<OptKeySpec>,
     ret: Type,
-    /// `(where (Trait TypeVar ...))` bounds after the return type — same
+    /// `(:where (Trait TypeVar ...))` bounds after the return type — same
     /// syntax and parse as a free `defun`'s (`Checker::parse_defun_sig`).
     /// Lets an `impl` method on a generic owner require trait bounds on the
     /// owner's own type variables (e.g. `cons-cell<A,B>`'s `equals` needing
-    /// `(where (Eq A) (Eq B))` for its recursive field comparisons).
+    /// `(:where (Eq A) (Eq B))` for its recursive field comparisons).
     bounds: BTreeMap<String, Vec<TraitBound>>,
     /// Index of the first body form in the `defmethod` parts: 4 when a
     /// `where` clause is present, 3 otherwise (plus 1 more if a leading
@@ -928,8 +928,8 @@ const DEF_C_STRUCT_PLACE: &str = "def-c-struct is written at top level, inside `
      (unsafe (def-c-struct name (field type)...))";
 
 /// How deep a blanket impl's own bounds may be chased before the search is
-/// declared non-terminating (`impl<T> A T (where (B T))` together with
-/// `impl<T> B T (where (A T))` would recur forever). Small on purpose:
+/// declared non-terminating (`impl<T> A T (:where (B T))` together with
+/// `impl<T> B T (:where (A T))` would recur forever). Small on purpose:
 /// legitimate chains are one or two links.
 const BLANKET_BOUND_DEPTH: usize = 16;
 
@@ -2907,7 +2907,7 @@ impl Checker {
         if parts.len() != 3 {
             return Err(Error::TypeError("defsignature: (defsignature name (param-type...) return-type)".into()));
         }
-        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        let (name, type_params) = self.parse_defun_name(parts[0])?;
         if !type_params.is_empty() {
             return Err(Error::TypeError(format!(
                 "defsignature: `{}` takes type parameters, and a generic function cannot be forward-declared — \
@@ -3137,7 +3137,7 @@ impl Checker {
         };
         match v {
             Value::Symbol(id) => {
-                let n = plain(heap.symbol_name(id).to_string())?;
+                let n = plain(heap.symbol_spelling(id).to_string())?;
                 Ok((n.clone(), n))
             }
             Value::Cons(_) => {
@@ -3151,7 +3151,7 @@ impl Checker {
                     return Err(bad());
                 }
                 let name = match elems[0] {
-                    Value::Symbol(id) => plain(heap.symbol_name(id).to_string())?,
+                    Value::Symbol(id) => plain(heap.symbol_spelling(id).to_string())?,
                     _ => return Err(bad()),
                 };
                 let c_symbol = match elems[1] {
@@ -3178,11 +3178,11 @@ impl Checker {
         let mut i = 0;
         while i < rest.len() {
             let key = match rest[i] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => id,
                 _ => return Err(Error::TypeError("defffi: expected an option keyword".into())),
             };
-            match key.as_str() {
-                ":library" => {
+            match key.well_known() {
+                wk::KW_LIBRARY => {
                     let v = rest.get(i + 1).ok_or_else(|| {
                         Error::TypeError("defffi: `:library` needs a name, as a string".into())
                     })?;
@@ -3196,10 +3196,10 @@ impl Checker {
                     }
                     i += 2;
                 }
-                other => {
+                _ => {
                     return Err(Error::TypeError(format!(
                         "defffi: `{}` is not an option here (only `:library` is)",
-                        other
+                        heap.symbol_spelling(key)
                     )))
                 }
             }
@@ -3254,7 +3254,7 @@ impl Checker {
             let elem_locs: Vec<Option<Loc>> = heap.list_to_vec_locs(v)?.into_iter().map(|(_, l)| l).collect();
             let parts_locs = &elem_locs[1..];
             if let Some(Value::Path(pid)) = elems.first() {
-                let is_attribute = heap.path_segments(*pid).iter().map(|s| heap.symbol_name(*s)).eq(typelisp_read::ATTRIBUTE_HEAD);
+                let is_attribute = heap.path_segments(*pid).iter().map(|s| heap.symbol_spelling(*s)).eq(typelisp_read::ATTRIBUTE_HEAD);
                 if is_attribute {
                     return self.check_attribute(heap, interp, &elems[1..], def_loc);
                 }
@@ -3265,17 +3265,17 @@ impl Checker {
                 // before it can be matched. Only `impl` takes parameters on
                 // the *head*; every other definition form carries them on the
                 // name that follows.
-                let (head, head_params) = parse_generic_name_header(heap.symbol_name(*id))?;
+                let (head, head_params) = parse_generic_name_header(heap.symbol_spelling(*id))?;
                 if head == "impl" && !head_params.is_empty() {
                     return self.check_impl_generic(heap, interp, &elems[1..], parts_locs, head_params);
                 }
                 // `(unsafe (def-c-struct ...)...)` declares C structs; any
                 // other top-level `unsafe` is an expression.
-                match heap.symbol_name(*id) {
-                    "unsafe" if Self::unsafe_declares_c_structs(heap, &elems[1..])? => {
+                match id.well_known() {
+                    wk::UNSAFE if Self::unsafe_declares_c_structs(heap, &elems[1..])? => {
                         return self.check_c_struct_block(heap, &elems[1..], parts_locs, def_loc);
                     }
-                    "def-c-struct" => return Err(Error::TypeError(DEF_C_STRUCT_PLACE.into())),
+                    wk::DEF_C_STRUCT => return Err(Error::TypeError(DEF_C_STRUCT_PLACE.into())),
                     _ => {}
                 }
                 match id.well_known() {
@@ -3374,7 +3374,7 @@ impl Checker {
                 wk::DEFTYPE => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
                 _ => {}
             }
-            if heap.symbol_name(id) == "def-c-struct" {
+            if id.is(wk::DEF_C_STRUCT) {
                 return Err(Error::TypeError(DEF_C_STRUCT_PLACE.into()));
             }
         }
@@ -3730,7 +3730,7 @@ impl Checker {
         let elems = heap.list_to_vec(v)?;
         let (macro_path, shape, display) = match elems.first() {
             Some(Value::Symbol(id)) => {
-                let head = heap.symbol_name(*id).to_string();
+                let head = heap.symbol_spelling(*id).to_string();
                 if Self::is_builtin_form_head(&head) {
                     return Ok(None);
                 }
@@ -3741,7 +3741,7 @@ impl Checker {
             }
             Some(Value::Path(pid)) => {
                 let segs: Vec<String> =
-                    heap.path_segments(*pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
+                    heap.path_segments(*pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
                 match self.resolve_macro_path(&segs) {
                     Some((p, shape)) => (p, shape, segs.join("::")),
                     None => return Ok(None),
@@ -4415,7 +4415,7 @@ impl Checker {
             },
             _ => None,
         };
-        sym.and_then(|id| parse_generic_name_header(heap.symbol_name(id)).ok()).map(|(_, ps)| ps).unwrap_or_default()
+        sym.and_then(|id| parse_generic_name_header(heap.symbol_spelling(id)).ok()).map(|(_, ps)| ps).unwrap_or_default()
     }
 
     /// The type variables a written type introduces by naming them: every
@@ -4468,7 +4468,7 @@ impl Checker {
                  (`defsignature` declares functions only). If `{}` is meant to be a type variable, \
                  declare it: in the name of a `defun`/`defstruct`/`defenum`/`deftype` (`name<{}>`), \
                  in a `defmethod` receiver or an `impl` target (`box<{}>`), or as a `deftrait`'s \
-                 `(type {})`.",
+                 `(:type {})`.",
                 p, p, p, p, p
             ))),
         }
@@ -4707,7 +4707,7 @@ impl Checker {
         // The name first: a malformed header (the old `(name T...)` list form)
         // has its own error, which an unknown-type report on `T` would hide.
         let vars = match parts.first() {
-            Some(&name) => self.parse_defun_name(heap, name)?.1,
+            Some(&name) => self.parse_defun_name(name)?.1,
             None => Vec::new(),
         };
         self.with_type_names(vars, |c| {
@@ -4737,7 +4737,7 @@ impl Checker {
         def_loc: Option<Loc>,
     ) -> Result<TopLevelForm, Error> {
         let (params, param_locs, rest, ret, bounds, body_start, doc) = self.parse_defun_sig(heap, parts, parts_locs)?;
-        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        let (name, type_params) = self.parse_defun_name(parts[0])?;
         let fq_name = self.fq(&name);
 
         // Register the signature in the current namespace before checking the
@@ -4867,7 +4867,7 @@ impl Checker {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
-        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        let (name, type_params) = self.parse_defun_name(parts[0])?;
         let fq_name = self.fq(&name);
         let (required, required_locs, optionals_raw, rest, keys_raw) = self.parse_defun_params_full(heap, parts[1])?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
@@ -4999,7 +4999,7 @@ impl Checker {
 
 
     /// Parses a `defun` form's parameter list, return type, and optional
-    /// `(where ...)` clause (`parts` = everything after the `defun` keyword),
+    /// `(:where ...)` clause (`parts` = everything after the `defun` keyword),
     /// returning them plus the body's starting index in `parts`. Shared by
     /// [`Self::check_defun`] and [`Self::specialize_defun`] — the latter
     /// re-parses a retained generic template with `type_var_bindings` in
@@ -5029,7 +5029,7 @@ impl Checker {
     }
 
     /// Reads what may follow a signature's return type at `parts[at]`: an
-    /// optional `(where ...)` clause, then an optional docstring. Returns the
+    /// optional `(:where ...)` clause, then an optional docstring. Returns the
     /// bounds, the index the body starts at, and the docstring.
     #[allow(clippy::type_complexity)]
     fn parse_where_and_docstring(
@@ -5098,7 +5098,7 @@ impl Checker {
             return;
         }
         // Only if the impl's own `where` clause holds at these arguments.
-        // `(impl print-object Array<T> (where (print-object T)) ...)` applies
+        // `(impl print-object Array<T> (:where (print-object T)) ...)` applies
         // to an `Array<i32>` and not to an `Array<point>` whose `point` never
         // implemented the trait — and this request is not a call anyone
         // wrote, so an unsatisfiable one has to be *dropped*, not reported:
@@ -5418,7 +5418,7 @@ impl Checker {
         let env = Env::new().extended(params.clone())?;
         // As in `specialize_method_form`: the implicit block keeps the name
         // the source wrote, which is not the mangled one this emits under.
-        let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
+        let (name, _) = self.parse_defun_name(tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
         self.defun_form(heap, mangled, &params, &ret, &body)
@@ -5489,7 +5489,7 @@ impl Checker {
         let env = Env::new().extended(params.clone())?;
         // As in `specialize_method_form`: the implicit block keeps the name
         // the source wrote, which is not the mangled one this emits under.
-        let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
+        let (name, _) = self.parse_defun_name(tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
         self.defun_form(heap, mangled, &params, &ret, &body)
@@ -5610,7 +5610,7 @@ impl Checker {
 
 
 
-    /// `(where (Trait1 T1 (Assoc1 Concrete1)...) (Trait2 T2)...)`: trait
+    /// `(:where (Trait1 T1 (Assoc1 Concrete1)...) (Trait2 T2)...)`: trait
     /// bounds on a generic `defun`'s type parameters, keyed by parameter
     /// name, each optionally pinning one or more of that trait's associated
     /// types to a concrete type — see `TraitBound`'s doc comment for how
@@ -5627,7 +5627,7 @@ impl Checker {
             let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
             if parts.len() < 2 {
                 return Err(Error::TypeError(
-                    "where: each bound must be (Trait type-param (AssocName Type)...)".into(),
+                    ":where: each bound must be (Trait type-param (AssocName Type)...)".into(),
                 ));
             }
             // Resolved to the trait's fully-qualified path (not left as the
@@ -5637,17 +5637,17 @@ impl Checker {
             // (every file is one) a bare `err2` would otherwise be stored as
             // root `err2` and match none of them.
             let trait_name = match parts[0] {
-                Value::Symbol(id) => self.resolve_trait_name(heap.symbol_name(id))?,
-                _ => return Err(Error::TypeError("where: trait name must be a symbol".into())),
+                Value::Symbol(id) => self.resolve_trait_name(heap.symbol_spelling(id))?,
+                _ => return Err(Error::TypeError(":where: trait name must be a symbol".into())),
             };
             if let Some(l) = parts_locs[0].1.as_ref() {
                 self.record_trait_use(&trait_name, l.clone());
             }
             let tparam = match parts[1] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
-                _ => return Err(Error::TypeError("where: type parameter must be a symbol".into())),
+                Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
+                _ => return Err(Error::TypeError(":where: type parameter must be a symbol".into())),
             };
-            let assoc = self.parse_trait_bound_pins(heap, &parts[2..], "where")?;
+            let assoc = self.parse_trait_bound_pins(heap, &parts[2..], ":where")?;
             bounds.entry(tparam).or_default().push(TraitBound { trait_path: trait_name, assoc });
         }
         Ok(bounds)
@@ -5673,7 +5673,7 @@ impl Checker {
                 )));
             }
             let aname = match pin_parts[0] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
                 _ => {
                     return Err(Error::TypeError(format!(
                         "{}: associated type name must be a symbol",
@@ -5697,7 +5697,7 @@ impl Checker {
     /// give an inherited method's signature a concrete meaning, and
     /// `TraitDef::assoc_types` would have to grow the inherited names —
     /// changing `:dyn` pin arity for every existing trait. The pin's type may
-    /// reference `Sub`'s *own* associated types (`(deftrait Collection (type
+    /// reference `Sub`'s *own* associated types (`(deftrait Collection (:type
     /// Elem) ((Iter (Item Elem))) ...)`), which resolve when the `:dyn`'s own
     /// pins are substituted.
     fn parse_supertrait_list(
@@ -5759,7 +5759,7 @@ impl Checker {
         loc: Option<&Loc>,
     ) -> Result<Path, Error> {
         let written = match v {
-            Value::Symbol(id) => heap.symbol_name(id),
+            Value::Symbol(id) => heap.symbol_spelling(id),
             _ => {
                 return Err(Error::TypeError(format!(
                     "deftrait {}: supertrait name must be a symbol",
@@ -5870,9 +5870,9 @@ impl Checker {
     /// generic syntax a *type* position uses (`Vector<T>`), so all three
     /// defining forms read consistently. The old `(name T1 T2...)` list form
     /// is no longer accepted.
-    fn parse_defun_name(&self, heap: &Heap, v: Value) -> Result<(String, Vec<String>), Error> {
+    fn parse_defun_name(&self, v: Value) -> Result<(String, Vec<String>), Error> {
         match v {
-            Value::Symbol(id) => parse_generic_name_header(heap.symbol_name(id)),
+            Value::Symbol(id) => parse_generic_name_header(&bound_name(id, "a definition")?),
             _ => Err(Error::TypeError(
                 "definition name must be a symbol (write `name<T>` for type parameters)".into(),
             )),
@@ -5901,7 +5901,7 @@ impl Checker {
             return Err(Error::TypeError("defmacro: (defmacro name (params) body...)".into()));
         }
         let name = match parts[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Symbol(id) => bound_name(id, "defmacro")?,
             _ => return Err(Error::TypeError("defmacro: name must be a symbol".into())),
         };
         // Parse the CL-style lambda list into its four ordered regions:
@@ -6037,7 +6037,7 @@ impl Checker {
     /// A bare-symbol lambda-list parameter name (`required`/`&rest`).
     fn macro_param_name(heap: &Heap, v: Value, section: &str) -> Result<String, Error> {
         match v {
-            Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
+            Value::Symbol(id) => Ok(heap.symbol_spelling(id).to_string()),
             _ => Err(Error::TypeError(format!("defmacro: {} parameter must be a name", section))),
         }
     }
@@ -6046,7 +6046,7 @@ impl Checker {
     /// `(name default-form)` pair. Returns `(name, Some(form)|None)`.
     fn macro_opt_key_spec(heap: &Heap, v: Value, section: &str) -> Result<(String, Option<Value>), Error> {
         match v {
-            Value::Symbol(id) => Ok((heap.symbol_name(id).to_string(), None)),
+            Value::Symbol(id) => Ok((heap.symbol_spelling(id).to_string(), None)),
             Value::Cons(_) => {
                 let items = heap.list_to_vec(v)?;
                 if items.is_empty() || items.len() > 2 {
@@ -6141,7 +6141,7 @@ impl Checker {
                 return Err(Error::TypeError("parameter must be (name type)".into()));
             }
             let name = match pair[0] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => bound_name(id, "a parameter")?,
                 _ => return Err(Error::TypeError("parameter name must be a symbol".into())),
             };
             out.push((name, self.parse_type_here_at(heap, pair[1], pair_locs.get(1).and_then(|(_, l)| l.as_ref()))?));
@@ -6167,7 +6167,7 @@ impl Checker {
             )));
         }
         let name = match items_locs[0].0 {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Symbol(id) => bound_name(id, "a parameter")?,
             _ => return Err(Error::TypeError(format!("{}: {} parameter name must be a symbol", what, section))),
         };
         let name_loc = items_locs[0].1.clone();
@@ -6308,7 +6308,7 @@ impl Checker {
                 ));
             }
             let name = match rest[0] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => bound_name(id, "defstruct")?,
                 _ => return Err(Error::TypeError("defstruct: field name must be a symbol".into())),
             };
             out.push(StructField {
@@ -6402,8 +6402,8 @@ impl Checker {
             // `(defstruct (Pair A B) ...)`, which the option list now occupies
             // the syntax of. Say that, rather than "an option must be a list".
             if let Value::Symbol(id) = opt {
-                let name = heap.symbol_name(*id);
-                if !name.starts_with(':') {
+                let name = heap.symbol_spelling(*id);
+                if !id.is_keyword() {
                     return Err(Error::TypeError(format!(
                         "defstruct: `{}` is not an option — a definition name's type parameters go on the name itself (`Name<{}>`); the list after `defstruct` is the option list (`:copier`, `:include`)",
                         name, name
@@ -6414,25 +6414,25 @@ impl Checker {
                 Error::TypeError("defstruct: each option must be a list, e.g. (:copier copy-point)".into())
             })?;
             let key = match items.first() {
-                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                Some(Value::Symbol(id)) => *id,
                 _ => return Err(Error::TypeError("defstruct: an option starts with a keyword, e.g. (:copier copy-point)".into())),
             };
-            match key.as_str() {
-                ":constructor" => {
+            match key.well_known() {
+                wk::KW_CONSTRUCTOR => {
                     return Err(Error::TypeError(
                         "defstruct: (:constructor ...) is gone — write the constructor as a static method in the type's `impl`, \
                          e.g. (impl Point (pub new ((x int) (y int)) Point (make-instance 'Point :x x :y y)))"
                             .into(),
                     ))
                 }
-                ":copier" => {
+                wk::KW_COPIER => {
                     let name = single_name_option(heap, &items[1..], ":copier")?;
                     if out.copier.is_some() {
                         return Err(Error::TypeError("defstruct: :copier may appear only once".into()));
                     }
                     out.copier = Some(name);
                 }
-                ":include" => {
+                wk::KW_INCLUDE => {
                     if items.len() != 2 {
                         return Err(Error::TypeError("defstruct: (:include Parent) takes exactly one type".into()));
                     }
@@ -6441,28 +6441,28 @@ impl Checker {
                     }
                     out.include = Some((items[1], opt_locs.get(i).and_then(|l| l.clone())));
                 }
-                ":conc-name" => {
+                wk::KW_CONC_NAME => {
                     return Err(Error::TypeError(
                         "defstruct: :conc-name has nothing to do here — accessors are methods dispatched on the receiver's type, so slot names never collide, and a prefix would break `instance::field`"
                             .into(),
                     ))
                 }
-                ":predicate" => {
+                wk::KW_PREDICATE => {
                     return Err(Error::TypeError(
                         "defstruct: :predicate has nothing to answer — a type is a compile-time classification with no runtime witness, so the generated predicate could only ever return true"
                             .into(),
                     ))
                 }
-                ":type" | ":initial-offset" | ":named" => {
+                wk::KW_TYPE | wk::KW_INITIAL_OFFSET | wk::KW_NAMED => {
                     return Err(Error::TypeError(format!(
                         "defstruct: `{}` re-lays the value out as a list or vector; the representation belongs to the compiler here and nothing in the language observes it",
-                        key
+                        heap.symbol_spelling(key)
                     )))
                 }
-                other => {
+                _ => {
                     return Err(Error::TypeError(format!(
                         "defstruct: unknown option `{}` (known: :copier, :include)",
-                        other
+                        heap.symbol_spelling(key)
                     )))
                 }
             }
@@ -6473,7 +6473,7 @@ impl Checker {
     // ---- deftrait / impl ---------------------------------------------------
 
     /// [`Self::check_deftrait_form`] with the trait's type variables in scope:
-    /// `Self`, and every associated type it declares with `(type Name)`.
+    /// `Self`, and every associated type it declares with `(:type Name)`.
     fn check_deftrait(
         &mut self,
         heap: &mut Heap,
@@ -6487,15 +6487,15 @@ impl Checker {
         for item in parts.iter().skip(2) {
             let Ok(elems) = heap.list_to_vec(*item) else { continue };
             if let [Value::Symbol(head), Value::Symbol(name)] = elems.as_slice() {
-                if heap.symbol_name(*head) == "type" {
-                    vars.push(heap.symbol_name(*name).to_string());
+                if head.is(wk::KW_TYPE) {
+                    vars.push(heap.symbol_spelling(*name).to_string());
                 }
             }
         }
         self.with_type_names(vars, |c| c.check_deftrait_form(heap, interp, parts, parts_locs, public, def_loc))
     }
 
-    /// `(deftrait Name (Super...) (type AssocName)... (method-name ((self Self) params...) Ret)...)`:
+    /// `(deftrait Name (Super...) (:type AssocName)... (method-name ((self Self) params...) Ret)...)`:
     /// declares a trait as a set of method signature *templates* (no
     /// bodies) — `Self` and any declared associated type name are usable as
     /// ordinary type variables in a signature, exactly like a generic
@@ -6525,13 +6525,13 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError(
-                "deftrait: (deftrait Name (Super...) (type AssocName)... (method (params...) ret)...) \
+                "deftrait: (deftrait Name (Super...) (:type AssocName)... (method (params...) ret)...) \
                  — the supertrait list is required; write `()` for none"
                     .into(),
             ));
         }
         let name = match parts[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Symbol(id) => bound_name(id, "deftrait")?,
             _ => return Err(Error::TypeError("deftrait: name must be a symbol".into())),
         };
         let fq_name = self.fq(&name);
@@ -6585,15 +6585,15 @@ impl Checker {
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
             let head = match elems.first() {
-                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                Some(Value::Symbol(id)) => heap.symbol_spelling(*id).to_string(),
                 _ => return Err(Error::TypeError("deftrait: item must start with a symbol".into())),
             };
-            if head == "type" {
+            if is_symbol(elems[0], wk::KW_TYPE) {
                 if elems.len() != 2 {
-                    return Err(Error::TypeError("deftrait: (type AssocName)".into()));
+                    return Err(Error::TypeError("deftrait: (:type AssocName)".into()));
                 }
                 let aname = match elems[1] {
-                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    Value::Symbol(id) => bound_name(id, "deftrait")?,
                     _ => return Err(Error::TypeError("deftrait: associated type name must be a symbol".into())),
                 };
                 assoc_types.push(aname);
@@ -6686,13 +6686,13 @@ impl Checker {
         forms::module_form(heap, &fq_name, &[])
     }
 
-    /// `(impl TraitName TargetType (type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`:
+    /// `(impl TraitName TargetType (:type AssocName ConcreteType)... (method-name (recv params...) Ret body...)...)`:
     /// implements `TraitName` for `TargetType`. Each method is checked and
     /// registered exactly like an ordinary `(defmethod method-name ((self
     /// TargetType) params...) Ret body...)` — `Self` (and any of the
     /// trait's associated type names) occurring in a method's *written*
     /// parameter/return type syntax is textually substituted with
-    /// `TargetType`/the `(type ...)` binding's concrete type *before*
+    /// `TargetType`/the `(:type ...)` binding's concrete type *before*
     /// parsing, by rewriting the read `Value` tree (`Checker::subst_value`),
     /// so the rest of `check_defmethod` never has to know `Self`/associated
     /// types exist — by the time it parses the receiver/parameter/return
@@ -6721,7 +6721,7 @@ impl Checker {
     fn check_impl(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
         // `(impl Trait Type item...)` names two things before its items;
         // an inherent `(impl Type item...)` names one, so what follows the
-        // first is an item, a `(where ...)`, or nothing.
+        // first is an item, a `(:where ...)`, or nothing.
         if matches!(parts.get(1), None | Some(Value::Cons(_))) {
             let vars = parts.first().map(|t| self.written_type_vars(heap, *t)).unwrap_or_default();
             return self.with_type_names(vars, |c| c.check_impl_inherent(heap, interp, parts, parts_locs));
@@ -6730,8 +6730,8 @@ impl Checker {
         self.with_type_names(vars, |c| c.check_impl_form(heap, interp, parts, parts_locs))
     }
 
-    /// `(impl Type (where ...)? item...)`: Rust's inherent `impl`. Each item
-    /// is `(pub? name<U...>? (params...) Ret (where ...)? body...)`; one whose
+    /// `(impl Type (:where ...)? item...)`: Rust's inherent `impl`. Each item
+    /// is `(pub? name<U...>? (params...) Ret (:where ...)? body...)`; one whose
     /// first parameter is `self` (bare, or `(self Self)`) is an instance
     /// method, any other a static method, called `(Type::name args...)`.
     /// `Self` in a parameter or return type is the target type.
@@ -6802,7 +6802,7 @@ impl Checker {
     fn normalize_inherent_item(&mut self, heap: &mut Heap, item: Value) -> Result<(bool, Value, bool), Error> {
         let shape = "impl: an item is (pub? name (params...) ReturnType body...)";
         let mut elems = heap.list_to_vec_locs(item).map_err(|_| Error::TypeError(shape.into()))?;
-        let public = matches!(elems.first(), Some((Value::Symbol(id), _)) if heap.symbol_name(*id) == "pub");
+        let public = matches!(elems.first(), Some((Value::Symbol(id), _)) if id.is(wk::PUB));
         if public {
             elems.remove(0);
         }
@@ -6814,7 +6814,7 @@ impl Checker {
             v @ Value::Cons(_) => heap.list_to_vec_locs(v)?,
             _ => return Err(Error::TypeError(shape.into())),
         };
-        let is_self = |heap: &Heap, v: Value| matches!(v, Value::Symbol(id) if heap.symbol_name(id) == "self");
+        let is_self = |_: &Heap, v: Value| is_symbol(v, wk::SELF);
         let first_is_self = match params.first() {
             Some((v @ Value::Symbol(_), _)) => is_self(heap, *v),
             Some((v @ Value::Cons(_), _)) => heap.car(*v).map(|h| is_self(heap, h)).unwrap_or(false),
@@ -6837,7 +6837,7 @@ impl Checker {
 
     fn check_impl_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
-            return Err(Error::TypeError("impl: (impl TraitName TargetType (type AssocName Type)... (method ...)...)".into()));
+            return Err(Error::TypeError("impl: (impl TraitName TargetType (:type AssocName Type)... (method ...)...)".into()));
         }
         // A bare name searches the ancestor module chain; a `::` path names
         // the module outright, which is the only way to implement a trait
@@ -6896,19 +6896,19 @@ impl Checker {
         // `Self` -> the target type's *written* form (`parts[1]`, unparsed —
         // substitution happens before `parse_type` runs on each method, so
         // a generic target like `(VectorIter T)` carries its own type
-        // variable `T` through untouched). Each `(type AssocName Type)`
+        // variable `T` through untouched). Each `(:type AssocName Type)`
         // binding adds one more substitution, keyed by the trait's
         // associated type name.
         let mut subst: HashMap<String, Value> = HashMap::new();
         subst.insert("self".to_string(), parts[1]);
-        // Parsed (not just textual) parallel of `subst`'s `(type AssocName
+        // Parsed (not just textual) parallel of `subst`'s `(:type AssocName
         // Type)` bindings, for `AdtDef::trait_assoc` — lets
         // `Checker::check_call`/`resolve_trait_assoc_type` later recover
         // what this `impl` concretely binds each associated type to, without
         // re-parsing `subst`'s raw `Value`s.
         let mut assoc_concrete: BTreeMap<String, Type> = BTreeMap::new();
 
-        // An optional impl-level `(where ...)`, right after the target type:
+        // An optional impl-level `(:where ...)`, right after the target type:
         // bounds that hold for *every* method of this `impl`, so the owner's
         // type parameters are constrained once instead of on each method.
         // Merged into each method's own clause below, textually, so the
@@ -6928,16 +6928,15 @@ impl Checker {
         for item in &parts[item_start..] {
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
-            let head = match elems.first() {
-                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
-                _ => return Err(Error::TypeError("impl: item must start with a symbol".into())),
-            };
-            if head == "type" {
+            if !matches!(elems.first(), Some(Value::Symbol(_))) {
+                return Err(Error::TypeError("impl: item must start with a symbol".into()));
+            }
+            if is_symbol(elems[0], wk::KW_TYPE) {
                 if elems.len() != 3 {
-                    return Err(Error::TypeError("impl: (type AssocName Type)".into()));
+                    return Err(Error::TypeError("impl: (:type AssocName Type)".into()));
                 }
                 let aname = match elems[1] {
-                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    Value::Symbol(id) => bound_name(id, "impl")?,
                     _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
                 };
                 assoc_concrete.insert(aname.clone(), self.parse_type_here_at(heap, elems[2], elem_locs[2].1.as_ref())?);
@@ -6954,7 +6953,7 @@ impl Checker {
         let written: Vec<String> = method_forms
             .iter()
             .map(|m| match heap.list_to_vec(*m)?.first() {
-                Some(Value::Symbol(id)) => Ok(heap.symbol_name(*id).to_string()),
+                Some(Value::Symbol(id)) => Ok(heap.symbol_spelling(*id).to_string()),
                 _ => Err(Error::TypeError("impl: method name must be a symbol".into())),
             })
             .collect::<Result<_, Error>>()?;
@@ -7028,7 +7027,7 @@ impl Checker {
     }
 
     /// Rewrite one `impl` method item's *type* positions through `subst`,
-    /// returning the rebuilt `(method-name (recv params...) ret (where ...)?
+    /// returning the rebuilt `(method-name (recv params...) ret (:where ...)?
     /// body...)` element list and its per-element locations — exactly the
     /// shape [`Self::check_defmethod_in`] and [`Self::parse_defmethod_sig`]
     /// consume.
@@ -7038,7 +7037,7 @@ impl Checker {
     /// `subst`'s `"self"` key: the receiver is conventionally also named
     /// `self`, a plain variable, completely unrelated to the `Self` *type*
     /// keyword even though both case-fold to the same string), the return
-    /// type, and the method's own `(where ...)`, which is merged with the
+    /// type, and the method's own `(:where ...)`, which is merged with the
     /// impl-level clause into a single one. The body is left untouched: it's
     /// executable code, not type syntax, so any `Self`/`Item` appearing there
     /// is an ordinary (if confusingly named) variable/function reference, not
@@ -7085,7 +7084,7 @@ impl Checker {
             // refusal for the other way in — an *inherent* method that a
             // later `impl` adopts as the trait's.
             if let Value::Symbol(id) = pair {
-                let name = heap.symbol_name(*id).to_string();
+                let name = heap.symbol_spelling(*id).to_string();
                 if inherent && name.starts_with('&') {
                     new_recv_pairs.push((*pair, pair_loc.clone()));
                     continue;
@@ -7094,7 +7093,7 @@ impl Checker {
                     return Err(Error::TypeError(format!(
                         "impl: method `{}` may not declare {} — a trait method's arity is fixed by \
                          its vtable slot",
-                        heap.symbol_name(match elems[0] {
+                        heap.symbol_spelling(match elems[0] {
                             Value::Symbol(n) => n,
                             _ => *id,
                         }),
@@ -7190,7 +7189,7 @@ impl Checker {
         out
     }
 
-    /// Fuse an `impl`-level `(where ...)` and a method's own into the single
+    /// Fuse an `impl`-level `(:where ...)` and a method's own into the single
     /// clause `Checker::parse_defmethod_sig` expects, impl-level bounds
     /// first. `None` when neither is present, so a method with no bounds is
     /// rebuilt exactly as before.
@@ -7234,7 +7233,7 @@ impl Checker {
         Ok(Some(forms::list_from_vec_locs(heap, &items)?))
     }
 
-    /// A whole `(where ...)` clause through `subst`, bound by bound — see
+    /// A whole `(:where ...)` clause through `subst`, bound by bound — see
     /// [`Self::subst_where_bound`].
     fn subst_where_clause(heap: &mut Heap, w: Value, subst: &HashMap<String, Value>) -> Result<Value, Error> {
         let mut heap = RootScope::new(heap);
@@ -7253,7 +7252,7 @@ impl Checker {
     /// positions only: the bounded type and each pin's type. An `impl`'s
     /// `subst` maps its associated type names as well as `Self`, and a pin's
     /// name is one of those names — rewritten, `(Iter I (Item A))` inside an
-    /// `impl` that declares `(type Item A)` would become `(Iter I (A A))`, a
+    /// `impl` that declares `(:type Item A)` would become `(Iter I (A A))`, a
     /// bound that no longer says what `I`'s `Item` is. A part that is not a
     /// list where one belongs is left as written, for `parse_where_clause`
     /// to report.
@@ -7331,7 +7330,7 @@ impl Checker {
         for a in &tdef.assoc_types {
             if !assoc_concrete.contains_key(a) {
                 return Err(Error::TypeError(format!(
-                    "impl {} {}: associated type `{}` is not bound — write `(type {} <type>)`",
+                    "impl {} {}: associated type `{}` is not bound — write `(:type {} <type>)`",
                     trait_fq, target_fq, a, a
                 )));
             }
@@ -7519,7 +7518,7 @@ impl Checker {
         let mut items: Vec<Vec<crate::owned_form::OwnedForm>> = Vec::new();
         for (aname, ty) in &b.assoc {
             items.push(vec![
-                crate::owned_form::OwnedForm::Sym("type".into()),
+                crate::owned_form::OwnedForm::Keyword("type".into()),
                 crate::owned_form::OwnedForm::Sym(aname.clone()),
                 ty.clone(),
             ]);
@@ -7588,8 +7587,8 @@ impl Checker {
     /// so "do these overlap" has no answer at any single point in the file.
     /// Preferring the explicit one is at least order-independent.
     fn type_implements(&self, ty: &Type, tb: &TraitBound, depth: usize) -> bool {
-        // Cut polymorphic recursion (`impl<T> A T (where (B T))` plus
-        // `impl<T> B T (where (A T))`), which would otherwise ask the same
+        // Cut polymorphic recursion (`impl<T> A T (:where (B T))` plus
+        // `impl<T> B T (:where (A T))`), which would otherwise ask the same
         // question one wrapper deeper forever.
         if depth > BLANKET_BOUND_DEPTH {
             return false;
@@ -7709,12 +7708,12 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         if parts.len() < 2 {
             return Err(Error::TypeError(
-                "impl: (impl<T> TraitName Target (where ...) (method ...)...)".into(),
+                "impl: (impl<T> TraitName Target (:where ...) (method ...)...)".into(),
             ));
         }
         let target_var = match parts[1] {
             Value::Symbol(id) => {
-                let n = heap.symbol_name(id).to_string();
+                let n = heap.symbol_spelling(id).to_string();
                 (head_params.contains(&n) && self.reg.type_def(&Path::root(&n)).is_none()).then_some(n)
             }
             _ => None,
@@ -7782,7 +7781,7 @@ impl Checker {
         for tp in bounds.keys() {
             if !head_params.contains(tp) {
                 return Err(Error::TypeError(format!(
-                    "impl<{}> {}: `where` bounds `{}`, which is not one of the impl's type parameters",
+                    "impl<{}> {}: `:where` bounds `{}`, which is not one of the impl's type parameters",
                     head_params.join(","),
                     trait_fq,
                     tp
@@ -7798,20 +7797,19 @@ impl Checker {
         let mut method_forms: Vec<Value> = Vec::new();
         for item in &parts[at..] {
             let elems = heap.list_to_vec(*item)?;
-            let head = match elems.first() {
-                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
-                _ => return Err(Error::TypeError("impl: item must start with a symbol".into())),
-            };
+            if !matches!(elems.first(), Some(Value::Symbol(_))) {
+                return Err(Error::TypeError("impl: item must start with a symbol".into()));
+            }
             let owned = elems
                 .iter()
                 .map(|v| crate::owned_form::value_to_owned(heap, *v))
                 .collect::<Result<Vec<_>, Error>>()?;
-            if head == "type" {
+            if is_symbol(elems[0], wk::KW_TYPE) {
                 if elems.len() != 3 {
-                    return Err(Error::TypeError("impl: (type AssocName Type)".into()));
+                    return Err(Error::TypeError("impl: (:type AssocName Type)".into()));
                 }
                 let aname = match elems[1] {
-                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    Value::Symbol(id) => bound_name(id, "impl")?,
                     _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
                 };
                 assoc_written.push((aname.clone(), elems[2]));
@@ -7856,7 +7854,7 @@ impl Checker {
     /// method call on it resolves through `Env::bounds` to a diagnostics-only
     /// the unreachable-`panic` node ([`Self::check_method_call`]'s `Bound` arm).
     /// Two bound sets are in scope, matching what every materialization will
-    /// have: the impl's own `(where ...)` — already merged into each method's
+    /// have: the impl's own `(:where ...)` — already merged into each method's
     /// clause by [`Self::subst_method_item`] — and the trait being
     /// implemented, since inside `impl<T> Clamp T` the target *does* implement
     /// `Clamp`, so a method may call its siblings on `self`.
@@ -8316,7 +8314,7 @@ impl Checker {
         if let Type::Dyn(from, from_pins) = value.ty.clone() {
             return self.upcast_dyn(heap, value, &from, &from_pins, trait_path, pins);
         }
-        // Boxing a `where`-bounded type variable (`(defun f<E> ... (where (Error E))
+        // Boxing a `where`-bounded type variable (`(defun f<E> ... (:where (Error E))
         // ... (as :dyn Error e))`): which vtable to build is only knowable once
         // `E` is concrete, so the generic body — diagnostics-only, never
         // executed — carries the same erased-generic placeholder a bounded
@@ -8709,7 +8707,7 @@ impl Checker {
     fn subst_value(heap: &mut Heap, v: Value, subst: &HashMap<String, Value>) -> Result<Value, Error> {
         match v {
             Value::Symbol(id) => {
-                let name = heap.symbol_name(id).to_string();
+                let name = heap.symbol_spelling(id).to_string();
                 match subst.get(&name) {
                     Some(bound) => Ok(*bound),
                     None => Self::subst_inside_name(heap, v, &name, subst),
@@ -8724,7 +8722,7 @@ impl Checker {
                 let name = heap
                     .path_segments(id)
                     .iter()
-                    .map(|s| heap.symbol_name(*s))
+                    .map(|s| heap.symbol_spelling(*s))
                     .collect::<Vec<_>>()
                     .join("::");
                 Self::subst_inside_name(heap, v, &name, subst)
@@ -8785,7 +8783,7 @@ impl Checker {
         if !name.contains('<') || !name.ends_with('>') {
             return Ok(v);
         }
-        // Not everything `subst_value` walks is a type: a `(where ...)`
+        // Not everything `subst_value` walks is a type: a `(:where ...)`
         // bound leads with a trait name, and the clause is rewritten by the
         // same walk. A name the type grammar rejects is left exactly as
         // written — whatever reads it next parses it with a span to blame,
@@ -8818,7 +8816,7 @@ impl Checker {
         // segments of its own that no closing form pops, so the body's end is
         // what restores the namespace — see `Checker::ns_base`.
         let base = self.ns.len();
-        let path = self.enter_module(&segs);
+        let path = self.enter_module(&segs)?;
 
         let mut body = Vec::new();
         let mut result = Ok(());
@@ -8864,12 +8862,22 @@ impl Checker {
     /// same segment count, even on a check error in between (mirroring
     /// [`Self::check_module`], which pops before propagating its body's
     /// first error).
-    pub fn enter_module(&mut self, segs: &[String]) -> Path {
+    ///
+    /// The root's `keyword` is the keyword namespace (CL's `KEYWORD`
+    /// package), which owns every keyword and nothing else, so no module may
+    /// take its place.
+    pub fn enter_module(&mut self, segs: &[String]) -> Result<Path, Error> {
+        if self.ns.is_empty() && segs.first().is_some_and(|s| s.eq_ignore_ascii_case(typelisp_mem::symbols::KEYWORD_MODULE)) {
+            return Err(Error::TypeError(format!(
+                "module `{}` is the keyword namespace, which holds the keywords and nothing else — choose another name",
+                typelisp_mem::symbols::KEYWORD_MODULE
+            )));
+        }
         for s in segs {
             self.ns.push(s.clone());
         }
         self.reg.root.module_mut(&self.ns);
-        Path::from_segments(self.ns.clone())
+        Ok(Path::from_segments(self.ns.clone()))
     }
 
     /// Pop `depth` segments pushed by [`Self::enter_module`].
@@ -8885,11 +8893,11 @@ impl Checker {
     /// wrapping a file's whole content in the module its location derives
     /// to; a nested `(module ...)` form inside that file still goes through
     /// plain [`Self::enter_module`] via [`Self::check_module`].
-    pub fn enter_file_module(&mut self, segs: &[String]) -> Path {
-        self.ns_base.push(self.ns.len());
-        let path = self.enter_module(segs);
+    pub fn enter_file_module(&mut self, segs: &[String]) -> Result<Path, Error> {
+        let path = self.enter_module(segs)?;
+        self.ns_base.push(self.ns.len() - segs.len());
         self.file_ns.push(self.ns.clone());
-        path
+        Ok(path)
     }
 
     /// Undo [`Self::enter_file_module`]: restore the namespace this file was
@@ -9301,7 +9309,7 @@ impl Checker {
         binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
         // `with_bounds` mirrors `check_defun`'s body env: inside the body a
         // method call on a `where`-bounded type variable (e.g. `(equals
-        // self::car other::car)` with `self::car : A` under `(where (Eq A))`)
+        // self::car other::car)` with `self::car : A` under `(:where (Eq A))`)
         // resolves through `check_method_call`'s `Bound` arm to a
         // diagnostics-only unreachable `panic`, exactly as in generic `defun`
         // bodies.
@@ -9365,7 +9373,7 @@ impl Checker {
             ));
         }
         let (method, own_params) = match parts[0] {
-            Value::Symbol(id) => parse_generic_name_header(heap.symbol_name(id))?,
+            Value::Symbol(id) => parse_generic_name_header(heap.symbol_spelling(id))?,
             _ => return Err(Error::TypeError("impl: a method's name must be a symbol".into())),
         };
         let sig_list_locs = heap.list_to_vec_locs(parts[1])?;
@@ -9385,7 +9393,7 @@ impl Checker {
                     return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method)));
                 }
                 let sname = match recv[0] {
-                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    Value::Symbol(id) => bound_name(id, "defmethod")?,
                     _ => {
                         return Err(Error::TypeError(format!(
                             "impl: method `{}`: the receiver's name must be a symbol",
@@ -9510,7 +9518,7 @@ impl Checker {
             }
             _ => (parts[0], StructOptions::default()),
         };
-        let (name, type_params) = self.parse_defun_name(heap, name_form)?;
+        let (name, type_params) = self.parse_defun_name(name_form)?;
         // A leading docstring, right after the name and before the field
         // list — CL's `(defstruct (name options) documentation slot...)`
         // position. Unlike `defun`'s, unambiguous: a field is always a
@@ -9803,7 +9811,7 @@ impl Checker {
             // list, so this is what an annotation site actually sees.
             Type::Dyn(path, pins) => {
                 let mut f = Items::new(heap);
-                let head = f.heap().intern_symbol(":dyn");
+                let head = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::DYN));
                 f.push(head);
                 let inner = ConcreteNames::type_key(&Type::Named(path.clone(), pins.clone()));
                 let name = f.heap().intern_symbol(&inner);
@@ -9883,7 +9891,7 @@ impl Checker {
     fn check_deftype(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         let mut vars = Self::header_type_vars(heap, parts.first());
         if let Some(Value::Symbol(id)) = parts.first() {
-            if let Ok((name, _)) = parse_generic_name_header(heap.symbol_name(*id)) {
+            if let Ok((name, _)) = parse_generic_name_header(heap.symbol_spelling(*id)) {
                 vars.push(name.to_string());
             }
         }
@@ -9931,7 +9939,7 @@ impl Checker {
         if parts.is_empty() {
             return Err(Error::TypeError("deftype: (deftype Name Type)".into()));
         }
-        let (name, params) = self.parse_defun_name(heap, parts[0])?;
+        let (name, params) = self.parse_defun_name(parts[0])?;
         // A leading docstring, in the same position `defstruct`/`defenum`
         // take one. Unambiguous for the same reason: a type is never written
         // as a string literal.
@@ -10018,7 +10026,7 @@ impl Checker {
         if parts.is_empty() {
             return Err(Error::TypeError("defenum: (defenum Name (Variant Type...)...)".into()));
         }
-        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
+        let (name, type_params) = self.parse_defun_name(parts[0])?;
         // A leading docstring, right after the name and before the variant
         // list — same position/rule as `defstruct`'s (no ambiguity: a
         // variant is always a symbol or a `(Name Type...)` list, never a
@@ -10059,11 +10067,11 @@ impl Checker {
             let (vname, field_vals): (String, Vec<(Value, Option<Loc>)>) = match *item {
                 // A bare symbol is a nullary variant (e.g. `None`); the
                 // parenthesized `(None)` form is equally accepted below.
-                Value::Symbol(id) => (heap.symbol_name(id).to_string(), Vec::new()),
+                Value::Symbol(id) => (heap.symbol_spelling(id).to_string(), Vec::new()),
                 Value::Cons(_) => {
                     let elems = heap.list_to_vec_locs(*item)?;
                     let vname = match elems.first() {
-                        Some((Value::Symbol(id), _)) => heap.symbol_name(*id).to_string(),
+                        Some((Value::Symbol(id), _)) => heap.symbol_spelling(*id).to_string(),
                         _ => return Err(Error::TypeError("defenum: variant name must be a symbol".into())),
                     };
                     (vname, elems[1..].to_vec())
@@ -10268,7 +10276,7 @@ impl Checker {
             return Err(Error::TypeError("in-module: (in-module path)".into()));
         }
         let segs = path_to_segs(heap, parts[0])?;
-        let path = self.enter_module(&segs);
+        let path = self.enter_module(&segs)?;
         forms::module_form(heap, &path, &[])
     }
 
@@ -10669,7 +10677,7 @@ impl Checker {
                 }
                 if let (Some("var"), Some(ref_loc)) = (core::op(heap, checked.form), loc) {
                     if let Some(Value::Symbol(id)) = core::field(heap, checked.form, 0) {
-                        let name = heap.symbol_name(id).to_string();
+                        let name = heap.symbol_spelling(id).to_string();
                         if let Some(bind_loc) = env.get_loc(&name) {
                             self.local_refs.borrow_mut().insert((ref_loc.line, ref_loc.col), bind_loc);
                         }
@@ -10850,19 +10858,12 @@ impl Checker {
                 Checked::new(core::tagged(heap, "unit", &[])?, Type::Unit)
             }
             Value::Symbol(id) => {
-                let name = heap.symbol_name(id).to_string();
+                let name = heap.symbol_spelling(id).to_string();
                 let name = name.as_str();
                 // A keyword (`:name`) is self-evaluating (CL), so it is
                 // matched *before* every binding lookup below — it can never
-                // name a variable, global, function or method. `::foo` is the
-                // absolute-path syntax, not a keyword, and never reaches here
-                // as a `Value::Symbol` (the reader makes it a `Value::Path`);
-                // the `!starts_with("::")` guard keeps that distinction
-                // explicit alongside `read::reader::validate_keyword`'s.
-                if name.starts_with(':') && !name.starts_with("::") {
-                    // The interned symbol *including* the leading colon, so
-                    // "same name -> same object" falls out of the heap's own
-                    // interning with no separate keyword table.
+                // name a variable, global, function or method.
+                if id.is_keyword() {
                     Checked::new(core::tagged(heap, "sym", &[Value::Symbol(id)])?, Type::Symbol)
                 } else if let Some(t) = env.get(name) {
                     // A `symbol-macrolet` binding: the name is not a variable
@@ -10944,7 +10945,7 @@ impl Checker {
                 let segs: Vec<String> = heap
                     .path_segments(pid)
                     .iter()
-                    .map(|s| heap.symbol_name(*s).to_string())
+                    .map(|s| heap.symbol_spelling(*s).to_string())
                     .collect();
                 // `var::field` — sugar for `(field var)`, a field accessor's
                 // ordinary instance-method call (`Checker::check_defstruct`
@@ -11157,7 +11158,7 @@ impl Checker {
             let segs: Vec<String> = heap
                 .path_segments(pid)
                 .iter()
-                .map(|s| heap.symbol_name(*s).to_string())
+                .map(|s| heap.symbol_spelling(*s).to_string())
                 .collect();
             return self.check_path_call(heap, interp, env, &segs, nth_loc(&elem_locs, 0).as_ref(), args, arg_locs, expected);
         }
@@ -11165,7 +11166,7 @@ impl Checker {
         // A non-symbol head (e.g. a `lambda` literal or any expression) is
         // evaluated and applied as a function value.
         let head = match elems[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
             _ => {
                 let callee = self.check_at(heap, interp, env, elems[0], None, nth_loc(&elem_locs, 0))?;
                 return self.check_apply(heap, interp, env, callee, args, arg_locs);
@@ -11516,7 +11517,7 @@ impl Checker {
                 return Err(Error::TypeError("macrolet: each binding is (name (params) body...)".into()));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => bound_name(id, "macrolet")?,
                 _ => return Err(Error::TypeError("macrolet: the binding name must be a symbol".into())),
             };
             let param_vals = heap.list_to_vec(parts[1])?;
@@ -11598,7 +11599,7 @@ impl Checker {
                 return Err(Error::TypeError("symbol-macrolet: each binding is (name form)".into()));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => bound_name(id, "symbol-macrolet")?,
                 _ => {
                     return Err(Error::TypeError(
                         "symbol-macrolet: the binding name must be a symbol".into(),
@@ -11689,7 +11690,7 @@ impl Checker {
                 ));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => bound_name(id, "labels")?,
                 _ => return Err(Error::TypeError("labels: name must be a symbol".into())),
             };
             let name_loc = parts_locs.first().and_then(|(_, l)| l.clone());
@@ -12026,7 +12027,7 @@ impl Checker {
     /// for it.
     ///
     /// An operator on a bounded type variable means its trait's method:
-    /// `(+ a b)` under `(where (Add T))` is `(add a b)`. The trait cannot
+    /// `(+ a b)` under `(:where (Add T))` is `(add a b)`. The trait cannot
     /// declare the operator itself — an `impl` naming a method `+` is refused,
     /// because `+` belongs to the primitive types' built-in tables — so the
     /// two spellings meet here. A bound that declares the written name itself
@@ -12231,7 +12232,7 @@ impl Checker {
             if let Type::Named(p, targs) = &recv_ty {
                 if targs.is_empty() && p.is_simple() && self.reg.type_def(p).is_none() {
                     return Err(Error::TypeError(format!(
-                        "no method `{}` for type variable `{}`: none of the traits in its `where` bounds provides `{}`",
+                        "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",
                         method, recv_ty, method
                     )));
                 }
@@ -12627,11 +12628,15 @@ impl Checker {
             let mut i = 0;
             while i < tail.len() {
                 let kw = match tail[i] {
-                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    Value::Symbol(id) if id.is_keyword() => id.name().to_string(),
+                    Value::Symbol(id) => {
+                        return Err(Error::TypeError(format!(
+                            "{}: expected a `:name` keyword, got `{}`",
+                            who,
+                            heap.symbol_spelling(id)
+                        )))
+                    }
                     _ => return Err(Error::TypeError(format!("{}: expected a `:name` keyword, got a non-symbol", who))),
-                };
-                let Some(kw) = kw.strip_prefix(':').map(|s| s.to_string()) else {
-                    return Err(Error::TypeError(format!("{}: expected a `:name` keyword, got `{}`", who, kw)));
                 };
                 let Some(key) = sig.keys.iter().find(|k| k.name == kw) else {
                     return Err(Error::TypeError(format!("{}: unknown keyword argument :{}", who, kw)));
@@ -12819,7 +12824,7 @@ impl Checker {
             return Err(Error::TypeError(shape));
         };
         if let Value::Symbol(id) = head {
-            let name = heap.symbol_name(id).to_string();
+            let name = heap.symbol_spelling(id).to_string();
             if Self::is_builtin_form_head(&name) {
                 return Err(Error::TypeError(format!("`{}` cannot start `{}`. {}", form_name, name, shape)));
             }
@@ -12833,7 +12838,7 @@ impl Checker {
         let is_call = matches!(
             heap.car(inner.form),
             Ok(Value::Symbol(id))
-                if matches!(heap.symbol_name(id), "call" | "assoc" | "dyn-call" | "apply")
+                if matches!(heap.symbol_spelling(id), "call" | "assoc" | "dyn-call" | "apply")
         );
         if !is_call {
             return Err(Error::TypeError(format!("`{}` needs a call, and this is not one. {}", form_name, shape)));
@@ -12849,7 +12854,7 @@ impl Checker {
         Ok(Checked::new(form, ty))
     }
 
-    /// `(select ((v (recv ch)) body...) ((send ch x) body...) (else body...))`
+    /// `(select ((v (recv ch)) body...) ((send ch x) body...) (:else body...))`
     /// — wait until one of several channel operations can go, and run that
     /// arm.
     ///
@@ -12877,7 +12882,7 @@ impl Checker {
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
-        const SHAPE: &str = "`select` takes arms: (select ((v (recv ch)) body...) ((send ch x) body...) (else body...))";
+        const SHAPE: &str = "`select` takes arms: (select ((v (recv ch)) body...) ((send ch x) body...) (:else body...))";
         if args.is_empty() {
             return Err(Error::TypeError(format!(
                 "`select` with no arms would wait forever. {}",
@@ -12901,11 +12906,11 @@ impl Checker {
             };
             if saw_else {
                 return Err(Error::TypeError(
-                    "`select`: `else` must be the last arm — every arm after it is unreachable".into(),
+                    "`select`: `:else` must be the last arm — every arm after it is unreachable".into(),
                 ));
             }
-            // `(else body...)`
-            if matches!(head, Value::Symbol(id) if heap.symbol_name(*id) == "else") {
+            // `(:else body...)`
+            if matches!(head, Value::Symbol(id) if id.is(wk::KW_ELSE)) {
                 saw_else = true;
                 let (body, body_ty) = self.check_seq(heap, interp, env, rest, &vec![None; rest.len()], expected)?;
                 ty = Some(match ty {
@@ -12920,14 +12925,10 @@ impl Checker {
             // Otherwise the head is the operation, and the rest is the body.
             let op = heap.list_to_vec(*head).map_err(|_| Error::TypeError(SHAPE.to_string()))?;
             let op_head = op.first().copied().unwrap_or(Value::Empty);
-            let op_name = match op_head {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
-                // `(v (recv ch))` — the head is the bound name, not a symbol
-                // naming an operation.
-                _ => String::new(),
-            };
             channel_arms += 1;
-            let arm_form = if op_name == "send" {
+            // `(v (recv ch))` has a list at its head — the bound name — so
+            // only a send arm's head is a symbol.
+            let arm_form = if is_symbol(op_head, wk::SEND) {
                 // `((send ch x) body...)`
                 if op.len() != 3 {
                     return Err(Error::TypeError(format!("`select`: a send arm is (send ch value). {}", SHAPE)));
@@ -12967,12 +12968,12 @@ impl Checker {
                         SHAPE
                     )));
                 };
-                let var = heap.symbol_name(vid).to_string();
+                let var = heap.symbol_spelling(vid).to_string();
                 if op.len() != 2 {
                     return Err(Error::TypeError(format!("`select`: a receive arm is (v (recv ch)). {}", SHAPE)));
                 }
                 let inner = heap.list_to_vec(op[1]).map_err(|_| Error::TypeError(SHAPE.to_string()))?;
-                let is_recv = matches!(inner.first(), Some(Value::Symbol(id)) if heap.symbol_name(*id) == "recv");
+                let is_recv = matches!(inner.first(), Some(Value::Symbol(id)) if id.is(wk::RECV));
                 if !is_recv || inner.len() != 2 {
                     return Err(Error::TypeError(format!("`select`: a receive arm is (v (recv ch)). {}", SHAPE)));
                 }
@@ -13000,7 +13001,7 @@ impl Checker {
         }
         if channel_arms == 0 {
             return Err(Error::TypeError(
-                "`select` needs at least one channel arm — one with only `else` is just its body".into(),
+                "`select` needs at least one channel arm — one with only `:else` is just its body".into(),
             ));
         }
         let node = forms::select_form(heap, &arms)?;
@@ -13830,7 +13831,7 @@ impl Checker {
                 return Err(Error::TypeError("let: binding must be (name val)".into()));
             }
             let name = match pair[0] {
-                Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                Value::Symbol(id) => bound_name(id, "let")?,
                 _ => return Err(Error::TypeError("let: binding name must be a symbol".into())),
             };
             name_locs.push(pair_locs.first().and_then(|(_, l)| l.clone()));
@@ -13904,7 +13905,7 @@ impl Checker {
             return Err(Error::TypeError("let*: binding must be (name val)".into()));
         }
         let name = match pair[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Symbol(id) => bound_name(id, "let*")?,
             _ => return Err(Error::TypeError("let*: binding name must be a symbol".into())),
         };
         let name_loc = pair_locs.first().and_then(|(_, l)| l.clone());
@@ -13947,7 +13948,7 @@ impl Checker {
             let segs: Vec<String> = heap
                 .path_segments(pid)
                 .iter()
-                .map(|s| heap.symbol_name(*s).to_string())
+                .map(|s| heap.symbol_spelling(*s).to_string())
                 .collect();
             return self.check_field_set(heap, interp, env, &segs, args[1], value_loc);
         }
@@ -13955,7 +13956,7 @@ impl Checker {
             return self.check_setf_call_place(heap, interp, env, args[0], args[1]);
         }
         let name = match args[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Symbol(id) => bound_name(id, "setf")?,
             _ => return Err(Error::TypeError(
                 "setf: target must be a variable, `var::field`, or a `(get recv key...)` call form".into(),
             )),
@@ -14087,7 +14088,7 @@ impl Checker {
         let Value::Symbol(head_id) = *head else {
             return Err(Error::TypeError("setf: place's head must be a function name".into()));
         };
-        let accessor = heap.symbol_name(head_id).to_string();
+        let accessor = heap.symbol_spelling(head_id).to_string();
         if accessor == "c-deref" {
             return self.check_c_deref_set(heap, interp, env, rest, value);
         }
@@ -14256,7 +14257,7 @@ impl Checker {
         let mut k = 0;
         while k < rest.len() {
             let slot = match rest[k] {
-                Value::Symbol(id) if heap.symbol_name(id).starts_with(':') => heap.symbol_name(id)[1..].to_string(),
+                Value::Symbol(id) if id.is_keyword() => id.name().to_string(),
                 _ => {
                     return Err(Error::TypeError(format!(
                         "make-instance {}: the arguments after the type are pairs of a slot keyword and a value, such as `:{} v`",
@@ -14651,7 +14652,7 @@ impl Checker {
             .filter(|elems| elems.len() == 2)
             .filter(|elems| matches!(elems[0], Value::Symbol(id) if id.is(wk::QUOTE)))
             .and_then(|elems| match elems[1] {
-                Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+                Value::Symbol(id) => Some(heap.symbol_spelling(id).to_string()),
                 _ => None,
             })
             .ok_or_else(|| Error::TypeError(format!("{} — the result type must be a quoted symbol", usage)))?;
@@ -14931,7 +14932,7 @@ impl Checker {
                     return Err(Error::TypeError("defvar: name must be (name Type)".into()));
                 }
                 let name = match pair[0] {
-                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    Value::Symbol(id) => bound_name(id, "defvar")?,
                     _ => return Err(Error::TypeError("defvar: name must be a symbol".into())),
                 };
                 (name, self.parse_type_here_at(heap, pair[1], pair_locs[1].1.as_ref())?)
@@ -14939,7 +14940,7 @@ impl Checker {
             Value::Symbol(id) => {
                 return Err(Error::TypeError(format!(
                     "defvar: a global needs a declared type — write (defvar ({} Type) value)",
-                    heap.symbol_name(id)
+                    heap.symbol_spelling(id)
                 )))
             }
             _ => return Err(Error::TypeError("defvar: name must be (name Type)".into())),
@@ -14980,7 +14981,7 @@ impl Checker {
     ) -> Result<Checked, Error> {
         // CL's own rule: a `loop` whose first form is a keyword is the
         // extended DSL, anything else is the simple loop this always was.
-        if loop_dsl::is_dsl(heap, args) {
+        if loop_dsl::is_dsl(args) {
             return self.check_loop_dsl(heap, interp, env, args, arg_locs, expected);
         }
         let (body, ty) = self.check_loop_body(heap, interp, env, args, arg_locs, Type::Never)?;
@@ -15022,7 +15023,7 @@ impl Checker {
         let plan = loop_dsl::parse(heap, args, arg_locs)?;
 
         // Pass 1a: the loop variables, each learned in the environment its
-        // predecessors built (`:with j = (* i 2)` after `:for i …` is legal
+        // predecessors built (`:with j := (* i 2)` after `:for i …` is legal
         // in CL, and `let*` gives it the same meaning here).
         let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
         for var in &plan.vars {
@@ -15161,7 +15162,18 @@ impl Checker {
             .filter(|elems| matches!(elems[0], Value::Symbol(id) if id.is(wk::QUOTE)))
             .map(|elems| elems[1]);
         match quoted {
-            Some(sym @ Value::Symbol(id)) => Ok((heap.symbol_name(id).to_string(), sym)),
+            // Keyed by the symbol's module as well as its spelling, so two
+            // modules' `'done` are two tags carrying two types, as they are
+            // two symbols at run time.
+            Some(sym @ Value::Symbol(id)) => {
+                let home = typelisp_mem::symbols::ns_path(id.home());
+                let key = if id.is_keyword() || home.is_empty() {
+                    id.spelling().to_string()
+                } else {
+                    format!("{}::{}", home.join("::"), id.spelling())
+                };
+                Ok((key, sym))
+            }
             _ => Err(Error::TypeError(format!("{}: the tag must be a literal symbol, as in ({} 'done ...)", who, who))),
         }
     }
@@ -15477,7 +15489,7 @@ impl Checker {
     /// spelling this form does not have.
     fn escape_name(heap: &Heap, arg: Option<Value>, who: &str) -> Result<String, Error> {
         match arg {
-            Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
+            Some(Value::Symbol(id)) => Ok(heap.symbol_spelling(id).to_string()),
             Some(_) => Err(Error::TypeError(format!("{}: the name must be a bare symbol", who))),
             None => Err(Error::TypeError(format!("{}: missing the block name", who))),
         }
@@ -15857,7 +15869,7 @@ impl Checker {
     /// *that*, rather than by building the call here: `write-string` is a
     /// `CharOutput` method, and how it resolves depends on the receiver
     /// (a concrete stream type, a `:dyn CharOutput`, or a bound type
-    /// variable inside a `(where (CharOutput S))` function). Handing the
+    /// variable inside a `(:where (CharOutput S))` function). Handing the
     /// rewritten form back to [`Self::check`] is what lets all three work
     /// without this special form knowing anything about trait dispatch.
     ///
@@ -16091,25 +16103,25 @@ impl Checker {
         let mut per_line = false;
         let mut opts = spec[1..].iter();
         while let Some(&key) = opts.next() {
-            let name = match key {
-                Value::Symbol(id) => s.symbol_name(id).to_string(),
+            let (kw, name) = match key {
+                Value::Symbol(id) => (id, s.symbol_spelling(id).to_string()),
                 _ => return Err(Error::TypeError("pprint-logical-block: expected a keyword option".into())),
             };
             let Some(&value) = opts.next() else {
                 return Err(Error::TypeError(format!("pprint-logical-block: {} needs a value", name)));
             };
             let value = self.check_at(&mut s, interp, env, value, Some(&Type::Str), None)?;
-            match name.as_str() {
-                ":prefix" => prefix = value,
-                ":per-line-prefix" => {
+            match kw.well_known() {
+                wk::KW_PREFIX => prefix = value,
+                wk::KW_PER_LINE_PREFIX => {
                     prefix = value;
                     per_line = true;
                 }
-                ":suffix" => suffix = value,
-                other => {
+                wk::KW_SUFFIX => suffix = value,
+                _ => {
                     return Err(Error::TypeError(format!(
                         "pprint-logical-block: unknown option {} (expected :prefix, :per-line-prefix or :suffix)",
-                        other
+                        name
                     )))
                 }
             }
@@ -16292,6 +16304,16 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
+        // `(intern NAME)`: CL's current package is the module the call is
+        // written in, which only the checker knows, so it becomes the second
+        // argument here — the module's path as `intern` reads one.
+        if sig.builtin && args.len() == 1 && *name == Path::root("intern") {
+            let ns = heap.alloc_string(self.ns.join("::"));
+            heap.push_root(ns);
+            let r = self.check_call(heap, interp, env, name, &[args[0], ns], &[arg_locs[0].clone(), None]);
+            heap.pop_root();
+            return r;
+        }
         // Rule A. Before the arity check, so the message a caller gets is the
         // one about permission rather than one about the shape of a call it
         // was never allowed to write. Ahead of the `&optional`/`&key`
@@ -16373,7 +16395,7 @@ impl Checker {
     ///
     /// Not always checked in that order. A type parameter a `where` clause
     /// pins to another's associated type — `A` in `find`'s
-    /// `(where (Iter I (Item A)))` — is decided by the argument that fixes
+    /// `(:where (Iter I (Item A)))` — is decided by the argument that fixes
     /// `I`, and an argument typed `A` checked before it has nothing to be
     /// checked against: `(find 1 (iter w))` over a `Vector<i32>` read the `1`
     /// as an `int`, and the pin then disagreed with it. So an argument whose
@@ -16516,19 +16538,20 @@ impl Checker {
             let mut i = 0;
             while i < tail.len() {
                 let kw_name = match tail[i] {
-                    Value::Symbol(id) => heap.symbol_name(id).to_string(),
+                    Value::Symbol(id) if id.is_keyword() => id.name().to_string(),
+                    Value::Symbol(id) => {
+                        return Err(Error::TypeError(format!(
+                            "{}: expected a `:name` keyword, got `{}`",
+                            name,
+                            heap.symbol_spelling(id)
+                        )))
+                    }
                     _ => {
                         return Err(Error::TypeError(format!(
                             "{}: expected a `:name` keyword, got a non-symbol",
                             name
                         )))
                     }
-                };
-                let Some(kw_name) = kw_name.strip_prefix(':').map(|s| s.to_string()) else {
-                    return Err(Error::TypeError(format!(
-                        "{}: expected a `:name` keyword, got `{}`",
-                        name, kw_name
-                    )));
                 };
                 let Some(key) = sig.keys.iter().find(|k| k.name == kw_name) else {
                     return Err(Error::TypeError(format!("{}: unknown keyword argument :{}", name, kw_name)));
@@ -16684,9 +16707,9 @@ impl Checker {
                     let declared = caller_bounds.get(var_name);
                     for tb in trait_bounds {
                         // A caller bound discharges this one when it names
-                        // the same trait *or a subtrait of it*: `(where (Ord
+                        // the same trait *or a subtrait of it*: `(:where (Ord
                         // T))` already obliges `T` to implement `Eq`, so it
-                        // satisfies a callee's `(where (Eq T))`. The pins are
+                        // satisfies a callee's `(:where (Eq T))`. The pins are
                         // composed down the chain for the same reason
                         // `check_dyn_call` composes them.
                         let satisfied = declared.is_some_and(|caller_tbs| {
@@ -16730,7 +16753,7 @@ impl Checker {
                             return Err(Error::TypeError(format!(
                                 "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
                                  which has no `where` bound declaring it implements `{}` — the enclosing function's \
-                                 signature needs a matching `where` clause on `{}`",
+                                 signature needs a matching `:where` clause on `{}`",
                                 name, tparam, var_name, tb.trait_path, var_name
                             )));
                         }
@@ -16743,14 +16766,14 @@ impl Checker {
             // pointer — has no impls of its own, but it does implement what
             // `type_implements` finds (a trait object its trait, a blanket
             // impl anything). This used to `continue`, which let a
-            // `:dyn Error` through `(where (Eq T))`. `!` has no values, so
+            // `:dyn Error` through `(:where (Eq T))`. `!` has no values, so
             // nothing can be asked of one.
             let Some(type_fq) = type_fq else {
                 if *concrete != Type::Never {
                     for tb in trait_bounds {
                         if !self.type_implements(concrete, tb, 0) {
                             return Err(Error::TypeError(format!(
-                                "{}: type `{}` does not implement trait `{}` required by `where` clause on type parameter `{}`",
+                                "{}: type `{}` does not implement trait `{}` required by `:where` clause on type parameter `{}`",
                                 name, concrete, tb.trait_path, tparam
                             )));
                         }
@@ -16760,7 +16783,7 @@ impl Checker {
             };
             let def = self.reg.type_def(&type_fq).ok_or_else(|| {
                 Error::TypeError(format!(
-                    "{}: type `{}` does not implement a trait required by `where` clause on type parameter `{}`",
+                    "{}: type `{}` does not implement a trait required by `:where` clause on type parameter `{}`",
                     name, concrete, tparam
                 ))
             })?;
@@ -16770,7 +16793,7 @@ impl Checker {
                 // materialization).
                 if !self.type_implements(concrete, tb, 0) {
                     return Err(Error::TypeError(format!(
-                        "{}: type `{}` does not implement trait `{}` required by `where` clause on type parameter `{}`",
+                        "{}: type `{}` does not implement trait `{}` required by `:where` clause on type parameter `{}`",
                         name, concrete, tb.trait_path, tparam
                     )));
                 }
@@ -16796,7 +16819,7 @@ impl Checker {
                         Some(actual) if self.type_is_open(&actual) => {}
                         actual => {
                             return Err(Error::TypeError(format!(
-                                "{}: type `{}`'s associated type `{}` is `{}`, but `where` clause requires `{}`",
+                                "{}: type `{}`'s associated type `{}` is `{}`, but `:where` clause requires `{}`",
                                 name,
                                 concrete,
                                 assoc_name,
@@ -16951,7 +16974,7 @@ impl Checker {
             scrut = Checked::new(forms::rooted(heap, form), sexpr_ty());
         }
         // A scrutinee that is *not* a data type is matched by value alone:
-        // its arms can only be literals, `(= expr)` guards, and a catch-all,
+        // its arms can only be literals, `(:= expr)` guards, and a catch-all,
         // so there is no variant coverage to compute and the catch-all is
         // mandatory (checked below, where an ADT's own exhaustiveness is).
         // Before, `expect_adt`'s error stopped this dead — which meant a
@@ -17068,7 +17091,7 @@ impl Checker {
             }
             // `(pat :when test body...)`: the guard sits between the pattern
             // and the body.
-            let guard = if parts.len() >= 2 && is_keyword(heap, parts[1], "when") {
+            let guard = if parts.len() >= 2 && is_symbol(parts[1], wk::KW_WHEN) {
                 if parts.len() < 3 {
                     recover_arm!(Err(Error::TypeError("match: `:when` needs a condition: (pattern :when test body...)".into())));
                 }
@@ -17354,10 +17377,23 @@ impl Checker {
     ) -> Result<(Pattern, PatternBindings), Error> {
         match v {
             Value::Symbol(id) => {
-                let name = heap.symbol_name(id).to_string();
-                if name == "_" {
+                if id.is(wk::UNDERSCORE) {
                     return Ok((Pattern::Wildcard, Vec::new()));
                 }
+                // A keyword names itself, so as a pattern it is that symbol —
+                // what `':x` says — and never a variable.
+                if id.is_keyword() {
+                    let quoted = {
+                        let mut s = RootScope::new(heap);
+                        let q = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::QUOTE));
+                        core::list(&mut s, &[q, v])?
+                    };
+                    heap.push_root(quoted);
+                    let r = self.check_pattern(heap, interp, env, expected, quoted, loc);
+                    heap.pop_root();
+                    return r;
+                }
+                let name = heap.symbol_spelling(id).to_string();
                 // A bare name that *is* a constructor of the scrutinee's own
                 // type is that constructor, not a new variable — `(match c
                 // (red 1) (blue 2))`. Without this the arm silently binds
@@ -17420,7 +17456,7 @@ impl Checker {
             // variant pattern named instead, which destructures to the
             // scalar's own type and so compares it by value. The immediate
             // literals (`'foo`, an integer, a `char`, a `bool`) have no
-            // such gap and are left alone; so is an explicit `(= expr)`,
+            // such gap and are left alone; so is an explicit `(:= expr)`,
             // where the author asked for `equals` in as many words.
             // `#{a b}`: a tuple's elements, each matched by its own pattern.
             Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => self.check_tuple_pattern(heap, interp, env, expected, id),
@@ -17493,7 +17529,7 @@ impl Checker {
         loc: Option<&Loc>,
     ) -> Result<Option<(Pattern, PatternBindings)>, Error> {
         let Value::Symbol(id) = v else { return Ok(None) };
-        let name = heap.symbol_name(id).to_string();
+        let name = heap.symbol_spelling(id).to_string();
         // A one-element `(name)` pattern is exactly what the parenthesized
         // spelling of a no-field variant already is, so both resolutions
         // below are handed the same shape they always see.
@@ -17513,7 +17549,7 @@ impl Checker {
         self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, false).map(Some)
     }
 
-    /// Lower a value pattern — a non-immediate literal, or `(= expr)`'s
+    /// Lower a value pattern — a non-immediate literal, or `(:= expr)`'s
     /// expression — into the [`Pattern::Guard`] that tests it.
     ///
     /// The test is built as *source* (`(equals $match-scrut EXPR)`) and run
@@ -17567,12 +17603,12 @@ impl Checker {
     /// instead of the problem.
     ///
     /// The second lookup is why a generic body can use a value pattern at
-    /// all: `(defun same<A> ((x A) (y A)) i32 (where (Eq A)) (match x ((= y)
+    /// all: `(defun same<A> ((x A) (y A)) i32 (:where (Eq A)) (match x ((:= y)
     /// 1) (_ 0)))` is checked once with `A` still a type variable, and there
     /// is no `AdtDef` to ask — the `where` clause is the promise, and the
     /// call it lowers to becomes a real one when monomorphization re-checks
     /// the body with `A` known. `trait_method` searches inherited methods
-    /// too, so `(where (Ord A))` is equally enough.
+    /// too, so `(:where (Ord A))` is equally enough.
     fn implements_eq(&self, env: &Env, ty: &Type) -> bool {
         // Exactly the lookup the `equals` call will make — its own table, a
         // blanket impl, a bounded type variable, a trait object — rather than
@@ -17598,33 +17634,34 @@ impl Checker {
         }
         let loc = parts_locs[0].1.clone();
 
-        // `(= expr)` — the escape into ordinary evaluation, and the only way
+        // `(:= expr)` — the escape into ordinary evaluation, and the only way
         // to compare against a value with no literal syntax (a `defstruct`
         // instance, a global, a computed one). Ahead of every resolution
-        // below because `=` names no constructor and never could.
-        if is_symbol(parts[0], wk::EQUALS) {
+        // below because a keyword names no constructor and never could.
+        if is_symbol(parts[0], wk::COLON_EQUALS) {
             if parts.len() != 2 {
-                return Err(Error::TypeError("pattern: (= expr)".into()));
+                return Err(Error::TypeError("pattern: (:= expr)".into()));
             }
             return self.value_pattern(heap, interp, env, expected, parts[1], loc);
         }
         // `'foo` — a symbol literal. It reaches here as `(quote foo)`, and
-        // it is *not* checked as an expression the way `(= expr)`'s argument
+        // it is *not* checked as an expression the way `(:= expr)`'s argument
         // is: a quoted datum's type is `Sexpr`, so `(equals sym 'foo)`
         // would be a type error. The comparison wanted is between two
-        // `symbol`s, so the test is built over the symbol's *name* —
-        // `string->symbol` is the bridge, and interning is exactly what
-        // makes the resulting comparison identity-as-equality on both
-        // sides of the compile boundary.
+        // `symbol`s, so the test is built over `intern` with the symbol's
+        // name and the module that owns it — which gives back this very
+        // symbol, on both sides of the compile boundary, keyword or not.
         if is_symbol(parts[0], wk::QUOTE) && parts.len() == 2 {
             if let Value::Symbol(id) = parts[1] {
-                let name = heap.symbol_name(id).to_string();
+                let home = typelisp_mem::symbols::ns_path(id.home()).join("::");
                 let expr = {
                     let mut s = RootScope::new(heap);
-                    let f = s.intern_symbol("string->symbol");
-                    let lit = s.alloc_string(name);
-                    s.push_root(lit);
-                    core::list(&mut s, &[f, lit])?
+                    let f = s.intern_symbol("intern");
+                    let name = s.alloc_string(id.name().to_string());
+                    s.push_root(name);
+                    let home = s.alloc_string(home);
+                    s.push_root(home);
+                    core::list(&mut s, &[f, name, home])?
                 };
                 return self.value_pattern(heap, interp, env, expected, expr, loc);
             }
@@ -17643,7 +17680,7 @@ impl Checker {
                 }
             }
             let is_builtin_head = matches!(parts[0], Value::Symbol(id)
-                if crate::sexpr_variant::is_ctor_name(&heap.symbol_name(id)));
+                if crate::sexpr_variant::is_ctor_name(&heap.symbol_spelling(id)));
             if !is_builtin_head {
                 if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0], parts_locs[0].1.as_ref())? {
                     if self.reg.type_def(&adt_name).is_some_and(|d| d.kind == AdtKind::Struct) {
@@ -17657,7 +17694,7 @@ impl Checker {
         }
 
         let ctor = match parts[0] {
-            Value::Symbol(id) => heap.symbol_name(id).to_string(),
+            Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
             _ => return Err(Error::TypeError("pattern: constructor must be a symbol".into())),
         };
 
@@ -17688,10 +17725,10 @@ impl Checker {
         let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
         if def.kind == AdtKind::Struct && !def.builtin {
             let head_ty = match parts[0] {
-                Value::Symbol(id) => self.resolve_bare_type(heap.symbol_name(id)),
+                Value::Symbol(id) => self.resolve_bare_type(heap.symbol_spelling(id)),
                 Value::Path(pid) => {
                     let segs: Vec<String> =
-                        heap.path_segments(pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
+                        heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
                     self.resolve_type_path(&segs)
                 }
                 _ => None,
@@ -17742,15 +17779,15 @@ impl Checker {
                 got
             ))
         };
-        let keyword = |heap: &Heap, v: Value| match v {
-            Value::Symbol(id) => heap.symbol_name(id).strip_prefix(':').map(str::to_string),
+        let keyword = |v: Value| match v {
+            Value::Symbol(id) if id.is_keyword() => Some(id.name().to_string()),
             _ => None,
         };
         let mut slots: Vec<Option<(Value, Option<Loc>)>> = vec![None; field_names.len()];
         let rest = &parts_locs[1..];
         let mut k = 0;
         while k < rest.len() {
-            let Some(slot) = keyword(heap, rest[k].0) else {
+            let Some(slot) = keyword(rest[k].0) else {
                 return Err(shape(&format!("`{}` is not a slot keyword", core::print(heap, rest[k].0))));
             };
             let Some(i) = field_names.iter().position(|f| *f == slot) else {
@@ -17765,7 +17802,7 @@ impl Checker {
                 return Err(Error::TypeError(format!("pattern `{}`: slot `{}` is written twice", adt_name, slot)));
             }
             let sub = match rest.get(k + 1) {
-                Some(next) if keyword(heap, next.0).is_none() => {
+                Some(next) if keyword(next.0).is_none() => {
                     k += 2;
                     next.clone()
                 }
@@ -17812,7 +17849,7 @@ impl Checker {
         };
         match head {
             Value::Symbol(id) => {
-                let name = heap.symbol_name(id);
+                let name = heap.symbol_spelling(id);
                 if let Some(type_fq) = self.resolve_bare_type(name) {
                     if let Some(def) = self.reg.type_def(&type_fq) {
                         if def.kind == AdtKind::Struct {
@@ -17837,7 +17874,7 @@ impl Checker {
             }
             Value::Path(pid) => {
                 let segs: Vec<String> =
-                    heap.path_segments(pid).iter().map(|s| heap.symbol_name(*s).to_string()).collect();
+                    heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
                 if segs.len() < 2 {
                     return Ok(None);
                 }
@@ -17901,7 +17938,7 @@ impl Checker {
             let sub_locs = heap.list_to_vec_locs(parts[2]).map_err(|_| must_name())?;
             let sub: Vec<Value> = sub_locs.iter().map(|(v, _)| *v).collect();
             let ctor = match sub.first() {
-                Some(Value::Symbol(id)) => heap.symbol_name(*id).to_string(),
+                Some(Value::Symbol(id)) => heap.symbol_spelling(*id).to_string(),
                 _ => return Err(must_name()),
             };
             let (adt_name, targs) = self.expect_adt(&ty)?;
@@ -18084,6 +18121,21 @@ fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
 /// Takes a [`SymRef`] rather than a name: the syntax words this asks about are
 /// pre-interned (`BUILTIN_SYMBOLS`), so the test is an integer comparison and
 /// there is no spelling to get wrong.
+/// The name a binding or a definition introduces with the symbol `id`. A
+/// keyword cannot be one: CL makes every keyword a constant variable naming
+/// itself, so it can be neither bound nor assigned, and no definition takes
+/// its name either.
+fn bound_name(id: typelisp_mem::SymRef, who: &str) -> Result<String, Error> {
+    if id.is_keyword() {
+        return Err(Error::TypeError(format!(
+            "{}: `{}` is a keyword — a constant that names itself — so it cannot be bound, assigned or defined",
+            who,
+            id.spelling()
+        )));
+    }
+    Ok(id.spelling().to_string())
+}
+
 fn is_symbol(v: Value, konst: u32) -> bool {
     matches!(v, Value::Symbol(id) if id.is(konst))
 }
@@ -18109,26 +18161,20 @@ fn tuple_element_field(ty: &Type, name: &str) -> Result<Option<String>, Error> {
     }
 }
 
-/// Whether `v` is the keyword `:name`. Keywords are read as symbols whose
-/// name keeps the colon.
-fn is_keyword(heap: &Heap, v: Value, name: &str) -> bool {
-    matches!(v, Value::Symbol(id) if heap.symbol_name(id).strip_prefix(':') == Some(name))
-}
-
 /// A `match` arm's pattern with every `(:or p1 p2 ...)` in it multiplied
 /// out: one pattern per combination of alternatives, in the order the arms
 /// they stand for are tried (left to right, the outer alternative varying
 /// slowest). A pattern with no `:or` comes back as itself, so it keeps the
 /// source positions its cells carry.
 ///
-/// `(= expr)` and `'datum` hold an expression and a datum, not patterns, so
+/// `(:= expr)` and `'datum` hold an expression and a datum, not patterns, so
 /// nothing inside them is an alternative. The lists built here are rooted
 /// on the heap's stack, which the enclosing top-level check releases.
 fn expand_or_patterns(heap: &mut Heap, v: Value) -> Result<Vec<Value>, Error> {
     let Value::Cons(_) = v else { return Ok(vec![v]) };
     let items = heap.list_to_vec(v)?;
     let Some(&head) = items.first() else { return Ok(vec![v]) };
-    if is_keyword(heap, head, "or") {
+    if is_symbol(head, wk::KW_OR) {
         if items.len() < 2 {
             return Err(Error::TypeError("pattern: `(:or)` needs at least one alternative".into()));
         }
@@ -18138,7 +18184,7 @@ fn expand_or_patterns(heap: &mut Heap, v: Value) -> Result<Vec<Value>, Error> {
         }
         return Ok(out);
     }
-    if is_symbol(head, wk::EQUALS) || is_symbol(head, wk::QUOTE) {
+    if is_symbol(head, wk::COLON_EQUALS) || is_symbol(head, wk::QUOTE) {
         return Ok(vec![v]);
     }
     let mut per_item: Vec<Vec<Value>> = vec![vec![head]];
@@ -18796,11 +18842,11 @@ fn unify(
 /// rejected with `msg`, which says what this particular form wanted.
 fn unevaluated_name(heap: &Heap, v: Value, msg: &str) -> Result<String, Error> {
     match v {
-        Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
+        Value::Symbol(id) => Ok(heap.symbol_spelling(id).to_string()),
         Value::Path(pid) => Ok(heap
             .path_segments(pid)
             .iter()
-            .map(|s| heap.symbol_name(*s).to_string())
+            .map(|s| heap.symbol_spelling(*s).to_string())
             .collect::<Vec<_>>()
             .join("::")),
         _ => Err(Error::TypeError(msg.into())),
@@ -18825,17 +18871,17 @@ enum DefRef {
 /// The lowercase segments of a module/use path (a symbol or a `Value::Path`).
 fn path_to_segs(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
     match v {
-        Value::Symbol(id) => Ok(vec![heap.symbol_name(id).to_string()]),
+        Value::Symbol(id) => Ok(vec![heap.symbol_spelling(id).to_string()]),
         Value::Path(id) => Ok(heap
             .path_segments(id)
             .iter()
-            .map(|s| heap.symbol_name(*s).to_string())
+            .map(|s| heap.symbol_spelling(*s).to_string())
             .collect()),
         _ => Err(Error::TypeError("expected a name or `::` path".into())),
     }
 }
 
-/// Whether `v` is a `(where ...)` clause (vs. an ordinary body form) —
+/// Whether `v` is a `(:where ...)` clause (vs. an ordinary body form) —
 /// `Checker::check_defun` peeks at this to decide whether to consume it.
 /// Rejects a `defun` that disagrees with the `defsignature` that promised it.
 ///
@@ -18901,8 +18947,7 @@ fn item_path(module: &[String], name: &str) -> Path {
 }
 
 fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
-    Ok(matches!(v, Value::Cons(_))
-        && matches!(heap.list_to_vec(v)?.first(), Some(Value::Symbol(id)) if id.is(wk::WHERE)))
+    Ok(matches!(v, Value::Cons(_)) && heap.list_to_vec(v)?.first().is_some_and(|h| is_symbol(*h, wk::KW_WHERE)))
 }
 
 /// Peeks `parts[at]` for a leading docstring — CL's rule for `defun`/
@@ -19002,7 +19047,7 @@ const OPT_KEY_NEEDS_A_NAME: &str = "{}: &optional/&key need a named callee (a `d
 /// A `defstruct` option that takes exactly one name (`(:copier copy-point)`).
 fn single_name_option(heap: &Heap, rest: &[Value], what: &str) -> Result<String, Error> {
     match rest {
-        [Value::Symbol(id)] => Ok(heap.symbol_name(*id).to_string()),
+        [Value::Symbol(id)] => Ok(heap.symbol_spelling(*id).to_string()),
         _ => Err(Error::TypeError(format!("defstruct: ({} name) takes exactly one name", what))),
     }
 }

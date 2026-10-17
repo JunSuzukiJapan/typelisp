@@ -134,13 +134,13 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - `((v (recv ch)) 본체...)`는 받기 갈래이다. `v`에는 `Option<T>`가 들어간다.
 - `((send ch x) 본체...)`는 보내기 갈래이다.
 - 여러 갈래가 동시에 진행할 수 있으면 그중 하나가 무작위로 선택된다.
-- 마지막에 `(else 본체...)`를 쓰면 바로 진행할 수 있는 갈래가 없을 때 `else`가 실행되고 `select`는 기다리지 않는다.
+- 마지막에 `(:else 본체...)`를 쓰면 바로 진행할 수 있는 갈래가 없을 때 `:else`가 실행되고 `select`는 기다리지 않는다.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

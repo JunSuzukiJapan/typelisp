@@ -22,7 +22,7 @@
 use std::cell::RefCell;
 use std::io::Write;
 
-use typelisp_mem::{BoxId, Heap, Value};
+use typelisp_mem::{wk, BoxId, Heap, SymRef, Value};
 use crate::format::{self, PrintVars, RenderCtx};
 use crate::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind};
 use crate::PrintEnv;
@@ -131,15 +131,19 @@ pub fn read_print_vars(heap: &Heap, global: &dyn Fn(&str) -> Result<Value, Strin
         b if (2..=36).contains(&b) => b as u32,
         b => return Err(format!("*print-base* must be between 2 and 36, got {}", b)),
     };
-    // A keyword is an ordinary symbol whose interned name keeps the leading
-    // colon, not a type of its own — so the checker lets any symbol through
-    // and the three names CL defines are checked here.
+    // A keyword is a symbol, not a type of its own — so the checker lets any
+    // symbol through and the three keywords CL defines are checked here.
     let case = match global("*print-case*")? {
-        Value::Symbol(id) => match heap.symbol_name(id) {
-            ":upcase" => format::PrintCase::Upcase,
-            ":downcase" => format::PrintCase::Downcase,
-            ":capitalize" => format::PrintCase::Capitalize,
-            other => return Err(format!("*print-case* must be :upcase, :downcase or :capitalize, got {}", other)),
+        Value::Symbol(id) => match id.well_known() {
+            wk::UPCASE => format::PrintCase::Upcase,
+            wk::KW_DOWNCASE => format::PrintCase::Downcase,
+            wk::CAPITALIZE => format::PrintCase::Capitalize,
+            _ => {
+                return Err(format!(
+                    "*print-case* must be :upcase, :downcase or :capitalize, got {}",
+                    heap.symbol_spelling(id)
+                ))
+            }
         },
         other => return Err(format!("internal error: *print-case* holds {:?}, not a symbol", other)),
     };
@@ -492,12 +496,11 @@ fn arg_int(args: &[Value], i: usize, who: &str) -> Result<i64, PrintError> {
     }
 }
 
-/// A `pprint-*` operator's keyword argument (`:linear`, `:block`, …).
-/// Keywords are ordinary interned symbols whose name keeps the leading colon,
-/// so this is just "the symbol's name".
-fn arg_keyword<'a>(heap: &'a Heap, args: &[Value], i: usize, who: &str) -> Result<&'a str, PrintError> {
+/// A `pprint-*` operator's keyword argument (`:linear`, `:block`, …), as the
+/// symbol itself: the caller compares it with the vocabulary's keywords.
+fn arg_keyword(args: &[Value], i: usize, who: &str) -> Result<SymRef, PrintError> {
     match args.get(i) {
-        Some(Value::Symbol(id)) => Ok(heap.symbol_name(*id)),
+        Some(Value::Symbol(id)) => Ok(*id),
         Some(v) => shape(who, i, v),
         None => Err(PrintError::Shape(format!("{}: expected at least {} arguments", who, i + 1))),
     }
@@ -562,15 +565,16 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
         })(),
         "pprint-block-end-rt" => block_end(heap).map(|()| Value::Empty).map_err(PrintError::Raise),
         "pprint-newline" => (|| {
-            let kind = match arg_keyword(heap, args, 0, "pprint-newline")? {
-                ":linear" => NewlineKind::Linear,
-                ":fill" => NewlineKind::Fill,
-                ":miser" => NewlineKind::Miser,
-                ":mandatory" => NewlineKind::Mandatory,
-                other => {
+            let kw = arg_keyword(args, 0, "pprint-newline")?;
+            let kind = match kw.well_known() {
+                wk::KW_LINEAR => NewlineKind::Linear,
+                wk::KW_FILL => NewlineKind::Fill,
+                wk::KW_MISER => NewlineKind::Miser,
+                wk::KW_MANDATORY => NewlineKind::Mandatory,
+                _ => {
                     return Err(PrintError::Raise(format!(
                         "pprint-newline: expected :linear, :fill, :miser or :mandatory, got {}",
-                        other
+                        heap.symbol_spelling(kw)
                     )))
                 }
             };
@@ -578,25 +582,27 @@ fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Re
             Ok(Value::Empty)
         })(),
         "pprint-indent" => (|| {
-            let kind = match arg_keyword(heap, args, 0, "pprint-indent")? {
-                ":block" => IndentKind::Block,
-                ":current" => IndentKind::Current,
-                other => return Err(PrintError::Raise(format!("pprint-indent: expected :block or :current, got {}", other))),
+            let kw = arg_keyword(args, 0, "pprint-indent")?;
+            let kind = match kw.well_known() {
+                wk::KW_BLOCK => IndentKind::Block,
+                wk::KW_CURRENT => IndentKind::Current,
+                _ => return Err(PrintError::Raise(format!("pprint-indent: expected :block or :current, got {}", heap.symbol_spelling(kw)))),
             };
             let n = arg_int(args, 1, "pprint-indent")?;
             record_op(Op::Indent(kind, n));
             Ok(Value::Empty)
         })(),
         "pprint-tab" => (|| {
-            let kind = match arg_keyword(heap, args, 0, "pprint-tab")? {
-                ":line" => TabKind::Line,
-                ":section" => TabKind::Section,
-                ":line-relative" => TabKind::LineRelative,
-                ":section-relative" => TabKind::SectionRelative,
-                other => {
+            let kw = arg_keyword(args, 0, "pprint-tab")?;
+            let kind = match kw.well_known() {
+                wk::KW_LINE => TabKind::Line,
+                wk::KW_SECTION => TabKind::Section,
+                wk::KW_LINE_RELATIVE => TabKind::LineRelative,
+                wk::KW_SECTION_RELATIVE => TabKind::SectionRelative,
+                _ => {
                     return Err(PrintError::Raise(format!(
                         "pprint-tab: expected :line, :section, :line-relative or :section-relative, got {}",
-                        other
+                        heap.symbol_spelling(kw)
                     )))
                 }
             };

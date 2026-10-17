@@ -185,7 +185,7 @@ CL 從 `read-from-string` 回傳**2 個值**（值與位置），但這個語言
 
 | 形式 | 文件字串的位置 |
 |---|---|
-| `defun` / `impl` 的方法 / `defmacro` | 本體的開頭（回傳值型別、`where` 子句之後）。僅當其後至少還有一個本體形式時——單獨的字串仍是回傳值 |
+| `defun` / `impl` 的方法 / `defmacro` | 本體的開頭（回傳值型別、`:where` 子句之後）。僅當其後至少還有一個本體形式時——單獨的字串仍是回傳值 |
 | `defvar` / `defconstant` | 初始值的**後面**：`(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | 名稱的**緊後面**，欄位／變體清單之前 |
 | `deftype` | 名稱的**緊後面**，型別之前：`(deftype meters "doc" i32)` |

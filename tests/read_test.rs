@@ -14,12 +14,12 @@ fn show(h: &Heap, v: Value) -> String {
         Value::Boxed(id) => h.f64_value(id).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
-        Value::Symbol(id) => h.symbol_name(id).to_string(),
+        Value::Symbol(id) => h.symbol_spelling(id).to_string(),
         Value::Str(id) => format!("\"{}\"", h.string(id)),
         Value::Path(id) => h
             .path_segments(id)
             .iter()
-            .map(|s| h.symbol_name(*s))
+            .map(|s| h.symbol_spelling(*s))
             .collect::<Vec<_>>()
             .join("::"),
         Value::Cons(_) => {
@@ -144,7 +144,7 @@ fn double_colon_tokens_become_paths() {
     match v {
         Value::Path(id) => {
             let segs: Vec<&str> =
-                h.path_segments(id).iter().map(|s| h.symbol_name(*s)).collect();
+                h.path_segments(id).iter().map(|s| h.symbol_spelling(*s)).collect();
             assert_eq!(segs, ["std", "process", "exit"]);
         }
         _ => panic!("expected Path, got {:?}", v),

@@ -22,7 +22,7 @@ setiap direktif mengonsumsi argumen variadik berikutnya secara berurutan.
 
 Tipe `dest` membagi maknanya menjadi dua (yang mana yang berlaku ditentukan secara statis). Bentuk
 stream dapat ditulis dengan cara yang sama dengan tipe stream konkret, `:dyn CharOutput`, atau
-variabel tipe yang dibatasi oleh `(where (CharOutput S))`. `dest` yang bukan `bool` maupun stream
+variabel tipe yang dibatasi oleh `(:where (CharOutput S))`. `dest` yang bukan `bool` maupun stream
 adalah kesalahan tipe.
 
 **String kendali harus berupa literal** (batasan yang sama seperti `format!` pada Rust). Direktif di
@@ -253,7 +253,7 @@ Aturan:
 
 - **Pendaftaran bersifat statis.** `impl` diperiksa tipenya sebagai definisi metode biasa, sehingga
   nama tipe yang salah eja atau signature yang salah adalah kesalahan kompilasi.
-- **Ia bekerja untuk tipe generik juga.** `(impl print-object box<T> (where (print-object T)) ...)`
+- **Ia bekerja untuk tipe generik juga.** `(impl print-object box<T> (:where (print-object T)) ...)`
   menuju badan terpisah untuk setiap argumen tipe: sebuah nilai mengingat tipenya termasuk argumen
   tipenya (`box<i32>`). Tipe generik bawaan seperti `Vector<T>` bekerja dengan cara yang sama.
 - **Pilihan dibuat saat pencetakan.** Direktif mana yang mengonsumsi argumen mana bergantung pada isi
@@ -270,7 +270,7 @@ Aturan:
   kode generik menyatakan "nilai bertipe tak dikenal boleh dirender" (bentuk yang sama seperti
   `T: Display` pada Rust). `print-object` pada `Array<T>` adalah contohnya.
 - **Dengan argumen tipe yang tidak memenuhi batas, representasi bawaan dipakai secara diam-diam.**
-  `(impl print-object Array<T> (where (print-object T)))` berlaku untuk `Array<i32>`, tetapi tidak
+  `(impl print-object Array<T> (:where (print-object T)))` berlaku untuk `Array<i32>`, tetapi tidak
   untuk `Array` yang elemennya `defstruct` tanpa `print-object`. Tidak masuk akal jika sekadar
   membuat larik menjadi kesalahan, sehingga ini bukan kesalahan.
 - Mekanisme CL lainnya, `set-pprint-dispatch` / `*print-pprint-dispatch*` (registri saat dijalankan

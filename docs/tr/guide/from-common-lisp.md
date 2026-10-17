@@ -222,8 +222,9 @@ sembolle (`'done`) sınırlıdır ve bir etiketle fırlatılan değerlerin tek b
 Paketler yoktur. Ad alanları modüllerdir ve bir dosya kendi başına bir modüldür. `pkg:symbol` yerine
 `module::name` yazın ve adları `use` ile getirin ([Modüller ve Dosya Düzeni](modules.md)).
 
-`:foo` anahtar sözcükleri vardır ve kendi kendine değerlendirilen sembollerdir. Paketler olmadığından
-iki nokta adın bir parçasıdır: `(symbol->string :foo)`, `":foo"` döndürür.
+`:foo` anahtar sözcükleri vardır ve CL'deki gibi kendi kendilerine değerlendirilir ve anahtar sözcük ad
+alanı `keyword`'e aittir. `(symbol->string :foo)`, `"foo"`; `(intern "foo" "keyword")` ise `:foo`
+döndürür. `intern`'in ikinci argümanı, paket adı yerine bir modül yoludur.
 
 ## 10. Okuma ve sözdizimindeki farklar
 

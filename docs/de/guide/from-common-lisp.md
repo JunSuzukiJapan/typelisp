@@ -225,8 +225,10 @@ Wie sich `defstruct` unterscheidet:
 Es gibt keine Pakete. Namensräume sind Module, und eine Datei ist für sich ein Modul. Statt `pkg:symbol`
 schreibt man `module::name`, und Namen holt man mit `use` herein ([Module und Dateiaufteilung](modules.md)).
 
-Schlüsselwörter `:foo` gibt es; es sind Symbole, die zu sich selbst auswerten. Da es keine Pakete gibt, ist der
-Doppelpunkt Teil des Namens: `(symbol->string :foo)` gibt `":foo"` zurück.
+Schlüsselwörter `:foo` gibt es; wie in CL werten sie zu sich selbst aus und gehören zum
+Schlüsselwort-Namensraum `keyword`. `(symbol->string :foo)` gibt `"foo"` zurück,
+`(intern "foo" "keyword")` gibt `:foo` zurück. Das zweite Argument von `intern` ist ein Modulpfad statt
+eines Paketnamens.
 
 ## 10. Unterschiede beim Lesen und in der Syntax
 

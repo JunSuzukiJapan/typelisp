@@ -13,7 +13,7 @@ Các trait cho việc lặp, so sánh và số học. Các trait chuẩn khác n
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -27,7 +27,7 @@ khai `Iter` cho kiểu của riêng mình, nó có thể được duyệt bằng
 ## 2. `Eq` / `Ord` (so sánh)
 
 Chúng tương ứng với `PartialEq`/`PartialOrd` của Rust (được đặt tên `Eq`/`Ord`). Chúng được dùng trong
-các ràng buộc `where` của hàm generic để yêu cầu các kiểu phần tử có thể so sánh được
+các ràng buộc `:where` của hàm generic để yêu cầu các kiểu phần tử có thể so sánh được
 (`sort`/`member`/`assoc` v.v.).
 
 ```lisp
@@ -77,7 +77,7 @@ tử dựng sẵn** ([Số](numbers.md)) và không đi qua tầng này.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -89,11 +89,11 @@ tử dựng sẵn** ([Số](numbers.md)) và không đi qua tầng này.
 ```
 
 **Bên trong một ràng buộc, bạn có thể viết toán tử.** Khi bên nhận là một biến kiểu bị ràng buộc bởi
-`where`, các toán tử được hiểu là phương thức của trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
+`:where`, các toán tử được hiểu là phương thức của trait (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`,
 `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -108,5 +108,5 @@ trên mọi kiểu số nguyên và `int`.
 **`Div` đặt tên kiểu kết quả bằng kiểu liên kết `Output`.** Như CL, `/` trên hai số nguyên là
 `rational`, nên `Output` của `int` là `rational`, còn của mọi kiểu số khác là chính kiểu đó. Vì `Output`
 khác nhau giữa các kiểu, `Number` không chứa `Div` (danh sách supertrait phải cố định mọi kiểu liên
-kết). Hàm tổng quát có phép chia nhận kiểu kết quả bằng `(where (Div T (Output R)))`, hoặc yêu cầu phép
-chia khép kín trong `T` bằng `(where (Div T (Output T)))` (khi đó không truyền được `int`).
+kết). Hàm tổng quát có phép chia nhận kiểu kết quả bằng `(:where (Div T (Output R)))`, hoặc yêu cầu phép
+chia khép kín trong `T` bằng `(:where (Div T (Output T)))` (khi đó không truyền được `int`).

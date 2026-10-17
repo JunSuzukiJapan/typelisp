@@ -1,12 +1,13 @@
-//! Tests for CL-style keywords (`:name`): self-evaluating interned symbols.
+//! Tests for CL-style keywords (`:name`): self-evaluating symbols of the
+//! keyword namespace.
 //!
-//! A keyword is a `Value::Symbol` whose interned name *includes* the leading
-//! colon — there is no separate keyword package or table, so "same name ->
-//! same object" comes straight from `Heap::intern_symbol` (which also
-//! case-folds, hence `:foo` and `:FOO` are one object). The checker turns one
-//! into `Expr::SymLit` before any binding lookup (`Checker::check_inner`'s
-//! `Value::Symbol` case), and the reader rejects malformed spellings
-//! (`read::reader::validate_keyword`).
+//! A keyword is a symbol owned by the root's module `keyword` (CL's
+//! `KEYWORD` package), whichever module wrote it, so "same name -> same
+//! object" holds across modules too. Its name has no colon — the colon spells
+//! it — and being a keyword is being owned by that module, which `keywordp`
+//! asks. The checker turns one into a symbol literal before any binding
+//! lookup, refuses one wherever a name would be bound or defined, and the
+//! reader rejects malformed spellings.
 
 extern crate typelisp;
 
@@ -56,16 +57,14 @@ fn read_err(src: &str) -> String {
 fn a_keyword_evaluates_to_itself_without_being_bound() {
     // The point of a keyword: no `defvar`, no `let`, yet it is not an
     // "unbound variable" error. Its static type is the ordinary `symbol`.
-    // The interned name keeps the leading colon: typelisp has no package
-    // system, so the colon *is* the whole of what makes a keyword a keyword
-    // (unlike CL, where `symbol-name` drops the package-marker colon).
-    assert_eq!(eval_string("(symbol->string :foo)"), ":foo");
+    // As in CL, the colon spells the keyword and is no part of its name.
+    assert_eq!(eval_string("(symbol->string :foo)"), "foo");
 }
 
 #[test]
 fn a_keyword_is_typed_as_symbol_and_flows_where_a_symbol_is_expected() {
     let out = eval_string("(defun name-of ((s symbol)) string (symbol->string s)) (name-of :hello)");
-    assert_eq!(out, ":hello");
+    assert_eq!(out, "hello");
 }
 
 #[test]
@@ -85,7 +84,7 @@ fn a_keyword_can_be_stored_in_a_sexpr_datum() {
     // The `Symbol -> Sexpr` transparent retype already in `check_inner`
     // covers this — a keyword needs no wrapping constructor.
     let out = eval_string("(match (sexpr-car (list :a :b)) ((sym s) (symbol->string s)) (_ \"not a symbol\"))");
-    assert_eq!(out, ":a");
+    assert_eq!(out, "a");
 }
 
 // ---- keywordp -----------------------------------------------------------
@@ -95,6 +94,70 @@ fn keywordp_distinguishes_keywords_from_ordinary_symbols() {
     assert_eq!(eval_ok("(keywordp :foo)"), Value::Bool(true));
     assert_eq!(eval_ok("(keywordp (string->symbol \"foo\"))"), Value::Bool(false));
     assert_eq!(eval_ok("(keywordp (string->symbol \"\"))"), Value::Bool(false));
+}
+
+// ---- one namespace, CL's names ------------------------------------------
+
+#[test]
+fn a_keyword_written_in_a_module_is_the_roots_keyword() {
+    let out = eval_ok("(module m (pub defun k () symbol :zork)) (eq (m::k) :zork)");
+    assert_eq!(out, Value::Bool(true));
+}
+
+#[test]
+fn intern_into_the_keyword_namespace_makes_the_keyword() {
+    assert_eq!(eval_ok("(eq (intern \"foo\" \"keyword\") :foo)"), Value::Bool(true));
+    assert_eq!(eval_ok("(keywordp (intern \"foo\" \"keyword\"))"), Value::Bool(true));
+}
+
+#[test]
+fn a_name_starting_with_a_colon_does_not_make_a_keyword() {
+    // CL's `(intern ":foo")`: an ordinary symbol whose name has a colon.
+    assert_eq!(eval_ok("(keywordp (string->symbol \":foo\"))"), Value::Bool(false));
+    assert_eq!(eval_ok("(eq (intern \":foo\") :foo)"), Value::Bool(false));
+    assert_eq!(eval_ok("(eq (quote |:foo|) (intern \":foo\"))"), Value::Bool(true));
+}
+
+#[test]
+fn intern_without_a_namespace_interns_where_the_call_is_written() {
+    let out = eval_ok("(module m (pub defun same () bool (eq (intern \"zork\") (quote zork)))) (m::same)");
+    assert_eq!(out, Value::Bool(true));
+    let out = eval_ok("(module m (pub defun q () symbol (quote zork))) (eq (m::q) (intern \"zork\" \"m\"))");
+    assert_eq!(out, Value::Bool(true));
+}
+
+#[test]
+fn a_keyword_prints_with_its_colon_only_when_escaped() {
+    assert_eq!(eval_string("(format false \"~a ~s\" :foo :foo)"), "foo :foo");
+    assert_eq!(eval_string("(format false \"~s\" (intern \":foo\"))"), "|:foo|");
+}
+
+#[test]
+fn a_keyword_pattern_matches_only_that_keyword() {
+    assert_eq!(eval_ok("(match :y (:x 1) (_ 0))"), Value::Int(0));
+    assert_eq!(eval_ok("(match :x (:x 1) (_ 0))"), Value::Int(1));
+}
+
+// ---- a keyword is a constant --------------------------------------------
+
+#[test]
+fn a_keyword_cannot_be_bound_assigned_or_defined() {
+    for src in [
+        "(let ((:foo 1)) 1)",
+        "(defun f ((:x int)) int 1)",
+        "(defvar (:bar int) 1)",
+        "(defun :baz () int 1)",
+        "(defmacro :m () 1)",
+    ] {
+        let e = run(src).expect_err(src);
+        assert!(e.contains("is a keyword"), "{}: {}", src, e);
+    }
+}
+
+#[test]
+fn no_module_takes_the_keyword_namespaces_name() {
+    let e = run("(module keyword (defun f () int 1))").expect_err("module keyword");
+    assert!(e.contains("keyword namespace"), "{}", e);
 }
 
 // ---- malformed keywords are read errors ---------------------------------

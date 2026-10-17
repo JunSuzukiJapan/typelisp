@@ -138,13 +138,13 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - `((v (recv ch)) body...)` فرع استقبال. وتحصل `v` على `Option<T>`.
 - `((send ch x) body...)` فرع إرسال.
 - عندما يمكن لعدة فروع المضي في الوقت نفسه يُختار أحدها عشوائيًا.
-- ومع `(else body...)` في النهاية يعمل `else` عندما لا يستطيع أي فرع المضي في الحال، ولا تنتظر `select`.
+- ومع `(:else body...)` في النهاية يعمل `:else` عندما لا يستطيع أي فرع المضي في الحال، ولا تنتظر `select`.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

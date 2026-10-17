@@ -13,7 +13,7 @@ di [Tipe](../types.md). Cara mendefinisikan trait ada di
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -27,7 +27,7 @@ adanya, dan diserahkan ke [fungsi sekuens](sequences.md#4-fungsi-sekuens-pada-it
 ## 2. `Eq` / `Ord` (perbandingan)
 
 Ini sepadan dengan `PartialEq`/`PartialOrd` pada Rust (dinamai `Eq`/`Ord`). Keduanya dipakai pada
-batas `where` fungsi generik untuk mensyaratkan bahwa tipe elemen dapat dibandingkan
+batas `:where` fungsi generik untuk mensyaratkan bahwa tipe elemen dapat dibandingkan
 (`sort`/`member`/`assoc` dan sebagainya).
 
 ```lisp
@@ -78,7 +78,7 @@ konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lap
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -90,11 +90,11 @@ konkret memakai operator bawaan** ([Bilangan](numbers.md)) dan tidak melalui lap
 ```
 
 **Di dalam batas, Anda dapat menulis operator.** Ketika penerimanya adalah variabel tipe yang
-dibatasi oleh `where`, operator dibaca sebagai metode trait (`+`→`add`, `-`→`sub`, `*`→`mul`,
+dibatasi oleh `:where`, operator dibaca sebagai metode trait (`+`→`add`, `-`→`sub`, `*`→`mul`,
 `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -110,5 +110,5 @@ Diimplementasikan untuk: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` pada semua tipe 
 adalah `rational`, sehingga `Output` milik `int` adalah `rational`, dan milik tipe numerik lain adalah
 tipe itu sendiri. Karena `Output` berbeda antar tipe, `Number` tidak menyertakan `Div` (daftar supertrait
 harus menetapkan setiap tipe terkait). Fungsi generik yang membagi menerima tipe hasil dengan
-`(where (Div T (Output R)))`, atau meminta pembagian yang tertutup dalam `T` dengan
-`(where (Div T (Output T)))` (maka `int` tidak dapat diteruskan).
+`(:where (Div T (Output R)))`, atau meminta pembagian yang tertutup dalam `T` dengan
+`(:where (Div T (Output T)))` (maka `int` tidak dapat diteruskan).

@@ -14,7 +14,7 @@ lo verifica in modo meccanico (vedi la fine di questo documento).
   - Nomi definiti (il `NAME` di `(defun NAME ...)` come nome di funzione, di `(defstruct NAME ...)`
     come nome di tipo e di `(defvar (NAME ...))` come nome di variabile; lo stesso con `pub`, come
     in `(pub defun NAME ...)`)
-  - Parole chiave di namespace e di dichiarazione (`pub` `module` `use` `load` `impl` `where`) e
+  - Parole chiave di namespace e di dichiarazione (`pub` `module` `use` `load` `impl`) e
     marcatori della lista dei parametri lambda (`&rest` `&optional` `&key`)
   - Funzioni predefinite (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` e così via)
   - Tipi primitivi (inclusi `bignum` / `ratio`), tipi predefiniti, tipi di errore predefiniti

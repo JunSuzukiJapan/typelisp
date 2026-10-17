@@ -217,7 +217,7 @@ pub fn op_is(heap: &Heap, form: Value, konst: u32) -> bool {
 /// error messages and diagnostics. To recognize a tag use [`op_sym`].
 pub fn op(heap: &Heap, form: Value) -> Option<&str> {
     match heap.car(form).ok()? {
-        Value::Symbol(id) => Some(heap.symbol_name(id)),
+        Value::Symbol(id) => Some(heap.symbol_spelling(id)),
         _ => None,
     }
 }
@@ -275,7 +275,7 @@ pub fn field(heap: &Heap, form: Value, i: usize) -> Option<Value> {
 pub fn path_field(heap: &Heap, form: Value, i: usize) -> Option<crate::Path> {
     match field(heap, form, i)? {
         Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
-        Value::Symbol(id) => Some(crate::Path::root(heap.symbol_name(id))),
+        Value::Symbol(id) => Some(crate::Path::root(heap.symbol_spelling(id))),
         _ => None,
     }
 }
@@ -289,7 +289,7 @@ pub fn path_field(heap: &Heap, form: Value, i: usize) -> Option<crate::Path> {
 /// does not recognize is simply not the one it was after.
 pub fn sym_name_field(heap: &Heap, form: Value, i: usize) -> Option<String> {
     match field(heap, form, i)? {
-        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+        Value::Symbol(id) => Some(heap.symbol_spelling(id).to_string()),
         _ => None,
     }
 }
@@ -323,7 +323,7 @@ fn write_form(heap: &Heap, v: Value, out: &mut String) {
         Value::Char(c) => {
             let _ = write!(out, "#\\{}", c);
         }
-        Value::Symbol(id) => out.push_str(heap.symbol_name(id)),
+        Value::Symbol(id) => out.push_str(heap.symbol_spelling(id)),
         Value::Str(id) => {
             let _ = write!(out, "{:?}", heap.string(id));
         }
@@ -333,7 +333,7 @@ fn write_form(heap: &Heap, v: Value, out: &mut String) {
                 if i > 0 {
                     out.push_str("::");
                 }
-                out.push_str(heap.symbol_name(*s));
+                out.push_str(heap.symbol_spelling(*s));
             }
         }
         Value::Cons(_) => {

@@ -86,10 +86,10 @@ une ligne.
 ### Rendre génériques les fonctions de lecture et d'écriture
 
 Chaque sorte de flux est un type à part, mais les opérations communes sont regroupées dans des traits. Une fonction
-qui prend son argument avec `(where (CharInput S))` peut lire depuis un fichier, une chaîne ou une socket.
+qui prend son argument avec `(:where (CharInput S))` peut lire depuis un fichier, une chaîne ou une socket.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

@@ -46,7 +46,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``unknown type `foo`: no type of that name is visible here. ...`` | لا يوجد نوع بهذا الاسم. عرّف النوع قبل أول صيغة تستخدمه (لا يوجد إعلان مسبق للأنواع). وإذا كنت تقصد متغير نوع فاكتبه في موضع إعلان مثل `<foo>` بعد اسم الدالة ([مرجع الصياغة 3.6](syntax.md#36-defstruct--البنى-أنواع-يعرفها-المستخدم)) |
 | ``cannot infer type argument `t` for `vector::new` `` | لا يمكن تحديد وسيط نوع. اكتب النوع بـ `the` كما في `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | لا يعالج `match` كل المتغايرات. أضف فروعًا للمتغايرات الناقصة أو فرع `_` |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | تشترط الدالة سمة لا ينفّذها النوع الذي مرّرته. اكتب `(impl Eq pt ...)` ([السمات القياسية](functions/traits.md)) |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | تشترط الدالة سمة لا ينفّذها النوع الذي مرّرته. اكتب `(impl Eq pt ...)` ([السمات القياسية](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | مُرِّرت قيمة من نوع لا ينفّذ السمة حيث يُتوقَّع `:dyn`. اكتب `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | كُتب اسم سمة حيث يُوضع نوع. اكتب `:dyn Error` |
 | ``if: (if cond then else)`` | شكل `if` خاطئ. يتطلب `if` فرع else. وعندما لا تحتاج إليه استخدم `when` |

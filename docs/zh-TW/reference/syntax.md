@@ -31,10 +31,17 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
 - **字串**：`"..."`。跳脫序列有 `\n` `\t` `\r` `\0` `\\` `\"`（其他的 `\x` 就是 `x`）。
 - **符號**：包含英數字與符號的任意記號（`+` `<=` `my-func` 等）。
   `]` 和 `}` 會結束一個記號，所以不能寫在符號中；在資料的開頭遇到它們是讀取錯誤。`[` 和 `{` 可以寫在符號中：與 CL 一樣，它們保留給程式設計師在[讀取巨集](#11-讀取巨集readtable)中使用。
-- **關鍵字**：像 `:name` 這樣以冒號開頭的符號（依 CL）。它是自我求值的——不查找繫結，值就是它本身，靜態型別為 `symbol`。同名的關鍵字一律是同一
-  個物件（`(eq :foo :FOO)` 為真。與其他符號一樣會被轉為小寫）。冒號本身是名稱的一部分，`(symbol->string :foo)` 是 `":foo"`（typelisp 沒有
-  套件機制，所以與 CL 的 `symbol-name` 不同）。單獨的 `:` 或像 `:a:b` 這樣包含額外冒號的是讀取錯誤。以 `keywordp` 判斷。以 `::` 開頭的不是
-  關鍵字，而是絕對路徑（見下文）。
+  `|` 與 `|` 之間的內容依原樣讀取，分隔符與冒號也可以寫進名稱（CL 的多重跳脫）。
+  `|:foo|` 是名稱為 `:foo` 的一般符號，不是關鍵字。
+- **關鍵字**：像 `:name` 這樣以冒號開頭的符號（依 CL）。
+  無論寫在哪個模組裡，都是關鍵字專用命名空間 `keyword`（CL 的 `KEYWORD` 套件）中同名的唯一一個符號。
+  它是自我求值的——不查找繫結，值就是它本身，靜態型別為 `symbol`。
+  同名的關鍵字一律是同一個物件（`(eq :foo :FOO)` 為真。與其他符號一樣會被轉為小寫）。
+  冒號不是名稱的一部分，`(symbol->string :foo)` 是 `"foo"`。
+  `~s` 印出 `:foo`，`~a` 印出 `foo`。
+  關鍵字是以自身為值的常數，所以既不能作為變數繫結或賦值，也不能作為定義的名稱（型別錯誤）。
+  從字串建立時寫 `(intern "foo" "keyword")`。以 `keywordp` 判斷（是否屬於關鍵字專用命名空間）。
+  單獨的 `:` 或像 `:a:b` 這樣包含額外冒號的是讀取錯誤。以 `::` 開頭的不是關鍵字，而是絕對路徑（見下文）。
   另外，`:dyn` 是只用於型別位置的保留關鍵字，寫在其他位置是錯誤（見[第 2 章](#2-型別的寫法)）。
 - **串列**：`(a b c)`。點對 `(a . b)` 也可以讀取。
 - **向量**：`#(1 2 3)`（與 CL 相同）。內容全部是字面值，不會求值——`#(a b)` 中的 `a` 是符號而不是變數。元素型別由上下文決定（`(the Vector<i32> #(1 2))`），沒有上下文時取第一個元素的型別（`#(1 2 3)` 是 `Vector<int>`）。元素型別必須一致，`#(1 "a")` 是型別錯誤。既沒有元素也沒有上下文的 `#()` 也是型別錯誤。每次求值都會建立新的向量。在預期 S 運算式資料的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 讀到的資料），它是元素全部為資料的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `vector` 變體。
@@ -143,9 +150,9 @@ typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式
     解析的簽章中得到。`lambda` 作為值傳遞，描述這個值的只有函式型別 `(fn ...)`——那裡沒有放式子的地方，如果放了，「簽章相同而只有預設值不同的
     兩個 lambda」就會成為不同的型別。`&rest` 只涉及型別的問題，所以可以寫進函式型別。
 - **前置參照以 `defsignature` 宣告**（見下文）。沒有宣告的名稱不能在定義之前呼叫——因為頂層是依原始碼順序逐個形式檢查與執行的。
-- 要求 trait 約束時，在本體之前寫 `where` 子句：`(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- 要求 trait 約束時，在本體之前寫 `:where` 子句：`(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   （以 `(AssocName ConcreteType)` 固定關聯型別可以省略）。
-- **文件字串**：在 `where` 子句（如果有）之後、本體開頭放置字串字面值，它就成為文件字串（依 CL）。但僅當其後至少還有一個本體形式時——單獨的
+- **文件字串**：在 `:where` 子句（如果有）之後、本體開頭放置字串字面值，它就成為文件字串（依 CL）。但僅當其後至少還有一個本體形式時——單獨的
   字串仍是回傳值，不會被視為文件字串：`(defun f () string "doc" "value")` 帶有文件字串並回傳 `"value"`，而 `(defun f () string "value")`
   沒有文件字串並回傳 `"value"`。可以用 `(documentation name)` 取出（[文件字串](functions/system.md#7-文件字串--documentation)）。
 
@@ -455,7 +462,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   (pub name ...))                                      ; 在定義型別的模組之外也公開
 
 ; 泛型型別
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 為以 `defstruct`（3.6）、`defenum`（3.7）定義的型別加上方法。相當於 Rust 的固有 impl
@@ -474,7 +481,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   以 `(documentation Type::name)` 取出。trait 的 `impl` 的方法也一樣。
 - 只能為自己程式中的型別書寫。`Vector`、`Option`、`int` 這類標準函式庫的型別不能寫（會出現
   `... is a standard library type` 錯誤）。想為標準型別增加操作時，定義一個 trait，再對該型別寫 `impl`。
-- 在 `(impl X ...)` 中，`X` 之後是項目（串列）、`where` 或什麼都沒有時，就是這裡的固有 impl；
+- 在 `(impl X ...)` 中，`X` 之後是項目（串列）、`:where` 或什麼都沒有時，就是這裡的固有 impl；
   是名稱時，就是 trait 的 `impl`（`(impl Trait Type ...)`，3.9）。
 
 ```lisp
@@ -561,7 +568,7 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   宣告。尚未定義的名稱，在 `defun` 的引數型別與 `the` 中同樣會得到 `unknown type` 錯誤。因此互相參照的兩個型別無法寫出。
 - **型別變數只有寫在宣告部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名稱的 `<T>`，
   固有 `impl` 是對象型別（`(impl box<T> ...)`）以及各方法名稱中的 `<U>`，trait 的 `impl` 是對象型別與
-  `impl<T>`，`deftrait` 是 `Self` 以及 `(type Item)` 的關聯型別。在其他地方——引數、回傳值、本體中
+  `impl<T>`，`deftrait` 是 `Self` 以及 `(:type Item)` 的關聯型別。在其他地方——引數、回傳值、本體中
   的 `the`/`lambda`——第一次出現的名稱不會成為型別變數，而是 `unknown type`。
 - **文件字串**：在名稱之後、欄位清單之前放置字串字面值，它就成為文件字串（`(defstruct Name "doc" (field Type)...)`——與 CL 的 `defstruct`
   位置相同）。欄位一律是 `(name Type ...)` 的形式，不可能是裸字串，所以沒有歧義。以 `(documentation Name)` 取出。
@@ -674,18 +681,18 @@ C 函式的呼叫只能寫在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 繼承清單是必要的。沒有時為 ()
-  (type AssocName)                       ; 關聯型別（可以多個，可以省略）
+  (:type AssocName)                       ; 關聯型別（可以多個，可以省略）
   (method-name ((self Self) params...) RetType)          ; 沒有本體＝必須實作
   (method-name ((self Self) params...) RetType body...)) ; 有本體＝預設實作
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; 作用於整個 impl 的約束（可以省略）
-  (type AssocName ConcreteType)          ; 具體化關聯型別
+  (:where (Trait A)...)                   ; 作用於整個 impl 的約束（可以省略）
+  (:type AssocName ConcreteType)          ; 具體化關聯型別
   (method-name (recv params...) RetType body...))
 ```
 
 透過 `impl`，每個方法都作為 `TargetType` 的方法登記，可以像固有 `impl`（3.5）的方法一樣呼叫。
-trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛型函式的 `where` 子句中作為 trait 約束參照
+trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛型函式的 `:where` 子句中作為 trait 約束參照
 （見 [3.1 defun](#31-defun--函式定義)）。trait 名稱也可以寫 `m::Trait` 這樣的 `::` 路徑。
 
 **繼承清單（必要）**：一定寫在 trait 名稱之後。元素是裸 trait 名稱，或者在該 trait 有關聯型別時，寫成**固定了所有關聯型別**的
@@ -699,16 +706,16 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 ```
 
 繼承有 3 個效果。(1) `impl Ord X` 要求**先**寫 `impl Eq X`（關於書寫順序的規則。是在 REPL 與逐一 `load` 中都能確定判斷的唯一形式，比 Rust
-更嚴格）。(2) 只要 `(where (Ord T))` 就能呼叫 `Eq` 的方法。(3) 可以從 `:dyn Ord` 呼叫 `Eq` 的方法，`:dyn Ord` 的值可以直接傳給要求 `:dyn Eq`
+更嚴格）。(2) 只要 `(:where (Ord T))` 就能呼叫 `Eq` 的方法。(3) 可以從 `:dyn Ord` 呼叫 `Eq` 的方法，`:dyn Ord` 的值可以直接傳給要求 `:dyn Eq`
 的位置（向上轉型）。子 trait 重新宣告與父同名的方法，以及從兩個父繼承同名的方法，都是錯誤（vtable 的槽每個名稱一個）。菱形繼承會合併為一個槽。
 
 **預設實作**：在簽章後寫本體，`impl` 省略該方法時就使用它。本體在寫下 trait 的**模組的命名空間**中解析，所以也可以呼叫該模組中非公開的函式。
-有本體的方法也可以寫 `where` 子句與文件字串。本體的型別檢查**在宣告時進行一次**，`Self` 保持為型別變數（以 `Self: 該 trait` 為約束）（與 Rust
+有本體的方法也可以寫 `:where` 子句與文件字串。本體的型別檢查**在宣告時進行一次**，`Self` 保持為型別變數（以 `Self: 該 trait` 為約束）（與 Rust
 相同）——即使是沒有任何 `impl` 省略的預設實作，對任何實作型別都通不過的錯誤也會在那裡被排除。對 `self` 呼叫該 trait 本身及其繼承來源的方法會
 藉這個約束通過，關聯型別固定為自己，所以回傳 `Item` 的簽章與本體在不知道具體型別的情況下進行比對。
 
 **依具體型別的實作**：泛型型別可以為每個具體型別分別寫 `impl`（`(impl Show Box<int> ...)` 和
-`(impl Show Box<string> ...)`）。`:dyn`、`where` 約束、關聯型別和 `print-object` 也都依具體型別生效，
+`(impl Show Box<string> ...)`）。`:dyn`、`:where` 約束、關聯型別和 `print-object` 也都依具體型別生效，
 沒有 `impl` 的具體型別（`Box<f64>`）不實作該 trait。同一個 trait 不能同時為 `Box<T>` 和 `Box<int>` 寫
 `impl`（與 3.5 中方法的規則相同）。父 trait 只需在該具體型別上已實作即可（`Box<int>` 或 `Box<T>` 的 `impl`）。
 
@@ -718,14 +725,14 @@ trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。trait 在泛�
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; 沒有本體——全部使用預設實作
+(impl<T> Clamp T (:where (Ord T)))          ; 沒有本體——全部使用預設實作
 ```
 
 **在具體型別實際使用之前不會產生程式碼**（每種型別一次，與一般單型化相同的機制）。一個 trait 最多一個全面實作。同一型別有明確的 `impl` 時，那個
 優先。本體的型別檢查與產生是分開的，在宣告時**保持對象為型別變數**進行一次（與 Rust 相同）——即使是一次也沒被使用的實作，在宣告的約束下對任何
-對象都通不過的錯誤也會在那裡被排除。約束所允許的呼叫（`(where (Ord T))` 下的 `(less self other)` 等）與泛型 `defun` 的本體同樣對待，可以通過。
+對象都通不過的錯誤也會在那裡被排除。約束所允許的呼叫（`(:where (Ord T))` 下的 `(less self other)` 等）與泛型 `defun` 的本體同樣對待，可以通過。
 
-**文件字串**：`deftrait` 在繼承清單之後、項目清單之前放置字串字面值，整個 trait 就能有一個文件字串（`(deftrait Name () "doc" (type ...)
+**文件字串**：`deftrait` 在繼承清單之後、項目清單之前放置字串字面值，整個 trait 就能有一個文件字串（`(deftrait Name () "doc" (:type ...)
 (method ...)...)`）。沒有本體的簽章不能寫文件字串——結尾的字串本身會成為預設實作的回傳值，兩者無法區分。
 
 標準函式庫提供的 trait：**`Iter`**（`next`／關聯型別 `Item`。`doiter`／序列函式的基礎）、**`Eq`**（`equals`。`not-equals` 是預設實作）、
@@ -933,11 +940,11 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 (if cond then else)                 ; else 是必要的（固定 3 個元素）
 (when cond body...)                 ; 沒有 else 的 if（Unit 型別）。defmacro
 (unless cond body...)               ; when 的否定版。defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; 鍵清單：符合其中任一個
-  (else body...))                   ; expr 只求值一次。key 以 equal 比較。
+  (:else body...))                   ; expr 只求值一次。key 以 equal 比較。
                                      ; key 是「字面值」，不求值（與 CL 相同）。
                                      ; 裸符號 a 表示符號 'a。
                                      ; 寫 'a 是錯誤（使用裸的 a）。defmacro
@@ -1018,7 +1025,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 - **立即值字面值**：整數 / `true`/`false` / 字元 —— 以字比較
 - **值字面值**：字串 / 浮點數 / 符號（`'foo`）/ 多倍精度整數 / ratio —— 以該型別的 `Eq::equals`（[標準 trait](functions/traits.md#2-eq--ord比較)）
   依值比較。字串比較的是內容，而不是同一性
-- `(= expr)` —— 對任意式子求值，以 `Eq::equals` 比較。是比較沒有字面值語法的型別（`defstruct` 實例、全域變數、計算結果）的唯一寫法，使用者定義的
+- `(:= expr)` —— 對任意式子求值，以 `Eq::equals` 比較。是比較沒有字面值語法的型別（`defstruct` 實例、全域變數、計算結果）的唯一寫法，使用者定義的
   `Eq` 實作直接成為比較規則。`expr` 可以參照從該分支位置可見的任何東西（引數、外層繫結、全域變數）
 - `(Ctor sub-pattern...)` —— 建構函式模式（`Some x` `None` `Cons a d` `Ok v` 等）
 - `(Type :slot pattern... :slot...)` — 結構的模式。在型別名稱之後以關鍵字寫槽。關鍵字之後是模式時，
@@ -1036,7 +1043,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 - `#{p0 p1 ...}` —— 元組模式。逐個元素用子模式比對。對 `Sexpr` 而言，只符合元素個數相同的 `#{..}` 資料
 - `(:or p1 p2 ...)` —— or 模式。任一個選項符合即符合。分支本體只有一個，所以每個選項都必須以相同的型別繫結相同名稱的變數。也可以寫在建構函式模式內部（`(some (:or (circle r) (rect r _)))`）
 
-以值字面值／`(= expr)` 比較沒有實作 `Eq` 的型別是型別錯誤（比起留下默默不符合的分支，選擇說明無法比較）。
+以值字面值／`(:= expr)` 比較沒有實作 `Eq` 的型別是型別錯誤（比起留下默默不符合的分支，選擇說明無法比較）。
 
 **守衛**：在模式後面寫 `:when 條件`，則只有當模式符合且條件也為真時才選擇該分支。條件為假時嘗試下一個分支。條件可以讀取模式繫結的變數。
 
@@ -1060,7 +1067,7 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 ```
 
 不是立即值的字面值（字串 / 浮點數 / 多倍精度整數 / ratio）**不能**對 `Sexpr` 書寫。它們的 `eq` 比較物件的同一性，會成為「型別能通過但永遠不
-符合的分支」，所以作為點出變體模式的錯誤——寫 `(str "hi")` 就會拆解為 `string` 進行內容比較。`(= expr)` 明確要求 `equals`，所以不受這個限制。
+符合的分支」，所以作為點出變體模式的錯誤——寫 `(str "hi")` 就會拆解為 `string` 進行內容比較。`(:= expr)` 明確要求 `equals`，所以不受這個限制。
 
 **被比對值不必是 ADT。** `string`/`symbol`/`i32`/`f64` 等可以直接 `match`（那正是字串字面值模式派上用場的地方）。但沒有變體的型別無法以列舉
 窮盡，所以 `_`（或者作為萬用字元的繫結模式）是必要的：
@@ -1189,12 +1196,12 @@ CL 讓兩者共用一個相同——它們是拆解同一種東西的兩種形�
 `loop` 的**第 1 個元素是關鍵字時**，以子句序列讀取。否則仍是上面的簡單迴圈，已經寫好的 `loop` 的意義不變（與 CL 本身的 simple loop 規則相同）。
 
 CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但這裡**全部是關鍵字**——裸的 `for` 只會成為變數參照，而是不是關鍵字也正是與
-簡單迴圈的分界。例外是分隔變數與值的 `=`，它的位置是唯一的，所以裸寫與關鍵字（`:=`）都能讀取。
+簡單迴圈的分界。分隔變數與值的詞也不例外，寫作 `:=`。
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1202,11 +1209,11 @@ CL 以裸符號書寫子句詞（`(loop for i from 1 to 3 collect i)`），但�
 
 | 子句 | 意義 |
 |---|---|
-| `:with v = e` | 只繫結一次。可以讀取前面子句的變數 |
+| `:with v := e` | 只繫結一次。可以讀取前面子句的變數 |
 | `:for v :in s` / `:for v :across s` | 依序取 `Iter` 的元素。這裡沒有 CL 的串列／向量之分，所以是同一子句的不同寫法 |
 | `:for v :on s` | 依序取之後的**後綴**。CL 傳遞共享的尾端 cons，但 `Iter` 沒有可共享的尾端，所以是新的 `Vector` |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | 計數。也可以用 `:downfrom`/`:upfrom` |
-| `:for v = e [:then f]` | 從 `e` 開始，第 2 次以後為 `f`（沒有 `:then` 時每次都是 `e`） |
+| `:for v := e [:then f]` | 從 `e` 開始，第 2 次以後為 `f`（沒有 `:then` 時每次都是 `e`） |
 | `:repeat n` | 迴圈這麼多次 |
 
 寫多個 `:for` 時**平行**前進，任何一個用盡時結束。
@@ -1461,7 +1468,7 @@ typl --image session.typld             # REPL 也一樣
 
 `f` 的型別是 `(fn (string-input-stream char) Option<Sexpr>)`。第 1 個引數是**以尚未讀取的文字為內容的串流**，第 2 個引數是**觸發的字元**（分派
 時為第 2 個字元）。回傳值成為在那裡讀到的資料。串流是具體型別而不是 `:dyn PeekInput`，是因為讀取器傳遞的一律是這一種——`read-sexpr` /
-`read-char` / `peek-char` / `unread-char` / `read-delimited-list` 都是 `(where (PeekInput S))`，所以具體型別可以直接全部使用。
+`read-char` / `peek-char` / `unread-char` / `read-delimited-list` 都是 `(:where (PeekInput S))`，所以具體型別可以直接全部使用。
 
 ```lisp
 (set-macro-character #\!
@@ -1551,14 +1558,14 @@ typl --image session.typld             # REPL 也一樣
 (select
   ((v (recv ch1)) body...)          ; 接收分支。v 繫結為 Option<T>
   ((send ch2 x) body...)            ; 傳送分支
-  (else body...))                   ; 可以省略。**要寫的話放在最後**
+  (:else body...))                   ; 可以省略。**要寫的話放在最後**
 ```
 
-- **有 `else` 時不會阻塞**（Go 的 `default`）。沒有時等到某個分支變得可行。
+- **有 `:else` 時不會阻塞**（Go 的 `default`）。沒有時等到某個分支變得可行。
 - **同時有多個可行時隨機選擇一個**（依書寫順序的話，後面的分支會餓死）。
 - 接收分支的 `v` 是 **`Option<T>`**。關閉的通道是「回答」而不是略過分支的理由，所以在分支中 `match`。
 - 型別是**所有分支本體型別的合併型別**（與 `match` 分支的規則相同）。
-- 0 個分支的 `(select)` 是型別錯誤（不採用 Go 的 `select{}`＝永久阻塞）。只有 `else` 的 `select` 也一樣——與直接寫本體相同。
+- 0 個分支的 `(select)` 是型別錯誤（不採用 Go 的 `select{}`＝永久阻塞）。只有 `:else` 的 `select` 也一樣——與直接寫本體相同。
 
 **無論選擇哪個分支，通道運算式與要傳送的值都由左至右各求值一次**（與 `case` 對鍵所持的規則相同）。
 

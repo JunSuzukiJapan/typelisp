@@ -15,7 +15,7 @@
      (cond
        ((< x v) (node v (insert l x) r))
        ((> x v) (node v l (insert r x)))
-       (else t)))))
+       (:else t)))))
 
 (defun contains ((t tree) (x int)) bool
   (match t
@@ -24,7 +24,7 @@
      (cond
        ((= x v) true)
        ((< x v) (contains l x))
-       (else (contains r x))))))
+       (:else (contains r x))))))
 
 (defun inorder-print ((t tree)) ()
   (match t

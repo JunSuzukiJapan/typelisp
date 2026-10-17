@@ -225,8 +225,9 @@ Tidak ada paket. Ruang nama adalah modul, dan sebuah berkas adalah modul tersend
 `pkg:symbol`, tulis `module::name`, dan bawa nama masuk dengan `use`
 ([Modul dan Tata Letak Berkas](modules.md)).
 
-Keyword `:foo` ada dan merupakan simbol yang dievaluasi menjadi dirinya sendiri. Karena tidak ada
-paket, titik dua adalah bagian dari nama: `(symbol->string :foo)` mengembalikan `":foo"`.
+Keyword `:foo` ada dan, seperti di CL, dievaluasi menjadi dirinya sendiri dan termasuk namespace keyword
+`keyword`. `(symbol->string :foo)` mengembalikan `"foo"`, dan `(intern "foo" "keyword")` mengembalikan
+`:foo`. Argumen kedua `intern` adalah path modul sebagai ganti nama paket.
 
 ## 10. Perbedaan dalam pembacaan dan sintaks
 

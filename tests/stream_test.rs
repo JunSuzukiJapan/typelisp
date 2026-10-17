@@ -247,7 +247,7 @@ fn a_user_defined_type_can_be_a_stream() {
              (open-stream-p ((self Self)) bool true)
              (close ((self Self)) () ()))
            (impl OutputStream counter
-             (type Item char)
+             (:type Item char)
              (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
            (impl CharOutput counter)
            (let ((c (make-instance 'counter :n 0)))
@@ -266,7 +266,7 @@ fn a_user_stream_can_go_into_a_broadcast_alongside_a_builtin_one() {
              (open-stream-p ((self Self)) bool true)
              (close ((self Self)) () ()))
            (impl OutputStream counter
-             (type Item char)
+             (:type Item char)
              (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
            (impl CharOutput counter)
            (let ((c (make-instance 'counter :n 0))
@@ -472,7 +472,7 @@ fn a_stream_that_cannot_tell_gets_its_newline() {
              (open-stream-p ((self Self)) bool true)
              (close ((self Self)) () ()))
            (impl OutputStream sink
-             (type Item char)
+             (:type Item char)
              (write-item ((self Self) (c char)) () (setf self::text (append self::text (char->string c)))))
            (impl CharOutput sink)
            (let ((k (make-instance 'sink :text "")))
@@ -527,7 +527,7 @@ fn format_writes_to_a_stream_destination() {
 #[test]
 fn format_to_a_stream_works_through_a_trait_bound_and_a_trait_object() {
     let v = eval_string(
-        r#"(defun via-bound<S> ((s S)) () (where (CharOutput S)) (format s "[~d]" 1))
+        r#"(defun via-bound<S> ((s S)) () (:where (CharOutput S)) (format s "[~d]" 1))
            (defun via-dyn ((s :dyn CharOutput)) () (format s "{~a}" true))
            (let ((s (make-string-output-stream)))
              (via-bound s)
@@ -748,7 +748,7 @@ fn a_user_defined_input_stream_can_be_read_from() {
              (open-stream-p ((self Self)) bool true)
              (close ((self Self)) () ()))
            (impl InputStream fixed
-             (type Item char)
+             (:type Item char)
              (read-item ((self Self)) Option<char>
                (if (>= self::at (length self::text))
                    (option::none)

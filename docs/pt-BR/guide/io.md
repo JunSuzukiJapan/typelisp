@@ -85,10 +85,10 @@ stream de caracteres é um erro de tipo.
 ### Tornar genéricas as funções de leitura e escrita
 
 Cada tipo de stream é um tipo próprio, mas as operações em comum estão reunidas em traits. Uma função que
-recebe seu argumento com `(where (CharInput S))` pode ler de um arquivo, de uma string ou de um socket.
+recebe seu argumento com `(:where (CharInput S))` pode ler de um arquivo, de uma string ou de um socket.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

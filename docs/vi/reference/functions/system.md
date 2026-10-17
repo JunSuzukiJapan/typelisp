@@ -215,7 +215,7 @@ ngay lập tức và vĩnh viễn vào môi trường toàn cục.
 
 | Dạng | Vị trí của docstring |
 |---|---|
-| `defun` / phương thức trong `impl` / `defmacro` | Ở đầu thân (sau kiểu trả về và mệnh đề `where`). Chỉ khi có ít nhất một dạng của thân theo sau; một chuỗi đứng một mình vẫn là giá trị trả về |
+| `defun` / phương thức trong `impl` / `defmacro` | Ở đầu thân (sau kiểu trả về và mệnh đề `:where`). Chỉ khi có ít nhất một dạng của thân theo sau; một chuỗi đứng một mình vẫn là giá trị trả về |
 | `defvar` / `defconstant` | **Sau** giá trị ban đầu: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Ngay sau** tên, trước các trường/variant |
 | `deftype` | **Ngay sau** tên, trước kiểu: `(deftype meters "doc" i32)` |

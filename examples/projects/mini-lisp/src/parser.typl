@@ -46,7 +46,7 @@
                (let ((b (parse-expr c)))
                  (advance c)
                  (binop head a b))))
-            (else (panic (append "parse error: unknown form `" (append head "`"))))))
+            (:else (panic (append "parse error: unknown form `" (append head "`"))))))
         (let ((n (parse-int tok)))
           (if (is-ok n) (lit (unwrap n)) (var tok))))))
 

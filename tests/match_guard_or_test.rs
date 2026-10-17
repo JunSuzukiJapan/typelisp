@@ -121,7 +121,7 @@ fn a_value_pattern_under_the_in_a_closure_reads_a_captured_variable() {
     both(
         r##"(let* ((want (make-instance 'P :x 3))
                   (f (lambda ((d Option<Sexpr>)) bool
-                       (match d ((the P (= want)) true) (_ false)))))
+                       (match d ((the P (:= want)) true) (_ false)))))
              (format false "~a ~a" (f (make-instance 'P :x 3)) (f (make-instance 'P :x 4))))"##,
         "true false",
     );

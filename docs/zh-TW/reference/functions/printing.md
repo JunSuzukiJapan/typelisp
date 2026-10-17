@@ -18,7 +18,7 @@
 | `format` | `(format dest control args...)` | `(bool, string, ...)→string` | CL 的 `format`。回傳展開後的字串。`dest` 為 `true`（CL 的 `t`）時還會寫到標準輸出；為 `false`（CL 的 `nil`）時不寫，只回傳字串 |
 | `format`（寫到串流） | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` 不是 `bool` 時是 CL 的寫到串流。把展開的字串寫到該串流。回傳值是 `()`（相當於 CL 的 `nil`），不回傳字串 |
 
-依 `dest` 的型別分為兩種意義（屬於哪一種是靜態決定的）。寫到串流時，具體串流型別、`:dyn CharOutput`、`(where (CharOutput S))` 的型別變數
+依 `dest` 的型別分為兩種意義（屬於哪一種是靜態決定的）。寫到串流時，具體串流型別、`:dyn CharOutput`、`(:where (CharOutput S))` 的型別變數
 都可以同樣書寫。既不是 `bool` 也不是串流的 `dest` 是型別錯誤。
 
 **控制字串必須是字面值**（與 Rust 的 `format!` 同樣的限制）。其中的指令決定取幾個引數、什麼型別，所以執行期組出的字串在檢查時無法讀取。
@@ -215,7 +215,7 @@ CLHS 22.1.3 的列印函式。不做格式展開，直接列印一個值。串�
 規則：
 
 - **登記是靜態的。** `impl` 作為一般的方法定義進行型別檢查，所以型別名稱拼錯與簽章不符都是編譯錯誤。
-- **對泛型型別也生效。** `(impl print-object box<T> (where (print-object T)) ...)` 會依型別引數跳到不同的本體——值記得包括自身型別引數在內的
+- **對泛型型別也生效。** `(impl print-object box<T> (:where (print-object T)) ...)` 會依型別引數跳到不同的本體——值記得包括自身型別引數在內的
   型別（`box<i32>`）。`Vector<T>` 這樣的內建泛型型別也一樣。
 - **選擇發生在列印時。** 哪個指令消耗哪個引數取決於控制字串在執行期的內容，所以 `~a` 與 `~s` 的差別（即 `escape`）只有在列印的那一刻才
   知道。與 CLOS 中 `print-object` 方法「依類別定義，列印時選擇」相同。
@@ -223,7 +223,7 @@ CLHS 22.1.3 的列印函式。不做格式展開，直接列印一個值。串�
   是值的同一性而不是深度限制，所以不會妨礙正當的自我參照結構的巢狀列印。
 - **所有純量型別都實作了這個 trait。** 這是**為了用作約束**：`format` 的可變引數不能接受型別變數，所以泛型程式碼要表達「可以描繪未知型別
   的值」，只有這個約束（與 Rust 的 `T: Display` 形式相同）。`Array<T>` 的 `print-object` 就是一例。
-- **型別引數不滿足約束時，默默使用內建表示。** `(impl print-object Array<T> (where (print-object T)))` 對 `Array<i32>` 生效，但對元素是
+- **型別引數不滿足約束時，默默使用內建表示。** `(impl print-object Array<T> (:where (print-object T)))` 對 `Array<i32>` 生效，但對元素是
   沒有寫 `print-object` 的 `defstruct` 的 `Array` 不生效。光是建立陣列就出錯是說不通的，所以不會出錯。
 - CL 的另一種機制 `set-pprint-dispatch` / `*print-pprint-dispatch*`（以型別指定子為鍵的執行期登記表）**沒有採用**。它的登記沒有檢查，
   不適合靜態型別語言。

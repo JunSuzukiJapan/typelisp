@@ -10,7 +10,7 @@
           ((equal c #\Space) (setf i (+ i 1)) ())
           ((equal c #\() (push toks "(") (setf i (+ i 1)) ())
           ((equal c #\)) (push toks ")") (setf i (+ i 1)) ())
-          (else
+          (:else
            (let ((start i))
              (while (and (< i n)
                          (not (equal (ref s i) #\Space))

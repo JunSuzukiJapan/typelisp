@@ -168,7 +168,7 @@ fn an_unwind_with_no_handler_empties_the_chain() {
     assert_eq!(heap.root_count(), before, "the unwound frame's roots were left behind");
     // Still travelling: the boundary above is what turns it into an error.
     let (parked_tag, parked_value) = unsafe { typelisp_rt::take_throw() }.expect("the throw is still in flight");
-    assert_eq!(parked_tag, "boom");
+    assert_eq!(Value::Symbol(parked_tag), heap.intern_symbol("boom"));
     assert_eq!(parked_value, Value::Int(THROWN));
     unsafe { typelisp_rt::clear_throw() };
 }
@@ -191,7 +191,7 @@ fn a_handler_that_declines_keeps_the_throw_travelling() {
     assert_eq!(drive(&mut heap, guarded, &[caught, thrown]), Err(Paused::Unwinding));
     assert_eq!(heap.root_count(), before);
     let (parked_tag, parked_value) = unsafe { typelisp_rt::take_throw() }.expect("the throw is still in flight");
-    assert_eq!(parked_tag, "outer");
+    assert_eq!(Value::Symbol(parked_tag), heap.intern_symbol("outer"));
     assert_eq!(parked_value, Value::Int(THROWN));
     unsafe { typelisp_rt::clear_throw() };
 }

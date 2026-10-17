@@ -10,8 +10,8 @@ CL 用类层次表示的东西，在这里用 **trait 层次**表示。方向（
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; 字符输入
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; 字符输出
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; 可以退回一个字符的输入
@@ -19,7 +19,7 @@ CL 用类层次表示的东西，在这里用 **trait 层次**表示。方向（
 (deftrait ByteOutput ((OutputStream (Item int))) ...)    ; 字节输出
 ```
 
-读取字符的函数只要接受 `(where (CharInput S))` 或 `:dyn CharInput`，就能接受任何流类型，无论是内置的还是用户定义的。
+读取字符的函数只要接受 `(:where (CharInput S))` 或 `:dyn CharInput`，就能接受任何流类型，无论是内置的还是用户定义的。
 
 ## 2. 方法
 
@@ -159,7 +159,7 @@ trait 解析（第 9 章）。
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 其余方法全部使用默认实现
 
@@ -223,7 +223,7 @@ trait 解析（第 9 章）。
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | 用 `default` 补全 `p` 中没有的成分。相对的 `p` 放在 `default` 的目录下，绝对的 `p` 保持自己的目录 |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | 以 `default` 为基准的相对表示。不在基准之下时为 `p` 的全部 |
 
-类型参数都带有 `(where (Pathish P))`。
+类型参数都带有 `(:where (Pathish P))`。
 
 ## 10. 与 CL 的区别
 

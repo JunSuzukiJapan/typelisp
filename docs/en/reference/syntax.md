@@ -46,13 +46,18 @@ and for reading error messages, [errors.md](errors.md).
   `]` and `}` end a token, so they cannot appear inside a symbol, and one at the start of a datum is
   a read error. `[` and `{` can appear inside a symbol: as in CL, they are left free for programmers
   to use in [reader macros](#11-reader-macros-readtable).
-- **Keywords**: symbols starting with a colon, such as `:name` (as in CL). They are self-evaluating:
-  they look up no binding and their value is themselves, with static type `symbol`. Keywords with the
-  same name are always the same object (`(eq :foo :FOO)` is true; like other symbols they are
-  lower-cased). The colon itself is part of the name, so `(symbol->string :foo)` is `":foo"` (typelisp
-  has no package system, so this differs from CL's `symbol-name`). A lone `:` or one with additional
-  colons such as `:a:b` is a read error. Test with `keywordp`. Ones starting with `::` are not keywords
-  but absolute paths (below).
+  Text between `|` and `|` is read as written, delimiters and colons included (CL's multiple escape): `|:foo|`
+  is an ordinary symbol whose name is `:foo`, not a keyword.
+- **Keywords**: symbols starting with a colon, such as `:name` (as in CL). Whichever module they are written in,
+  they are the one symbol of that name in the keyword namespace `keyword` (CL's `KEYWORD` package). They are
+  self-evaluating: they look up no binding and their value is themselves, with static type `symbol`. Keywords
+  with the same name are always the same object (`(eq :foo :FOO)` is true; like other symbols they are
+  lower-cased). The colon is not part of the name: `(symbol->string :foo)` is `"foo"`. `~s` prints `:foo` and
+  `~a` prints `foo`. A keyword is a constant whose value is itself, so it can neither be bound nor assigned as a
+  variable, nor be the name of a definition (a type error). To make one from a string, write
+  `(intern "foo" "keyword")`. Test with `keywordp` (whether it belongs to the keyword namespace). A lone `:` or
+  one with additional colons such as `:a:b` is a read error. Ones starting with `::` are not keywords but
+  absolute paths (below).
   Note that `:dyn` is a reserved keyword for type positions only; writing it anywhere else is an error
   (see [chapter 2](#2-writing-types)).
 - **Lists**: `(a b c)`. Dotted pairs `(a . b)` can be read too.
@@ -234,10 +239,10 @@ In source, types are written as ordinary symbols or lists.
 - **Forward references are declared with `defsignature`** (below). A name that has not been declared
   cannot be called before its definition, because the top level is checked and run one form at a time,
   in source order.
-- To require trait bounds, write a `where` clause right before the body:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- To require trait bounds, write a `:where` clause right before the body:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   (fixing an associated type with `(AssocName ConcreteType)` is optional).
-- **Docstrings**: a string literal at the start of the body, right after the `where` clause (if any),
+- **Docstrings**: a string literal at the start of the body, right after the `:where` clause (if any),
   becomes the docstring (as in CL). Only when at least one body form follows it, though: a lone string
   stays the return value and is not taken as a docstring: `(defun f () string "doc" "value")` has a
   docstring and returns `"value"`, while `(defun f () string "value")` has no docstring and returns
@@ -618,7 +623,7 @@ The type annotation is required (it is not inferred from the initializer). `defv
   (pub name ...))                                      ; public outside the type's module too
 
 ; a generic type
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 Gives methods to a type defined with `defstruct` (3.6) or `defenum` (3.7). It corresponds to Rust's
@@ -641,7 +646,7 @@ inherent impl (`impl Point { ... }`).
 - Only the program's own types can have one. A standard-library type such as `Vector`, `Option` or
   `int` cannot (the error says `... is a standard library type`). To add an operation to a standard
   type, define a trait and `impl` it for that type.
-- In `(impl X ...)`, if what follows `X` is an item (a list), a `where`, or nothing, this is the
+- In `(impl X ...)`, if what follows `X` is an item (a list), a `:where`, or nothing, this is the
   inherent impl; if it is a name, it is a trait's `impl` (`(impl Trait Type ...)`, 3.9).
 
 ```lisp
@@ -737,7 +742,7 @@ a method of the same name.
 - **Type variables are only those written in declaring positions.** For
   `defun`/`defstruct`/`defenum`/`deftype`, the `<T>` of the name; for an inherent `impl`, the target
   type (`(impl box<T> ...)`) and the `<U>` of each method's name; for a trait's `impl`, the target type
-  and `impl<T>`; for `deftrait`, `Self` and the associated types of `(type Item)`. A name appearing for
+  and `impl<T>`; for `deftrait`, `Self` and the associated types of `(:type Item)`. A name appearing for
   the first time anywhere else (arguments, the return value, `the`/`lambda` in the body) does not
   become a type variable; it is `unknown type`.
 - **Docstrings**: a string literal right after the name, before the fields, becomes the docstring
@@ -878,19 +883,19 @@ a type**.
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
-  (type AssocName)                       ; associated types (any number, optional)
+  (:type AssocName)                       ; associated types (any number, optional)
   (method-name ((self Self) params...) RetType)          ; no body = must be implemented
   (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; bounds applying to the whole impl (optional)
-  (type AssocName ConcreteType)          ; makes an associated type concrete
+  (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
+  (:type AssocName ConcreteType)          ; makes an associated type concrete
   (method-name (recv params...) RetType body...))
 ```
 
 Through `impl`, each method is registered as a method of `TargetType` and is called like a method of an
 inherent `impl` (3.5). The methods of a trait's `impl` are always public, without `pub`. Traits are
-referred to as trait bounds in the `where` clauses of generic functions (see
+referred to as trait bounds in the `:where` clauses of generic functions (see
 [3.1 defun](#31-defun--function-definitions)). A trait name can also be a `::` path such as `m::Trait`.
 
 **The supertrait list (required)**: always written right after the trait name. Each element is a bare
@@ -906,7 +911,7 @@ types pinned**.
 
 Inheritance has three effects. (1) `impl Ord X` requires `impl Eq X` to be written **first** (a rule
 about order of writing: the only form that can be decided deterministically in the REPL and with
-step-by-step `load`, and stricter than Rust). (2) `(where (Ord T))` alone lets you call the methods of
+step-by-step `load`, and stricter than Rust). (2) `(:where (Ord T))` alone lets you call the methods of
 `Eq` too. (3) The methods of `Eq` can be called through a `:dyn Ord`, and a `:dyn Ord` value can be passed
 as it is where a `:dyn Eq` is required (upcasting). A subtrait redeclaring a method of the same name as
 its parent, and inheriting methods of the same name from two parents, are both errors (a vtable has one
@@ -914,7 +919,7 @@ slot per name). Diamond inheritance merges into one slot.
 
 **Default implementations**: a body after the signature is used when an `impl` leaves the method out. The
 body is resolved in **the namespace of the module** where the trait is written, so it can call
-non-public functions of that module. Methods with bodies can also have `where` clauses and docstrings.
+non-public functions of that module. Methods with bodies can also have `:where` clauses and docstrings.
 The body is type-checked **once, at the point of declaration**, with `Self` left as a type variable
 (bounded by `Self: the trait itself`), as in Rust: mistakes that would fail for every `impl` and every
 implementing type, even in defaults no `impl` ever omits, are caught there. Calls on `self` to methods of
@@ -923,7 +928,7 @@ themselves, so a signature returning `Item` is matched against the body without 
 type.
 
 **Implementations per instantiation**: a generic type can have a separate `impl` for each
-instantiation (`(impl Show Box<int> ...)` and `(impl Show Box<string> ...)`). `:dyn`, `where` bounds,
+instantiation (`(impl Show Box<int> ...)` and `(impl Show Box<string> ...)`). `:dyn`, `:where` bounds,
 associated types and `print-object` all work per instantiation, and an instantiation with no `impl`
 (`Box<f64>`) does not implement the trait. The same trait cannot be implemented for both `Box<T>` and
 `Box<int>` (the same rule as for methods in 3.5). A supertrait only has to be implemented at that
@@ -936,7 +941,7 @@ type meeting the bounds.
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; no body at all; everything is the default
+(impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
 **No code is generated until a concrete type actually uses it** (once per type, by the same mechanism as
@@ -944,11 +949,11 @@ ordinary monomorphization). A trait can have at most one blanket implementation.
 explicit `impl`, that one takes priority. Type-checking the body is separate from generation: it is done
 once at the point of declaration, **with the target left as a type variable** (as in Rust), so even an
 implementation that is never used has its mistakes caught there if they would fail for every target
-under the declared bounds. Calls justified by the bounds (`(less self other)` under `(where (Ord T))`
+under the declared bounds. Calls justified by the bounds (`(less self other)` under `(:where (Ord T))`
 and so on) pass, as in the body of a generic `defun`.
 
 **Docstrings**: a `deftrait` can have one docstring for the whole trait, as a string literal right after
-the supertrait list, before the items (`(deftrait Name () "doc" (type ...) (method ...)...)`). A signature
+the supertrait list, before the items (`(deftrait Name () "doc" (:type ...) (method ...)...)`). A signature
 without a body cannot have a docstring: a trailing string would itself be the return value of a default
 implementation, so the two could not be told apart.
 
@@ -1202,11 +1207,11 @@ What a test `print`s goes straight to standard output (it is not captured). For 
 (if cond then else)                 ; else is required (always three elements)
 (when cond body...)                 ; an if without else (Unit type). defmacro
 (unless cond body...)               ; the negation of when. defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; a list of keys: matches if any of them does
-  (else body...))                   ; expr is evaluated once. keys are compared with equal.
+  (:else body...))                   ; expr is evaluated once. keys are compared with equal.
                                      ; keys are "literals" and are not evaluated (as in CL).
                                      ; a bare symbol a means the symbol 'a.
                                      ; writing 'a is an error (use the bare a). defmacro
@@ -1303,7 +1308,7 @@ Kinds of patterns:
 - **Value literals**: strings / floating-point numbers / symbols (`'foo`) / bignum integers / ratios —
   compared by value with that type's `Eq::equals` ([Standard Traits](functions/traits.md#2-eq--ord-comparison)).
   Strings compare by contents, not by identity
-- `(= expr)` — evaluates any expression and compares with `Eq::equals`. The only way to compare types
+- `(:= expr)` — evaluates any expression and compares with `Eq::equals`. The only way to compare types
   that have no literal syntax (`defstruct` instances, globals, computed results), and a user-defined `Eq`
   implementation becomes the comparison rule as it is. `expr` can refer to anything visible from the
   arm's position (arguments, outer bindings, globals)
@@ -1327,7 +1332,7 @@ Kinds of patterns:
   so every alternative must bind the same variables at the same types. It can also be written inside
   a constructor pattern (`(some (:or (circle r) (rect r _)))`)
 
-Comparing a type that does not implement `Eq` with a value literal / `(= expr)` is a type error (this
+Comparing a type that does not implement `Eq` with a value literal / `(:= expr)` is a type error (this
 language chooses to say "these cannot be compared" rather than leave an arm that silently never matches).
 
 **Guards**: writing `:when condition` after the pattern selects the arm only when the pattern
@@ -1359,7 +1364,7 @@ match by content:
 Non-immediate literals (strings / floating-point numbers / bignum integers / ratios) **cannot be written**
 against an `Sexpr`. Their `eq` compares object identity, which would make an "arm that type-checks but
 never matches", so it is an error naming the variant pattern: write `(str "hi")` and it is taken apart
-into a `string` and compared by content. `(= expr)` explicitly asks for `equals`, so this restriction does
+into a `string` and compared by content. `(:= expr)` explicitly asks for `equals`, so this restriction does
 not apply to it.
 
 **The scrutinee does not have to be an ADT.** `string`/`symbol`/`i32`/`f64` and the like can be matched
@@ -1519,13 +1524,12 @@ loop rule).
 
 CL writes the clause words as bare symbols (`(loop for i from 1 to 3 collect i)`), but here **all of them
 are keywords**: a bare `for` would be just a variable reference, and being a keyword is also what tells it
-apart from a simple loop. The exception is `=`, which separates a variable from a value: its position is
-unambiguous, so it is read either bare or as a keyword (`:=`).
+apart from a simple loop. The word that separates a variable from its value is no exception: it is written `:=`.
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1534,11 +1538,11 @@ unambiguous, so it is read either bare or as a keyword (`:=`).
 
 | Clause | Meaning |
 |---|---|
-| `:with v = e` | Binds once. May read the variables of earlier clauses |
+| `:with v := e` | Binds once. May read the variables of earlier clauses |
 | `:for v :in s` / `:for v :across s` | The elements of an `Iter` in order. CL's list/vector distinction does not exist here, so these are two spellings of the same clause |
 | `:for v :on s` | The successive **suffixes**. CL passes the shared tail cons, but an `Iter` has no tail to share, so each is a new `Vector` |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | Counting. `:downfrom`/`:upfrom` also work |
-| `:for v = e [:then f]` | Starts with `e`, and from the second time on uses `f` (without `:then`, `e` every time) |
+| `:for v := e [:then f]` | Starts with `e`, and from the second time on uses `f` (without `:then`, `e` every time) |
 | `:repeat n` | Iterates that many times |
 
 With several `:for`s, they advance **in parallel**, and the loop ends as soon as any one is exhausted.
@@ -1855,7 +1859,7 @@ The type of `f` is `(fn (string-input-stream char) Option<Sexpr>)`. The first ar
 the text not yet read**, and the second is **the character that triggered it** (the second character for a
 dispatch). The return value becomes the data read at that point. The stream is a concrete type rather than
 `:dyn PeekInput` because the reader always passes this one kind: `read-sexpr` / `read-char` / `peek-char` /
-`unread-char` / `read-delimited-list` all take `(where (PeekInput S))`, so all of them work on the concrete
+`unread-char` / `read-delimited-list` all take `(:where (PeekInput S))`, so all of them work on the concrete
 type as it is.
 
 ```lisp
@@ -1967,17 +1971,17 @@ and the rest can be used as they are.
 (select
   ((v (recv ch1)) body...)          ; a receive arm. v is bound to an Option<T>
   ((send ch2 x) body...)            ; a send arm
-  (else body...))                   ; optional. **if written, it goes last**
+  (:else body...))                   ; optional. **if written, it goes last**
 ```
 
-- **With `else`, it does not block** (Go's `default`). Without it, it waits until one becomes possible.
+- **With `:else`, it does not block** (Go's `default`). Without it, it waits until one becomes possible.
 - **If several are possible at once, one is chosen at random** (in written order, later arms would
   starve).
 - The `v` of a receive arm is an **`Option<T>`**. A closed channel is "an answer", not a reason to skip the
   arm, so `match` on it inside the arm.
 - The type is **the join of the types of all the arms' bodies** (the same rule as `match` arms).
 - `(select)` with zero arms is a type error (Go's `select{}`, blocking forever, is not adopted). A `select`
-  with only `else` is too, since it is the same as writing the body directly.
+  with only `:else` is too, since it is the same as writing the body directly.
 
 **The channel expressions and the values to send are evaluated once each, from left to right, whichever
 arm is chosen** (the same discipline `case` has for its keys).

@@ -46,26 +46,26 @@ Leaving out even one of the methods the trait declares is a type error at the `i
 
 ## 2. Trait bounds: "any type that implements this trait"
 
-You can put a condition on a generic function's type parameter with `where`. This is called a
+You can put a condition on a generic function's type parameter with `:where`. This is called a
 **trait bound**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Because of `(where (Shape T))`, the body can use `name` and `area` on values of `T`. Without the
+Because of `(:where (Shape T))`, the body can use `name` and `area` on values of `T`. Without the
 bound nothing is known about `T`, so they could not be called.
 
 Passing a type that does not implement `Shape` is a type error at the call.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 A generic function gets its own copy for each type it is called with. No run-time type tests or
@@ -99,7 +99,7 @@ available for your type.
 
 | Trait | Methods to implement | What it enables |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, the `(= expr)` pattern of `match`, and so on |
+| `Eq` | `equals` | `member`, `find`, `position`, the `(:= expr)` pattern of `match`, and so on |
 | `Ord` | `less` | `less-equal`, `greater` and so on. `Ord` inherits from `Eq` |
 | `print-object` | `print-object` | How values are shown by `println` and friends |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` and so on |
@@ -135,7 +135,7 @@ Combined with a trait bound, you can write a function that works for any type im
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -180,7 +180,7 @@ total 9
 
 Choosing between the trait bounds of section 2 and `:dyn`:
 
-| | Trait bound (`where`) | `:dyn Trait` |
+| | Trait bound (`:where`) | `:dyn Trait` |
 |---|---|---|
 | When the called method is decided | Before running | At run time |
 | Mixing types in one `Vector` | Not possible | Possible |

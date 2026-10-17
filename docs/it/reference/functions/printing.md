@@ -22,7 +22,7 @@ controllo**, e ogni direttiva consuma a turno gli argomenti variadici che seguon
 
 Il tipo di `dest` divide il significato in due (quale si applichi viene deciso staticamente). La forma
 con stream si può scrivere allo stesso modo con un tipo di stream concreto, un `:dyn CharOutput` o una
-variabile di tipo vincolata da `(where (CharOutput S))`. Un `dest` che non è né un `bool` né uno stream
+variabile di tipo vincolata da `(:where (CharOutput S))`. Un `dest` che non è né un `bool` né uno stream
 è un errore di tipo.
 
 **La stringa di controllo deve essere un letterale** (la stessa restrizione di `format!` di Rust). Le
@@ -253,7 +253,7 @@ Regole:
 
 - **La registrazione è statica.** Un `impl` viene controllato nei tipi come una normale definizione di
   metodo, quindi un nome di tipo scritto male o una firma sbagliata è un errore di compilazione.
-- **Funziona anche per i tipi generici.** `(impl print-object box<T> (where (print-object T)) ...)` va a
+- **Funziona anche per i tipi generici.** `(impl print-object box<T> (:where (print-object T)) ...)` va a
   un corpo separato per ogni argomento di tipo: un valore ricorda il proprio tipo compresi gli argomenti
   di tipo (`box<i32>`). I tipi generici predefiniti come `Vector<T>` funzionano allo stesso modo.
 - **La scelta viene fatta al momento della stampa.** Quale direttiva consuma quale argomento dipende dal
@@ -269,7 +269,7 @@ Regole:
   modo in cui il codice generico può dire "valori di un tipo sconosciuto possono essere resi" (la stessa
   forma di `T: Display` di Rust). Il `print-object` di `Array<T>` ne è un esempio.
 - **Con argomenti di tipo che non soddisfano il vincolo, viene usata in silenzio la rappresentazione
-  predefinita.** `(impl print-object Array<T> (where (print-object T)))` si applica a `Array<i32>`, ma
+  predefinita.** `(impl print-object Array<T> (:where (print-object T)))` si applica a `Array<i32>`, ma
   non a un `Array` i cui elementi sono una `defstruct` senza `print-object`. Non avrebbe senso che la
   semplice creazione di un array fosse un errore, quindi non lo è.
 - L'altro meccanismo di CL, `set-pprint-dispatch` / `*print-pprint-dispatch*` (un registro a runtime

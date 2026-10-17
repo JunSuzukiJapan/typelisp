@@ -12,8 +12,8 @@ này có đọc được không?".
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; đầu vào ký tự
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; đầu ra ký tự
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; đầu vào có thể đẩy lại một ký tự
@@ -22,7 +22,7 @@ này có đọc được không?".
 ```
 
 Một hàm đọc ký tự chấp nhận mọi kiểu stream, dựng sẵn hay do người dùng định nghĩa, nếu nó nhận
-`(where (CharInput S))` hoặc `:dyn CharInput`.
+`(:where (CharInput S))` hoặc `:dyn CharInput`.
 
 ## 2. Phương thức
 
@@ -170,7 +170,7 @@ stream tổ hợp.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; mọi phương thức còn lại là mặc định
 
@@ -237,7 +237,7 @@ tích nào xảy ra.
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Điền các thành phần còn thiếu của `p` từ `default`. Một `p` tương đối được đặt dưới thư mục của `default`; một `p` tuyệt đối giữ thư mục của chính nó |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | Dạng tương đối so với `default`. Toàn bộ `p` nếu nó không nằm dưới gốc cơ sở |
 
-Các đối số kiểu đều mang `(where (Pathish P))`.
+Các đối số kiểu đều mang `(:where (Pathish P))`.
 
 ## 10. Khác biệt so với CL
 

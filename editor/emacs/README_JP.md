@@ -11,7 +11,7 @@ VS Code 版は [../vscode/](../vscode/README_JP.md)。両者は同じキーワ�
     `print`/`println`/`format`、`pprint` 系 など）
   - 定義名の強調（`(defun NAME ...)` の `NAME` を関数名、`(defstruct NAME ...)` を型名、
     `(defvar (NAME ...))` を変数名として。`(pub defun NAME ...)` の `pub` 付きも同様）
-  - 名前空間・宣言キーワード（`pub` `module` `use` `load` `impl` `where`）と
+  - 名前空間・宣言キーワード（`pub` `module` `use` `load` `impl`）と
     ラムダリスト標識（`&rest` `&optional` `&key`）
   - 組み込み関数（`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` など）
   - プリミティブ型（`bignum` / `ratio` を含む）・組み込み型・組み込みエラー型

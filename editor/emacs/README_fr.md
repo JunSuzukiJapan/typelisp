@@ -14,7 +14,7 @@ mêmes tables de mots-clés et les mêmes règles d'indentation, et
   - Noms définis (le `NAME` de `(defun NAME ...)` comme nom de fonction, celui de
     `(defstruct NAME ...)` comme nom de type et celui de `(defvar (NAME ...))` comme nom de
     variable ; de même avec `pub`, comme dans `(pub defun NAME ...)`)
-  - Mots-clés d'espaces de noms et de déclarations (`pub` `module` `use` `load` `impl` `where`) et
+  - Mots-clés d'espaces de noms et de déclarations (`pub` `module` `use` `load` `impl`) et
     marqueurs de liste lambda (`&rest` `&optional` `&key`)
   - Fonctions intégrées (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car`, etc.)
   - Types primitifs (y compris `bignum` / `ratio`), types intégrés, types d'erreur intégrés

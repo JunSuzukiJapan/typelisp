@@ -42,24 +42,24 @@ Trait द्वारा घोषित मेथडों में से ए
 
 ## 2. Trait बाउंड: "कोई भी टाइप जो इस trait को लागू करता हो"
 
-आप `where` से जेनेरिक फ़ंक्शन के टाइप पैरामीटर पर शर्त लगा सकते हैं। इसे **trait बाउंड** कहते हैं।
+आप `:where` से जेनेरिक फ़ंक्शन के टाइप पैरामीटर पर शर्त लगा सकते हैं। इसे **trait बाउंड** कहते हैं।
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-`(where (Shape T))` के कारण बॉडी `T` के मानों पर `name` और `area` का उपयोग कर सकती है। बाउंड के बिना `T` के बारे में कुछ ज्ञात नहीं होता, इसलिए उन्हें कॉल नहीं किया जा सकता।
+`(:where (Shape T))` के कारण बॉडी `T` के मानों पर `name` और `area` का उपयोग कर सकती है। बाउंड के बिना `T` के बारे में कुछ ज्ञात नहीं होता, इसलिए उन्हें कॉल नहीं किया जा सकता।
 
 ऐसा टाइप पास करना जो `Shape` को लागू नहीं करता, कॉल पर टाइप त्रुटि है।
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 जेनेरिक फ़ंक्शन को हर उस टाइप के लिए अपनी अलग प्रति मिलती है जिसके साथ उसे कॉल किया जाता है। इसमें कोई रन-टाइम टाइप जाँच या शाखा शामिल नहीं होती।
@@ -91,7 +91,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | Trait | लागू करने वाले मेथड | यह क्या सक्षम करता है |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, `match` का `(= expr)` पैटर्न, आदि |
+| `Eq` | `equals` | `member`, `find`, `position`, `match` का `(:= expr)` पैटर्न, आदि |
 | `Ord` | `less` | `less-equal`, `greater` आदि। `Ord`, `Eq` से विरासत लेता है |
 | `print-object` | `print-object` | `println` और उसके साथियों द्वारा मान कैसे दिखाए जाते हैं |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` आदि |
@@ -125,7 +125,7 @@ trait बाउंड के साथ मिलाकर आप ऐसा फ�
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -167,7 +167,7 @@ total 9
 
 खंड 2 के trait बाउंड और `:dyn` में से चुनना:
 
-| | Trait बाउंड (`where`) | `:dyn Trait` |
+| | Trait बाउंड (`:where`) | `:dyn Trait` |
 |---|---|---|
 | कॉल किया जाने वाला मेथड कब तय होता है | चलने से पहले | रन टाइम पर |
 | एक `Vector` में टाइप मिलाना | संभव नहीं | संभव |

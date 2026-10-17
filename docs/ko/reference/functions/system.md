@@ -201,7 +201,7 @@ CLHS의 `eval`을 따른다. **현재의 전역 환경**(실행 시에 더한 �
 
 | 형식 | 문서 문자열의 위치 |
 |---|---|
-| `defun` / `impl`의 메서드 / `defmacro` | 본체의 맨 앞(반환 타입과 `where` 절 뒤). 뒤에 본체 형식이 하나 이상 있을 때만. 홀로 있는 문자열은 반환값으로 남는다 |
+| `defun` / `impl`의 메서드 / `defmacro` | 본체의 맨 앞(반환 타입과 `:where` 절 뒤). 뒤에 본체 형식이 하나 이상 있을 때만. 홀로 있는 문자열은 반환값으로 남는다 |
 | `defvar` / `defconstant` | 초깃값 **뒤**: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | 이름 **바로 뒤**, 필드/변형 앞 |
 | `deftype` | 이름 **바로 뒤**, 타입 앞: `(deftype meters "doc" i32)` |

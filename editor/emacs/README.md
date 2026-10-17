@@ -14,7 +14,7 @@ mechanically (see the end of this document).
   - Defined names (the `NAME` of `(defun NAME ...)` as a function name, of `(defstruct NAME ...)`
     as a type name, and of `(defvar (NAME ...))` as a variable name; the same with `pub`, as in
     `(pub defun NAME ...)`)
-  - Namespace and declaration keywords (`pub` `module` `use` `load` `impl` `where`) and lambda
+  - Namespace and declaration keywords (`pub` `module` `use` `load` `impl`) and lambda
     list markers (`&rest` `&optional` `&key`)
   - Built-in functions (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` and so on)
   - Primitive types (including `bignum` / `ratio`), built-in types, built-in error types

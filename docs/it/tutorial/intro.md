@@ -170,7 +170,7 @@ Quando nel caso falso non deve succedere nulla, usa `when` (e `unless` per l'opp
 
 ### cond
 
-Con tre o più condizioni, `cond` si legge meglio. L'`else` finale viene preso quando nessuna delle
+Con tre o più condizioni, `cond` si legge meglio. L'`:else` finale viene preso quando nessuna delle
 condizioni è vera.
 
 ```lisp
@@ -178,7 +178,7 @@ condizioni è vera.
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

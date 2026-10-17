@@ -104,12 +104,12 @@ x))
 (defun s () ()
 (cond
 ((< 1 2) ())
-(else ())))
+(:else ())))
 --- expected
 (defun s () ()
   (cond
     ((< 1 2) ())
-    (else ())))
+    (:else ())))
 
 === do stepping
 --- input

@@ -45,7 +45,7 @@ fn eval_ok(src: &str) -> Value {
 
 /// [`run`], but with the prelude loaded first — for the tests whose place
 /// needs something the prelude defines. A `HashTable<K,V>`'s key methods
-/// carry `(where (Hash K))` since Phase 6a, and every `Hash` implementation
+/// carry `(:where (Hash K))` since Phase 6a, and every `Hash` implementation
 /// (including `string`'s) is a prelude `impl`, so a bare `Checker` cannot
 /// type-check `(get h "a")` at all.
 fn eval_ok_with_prelude(src: &str) -> Value {
@@ -67,7 +67,7 @@ fn eval_ok_with_prelude(src: &str) -> Value {
 
 /// [`check`], but with the prelude loaded first -- same reason as
 /// [`eval_ok_with_prelude`]: without the prelude's `Hash` impls the
-/// `(where (Hash K))` on `get`/`set` cannot be discharged, so the check
+/// `(:where (Hash K))` on `get`/`set` cannot be discharged, so the check
 /// fails for lack of a *method*, which would let a test that means to
 /// assert a genuine type error pass for the wrong reason.
 fn check_with_prelude(src: &str) -> Result<Option<Type>, Error> {

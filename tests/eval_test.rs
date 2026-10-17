@@ -175,12 +175,12 @@ fn or_short_circuits_to_bool() {
 
 #[test]
 fn cond_selects_first_true_clause() {
-    assert_eq!(eval_ok_with_prelude("(cond ((< 1 2) 10) (else 20))"), Value::Int(10));
+    assert_eq!(eval_ok_with_prelude("(cond ((< 1 2) 10) (:else 20))"), Value::Int(10));
     assert_eq!(
-        eval_ok_with_prelude("(cond ((< 3 2) 10) ((< 1 2) 20) (else 30))"),
+        eval_ok_with_prelude("(cond ((< 3 2) 10) ((< 1 2) 20) (:else 30))"),
         Value::Int(20)
     );
-    assert_eq!(eval_ok_with_prelude("(cond ((< 3 2) 10) (else 30))"), Value::Int(30));
+    assert_eq!(eval_ok_with_prelude("(cond ((< 3 2) 10) (:else 30))"), Value::Int(30));
 }
 
 #[test]
@@ -412,7 +412,7 @@ fn sexpr_eq(h: &Heap, a: Value, b: Value) -> bool {
         },
         (Value::Char(x), Value::Char(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
-        (Value::Symbol(x), Value::Symbol(y)) => h.symbol_name(x) == h.symbol_name(y),
+        (Value::Symbol(x), Value::Symbol(y)) => h.symbol_spelling(x) == h.symbol_spelling(y),
         (Value::Str(x), Value::Str(y)) => *h.string(x) == *h.string(y),
         (Value::Cons(_), Value::Cons(_)) => {
             sexpr_eq(h, h.car(a).unwrap(), h.car(b).unwrap())
@@ -606,7 +606,7 @@ fn module_global_via_path() {
 #[test]
 fn cond_with_classify() {
     let src = "(defun classify ((n int)) int \
-                 (cond ((< n 0) (- 0 1)) ((= n 0) 0) (else 1))) \
+                 (cond ((< n 0) (- 0 1)) ((= n 0) 0) (:else 1))) \
                (classify 7)";
     assert_eq!(eval_ok_with_prelude(src), Value::Int(1));
 }

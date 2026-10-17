@@ -85,10 +85,10 @@ lỗi kiểu.
 ### Làm cho các hàm đọc và ghi trở nên generic
 
 Mỗi loại stream là một kiểu riêng, nhưng các thao tác chung được gom vào các trait. Một hàm nhận đối số
-bằng `(where (CharInput S))` có thể đọc từ một tệp, một chuỗi hoặc một socket.
+bằng `(:where (CharInput S))` có thể đọc từ một tệp, một chuỗi hoặc một socket.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

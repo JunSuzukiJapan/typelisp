@@ -80,9 +80,10 @@
 
 | ชื่อ | รูปแบบ | ชนิด | คำอธิบาย |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | ดึงชื่อของสัญลักษณ์ออกมา |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | สร้างสัญลักษณ์จากสตริง (intern) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | เป็นคีย์เวิร์ด (`:name`) หรือไม่ เครื่องหมายทวิภาคเป็นส่วนของชื่อ ดังนั้นการทดสอบดูที่อักขระตัวแรก ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#1-องค์ประกอบทางศัพท์)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | ดึงชื่อของสัญลักษณ์ออกมา ชื่อของคีย์เวิร์ดไม่มีทวิภาค (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | สร้างสัญลักษณ์จากสตริง (intern ในมอดูลราก) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | สร้างสัญลักษณ์ `name` ในเนมสเปซ `namespace` (`intern` ของ CL) `namespace` คือพาธของมอดูลจากราก (`"geometry::shapes"`) `"keyword"` คือของคีย์เวิร์ด และ `""` คือราก ถ้าละไว้คือมอดูลที่เขียนการเรียกนั้น |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | เป็นคีย์เวิร์ดหรือไม่ คืออยู่ในเนมสเปซของคีย์เวิร์ดหรือไม่ ([เอกสารอ้างอิงไวยากรณ์](../syntax.md#1-องค์ประกอบทางศัพท์)) |
 
 สำหรับ `gensym` ดู[แมโคร](system.md#8-แมโคร)
 

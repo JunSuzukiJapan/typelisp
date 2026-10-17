@@ -12,8 +12,8 @@ tijdens runtime te vragen "kan deze stream worden gelezen?".
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; character input
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; character output
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; input that can push back one character
@@ -22,7 +22,7 @@ tijdens runtime te vragen "kan deze stream worden gelezen?".
 ```
 
 Een functie die tekens leest accepteert elk streamtype, ingebouwd of door de gebruiker gedefinieerd,
-als ze `(where (CharInput S))` of `:dyn CharInput` neemt.
+als ze `(:where (CharInput S))` of `:dyn CharInput` neemt.
 
 ## 2. Methoden
 
@@ -175,7 +175,7 @@ samengestelde streams.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
@@ -244,7 +244,7 @@ doorgeeft, vindt er geen parsing plaats.
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Vult de componenten die in `p` ontbreken uit `default`. Een relatieve `p` komt onder de map van `default`; een absolute `p` behoudt zijn eigen map |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | De vorm relatief aan `default`. Heel `p` als het niet onder de basis ligt |
 
-De typeargumenten dragen allemaal `(where (Pathish P))`.
+De typeargumenten dragen allemaal `(:where (Pathish P))`.
 
 ## 10. Verschillen met CL
 

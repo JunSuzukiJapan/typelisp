@@ -22,7 +22,7 @@ cada directiva consume por turno los argumentos variádicos que siguen.
 
 El tipo de `dest` divide el significado en dos (cuál se aplica se decide estáticamente). La forma con
 stream se puede escribir igual con un tipo de stream concreto, un `:dyn CharOutput` o una variable de tipo
-ligada por `(where (CharOutput S))`. Un `dest` que no es ni `bool` ni stream es un error de tipos.
+ligada por `(:where (CharOutput S))`. Un `dest` que no es ni `bool` ni stream es un error de tipos.
 
 **La cadena de control debe ser un literal** (la misma restricción que el `format!` de Rust). Las directivas
 que contiene deciden cuántos argumentos se toman y de qué tipos, así que una cadena construida en tiempo de
@@ -249,7 +249,7 @@ Reglas:
 
 - **El registro es estático.** Un `impl` se comprueba como una definición de método normal, así que un
   nombre de tipo mal escrito o una firma incorrecta es un error de compilación.
-- **También funciona para tipos genéricos.** `(impl print-object box<T> (where (print-object T)) ...)` va a
+- **También funciona para tipos genéricos.** `(impl print-object box<T> (:where (print-object T)) ...)` va a
   un cuerpo distinto para cada argumento de tipo: un valor recuerda su tipo incluidos sus argumentos de tipo
   (`box<i32>`). Los tipos genéricos incorporados como `Vector<T>` funcionan igual.
 - **La elección se hace al imprimir.** Qué directiva consume qué argumento depende del contenido en tiempo
@@ -265,7 +265,7 @@ Reglas:
   forma en que el código genérico puede decir "los valores de un tipo desconocido se pueden representar" (la
   misma forma que el `T: Display` de Rust). El `print-object` de `Array<T>` es un ejemplo.
 - **Con argumentos de tipo que no cumplen la restricción, se usa en silencio la representación
-  incorporada.** `(impl print-object Array<T> (where (print-object T)))` se aplica a `Array<i32>`, pero no a
+  incorporada.** `(impl print-object Array<T> (:where (print-object T)))` se aplica a `Array<i32>`, pero no a
   un `Array` cuyos elementos son un `defstruct` sin `print-object`. No tendría sentido que el mero hecho de
   crear un arreglo fuera un error, así que no es un error.
 - El otro mecanismo de CL, `set-pprint-dispatch` / `*print-pprint-dispatch*` (un registro en tiempo de

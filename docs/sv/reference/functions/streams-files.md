@@ -12,8 +12,8 @@ läsas?".
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; teckeninmatning
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; teckenutmatning
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; inmatning som kan skjuta tillbaka ett tecken
@@ -22,7 +22,7 @@ läsas?".
 ```
 
 En funktion som läser tecken accepterar vilken strömtyp som helst, inbyggd eller användardefinierad, om
-den tar `(where (CharInput S))` eller `:dyn CharInput`.
+den tar `(:where (CharInput S))` eller `:dyn CharInput`.
 
 ## 2. Metoder
 
@@ -174,7 +174,7 @@ sammansatta strömmar.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; varje återstående metod är standardimplementationen
 
@@ -241,7 +241,7 @@ tolkning.
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Fyller de komponenter som saknas i `p` från `default`. Ett relativt `p` hamnar under katalogen i `default`; ett absolut `p` behåller sin egen katalog |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | Formen relativt `default`. Hela `p` om det inte ligger under basen |
 
-Typargumenten har alla `(where (Pathish P))`.
+Typargumenten har alla `(:where (Pathish P))`.
 
 ## 10. Skillnader mot CL
 

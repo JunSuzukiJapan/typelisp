@@ -145,13 +145,13 @@ levererar ett värde när den angivna tiden har gått. I kombination med `select
 - `((v (recv ch)) body...)` är en mottagningsgren. `v` får ett `Option<T>`.
 - `((send ch x) body...)` är en sändningsgren.
 - När flera grenar kan gå vidare samtidigt väljs en av dem slumpmässigt.
-- Med `(else body...)` sist körs `else` när ingen gren kan gå vidare direkt, och `select` väntar inte.
+- Med `(:else body...)` sist körs `:else` när ingen gren kan gå vidare direkt, och `select` väntar inte.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

@@ -12,8 +12,8 @@ w czasie działania „czy ten strumień można czytać?".
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; wejście znakowe
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; wyjście znakowe
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; wejście, które potrafi odłożyć jeden znak z powrotem
@@ -22,7 +22,7 @@ w czasie działania „czy ten strumień można czytać?".
 ```
 
 Funkcja czytająca znaki akceptuje dowolny typ strumienia, wbudowany lub zdefiniowany przez użytkownika, jeśli przyjmuje
-`(where (CharInput S))` lub `:dyn CharInput`.
+`(:where (CharInput S))` lub `:dyn CharInput`.
 
 ## 2. Metody
 
@@ -173,7 +173,7 @@ strumieni złożonych.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; każda pozostała metoda jest domyślna
 
@@ -239,7 +239,7 @@ Implementują go zarówno `string`, jak i `pathname`, a **każda operacja na pli
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Uzupełnia składniki brakujące w `p` z `default`. Względne `p` trafia pod katalog `default`; bezwzględne `p` zachowuje własny katalog |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | Postać względna wobec `default`. Całe `p`, jeśli nie jest pod bazą |
 
-Argumenty typu mają wszędzie `(where (Pathish P))`.
+Argumenty typu mają wszędzie `(:where (Pathish P))`.
 
 ## 10. Różnice względem CL
 

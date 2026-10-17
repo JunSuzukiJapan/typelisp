@@ -14,7 +14,7 @@ quy tắc thụt lề giống nhau, và `cargo test --test editor_keyword_sync_t
   - Các tên được định nghĩa (`(defun NAME ...)` là hàm, `(defstruct NAME ...)` là kiểu,
     `(defvar (NAME ...))` là biến; tương tự với `pub`, như trong `(pub defun NAME ...)`) và cả hai tên của
     `(impl Trait Type)`
-  - Các từ khóa không gian tên và khai báo (`pub` `module` `use` `load` `impl` `where`) và các dấu hiệu của
+  - Các từ khóa không gian tên và khai báo (`pub` `module` `use` `load` `impl`) và các dấu hiệu của
     danh sách lambda (`&rest` `&optional` `&key`)
   - Hàm dựng sẵn, kiểu nguyên thủy (gồm `bignum` / `ratio`), kiểu lỗi dựng sẵn, các kiểu người dùng viết
     hoa chữ đầu (`Capitalized`), và kiểu trait object `:dyn Trait` (cũng bên trong các đối số generic)

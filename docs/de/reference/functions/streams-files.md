@@ -12,8 +12,8 @@ nicht fragen „lässt sich aus diesem Stream lesen?“.
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; Zeicheneingabe
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; Zeichenausgabe
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; Eingabe, die ein Zeichen zurückstellen kann
@@ -22,7 +22,7 @@ nicht fragen „lässt sich aus diesem Stream lesen?“.
 ```
 
 Eine Funktion, die Zeichen liest, akzeptiert jeden Stream-Typ, eingebaut oder benutzerdefiniert, wenn sie
-`(where (CharInput S))` oder `:dyn CharInput` nimmt.
+`(:where (CharInput S))` oder `:dyn CharInput` nimmt.
 
 ## 2. Methoden
 
@@ -174,7 +174,7 @@ zusammengesetzte Streams gesteckt werden.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; alle übrigen Methoden sind die Standardimplementierungen
 
@@ -241,7 +241,7 @@ Zeichenkette übergibt, findet also kein Parsen statt.
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Ergänzt die in `p` fehlenden Komponenten aus `default`. Ein relatives `p` kommt unter das Verzeichnis von `default`; ein absolutes `p` behält sein eigenes Verzeichnis |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | Die Form relativ zu `default`. Ganz `p`, wenn es nicht unter der Basis liegt |
 
-Die Typargumente tragen alle `(where (Pathish P))`.
+Die Typargumente tragen alle `(:where (Pathish P))`.
 
 ## 10. Unterschiede zu CL
 

@@ -280,7 +280,8 @@ fn key_parameters_read_a_plist() {
     // `&rest` and `&key` see the same tail, as they do in CL.
     assert_eq!(
         show("(destructuring-bind (a &rest r &key (k 3)) (quote (1 :k 9)) (format false \"~a|~a|~a\" a r k))"),
-        "1|(:k 9)|9"
+        // `~a` is CL's `princ`, which writes a keyword without its colon.
+        "1|(k 9)|9"
     );
 }
 

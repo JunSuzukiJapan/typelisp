@@ -51,14 +51,19 @@ untuk membaca pesan kesalahan, [errors.md](errors.md).
   awal sebuah datum adalah galat pembacaan. `[` dan `{` boleh muncul di dalam simbol: seperti di CL,
   keduanya dibiarkan bebas agar pemrogram dapat memakainya dalam [makro
   pembaca](#11-reader-macro-readtable).
-- **Keyword**: simbol yang diawali titik dua, seperti `:name` (seperti di CL). Keyword mengevaluasi
-  dirinya sendiri: tidak mencari pengikatan dan nilainya adalah dirinya sendiri, dengan tipe statis
-  `symbol`. Keyword bernama sama selalu objek yang sama (`(eq :foo :FOO)` benar; seperti simbol lain
-  ia menjadi huruf kecil). Titik dua itu sendiri adalah bagian dari nama, sehingga
-  `(symbol->string :foo)` adalah `":foo"` (typelisp tidak memiliki sistem paket, sehingga ini
-  berbeda dari `symbol-name` pada CL). `:` sendirian atau yang memiliki titik dua tambahan seperti
-  `:a:b` adalah kesalahan pembacaan. Ujilah dengan `keywordp`. Yang diawali `::` bukan keyword
-  melainkan path absolut (di bawah). Perhatikan bahwa `:dyn` adalah keyword tercadang khusus untuk
+  Apa yang ada di antara `|` dan `|` dibaca sebagaimana ditulis, termasuk pemisah dan titik dua (escape ganda
+  CL): `|:foo|` adalah simbol biasa yang namanya `:foo`, bukan keyword.
+- **Keyword**: simbol yang diawali titik dua, seperti `:name` (seperti di CL). Di modul mana pun ditulis,
+  keyword adalah satu-satunya simbol bernama itu di namespace keyword `keyword` (paket `KEYWORD` pada CL).
+  Keyword mengevaluasi dirinya sendiri: tidak mencari pengikatan dan nilainya adalah dirinya sendiri, dengan
+  tipe statis `symbol`. Keyword bernama sama selalu objek yang sama (`(eq :foo :FOO)` benar; seperti simbol lain
+  ia menjadi huruf kecil). Titik dua bukan bagian dari nama: `(symbol->string :foo)` adalah `"foo"`. `~s`
+  mencetak `:foo` dan `~a` mencetak `foo`. Keyword adalah konstanta yang nilainya dirinya sendiri, sehingga
+  tidak dapat diikat maupun diberi nilai sebagai variabel, dan tidak dapat menjadi nama definisi (kesalahan
+  tipe). Untuk membuatnya dari string, tulis `(intern "foo" "keyword")`. Ujilah dengan `keywordp` (apakah
+  termasuk namespace keyword). `:` sendirian atau yang memiliki titik dua tambahan seperti `:a:b` adalah
+  kesalahan pembacaan. Yang diawali `::` bukan keyword melainkan path absolut (di bawah).
+  Perhatikan bahwa `:dyn` adalah keyword tercadang khusus untuk
   posisi tipe; menulisnya di tempat lain adalah kesalahan (lihat [bab 2](#2-menulis-tipe)).
 - **Daftar**: `(a b c)`. Pasangan bertitik `(a . b)` juga dapat dibaca.
 - **Vektor**: `#(1 2 3)` (seperti di CL). Isinya hanya literal dan tidak dievaluasi: `a` dalam
@@ -244,10 +249,10 @@ Pada kode sumber, tipe ditulis sebagai simbol atau daftar biasa.
 - **Rujukan maju dideklarasikan dengan `defsignature`** (di bawah). Nama yang belum dideklarasikan
   tidak dapat dipanggil sebelum definisinya, karena tingkat atas diperiksa dan dijalankan satu bentuk
   sekali waktu, sesuai urutan sumber.
-- Untuk mensyaratkan batas trait, tulis klausa `where` tepat sebelum badan:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- Untuk mensyaratkan batas trait, tulis klausa `:where` tepat sebelum badan:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   (menetapkan tipe terkait dengan `(AssocName ConcreteType)` bersifat opsional).
-- **Docstring**: literal string di awal badan, tepat setelah klausa `where` (jika ada), menjadi
+- **Docstring**: literal string di awal badan, tepat setelah klausa `:where` (jika ada), menjadi
   docstring (seperti di CL). Hanya ketika setidaknya satu bentuk badan menyusulnya, tetapi: string
   tunggal tetap menjadi nilai kembalian dan tidak dianggap docstring:
   `(defun f () string "doc" "value")` memiliki docstring dan mengembalikan `"value"`, sedangkan
@@ -647,7 +652,7 @@ tidak dapat (`setf` adalah kesalahan).
   (pub name ...))                                      ; publik juga di luar modul tipe
 
 ; tipe generik
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 Memberi metode pada tipe yang didefinisikan dengan `defstruct` (3.6) atau `defenum` (3.7). Ini setara
@@ -670,7 +675,7 @@ dengan impl inheren di Rust (`impl Point { ... }`).
 - Hanya tipe milik program sendiri yang dapat memilikinya. Tipe pustaka standar seperti `Vector`, `Option`
   atau `int` tidak bisa (galatnya berbunyi `... is a standard library type`). Untuk menambah operasi pada
   tipe standar, definisikan sebuah trait lalu tulis `impl`-nya untuk tipe itu.
-- Dalam `(impl X ...)`, jika yang mengikuti `X` adalah item (sebuah list), `where`, atau tidak ada apa-apa,
+- Dalam `(impl X ...)`, jika yang mengikuti `X` adalah item (sebuah list), `:where`, atau tidak ada apa-apa,
   itulah impl inheren ini; jika berupa nama, itu adalah `impl` sebuah trait (`(impl Trait Type ...)`, 3.9).
 
 ```lisp
@@ -769,7 +774,7 @@ metode bernama sama.
 - **Variabel tipe hanyalah yang ditulis di posisi deklarasi.** Untuk `defun`/`defstruct`/`defenum`/`deftype`,
   `<T>` pada nama; untuk `impl` inheren, tipe sasaran (`(impl box<T> ...)`) dan `<U>` pada nama tiap
   metode; untuk `impl` sebuah trait, tipe sasaran dan `impl<T>`; untuk `deftrait`, `Self` dan tipe terkait
-  dari `(type Item)`. Nama yang muncul pertama kali di tempat lain (argumen, nilai kembali, `the`/`lambda`
+  dari `(:type Item)`. Nama yang muncul pertama kali di tempat lain (argumen, nilai kembali, `the`/`lambda`
   di badan) tidak menjadi variabel tipe; ia adalah `unknown type`.
 - **Docstring**: literal string tepat setelah nama, sebelum field, menjadi docstring
   (`(defstruct Name "doc" (field Type)...)`, posisi yang sama seperti `defstruct` pada CL). Sebuah
@@ -914,19 +919,19 @@ untuk tipe, bukan sebuah tipe**.
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
-  (type AssocName)                       ; associated types (any number, optional)
+  (:type AssocName)                       ; associated types (any number, optional)
   (method-name ((self Self) params...) RetType)          ; no body = must be implemented
   (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; bounds applying to the whole impl (optional)
-  (type AssocName ConcreteType)          ; makes an associated type concrete
+  (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
+  (:type AssocName ConcreteType)          ; makes an associated type concrete
   (method-name (recv params...) RetType body...))
 ```
 
 Melalui `impl`, setiap metode didaftarkan sebagai metode `TargetType` dan dipanggil seperti metode `impl`
 inheren (3.5). Metode di `impl` sebuah trait selalu publik, tanpa `pub`. Trait dirujuk sebagai batas trait
-dalam klausa `where` fungsi generik (lihat [3.1 defun](#31-defun--definisi-fungsi)). Nama trait juga dapat berupa jalur `::` seperti
+dalam klausa `:where` fungsi generik (lihat [3.1 defun](#31-defun--definisi-fungsi)). Nama trait juga dapat berupa jalur `::` seperti
 `m::Trait`.
 
 **Daftar supertrait (wajib)**: selalu ditulis tepat setelah nama trait. Setiap elemen adalah nama
@@ -942,7 +947,7 @@ terkaitnya ditetapkan**.
 
 Pewarisan memiliki tiga efek. (1) `impl Ord X` mensyaratkan `impl Eq X` ditulis **lebih dulu**
 (aturan tentang urutan penulisan: satu-satunya bentuk yang dapat ditentukan secara deterministik di
-REPL dan dengan `load` langkah demi langkah, dan lebih ketat daripada Rust). (2) `(where (Ord T))`
+REPL dan dengan `load` langkah demi langkah, dan lebih ketat daripada Rust). (2) `(:where (Ord T))`
 saja memungkinkan Anda memanggil metode `Eq` juga. (3) Metode `Eq` dapat dipanggil melalui `:dyn Ord`,
 dan nilai `:dyn Ord` dapat diserahkan apa adanya di tempat `:dyn Eq` diperlukan (upcasting). Subtrait
 yang mendeklarasikan ulang metode bernama sama dengan induknya, dan pewarisan metode bernama sama
@@ -951,7 +956,7 @@ digabung menjadi satu slot.
 
 **Implementasi bawaan**: badan setelah signature dipakai ketika `impl` menghilangkan metodenya. Badan
 diselesaikan di **ruang nama modul** tempat trait ditulis, sehingga ia dapat memanggil fungsi tidak
-publik dari modul itu. Metode dengan badan juga dapat memiliki klausa `where` dan docstring. Badan
+publik dari modul itu. Metode dengan badan juga dapat memiliki klausa `:where` dan docstring. Badan
 diperiksa tipenya **sekali, pada titik deklarasi**, dengan `Self` dibiarkan sebagai variabel tipe
 (dibatasi oleh `Self: trait itu sendiri`), seperti di Rust: kesalahan yang akan gagal untuk setiap
 `impl` dan setiap tipe pengimplementasi, bahkan pada bawaan yang tidak pernah dihilangkan `impl`
@@ -960,7 +965,7 @@ melewati batas ini, dan tipe terkait ditetapkan ke dirinya sendiri, sehingga sig
 mengembalikan `Item` dicocokkan dengan badan tanpa mengetahui tipe konkretnya.
 
 **Implementasi per instansiasi**: tipe generik bisa memiliki `impl` terpisah untuk tiap instansiasi
-(`(impl Show Box<int> ...)` dan `(impl Show Box<string> ...)`). `:dyn`, batasan `where`, tipe terkait, dan
+(`(impl Show Box<int> ...)` dan `(impl Show Box<string> ...)`). `:dyn`, batasan `:where`, tipe terkait, dan
 `print-object` berlaku per instansiasi, dan instansiasi tanpa `impl` (`Box<f64>`) tidak mengimplementasikan
 trait itu. Trait yang sama tidak bisa diimplementasikan untuk `Box<T>` sekaligus `Box<int>` (aturan yang sama
 dengan metode di 3.5). Supertrait cukup diimplementasikan pada instansiasi itu (oleh `impl` untuk `Box<int>`
@@ -973,7 +978,7 @@ sekaligus untuk setiap tipe yang memenuhi batas.
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; no body at all; everything is the default
+(impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
 **Tidak ada kode yang dihasilkan sampai tipe konkret benar-benar memakainya** (sekali per tipe,
@@ -983,11 +988,11 @@ tipe badan terpisah dari pembangkitan: ia dilakukan sekali pada titik deklarasi,
 dibiarkan sebagai variabel tipe** (seperti di Rust), sehingga bahkan implementasi yang tidak pernah
 dipakai pun kesalahannya tertangkap di sana jika akan gagal untuk setiap sasaran di bawah batas yang
 dideklarasikan. Pemanggilan yang dibenarkan oleh batas (`(less self other)` di bawah
-`(where (Ord T))` dan sebagainya) lolos, seperti pada badan `defun` generik.
+`(:where (Ord T))` dan sebagainya) lolos, seperti pada badan `defun` generik.
 
 **Docstring**: `deftrait` dapat memiliki satu docstring untuk seluruh trait, sebagai literal string
 tepat setelah daftar supertrait, sebelum butir-butir
-(`(deftrait Name () "doc" (type ...) (method ...)...)`). Signature tanpa badan tidak dapat memiliki
+(`(deftrait Name () "doc" (:type ...) (method ...)...)`). Signature tanpa badan tidak dapat memiliki
 docstring: string di akhir akan menjadi nilai kembalian implementasi bawaan itu sendiri, sehingga
 keduanya tidak dapat dibedakan.
 
@@ -1246,11 +1251,11 @@ Apa yang dicetak pengujian dengan `print` langsung masuk ke keluaran standar (ti
 (if cond then else)                 ; else is required (always three elements)
 (when cond body...)                 ; an if without else (Unit type). defmacro
 (unless cond body...)               ; the negation of when. defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; a list of keys: matches if any of them does
-  (else body...))                   ; expr is evaluated once. keys are compared with equal.
+  (:else body...))                   ; expr is evaluated once. keys are compared with equal.
                                      ; keys are "literals" and are not evaluated (as in CL).
                                      ; a bare symbol a means the symbol 'a.
                                      ; writing 'a is an error (use the bare a). defmacro
@@ -1354,7 +1359,7 @@ Jenis pola:
   rasio — dibandingkan berdasarkan nilai dengan `Eq::equals` tipe itu
   ([Trait Standar](functions/traits.md#2-eq--ord-perbandingan)). String dibandingkan berdasarkan isi,
   bukan identitas
-- `(= expr)` — mengevaluasi ekspresi apa pun dan membandingkan dengan `Eq::equals`. Satu-satunya cara
+- `(:= expr)` — mengevaluasi ekspresi apa pun dan membandingkan dengan `Eq::equals`. Satu-satunya cara
   membandingkan tipe yang tidak memiliki sintaks literal (instans `defstruct`, variabel global, hasil
   komputasi), dan implementasi `Eq` buatan pengguna menjadi aturan perbandingan apa adanya. `expr`
   dapat merujuk apa pun yang terlihat dari posisi cabang (argumen, pengikatan luar, variabel global)
@@ -1378,7 +1383,7 @@ Jenis pola:
   setiap alternatif harus mengikat variabel yang sama dengan tipe yang sama. Dapat juga ditulis di
   dalam pola konstruktor (`(some (:or (circle r) (rect r _)))`)
 
-Membandingkan tipe yang tidak mengimplementasikan `Eq` dengan literal nilai / `(= expr)` adalah
+Membandingkan tipe yang tidak mengimplementasikan `Eq` dengan literal nilai / `(:= expr)` adalah
 kesalahan tipe (bahasa ini memilih untuk mengatakan "ini tidak dapat dibandingkan" daripada
 membiarkan cabang yang diam-diam tidak pernah cocok).
 
@@ -1412,7 +1417,7 @@ Literal non-langsung (string / bilangan floating-point / bilangan bulat bignum /
 ditulis** terhadap `Sexpr`. `eq` pada literal itu membandingkan identitas objek, yang akan membuat
 "cabang yang lolos pemeriksaan tipe tetapi tidak pernah cocok", sehingga ia adalah kesalahan yang
 menyebut pola varian: tulis `(str "hi")` dan ia dibongkar menjadi `string` lalu dibandingkan
-berdasarkan isi. `(= expr)` secara eksplisit meminta `equals`, sehingga batasan ini tidak berlaku
+berdasarkan isi. `(:= expr)` secara eksplisit meminta `equals`, sehingga batasan ini tidak berlaku
 padanya.
 
 **Scrutinee tidak harus berupa ADT.** `string`/`symbol`/`i32`/`f64` dan sejenisnya dapat dicocokkan
@@ -1576,13 +1581,12 @@ sederhana CL sendiri).
 
 CL menulis kata klausa sebagai simbol polos (`(loop for i from 1 to 3 collect i)`), tetapi di sini
 **semuanya adalah keyword**: `for` polos hanyalah rujukan variabel, dan menjadi keyword juga yang
-membedakannya dari loop sederhana. Pengecualiannya adalah `=`, yang memisahkan variabel dari nilai:
-posisinya tidak ambigu, sehingga ia dibaca polos atau sebagai keyword (`:=`).
+membedakannya dari loop sederhana. Kata yang memisahkan variabel dari nilainya pun bukan pengecualian: ia ditulis `:=`.
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1591,11 +1595,11 @@ dibaca sebagai "iterasi hanya dari situ dan seterusnya", sehingga merupakan kesa
 
 | Klausa | Arti |
 |---|---|
-| `:with v = e` | Mengikat sekali. Boleh membaca variabel dari klausa sebelumnya |
+| `:with v := e` | Mengikat sekali. Boleh membaca variabel dari klausa sebelumnya |
 | `:for v :in s` / `:for v :across s` | Elemen `Iter` secara berurutan. Pembedaan list/vector pada CL tidak ada di sini, sehingga ini dua ejaan dari klausa yang sama |
 | `:for v :on s` | **Sufiks** yang berturut-turut. CL menyerahkan cons ekor yang dibagi, tetapi `Iter` tidak memiliki ekor untuk dibagi, sehingga masing-masing adalah `Vector` baru |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | Menghitung. `:downfrom`/`:upfrom` juga berfungsi |
-| `:for v = e [:then f]` | Dimulai dengan `e`, dan dari kali kedua memakai `f` (tanpa `:then`, `e` setiap kali) |
+| `:for v := e [:then f]` | Dimulai dengan `e`, dan dari kali kedua memakai `f` (tanpa `:then`, `e` setiap kali) |
 | `:repeat n` | Mengiterasi sebanyak itu |
 
 Dengan beberapa `:for`, semuanya maju **secara paralel**, dan perulangan berakhir begitu salah satu
@@ -1927,7 +1931,7 @@ Tipe `f` adalah `(fn (string-input-stream char) Option<Sexpr>)`. Argumen pertama
 teks yang belum dibaca**, dan yang kedua adalah **karakter yang memicunya** (karakter kedua untuk
 dispatch). Nilai kembalian menjadi data yang dibaca pada titik itu. Stream adalah tipe konkret dan
 bukan `:dyn PeekInput` karena reader selalu menyerahkan satu jenis ini: `read-sexpr` / `read-char` /
-`peek-char` / `unread-char` / `read-delimited-list` semuanya menerima `(where (PeekInput S))`,
+`peek-char` / `unread-char` / `read-delimited-list` semuanya menerima `(:where (PeekInput S))`,
 sehingga semuanya bekerja pada tipe konkret apa adanya.
 
 ```lisp
@@ -2042,10 +2046,10 @@ tetap maju. Di dalamnya, `task`, `send`, `recv`, dan sisanya dapat dipakai apa a
 (select
   ((v (recv ch1)) body...)          ; a receive arm. v is bound to an Option<T>
   ((send ch2 x) body...)            ; a send arm
-  (else body...))                   ; optional. **if written, it goes last**
+  (:else body...))                   ; optional. **if written, it goes last**
 ```
 
-- **Dengan `else`, ia tidak memblokir** (`default` pada Go). Tanpanya, ia menunggu sampai salah satu
+- **Dengan `:else`, ia tidak memblokir** (`default` pada Go). Tanpanya, ia menunggu sampai salah satu
   menjadi mungkin.
 - **Jika beberapa mungkin sekaligus, satu dipilih secara acak** (jika berdasarkan urutan penulisan,
   cabang belakangan akan kelaparan).
@@ -2053,7 +2057,7 @@ tetap maju. Di dalamnya, `task`, `send`, `recv`, dan sisanya dapat dipakai apa a
   bukan alasan melewati cabang, sehingga `match` padanya di dalam cabang.
 - Tipenya adalah **gabungan tipe badan semua cabang** (aturan yang sama seperti cabang `match`).
 - `(select)` dengan nol cabang adalah kesalahan tipe (`select{}` pada Go, memblokir selamanya, tidak
-  diadopsi). `select` yang hanya berisi `else` juga, karena sama dengan menulis badan langsung.
+  diadopsi). `select` yang hanya berisi `:else` juga, karena sama dengan menulis badan langsung.
 
 **Ekspresi kanal dan nilai yang dikirim dievaluasi sekali masing-masing, dari kiri ke kanan, cabang
 mana pun yang dipilih** (disiplin yang sama dimiliki `case` untuk kuncinya).

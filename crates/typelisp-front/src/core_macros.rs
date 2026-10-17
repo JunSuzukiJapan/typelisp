@@ -67,7 +67,7 @@ pub const SOURCE: &str = r##"
 (defmacro unless (test &rest body) `(if ,test () (progn ,@body ())))
 
 ;; `cond`: nested `if`s, one clause peeled off per recursive expansion (same
-;; self-recursion shape as `and`/`or` above). `else`-detection mirrors `case`'s.
+;; self-recursion shape as `and`/`or` above). `:else`-detection mirrors `case`'s.
 ;; A clause that is not a list is refused by name: taking it apart would fail
 ;; with a message about `sexpr-car` that says nothing of which form is wrong.
 (defmacro cond (&rest clauses)
@@ -75,7 +75,7 @@ pub const SOURCE: &str = r##"
       ()
       (let ((clause (sexpr-car clauses)))
         (if (sexpr-consp clause) () (panic "cond: each clause is a list, (TEST FORM...)"))
-        (if (eq (sexpr-car clause) (quote else))
+        (if (eq (sexpr-car clause) (quote :else))
             `(progn ,@(sexpr-cdr clause))
             `(if ,(sexpr-car clause) (progn ,@(sexpr-cdr clause)) (cond ,@(sexpr-cdr clauses)))))))
 
@@ -145,7 +145,7 @@ pub const SOURCE: &str = r##"
       (if (sexpr-null rest) (break) ())
       (let ((c (sexpr-car rest)))
         (if (sexpr-consp c) () (panic "case: each clause is a list, (KEYS FORM...)"))
-        (setf out (sexpr-append out (list (if (eq (sexpr-car c) (quote else))
+        (setf out (sexpr-append out (list (if (eq (sexpr-car c) (quote :else))
                                               c
                                               (sexpr-cons (%internal::case-key-test tmp (sexpr-car c)) (sexpr-cdr c)))))))
       (setf rest (sexpr-cdr rest)))
@@ -155,10 +155,10 @@ pub const SOURCE: &str = r##"
 ;; offering restarts, and there are none to offer here.
 (pub defmacro ecase (expr &rest clauses)
   "`case` with no fallthrough: a value matching no clause panics."
-  `(case ,expr ,@clauses (else (panic "ecase: no clause matched"))))
+  `(case ,expr ,@clauses (:else (panic "ecase: no clause matched"))))
 (pub defmacro ccase (expr &rest clauses)
   "CL's `ccase`. With no restarts to offer, identical to `ecase`."
-  `(case ,expr ,@clauses (else (panic "ccase: no clause matched"))))
+  `(case ,expr ,@clauses (:else (panic "ccase: no clause matched"))))
 "##;
 
 /// Reads, checks and executes [`SOURCE`] against the given environment.

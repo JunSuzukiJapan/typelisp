@@ -10,8 +10,8 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; 文字入力
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; 文字出力
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; 1文字押し戻せる入力
@@ -19,7 +19,7 @@ CL がクラス階層で表すものを、ここでは**トレイト階層**で�
 (deftrait ByteOutput ((OutputStream (Item int))) ...)    ; バイト出力
 ```
 
-文字を読む関数は `(where (CharInput S))` か `:dyn CharInput` を取れば、組み込み・ユーザ定義を
+文字を読む関数は `(:where (CharInput S))` か `:dyn CharInput` を取れば、組み込み・ユーザ定義を
 問わずあらゆるストリーム型を受け付ける。
 
 ## 2. メソッド
@@ -167,7 +167,7 @@ CL は `(open name :element-type '(unsigned-byte 8))` と要素型を**呼び出
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 残りのメソッドは全部デフォルト
 
@@ -233,7 +233,7 @@ CL がパス名指定子（文字列かパス名）を受ける場所で、こ�
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | `p` に無い成分を `default` から補う。相対の `p` は `default` のディレクトリの下に置かれ、絶対の `p` は自分のディレクトリを保つ |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | `default` を基準にした相対表記。基準の下に無ければ `p` の全体 |
 
-型引数はいずれも `(where (Pathish P))`。
+型引数はいずれも `(:where (Pathish P))`。
 
 ## 10. CL との違い
 

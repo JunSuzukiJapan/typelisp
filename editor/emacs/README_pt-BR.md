@@ -14,7 +14,7 @@ mesmas tabelas de palavras-chave e as mesmas regras de indentação, e
   - Nomes definidos (o `NAME` de `(defun NAME ...)` como nome de função, o de
     `(defstruct NAME ...)` como nome de tipo e o de `(defvar (NAME ...))` como nome de variável; o
     mesmo com `pub`, como em `(pub defun NAME ...)`)
-  - Palavras-chave de namespaces e declarações (`pub` `module` `use` `load` `impl` `where`) e
+  - Palavras-chave de namespaces e declarações (`pub` `module` `use` `load` `impl`) e
     marcadores de lista lambda (`&rest` `&optional` `&key`)
   - Funções embutidas (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` etc.)
   - Tipos primitivos (incluindo `bignum` / `ratio`), tipos embutidos, tipos de erro embutidos

@@ -154,7 +154,7 @@
      (result::ok (make-instance 'hline :x (get ns 0) :y (get ns 1) :len (get ns 2))))
     ;; Both an unknown name and a wrong number of arguments end up here.
     ;; 名前が知らないものだった場合も、引数の個数が合わない場合もここへ落ちる。
-    (else (result::err (make-instance 'bad-command :detail (format false "~a with ~d args" kind (len ns)))))))
+    (:else (result::err (make-instance 'bad-command :detail (format false "~a with ~d args" kind (len ns)))))))
 
 (defun parse-line ((line string)) Result<:dyn Shape, :dyn Error>
   (let ((ws (split-words line)))

@@ -216,7 +216,7 @@ globala miljön omedelbart och permanent.
 
 | Form | Dokumentationssträngens position |
 |---|---|
-| `defun` / metoder i `impl` / `defmacro` | I början av kroppen (efter returtypen och `where`-satsen). Bara när minst en kroppsform följer; en ensam sträng förblir returvärdet |
+| `defun` / metoder i `impl` / `defmacro` | I början av kroppen (efter returtypen och `:where`-satsen). Bara när minst en kroppsform följer; en ensam sträng förblir returvärdet |
 | `defvar` / `defconstant` | **Efter** startvärdet: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Direkt efter** namnet, före fälten/varianterna |
 | `deftype` | **Direkt efter** namnet, före typen: `(deftype meters "doc" i32)` |

@@ -256,7 +256,7 @@ impl Interp {
         let op = match Op::from_sym(tag) {
             Some(op) => op,
             None => {
-                let name = heap.symbol_name(tag).to_string();
+                let name = heap.symbol_spelling(tag).to_string();
                 return Err(EvalError::Internal(format!("eval: no evaluation for core form `{}`", name)));
             }
         };
@@ -322,7 +322,7 @@ impl Interp {
                 let sym = self.sym_field(heap, form, 0, "var")?;
                 match env_lookup(heap, env, sym) {
                     Some(cell) => cell_value(heap, cell),
-                    None => Err(EvalError::Unbound(heap.symbol_name(sym).to_string())),
+                    None => Err(EvalError::Unbound(heap.symbol_spelling(sym).to_string())),
                 }
             }
 
@@ -398,15 +398,15 @@ impl Interp {
     /// The symbol a `catch`/`throw` node's first field names.
     ///
     /// Stored as a quoted `Sexpr` symbol datum (`forms::catch_form`), so this
-    /// is the same shape `Op::Quote` produces — read back by name because
-    /// that is what `EvalError::Throw` carries between the throw site and its
-    /// catch, which may be in a different function entirely.
-    pub(super) fn throw_tag_of(&self, heap: &Heap, form: Value, who: &str) -> Result<String, EvalError> {
+    /// is the same shape `Op::Quote` produces — the symbol itself, which is
+    /// what `EvalError::Throw` carries between the throw site and its catch,
+    /// which may be in a different function entirely.
+    pub(super) fn throw_tag_of(&self, heap: &Heap, form: Value, who: &str) -> Result<typelisp_mem::SymRef, EvalError> {
         let quoted = core::field(heap, form, 0)
             .and_then(|q| core::field(heap, q, 0))
             .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) has no tag", who)))?;
         match quoted {
-            Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
+            Value::Symbol(id) => Ok(id),
             other => Err(EvalError::Internal(format!("eval: ({} ..) tag is not a symbol: {:?}", who, other))),
         }
     }
@@ -1121,7 +1121,7 @@ pub(super) fn match_core_pattern(
     v: Value,
 ) -> Result<Option<Vec<(SymRef, Value)>>, EvalError> {
     let tag = match heap.car(pat) {
-        Ok(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+        Ok(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
         _ => return Err(EvalError::Internal(format!("eval: not a pattern: {}", core::print(heap, pat)))),
     };
     match tag.as_str() {
@@ -1157,7 +1157,7 @@ pub(super) fn match_core_pattern(
         // `(pat-guard SYM TEST)` — matches iff `TEST` (a checked `bool`
         // expression that reads the value under test through `SYM`) is true.
         // This is what a `string`/`f64`/`symbol`/`bignum`/`ratio` literal and
-        // an explicit `(= expr)` both lower to; see `Pattern::Guard`.
+        // an explicit `(:= expr)` both lower to; see `Pattern::Guard`.
         //
         // The binding is made here and thrown away here: the frame it needs
         // exists only for the duration of the test, and `SYM` is the
@@ -1571,13 +1571,13 @@ fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, String), Eval
     };
     let ty = match ty {
         Value::Path(id) => crate::types::path_from_id(heap, id),
-        Value::Symbol(id) => crate::Path::root(heap.symbol_name(id)),
+        Value::Symbol(id) => crate::Path::root(heap.symbol_spelling(id)),
         other => return Err(EvalError::Internal(format!("eval: vtable slot type is {:?}", other))),
     };
     let Value::Symbol(name) = name else {
         return Err(EvalError::Internal(format!("eval: vtable slot method is {:?}", name)));
     };
-    Ok((ty, heap.symbol_name(name).to_string()))
+    Ok((ty, heap.symbol_spelling(name).to_string()))
 }
 
 /// One supertrait's dispatch table: the trait it is for, and that trait's
@@ -1605,7 +1605,7 @@ pub(super) fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<Super
             };
             let path = match path {
                 Value::Path(id) => crate::types::path_from_id(heap, id),
-                Value::Symbol(id) => crate::Path::root(heap.symbol_name(id)),
+                Value::Symbol(id) => crate::Path::root(heap.symbol_spelling(id)),
                 other => return Err(EvalError::Internal(format!("eval: (dyn-new ..) supertrait path is {:?}", other))),
             };
             let slots = heap
@@ -1657,7 +1657,7 @@ pub(super) fn param_reprs(heap: &Heap, params: Value) -> Result<Vec<Repr>, EvalE
 pub(super) fn path_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::Path, EvalError> {
     match core::field(heap, form, i) {
         Some(Value::Path(id)) => Ok(crate::types::path_from_id(heap, id)),
-        Some(Value::Symbol(id)) => Ok(crate::Path::root(heap.symbol_name(id))),
+        Some(Value::Symbol(id)) => Ok(crate::Path::root(heap.symbol_spelling(id))),
         other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a path: {:?}", what, i, other))),
     }
 }
@@ -1753,7 +1753,7 @@ impl Interp {
     /// [`Self::exec`]'s body, one top-level form.
     fn exec_form(&self, heap: &mut Heap, tl: Value) -> Result<Option<Value>, EvalError> {
         let tag = match heap.car(tl) {
-            Ok(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+            Ok(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
             _ => {
                 return Err(EvalError::Internal(format!(
                     "exec: not a top-level core form: {}",
@@ -2131,7 +2131,7 @@ impl Interp {
 /// A field holding an interned symbol, as a `String`.
 pub(super) fn sym_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
     match core::field(heap, form, i) {
-        Some(Value::Symbol(id)) => Ok(heap.symbol_name(id).to_string()),
+        Some(Value::Symbol(id)) => Ok(heap.symbol_spelling(id).to_string()),
         other => Err(EvalError::Internal(format!("exec: ({} ..) field {} is not a symbol: {:?}", what, i, other))),
     }
 }
@@ -2189,7 +2189,7 @@ fn param_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<(Vec<Str
             .map_err(|e| EvalError::Internal(format!("exec: ({} ..) parameter: {}", what, e)))?;
         match parts.as_slice() {
             [Value::Symbol(sym), r] => {
-                names.push(heap.symbol_name(*sym).to_string());
+                names.push(heap.symbol_spelling(*sym).to_string());
                 reprs.push(Repr::read(heap, *r).ok_or_else(|| {
                     EvalError::Internal(format!("exec: ({} ..) parameter representation: {}", what, core::print(heap, *r)))
                 })?);
@@ -2244,7 +2244,7 @@ fn sym_list_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<
         .map_err(|e| EvalError::Internal(format!("exec: ({} ..) symbol list: {}", what, e)))?;
     vs.into_iter()
         .map(|v| match v {
-            Value::Symbol(id) => Ok(heap.symbol_name(id).to_string()),
+            Value::Symbol(id) => Ok(heap.symbol_spelling(id).to_string()),
             other => Err(EvalError::Internal(format!("exec: ({} ..) not a symbol: {:?}", what, other))),
         })
         .collect()
@@ -2303,7 +2303,7 @@ fn macro_lambda(heap: &Heap, form: Value, i: usize) -> Result<MacroLambda, EvalE
                 core::print(heap, entry)
             )));
         };
-        key_defaults.push((heap.symbol_name(sym).to_string(), default.to_vec()));
+        key_defaults.push((heap.symbol_spelling(sym).to_string(), default.to_vec()));
     }
     Ok(MacroLambda { required, optionals, keys: key_defaults })
 }

@@ -84,9 +84,10 @@ not automatically in the other direction.
 
 | Name | Form | Type | Description |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Takes out the symbol's name |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Makes a symbol from a string (interns it) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Whether it is a keyword (`:name`). The colon is part of the name, so the test looks at the first character ([Syntax Reference](../syntax.md#1-lexical-elements)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Takes out the symbol's name. A keyword's name has no colon (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Makes a symbol from a string (interns it in the root module) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Makes the symbol `name` in the namespace `namespace` (CL's `intern`). `namespace` is a module path from the root (`"geometry::shapes"`); `"keyword"` is the keywords' and `""` the root. Left out, it is the module the call is written in |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Whether it is a keyword, that is, whether it belongs to the keyword namespace ([Syntax Reference](../syntax.md#1-lexical-elements)) |
 
 For `gensym`, see [Macros](system.md#8-macros).
 

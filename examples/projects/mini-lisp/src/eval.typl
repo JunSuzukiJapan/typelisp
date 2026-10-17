@@ -19,7 +19,7 @@
            ((equal op "<") (if (< x y) 1 0))
            ((equal op ">") (if (> x y) 1 0))
            ((equal op "=") (if (= x y) 1 0))
-           (else (panic (append "unknown operator: " op)))))))
+           (:else (panic (append "unknown operator: " op)))))))
     ((iff test then els) (if (/= (eval test env) 0) (eval then env) (eval els env)))
     ((def name val)
      (let ((v (eval val env)))

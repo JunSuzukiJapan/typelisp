@@ -13,7 +13,7 @@
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -27,7 +27,7 @@
 ## 2. `Eq` / `Ord` (порівняння)
 
 Вони відповідають `PartialEq`/`PartialOrd` з Rust (названі `Eq`/`Ord`). Їх використовують в обмеженнях
-`where` узагальнених функцій, щоб вимагати, що типи елементів можна порівнювати (`sort`/`member`/`assoc`
+`:where` узагальнених функцій, щоб вимагати, що типи елементів можна порівнювати (`sort`/`member`/`assoc`
 тощо).
 
 ```lisp
@@ -78,7 +78,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -89,12 +89,12 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; методів немає; поєднання п'яти
 ```
 
-**Всередині обмеження можна писати оператори.** Коли одержувач — змінна типу, обмежена через `where`,
+**Всередині обмеження можна писати оператори.** Коли одержувач — змінна типу, обмежена через `:where`,
 оператори читаються як методи трейта (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
 `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -110,5 +110,5 @@
 `rational`, тому `Output` у `int` — `rational`, а в будь-якого іншого числового типу — сам цей тип.
 Оскільки `Output` у типів різний, `Number` не містить `Div` (список супертрейтів має закріплювати кожен
 асоційований тип). Узагальнена функція, що ділить, приймає тип результату через
-`(where (Div T (Output R)))` або вимагає ділення, замкненого в `T`, через `(where (Div T (Output T)))`
+`(:where (Div T (Output R)))` або вимагає ділення, замкненого в `T`, через `(:where (Div T (Output T)))`
 (тоді `int` передати не можна).

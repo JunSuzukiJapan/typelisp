@@ -102,7 +102,7 @@ vektörü `(map (iter v) f)` gibi `iter`'den geçirin. Yıkıcı işlemler (`nre
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL'nin `hash-table-size`'ı. Bu tabloda dolu girdilerin sayısıdır (`count`'a eşit) |
 
 **`Hash`'i gerçekleştiren her tür anahtar olabilir**; `defstruct`/`defenum` türleri dahil.
-`get`/`set`/`remove` `(where (Hash K))` taşır; bu yüzden onu gerçekleştirmeyen bir türle anahtarlanan
+`get`/`set`/`remove` `(:where (Hash K))` taşır; bu yüzden onu gerçekleştirmeyen bir türle anahtarlanan
 bir tablo **tür hatasıdır** (`f64`, `NaN` yüzünden `Hash`'e sahip değildir).
 
 ```lisp

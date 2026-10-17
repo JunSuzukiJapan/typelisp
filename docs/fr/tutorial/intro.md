@@ -170,7 +170,7 @@ Quand rien ne doit se passer dans le cas faux, utilisez `when` (et `unless` pour
 
 ### cond
 
-Avec trois conditions ou plus, `cond` est plus lisible. Le `else` final est pris quand aucune des conditions
+Avec trois conditions ou plus, `cond` est plus lisible. Le `:else` final est pris quand aucune des conditions
 n'est vérifiée.
 
 ```lisp
@@ -178,7 +178,7 @@ n'est vérifiée.
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

@@ -224,7 +224,7 @@ sofort und dauerhaft in der globalen Umgebung registriert.
 
 | Form | Position des Docstrings |
 |---|---|
-| `defun` / Methoden in `impl` / `defmacro` | Am Anfang des Rumpfes (nach dem Rückgabetyp und der `where`-Klausel). Nur wenn mindestens eine Rumpfform folgt; eine einzelne Zeichenkette bleibt der Rückgabewert |
+| `defun` / Methoden in `impl` / `defmacro` | Am Anfang des Rumpfes (nach dem Rückgabetyp und der `:where`-Klausel). Nur wenn mindestens eine Rumpfform folgt; eine einzelne Zeichenkette bleibt der Rückgabewert |
 | `defvar` / `defconstant` | **Nach** dem Anfangswert: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Direkt nach** dem Namen, vor den Feldern/Varianten |
 | `deftype` | **Direkt nach** dem Namen, vor dem Typ: `(deftype meters "doc" i32)` |

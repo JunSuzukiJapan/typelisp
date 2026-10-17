@@ -22,7 +22,7 @@ của CL)**. Đối số đầu tiên (thứ hai với `format`) là **chuỗi �
 
 Kiểu của `dest` chia ý nghĩa làm hai (cái nào áp dụng được quyết định tĩnh). Dạng stream có thể được viết
 giống nhau với một kiểu stream cụ thể, một `:dyn CharOutput`, hoặc một biến kiểu bị ràng buộc bởi
-`(where (CharOutput S))`. Một `dest` không phải `bool` cũng không phải stream là lỗi kiểu.
+`(:where (CharOutput S))`. Một `dest` không phải `bool` cũng không phải stream là lỗi kiểu.
 
 **Chuỗi điều khiển phải là một literal** (cùng hạn chế như `format!` của Rust). Các chỉ thị trong đó quyết
 định có bao nhiêu đối số được lấy và thuộc kiểu nào, nên một chuỗi dựng lúc chạy không thể đọc được lúc
@@ -246,7 +246,7 @@ Các quy tắc:
 
 - **Việc đăng ký là tĩnh.** Một `impl` được kiểm tra kiểu như một định nghĩa phương thức thông thường, nên
   một tên kiểu viết sai chính tả hoặc một chữ ký sai là lỗi biên dịch.
-- **Nó cũng hoạt động với các kiểu generic.** `(impl print-object box<T> (where (print-object T)) ...)` đi
+- **Nó cũng hoạt động với các kiểu generic.** `(impl print-object box<T> (:where (print-object T)) ...)` đi
   tới một thân riêng cho mỗi đối số kiểu: một giá trị nhớ kiểu của nó gồm cả các đối số kiểu
   (`box<i32>`). Các kiểu generic dựng sẵn như `Vector<T>` hoạt động tương tự.
 - **Việc chọn được thực hiện lúc in.** Chỉ thị nào tiêu thụ đối số nào phụ thuộc vào nội dung lúc chạy của
@@ -261,7 +261,7 @@ Các quy tắc:
   "các giá trị của một kiểu chưa biết có thể được hiển thị" (cùng dạng với `T: Display` của Rust).
   `print-object` của `Array<T>` là một ví dụ.
 - **Với các đối số kiểu không đáp ứng ràng buộc, biểu diễn dựng sẵn được dùng một cách im lặng.**
-  `(impl print-object Array<T> (where (print-object T)))` áp dụng cho `Array<i32>`, nhưng không áp dụng cho
+  `(impl print-object Array<T> (:where (print-object T)))` áp dụng cho `Array<i32>`, nhưng không áp dụng cho
   một `Array` có các phần tử là `defstruct` không có `print-object`. Việc chỉ tạo một mảng mà bị lỗi là vô
   nghĩa, nên nó không phải lỗi.
 - Cơ chế khác của CL, `set-pprint-dispatch` / `*print-pprint-dispatch*` (một registry lúc chạy khóa theo type

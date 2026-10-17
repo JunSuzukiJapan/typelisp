@@ -88,9 +88,10 @@ maar niet automatisch in de andere richting.
 
 | Naam | Vorm | Type | Beschrijving |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Haalt de naam van het symbool eruit |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Maakt een symbool uit een string (internt het) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Of het een keyword (`:name`) is. De dubbele punt maakt deel uit van de naam, dus de test kijkt naar het eerste teken ([Syntaxreferentie](../syntax.md#1-lexicale-elementen)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Haalt de naam van het symbool eruit. De naam van een keyword bevat geen dubbele punt (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Maakt een symbool uit een string (internt het in de wortelmodule) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Maakt het symbool `name` in de naamruimte `namespace` (de `intern` van CL). `namespace` is een modulepad vanaf de wortel (`"geometry::shapes"`); `"keyword"` is die van de keywords en `""` de wortel. Weggelaten is het de module waarin de aanroep staat |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Of het een keyword is, dat wil zeggen of het tot de keyword-naamruimte behoort ([Syntaxreferentie](../syntax.md#1-lexicale-elementen)) |
 
 Voor `gensym` zie [Macro's](system.md#8-macros).
 

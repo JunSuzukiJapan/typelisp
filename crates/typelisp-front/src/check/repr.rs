@@ -425,13 +425,13 @@ impl Repr {
     pub fn read(heap: &Heap, v: Value) -> Option<Repr> {
         match v {
             Value::Symbol(id) => {
-                let name = heap.symbol_name(id);
+                let name = heap.symbol_spelling(id);
                 Repr::SIMPLE.iter().find(|r| r.tag() == name).cloned()
             }
             Value::Cons(_) => {
                 let items = heap.list_to_vec(v).ok()?;
                 let head = match items.first()? {
-                    Value::Symbol(id) => heap.symbol_name(*id),
+                    Value::Symbol(id) => heap.symbol_spelling(*id),
                     _ => return None,
                 };
                 let arg = |i: usize| Repr::read(heap, *items.get(i)?).map(Box::new);

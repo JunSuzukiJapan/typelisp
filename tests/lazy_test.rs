@@ -112,12 +112,12 @@ fn nothing_is_computed_ahead() {
 fn an_impl_where_pin_types_the_source() {
     let src = r##"
 (defstruct every-other-iter<I,A> (src I))
-(impl Iter every-other-iter<I,A> (where (Iter I (Item A)))
-  (type Item A)
+(impl Iter every-other-iter<I,A> (:where (Iter I (Item A)))
+  (:type Item A)
   (next ((self Self)) Option<A>
     (next self::src)
     (next self::src)))
-(defun every-other<I,A> ((it I)) every-other-iter<I,A> (where (Iter I (Item A))) (make-instance 'every-other-iter :src it))
+(defun every-other<I,A> ((it I)) every-other-iter<I,A> (:where (Iter I (Item A))) (make-instance 'every-other-iter :src it))
 (format false "~s" (collect (every-other (iter (the Vector<int> #(1 2 3 4))))))
 "##;
     assert_eq!(eval_string(src), "#(2 4)");

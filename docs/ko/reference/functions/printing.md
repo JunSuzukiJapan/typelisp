@@ -19,7 +19,7 @@
 | `format`(스트림으로) | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest`가 `bool`이 아니면 CL의 스트림 출력 대상이다. 전개한 문자열을 그 스트림에 쓴다. 반환값은 `()`(CL의 `nil`)이며 문자열은 반환하지 않는다 |
 
 `dest`의 타입이 의미를 둘로 나눈다(어느 쪽인지는 정적으로 정해진다). 스트림 형식은 구체 스트림 타입, `:dyn CharOutput`,
-`(where (CharOutput S))`로 묶인 타입 변수 어느 것으로도 똑같이 쓸 수 있다. `bool`도 스트림도 아닌 `dest`는 타입 오류이다.
+`(:where (CharOutput S))`로 묶인 타입 변수 어느 것으로도 똑같이 쓸 수 있다. `bool`도 스트림도 아닌 `dest`는 타입 오류이다.
 
 **제어 문자열은 리터럴이어야 한다**(Rust의 `format!`과 같은 제한). 그 안의 지시자가 인수를 몇 개, 어떤 타입으로 받을지
 정하므로 실행 중에 만든 문자열은 검사 시에 읽을 수 없다. 리터럴이어야 하므로 **인수의 개수와 타입은 검사 시에
@@ -228,7 +228,7 @@ CL에서 `pprint-exit-if-list-exhausted`는 `pprint-logical-block`에서의 비�
 
 - **등록은 정적이다.** `impl`은 보통의 메서드 정의로 타입 검사되므로 타입 이름의 철자 실수나 잘못된 시그니처는 컴파일
   오류이다.
-- **제네릭 타입에도 동작한다.** `(impl print-object box<T> (where (print-object T)) ...)`는 타입 인수마다 다른 본체로 간다.
+- **제네릭 타입에도 동작한다.** `(impl print-object box<T> (:where (print-object T)) ...)`는 타입 인수마다 다른 본체로 간다.
   값은 타입 인수를 포함한 자기 타입(`box<i32>`)을 기억한다. `Vector<T>` 같은 내장 제네릭 타입도 같은 방식으로 동작한다.
 - **선택은 출력할 때 이루어진다.** 어느 지시자가 어느 인수를 소비할지는 제어 문자열의 실행 시 내용에 따라 달라지므로
   `~a`와 `~s`의 구별(즉 `escape`)은 출력하는 순간에만 알 수 있다. `print-object` 메서드가 "클래스마다 정의되고 출력할 때
@@ -239,7 +239,7 @@ CL에서 `pprint-exit-if-list-exhausted`는 `pprint-logical-block`에서의 비�
 - **모든 스칼라 타입이 이 트레이트를 구현한다.** 이것은 **경계로 쓸 수 있게 하기 위해서이다**. `format`의 가변 인수는 타입
   변수를 받을 수 없으므로 이 경계는 제네릭 코드가 "알 수 없는 타입의 값을 그려도 된다"고 말하는 유일한 방법이다(Rust의
   `T: Display`와 같은 모양). `Array<T>`의 `print-object`가 그 예이다.
-- **경계를 만족하지 않는 타입 인수에서는 조용히 내장 표현을 쓴다.** `(impl print-object Array<T> (where (print-object T)))`는
+- **경계를 만족하지 않는 타입 인수에서는 조용히 내장 표현을 쓴다.** `(impl print-object Array<T> (:where (print-object T)))`는
   `Array<i32>`에는 적용되지만 요소가 `print-object` 없는 `defstruct`인 `Array`에는 적용되지 않는다. 배열을 만들기만 해도
   오류가 되는 것은 말이 되지 않으므로 오류로 하지 않는다.
 - CL의 또 다른 구조인 `set-pprint-dispatch` / `*print-pprint-dispatch*`(타입 지정자를 키로 하는 실행 시 등록부)는

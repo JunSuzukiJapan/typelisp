@@ -220,8 +220,9 @@ Em que o `defstruct` difere:
 Não há pacotes. Os namespaces são módulos, e um arquivo é um módulo por si só. Em vez de `pkg:symbol`,
 escreve-se `module::name`, e os nomes são trazidos com `use` ([Módulos e organização de arquivos](modules.md)).
 
-As palavras-chave `:foo` existem e são símbolos que avaliam para si mesmos. Como não há pacotes, os dois-pontos
-fazem parte do nome: `(symbol->string :foo)` devolve `":foo"`.
+As palavras-chave `:foo` existem e, como no CL, avaliam para si mesmas e pertencem ao espaço de nomes das
+palavras-chave, `keyword`. `(symbol->string :foo)` devolve `"foo"` e `(intern "foo" "keyword")` devolve
+`:foo`. O segundo argumento de `intern` é um caminho de módulo no lugar de um nome de pacote.
 
 ## 10. Diferenças de leitura e sintaxe
 

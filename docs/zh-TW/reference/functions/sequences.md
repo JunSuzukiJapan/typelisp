@@ -67,9 +67,10 @@
 
 | 名稱 | 形式 | 型別 | 說明 |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | 取出符號名稱 |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | 從字串建立符號（intern） |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | 是否為關鍵字（`:name`）。冒號是名稱的一部分，所以依第一個字元判斷（[語法參考](../syntax.md#1-詞法元素)） |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | 取出符號名。關鍵字的名稱不含冒號（`:foo` → `"foo"`） |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | 從字串建立符號（intern 到根模組） |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 在命名空間 `namespace` 中建立名為 `name` 的符號（CL 的 `intern`）。`namespace` 是從根開始的模組路徑（`"geometry::shapes"`），`"keyword"` 表示關鍵字，`""` 表示根。省略時為呼叫所在的模組 |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | 是否為關鍵字，即是否屬於關鍵字專用命名空間（[語法參考](../syntax.md#1-詞法元素)） |
 
 `gensym` 見[巨集](system.md#8-巨集)。
 

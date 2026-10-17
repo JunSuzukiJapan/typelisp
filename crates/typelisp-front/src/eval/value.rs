@@ -85,8 +85,9 @@ pub enum EvalError {
     /// `(catch 'tag ...)`. Like [`EvalError::Break`]/[`EvalError::Return`]
     /// this is control flow rather than a failure, but unlike them it crosses
     /// function boundaries — which is the whole point of `catch`/`throw`, and
-    /// why the tag has to travel with it.
-    Throw(String, Box<Value>),
+    /// why the tag has to travel with it — the symbol itself, so a `catch`
+    /// claims a throw when the two tags are one symbol, not one spelling.
+    Throw(typelisp_mem::SymRef, Box<Value>),
     /// `return value`: unwinding to the nearest enclosing loop with `value`.
     Return(Box<Value>),
     /// `(return-from name value)`: unwinding to the enclosing `(block name
@@ -166,7 +167,7 @@ impl fmt::Display for EvalError {
             EvalError::ReturnFrom(name, _) => {
                 write!(f, "internal error: (return-from {}) escaped its block", name)
             }
-            EvalError::Throw(tag, _) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag),
+            EvalError::Throw(tag, _) => write!(f, "throw: no enclosing (catch '{}) for this throw", tag.spelling()),
             EvalError::At(loc, inner) => write!(f, "{}: {}", loc, inner),
         }
     }

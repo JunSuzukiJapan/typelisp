@@ -177,9 +177,9 @@ fn ordinary_defun_without_type_params_still_works() {
 fn a_bounded_generic_can_delegate_when_the_item_variable_is_named_differently() {
     assert_eq!(
         eval_ok_with_prelude(
-            "(defun mylen<I,B> ((it I)) int (where (Iter I (Item B)))
+            "(defun mylen<I,B> ((it I)) int (:where (Iter I (Item B)))
                (let ((n 0)) (doiter (x it) (setf n (+ n 1))) n))
-             (defun mylen2<J,C> ((it J)) int (where (Iter J (Item C)))
+             (defun mylen2<J,C> ((it J)) int (:where (Iter J (Item C)))
                (mylen it))
              (let ((v (the Vector<int> (Vector::new))))
                (push v 1) (push v 2)
@@ -194,7 +194,7 @@ fn a_bounded_generic_can_delegate_when_the_item_variable_is_named_differently() 
 fn a_bounded_generic_can_delegate_with_a_structured_associated_type_pin() {
     assert_eq!(
         eval_ok_with_prelude(
-            "(defun firstkey<I,K,V> ((it I)) Option<K> (where (Iter I (Item cons-cell<K,V>)))
+            "(defun firstkey<I,K,V> ((it I)) Option<K> (:where (Iter I (Item cons-cell<K,V>)))
                (match (find-if it (lambda ((p cons-cell<K,V>)) bool true))
                  ((some p) (option::some (car p)))
                  ((none) (option::none))))

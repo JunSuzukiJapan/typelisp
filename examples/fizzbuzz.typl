@@ -9,6 +9,6 @@
         ((= (mod k 15) 0) (println "FizzBuzz"))
         ((= (mod k 3) 0) (println "Fizz"))
         ((= (mod k 5) 0) (println "Buzz"))
-        (else (println "~d" k))))))
+        (:else (println "~d" k))))))
 
 (fizzbuzz 20)

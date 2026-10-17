@@ -14,7 +14,7 @@
   - Определяемые имена (`NAME` в `(defun NAME ...)` как имя функции, в `(defstruct NAME ...)` как
     имя типа, в `(defvar (NAME ...))` как имя переменной; то же с `pub`, как в
     `(pub defun NAME ...)`)
-  - Ключевые слова пространств имён и объявлений (`pub` `module` `use` `load` `impl` `where`) и
+  - Ключевые слова пространств имён и объявлений (`pub` `module` `use` `load` `impl`) и
     маркеры лямбда-списка (`&rest` `&optional` `&key`)
   - Встроенные функции (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` и т. д.)
   - Примитивные типы (включая `bignum` / `ratio`), встроенные типы, встроенные типы ошибок

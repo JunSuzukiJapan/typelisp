@@ -11,7 +11,7 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Va
 /// Loads the prelude, because `get`/`set`/`remove` **are** prelude
 /// `defmethod`s: looking a key up means hashing it and comparing it, and both
 /// are the key type's own `sxhash`/`equals`, so no builtin could do it. Their
-/// `(where (Hash K))` bound is what turned "unsupported key type" from a
+/// `(:where (Hash K))` bound is what turned "unsupported key type" from a
 /// runtime panic into a type error — and then into no restriction at all, a
 /// `defstruct` included. Every real program loads the prelude anyway; the one
 /// thing that deliberately does not is the compiler island, which never holds
@@ -98,7 +98,7 @@ fn sexpr_to_string(heap: &Heap, v: Value) -> String {
         Value::Boxed(id) => heap.f64_value(id).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
-        Value::Symbol(id) => heap.symbol_name(id).to_string(),
+        Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
         Value::Str(id) => format!("{:?}", heap.string(id)),
         Value::Path(_) => "<path>".to_string(),
         Value::Cons(_) => {

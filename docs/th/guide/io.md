@@ -86,10 +86,10 @@
 ### ทำให้ฟังก์ชันอ่านและเขียนเป็น generic
 
 สตรีมแต่ละแบบเป็นชนิดของตัวเอง แต่การดำเนินการที่ใช้ร่วมกันถูกรวมไว้ใน trait ฟังก์ชัน
-ที่รับอาร์กิวเมนต์ด้วย `(where (CharInput S))` อ่านได้จากไฟล์ สตริง หรือซ็อกเก็ต
+ที่รับอาร์กิวเมนต์ด้วย `(:where (CharInput S))` อ่านได้จากไฟล์ สตริง หรือซ็อกเก็ต
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

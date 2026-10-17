@@ -53,13 +53,18 @@ metodi predefiniti, si veda [Funzioni predefinite](functions/README.md); per l'e
   all'inizio di un dato è un errore di lettura. `[` e `{` possono invece comparire in un simbolo:
   come in CL, restano liberi perché il programmatore li usi nelle [macro di
   lettura](#11-reader-macro-readtable).
-- **Parole chiave**: simboli che iniziano con i due punti, come `:name` (come in CL). Valutano se stesse:
-  non cercano alcun binding e il loro valore è se stesse, con tipo statico `symbol`. Le parole chiave
-  con lo stesso nome sono sempre lo stesso oggetto (`(eq :foo :FOO)` è vero; come gli altri simboli
-  vengono convertite in minuscolo). I due punti fanno parte del nome, quindi `(symbol->string :foo)` è
-  `":foo"` (typelisp non ha un sistema di package, quindi differisce dal `symbol-name` di CL). Un `:`
-  isolato o con altri due punti come `:a:b` è un errore di lettura. Si verifica con `keywordp`. Quelli
-  che iniziano con `::` non sono parole chiave ma percorsi assoluti (sotto).
+  Ciò che sta tra `|` e `|` viene letto così come è scritto, delimitatori e due punti compresi (l'escape
+  multiplo di CL): `|:foo|` è un simbolo ordinario il cui nome è `:foo`, non una parola chiave.
+- **Parole chiave**: simboli che iniziano con i due punti, come `:name` (come in CL). In qualunque modulo siano
+  scritte, sono l'unico simbolo di quel nome nello spazio dei nomi delle parole chiave, `keyword` (il package
+  `KEYWORD` di CL). Valutano se stesse: non cercano alcun binding e il loro valore è se stesse, con tipo statico
+  `symbol`. Le parole chiave con lo stesso nome sono sempre lo stesso oggetto (`(eq :foo :FOO)` è vero; come gli
+  altri simboli vengono convertite in minuscolo). I due punti non fanno parte del nome: `(symbol->string :foo)`
+  è `"foo"`. `~s` stampa `:foo` e `~a` stampa `foo`. Una parola chiave è una costante il cui valore è se stessa,
+  quindi non può essere né legata né assegnata come variabile, né essere il nome di una definizione (un errore
+  di tipo). Per crearne una da una stringa si scrive `(intern "foo" "keyword")`. Si verifica con `keywordp` (se
+  appartiene allo spazio dei nomi delle parole chiave). Un `:` isolato o con altri due punti come `:a:b` è un
+  errore di lettura. Quelli che iniziano con `::` non sono parole chiave ma percorsi assoluti (sotto).
   Si noti che `:dyn` è una parola chiave riservata solo per le posizioni di tipo; scriverla altrove è un
   errore (si veda il [capitolo 2](#2-scrittura-dei-tipi)).
 - **Liste**: `(a b c)`. Si possono leggere anche le coppie puntate `(a . b)`.
@@ -248,10 +253,10 @@ Nel sorgente, i tipi si scrivono come normali simboli o liste.
 - **I riferimenti in avanti si dichiarano con `defsignature`** (sotto). Un nome che non è stato
   dichiarato non può essere chiamato prima della sua definizione, perché il primo livello viene
   controllato ed eseguito una forma alla volta, in ordine di sorgente.
-- Per richiedere vincoli di trait, scrivi una clausola `where` subito prima del corpo:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- Per richiedere vincoli di trait, scrivi una clausola `:where` subito prima del corpo:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   (fissare un tipo associato con `(AssocName ConcreteType)` è facoltativo).
-- **Docstring**: un letterale stringa all'inizio del corpo, subito dopo la clausola `where` (se c'è),
+- **Docstring**: un letterale stringa all'inizio del corpo, subito dopo la clausola `:where` (se c'è),
   diventa la docstring (come in CL). Solo quando segue almeno una forma del corpo, però: una stringa da
   sola resta il valore di ritorno e non viene presa come docstring: `(defun f () string "doc" "value")`
   ha una docstring e restituisce `"value"`, mentre `(defun f () string "value")` non ha docstring e
@@ -647,7 +652,7 @@ modificata; `defconstant` no (`setf` è un errore).
   (pub name ...))                                      ; pubblico anche fuori dal modulo del tipo
 
 ; un tipo generico
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 Dà metodi a un tipo definito con `defstruct` (3.6) o `defenum` (3.7). Corrisponde all'impl inerente di
@@ -671,7 +676,7 @@ Rust (`impl Point { ... }`).
 - Solo i tipi del programma stesso possono averne uno. Un tipo della libreria standard come `Vector`,
   `Option` o `int` no (l'errore dice `... is a standard library type`). Per aggiungere un'operazione a un
   tipo standard, definisci un trait e scrivine l'`impl` per quel tipo.
-- In `(impl X ...)`, se ciò che segue `X` è un elemento (una lista), un `where` o niente, è questo impl
+- In `(impl X ...)`, se ciò che segue `X` è un elemento (una lista), un `:where` o niente, è questo impl
   inerente; se è un nome, è l'`impl` di un trait (`(impl Trait Type ...)`, 3.9).
 
 ```lisp
@@ -768,7 +773,7 @@ un metodo con lo stesso nome.
 - **Le variabili di tipo sono solo quelle scritte nelle posizioni di dichiarazione.** Per
   `defun`/`defstruct`/`defenum`/`deftype`, il `<T>` del nome; per un `impl` inerente, il tipo di
   destinazione (`(impl box<T> ...)`) e il `<U>` del nome di ciascun metodo; per l'`impl` di un trait, il
-  tipo di destinazione e `impl<T>`; per `deftrait`, `Self` e i tipi associati di `(type Item)`. Un nome che
+  tipo di destinazione e `impl<T>`; per `deftrait`, `Self` e i tipi associati di `(:type Item)`. Un nome che
   compare per la prima volta altrove (argomenti, valore di ritorno, `the`/`lambda` nel corpo) non diventa
   una variabile di tipo; è `unknown type`.
 - **Docstring**: un letterale stringa subito dopo il nome, prima dei campi, diventa la docstring
@@ -915,19 +920,19 @@ un tipo, non un tipo**.
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
-  (type AssocName)                       ; associated types (any number, optional)
+  (:type AssocName)                       ; associated types (any number, optional)
   (method-name ((self Self) params...) RetType)          ; no body = must be implemented
   (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; bounds applying to the whole impl (optional)
-  (type AssocName ConcreteType)          ; makes an associated type concrete
+  (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
+  (:type AssocName ConcreteType)          ; makes an associated type concrete
   (method-name (recv params...) RetType body...))
 ```
 
 Tramite `impl`, ogni metodo viene registrato come metodo di `TargetType` e si chiama come un metodo di un
 `impl` inerente (3.5). I metodi dell'`impl` di un trait sono sempre pubblici, senza `pub`. I trait vengono
-citati come vincoli di trait nelle clausole `where` delle funzioni generiche (vedi [3.1 defun](#31-defun--definizioni-di-funzione)). Il nome di un
+citati come vincoli di trait nelle clausole `:where` delle funzioni generiche (vedi [3.1 defun](#31-defun--definizioni-di-funzione)). Il nome di un
 trait può anche essere un percorso `::` come `m::Trait`.
 
 **L'elenco dei supertrait (obbligatorio)**: scritto sempre subito dopo il nome del trait. Ogni elemento è
@@ -943,7 +948,7 @@ suoi tipi associati fissati**.
 
 L'ereditarietà ha tre effetti. (1) `impl Ord X` richiede che `impl Eq X` sia scritto **per primo** (una
 regola sull'ordine di scrittura: l'unica forma che si può decidere in modo deterministico nel REPL e con
-`load` passo per passo, e più severa di Rust). (2) `(where (Ord T))` da solo permette di chiamare anche i
+`load` passo per passo, e più severa di Rust). (2) `(:where (Ord T))` da solo permette di chiamare anche i
 metodi di `Eq`. (3) I metodi di `Eq` si possono chiamare attraverso un `:dyn Ord`, e un valore `:dyn Ord`
 può essere passato così com'è dove è richiesto un `:dyn Eq` (upcasting). Un sottotrait che ridichiara un
 metodo con lo stesso nome del genitore, e l'ereditare metodi con lo stesso nome da due genitori, sono
@@ -951,7 +956,7 @@ entrambi errori (una vtable ha uno slot per nome). L'ereditarietà a diamante si
 
 **Implementazioni predefinite**: un corpo dopo la firma viene usato quando un `impl` omette il metodo. Il
 corpo viene risolto nel **namespace del modulo** in cui il trait è scritto, quindi può chiamare funzioni
-non pubbliche di quel modulo. Anche i metodi con corpo possono avere clausole `where` e docstring. Il
+non pubbliche di quel modulo. Anche i metodi con corpo possono avere clausole `:where` e docstring. Il
 corpo viene controllato nei tipi **una volta, nel punto di dichiarazione**, con `Self` lasciato come
 variabile di tipo (vincolata da `Self: il trait stesso`), come in Rust: gli errori che fallirebbero per
 ogni `impl` e per ogni tipo che implementa, anche nei predefiniti che nessun `impl` omette mai, vengono
@@ -960,7 +965,7 @@ questo vincolo, e i tipi associati sono fissati a se stessi, quindi una firma ch
 confrontata con il corpo senza conoscere il tipo concreto.
 
 **Implementazioni per istanziazione**: un tipo generico può avere un `impl` distinto per ogni
-istanziazione (`(impl Show Box<int> ...)` e `(impl Show Box<string> ...)`). `:dyn`, i vincoli `where`, i
+istanziazione (`(impl Show Box<int> ...)` e `(impl Show Box<string> ...)`). `:dyn`, i vincoli `:where`, i
 tipi associati e `print-object` funzionano per istanziazione, e un'istanziazione senza `impl` (`Box<f64>`)
 non implementa il trait. Lo stesso trait non può essere implementato sia per `Box<T>` sia per `Box<int>` (la
 stessa regola dei metodi in 3.5). Basta che il supertrait sia implementato in quell'istanziazione (da un
@@ -973,7 +978,7 @@ per ogni tipo che soddisfa i vincoli.
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; no body at all; everything is the default
+(impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
 **Non viene generato alcun codice finché un tipo concreto non lo usa davvero** (una volta per tipo, con lo
@@ -982,11 +987,11 @@ blanket. Se un tipo ha un `impl` esplicito, quello ha la priorità. Il controllo
 separato dalla generazione: viene fatto una volta nel punto di dichiarazione, **con il bersaglio lasciato
 come variabile di tipo** (come in Rust), quindi anche un'implementazione mai usata ha i propri errori
 trovati lì se fallirebbero per ogni bersaglio sotto i vincoli dichiarati. Le chiamate giustificate dai
-vincoli (`(less self other)` sotto `(where (Ord T))` e così via) passano, come nel corpo di una `defun`
+vincoli (`(less self other)` sotto `(:where (Ord T))` e così via) passano, come nel corpo di una `defun`
 generica.
 
 **Docstring**: un `deftrait` può avere una docstring per l'intero trait, come letterale stringa subito
-dopo l'elenco dei supertrait, prima delle voci (`(deftrait Name () "doc" (type ...) (method ...)...)`).
+dopo l'elenco dei supertrait, prima delle voci (`(deftrait Name () "doc" (:type ...) (method ...)...)`).
 Una firma senza corpo non può avere una docstring: una stringa finale sarebbe essa stessa il valore di
 ritorno di un'implementazione predefinita, quindi i due casi non si potrebbero distinguere.
 
@@ -1249,11 +1254,11 @@ Ciò che un test stampa con `print` va direttamente sullo standard output (non v
 (if cond then else)                 ; else is required (always three elements)
 (when cond body...)                 ; an if without else (Unit type). defmacro
 (unless cond body...)               ; the negation of when. defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; a list of keys: matches if any of them does
-  (else body...))                   ; expr is evaluated once. keys are compared with equal.
+  (:else body...))                   ; expr is evaluated once. keys are compared with equal.
                                      ; keys are "literals" and are not evaluated (as in CL).
                                      ; a bare symbol a means the symbol 'a.
                                      ; writing 'a is an error (use the bare a). defmacro
@@ -1356,7 +1361,7 @@ Tipi di pattern:
   rapporti — confrontati per valore con l'`Eq::equals` di quel tipo
   ([Trait standard](functions/traits.md#2-eq--ord-confronto)). Le stringhe si confrontano per contenuto,
   non per identità
-- `(= expr)` — valuta un'espressione qualsiasi e confronta con `Eq::equals`. L'unico modo di confrontare
+- `(:= expr)` — valuta un'espressione qualsiasi e confronta con `Eq::equals`. L'unico modo di confrontare
   tipi che non hanno sintassi di letterale (istanze di `defstruct`, globali, risultati calcolati), e
   un'implementazione `Eq` definita dall'utente diventa la regola di confronto così com'è. `expr` può
   fare riferimento a qualsiasi cosa visibile dalla posizione del ramo (argomenti, binding esterni,
@@ -1383,7 +1388,7 @@ Tipi di pattern:
   stessi tipi. Si può scrivere anche dentro un pattern costruttore
   (`(some (:or (circle r) (rect r _)))`)
 
-Confrontare un tipo che non implementa `Eq` con un letterale di valore / `(= expr)` è un errore di tipo
+Confrontare un tipo che non implementa `Eq` con un letterale di valore / `(:= expr)` è un errore di tipo
 (questo linguaggio sceglie di dire "questi non si possono confrontare" anziché lasciare un ramo che in
 silenzio non corrisponde mai).
 
@@ -1417,7 +1422,7 @@ I letterali non immediati (stringhe / numeri in virgola mobile / interi bignum /
 possono scrivere** contro una `Sexpr`. Il loro `eq` confronta l'identità dell'oggetto, il che
 produrrebbe un "ramo che supera il controllo dei tipi ma non corrisponde mai", quindi è un errore che
 nomina il pattern di variante: scrivi `(str "hi")` e viene scomposto in una `string` e confrontato per
-contenuto. `(= expr)` richiede esplicitamente `equals`, quindi questa restrizione non si applica ad
+contenuto. `(:= expr)` richiede esplicitamente `equals`, quindi questa restrizione non si applica ad
 esso.
 
 **Lo scrutinee non deve essere necessariamente un ADT.** `string`/`symbol`/`i32`/`f64` e simili si possono
@@ -1583,14 +1588,12 @@ del simple loop di CL).
 
 CL scrive le parole di clausola come simboli semplici (`(loop for i from 1 to 3 collect i)`), ma qui
 **tutte sono parole chiave**: un `for` semplice sarebbe solo un riferimento a variabile, ed essere una
-parola chiave è anche ciò che lo distingue da un ciclo semplice. L'eccezione è `=`, che separa una
-variabile da un valore: la sua posizione è non ambigua, quindi viene letto sia semplice sia come parola
-chiave (`:=`).
+parola chiave è anche ciò che lo distingue da un ciclo semplice. Nemmeno la parola che separa una variabile dal suo valore fa eccezione: si scrive `:=`.
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1599,11 +1602,11 @@ potrebbero essere lette come "itera solo da lì in poi", quindi è un errore):
 
 | Clausola | Significato |
 |---|---|
-| `:with v = e` | Associa una volta. Può leggere le variabili delle clausole precedenti |
+| `:with v := e` | Associa una volta. Può leggere le variabili delle clausole precedenti |
 | `:for v :in s` / `:for v :across s` | Gli elementi di un `Iter` in ordine. La distinzione di CL tra lista e vettore qui non esiste, quindi sono due grafie della stessa clausola |
 | `:for v :on s` | I **suffissi** successivi. CL passa la coda cons condivisa, ma un `Iter` non ha una coda da condividere, quindi ciascuno è un nuovo `Vector` |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | Conteggio. Funzionano anche `:downfrom`/`:upfrom` |
-| `:for v = e [:then f]` | Parte con `e`, e dalla seconda volta usa `f` (senza `:then`, `e` ogni volta) |
+| `:for v := e [:then f]` | Parte con `e`, e dalla seconda volta usa `f` (senza `:then`, `e` ogni volta) |
 | `:repeat n` | Itera quel numero di volte |
 
 Con più `:for`, avanzano **in parallelo**, e il ciclo termina non appena uno qualsiasi è esaurito.
@@ -1933,7 +1936,7 @@ Il tipo di `f` è `(fn (string-input-stream char) Option<Sexpr>)`. Il primo argo
 testo non ancora letto**, e il secondo è **il carattere che lo ha attivato** (il secondo carattere per un
 dispatch). Il valore di ritorno diventa il dato letto in quel punto. Lo stream è un tipo concreto anziché
 `:dyn PeekInput` perché il lettore passa sempre questo unico tipo: `read-sexpr` / `read-char` /
-`peek-char` / `unread-char` / `read-delimited-list` prendono tutti `(where (PeekInput S))`, quindi
+`peek-char` / `unread-char` / `read-delimited-list` prendono tutti `(:where (PeekInput S))`, quindi
 funzionano tutti sul tipo concreto così com'è.
 
 ```lisp
@@ -2048,17 +2051,17 @@ resto.
 (select
   ((v (recv ch1)) body...)          ; a receive arm. v is bound to an Option<T>
   ((send ch2 x) body...)            ; a send arm
-  (else body...))                   ; optional. **if written, it goes last**
+  (:else body...))                   ; optional. **if written, it goes last**
 ```
 
-- **Con `else`, non blocca** (il `default` di Go). Senza, attende finché una diventa possibile.
+- **Con `:else`, non blocca** (il `default` di Go). Senza, attende finché una diventa possibile.
 - **Se più rami sono possibili contemporaneamente, ne viene scelto uno a caso** (in ordine di
   scrittura, i rami successivi andrebbero in starvation).
 - La `v` di un ramo di ricezione è un **`Option<T>`**. Un canale chiuso è "una risposta", non un motivo
   per saltare il ramo, quindi fai `match` su di essa dentro il ramo.
 - Il tipo è **l'unione dei tipi dei corpi di tutti i rami** (la stessa regola dei rami di `match`).
 - `(select)` con zero rami è un errore di tipo (il `select{}` di Go, che blocca per sempre, non è
-  adottato). Lo è anche un `select` con solo `else`, dato che equivale a scrivere direttamente il corpo.
+  adottato). Lo è anche un `select` con solo `:else`, dato che equivale a scrivere direttamente il corpo.
 
 **Le espressioni dei canali e i valori da inviare vengono valutati una volta ciascuno, da sinistra a
 destra, qualunque ramo venga scelto** (la stessa disciplina che `case` ha per le sue chiavi).

@@ -47,7 +47,7 @@ Mistakes found before running. The form is not run until they are fixed.
 | ``unknown type `foo`: no type of that name is visible here. ...`` | There is no type of that name. Define a type before the first form that uses it (types have no forward declaration). If you meant a type variable, write it in a declaring position such as `<foo>` after the function name ([Syntax Reference 3.6](syntax.md#36-defstruct--structs-user-defined-types)) |
 | ``cannot infer type argument `t` for `vector::new` `` | A type argument cannot be determined. Write the type with `the`, as in `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | The `match` does not handle every variant. Add arms for the missing variants, or a `_` arm |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | The function requires a trait that the type you passed does not implement. Write `(impl Eq pt ...)` ([Standard Traits](functions/traits.md)) |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | The function requires a trait that the type you passed does not implement. Write `(impl Eq pt ...)` ([Standard Traits](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | A value of a type that does not implement the trait was passed where a `:dyn` is expected. Write the `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | A trait name was written where a type goes. Write `:dyn Error` |
 | ``if: (if cond then else)`` | The `if` has the wrong shape. `if` requires an else branch. When you do not need one, use `when` |

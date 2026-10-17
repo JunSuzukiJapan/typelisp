@@ -146,14 +146,14 @@ espera máximo.
 - `((v (recv ch)) cuerpo...)` es una rama de recepción. `v` recibe un `Option<T>`.
 - `((send ch x) cuerpo...)` es una rama de envío.
 - Cuando varias ramas pueden avanzar a la vez, se elige una al azar.
-- Con `(else cuerpo...)` al final, `else` se ejecuta cuando ninguna rama puede avanzar de inmediato, y
+- Con `(:else cuerpo...)` al final, `:else` se ejecuta cuando ninguna rama puede avanzar de inmediato, y
   `select` no espera.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

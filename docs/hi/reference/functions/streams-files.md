@@ -9,8 +9,8 @@ CL जो क्लास पदानुक्रम से व्यक्त 
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; कैरेक्टर इनपुट
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; कैरेक्टर आउटपुट
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; ऐसा इनपुट जो एक कैरेक्टर वापस धकेल सकता है
@@ -18,7 +18,7 @@ CL जो क्लास पदानुक्रम से व्यक्त 
 (deftrait ByteOutput ((OutputStream (Item int))) ...)    ; बाइट आउटपुट
 ```
 
-कैरेक्टर पढ़ने वाला फ़ंक्शन, यदि वह `(where (CharInput S))` या `:dyn CharInput` लेता है, तो किसी भी स्ट्रीम टाइप को स्वीकार करता है, बिल्ट-इन हो या उपयोगकर्ता-परिभाषित।
+कैरेक्टर पढ़ने वाला फ़ंक्शन, यदि वह `(:where (CharInput S))` या `:dyn CharInput` लेता है, तो किसी भी स्ट्रीम टाइप को स्वीकार करता है, बिल्ट-इन हो या उपयोगकर्ता-परिभाषित।
 
 ## 2. मेथड
 
@@ -150,7 +150,7 @@ CL तत्व टाइप **कॉल में** तय करता है,
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; शेष हर मेथड डिफ़ॉल्ट है
 
@@ -210,7 +210,7 @@ CL तत्व टाइप **कॉल में** तय करता है,
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | `p` में छूटे घटकों को `default` से भरता है। सापेक्ष `p` `default` की डायरेक्टरी के नीचे जाता है; निरपेक्ष `p` अपनी डायरेक्टरी रखता है |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | `default` के सापेक्ष रूप। यदि `p` आधार के नीचे नहीं है तो पूरा `p` |
 
-टाइप आर्ग्युमेंट सभी `(where (Pathish P))` लिए होते हैं।
+टाइप आर्ग्युमेंट सभी `(:where (Pathish P))` लिए होते हैं।
 
 ## 10. CL से अंतर
 

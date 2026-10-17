@@ -146,14 +146,14 @@ un timeout.
 - `((v (recv ch)) body...)` è un ramo di ricezione. `v` riceve un `Option<T>`.
 - `((send ch x) body...)` è un ramo di invio.
 - Quando più rami possono procedere nello stesso momento, ne viene scelto uno a caso.
-- Con `(else body...)` alla fine, `else` viene eseguito quando nessun ramo può procedere subito, e
+- Con `(:else body...)` alla fine, `:else` viene eseguito quando nessun ramo può procedere subito, e
   `select` non attende.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

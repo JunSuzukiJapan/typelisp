@@ -50,7 +50,7 @@ It looks like this:
 (defun is-whitespace ((b int)) bool
   (case b
     ((#x20 #x09 #x0a #x0b #x0c #x0d) true)
-    (else false)))
+    (:else false)))
 
 (defun main () ()
   (let ((args (command-line-args)))
@@ -151,7 +151,7 @@ returns `Result<T,E>`; `match` takes the contents out.
   (case id
     (1 (Option::some "alice"))
     (2 (Option::some "bob"))
-    (else (Option::none))))
+    (:else (Option::none))))
 
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)

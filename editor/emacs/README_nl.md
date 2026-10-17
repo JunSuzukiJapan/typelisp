@@ -14,7 +14,7 @@ controleert dat mechanisch (zie het einde van dit document).
   - Gedefinieerde namen (de `NAME` van `(defun NAME ...)` als functienaam, van `(defstruct NAME ...)`
     als typenaam, en van `(defvar (NAME ...))` als variabelenaam; hetzelfde met `pub`, zoals in
     `(pub defun NAME ...)`)
-  - Namespace- en declaratiesleutelwoorden (`pub` `module` `use` `load` `impl` `where`) en
+  - Namespace- en declaratiesleutelwoorden (`pub` `module` `use` `load` `impl`) en
     markeringen van lambdalijsten (`&rest` `&optional` `&key`)
   - Ingebouwde functies (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` enzovoort)
   - Primitieve types (inclusief `bignum` / `ratio`), ingebouwde types, ingebouwde foutentypes

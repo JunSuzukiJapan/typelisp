@@ -4,7 +4,7 @@
 //! CL states `sxhash`'s contract as an implication: `(equal x y)` implies
 //! `(= (sxhash x) (sxhash y))`. Here it is a trait with `Eq` as its
 //! supertrait, which says the same thing in the language's own terms — and
-//! lets `HashTable`'s key methods carry `(where (Hash K))`, so a key type the
+//! lets `HashTable`'s key methods carry `(:where (Hash K))`, so a key type the
 //! table cannot hold is a *type error* instead of the runtime panic it used
 //! to be.
 
@@ -83,7 +83,7 @@ fn a_user_type_can_implement_hash() {
 #[test]
 fn a_generic_function_can_require_hash() {
     let src = "
-        (defun both<T> ((a T) (b T)) int (where (Hash T)) (+ (sxhash a) (sxhash b)))
+        (defun both<T> ((a T) (b T)) int (:where (Hash T)) (+ (sxhash a) (sxhash b)))
         (both 3 4)
     ";
     assert_eq!(eval_ok(src), Value::Int(7));
@@ -91,10 +91,10 @@ fn a_generic_function_can_require_hash() {
 
 #[test]
 fn hash_inherits_eq() {
-    // `Hash`'s supertrait is `Eq`, so a `(where (Hash T))` bound already
+    // `Hash`'s supertrait is `Eq`, so a `(:where (Hash T))` bound already
     // obliges `T` to be comparable — no second bound needed.
     let src = "
-        (defun same<T> ((a T) (b T)) bool (where (Hash T)) (equals a b))
+        (defun same<T> ((a T) (b T)) bool (:where (Hash T)) (equals a b))
         (same 3 3)
     ";
     assert_eq!(eval_ok(src), Value::Bool(true));
@@ -168,7 +168,7 @@ fn size_reports_the_occupancy() {
 // What `Hash` was put in for. The table is stored as hash -> bucket, and
 // neither hashing a key nor comparing two is something the layer below can
 // do: both are the key type's own methods. So `get`/`set`/`remove` are
-// prelude `defmethod`s carrying `(where (Hash K))`, written on five bucket
+// prelude `defmethod`s carrying `(:where (Hash K))`, written on five bucket
 // primitives — and a `defstruct` that implements `Hash` is a key like any
 // other.
 

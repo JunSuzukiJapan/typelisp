@@ -172,7 +172,7 @@ Als er in het onware geval niets moet gebeuren, gebruik je `when` (en `unless` v
 
 ### cond
 
-Bij drie of meer voorwaarden leest `cond` beter. De laatste `else` wordt genomen als geen van de
+Bij drie of meer voorwaarden leest `cond` beter. De laatste `:else` wordt genomen als geen van de
 voorwaarden geldt.
 
 ```lisp
@@ -180,7 +180,7 @@ voorwaarden geldt.
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

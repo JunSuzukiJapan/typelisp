@@ -152,7 +152,7 @@
       ((and (>= (length s) 7) (equal (substring s 0 7) "http://"))
        (setf rest (substring s 7 (length s)))
        ())
-      (else ()))
+      (:else ()))
     (if (equal rest "")
         (result::err (simple-error (append "not an http(s) URL: " s)))
         (let ((slash (unwrap-or (search rest "/") (length rest))))

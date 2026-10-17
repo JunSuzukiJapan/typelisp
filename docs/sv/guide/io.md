@@ -85,10 +85,10 @@ byte från en teckenström är ett typfel.
 ### Göra läs- och skrivfunktioner generiska
 
 Varje slags ström är en egen typ, men de gemensamma operationerna är samlade i traits. En funktion som
-tar sitt argument med `(where (CharInput S))` kan läsa från en fil, en sträng eller en socket.
+tar sitt argument med `(:where (CharInput S))` kan läsa från en fil, en sträng eller en socket.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

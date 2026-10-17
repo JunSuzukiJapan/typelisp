@@ -46,26 +46,26 @@ Att utelämna även bara en av de metoder traitet deklarerar är ett typfel vid 
 
 ## 2. Trait-gränser: "vilken typ som helst som implementerar det här traitet"
 
-Man kan ställa ett villkor på en generisk funktions typparameter med `where`. Det kallas en
+Man kan ställa ett villkor på en generisk funktions typparameter med `:where`. Det kallas en
 **trait-gräns**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Tack vare `(where (Shape T))` kan kroppen använda `name` och `area` på värden av typen `T`. Utan gränsen
+Tack vare `(:where (Shape T))` kan kroppen använda `name` och `area` på värden av typen `T`. Utan gränsen
 är ingenting känt om `T`, så de skulle inte gå att anropa.
 
 Att skicka en typ som inte implementerar `Shape` är ett typfel vid anropet.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 En generisk funktion får en egen kopia för varje typ den anropas med. Inga typtester eller
@@ -99,7 +99,7 @@ det tillgängliga för din typ.
 
 | Trait | Metoder att implementera | Vad det möjliggör |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, mönstret `(= expr)` i `match` med flera |
+| `Eq` | `equals` | `member`, `find`, `position`, mönstret `(:= expr)` i `match` med flera |
 | `Ord` | `less` | `less-equal`, `greater` med flera. `Ord` ärver från `Eq` |
 | `print-object` | `print-object` | Hur värden visas av `println` och liknande |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` med flera |
@@ -136,7 +136,7 @@ implementerar `Ord`.
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -181,7 +181,7 @@ total 9
 
 Valet mellan trait-gränserna i avsnitt 2 och `:dyn`:
 
-| | Trait-gräns (`where`) | `:dyn Trait` |
+| | Trait-gräns (`:where`) | `:dyn Trait` |
 |---|---|---|
 | När den anropade metoden avgörs | Före körning | Vid körning |
 | Blanda typer i en `Vector` | Inte möjligt | Möjligt |

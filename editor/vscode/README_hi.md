@@ -9,7 +9,7 @@ Emacs संस्करण [../emacs/](../emacs/README_hi.md) में है�
 - **सिंटैक्स हाइलाइटिंग** (TextMate ग्रामर; भाषा सर्वर की ज़रूरत नहीं)
   - विशेष फ़ॉर्म और नियंत्रण संरचनाएँ (`defun` `let` `if` `match` `loop` `lambda` `setf` `as` `apply`, `print`/`println`/`format`, `pprint` परिवार)
   - परिभाषित नाम (`(defun NAME ...)` फ़ंक्शन के रूप में, `(defstruct NAME ...)` टाइप के रूप में, `(defvar (NAME ...))` वेरिएबल के रूप में; `(pub defun NAME ...)` की तरह `pub` के साथ भी यही) और `(impl Trait Type)` के दोनों नाम
-  - नेमस्पेस और घोषणा कीवर्ड (`pub` `module` `use` `load` `impl` `where`) और लैम्ब्डा सूची मार्कर (`&rest` `&optional` `&key`)
+  - नेमस्पेस और घोषणा कीवर्ड (`pub` `module` `use` `load` `impl`) और लैम्ब्डा सूची मार्कर (`&rest` `&optional` `&key`)
   - बिल्ट-इन फ़ंक्शन, आदिम टाइप (`bignum` / `ratio` सहित), बिल्ट-इन त्रुटि टाइप, `Capitalized` उपयोगकर्ता टाइप, और trait ऑब्जेक्ट टाइप `:dyn Trait` (जेनेरिक आर्ग्युमेंट के भीतर भी)
   - संख्या लिटरल (दशमलव / `0xff` / `1.5` / `3.0e10` / `1/3`), `#\Space` जैसे कैरेक्टर लिटरल, `:name` जैसे कीवर्ड, और `*print-pretty*` जैसे earmuff वाले ग्लोबल
   - **स्ट्रिंग के भीतर `format` नियंत्रण निर्देश** (`~a` `~5,'0d` `~{...~}` `~^` आदि)

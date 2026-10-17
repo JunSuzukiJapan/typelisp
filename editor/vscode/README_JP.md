@@ -11,7 +11,7 @@ Emacs 版は [../emacs/](../emacs/README_JP.md)。両者は同じキーワード
     `print`/`println`/`format`、`pprint` 系）
   - 定義名（`(defun NAME ...)` は関数、`(defstruct NAME ...)` は型、`(defvar (NAME ...))` は変数。
     `(pub defun NAME ...)` の `pub` 付きも同様）と `(impl Trait Type)` の両名
-  - 名前空間・宣言キーワード（`pub` `module` `use` `load` `impl` `where`）、
+  - 名前空間・宣言キーワード（`pub` `module` `use` `load` `impl`）、
     ラムダリスト標識（`&rest` `&optional` `&key`）
   - 組み込み関数・プリミティブ型（`bignum` / `ratio` 含む）・組み込みエラー型・
     `Capitalized` なユーザ型・trait オブジェクト型 `:dyn Trait`（ジェネリック引数の内側も）

@@ -32,5 +32,5 @@
                (setf v (+ (* v 10) (digit-value (ref s i))))
                (setf i (+ i 1)))
              (push toks (tnum v))))
-          (else (panic (append "tokenize: unexpected character " (substring s i (+ i 1))))))))
+          (:else (panic (append "tokenize: unexpected character " (substring s i (+ i 1))))))))
     toks))

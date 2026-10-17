@@ -7,7 +7,7 @@
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -15,7 +15,7 @@
 
 ## 2. `Eq` / `Ord` (तुलना)
 
-ये Rust के `PartialEq`/`PartialOrd` के अनुरूप हैं (नाम `Eq`/`Ord`)। इनका उपयोग जेनेरिक फ़ंक्शन के `where` बाउंड में यह माँगने के लिए होता है कि तत्व टाइप की तुलना हो सके (`sort`/`member`/`assoc` आदि)।
+ये Rust के `PartialEq`/`PartialOrd` के अनुरूप हैं (नाम `Eq`/`Ord`)। इनका उपयोग जेनेरिक फ़ंक्शन के `:where` बाउंड में यह माँगने के लिए होता है कि तत्व टाइप की तुलना हो सके (`sort`/`member`/`assoc` आदि)।
 
 ```lisp
 (deftrait Eq ()
@@ -54,7 +54,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -65,10 +65,10 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; कोई मेथड नहीं; पाँच का संयोजन
 ```
 
-**बाउंड के भीतर, आप ऑपरेटर लिख सकते हैं।** जब रिसीवर `where` से बँधा टाइप वेरिएबल हो, तो ऑपरेटर trait मेथड के रूप में पढ़े जाते हैं (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
+**बाउंड के भीतर, आप ऑपरेटर लिख सकते हैं।** जब रिसीवर `:where` से बँधा टाइप वेरिएबल हो, तो ऑपरेटर trait मेथड के रूप में पढ़े जाते हैं (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -80,5 +80,5 @@ trait मेथड का नाम `+` नहीं है क्योंक�
 **`Div` अपने परिणाम के प्रकार को संबद्ध प्रकार `Output` से नाम देता है।** CL की तरह दो पूर्णांकों पर `/`
 `rational` है, इसलिए `int` का `Output` `rational` है, और हर दूसरे संख्यात्मक प्रकार का वह प्रकार स्वयं।
 चूँकि `Output` प्रकार के अनुसार अलग है, `Number` में `Div` शामिल नहीं है (supertrait सूची को हर संबद्ध
-प्रकार स्थिर करना होता है)। भाग करने वाला जेनेरिक फ़ंक्शन परिणाम का प्रकार `(where (Div T (Output R)))` से
-लेता है, या `(where (Div T (Output T)))` से `T` के भीतर बंद भाग माँगता है (तब `int` नहीं दिया जा सकता)।
+प्रकार स्थिर करना होता है)। भाग करने वाला जेनेरिक फ़ंक्शन परिणाम का प्रकार `(:where (Div T (Output R)))` से
+लेता है, या `(:where (Div T (Output T)))` से `T` के भीतर बंद भाग माँगता है (तब `int` नहीं दिया जा सकता)।

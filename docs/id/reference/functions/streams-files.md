@@ -12,8 +12,8 @@ saat dijalankan "apakah stream ini dapat dibaca?".
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; character input
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; character output
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; input that can push back one character
@@ -22,7 +22,7 @@ saat dijalankan "apakah stream ini dapat dibaca?".
 ```
 
 Fungsi yang membaca karakter menerima tipe stream apa pun, bawaan maupun buatan pengguna, jika ia
-menerima `(where (CharInput S))` atau `:dyn CharInput`.
+menerima `(:where (CharInput S))` atau `:dyn CharInput`.
 
 ## 2. Metode
 
@@ -177,7 +177,7 @@ komposit.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
@@ -244,7 +244,7 @@ dirinya, sehingga selama Anda menyerahkan string, tidak ada penguraian yang terj
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Mengisi komponen yang hilang dari `p` dengan `default`. `p` relatif ditaruh di bawah direktori `default`; `p` absolut mempertahankan direktorinya sendiri |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | Bentuk relatif terhadap `default`. Seluruh `p` jika tidak berada di bawah basis |
 
-Argumen tipe semuanya membawa `(where (Pathish P))`.
+Argumen tipe semuanya membawa `(:where (Pathish P))`.
 
 ## 10. Perbedaan dari CL
 

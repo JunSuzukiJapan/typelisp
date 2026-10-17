@@ -133,7 +133,7 @@ pub fn intern_path_id(heap: &mut Heap, p: &Path) -> PathId {
 /// [`intern_path_id`].
 pub fn path_from_id(heap: &Heap, id: PathId) -> Path {
     Path::from_segments(
-        heap.path_segments(id).iter().map(|s| heap.symbol_name(*s).to_string()).collect(),
+        heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
     )
 }
 
@@ -631,7 +631,7 @@ pub fn parse_type_spanned(
     match v {
         Value::Empty => Ok(Type::Unit),
         Value::Symbol(id) => {
-            let name = heap.symbol_name(id);
+            let name = heap.symbol_spelling(id);
             parse_type_name_rec(name, loc, out)
         }
         Value::Path(id) => {
@@ -645,7 +645,7 @@ pub fn parse_type_spanned(
             let name = heap
                 .path_segments(id)
                 .iter()
-                .map(|s| heap.symbol_name(*s))
+                .map(|s| heap.symbol_spelling(*s))
                 .collect::<Vec<_>>()
                 .join("::");
             parse_type_name_rec(&name, loc, out)
@@ -685,7 +685,7 @@ fn is_fn_form(heap: &Heap, v: Value) -> bool {
 
 /// Whether `v` is a `(ptr ...)` list — a typed C pointer.
 fn is_ptr_form(heap: &Heap, v: Value) -> bool {
-    matches!(heap.car(v), Ok(Value::Symbol(id)) if heap.symbol_name(id) == "ptr")
+    matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::PTR))
 }
 
 /// Parse `(ptr T)` into [`Type::PtrTo`]. What `T` may be is the checker's

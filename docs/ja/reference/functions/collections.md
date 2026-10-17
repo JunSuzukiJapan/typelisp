@@ -98,7 +98,7 @@
 | `size` | `(size h)` | `HashTable<K,V>→int` | CL `hash-table-size`。この表では占有数（＝`count`） |
 
 **キーの型は `Hash` を実装していれば何でもよい**——`defstruct`/`defenum` も含めて。
-`get`/`set`/`remove` は `(where (Hash K))` を持つので、実装していない型をキーにした表は
+`get`/`set`/`remove` は `(:where (Hash K))` を持つので、実装していない型をキーにした表は
 **型エラー**（`f64` に `Hash` が無いのは `NaN` のため）。
 
 ```lisp

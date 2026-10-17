@@ -14,7 +14,7 @@ mechanicznie (zobacz niżej).
   - Definiowane nazwy (`(defun NAME ...)` jako funkcja, `(defstruct NAME ...)` jako typ,
     `(defvar (NAME ...))` jako zmienna; to samo z `pub`, jak w `(pub defun NAME ...)`) oraz
     obie nazwy w `(impl Trait Type)`
-  - Słowa kluczowe przestrzeni nazw i deklaracji (`pub` `module` `use` `load` `impl` `where`) oraz znaczniki
+  - Słowa kluczowe przestrzeni nazw i deklaracji (`pub` `module` `use` `load` `impl`) oraz znaczniki
     listy lambda (`&rest` `&optional` `&key`)
   - Funkcje wbudowane, typy prymitywne (w tym `bignum` / `ratio`), wbudowane typy błędów,
     typy użytkownika pisane wielką literą (`Capitalized`) oraz typ obiektu traitu `:dyn Trait` (także wewnątrz argumentów

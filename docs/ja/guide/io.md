@@ -84,10 +84,10 @@
 ### 読み書きする関数を汎用にする
 
 ストリームは型ごとに別ですが、共通の操作はトレイトにまとまっています。引数を
-`(where (CharInput S))` で受ければ、ファイル・文字列・ソケットのどれからでも読める関数になります。
+`(:where (CharInput S))` で受ければ、ファイル・文字列・ソケットのどれからでも読める関数になります。
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

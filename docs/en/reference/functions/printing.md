@@ -22,7 +22,7 @@ directive consumes the following variadic arguments in turn.
 
 The type of `dest` splits the meaning in two (which one applies is decided statically). The stream
 form can be written the same way with a concrete stream type, a `:dyn CharOutput`, or a type variable
-bound by `(where (CharOutput S))`. A `dest` that is neither a `bool` nor a stream is a type error.
+bound by `(:where (CharOutput S))`. A `dest` that is neither a `bool` nor a stream is a type error.
 
 **The control string must be a literal** (the same restriction as Rust's `format!`). The directives in
 it decide how many arguments are taken and of which types, so a string built at run time cannot be
@@ -248,7 +248,7 @@ Rules:
 
 - **Registration is static.** An `impl` is type-checked as an ordinary method definition, so a
   misspelled type name or a wrong signature is a compile error.
-- **It works for generic types too.** `(impl print-object box<T> (where (print-object T)) ...)` goes to
+- **It works for generic types too.** `(impl print-object box<T> (:where (print-object T)) ...)` goes to
   a separate body for each type argument: a value remembers its type including its type arguments
   (`box<i32>`). Built-in generic types such as `Vector<T>` work the same way.
 - **The choice is made at print time.** Which directive consumes which argument depends on the
@@ -264,7 +264,7 @@ Rules:
   code can say "values of an unknown type may be rendered" (the same shape as Rust's `T: Display`).
   The `print-object` of `Array<T>` is an example.
 - **With type arguments that do not meet the bound, the built-in representation is used silently.**
-  `(impl print-object Array<T> (where (print-object T)))` applies to `Array<i32>`, but not to an
+  `(impl print-object Array<T> (:where (print-object T)))` applies to `Array<i32>`, but not to an
   `Array` whose elements are a `defstruct` without a `print-object`. It would make no sense for merely
   creating an array to be an error, so it is not an error.
 - CL's other mechanism, `set-pprint-dispatch` / `*print-pprint-dispatch*` (a run-time registry keyed by

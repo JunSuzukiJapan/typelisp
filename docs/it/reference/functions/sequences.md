@@ -85,9 +85,10 @@ automaticamente nell'altra direzione.
 
 | Nome | Forma | Tipo | Descrizione |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Estrae il nome del simbolo |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Crea un simbolo da una stringa (lo interna) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Se è una parola chiave (`:name`). I due punti fanno parte del nome, quindi il test guarda il primo carattere ([Riferimento della sintassi](../syntax.md#1-elementi-lessicali)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Estrae il nome del simbolo. Il nome di una parola chiave non contiene i due punti (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Crea un simbolo da una stringa (lo interna nel modulo radice) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Crea il simbolo `name` nello spazio dei nomi `namespace` (l'`intern` di CL). `namespace` è un percorso di modulo dalla radice (`"geometry::shapes"`); `"keyword"` è quello delle parole chiave e `""` la radice. Se omesso, è il modulo in cui è scritta la chiamata |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Se è una parola chiave, cioè se appartiene allo spazio dei nomi delle parole chiave ([Riferimento della sintassi](../syntax.md#1-elementi-lessicali)) |
 
 Per `gensym`, si veda [Macro](system.md#8-macro).
 

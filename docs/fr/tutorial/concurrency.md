@@ -144,14 +144,14 @@ un canal qui livre une valeur une fois le temps donné écoulé. Combiné avec `
 - `((v (recv ch)) body...)` est une branche de réception. `v` reçoit une `Option<T>`.
 - `((send ch x) body...)` est une branche d'envoi.
 - Quand plusieurs branches peuvent avancer en même temps, l'une d'elles est choisie au hasard.
-- Avec `(else body...)` à la fin, `else` s'exécute quand aucune branche ne peut avancer immédiatement, et `select`
+- Avec `(:else body...)` à la fin, `:else` s'exécute quand aucune branche ne peut avancer immédiatement, et `select`
   n'attend pas.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

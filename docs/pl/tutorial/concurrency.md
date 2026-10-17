@@ -145,14 +145,14 @@ daje limit czasu (timeout).
 - `((v (recv ch)) body...)` to ramię odbierające. `v` dostaje `Option<T>`.
 - `((send ch x) body...)` to ramię wysyłające.
 - Gdy kilka ramion może przejść jednocześnie, jedno z nich jest wybierane losowo.
-- Z `(else body...)` na końcu `else` jest wykonywane, gdy żadne ramię nie może przejść od razu, a `select`
+- Z `(:else body...)` na końcu `:else` jest wykonywane, gdy żadne ramię nie może przejść od razu, a `select`
   nie czeka.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

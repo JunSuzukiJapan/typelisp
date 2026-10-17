@@ -81,11 +81,11 @@ panic한다.
 
 ### 읽고 쓰는 함수를 일반화하기
 
-스트림은 종류마다 다른 타입이지만 공통 연산은 트레이트로 모여 있다. 인수를 `(where (CharInput S))`로 받는 함수는
+스트림은 종류마다 다른 타입이지만 공통 연산은 트레이트로 모여 있다. 인수를 `(:where (CharInput S))`로 받는 함수는
 파일, 문자열, 소켓 어느 것에서든 읽을 수 있다.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

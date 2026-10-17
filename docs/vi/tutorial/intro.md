@@ -163,14 +163,14 @@ Khi không cần làm gì ở trường hợp sai, hãy dùng `when` (và `unles
 
 ### cond
 
-Với ba điều kiện trở lên, `cond` dễ đọc hơn. `else` cuối cùng được chọn khi không điều kiện nào đúng.
+Với ba điều kiện trở lên, `cond` dễ đọc hơn. `:else` cuối cùng được chọn khi không điều kiện nào đúng.
 
 ```lisp
 (defun describe-number ((n int)) string
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

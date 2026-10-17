@@ -208,7 +208,7 @@ CLHS の `eval` に準拠する: **現在の大域環境**（グローバルの�
 
 | フォーム | docstring の位置 |
 |---|---|
-| `defun` / `impl` のメソッド / `defmacro` | 本体の先頭（戻り値型・`where` 節の後）。ただし後ろに本体フォームが最低1つ続く場合のみ——単独の文字列は戻り値のまま |
+| `defun` / `impl` のメソッド / `defmacro` | 本体の先頭（戻り値型・`:where` 節の後）。ただし後ろに本体フォームが最低1つ続く場合のみ——単独の文字列は戻り値のまま |
 | `defvar` / `defconstant` | 初期値の**後ろ**: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | 名前の**直後**、フィールド/バリアント列の前 |
 | `deftype` | 名前の**直後**、型の前: `(deftype meters "doc" i32)` |

@@ -46,7 +46,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``unknown type `foo`: no type of that name is visible here. ...`` | ไม่มีชนิดชื่อนั้น ให้นิยามชนิดก่อนฟอร์มแรกที่ใช้มัน (ชนิดไม่มีการประกาศล่วงหน้า) หากหมายถึงตัวแปรชนิด ให้เขียนในตำแหน่งที่ประกาศ เช่น `<foo>` หลังชื่อฟังก์ชัน ([เอกสารอ้างอิงไวยากรณ์ 3.6](syntax.md#36-defstruct--struct-ชนิดที่ผู้ใช้นิยาม)) |
 | ``cannot infer type argument `t` for `vector::new` `` | ไม่สามารถกำหนดอาร์กิวเมนต์ชนิดได้ ให้เขียนชนิดด้วย `the` เช่น `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` ไม่จัดการทุก variant ให้เพิ่มกิ่งสำหรับ variant ที่ขาด หรือกิ่ง `_` |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | ฟังก์ชันต้องการ trait ที่ชนิดที่คุณส่งไม่ได้ implement ให้เขียน `(impl Eq pt ...)` ([Trait มาตรฐาน](functions/traits.md)) |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | ฟังก์ชันต้องการ trait ที่ชนิดที่คุณส่งไม่ได้ implement ให้เขียน `(impl Eq pt ...)` ([Trait มาตรฐาน](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | ค่าของชนิดที่ไม่ได้ implement trait ถูกส่งในที่ที่คาดหวัง `:dyn` ให้เขียน `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | ชื่อ trait ถูกเขียนในที่ที่ต้องเป็นชนิด ให้เขียน `:dyn Error` |
 | ``if: (if cond then else)`` | `if` มีรูปร่างผิด `if` ต้องมีกิ่ง else เมื่อไม่ต้องการ ให้ใช้ `when` |

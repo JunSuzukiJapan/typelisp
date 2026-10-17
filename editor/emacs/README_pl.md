@@ -14,7 +14,7 @@ mechanicznie (zobacz koniec tego dokumentu).
   - Definiowane nazwy (`NAME` w `(defun NAME ...)` jako nazwa funkcji, w `(defstruct NAME ...)`
     jako nazwa typu i w `(defvar (NAME ...))` jako nazwa zmiennej; to samo z `pub`, jak w
     `(pub defun NAME ...)`)
-  - Słowa kluczowe przestrzeni nazw i deklaracji (`pub` `module` `use` `load` `impl` `where`) oraz znaczniki
+  - Słowa kluczowe przestrzeni nazw i deklaracji (`pub` `module` `use` `load` `impl`) oraz znaczniki
     listy lambda (`&rest` `&optional` `&key`)
   - Funkcje wbudowane (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` i tak dalej)
   - Typy prymitywne (w tym `bignum` / `ratio`), typy wbudowane, wbudowane typy błędów

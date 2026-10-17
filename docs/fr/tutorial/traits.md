@@ -46,26 +46,26 @@ Omettre ne serait-ce qu'une des méthodes que le trait déclare est une erreur d
 
 ## 2. Bornes de traits : « n'importe quel type qui implémente ce trait »
 
-On peut poser une condition sur le paramètre de type d'une fonction générique avec `where`. C'est ce qu'on appelle
+On peut poser une condition sur le paramètre de type d'une fonction générique avec `:where`. C'est ce qu'on appelle
 une **borne de trait**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Grâce à `(where (Shape T))`, le corps peut utiliser `name` et `area` sur des valeurs de `T`. Sans la borne, on ne
+Grâce à `(:where (Shape T))`, le corps peut utiliser `name` et `area` sur des valeurs de `T`. Sans la borne, on ne
 sait rien de `T`, et on ne pourrait pas les appeler.
 
 Passer un type qui n'implémente pas `Shape` est une erreur de type à l'appel.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Une fonction générique reçoit sa propre copie pour chaque type avec lequel elle est appelée. Aucun test de type ni
@@ -99,7 +99,7 @@ standard qui l'utilisent.
 
 | Trait | Méthodes à implémenter | Ce que cela permet |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, le motif `(= expr)` de `match`, etc. |
+| `Eq` | `equals` | `member`, `find`, `position`, le motif `(:= expr)` de `match`, etc. |
 | `Ord` | `less` | `less-equal`, `greater`, etc. `Ord` hérite de `Eq` |
 | `print-object` | `print-object` | La façon dont `println` et consorts affichent les valeurs |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, etc. |
@@ -135,7 +135,7 @@ Combiné à une borne de trait, on peut écrire une fonction qui marche pour tou
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -181,7 +181,7 @@ total 9
 
 Choisir entre les bornes de traits de la section 2 et `:dyn` :
 
-| | Borne de trait (`where`) | `:dyn Trait` |
+| | Borne de trait (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Quand la méthode appelée est décidée | Avant l'exécution | À l'exécution |
 | Mélanger des types dans un même `Vector` | Impossible | Possible |

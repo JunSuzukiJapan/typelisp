@@ -236,7 +236,7 @@ fn a_generic_function_over_byteinput_accepts_a_binary_file_stream() {
     // The point of the trait layer: a caller writes the bound, not the type.
     let path = tmp("generic");
     is_true(&format!(
-        r#"(defun total<S> ((s S)) int (where (ByteInput S))
+        r#"(defun total<S> ((s S)) int (:where (ByteInput S))
              (let ((n (the int 0)))
                (progn (loop (match (read-byte s) ((none) (break)) ((some b) (setf n (+ n b))))) n)))
            (progn

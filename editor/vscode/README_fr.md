@@ -14,7 +14,7 @@ tables de mots-clés et les mêmes règles d'indentation, et
   - Noms définis (`(defun NAME ...)` comme fonction, `(defstruct NAME ...)` comme type,
     `(defvar (NAME ...))` comme variable ; de même avec `pub`, comme dans `(pub defun NAME ...)`)
     et les deux noms de `(impl Trait Type)`
-  - Mots-clés d'espaces de noms et de déclarations (`pub` `module` `use` `load` `impl` `where`) et
+  - Mots-clés d'espaces de noms et de déclarations (`pub` `module` `use` `load` `impl`) et
     marqueurs de liste lambda (`&rest` `&optional` `&key`)
   - Fonctions intégrées, types primitifs (y compris `bignum` / `ratio`), types d'erreur intégrés,
     types utilisateur `Capitalized` et le type d'objet trait `:dyn Trait` (y compris à l'intérieur

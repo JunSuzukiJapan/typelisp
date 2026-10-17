@@ -103,7 +103,7 @@ vetor por `iter`, como em `(map (iter v) f)`. As operações destrutivas (`nreve
 | `size` | `(size h)` | `HashTable<K,V>→int` | O `hash-table-size` do CL. Nesta tabela é o número de entradas ocupadas (igual a `count`) |
 
 **Qualquer tipo que implemente `Hash` pode ser chave**, incluindo os tipos `defstruct`/`defenum`.
-`get`/`set`/`remove` carregam `(where (Hash K))`, então uma tabela cuja chave é um tipo que não o implementa é
+`get`/`set`/`remove` carregam `(:where (Hash K))`, então uma tabela cuja chave é um tipo que não o implementa é
 um **erro de tipo** (`f64` não tem `Hash` por causa de `NaN`).
 
 ```lisp

@@ -47,7 +47,7 @@ use crate::{DefLocs, Docs, Loc, Registry, SymRef, TopLevelForm};
 /// EXPR)`), every node of it carries the whole pattern's span rather than
 /// its own, and its receiver names a variable no user wrote. Descending
 /// would offer hovers positioned at the pattern for nodes half of which are
-/// not in the source — so `(= expr)`'s `expr` has no hover, which is the
+/// not in the source — so `(:= expr)`'s `expr` has no hover, which is the
 /// same deal `(pat-lit (int 1))`'s literal already gets.
 fn is_opaque(tag: SymRef) -> bool {
     matches!(
@@ -458,7 +458,7 @@ fn sym_list_at(heap: &Heap, form: Value, i: usize) -> Vec<String> {
         .map(|vs| {
             vs.into_iter()
                 .filter_map(|v| match v {
-                    Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+                    Value::Symbol(id) => Some(heap.symbol_spelling(id).to_string()),
                     _ => None,
                 })
                 .collect()
@@ -474,7 +474,7 @@ fn sym_list_at(heap: &Heap, form: Value, i: usize) -> Vec<String> {
 /// and a parameter `(SYM REPR)` all name themselves in that first position.
 fn list_head_sym(heap: &Heap, list: Value) -> Option<String> {
     match heap.car(list).ok()? {
-        Value::Symbol(id) => Some(heap.symbol_name(id).to_string()),
+        Value::Symbol(id) => Some(heap.symbol_spelling(id).to_string()),
         _ => None,
     }
 }

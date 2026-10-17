@@ -43,25 +43,25 @@
 
 ## 2. トレイト境界：「このトレイトを実装した型なら何でも」
 
-ジェネリック関数の型パラメータに、`where` で条件を付けられます。これを**トレイト境界**と呼びます。
+ジェネリック関数の型パラメータに、`:where` で条件を付けられます。これを**トレイト境界**と呼びます。
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-`(where (Shape T))` があるので、本体で `T` の値に `name` と `area` を使えます。境界が無ければ、
+`(:where (Shape T))` があるので、本体で `T` の値に `name` と `area` を使えます。境界が無ければ、
 `T` について何も分からないので呼べません。
 
 `Shape` を実装していない型を渡すと、呼び出した位置で型エラーになります。
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 ジェネリック関数は、呼ばれた型ごとに専用の関数が作られます。実行時に型を調べて分岐する処理は
@@ -94,7 +94,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | トレイト | 実装するメソッド | 使えるようになるもの |
 |---|---|---|
-| `Eq` | `equals` | `member`、`find`、`position`、`match` の `(= 式)` パターンなど |
+| `Eq` | `equals` | `member`、`find`、`position`、`match` の `(:= 式)` パターンなど |
 | `Ord` | `less` | `less-equal`、`greater` など。`Ord` は `Eq` を継承する |
 | `print-object` | `print-object` | `println` などでの表示のしかた |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` など |
@@ -130,7 +130,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -173,7 +173,7 @@ total 9
 
 2 節のトレイト境界と `:dyn` の使い分け:
 
-| | トレイト境界（`where`） | `:dyn Trait` |
+| | トレイト境界（`:where`） | `:dyn Trait` |
 |---|---|---|
 | 呼び出し先が決まるとき | 実行前 | 実行時 |
 | 1 つの `Vector` に違う型を混ぜる | できない | できる |

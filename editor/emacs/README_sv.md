@@ -14,7 +14,7 @@ slutet av det här dokumentet).
   - Definierade namn (`NAME` i `(defun NAME ...)` som funktionsnamn, i `(defstruct NAME ...)`
     som typnamn och i `(defvar (NAME ...))` som variabelnamn; detsamma med `pub`, som i
     `(pub defun NAME ...)`)
-  - Nyckelord för namnrymder och deklarationer (`pub` `module` `use` `load` `impl` `where`) och
+  - Nyckelord för namnrymder och deklarationer (`pub` `module` `use` `load` `impl`) och
     markörer i lambdalistor (`&rest` `&optional` `&key`)
   - Inbyggda funktioner (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` och så vidare)
   - Primitiva typer (inklusive `bignum` / `ratio`), inbyggda typer, inbyggda feltyper

@@ -191,7 +191,7 @@ pub fn capture_program_dump(
         typelisp_front::mem::symbols::ns_of(entry_segs),
     );
     let entry_path = super::aot::entry_point_path(entry_segs);
-    chk.enter_file_module(entry_segs);
+    chk.enter_file_module(entry_segs).map_err(|e| e.to_string())?;
     loop {
         let next = {
             let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &interp);

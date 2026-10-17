@@ -49,13 +49,18 @@ hata mesajlarının okunması için [errors.md](errors.md) belgelerine bakın.
   başında görülmeleri okuma hatasıdır. `[` ve `{` ise sembolün içinde yer alabilir: CL'de olduğu
   gibi, programcının [okuyucu makrolarında](#11-okuyucu-makroları-readtable) kullanabilmesi için boş
   bırakılmıştır.
-- **Anahtar sözcükler**: `:name` gibi iki nokta üst üsteyle başlayan semboller (CL'deki gibi). Kendi
-  kendilerini değerlendirirler: hiçbir bağlamaya bakmazlar ve değerleri kendileridir; statik türleri
-  `symbol`'dür. Aynı adlı anahtar sözcükler her zaman aynı nesnedir (`(eq :foo :FOO)` doğrudur; diğer
-  semboller gibi küçük harfe çevrilirler). İki noktanın kendisi adın bir parçasıdır; bu yüzden
-  `(symbol->string :foo)`, `":foo"`'dur (typelisp'in paket sistemi yoktur; bu, CL'nin `symbol-name`'inden
-  farklıdır). Yalnız bir `:` ya da `:a:b` gibi ek iki noktalı olanlar bir okuma hatasıdır. `keywordp` ile
-  sınayın. `::` ile başlayanlar anahtar sözcük değil, mutlak yollardır (aşağıda).
+  `|` ile `|` arasındaki metin, ayırıcılar ve iki noktalar dahil yazıldığı gibi okunur (CL'nin çoklu kaçışı):
+  `|:foo|`, adı `:foo` olan sıradan bir semboldür, anahtar sözcük değildir.
+- **Anahtar sözcükler**: `:name` gibi iki nokta üst üsteyle başlayan semboller (CL'deki gibi). Hangi modülde
+  yazılırsa yazılsın, anahtar sözcük ad alanı `keyword` (CL'nin `KEYWORD` paketi) içindeki o addaki tek
+  semboldürler. Kendi kendilerini değerlendirirler: hiçbir bağlamaya bakmazlar ve değerleri kendileridir; statik
+  türleri `symbol`'dür. Aynı adlı anahtar sözcükler her zaman aynı nesnedir (`(eq :foo :FOO)` doğrudur; diğer
+  semboller gibi küçük harfe çevrilirler). İki nokta adın bir parçası değildir: `(symbol->string :foo)`,
+  `"foo"`'dur. `~s` `:foo`, `~a` ise `foo` yazdırır. Anahtar sözcük, değeri kendisi olan bir sabittir; bu yüzden
+  değişken olarak bağlanamaz, atanamaz ve bir tanımın adı olamaz (tür hatası). Bir string'den
+  `(intern "foo" "keyword")` ile yapılır. `keywordp` ile sınayın (anahtar sözcük ad alanına ait olup olmadığı).
+  Yalnız bir `:` ya da `:a:b` gibi ek iki noktalı olanlar bir okuma hatasıdır. `::` ile başlayanlar anahtar
+  sözcük değil, mutlak yollardır (aşağıda).
   `:dyn`'in yalnızca tür konumları için ayrılmış bir anahtar sözcük olduğunu, başka bir yere yazmanın
   hata olduğunu unutmayın ([2. bölüm](#2-türlerin-yazımı)'e bakın).
 - **Listeler**: `(a b c)`. Noktalı çiftler `(a . b)` de okunabilir.
@@ -238,10 +243,10 @@ Kaynakta türler sıradan semboller ya da listeler olarak yazılır.
     meselesinin içinde kalır; bu yüzden bir fonksiyon türünde yazılabilir.
 - **İleri başvurular `defsignature` ile bildirilir** (aşağıda). Bildirilmemiş bir ad, tanımından önce
   çağrılamaz; çünkü üst düzey, kaynak sırasıyla her seferinde bir form denetlenir ve çalıştırılır.
-- Trait sınırlarını zorunlu kılmak için gövdeden hemen önce bir `where` yan tümcesi yazın:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- Trait sınırlarını zorunlu kılmak için gövdeden hemen önce bir `:where` yan tümcesi yazın:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   (bir ilişkili türü `(AssocName ConcreteType)` ile sabitlemek isteğe bağlıdır).
-- **Docstring'ler**: gövdenin başındaki, varsa `where` yan tümcesinden hemen sonraki bir string sabiti
+- **Docstring'ler**: gövdenin başındaki, varsa `:where` yan tümcesinden hemen sonraki bir string sabiti
   docstring olur (CL'deki gibi). Ancak yalnızca onu en az bir gövde formu izlediğinde: tek başına bir
   string dönüş değeri olarak kalır ve docstring sayılmaz: `(defun f () string "doc" "value")` bir
   docstring'e sahiptir ve `"value"` döndürür; `(defun f () string "value")` ise docstring'e sahip değildir
@@ -624,7 +629,7 @@ değiştirilemez (`setf` bir hatadır).
   (pub name ...))                                      ; türün modülü dışında da açık
 
 ; genel bir tür
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 `defstruct` (3.6) veya `defenum` (3.7) ile tanımlanan bir türe metot verir. Rust'ın içsel impl'ine
@@ -647,7 +652,7 @@ değiştirilemez (`setf` bir hatadır).
 - Yalnızca programın kendi türleri için yazılabilir. `Vector`, `Option` veya `int` gibi standart
   kütüphane türleri için yazılamaz (hata `... is a standard library type` der). Standart bir türe işlem
   eklemek için bir trait tanımlayıp o tür için `impl`'ini yazın.
-- `(impl X ...)` içinde `X`'ten sonra bir öğe (bir liste), bir `where` ya da hiçbir şey geliyorsa bu
+- `(impl X ...)` içinde `X`'ten sonra bir öğe (bir liste), bir `:where` ya da hiçbir şey geliyorsa bu
   içsel impl'dir; bir ad geliyorsa bir trait'in `impl`'idir (`(impl Trait Type ...)`, 3.9).
 
 ```lisp
@@ -740,7 +745,7 @@ ortak) ya da hepsini somut tür olarak (`Box<int>`, yalnızca o örneklenme içi
   `the` içinde aynı `unknown type` hatasını verir. Bu yüzden birbirine başvuran iki tür yazılamaz.
 - **Tür değişkenleri yalnızca bildirim konumlarında yazılanlardır.** `defun`/`defstruct`/`defenum`/`deftype`
   için adın `<T>`'si; içsel bir `impl` için hedef tür (`(impl box<T> ...)`) ve her metodun adındaki `<U>`;
-  bir trait'in `impl`'i için hedef tür ve `impl<T>`; `deftrait` için `Self` ve `(type Item)`'ın ilişkili
+  bir trait'in `impl`'i için hedef tür ve `impl<T>`; `deftrait` için `Self` ve `(:type Item)`'ın ilişkili
   türleri. Başka bir yerde (argümanlar, dönüş değeri, gövdedeki `the`/`lambda`) ilk kez görünen bir ad
   tür değişkeni olmaz; `unknown type` olur.
 - **Docstring'ler**: adın hemen ardından, alanlardan önce gelen bir string sabiti docstring olur
@@ -879,19 +884,19 @@ değil**.
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; the supertrait list is required; () if none
-  (type AssocName)                       ; associated types (any number, optional)
+  (:type AssocName)                       ; associated types (any number, optional)
   (method-name ((self Self) params...) RetType)          ; no body = must be implemented
   (method-name ((self Self) params...) RetType body...)) ; with a body = default implementation
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; bounds applying to the whole impl (optional)
-  (type AssocName ConcreteType)          ; makes an associated type concrete
+  (:where (Trait A)...)                   ; bounds applying to the whole impl (optional)
+  (:type AssocName ConcreteType)          ; makes an associated type concrete
   (method-name (recv params...) RetType body...))
 ```
 
 `impl` aracılığıyla her metot `TargetType`'ın bir metodu olarak kaydedilir ve içsel bir `impl`'in (3.5)
 metodu gibi çağrılır. Bir trait'in `impl`'inin metotları `pub` olmadan da her zaman açıktır. Trait'lere
-genel fonksiyonların `where` yan tümcelerinde trait sınırı olarak başvurulur (bkz. [3.1 defun](#31-defun--fonksiyon-tanımları)). Bir trait adı
+genel fonksiyonların `:where` yan tümcelerinde trait sınırı olarak başvurulur (bkz. [3.1 defun](#31-defun--fonksiyon-tanımları)). Bir trait adı
 `m::Trait` gibi bir `::` yolu da olabilir.
 
 **Üst trait listesi (zorunlu)**: her zaman trait adının hemen ardından yazılır. Her eleman çıplak bir
@@ -907,7 +912,7 @@ trait adıdır ya da o trait'in ilişkili türleri varsa, **tüm ilişkili türl
 
 Mirasın üç etkisi vardır. (1) `impl Ord X`, `impl Eq X`'in **önce** yazılmasını gerektirir (yazma sırasıyla
 ilgili bir kural: REPL'de ve adım adım `load` ile belirlenimci olarak karara bağlanabilen tek biçim ve
-Rust'tan daha katı). (2) Yalnızca `(where (Ord T))` bile `Eq`'in metotlarını çağırmanıza izin verir. (3)
+Rust'tan daha katı). (2) Yalnızca `(:where (Ord T))` bile `Eq`'in metotlarını çağırmanıza izin verir. (3)
 `Eq`'in metotları bir `:dyn Ord` üzerinden çağrılabilir ve bir `:dyn Ord` değeri, bir `:dyn Eq`'in
 gerektiği yere olduğu gibi geçirilebilir (yukarı dönüşüm). Bir alt trait'in ebeveyniyle aynı adlı bir
 metodu yeniden bildirmesi ve iki ebeveynden aynı adlı metotlar miras alması, ikisi de hatadır (bir
@@ -915,7 +920,7 @@ vtable'ın ad başına bir yuvası vardır). Elmas miras tek bir yuvada birleşi
 
 **Varsayılan gerçekleştirmeler**: imzadan sonraki bir gövde, bir `impl` metodu atladığında kullanılır.
 Gövde, trait'in yazıldığı **modülün ad alanında** çözümlenir; bu yüzden o modülün genel olmayan
-fonksiyonlarını çağırabilir. Gövdeli metotlar `where` yan tümceleri ve docstring'ler de taşıyabilir.
+fonksiyonlarını çağırabilir. Gövdeli metotlar `:where` yan tümceleri ve docstring'ler de taşıyabilir.
 Gövde, Rust'taki gibi `Self` bir tür değişkeni olarak (`Self: trait'in kendisi` ile sınırlı) bırakılarak,
 **bildirim noktasında bir kez** tür denetiminden geçer: her `impl` ve her gerçekleştiren tür için
 başarısız olacak hatalar, hiçbir `impl`'in asla atlamadığı varsayılanlarda bile orada yakalanır.
@@ -924,7 +929,7 @@ geçer ve ilişkili türler kendilerine sabitlenir; bu yüzden `Item` döndüren
 gövdeyle eşleştirilir.
 
 **Örneklenme başına uygulamalar**: genel bir türün her örneklenmesi için ayrı bir `impl` olabilir
-(`(impl Show Box<int> ...)` ve `(impl Show Box<string> ...)`). `:dyn`, `where` sınırları, ilişkili türler
+(`(impl Show Box<int> ...)` ve `(impl Show Box<string> ...)`). `:dyn`, `:where` sınırları, ilişkili türler
 ve `print-object` örneklenme başına çalışır; `impl`'i olmayan bir örneklenme (`Box<f64>`) trait'i uygulamaz.
 Aynı trait hem `Box<T>` hem de `Box<int>` için uygulanamaz (3.5'teki metotlarla aynı kural). Üst trait'in o
 örneklenmede uygulanmış olması yeterlidir (`Box<int>`'in ya da `Box<T>`'nin bir `impl`'iyle).
@@ -936,7 +941,7 @@ bir anda gerçekleştirir.
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; no body at all; everything is the default
+(impl<T> Clamp T (:where (Ord T)))          ; no body at all; everything is the default
 ```
 
 **Somut bir tür onu gerçekten kullanana kadar hiçbir kod üretilmez** (tür başına bir kez, sıradan
@@ -944,11 +949,11 @@ tekilleştirmeyle aynı mekanizmayla). Bir trait'in en fazla bir blanket gerçek
 türün açık bir `impl`'i varsa o öncelik alır. Gövdenin tür denetimi üretimden ayrıdır: bildirim noktasında
 bir kez, **hedef bir tür değişkeni olarak bırakılarak** (Rust'taki gibi) yapılır; bu yüzden hiç
 kullanılmayan bir gerçekleştirmenin bile, bildirilen sınırlar altında her hedef için başarısız olacak
-hataları orada yakalanır. Sınırların haklı kıldığı çağrılar (`(where (Ord T))` altında `(less self other)`
+hataları orada yakalanır. Sınırların haklı kıldığı çağrılar (`(:where (Ord T))` altında `(less self other)`
 vb.), jenerik bir `defun`'un gövdesinde olduğu gibi geçer.
 
 **Docstring'ler**: bir `deftrait`, üst trait listesinin hemen ardından, öğelerden önce bir string sabiti
-olarak tüm trait için bir docstring'e sahip olabilir (`(deftrait Name () "doc" (type ...) (method ...)...)`).
+olarak tüm trait için bir docstring'e sahip olabilir (`(deftrait Name () "doc" (:type ...) (method ...)...)`).
 Gövdesiz bir imzanın docstring'i olamaz: sondaki bir string, bir varsayılan gerçekleştirmenin dönüş değeri
 olurdu; bu yüzden ikisi ayırt edilemezdi.
 
@@ -1197,11 +1202,11 @@ Bir testin `print` ile yazdıkları doğrudan standart çıktıya gider (yakalan
 (if cond then else)                 ; else is required (always three elements)
 (when cond body...)                 ; an if without else (Unit type). defmacro
 (unless cond body...)               ; the negation of when. defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; a list of keys: matches if any of them does
-  (else body...))                   ; expr is evaluated once. keys are compared with equal.
+  (:else body...))                   ; expr is evaluated once. keys are compared with equal.
                                      ; keys are "literals" and are not evaluated (as in CL).
                                      ; a bare symbol a means the symbol 'a.
                                      ; writing 'a is an error (use the bare a). defmacro
@@ -1301,7 +1306,7 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   oranlar — o türün `Eq::equals`'ıyla değere göre karşılaştırılır
   ([Standart Trait'ler](functions/traits.md#2-eq--ord-karşılaştırma)). String'ler kimliğe değil, içeriğe
   göre karşılaştırılır
-- `(= expr)` — herhangi bir ifadeyi değerlendirir ve `Eq::equals` ile karşılaştırır. Sabit sözdizimi
+- `(:= expr)` — herhangi bir ifadeyi değerlendirir ve `Eq::equals` ile karşılaştırır. Sabit sözdizimi
   olmayan türleri (`defstruct` örnekleri, globaller, hesaplanan sonuçlar) karşılaştırmanın tek yolu ve
   kullanıcı tanımlı bir `Eq` gerçekleştirmesi olduğu gibi karşılaştırma kuralı olur. `expr`, kolun
   konumundan görünen her şeye (bağımsız değişkenler, dış bağlamalar, globaller) başvurabilir
@@ -1325,7 +1330,7 @@ tek bir tane paylaşmasıyla aynı nedenle: bunlar aynı şeyi ayrıştıran iki
   tektir, bu yüzden her seçenek aynı değişkenleri aynı türlerle bağlamalıdır. Bir yapıcı örüntüsünün
   içine de yazılabilir (`(some (:or (circle r) (rect r _)))`)
 
-`Eq`'i gerçekleştirmeyen bir türü bir değer sabitiyle / `(= expr)` ile karşılaştırmak tür hatasıdır (bu
+`Eq`'i gerçekleştirmeyen bir türü bir değer sabitiyle / `(:= expr)` ile karşılaştırmak tür hatasıdır (bu
 dil, sessizce asla eşleşmeyen bir kolu bırakmak yerine "bunlar karşılaştırılamaz" demeyi seçer).
 
 **Korumalar**: örüntünün ardından `:when koşul` yazmak, kolu yalnızca örüntü eşleştiğinde ve ayrıca
@@ -1357,7 +1362,7 @@ gibi yazılabilir ve içeriğe göre eşleşir:
 Anlık olmayan sabitler (string'ler / kayan noktalı sayılar / bignum tamsayılar / oranlar) bir `Sexpr`'e
 karşı **yazılamaz**. Bunların `eq`'i nesne kimliğini karşılaştırır; bu da "tür denetiminden geçen ama asla
 eşleşmeyen bir kol" yapardı; bu yüzden varyant örüntüsünü adlandıran bir hatadır: `(str "hi")` yazın;
-bir `string`'e ayrıştırılır ve içeriğe göre karşılaştırılır. `(= expr)` açıkça `equals` ister; bu yüzden
+bir `string`'e ayrıştırılır ve içeriğe göre karşılaştırılır. `(:= expr)` açıkça `equals` ister; bu yüzden
 bu kısıtlama ona uygulanmaz.
 
 **Denetlenen değerin bir ADT olması gerekmez.** `string`/`symbol`/`i32`/`f64` ve benzerleri doğrudan
@@ -1517,13 +1522,12 @@ basit döngü olarak kalır ve mevcut `loop`'ların anlamı değişmez (CL'nin k
 
 CL yan tümce sözcüklerini çıplak semboller olarak yazar (`(loop for i from 1 to 3 collect i)`), ancak
 burada **hepsi anahtar sözcüktür**: çıplak bir `for` yalnızca bir değişken başvurusu olurdu ve anahtar
-sözcük olmak, onu basit bir döngüden ayıran şeydir. İstisna, bir değişkeni bir değerden ayıran `=`'tir:
-konumu belirsiz değildir; bu yüzden çıplak ya da bir anahtar sözcük (`:=`) olarak okunur.
+sözcük olmak, onu basit bir döngüden ayıran şeydir. Bir değişkeni değerinden ayıran sözcük de istisna değildir: `:=` olarak yazılır.
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1532,11 +1536,11 @@ konumu belirsiz değildir; bu yüzden çıplak ya da bir anahtar sözcük (`:=`)
 
 | Yan tümce | Anlamı |
 |---|---|
-| `:with v = e` | Bir kez bağlar. Önceki yan tümcelerin değişkenlerini okuyabilir |
+| `:with v := e` | Bir kez bağlar. Önceki yan tümcelerin değişkenlerini okuyabilir |
 | `:for v :in s` / `:for v :across s` | Bir `Iter`'in elemanları sırayla. CL'nin liste/vektör ayrımı burada yoktur; bu yüzden bunlar aynı yan tümcenin iki yazımıdır |
 | `:for v :on s` | Ardışık **sonekler**. CL paylaşılan kuyruk cons'unu geçirir, ancak bir `Iter`'in paylaşılacak kuyruğu yoktur; bu yüzden her biri yeni bir `Vector`'dür |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | Sayma. `:downfrom`/`:upfrom` da çalışır |
-| `:for v = e [:then f]` | `e` ile başlar ve ikinci seferden itibaren `f` kullanır (`:then` olmadan her seferinde `e`) |
+| `:for v := e [:then f]` | `e` ile başlar ve ikinci seferden itibaren `f` kullanır (`:then` olmadan her seferinde `e`) |
 | `:repeat n` | O kadar kez yineler |
 
 Birkaç `:for` ile bunlar **paralel olarak** ilerler ve herhangi biri tükenir tükenmez döngü biter.
@@ -1856,7 +1860,7 @@ Okuyucunun **belirli bir karakterle karşılaştığında ne yaptığı** progra
 okunmamış metin üzerinde bir akıştır** ve ikincisi **onu tetikleyen karakterdir** (dağıtım için ikinci
 karakter). Dönüş değeri o noktada okunan veri olur. Akış, `:dyn PeekInput` değil, somut bir türdür; çünkü
 okuyucu her zaman bu tek türü geçirir: `read-sexpr` / `read-char` / `peek-char` / `unread-char` /
-`read-delimited-list`'in hepsi `(where (PeekInput S))` alır; bu yüzden hepsi somut türde olduğu gibi
+`read-delimited-list`'in hepsi `(:where (PeekInput S))` alır; bu yüzden hepsi somut türde olduğu gibi
 çalışır.
 
 ```lisp
@@ -1966,17 +1970,17 @@ C fonksiyonu (`defffi`) çağırmak yalnızca o thread'i durdurur ve diğer task
 (select
   ((v (recv ch1)) body...)          ; a receive arm. v is bound to an Option<T>
   ((send ch2 x) body...)            ; a send arm
-  (else body...))                   ; optional. **if written, it goes last**
+  (:else body...))                   ; optional. **if written, it goes last**
 ```
 
-- **`else` ile bloke olmaz** (Go'nun `default`'u). Olmadan biri mümkün olana kadar bekler.
+- **`:else` ile bloke olmaz** (Go'nun `default`'u). Olmadan biri mümkün olana kadar bekler.
 - **Birkaçı aynı anda mümkünse biri rastgele seçilir** (yazılan sırayla olsaydı sonraki kollar açlıktan
   ölürdü).
 - Bir alma kolunun `v`'si bir **`Option<T>`**'dir. Kapalı bir kanal "bir yanıttır", kolu atlama nedeni
   değildir; bu yüzden kolun içinde ona `match` uygulayın.
 - Tür, **tüm kolların gövdelerinin türlerinin birleşimidir** (`match` kollarıyla aynı kural).
 - Sıfır kollu `(select)` bir tür hatasıdır (Go'nun sonsuza dek bloke olan `select{}`'ı benimsenmemiştir).
-  Yalnızca `else` içeren bir `select` de öyledir; çünkü gövdeyi doğrudan yazmakla aynıdır.
+  Yalnızca `:else` içeren bir `select` de öyledir; çünkü gövdeyi doğrudan yazmakla aynıdır.
 
 **Kanal ifadeleri ve gönderilecek değerler, hangi kol seçilirse seçilsin, soldan sağa bir kez
 değerlendirilir** (`case`'in anahtarları için sahip olduğu aynı disiplin).

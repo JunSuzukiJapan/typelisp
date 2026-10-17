@@ -75,7 +75,7 @@ fn run_with_prelude_under_gc_stress(src: &str) -> Result<(Value, Heap), EvalErro
 /// only ever holds symbols and conses).
 fn sexpr_to_string(heap: &Heap, v: Value) -> String {
     match v {
-        Value::Symbol(id) => heap.symbol_name(id).to_string(),
+        Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
         Value::Cons(_) => {
             let mut parts = Vec::new();
             let mut cur = v;

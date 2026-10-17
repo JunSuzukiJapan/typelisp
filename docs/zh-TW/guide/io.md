@@ -76,10 +76,10 @@
 
 ### 讓讀寫函式通用
 
-串流的型別各不相同，但共同的操作整理在 trait 中。以 `(where (CharInput S))` 接收引數，函式就能從檔案、字串、socket 中的任何一種讀取。
+串流的型別各不相同，但共同的操作整理在 trait 中。以 `(:where (CharInput S))` 接收引數，函式就能從檔案、字串、socket 中的任何一種讀取。
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

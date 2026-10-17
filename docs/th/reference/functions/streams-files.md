@@ -12,8 +12,8 @@ trait และเมทอดของสตรีม ชนิดสตรี�
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; character input
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; character output
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; input that can push back one character
@@ -22,7 +22,7 @@ trait และเมทอดของสตรีม ชนิดสตรี�
 ```
 
 ฟังก์ชันที่อ่านอักขระรับชนิดสตรีมใดก็ได้ ไม่ว่าจะมีให้ในตัวหรือผู้ใช้นิยาม หากรับ
-`(where (CharInput S))` หรือ `:dyn CharInput`
+`(:where (CharInput S))` หรือ `:dyn CharInput`
 
 ## 2. เมทอด
 
@@ -172,7 +172,7 @@ pathname designator ของ CL แก้ไขผ่าน trait `Pathish` แ
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
@@ -238,7 +238,7 @@ pathname designator ของ CL แก้ไขผ่าน trait `Pathish` แ
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | เติมส่วนประกอบที่ขาดจาก `p` จาก `default` `p` แบบสัมพัทธ์ไปอยู่ใต้ไดเรกทอรีของ `default` `p` แบบสัมบูรณ์คงไดเรกทอรีของตัวเอง |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | รูปแบบที่สัมพัทธ์กับ `default` ทั้งหมดของ `p` หากไม่ได้อยู่ใต้ฐาน |
 
-อาร์กิวเมนต์ชนิดทั้งหมดมี `(where (Pathish P))`
+อาร์กิวเมนต์ชนิดทั้งหมดมี `(:where (Pathish P))`
 
 ## 10. ความแตกต่างจาก CL
 

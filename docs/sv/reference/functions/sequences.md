@@ -84,9 +84,10 @@ automatiskt i den andra riktningen.
 
 | Namn | Form | Typ | Beskrivning |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Tar ut symbolens namn |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Skapar en symbol från en sträng (internerar den) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Om det är ett keyword (`:name`). Kolonet är en del av namnet, så testet tittar på det första tecknet ([Syntaxreferens](../syntax.md#1-lexikaliska-element)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Tar ut symbolens namn. Ett keywords namn har inget kolon (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Skapar en symbol från en sträng (internerar den i rotmodulen) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Skapar symbolen `name` i namnrymden `namespace` (CL:s `intern`). `namespace` är en modulsökväg från roten (`"geometry::shapes"`); `"keyword"` är keywordens och `""` roten. Utelämnad är det modulen där anropet står |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Om det är ett keyword, det vill säga om den hör till keyword-namnrymden ([Syntaxreferens](../syntax.md#1-lexikaliska-element)) |
 
 För `gensym`, se [Makron](system.md#8-makron).
 

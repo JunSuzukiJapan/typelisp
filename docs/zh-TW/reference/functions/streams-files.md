@@ -9,8 +9,8 @@ CL 以類別階層表示的東西，在這裡以 **trait 階層**表示。方向
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; 字元輸入
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; 字元輸出
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; 可以推回一個字元的輸入
@@ -18,7 +18,7 @@ CL 以類別階層表示的東西，在這裡以 **trait 階層**表示。方向
 (deftrait ByteOutput ((OutputStream (Item int))) ...)    ; 位元組輸出
 ```
 
-讀取字元的函式只要接受 `(where (CharInput S))` 或 `:dyn CharInput`，就能接受任何串流型別，無論是內建的還是使用者定義的。
+讀取字元的函式只要接受 `(:where (CharInput S))` 或 `:dyn CharInput`，就能接受任何串流型別，無論是內建的還是使用者定義的。
 
 ## 2. 方法
 
@@ -156,7 +156,7 @@ CL 在**呼叫**中決定元素型別，如 `(open name :element-type '(unsigned
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 其餘方法全部使用預設實作
 
@@ -218,7 +218,7 @@ CL 在**呼叫**中決定元素型別，如 `(open name :element-type '(unsigned
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | 以 `default` 補上 `p` 中沒有的成分。相對的 `p` 放在 `default` 的目錄下，絕對的 `p` 保持自己的目錄 |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | 以 `default` 為基準的相對表示。不在基準之下時為 `p` 的全部 |
 
-型別引數都帶有 `(where (Pathish P))`。
+型別引數都帶有 `(:where (Pathish P))`。
 
 ## 10. 與 CL 的差異
 

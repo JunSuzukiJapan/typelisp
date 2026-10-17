@@ -227,7 +227,7 @@ entorno global de inmediato y de forma permanente.
 
 | Forma | Posición de la docstring |
 |---|---|
-| `defun` / métodos de `impl` / `defmacro` | Al principio del cuerpo (tras el tipo de retorno y la cláusula `where`). Solo cuando la sigue al menos una forma del cuerpo; una cadena sola sigue siendo el valor de retorno |
+| `defun` / métodos de `impl` / `defmacro` | Al principio del cuerpo (tras el tipo de retorno y la cláusula `:where`). Solo cuando la sigue al menos una forma del cuerpo; una cadena sola sigue siendo el valor de retorno |
 | `defvar` / `defconstant` | **Después** del valor inicial: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Justo después** del nombre, antes de los campos/variantes |
 | `deftype` | **Justo después** del nombre, antes del tipo: `(deftype meters "doc" i32)` |

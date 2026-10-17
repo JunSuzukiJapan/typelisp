@@ -45,25 +45,25 @@
 
 ## 2. قيود السمات: "أي نوع ينفّذ هذه السمة"
 
-يمكنك وضع شرط على معامل نوع في دالة عامة بـ `where`. ويسمى هذا **قيد سمة (trait bound)**.
+يمكنك وضع شرط على معامل نوع في دالة عامة بـ `:where`. ويسمى هذا **قيد سمة (trait bound)**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-بفضل `(where (Shape T))` يمكن للجسم استخدام `name` و`area` على قيم `T`. وبدون القيد لا يُعرف شيء عن
+بفضل `(:where (Shape T))` يمكن للجسم استخدام `name` و`area` على قيم `T`. وبدون القيد لا يُعرف شيء عن
 `T` فلا يمكن استدعاؤهما.
 
 وتمرير نوع لا ينفّذ `Shape` خطأ في الأنواع عند الاستدعاء.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 تحصل الدالة العامة على نسخة خاصة بها لكل نوع تُستدعى به. ولا تدخل فيها اختبارات أنواع ولا تفرعات وقت
@@ -96,7 +96,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | السمة | التوابع الواجب تنفيذها | ما تتيحه |
 |---|---|---|
-| `Eq` | `equals` | `member` و`find` و`position` ونمط `(= expr)` في `match` وغيرها |
+| `Eq` | `equals` | `member` و`find` و`position` ونمط `(:= expr)` في `match` وغيرها |
 | `Ord` | `less` | `less-equal` و`greater` وغيرها. وترث `Ord` من `Eq` |
 | `print-object` | `print-object` | كيف تعرض `println` وأخواتها القيم |
 | `Iter` | `next` | `doiter` و`map` و`filter` و`sort` وغيرها |
@@ -132,7 +132,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -175,7 +175,7 @@ total 9
 
 الاختيار بين قيود السمات في القسم 2 و`:dyn`:
 
-| | قيد السمة (`where`) | `:dyn Trait` |
+| | قيد السمة (`:where`) | `:dyn Trait` |
 |---|---|---|
 | متى يتحدد التابع المستدعى | قبل التشغيل | وقت التشغيل |
 | خلط الأنواع في `Vector` واحد | غير ممكن | ممكن |

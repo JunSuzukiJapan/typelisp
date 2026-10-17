@@ -10,7 +10,7 @@
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -22,7 +22,7 @@
 
 ## 2. `Eq` / `Ord`（比較）
 
-Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジェネリック関数の `where` 境界で
+Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジェネリック関数の `:where` 境界で
 要素型の比較を要求するのに使う（`sort`/`member`/`assoc` 等）。
 
 ```lisp
@@ -71,7 +71,7 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -82,12 +82,12 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 (deftrait Number (Add Sub Mul Rem Ord))                   ; メソッド無し・5つの合成
 ```
 
-**境界内では演算子で書ける。** `where` で束縛された型変数が受け手のとき、演算子は
+**境界内では演算子で書ける。** `:where` で束縛された型変数が受け手のとき、演算子は
 トレイトメソッドへ読み替えられる（`+`→`add`、`-`→`sub`、`*`→`mul`、`/`→`div`、
 `rem`→`remainder`、`logand`→`bit-and`、`=`→`equals`、`<`→`less` …）:
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -100,5 +100,5 @@ Rust の `PartialEq`/`PartialOrd` に当たる（名前は `Eq`/`Ord`）。ジ�
 **`Div` は結果の型を関連型 `Output` で名乗る。** CL と同じく整数どうしの `/` は `rational` なので、
 `int` の `Output` は `rational`、ほかの数値型は自分自身。`Output` が型ごとに違うため `Number` には
 `Div` を含めない（継承リストでは関連型をすべて固定する必要がある）。割り算をするジェネリック関数は
-`(where (Div T (Output R)))` で結果の型を受け取るか、`(where (Div T (Output T)))` で `T` の中に
+`(:where (Div T (Output R)))` で結果の型を受け取るか、`(:where (Div T (Output T)))` で `T` の中に
 閉じた割り算を要求する（この場合 `int` は渡せない）。

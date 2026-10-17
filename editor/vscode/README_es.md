@@ -14,8 +14,8 @@ comprueba de forma mecánica (véase más abajo).
   - Nombres definidos (`(defun NAME ...)` como función, `(defstruct NAME ...)` como tipo,
     `(defvar (NAME ...))` como variable; lo mismo con `pub`, como en `(pub defun NAME ...)`) y los
     dos nombres de `(impl Trait Type)`
-  - Palabras clave de espacios de nombres y declaraciones (`pub` `module` `use` `load` `impl`
-    `where`) y marcadores de lista lambda (`&rest` `&optional` `&key`)
+  - Palabras clave de espacios de nombres y declaraciones (`pub` `module` `use` `load` `impl`)
+    y marcadores de lista lambda (`&rest` `&optional` `&key`)
   - Funciones integradas, tipos primitivos (incluidos `bignum` / `ratio`), tipos de error
     integrados, tipos de usuario `Capitalized` y el tipo de objeto trait `:dyn Trait` (también
     dentro de argumentos genéricos)

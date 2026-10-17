@@ -77,11 +77,11 @@
 
 ### 让读写函数通用
 
-流的类型各不相同，但共同的操作归纳在 trait 中。用 `(where (CharInput S))` 接收参数，函数就能从文件、字符串、套接字
+流的类型各不相同，但共同的操作归纳在 trait 中。用 `(:where (CharInput S))` 接收参数，函数就能从文件、字符串、套接字
 中的任何一种读取。
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

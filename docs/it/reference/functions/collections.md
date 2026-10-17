@@ -104,7 +104,7 @@ passa il vettore attraverso `iter`, come in `(map (iter v) f)`. Le operazioni di
 | `size` | `(size h)` | `HashTable<K,V>→int` | Il `hash-table-size` di CL. In questa tabella è il numero di voci occupate (uguale a `count`) |
 
 **Qualsiasi tipo che implementi `Hash` può essere una chiave**, compresi i tipi `defstruct`/`defenum`.
-`get`/`set`/`remove` portano `(where (Hash K))`, quindi una tabella con chiave di un tipo che non lo
+`get`/`set`/`remove` portano `(:where (Hash K))`, quindi una tabella con chiave di un tipo che non lo
 implementa è un **errore di tipo** (`f64` non ha `Hash` a causa di `NaN`).
 
 ```lisp

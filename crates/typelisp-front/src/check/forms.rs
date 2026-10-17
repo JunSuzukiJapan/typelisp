@@ -21,7 +21,7 @@
 //! the rooting discipline comes from [`crate::check::core`] (see its module doc
 //! comment for why a raw `cons` is not enough).
 
-use typelisp_mem::{Error, Heap, Loc, RootScope, Value};
+use typelisp_mem::{wk, Error, Heap, Loc, RootScope, Value};
 
 use crate::check::checker::MacroLambda;
 use crate::check::core::{self, Checked, Items};
@@ -637,7 +637,7 @@ pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
         // ride along as the head's arguments, which is where
         // `types::parse_dyn_type` reads them back out of.
         Type::Dyn(p, pins) => {
-            let head = heap.intern_symbol(":dyn");
+            let head = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::DYN));
             let mut s = RootScope::new(heap);
             s.push_root(head);
             let inner = type_to_form(&mut s, &Type::Named(p.clone(), pins.clone()))?;

@@ -46,26 +46,26 @@ Ook maar één van de methoden die de trait declareert weglaten is een typefout 
 
 ## 2. Trait bounds: "elk type dat deze trait implementeert"
 
-Met `where` kun je een voorwaarde stellen aan de typeparameter van een generieke functie. Dit heet
+Met `:where` kun je een voorwaarde stellen aan de typeparameter van een generieke functie. Dit heet
 een **trait bound**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Dankzij `(where (Shape T))` kan de body `name` en `area` op waarden van `T` gebruiken. Zonder de
+Dankzij `(:where (Shape T))` kan de body `name` en `area` op waarden van `T` gebruiken. Zonder de
 bound is niets over `T` bekend, dus ze konden niet worden aangeroepen.
 
 Een type doorgeven dat `Shape` niet implementeert is een typefout bij de aanroep.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Een generieke functie krijgt een eigen kopie voor elk type waarmee ze wordt aangeroepen. Er zijn geen
@@ -99,7 +99,7 @@ gebruiken beschikbaar voor je type.
 
 | Trait | Te implementeren methoden | Wat het mogelijk maakt |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, het patroon `(= expr)` van `match`, enzovoort |
+| `Eq` | `equals` | `member`, `find`, `position`, het patroon `(:= expr)` van `match`, enzovoort |
 | `Ord` | `less` | `less-equal`, `greater` enzovoort. `Ord` erft van `Eq` |
 | `print-object` | `print-object` | Hoe waarden door `println` en verwanten worden getoond |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` enzovoort |
@@ -136,7 +136,7 @@ implementeert.
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -184,7 +184,7 @@ total 9
 
 Kiezen tussen de trait bounds van paragraaf 2 en `:dyn`:
 
-| | Trait bound (`where`) | `:dyn Trait` |
+| | Trait bound (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Wanneer de aangeroepen methode wordt bepaald | Voor het uitvoeren | Tijdens runtime |
 | Types mengen in één `Vector` | Niet mogelijk | Mogelijk |

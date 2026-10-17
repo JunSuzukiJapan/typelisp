@@ -14,7 +14,7 @@ const DEFS: &str = r##"
   (pub scaled ((self Self) (k f64) &optional (dk f64 0.0)) Point
     (make-instance 'Point :x (* self::x (+ k dk)) :y (* self::y k))))
 (defstruct Box<T> (v T))
-(impl Box<T> (where (print-object T))
+(impl Box<T> (:where (print-object T))
   (pub show (self) string (format false "box:~a" (print-object self::v false)))
   (pub map<U> (self (f (fn (T) U))) Box<U> (make-instance 'Box :v (f self::v))))
 "##;

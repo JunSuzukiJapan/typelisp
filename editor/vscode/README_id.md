@@ -14,7 +14,7 @@ mekanis (lihat di bawah).
   - Nama yang didefinisikan (`(defun NAME ...)` sebagai fungsi, `(defstruct NAME ...)` sebagai tipe,
     `(defvar (NAME ...))` sebagai variabel; sama dengan `pub`, seperti `(pub defun NAME ...)`) dan
     kedua nama pada `(impl Trait Type)`
-  - Keyword ruang nama dan deklarasi (`pub` `module` `use` `load` `impl` `where`) dan penanda daftar
+  - Keyword ruang nama dan deklarasi (`pub` `module` `use` `load` `impl`) dan penanda daftar
     lambda (`&rest` `&optional` `&key`)
   - Fungsi bawaan, tipe primitif (termasuk `bignum` / `ratio`), tipe kesalahan bawaan, tipe
     buatan pengguna berawalan huruf kapital (`Capitalized`), dan tipe objek trait `:dyn Trait`

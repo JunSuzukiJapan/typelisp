@@ -28,9 +28,8 @@ use typelisp_mem::{symbols, wk, Error, Heap, Loc, NsId, SymRef, TypeKeyId, Value
 
 /// The feature set consulted by `#+`/`#-` reader conditionals (CLHS 24.1.2 —
 /// the closest an s-expression reader has to a preprocessor). A feature is
-/// named by its keyword spelling (`:darwin`, `:unix`, `:my-flag`, ...);
-/// membership is checked case-insensitively, matching `Heap::intern_symbol`'s
-/// own folding.
+/// a keyword (`:darwin`, `:unix`, `:my-flag`, ...), held as the keyword
+/// symbol itself, so membership is the identity of the keyword read.
 ///
 /// Unlike CL's `*features*` — an ordinary mutable special variable a program
 /// can `push`/`pushnew` into mid-file, so a later top-level form sees an
@@ -42,7 +41,7 @@ use typelisp_mem::{symbols, wk, Error, Heap, Loc, NsId, SymRef, TypeKeyId, Value
 /// [`Features::host`] and extendable with caller-supplied names via
 /// [`Reader::with_features`] (the `typl` CLI's `--feature` flag).
 #[derive(Clone, Debug, Default)]
-pub struct Features(HashSet<String>);
+pub struct Features(HashSet<SymRef>);
 
 impl Features {
     /// The default set: `:typelisp`, the host architecture, and the host OS
@@ -50,40 +49,39 @@ impl Features {
     /// platform features (e.g. SBCL's `:unix` / `:darwin` / `:x86-64`).
     pub fn host() -> Features {
         let mut set = HashSet::new();
-        set.insert(":typelisp".to_string());
-        set.insert(format!(":{}", std::env::consts::ARCH));
+        let mut add = |name: &str| set.insert(symbols::intern_keyword(name));
+        add("typelisp");
+        add(std::env::consts::ARCH);
         match std::env::consts::OS {
             "macos" => {
-                set.insert(":darwin".to_string());
-                set.insert(":macos".to_string());
+                add("darwin");
+                add("macos");
             }
             other => {
-                set.insert(format!(":{}", other));
+                add(other);
             }
         }
         if cfg!(unix) {
-            set.insert(":unix".to_string());
+            add("unix");
         }
         if cfg!(windows) {
-            set.insert(":windows".to_string());
+            add("windows");
         }
         Features(set)
     }
 
-    /// This feature set with `extra` names also present, each folded to
-    /// lowercase and given a leading `:` if it doesn't already have one —
-    /// callers may pass either `"my-feature"` or `":my-feature"`.
+    /// This feature set with the keywords `extra` names also present —
+    /// callers may pass either `"my-feature"` or `":my-feature"` (the
+    /// `--feature` flag's text, where the colon is optional spelling).
     pub fn with(mut self, extra: impl IntoIterator<Item = String>) -> Features {
         for name in extra {
-            let name = name.to_lowercase();
-            let name = if name.starts_with(':') { name } else { format!(":{}", name) };
-            self.0.insert(name);
+            self.0.insert(symbols::intern_keyword(name.strip_prefix(':').unwrap_or(&name)));
         }
         self
     }
 
-    fn has(&self, name: &str) -> bool {
-        self.0.contains(name)
+    fn has(&self, feature: SymRef) -> bool {
+        self.0.contains(&feature)
     }
 }
 
@@ -569,14 +567,13 @@ fn skip_feature_conditional(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> 
 fn eval_feature_expr(heap: &Heap, features: &Features, v: Value) -> Result<bool, Error> {
     match v {
         Value::Symbol(id) => {
-            let name = heap.symbol_name(id);
-            if !name.starts_with(':') {
+            if !id.is_keyword() {
                 return Err(Error::ReadError(format!(
                     "feature expression must be a keyword (e.g. `:darwin`) or an `(and/or/not ...)` form, found `{}`",
-                    name
+                    heap.symbol_spelling(id)
                 )));
             }
-            Ok(features.has(name))
+            Ok(features.has(id))
         }
         Value::Cons(_) => {
             let op_sym = heap.car(v)?;
@@ -585,7 +582,6 @@ fn eval_feature_expr(heap: &Heap, features: &Features, v: Value) -> Result<bool,
                     "feature expression list must start with `and`, `or`, or `not`".to_string(),
                 ));
             };
-            let op = heap.symbol_name(op_id).to_string();
             let mut operands = Vec::new();
             let mut rest = heap.cdr(v)?;
             loop {
@@ -598,8 +594,8 @@ fn eval_feature_expr(heap: &Heap, features: &Features, v: Value) -> Result<bool,
                     _ => return Err(Error::ReadError("feature expression must be a proper list".to_string())),
                 }
             }
-            match op.as_str() {
-                "and" => {
+            match op_id.well_known() {
+                wk::AND => {
                     for o in operands {
                         if !eval_feature_expr(heap, features, o)? {
                             return Ok(false);
@@ -607,7 +603,7 @@ fn eval_feature_expr(heap: &Heap, features: &Features, v: Value) -> Result<bool,
                     }
                     Ok(true)
                 }
-                "or" => {
+                wk::OR => {
                     for o in operands {
                         if eval_feature_expr(heap, features, o)? {
                             return Ok(true);
@@ -615,13 +611,13 @@ fn eval_feature_expr(heap: &Heap, features: &Features, v: Value) -> Result<bool,
                     }
                     Ok(false)
                 }
-                "not" => {
+                wk::NOT => {
                     if operands.len() != 1 {
                         return Err(Error::ReadError("`not` feature expression takes exactly one operand".to_string()));
                     }
                     Ok(!eval_feature_expr(heap, features, operands[0])?)
                 }
-                other => Err(Error::ReadError(format!("unknown feature expression operator: `{}`", other))),
+                _ => Err(Error::ReadError(format!("unknown feature expression operator: `{}`", heap.symbol_spelling(op_id)))),
             }
         }
         _ => Err(Error::ReadError(
@@ -697,16 +693,16 @@ fn read_datum_here(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Va
         // Nothing the reader knows opens with these, so meeting one where a
         // datum starts means its opener is missing (or it is a typo for `)`).
         Some(c @ (']' | '}')) => Err(Error::ReadError(format!("unexpected `{}`: nothing open for it to close", c))),
-        Some('\'') => read_wrapped(cur, heap, ctx, "quote"),
-        Some('`') => read_wrapped(cur, heap, ctx, "quasiquote"),
+        Some('\'') => read_wrapped(cur, heap, ctx, symbols::well_known_symbol(wk::QUOTE)),
+        Some('`') => read_wrapped(cur, heap, ctx, symbols::intern("quasiquote")),
         Some(',') => {
             let start = cur.loc(); // before the prefix, like read_wrapped
             cur.next(); // the ','
             if cur.peek() == Some('@') {
                 cur.next(); // the '@'
-                read_wrapped_body(cur, heap, ctx, "unquote-splicing", start)
+                read_wrapped_body(cur, heap, ctx, symbols::well_known_symbol(wk::UNQUOTE_SPLICING), start)
             } else {
-                read_wrapped_body(cur, heap, ctx, "unquote", start)
+                read_wrapped_body(cur, heap, ctx, symbols::well_known_symbol(wk::UNQUOTE), start)
             }
         }
         Some('"') => read_string(cur, heap),
@@ -728,7 +724,7 @@ fn read_datum_here(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Va
                 if matches!(cur.peek(), None | Some(')')) {
                     return Err(Error::ReadError("`:dyn` must be followed by a trait name".to_string()));
                 }
-                return read_wrapped_body(cur, heap, ctx, ":dyn", start);
+                return read_wrapped_body(cur, heap, ctx, symbols::well_known_symbol(wk::DYN), start);
             }
             Ok(v)
         }
@@ -781,7 +777,7 @@ fn call_macro_char(
 /// 2-element list) to [`read_wrapped_body`] — `,@` needs to consume *two*
 /// prefix characters (`,` then `@`), so its caller in [`read_datum`] does
 /// that part itself and calls `read_wrapped_body` directly.
-fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, head: &str) -> Result<Value, Error> {
+fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, head: SymRef) -> Result<Value, Error> {
     let start = cur.loc(); // the prefix character — where the whole form begins
     cur.next(); // the prefix character
     read_wrapped_body(cur, heap, ctx, head, start)
@@ -794,12 +790,12 @@ fn read_wrapped(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, head: &str) -> 
 /// head cell's `cons_loc` spans prefix through datum end, the `head` symbol's
 /// `elem_loc` covers the prefix character(s), and the datum's `elem_loc` its
 /// own span.
-fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, head: &str, start: Loc) -> Result<Value, Error> {
+fn read_wrapped_body(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, head: SymRef, start: Loc) -> Result<Value, Error> {
     let head_loc = start.clone().with_end(cur.line, cur.col); // the consumed prefix
     let (d, d_loc) = read_datum_spanned(cur, heap, ctx)?;
     let form_loc = start.with_end(cur.line, cur.col);
     heap.push_root(d);
-    let q = heap.intern_symbol(head); // symbols are permanent; no rooting needed
+    let q = Value::Symbol(head); // symbols are permanent; no rooting needed
     let result = (|| {
         let inner = heap.cons(d, Value::Empty)?;
         if let Value::Cons(cr) = inner {
@@ -1431,7 +1427,24 @@ fn read_char(cur: &mut Cursor) -> Result<Value, Error> {
 
 fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error> {
     let mut tok = String::new();
+    // CL's multiple escape: what stands between `|`s is taken as written,
+    // delimiters included, and a token with any is a plain symbol — never a
+    // keyword, a number, a boolean or a path. `|:foo|` is how the printer
+    // writes a symbol whose name starts with a colon.
+    let mut escaped = false;
     while let Some(c) = cur.peek() {
+        if c == '|' {
+            cur.next();
+            loop {
+                match cur.next() {
+                    Some('|') => break,
+                    Some(c) => tok.push(c),
+                    None => return Err(Error::ReadError("end of input inside `|...|`".to_string())),
+                }
+            }
+            escaped = true;
+            continue;
+        }
         if is_delimiter(c) {
             break;
         }
@@ -1449,8 +1462,13 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error
         tok.push(c);
         cur.next();
     }
+    if escaped {
+        return Ok(heap.intern_symbol_in(ns, &tok));
+    }
     // tok is non-empty: read_datum only dispatches here on a non-delimiter.
-    validate_keyword(&tok)?;
+    if let Some(name) = keyword_name(&tok)? {
+        return Ok(Value::Symbol(symbols::intern_keyword(name)));
+    }
     if let Some(v) = parse_number(heap, &tok)? {
         return Ok(v);
     }
@@ -1617,9 +1635,12 @@ fn type_args_error(tok: &str, what: &str) -> Error {
 /// syntax (`split_path_top_level` turns it into a `Value::Path` whose first
 /// segment is empty, "from root"), not a keyword. Only a lone leading `:`
 /// starts a keyword.
-fn validate_keyword(tok: &str) -> Result<(), Error> {
+///
+/// A well-formed keyword token gives the keyword's name — the token without
+/// its colon, which spells the keyword and is no part of the name.
+fn keyword_name(tok: &str) -> Result<Option<&str>, Error> {
     if !tok.starts_with(':') || tok.starts_with("::") {
-        return Ok(());
+        return Ok(None);
     }
     if tok.len() == 1 {
         return Err(Error::ReadError("`:` alone is not a keyword — write `:name`".to_string()));
@@ -1630,7 +1651,7 @@ fn validate_keyword(tok: &str) -> Result<(), Error> {
             tok
         )));
     }
-    Ok(())
+    Ok(Some(&tok[1..]))
 }
 
 /// Split a token on `::` occurring at `<>` nesting depth 0, so that

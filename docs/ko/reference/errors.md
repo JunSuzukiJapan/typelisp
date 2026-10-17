@@ -45,7 +45,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``unknown type `foo`: no type of that name is visible here. ...`` | 그 이름의 타입이 없다. 타입은 그것을 쓰는 첫 형식보다 앞에서 정의한다(타입에는 전방 선언이 없다). 타입 변수를 뜻했다면 함수 이름 뒤의 `<foo>` 같은 선언 위치에 쓴다([문법 레퍼런스 3.6](syntax.md#36-defstruct--구조체사용자-정의-타입)) |
 | ``cannot infer type argument `t` for `vector::new` `` | 타입 인수를 정할 수 없다. `(the Vector<int> (Vector::new))`처럼 `the`로 타입을 쓴다 |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match`가 모든 변형을 다루지 않는다. 빠진 변형의 갈래나 `_` 갈래를 추가한다 |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | 함수가 요구하는 트레이트를 넘긴 타입이 구현하지 않는다. `(impl Eq pt ...)`를 쓴다([표준 트레이트](functions/traits.md)) |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | 함수가 요구하는 트레이트를 넘긴 타입이 구현하지 않는다. `(impl Eq pt ...)`를 쓴다([표준 트레이트](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | `:dyn`을 기대하는 곳에 트레이트를 구현하지 않은 타입의 값을 넘겼다. `impl`을 쓴다 |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | 타입을 쓰는 곳에 트레이트 이름을 썼다. `:dyn Error`라고 쓴다 |
 | ``if: (if cond then else)`` | `if`의 모양이 잘못되었다. `if`에는 else가 필요하다. 필요 없으면 `when`을 쓴다 |

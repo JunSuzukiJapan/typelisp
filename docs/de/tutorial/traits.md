@@ -46,26 +46,26 @@ Fehlt auch nur eine der Methoden, die der Trait deklariert, ist das ein Typfehle
 
 ## 2. Trait-Schranken: „jeder Typ, der diesen Trait implementiert“
 
-Mit `where` lässt sich eine Bedingung an den Typparameter einer generischen Funktion knüpfen. Das nennt man
+Mit `:where` lässt sich eine Bedingung an den Typparameter einer generischen Funktion knüpfen. Das nennt man
 eine **Trait-Schranke**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Dank `(where (Shape T))` kann der Rumpf `name` und `area` auf Werte von `T` anwenden. Ohne die Schranke wäre
+Dank `(:where (Shape T))` kann der Rumpf `name` und `area` auf Werte von `T` anwenden. Ohne die Schranke wäre
 über `T` nichts bekannt, und sie ließen sich nicht aufrufen.
 
 Wer einen Typ übergibt, der `Shape` nicht implementiert, bekommt beim Aufruf einen Typfehler.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Eine generische Funktion erhält für jeden Typ, mit dem sie aufgerufen wird, eine eigene Kopie.
@@ -99,7 +99,7 @@ verwenden, für den eigenen Typ zur Verfügung.
 
 | Trait | Zu implementierende Methoden | Was dadurch möglich wird |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, das Muster `(= expr)` von `match` usw. |
+| `Eq` | `equals` | `member`, `find`, `position`, das Muster `(:= expr)` von `match` usw. |
 | `Ord` | `less` | `less-equal`, `greater` usw. `Ord` erbt von `Eq` |
 | `print-object` | `print-object` | Wie `println` und Verwandte Werte anzeigen |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` usw. |
@@ -136,7 +136,7 @@ Zusammen mit einer Trait-Schranke lässt sich eine Funktion schreiben, die für 
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -184,7 +184,7 @@ total 9
 
 Wie man zwischen den Trait-Schranken aus Abschnitt 2 und `:dyn` wählt:
 
-| | Trait-Schranke (`where`) | `:dyn Trait` |
+| | Trait-Schranke (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Wann die aufgerufene Methode feststeht | Vor der Ausführung | Zur Laufzeit |
 | Typen in einem `Vector` mischen | Nicht möglich | Möglich |

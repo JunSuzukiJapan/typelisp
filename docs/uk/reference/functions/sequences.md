@@ -83,9 +83,10 @@
 
 | Назва | Форма | Тип | Опис |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Виймає назву символу |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Створює символ із рядка (інтернує його) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Чи це ключове слово (`:name`). Двокрапка — частина назви, тож перевірка дивиться на перший знак ([Довідник із синтаксису](../syntax.md#1-лексичні-елементи)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Виймає назву символу. Назва ключового слова не містить двокрапки (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Створює символ із рядка (інтернує його в кореневому модулі) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Створює символ `name` у просторі імен `namespace` (`intern` з CL). `namespace` — шлях модуля від кореня (`"geometry::shapes"`); `"keyword"` — простір ключових слів, `""` — корінь. Якщо пропущено, це модуль, у якому написано виклик |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Чи це ключове слово, тобто чи належить воно до простору імен ключових слів ([Довідник із синтаксису](../syntax.md#1-лексичні-елементи)) |
 
 Про `gensym` див. [Макроси](system.md#8-макроси).
 

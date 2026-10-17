@@ -100,7 +100,7 @@ impl Checker {
         let mut test = false;
         for a in heap.list_to_vec(*attrs)? {
             match a {
-                Value::Symbol(id) if heap.symbol_name(id) == "test" => {
+                Value::Symbol(id) if id.is(wk::TEST) => {
                     if test {
                         return Err(Error::TypeError("`#[test]` is given twice".into()));
                     }
@@ -109,7 +109,7 @@ impl Checker {
                 Value::Symbol(id) => {
                     return Err(Error::TypeError(format!(
                         "unknown attribute `{}`: the one attribute is `test`",
-                        heap.symbol_name(id)
+                        heap.symbol_spelling(id)
                     )))
                 }
                 _ => return Err(Error::TypeError("an attribute is a name: the one attribute is `test`".into())),
@@ -129,7 +129,7 @@ impl Checker {
         let locs: Vec<Option<Loc>> = elems_locs.into_iter().map(|(_, l)| l).collect();
         let loc = heap.cons_loc(*form).or(def_loc);
         let (name, type_params) = match elems.get(1) {
-            Some(&n) => self.parse_defun_name(heap, n)?,
+            Some(&n) => self.parse_defun_name(n)?,
             None => return Err(Error::TypeError("defun: (defun name (params...) ret body...)".into())),
         };
         if !type_params.is_empty() {

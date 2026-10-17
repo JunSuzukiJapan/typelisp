@@ -22,7 +22,7 @@ elke directief verbruikt achtereenvolgens de volgende variadische argumenten.
 
 Het type van `dest` splitst de betekenis in twee (welke geldt, wordt statisch bepaald). De streamvorm
 kan op dezelfde manier worden geschreven met een concreet streamtype, een `:dyn CharOutput`, of een
-typevariabele die door `(where (CharOutput S))` is gebonden. Een `dest` die geen `bool` en geen stream
+typevariabele die door `(:where (CharOutput S))` is gebonden. Een `dest` die geen `bool` en geen stream
 is, is een typefout.
 
 **De stuurstring moet een literal zijn** (dezelfde beperking als `format!` van Rust). De directieven
@@ -254,7 +254,7 @@ Regels:
 
 - **Registratie is statisch.** Een `impl` wordt als gewone methodedefinitie getypechecked, dus een
   verkeerd gespelde typenaam of een verkeerde signatuur is een compileerfout.
-- **Het werkt ook voor generieke types.** `(impl print-object box<T> (where (print-object T)) ...)` gaat
+- **Het werkt ook voor generieke types.** `(impl print-object box<T> (:where (print-object T)) ...)` gaat
   naar een aparte body voor elk typeargument: een waarde onthoudt zijn type inclusief zijn typeargumenten
   (`box<i32>`). Ingebouwde generieke types zoals `Vector<T>` werken op dezelfde manier.
 - **De keuze wordt tijdens het afdrukken gemaakt.** Welke directief welk argument verbruikt hangt af van
@@ -271,7 +271,7 @@ Regels:
   waarop generieke code kan zeggen "waarden van een onbekend type mogen worden weergegeven" (dezelfde vorm
   als `T: Display` van Rust). De `print-object` van `Array<T>` is een voorbeeld.
 - **Bij typeargumenten die niet aan de bound voldoen, wordt stilzwijgend de ingebouwde weergave
-  gebruikt.** `(impl print-object Array<T> (where (print-object T)))` is van toepassing op
+  gebruikt.** `(impl print-object Array<T> (:where (print-object T)))` is van toepassing op
   `Array<i32>`, maar niet op een `Array` waarvan de elementen een `defstruct` zonder `print-object` zijn.
   Het zou nergens op slaan als het louter maken van een array een fout was, dus het is geen fout.
 - Het andere mechanisme van CL, `set-pprint-dispatch` / `*print-pprint-dispatch*` (een

@@ -674,31 +674,31 @@ fn while_let_does_not_run_the_body_when_the_pattern_never_matches() {
 
 #[test]
 fn case_matches_the_first_equal_clause() {
-    assert_eq!(eval_ok("(case 1 (1 100) (2 200) (else 999))"), Value::Int(100));
+    assert_eq!(eval_ok("(case 1 (1 100) (2 200) (:else 999))"), Value::Int(100));
 }
 
 #[test]
 fn case_matches_a_later_clause() {
-    assert_eq!(eval_ok("(case 2 (1 100) (2 200) (else 999))"), Value::Int(200));
+    assert_eq!(eval_ok("(case 2 (1 100) (2 200) (:else 999))"), Value::Int(200));
 }
 
 #[test]
 fn case_falls_through_to_else_when_nothing_matches() {
-    assert_eq!(eval_ok("(case 3 (1 100) (2 200) (else 999))"), Value::Int(999));
+    assert_eq!(eval_ok("(case 3 (1 100) (2 200) (:else 999))"), Value::Int(999));
 }
 
 #[test]
 fn case_matches_bare_symbol_keys() {
-    assert_eq!(eval_ok("(case (quote b) (a 1) (b 2) (else 0))"), Value::Int(2));
+    assert_eq!(eval_ok("(case (quote b) (a 1) (b 2) (:else 0))"), Value::Int(2));
 }
 
 /// A key list, CL's `((k1 k2) form)` — the thing keys-as-expressions could not
 /// express: the list read as a call, and this failed to check.
 #[test]
 fn case_matches_any_key_in_a_key_list() {
-    assert_eq!(eval_ok("(case 2 ((1 2 3) 100) ((8 9) 200) (else 0))"), Value::Int(100));
-    assert_eq!(eval_ok("(case 9 ((1 2 3) 100) ((8 9) 200) (else 0))"), Value::Int(200));
-    assert_eq!(eval_ok("(case 5 ((1 2 3) 100) ((8 9) 200) (else 0))"), Value::Int(0));
+    assert_eq!(eval_ok("(case 2 ((1 2 3) 100) ((8 9) 200) (:else 0))"), Value::Int(100));
+    assert_eq!(eval_ok("(case 9 ((1 2 3) 100) ((8 9) 200) (:else 0))"), Value::Int(200));
+    assert_eq!(eval_ok("(case 5 ((1 2 3) 100) ((8 9) 200) (:else 0))"), Value::Int(0));
 }
 
 /// `'sym` in key position is refused, not read CL's way (the two-key list
@@ -707,7 +707,7 @@ fn case_matches_any_key_in_a_key_list() {
 /// *documented* spelling for a symbol key until keys became literals.
 #[test]
 fn case_refuses_a_quoted_key() {
-    let msg = check_err("(case (quote b) ('a 1) (else 0))");
+    let msg = check_err("(case (quote b) ('a 1) (:else 0))");
     assert!(msg.contains("quoted key"), "unexpected error: {}", msg);
 }
 
@@ -719,7 +719,7 @@ fn case_matches_string_keys_by_content() {
     // real CL either — see the eq/eql/equal/equalp section), so a string
     // key matches by content even though the scrutinee and the key literal
     // are always separately allocated `Str`s.
-    let src = r#"(case "b" ("a" 1) ("b" 2) (else 0))"#;
+    let src = r#"(case "b" ("a" 1) ("b" 2) (:else 0))"#;
     assert_eq!(eval_ok(src), Value::Int(2));
 }
 
@@ -728,7 +728,7 @@ fn case_evaluates_its_expr_exactly_once() {
     let src = r#"
         (defvar (calls int) 0)
         (defun next-call () int (progn (setf calls (+ calls 1)) calls))
-        (progn (case (next-call) (1 100) (else 0)) calls)
+        (progn (case (next-call) (1 100) (:else 0)) calls)
     "#;
     assert_eq!(eval_ok(src), Value::Int(1));
 }

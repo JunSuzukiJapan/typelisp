@@ -11,7 +11,7 @@
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -23,7 +23,7 @@
 
 ## 2. `Eq` / `Ord` (сравнение)
 
-Соответствуют `PartialEq`/`PartialOrd` из Rust (названы `Eq`/`Ord`). Используются в ограничениях `where` обобщённых
+Соответствуют `PartialEq`/`PartialOrd` из Rust (названы `Eq`/`Ord`). Используются в ограничениях `:where` обобщённых
 функций, чтобы потребовать сравнимости типов элементов (`sort`/`member`/`assoc` и т. д.).
 
 ```lisp
@@ -72,7 +72,7 @@
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -83,12 +83,12 @@
 (deftrait Number (Add Sub Mul Rem Ord))                   ; методов нет; сочетание пяти
 ```
 
-**Внутри ограничения можно писать операторы.** Когда получатель — переменная типа, связанная `where`, операторы
+**Внутри ограничения можно писать операторы.** Когда получатель — переменная типа, связанная `:where`, операторы
 читаются как методы трейтов (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`,
 `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -103,5 +103,5 @@
 `rational`, поэтому `Output` у `int` — `rational`, а у любого другого числового типа — сам этот тип.
 Поскольку `Output` у типов разный, `Number` не включает `Div` (список супертрейтов должен закреплять
 каждый ассоциированный тип). Обобщённая функция, которая делит, принимает тип результата через
-`(where (Div T (Output R)))` или требует деления, замкнутого в `T`, через `(where (Div T (Output T)))`
+`(:where (Div T (Output R)))` или требует деления, замкнутого в `T`, через `(:where (Div T (Output T)))`
 (тогда `int` передать нельзя).

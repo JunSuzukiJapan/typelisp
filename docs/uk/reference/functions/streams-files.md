@@ -12,8 +12,8 @@
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; character input
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; character output
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; input that can push back one character
@@ -22,7 +22,7 @@
 ```
 
 Функція, що читає знаки, приймає будь-який тип потоку, вбудований чи користувацький, якщо вона приймає
-`(where (CharInput S))` або `:dyn CharInput`.
+`(:where (CharInput S))` або `:dyn CharInput`.
 
 ## 2. Методи
 
@@ -171,7 +171,7 @@ designator-ів шляхів CL, що розв'язується через тр�
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
@@ -237,7 +237,7 @@ designator-ів шляхів CL, що розв'язується через тр�
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Заповнює складники, яких бракує в `p`, зі `default`. Відносний `p` потрапляє під каталог `default`; абсолютний `p` зберігає власний каталог |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | Форма відносно `default`. Увесь `p`, якщо він не під базою |
 
-Усі аргументи типів несуть `(where (Pathish P))`.
+Усі аргументи типів несуть `(:where (Pathish P))`.
 
 ## 10. Відмінності від CL
 

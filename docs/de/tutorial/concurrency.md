@@ -146,14 +146,14 @@ Zeitlimit.
 - `((v (recv ch)) Rumpf...)` ist ein Empfangszweig. `v` bekommt ein `Option<T>`.
 - `((send ch x) Rumpf...)` ist ein Sendezweig.
 - Wenn mehrere Zweige gleichzeitig fortfahren können, wird einer davon zufällig gewählt.
-- Steht `(else Rumpf...)` am Ende, läuft `else`, wenn kein Zweig sofort fortfahren kann, und `select` wartet
+- Steht `(:else Rumpf...)` am Ende, läuft `:else`, wenn kein Zweig sofort fortfahren kann, und `select` wartet
   nicht.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

@@ -205,7 +205,7 @@ fn generic_optional_where_bound_is_validated() {
         (deftrait eq2 () (same ((self Self) (other Self)) bool))
         (impl eq2 int (same ((self Self) (other Self)) bool (= self other)))
         (defstruct no-eq (n int))
-        (defun check-eq<T> ((a T) (b T) &optional (verbose bool false)) bool (where (eq2 T)) (same a b))
+        (defun check-eq<T> ((a T) (b T) &optional (verbose bool false)) bool (:where (eq2 T)) (same a b))
     ";
     assert_eq!(eval_ok(&format!("{} (check-eq 1 1)", prog)), Value::Bool(true));
     assert_eq!(eval_ok(&format!("{} (check-eq 1 2)", prog)), Value::Bool(false));

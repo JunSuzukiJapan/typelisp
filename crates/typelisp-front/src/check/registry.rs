@@ -68,7 +68,7 @@ pub struct FnSig {
     /// is Rust the workspace ships and has checked, and needs no permission to
     /// call.
     pub ffi: bool,
-    /// Trait bounds declared by this function's own `(where (Trait T
+    /// Trait bounds declared by this function's own `(:where (Trait T
     /// (Assoc Concrete)...)...)` clause (`Checker::check_defun`), keyed by
     /// type-parameter name — empty for a non-generic function or a generic
     /// one with no `where` clause. Stored on the registered signature (not
@@ -278,7 +278,7 @@ pub struct AdtDef {
     /// Per-implemented-trait associated-type bindings, parsed
     /// (`Checker::check_impl`): trait `Path` -> {associated-type name -> the
     /// `Type` this `impl` binds it to}. For a generic `impl` (e.g. `(impl
-    /// Iter (vector-iter T) (type Item T) ...)`), the stored `Type` may
+    /// Iter (vector-iter T) (:type Item T) ...)`), the stored `Type` may
     /// itself still mention this ADT's own `params` (here, `T`) rather than
     /// being fully concrete — see `resolve_trait_assoc_type`, which
     /// substitutes a *specific* instantiation's `params` (e.g.
@@ -423,7 +423,7 @@ pub struct TraitDefault {
 
 /// A blanket `impl` — one written over a bare type variable rather than a
 /// named type, so it covers *every* type satisfying its bounds:
-/// `(impl<T> Clamp T (where (Ord T)) ...)`, Rust's `impl<T: Ord> Clamp for T`.
+/// `(impl<T> Clamp T (:where (Ord T)) ...)`, Rust's `impl<T: Ord> Clamp for T`.
 ///
 /// Nothing is registered on any `AdtDef` when this is declared, and no method
 /// body is checked: a blanket impl generates code only when some concrete
@@ -437,10 +437,10 @@ pub struct BlanketImpl {
     pub trait_path: Path,
     /// The type-variable name the impl abstracts over, as written (`t`).
     pub target_var: String,
-    /// The impl-level `(where ...)`, keyed by type-parameter name — the
+    /// The impl-level `(:where ...)`, keyed by type-parameter name — the
     /// condition a candidate type must satisfy to be covered.
     pub bounds: BTreeMap<String, Vec<TraitBound>>,
-    /// `(type AssocName Type)` items, as written; the type may mention
+    /// `(:type AssocName Type)` items, as written; the type may mention
     /// `target_var`, so it can only be parsed once the target is known.
     pub assoc: Vec<(String, crate::owned_form::OwnedForm)>,
     /// Method items, as written — replayed per materialization.
@@ -510,7 +510,7 @@ pub struct Namespace {
     pub fns: HashMap<String, FnSig>,
     /// `deftrait`s defined directly here, keyed by unqualified name.
     pub traits: HashMap<String, TraitDef>,
-    /// Blanket `impl`s declared directly here (`(impl<T> Clamp T (where (Ord
+    /// Blanket `impl`s declared directly here (`(impl<T> Clamp T (:where (Ord
     /// T)) ...)`) — kept in declaration order, which is not consulted for
     /// resolution (at most one may cover any trait) but keeps diagnostics
     /// and fasl output deterministic.
@@ -978,6 +978,15 @@ impl Registry {
         // `(Sym s)` definitions no longer type-check.
         root.fns.insert("symbol->string".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Str));
         root.fns.insert("string->symbol".to_string(), FnSig::builtin(vec![Type::Str], Type::Symbol));
+        // CL's `intern`: `(intern NAME NAMESPACE)` is the symbol `NAME` in the
+        // module `NAMESPACE` names (`"keyword"` for a keyword). Written with
+        // one argument, it interns in the module the call is written in —
+        // CL's current package — which `Checker::check_call` fills in.
+        root.fns.insert("intern".to_string(), FnSig::builtin(vec![Type::Str, Type::Str], Type::Symbol));
+        // CL's `keywordp`: owned by the keyword module. A Rust builtin because
+        // the owner is not reachable from the language — a keyword's name says
+        // nothing about it being one.
+        root.fns.insert("keywordp".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Bool));
         // `exit`: process termination (cl-equivalence-catalog.md §1.2). Unlike
         // `panic`/`unreachable`/`todo` (which unwind through `EvalError::Panic`,
         // a typelisp-level signal), this needs an actual OS call
@@ -1512,7 +1521,7 @@ fn register_system_builtins(root: &mut Namespace) {
 /// so the stream a macro sees is *always* one made over that text — a trait
 /// object would be a generality with exactly one inhabitant. Nothing is lost
 /// with it: every reader operation a macro wants (`read-sexpr`, `read-char`,
-/// `peek-char`, `unread-char`) is generic over `(where (PeekInput S))` and
+/// `peek-char`, `unread-char`) is generic over `(:where (PeekInput S))` and
 /// takes the concrete type directly.
 ///
 /// The character comes second, as in CL, and is the *sub*-character for a
@@ -1793,7 +1802,7 @@ fn result_of(t: Type, e: Type) -> Type {
 fn hashtable_def() -> AdtDef {
     let mut assoc = BTreeMap::new();
     // The key methods require `K: Hash` — and they are in the *prelude*
-    // now, where the bound is written as an ordinary `(where (Hash K))`.
+    // now, where the bound is written as an ordinary `(:where (Hash K))`.
     // That is what turned "unsupported key type" from a runtime panic into a
     // type error, and then into no restriction at all: the bound gives the
     // prelude's `get`/`set`/`remove` the key type's own `sxhash` and
@@ -1803,7 +1812,7 @@ fn hashtable_def() -> AdtDef {
         AssocFn { sig: FnSig::builtin(vec![], hashtable_ty()), instance: false, builtin: true },
     );
     // `get`/`set`/`remove` are **not here**. They are prelude `defmethod`s
-    // (`(where (Hash K))`), written on the five bucket primitives below —
+    // (`(:where (Hash K))`), written on the five bucket primitives below —
     // because looking a key up means hashing it and comparing it, and both of
     // those are the key type's own methods, written in typelisp. A builtin
     // that did the whole lookup would have to call back into the interpreter

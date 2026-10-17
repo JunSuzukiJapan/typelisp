@@ -83,9 +83,10 @@ theo chiều ngược lại.
 
 | Tên | Dạng | Kiểu | Mô tả |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Lấy tên của symbol |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Tạo một symbol từ một chuỗi (intern nó) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Có phải là keyword (`:name`) không. Dấu hai chấm là một phần của tên, nên phép kiểm tra nhìn vào ký tự đầu ([Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-vựng)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Lấy tên của symbol. Tên của keyword không chứa dấu hai chấm (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Tạo một symbol từ một chuỗi (intern nó trong module gốc) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Tạo symbol `name` trong không gian tên `namespace` (`intern` của CL). `namespace` là đường dẫn module tính từ gốc (`"geometry::shapes"`); `"keyword"` là của keyword và `""` là gốc. Nếu bỏ qua, đó là module nơi lời gọi được viết |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Có phải là keyword không, tức là có thuộc không gian tên keyword không ([Tham chiếu cú pháp](../syntax.md#1-cú-pháp-từ-vựng)) |
 
 Về `gensym`, xem [Macro](system.md#8-macro).
 

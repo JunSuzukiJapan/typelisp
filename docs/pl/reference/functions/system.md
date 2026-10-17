@@ -220,7 +220,7 @@ rejestrowane w środowisku globalnym natychmiast i na stałe.
 
 | Forma | Pozycja docstringu |
 |---|---|
-| `defun` / metody w `impl` / `defmacro` | Na początku ciała (po typie zwracanym i klauzuli `where`). Tylko gdy następuje co najmniej jedna forma ciała; sam łańcuch pozostaje wartością zwracaną |
+| `defun` / metody w `impl` / `defmacro` | Na początku ciała (po typie zwracanym i klauzuli `:where`). Tylko gdy następuje co najmniej jedna forma ciała; sam łańcuch pozostaje wartością zwracaną |
 | `defvar` / `defconstant` | **Po** wartości początkowej: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Zaraz po** nazwie, przed polami/wariantami |
 | `deftype` | **Zaraz po** nazwie, przed typem: `(deftype meters "doc" i32)` |

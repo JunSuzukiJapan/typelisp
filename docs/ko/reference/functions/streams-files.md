@@ -11,8 +11,8 @@ CL이 클래스 계층으로 나타내는 것을 여기서는 **트레이트 계
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; 문자 입력
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; 문자 출력
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; 한 글자 되돌릴 수 있는 입력
@@ -20,7 +20,7 @@ CL이 클래스 계층으로 나타내는 것을 여기서는 **트레이트 계
 (deftrait ByteOutput ((OutputStream (Item int))) ...)    ; 바이트 출력
 ```
 
-문자를 읽는 함수는 `(where (CharInput S))`나 `:dyn CharInput`으로 받으면 내장이든 사용자 정의든 어떤 스트림 타입이든 받는다.
+문자를 읽는 함수는 `(:where (CharInput S))`나 `:dyn CharInput`으로 받으면 내장이든 사용자 정의든 어떤 스트림 타입이든 받는다.
 
 ## 2. 메서드
 
@@ -163,7 +163,7 @@ CL은 `(open name :element-type '(unsigned-byte 8))`처럼 **호출**에서 요�
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; 남은 메서드는 모두 기본 구현
 
@@ -227,7 +227,7 @@ CL이 경로명 지정자(문자열 또는 경로명)를 받는 곳에서 이 �
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | `p`에 빠진 구성 요소를 `default`에서 채운다. 상대 경로의 `p`는 `default`의 디렉터리 아래로 가고, 절대 경로의 `p`는 자신의 디렉터리를 유지한다 |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | `default`에 대한 상대 형태. 기준 아래에 없으면 `p` 전부 |
 
-타입 인수는 모두 `(where (Pathish P))`를 가진다.
+타입 인수는 모두 `(:where (Pathish P))`를 가진다.
 
 ## 10. CL과의 차이
 

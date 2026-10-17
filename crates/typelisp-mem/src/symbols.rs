@@ -39,6 +39,17 @@
 //! [`NsId::ROOT`] is an ordinary module that happens to be first: the prelude,
 //! the core macro layer and the island are read into it.
 //!
+//! ## Keywords
+//!
+//! [`NsId::KEYWORD`] is CL's `KEYWORD` package: the module `keyword` at the
+//! root, which every keyword belongs to whichever module wrote it. The reader
+//! turns `:foo` into the symbol *named* `foo` in that module ([`intern_keyword`]);
+//! the colon is how a keyword is spelled, not part of its name. Being a
+//! keyword is being owned by that module ([`SymRef::is_keyword`]), and nothing
+//! about a name says so: `(intern ":foo")` is an ordinary symbol whose name
+//! starts with a colon. The keyword module imports nothing, and no other
+//! module imports a keyword, so `foo` and `:foo` never meet in one table.
+//!
 //! ## Why an address and not an index
 //!
 //! An index needs a reverse table (`id -> name`) to print with, and is only
@@ -91,8 +102,10 @@ macro_rules! well_known_symbols {
     ($($section:literal $($konst:ident => $name:literal)+)+) => {
         /// The names the compiler compares symbols against — the head of a
         /// definition form, a lambda-list marker, a core-IR operator tag, a
-        /// `loop` clause word. All interned into the root module when the
-        /// table is created.
+        /// `loop` clause word. Interned when the table is created: an entry
+        /// spelled with a leading colon is the keyword of that name (the
+        /// colon dropped) in the keyword module, every other one is the
+        /// system module's, imported into each module.
         ///
         /// This list lives in the memory crate rather than with the front end
         /// that gives each name meaning, because the table itself does. The
@@ -134,13 +147,16 @@ well_known_symbols! {
     THE => "the"
     FN => "fn"
     PUB => "pub"
-    WHERE => "where"
+    // Retired 2026-10-17: the bound clause is `(:where ...)` now, a keyword.
+    RETIRED_WHERE => "where"
     RETURN => "return"
     REST => "&rest"
     OPTIONAL => "&optional"
     KEY => "&key"
     DYN => ":dyn"
-    EQUALS => "="
+    // Retired 2026-10-17: `match`'s value pattern and `loop`'s binding are
+    // spelled with the keyword `:=` now, not a bare `=`.
+    RETIRED_EQUALS => "="
     COLON_EQUALS => ":="
 
     "Core-IR operator tags shared with the island (`compile-value`'s dispatch)."
@@ -421,8 +437,11 @@ well_known_symbols! {
      ...))` in a script failed with `unbound variable: else` while the same
      form worked at the REPL. In the vocabulary, the name is imported into
      every module from the system one, and there is one `else` again.
-     `select`'s arm compares by name in the checker and never noticed."
-    ELSE => "else"
+     `select`'s arm compares by name in the checker and never noticed.
+     Retired on 2026-10-17, when the fallthrough clause became `:else` — a
+     keyword, which is one symbol in every module without a vocabulary entry.
+     Kept, not removed, because this table is positional."
+    RETIRED_ELSE => "else"
 
     "Appended for tasks in AOT executables (2026-09-17). Two nodes only the
      compile bridge builds, out of a `(task RET-R CALL)`: `(spawn RET-R
@@ -467,6 +486,48 @@ well_known_symbols! {
      field of the arm, so that every tier tests it where it already tests a
      pattern, and failing it is failing the pattern."
     PAT_WHEN => "pat-when"
+
+    "Appended 2026-10-17, when keywords moved into a module of their own and
+     every comparison of a symbol became a comparison of pointers. Each of
+     these used to be recognized by reading its name back as text, which a
+     symbol written in a module of the same name also passed; in the
+     vocabulary, each one is one symbol everywhere, compared by `is`. The
+     keywords among them live in the keyword module (see the module doc
+     comment), the rest in the system one."
+    NOT => "not"
+    UNSAFE => "unsafe"
+    DEF_C_STRUCT => "def-c-struct"
+    SELF => "self"
+    TEST => "test"
+    PTR => "ptr"
+    RECV => "recv"
+    SEND => "send"
+    KW_TYPE => ":type"
+    KW_WHERE => ":where"
+    KW_OR => ":or"
+    KW_CONSTRUCTOR => ":constructor"
+    KW_COPIER => ":copier"
+    KW_INCLUDE => ":include"
+    KW_CONC_NAME => ":conc-name"
+    KW_PREDICATE => ":predicate"
+    KW_INITIAL_OFFSET => ":initial-offset"
+    KW_LIBRARY => ":library"
+    KW_PREFIX => ":prefix"
+    KW_PER_LINE_PREFIX => ":per-line-prefix"
+    KW_SUFFIX => ":suffix"
+    KW_DOWNCASE => ":downcase"
+    KW_LINEAR => ":linear"
+    KW_FILL => ":fill"
+    KW_MISER => ":miser"
+    KW_MANDATORY => ":mandatory"
+    KW_BLOCK => ":block"
+    KW_CURRENT => ":current"
+    KW_LINE => ":line"
+    KW_SECTION => ":section"
+    KW_LINE_RELATIVE => ":line-relative"
+    KW_SECTION_RELATIVE => ":section-relative"
+    INTERN => "intern"
+    UNDERSCORE => "_"
 }
 
 
@@ -482,8 +543,10 @@ well_known_symbols! {
 /// Every field is immutable once written, and the header is never freed.
 #[repr(C, align(8))]
 pub struct Symbol {
-    /// The canonical (lowercase) name.
-    name: Box<str>,
+    /// The canonical (lowercase) spelling: the name, with a colon in front
+    /// for a keyword. One allocation serves [`SymRef::name`] and
+    /// [`SymRef::spelling`], which differ only by that colon.
+    spelling: Box<str>,
     /// The module that owns this symbol — the one it was created in. A module
     /// that merely [`import`]s it is not its home.
     home: NsId,
@@ -532,19 +595,40 @@ impl SymRef {
         unsafe { &*self.0 }
     }
 
-    /// The symbol's canonical (lowercase) name.
+    /// The symbol's canonical (lowercase) name — CL's `symbol-name`, so a
+    /// keyword's has no colon: `:foo`'s name is `foo`.
     ///
     /// `'static` for real, not asserted: headers are leaked. Reading a name is
     /// one dereference — there is no reverse table, which is the whole point
     /// of the identity being an address.
     pub fn name(&self) -> &'static str {
-        &self.header().name
+        let spelling: &'static str = &self.header().spelling;
+        if self.is_keyword() {
+            &spelling[1..]
+        } else {
+            spelling
+        }
+    }
+
+    /// How the symbol is written: its name, with a keyword's colon in front.
+    /// What the compiler keys a symbol by when it needs a string (an
+    /// environment, a diagnostic), so a keyword never stands where the plain
+    /// symbol of the same name does. Not an identity: two symbols are the
+    /// same when their addresses are.
+    pub fn spelling(&self) -> &'static str {
+        &self.header().spelling
     }
 
     /// The module that owns this symbol. Not "a module it is visible from":
     /// an imported symbol keeps the home it was created with.
     pub fn home(&self) -> NsId {
         self.header().home
+    }
+
+    /// Whether this is a keyword — owned by [`NsId::KEYWORD`]. The only test
+    /// there is: a keyword's name is an ordinary name, colon-less.
+    pub fn is_keyword(&self) -> bool {
+        self.home() == NsId::KEYWORD
     }
 
     /// Which member of the fixed vocabulary this is, or [`NOT_WELL_KNOWN`].
@@ -594,6 +678,11 @@ impl NsId {
     /// are read into it, as is a source file that declares no module of its
     /// own. Ordinary in every respect but being created first.
     pub const ROOT: NsId = NsId(1);
+
+    /// Where every keyword lives — see the module doc comment. It is the
+    /// root's child `keyword`, so its path is `["keyword"]` and re-interning a
+    /// keyword by path lands back here.
+    pub const KEYWORD: NsId = NsId(2);
 }
 
 /// One module's table.
@@ -623,34 +712,42 @@ struct SymTable {
 impl SymTable {
     fn new() -> SymTable {
         let mut t = SymTable { nodes: Vec::new(), created: 0 };
-        // The system module owns the vocabulary...
-        t.push_node(None, "");
+        let empty = |parent: Option<NsId>, segment: &str| NsNode {
+            syms: HashMap::new(),
+            children: HashMap::new(),
+            parent,
+            segment: segment.into(),
+        };
+        t.nodes.push(empty(None, ""));
+        t.nodes.push(empty(None, ""));
+        t.nodes.push(empty(Some(NsId::ROOT), KEYWORD_MODULE));
+        t.nodes[NsId::ROOT.0 as usize].children.insert(KEYWORD_MODULE.into(), NsId::KEYWORD);
+        // The system module owns the vocabulary, except its keywords, which
+        // the keyword module owns under their names without the colon...
         let vocabulary: Vec<SymRef> = BUILTIN_SYMBOLS
             .iter()
             .enumerate()
-            .map(|(i, name)| t.create(NsId::SYSTEM, name, i as u32))
+            .map(|(i, name)| match name.strip_prefix(':') {
+                Some(kw) => t.create(NsId::KEYWORD, kw, i as u32),
+                None => t.create(NsId::SYSTEM, name, i as u32),
+            })
             .collect();
         WELL_KNOWN
             .set(vocabulary.into_boxed_slice())
             .unwrap_or_else(|_| unreachable!("the table is built exactly once"));
         // ...and the root module is the first to import it.
-        t.push_node(None, "");
-        debug_assert_eq!(t.nodes.len(), 2);
+        t.nodes[NsId::ROOT.0 as usize].syms = t.nodes[NsId::SYSTEM.0 as usize].syms.clone();
         t
     }
 
-    /// Appends a node, giving it the system vocabulary. `parent` is `None` for
-    /// the two modules that are not written inside another one.
+    /// Appends a module node, giving it the system vocabulary. The three
+    /// fixed nodes (system, root, keyword) are built by [`SymTable::new`].
     fn push_node(&mut self, parent: Option<NsId>, segment: &str) -> NsId {
         let id = NsId(self.nodes.len() as u32);
-        let syms = if id == NsId::SYSTEM {
-            HashMap::new()
-        } else {
-            // By pointer, not by name: this is property 4 in the module doc
-            // comment, and the reason `defun` means the same thing in every
-            // module.
-            self.nodes[NsId::SYSTEM.0 as usize].syms.clone()
-        };
+        // By pointer, not by name: this is property 4 in the module doc
+        // comment, and the reason `defun` means the same thing in every
+        // module.
+        let syms = self.nodes[NsId::SYSTEM.0 as usize].syms.clone();
         self.nodes.push(NsNode {
             syms,
             children: HashMap::new(),
@@ -671,8 +768,8 @@ impl SymTable {
         // Leaked on purpose: symbols are permanent, so this is the allocation
         // that gives `SymRef::name` a genuine `'static` and makes the address
         // impossible to dangle.
-        let header: &'static Symbol =
-            Box::leak(Box::new(Symbol { name: name.into(), home: ns, well_known }));
+        let spelling: Box<str> = if ns == NsId::KEYWORD { format!(":{}", name).into() } else { name.into() };
+        let header: &'static Symbol = Box::leak(Box::new(Symbol { spelling, home: ns, well_known }));
         let sym = SymRef(header as *const Symbol);
         self.nodes[ns.0 as usize].syms.insert(name.into(), sym);
         self.created += 1;
@@ -727,6 +824,10 @@ fn table() -> MutexGuard<'static, SymTable> {
 /// `ns`**, which is what makes `m::foo` and `n::foo` different symbols. The
 /// fixed vocabulary is the same symbol everywhere only because every module
 /// imports it from [`NsId::SYSTEM`] when it is created.
+///
+/// `ns` may be [`NsId::KEYWORD`]; that is [`intern_keyword`]. Nothing about
+/// `name` routes it anywhere else — `":foo"` interned in a module is a symbol
+/// of that module whose name starts with a colon, as CL's `intern` makes.
 pub fn intern_in(ns: NsId, name: &str) -> SymRef {
     let key = name.to_lowercase();
     let mut t = table();
@@ -735,6 +836,29 @@ pub fn intern_in(ns: NsId, name: &str) -> SymRef {
     }
     t.create(ns, &key, NOT_WELL_KNOWN)
 }
+
+/// The keyword named `name` — what the reader makes of `:name`. `name` is
+/// the keyword's name, without the colon that spells it.
+pub fn intern_keyword(name: &str) -> SymRef {
+    intern_in(NsId::KEYWORD, name)
+}
+
+/// The module a namespace name names — the second argument of `intern`.
+/// A name is a module path from the root with `::` between its segments
+/// (`"geometry::shapes"`), `"keyword"` is the keyword module, and `""` is the
+/// root. Segments fold to lowercase as module names do.
+pub fn ns_named(name: &str) -> NsId {
+    let name = name.strip_prefix("::").unwrap_or(name);
+    if name.is_empty() {
+        return NsId::ROOT;
+    }
+    let segments: Vec<String> = name.split("::").map(str::to_string).collect();
+    ns_of(&segments)
+}
+
+/// The keyword module's segment under the root — CL's `KEYWORD` package,
+/// and what `(intern NAME "keyword")` names.
+pub const KEYWORD_MODULE: &str = "keyword";
 
 /// [`intern_in`] at the root module — for every caller with no lexical module
 /// to work from: the prelude and the island (which *are* root), the checker

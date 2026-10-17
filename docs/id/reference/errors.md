@@ -47,7 +47,7 @@ Kesalahan yang ditemukan sebelum dijalankan. Bentuk itu tidak dijalankan sampai 
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Tidak ada tipe dengan nama itu. Definisikan tipe sebelum bentuk pertama yang memakainya (tipe tidak punya deklarasi maju). Jika yang Anda maksud variabel tipe, tulis di posisi pendeklarasian seperti `<foo>` setelah nama fungsi ([Referensi Sintaks 3.6](syntax.md#36-defstruct--struct-tipe-buatan-pengguna)) |
 | ``cannot infer type argument `t` for `vector::new` `` | Argumen tipe tidak dapat ditentukan. Tulis tipenya dengan `the`, seperti `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` tidak menangani setiap varian. Tambahkan cabang untuk varian yang kurang, atau cabang `_` |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | Fungsi mensyaratkan trait yang tidak diimplementasikan oleh tipe yang Anda berikan. Tulis `(impl Eq pt ...)` ([Trait Standar](functions/traits.md)) |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Fungsi mensyaratkan trait yang tidak diimplementasikan oleh tipe yang Anda berikan. Tulis `(impl Eq pt ...)` ([Trait Standar](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Nilai bertipe yang tidak mengimplementasikan trait diberikan di tempat yang mengharapkan `:dyn`. Tulis `impl`-nya |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | Nama trait ditulis di tempat tipe. Tulis `:dyn Error` |
 | ``if: (if cond then else)`` | `if` memiliki bentuk yang salah. `if` mensyaratkan cabang else. Jika tidak memerlukannya, gunakan `when` |

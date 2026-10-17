@@ -143,13 +143,13 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - `((v (recv ch)) 本体...)` は受信の腕です。`v` には `Option<T>` が入ります。
 - `((send ch x) 本体...)` と書くと送信の腕になります。
 - 同時に複数の腕が実行できるときは、そのうちの 1 つが無作為に選ばれます。
-- 最後に `(else 本体...)` を書くと、どの腕もすぐには実行できないときに `else` を実行し、待ちません。
+- 最後に `(:else 本体...)` を書くと、どの腕もすぐには実行できないときに `:else` を実行し、待ちません。
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

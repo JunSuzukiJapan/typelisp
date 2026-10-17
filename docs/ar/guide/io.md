@@ -85,10 +85,10 @@
 ### جعل دوال القراءة والكتابة عامة
 
 كل نوع من التدفقات نوع قائم بذاته، لكن العمليات المشتركة مجمعة في سمات (traits). والدالة التي تأخذ
-وسيطها بـ `(where (CharInput S))` يمكنها القراءة من ملف أو سلسلة نصية أو مقبس.
+وسيطها بـ `(:where (CharInput S))` يمكنها القراءة من ملف أو سلسلة نصية أو مقبس.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

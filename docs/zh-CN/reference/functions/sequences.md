@@ -70,9 +70,10 @@
 
 | 名称 | 形式 | 类型 | 说明 |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | 取出符号名 |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | 从字符串创建符号（intern） |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | 是否为关键字（`:name`）。冒号是名字的一部分，所以按首字符判断（[语法参考](../syntax.md#1-词法元素)） |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | 取出符号名。关键字的名字不含冒号（`:foo` → `"foo"`） |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | 从字符串创建符号（intern 到根模块） |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | 在命名空间 `namespace` 中创建名为 `name` 的符号（CL 的 `intern`）。`namespace` 是从根开始的模块路径（`"geometry::shapes"`），`"keyword"` 表示关键字，`""` 表示根。省略时为调用所在的模块 |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | 是否为关键字，即是否属于关键字专用命名空间（[语法参考](../syntax.md#1-词法元素)） |
 
 `gensym` 见[宏](system.md#8-宏)。
 

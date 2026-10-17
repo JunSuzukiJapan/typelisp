@@ -14,8 +14,8 @@ lo comprueba de forma mecánica (véase el final de este documento).
   - Nombres definidos (el `NAME` de `(defun NAME ...)` como nombre de función, el de
     `(defstruct NAME ...)` como nombre de tipo y el de `(defvar (NAME ...))` como nombre de
     variable; lo mismo con `pub`, como en `(pub defun NAME ...)`)
-  - Palabras clave de espacios de nombres y declaraciones (`pub` `module` `use` `load` `impl`
-    `where`) y marcadores de lista lambda (`&rest` `&optional` `&key`)
+  - Palabras clave de espacios de nombres y declaraciones (`pub` `module` `use` `load` `impl`)
+    y marcadores de lista lambda (`&rest` `&optional` `&key`)
   - Funciones integradas (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car`, etc.)
   - Tipos primitivos (incluidos `bignum` / `ratio`), tipos integrados, tipos de error integrados
     (`ParseIntError`, etc.), tipos de usuario `Capitalized` y el tipo de objeto trait `:dyn Trait`

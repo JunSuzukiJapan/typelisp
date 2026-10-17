@@ -103,7 +103,7 @@ truyền vector qua `iter`, như `(map (iter v) f)`. Các thao tác phá hủy (
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` của CL. Trong bảng này nó là số mục đang chiếm (bằng `count`) |
 
 **Mọi kiểu triển khai `Hash` đều có thể làm khóa**, gồm cả các kiểu `defstruct`/`defenum`.
-`get`/`set`/`remove` mang `(where (Hash K))`, nên một bảng có khóa thuộc kiểu không triển khai nó là
+`get`/`set`/`remove` mang `(:where (Hash K))`, nên một bảng có khóa thuộc kiểu không triển khai nó là
 **lỗi kiểu** (`f64` không có `Hash` vì `NaN`).
 
 ```lisp

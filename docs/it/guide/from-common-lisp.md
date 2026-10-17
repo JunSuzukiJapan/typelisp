@@ -225,8 +225,10 @@ Non esistono i package. I namespace sono moduli, e un file è un modulo a sé st
 `pkg:symbol`, scrivi `module::name`, e importa i nomi con `use`
 ([Moduli e organizzazione dei file](modules.md)).
 
-Le parole chiave `:foo` esistono e sono simboli che valutano se stessi. Poiché non ci sono package, i
-due punti fanno parte del nome: `(symbol->string :foo)` restituisce `":foo"`.
+Le parole chiave `:foo` esistono e, come in CL, valutano se stesse e appartengono allo spazio dei nomi
+delle parole chiave, `keyword`. `(symbol->string :foo)` restituisce `"foo"` e `(intern "foo" "keyword")`
+restituisce `:foo`. Il secondo argomento di `intern` è un percorso di modulo al posto del nome di un
+package.
 
 ## 10. Differenze nella lettura e nella sintassi
 

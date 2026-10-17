@@ -26,7 +26,7 @@ const DEFS: &str = r##"
 (impl Box<T>
   (twice<U> (self (f (fn (T) U)) (g (fn (U) U))) Box<U>
     (fmap (fmap self f) g))
-  (same<U> (self (a U) (b U)) bool (where (Eq U))
+  (same<U> (self (a U) (b U)) bool (:where (Eq U))
     (equals a b)))
 (defun apply-it ((g (fn (Box<int> (fn (int) bool)) Box<bool>))) bool
   (v (g (make-instance 'Box :v 5) (lambda ((x int)) bool (> x 2)))))

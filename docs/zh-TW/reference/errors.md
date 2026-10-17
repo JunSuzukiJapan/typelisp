@@ -45,7 +45,7 @@ error: main.typl:1:24: type error: type mismatch: expected `i32`, found `string`
 | ``unknown type `foo`: no type of that name is visible here. ...`` | 沒有該名稱的型別。型別要在第一次使用它的形式之前定義（型別沒有前置宣告）。如果本意是型別變數，請寫在函式名稱的 `<foo>` 等宣告位置（[語法參考 3.6](syntax.md#36-defstruct--結構使用者定義型別)） |
 | ``cannot infer type argument `t` for `vector::new` `` | 無法決定型別引數。像 `(the Vector<int> (Vector::new))` 這樣以 `the` 寫出型別 |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` 沒有處理所有變體。加上缺少的變體分支或 `_` 分支 |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | 函式要求某個 trait，但傳入的型別沒有實作。寫 `(impl Eq pt ...)`（[標準 trait](functions/traits.md)） |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | 函式要求某個 trait，但傳入的型別沒有實作。寫 `(impl Eq pt ...)`（[標準 trait](functions/traits.md)） |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | 在 `:dyn` 的位置傳入了沒有實作該 trait 的型別的值。寫 `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | 在型別的位置寫了 trait 名稱。寫成 `:dyn Error` |
 | ``if: (if cond then else)`` | `if` 的形式不對。`if` 必須有 else。不需要 else 時使用 `when` |

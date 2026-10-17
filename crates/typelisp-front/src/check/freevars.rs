@@ -235,7 +235,7 @@ fn walk_here(
                 pattern_bindings(heap, *pat, &mut inner)?;
                 // A `pat-guard`'s test is an ordinary expression sitting
                 // inside the pattern, and it can name anything the arm body
-                // could — `(= limit)` reads the enclosing `limit`. Missing
+                // could — `(:= limit)` reads the enclosing `limit`. Missing
                 // these would make a closure over such a `match` capture one
                 // slot too few. `inner` already holds the guard's own
                 // scrutinee name (`pattern_bindings` inserts it), so the

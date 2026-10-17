@@ -46,7 +46,7 @@ Các sai sót được phát hiện trước khi chạy. Dạng đó không đư
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Không có kiểu nào mang tên đó. Hãy định nghĩa kiểu trước dạng đầu tiên dùng nó (kiểu không có khai báo trước). Nếu bạn muốn nói một biến kiểu, hãy viết nó ở vị trí khai báo như `<foo>` sau tên hàm ([Tham chiếu cú pháp 3.6](syntax.md#36-defstruct--struct-kiểu-do-người-dùng-định-nghĩa)) |
 | ``cannot infer type argument `t` for `vector::new` `` | Không xác định được một đối số kiểu. Hãy viết kiểu bằng `the`, như `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` không xử lý mọi variant. Hãy thêm các nhánh cho những variant còn thiếu, hoặc một nhánh `_` |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | Hàm yêu cầu một trait mà kiểu bạn truyền vào không triển khai. Hãy viết `(impl Eq pt ...)` ([Các trait chuẩn](functions/traits.md)) |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Hàm yêu cầu một trait mà kiểu bạn truyền vào không triển khai. Hãy viết `(impl Eq pt ...)` ([Các trait chuẩn](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Một giá trị của kiểu không triển khai trait được truyền vào chỗ mong đợi `:dyn`. Hãy viết `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | Một tên trait được viết ở chỗ cần kiểu. Hãy viết `:dyn Error` |
 | ``if: (if cond then else)`` | `if` có dạng sai. `if` yêu cầu một nhánh else. Khi bạn không cần nó, hãy dùng `when` |

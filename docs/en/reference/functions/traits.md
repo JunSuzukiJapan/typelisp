@@ -13,7 +13,7 @@ chapters: `Hash` ([HashTable](collections.md#4-hashtablekv)), `Error`
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -26,7 +26,7 @@ for your own type, it can be walked with `doiter` as it is, and passed to the
 
 ## 2. `Eq` / `Ord` (comparison)
 
-These correspond to Rust's `PartialEq`/`PartialOrd` (named `Eq`/`Ord`). They are used in the `where`
+These correspond to Rust's `PartialEq`/`PartialOrd` (named `Eq`/`Ord`). They are used in the `:where`
 bounds of generic functions to require that element types can be compared (`sort`/`member`/`assoc`
 and so on).
 
@@ -78,7 +78,7 @@ built-in operators** ([Numbers](numbers.md)) and does not go through this layer.
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -89,12 +89,12 @@ built-in operators** ([Numbers](numbers.md)) and does not go through this layer.
 (deftrait Number (Add Sub Mul Rem Ord))                   ; no methods; a combination of five
 ```
 
-**Inside a bound, you can write operators.** When the receiver is a type variable bound by `where`,
+**Inside a bound, you can write operators.** When the receiver is a type variable bound by `:where`,
 operators are read as trait methods (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
 `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -110,5 +110,5 @@ Implemented for: `Add`/`Sub`/`Mul`/`Div`/`Rem`/`Number` on all numeric types (ex
 `rational`, so the `Output` of `int` is `rational`, and that of every other numeric type is the type
 itself. Because `Output` differs between the types, `Number` does not include `Div` (a supertrait list
 must pin every associated type). A generic function that divides takes the result type with
-`(where (Div T (Output R)))`, or asks for division closed in `T` with `(where (Div T (Output T)))` (an
+`(:where (Div T (Output R)))`, or asks for division closed in `T` with `(:where (Div T (Output T)))` (an
 `int` cannot be passed then).

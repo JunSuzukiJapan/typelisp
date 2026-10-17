@@ -43,24 +43,24 @@ trait 幾乎相同。閱讀本章前請先讀[型別基礎](types.md)。
 
 ## 2. trait 約束：「實作了這個 trait 的任何型別」
 
-可以用 `where` 為泛型函式的型別參數加上條件。這稱為 **trait 約束**。
+可以用 `:where` 為泛型函式的型別參數加上條件。這稱為 **trait 約束**。
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-因為有 `(where (Shape T))`，本體中可以對 `T` 的值使用 `name` 與 `area`。沒有約束時對 `T` 一無所知，就無法呼叫。
+因為有 `(:where (Shape T))`，本體中可以對 `T` 的值使用 `name` 與 `area`。沒有約束時對 `T` 一無所知，就無法呼叫。
 
 傳入沒有實作 `Shape` 的型別時，會在呼叫處出現型別錯誤。
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 泛型函式會為每個被呼叫的型別產生專用的函式。不會在執行期檢查型別並分支。
@@ -92,7 +92,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | trait | 要實作的方法 | 可以使用的功能 |
 |---|---|---|
-| `Eq` | `equals` | `member`、`find`、`position`、`match` 的 `(= 式)` 模式等 |
+| `Eq` | `equals` | `member`、`find`、`position`、`match` 的 `(:= 式)` 模式等 |
 | `Ord` | `less` | `less-equal`、`greater` 等。`Ord` 繼承 `Eq` |
 | `print-object` | `print-object` | `println` 等顯示時的形式 |
 | `Iter` | `next` | `doiter`、`map`、`filter`、`sort` 等 |
@@ -126,7 +126,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -169,7 +169,7 @@ total 9
 
 第 2 節的 trait 約束與 `:dyn` 的選擇：
 
-| | trait 約束（`where`） | `:dyn Trait` |
+| | trait 約束（`:where`） | `:dyn Trait` |
 |---|---|---|
 | 呼叫對象何時決定 | 執行前 | 執行期 |
 | 在一個 `Vector` 中混合不同型別 | 不可以 | 可以 |

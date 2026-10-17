@@ -104,7 +104,7 @@ enzovoort) staan in [Destructieve bewerkingen](sequences.md#7-destructieve-bewer
 | `size` | `(size h)` | `HashTable<K,V>→int` | `hash-table-size` van CL. In deze tabel is het het aantal bezette invoeren (gelijk aan `count`) |
 
 **Elk type dat `Hash` implementeert kan een sleutel zijn**, ook `defstruct`/`defenum`-types.
-`get`/`set`/`remove` dragen `(where (Hash K))`, dus een tabel met een sleutel van een type dat het
+`get`/`set`/`remove` dragen `(:where (Hash K))`, dus een tabel met een sleutel van een type dat het
 niet implementeert is een **typefout** (`f64` heeft geen `Hash` vanwege `NaN`).
 
 ```lisp

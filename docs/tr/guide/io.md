@@ -86,11 +86,11 @@ bir karakter akışından bayt okumaya çalışmak bir tür hatasıdır.
 ### Okuma ve yazma fonksiyonlarını jenerik yapma
 
 Her akış türü kendi başına bir türdür, ancak ortak işlemler trait'lerde toplanmıştır. Bağımsız
-değişkenini `(where (CharInput S))` ile alan bir fonksiyon, bir dosyadan, bir string'den ya da bir
+değişkenini `(:where (CharInput S))` ile alan bir fonksiyon, bir dosyadan, bir string'den ya da bir
 soketten okuyabilir.
 
 ```lisp
-(defun count-lines<S> ((s S)) int (where (CharInput S))
+(defun count-lines<S> ((s S)) int (:where (CharInput S))
   (let ((n 0))
     (loop (match (read-line s)
             ((some _) (setf n (+ n 1)))

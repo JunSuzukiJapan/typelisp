@@ -12,8 +12,8 @@ okunabilir mi?" diye sormaya gerek yoktur.
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; character input
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; character output
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; input that can push back one character
@@ -21,7 +21,7 @@ okunabilir mi?" diye sormaya gerek yoktur.
 (deftrait ByteOutput ((OutputStream (Item int))) ...)    ; byte output
 ```
 
-Karakter okuyan bir fonksiyon, `(where (CharInput S))` ya da `:dyn CharInput` alıyorsa, yerleşik ya da
+Karakter okuyan bir fonksiyon, `(:where (CharInput S))` ya da `:dyn CharInput` alıyorsa, yerleşik ya da
 kullanıcı tanımlı her akış türünü kabul eder.
 
 ## 2. Metotlar
@@ -173,7 +173,7 @@ girebilir.
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; every remaining method is the default
 
@@ -240,7 +240,7 @@ string geçirdiğiniz sürece hiçbir ayrıştırma olmaz.
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | `p`'de eksik bileşenleri `default`'tan doldurur. Göreli bir `p`, `default`'un dizininin altına gider; mutlak bir `p` kendi dizinini korur |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | `default`'a göre biçim. Tabanın altında değilse `p`'nin tamamı |
 
-Tür bağımsız değişkenlerinin hepsi `(where (Pathish P))` taşır.
+Tür bağımsız değişkenlerinin hepsi `(:where (Pathish P))` taşır.
 
 ## 10. CL'den farklar
 

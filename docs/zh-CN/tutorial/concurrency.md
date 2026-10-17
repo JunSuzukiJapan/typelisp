@@ -133,13 +133,13 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - `((v (recv ch)) 主体...)` 是接收分支。`v` 中是 `Option<T>`。
 - 写成 `((send ch x) 主体...)` 就是发送分支。
 - 同时有多个分支可以执行时，随机选择其中一个。
-- 在最后写 `(else 主体...)`，当没有分支能立即执行时执行 `else`，不会等待。
+- 在最后写 `(:else 主体...)`，当没有分支能立即执行时执行 `:else`，不会等待。
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

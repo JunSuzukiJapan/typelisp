@@ -44,26 +44,26 @@
 
 ## 2. Ограничения трейтами: «любой тип, реализующий этот трейт»
 
-На параметр типа обобщённой функции можно наложить условие с помощью `where`. Это называется **ограничением
+На параметр типа обобщённой функции можно наложить условие с помощью `:where`. Это называется **ограничением
 трейтом**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Благодаря `(where (Shape T))` тело может использовать `name` и `area` на значениях `T`. Без ограничения о `T` ничего
+Благодаря `(:where (Shape T))` тело может использовать `name` и `area` на значениях `T`. Без ограничения о `T` ничего
 не известно, и вызвать их было бы нельзя.
 
 Передача типа, не реализующего `Shape`, — ошибка типа в месте вызова.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Обобщённая функция получает собственную копию для каждого типа, с которым её вызывают. Никаких проверок типов и
@@ -97,7 +97,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | Трейт | Методы для реализации | Что это даёт |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, образец `(= expr)` в `match` и т. д. |
+| `Eq` | `equals` | `member`, `find`, `position`, образец `(:= expr)` в `match` и т. д. |
 | `Ord` | `less` | `less-equal`, `greater` и т. д. `Ord` наследуется от `Eq` |
 | `print-object` | `print-object` | То, как значения показывают `println` и подобные |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` и т. д. |
@@ -133,7 +133,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -176,7 +176,7 @@ total 9
 
 Выбор между ограничениями трейтами из раздела 2 и `:dyn`:
 
-| | Ограничение трейтом (`where`) | `:dyn Trait` |
+| | Ограничение трейтом (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Когда определяется вызываемый метод | До выполнения | Во время выполнения |
 | Смешение типов в одном `Vector` | Невозможно | Возможно |

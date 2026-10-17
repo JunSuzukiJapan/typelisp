@@ -47,13 +47,18 @@ och för att läsa felmeddelanden, [errors.md](errors.md).
   `]` och `}` avslutar en token och kan därför inte stå i en symbol; står en sådan i början av ett
   datum är det ett läsfel. `[` och `{` kan stå i en symbol: precis som i CL lämnas de fria så att
   programmeraren kan använda dem i [läsmakron](#11-läsarmakron-readtable).
-- **Keywords**: symboler som börjar med ett kolon, som `:name` (som i CL). De utvärderas till sig själva:
-  de slår inte upp någon bindning och deras värde är de själva, med statisk typ `symbol`. Keywords med
-  samma namn är alltid samma objekt (`(eq :foo :FOO)` är sant; liksom andra symboler görs de till
-  gemener). Själva kolonet är en del av namnet, så `(symbol->string :foo)` är `":foo"` (typelisp har
-  inget paketsystem, så detta skiljer sig från CL:s `symbol-name`). Ett ensamt `:` eller ett med ytterligare
-  kolon som `:a:b` är ett läsfel. Testa med `keywordp`. De som börjar med `::` är inte keywords utan
-  absoluta sökvägar (nedan).
+  Det som står mellan `|` och `|` läses som det är skrivet, avgränsare och kolon inräknade (CL:s multipla
+  escape): `|:foo|` är en vanlig symbol vars namn är `:foo`, inte ett keyword.
+- **Keywords**: symboler som börjar med ett kolon, som `:name` (som i CL). Vilken modul de än skrivs i är de den
+  enda symbolen med det namnet i keyword-namnrymden `keyword` (CL:s paket `KEYWORD`). De utvärderas till sig
+  själva: de slår inte upp någon bindning och deras värde är de själva, med statisk typ `symbol`. Keywords med
+  samma namn är alltid samma objekt (`(eq :foo :FOO)` är sant; liksom andra symboler görs de till gemener).
+  Kolonet är inte en del av namnet: `(symbol->string :foo)` är `"foo"`. `~s` skriver ut `:foo` och `~a` skriver
+  ut `foo`. Ett keyword är en konstant vars värde är den själv, så det kan varken bindas eller tilldelas som
+  variabel eller vara namnet på en definition (ett typfel). Från en sträng skapas det med
+  `(intern "foo" "keyword")`. Testa med `keywordp` (om den hör till keyword-namnrymden). Ett ensamt `:` eller
+  ett med ytterligare kolon som `:a:b` är ett läsfel. De som börjar med `::` är inte keywords utan absoluta
+  sökvägar (nedan).
   Notera att `:dyn` är ett reserverat keyword bara för typpositioner; att skriva det någon annanstans är
   ett fel (se [kapitel 2](#2-hur-typer-skrivs)).
 - **Listor**: `(a b c)`. Punktpar `(a . b)` kan också läsas.
@@ -235,10 +240,10 @@ I källkod skrivs typer som vanliga symboler eller listor.
 - **Framåtreferenser deklareras med `defsignature`** (nedan). Ett namn som inte har deklarerats kan inte
   anropas före sin definition, eftersom toppnivån kontrolleras och körs en form i taget, i
   källordning.
-- För att kräva trait-gränser skriver man en `where`-sats precis före kroppen:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- För att kräva trait-gränser skriver man en `:where`-sats precis före kroppen:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   (att fastställa en associerad typ med `(AssocName ConcreteType)` är valfritt).
-- **Dokumentationssträngar**: en strängliteral i början av kroppen, direkt efter `where`-satsen (om den
+- **Dokumentationssträngar**: en strängliteral i början av kroppen, direkt efter `:where`-satsen (om den
   finns), blir dokumentationssträngen (som i CL). Dock bara när minst en kroppsform följer efter den: en
   ensam sträng förblir returvärdet och tas inte som dokumentationssträng: `(defun f () string "doc" "value")`
   har en dokumentationssträng och returnerar `"value"`, medan `(defun f () string "value")` inte har någon
@@ -619,7 +624,7 @@ kan inte (`setf` är ett fel).
   (pub name ...))                                      ; publik även utanför typens modul
 
 ; en generisk typ
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 Ger metoder till en typ som definierats med `defstruct` (3.6) eller `defenum` (3.7). Motsvarar Rusts
@@ -642,7 +647,7 @@ inneboende impl (`impl Point { ... }`).
 - Bara programmets egna typer kan ha en. En typ från standardbiblioteket som `Vector`, `Option` eller
   `int` kan inte det (felet säger `... is a standard library type`). För att lägga till en operation till
   en standardtyp, definiera ett trait och skriv dess `impl` för den typen.
-- Om det som följer `X` i `(impl X ...)` är en post (en lista), ett `where` eller ingenting, är det den
+- Om det som följer `X` i `(impl X ...)` är en post (en lista), ett `:where` eller ingenting, är det den
   inneboende impl:en; är det ett namn, är det ett traits `impl` (`(impl Trait Type ...)`, 3.9).
 
 ```lisp
@@ -737,7 +742,7 @@ namn.
 - **Typvariabler är bara de som skrivs i deklarerande positioner.** För `defun`/`defstruct`/`defenum`/`deftype`
   namnets `<T>`; för en inneboende `impl` måltypen (`(impl box<T> ...)`) och `<U>` i varje metods namn; för
   ett traits `impl` måltypen och `impl<T>`; för `deftrait` `Self` och de associerade typerna i
-  `(type Item)`. Ett namn som dyker upp första gången någon annanstans (argument, returvärde,
+  `(:type Item)`. Ett namn som dyker upp första gången någon annanstans (argument, returvärde,
   `the`/`lambda` i kroppen) blir ingen typvariabel; det är `unknown type`.
 - **Dokumentationssträngar**: en strängliteral direkt efter namnet, före fälten, blir dokumentationssträngen
   (`(defstruct Name "doc" (field Type)...)`, samma position som CL:s `defstruct`). Ett fält har alltid
@@ -876,19 +881,19 @@ typ, inte en typ**.
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; listan över supertraits är obligatorisk; () om inga
-  (type AssocName)                       ; associerade typer (hur många som helst, valfritt)
+  (:type AssocName)                       ; associerade typer (hur många som helst, valfritt)
   (method-name ((self Self) params...) RetType)          ; ingen kropp = måste implementeras
   (method-name ((self Self) params...) RetType body...)) ; med kropp = standardimplementation
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; gränser som gäller hela impl (valfritt)
-  (type AssocName ConcreteType)          ; gör en associerad typ konkret
+  (:where (Trait A)...)                   ; gränser som gäller hela impl (valfritt)
+  (:type AssocName ConcreteType)          ; gör en associerad typ konkret
   (method-name (recv params...) RetType body...))
 ```
 
 Genom `impl` registreras varje metod som en metod hos `TargetType` och anropas som en metod i en inneboende
 `impl` (3.5). Metoderna i ett traits `impl` är alltid publika, utan `pub`. Traits refereras som
-traitgränser i `where`-satserna hos generiska funktioner (se [3.1 defun](#31-defun--funktionsdefinitioner)). Ett traitnamn kan också vara en
+traitgränser i `:where`-satserna hos generiska funktioner (se [3.1 defun](#31-defun--funktionsdefinitioner)). Ett traitnamn kan också vara en
 `::`-sökväg som `m::Trait`.
 
 **Listan över supertraits (obligatorisk)**: skrivs alltid direkt efter traitnamnet. Varje element är ett
@@ -904,7 +909,7 @@ associerade typer fastlagda**.
 
 Arv har tre effekter. (1) `impl Ord X` kräver att `impl Eq X` skrivs **först** (en regel om
 skrivordning: den enda form som kan avgöras deterministiskt i REPL och med stegvis `load`, och strängare
-än Rust). (2) `(where (Ord T))` ensamt låter dig anropa också `Eq`s metoder. (3) `Eq`s metoder kan
+än Rust). (2) `(:where (Ord T))` ensamt låter dig anropa också `Eq`s metoder. (3) `Eq`s metoder kan
 anropas genom en `:dyn Ord`, och ett värde av `:dyn Ord` kan skickas som det är där en `:dyn Eq` krävs
 (uppkastning). Att ett subtrait omdeklarerar en metod med samma namn som sin förälder, och att ärva metoder
 med samma namn från två föräldrar, är båda fel (en vtable har en plats per namn). Diamantarv slås ihop till
@@ -912,7 +917,7 @@ en plats.
 
 **Standardimplementationer**: en kropp efter signaturen används när en `impl` utelämnar metoden. Kroppen
 löses upp i **namnrymden för den modul** där traitet är skrivet, så den kan anropa icke-publika funktioner
-i den modulen. Metoder med kroppar kan också ha `where`-satser och dokumentationssträngar. Kroppen
+i den modulen. Metoder med kroppar kan också ha `:where`-satser och dokumentationssträngar. Kroppen
 typkontrolleras **en gång, vid deklarationsstället**, med `Self` kvar som en typvariabel (begränsad av
 `Self: själva traitet`), som i Rust: fel som skulle misslyckas för varje `impl` och varje implementerande
 typ, även i standardvärden som ingen `impl` någonsin utelämnar, fångas där. Anrop på `self` till metoder i
@@ -921,7 +926,7 @@ till sig själva, så en signatur som returnerar `Item` matchas mot kroppen utan
 typen.
 
 **Implementationer per instansiering**: en generisk typ kan ha en egen `impl` för varje instansiering
-(`(impl Show Box<int> ...)` och `(impl Show Box<string> ...)`). `:dyn`, `where`-gränser, associerade typer
+(`(impl Show Box<int> ...)` och `(impl Show Box<string> ...)`). `:dyn`, `:where`-gränser, associerade typer
 och `print-object` gäller per instansiering, och en instansiering utan `impl` (`Box<f64>`) implementerar inte
 traiten. Samma trait kan inte implementeras både för `Box<T>` och för `Box<int>` (samma regel som för metoder
 i 3.5). En supertrait behöver bara vara implementerad för den instansieringen (av en `impl` för `Box<int>`
@@ -934,7 +939,7 @@ implementerar traitet på en gång för varje typ som uppfyller gränserna.
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; ingen kropp alls; allt är standardimplementationen
+(impl<T> Clamp T (:where (Ord T)))          ; ingen kropp alls; allt är standardimplementationen
 ```
 
 **Ingen kod genereras förrän en konkret typ faktiskt använder det** (en gång per typ, med samma mekanism
@@ -942,12 +947,12 @@ som vanlig monomorfisering). Ett trait kan ha högst en generell implementation.
 explicit `impl` har den företräde. Typkontrollen av kroppen är skild från genereringen: den görs en gång på
 deklarationsstället, **med målet kvar som en typvariabel** (som i Rust), så även en implementation som
 aldrig används får sina fel fångade där om de skulle misslyckas för varje mål under de deklarerade
-gränserna. Anrop som motiveras av gränserna (`(less self other)` under `(where (Ord T))` och så vidare)
+gränserna. Anrop som motiveras av gränserna (`(less self other)` under `(:where (Ord T))` och så vidare)
 passerar, som i kroppen av en generisk `defun`.
 
 **Dokumentationssträngar**: ett `deftrait` kan ha en dokumentationssträng för hela traitet, som en
 strängliteral direkt efter listan över supertraits, före posterna
-(`(deftrait Name () "doc" (type ...) (method ...)...)`). En signatur utan kropp kan inte ha en
+(`(deftrait Name () "doc" (:type ...) (method ...)...)`). En signatur utan kropp kan inte ha en
 dokumentationssträng: en avslutande sträng skulle själv vara returvärdet för en standardimplementation, så
 de två kunde inte skiljas åt.
 
@@ -1200,11 +1205,11 @@ Det ett test skriver ut med `print` går direkt till standard ut (det fångas in
 (if cond then else)                 ; else är obligatoriskt (alltid tre element)
 (when cond body...)                 ; ett if utan else (typen Unit). defmacro
 (unless cond body...)               ; negationen av when. defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; en lista av nycklar: matchar om någon av dem gör det
-  (else body...))                   ; expr utvärderas en gång. nycklar jämförs med equal.
+  (:else body...))                   ; expr utvärderas en gång. nycklar jämförs med equal.
                                      ; nycklar är "literaler" och utvärderas inte (som i CL).
                                      ; en bar symbol a betyder symbolen 'a.
                                      ; att skriva 'a är ett fel (använd den bara a). defmacro
@@ -1302,7 +1307,7 @@ Slag av mönster:
 - **Värdeliteraler**: strängar / flyttal / symboler (`'foo`) / bignum-heltal / kvoter — jämförs efter värde
   med den typens `Eq::equals` ([Standardtraits](functions/traits.md#2-eq--ord-jämförelse)). Strängar jämförs
   efter innehåll, inte efter identitet
-- `(= expr)` — utvärderar vilket uttryck som helst och jämför med `Eq::equals`. Det enda sättet att jämföra
+- `(:= expr)` — utvärderar vilket uttryck som helst och jämför med `Eq::equals`. Det enda sättet att jämföra
   typer som saknar literalsyntax (`defstruct`-instanser, globaler, beräknade resultat), och en
   användardefinierad `Eq`-implementation blir jämförelseregeln som den är. `expr` kan referera till allt
   som syns från grenens position (argument, yttre bindningar, globaler)
@@ -1326,7 +1331,7 @@ Slag av mönster:
   enda kropp, så varje alternativ måste binda samma variabler med samma typer. Det kan också skrivas
   inuti ett konstruktormönster (`(some (:or (circle r) (rect r _)))`)
 
-Att jämföra en typ som inte implementerar `Eq` med en värdeliteral / `(= expr)` är ett typfel (det här
+Att jämföra en typ som inte implementerar `Eq` med en värdeliteral / `(:= expr)` är ett typfel (det här
 språket väljer att säga "dessa kan inte jämföras" i stället för att lämna en gren som tyst aldrig matchar).
 
 **Vakter**: `:when villkor` efter mönstret väljer grenen bara när mönstret matchar och villkoret
@@ -1358,7 +1363,7 @@ innehåll:
 Icke-omedelbara literaler (strängar / flyttal / bignum-heltal / kvoter) **kan inte skrivas** mot en
 `Sexpr`. Deras `eq` jämför objektidentitet, vilket skulle ge en "gren som typkontrolleras men aldrig
 matchar", så det är ett fel som namnger variantmönstret: skriv `(str "hi")` så plockas den isär till en
-`string` och jämförs efter innehåll. `(= expr)` ber uttryckligen om `equals`, så den här begränsningen
+`string` och jämförs efter innehåll. `(:= expr)` ber uttryckligen om `equals`, så den här begränsningen
 gäller inte det.
 
 **Scrutineen behöver inte vara en ADT.** `string`/`symbol`/`i32`/`f64` och liknande kan matchas direkt
@@ -1517,13 +1522,12 @@ enkel loop).
 
 CL skriver satsorden som bara symboler (`(loop for i from 1 to 3 collect i)`), men här är **alla
 keywords**: ett bart `for` vore bara en variabelreferens, och att vara ett keyword är också det som skiljer
-det från en enkel slinga. Undantaget är `=`, som skiljer en variabel från ett värde: dess position är
-entydig, så det läses antingen bart eller som ett keyword (`:=`).
+det från en enkel slinga. Ordet som skiljer en variabel från dess värde är inget undantag: det skrivs `:=`.
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1532,11 +1536,11 @@ bara härifrån och framåt", så det är ett fel):
 
 | Sats | Betydelse |
 |---|---|
-| `:with v = e` | Binder en gång. Får läsa variablerna från tidigare satser |
+| `:with v := e` | Binder en gång. Får läsa variablerna från tidigare satser |
 | `:for v :in s` / `:for v :across s` | Elementen i en `Iter` i ordning. CL:s skillnad mellan lista/vektor finns inte här, så dessa är två stavningar av samma sats |
 | `:for v :on s` | De på varandra följande **suffixen**. CL skickar den delade svans-cons, men en `Iter` har ingen svans att dela, så var och en är en ny `Vector` |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | Räkning. `:downfrom`/`:upfrom` fungerar också |
-| `:for v = e [:then f]` | Börjar med `e`, och från andra gången används `f` (utan `:then`, `e` varje gång) |
+| `:for v := e [:then f]` | Börjar med `e`, och från andra gången används `f` (utan `:then`, `e` varje gång) |
 | `:repeat n` | Itererar så många gånger |
 
 Med flera `:for` stegar de **parallellt**, och slingan slutar så fort någon av dem är uttömd.
@@ -1854,7 +1858,7 @@ Typen på `f` är `(fn (string-input-stream char) Option<Sexpr>)`. Det första a
 den text som ännu inte lästs**, och det andra är **tecknet som utlöste det** (det andra tecknet för en
 dispatch). Returvärdet blir den data som lästes på det stället. Strömmen är en konkret typ i stället för
 `:dyn PeekInput` eftersom läsaren alltid skickar just det här ena slaget: `read-sexpr` / `read-char` /
-`peek-char` / `unread-char` / `read-delimited-list` tar alla `(where (PeekInput S))`, så alla fungerar på
+`peek-char` / `unread-char` / `read-delimited-list` tar alla `(:where (PeekInput S))`, så alla fungerar på
 den konkreta typen som den är.
 
 ```lisp
@@ -1966,16 +1970,16 @@ och resten användas som de är.
 (select
   ((v (recv ch1)) body...)          ; en mottagningsgren. v binds till en Option<T>
   ((send ch2 x) body...)            ; en sändningsgren
-  (else body...))                   ; valfritt. **om det skrivs kommer det sist**
+  (:else body...))                   ; valfritt. **om det skrivs kommer det sist**
 ```
 
-- **Med `else` blockerar den inte** (Gos `default`). Utan det väntar den tills en blir möjlig.
+- **Med `:else` blockerar den inte** (Gos `default`). Utan det väntar den tills en blir möjlig.
 - **Om flera är möjliga samtidigt väljs en slumpmässigt** (i skriven ordning skulle senare grenar svälta).
 - `v` i en mottagningsgren är ett **`Option<T>`**. En stängd kanal är "ett svar", inte ett skäl att hoppa
   över grenen, så gör `match` på den inuti grenen.
 - Typen är **föreningen av typerna för alla grenars kroppar** (samma regel som för `match`-grenar).
 - `(select)` med noll grenar är ett typfel (Gos `select{}`, som blockerar för alltid, är inte antaget). En
-  `select` med bara `else` är det också, eftersom det är samma som att skriva kroppen direkt.
+  `select` med bara `:else` är det också, eftersom det är samma som att skriva kroppen direkt.
 
 **Kanaluttrycken och värdena som ska skickas utvärderas en gång vardera, från vänster till höger, oavsett
 vilken gren som väljs** (samma disciplin som `case` har för sina nycklar).

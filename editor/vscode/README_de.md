@@ -14,7 +14,7 @@ prüft das maschinell (siehe unten).
   - Definierte Namen (`(defun NAME ...)` als Funktion, `(defstruct NAME ...)` als Typ,
     `(defvar (NAME ...))` als Variable; ebenso mit `pub`, wie in `(pub defun NAME ...)`) und beide
     Namen von `(impl Trait Type)`
-  - Schlüsselwörter für Namensräume und Deklarationen (`pub` `module` `use` `load` `impl` `where`)
+  - Schlüsselwörter für Namensräume und Deklarationen (`pub` `module` `use` `load` `impl`)
     und Lambda-Listen-Marker (`&rest` `&optional` `&key`)
   - Eingebaute Funktionen, primitive Typen (einschließlich `bignum` / `ratio`), eingebaute
     Fehlertypen, `Capitalized`-Benutzertypen und der Trait-Objekttyp `:dyn Trait` (auch innerhalb

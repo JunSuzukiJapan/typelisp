@@ -88,9 +88,10 @@ diperlukan, tetapi tidak secara otomatis ke arah sebaliknya.
 
 | Nama | Bentuk | Tipe | Deskripsi |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Mengambil nama simbol |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Membuat simbol dari string (meng-intern-nya) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Apakah keyword (`:name`). Titik dua adalah bagian dari nama, sehingga pengujian melihat karakter pertama ([Referensi Sintaks](../syntax.md#1-unsur-leksikal)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Mengambil nama simbol. Nama keyword tidak mengandung titik dua (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Membuat simbol dari string (meng-intern-nya di modul akar) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Membuat simbol `name` di namespace `namespace` (`intern` pada CL). `namespace` adalah path modul dari akar (`"geometry::shapes"`); `"keyword"` adalah milik keyword dan `""` adalah akar. Jika dihilangkan, yaitu modul tempat panggilan ditulis |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Apakah keyword, yaitu apakah termasuk namespace keyword ([Referensi Sintaks](../syntax.md#1-unsur-leksikal)) |
 
 Untuk `gensym`, lihat [Makro](system.md#8-makro).
 

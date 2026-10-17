@@ -45,26 +45,26 @@ Trait'in bildirdiği metotlardan birini bile atlamak, `impl`'de bir tür hatası
 
 ## 2. Trait sınırları: "bu trait'i gerçekleştiren herhangi bir tür"
 
-Jenerik bir fonksiyonun tür parametresine `where` ile bir koşul koyabilirsiniz. Buna **trait
+Jenerik bir fonksiyonun tür parametresine `:where` ile bir koşul koyabilirsiniz. Buna **trait
 sınırı** denir.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-`(where (Shape T))` sayesinde gövde, `T` türündeki değerlerde `name` ve `area`'yı kullanabilir. Sınır
+`(:where (Shape T))` sayesinde gövde, `T` türündeki değerlerde `name` ve `area`'yı kullanabilir. Sınır
 olmadan `T` hakkında hiçbir şey bilinmez; bu yüzden onlar çağrılamazdı.
 
 `Shape`'i gerçekleştirmeyen bir türü geçirmek, çağrıda bir tür hatasıdır.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Jenerik bir fonksiyon, çağrıldığı her tür için kendi kopyasını alır. Çalışma zamanında tür sınaması
@@ -98,7 +98,7 @@ fonksiyonları türünüz için kullanılabilir kılar.
 
 | Trait | Gerçekleştirilecek metotlar | Neyi mümkün kılar |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, `match`'in `(= expr)` örüntüsü vb. |
+| `Eq` | `equals` | `member`, `find`, `position`, `match`'in `(:= expr)` örüntüsü vb. |
 | `Ord` | `less` | `less-equal`, `greater` vb. `Ord`, `Eq`'ten miras alır |
 | `print-object` | `print-object` | Değerlerin `println` ve benzerleriyle nasıl gösterileceği |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` vb. |
@@ -135,7 +135,7 @@ yazabilirsiniz.
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -180,7 +180,7 @@ total 9
 
 Bölüm 2'deki trait sınırları ile `:dyn` arasında seçim:
 
-| | Trait sınırı (`where`) | `:dyn Trait` |
+| | Trait sınırı (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Çağrılan metodun belirlendiği an | Çalışmadan önce | Çalışma zamanında |
 | Tek bir `Vector`'de türleri karıştırma | Mümkün değil | Mümkün |

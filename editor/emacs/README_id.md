@@ -14,7 +14,7 @@ mekanis (lihat akhir dokumen ini).
   - Nama yang didefinisikan (`NAME` pada `(defun NAME ...)` sebagai nama fungsi, pada
     `(defstruct NAME ...)` sebagai nama tipe, dan pada `(defvar (NAME ...))` sebagai nama variabel;
     sama dengan `pub`, seperti `(pub defun NAME ...)`)
-  - Keyword ruang nama dan deklarasi (`pub` `module` `use` `load` `impl` `where`) dan penanda daftar
+  - Keyword ruang nama dan deklarasi (`pub` `module` `use` `load` `impl`) dan penanda daftar
     lambda (`&rest` `&optional` `&key`)
   - Fungsi bawaan (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` dan sebagainya)
   - Tipe primitif (termasuk `bignum` / `ratio`), tipe bawaan, tipe kesalahan bawaan

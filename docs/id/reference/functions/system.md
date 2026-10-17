@@ -232,7 +232,7 @@ langsung didaftarkan ke lingkungan global secara permanen.
 
 | Bentuk | Posisi docstring |
 |---|---|
-| `defun` / metode di `impl` / `defmacro` | Di awal badan (setelah tipe kembalian dan klausa `where`). Hanya ketika setidaknya satu bentuk badan menyusul; string tunggal tetap menjadi nilai kembalian |
+| `defun` / metode di `impl` / `defmacro` | Di awal badan (setelah tipe kembalian dan klausa `:where`). Hanya ketika setidaknya satu bentuk badan menyusul; string tunggal tetap menjadi nilai kembalian |
 | `defvar` / `defconstant` | **Setelah** nilai awal: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Tepat setelah** nama, sebelum field/varian |
 | `deftype` | **Tepat setelah** nama, sebelum tipe: `(deftype meters "doc" i32)` |

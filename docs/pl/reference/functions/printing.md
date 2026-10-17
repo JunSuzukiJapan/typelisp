@@ -22,7 +22,7 @@ dyrektywa zużywa kolejne argumenty o zmiennej liczbie po kolei.
 
 Typ `dest` rozdziela znaczenie na dwa (to, które obowiązuje, jest ustalane statycznie). Formę strumieniową
 można zapisać tak samo z konkretnym typem strumienia, z `:dyn CharOutput` lub ze zmienną typową
-związaną przez `(where (CharOutput S))`. `dest`, które nie jest ani `bool`, ani strumieniem, jest błędem typu.
+związaną przez `(:where (CharOutput S))`. `dest`, które nie jest ani `bool`, ani strumieniem, jest błędem typu.
 
 **Łańcuch sterujący musi być literałem** (to samo ograniczenie co w `format!` z Rust). Dyrektywy
 w nim zawarte decydują o tym, ile argumentów jest branych i jakich typów, więc łańcuch zbudowany w czasie działania nie może być
@@ -248,7 +248,7 @@ Reguły:
 
 - **Rejestracja jest statyczna.** `impl` jest sprawdzane pod względem typów jak zwykła definicja metody, więc
   błędnie zapisana nazwa typu lub zły podpis są błędem kompilacji.
-- **Działa także dla typów generycznych.** `(impl print-object box<T> (where (print-object T)) ...)` trafia do
+- **Działa także dla typów generycznych.** `(impl print-object box<T> (:where (print-object T)) ...)` trafia do
   osobnego ciała dla każdego argumentu typu: wartość pamięta swój typ łącznie z argumentami typu
   (`box<i32>`). Wbudowane typy generyczne, takie jak `Vector<T>`, działają tak samo.
 - **Wybór jest dokonywany w czasie wypisywania.** To, która dyrektywa zużywa który argument, zależy od
@@ -264,7 +264,7 @@ Reguły:
   może powiedzieć „wartości nieznanego typu można wyrenderować" (ten sam kształt co `T: Display` w Rust).
   Przykładem jest `print-object` dla `Array<T>`.
 - **Przy argumentach typu niespełniających ograniczenia po cichu używana jest reprezentacja wbudowana.**
-  `(impl print-object Array<T> (where (print-object T)))` ma zastosowanie do `Array<i32>`, ale nie do
+  `(impl print-object Array<T> (:where (print-object T)))` ma zastosowanie do `Array<i32>`, ale nie do
   `Array`, której elementami są `defstruct` bez `print-object`. Nie miałoby sensu, żeby samo
   utworzenie tablicy było błędem, więc nie jest.
 - Inny mechanizm CL, `set-pprint-dispatch` / `*print-pprint-dispatch*` (rejestr czasu działania indeksowany

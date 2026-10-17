@@ -12,8 +12,8 @@
 
 ```lisp
 (deftrait Stream ()             (open-stream-p ...) (close ...))
-(deftrait InputStream  (Stream) (type Item) (read-item ...))
-(deftrait OutputStream (Stream) (type Item) (write-item ...))
+(deftrait InputStream  (Stream) (:type Item) (read-item ...))
+(deftrait OutputStream (Stream) (:type Item) (write-item ...))
 (deftrait CharInput  ((InputStream  (Item char))) ...)   ; символьный ввод
 (deftrait CharOutput ((OutputStream (Item char))) ...)   ; символьный вывод
 (deftrait PeekInput  (CharInput) (unread-char ...) (peek-char ...))  ; ввод, способный вернуть один символ
@@ -22,7 +22,7 @@
 ```
 
 Функция, читающая символы, принимает любой тип потока, встроенный или пользовательский, если она принимает
-`(where (CharInput S))` или `:dyn CharInput`.
+`(:where (CharInput S))` или `:dyn CharInput`.
 
 ## 2. Методы
 
@@ -169,7 +169,7 @@ CL определяет тип элементов **в вызове**, как `(
   (open-stream-p ((self Self)) bool true)
   (close ((self Self)) () ()))
 (impl OutputStream counter
-  (type Item char)
+  (:type Item char)
   (write-item ((self Self) (c char)) () (setf self::n (+ self::n 1))))
 (impl CharOutput counter)              ; все остальные методы — по умолчанию
 
@@ -235,7 +235,7 @@ CL определяет тип элементов **в вызове**, как `(
 | `merge-pathnames` | `(merge-pathnames p default)` | `(P,D)→pathname` | Дополняет недостающие у `p` компоненты из `default`. Относительный `p` помещается в каталог `default`; абсолютный `p` сохраняет свой каталог |
 | `enough-namestring` | `(enough-namestring p default)` | `(P,D)→string` | Форма относительно `default`. Весь `p`, если он не под базой |
 
-Все аргументы типа несут `(where (Pathish P))`.
+Все аргументы типа несут `(:where (Pathish P))`.
 
 ## 10. Отличия от CL
 

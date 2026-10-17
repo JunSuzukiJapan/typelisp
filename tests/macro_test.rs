@@ -107,7 +107,7 @@ fn sexpr_to_string(heap: &Heap, v: Value) -> String {
         Value::Boxed(id) => heap.f64_value(id).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
-        Value::Symbol(id) => heap.symbol_name(id).to_string(),
+        Value::Symbol(id) => heap.symbol_spelling(id).to_string(),
         Value::Str(id) => format!("{:?}", heap.string(id)),
         Value::Path(_) => "<path>".to_string(),
         Value::Cons(_) => {
@@ -539,7 +539,7 @@ fn cond_with_several_clauses_selects_the_first_true_one() {
                        ((= n 0) \"zero\")
                        ((< n 10) \"small\")
                        ((< n 100) \"medium\")
-                       (else \"large\")))";
+                       (:else \"large\")))";
     assert_string(eval_ok_with_prelude(&format!("{src} (band -1)")), "neg");
     assert_string(eval_ok_with_prelude(&format!("{src} (band 0)")), "zero");
     assert_string(eval_ok_with_prelude(&format!("{src} (band 5)")), "small");

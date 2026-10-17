@@ -46,7 +46,7 @@ Błędy znalezione przed uruchomieniem. Forma nie jest uruchamiana, dopóki nie 
 | ``unknown type `foo`: no type of that name is visible here. ...`` | Nie ma typu o tej nazwie. Zdefiniuj typ przed pierwszą formą, która go używa (typy nie mają deklaracji wyprzedzających). Jeśli miałeś na myśli zmienną typową, zapisz ją w pozycji deklarującej, takiej jak `<foo>` po nazwie funkcji ([Referencja składni 3.6](syntax.md#36-defstruct--struktury-typy-definiowane-przez-użytkownika)) |
 | ``cannot infer type argument `t` for `vector::new` `` | Nie da się określić argumentu typu. Zapisz typ za pomocą `the`, jak w `(the Vector<int> (Vector::new))` |
 | ``non-exhaustive match on `color`: 1/2 variants covered`` | `match` nie obsługuje każdego wariantu. Dodaj ramiona dla brakujących wariantów lub ramię `_` |
-| ``type `pt` does not implement trait `eq` required by `where` clause on type parameter `a` `` | Funkcja wymaga traitu, którego przekazany typ nie implementuje. Napisz `(impl Eq pt ...)` ([Traity standardowe](functions/traits.md)) |
+| ``type `pt` does not implement trait `eq` required by `:where` clause on type parameter `a` `` | Funkcja wymaga traitu, którego przekazany typ nie implementuje. Napisz `(impl Eq pt ...)` ([Traity standardowe](functions/traits.md)) |
 | ``` `sq` does not implement `shape`, so it cannot be used as `:dyn shape` ``` | Wartość typu, który nie implementuje traitu, została przekazana tam, gdzie oczekiwane jest `:dyn`. Napisz `impl` |
 | ``` `error` is a trait, not a type — write `:dyn error` for a trait object ``` | Nazwę traitu zapisano tam, gdzie powinien stać typ. Napisz `:dyn Error` |
 | ``if: (if cond then else)`` | `if` ma niewłaściwy kształt. `if` wymaga gałęzi else. Gdy jej nie potrzebujesz, użyj `when` |

@@ -12,7 +12,7 @@ Emacs 판은 [../emacs/](../emacs/README_ko.md)에 있습니다. 둘은 같은 �
     `print`/`println`/`format`, `pprint` 계열)
   - 정의 이름(`(defun NAME ...)`은 함수, `(defstruct NAME ...)`은 타입, `(defvar (NAME ...))`은 변수.
     `pub`가 붙은 `(pub defun NAME ...)`도 마찬가지)과 `(impl Trait Type)`의 두 이름
-  - 이름공간·선언 키워드(`pub` `module` `use` `load` `impl` `where`),
+  - 이름공간·선언 키워드(`pub` `module` `use` `load` `impl`),
     람다 리스트 표지(`&rest` `&optional` `&key`)
   - 내장 함수·기본 타입(`bignum` / `ratio` 포함)·내장 오류 타입·
     `Capitalized`인 사용자 타입·트레이트 객체 타입 `:dyn Trait`(제네릭 인수 안쪽도)

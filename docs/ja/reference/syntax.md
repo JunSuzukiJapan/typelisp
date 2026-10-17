@@ -40,12 +40,18 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
 - **シンボル**: 英数字・記号を含む任意のトークン（`+` `<=` `my-func` など）。`]` と `}` は
   トークンの区切りになるので、シンボルの中には書けない。データの始まりに `]` や `}` が来ると
   読み取りエラーになる。`[` と `{` はシンボルの中に書ける（CL と同じく、利用者が
-  [リーダマクロ](#11-リーダマクロreadtable)に使えるよう空けてある）。
-- **キーワード**: `:name` のようにコロンで始まるシンボル（CL 準拠）。自己評価する——束縛を探さず
-  それ自身の値になり、静的型は `symbol`。同名なら常に同一オブジェクト（`(eq :foo :FOO)` は真。
-  他のシンボル同様に小文字化される）。コロン自体は名前の一部で、`(symbol->string :foo)` は
-  `":foo"`（typelisp にはパッケージ機構が無いため、CL の `symbol-name` とは異なる）。
-  `:` 単独や `:a:b` のように追加のコロンを含むものは読み取りエラー。判定は `keywordp`。
+  [リーダマクロ](#11-リーダマクロreadtable)に使えるよう空けてある）。`|` と `|` の間は書いたとおりに
+  読み、区切り文字やコロンも名前に含められる（CL の多重エスケープ）。`|:foo|` は名前が `:foo` の
+  普通のシンボルで、キーワードではない。
+- **キーワード**: `:name` のようにコロンで始まるシンボル（CL 準拠）。どのモジュールで書いても、
+  キーワード用の名前空間 `keyword`（CL の `KEYWORD` パッケージ）に属する同じ 1 つのシンボルになる。
+  自己評価する——束縛を探さずそれ自身の値になり、静的型は `symbol`。同名なら常に同一オブジェクト
+  （`(eq :foo :FOO)` は真。他のシンボル同様に小文字化される）。コロンは名前の一部ではなく、
+  `(symbol->string :foo)` は `"foo"`。`~s` では `:foo`、`~a` では `foo` と印字する。
+  キーワードは自分自身を値に持つ定数なので、変数として束縛・代入することも、定義の名前にすることも
+  できない（型エラー）。文字列からは `(intern "foo" "keyword")` で作る。判定は `keywordp`
+  （キーワード用の名前空間に属するか）。
+  `:` 単独や `:a:b` のように追加のコロンを含むものは読み取りエラー。
   先頭が `::` のものはキーワードではなく絶対パス（下記）。
   なお `:dyn` は型位置専用の予約キーワードで、それ以外の場所に書くとエラーになる（[2 章](#2-型の書き方)参照）。
 - **リスト**: `(a b c)`。ドット対 `(a . b)` も読み取り可能。
@@ -212,10 +218,10 @@ typelisp は静的型付きの Lisp。文法は S 式。組み込み関数・メ
     ラムダ」が別の型になってしまう。`&rest` は型の話に閉じているので関数型に書ける。
 - **前方参照は `defsignature` で宣言する**（下記）。宣言していない名前は、定義より前では
   呼べない——トップレベルは 1 フォームずつ、ソース順に検査・実行されるため。
-- トレイト境界を要求する場合は本体の直前に `where` 節を書く:
-  `(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- トレイト境界を要求する場合は本体の直前に `:where` 節を書く:
+  `(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   （`(AssocName ConcreteType)` による関連型の固定は省略可能）。
-- **docstring**: `where` 節（あれば）の直後、本体の先頭に文字列リテラルを置くと docstring になる
+- **docstring**: `:where` 節（あれば）の直後、本体の先頭に文字列リテラルを置くと docstring になる
   （CL 準拠）。ただし後ろに本体フォームが最低1つ続く場合のみ——単独の文字列は戻り値のままで
   docstring とは区別されない: `(defun f () string "doc" "value")` は docstring 付きで `"value"` を
   返すが、`(defun f () string "value")` は docstring なしで `"value"` を返す。
@@ -573,7 +579,7 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   (pub name ...))                                      ; 型を定義したモジュールの外にも公開する
 
 ; ジェネリックな型
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 `defstruct`（3.6）・`defenum`（3.7）で定義した型にメソッドを持たせる。Rust の固有 impl
@@ -594,7 +600,7 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
 - 書けるのは自分のプログラムの型だけ。`Vector`・`Option`・`int` のような標準ライブラリの型には
   書けない（`... is a standard library type` のエラー）。標準の型に操作を足したいときは
   トレイトを定義して、その型に `impl` する。
-- `(impl X ...)` の `X` の次が項目（リスト）か `where` か何も無ければこの固有 impl、
+- `(impl X ...)` の `X` の次が項目（リスト）か `:where` か何も無ければこの固有 impl、
   名前ならトレイトの `impl`（`(impl Trait Type ...)`、3.9）。
 
 ```lisp
@@ -686,7 +692,7 @@ C と同じ配置の構造体を宣言する。トップレベルの `unsafe` �
   参照し合う 2 つの型は書けない。
 - **型変数は宣言部に書いたものだけ**。`defun`/`defstruct`/`defenum`/`deftype` は名前の `<T>`、
   固有 `impl` は対象の型（`(impl box<T> ...)`）と各メソッドの名前の `<U>`、トレイトの `impl` は
-  対象の型と `impl<T>`、`deftrait` は `Self` と `(type Item)` の関連型。それ以外の
+  対象の型と `impl<T>`、`deftrait` は `Self` と `(:type Item)` の関連型。それ以外の
   場所——引数・戻り値・本体の `the`/`lambda`——に初めて現れる名前は型変数にはならず、
   `unknown type` になる。
 - **docstring**: 名前の直後、フィールド列の前に文字列リテラルを置くと docstring になる
@@ -822,19 +828,19 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 継承リストは必須。無ければ ()
-  (type AssocName)                       ; 関連型（複数可、省略可）
+  (:type AssocName)                       ; 関連型（複数可、省略可）
   (method-name ((self Self) params...) RetType)          ; 本体なし＝実装必須
   (method-name ((self Self) params...) RetType body...)) ; 本体あり＝デフォルト実装
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; impl 全体に効く境界（省略可）
-  (type AssocName ConcreteType)          ; 関連型を具体化
+  (:where (Trait A)...)                   ; impl 全体に効く境界（省略可）
+  (:type AssocName ConcreteType)          ; 関連型を具体化
   (method-name (recv params...) RetType body...))
 ```
 
 `impl` によって各メソッドは `TargetType` のメソッドとして登録され、固有 `impl`（3.5）のメソッドと
 同じように呼べる。トレイトの `impl` のメソッドは `pub` を書かなくても常に公開される。トレイトは
-ジェネリック関数の `where` 節でトレイト境界として参照する（[3.1 defun](#31-defun--関数定義) 参照）。
+ジェネリック関数の `:where` 節でトレイト境界として参照する（[3.1 defun](#31-defun--関数定義) 参照）。
 トレイト名には `m::Trait` のような `::` パスも書ける。
 
 **継承リスト（必須）**: トレイト名の直後に必ず書く。要素は素のトレイト名か、そのトレイトが
@@ -849,21 +855,21 @@ CL の `deftype` を、静的型付けの言語で意味の通る範囲に絞っ
 
 継承の効果は3つ。(1) `impl Ord X` は `impl Eq X` を**先に**書くことを要求する（記述順の規則。
 REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust より制限が強い）。
-(2) `(where (Ord T))` だけで `Eq` のメソッドも呼べる。(3) `:dyn Ord` から `Eq` のメソッドを呼べ、
+(2) `(:where (Ord T))` だけで `Eq` のメソッドも呼べる。(3) `:dyn Ord` から `Eq` のメソッドを呼べ、
 `:dyn Ord` の値をそのまま `:dyn Eq` を要求する場所に渡せる（アップキャスト）。
 サブトレイトが親と同名のメソッドを再宣言することと、2つの親から同名のメソッドを継承することは
 どちらもエラー（vtable のスロットは名前ごとに1つ）。ダイヤモンド継承は合流して1スロットになる。
 
 **デフォルト実装**: シグネチャの後ろに本体を書くと、その `impl` が省略したときに使われる。
 本体はトレイトを書いた**モジュールの名前空間**で解決されるので、そのモジュール内の非公開関数も
-呼べる。本体を持つメソッドは `where` 節と docstring も書ける。
+呼べる。本体を持つメソッドは `:where` 節と docstring も書ける。
 本体の型検査は**宣言の時点で1回**、`Self` を型変数のまま（`Self: そのトレイト` を境界として）
 行う（Rust と同じ）——どの `impl` も省略しないデフォルトでも、どの実装型でも通らない誤りは
 そこで弾かれる。`self` に対するそのトレイト自身・継承元のメソッド呼び出しはこの境界で通り、
 関連型は自分自身に固定されるので `Item` を返すシグネチャと本体は具体型を知らないまま照合される。
 
 **具体型ごとの実装**: ジェネリックな型には、具体型ごとに別の `impl` を書ける
-（`(impl Show Box<int> ...)` と `(impl Show Box<string> ...)`）。`:dyn`・`where` の境界・関連型・
+（`(impl Show Box<int> ...)` と `(impl Show Box<string> ...)`）。`:dyn`・`:where` の境界・関連型・
 `print-object` も具体型ごとに効き、`impl` の無い具体型（`Box<f64>`）はそのトレイトを実装していない。
 同じトレイトを `Box<T>` と `Box<int>` の両方に `impl` することはできない（3.5 のメソッドと同じ規則）。
 継承元のトレイトは、その具体型で実装されていればよい（`Box<int>` か `Box<T>` の `impl`）。
@@ -874,18 +880,18 @@ REPL でも逐次 `load` でも決定的に判定できる唯一の形で、Rust
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; 本体ゼロ — 全部デフォルト
+(impl<T> Clamp T (:where (Ord T)))          ; 本体ゼロ — 全部デフォルト
 ```
 
 コードは**具体型が実際に使うまで生成されない**（型ごとに1回、通常の単型化と同じ仕組み）。
 1つのトレイトにブランケット実装は1つまで。同じ型に明示 `impl` があればそちらが優先される。
 本体の型検査は生成とは別で、宣言の時点で1回**対象を型変数のまま**行う（Rust と同じ）——
 一度も使われない実装でも、宣言した境界でどの対象にも通らない誤りはそこで弾かれる。
-境界が正当化する呼び出し（`(where (Ord T))` 下の `(less self other)` 等）は、ジェネリック
+境界が正当化する呼び出し（`(:where (Ord T))` 下の `(less self other)` 等）は、ジェネリック
 `defun` の本体と同じ扱いで通る。
 
 **docstring**: `deftrait` は継承リストの直後、アイテム列の前に文字列リテラルを置くとトレイト全体に1つ
-docstring を持てる（`(deftrait Name () "doc" (type ...) (method ...)...)`）。本体を持たないシグネチャに
+docstring を持てる（`(deftrait Name () "doc" (:type ...) (method ...)...)`）。本体を持たないシグネチャに
 docstring は書けない——末尾の文字列はそれ自体がデフォルト実装の戻り値になるので、両者を区別できない。
 
 標準ライブラリが提供するトレイト: **`Iter`**（`next`／関連型 `Item`。`doiter`／シーケンス関数の
@@ -1136,11 +1142,11 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 (if cond then else)                 ; else は必須（3要素固定）
 (when cond body...)                 ; else なしの if（Unit 型）。defmacro
 (unless cond body...)               ; when の否定版。defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; キー列: どれかに当たれば
-  (else body...))                   ; expr は一度だけ評価。key は equal で比較。
+  (:else body...))                   ; expr は一度だけ評価。key は equal で比較。
                                      ; key は「リテラル」で、評価されない（CL と同じ）。
                                      ; 裸のシンボル a はシンボル 'a を意味する。
                                      ; 'a と書くとエラー（裸の a を使う）。defmacro
@@ -1233,7 +1239,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - **即値リテラル**: 整数 / `true`/`false` / 文字 — 語の比較
 - **値リテラル**: 文字列 / 浮動小数点 / シンボル（`'foo`）/ 多倍長の整数 / ratio — その型の
   `Eq::equals`（[トレイト](functions/traits.md#2-eq--ord比較)）による値比較。文字列は内容比較であって同一性比較ではない
-- `(= expr)` — 任意の式を評価し、`Eq::equals` で比較する。リテラル構文を持たない型
+- `(:= expr)` — 任意の式を評価し、`Eq::equals` で比較する。リテラル構文を持たない型
   （`defstruct` インスタンス、グローバル、計算結果）を比較する唯一の書き方であり、
   ユーザ定義の `Eq` 実装がそのまま比較規則になる。`expr` はその腕の位置から見えるものを何でも
   参照できる（引数、外側の束縛、グローバル）
@@ -1257,7 +1263,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
   選択肢も同じ名前の変数を同じ型で束縛しなければならない。コンストラクタパターンの中にも書ける
   （`(some (:or (circle r) (rect r _)))`）
 
-`Eq` を実装しない型を値リテラル／`(= expr)` で比較しようとすると型エラーになる
+`Eq` を実装しない型を値リテラル／`(:= expr)` で比較しようとすると型エラーになる
 （マッチしない腕が黙って残るより、比較できないと言うほうを選んでいる）。
 
 **ガード**: パターンの後ろに `:when 条件` を書くと、パターンがマッチし、さらに条件が真のときだけ
@@ -1287,7 +1293,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 即値でないリテラル（文字列 / 浮動小数点 / 多倍長の整数 / ratio）は `Sexpr` に対して**書けない**。
 それらの `eq` はオブジェクトの同一性を比べるので「型は通るが決してマッチしない腕」になるため、
 変種パターンを名指すエラーにしてある——`(str "hi")` と書けば `string` に分解されて内容比較になる。
-`(= expr)` は明示的に `equals` を求めているので、この制限は掛からない。
+`(:= expr)` は明示的に `equals` を求めているので、この制限は掛からない。
 
 **スクルーティニーは ADT でなくてよい**。`string`/`symbol`/`i32`/`f64` などをそのまま `match`
 できる（それが文字列リテラルパターンの置き場所になる）。ただし変種を持たない型は列挙で網羅できない
@@ -1436,13 +1442,12 @@ downcast パターンを使う `match` の網羅性チェックは、`Sexpr` 本
 
 CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 collect i)`）、ここでは
 **すべてキーワード**にする——裸の `for` はただの変数参照になってしまうし、キーワードで
-あることが単純ループとの分かれ目でもある。例外は変数と値を区切る `=` で、位置が
-一意なので裸でもキーワード（`:=`）でも読む。
+あることが単純ループとの分かれ目でもある。変数と値を区切る語も同じで、`:=` と書く。
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1451,11 +1456,11 @@ CL は節の語を裸のシンボルで書くが（`(loop for i from 1 to 3 coll
 
 | 節 | 意味 |
 |---|---|
-| `:with v = e` | 一度だけ束縛する。前の節の変数を読んでよい |
+| `:with v := e` | 一度だけ束縛する。前の節の変数を読んでよい |
 | `:for v :in s` / `:for v :across s` | `Iter` の要素を順に。CL のリスト/ベクタの区別はここには無いので同じ節の別綴り |
 | `:for v :on s` | 以降の**接尾辞**を順に。CL は共有される tail cons を渡すが、`Iter` に共有すべき tail は無いので新しい `Vector` |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | 数え上げ。`:downfrom`/`:upfrom` も可 |
-| `:for v = e [:then f]` | `e` で始め、2 回目以降は `f`（`:then` 無しなら毎回 `e`） |
+| `:for v := e [:then f]` | `e` で始め、2 回目以降は `f`（`:then` 無しなら毎回 `e`） |
 | `:repeat n` | 回数だけ回す |
 
 `:for` を複数書くと**並行に**進み、どれか 1 つが尽きた時点で終わる。
@@ -1759,7 +1764,7 @@ typl --image session.typld             # REPL も同じ
 張ったストリーム**、第 2 引数は**発火した文字**（ディスパッチなら 2 文字目）。返り値がそこに
 読まれたデータになる。ストリームが `:dyn PeekInput` でなく具体型なのは、リーダが渡すものが
 常にこれ 1 種類だから——`read-sexpr` / `read-char` / `peek-char` / `unread-char` /
-`read-delimited-list` はどれも `(where (PeekInput S))` なので、具体型のまま全部使える。
+`read-delimited-list` はどれも `(:where (PeekInput S))` なので、具体型のまま全部使える。
 
 ```lisp
 (set-macro-character #\!
@@ -1867,15 +1872,15 @@ readtable が**値でない**ため——値なら「リーダに手渡せるも
 (select
   ((v (recv ch1)) body...)          ; 受信腕。v は Option<T> に束縛される
   ((send ch2 x) body...)            ; 送信腕
-  (else body...))                   ; 省略可。**書くなら最後**
+  (:else body...))                   ; 省略可。**書くなら最後**
 ```
 
-- **`else` があればブロックしない**（Go の `default`）。無ければどれかが可能になるまで待つ。
+- **`:else` があればブロックしない**（Go の `default`）。無ければどれかが可能になるまで待つ。
 - **同時に複数可能なら 1 つを無作為に選ぶ**（記述順にすると後ろの腕が飢える）。
 - 受信腕の `v` は **`Option<T>`**。閉じたチャネルは「答え」であって腕が飛ばされるのではない
   ので、腕の中で `match` する。
 - 型は**全腕の本体の型の合流型**（`match` の腕と同じ規則）。
-- 腕が 0 個の `(select)` は型エラー（Go の `select{}` ＝永久ブロックは非採用）。`else` だけの
+- 腕が 0 個の `(select)` は型エラー（Go の `select{}` ＝永久ブロックは非採用）。`:else` だけの
   `select` も同様——本体をそのまま書いたのと同じだから。
 
 **チャネル式と送る値は、どの腕が選ばれるかに関わらず左から 1 度だけ評価される**

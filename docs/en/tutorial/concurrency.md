@@ -145,14 +145,14 @@ gives you a timeout.
 - `((v (recv ch)) body...)` is a receive arm. `v` gets an `Option<T>`.
 - `((send ch x) body...)` is a send arm.
 - When several arms can proceed at the same time, one of them is chosen at random.
-- With `(else body...)` at the end, `else` runs when no arm can proceed right away, and `select`
+- With `(:else body...)` at the end, `:else` runs when no arm can proceed right away, and `select`
   does not wait.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

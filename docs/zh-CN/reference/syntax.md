@@ -31,10 +31,17 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
 - **字符串**：`"..."`。转义有 `\n` `\t` `\r` `\0` `\\` `\"`（其他的 `\x` 就是 `x`）。
 - **符号**：包含字母、数字和符号的任意记号（`+` `<=` `my-func` 等）。
   `]` 和 `}` 会结束一个记号，所以不能写在符号中；在数据的开头遇到它们是读取错误。`[` 和 `{` 可以写在符号中：与 CL 一样，它们留给程序员在[读取宏](#11-读取宏readtable)中使用。
-- **关键字**：像 `:name` 这样以冒号开头的符号（遵循 CL）。它是自求值的——不查找绑定，值就是它自身，静态类型为 `symbol`。同名的
-  关键字总是同一个对象（`(eq :foo :FOO)` 为真。与其他符号一样会被转为小写）。冒号本身是名字的一部分，`(symbol->string :foo)`
-  是 `":foo"`（typelisp 没有包机制，所以与 CL 的 `symbol-name` 不同）。单独的 `:` 或像 `:a:b` 这样包含额外冒号的是读取错误。
-  判断用 `keywordp`。以 `::` 开头的不是关键字，而是绝对路径（见下文）。
+  `|` 与 `|` 之间的内容按原样读取，分隔符和冒号也可以写进名字（CL 的多重转义）。
+  `|:foo|` 是名字为 `:foo` 的普通符号，不是关键字。
+- **关键字**：像 `:name` 这样以冒号开头的符号（遵循 CL）。
+  无论写在哪个模块里，都是关键字专用命名空间 `keyword`（CL 的 `KEYWORD` 包）中同名的唯一一个符号。
+  它是自求值的——不查找绑定，值就是它自身，静态类型为 `symbol`。
+  同名的关键字总是同一个对象（`(eq :foo :FOO)` 为真。与其他符号一样会被转为小写）。
+  冒号不是名字的一部分，`(symbol->string :foo)` 是 `"foo"`。
+  `~s` 打印为 `:foo`，`~a` 打印为 `foo`。
+  关键字是以自身为值的常量，所以既不能作为变量绑定或赋值，也不能作为定义的名字（类型错误）。
+  从字符串创建时写 `(intern "foo" "keyword")`。判断用 `keywordp`（是否属于关键字专用命名空间）。
+  单独的 `:` 或像 `:a:b` 这样包含额外冒号的是读取错误。以 `::` 开头的不是关键字，而是绝对路径（见下文）。
   另外，`:dyn` 是只用于类型位置的保留关键字，写在其他位置是错误（见[第 2 章](#2-类型的写法)）。
 - **列表**：`(a b c)`。点对 `(a . b)` 也可以读取。
 - **向量**：`#(1 2 3)`（与 CL 相同）。内容全部是字面量，不会求值——`#(a b)` 中的 `a` 是符号而不是变量。元素类型由上下文决定（`(the Vector<i32> #(1 2))`），没有上下文时取第一个元素的类型（`#(1 2 3)` 是 `Vector<int>`）。元素类型必须一致，`#(1 "a")` 是类型错误。既没有元素也没有上下文的 `#()` 也是类型错误。每次求值都会创建新的向量。在期望 S 表达式数据的位置（`(the Option<Sexpr> #(1 x))`、`'#(..)`、`read` 读到的数据），它是元素全部为数据的 `Vector<Option<Sexpr>>`——即 `Sexpr` 的 `vector` 变体。
@@ -143,9 +150,9 @@ typelisp 是一种静态类型的 Lisp，语法采用 S 表达式。内置函数
     而它只能从按名字解析的签名中得到。`lambda` 作为值传递，描述这个值的只有函数类型 `(fn ...)`——那里没有放式子的地方，如果放了，
     "签名相同而只有默认值不同的两个 lambda"就会成为不同的类型。`&rest` 只涉及类型的问题，所以可以写进函数类型。
 - **前向引用用 `defsignature` 声明**（见下文）。没有声明的名字不能在定义之前调用——因为顶层是按源代码顺序逐个形式检查和执行的。
-- 要求 trait 约束时，在函数体之前写 `where` 子句：`(defun name<T> (params) Ret (where (Trait T (AssocName ConcreteType)...)) body...)`
+- 要求 trait 约束时，在函数体之前写 `:where` 子句：`(defun name<T> (params) Ret (:where (Trait T (AssocName ConcreteType)...)) body...)`
   （用 `(AssocName ConcreteType)` 固定关联类型可以省略）。
-- **文档字符串**：在 `where` 子句（如果有）之后、函数体开头放置字符串字面量，它就成为文档字符串（遵循 CL）。但仅当其后至少还有
+- **文档字符串**：在 `:where` 子句（如果有）之后、函数体开头放置字符串字面量，它就成为文档字符串（遵循 CL）。但仅当其后至少还有
   一个函数体形式时——单独的字符串仍是返回值，不会被视为文档字符串：`(defun f () string "doc" "value")` 带有文档字符串并返回
   `"value"`，而 `(defun f () string "value")` 没有文档字符串并返回 `"value"`。可以用 `(documentation name)` 取出
   （[文档字符串](functions/system.md#7-文档字符串--documentation)）。
@@ -463,7 +470,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   (pub name ...))                                      ; 在定义类型的模块之外也公开
 
 ; 泛型类型
-(impl Type<T> (where (Trait T)...) item...)
+(impl Type<T> (:where (Trait T)...) item...)
 ```
 
 给用 `defstruct`（3.6）、`defenum`（3.7）定义的类型添加方法。相当于 Rust 的固有 impl
@@ -482,7 +489,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   用 `(documentation Type::name)` 取出。trait 的 `impl` 的方法也一样。
 - 只能为自己程序中的类型书写。`Vector`、`Option`、`int` 这样的标准库类型不能写（会报
   `... is a standard library type` 错误）。想给标准类型增加操作时，定义一个 trait，再对该类型写 `impl`。
-- 在 `(impl X ...)` 中，`X` 之后是项目（列表）、`where` 或什么都没有时，就是这里的固有 impl；
+- 在 `(impl X ...)` 中，`X` 之后是项目（列表）、`:where` 或什么都没有时，就是这里的固有 impl；
   是名字时，就是 trait 的 `impl`（`(impl Trait Type ...)`，3.9）。
 
 ```lisp
@@ -570,7 +577,7 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
   类型无法写出。
 - **类型变量只有写在声明部分的那些。** `defun`/`defstruct`/`defenum`/`deftype` 是名字的 `<T>`，
   固有 `impl` 是目标类型（`(impl box<T> ...)`）和各方法名字的 `<U>`，trait 的 `impl` 是目标类型和
-  `impl<T>`，`deftrait` 是 `Self` 和 `(type Item)` 的关联类型。在其他位置（参数、返回值、本体中的
+  `impl<T>`，`deftrait` 是 `Self` 和 `(:type Item)` 的关联类型。在其他位置（参数、返回值、本体中的
   `the`/`lambda`）首次出现的名字不会成为类型变量，而是 `unknown type`。
 - **文档字符串**：在名字之后、字段列表之前放置字符串字面量，它就成为文档字符串（`(defstruct Name "doc" (field Type)...)`——与
   CL 的 `defstruct` 位置相同）。字段总是 `(name Type ...)` 的形式，不可能是裸字符串，所以没有歧义。用 `(documentation Name)` 取出。
@@ -686,18 +693,18 @@ C 函数的调用只能写在 `unsafe` 中，所以只有在 `unsafe` 中才能�
 
 ```lisp
 (deftrait TraitName (SuperTrait...)      ; 继承列表是必需的。没有时为 ()
-  (type AssocName)                       ; 关联类型（可以多个，可以省略）
+  (:type AssocName)                       ; 关联类型（可以多个，可以省略）
   (method-name ((self Self) params...) RetType)          ; 没有函数体＝必须实现
   (method-name ((self Self) params...) RetType body...)) ; 有函数体＝默认实现
 
 (impl TraitName TargetType
-  (where (Trait A)...)                   ; 作用于整个 impl 的约束（可以省略）
-  (type AssocName ConcreteType)          ; 具体化关联类型
+  (:where (Trait A)...)                   ; 作用于整个 impl 的约束（可以省略）
+  (:type AssocName ConcreteType)          ; 具体化关联类型
   (method-name (recv params...) RetType body...))
 ```
 
 通过 `impl`，每个方法都作为 `TargetType` 的方法注册，可以像固有 `impl`（3.5）的方法一样调用。
-trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛型函数的 `where` 子句中作为 trait 约束引用
+trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛型函数的 `:where` 子句中作为 trait 约束引用
 （见 [3.1 defun](#31-defun--函数定义)）。trait 名也可以写 `m::Trait` 这样的 `::` 路径。
 
 **继承列表（必需）**：一定写在 trait 名之后。元素是裸 trait 名，或者在该 trait 有关联类型时，写成**固定了所有关联类型**的
@@ -711,18 +718,18 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 ```
 
 继承有 3 个效果。(1) `impl Ord X` 要求**先**写 `impl Eq X`（关于书写顺序的规则。是在 REPL 和逐个 `load` 中都能确定地判断的唯一
-形式，比 Rust 更严格）。(2) 只要 `(where (Ord T))` 就能调用 `Eq` 的方法。(3) 可以从 `:dyn Ord` 调用 `Eq` 的方法，`:dyn Ord` 的值
+形式，比 Rust 更严格）。(2) 只要 `(:where (Ord T))` 就能调用 `Eq` 的方法。(3) 可以从 `:dyn Ord` 调用 `Eq` 的方法，`:dyn Ord` 的值
 可以直接传给要求 `:dyn Eq` 的位置（向上转换）。子 trait 重新声明与父同名的方法，以及从两个父继承同名的方法，都是错误（vtable 的槽
 每个名字一个）。菱形继承会合并为一个槽。
 
 **默认实现**：在签名后写函数体，`impl` 省略该方法时就使用它。函数体在写下 trait 的**模块的命名空间**中解析，所以也可以调用该模块
-中非公开的函数。有函数体的方法也可以写 `where` 子句和文档字符串。函数体的类型检查**在声明时进行一次**，`Self` 保持为类型变量
+中非公开的函数。有函数体的方法也可以写 `:where` 子句和文档字符串。函数体的类型检查**在声明时进行一次**，`Self` 保持为类型变量
 （以 `Self: 该 trait` 为约束）（与 Rust 相同）——即使是没有任何 `impl` 省略的默认实现，对任何实现类型都通不过的错误也会在那里被
 排除。对 `self` 调用该 trait 自身及其继承来源的方法会借这个约束通过，关联类型固定为自身，所以返回 `Item` 的签名与函数体在不知道
 具体类型的情况下进行对照。
 
 **按具体类型的实现**：泛型类型可以为每个具体类型分别写 `impl`（`(impl Show Box<int> ...)` 和
-`(impl Show Box<string> ...)`）。`:dyn`、`where` 约束、关联类型和 `print-object` 也都按具体类型生效，
+`(impl Show Box<string> ...)`）。`:dyn`、`:where` 约束、关联类型和 `print-object` 也都按具体类型生效，
 没有 `impl` 的具体类型（`Box<f64>`）不实现该 trait。同一个 trait 不能同时为 `Box<T>` 和 `Box<int>` 写
 `impl`（与 3.5 中方法的规则相同）。父 trait 只需在该具体类型上已实现即可（`Box<int>` 或 `Box<T>` 的 `impl`）。
 
@@ -732,16 +739,16 @@ trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。trait 在泛�
 (deftrait Clamp (Ord)
   (clamp ((self Self) (lo Self) (hi Self)) Self
     (if (less self lo) lo (if (less hi self) hi self))))
-(impl<T> Clamp T (where (Ord T)))          ; 没有函数体——全部使用默认实现
+(impl<T> Clamp T (:where (Ord T)))          ; 没有函数体——全部使用默认实现
 ```
 
 **在具体类型实际使用之前不会生成代码**（每种类型一次，与普通单态化相同的机制）。一个 trait 最多一个全面实现。同一类型有显式
 `impl` 时，那个优先。函数体的类型检查与生成是分开的，在声明时**保持对象为类型变量**进行一次（与 Rust 相同）——即使是一次也没被
-使用的实现，在声明的约束下对任何对象都通不过的错误也会在那里被排除。约束所允许的调用（`(where (Ord T))` 下的
+使用的实现，在声明的约束下对任何对象都通不过的错误也会在那里被排除。约束所允许的调用（`(:where (Ord T))` 下的
 `(less self other)` 等）与泛型 `defun` 的函数体同样对待，可以通过。
 
 **文档字符串**：`deftrait` 在继承列表之后、项目列表之前放置字符串字面量，整个 trait 就能有一个文档字符串
-（`(deftrait Name () "doc" (type ...) (method ...)...)`）。没有函数体的签名不能写文档字符串——末尾的字符串本身会成为默认实现的
+（`(deftrait Name () "doc" (:type ...) (method ...)...)`）。没有函数体的签名不能写文档字符串——末尾的字符串本身会成为默认实现的
 返回值，两者无法区分。
 
 标准库提供的 trait：**`Iter`**（`next`／关联类型 `Item`。`doiter`／序列函数的基础）、**`Eq`**（`equals`。`not-equals` 是默认
@@ -952,11 +959,11 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 (if cond then else)                 ; else 是必需的（固定 3 个元素）
 (when cond body...)                 ; 没有 else 的 if（Unit 类型）。defmacro
 (unless cond body...)               ; when 的否定版。defmacro
-(cond (test1 body...) (test2 body...) ... (else body...))   ; defmacro
+(cond (test1 body...) (test2 body...) ... (:else body...))   ; defmacro
 (case expr
   (key1 body...)
   ((key2 key3) body...)             ; 键列表：匹配其中任一个
-  (else body...))                   ; expr 只求值一次。key 用 equal 比较。
+  (:else body...))                   ; expr 只求值一次。key 用 equal 比较。
                                      ; key 是"字面量"，不求值（与 CL 相同）。
                                      ; 裸符号 a 表示符号 'a。
                                      ; 写 'a 是错误（使用裸的 a）。defmacro
@@ -1040,7 +1047,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - **立即值字面量**：整数 / `true`/`false` / 字符 —— 按字比较
 - **值字面量**：字符串 / 浮点数 / 符号（`'foo`）/ 多精度整数 / ratio —— 用该类型的 `Eq::equals`
   （[标准 trait](functions/traits.md#2-eq--ord比较)）按值比较。字符串比较的是内容，而不是同一性
-- `(= expr)` —— 求值任意式子，用 `Eq::equals` 比较。是比较没有字面量语法的类型（`defstruct` 实例、全局变量、计算结果）的唯一写法，
+- `(:= expr)` —— 求值任意式子，用 `Eq::equals` 比较。是比较没有字面量语法的类型（`defstruct` 实例、全局变量、计算结果）的唯一写法，
   用户定义的 `Eq` 实现直接成为比较规则。`expr` 可以引用从该分支位置可见的任何东西（参数、外层绑定、全局变量）
 - `(Ctor sub-pattern...)` —— 构造函数模式（`Some x` `None` `Cons a d` `Ok v` 等）
 - `(Type :slot pattern... :slot...)` — 结构体模式。在类型名之后用关键字写槽。关键字后面是模式时，
@@ -1058,7 +1065,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 - `#{p0 p1 ...}` —— 元组模式。逐个元素用子模式匹配。对 `Sexpr` 而言，只匹配元素个数相同的 `#{..}` 数据
 - `(:or p1 p2 ...)` —— or 模式。任意一个选项匹配即匹配。分支体只有一个，所以每个选项都必须以相同的类型绑定相同名字的变量。也可以写在构造函数模式内部（`(some (:or (circle r) (rect r _)))`）
 
-用值字面量／`(= expr)` 比较没有实现 `Eq` 的类型是类型错误（比起留下悄悄不匹配的分支，选择说明无法比较）。
+用值字面量／`(:= expr)` 比较没有实现 `Eq` 的类型是类型错误（比起留下悄悄不匹配的分支，选择说明无法比较）。
 
 **守卫**：在模式后面写 `:when 条件`，则只有当模式匹配且条件也为真时才选择该分支。条件为假时尝试下一个分支。条件可以读取模式绑定的变量。
 
@@ -1082,7 +1089,7 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 ```
 
 不是立即值的字面量（字符串 / 浮点数 / 多精度整数 / ratio）**不能**对 `Sexpr` 书写。它们的 `eq` 比较对象的同一性，会成为"类型能
-通过但永远不匹配的分支"，所以作为点出变体模式的错误——写 `(str "hi")` 就会拆解为 `string` 进行内容比较。`(= expr)` 明确要求
+通过但永远不匹配的分支"，所以作为点出变体模式的错误——写 `(str "hi")` 就会拆解为 `string` 进行内容比较。`(:= expr)` 明确要求
 `equals`，所以不受这个限制。
 
 **被匹配值不必是 ADT。** `string`/`symbol`/`i32`/`f64` 等可以直接 `match`（那正是字符串字面量模式的用武之地）。但没有变体的类型
@@ -1215,12 +1222,12 @@ test result: FAILED. 1 passed; 1 failed; 0 filtered out
 loop 规则相同）。
 
 CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但这里**全部是关键字**——裸的 `for` 只会成为变量引用，而是不是
-关键字也正是与简单循环的分界。例外是分隔变量和值的 `=`，它的位置是唯一的，所以裸写和关键字（`:=`）都能读取。
+关键字也正是与简单循环的分界。分隔变量和值的词也不例外，写作 `:=`。
 
 ```lisp
 (loop :for i :from 1 :to 3 :collect i)              ; #(1 2 3)
 (loop :for x :in (iter v) :when (evenp x) :sum x)
-(loop :repeat 4 :for x = 1 :then (* x 2) :collect x) ; #(1 2 4 8)
+(loop :repeat 4 :for x := 1 :then (* x 2) :collect x) ; #(1 2 4 8)
 (loop :for i :from 1 :to 4 :sum i :into s :finally (return (* s 2))) ; 20
 ```
 
@@ -1228,11 +1235,11 @@ CL 用裸符号书写子句词（`(loop for i from 1 to 3 collect i)`），但�
 
 | 子句 | 含义 |
 |---|---|
-| `:with v = e` | 只绑定一次。可以读取前面子句的变量 |
+| `:with v := e` | 只绑定一次。可以读取前面子句的变量 |
 | `:for v :in s` / `:for v :across s` | 依次取 `Iter` 的元素。这里没有 CL 的列表／向量之分，所以是同一子句的不同写法 |
 | `:for v :on s` | 依次取之后的**后缀**。CL 传递共享的尾部 cons，但 `Iter` 没有可共享的尾部，所以是新的 `Vector` |
 | `:for v :from a [:to b \| :below b \| :downto b \| :above b] [:by s]` | 计数。也可以用 `:downfrom`/`:upfrom` |
-| `:for v = e [:then f]` | 从 `e` 开始，第 2 次以后为 `f`（没有 `:then` 时每次都是 `e`） |
+| `:for v := e [:then f]` | 从 `e` 开始，第 2 次以后为 `f`（没有 `:then` 时每次都是 `e`） |
 | `:repeat n` | 循环这么多次 |
 
 写多个 `:for` 时**并行**推进，任何一个用尽时结束。
@@ -1494,7 +1501,7 @@ typl --image session.typld             # REPL 也一样
 
 `f` 的类型是 `(fn (string-input-stream char) Option<Sexpr>)`。第 1 个参数是**以尚未读取的文本为内容的流**，第 2 个参数是**触发的
 字符**（分派时为第 2 个字符）。返回值成为在那里读到的数据。流是具体类型而不是 `:dyn PeekInput`，是因为读取器传递的总是这一种——
-`read-sexpr` / `read-char` / `peek-char` / `unread-char` / `read-delimited-list` 都是 `(where (PeekInput S))`，所以具体类型
+`read-sexpr` / `read-char` / `peek-char` / `unread-char` / `read-delimited-list` 都是 `(:where (PeekInput S))`，所以具体类型
 可以直接全部使用。
 
 ```lisp
@@ -1585,14 +1592,14 @@ typl --image session.typld             # REPL 也一样
 (select
   ((v (recv ch1)) body...)          ; 接收分支。v 绑定为 Option<T>
   ((send ch2 x) body...)            ; 发送分支
-  (else body...))                   ; 可以省略。**要写的话放在最后**
+  (:else body...))                   ; 可以省略。**要写的话放在最后**
 ```
 
-- **有 `else` 时不会阻塞**（Go 的 `default`）。没有时等到某个分支变得可能。
+- **有 `:else` 时不会阻塞**（Go 的 `default`）。没有时等到某个分支变得可能。
 - **同时有多个可能时随机选择一个**（按书写顺序的话，后面的分支会饿死）。
 - 接收分支的 `v` 是 **`Option<T>`**。关闭的通道是"回答"而不是跳过分支的理由，所以在分支中 `match`。
 - 类型是**所有分支函数体类型的合并类型**（与 `match` 分支的规则相同）。
-- 0 个分支的 `(select)` 是类型错误（不采用 Go 的 `select{}`＝永久阻塞）。只有 `else` 的 `select` 也一样——与直接写函数体相同。
+- 0 个分支的 `(select)` 是类型错误（不采用 Go 的 `select{}`＝永久阻塞）。只有 `:else` 的 `select` 也一样——与直接写函数体相同。
 
 **无论选择哪个分支，通道表达式和要发送的值都从左到右各求值一次**（与 `case` 对键所持的规则相同）。
 

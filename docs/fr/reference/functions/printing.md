@@ -22,7 +22,7 @@ directive consomme tour à tour les arguments variadiques qui suivent.
 
 Le type de `dest` scinde le sens en deux (lequel s'applique est décidé statiquement). La forme flux peut s'écrire de
 la même façon avec un type de flux concret, un `:dyn CharOutput` ou une variable de type liée par
-`(where (CharOutput S))`. Un `dest` qui n'est ni un `bool` ni un flux est une erreur de type.
+`(:where (CharOutput S))`. Un `dest` qui n'est ni un `bool` ni un flux est une erreur de type.
 
 **La chaîne de contrôle doit être un littéral** (la même restriction que le `format!` de Rust). Les directives
 qu'elle contient décident combien d'arguments sont pris et de quels types ; une chaîne construite à l'exécution ne
@@ -249,7 +249,7 @@ Règles :
 
 - **L'enregistrement est statique.** Un `impl` est vérifié comme une définition de méthode ordinaire ; un nom de type
   mal orthographié ou une mauvaise signature est donc une erreur de compilation.
-- **Cela marche aussi pour les types génériques.** `(impl print-object box<T> (where (print-object T)) ...)` mène à
+- **Cela marche aussi pour les types génériques.** `(impl print-object box<T> (:where (print-object T)) ...)` mène à
   un corps distinct pour chaque argument de type : une valeur se souvient de son type, arguments de type compris
   (`box<i32>`). Les types génériques intégrés comme `Vector<T>` fonctionnent de la même façon.
 - **Le choix se fait à l'affichage.** Quelle directive consomme quel argument dépend du contenu de la chaîne de
@@ -265,7 +265,7 @@ Règles :
   code générique de dire « les valeurs d'un type inconnu peuvent être rendues » (la même forme que le `T: Display`
   de Rust). Le `print-object` de `Array<T>` en est un exemple.
 - **Avec des arguments de type qui ne satisfont pas la borne, la représentation intégrée est utilisée
-  silencieusement.** `(impl print-object Array<T> (where (print-object T)))` s'applique à `Array<i32>`, mais pas à
+  silencieusement.** `(impl print-object Array<T> (:where (print-object T)))` s'applique à `Array<i32>`, mais pas à
   un `Array` dont les éléments sont un `defstruct` sans `print-object`. Il serait absurde que la simple création
   d'un tableau soit une erreur ; ce n'en est donc pas une.
 - L'autre mécanisme de CL, `set-pprint-dispatch` / `*print-pprint-dispatch*` (un registre à l'exécution indexé par

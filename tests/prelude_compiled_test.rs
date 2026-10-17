@@ -81,8 +81,6 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
         // was: `stream-read-char` / `stream-write-string`
         m("file-stream", "read-char"),
         m("string-output-stream", "write-string"),
-        // was: `symbol->string`
-        f("keywordp"),
         // was: `char::char->string`
         CompileTarget::Fn(Path::internal("reader-whitespacep")),
         // was: `random-state-next` / `make-random-state-fresh`

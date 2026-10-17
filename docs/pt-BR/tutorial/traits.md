@@ -46,26 +46,26 @@ Deixar de fora mesmo um só dos métodos que o trait declara é um erro de tipo 
 
 ## 2. Restrições de trait: "qualquer tipo que implemente este trait"
 
-É possível pôr uma condição no parâmetro de tipo de uma função genérica com `where`. Isso se chama
+É possível pôr uma condição no parâmetro de tipo de uma função genérica com `:where`. Isso se chama
 **restrição de trait**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Graças a `(where (Shape T))`, o corpo pode usar `name` e `area` em valores de `T`. Sem a restrição nada se
+Graças a `(:where (Shape T))`, o corpo pode usar `name` e `area` em valores de `T`. Sem a restrição nada se
 saberia sobre `T`, então eles não poderiam ser chamados.
 
 Passar um tipo que não implementa `Shape` é um erro de tipo na chamada.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Uma função genérica ganha uma cópia própria para cada tipo com que é chamada. Não há testes de tipo nem
@@ -99,7 +99,7 @@ que o usam.
 
 | Trait | Métodos a implementar | O que ele permite |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, o padrão `(= expr)` de `match` etc. |
+| `Eq` | `equals` | `member`, `find`, `position`, o padrão `(:= expr)` de `match` etc. |
 | `Ord` | `less` | `less-equal`, `greater` etc. `Ord` herda de `Eq` |
 | `print-object` | `print-object` | Como `println` e afins mostram os valores |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` etc. |
@@ -136,7 +136,7 @@ implemente `Ord`.
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -179,7 +179,7 @@ total 9
 
 Como escolher entre as restrições de trait da seção 2 e `:dyn`:
 
-| | Restrição de trait (`where`) | `:dyn Trait` |
+| | Restrição de trait (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Quando o método chamado é decidido | Antes da execução | Em tempo de execução |
 | Misturar tipos em um mesmo `Vector` | Não é possível | É possível |

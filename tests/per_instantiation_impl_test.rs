@@ -120,7 +120,7 @@ const SHOW: &str = r##"
 (impl Show Box<int> (show ((self Self)) string (format false "int ~a" self::v)))
 (impl Show Box<string> (show ((self Self)) string (format false "string ~a" self::v)))
 (defun via-dyn ((s :dyn Show)) string (show s))
-(defun via-bound<T> ((s T)) string (where (Show T)) (show s))
+(defun via-bound<T> ((s T)) string (:where (Show T)) (show s))
 "##;
 
 #[test]
@@ -154,10 +154,10 @@ fn a_where_bound_holds_at_each_instantiation_with_an_impl() {
 #[test]
 fn each_instantiation_binds_its_own_associated_type() {
     let defs = r##"
-(deftrait Unwrap () (type Item) (unwrap ((self Self)) Item))
+(deftrait Unwrap () (:type Item) (unwrap ((self Self)) Item))
 (defstruct Box<T> (v T))
-(impl Unwrap Box<int> (type Item int) (unwrap ((self Self)) int (+ self::v 1)))
-(impl Unwrap Box<string> (type Item string) (unwrap ((self Self)) string (format false "~a!" self::v)))
+(impl Unwrap Box<int> (:type Item int) (unwrap ((self Self)) int (+ self::v 1)))
+(impl Unwrap Box<string> (:type Item string) (unwrap ((self Self)) string (format false "~a!" self::v)))
 (defun get-int ((u :dyn Unwrap<int>)) int (unwrap u))
 "##;
     both(defs, r##"(format false "~a ~a ~a" (unwrap (make-instance 'Box :v 1)) (unwrap (make-instance 'Box :v "s")) (get-int (make-instance 'Box :v 5)))"##, "2 s! 6");
@@ -209,7 +209,7 @@ fn a_blanket_impl_at_two_instantiations_keeps_both() {
 (defstruct Box<T> (v T))
 (impl Ranked Box<int> (rank ((self Self)) int self::v))
 (impl Ranked Box<string> (rank ((self Self)) int 100))
-(impl<T> Twice T (where (Ranked T)))
+(impl<T> Twice T (:where (Ranked T)))
 "##;
     both(defs, r##"(format false "~a ~a" (twice-rank (make-instance 'Box :v 4)) (twice-rank (make-instance 'Box :v "s")))"##, "8 200");
 }

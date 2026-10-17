@@ -147,14 +147,14 @@ berlalu. Dikombinasikan dengan `select`, ia memberi Anda batas waktu.
 - `((v (recv ch)) body...)` adalah cabang penerimaan. `v` mendapat `Option<T>`.
 - `((send ch x) body...)` adalah cabang pengiriman.
 - Ketika beberapa cabang dapat berjalan pada saat yang sama, salah satunya dipilih secara acak.
-- Dengan `(else body...)` di akhir, `else` dijalankan ketika tidak ada cabang yang dapat langsung
+- Dengan `(:else body...)` di akhir, `:else` dijalankan ketika tidak ada cabang yang dapat langsung
   berjalan, dan `select` tidak menunggu.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

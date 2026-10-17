@@ -144,14 +144,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - `((v (recv ch)) body...)` — це гілка отримання. `v` отримує `Option<T>`.
 - `((send ch x) body...)` — це гілка надсилання.
 - Коли кілька гілок можуть виконатися одночасно, одна з них вибирається навмання.
-- З `(else body...)` наприкінці `else` виконується, коли жодна гілка не може виконатися одразу, і
+- З `(:else body...)` наприкінці `:else` виконується, коли жодна гілка не може виконатися одразу, і
   `select` не чекає.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

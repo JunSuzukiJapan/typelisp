@@ -19,7 +19,7 @@
 | `format`（写到流） | `(format stream control args...)` | `(S, string, ...)→()` where `CharOutput S` | `dest` 不是 `bool` 时是 CL 的写到流。把展开的字符串写到该流。返回值是 `()`（相当于 CL 的 `nil`），不返回字符串 |
 
 按 `dest` 的类型分为两种含义（属于哪一种是静态确定的）。写到流时，具体流类型、`:dyn CharOutput`、
-`(where (CharOutput S))` 的类型变量都可以同样书写。既不是 `bool` 也不是流的 `dest` 是类型错误。
+`(:where (CharOutput S))` 的类型变量都可以同样书写。既不是 `bool` 也不是流的 `dest` 是类型错误。
 
 **控制字符串必须是字面量**（与 Rust 的 `format!` 同样的限制）。其中的指令决定取多少个参数、什么类型，所以运行时拼出的
 字符串在检查时无法读取。限定为字面量后，**参数的个数和类型在检查时就会被检查**——`(println "~c" 1)` 和
@@ -218,7 +218,7 @@ CLHS 22.1.3 的打印函数。不做格式展开，直接打印一个值。流�
 规则：
 
 - **注册是静态的。** `impl` 作为普通的方法定义进行类型检查，所以类型名的拼写错误和签名不符都是编译错误。
-- **对泛型类型也生效。** `(impl print-object box<T> (where (print-object T)) ...)` 会按类型参数跳到不同的函数体——值
+- **对泛型类型也生效。** `(impl print-object box<T> (:where (print-object T)) ...)` 会按类型参数跳到不同的函数体——值
   记得包括自身类型参数在内的类型（`box<i32>`）。`Vector<T>` 这样的内置泛型类型也一样。
 - **选择发生在打印时。** 哪个指令消耗哪个参数取决于控制字符串在运行时的内容，所以 `~a` 与 `~s` 的区别（即 `escape`）
   只有在打印的那一刻才知道。与 CLOS 中 `print-object` 方法"按类定义，打印时选择"相同。
@@ -226,7 +226,7 @@ CLHS 22.1.3 的打印函数。不做格式展开，直接打印一个值。流�
   内置表示。判断依据是值的同一性而不是深度限制，所以不会妨碍正当的自引用结构的嵌套打印。
 - **所有标量类型都实现了这个 trait。** 这是**为了用作约束**：`format` 的可变参数不能接受类型变量，所以泛型代码要表达
   "可以渲染未知类型的值"，只有这个约束（与 Rust 的 `T: Display` 形式相同）。`Array<T>` 的 `print-object` 就是一例。
-- **类型参数不满足约束时，静默使用内置表示。** `(impl print-object Array<T> (where (print-object T)))` 对
+- **类型参数不满足约束时，静默使用内置表示。** `(impl print-object Array<T> (:where (print-object T)))` 对
   `Array<i32>` 生效，但对元素是没有写 `print-object` 的 `defstruct` 的 `Array` 不生效。仅仅创建数组就报错是说不通的，
   所以不报错。
 - CL 的另一种机制 `set-pprint-dispatch` / `*print-pprint-dispatch*`（以类型说明符为键的运行时注册表）**没有采用**。

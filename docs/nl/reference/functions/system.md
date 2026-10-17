@@ -229,7 +229,7 @@ geëvalueerd, en definities worden onmiddellijk en permanent in de globale omgev
 
 | Vorm | Positie van de docstring |
 |---|---|
-| `defun` / methoden in `impl` / `defmacro` | Aan het begin van de body (na het returntype en de `where`-clausule). Alleen wanneer er minstens één bodyvorm volgt; een losse string blijft de returnwaarde |
+| `defun` / methoden in `impl` / `defmacro` | Aan het begin van de body (na het returntype en de `:where`-clausule). Alleen wanneer er minstens één bodyvorm volgt; een losse string blijft de returnwaarde |
 | `defvar` / `defconstant` | **Na** de beginwaarde: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Direct na** de naam, vóór de velden/varianten |
 | `deftype` | **Direct na** de naam, vóór het type: `(deftype meters "doc" i32)` |

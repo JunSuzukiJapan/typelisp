@@ -44,26 +44,26 @@ Bỏ sót dù chỉ một trong các phương thức mà trait khai báo là l�
 
 ## 2. Ràng buộc trait: "mọi kiểu triển khai trait này"
 
-Bạn có thể đặt điều kiện lên tham số kiểu của một hàm generic bằng `where`. Điều này được gọi là
+Bạn có thể đặt điều kiện lên tham số kiểu của một hàm generic bằng `:where`. Điều này được gọi là
 **ràng buộc trait**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Nhờ `(where (Shape T))`, thân hàm có thể dùng `name` và `area` trên các giá trị kiểu `T`. Nếu không có
+Nhờ `(:where (Shape T))`, thân hàm có thể dùng `name` và `area` trên các giá trị kiểu `T`. Nếu không có
 ràng buộc thì không biết gì về `T`, nên không thể gọi chúng.
 
 Truyền một kiểu không triển khai `Shape` là lỗi kiểu tại lời gọi.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Một hàm generic có bản sao riêng cho mỗi kiểu mà nó được gọi. Không có kiểm tra kiểu hay rẽ nhánh nào
@@ -97,7 +97,7 @@ cho kiểu của bạn.
 
 | Trait | Phương thức cần triển khai | Nó cho phép gì |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, mẫu `(= expr)` của `match`, v.v. |
+| `Eq` | `equals` | `member`, `find`, `position`, mẫu `(:= expr)` của `match`, v.v. |
 | `Ord` | `less` | `less-equal`, `greater`, v.v. `Ord` kế thừa từ `Eq` |
 | `print-object` | `print-object` | Cách `println` và các hàm tương tự hiển thị giá trị |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, v.v. |
@@ -133,7 +133,7 @@ Kết hợp với ràng buộc trait, bạn có thể viết một hàm hoạt �
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -177,7 +177,7 @@ total 9
 
 Chọn giữa ràng buộc trait ở mục 2 và `:dyn`:
 
-| | Ràng buộc trait (`where`) | `:dyn Trait` |
+| | Ràng buộc trait (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Khi nào phương thức được gọi được quyết định | Trước khi chạy | Lúc chạy |
 | Trộn các kiểu trong một `Vector` | Không thể | Có thể |

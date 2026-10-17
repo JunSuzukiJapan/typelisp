@@ -46,26 +46,26 @@ Pominięcie choćby jednej z metod zadeklarowanych przez trait jest błędem typ
 
 ## 2. Ograniczenia traitów: „dowolny typ implementujący ten trait"
 
-Na parametr typu funkcji generycznej można nałożyć warunek za pomocą `where`. Nazywa się to
+Na parametr typu funkcji generycznej można nałożyć warunek za pomocą `:where`. Nazywa się to
 **ograniczeniem traitu**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Dzięki `(where (Shape T))` ciało funkcji może używać `name` i `area` na wartościach typu `T`. Bez
+Dzięki `(:where (Shape T))` ciało funkcji może używać `name` i `area` na wartościach typu `T`. Bez
 ograniczenia nic nie wiadomo o `T`, więc nie można by ich wywołać.
 
 Przekazanie typu, który nie implementuje `Shape`, jest błędem typu w miejscu wywołania.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Funkcja generyczna dostaje własną kopię dla każdego typu, z którym jest wywoływana. Nie są
@@ -99,7 +99,7 @@ funkcje standardowe, które z niego korzystają.
 
 | Trait | Metody do zaimplementowania | Co umożliwia |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, wzorzec `(= expr)` w `match` i tak dalej |
+| `Eq` | `equals` | `member`, `find`, `position`, wzorzec `(:= expr)` w `match` i tak dalej |
 | `Ord` | `less` | `less-equal`, `greater` i tak dalej. `Ord` dziedziczy z `Eq` |
 | `print-object` | `print-object` | Sposób pokazywania wartości przez `println` i pokrewne |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` i tak dalej |
@@ -135,7 +135,7 @@ W połączeniu z ograniczeniem traitu możesz napisać funkcję działającą dl
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -180,7 +180,7 @@ total 9
 
 Wybór między ograniczeniami traitów z sekcji 2 a `:dyn`:
 
-| | Ograniczenie traitu (`where`) | `:dyn Trait` |
+| | Ograniczenie traitu (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Kiedy rozstrzygana jest wywoływana metoda | Przed uruchomieniem | W czasie działania |
 | Mieszanie typów w jednym `Vector` | Niemożliwe | Możliwe |

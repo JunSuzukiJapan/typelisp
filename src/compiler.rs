@@ -772,7 +772,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; which is the whole reason these are separate variants.
 (defun narrow-wsig ((variant int)) int
   (case variant (#%sexpr-i8 17) (#%sexpr-i16 33) (#%sexpr-u8 16) (#%sexpr-u16 32) (#%sexpr-u32 64) (#%sexpr-i32 65)
-    (else (panic "narrow-wsig: not a narrow-integer Sexpr variant"))))
+    (:else (panic "narrow-wsig: not a narrow-integer Sexpr variant"))))
 
 ;; The kind number a `Sexpr` variant's payload is read and written with.
 ;; `Repr::field_kind` and `sexpr_def`'s numbering are one space, with one
@@ -850,7 +850,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; code already is (`compile-unit`). Its number sits clear of the
     ;; `Sexpr` variants so that adding a variant never collides with it.
     (#%kind-unit (const-word builder 0))
-    (else (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))
+    (:else (panic "compile-sexpr-field: field type is not representable in compiled code yet"))))
 
 ;; The encode-side mirror of `compile-sexpr-field`'s decode, over the exact
 ;; same `Repr::field_kind`/`Sexpr`-variant numbering (`kind-raw-int`,
@@ -898,7 +898,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; `decode` safely -- an immediate nil references nothing.
     ;; `compile-sexpr-field` above is the inverse.
     (#%kind-unit (nil-word builder))
-    (else (panic "compile-tag-struct-field: field type is not representable in compiled code yet"))))
+    (:else (panic "compile-tag-struct-field: field type is not representable in compiled code yet"))))
 
 ;; `names` is now a list of `(name . kind)` pairs (`core_bridge::name_kind_list`
 ;; — `kind` generalized from a plain `is-fn` `Bool` to a 3-way `Int` tag in
@@ -993,7 +993,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ((sexpr-consp forms)
      (let ((ignored (binding-slot builder m (sexpr-int (sexpr-car (sexpr-car forms))))))
        (fill-arg-slots builder m 0 (sexpr-cdr forms))))
-    (else ())))
+    (:else ())))
 
 ;; The address of a call's argument array, in the frame rather than on the
 ;; stack.
@@ -1028,7 +1028,7 @@ const SOURCE_TEMPLATE: &str = r#"
      (let ((first (binding-slot builder m (sexpr-int (sexpr-car (sexpr-car forms))))))
        (fill-arg-slots builder m 0 (sexpr-cdr forms))
        first))
-    (else (alloca-args builder 0))))
+    (:else (alloca-args builder 0))))
 
 (defun bind-params ((env Scope<llvm-value>) (builder llvm-builder) (m llvm-module) (f llvm-function) (names Option<Sexpr>) (idx int)) ()
   (if (sexpr-consp names)
@@ -1315,12 +1315,12 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; gives them no arithmetic and refuses to store them, so only the
     ;; conversions ever arrive here.
     (("c-long" "c-ulong") true)
-    (else false)))
+    (:else false)))
 
 (defun float-receiver-type? ((name string)) bool
   (case name
     (("f32" "f64") true)
-    (else false)))
+    (:else false)))
 
 ;; The receiver type's width and signedness as one number,
 ;; `width * 2 + (signed ? 1 : 0)` — `types::int_width_signed` on the Rust
@@ -1335,7 +1335,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; cast to one of these is the identity — which is what a cast to the
     ;; register's own width should be.
     ("c-long" 129) ("c-ulong" 128)
-    (else (panic (append "int-wsig: not an integer type: " name)))))
+    (:else (panic (append "int-wsig: not an integer type: " name)))))
 
 ;; `v` cut back to the type's width and re-extended into the 64-bit register
 ;; every compiled integer lives in: `shl` then `ashr` (signed) or `lshr`
@@ -1407,7 +1407,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; gap.
     (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32") true)
     (("int->c-long" "int->c-ulong") true)
-    (else false)))
+    (:else false)))
 
 ;; `sexpr`'s natively-compilable methods (`registry::sexpr_assoc` registers
 ;; exactly these two). `eq` is an `icmp eq` on the tagged handle; `eql` is the
@@ -1418,7 +1418,7 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun sexpr-native-method? ((method string)) bool
   (case method
     (("eq" "eql") true)
-    (else false)))
+    (:else false)))
 
 (defun string-native-method? ((method string)) bool
   (case method
@@ -1428,7 +1428,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; (`rt_str_substring`); every other one here is unary or binary.
     ("substring" true)
     (("upcase" "downcase") true)
-    (else false)))
+    (:else false)))
 
 ;; The string methods that take the receiver and nothing else, and so must be
 ;; recognized before `compile-assoc`'s string branch reads a second operand.
@@ -1437,7 +1437,7 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun string-unary-shim-method? ((method string)) bool
   (case method
     (("upcase" "downcase") true)
-    (else false)))
+    (:else false)))
 
 ;; The `rt_str_*` shim behind each of those — the string counterpart of
 ;; [`char-unary-shim-name`].
@@ -1445,7 +1445,7 @@ const SOURCE_TEMPLATE: &str = r#"
   (case method
     ("upcase" "rt_str_upcase")
     ("downcase" "rt_str_downcase")
-    (else (panic (append "string-unary-shim-name: not a string shim method " method)))))
+    (:else (panic (append "string-unary-shim-name: not a string shim method " method)))))
 
 ;; `char`'s natively-compilable methods: a compiled `char` is a raw `i64`
 ;; code point, so the content comparisons lower to the same integer `icmp`s
@@ -1470,7 +1470,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; is the shim's rule rather than one written here — so the compiled
     ;; answer cannot drift from the interpreted one.
     (("upcase" "downcase" "alphap" "digitp") true)
-    (else false)))
+    (:else false)))
 
 ;; The four `char` methods that are a shim call rather than an instruction,
 ;; and the shim each one names. Split from `char-native-method?` because the
@@ -1479,7 +1479,7 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun char-unary-shim-method? ((method string)) bool
   (case method
     (("upcase" "downcase" "alphap" "digitp") true)
-    (else false)))
+    (:else false)))
 
 (defun char-unary-shim-name ((method string)) string
   (case method
@@ -1487,7 +1487,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ("downcase" "rt_char_downcase")
     ("alphap" "rt_char_alphap")
     ("digitp" "rt_char_digitp")
-    (else (panic (append "char-unary-shim-name: not a char shim method " method)))))
+    (:else (panic (append "char-unary-shim-name: not a char shim method " method)))))
 
 ;; `bool`'s natively-compilable methods. `registry::bool_assoc` registers
 ;; `eq`/`eql`/`equal`/`equalp` as four names for one operation (two immediate
@@ -1497,7 +1497,7 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun bool-native-method? ((method string)) bool
   (case method
     (("eq" "eql" "equal" "equalp") true)
-    (else false)))
+    (:else false)))
 
 ;; `symbol`'s natively-compilable methods: `eq`/`eql`, the only two
 ;; `registry::symbol_assoc` registers. A compiled `symbol` is its interned
@@ -1506,7 +1506,7 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun symbol-native-method? ((method string)) bool
   (case method
          ("eq" true)
-         (else (equal method "eql"))))
+         (:else (equal method "eql"))))
 
 ;; `f64`'s natively-compilable methods: arithmetic (`+`/`-`/`*`/`/`) lowers to
 ;; LLVM float instructions (`build-fadd`/... — each `bitcast`s the
@@ -1545,7 +1545,7 @@ const SOURCE_TEMPLATE: &str = r#"
     ;; reasoning `/`/`mod` already use for `i64`.
     (("sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh" "asinh"
       "acosh" "atanh" "exp" "log") true)
-    (else false)))
+    (:else false)))
 
 ;; Whether `method`'s *result* is a float, so an `f32` receiver has to round
 ;; it. The conversions out of the float family (`float->int`/`->bignum`/
@@ -1557,7 +1557,7 @@ const SOURCE_TEMPLATE: &str = r#"
     (("+" "-" "*" "/" "mod" "expt" "sqrt" "floor" "ceiling" "round" "truncate"
       "max" "min" "sin" "cos" "tan" "asin" "acos" "atan" "sinh" "cosh" "tanh"
       "asinh" "acosh" "atanh" "exp" "log") true)
-    (else false)))
+    (:else false)))
 
 ;; `v` rounded to binary32 when the receiver is `f32` and the method's result
 ;; is a float — what makes `f32` arithmetic binary32 arithmetic rather than
@@ -1591,7 +1591,7 @@ const SOURCE_TEMPLATE: &str = r#"
     (("int->float" "int->ratio" "int->int" "int->char" "try-int->char") true)
     (("int->i8" "int->i16" "int->i32" "int->u8" "int->u16" "int->u32" "int->c-long" "int->c-ulong") true)
     (("try-int->i8" "try-int->i16" "try-int->i32" "try-int->u8" "try-int->u16" "try-int->u32" "try-int->c-long" "try-int->c-ulong") true)
-    (else false)))
+    (:else false)))
 
 ;; `ratio` (`registry::ratio_assoc`)'s natively-compilable methods — the
 ;; `ratio` counterpart of [`bignum-native-method?`] (no `mod`, CL doesn't
@@ -1603,7 +1603,7 @@ const SOURCE_TEMPLATE: &str = r#"
       "ratio->int" "ratio->float" "numerator" "denominator" "ratio->rational") true)
     ;; `max`/`min`: `rt_ratio_cmp` + `build-select`, same shape as `bignum`'s.
     (("max" "min") true)
-    (else false)))
+    (:else false)))
 
 ;; `rational` (`registry::rational_assoc`)'s methods: every one a
 ;; `typelisp_rt::rational` shim over tagged words, the comparisons derived
@@ -1612,7 +1612,7 @@ const SOURCE_TEMPLATE: &str = r#"
   (case method
     (("+" "-" "*" "/" "<" "<=" ">" ">=" "=" "/=" "eq" "eql" "equal" "equalp" "max" "min") true)
     (("rational->int" "try-rational->int" "rational->ratio" "rational->float" "numerator" "denominator") true)
-    (else false)))
+    (:else false)))
 
 ;; `ratio` counterpart of [`bignum-cmp-call`] (`rt_ratio_cmp`).
 (defun ratio-cmp-call ((builder llvm-builder) (m llvm-module) (x llvm-value) (y llvm-value)) llvm-value
@@ -1725,7 +1725,7 @@ const SOURCE_TEMPLATE: &str = r#"
     (let ((r (case op
                (0 (build-sadd-overflow builder m (left-operand builder) (right-operand builder) flag-slot))
                (1 (build-ssub-overflow builder m (left-operand builder) (right-operand builder) flag-slot))
-               (else (build-smul-overflow builder m (left-operand builder) (untag-fixnum builder (right-operand builder)) flag-slot)))))
+               (:else (build-smul-overflow builder m (left-operand builder) (untag-fixnum builder (right-operand builder)) flag-slot)))))
       (store-arg builder slot 0 r)
       (build-cond-br builder (load-raw builder flag-slot 0) slow-block merge-block))
     (position-at-end builder slow-block)
@@ -1776,7 +1776,7 @@ const SOURCE_TEMPLATE: &str = r#"
         (case op
           (0 (build-and builder a b))
           (1 (build-or builder a b))
-          (else (build-xor builder a b)))))
+          (:else (build-xor builder a b)))))
     (build-br builder merge-block)
     (position-at-end builder slow-block)
     (let ((args-ptr (alloca-args builder 2)))
@@ -1927,7 +1927,7 @@ const SOURCE_TEMPLATE: &str = r#"
     (#%sexpr-char (small-tag-test builder v 1))
     (#%sexpr-str (small-tag-test builder v 2))
     (#%sexpr-path (small-tag-test builder v 3))
-    (else (panic "compile-sexpr-tag-test: unknown Sexpr variant"))))
+    (:else (panic "compile-sexpr-tag-test: unknown Sexpr variant"))))
 
 ;; Shared by every atomic pattern test (`pat-lit`'s literal-equality
 ;; check, a Ctor pattern's tag test): appends a fresh "this test passed"
@@ -2130,7 +2130,7 @@ const SOURCE_TEMPLATE: &str = r#"
       (dyn-call (compile-dyn-call m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (dyn-upcast (compile-dyn-upcast m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
       (dyn-value (compile-dyn-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
-      (else (panic (append "compile-value: unsupported tag " (sexpr-sym-name (sexpr-car e))))))
+      (:else (panic (append "compile-value: unsupported tag " (sexpr-sym-name (sexpr-car e))))))
                            )
 
 ;; `(unit)` — `Expr::Unit`, represented (like every
@@ -2732,7 +2732,7 @@ const SOURCE_TEMPLATE: &str = r#"
                       (store-arg builder args-ptr 1 b)
                       (store-arg builder args-ptr 2 c)
                       (build-call builder (get-function m "rt_str_substring") args-ptr 3)))
-                   (else (panic (append "compile-assoc: unsupported str method " method)))))))))
+                   (:else (panic (append "compile-assoc: unsupported str method " method)))))))))
         ((if (int-receiver-type? type-name) (int-native-method? method) false)
          (let ((a (load-raw builder ops 0))
                (wsig (int-wsig type-name)))
@@ -2787,7 +2787,7 @@ const SOURCE_TEMPLATE: &str = r#"
              ;; `255`, and the raw `xor` gives `-1`.
              ("lognot"
               (build-normalize-int builder (build-xor builder a (const-word builder -1)) wsig))
-             (else (let ((b2 (load-raw builder ops 1)))
+             (:else (let ((b2 (load-raw builder ops 1)))
                       (case method
                         ;; The low `w` bits of a 64-bit sum are the sum's
                         ;; own low `w` bits, so the wide instruction is a
@@ -2846,7 +2846,7 @@ const SOURCE_TEMPLATE: &str = r#"
                          (int-binop-shim-call builder m "rt_int_ash" a (untag-int-value builder m cur-fn b2) wsig))
                         ("logbitp"
                          (int-binop-shim-call builder m "rt_int_logbitp" a (untag-int-value builder m cur-fn b2) wsig))
-                        (else (panic (append "compile-assoc: unsupported method " method)))))))))
+                        (:else (panic (append "compile-assoc: unsupported method " method)))))))))
         ((if (equal type-name "char") (char-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            ;; `char->int` is unary (receiver only) and the
@@ -2880,7 +2880,7 @@ const SOURCE_TEMPLATE: &str = r#"
                 (build-icmp-gt builder a b2))
                (">="
                 (build-icmp-ge builder a b2))
-               (else (build-icmp-eq builder a b2)))))))))
+               (:else (build-icmp-eq builder a b2)))))))))
         ;; `bool`/`symbol`: one `icmp eq` each, over a raw `0`/`1` and
         ;; over an interned handle respectively. Both receivers reach
         ;; `compile-assoc` with the type name the checker spells
@@ -2965,7 +2965,7 @@ const SOURCE_TEMPLATE: &str = r#"
               (unary-shim-call builder m "rt_f64_acosh" a))
              ("atanh"
               (unary-shim-call builder m "rt_f64_atanh" a))
-             (else (let ((b2 (load-raw builder ops 1)))
+             (:else (let ((b2 (load-raw builder ops 1)))
                       (case method
                         ("+"
                          (build-fadd builder a b2))
@@ -2993,7 +2993,7 @@ const SOURCE_TEMPLATE: &str = r#"
                          (build-fmaxnum builder m a b2))
                         ("min"
                          (build-fminnum builder m a b2))
-                        (else (build-fcmp-eq builder a b2)))))))))
+                        (:else (build-fcmp-eq builder a b2)))))))))
         ((if (equal type-name "int") (integer-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (case method
@@ -3016,7 +3016,7 @@ const SOURCE_TEMPLATE: &str = r#"
              ("lognot" (integer-unary-call builder m "rt_integer_lognot" a))
              ("logcount" (integer-unary-call builder m "rt_integer_logcount" a))
              ("integer-length" (integer-unary-call builder m "rt_integer_integer_length" a))
-             (else (let ((b2 (load-raw builder ops 1)))
+             (:else (let ((b2 (load-raw builder ops 1)))
                      (case method
                        ("+" (integer-arith builder m cur-fn "rt_integer_add" 0 a b2))
                        ("-" (integer-arith builder m cur-fn "rt_integer_sub" 1 a b2))
@@ -3043,7 +3043,7 @@ const SOURCE_TEMPLATE: &str = r#"
                        ;; wants it raw: untagged here, a bignum refused.
                        ("ash" (raising-binop-call builder m "rt_integer_ash" a (untag-int-value builder m cur-fn b2)))
                        ("logbitp" (raising-binop-call builder m "rt_integer_logbitp" a (untag-int-value builder m cur-fn b2)))
-                       (else (panic (append "compile-assoc: unsupported int method " method)))))))))
+                       (:else (panic (append "compile-assoc: unsupported int method " method)))))))))
         ((if (equal type-name "ratio") (ratio-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (case method
@@ -3057,7 +3057,7 @@ const SOURCE_TEMPLATE: &str = r#"
               (ratio-unary-call builder m "rt_ratio_denominator" a))
              ("ratio->rational"
               (ratio-unary-call builder m "rt_rational_from_ratio" a))
-             (else (let ((b2 (load-raw builder ops 1)))
+             (:else (let ((b2 (load-raw builder ops 1)))
                       (case method
                         ("+"
                          (ratio-binop-call builder m "rt_ratio_add" a b2))
@@ -3083,7 +3083,7 @@ const SOURCE_TEMPLATE: &str = r#"
                          (build-select builder (build-icmp-ge builder (ratio-cmp-call builder m a b2) (const-word builder 0)) a b2))
                         ("min"
                          (build-select builder (build-icmp-le builder (ratio-cmp-call builder m a b2) (const-word builder 0)) a b2))
-                        (else (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-word builder 0)))))))))
+                        (:else (build-icmp-eq builder (ratio-cmp-call builder m a b2) (const-word builder 0)))))))))
         ((if (equal type-name "rational") (rational-native-method? method) false)
          (let ((a (load-raw builder ops 0)))
            (case method
@@ -3096,7 +3096,7 @@ const SOURCE_TEMPLATE: &str = r#"
              ("rational->float" (ratio-unary-call builder m "rt_rational_to_float" a))
              ("numerator" (ratio-unary-call builder m "rt_rational_numerator" a))
              ("denominator" (ratio-unary-call builder m "rt_rational_denominator" a))
-             (else (let ((b2 (load-raw builder ops 1)))
+             (:else (let ((b2 (load-raw builder ops 1)))
                      (case method
                        ("+" (ratio-binop-call builder m "rt_rational_add" a b2))
                        ("-" (ratio-binop-call builder m "rt_rational_sub" a b2))
@@ -3109,8 +3109,8 @@ const SOURCE_TEMPLATE: &str = r#"
                        ("/=" (build-icmp-ne builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))
                        ("max" (build-select builder (build-icmp-ge builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)) a b2))
                        ("min" (build-select builder (build-icmp-le builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)) a b2))
-                       (else (build-icmp-eq builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))))))))
-        (else (compile-assoc-user m builder cur-fn protect callee ops (sexpr-list-length rest)))))))
+                       (:else (build-icmp-eq builder (ratio-binop-call builder m "rt_rational_cmp" a b2) (const-word builder 0)))))))))
+        (:else (compile-assoc-user m builder cur-fn protect callee ops (sexpr-list-length rest)))))))
 
 ;; The user-defined-method leg of `compile-assoc`'s
 ;; dispatch (see its doc comment): call the callee
@@ -4520,7 +4520,7 @@ const SOURCE_TEMPLATE: &str = r#"
       ;; test to NAME (exactly as `pat-bind` binds, and into this arm's own
       ;; frame, so it is discarded with it), compile TEST, and branch on the
       ;; `bool` it produces. This is what a `string`/`f64`/`symbol`/`bignum`/
-      ;; `ratio` literal pattern and an explicit `(= expr)` both lower to:
+      ;; `ratio` literal pattern and an explicit `(:= expr)` both lower to:
       ;; their equality is a call, not a word comparison, so there is nothing
       ;; for `pat-lit` to compare. The test is an ordinary expression --
       ;; `(equals NAME ...)`, already resolved to a concrete method by the
@@ -4560,7 +4560,7 @@ const SOURCE_TEMPLATE: &str = r#"
               (inner (sexpr-car (sexpr-cdr (sexpr-cdr pat)))))
          (compile-pattern-guard builder cur-fn (compile-sexpr-instance-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v type-name-form -1) fail-block)
          (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v inner fail-block)))
-      (else (panic (append "compile-pattern-test: unsupported pattern tag " (sexpr-sym-name (sexpr-car pat)))))))
+      (:else (panic (append "compile-pattern-test: unsupported pattern tag " (sexpr-sym-name (sexpr-car pat)))))))
 
 ;; The `pat-ctor` arm of `compile-pattern-test`, split out because its five
 ;; fields and three scrutinee kinds are a paragraph of their own.
@@ -4594,7 +4594,7 @@ const SOURCE_TEMPLATE: &str = r#"
              (compile-pattern-guard builder cur-fn (compile-sexpr-instance-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v type-name-form variant) fail-block)
              (compile-pattern-guard builder cur-fn (compile-box-tag-test builder m v variant) fail-block)))
       ;; `0` -- a tagged `Sexpr`.
-      (else
+      (:else
        (compile-pattern-guard builder cur-fn (compile-sexpr-tag-test builder m v variant) fail-block)))
     ;; The scrutinee goes to a slot before the fields are walked. It is read
     ;; once per field, and a sub-pattern between two of those reads can be a
@@ -4646,7 +4646,7 @@ const SOURCE_TEMPLATE: &str = r#"
                             ;; field shape off the variant instead.
                             (2 (compile-struct-field builder m (load-raw builder v-slot 0) (sexpr-int (sexpr-car field-kinds)) idx))
                             (1 (compile-box-field builder m (load-raw builder v-slot 0) (sexpr-int (sexpr-car field-kinds)) idx))
-                            (else (compile-sexpr-field builder m (load-raw builder v-slot 0) (sexpr-variant-kind variant) idx)))))
+                            (:else (compile-sexpr-field builder m (load-raw builder v-slot 0) (sexpr-variant-kind variant) idx)))))
              (compile-pattern-test m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup field-v p fail-block)
              (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v-slot scrut-kind variant rest-kinds rest (+ idx 1) fail-block)))))
         ()))
@@ -4860,7 +4860,7 @@ const SOURCE_TEMPLATE: &str = r#"
         ;; Every other variant index is a real one, and which of the
         ;; three constructors it names is decided by the node's two
         ;; flags rather than by the index.
-        (else
+        (:else
          (if is-sexpr
              (compile-construct-sexpr m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup variant arg-forms)
              (if mutable
@@ -5154,7 +5154,7 @@ const SOURCE_TEMPLATE: &str = r#"
          (store-arg builder args-ptr 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car arg-forms)))
          (store-arg builder args-ptr 1 (const-word builder (narrow-wsig variant)))
          (build-call builder (get-function m "rt_narrow_new") args-ptr 2)))
-      (else (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))
+      (:else (panic "compile-construct-sexpr: field type is not representable in compiled code yet"))))
 
 ;; `(field-get idx-unary-list kind-i64 obj-form)`
 ;; (Stage 6, extended by Stage 3 of the Sexpr/RtValue
@@ -5363,7 +5363,7 @@ const SOURCE_TEMPLATE: &str = r#"
           ;; more. (`get` reads it right away and would not need the slot; one
           ;; shape for both is cheaper to keep true than two.) Raw kind: an
           ;; index is a plain word with nothing for the collector to follow.
-          (else (let* ((idx-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
+          (:else (let* ((idx-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                        (idx-slot (spill builder m 0 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup idx-form))))
                   (if (equal method "get")
                        (let ((args-ptr (alloca-args builder 2)))
@@ -5481,7 +5481,7 @@ const SOURCE_TEMPLATE: &str = r#"
             ;; `keys`/`values`/`entries`, each of which builds a `Vector<_>`
             ;; whose instantiation only the checker knows — so the name slot's
             ;; key goes with the table as a second argument.
-            (else (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup option-type-name-form))
+            (:else (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup option-type-name-form))
                          (args-ptr (alloca-args builder 2)))
                      (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
                      (store-arg builder args-ptr 1 name-v)
@@ -5856,7 +5856,7 @@ const SOURCE_TEMPLATE: &str = r#"
                (store-arg builder args-ptr (+ idx 2)
                           (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup key-form))
                (fill-select-ops m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr (+ idx 3) rest)))
-            (else
+            (:else
              (let* ((vkind (sexpr-int (sexpr-car (sexpr-cdr arm))))
                     (chan-form (sexpr-car (sexpr-cdr (sexpr-cdr arm))))
                     (val-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr arm))))))
@@ -6003,7 +6003,7 @@ const SOURCE_TEMPLATE: &str = r#"
          ((int int-any-width float-any-width) (opt-atoms-p (sexpr-cdr e) 2))
          ((bool char) (opt-atoms-p (sexpr-cdr e) 1))
          (unit (sexpr-null (sexpr-cdr e)))
-         (else false))))
+         (:else false))))
 
 (defun opt-int-literal-p ((e Option<Sexpr>)) bool
   (and (sexpr-consp e) (equal (sexpr-car e) (quote int)) (opt-atoms-p (sexpr-cdr e) 2)))
@@ -6045,7 +6045,7 @@ const SOURCE_TEMPLATE: &str = r#"
         ((equal method "<=") `(bool ,(<= x y)))
         ((equal method ">") `(bool ,(> x y)))
         ((equal method ">=") `(bool ,(>= x y)))
-        (else e)))
+        (:else e)))
 
 ;; The node of an `(KIND . NODE)` argument, or `none` when `arg` is not one.
 (defun opt-arg-node ((arg Option<Sexpr>)) Option<Sexpr>
@@ -6073,7 +6073,7 @@ const SOURCE_TEMPLATE: &str = r#"
       (or (opt-may-leave-p (sexpr-car e)) (opt-may-leave-p (sexpr-cdr e)))
       (case e
         ((break return return-from panic throw) true)
-        (else false))))
+        (:else false))))
 
 ;; `(if IS-FN (bool B) THEN ELSE)` as the branch `B` takes.
 (defun opt-fold-if ((e Option<Sexpr>)) Option<Sexpr>
@@ -6169,7 +6169,7 @@ const SOURCE_TEMPLATE: &str = r#"
             (case (sexpr-car e)
               (assoc (opt-fold-int e))
               (if (opt-fold-if e))
-              (else e))))
+              (:else e))))
       e))
 
 ;; A function body (`compile-function`'s `body`) optimized at `level`.

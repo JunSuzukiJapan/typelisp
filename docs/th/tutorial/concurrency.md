@@ -145,14 +145,14 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - `((v (recv ch)) body...)` เป็นกิ่งรับ `v` ได้ `Option<T>`
 - `((send ch x) body...)` เป็นกิ่งส่ง
 - เมื่อหลายกิ่งดำเนินต่อได้พร้อมกัน จะเลือกหนึ่งในนั้นแบบสุ่ม
-- เมื่อมี `(else body...)` ที่ท้าย `else` จะรันเมื่อไม่มีกิ่งใดดำเนินต่อได้ทันที และ `select`
+- เมื่อมี `(:else body...)` ที่ท้าย `:else` จะรันเมื่อไม่มีกิ่งใดดำเนินต่อได้ทันที และ `select`
   ไม่รอ
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

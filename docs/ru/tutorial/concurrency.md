@@ -142,13 +142,13 @@ A: 1 jobs, B: 2 jobs, C: 3 jobs
 - `((v (recv ch)) body...)` — ветвь приёма. `v` получает `Option<T>`.
 - `((send ch x) body...)` — ветвь отправки.
 - Когда несколько ветвей могут выполниться одновременно, одна из них выбирается случайно.
-- С `(else body...)` в конце `else` выполняется, когда ни одна ветвь не может выполниться сразу, и `select` не ждёт.
+- С `(:else body...)` в конце `:else` выполняется, когда ни одна ветвь не может выполниться сразу, и `select` не ждёт.
 
 ```lisp
 (let ((ch (the Chan<int> (Chan::new 0))))
   (select
     ((v (recv ch)) (println "~a" v))
-    (else (println "nothing ready"))))
+    (:else (println "nothing ready"))))
 ;; nothing ready
 ```
 

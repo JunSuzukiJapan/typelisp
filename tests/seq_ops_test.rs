@@ -2,7 +2,7 @@
 //! — the typed rebuild of the `Sexpr` list operations removed in Phase 5, as
 //! generic `Iter` `defun`s (`length`/`append`/`nth`/`elt`/`take`/`subseq`/
 //! `last`/`butlast`/`every`/`any`) plus the `Eq`-bounded pair
-//! (`member`: `(where (Eq A))`, `assoc`: `(where (Iter I (Item
+//! (`member`: `(:where (Eq A))`, `assoc`: `(:where (Iter I (Item
 //! cons-cell<K,V>)) (Eq K))`) and `sort`, which — matching CL's own
 //! `(sort sequence predicate)` — takes an explicit comparator instead of an
 //! `Ord` bound. Also covers the `Eq`/`Ord` traits themselves: scalar impls,

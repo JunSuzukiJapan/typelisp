@@ -313,7 +313,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         "defmethod" => {
             let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
-                Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+                Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
                 _ => return Err("prelude: defmethod without a name".to_string()),
             };
             plan.items.push(CompileTarget::Method(type_path, method));

@@ -13,7 +13,7 @@ quy tắc thụt lề giống nhau, và `cargo test --test editor_keyword_sync_t
     `apply`, `print`/`println`/`format`, họ `pprint`, v.v.)
   - Các tên được định nghĩa (`NAME` của `(defun NAME ...)` là tên hàm, của `(defstruct NAME ...)` là tên kiểu,
     và của `(defvar (NAME ...))` là tên biến; tương tự với `pub`, như trong `(pub defun NAME ...)`)
-  - Các từ khóa không gian tên và khai báo (`pub` `module` `use` `load` `impl` `where`) và các dấu hiệu của
+  - Các từ khóa không gian tên và khai báo (`pub` `module` `use` `load` `impl`) và các dấu hiệu của
     danh sách lambda (`&rest` `&optional` `&key`)
   - Các hàm dựng sẵn (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car`, v.v.)
   - Kiểu nguyên thủy (gồm `bignum` / `ratio`), kiểu dựng sẵn, kiểu lỗi dựng sẵn (`ParseIntError`, v.v.), các

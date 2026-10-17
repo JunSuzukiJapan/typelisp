@@ -38,7 +38,7 @@ typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫
   (case id
     (1 (Option::some "alice"))
     (2 (Option::some "bob"))
-    (else (Option::none))))
+    (:else (Option::none))))
 
 (defun parse-port ((s string)) Result<int,string>
   (match (parse-int s)

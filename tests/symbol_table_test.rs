@@ -12,7 +12,8 @@
 //!    (there is no deallocation to get wrong);
 //! 3. **per-module** — `m::foo` and `n::foo` are different symbols, and the
 //!    only way one module sees another's symbol is by holding that very
-//!    pointer (the system vocabulary, imported into every module).
+//!    pointer (the system vocabulary, imported into every module). Keywords
+//!    are the exception: `:foo` is one symbol whichever module writes it.
 //!
 //! The tagged-word property (the low three bits are the tag's) is here too:
 //! it is an invariant of the *allocator*, so nothing in the type system
@@ -204,6 +205,38 @@ fn a_module_local_name_is_not_well_known() {
         symbols::intern_in(m, "an-ordinary-name").well_known(),
         typelisp::NOT_WELL_KNOWN
     );
+}
+
+#[test]
+fn a_keyword_is_one_symbol_in_every_module() {
+    let m = symbols::ns_of(&["keyword-writing-mod".to_string()]);
+    let at_root = symbols::intern_keyword("a-keyword-nobody-declared");
+    assert_eq!(at_root.home(), NsId::KEYWORD);
+    assert!(at_root.is_keyword());
+    assert_eq!(at_root.name(), "a-keyword-nobody-declared", "the colon is no part of the name");
+    assert_eq!(at_root.spelling(), ":a-keyword-nobody-declared");
+    // A colon in a name passed to `intern_in` is just a character of the name.
+    let colon_named = symbols::intern_in(m, ":a-keyword-nobody-declared");
+    assert_ne!(colon_named, at_root);
+    assert!(!colon_named.is_keyword());
+    assert_eq!(symbols::ns_path(NsId::KEYWORD), vec!["keyword".to_string()]);
+    assert_eq!(symbols::ns_named("keyword"), NsId::KEYWORD);
+}
+
+#[test]
+fn the_vocabularys_keywords_are_the_keyword_modules_too() {
+    let here = symbols::intern_keyword("else");
+    assert!(here.is(typelisp::wk::KW_ELSE), "still the vocabulary's `:else`, not a second one");
+    assert_eq!(here.home(), NsId::KEYWORD);
+}
+
+#[test]
+fn a_keyword_read_in_a_file_module_is_the_roots_keyword() {
+    let mut h = Heap::with_capacity(1 << 16);
+    let r = Reader::new();
+    let m = symbols::ns_of(&["keyword-reading-mod".to_string()]);
+    let forms = r.read_all_in_spanned_within(&mut h, "<test>", ":read-in-a-module", m).expect("read failed");
+    assert_eq!(sym(forms[0].0), symbols::intern_keyword("read-in-a-module"));
 }
 
 // ---- what the system import is actually protecting ------------------------

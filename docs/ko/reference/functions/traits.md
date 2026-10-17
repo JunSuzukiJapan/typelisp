@@ -11,7 +11,7 @@
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -22,7 +22,7 @@
 
 ## 2. `Eq` / `Ord`(비교)
 
-Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네릭 함수의 `where` 경계에서 요소 타입을 비교할 수 있음을
+Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네릭 함수의 `:where` 경계에서 요소 타입을 비교할 수 있음을
 요구하는 데 쓴다(`sort`/`member`/`assoc` 등).
 
 ```lisp
@@ -69,7 +69,7 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -80,11 +80,11 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 (deftrait Number (Add Sub Mul Rem Ord))                   ; 메서드 없음·5개의 합성
 ```
 
-**경계 안에서는 연산자를 쓸 수 있다.** 받는 쪽이 `where`로 묶인 타입 변수이면 연산자는 트레이트 메서드로 읽힌다
+**경계 안에서는 연산자를 쓸 수 있다.** 받는 쪽이 `:where`로 묶인 타입 변수이면 연산자는 트레이트 메서드로 읽힌다
 (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`, `logand`→`bit-and`, `=`→`equals`, `<`→`less` …).
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -97,5 +97,5 @@ Rust의 `PartialEq`/`PartialOrd`에 해당한다(이름은 `Eq`/`Ord`). 제네�
 **`Div`는 결과 타입을 연관 타입 `Output`으로 밝힌다.** CL과 마찬가지로 정수끼리의 `/`는 `rational`이므로
 `int`의 `Output`은 `rational`, 다른 수치 타입은 자기 자신이다. `Output`이 타입마다 다르므로 `Number`에는
 `Div`를 포함하지 않는다(상속 목록에서는 연관 타입을 모두 고정해야 한다). 나눗셈을 하는 제네릭 함수는
-`(where (Div T (Output R)))`로 결과 타입을 받거나, `(where (Div T (Output T)))`로 `T` 안에서 닫힌
+`(:where (Div T (Output R)))`로 결과 타입을 받거나, `(:where (Div T (Output T)))`로 `T` 안에서 닫힌
 나눗셈을 요구한다(이 경우 `int`는 넘길 수 없다).

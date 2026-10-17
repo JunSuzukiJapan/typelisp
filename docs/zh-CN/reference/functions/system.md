@@ -188,7 +188,7 @@ CL 从 `read-from-string` 返回**2 个值**（值与位置），但本语言没
 
 | 形式 | 文档字符串的位置 |
 |---|---|
-| `defun` / `impl` 的方法 / `defmacro` | 函数体的开头（返回值类型、`where` 子句之后）。仅当其后至少还有一个函数体形式时——单独的字符串仍是返回值 |
+| `defun` / `impl` 的方法 / `defmacro` | 函数体的开头（返回值类型、`:where` 子句之后）。仅当其后至少还有一个函数体形式时——单独的字符串仍是返回值 |
 | `defvar` / `defconstant` | 初始值的**后面**：`(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | 名字的**紧后**，字段／变体列表之前 |
 | `deftype` | 名字的**紧后**，类型之前：`(deftype meters "doc" i32)` |

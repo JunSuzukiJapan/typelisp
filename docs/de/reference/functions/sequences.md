@@ -87,9 +87,10 @@ der umgekehrten Richtung nicht automatisch.
 
 | Name | Form | Typ | Beschreibung |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Holt den Namen des Symbols heraus |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Erzeugt ein Symbol aus einer Zeichenkette (interniert es) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Ob es ein Schlüsselwort (`:name`) ist. Der Doppelpunkt ist Teil des Namens, daher prüft der Test das erste Zeichen ([Syntaxreferenz](../syntax.md#1-lexikalische-elemente)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Holt den Namen des Symbols heraus. Der Name eines Schlüsselworts enthält keinen Doppelpunkt (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Erzeugt ein Symbol aus einer Zeichenkette (interniert es im Wurzelmodul) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Erzeugt das Symbol `name` im Namensraum `namespace` (CLs `intern`). `namespace` ist ein Modulpfad ab der Wurzel (`"geometry::shapes"`); `"keyword"` ist der der Schlüsselwörter, `""` die Wurzel. Fehlt es, ist es das Modul, in dem der Aufruf steht |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Ob es ein Schlüsselwort ist, d. h. ob es zum Schlüsselwort-Namensraum gehört ([Syntaxreferenz](../syntax.md#1-lexikalische-elemente)) |
 
 Zu `gensym` siehe [Makros](system.md#8-makros).
 

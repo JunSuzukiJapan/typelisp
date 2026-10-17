@@ -14,7 +14,7 @@ denetler (bu belgenin sonuna bakın).
   - Tanımlanan adlar (`(defun NAME ...)`'ın `NAME`'i bir fonksiyon adı olarak, `(defstruct NAME ...)`'ınki
     bir tür adı olarak ve `(defvar (NAME ...))`'ınki bir değişken adı olarak; `(pub defun NAME ...)`
     gibi `pub` ile de aynı)
-  - Ad alanı ve bildirim anahtar sözcükleri (`pub` `module` `use` `load` `impl` `where`) ve lambda
+  - Ad alanı ve bildirim anahtar sözcükleri (`pub` `module` `use` `load` `impl`) ve lambda
     listesi işaretçileri (`&rest` `&optional` `&key`)
   - Yerleşik fonksiyonlar (`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` vb.)
   - İlkel türler (`bignum` / `ratio` dahil), yerleşik türler, yerleşik hata türleri (`ParseIntError`

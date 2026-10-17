@@ -12,7 +12,7 @@ Emacs 版見 [../emacs/](../emacs/README_zh-TW.md)。兩者使用相同的關鍵
     `print`/`println`/`format`、`pprint` 系列）
   - 定義名（`(defun NAME ...)` 為函式，`(defstruct NAME ...)` 為型別，`(defvar (NAME ...))` 為變數。
     帶 `pub` 的 `(pub defun NAME ...)` 也一樣）以及 `(impl Trait Type)` 的兩個名稱
-  - 命名空間與宣告關鍵字（`pub` `module` `use` `load` `impl` `where`）、
+  - 命名空間與宣告關鍵字（`pub` `module` `use` `load` `impl`）、
     lambda 串列標記（`&rest` `&optional` `&key`）
   - 內建函式、基本型別（包含 `bignum` / `ratio`）、內建錯誤型別、
     `Capitalized` 的使用者型別、trait 物件型別 `:dyn Trait`（泛型引數內部也是）

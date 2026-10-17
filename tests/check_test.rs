@@ -20,7 +20,7 @@ fn primary(h: &Heap, tl: TopLevelForm) -> TopLevelForm {
     let fields = core::fields(h, tl).expect("a module's fields are a proper list");
     let is_bundle = match fields[0] {
         Value::Path(id) => typelisp::path_from_id(h, id) == Path::root(MONO_BUNDLE_MODULE),
-        Value::Symbol(id) => h.symbol_name(id) == MONO_BUNDLE_MODULE,
+        Value::Symbol(id) => h.symbol_spelling(id) == MONO_BUNDLE_MODULE,
         _ => false,
     };
     if is_bundle {
@@ -399,7 +399,7 @@ fn match_binds_constructor_fields() {
 }
 
 /// A scrutinee that is *not* a data type is matched by value: literal
-/// patterns and `(= expr)` guards, with no variants to count. That makes a
+/// patterns and `(:= expr)` guards, with no variants to count. That makes a
 /// catch-all mandatory — the only way such a `match` is ever exhaustive.
 ///
 /// This used to be refused outright ("expected a data type, found I32"),

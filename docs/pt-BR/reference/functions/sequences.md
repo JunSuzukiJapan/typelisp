@@ -83,9 +83,10 @@ automaticamente na outra direção.
 
 | Nome | Forma | Tipo | Descrição |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | Tira o nome do símbolo |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | Cria um símbolo a partir de uma string (internando-o) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | Se é uma palavra-chave (`:name`). Os dois-pontos fazem parte do nome, então o teste olha o primeiro caractere ([Referência de sintaxe](../syntax.md#1-elementos-léxicos)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | Tira o nome do símbolo. O nome de uma palavra-chave não tem os dois-pontos (`:foo` → `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | Cria um símbolo a partir de uma string (internando-o no módulo raiz) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | Cria o símbolo `name` no espaço de nomes `namespace` (o `intern` do CL). `namespace` é um caminho de módulo a partir da raiz (`"geometry::shapes"`); `"keyword"` é o das palavras-chave e `""` a raiz. Omitido, é o módulo em que a chamada está escrita |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | Se é uma palavra-chave, isto é, se pertence ao espaço de nomes das palavras-chave ([Referência de sintaxe](../syntax.md#1-elementos-léxicos)) |
 
 Para `gensym`, consulte [Macros](system.md#8-macros).
 

@@ -166,7 +166,7 @@ When nothing should happen in the false case, use `when` (and `unless` for the o
 
 ### cond
 
-With three or more conditions, `cond` reads better. The final `else` is taken when none of the
+With three or more conditions, `cond` reads better. The final `:else` is taken when none of the
 conditions hold.
 
 ```lisp
@@ -174,7 +174,7 @@ conditions hold.
   (cond ((< n 0) "negative")
         ((= n 0) "zero")
         ((< n 10) "small")
-        (else "large")))
+        (:else "large")))
 ```
 
 ### match

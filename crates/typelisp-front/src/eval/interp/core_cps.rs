@@ -392,13 +392,13 @@ enum Frame {
     /// `(catch 'TAG BODY)` — the dynamic escape's landing site. A throw on
     /// some *other* tag keeps travelling; swallowing it here is the bug CL's
     /// `eq` tag comparison exists to prevent.
-    Catch { tag: String },
+    Catch { tag: typelisp_mem::SymRef },
     /// `(return VALUE)` — waiting on the value to carry out.
     Return,
     /// `(return-from NAME VALUE)` — waiting on the value.
     ReturnFrom { name: String },
     /// `(throw 'TAG VALUE)` — waiting on the value.
-    Throw { tag: String },
+    Throw { tag: typelisp_mem::SymRef },
     /// `(unwind-protect PROTECTED CLEANUP)` — running `PROTECTED`. However it
     /// is left, the cleanup runs.
     Protect { cleanup: Value, env: Value },
@@ -708,7 +708,7 @@ impl Task {
 /// program stops, which is Go's rule for an unrecovered panic.
 fn escaped_task_failure(e: EvalError) -> EvalError {
     match e {
-        EvalError::Throw(tag, _) => EvalError::Panic(format!("`throw` of `{}` left its task", tag)),
+        EvalError::Throw(tag, _) => EvalError::Panic(format!("`throw` of `{}` left its task", tag.spelling())),
         other => other,
     }
 }
@@ -1397,7 +1397,7 @@ impl Interp {
             _ => return Err(EvalError::Internal(format!("eval: not a core form: {}", core::print(heap, form)))),
         };
         let op = Op::from_sym(tag)
-            .ok_or_else(|| EvalError::Internal(format!("eval: unknown core tag `{}`", heap.symbol_name(tag))))?;
+            .ok_or_else(|| EvalError::Internal(format!("eval: unknown core tag `{}`", heap.symbol_spelling(tag))))?;
 
         match op {
             // Leaves: no subexpression, so no frame. These reach a value
@@ -1694,7 +1694,7 @@ impl Interp {
                     let body = tail_after_value(heap, rest, 2)?;
                     let f = heap.alloc_closure(params, ret, body, inner);
                     let cell = env_lookup(heap, inner, sym).ok_or_else(|| {
-                        EvalError::Internal(format!("eval: (labels ..) lost the slot for `{}`", heap.symbol_name(sym)))
+                        EvalError::Internal(format!("eval: (labels ..) lost the slot for `{}`", heap.symbol_spelling(sym)))
                     })?;
                     match cell {
                         Value::Boxed(id) if heap.is_cell(id) => heap.cell_set(id, f),
@@ -2096,7 +2096,7 @@ impl Interp {
         let path = match known {
             Some(path) => path,
             None => {
-                let names = param_names(heap, params)?.into_iter().map(|s| heap.symbol_name(s).to_string()).collect();
+                let names = param_names(heap, params)?.into_iter().map(|s| heap.symbol_spelling(s).to_string()).collect();
                 let reprs = param_reprs(heap, params)?;
                 let ret = Repr::read(heap, heap.closure_ret(id))
                     .ok_or_else(|| EvalError::Internal("thread: the closure has no declared return representation".to_string()))?;
@@ -2707,7 +2707,7 @@ impl Interp {
             // compiled code handed the same cell.
             Frame::Set { sym, env } => {
                 let cell = env_lookup(heap, env, sym)
-                    .ok_or_else(|| EvalError::Unbound(heap.symbol_name(sym).to_string()))?;
+                    .ok_or_else(|| EvalError::Unbound(heap.symbol_spelling(sym).to_string()))?;
                 match cell {
                     Value::Boxed(id) if heap.is_cell(id) => heap.cell_set(id, v),
                     other => {
@@ -3974,7 +3974,7 @@ mod tests {
         match &out[0] {
             Err(e) => match unlocated(e) {
                 EvalError::Throw(tag, v) => {
-                    assert_eq!(tag, "escaped");
+                    assert_eq!(tag.spelling(), "escaped");
                     assert_eq!(h.car(**v).unwrap(), Value::Int(5));
                 }
                 other => panic!("expected a throw, got {:?}", other),

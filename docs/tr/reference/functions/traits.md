@@ -13,7 +13,7 @@ Yineleme, karşılaştırma ve aritmetik için trait'ler. Diğer standart trait'
 
 ```lisp
 (deftrait Iter ()
-  (type Item)
+  (:type Item)
   (next ((self Self)) Option<Item>))
 ```
 
@@ -27,7 +27,7 @@ gerçekleştirirseniz `doiter` ile olduğu gibi gezilebilir ve
 ## 2. `Eq` / `Ord` (karşılaştırma)
 
 Bunlar Rust'ın `PartialEq`/`PartialOrd`'una karşılık gelir (`Eq`/`Ord` olarak adlandırılmıştır).
-Eleman türlerinin karşılaştırılabildiğini istemek için jenerik fonksiyonların `where` sınırlarında
+Eleman türlerinin karşılaştırılabildiğini istemek için jenerik fonksiyonların `:where` sınırlarında
 kullanılırlar (`sort`/`member`/`assoc` vb.).
 
 ```lisp
@@ -78,7 +78,7 @@ yerleşik işleçleri kullanır** ([Sayılar](numbers.md)) ve bu katmandan geçm
 (deftrait Add () (add ((self Self) (other Self)) Self))
 (deftrait Sub () (sub ((self Self) (other Self)) Self))
 (deftrait Mul () (mul ((self Self) (other Self)) Self))
-(deftrait Div () (type Output) (div ((self Self) (other Self)) Output))
+(deftrait Div () (:type Output) (div ((self Self) (other Self)) Output))
 (deftrait Rem () (remainder ((self Self) (other Self)) Self))
 (deftrait Bits ()
   (bit-and ((self Self) (other Self)) Self)
@@ -89,12 +89,12 @@ yerleşik işleçleri kullanır** ([Sayılar](numbers.md)) ve bu katmandan geçm
 (deftrait Number (Add Sub Mul Rem Ord))                   ; metot yok; beşinin birleşimi
 ```
 
-**Bir sınırın içinde işleç yazabilirsiniz.** Alıcı, `where` ile bağlanmış bir tür değişkeni olduğunda
+**Bir sınırın içinde işleç yazabilirsiniz.** Alıcı, `:where` ile bağlanmış bir tür değişkeni olduğunda
 işleçler trait metotları olarak okunur (`+`→`add`, `-`→`sub`, `*`→`mul`, `/`→`div`, `rem`→`remainder`,
 `logand`→`bit-and`, `=`→`equals`, `<`→`less` …):
 
 ```lisp
-(defun sum3<T> ((a T) (b T) (c T)) T (where (Number T))
+(defun sum3<T> ((a T) (b T) (c T)) T (:where (Number T))
   (+ a b c))                                              ; = (add (add a b) c)
 ```
 
@@ -110,5 +110,5 @@ bu yüzden `Sub` yeterlidir.
 bir `rational`'dır; bu yüzden `int`'in `Output`'u `rational`, diğer her sayısal tipinki tipin
 kendisidir. `Output` tipten tipe değiştiği için `Number`, `Div`'i içermez (üst trait listesi her
 ilişkili tipi sabitlemelidir). Bölme yapan genel bir fonksiyon sonuç tipini
-`(where (Div T (Output R)))` ile alır ya da `(where (Div T (Output T)))` ile `T` içinde kapalı bir
+`(:where (Div T (Output R)))` ile alır ya da `(:where (Div T (Output T)))` ile `T` içinde kapalı bir
 bölme ister (o zaman `int` geçirilemez).

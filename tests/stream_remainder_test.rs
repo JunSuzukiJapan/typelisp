@@ -90,7 +90,7 @@ fn a_user_stream_that_says_nothing_reports_nothing_ready() {
                  (open-stream-p ((self Self)) bool true)
                  (close ((self Self)) () ()))
                (impl InputStream fixed
-                 (type Item char)
+                 (:type Item char)
                  (read-item ((self Self)) Option<char>
                    (if (>= self::at (length self::text))
                        (option::none)
@@ -114,7 +114,7 @@ fn a_user_stream_that_answers_is_believed() {
                  (open-stream-p ((self Self)) bool true)
                  (close ((self Self)) () ()))
                (impl InputStream always
-                 (type Item char)
+                 (:type Item char)
                  (read-item ((self Self)) Option<char> (option::some #\q))
                  (listen ((self Self)) bool true))
                (impl CharInput always)

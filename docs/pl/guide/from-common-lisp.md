@@ -222,8 +222,9 @@ Nie ma pakietów. Przestrzeniami nazw są moduły, a plik sam jest modułem. Zam
 `pkg:symbol` pisz `module::name`, a nazwy wprowadzaj za pomocą `use`
 ([Moduły i układ plików](modules.md)).
 
-Słowa kluczowe `:foo` istnieją i są symbolami, które obliczają się do samych siebie. Ponieważ nie ma pakietów,
-dwukropek jest częścią nazwy: `(symbol->string :foo)` zwraca `":foo"`.
+Słowa kluczowe `:foo` istnieją i, jak w CL, obliczają się do samych siebie oraz należą do przestrzeni nazw
+słów kluczowych `keyword`. `(symbol->string :foo)` zwraca `"foo"`, a `(intern "foo" "keyword")` zwraca
+`:foo`. Drugim argumentem `intern` jest ścieżka modułu zamiast nazwy pakietu.
 
 ## 10. Różnice w czytaniu i składni
 

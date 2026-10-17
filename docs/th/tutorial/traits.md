@@ -46,26 +46,26 @@ trait ทำงานแทบเหมือนกับ trait ของ Rust �
 
 ## 2. ขอบเขตของ trait (trait bound): "ชนิดใดก็ได้ที่ implement trait นี้"
 
-คุณกำหนดเงื่อนไขให้พารามิเตอร์ชนิดของฟังก์ชัน generic ได้ด้วย `where` เรียกว่า
+คุณกำหนดเงื่อนไขให้พารามิเตอร์ชนิดของฟังก์ชัน generic ได้ด้วย `:where` เรียกว่า
 **trait bound**
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-เพราะ `(where (Shape T))` ตัวเนื้อหาจึงใช้ `name` และ `area` กับค่าชนิด `T` ได้ หากไม่มี
+เพราะ `(:where (Shape T))` ตัวเนื้อหาจึงใช้ `name` และ `area` กับค่าชนิด `T` ได้ หากไม่มี
 bound จะไม่ทราบอะไรเกี่ยวกับ `T` จึงเรียกไม่ได้
 
 การส่งชนิดที่ไม่ได้ implement `Shape` เป็นข้อผิดพลาดของชนิดที่จุดเรียก
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 ฟังก์ชัน generic ได้สำเนาของตัวเองสำหรับแต่ละชนิดที่มันถูกเรียก ไม่มีการทดสอบชนิดหรือ
@@ -99,7 +99,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 | Trait | เมทอดที่ต้อง implement | สิ่งที่เปิดใช้ได้ |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, รูปแบบ `(= expr)` ของ `match` และอื่น ๆ |
+| `Eq` | `equals` | `member`, `find`, `position`, รูปแบบ `(:= expr)` ของ `match` และอื่น ๆ |
 | `Ord` | `less` | `less-equal`, `greater` และอื่น ๆ `Ord` สืบทอดจาก `Eq` |
 | `print-object` | `print-object` | วิธีที่ `println` และพวกเดียวกันแสดงค่า |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort` และอื่น ๆ |
@@ -135,7 +135,7 @@ error: ...: type error: report: type `int` does not implement trait `shape` requ
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -180,7 +180,7 @@ total 9
 
 การเลือกระหว่าง trait bound ในหัวข้อ 2 กับ `:dyn`:
 
-| | Trait bound (`where`) | `:dyn Trait` |
+| | Trait bound (`:where`) | `:dyn Trait` |
 |---|---|---|
 | เมื่อเมทอดที่เรียกถูกตัดสิน | ก่อนรัน | ตอนรัน |
 | ผสมชนิดใน `Vector` เดียว | ไม่ได้ | ได้ |

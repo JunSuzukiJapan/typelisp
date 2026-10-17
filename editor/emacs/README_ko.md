@@ -12,7 +12,7 @@ VS Code 판은 [../vscode/](../vscode/README_ko.md)에 있습니다. 둘은 같�
     `print`/`println`/`format`, `pprint` 계열 등)
   - 정의 이름 강조(`(defun NAME ...)`의 `NAME`은 함수 이름, `(defstruct NAME ...)`은 타입 이름,
     `(defvar (NAME ...))`은 변수 이름으로. `pub`가 붙은 `(pub defun NAME ...)`도 마찬가지)
-  - 이름공간·선언 키워드(`pub` `module` `use` `load` `impl` `where`)와
+  - 이름공간·선언 키워드(`pub` `module` `use` `load` `impl`)와
     람다 리스트 표지(`&rest` `&optional` `&key`)
   - 내장 함수(`car` `map` `foldl` `unwrap` `parse-int` `message` `sexpr-car` 등)
   - 기본 타입(`bignum` / `ratio` 포함)·내장 타입·내장 오류 타입(`ParseIntError` 등)·

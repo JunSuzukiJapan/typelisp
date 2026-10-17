@@ -222,7 +222,7 @@ kalıcı olarak kaydedilir.
 
 | Form | Docstring'in konumu |
 |---|---|
-| `defun` / `impl` metotları / `defmacro` | Gövdenin başında (dönüş türünden ve `where` yan tümcesinden sonra). Yalnızca en az bir gövde formu izlediğinde; tek başına bir string dönüş değeri olarak kalır |
+| `defun` / `impl` metotları / `defmacro` | Gövdenin başında (dönüş türünden ve `:where` yan tümcesinden sonra). Yalnızca en az bir gövde formu izlediğinde; tek başına bir string dönüş değeri olarak kalır |
 | `defvar` / `defconstant` | Başlangıç değerinden **sonra**: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | Adın **hemen ardından**, alanlardan/varyantlardan önce |
 | `deftype` | Adın **hemen ardından**, türden önce: `(deftype meters "doc" i32)` |

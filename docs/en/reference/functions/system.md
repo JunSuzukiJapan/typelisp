@@ -220,7 +220,7 @@ registered in the global environment immediately and permanently.
 
 | Form | Position of the docstring |
 |---|---|
-| `defun` / methods in `impl` / `defmacro` | At the start of the body (after the return type and the `where` clause). Only when at least one body form follows; a lone string stays the return value |
+| `defun` / methods in `impl` / `defmacro` | At the start of the body (after the return type and the `:where` clause). Only when at least one body form follows; a lone string stays the return value |
 | `defvar` / `defconstant` | **After** the initial value: `(defvar (name Type) value "doc")` |
 | `defstruct` / `defenum` | **Right after** the name, before the fields/variants |
 | `deftype` | **Right after** the name, before the type: `(deftype meters "doc" i32)` |

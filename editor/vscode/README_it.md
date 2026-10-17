@@ -14,7 +14,7 @@ lo verifica in modo meccanico (vedi sotto).
   - Nomi definiti (`(defun NAME ...)` come funzione, `(defstruct NAME ...)` come tipo,
     `(defvar (NAME ...))` come variabile; lo stesso con `pub`, come in `(pub defun NAME ...)`) ed
     entrambi i nomi di `(impl Trait Type)`
-  - Parole chiave di namespace e di dichiarazione (`pub` `module` `use` `load` `impl` `where`) e
+  - Parole chiave di namespace e di dichiarazione (`pub` `module` `use` `load` `impl`) e
     marcatori della lista dei parametri lambda (`&rest` `&optional` `&key`)
   - Funzioni predefinite, tipi primitivi (inclusi `bignum` / `ratio`), tipi di errore predefiniti,
     tipi utente `Capitalized` e il tipo oggetto-trait `:dyn Trait` (anche dentro gli argomenti

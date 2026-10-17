@@ -47,26 +47,26 @@ Menghilangkan satu saja metode yang dideklarasikan trait adalah kesalahan tipe p
 
 ## 2. Batas trait: "tipe apa pun yang mengimplementasikan trait ini"
 
-Anda dapat memberi syarat pada parameter tipe fungsi generik dengan `where`. Ini disebut **batas
+Anda dapat memberi syarat pada parameter tipe fungsi generik dengan `:where`. Ini disebut **batas
 trait**.
 
 ```lisp
 (defun report<T> ((s T)) string
-  (where (Shape T))
+  (:where (Shape T))
   (format false "~a: ~a" (name s) (area s)))
 
 (report (make-instance 'circle :r 1))   ; => "circle: 3"
 (report (make-instance 'rect :w 2 :h 5))   ; => "rect: 10"
 ```
 
-Berkat `(where (Shape T))`, badan fungsi dapat memakai `name` dan `area` pada nilai bertipe `T`. Tanpa
+Berkat `(:where (Shape T))`, badan fungsi dapat memakai `name` dan `area` pada nilai bertipe `T`. Tanpa
 batas itu tidak ada yang diketahui tentang `T`, sehingga keduanya tidak dapat dipanggil.
 
 Memberikan tipe yang tidak mengimplementasikan `Shape` adalah kesalahan tipe pada pemanggilan.
 
 ```
 (report 5)
-error: ...: type error: report: type `int` does not implement trait `shape` required by `where` clause on type parameter `t`
+error: ...: type error: report: type `int` does not implement trait `shape` required by `:where` clause on type parameter `t`
 ```
 
 Fungsi generik mendapatkan salinannya sendiri untuk setiap tipe yang dipakai memanggilnya. Tidak ada
@@ -100,7 +100,7 @@ tersedia untuk tipe Anda.
 
 | Trait | Metode yang diimplementasikan | Yang diaktifkan |
 |---|---|---|
-| `Eq` | `equals` | `member`, `find`, `position`, pola `(= expr)` pada `match`, dan sebagainya |
+| `Eq` | `equals` | `member`, `find`, `position`, pola `(:= expr)` pada `match`, dan sebagainya |
 | `Ord` | `less` | `less-equal`, `greater`, dan sebagainya. `Ord` mewarisi `Eq` |
 | `print-object` | `print-object` | Cara nilai ditampilkan oleh `println` dan sejenisnya |
 | `Iter` | `next` | `doiter`, `map`, `filter`, `sort`, dan sebagainya |
@@ -137,7 +137,7 @@ mengimplementasikan `Ord`.
 
 ```lisp
 (defun largest<T> ((v Vector<T>)) Option<T>
-  (where (Ord T))
+  (:where (Ord T))
   (foldl (iter v)
          (lambda ((best Option<T>) (x T)) Option<T>
            (match best
@@ -185,7 +185,7 @@ total 9
 
 Memilih antara batas trait pada bagian 2 dan `:dyn`:
 
-| | Batas trait (`where`) | `:dyn Trait` |
+| | Batas trait (`:where`) | `:dyn Trait` |
 |---|---|---|
 | Kapan metode yang dipanggil ditentukan | Sebelum dijalankan | Saat dijalankan |
 | Mencampur tipe dalam satu `Vector` | Tidak dapat | Dapat |

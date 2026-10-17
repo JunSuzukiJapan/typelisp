@@ -77,9 +77,10 @@
 
 | الاسم | الصيغة | النوع | الوصف |
 |---|---|---|---|
-| `symbol->string` | `(symbol->string s)` | `symbol→string` | يستخرج اسم الرمز |
-| `string->symbol` | `(string->symbol s)` | `string→symbol` | يصنع رمزًا من سلسلة (يدرجه intern) |
-| `keywordp` | `(keywordp s)` | `symbol→bool` | هل هو كلمة مفتاحية (`:name`). والنقطتان الرأسيتان جزء من الاسم، فيفحص الاختبار المحرف الأول ([مرجع الصياغة](../syntax.md#1-العناصر-المعجمية)) |
+| `symbol->string` | `(symbol->string s)` | `symbol→string` | يستخرج اسم الرمز. واسم الكلمة المفتاحية لا يتضمن النقطتين الرأسيتين (`:foo` ← `"foo"`) |
+| `string->symbol` | `(string->symbol s)` | `string→symbol` | يصنع رمزًا من سلسلة (يدرجه intern في الوحدة الجذرية) |
+| `intern` | `(intern name [namespace])` | `(string,string)→symbol` | يصنع الرمز `name` في فضاء الأسماء `namespace` (`intern` في CL). و`namespace` مسار وحدة من الجذر (`"geometry::shapes"`)؛ و`"keyword"` فضاء الكلمات المفتاحية و`""` الجذر. وإن حُذف فهو الوحدة التي كُتب فيها الاستدعاء |
+| `keywordp` | `(keywordp s)` | `symbol→bool` | هل هو كلمة مفتاحية، أي هل ينتمي إلى فضاء أسماء الكلمات المفتاحية ([مرجع الصياغة](../syntax.md#1-العناصر-المعجمية)) |
 
 وبخصوص `gensym` انظر [الماكرو](system.md#8-الماكرو).
 

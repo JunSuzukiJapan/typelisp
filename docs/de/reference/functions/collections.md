@@ -105,7 +105,7 @@ unter [Destruktive Operationen](sequences.md#7-destruktive-operationen).
 | `size` | `(size h)` | `HashTable<K,V>→int` | CLs `hash-table-size`. Bei dieser Tabelle die Anzahl der belegten Einträge (gleich `count`) |
 
 **Jeder Typ, der `Hash` implementiert, kann Schlüssel sein**, auch `defstruct`/`defenum`-Typen.
-`get`/`set`/`remove` tragen `(where (Hash K))`, daher ist eine Tabelle, deren Schlüsseltyp ihn nicht
+`get`/`set`/`remove` tragen `(:where (Hash K))`, daher ist eine Tabelle, deren Schlüsseltyp ihn nicht
 implementiert, ein **Typfehler** (`f64` hat wegen `NaN` kein `Hash`).
 
 ```lisp

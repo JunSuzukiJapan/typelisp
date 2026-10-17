@@ -312,7 +312,7 @@ fn hash_form(
             }
             Value::Symbol(id) => {
                 4u8.hash(hasher);
-                heap.symbol_name(id).hash(hasher);
+                heap.symbol_spelling(id).hash(hasher);
             }
             Value::Str(id) => {
                 5u8.hash(hasher);
@@ -323,7 +323,7 @@ fn hash_form(
                 let segments = heap.path_segments(id);
                 segments.len().hash(hasher);
                 for seg in segments.iter() {
-                    heap.symbol_name(*seg).hash(hasher);
+                    heap.symbol_spelling(*seg).hash(hasher);
                 }
             }
             Value::Cons(_) => {
@@ -423,7 +423,7 @@ fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompileTarget>) ->
             let type_path = core::path_field(heap, tl, 0)
                 .ok_or_else(|| "island: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
-                Some(Value::Symbol(id)) => heap.symbol_name(id).to_string(),
+                Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
                 _ => return Err("island: defmethod without a name".to_string()),
             };
             out.push(CompileTarget::Method(type_path, method));
