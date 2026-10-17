@@ -540,11 +540,9 @@ impl Build<'_, '_> {
         Ok(out)
     }
 
-    /// A `::` name. The reader splits `a::b` into a `Value::Path` at read
-    /// time, so a symbol spelled that way would resolve to nothing.
-    fn path(&mut self, name: &str) -> Value {
-        let p = crate::Path::from_segments(name.split("::").map(str::to_string).collect());
-        forms::path_form(self.s, &p)
+    /// A `::` name, from its segments — as the reader reads `a::b`.
+    fn path(&mut self, segments: &[&str]) -> Value {
+        forms::path_form(self.s, &crate::Path::of(segments))
     }
 
     fn call(&mut self, head: &str, args: &[Value]) -> Result<Value, Error> {
@@ -556,7 +554,7 @@ impl Build<'_, '_> {
     }
 
     /// [`Self::call`] with a `::` head.
-    fn call_path(&mut self, head: &str, args: &[Value]) -> Result<Value, Error> {
+    fn call_path(&mut self, head: &[&str], args: &[Value]) -> Result<Value, Error> {
         let h = self.path(head);
         let mut items = Vec::with_capacity(args.len() + 1);
         items.push(h);
@@ -923,12 +921,12 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: &str) -> Result<
 
             let cmp = b.call(op, &[tmp_sym, best_sym])?;
             let pick = b.if_(cmp, tmp_sym, best_sym)?;
-            let some_pick = b.call_path("Option::some", &[pick])?;
+            let some_pick = b.call_path(&["option", "some"], &[pick])?;
             let some_head = b.sym("some");
             let some_pat = b.list(&[some_head, best_sym])?;
             let some_arm = b.list(&[some_pat, some_pick])?;
 
-            let some_tmp = b.call_path("Option::some", &[tmp_sym])?;
+            let some_tmp = b.call_path(&["option", "some"], &[tmp_sym])?;
             let none_head = b.sym("none");
             let none_pat = b.list(&[none_head])?;
             let none_arm = b.list(&[none_pat, some_tmp])?;

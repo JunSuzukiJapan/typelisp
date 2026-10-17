@@ -12,7 +12,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use crate::{wk, nominal_path, parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
 
 use super::loop_dsl;
-use typelisp_read::name_lexer::{NameLexer, NameTok};
 use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
@@ -43,29 +42,6 @@ use super::registry::{opt_key_effective_ty, AdtDef, AdtKind, BlanketImpl, AssocF
 /// `check`'s own resolution types (`Ref`/`CompileTarget`/`Pattern`), so a direct `use
 /// crate::eval::Interp` here would make the two modules mutually dependent;
 /// this trait keeps that dependency one-directional.
-/// Every Common Lisp comparison operator whose printed name contains a `<` or
-/// `>`. The `char<`/`char<=`/`string<`/`string<=` family is syntactically
-/// indistinguishable from an `ident<...>` generic header (an identifier
-/// immediately followed by `<`), so it would otherwise be mis-parsed as a
-/// malformed generic; the number family (`<`/`<=`/...) is already safe because
-/// it *starts* with punctuation, but is listed here too for completeness. A
-/// header whose whole name is one of these is always taken verbatim, with no
-/// type parameters. (Reader case-folding means these are the lowercase forms.)
-const CL_COMPARISON_OPERATORS: &[&str] = &[
-    "<", ">", "<=", ">=",
-    "char<", "char>", "char<=", "char>=",
-    "string<", "string>", "string<=", "string>=",
-];
-
-/// Parse a definition header symbol into a name and its type-parameter names.
-/// Accepts `name` (no params) or `name<T1,T2,...>` — the angle-bracket generic
-/// syntax also used in type positions. A symbol that does not begin with an
-/// identifier immediately followed by `<` (an operator name like `<=`, `->`,
-/// or any name whose second token isn't `<`), or that is one of the known
-/// [`CL_COMPARISON_OPERATORS`] (e.g. `char<`, `string<=`), is taken verbatim as
-/// the name with no type parameters, so operator-named `defun`s keep working.
-/// A name that *does* start `ident<` and isn't a known operator must be a
-/// well-formed `ident<Ident,Ident...>`.
 /// Whether `ty` is, or contains, one of the FFI's raw machine words.
 ///
 /// Recursive because a type argument can hold one *syntactically* — the checker
@@ -100,57 +76,30 @@ fn is_unsafe_form(heap: &Heap, v: Value) -> bool {
     }
 }
 
-fn parse_generic_name_header(raw: &str) -> Result<(String, Vec<String>), Error> {
-    // A known comparison operator (`char<`, `string<=`, ...) whose `<`/`>`
-    // would otherwise read as the start of a generic-parameter list.
-    if CL_COMPARISON_OPERATORS.contains(&raw) {
-        return Ok((raw.to_string(), Vec::new()));
-    }
-    let mut toks = NameLexer::new(raw).peekable();
-    let name = match toks.peek() {
-        Some(NameTok::Ident(s)) => s.to_string(),
-        // Punctuation-led name (`<=`, `<`, ...): verbatim, no generics.
-        _ => return Ok((raw.to_string(), Vec::new())),
-    };
-    toks.next(); // consume the leading identifier
-    match toks.peek() {
-        None => return Ok((name, Vec::new())), // plain, non-generic name
-        Some(NameTok::Lt) => {
-            toks.next(); // consume '<'
+/// A definition's header: its name and type-parameter names. `name` has
+/// none; `name<T1,T2,...>` — which the reader reads as `(%type-apply name T1
+/// T2 ...)`, the same structure a generic type in a type position is —
+/// declares them, each a plain name.
+fn generic_header(heap: &Heap, v: Value) -> Result<(String, Vec<String>), Error> {
+    match v {
+        Value::Symbol(id) => Ok((heap.symbol_spelling(id).to_string(), Vec::new())),
+        Value::Cons(_) if crate::types::is_type_application(heap, v) => {
+            let parts = heap.list_to_vec(v)?;
+            let name = match parts.get(1) {
+                Some(Value::Symbol(id)) => heap.symbol_spelling(*id).to_string(),
+                _ => return Err(Error::TypeError("a definition's name must be a plain name, with its type parameters after it".into())),
+            };
+            let params = parts[2..]
+                .iter()
+                .map(|p| match p {
+                    Value::Symbol(id) => Ok(heap.symbol_spelling(*id).to_string()),
+                    _ => Err(Error::TypeError(format!("definition name `{}`: type parameter must be a simple identifier", name))),
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok((name, params))
         }
-        // Second token isn't `<` (e.g. `->`, `foo::bar`, `a>b`): take verbatim.
-        _ => return Ok((raw.to_string(), Vec::new())),
+        _ => Err(Error::TypeError("definition name must be a symbol (write `name<T>` for type parameters)".into())),
     }
-    // From here a `<` was seen, so this must be a well-formed generic header.
-    let mut params = Vec::new();
-    loop {
-        match toks.next() {
-            Some(NameTok::Ident(s)) => params.push(s.to_string()),
-            _ => {
-                return Err(Error::TypeError(format!(
-                    "definition name `{}`: type parameter must be a simple identifier",
-                    raw
-                )))
-            }
-        }
-        match toks.next() {
-            Some(NameTok::Comma) => continue,
-            Some(NameTok::Gt) => break,
-            _ => {
-                return Err(Error::TypeError(format!(
-                    "definition name `{}`: malformed `<...>` type parameter list",
-                    raw
-                )))
-            }
-        }
-    }
-    if toks.next().is_some() {
-        return Err(Error::TypeError(format!(
-            "definition name `{}`: unexpected tokens after `>`",
-            raw
-        )));
-    }
-    Ok((name, params))
 }
 
 pub trait MacroExpander {
@@ -2925,7 +2874,7 @@ impl Checker {
         if parts.len() != 3 {
             return Err(Error::TypeError("defsignature: (defsignature name (param-type...) return-type)".into()));
         }
-        let (name, type_params) = self.parse_defun_name(parts[0])?;
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         if !type_params.is_empty() {
             return Err(Error::TypeError(format!(
                 "defsignature: `{}` takes type parameters, and a generic function cannot be forward-declared — \
@@ -3142,8 +3091,8 @@ impl Checker {
         // A generic declaration is refused for the reason `defsignature`
         // refuses one: instantiating a template needs a body to re-check, and
         // there is none here. C has no generics for it to mean, either.
-        let plain = |n: String| -> Result<String, Error> {
-            let (name, type_params) = parse_generic_name_header(&n)?;
+        let plain = |n: Value| -> Result<String, Error> {
+            let (name, type_params) = generic_header(heap, n)?;
             if type_params.is_empty() {
                 Ok(name)
             } else {
@@ -3154,8 +3103,12 @@ impl Checker {
             }
         };
         match v {
-            Value::Symbol(id) => {
-                let n = plain(heap.symbol_spelling(id).to_string())?;
+            Value::Symbol(_) => {
+                let n = plain(v)?;
+                Ok((n.clone(), n))
+            }
+            Value::Cons(_) if crate::types::is_type_application(heap, v) => {
+                let n = plain(v)?;
                 Ok((n.clone(), n))
             }
             Value::Cons(_) => {
@@ -3169,7 +3122,8 @@ impl Checker {
                     return Err(bad());
                 }
                 let name = match elems[0] {
-                    Value::Symbol(id) => plain(heap.symbol_spelling(id).to_string())?,
+                    Value::Symbol(_) => plain(elems[0])?,
+                    Value::Cons(_) if crate::types::is_type_application(heap, elems[0]) => plain(elems[0])?,
                     _ => return Err(bad()),
                 };
                 let c_symbol = match elems[1] {
@@ -3277,16 +3231,18 @@ impl Checker {
                     return self.check_attribute(heap, interp, &elems[1..], def_loc);
                 }
             }
-            if let Some(Value::Symbol(id)) = elems.first() {
-                // `impl<T>` lexes as a single symbol, exactly like `defstruct
-                // vector-iter<T>`'s name does, so the head has to be split
-                // before it can be matched. Only `impl` takes parameters on
-                // the *head*; every other definition form carries them on the
-                // name that follows.
-                let (head, head_params) = parse_generic_name_header(heap.symbol_spelling(*id))?;
-                if head == "impl" && !head_params.is_empty() {
+            // `impl<T>` reads as `(%type-apply impl T)`. Only `impl` takes
+            // parameters on the *head*; every other definition form carries
+            // them on the name that follows.
+            if let Some(head @ Value::Cons(_)) = elems.first() {
+                if crate::types::is_type_application(heap, *head)
+                    && matches!(heap.list_to_vec(*head)?.get(1), Some(Value::Symbol(id)) if id.is(wk::IMPL))
+                {
+                    let (_, head_params) = generic_header(heap, *head)?;
                     return self.check_impl_generic(heap, interp, &elems[1..], parts_locs, head_params);
                 }
+            }
+            if let Some(Value::Symbol(id)) = elems.first() {
                 // `(unsafe (def-c-struct ...)...)` declares C structs; any
                 // other top-level `unsafe` is an expression.
                 match id.well_known() {
@@ -4439,15 +4395,13 @@ impl Checker {
     /// that does not parse binds nothing here; the definition's own name
     /// parsing reports it.
     fn header_type_vars(heap: &Heap, name: Option<&Value>) -> Vec<String> {
-        let sym = match name {
-            Some(Value::Symbol(id)) => Some(*id),
-            Some(v @ Value::Cons(_)) => match heap.list_to_vec(*v).ok().and_then(|xs| xs.first().copied()) {
-                Some(Value::Symbol(id)) => Some(id),
-                _ => None,
-            },
-            _ => None,
+        let header = match name {
+            Some(v @ Value::Cons(_)) if crate::types::is_type_application(heap, *v) => Some(*v),
+            Some(v @ Value::Cons(_)) => heap.list_to_vec(*v).ok().and_then(|xs| xs.first().copied()),
+            Some(v) => Some(*v),
+            None => None,
         };
-        sym.and_then(|id| parse_generic_name_header(heap.symbol_spelling(id)).ok()).map(|(_, ps)| ps).unwrap_or_default()
+        header.and_then(|h| generic_header(heap, h).ok()).map(|(_, ps)| ps).unwrap_or_default()
     }
 
     /// The type variables a written type introduces by naming them: every
@@ -4739,7 +4693,7 @@ impl Checker {
         // The name first: a malformed header (the old `(name T...)` list form)
         // has its own error, which an unknown-type report on `T` would hide.
         let vars = match parts.first() {
-            Some(&name) => self.parse_defun_name(name)?.1,
+            Some(&name) => self.parse_defun_name(heap, name)?.1,
             None => Vec::new(),
         };
         self.with_type_names(vars, |c| {
@@ -4769,7 +4723,7 @@ impl Checker {
         def_loc: Option<Loc>,
     ) -> Result<TopLevelForm, Error> {
         let (params, param_locs, rest, ret, bounds, body_start, doc) = self.parse_defun_sig(heap, parts, parts_locs)?;
-        let (name, type_params) = self.parse_defun_name(parts[0])?;
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let fq_name = self.fq(&name);
 
         // Register the signature in the current namespace before checking the
@@ -4899,7 +4853,7 @@ impl Checker {
         if parts.len() < 3 {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
-        let (name, type_params) = self.parse_defun_name(parts[0])?;
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         let fq_name = self.fq(&name);
         let (required, required_locs, optionals_raw, rest, keys_raw) = self.parse_defun_params_full(heap, parts[1])?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
@@ -5450,7 +5404,7 @@ impl Checker {
         let env = Env::new().extended(params.clone())?;
         // As in `specialize_method_form`: the implicit block keeps the name
         // the source wrote, which is not the mangled one this emits under.
-        let (name, _) = self.parse_defun_name(tmpl.parts[0])?;
+        let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
         self.defun_form(heap, mangled, &params, &ret, &body)
@@ -5521,7 +5475,7 @@ impl Checker {
         let env = Env::new().extended(params.clone())?;
         // As in `specialize_method_form`: the implicit block keeps the name
         // the source wrote, which is not the mangled one this emits under.
-        let (name, _) = self.parse_defun_name(tmpl.parts[0])?;
+        let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
         self.defun_form(heap, mangled, &params, &ret, &body)
@@ -5902,13 +5856,15 @@ impl Checker {
     /// generic syntax a *type* position uses (`Vector<T>`), so all three
     /// defining forms read consistently. The old `(name T1 T2...)` list form
     /// is no longer accepted.
-    fn parse_defun_name(&self, v: Value) -> Result<(String, Vec<String>), Error> {
-        match v {
-            Value::Symbol(id) => parse_generic_name_header(&bound_name(id, "a definition")?),
-            _ => Err(Error::TypeError(
-                "definition name must be a symbol (write `name<T>` for type parameters)".into(),
-            )),
+    fn parse_defun_name(&self, heap: &Heap, v: Value) -> Result<(String, Vec<String>), Error> {
+        let name_sym = match v {
+            Value::Cons(_) if crate::types::is_type_application(heap, v) => heap.list_to_vec(v)?.get(1).copied(),
+            other => Some(other),
+        };
+        if let Some(Value::Symbol(id)) = name_sym {
+            bound_name(id, "a definition")?;
         }
+        generic_header(heap, v)
     }
 
     /// `(defmacro name (p1 p2 ...) body...)`: a compile-time code
@@ -6754,7 +6710,8 @@ impl Checker {
         // `(impl Trait Type item...)` names two things before its items;
         // an inherent `(impl Type item...)` names one, so what follows the
         // first is an item, a `(:where ...)`, or nothing.
-        if matches!(parts.get(1), None | Some(Value::Cons(_))) {
+        let names_a_type = parts.get(1).is_some_and(|v| !matches!(v, Value::Cons(_)) || crate::types::is_type_application(heap, *v));
+        if !names_a_type {
             let vars = parts.first().map(|t| self.written_type_vars(heap, *t)).unwrap_or_default();
             return self.with_type_names(vars, |c| c.check_impl_inherent(heap, interp, parts, parts_locs));
         }
@@ -6838,7 +6795,7 @@ impl Checker {
         if public {
             elems.remove(0);
         }
-        if elems.len() < 3 || !matches!(elems[0].0, Value::Symbol(_)) {
+        if elems.len() < 3 || generic_header(heap, elems[0].0).is_err() {
             return Err(Error::TypeError(shape.into()));
         }
         let params = match elems[1].0 {
@@ -6960,6 +6917,17 @@ impl Checker {
         for item in &parts[item_start..] {
             let elem_locs = heap.list_to_vec_locs(*item)?;
             let elems: Vec<Value> = elem_locs.iter().map(|(v, _)| *v).collect();
+            if let Some(head @ Value::Cons(_)) = elems.first() {
+                if let Ok((name, params)) = generic_header(heap, *head) {
+                    return Err(Error::TypeError(format!(
+                        "impl {}: `{}<{}>` declares type parameters of its own, and a trait's method has the \
+                         signature the trait gives it",
+                        trait_fq,
+                        name,
+                        params.join(",")
+                    )));
+                }
+            }
             if !matches!(elems.first(), Some(Value::Symbol(_))) {
                 return Err(Error::TypeError("impl: item must start with a symbol".into()));
             }
@@ -7689,18 +7657,14 @@ impl Checker {
     ///
     /// `check_impl` can use the target type *as written* because the user
     /// wrote it; a blanket materialization has no written form to reuse, only
-    /// a resolved `Type`. `ConcreteNames::type_key` already produces exactly the type
-    /// grammar for nominal and primitive types (`a::b<c,d>` is one symbol
-    /// that `parse_type_name_rec` reads straight back), so this is that plus
-    /// the shapes with no single-token spelling.
+    /// a resolved `Type`, which [`forms::type_to_form`] writes back as syntax.
     fn type_to_written_value(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
         match t {
-            Type::Unit => Ok(Value::Empty),
             Type::Dyn(..) | Type::Fn(..) | Type::Never => Err(Error::TypeError(format!(
                 "`{}` cannot be the target of a blanket impl — it is not a nominal type",
                 ConcreteNames::type_key(t)
             ))),
-            other => Ok(heap.intern_symbol(&ConcreteNames::type_key(other))),
+            other => forms::type_to_form(heap, other),
         }
     }
 
@@ -8742,27 +8706,12 @@ impl Checker {
     /// on data, so there's no quoting concern.
     fn subst_value(heap: &mut Heap, v: Value, subst: &HashMap<String, Value>) -> Result<Value, Error> {
         match v {
-            Value::Symbol(id) => {
-                let name = heap.symbol_spelling(id).to_string();
-                match subst.get(&name) {
-                    Some(bound) => Ok(*bound),
-                    None => Self::subst_inside_name(heap, v, &name, subst),
-                }
-            }
-            // A `::`-qualified name is one token to the reader too, so it can
-            // carry generic arguments on its last segment (`geo::pair<item>`)
-            // exactly as a bare one does. The whole-name lookup is skipped:
-            // every key of `subst` is a single-segment name (`self`, an
-            // associated type), so a joined path can never be one.
-            Value::Path(id) => {
-                let name = heap
-                    .path_segments(id)
-                    .iter()
-                    .map(|s| heap.symbol_spelling(*s))
-                    .collect::<Vec<_>>()
-                    .join("::");
-                Self::subst_inside_name(heap, v, &name, subst)
-            }
+            // A generic type's arguments are structure (`(%type-apply Name
+            // Arg...)`), so the walk below reaches every name inside one.
+            Value::Symbol(id) => match subst.get(heap.symbol_spelling(id)) {
+                Some(bound) => Ok(*bound),
+                None => Ok(v),
+            },
             Value::Cons(_) => {
                 let car = heap.car(v)?;
                 let cdr = heap.cdr(v)?;
@@ -8780,65 +8729,6 @@ impl Checker {
             }
             other => Ok(other),
         }
-    }
-
-    /// Substitute *inside* a type name — the half of [`Self::subst_value`]
-    /// the whole-name lookup cannot reach.
-    ///
-    /// `Vector<Item>` is a single symbol to the reader (the same reason
-    /// `impl<T>` is — `parse_generic_name_header`), so a trait's associated
-    /// type mentioned in a *generic argument* of a default method's signature
-    /// never matched anything, and the inherited signature reached
-    /// `Checker::check_impl_conformance` still saying `vector<item>` while
-    /// the trait's own declaration had been substituted to `vector<char>`.
-    ///
-    /// So the name is parsed into a [`Type`] — where the arguments are
-    /// structure rather than text — substituted there with the same
-    /// [`subst_apply`] the conformance check uses, and emitted back as syntax
-    /// by [`forms::type_to_form`]. Emitting *structure* and not a rebuilt
-    /// name is what makes the substitution total: an argument may end up
-    /// being something no name can spell, such as a `(fn ...)` type an
-    /// `impl` bound the associated type to.
-    ///
-    /// Returns `v` untouched unless a substitution actually applies, so an
-    /// ordinary concrete annotation keeps the spelling — and the source span
-    /// — it was written with.
-    fn subst_inside_name(
-        heap: &mut Heap,
-        v: Value,
-        name: &str,
-        subst: &HashMap<String, Value>,
-    ) -> Result<Value, Error> {
-        // `<` is the only way a name can carry a type inside it, and a
-        // generic name always closes with `>`. Both halves matter: the
-        // *parse* is deliberately tolerant of a premature end (`Result<`,
-        // whose speculative extension the reader rewound, has to reach the
-        // checker as an error rather than a panic), so without the closing
-        // test a comparison written tight — `a<b` — would parse as `a<b>`
-        // and be rewritten inside a body. `vector<t>::new` fails it too.
-        if !name.contains('<') || !name.ends_with('>') {
-            return Ok(v);
-        }
-        // Not everything `subst_value` walks is a type: a `(:where ...)`
-        // bound leads with a trait name, and the clause is rewritten by the
-        // same walk. A name the type grammar rejects is left exactly as
-        // written — whatever reads it next parses it with a span to blame,
-        // which is a better place to report it from than here.
-        let Ok(ty) = crate::types::parse_type_name(name) else {
-            return Ok(v);
-        };
-        let mut vars = BTreeSet::new();
-        type_var_names(&ty, &mut vars);
-        let mut tsubst: BTreeMap<String, Type> = BTreeMap::new();
-        for var in vars {
-            if let Some(bound) = subst.get(&var) {
-                tsubst.insert(var, parse_type_spanned(heap, *bound, None, &mut Vec::new())?);
-            }
-        }
-        if tsubst.is_empty() {
-            return Ok(v);
-        }
-        forms::type_to_form(heap, &subst_apply(&ty, &tsubst))
     }
 
     // ---- module / defmethod / use -----------------------------------------
@@ -9449,10 +9339,8 @@ impl Checker {
                 "impl: a method is (name ((self Self) params...) ReturnType body...)".into(),
             ));
         }
-        let (method, own_params) = match parts[0] {
-            Value::Symbol(id) => parse_generic_name_header(heap.symbol_spelling(id))?,
-            _ => return Err(Error::TypeError("impl: a method's name must be a symbol".into())),
-        };
+        let (method, own_params) = generic_header(heap, parts[0])
+            .map_err(|_| Error::TypeError("impl: a method's name must be a symbol, with any type parameters after it".into()))?;
         let sig_list_locs = heap.list_to_vec_locs(parts[1])?;
         let sig_list: Vec<Value> = sig_list_locs.iter().map(|(v, _)| *v).collect();
         if sig_list.is_empty() {
@@ -9463,6 +9351,9 @@ impl Checker {
         }
         // `(self T)` -> instance method; a bare type name -> static method.
         let (instance, self_name, self_name_loc, type_expr, type_expr_loc) = match sig_list[0] {
+            Value::Cons(_) if crate::types::is_type_application(heap, sig_list[0]) => {
+                (false, None, None, sig_list[0], sig_list_locs.first().and_then(|(_, l)| l.clone()))
+            }
             Value::Cons(_) => {
                 let recv_locs = heap.list_to_vec_locs(sig_list[0])?;
                 let recv: Vec<Value> = recv_locs.iter().map(|(v, _)| *v).collect();
@@ -9584,7 +9475,7 @@ impl Checker {
         // position carries options. A bare symbol is the common case and
         // means no options.
         let (name_form, options) = match parts[0] {
-            Value::Cons(_) => {
+            Value::Cons(_) if !crate::types::is_type_application(heap, parts[0]) => {
                 let items_locs = heap.list_to_vec_locs(parts[0])?;
                 let items: Vec<Value> = items_locs.iter().map(|(v, _)| *v).collect();
                 let locs: Vec<Option<Loc>> = items_locs.iter().map(|(_, l)| l.clone()).collect();
@@ -9595,7 +9486,7 @@ impl Checker {
             }
             _ => (parts[0], StructOptions::default()),
         };
-        let (name, type_params) = self.parse_defun_name(name_form)?;
+        let (name, type_params) = self.parse_defun_name(heap, name_form)?;
         // A leading docstring, right after the name and before the field
         // list — CL's `(defstruct (name options) documentation slot...)`
         // position. Unlike `defun`'s, unambiguous: a field is always a
@@ -9852,64 +9743,23 @@ impl Checker {
         result
     }
 
-    /// A [`Type`] rendered back into the surface syntax a type annotation is
-    /// written in, so a synthesized definition can carry it.
-    ///
-    /// [`ConcreteNames::type_key`] alone is not enough: it is a *serialization* (commas
-    /// inside `(fn ...)`, a bare `dyn` head), tuned for making two distinct
-    /// canonical types render differently, not for being read back. It is
-    /// exactly right for the atomic cases, which is why they go through it.
-    fn type_source(&self, heap: &mut Heap, t: &Type) -> Result<Value, Error> {
-        match t {
-            Type::Fn(ps, rest, r) => {
-                let mut out = Items::new(heap);
-                let head = out.heap().intern_symbol("fn");
-                out.push(head);
-                let param_list = {
-                    let mut params = Items::new(out.heap());
-                    for p in ps {
-                        let f = self.type_source(params.heap(), p)?;
-                        params.push(f);
-                    }
-                    if let Some(elem) = rest {
-                        let marker = params.heap().intern_symbol("&rest");
-                        params.push(marker);
-                        let f = self.type_source(params.heap(), elem)?;
-                        params.push(f);
-                    }
-                    params.finish_list()?
-                };
-                out.push(param_list);
-                let ret = self.type_source(out.heap(), r)?;
-                out.push(ret);
-                out.finish_list()
-            }
-            // The reader joins the two-word `:dyn Trait` spelling into this
-            // list, so this is what an annotation site actually sees.
-            Type::Dyn(path, pins) => {
-                let mut f = Items::new(heap);
-                let head = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::DYN));
-                f.push(head);
-                let inner = ConcreteNames::type_key(&Type::Named(path.clone(), pins.clone()));
-                let name = f.heap().intern_symbol(&inner);
-                f.push(name);
-                f.finish_list()
-            }
-            other => Ok(heap.intern_symbol(&ConcreteNames::type_key(other))),
-        }
-    }
-
     /// The receiver/return annotation for a generated static constructor:
     /// the struct's own written name, with its type parameters spelled back
     /// on (`point<T>`), which is what makes `check_defmethod_in` retain a
     /// specializable template for a generic owner.
-    fn owner_type_source(&self, heap: &mut Heap, name: &str, type_params: &[String]) -> Value {
-        let text = if type_params.is_empty() {
-            name.to_string()
-        } else {
-            format!("{}<{}>", name, type_params.join(","))
-        };
-        heap.intern_symbol(&text)
+    fn owner_type_source(&self, heap: &mut Heap, name: &str, type_params: &[String]) -> Result<Value, Error> {
+        let head = heap.intern_symbol(name);
+        if type_params.is_empty() {
+            return Ok(head);
+        }
+        let mut f = Items::new(heap);
+        f.push(Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::TYPE_APPLY)));
+        f.push(head);
+        for p in type_params {
+            let v = f.heap().intern_symbol(p);
+            f.push(v);
+        }
+        f.finish_list()
     }
 
     /// Synthesize a `(:copier name)` option's `defmethod` source: an
@@ -9933,7 +9783,7 @@ impl Checker {
                 let mut recv_pair = Items::new(sig.heap());
                 let sname = recv_pair.heap().intern_symbol("self");
                 recv_pair.push(sname);
-                let owner = self.owner_type_source(recv_pair.heap(), name, type_params);
+                let owner = self.owner_type_source(recv_pair.heap(), name, type_params)?;
                 recv_pair.push(owner);
                 recv_pair.finish_list()?
             };
@@ -9941,7 +9791,7 @@ impl Checker {
             sig.finish_list()?
         };
         out.push(sig_list);
-        let ret = self.owner_type_source(out.heap(), name, type_params);
+        let ret = self.owner_type_source(out.heap(), name, type_params)?;
         out.push(ret);
 
         let body = {
@@ -9967,10 +9817,8 @@ impl Checker {
     /// too, so that an alias that mentions itself is reported as exactly that.
     fn check_deftype(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
         let mut vars = Self::header_type_vars(heap, parts.first());
-        if let Some(Value::Symbol(id)) = parts.first() {
-            if let Ok((name, _)) = parse_generic_name_header(heap.symbol_spelling(*id)) {
-                vars.push(name.to_string());
-            }
+        if let Some(Ok((name, _))) = parts.first().map(|v| generic_header(heap, *v)) {
+            vars.push(name);
         }
         self.with_type_names(vars, |c| c.check_deftype_form(heap, parts, parts_locs, public, def_loc))
     }
@@ -10016,7 +9864,7 @@ impl Checker {
         if parts.is_empty() {
             return Err(Error::TypeError("deftype: (deftype Name Type)".into()));
         }
-        let (name, params) = self.parse_defun_name(parts[0])?;
+        let (name, params) = self.parse_defun_name(heap, parts[0])?;
         // A leading docstring, in the same position `defstruct`/`defenum`
         // take one. Unambiguous for the same reason: a type is never written
         // as a string literal.
@@ -10103,7 +9951,7 @@ impl Checker {
         if parts.is_empty() {
             return Err(Error::TypeError("defenum: (defenum Name (Variant Type...)...)".into()));
         }
-        let (name, type_params) = self.parse_defun_name(parts[0])?;
+        let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
         // A leading docstring, right after the name and before the variant
         // list — same position/rule as `defstruct`'s (no ambiguity: a
         // variant is always a symbol or a `(Name Type...)` list, never a
@@ -13339,27 +13187,28 @@ impl Checker {
 
     /// A written `Type<args>::member` — a method one instantiation's own
     /// `impl` wrote, named by that instantiation: the type and the method's
-    /// name there. `None` when `name` does not start with an instantiated
-    /// type.
-    fn instantiated_member(&self, name: &str, who: &str) -> Option<Result<(Path, String), Error>> {
-        let (type_text, member) = name.rsplit_once("::")?;
-        if !type_text.contains('<') {
-            return None;
-        }
-        let ty = self.canon(&crate::types::parse_type_name(type_text).ok()?);
-        let Type::Named(type_fq, args) = &ty else { return None };
-        let def = self.reg.type_def(type_fq)?;
+    /// name there.
+    fn instantiated_member(&self, ty: &Type, member: &str, who: &str) -> Result<(Path, String), Error> {
+        let ty = self.canon(ty);
+        let (type_fq, args) = match &ty {
+            Type::Named(type_fq, args) => (type_fq, args),
+            other => return Err(Error::TypeError(format!("{}: `{}` is not a generic type", who, other))),
+        };
+        let def = self
+            .reg
+            .type_def(type_fq)
+            .ok_or_else(|| Error::TypeError(format!("{}: no type `{}` is visible from here", who, type_fq)))?;
         if def.insts.get(&ConcreteNames::type_args(args)).is_some_and(|i| i.assoc.contains_key(member)) {
-            return Some(Ok((type_fq.clone(), ConcreteNames::specialization(member, args))));
+            return Ok((type_fq.clone(), ConcreteNames::specialization(member, args)));
         }
-        Some(Err(Error::TypeError(if def.assoc.contains_key(member) {
+        Err(Error::TypeError(if def.assoc.contains_key(member) {
             format!(
                 "{}: `{}` is written for every instantiation of `{}`, so it is named `{}::{}`",
                 who, member, type_fq, type_fq, member
             )
         } else {
             format!("{}: `{}` has no method `{}` of its own", who, ty, member)
-        })))
+        }))
     }
 
     /// Which function or method a bare name or a `::`-path names — the
@@ -13377,7 +13226,8 @@ impl Checker {
     /// anyway, rather than discarding it and handing `Interp` a bare string
     /// to re-resolve with a module-blind search — see this type's own doc
     /// comment for the bug that replaced.
-    fn resolve_callable(&self, name: &str, who: &str) -> Result<CompileTarget, Error> {
+    fn resolve_callable(&self, written_name: &WrittenName, who: &str) -> Result<CompileTarget, Error> {
+        let name = written_name.display();
         let generic_err = || {
             Error::TypeError(format!(
                 "{}: `{}` is generic — monomorphization runs per use, so there is no single body \
@@ -13397,18 +13247,20 @@ impl Checker {
         // an ordinary `Sexpr -> Sexpr` function — the interpreter keeps it in
         // the same `fns` table a `defun` goes in — so a `CompileTarget::Fn`
         // reaches it.
-        let segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
-        let written = if segs.len() == 1 { Written::Bare(name) } else { Written::Path(&segs) };
         let method_target = |type_fq: Path, method: String| {
             if self.generic_method_templates.contains_key(&(type_fq.clone(), method.clone())) {
                 return Err(generic_err());
             }
             Ok(CompileTarget::Method(type_fq, method))
         };
-        if let Some(found) = self.instantiated_member(name, who) {
-            let (type_fq, method) = found?;
-            return method_target(type_fq, method);
-        }
+        let segs = match written_name {
+            WrittenName::Instantiated(ty, member) => {
+                let (type_fq, method) = self.instantiated_member(ty, member, who)?;
+                return method_target(type_fq, method);
+            }
+            WrittenName::Segments(segs) => segs,
+        };
+        let written = if segs.len() == 1 { Written::Bare(&segs[0]) } else { Written::Path(segs) };
         match self.resolve_name(&Env::new(), written, &mut || None) {
             Some(Resolved::Value(ModuleValue::Fn(path))) | Some(Resolved::Macro(path, _)) => fn_target(path),
             Some(Resolved::Member(type_fq, member)) => {
@@ -13594,15 +13446,18 @@ impl Checker {
     /// Resolving to nothing is a check-time error, like any other unbound
     /// reference: the checker always knows where a name resolves, so there is
     /// nothing left for the runtime to look up.
-    fn resolve_definition(&self, name: &str, who: &str) -> Result<DefRef, Error> {
+    fn resolve_definition(&self, written_name: &WrittenName, who: &str) -> Result<DefRef, Error> {
+        let name = written_name.display();
         // A function, a global, a macro or a type's member: the one resolution
         // rule (`Self::resolve_name`), with no receiver.
-        let segs: Vec<String> = name.split("::").map(|s| s.to_string()).collect();
-        let written = if segs.len() == 1 { Written::Bare(name) } else { Written::Path(&segs) };
-        if let Some(found) = self.instantiated_member(name, who) {
-            let (type_fq, method) = found?;
-            return Ok(DefRef::Method(type_fq, method));
-        }
+        let segs = match written_name {
+            WrittenName::Instantiated(ty, member) => {
+                let (type_fq, method) = self.instantiated_member(ty, member, who)?;
+                return Ok(DefRef::Method(type_fq, method));
+            }
+            WrittenName::Segments(segs) => segs,
+        };
+        let written = if segs.len() == 1 { Written::Bare(&segs[0]) } else { Written::Path(segs) };
         match self.resolve_name(&Env::new(), written, &mut || None) {
             Some(Resolved::Value(ModuleValue::Var(path, _))) => return Ok(DefRef::Var(path)),
             Some(Resolved::Value(ModuleValue::Fn(path))) => return Ok(DefRef::Fn(path)),
@@ -13623,7 +13478,7 @@ impl Checker {
             None => {}
         }
         // Types and traits are a name space of their own.
-        if segs.len() == 1 {
+        if let [name] = segs.as_slice() {
             if let Some(path) = self.resolve_bare_type(name) {
                 return Ok(DefRef::Type(path));
             }
@@ -13682,7 +13537,7 @@ impl Checker {
                     None => {
                         return Err(Error::TypeError(format!(
                             "ed: `{}` has no source location — it is built in, so there is no file to open",
-                            name
+                            name.display()
                         )))
                     }
                 }
@@ -14384,7 +14239,7 @@ impl Checker {
                     value
                 } else {
                     let the = s.intern_symbol("the");
-                    let ty = self.type_source(&mut s, &field_types[i])?;
+                    let ty = forms::type_to_form(&mut s, &field_types[i])?;
                     s.push_root(ty);
                     let v = forms::list_from_vec_locs(&mut s, &[(the, None), (ty, None), (value, None)])?;
                     s.push_root(v);
@@ -14615,7 +14470,7 @@ impl Checker {
     ) -> Result<Value, Error> {
         let a = heap.intern_symbol(&self.gensym_place());
         let idx = heap.intern_symbol(&self.gensym_place());
-        let empty = self.the_form(heap, "Vector", &Type::Int, "Vector::new")?;
+        let empty = self.the_form(heap, "vector", &Type::Int, "new")?;
         let empty = forms::rooted(heap, empty);
         let push = heap.intern_symbol("push");
         let progn = heap.intern_symbol("progn");
@@ -15130,7 +14985,7 @@ impl Checker {
                     return Err(loop_thereis_error(&ty));
                 }
                 let elem = targs[0].clone();
-                Some(self.the_form(heap, "Option", &elem, "Option::none")?)
+                Some(self.the_form(heap, "option", &elem, "none")?)
             }
             None => None,
         };
@@ -15160,26 +15015,26 @@ impl Checker {
         let probe = forms::rooted(heap, probe);
         let ty = self.check_at(heap, interp, env, probe, None, None)?.ty;
         match acc.acc {
-            Acc::Collect | Acc::Append => self.the_form(heap, "Vector", &ty, "Vector::new"),
+            Acc::Collect | Acc::Append => self.the_form(heap, "vector", &ty, "new"),
             Acc::Sum => Ok(forms::numeric_identity_literal(heap, Some(&ty), 0)),
-            Acc::Maximize | Acc::Minimize => self.the_form(heap, "Option", &ty, "Option::none"),
+            Acc::Maximize | Acc::Minimize => self.the_form(heap, "option", &ty, "none"),
             Acc::Count => unreachable!("handled above"),
         }
     }
 
-    /// `(the OUTER<ELEM> (CTOR))` with the type written out — the checker
-    /// putting a type it worked out into the tree it is building, since
-    /// nothing downstream can rederive it.
+    /// `(the OUTER<ELEM> (OUTER::CTOR))` with the type written out — the
+    /// checker putting a type it worked out into the tree it is building,
+    /// since nothing downstream can rederive it. `outer` is a built-in type at
+    /// the root and `ctor` its static constructor.
     ///
-    /// The written form is [`ConcreteNames::type_key`]'s, which is the surface syntax,
-    /// and the round trip through [`Self::parse_type_here_at`] is *checked*
-    /// rather than assumed: not every type has surface syntax — a function
-    /// type's parentheses cannot be written inside `<>`
-    /// (`read::reader::read_type_in_args`) — and refusing to write one says
-    /// so here instead of emitting a form that fails somewhere less legible.
+    /// The written form is [`forms::type_to_form`]'s, and the round trip
+    /// through [`Self::parse_type_here_at`] is *checked* rather than assumed,
+    /// so a type that cannot be written is refused here instead of emitting a
+    /// form that fails somewhere less legible.
     fn the_form(&self, heap: &mut Heap, outer: &str, elem: &Type, ctor: &str) -> Result<Value, Error> {
-        let text = ConcreteNames::instantiated_type(outer, &[elem]);
-        let ty_form = heap.intern_symbol(&text);
+        let ty = Type::Named(Path::root(outer), vec![elem.clone()]);
+        let ty_form = forms::type_to_form(heap, &ty)?;
+        let ty_form = forms::rooted(heap, ty_form);
         let ok = match self.parse_type_here_at(heap, ty_form, None) {
             Ok(Type::Named(_, args)) => args.len() == 1 && args[0] == *elem,
             _ => false,
@@ -15187,15 +15042,11 @@ impl Checker {
         if !ok {
             return Err(Error::TypeError(format!(
                 "loop: `{}` has no written form, so this accumulator's type cannot be stated",
-                text
+                ty
             )));
         }
         let the = heap.intern_symbol("the");
-        // A `::` name is a `Value::Path`, not a symbol — the reader splits it
-        // at read time, so a symbol spelled `Vector::new` would resolve to
-        // nothing.
-        let ctor_path = Path::from_segments(ctor.split("::").map(str::to_string).collect());
-        let ctor_sym = forms::path_form(heap, &ctor_path);
+        let ctor_sym = forms::path_form(heap, &Path::of(&[outer, ctor]));
         let call = forms::list_from_vec_locs(heap, &[(ctor_sym, None)])?;
         let call = forms::rooted(heap, call);
         forms::list_from_vec_locs(heap, &[(the, None), (ty_form, None), (call, None)])
@@ -18746,27 +18597,6 @@ fn fn_value_type(sig: &FnSig) -> Type {
     Type::Fn(fn_value_params(sig), sig.rest.clone().map(Box::new), Box::new(sig.ret.clone()))
 }
 
-/// Every name [`subst_apply`] would look up: the simple, argument-less
-/// `Named` leaves of `t`, which are the only positions a type *variable* can
-/// occupy. A generic's head is not one of them — `vector<item>` mentions
-/// `item`, not `vector` — which is exactly the rule `subst_apply` follows.
-fn type_var_names(t: &Type, out: &mut BTreeSet<String>) {
-    match t {
-        Type::Named(n, args) if args.is_empty() && n.is_simple() => {
-            out.insert(n.last_segment().to_string());
-        }
-        Type::Named(_, args) => args.iter().for_each(|a| type_var_names(a, out)),
-        Type::Fn(ps, rest, r) => {
-            ps.iter().for_each(|p| type_var_names(p, out));
-            if let Some(t) = rest {
-                type_var_names(t, out);
-            }
-            type_var_names(r, out);
-        }
-        Type::Dyn(_, pins) => pins.iter().for_each(|p| type_var_names(p, out)),
-        _ => {}
-    }
-}
 
 /// Replace type parameters in `t` with their bindings from `subst`.
 /// `pub(crate)`: `crate::eval::interp`'s `data_variant_field_types` reuses it
@@ -18801,7 +18631,7 @@ pub(crate) fn subst_apply(t: &Type, subst: &BTreeMap<String, Type>) -> Type {
 /// signatures. `None` if `def` has no recorded binding for that trait/name
 /// pair.
 /// Whether `t` is a trait signature template's `Self` type variable. Written
-/// `Self` in source; `parse_type_name` case-folds it, so it canonicalizes to
+/// `Self` in source; the reader case-folds it, so it canonicalizes to
 /// the single-segment path `self` — there is no type by that name, so no real
 /// type can collide with it.
 fn is_self_tvar(t: &Type) -> bool {
@@ -18920,16 +18750,40 @@ fn unify(
 /// unevaluated symbol, or a `::`-path rejoined with the separator the reader
 /// split it on. A string is not a second spelling of the same thing and is
 /// rejected with `msg`, which says what this particular form wanted.
-fn unevaluated_name(heap: &Heap, v: Value, msg: &str) -> Result<String, Error> {
+fn unevaluated_name(heap: &Heap, v: Value, msg: &str) -> Result<WrittenName, Error> {
     match v {
-        Value::Symbol(id) => Ok(heap.symbol_spelling(id).to_string()),
-        Value::Path(pid) => Ok(heap
-            .path_segments(pid)
-            .iter()
-            .map(|s| heap.symbol_spelling(*s).to_string())
-            .collect::<Vec<_>>()
-            .join("::")),
+        Value::Symbol(id) => Ok(WrittenName::Segments(vec![heap.symbol_spelling(id).to_string()])),
+        Value::Path(pid) => Ok(WrittenName::Segments(
+            heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
+        )),
+        Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
+            let parts = heap.list_to_vec(v)?;
+            match parts.as_slice() {
+                [_, ty, Value::Symbol(member)] => {
+                    Ok(WrittenName::Instantiated(crate::types::parse_type(heap, *ty)?, heap.symbol_spelling(*member).to_string()))
+                }
+                _ => Err(Error::TypeError(msg.into())),
+            }
+        }
         _ => Err(Error::TypeError(msg.into())),
+    }
+}
+
+/// A definition's name as a form that names one writes it (`compile`,
+/// `trace`, `documentation`, ...): a symbol or `::` path, as its segments,
+/// or `Name<Args>::member`, a member of one instantiation.
+enum WrittenName {
+    Segments(Vec<String>),
+    Instantiated(Type, String),
+}
+
+impl WrittenName {
+    /// How the name reads in a message.
+    fn display(&self) -> String {
+        match self {
+            WrittenName::Segments(segs) => segs.join("::"),
+            WrittenName::Instantiated(ty, member) => format!("{}::{}", ty, member),
+        }
     }
 }
 
@@ -19162,48 +19016,39 @@ fn loop_thereis_error(ty: &Type) -> Error {
 
 #[cfg(test)]
 mod header_tests {
-    use super::{parse_generic_name_header, CL_COMPARISON_OPERATORS};
+    use super::generic_header;
+    use crate::{Heap, Reader};
+
+    fn header(src: &str) -> Result<(String, Vec<String>), crate::Error> {
+        let mut h = Heap::with_capacity(4096);
+        let v = Reader::new().read_all(&mut h, src).expect("reads")[0];
+        generic_header(&h, v)
+    }
 
     #[test]
     fn a_plain_name_has_no_type_parameters() {
-        assert_eq!(parse_generic_name_header("identity").unwrap(), ("identity".to_string(), vec![]));
+        assert_eq!(header("identity").unwrap(), ("identity".to_string(), vec![]));
         // Hyphens are ordinary name characters, not token boundaries.
-        assert_eq!(parse_generic_name_header("cons-cell").unwrap(), ("cons-cell".to_string(), vec![]));
+        assert_eq!(header("cons-cell").unwrap(), ("cons-cell".to_string(), vec![]));
     }
 
     #[test]
     fn an_angle_bracket_header_splits_into_name_and_params() {
-        assert_eq!(parse_generic_name_header("pair<a,b>").unwrap(), ("pair".to_string(), vec!["a".to_string(), "b".to_string()]));
-        assert_eq!(parse_generic_name_header("identity<t>").unwrap(), ("identity".to_string(), vec!["t".to_string()]));
+        assert_eq!(header("pair<a,b>").unwrap(), ("pair".to_string(), vec!["a".to_string(), "b".to_string()]));
+        assert_eq!(header("identity<t>").unwrap(), ("identity".to_string(), vec!["t".to_string()]));
     }
 
     #[test]
-    fn every_cl_comparison_operator_is_a_verbatim_name() {
-        // `char<`/`string<=`/... must not be mistaken for a generic header —
-        // the whole point of the whitelist. `<`/`<=`/... are already safe
-        // (punctuation-led) but round-trip here too.
-        for op in CL_COMPARISON_OPERATORS {
-            assert_eq!(
-                parse_generic_name_header(op).unwrap(),
-                (op.to_string(), vec![]),
-                "operator {:?} should be a verbatim name with no type parameters",
-                op
-            );
+    fn every_cl_comparison_operator_is_a_plain_name() {
+        // `char<`/`string<=`/...: a `<` with no type after it is part of the
+        // name.
+        for op in ["<", ">", "<=", ">=", "char<", "char>", "char<=", "char>=", "string<", "string>", "string<=", "string>=", "->", "+"] {
+            assert_eq!(header(&format!("{} ", op)).unwrap(), (op.to_string(), vec![]), "operator {:?}", op);
         }
     }
 
     #[test]
-    fn a_non_comparison_operator_name_is_still_verbatim() {
-        // Other punctuation-led / arrow-like names stay verbatim too.
-        assert_eq!(parse_generic_name_header("->").unwrap(), ("->".to_string(), vec![]));
-        assert_eq!(parse_generic_name_header("+").unwrap(), ("+".to_string(), vec![]));
-    }
-
-    #[test]
-    fn a_malformed_generic_header_is_rejected() {
-        // Starts `ident<` but isn't a known operator and doesn't close: an error,
-        // not a silent verbatim name (catches genuine typos like `pair<a`).
-        assert!(parse_generic_name_header("pair<a").is_err());
-        assert!(parse_generic_name_header("pair<a,>").is_err());
+    fn a_type_parameter_must_be_a_plain_name() {
+        assert!(header("pair<vector<t>>").is_err());
     }
 }

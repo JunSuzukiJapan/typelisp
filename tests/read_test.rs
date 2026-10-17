@@ -11,6 +11,10 @@ fn show(h: &Heap, v: Value) -> String {
         // The reader only ever makes an `f64` box: a source literal with no
         // declared type around it is a binary64 number, and narrowing to
         // `f32` is the checker's doing (`float_lit_ty`), not the reader's.
+        Value::Boxed(id) if h.sexpr_tuple_arity(id).is_some() => {
+            let elems: Vec<String> = (0..h.struct_field_count(id)).map(|i| show(h, h.struct_field(id, i))).collect();
+            format!("#{{{}}}", elems.join(" "))
+        }
         Value::Boxed(id) => h.f64_value(id).to_string(),
         Value::Bool(b) => b.to_string(),
         Value::Char(c) => format!("#\\{}", c),
@@ -22,6 +26,21 @@ fn show(h: &Heap, v: Value) -> String {
             .map(|s| h.symbol_spelling(*s))
             .collect::<Vec<_>>()
             .join("::"),
+        // `(%type-apply h a b)` is how `h<a,b>` reads; written back that way,
+        // with a `(:dyn T)` argument as `:dyn T`.
+        Value::Cons(_) if matches!(h.car(v), Ok(Value::Symbol(id)) if id.spelling() == "%type-apply") => {
+            let parts = h.list_to_vec(v).unwrap();
+            let args: Vec<String> = parts[2..]
+                .iter()
+                .map(|a| match *a {
+                    Value::Cons(_) if matches!(h.car(*a), Ok(Value::Symbol(id)) if id.spelling() == ":dyn") => {
+                        format!(":dyn {}", show(h, h.list_to_vec(*a).unwrap()[1]))
+                    }
+                    other => show(h, other),
+                })
+                .collect();
+            format!("{}<{}>", show(h, parts[1]), args.join(","))
+        }
         Value::Cons(_) => {
             let mut s = String::from("(");
             let mut cur = v;
@@ -135,7 +154,7 @@ fn operators_are_symbols() {
     roundtrip("+", "+");
     roundtrip("<=", "<=");
     roundtrip("1+", "1+");
-    roundtrip("Vec<String>", "vec<string>"); // single token, case-folded
+    roundtrip("Vec<String>", "vec<string>"); // case-folded
 }
 
 #[test]
@@ -437,7 +456,7 @@ fn unquote_splicing_spans_both_prefix_chars() {
 #[test]
 fn a_generic_type_token_may_contain_a_spaced_dyn_argument() {
     roundtrip("vector<:dyn drawable>", "vector<:dyn drawable>");
-    roundtrip("hashtable<string, :dyn drawable>", "hashtable<string, :dyn drawable>");
+    roundtrip("hashtable<string, :dyn drawable>", "hashtable<string,:dyn drawable>");
     roundtrip("vector<:dyn iter<int>>", "vector<:dyn iter<int>>");
 }
 
@@ -481,14 +500,14 @@ fn malformed_type_arguments_are_a_read_error() {
 /// written back as one space after a `,` and none elsewhere.
 #[test]
 fn type_arguments_may_span_lines() {
-    roundtrip("hashtable<string,\n    int>", "hashtable<string, int>");
+    roundtrip("hashtable<string,\n    int>", "hashtable<string,int>");
     roundtrip("hashtable<string ,int >", "hashtable<string,int>");
 }
 
 #[test]
 fn a_generic_type_token_may_contain_a_unit_argument() {
-    roundtrip("result<(), string>", "result<(), string>");
-    roundtrip("(defun f () result<(), string> 1)", "(defun f () result<(), string> 1)");
+    roundtrip("result<(), string>", "result<(),string>");
+    roundtrip("(defun f () result<(), string> 1)", "(defun f () result<(),string> 1)");
     roundtrip("option<result<(),()>>", "option<result<(),()>>");
 }
 

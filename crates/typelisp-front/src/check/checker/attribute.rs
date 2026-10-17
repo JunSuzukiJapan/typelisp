@@ -129,7 +129,7 @@ impl Checker {
         let locs: Vec<Option<Loc>> = elems_locs.into_iter().map(|(_, l)| l).collect();
         let loc = heap.cons_loc(*form).or(def_loc);
         let (name, type_params) = match elems.get(1) {
-            Some(&n) => self.parse_defun_name(n)?,
+            Some(&n) => self.parse_defun_name(heap, n)?,
             None => return Err(Error::TypeError("defun: (defun name (params...) ret body...)".into())),
         };
         if !type_params.is_empty() {

@@ -154,5 +154,5 @@ fn an_impl_method_cannot_add_type_parameters() {
     let msg = check_err(
         "(deftrait Show () (show ((self Self)) string))\n(defstruct P (x int))\n(impl Show P (show<U> ((self P)) string \"p\"))",
     );
-    assert!(msg.contains("`show<u>` is not a method of"), "{}", msg);
+    assert!(msg.contains("`show<u>` declares type parameters of its own"), "{}", msg);
 }

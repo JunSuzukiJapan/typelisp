@@ -1,7 +1,7 @@
 //! Tests for parsing type expressions from read `Sexpr` values.
 
 extern crate typelisp;
-use typelisp::{parse_type, Heap, Path, Reader, Type};
+use typelisp::{parse_type, Heap, Path, Reader, Type, Value};
 
 fn parse(src: &str) -> Type {
     parse_result(src).expect("parse_type failed")
@@ -35,10 +35,8 @@ fn unit_type() {
 
 #[test]
 fn unit_as_a_generic_argument() {
-    // `(`/`)` are reader delimiters, so getting `()` *inside* a type token
-    // takes two halves: the reader's type-argument grammar taking the pair as
-    // a type, and `NameTok::Unit` picking it back out. Before that this
-    // spelling tripped an assertion in `Path::from_segments`.
+    // `(`/`)` are reader delimiters, so `()` inside `<..>` is the reader's
+    // type-argument grammar taking the pair as the unit type.
     let unit_string = vec![Type::Unit, Type::Str];
     assert_eq!(parse("Result<(), String>"), Type::Named(Path::root("result"), unit_string.clone()));
     // Without the space, and with the unit in trailing position too.
@@ -69,14 +67,14 @@ fn a_unit_argument_records_no_name() {
 }
 
 #[test]
-fn a_malformed_generic_is_an_error_not_a_panic() {
+fn a_less_than_with_no_type_after_it_is_part_of_the_name() {
+    // `Result<` at the end of the input has no type after its `<`, so it is
+    // the plain name `result<` — as `string<` is — which no type has; that is
+    // the checker's to report. It used to reach `Path::from_segments` with
+    // zero segments.
     let mut h = Heap::with_capacity(256);
-    let r = Reader::new();
-    // An unterminated `<` — the reader's speculative extension rewinds and
-    // leaves the bare token `result<`, whose argument list has no name in it.
-    // This used to reach `Path::from_segments` with zero segments.
-    let v = r.read(&mut h, "Result<").expect("read failed");
-    assert!(parse_type(&h, v).is_err(), "`Result<` must be a reported type error");
+    let v = Reader::new().read(&mut h, "Result<").expect("read failed");
+    assert_eq!(parse_type(&h, v).unwrap(), Type::Named(Path::root("result<"), vec![]));
 }
 
 #[test]
@@ -330,9 +328,14 @@ fn a_nested_dyn_is_flagged_and_located_inside_its_token() {
 fn without_a_span_the_parse_still_succeeds_and_records_nothing() {
     // The checker hands `None` wherever a form has no recorded position (a
     // macro-synthesized annotation); parsing must not depend on it.
+    // Built here, as such a form is, so no element has a position either.
     let mut h = Heap::with_capacity(256);
-    let r = Reader::new();
-    let v = r.read(&mut h, "vector<rect>").expect("read failed");
+    let rect = h.intern_symbol("rect");
+    let vector = h.intern_symbol("vector");
+    let apply = h.intern_symbol("%type-apply");
+    let tail = h.cons(rect, Value::Empty).unwrap();
+    let tail = h.cons(vector, tail).unwrap();
+    let v = h.cons(apply, tail).unwrap();
     let mut out = Vec::new();
     let ty = typelisp::parse_type_spanned(&h, v, None, &mut out).expect("parse failed");
     assert_eq!(ty, Type::Named(Path::root("vector"), vec![Type::Named(Path::root("rect"), vec![])]));
@@ -368,8 +371,8 @@ fn a_generic_can_be_written_applied() {
 /// What the applied form is for: `Vector<(fn (int) int)>` cannot be written
 /// as a name, because a `(fn ...)` type is a list and the name grammar has no
 /// token for it. Substituting a trait's associated type into a signature has
-/// to be able to produce it anyway (`Checker::subst_inside_name`), so the
-/// syntax it emits has to be able to hold one.
+/// to be able to produce it anyway (`Checker::subst_value`), so the syntax it
+/// emits has to be able to hold one.
 #[test]
 fn an_applied_generic_carries_an_argument_no_name_can_spell() {
     assert_eq!(
@@ -393,17 +396,13 @@ fn an_applied_generic_is_rejected_without_arguments_or_with_an_applied_head() {
     assert!(parse_result("(vector<char> int)").is_err());
 }
 
-/// [`parse_type_name`] answers "is this *name* a type?" for symbols that may
-/// be nothing of the kind (`Checker::subst_inside_name` asks it about every
-/// name in a signature being substituted), so it has to consume the whole
-/// string. The parse it wraps stops at the closing `>` and would otherwise
-/// report the method path `vector<t>::new` as the type `vector<t>`.
+/// `Name<A>::member` names a member of one instantiation, not a type: it
+/// reads as `(%type-member (%type-apply Name A) member)`, which no type
+/// position accepts.
 #[test]
-fn a_type_name_must_be_the_whole_string() {
-    assert_eq!(
-        typelisp::parse_type_name("vector<char>").unwrap(),
-        Type::Named(Path::root("vector"), vec![Type::Char])
-    );
-    assert!(typelisp::parse_type_name("vector<t>::new").is_err());
-    assert!(typelisp::parse_type_name("vector<char>>").is_err());
+fn a_member_of_an_instantiation_is_not_a_type() {
+    assert_eq!(parse("vector<char>"), Type::Named(Path::root("vector"), vec![Type::Char]));
+    assert!(parse_result("vector<t>::new").is_err());
+    let mut h = Heap::with_capacity(256);
+    assert!(Reader::new().read(&mut h, "vector<char>>").is_err());
 }

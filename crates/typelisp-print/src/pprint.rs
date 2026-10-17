@@ -724,6 +724,13 @@ fn render_at_here(
         }
         Pre::Go(prefix) => out.push_str(&prefix),
     }
+    // A generic type is one token as written, never a block to lay out.
+    if crate::format::type_syntax(heap, v).is_some() {
+        let mut s = String::new();
+        st.render(heap, ctx, v, standard, depth, &mut s)?;
+        out.push_str(&s);
+        return Ok(());
+    }
     // `(quote x)` prints as `'x`, as CL's default dispatch table does.
     if let Some(inner) = quote_form(heap, v) {
         out.push('\'');

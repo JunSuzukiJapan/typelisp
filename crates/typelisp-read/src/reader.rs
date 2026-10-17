@@ -23,7 +23,6 @@ use std::sync::Arc;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use crate::name_lexer::{NameLexer, NameTok};
 use typelisp_mem::{symbols, wk, Error, Heap, Loc, NsId, SymRef, TypeKeyId, Value};
 
 /// The feature set consulted by `#+`/`#-` reader conditionals (CLHS 24.1.2 —
@@ -488,12 +487,11 @@ fn is_ws(c: char) -> bool {
 
 /// Characters that terminate a token / separate data.
 ///
-/// `,` is deliberately *not* here even though it introduces `unquote`: a
-/// generic type token like `Pair<K,V>` is read as one plain symbol (split on
-/// `<>`/`,` later, in `parse_type_name` — see `types.rs`), so `,` must stay
-/// usable mid-token. `read_datum`'s dispatch on the *first* character of a
-/// fresh datum already recognizes a datum-initial `,` as unquote regardless
-/// of whether it's a delimiter; nothing relies on it being one.
+/// `,` is deliberately *not* here even though it introduces `unquote`:
+/// `read_datum`'s dispatch on the *first* character of a fresh datum already
+/// recognizes a datum-initial `,` as unquote regardless of whether it's a
+/// delimiter, and inside a generic type's `<..>` the type-argument reader
+/// (`read_type_application`) separates arguments at it itself.
 ///
 /// `]` and `}` end a token so that `#[test]` and `#{a b}` close where they
 /// look like they close. `[` and `{` do not: on their own they are left to
@@ -723,8 +721,7 @@ fn read_datum_here(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Va
             // ...)` types) can then keep its "a type is one `Value`"
             // assumption unchanged; `types::parse_type` recognizes the
             // resulting list. Inside a generic argument the same spelling is
-            // handled a level down, by `read_type_args` + the type parser,
-            // since there is no datum boundary there at all.
+            // read by `read_type_arg`, which builds the same list.
             if matches!(v, Value::Symbol(id) if id.is(wk::DYN)) {
                 skip_ws_comments(cur, heap, ctx)?;
                 if matches!(cur.peek(), None | Some(')')) {
@@ -1426,6 +1423,58 @@ fn read_char(cur: &mut Cursor) -> Result<Value, Error> {
 // ----------------------------------------------------------------------
 
 fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error> {
+    let start = cur.loc();
+    let (tok, escaped) = lex_token(cur, false)?;
+    let head = token_value(heap, ns, &tok, escaped)?;
+    // A name followed directly by `<` and a type is a generic type: what
+    // follows, up to the matching `>`, is its type arguments (`read_type_application`).
+    // Anything else after the `<` was taken into the token above, which is
+    // what `<`, `<=`, `string<` and `(string< a b)` need.
+    if !(cur.peek() == Some('<') && cur.peek2().is_some_and(starts_type)) {
+        return Ok(head);
+    }
+    if escaped || !matches!(head, Value::Symbol(_) | Value::Path(_)) {
+        return Err(Error::ReadError(format!("`{}` is not a type name, so it takes no `<..>`", tok)));
+    }
+    let head_loc = start.clone().with_end(cur.line, cur.col);
+    let applied = read_type_application(cur, heap, ns, (head, head_loc), start.clone())?;
+    // `Name<A>::member` — a member of that instantiation.
+    if cur.peek() == Some(':') && cur.peek2() == Some(':') {
+        let applied_loc = start.clone().with_end(cur.line, cur.col);
+        cur.next();
+        cur.next();
+        let member_start = cur.loc();
+        let (member_tok, member_escaped) = lex_token(cur, false)?;
+        let member = token_value(heap, ns, &member_tok, member_escaped)?;
+        if !matches!(member, Value::Symbol(_)) || cur.peek() == Some('<') {
+            return Err(Error::ReadError(format!("`::{}` after a generic type must name one of its members", member_tok)));
+        }
+        let member_loc = member_start.with_end(cur.line, cur.col);
+        heap.push_root(applied);
+        let r = located_list(
+            heap,
+            &[
+                (Value::Symbol(symbols::well_known_symbol(wk::TYPE_MEMBER)), start.clone().with_end(start.line, start.col)),
+                (applied, applied_loc),
+                (member, member_loc),
+            ],
+            start.with_end(cur.line, cur.col),
+        );
+        heap.pop_root();
+        return r;
+    }
+    if !is_delim_or_eof(cur.peek()) {
+        return Err(Error::ReadError(format!("unexpected `{}` after the type arguments of `{}`", cur.peek().unwrap_or(' '), tok)));
+    }
+    Ok(applied)
+}
+
+/// One token's characters, up to a delimiter — and, in a type argument
+/// (`in_type_args`), up to the `<`, `>`, `,`, `{` or `}` the type grammar
+/// separates names with. A `<` followed by a type ends the token too: the
+/// caller reads what follows as type arguments. Whether any `|...|` escape
+/// was in it is the second half of the answer.
+fn lex_token(cur: &mut Cursor, in_type_args: bool) -> Result<(String, bool), Error> {
     let mut tok = String::new();
     // CL's multiple escape: what stands between `|`s is taken as written,
     // delimiters included, and a token with any is a plain symbol — never a
@@ -1448,28 +1497,31 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error
         if is_delimiter(c) {
             break;
         }
-        // A name followed directly by `<` and a type is a generic type, and
-        // what follows is lexed as type arguments (`read_type_args`) up to
-        // the matching `>` — whitespace, `#{..}` and `()` included. Anything
-        // else after the `<` leaves it an ordinary character, which is what
-        // `<`, `<=`, `string<` and `(string< a b)` need.
+        if in_type_args && matches!(c, '<' | '>' | ',' | '{' | '}') {
+            break;
+        }
         if c == '<' && !tok.is_empty() && cur.peek2().is_some_and(starts_type) {
-            cur.next();
-            tok.push('<');
-            read_type_args(cur, &mut tok)?;
-            continue;
+            break;
         }
         tok.push(c);
         cur.next();
     }
+    Ok((tok, escaped))
+}
+
+/// What a token reads as in module `ns`: a keyword, a number, a boolean, a
+/// `::` path of symbols, or a symbol.
+fn token_value(heap: &mut Heap, ns: NsId, tok: &str, escaped: bool) -> Result<Value, Error> {
     if escaped {
-        return Ok(heap.intern_symbol_in(ns, &tok));
+        return Ok(heap.intern_symbol_in(ns, tok));
     }
-    // tok is non-empty: read_datum only dispatches here on a non-delimiter.
-    if let Some(name) = keyword_name(&tok)? {
+    if tok.is_empty() {
+        return Err(Error::ReadError("expected a name".to_string()));
+    }
+    if let Some(name) = keyword_name(tok)? {
         return Ok(Value::Symbol(symbols::intern_keyword(name)));
     }
-    if let Some(v) = parse_number(heap, &tok)? {
+    if let Some(v) = parse_number(heap, tok)? {
         return Ok(v);
     }
     match tok.to_lowercase().as_str() {
@@ -1477,9 +1529,10 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error
         "false" => Ok(Value::Bool(false)),
         _ => {
             // A `::`-qualified token becomes a path of interned symbol segments.
-        // A leading `::` (e.g. `::foo`) encodes an absolute path: the first
-        // segment is the empty string, which the checker treats as "from root".
-            if let Some(parts) = split_path_top_level(&tok) {
+            // A leading `::` (e.g. `::foo`) encodes an absolute path: the first
+            // segment is the empty string, which the checker treats as "from root".
+            if tok.contains("::") {
+                let parts: Vec<&str> = tok.split("::").collect();
                 // Interior empty segments (e.g. `foo::::bar`) are malformed.
                 if parts[1..].iter().any(|p| p.is_empty()) {
                     return Err(Error::ReadError(format!("malformed path: {}", tok)));
@@ -1497,7 +1550,7 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error
                 }
                 return Ok(heap.intern_path(&segs));
             }
-            Ok(heap.intern_symbol_in(ns, &tok))
+            Ok(heap.intern_symbol_in(ns, tok))
         }
     }
 }
@@ -1508,107 +1561,142 @@ fn starts_type(c: char) -> bool {
     c.is_alphabetic() || matches!(c, '_' | '%' | '*' | '#' | '(' | ':' | '!')
 }
 
-/// The type arguments of a generic type, lexed by the type grammar: the
-/// cursor is just past the `<`, and on success just past the matching `>`.
-/// Each type is appended to `tok` with its whitespace normalized — one space
-/// where the source had any after a `,`, between a tuple's elements and after
-/// `:dyn`, and none anywhere else — so the token reads back as written and
-/// `types::parse_type_name` meets one spelling of it.
+/// `head<A,B>` as `(%type-apply head A B)`: the cursor is on the `<`, and on
+/// success just past the matching `>`. Each argument is a type read as data
+/// ([`read_type_arg`]), so a name in it is read exactly as anywhere else.
 ///
 /// A malformed argument list is a read error, not a reason to read the text
 /// some other way: once a name is followed by `<` and a type, it is a type.
-fn read_type_args(cur: &mut Cursor, tok: &mut String) -> Result<(), Error> {
-    loop {
+fn read_type_application(cur: &mut Cursor, heap: &mut Heap, ns: NsId, head: (Value, Loc), start: Loc) -> Result<Value, Error> {
+    let mark = heap.root_count();
+    let marker_loc = head.1.clone();
+    let mut elems = vec![(Value::Symbol(symbols::well_known_symbol(wk::TYPE_APPLY)), marker_loc), head];
+    cur.next(); // '<'
+    let result = (|| loop {
         skip_type_ws(cur);
-        read_type_in_args(cur, tok)?;
+        let arg = read_type_arg(cur, heap, ns)?;
+        heap.push_root(arg.0);
+        elems.push(arg);
         skip_type_ws(cur);
         match cur.peek() {
             Some(',') => {
                 cur.next();
-                tok.push(',');
-                if skip_type_ws(cur) {
-                    tok.push(' ');
-                }
             }
             Some('>') => {
                 cur.next();
-                tok.push('>');
                 return Ok(());
             }
-            Some(c) => return Err(type_args_error(tok, &format!("expected `,` or `>`, found `{}`", c))),
-            None => return Err(type_args_error(tok, "end of input before the closing `>`")),
+            Some(c) => return Err(type_args_error(&format!("expected `,` or `>`, found `{}`", c))),
+            None => return Err(type_args_error("end of input before the closing `>`")),
         }
-    }
+    })();
+    let built = result.and_then(|()| located_list(heap, &elems, start.with_end(cur.line, cur.col)));
+    restore_roots(heap, mark);
+    built
 }
 
-/// One type inside `<..>`: `()`, `#{T ...}`, `:dyn T`, or a name with its own
-/// optional `<..>`.
-fn read_type_in_args(cur: &mut Cursor, tok: &mut String) -> Result<(), Error> {
+/// One type inside `<..>`, as data, with where it was written: `()`,
+/// `#{T ...}`, `:dyn T` (as `(:dyn T)`), or a name with its own optional
+/// `<..>`. A parenthesized type other than `()` is refused: a function type
+/// is given a name with `deftype`.
+fn read_type_arg(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<(Value, Loc), Error> {
+    let start = cur.loc();
     match cur.peek() {
         Some('(') => {
             if cur.peek2() != Some(')') {
                 return Err(type_args_error(
-                    tok,
                     "the only type written in parentheses inside `<..>` is `()`; give a function type a name with `deftype`",
                 ));
             }
             cur.next();
             cur.next();
-            tok.push_str("()");
-            Ok(())
+            Ok((Value::Empty, start.with_end(cur.line, cur.col)))
         }
         Some('#') if cur.peek2() == Some('{') => {
             cur.next();
             cur.next();
-            tok.push_str("#{");
-            let mut first = true;
-            loop {
+            let mark = heap.root_count();
+            let mut elems: Vec<Value> = Vec::new();
+            let result = (|| loop {
                 skip_type_ws(cur);
                 match cur.peek() {
                     Some('}') => {
                         cur.next();
-                        tok.push('}');
                         return Ok(());
                     }
                     Some(_) => {
-                        if !first {
-                            tok.push(' ');
-                        }
-                        first = false;
-                        read_type_in_args(cur, tok)?;
+                        let (e, _) = read_type_arg(cur, heap, ns)?;
+                        heap.push_root(e);
+                        elems.push(e);
                     }
-                    None => return Err(type_args_error(tok, "end of input before the closing `}` of a tuple type")),
+                    None => return Err(type_args_error("end of input before the closing `}` of a tuple type")),
                 }
+            })();
+            if let Err(e) = result {
+                restore_roots(heap, mark);
+                return Err(e);
             }
+            if !(1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&elems.len()) {
+                restore_roots(heap, mark);
+                return Err(type_args_error(&format!("a tuple type has 1 to {} elements", typelisp_mem::TUPLE_MAX_ARITY)));
+            }
+            let key = heap.intern_type_key(&typelisp_mem::sexpr_tuple_key(elems.len()));
+            let v = heap.alloc_struct(key, elems);
+            restore_roots(heap, mark);
+            Ok((v, start.with_end(cur.line, cur.col)))
         }
         Some(_) => {
-            let start = tok.len();
-            while let Some(c) = cur.peek() {
-                if is_delimiter(c) || matches!(c, '<' | '>' | ',' | '{') {
-                    break;
-                }
-                tok.push(c);
-                cur.next();
+            let (tok, escaped) = lex_token(cur, true)?;
+            if tok.is_empty() {
+                return Err(type_args_error("expected a type"));
             }
-            if tok.len() == start {
-                return Err(type_args_error(tok, "expected a type"));
-            }
-            if &tok[start..] == ":dyn" {
+            let head_loc = start.clone().with_end(cur.line, cur.col);
+            let head = token_value(heap, ns, &tok, escaped)?;
+            if matches!(head, Value::Symbol(id) if id.is(wk::DYN)) {
                 if !skip_type_ws(cur) {
-                    return Err(type_args_error(tok, "`:dyn` needs a space before its trait"));
+                    return Err(type_args_error("`:dyn` needs a space before its trait"));
                 }
-                tok.push(' ');
-                return read_type_in_args(cur, tok);
+                let inner = read_type_arg(cur, heap, ns)?;
+                heap.push_root(inner.0);
+                let r = located_list(heap, &[(head, head_loc), inner], start.clone().with_end(cur.line, cur.col));
+                heap.pop_root();
+                return Ok((r?, start.with_end(cur.line, cur.col)));
             }
             if cur.peek() == Some('<') {
-                cur.next();
-                tok.push('<');
-                read_type_args(cur, tok)?;
+                let v = read_type_application(cur, heap, ns, (head, head_loc), start.clone())?;
+                return Ok((v, start.with_end(cur.line, cur.col)));
             }
-            Ok(())
+            Ok((head, head_loc))
         }
-        None => Err(type_args_error(tok, "end of input where a type was expected")),
+        None => Err(type_args_error("end of input where a type was expected")),
     }
+}
+
+/// The list of `elems` — each element's car tagged with where it was written,
+/// the list itself with `loc` — as [`read_list`] builds one. The elements
+/// are the caller's to keep rooted.
+fn located_list(heap: &mut Heap, elems: &[(Value, Loc)], loc: Loc) -> Result<Value, Error> {
+    let mut acc = Value::Empty;
+    let mark = heap.root_count();
+    for (e, l) in elems.iter().rev() {
+        let cell = match heap.cons(*e, acc) {
+            Ok(c) => c,
+            Err(err) => {
+                restore_roots(heap, mark);
+                return Err(err);
+            }
+        };
+        heap.push_root(cell);
+        if let Value::Cons(cr) = cell {
+            heap.set_elem_loc(cr, l.clone());
+        }
+        acc = cell;
+    }
+    restore_roots(heap, mark);
+    if let Value::Cons(cr) = acc {
+        heap.set_cons_loc(cr, loc);
+    }
+    Ok(acc)
 }
 
 /// Skip whitespace inside type arguments, newlines included; whether there
@@ -1622,8 +1710,8 @@ fn skip_type_ws(cur: &mut Cursor) -> bool {
     any
 }
 
-fn type_args_error(tok: &str, what: &str) -> Error {
-    Error::ReadError(format!("in the type arguments of `{}`: {}", tok, what))
+fn type_args_error(what: &str) -> Error {
+    Error::ReadError(format!("in type arguments: {}", what))
 }
 
 /// Reject malformed keyword tokens. A keyword is a token starting with a
@@ -1632,8 +1720,8 @@ fn type_args_error(tok: &str, what: &str) -> Error {
 /// further `:` in it is a mistake rather than a path separator.
 ///
 /// The leading-`::` exclusion is load-bearing: `::foo` is the *absolute path*
-/// syntax (`split_path_top_level` turns it into a `Value::Path` whose first
-/// segment is empty, "from root"), not a keyword. Only a lone leading `:`
+/// syntax (`token_value` turns it into a `Value::Path` whose first segment
+/// is empty, "from root"), not a keyword. Only a lone leading `:`
 /// starts a keyword.
 ///
 /// A well-formed keyword token gives the keyword's name — the token without
@@ -1652,35 +1740,6 @@ fn keyword_name(tok: &str) -> Result<Option<&str>, Error> {
         )));
     }
     Ok(Some(&tok[1..]))
-}
-
-/// Split a token on `::` occurring at `<>` nesting depth 0, so that
-/// `geometry::Point` and `geometry::Vec<T>` split but `Vec<a::b>` does not.
-/// Returns `None` when there is no top-level `::`.
-fn split_path_top_level(tok: &str) -> Option<Vec<&str>> {
-    let mut depth: i32 = 0;
-    let mut parts: Vec<&str> = Vec::new();
-    let mut start = 0;
-    let mut found = false;
-    let mut lex = NameLexer::new(tok);
-    while let Some(t) = lex.next() {
-        match t {
-            NameTok::Lt => depth += 1,
-            NameTok::Gt => depth -= 1,
-            NameTok::ColonColon if depth == 0 => {
-                let sep_end = lex.pos(); // just past this "::"
-                parts.push(&tok[start..sep_end - 2]);
-                start = sep_end;
-                found = true;
-            }
-            _ => {}
-        }
-    }
-    if !found {
-        return None;
-    }
-    parts.push(&tok[start..]);
-    Some(parts)
 }
 
 /// Interpret a token as a number, or `Ok(None)` if it is a symbol. Takes

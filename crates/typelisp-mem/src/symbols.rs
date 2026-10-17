@@ -586,6 +586,13 @@ well_known_symbols! {
     REPR_HASHTABLE => "hashtable"
     REPR_NICHE => "niche"
     REPR_NONE => "none"
+
+    "How the reader writes a generic type and a member of one: `Name<A,B>`
+     reads as `(%type-apply Name A B)`, and `Name<A>::m` as
+     `(%type-member (%type-apply Name A) m)` — a structure, so no symbol's
+     name ever holds a type or a path. Reserved: no program binds them."
+    TYPE_APPLY => "%type-apply"
+    TYPE_MEMBER => "%type-member"
 }
 
 
@@ -794,14 +801,15 @@ pub const CORE_MODULE: &str = "%core";
 /// not care. `SymRef::home` is what tells them apart.
 struct NsNode {
     syms: HashMap<Box<str>, SymRef>,
-    /// Child modules, by segment — the same shape as the checker's
-    /// `Namespace::modules`. Structure only: a lookup never follows it.
-    children: HashMap<Box<str>, NsId>,
+    /// Child modules, by the symbol that names each: the one its name reads
+    /// as in this module, so `foo::bar` is `foo`'s child under `foo`'s `bar`.
+    children: HashMap<SymRef, NsId>,
     /// The module this one is written inside, for [`SymTable::path`]. Never
     /// consulted when resolving a name.
     parent: Option<NsId>,
-    /// The segment this module was reached by, for diagnostics.
-    segment: Box<str>,
+    /// The symbol this module is named by in its parent; `None` for the
+    /// system module and the root, which have no parent.
+    name: Option<SymRef>,
 }
 
 struct SymTable {
@@ -818,20 +826,13 @@ struct SymTable {
 impl SymTable {
     fn new() -> SymTable {
         let mut t = SymTable { nodes: Vec::new(), std_exports: HashMap::new(), created: 0 };
-        let empty = |parent: Option<NsId>, segment: &str| NsNode {
-            syms: HashMap::new(),
-            children: HashMap::new(),
-            parent,
-            segment: segment.into(),
-        };
-        t.nodes.push(empty(None, ""));
-        t.nodes.push(empty(None, ""));
-        t.nodes.push(empty(Some(NsId::ROOT), KEYWORD_MODULE));
-        t.nodes.push(empty(Some(NsId::ROOT), STD_MODULE));
-        t.nodes.push(empty(Some(NsId::ROOT), CORE_MODULE));
-        for (segment, id) in [(KEYWORD_MODULE, NsId::KEYWORD), (STD_MODULE, NsId::STD), (CORE_MODULE, NsId::CORE)] {
-            t.nodes[NsId::ROOT.0 as usize].children.insert(segment.into(), id);
-        }
+        // The fixed nodes, named once the root can read their names (below).
+        let empty = |parent: Option<NsId>| NsNode { syms: HashMap::new(), children: HashMap::new(), parent, name: None };
+        t.nodes.push(empty(None));
+        t.nodes.push(empty(None));
+        t.nodes.push(empty(Some(NsId::ROOT)));
+        t.nodes.push(empty(Some(NsId::ROOT)));
+        t.nodes.push(empty(Some(NsId::ROOT)));
         // The system module owns the reserved words. A keyword belongs to the
         // keyword module under its name without the colon, a standard
         // library name to `std` (which exports it), an IR name to `%core`.
@@ -863,23 +864,23 @@ impl SymTable {
                 t.nodes[ns.0 as usize].syms.insert(name.clone(), *sym);
             }
         }
+        for (segment, id) in [(KEYWORD_MODULE, NsId::KEYWORD), (STD_MODULE, NsId::STD), (CORE_MODULE, NsId::CORE)] {
+            let name = t.read(NsId::ROOT, segment);
+            t.nodes[id.0 as usize].name = Some(name);
+            t.nodes[NsId::ROOT.0 as usize].children.insert(name, id);
+        }
         t
     }
 
     /// Appends a module node, giving it the reserved words. The fixed nodes
     /// (system, root, keyword, std, core) are built by [`SymTable::new`].
-    fn push_node(&mut self, parent: Option<NsId>, segment: &str) -> NsId {
+    fn push_node(&mut self, parent: NsId, name: SymRef) -> NsId {
         let id = NsId(self.nodes.len() as u32);
         // By pointer, not by name: this is property 4 in the module doc
         // comment, and the reason `defun` means the same thing in every
         // module.
         let syms = self.nodes[NsId::SYSTEM.0 as usize].syms.clone();
-        self.nodes.push(NsNode {
-            syms,
-            children: HashMap::new(),
-            parent,
-            segment: segment.into(),
-        });
+        self.nodes.push(NsNode { syms, children: HashMap::new(), parent: Some(parent), name: Some(name) });
         id
     }
 
@@ -902,12 +903,29 @@ impl SymTable {
         sym
     }
 
+    /// What `name` reads as in `ns` — [`intern_in`]'s rule, with the lock
+    /// already held. `name` is already lowercase.
+    fn read(&mut self, ns: NsId, name: &str) -> SymRef {
+        if let Some(s) = self.lookup(ns, name) {
+            return s;
+        }
+        if ns != NsId::KEYWORD {
+            if let Some(s) = self.std_exports.get(name) {
+                return *s;
+            }
+        }
+        self.create(ns, name, NOT_WELL_KNOWN)
+    }
+
+    /// `parent`'s child module named `segment`, created if new. The child is
+    /// keyed by the symbol `segment` reads as in `parent`.
     fn child(&mut self, parent: NsId, segment: &str) -> NsId {
-        if let Some(id) = self.nodes[parent.0 as usize].children.get(segment) {
+        let name = self.read(parent, segment);
+        if let Some(id) = self.nodes[parent.0 as usize].children.get(&name) {
             return *id;
         }
-        let id = self.push_node(Some(parent), segment);
-        self.nodes[parent.0 as usize].children.insert(segment.into(), id);
+        let id = self.push_node(parent, name);
+        self.nodes[parent.0 as usize].children.insert(name, id);
         id
     }
 
@@ -916,8 +934,8 @@ impl SymTable {
         let mut cur = Some(ns);
         while let Some(id) = cur {
             let node = &self.nodes[id.0 as usize];
-            if node.parent.is_some() {
-                segs.push(node.segment.to_string());
+            if let Some(name) = node.name {
+                segs.push(name.name().to_string());
             }
             cur = node.parent;
         }
@@ -957,17 +975,7 @@ fn table() -> MutexGuard<'static, SymTable> {
 /// else — `":foo"` interned in a module is a symbol of that module whose name
 /// starts with a colon, as CL's `intern` makes.
 pub fn intern_in(ns: NsId, name: &str) -> SymRef {
-    let key = name.to_lowercase();
-    let mut t = table();
-    if let Some(s) = t.lookup(ns, &key) {
-        return s;
-    }
-    if ns != NsId::KEYWORD {
-        if let Some(s) = t.std_exports.get(key.as_str()) {
-            return *s;
-        }
-    }
-    t.create(ns, &key, NOT_WELL_KNOWN)
+    table().read(ns, &name.to_lowercase())
 }
 
 /// The symbol named `name` whose home is `ns`, creating it there if `ns`

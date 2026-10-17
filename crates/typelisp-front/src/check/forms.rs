@@ -621,11 +621,13 @@ pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
         // Not in `prim_type_path` (`!` has no method table), so spelled here.
         Type::Never => Ok(heap.intern_symbol("!")),
         Type::Named(p, args) if args.is_empty() => Ok(type_name_value(heap, p)),
+        // `(%type-apply Name Arg...)`, the reader's structure for `Name<Arg,...>`.
         Type::Named(p, args) => {
             let head = type_name_value(heap, p);
             let mut s = RootScope::new(heap);
             s.push_root(head);
-            let mut items: Vec<(Value, Option<Loc>)> = vec![(head, None)];
+            let marker = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::TYPE_APPLY));
+            let mut items: Vec<(Value, Option<Loc>)> = vec![(marker, None), (head, None)];
             for a in args {
                 let f = type_to_form(&mut s, a)?;
                 s.push_root(f);

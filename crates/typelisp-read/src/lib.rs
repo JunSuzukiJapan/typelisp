@@ -14,7 +14,6 @@
 //! cons cells and `Loc`s; it has never known about types, scopes or
 //! evaluation.
 
-pub mod name_lexer;
 pub mod reader;
 pub mod runtime;
 pub mod shim;

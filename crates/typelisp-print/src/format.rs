@@ -3142,6 +3142,37 @@ impl Renderer {
             // printer. Reaching here is an interpreter bug, reported rather
             // than mis-rendered as a float.
             Value::Boxed(_) => return Err("print: unprintable boxed object".to_string()),
+            Value::Cons(_) if type_syntax(heap, v).is_some() => {
+                // `(%type-apply vector int)` is `vector<int>`, and
+                // `(%type-member T m)` is `T::m`: the reader's structure for
+                // a generic type, written back the way it is read.
+                match type_syntax(heap, v).expect("checked just above") {
+                    TypeSyntax::Apply(head, args) => {
+                        self.render(heap, ctx, head, standard, depth + 1, out)?;
+                        out.push('<');
+                        for (i, a) in args.iter().enumerate() {
+                            if i > 0 {
+                                out.push(',');
+                            }
+                            // `(:dyn T)` is written `:dyn T` inside `<..>`,
+                            // where no parenthesized type but `()` reads.
+                            match dyn_type_arg(heap, *a) {
+                                Some(t) => {
+                                    out.push_str(":dyn ");
+                                    self.render(heap, ctx, t, standard, depth + 1, out)?;
+                                }
+                                None => self.render(heap, ctx, *a, standard, depth + 1, out)?,
+                            }
+                        }
+                        out.push('>');
+                    }
+                    TypeSyntax::Member(ty, member) => {
+                        self.render(heap, ctx, ty, standard, depth + 1, out)?;
+                        out.push_str("::");
+                        self.render(heap, ctx, member, standard, depth + 1, out)?;
+                    }
+                }
+            }
             Value::Cons(_) => {
                 out.push('(');
                 let mut cur = v;
@@ -3192,4 +3223,50 @@ impl Renderer {
     fn is_shared(&self, heap: &Heap, v: Value) -> bool {
         container_key(heap, v).is_some_and(|k| self.shared.contains_key(&k))
     }
+}
+
+/// The reader's structure for a generic type or a member of one, which
+/// prints as it is written: `(%type-apply Name A B)` is `Name<A,B>` and
+/// `(%type-member T m)` is `T::m`.
+pub(crate) enum TypeSyntax {
+    Apply(Value, Vec<Value>),
+    Member(Value, Value),
+}
+
+/// `v` as [`TypeSyntax`], when it is well formed as one: an application with
+/// a head and at least one argument, a member with a type and a name.
+pub(crate) fn type_syntax(heap: &Heap, v: Value) -> Option<TypeSyntax> {
+    let Ok(Value::Symbol(head)) = heap.car(v) else { return None };
+    let marker = head.well_known();
+    if marker != typelisp_mem::wk::TYPE_APPLY && marker != typelisp_mem::wk::TYPE_MEMBER {
+        return None;
+    }
+    let mut rest = Vec::new();
+    let mut cur = heap.cdr(v).ok()?;
+    loop {
+        match cur {
+            Value::Cons(_) => {
+                rest.push(heap.car(cur).ok()?);
+                cur = heap.cdr(cur).ok()?;
+            }
+            Value::Empty => break,
+            _ => return None,
+        }
+    }
+    if marker == typelisp_mem::wk::TYPE_APPLY {
+        (rest.len() >= 2).then(|| TypeSyntax::Apply(rest[0], rest[1..].to_vec()))
+    } else {
+        (rest.len() == 2).then(|| TypeSyntax::Member(rest[0], rest[1]))
+    }
+}
+
+/// The trait of a `(:dyn T)` type argument.
+fn dyn_type_arg(heap: &Heap, v: Value) -> Option<Value> {
+    let Ok(Value::Symbol(head)) = heap.car(v) else { return None };
+    if !head.is(typelisp_mem::wk::DYN) {
+        return None;
+    }
+    let rest = heap.cdr(v).ok()?;
+    let t = heap.car(rest).ok()?;
+    matches!(heap.cdr(rest).ok()?, Value::Empty).then_some(t)
 }
