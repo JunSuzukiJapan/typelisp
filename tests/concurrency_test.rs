@@ -1114,12 +1114,13 @@ fn an_interpreted_caller_applying_a_compiled_closure_may_really_wait() {
 /// shows up here as a wrong total or a crash.
 #[test]
 fn a_task_that_moves_to_the_interpreter_s_thread_keeps_its_roots_under_gc_stress() {
-    let src = r#"(defun work ((cb (fn (int) int)) (n int)) int
+    let src = r#"(defun count-items ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ 1 (count-items (sexpr-cdr s))) 0))
+                 (defun work ((cb (fn (int) int)) (n int)) int
                    (let ((xs (list n (+ n 1) (+ n 2))))
-                     (+ (cb (sexpr-list-length xs)) (* 3 n) 3)))
+                     (+ (cb (count-items xs)) (* 3 n) 3)))
                  (defun start ((cb (fn (int) int)) (n int)) Task<int> (task (work cb n)))
                  (compile start)
-                 (let ((cb (lambda ((k int)) int (sexpr-list-length (list k k k k))))
+                 (let ((cb (lambda ((k int)) int (count-items (list k k k k))))
                        (tasks (the Vector<Task<int>> (Vector::new)))
                        (total 0))
                    (dotimes (i 4) (push tasks (start cb (* i 10))))

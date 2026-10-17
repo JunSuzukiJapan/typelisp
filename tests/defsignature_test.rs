@@ -151,7 +151,8 @@ fn a_declared_rest_argument_is_collected_at_the_call() {
     let src = "
         (defsignature total (&rest int) int)
         (defun a () int (total 1 2 3))
-        (defun total (&rest (xs int)) int (sexpr-list-length xs))
+        (defun count-items ((s Option<Sexpr>)) int (if (sexpr-consp s) (+ 1 (count-items (sexpr-cdr s))) 0))
+        (defun total (&rest (xs int)) int (count-items xs))
         (a)";
     assert_eq!(eval_ok_with_island(src), Value::Int(3));
 }

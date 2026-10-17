@@ -141,6 +141,36 @@ unsafe fn function<F: Copy>(code: &JitCode, name: &str) -> F {
     std::mem::transmute_copy::<usize, F>(&addr)
 }
 
+/// `src`, read and checked inside the island's own module (`%core`), where
+/// the island's functions are and where `var`/`call`/`let` are the core IR's
+/// tags — the module a test calling `compile-function` on hand-written IR has
+/// to be written in.
+fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Error> {
+    read_core_result(h, src)
+}
+
+/// Core IR written as text, read in the core IR's module so its tags are the
+/// IR's own symbols.
+fn read_core_result(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Error> {
+    Ok(Reader::new()
+        .read_all_in_spanned_within(h, "<core>", src, typelisp::NsId::CORE)?
+        .into_iter()
+        .map(|(v, _)| v)
+        .collect())
+}
+
+fn read_in_island(h: &mut Heap, chk: &mut Checker, src: &str) -> Vec<Value> {
+    let r = Reader::new();
+    let vs = r
+        .read_all_in_spanned_within(h, "<input>", src, typelisp::NsId::CORE)
+        .expect("read failed")
+        .into_iter()
+        .map(|(v, _)| v)
+        .collect();
+    chk.enter_file_module(&typelisp::compiler::island_module_segments()).expect("the island's module");
+    vs
+}
+
 /// Like [`run`], but with the (typelisp-hosted) compiler body
 /// (`compiler::SOURCE`) loaded first, for tests that call
 /// `compile-constant-function`/`compile-value`.
@@ -194,6 +224,42 @@ fn eval_string_with_compiler_and_capacity(src: &str, capacity: usize) -> String 
 
 fn eval_string_with_compiler(src: &str) -> String {
     eval_string_with_compiler_and_capacity(src, 1 << 16)
+}
+
+/// [`eval_ok_with_compiler`] for a test that calls the island's own functions
+/// on hand-written core IR: the source is read and checked inside the
+/// island's module ([`read_in_island`]).
+fn eval_ok_in_island(src: &str) -> Value {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
+    let mut interp = Interp::new();
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let mut last = Value::Empty;
+    for v in read_in_island(&mut h, &mut chk, src) {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    last
+}
+
+/// [`eval_ok_in_island`]'s string-returning counterpart.
+fn eval_string_in_island(src: &str) -> String {
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    typelisp::compile::install_llvm_backend();
+    let mut interp = Interp::new();
+    load_compiler(&mut h, &mut chk, &mut interp);
+    let mut last = Value::Empty;
+    for v in read_in_island(&mut h, &mut chk, src) {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    read_str(&h, last)
 }
 
 /// Like [`run_with_compiler`], but with the prelude (`prelude::SOURCE` —
@@ -364,7 +430,7 @@ fn a_freshly_built_module_verifies_successfully() {
 /// compiler body consuming it). No parameters, hence the empty `'()`.
 #[test]
 fn the_compiler_body_compiles_an_int_literal_node() {
-    let ir = eval_string_with_compiler(
+    let ir = eval_string_in_island(
         r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(int-any-width 0 42)))"#,
     );
     assert!(ir.contains("define i64 @answer(i64"), "IR was:\n{}", ir);
@@ -394,7 +460,7 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 /// `(+ a b)`'s typed AST (an `i32::+` instance-method call on two `Var`s).
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false)))"#,
     ));
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
@@ -420,7 +486,7 @@ fn the_compiler_body_compiles_a_two_parameter_addition() {
 /// out to verify.
 #[test]
 fn the_compiler_body_compiles_a_labels_form_with_a_sibling_call() {
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"(compile-function (llvm-module::create "mod") "outer" '() '(labels () (("f" ((x . 0)) (apply "g" (0 var "x" false))) ("g" ((n . 0)) (var "n" false))) (apply "f" (0 int-any-width 0 5))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
@@ -453,7 +519,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     // forward-declaration (see
     // `the_compiler_body_boxes_a_bare_labels_sibling_reference`'s doc
     // comment for the same idiom).
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_i32''+" (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
@@ -883,7 +949,7 @@ fn a_sibling_that_never_references_a_capture_still_forwards_it_to_another_siblin
 /// into `compile-value`.
 #[test]
 fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"
         (let ((m (llvm-module::create "mod")))
           (compile-function m "double" '((x . 0)) '(assoc "i32" "+" true "tl_i32''+" (0 var "x" false) (0 var "x" false)))
@@ -910,7 +976,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
 /// of this stage's scope, see `compiler.rs`'s `compile-call` doc comment).
 #[test]
 fn the_compiler_body_compiles_a_self_referencing_call() {
-    let ir = eval_string_with_compiler(
+    let ir = eval_string_in_island(
         r#"(to-string (compile-function (llvm-module::create "mod") "f" '((n . 0)) '(call "f" (0 var "n" false))))"#,
     );
     assert!(ir.contains("define i64 @f(i64"), "IR was:\n{}", ir);
@@ -1494,7 +1560,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference() {
     // test binary, the same idiom `rt_root_count`/`rt_truncate_sexpr_roots`
     // need elsewhere in this file. `Heap` must be registered active for the
     // call too, since `rt_coroutine_closure_new` allocates on it.
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
              (compile-function m "outer" '() '(labels () (("f" ((n . 0)) (var "n" false))) (apply-indirect (var "f" true) (0 int-any-width 0 5)))))"#,
@@ -1521,7 +1587,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
     // indirect apply's own shim is declared by `coroutine-apply`, and
     // `bind-captures` stopped rooting captured values in C1 — a capture lives
     // in a frame slot, which *is* the root.
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
              (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_i32''+" (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
@@ -1549,7 +1615,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
 /// explains — this module is built by a direct `compile-function` call.
 #[test]
 fn the_compiler_body_boxes_a_labels_sibling_that_bare_references_itself() {
-    let ir = eval_string_with_compiler(
+    let ir = eval_string_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_coroutine_closure_new"))) ())
              (to-string (compile-function m "outer" '() '(labels () (("f" () (var "f" true))) (apply "f")))))"#,
@@ -1816,7 +1882,7 @@ fn compile_a_captured_cell_survives_gc_pressure_across_many_calls() {
 /// `the_compiler_body_compiles_an_int_literal_node` gives.
 #[test]
 fn the_compiler_body_compiles_a_bool_literal_node() {
-    let ir = eval_string_with_compiler(
+    let ir = eval_string_in_island(
         r#"(to-string (compile-function (llvm-module::create "mod") "answer" '() '(bool true)))"#,
     );
     assert!(ir.contains("store i64 1, ptr %coro_ret_slot"), "IR was:\n{}", ir);
@@ -1826,7 +1892,7 @@ fn the_compiler_body_compiles_a_bool_literal_node() {
 /// `build-icmp-lt` end to end, JIT-executed both ways.
 #[test]
 fn the_compiler_body_compiles_an_integer_comparison() {
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"(compile-function (llvm-module::create "mod") "lt" '((a . 0) (b . 0))
               '(assoc "i32" "<" true "tl_i32''<" (0 var "a" false) (0 var "b" false)))"#,
     ));
@@ -1865,7 +1931,7 @@ fn the_compiler_body_compiles_an_integer_comparison() {
 /// to prove both the `then` and `else` arm are reachable and correct.
 #[test]
 fn the_compiler_body_compiles_an_if_expression() {
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"(compile-function (llvm-module::create "mod") "maxab" '((a . 0) (b . 0))
               '(if false
                    (assoc "i32" ">" true "tl_i32''>" (0 var "a" false) (0 var "b" false))
@@ -1890,7 +1956,7 @@ fn the_compiler_body_compiles_an_if_expression() {
 /// x)`'s second `x` must read the real parameter, not 99.
 #[test]
 fn let_shadowing_is_correctly_restored_after_the_let_ends() {
-    let module = expect_llvm_module(eval_ok_with_compiler(
+    let module = expect_llvm_module(eval_ok_in_island(
         r#"(compile-function (llvm-module::create "mod") "shadow_test" '((x . 0))
               '(assoc "i32" "+" true "tl_i32''+"
                  (0 let (((x . 0) . (int-any-width 0 99))) (var "x" false))
@@ -6164,11 +6230,11 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
     let r = Reader::new();
     let mut definitions = Definitions::new();
     for d in defs {
-        for v in r.read_all(&mut h, d).expect("read failed") {
+        for v in read_core(&mut h, d).expect("read failed") {
             definitions.record(&h, v).expect("recording the definition failed");
         }
     }
-    let mut vs = r.read_all(&mut h, core_src).expect("read failed");
+    let mut vs = read_core(&mut h, core_src).expect("read failed");
     assert_eq!(vs.len(), 1, "expected one core form");
     let form = vs.pop().unwrap();
     h.push_root(form);
@@ -6204,7 +6270,7 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
     // rather than only against the island, so a change to either is visible.
     assert_eq!(body, r#"(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#);
 
-    let module = expect_llvm_module(eval_ok_with_compiler(&format!(
+    let module = expect_llvm_module(eval_ok_in_island(&format!(
         r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '{})"#,
         body
     )));
@@ -6229,7 +6295,7 @@ fn the_island_compiles_a_bridged_let_and_if() {
                (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 0) (var d))
                (var d)))",
     );
-    let module = expect_llvm_module(eval_ok_with_compiler(&format!(
+    let module = expect_llvm_module(eval_ok_in_island(&format!(
         r#"(compile-function (llvm-module::create "mod") "absdiff" '((a . 0) (b . 0)) '{})"#,
         body
     )));
@@ -6282,7 +6348,7 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
              ((pat-ctor maybe-int \"maybe-int\" 1 false (int-any-width) (pat-bind x)) (var x))))",
     );
     let src = compile_function_source("second", "((a . 0) (b . 0))", &body);
-    let ir = eval_string_with_compiler(&format!("(to-string {})", src));
+    let ir = eval_string_in_island(&format!("(to-string {})", src));
     // The struct is built and read, and the enum box is built and tested —
     // i.e. the island really took each of the three tags, rather than
     // compiling something degenerate that happens to verify.
@@ -6290,7 +6356,7 @@ fn the_island_accepts_a_bridged_construct_field_and_match() {
         assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
     }
     assert!(
-        expect_bool(eval_ok_with_compiler(&format!("(verify {})", src))),
+        expect_bool(eval_ok_in_island(&format!("(verify {})", src))),
         "the module the island built from the bridged form did not verify"
     );
 }
@@ -6316,7 +6382,7 @@ fn the_island_runs_a_bridged_loop() {
              (set i (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var i) (int-any-width 1))))
            (var acc))",
     );
-    let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
+    let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
         "mul",
         "((a . 0) (b . 0))",
         &body,
@@ -6353,7 +6419,7 @@ fn the_island_runs_a_bridged_labels_block() {
                           (assoc i32 * true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
            (apply (var rec) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
     );
-    let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
+    let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
         "fact",
         "((a . 0))",
         &body,
@@ -6393,12 +6459,12 @@ fn the_island_accepts_a_bridged_escaping_closure() {
     assert!(body.contains("apply-indirect"), "the closure should be applied through its value: {}", body);
 
     let src = compile_function_source("addn", "((a . 0))", &body);
-    let ir = eval_string_with_compiler(&format!("(to-string {})", src));
+    let ir = eval_string_in_island(&format!("(to-string {})", src));
     for expected in ["rt_cell_new", "rt_cell_get", "define i64 @addn"] {
         assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
     }
     assert!(
-        expect_bool(eval_ok_with_compiler(&format!("(verify {})", src))),
+        expect_bool(eval_ok_in_island(&format!("(verify {})", src))),
         "the module the island built from the bridged closure did not verify"
     );
 }
@@ -6415,12 +6481,12 @@ fn the_island_accepts_a_bridged_escaping_closure() {
 fn the_island_accepts_a_bridged_quoted_datum() {
     let body = bridge_to_island_text(r#"(quote (1 foo "hi"))"#);
     let src = compile_function_source("datum", "()", &body);
-    let ir = eval_string_with_compiler(&format!("(to-string {})", src));
+    let ir = eval_string_in_island(&format!("(to-string {})", src));
     for expected in ["rt_cons", "rt_intern_symbol", "rt_str_new", "define i64 @datum"] {
         assert!(ir.contains(expected), "expected {} in the IR:\n{}", expected, ir);
     }
     assert!(
-        expect_bool(eval_ok_with_compiler(&format!("(verify {})", src))),
+        expect_bool(eval_ok_in_island(&format!("(verify {})", src))),
         "the module the island built from the bridged datum did not verify"
     );
 }
@@ -6443,8 +6509,7 @@ fn the_island_runs_a_whole_bridged_defun() {
     let r = Reader::new();
     let definitions = Definitions::new();
     let globals = HashMap::new();
-    let form = r
-        .read_all(
+    let form = read_core_result(
             &mut h,
             "(defun m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width
                (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var x) (var lo))
@@ -6462,7 +6527,7 @@ fn the_island_runs_a_whole_bridged_defun() {
     let (name, params, body) = (f.name.clone(), core::print(&h, f.params), core::print(&h, f.body));
     drop(h);
 
-    let module = expect_llvm_module(eval_ok_with_compiler(&compile_function_source(
+    let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
         &name, &params, &body,
     )));
     // The bridging heap `h` is dropped above, and a compiled function now

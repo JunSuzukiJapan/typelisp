@@ -3237,6 +3237,12 @@ fn bignum_form(heap: &mut Heap, n: &num_bigint::BigInt) -> Result<Value, Error> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Core IR written as text, read in the core IR's module so its tags are
+    /// the IR's own symbols.
+    fn read_core(r: &crate::Reader, h: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
+        Ok(r.read_all_in_spanned_within(h, "<core>", src, typelisp_mem::NsId::CORE)?.into_iter().map(|(v, _)| v).collect())
+    }
     use crate::Reader;
     use std::collections::HashMap;
 
@@ -3266,7 +3272,7 @@ mod tests {
             &globals,
             DynTables { vtables: &vtables, trait_ids: &trait_ids },
         );
-        let mut vs = r.read_all(&mut h, src).expect("read failed");
+        let mut vs = read_core(&r, &mut h, src).expect("read failed");
         let form = vs.pop().unwrap();
         h.push_root(form);
         let island = to_island(&mut h, form, cx).unwrap_or_else(|e| panic!("{:?} did not translate: {}", src, e));
@@ -3288,7 +3294,7 @@ mod tests {
         let r = Reader::new();
         let definitions = record_all(&mut h, &r, defs);
         let globals = globals();
-        let mut vs = r.read_all(&mut h, src).expect("read failed");
+        let mut vs = read_core(&r, &mut h, src).expect("read failed");
         assert_eq!(vs.len(), 1, "expected one form in {:?}", src);
         let core_form = vs.pop().unwrap();
         h.push_root(core_form);
@@ -3305,7 +3311,7 @@ mod tests {
     fn record_all(h: &mut Heap, r: &Reader, defs: &[&str]) -> Definitions {
         let mut definitions = Definitions::new();
         for d in defs {
-            let vs = r.read_all(h, d).expect("read failed");
+            let vs = read_core(&r, h, d).expect("read failed");
             for v in vs {
                 definitions.record(h, v).expect("recording the definition failed");
             }
@@ -3323,7 +3329,7 @@ mod tests {
         let definitions = record_all(&mut h, &r, defs);
         let globals = globals();
         let cx = Ctx::new(&definitions, &globals);
-        let mut vs = r.read_all(&mut h, src).expect("read failed");
+        let mut vs = read_core(&r, &mut h, src).expect("read failed");
         let core_form = vs.pop().unwrap();
         match to_island(&mut h, core_form, cx) {
             Ok(v) => panic!("{:?} unexpectedly translated to {}", src, core::print(&h, v)),
@@ -3908,8 +3914,13 @@ mod tests {
             "(construct true false () 6 (str (int-any-width 0 104) (int-any-width 0 105)))"
         );
         // A symbol is interned at run time rather than stored, hence a marker
-        // past the variant numbering.
-        assert_eq!(bridged("(quote foo)"), "(construct true false () 100 (str (int-any-width 0 102) (int-any-width 0 111) (int-any-width 0 111)))");
+        // past the variant numbering: its name, then its home's segments —
+        // here `%core`, the module this IR text is read in.
+        assert_eq!(
+            bridged("(quote foo)"),
+            "(construct true false () 100 (str (int-any-width 0 102) (int-any-width 0 111) (int-any-width 0 111)) \
+             (str (int-any-width 0 37) (int-any-width 0 99) (int-any-width 0 111) (int-any-width 0 114) (int-any-width 0 101)))"
+        );
         assert_eq!(bridged("(sym foo)"), bridged("(quote foo)"));
         // A path's segments each become a string, interned back at run time.
         assert_eq!(
@@ -3980,7 +3991,7 @@ mod tests {
         let definitions = record_all(&mut h, &r, defs);
         let globals = globals();
         let cx = Ctx::new(&definitions, &globals);
-        let mut vs = r.read_all(&mut h, src).expect("read failed");
+        let mut vs = read_core(&r, &mut h, src).expect("read failed");
         let form = vs.pop().unwrap();
         h.push_root(form);
         let f = top_level_function(&mut h, form, cx).expect("translation failed")?;
@@ -4061,12 +4072,12 @@ mod tests {
         let definitions = Definitions::new();
         let globals = globals();
         let cx = Ctx::new(&definitions, &globals);
-        let form = r.read_all(&mut h, "(defvar m::total sexpr true (quote ()))").expect("read failed")[0];
+        let form = read_core(&r, &mut h, "(defvar m::total sexpr true (quote ()))").expect("read failed")[0];
         h.push_root(form);
         let node = global_init(&mut h, form, cx).expect("translation failed").expect("a defvar has one");
         assert_eq!(core::print(&h, node), "(global-init 6 (construct true false () 0))");
         // Nothing else is one.
-        let other = r.read_all(&mut h, "(defun f () unit (unit))").expect("read failed")[0];
+        let other = read_core(&r, &mut h, "(defun f () unit (unit))").expect("read failed")[0];
         assert!(global_init(&mut h, other, cx).expect("translation failed").is_none());
     }
 

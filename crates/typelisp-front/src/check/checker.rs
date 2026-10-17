@@ -7530,7 +7530,7 @@ impl Checker {
         for (aname, ty) in &b.assoc {
             items.push(vec![
                 crate::owned_form::OwnedForm::Keyword("type".into()),
-                crate::owned_form::OwnedForm::Sym(aname.clone()),
+                crate::owned_form::OwnedForm::Sym(aname.clone(), ns.clone()),
                 ty.clone(),
             ]);
         }
@@ -7552,7 +7552,7 @@ impl Checker {
             &if segs.len() > 1 {
                 crate::owned_form::OwnedForm::Path(segs)
             } else {
-                crate::owned_form::OwnedForm::Sym(trait_path.last_segment().to_string())
+                crate::owned_form::OwnedForm::Sym(trait_path.last_segment().to_string(), ns.clone())
             },
         )?;
         heap.push_permanent_root(trait_v);

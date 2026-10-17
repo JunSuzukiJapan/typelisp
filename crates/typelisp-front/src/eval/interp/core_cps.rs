@@ -3072,6 +3072,12 @@ impl Interp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A binding name as core IR text read in `%core` spells it — the same
+    /// symbol [`read1`] reads for that name.
+    fn core_symbol(name: &str) -> Value {
+        Value::Symbol(typelisp_mem::symbols::intern_in(typelisp_mem::NsId::CORE, name))
+    }
     use crate::Reader;
 
     /// A heap in stress mode: every `cons` collects first, so a value a frame
@@ -3087,7 +3093,13 @@ mod tests {
 
     fn read1(heap: &mut Heap, src: &str) -> Value {
         let r = Reader::new();
-        let mut vs = r.read_all(heap, src).expect("read failed");
+        // Core IR, read in the core IR's module so its tags are the IR's own.
+        let mut vs: Vec<Value> = r
+            .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
+            .expect("read failed")
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect();
         assert_eq!(vs.len(), 1, "expected exactly one form in {:?}", src);
         vs.pop().unwrap()
     }
@@ -3485,7 +3497,7 @@ mod tests {
             xs = h.cons(Value::Int(0), xs).expect("heap exhausted building the input");
             h.set_root(0, xs);
         }
-        let sym = match h.intern_symbol("xs") {
+        let sym = match core_symbol("xs") {
             Value::Symbol(id) => id,
             _ => unreachable!(),
         };

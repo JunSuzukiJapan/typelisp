@@ -418,7 +418,7 @@ pub fn run_compile_function(
     let body_sexpr = optimize_ir(interp, &mut heap, body_sexpr)?;
     heap.push_root(body_sexpr);
     let heap = &mut *heap;
-    let compiler_path = Path::root("compile-function");
+    let compiler_path = crate::compiler::island_path("compile-function");
     let argv = vec![
         crate::compile::llvm_builtins::llvm_module_value_rc(module),
         str_rt(heap, internal_name),
@@ -461,7 +461,7 @@ fn optimize_ir(interp: &Interp, heap: &mut Heap, body_sexpr: Value) -> Result<Va
     if level == 0 {
         return Ok(body_sexpr);
     }
-    let def = interp.root.borrow().get_fn(&Path::root("optimize-ir")).ok_or_else(|| {
+    let def = interp.root.borrow().get_fn(&crate::compiler::island_path("optimize-ir")).ok_or_else(|| {
         EvalError::Internal("compile: compiler body not loaded — call load_compiler first".into())
     })?;
     let argv = vec![Value::Int(level as i64), body_sexpr];

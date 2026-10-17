@@ -44,8 +44,10 @@ pub enum OwnedForm {
     Int(i64),
     Char(char),
     Bool(bool),
-    /// An interned symbol, by name (re-interned on load).
-    Sym(String),
+    /// An interned symbol, by name and the segments of its home module from
+    /// the root (re-interned in that module on load, never resolved again:
+    /// the home is where the symbol already was).
+    Sym(String, Vec<String>),
     /// A keyword, by name — without the colon that spells it (re-interned in
     /// the keyword module on load). Its own variant because being a keyword
     /// is where a symbol belongs, which a name does not say.
@@ -189,7 +191,7 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Char(c) => OwnedForm::Char(c),
         Value::Bool(b) => OwnedForm::Bool(b),
         Value::Symbol(id) if id.is_keyword() => OwnedForm::Keyword(id.name().to_string()),
-        Value::Symbol(id) => OwnedForm::Sym(id.name().to_string()),
+        Value::Symbol(id) => OwnedForm::Sym(id.name().to_string(), typelisp_mem::symbols::ns_path(id.home())),
         Value::Str(id) => OwnedForm::Str(heap.string(id).to_string()),
         Value::Path(id) => OwnedForm::Path(
             heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
@@ -264,7 +266,7 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         OwnedForm::Int(n) => Value::Int(*n),
         OwnedForm::Char(c) => Value::Char(*c),
         OwnedForm::Bool(b) => Value::Bool(*b),
-        OwnedForm::Sym(name) => heap.intern_symbol(name),
+        OwnedForm::Sym(name, home) => Value::Symbol(typelisp_mem::symbols::intern_at_home_path(home, name)),
         OwnedForm::Keyword(name) => heap.intern_keyword(name),
         OwnedForm::Str(s) => heap.alloc_string(s.clone()),
         OwnedForm::Path(segs) => {

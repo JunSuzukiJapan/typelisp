@@ -3418,7 +3418,7 @@ pub unsafe extern "C" fn rt_intern_symbol(args: *const i64, argc: u32) -> i64 {
     };
     let name = str_arg(0);
     let home: Vec<String> = (1..argc).map(str_arg).collect();
-    encode(Value::Symbol(typelisp_mem::symbols::intern_in_path(&home, &name)))
+    encode(Value::Symbol(typelisp_mem::symbols::intern_at_home_path(&home, &name)))
 }
 
 /// `(intern NAME NAMESPACE)`: the symbol `NAME` in the module the string

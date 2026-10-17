@@ -82,13 +82,21 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
     // afterwards which of them contributed what.
     let before = chk.signature(&heap)?;
 
+    // The island is written in the core IR's module, whose symbols are the
+    // IR's tags: a `case` key `var` there is the tag `var`, and the island's
+    // functions are `%core`'s.
     let reader = Reader::new();
-    let forms = reader
-        .read_all(&mut heap, &crate::compiler::SOURCE)
-        .map_err(|e| format!("island read failed: {}", e))?;
+    let forms: Vec<Value> = reader
+        .read_all_in_spanned_within(&mut heap, "<compiler island>", &crate::compiler::SOURCE, typelisp_mem::NsId::CORE)
+        .map_err(|e| format!("island read failed: {}", e))?
+        .into_iter()
+        .map(|(v, _)| v)
+        .collect();
     let forms_digest = hash_read_forms(&heap, &forms)?;
     let mut items: Vec<CompileTarget> = Vec::new();
     let mut checked: Vec<Value> = Vec::new();
+    let island_segs = crate::compiler::island_module_segments();
+    chk.enter_file_module(&island_segs).map_err(|e| format!("island: {}", e))?;
     for v in forms {
         let tl = chk.check_form(&mut heap, &interp, v).map_err(|e| format!("island check failed: {}", e))?;
         for w in chk.take_warnings() {
@@ -102,6 +110,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         checked.push(tl);
         interp.exec(&mut heap, tl).map_err(|e| format!("island exec failed: {}", e))?;
     }
+    chk.exit_file_module(island_segs.len());
     let delta = chk.capture_delta(&heap, &before)?;
 
     // Install the *committed* island bitcode so the compile loop below drives

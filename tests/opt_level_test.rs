@@ -111,46 +111,66 @@ fn every_level_runs_what_the_unoptimized_run_does() {
     }
 }
 
+/// `optimize-ir` at `level` on core IR written as text, printed with `~s`.
+///
+/// Read and checked in the island's own module (`%core`): the island's
+/// functions are that module's, and only there are `let`/`var`/`assoc` the
+/// core IR's tags rather than ordinary symbols.
+fn optimized(level: i64, ir: &str) -> String {
+    use typelisp::{load_compiler, load_prelude, Checker, Heap, Interp, Reader, Value};
+    let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut h, &mut chk, &mut interp);
+    load_compiler(&mut h, &mut chk, &mut interp);
+    chk.enter_file_module(&typelisp::compiler::island_module_segments()).expect("the island's module");
+    let src = format!("(format false \"~s\" (optimize-ir {} '{}))", level, ir);
+    let forms = Reader::new()
+        .read_all_in_spanned_within(&mut h, "<ir>", &src, typelisp::NsId::CORE)
+        .expect("read failed");
+    let mut last = Value::Empty;
+    for (v, _) in forms {
+        let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
+        if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
+            last = val;
+        }
+    }
+    match last {
+        Value::Str(id) => h.string(id).to_string(),
+        other => panic!("expected a string, got {:?}", other),
+    }
+}
+
 #[test]
 fn the_island_rewrites_only_at_level_one_and_up() {
-    let dir = scratch("island");
-    let file = write(
-        &dir,
-        "ir.typl",
-        r#"
-(defun show ((level int) (e Option<Sexpr>)) () (println "~s" (optimize-ir level e)))
-(show 0 '(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false))))
-(show 1 '(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false))))
-(show 1 '(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "k" false) (2 var "k" false))))
-(show 1 '(if false (assoc "int" "<" true "f" (2 int 0 1) (2 int 0 2)) (int 0 1) (int 0 2)))
-(show 1 '(if false (bool true) (break) (int 0 1)))
-(show 1 '(let (((k . 2) int 0 1)) (set "k" 2 (int 0 2)) (var "k" false)))
-(show 1 '(let (((k . 2) int 0 1)) (let (((k . 2) int 0 2)) (var "k" false))))
-(show 1 '(let (((k . 2) int 0 1) ((j . 2) var "k" false)) (var "k" false)))
-(show 1 '(let (((k . 2) int 1073741823 -1)) (assoc "int" "+" true "f" (2 var "k" false) (2 int 0 1))))
-"#,
-    );
-    let (code, out, err) = output(typl().arg(&file));
-    assert_eq!(code, 0, "{}", err);
-    let expected = [
+    let cases = [
         // Level 0: nothing.
-        r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false)))"#,
-        r#"(let () (assoc "int" "+" true "f" (2 var "n" false) (2 int 0 10)))"#,
-        r#"(let () (int 0 20))"#,
-        r#"(int 0 1)"#,
+        (0, r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false)))"#,
+            r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false)))"#),
+        (1, r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "n" false) (2 var "k" false)))"#,
+            r#"(let () (assoc "int" "+" true "f" (2 var "n" false) (2 int 0 10)))"#),
+        (1, r#"(let (((k . 2) int 0 10)) (assoc "int" "+" true "f" (2 var "k" false) (2 var "k" false)))"#,
+            r#"(let () (int 0 20))"#),
+        (1, r#"(if false (assoc "int" "<" true "f" (2 int 0 1) (2 int 0 2)) (int 0 1) (int 0 2))"#,
+            r#"(int 0 1)"#),
         // The branch taken leaves its block.
-        r#"(if false (bool true) (break) (int 0 1))"#,
+        (1, r#"(if false (bool true) (break) (int 0 1))"#, r#"(if false (bool true) (break) (int 0 1))"#),
         // Assigned.
-        r#"(let (((k . 2) int 0 1)) (set "k" 2 (int 0 2)) (var "k" false))"#,
+        (1, r#"(let (((k . 2) int 0 1)) (set "k" 2 (int 0 2)) (var "k" false))"#,
+            r#"(let (((k . 2) int 0 1)) (set "k" 2 (int 0 2)) (var "k" false))"#),
         // Shadowed: the inner one is propagated, the outer one is not.
-        r#"(let (((k . 2) int 0 1)) (let () (int 0 2)))"#,
+        (1, r#"(let (((k . 2) int 0 1)) (let (((k . 2) int 0 2)) (var "k" false)))"#,
+            r#"(let (((k . 2) int 0 1)) (let () (int 0 2)))"#),
         // A binding form reads an outer `k`.
-        r#"(let (((k . 2) int 0 1) ((j . 2) var "k" false)) (var "k" false))"#,
+        (1, r#"(let (((k . 2) int 0 1) ((j . 2) var "k" false)) (var "k" false))"#,
+            r#"(let (((k . 2) int 0 1) ((j . 2) var "k" false)) (var "k" false))"#),
         // The sum is past the fixnum range.
-        r#"(let () (assoc "int" "+" true "f" (2 int 1073741823 -1) (2 int 0 1)))"#,
+        (1, r#"(let (((k . 2) int 1073741823 -1)) (assoc "int" "+" true "f" (2 var "k" false) (2 int 0 1)))"#,
+            r#"(let () (assoc "int" "+" true "f" (2 int 1073741823 -1) (2 int 0 1)))"#),
     ];
-    let got: Vec<&str> = out.lines().collect();
-    assert_eq!(got, expected);
+    for (level, ir, expected) in cases {
+        assert_eq!(optimized(level, ir), expected, "-O{} of {}", level, ir);
+    }
 }
 
 #[test]

@@ -6281,6 +6281,18 @@ pub const SOURCE_EMITS_LAYOUT: u8 = typelisp_mem::tagged::LAYOUT_OPTION_NICHE;
 /// which is what lets interpreted closures be removed entirely (Stage 8).
 /// `SOURCE` being fixed and the dump a committed, digest-checked artifact, any
 /// failure here is a build/bug condition, not a user error — hence the panics.
+/// The module the island is written in: the core IR's, `%core`.
+pub fn island_module_segments() -> Vec<String> {
+    vec![typelisp_mem::symbols::CORE_MODULE.to_string()]
+}
+
+/// The island's function `name`, by its path in [`island_module_segments`].
+pub fn island_path(name: &str) -> crate::types::Path {
+    let mut segs = island_module_segments();
+    segs.push(name.to_string());
+    crate::types::Path::from_segments(segs)
+}
+
 pub fn load_aot(heap: &mut Heap, chk: &mut Checker, interp: &mut Interp) {
     // The island's whole purpose is emitting IR, so this is where the backend
     // that does the emitting becomes available: every path that can reach an

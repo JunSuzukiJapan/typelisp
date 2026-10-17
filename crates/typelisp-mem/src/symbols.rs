@@ -741,7 +741,51 @@ impl NsId {
     /// root's child `keyword`, so its path is `["keyword"]` and re-interning a
     /// keyword by path lands back here.
     pub const KEYWORD: NsId = NsId(2);
+
+    /// The standard library's module, the root's child `std`. What it
+    /// exports is visible in every module without being imported: reading a
+    /// name a module does not hold yields `std`'s symbol of that name when
+    /// `std` exports one ([`intern_in`]).
+    pub const STD: NsId = NsId(3);
+
+    /// The core IR's module, the root's child `%core`: the IR's tags and the
+    /// names the compiler island is written with. No other module imports
+    /// these, so a user's `var` or `call` is the user's own symbol.
+    pub const CORE: NsId = NsId(4);
 }
+
+/// The vocabulary members owned by [`NsId::STD`] rather than the system
+/// module: names the standard library defines, which a module may define for
+/// itself only after declaring so (`shadow`). Exported by `std`.
+pub const STD_VOCABULARY: &[u32] = &[
+    wk::COND, wk::AND, wk::OR, wk::WHEN, wk::UNLESS, wk::WHILE, wk::UNTIL, wk::CASE,
+    wk::DOLIST, wk::DOTIMES, wk::DOITER, wk::DO, wk::NOT, wk::INTERN,
+];
+
+/// The vocabulary members owned by [`NsId::CORE`]: core-IR tags with no
+/// meaning in source, the value representations the IR names, the names
+/// retired from the vocabulary, and the reader's attribute head.
+pub const CORE_VOCABULARY: &[u32] = &[
+    wk::RETIRED_WHERE, wk::RETIRED_EQUALS, wk::INT, wk::RETIRED_FLOAT, wk::BIGNUM, wk::RATIO, wk::CHAR,
+    wk::BOOL, wk::STR, wk::UNIT, wk::VAR, wk::SET, wk::GLOBAL, wk::SET_GLOBAL, wk::CALL, wk::ASSOC,
+    wk::CONSTRUCT, wk::FIELD_GET, wk::FIELD_SET, wk::DYN_NEW, wk::DYN_UPCAST, wk::DYN_CALL, wk::DYN_VALUE,
+    wk::SYM, wk::FNREF, wk::METHODREF, wk::COMPILE_FN, wk::METHOD, wk::PAT_WILD, wk::PAT_EMPTY,
+    wk::RETIRED_PAT_NONEMPTY, wk::PAT_BIND, wk::PAT_LIT, wk::PAT_GUARD, wk::PAT_CTOR, wk::PAT_TYPETEST,
+    wk::EXPR, wk::NIL, wk::CONS, wk::PATH, wk::INT_ANY_WIDTH, wk::FLOAT_ANY_WIDTH,
+    wk::I32, wk::F64, wk::F32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32, wk::DISASSEMBLE_FN,
+    wk::RETIRED_GO, wk::UNTAG_INT, wk::TAG_INT, wk::SOME_OF, wk::PAT_SOME, wk::BOX_OPTION,
+    wk::RETIRED_ELSE, wk::SPAWN, wk::TAG, wk::SPAWN_THREAD, wk::PAT_WHEN, wk::INTERNAL_MODULE_NAME,
+    wk::ATTRIBUTE, wk::APPLY_INDIRECT, wk::CELLVAR, wk::CELLSET, wk::GLOBAL_INIT, wk::HASHTABLE_OP,
+    wk::LLVM_OP, wk::SUSPEND, wk::VECTOR_OP, wk::REPR_HANDLE, wk::REPR_RAW_WORD, wk::REPR_RATIONAL,
+    wk::REPR_RANDOM_STATE, wk::REPR_SEXPR, wk::REPR_STRUCT, wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_SCOPE,
+    wk::REPR_VECTOR, wk::REPR_HASHTABLE, wk::REPR_NICHE, wk::REPR_NONE,
+];
+
+/// The standard library module's segment under the root.
+pub const STD_MODULE: &str = "std";
+
+/// The core IR module's segment under the root.
+pub const CORE_MODULE: &str = "%core";
 
 /// One module's table.
 ///
@@ -762,6 +806,10 @@ struct NsNode {
 
 struct SymTable {
     nodes: Vec<NsNode>,
+    /// What [`NsId::STD`] exports, by name: the symbols every module sees
+    /// without importing them. Consulted by [`intern_in`] after the module's
+    /// own table.
+    std_exports: HashMap<Box<str>, SymRef>,
     /// How many headers have been created. Summing `syms.len()` would count
     /// an imported symbol once per module that can see it.
     created: usize,
@@ -769,7 +817,7 @@ struct SymTable {
 
 impl SymTable {
     fn new() -> SymTable {
-        let mut t = SymTable { nodes: Vec::new(), created: 0 };
+        let mut t = SymTable { nodes: Vec::new(), std_exports: HashMap::new(), created: 0 };
         let empty = |parent: Option<NsId>, segment: &str| NsNode {
             syms: HashMap::new(),
             children: HashMap::new(),
@@ -779,27 +827,47 @@ impl SymTable {
         t.nodes.push(empty(None, ""));
         t.nodes.push(empty(None, ""));
         t.nodes.push(empty(Some(NsId::ROOT), KEYWORD_MODULE));
-        t.nodes[NsId::ROOT.0 as usize].children.insert(KEYWORD_MODULE.into(), NsId::KEYWORD);
-        // The system module owns the vocabulary, except its keywords, which
-        // the keyword module owns under their names without the colon...
+        t.nodes.push(empty(Some(NsId::ROOT), STD_MODULE));
+        t.nodes.push(empty(Some(NsId::ROOT), CORE_MODULE));
+        for (segment, id) in [(KEYWORD_MODULE, NsId::KEYWORD), (STD_MODULE, NsId::STD), (CORE_MODULE, NsId::CORE)] {
+            t.nodes[NsId::ROOT.0 as usize].children.insert(segment.into(), id);
+        }
+        // The system module owns the reserved words. A keyword belongs to the
+        // keyword module under its name without the colon, a standard
+        // library name to `std` (which exports it), an IR name to `%core`.
         let vocabulary: Vec<SymRef> = BUILTIN_SYMBOLS
             .iter()
             .enumerate()
-            .map(|(i, name)| match name.strip_prefix(':') {
-                Some(kw) => t.create(NsId::KEYWORD, kw, i as u32),
-                None => t.create(NsId::SYSTEM, name, i as u32),
+            .map(|(i, name)| {
+                let i = i as u32;
+                if let Some(kw) = name.strip_prefix(':') {
+                    t.create(NsId::KEYWORD, kw, i)
+                } else if STD_VOCABULARY.contains(&i) {
+                    let sym = t.create(NsId::STD, name, i);
+                    t.std_exports.insert((*name).into(), sym);
+                    sym
+                } else if CORE_VOCABULARY.contains(&i) {
+                    t.create(NsId::CORE, name, i)
+                } else {
+                    t.create(NsId::SYSTEM, name, i)
+                }
             })
             .collect();
         WELL_KNOWN
             .set(vocabulary.into_boxed_slice())
             .unwrap_or_else(|_| unreachable!("the table is built exactly once"));
-        // ...and the root module is the first to import it.
-        t.nodes[NsId::ROOT.0 as usize].syms = t.nodes[NsId::SYSTEM.0 as usize].syms.clone();
+        // Every module but the keyword one holds the reserved words.
+        let reserved = t.nodes[NsId::SYSTEM.0 as usize].syms.clone();
+        for ns in [NsId::ROOT, NsId::STD, NsId::CORE] {
+            for (name, sym) in &reserved {
+                t.nodes[ns.0 as usize].syms.insert(name.clone(), *sym);
+            }
+        }
         t
     }
 
-    /// Appends a module node, giving it the system vocabulary. The three
-    /// fixed nodes (system, root, keyword) are built by [`SymTable::new`].
+    /// Appends a module node, giving it the reserved words. The fixed nodes
+    /// (system, root, keyword, std, core) are built by [`SymTable::new`].
     fn push_node(&mut self, parent: Option<NsId>, segment: &str) -> NsId {
         let id = NsId(self.nodes.len() as u32);
         // By pointer, not by name: this is property 4 in the module doc
@@ -877,22 +945,49 @@ fn table() -> MutexGuard<'static, SymTable> {
 /// Names are **case-insensitive**: they fold to a canonical lowercase form, so
 /// `Foo`, `FOO` and `foo` all intern to one symbol.
 ///
-/// Only `ns`'s own table is consulted. A name it does not hold — neither
-/// created there nor imported into it — becomes a **new symbol owned by
-/// `ns`**, which is what makes `m::foo` and `n::foo` different symbols. The
-/// fixed vocabulary is the same symbol everywhere only because every module
-/// imports it from [`NsId::SYSTEM`] when it is created.
+/// The name means, in order: the symbol `ns`'s own table holds (one it
+/// created, a reserved word every module holds, or one it declared its own
+/// with `shadow`); else the symbol [`NsId::STD`] exports under that name;
+/// else a **new symbol owned by `ns`**. Nothing else is looked at — not the
+/// modules `ns` is written inside, not any other module — so `m::foo` and
+/// `n::foo` are different symbols unless `std` exports `foo`.
 ///
-/// `ns` may be [`NsId::KEYWORD`]; that is [`intern_keyword`]. Nothing about
-/// `name` routes it anywhere else — `":foo"` interned in a module is a symbol
-/// of that module whose name starts with a colon, as CL's `intern` makes.
+/// `ns` may be [`NsId::KEYWORD`]; that is [`intern_keyword`], and the keyword
+/// module sees nothing `std` exports. Nothing about `name` routes it anywhere
+/// else — `":foo"` interned in a module is a symbol of that module whose name
+/// starts with a colon, as CL's `intern` makes.
 pub fn intern_in(ns: NsId, name: &str) -> SymRef {
     let key = name.to_lowercase();
     let mut t = table();
     if let Some(s) = t.lookup(ns, &key) {
         return s;
     }
+    if ns != NsId::KEYWORD {
+        if let Some(s) = t.std_exports.get(key.as_str()) {
+            return *s;
+        }
+    }
     t.create(ns, &key, NOT_WELL_KNOWN)
+}
+
+/// The symbol named `name` whose home is `ns`, creating it there if `ns`
+/// holds none — without looking at what `std` exports.
+///
+/// For rebuilding a symbol whose home was recorded (a dump, compiled code
+/// re-interning a quoted symbol): the home is the answer, and consulting
+/// `std`'s exports could hand back a different symbol of the same name.
+pub fn intern_at_home(ns: NsId, name: &str) -> SymRef {
+    let key = name.to_lowercase();
+    let mut t = table();
+    if let Some(s) = t.lookup(ns, &key) {
+        return s;
+    }
+    t.create(ns, &key, NOT_WELL_KNOWN)
+}
+
+/// [`intern_at_home`] for a home given as segments from the root.
+pub fn intern_at_home_path(segments: &[String], name: &str) -> SymRef {
+    intern_at_home(ns_of(segments), name)
 }
 
 /// The keyword named `name` — what the reader makes of `:name`. `name` is
@@ -984,9 +1079,3 @@ pub fn well_known_symbol(i: u32) -> SymRef {
     WELL_KNOWN.get().expect("building the table fills WELL_KNOWN")[i as usize]
 }
 
-/// Intern `name` in the module `segments` names, relative to the root —
-/// [`ns_of`] and [`intern_in`] in one step, for callers holding a path rather
-/// than an [`NsId`] (compiled code rebuilding a quoted symbol).
-pub fn intern_in_path(segments: &[String], name: &str) -> SymRef {
-    intern_in(ns_of(segments), name)
-}

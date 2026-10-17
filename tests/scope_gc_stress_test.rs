@@ -33,8 +33,14 @@ fn stressed() -> (Heap, Checker, Interp) {
 }
 
 fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> Result<Value, EvalError> {
-    let r = Reader::new();
-    let vs = r.read_all(h, src).expect("read failed");
+    // In the island's own module, where its functions are.
+    chk.enter_file_module(&typelisp::compiler::island_module_segments()).expect("the island's module");
+    let vs: Vec<Value> = Reader::new()
+        .read_all_in_spanned_within(h, "<input>", src, typelisp::NsId::CORE)
+        .expect("read failed")
+        .into_iter()
+        .map(|(v, _)| v)
+        .collect();
     let mut last = Value::Empty;
     for v in vs {
         let tl = chk.check_form(h, interp, v).expect("check failed");
@@ -42,6 +48,7 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
             last = val;
         }
     }
+    chk.exit_file_module(typelisp::compiler::island_module_segments().len());
     Ok(last)
 }
 

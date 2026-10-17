@@ -2311,6 +2311,12 @@ fn macro_lambda(heap: &Heap, form: Value, i: usize) -> Result<MacroLambda, EvalE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A binding name as core IR text read in `%core` spells it — the same
+    /// symbol [`read1`] reads for that name.
+    fn core_symbol(name: &str) -> Value {
+        Value::Symbol(typelisp_mem::symbols::intern_in(typelisp_mem::NsId::CORE, name))
+    }
     use crate::Reader;
     use crate::sexpr_variant::{CONS, INT, NIL, PATH, STR};
 
@@ -2327,7 +2333,13 @@ mod tests {
     /// under `gc_stress` when the heap is one of ours.
     fn read1(heap: &mut Heap, src: &str) -> Value {
         let r = Reader::new();
-        let mut vs = r.read_all(heap, src).expect("read failed");
+        // Core IR, read in the core IR's module so its tags are the IR's own.
+        let mut vs: Vec<Value> = r
+            .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
+            .expect("read failed")
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect();
         assert_eq!(vs.len(), 1, "expected exactly one form in {:?}", src);
         vs.pop().unwrap()
     }
@@ -2908,7 +2920,7 @@ mod tests {
         };
         let path = h.intern_path(&[a, b]);
         h.push_root(path);
-        let name = match h.intern_symbol("p") {
+        let name = match core_symbol("p") {
             Value::Symbol(id) => id,
             _ => unreachable!(),
         };
@@ -2944,7 +2956,7 @@ mod tests {
     #[test]
     fn two_path_patterns_in_one_arm_both_keep_their_bindings() {
         let mut h = stress_heap();
-        let sym = |h: &mut Heap, n: &str| match h.intern_symbol(n) {
+        let sym = |h: &mut Heap, n: &str| match core_symbol(n) {
             Value::Symbol(id) => id,
             _ => unreachable!(),
         };
@@ -3260,7 +3272,7 @@ mod tests {
             xs = h.cons(Value::Int(1), xs).unwrap();
             h.push_root(xs);
         }
-        let name = match h.intern_symbol("xs") {
+        let name = match core_symbol("xs") {
             Value::Symbol(id) => id,
             _ => unreachable!(),
         };
@@ -3323,7 +3335,7 @@ mod tests {
         assert!(reclaimed >= GARBAGE, "only {} cells were reclaimed — the collection did not run", reclaimed);
 
         // Call it through a fresh form, in a fresh environment.
-        let name = match h.intern_symbol("g") {
+        let name = match core_symbol("g") {
             Value::Symbol(id) => id,
             _ => unreachable!(),
         };
@@ -3358,7 +3370,7 @@ mod tests {
         let recv = crate::types::intern_path_id(&mut h, &crate::Path::root("i32"));
         let plus = h.alloc_builtin_fn(Some(recv), "+", "i32");
         h.push_root(plus);
-        let name = match h.intern_symbol("f") {
+        let name = match core_symbol("f") {
             Value::Symbol(id) => id,
             _ => unreachable!(),
         };

@@ -420,9 +420,16 @@ fn the_builtin_symbols_report_their_own_wk_constant() {
     let mut heap = typelisp::Heap::with_capacity(64);
     for (i, name) in BUILTIN_SYMBOLS.iter().enumerate() {
         assert_eq!(*name, name.to_lowercase(), "`{}` is not the canonical form it interns under", name);
-        // A vocabulary entry spelled with a colon is the keyword of that name.
+        // Each entry is interned in the module that owns it: a colon-spelled
+        // one is the keyword of that name, a standard library name `std`'s,
+        // an IR name `%core`'s, every other one a reserved word every module
+        // holds.
+        let i32_index = i as u32;
         let interned = match name.strip_prefix(':') {
             Some(kw) => heap.intern_keyword(kw),
+            None if typelisp::mem::symbols::CORE_VOCABULARY.contains(&i32_index) => {
+                Value::Symbol(typelisp::mem::symbols::intern_in(typelisp::NsId::CORE, name))
+            }
             None => heap.intern_symbol(name),
         };
         let Value::Symbol(sym) = interned else {
