@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 표준 트레이트
 
 반복, 비교, 산술을 위한 트레이트. 그 밖의 표준 트레이트는 각자의 장에 있다: `Hash`([HashTable](collections.md#4-hashtablekv)),

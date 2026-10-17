@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # स्ट्रीम और फ़ाइलें
 
 स्ट्रीम trait और मेथड, ठोस स्ट्रीम टाइप, फ़ाइल ऑपरेशन और पाथनेम। नेटवर्क सॉकेट भी स्ट्रीम हैं, और [नेटवर्किंग](network.md) में कवर हैं।

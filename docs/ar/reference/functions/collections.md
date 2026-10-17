@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/collections.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/collections.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # السلاسل النصية والمحارف والمجموعات
 
 `string` و`char` و`Vector<T>` و`HashTable<K,V>` و`Array<T>` و`BitVector` و`HashSet<T>` و`SortedTable<K,V>` و`Deque<T>`.

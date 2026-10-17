@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # trait
 
 trait 是「這個型別支援這些操作」的約定。它讓多個型別擁有同名的操作，使用這些操作的函式就不必為每個型別分別撰寫。其機制與 Rust 的

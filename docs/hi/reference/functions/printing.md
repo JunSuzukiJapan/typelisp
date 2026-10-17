@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # प्रिंटिंग
 
 `print`/`println`/`format`, एक-आर्ग्युमेंट प्रिंटर, सुंदर प्रिंटर, `print-object`, और प्रिंटिंग को नियंत्रित करने वाले वेरिएबल। फ़ॉर्मैट निर्देशों की सूची [format.md](format.md) में है। स्ट्रीम से पढ़ना और लिखना [स्ट्रीम और फ़ाइलें](streams-files.md) में है।

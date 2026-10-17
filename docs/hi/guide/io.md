@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # फ़ाइल I/O, स्ट्रीम और नेटवर्किंग
 
 यह गाइड फ़ाइलें पढ़ने-लिखने, पाथनेम और सॉकेट संचार की बुनियादी बातें दिखाती है। फ़ंक्शनों की सूचियाँ [स्ट्रीम और फ़ाइलें](../reference/functions/streams-files.md) और [नेटवर्किंग](../reference/functions/network.md) में हैं।

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # E/S de archivos, streams y red
 
 Esta guía muestra lo básico de leer y escribir archivos, los nombres de ruta y la comunicación por sockets.

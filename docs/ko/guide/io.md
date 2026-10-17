@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 파일 입출력, 스트림, 네트워크
 
 이 가이드에서는 파일 읽기와 쓰기, 경로명, 소켓 통신의 기본을 보인다. 함수 목록은

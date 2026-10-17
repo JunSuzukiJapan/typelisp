@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Довідник із синтаксису typelisp
 
 typelisp — це Лісп зі статичною типізацією, що записується S-виразами. Перелік вбудованих функцій і

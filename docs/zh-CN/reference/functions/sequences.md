@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 序对、S 表达式与序列
 
 泛型序对 `cons-cell`、S 表达式数据 `Sexpr`、符号、构建在 `Iter` 之上的序列函数，以及高阶函数。

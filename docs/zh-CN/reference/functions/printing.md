@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 打印
 
 `print`/`println`/`format`、单参数打印函数、pretty printer、`print-object`，以及控制打印的变量。格式指令一览见

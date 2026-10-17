@@ -1,4 +1,4 @@
-<!-- translated-from: editor/vscode/README_JP.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: editor/vscode/README_JP.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # typelisp (VS Code)
 
 Uma extensão do VS Code para editar código-fonte typelisp (`.typl`).

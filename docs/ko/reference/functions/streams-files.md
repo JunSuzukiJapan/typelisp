@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 스트림과 파일
 
 스트림의 트레이트와 메서드, 구체 스트림 타입, 파일 조작, 경로명. 네트워크 소켓도 스트림이며 [네트워크](network.md)에서

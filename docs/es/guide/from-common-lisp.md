@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Para programadores de Common Lisp
 
 typelisp hereda la sintaxis de Common Lisp (CL) y muchos de sus nombres de funciones, pero es un lenguaje

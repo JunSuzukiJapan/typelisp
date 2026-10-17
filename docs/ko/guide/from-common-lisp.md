@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Common Lisp 사용자를 위해
 
 typelisp는 Common Lisp(CL)의 문법과 많은 함수 이름을 이어받았지만 정적 타입 언어이다. 그래서 CL 코드가 쓴 그대로

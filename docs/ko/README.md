@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
+<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # typelisp 문서 (한국어)
 
 typelisp는 정적 타입 Lisp이다. 설치와 빌드 방법은 저장소 최상위의 [README.md](../../README.md)(영어)를

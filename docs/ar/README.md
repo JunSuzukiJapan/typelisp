@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
+<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # توثيق typelisp (العربية)
 
 typelisp هي لغة Lisp ذات أنواع ساكنة. للاطلاع على طريقة التثبيت والبناء راجع

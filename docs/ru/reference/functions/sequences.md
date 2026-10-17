@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Пары, S-выражения и последовательности
 
 Обобщённая пара `cons-cell`, данные S-выражений `Sexpr`, символы, функции последовательностей, написанные поверх

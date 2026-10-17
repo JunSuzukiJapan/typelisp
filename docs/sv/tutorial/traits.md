@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Traits
 
 Ett trait är ett löfte om att "den här typen stöder dessa operationer". Med traits kan flera typer dela

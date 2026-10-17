@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/intro.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/tutorial/intro.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Первые шаги
 
 Начиная с вычисления выражений в REPL, эта глава по порядку рассматривает функции, переменные, ветвления, циклы, а

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 并发
 
 在 typelisp 中，通过启动**任务**（轻量级线程）让多项工作并发进行，任务之间通过**通道**传递值。这与 Go 的

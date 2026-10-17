@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # जोड़ियाँ, S-एक्सप्रेशन और अनुक्रम
 
 जेनेरिक जोड़ी `cons-cell`, S-एक्सप्रेशन डेटा `Sexpr`, सिंबल, `Iter` के ऊपर लिखे अनुक्रम फ़ंक्शन, और उच्च-क्रम फ़ंक्शन।

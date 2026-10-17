@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # สตรีมและไฟล์
 
 trait และเมทอดของสตรีม ชนิดสตรีมที่เป็นรูปธรรม การดำเนินการกับไฟล์ และ pathname ซ็อกเก็ตเครือข่ายก็เป็น

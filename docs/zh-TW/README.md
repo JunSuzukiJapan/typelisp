@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
+<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # typelisp 文件（繁體中文）
 
 typelisp 是一種靜態型別的 Lisp。安裝與建置方法請參閱儲存庫根目錄的 [README.md](../../README.md)（英文）。

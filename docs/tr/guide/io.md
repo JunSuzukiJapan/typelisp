@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Dosya G/Ç, Akışlar ve Ağ
 
 Bu kılavuz, dosya okuma ve yazmanın, yol adlarının ve soket iletişiminin temellerini gösterir.

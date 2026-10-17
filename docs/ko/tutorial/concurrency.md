@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 동시성
 
 typelisp에서는 **태스크**(경량 스레드)를 시작해서 처리를 동시에 진행하고, 태스크끼리는 **채널**을 통해 값을

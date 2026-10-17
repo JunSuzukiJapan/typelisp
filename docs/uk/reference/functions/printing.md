@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Друк
 
 `print`/`println`/`format`, друкарі з одним аргументом, pretty printer, `print-object` і змінні, що

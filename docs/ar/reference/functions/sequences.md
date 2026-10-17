@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # الأزواج والتعبيرات الرمزية والتسلسلات
 
 الزوج العام `cons-cell` وبيانات التعبيرات الرمزية `Sexpr` والرموز ودوال التسلسلات المكتوبة فوق `Iter`

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # التزامن
 
 في typelisp تُشغَّل الأعمال بالتزامن ببدء **مهام (tasks)** (خيوط خفيفة)، وتمرّر المهام القيم بعضها إلى بعض

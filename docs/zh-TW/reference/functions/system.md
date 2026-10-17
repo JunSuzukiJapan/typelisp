@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 時間、執行環境與實作
 
 時間、執行環境的查詢、實作工具、文字的解析與求值、文件字串，以及巨集相關的函式。

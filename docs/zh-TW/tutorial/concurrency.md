@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/concurrency.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/concurrency.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 並行
 
 在 typelisp 中，透過啟動**任務**（輕量級執行緒）讓多項工作並行進行，任務之間透過**通道**傳遞值。這與 Go 的 goroutine 和通道很接近。

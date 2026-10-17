@@ -1,4 +1,4 @@
-<!-- translated-from: editor/emacs/README_JP.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: editor/emacs/README_JP.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # typelisp-mode (Emacs)
 
 An Emacs major mode for editing typelisp source (`.typl`).

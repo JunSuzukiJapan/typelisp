@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức

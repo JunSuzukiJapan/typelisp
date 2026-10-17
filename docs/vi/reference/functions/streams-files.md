@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/reference/functions/streams-files.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Stream và tệp
 
 Các trait và phương thức của stream, các kiểu stream cụ thể, thao tác tệp và pathname. Socket mạng cũng là

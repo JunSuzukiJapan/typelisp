@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/from-common-lisp.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 写给 Common Lisp 用户
 
 typelisp 继承了 Common Lisp（以下简称 CL）的语法和许多函数名，但它是静态类型语言。因此，CL 的写法并不总能直接通过。

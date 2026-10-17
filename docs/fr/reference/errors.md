@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/errors.md @ b550ae4adbf0e3f78566a6c1f79d671a5d08627e -->
+<!-- translated-from: docs/ja/reference/errors.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Messages d'erreur
 
 Ce que signifient les principaux messages d'erreur de `typl` et comment les corriger.

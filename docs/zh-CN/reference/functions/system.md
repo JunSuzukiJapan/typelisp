@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 时间、运行环境与实现
 
 时间、运行环境的查询、实现工具、文本的解析与求值、文档字符串，以及宏相关的函数。

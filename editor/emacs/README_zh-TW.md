@@ -1,4 +1,4 @@
-<!-- translated-from: editor/emacs/README_JP.md @ e5e6bdf72dbe4cf76a395c536f23b887cdae8fea -->
+<!-- translated-from: editor/emacs/README_JP.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # typelisp-mode（Emacs）
 
 用來編輯 typelisp 原始碼（`.typl`）的 Emacs 主模式。

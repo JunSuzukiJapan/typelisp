@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Thời gian, môi trường và triển khai
 
 Các hàm về thời gian, truy vấn môi trường chạy, công cụ triển khai, phân tích và đánh giá văn bản, docstring

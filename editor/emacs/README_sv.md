@@ -1,4 +1,4 @@
-<!-- translated-from: editor/emacs/README_JP.md @ 3093a4f5a38833618b09ebc46584252a999a384e -->
+<!-- translated-from: editor/emacs/README_JP.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # typelisp-mode (Emacs)
 
 Ett huvudläge (major mode) i Emacs för att redigera typelisp-källkod (`.typl`).

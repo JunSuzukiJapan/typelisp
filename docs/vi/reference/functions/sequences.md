@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Cặp, S-expression và dãy
 
 Cặp generic `cons-cell`, dữ liệu S-expression `Sexpr`, symbol, các hàm trên dãy được viết dựa trên `Iter`,

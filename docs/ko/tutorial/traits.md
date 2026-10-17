@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/tutorial/traits.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/tutorial/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 트레이트
 
 트레이트는 "이 타입은 이런 연산을 지원한다"는 약속이다. 트레이트를 쓰면 여러 타입이 같은 이름의 연산을 공유할 수

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/io.md @ 6a9ad7ad4f7c098262628978d36af26e7cdd0401 -->
+<!-- translated-from: docs/ja/guide/io.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 檔案 I/O、串流與網路
 
 本指南說明檔案讀寫、路徑名稱以及 socket 通訊的基本寫法。函式一覽見[串流與檔案](../reference/functions/streams-files.md)與

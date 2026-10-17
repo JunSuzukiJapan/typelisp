@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Справочник по синтаксису typelisp
 
 typelisp — это Лисп со статической типизацией, записываемый S-выражениями. Список встроенных функций и методов — во

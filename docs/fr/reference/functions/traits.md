@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Traits standard
 
 Les traits d'itération, de comparaison et d'arithmétique. Les autres traits standard se trouvent dans leurs propres

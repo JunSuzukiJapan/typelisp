@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/traits.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/traits.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 標準 trait
 
 用於迭代、比較與算術的 trait。其他標準 trait 在各自的章節中：`Hash`（[HashTable](collections.md#4-hashtablekv)）、`Error`

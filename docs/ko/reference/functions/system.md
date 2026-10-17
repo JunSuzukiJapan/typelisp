@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/system.md @ ee41198eacc62bb0b458de9ce6a26afecc89e23e -->
+<!-- translated-from: docs/ja/reference/functions/system.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 시간, 환경, 구현
 
 시간 함수, 실행 환경에 대한 질의, 구현 도구, 텍스트의 해석과 평가, 문서 문자열, 매크로.

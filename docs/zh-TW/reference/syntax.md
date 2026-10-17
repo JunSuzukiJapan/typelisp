@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # typelisp 語法參考
 
 typelisp 是一種靜態型別的 Lisp，語法採用 S 運算式。內建函式與方法的一覽見[內建函式](functions/README.md)，型別一覽見 [types.md](types.md)，

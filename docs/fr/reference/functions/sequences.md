@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Paires, S-expressions et séquences
 
 La paire générique `cons-cell`, les données S-expression `Sexpr`, les symboles, les fonctions de séquence écrites

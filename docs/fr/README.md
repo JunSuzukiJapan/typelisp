@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/README.md @ 7d830ae3902dd3c581c7cf6fa5365b91b34106da -->
+<!-- translated-from: docs/ja/README.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # Documentation de typelisp (français)
 
 typelisp est un Lisp à typage statique. Pour l'installer et le compiler, voir le

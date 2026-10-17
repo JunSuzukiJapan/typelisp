@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/sequences.md @ eae672c1a271f0b6947f024e81dee8338b2f5ff4 -->
+<!-- translated-from: docs/ja/reference/functions/sequences.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # 쌍, S 식, 시퀀스
 
 제네릭 쌍 `cons-cell`, S 식 데이터 `Sexpr`, 심볼, `Iter` 위에 쓰인 시퀀스 함수, 고차 함수.

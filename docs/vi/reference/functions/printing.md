@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/functions/printing.md @ b228b9f6a6a6786e814804c166bce6b79db55522 -->
+<!-- translated-from: docs/ja/reference/functions/printing.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
 # In
 
 `print`/`println`/`format`, các hàm in một đối số, pretty printer, `print-object`, và các biến điều khiển việc
