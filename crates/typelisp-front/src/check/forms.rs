@@ -47,7 +47,7 @@ use crate::types::{Path, Type};
 /// releases them all at once regardless of how many there were.
 pub(super) fn var_form(heap: &mut Heap, name: &str) -> Result<Value, Error> {
     let sym = heap.intern_symbol(name);
-    let form = core::tagged(heap, "var", &[sym])?;
+    let form = core::tagged(heap, wk::VAR, &[sym])?;
     Ok(rooted(heap, form))
 }
 
@@ -57,12 +57,12 @@ pub(super) fn set_form(heap: &mut Heap, name: &str, value: Value) -> Result<Valu
     let sym = f.heap().intern_symbol(name);
     f.push(sym);
     f.push(value);
-    f.finish("set")
+    f.finish(wk::SET)
 }
 
 /// `(if C T E)`.
 pub(super) fn if_form(heap: &mut Heap, cond: Value, then: Value, els: Value) -> Result<Value, Error> {
-    core::tagged(heap, "if", &[cond, then, els])
+    core::tagged(heap, wk::IF, &[cond, then, els])
 }
 
 /// `(quote DATUM)` — the datum, unevaluated.
@@ -74,7 +74,7 @@ pub(super) fn if_form(heap: &mut Heap, cond: Value, then: Value, els: Value) -> 
 /// heap-independent Rust memory (the collector could not see a raw pointer
 /// baked into an `Expr`).
 pub(super) fn quote_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
-    core::tagged(heap, "quote", &[datum])
+    core::tagged(heap, wk::QUOTE, &[datum])
 }
 
 /// `(quote ())` — the empty list as a `sexpr` datum, the base case every
@@ -87,7 +87,7 @@ pub(super) fn quote_nil(heap: &mut Heap) -> Result<Value, Error> {
 /// than reads: a `pprint` layout name, a logical block's default affix.
 pub(super) fn str_lit_form(heap: &mut Heap, text: &str) -> Result<Value, Error> {
     let v = heap.alloc_string(text.to_string());
-    let form = core::tagged(heap, "str", &[v])?;
+    let form = core::tagged(heap, wk::STR, &[v])?;
     Ok(rooted(heap, form))
 }
 
@@ -109,7 +109,7 @@ pub(super) fn rooted(heap: &mut Heap, form: Value) -> Value {
 
 /// `(panic FORM)` — diverges with the message the form evaluates to.
 pub(super) fn panic_form(heap: &mut Heap, msg: Value) -> Result<Value, Error> {
-    core::tagged(heap, "panic", &[msg])
+    core::tagged(heap, wk::PANIC, &[msg])
 }
 
 /// The node a *never-executed* position in an erased generic body lowers
@@ -155,19 +155,19 @@ pub(super) fn loop_form(heap: &mut Heap, repr: Value, body: &[Value]) -> Result<
     let mut items = Vec::with_capacity(body.len() + 1);
     items.push(repr);
     items.extend_from_slice(body);
-    core::tagged(heap, "loop", &items)
+    core::tagged(heap, wk::LOOP, &items)
 }
 
 /// `(break)` — leave the nearest enclosing loop with no value.
 pub(super) fn break_form(heap: &mut Heap) -> Result<Value, Error> {
-    core::tagged(heap, "break", &[])
+    core::tagged(heap, wk::BREAK, &[])
 }
 
 /// `(return)` / `(return FORM)` — leave the nearest enclosing loop.
 pub(super) fn return_form(heap: &mut Heap, value: Option<Value>) -> Result<Value, Error> {
     match value {
-        Some(v) => core::tagged(heap, "return", &[v]),
-        None => core::tagged(heap, "return", &[]),
+        Some(v) => core::tagged(heap, wk::RETURN, &[v]),
+        None => core::tagged(heap, wk::RETURN, &[]),
     }
 }
 
@@ -203,7 +203,7 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
     // (a parametric one is a whole list) and `str_lit_form` allocates next.
     let repr = rooted(heap, repr);
     let name = str_lit_form(heap, name)?;
-    core::tagged(heap, "block", &[name, body, repr])
+    core::tagged(heap, wk::BLOCK, &[name, body, repr])
 }
 
 /// `(task RET-R KEY CALL)` — run `CALL` in a new task.
@@ -233,7 +233,7 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 ///
 /// `tag` is `"task"` or `"thread"`: `(thread RET-R KEY CALL)` is the same node
 /// for a task that runs on an OS thread of its own.
-pub(super) fn spawn_form(heap: &mut Heap, tag: &str, ret: Value, key: &str, call: Value) -> Result<Value, Error> {
+pub(super) fn spawn_form(heap: &mut Heap, tag: u32, ret: Value, key: &str, call: Value) -> Result<Value, Error> {
     let call = rooted(heap, call);
     let ret = rooted(heap, ret);
     let key = heap.alloc_string(key.to_string());
@@ -253,15 +253,15 @@ pub(super) fn spawn_form(heap: &mut Heap, tag: &str, ret: Value, key: &str, call
 /// function can suspend, and `let` already knows how to be in the middle of
 /// that.
 ///
-/// The arms carry plain data — a `Value::Str` tag, the bound name, the
-/// `Option<T>` key, a field kind — rather than lowered literal nodes, the same
-/// way `assoc` carries its result key. Both readers want the string itself.
+/// The arms carry plain data — a tag symbol (`recv`, `send`, `:else`), the
+/// bound name, the `Option<T>` key, a field kind — rather than lowered literal
+/// nodes, the same way `assoc` carries its result key.
 pub(super) fn select_form(heap: &mut Heap, arms: &[Value]) -> Result<Value, Error> {
-    let form = core::tagged(heap, "select", arms)?;
+    let form = core::tagged(heap, wk::SELECT, arms)?;
     Ok(rooted(heap, form))
 }
 
-/// `("recv" VAR OPT-KEY CHAN BODY)` — one receive arm.
+/// `(recv VAR OPT-KEY CHAN BODY)` — one receive arm.
 ///
 /// `VAR` is bound to the `Option<T>` the receive answers with, so an arm sees
 /// the end of a closed channel rather than being skipped. `OPT-KEY` is that
@@ -285,7 +285,7 @@ pub(super) fn select_recv_arm(
     let body = rooted(heap, body);
     let arm_heap = &mut *heap;
     let mut f = Items::new(arm_heap);
-    let tag = f.heap().alloc_string("recv".to_string());
+    let tag = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::RECV));
     f.push(tag);
     let v = f.heap().intern_symbol(var);
     f.push(v);
@@ -297,7 +297,7 @@ pub(super) fn select_recv_arm(
     Ok(rooted(arm_heap, arm))
 }
 
-/// `("send" VALUE-KIND CHAN VALUE BODY)` — one send arm.
+/// `(send VALUE-KIND CHAN VALUE BODY)` — one send arm.
 ///
 /// `VALUE-KIND` is the element's [`Repr::field_kind`](crate::check::repr::Repr::field_kind),
 /// for the compiled side: a value reaches the driver as one machine word and a
@@ -315,7 +315,7 @@ pub(super) fn select_send_arm(
     let body = rooted(heap, body);
     let arm_heap = &mut *heap;
     let mut f = Items::new(arm_heap);
-    let tag = f.heap().alloc_string("send".to_string());
+    let tag = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::SEND));
     f.push(tag);
     f.push(Value::Int(value_kind));
     f.push(chan);
@@ -325,14 +325,14 @@ pub(super) fn select_send_arm(
     Ok(rooted(arm_heap, arm))
 }
 
-/// `("else" BODY)` — the arm that runs when nothing else is ready.
+/// `(:else BODY)` — the arm that runs when nothing else is ready.
 ///
 /// Always last, which is what lets its index be the number of channel arms.
 pub(super) fn select_else_arm(heap: &mut Heap, body: Value) -> Result<Value, Error> {
     let body = rooted(heap, body);
     let arm_heap = &mut *heap;
     let mut f = Items::new(arm_heap);
-    let tag = f.heap().alloc_string("else".to_string());
+    let tag = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::KW_ELSE));
     f.push(tag);
     f.push(body);
     let arm = f.finish_list()?;
@@ -344,8 +344,8 @@ pub(super) fn select_else_arm(heap: &mut Heap, body: Value) -> Result<Value, Err
 pub(super) fn return_from_form(heap: &mut Heap, name: &str, value: Option<Value>) -> Result<Value, Error> {
     let name = str_lit_form(heap, name)?;
     match value {
-        Some(v) => core::tagged(heap, "return-from", &[name, v]),
-        None => core::tagged(heap, "return-from", &[name]),
+        Some(v) => core::tagged(heap, wk::RETURN_FROM, &[name, v]),
+        None => core::tagged(heap, wk::RETURN_FROM, &[name]),
     }
 }
 
@@ -363,7 +363,7 @@ pub(super) fn return_from_form(heap: &mut Heap, name: &str, value: Option<Value>
 /// only the repr says whether that word is a tagged `Sexpr` or a raw one.
 /// The interpreter ignores the field.
 pub(super) fn catch_form(heap: &mut Heap, tag: Value, body: Value, repr: Value) -> Result<Value, Error> {
-    core::tagged(heap, "catch", &[tag, body, repr])
+    core::tagged(heap, wk::CATCH, &[tag, body, repr])
 }
 
 /// `(throw SYMBOL FORM REPR)` — leave for the nearest dynamically enclosing
@@ -371,7 +371,7 @@ pub(super) fn catch_form(heap: &mut Heap, tag: Value, body: Value, repr: Value) 
 /// thrown value's representation, for the reason [`catch_form`]'s doc comment
 /// gives.
 pub(super) fn throw_form(heap: &mut Heap, tag: Value, value: Value, repr: Value) -> Result<Value, Error> {
-    core::tagged(heap, "throw", &[tag, value, repr])
+    core::tagged(heap, wk::THROW, &[tag, value, repr])
 }
 
 /// `(unwind-protect PROTECTED CLEANUP REPR)` — run `PROTECTED`, then
@@ -389,7 +389,7 @@ pub(super) fn unwind_protect_form(
     cleanup: Value,
     repr: Value,
 ) -> Result<Value, Error> {
-    core::tagged(heap, "unwind-protect", &[protected, cleanup, repr])
+    core::tagged(heap, wk::UNWIND_PROTECT, &[protected, cleanup, repr])
 }
 
 /// `(dyn-upcast TRAIT FORM)`.
@@ -398,7 +398,7 @@ pub(super) fn dyn_upcast_form(heap: &mut Heap, to_trait: &Path, value: Value) ->
     let tp = path_form(f.heap(), to_trait);
     f.push(tp);
     f.push(value);
-    f.finish("dyn-upcast")
+    f.finish(wk::DYN_UPCAST)
 }
 
 /// `(some-of REPR FORM)` — a niched `Option<T>`'s `some`: `FORM`'s value as
@@ -409,7 +409,7 @@ pub(super) fn some_of_form(heap: &mut Heap, payload: &Repr, value: Value) -> Res
     let repr = payload.write(heap)?;
     let mut s = RootScope::new(heap);
     s.push_root(repr);
-    core::tagged(&mut s, "some-of", &[repr, value])
+    core::tagged(&mut s, wk::SOME_OF, &[repr, value])
 }
 
 /// `(box-option KEY FORM)` — a niched `Option` put into the `BoxedObj::Enum`
@@ -421,14 +421,14 @@ pub(super) fn box_option_form(heap: &mut Heap, key: &str, value: Value) -> Resul
     let key = heap.alloc_string(key.to_string());
     let mut s = RootScope::new(heap);
     s.push_root(key);
-    core::tagged(&mut s, "box-option", &[key, value])
+    core::tagged(&mut s, wk::BOX_OPTION, &[key, value])
 }
 
 /// `(dyn-value FORM)` — the concrete value inside a trait object, typed as
 /// `sexpr` so `match`ing a trait object back down reuses the existing
 /// downcast patterns.
 pub(super) fn dyn_value_form(heap: &mut Heap, value: Value) -> Result<Value, Error> {
-    core::tagged(heap, "dyn-value", &[value])
+    core::tagged(heap, wk::DYN_VALUE, &[value])
 }
 
 /// `(defmacro PATH (SYM...) REST (REQUIRED (OPT-BODY...) ((SYM OPT-BODY...)...)) BODY...)`.
@@ -475,7 +475,7 @@ pub(super) fn defmacro_form(
     };
     f.push(lam);
     f.extend(body.iter().copied());
-    f.finish("defmacro")
+    f.finish(wk::DEFMACRO)
 }
 
 /// `(module PATH FORM...)` — a namespace and the forms defined in it.
@@ -489,7 +489,7 @@ pub(super) fn module_form(heap: &mut Heap, path: &Path, body: &[Value]) -> Resul
     let p = path_form(f.heap(), path);
     f.push(p);
     f.extend(body.iter().copied());
-    f.finish("module")
+    f.finish(wk::MODULE)
 }
 
 /// `(use ALIAS TARGET)`.
@@ -499,7 +499,7 @@ pub(super) fn use_form(heap: &mut Heap, alias: &Path, target: &Path) -> Result<V
     f.push(a);
     let t = path_form(f.heap(), target);
     f.push(t);
-    f.finish("use")
+    f.finish(wk::USE)
 }
 
 /// `(defsignature)` — a forward declaration, which produces no code. The
@@ -507,32 +507,32 @@ pub(super) fn use_form(heap: &mut Heap, alias: &Path, target: &Path) -> Result<V
 /// registry), so what reaches `Interp::exec` is an empty marker, the way
 /// `(use ...)` is one.
 pub(super) fn defsignature_form(heap: &mut Heap) -> Result<Value, Error> {
-    core::tagged(heap, "defsignature", &[])
+    core::tagged(heap, wk::DEFSIGNATURE, &[])
 }
 
 /// `(load "PATH")` — recorded, not performed: the checker cannot do file
 /// I/O, so the driver reads this and loads the file before checking on.
 pub(super) fn load_form(heap: &mut Heap, path: &str) -> Result<Value, Error> {
     let s = heap.alloc_string(path.to_string());
-    core::tagged(heap, "load", &[s])
+    core::tagged(heap, wk::LOAD, &[s])
 }
 
 /// `(expr FORM)` — a bare top-level expression, to be evaluated.
 pub(super) fn expr_form(heap: &mut Heap, form: Value) -> Result<Value, Error> {
-    core::tagged(heap, "expr", &[form])
+    core::tagged(heap, wk::EXPR, &[form])
 }
 
 /// `(compile-fn (fn PATH))` or `(compile-fn (method PATH SYM))`.
 pub(super) fn compile_fn_form(heap: &mut Heap, target: &CompileTarget) -> Result<Value, Error> {
     let payload = compile_target_payload(heap, target)?;
-    core::tagged(heap, "compile-fn", &[payload])
+    core::tagged(heap, wk::COMPILE_FN, &[payload])
 }
 
 /// `(trace PAYLOAD...)` / `(untrace PAYLOAD...)`, whose payloads are the same
 /// `(fn ..)`/`(method ..)` resolutions `compile-fn` carries — the four forms
 /// that name a single body all resolve it the same way, so they all travel in
 /// the same shape.
-pub(super) fn trace_form(heap: &mut Heap, tag: &str, targets: &[CompileTarget]) -> Result<Value, Error> {
+pub(super) fn trace_form(heap: &mut Heap, tag: u32, targets: &[CompileTarget]) -> Result<Value, Error> {
     let mut payloads = Vec::with_capacity(targets.len());
     for t in targets {
         payloads.push(compile_target_payload(heap, t)?);
@@ -544,7 +544,7 @@ pub(super) fn trace_form(heap: &mut Heap, tag: &str, targets: &[CompileTarget]) 
 /// instead of host assembly.
 pub(super) fn disassemble_fn_form(heap: &mut Heap, target: &CompileTarget, llvm_ir: bool) -> Result<Value, Error> {
     let payload = compile_target_payload(heap, target)?;
-    core::tagged(heap, "disassemble-fn", &[payload, Value::Bool(llvm_ir)])
+    core::tagged(heap, wk::DISASSEMBLE_FN, &[payload, Value::Bool(llvm_ir)])
 }
 
 /// `(fn PATH)` or `(method PATH SYM)` — one resolved target, as the node
@@ -555,7 +555,7 @@ fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Val
             let mut f = Items::new(heap);
             let path = path_form(f.heap(), path);
             f.push(path);
-            f.finish("fn")
+            f.finish(wk::FN)
         }
         CompileTarget::Method(type_name, method) => {
             let mut f = Items::new(heap);
@@ -563,7 +563,7 @@ fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Val
             f.push(tp);
             let m = f.heap().intern_symbol(method);
             f.push(m);
-            f.finish("method")
+            f.finish(wk::METHOD)
         }
     }
 }
@@ -579,9 +579,9 @@ fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Val
 pub(super) fn hole(heap: &mut Heap, loc: Option<Loc>) -> Result<Checked, Error> {
     let msg = heap.alloc_string("<check-error>".to_string());
     let mut f = Items::new(heap);
-    let text = core::tagged(f.heap(), "str", &[msg])?;
+    let text = core::tagged(f.heap(), wk::STR, &[msg])?;
     f.push(text);
-    let form = f.finish_at("panic", loc)?;
+    let form = f.finish_at(wk::PANIC, loc)?;
     Ok(Checked::new(form, Type::Never))
 }
 

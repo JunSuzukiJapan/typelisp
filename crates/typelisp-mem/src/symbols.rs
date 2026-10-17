@@ -560,6 +560,32 @@ well_known_symbols! {
     ED => "ed"
     INTERNAL_MODULE_NAME => "%internal"
     ATTRIBUTE => "attribute"
+    "Appended 2026-10-17 with the above: the island-only core-IR tags the
+     bridge builds, so every tag is made from its constant and recognized by
+     it, never by its name."
+    APPLY_INDIRECT => "apply-indirect"
+    CELLVAR => "cellvar"
+    CELLSET => "cellset"
+    GLOBAL_INIT => "global-init"
+    HASHTABLE_OP => "hashtable-op"
+    LLVM_OP => "llvm-op"
+    SUSPEND => "suspend"
+    VECTOR_OP => "vector-op"
+    "Appended 2026-10-17 with the above: the value representations the core
+     IR writes as symbols (`Repr::write`), the ones not already above."
+    REPR_HANDLE => "handle"
+    REPR_RAW_WORD => "raw-word"
+    REPR_RATIONAL => "rational"
+    REPR_RANDOM_STATE => "random-state"
+    REPR_SEXPR => "sexpr"
+    REPR_STRUCT => "struct"
+    REPR_ENUM => "enum"
+    REPR_DYN => "dyn"
+    REPR_SCOPE => "scope"
+    REPR_VECTOR => "vector"
+    REPR_HASHTABLE => "hashtable"
+    REPR_NICHE => "niche"
+    REPR_NONE => "none"
 }
 
 

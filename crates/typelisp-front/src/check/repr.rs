@@ -24,7 +24,7 @@
 
 use std::collections::HashSet;
 
-use typelisp_mem::{Error, Heap, Value};
+use typelisp_mem::{wk, Error, Heap, Value};
 
 use crate::check::registry::AdtKind;
 use crate::types::{path_is_builtin, path_is_builtin_any, Path, Type, LLVM_HANDLE_TYPES};
@@ -343,6 +343,37 @@ impl Repr {
         }
     }
 
+    /// The vocabulary member [`Repr::write`] spells this representation's
+    /// head with — [`Repr::tag`]'s symbol.
+    pub fn tag_wk(&self) -> u32 {
+        match self {
+            Repr::Narrow => wk::INT_ANY_WIDTH,
+            Repr::Int => wk::INT,
+            Repr::F64 => wk::F64,
+            Repr::F32 => wk::F32,
+            Repr::Char => wk::CHAR,
+            Repr::Bool => wk::BOOL,
+            Repr::Unit => wk::UNIT,
+            Repr::Handle => wk::REPR_HANDLE,
+            Repr::RawWord => wk::REPR_RAW_WORD,
+            Repr::Str => wk::STR,
+            Repr::Sym => wk::SYM,
+            Repr::Ratio => wk::RATIO,
+            Repr::Rational => wk::REPR_RATIONAL,
+            Repr::RandomState => wk::REPR_RANDOM_STATE,
+            Repr::Sexpr => wk::REPR_SEXPR,
+            Repr::Struct => wk::REPR_STRUCT,
+            Repr::Enum => wk::REPR_ENUM,
+            Repr::Dyn => wk::REPR_DYN,
+            Repr::Scope(_) => wk::REPR_SCOPE,
+            Repr::Vector(_) => wk::REPR_VECTOR,
+            Repr::HashTable(..) => wk::REPR_HASHTABLE,
+            Repr::Niche(_) => wk::REPR_NICHE,
+            Repr::Fn => wk::FN,
+            Repr::None => wk::REPR_NONE,
+        }
+    }
+
     /// Every simple representation, for [`Repr::read`] and for a test that
     /// wants to enumerate the vocabulary.
     pub const SIMPLE: [Repr; 20] = [
@@ -381,8 +412,8 @@ impl Repr {
         }
     }
 
-    fn write_head(&self, heap: &mut Heap) -> Value {
-        heap.intern_symbol(self.tag())
+    fn write_head(&self, _heap: &mut Heap) -> Value {
+        Value::Symbol(typelisp_mem::symbols::well_known_symbol(self.tag_wk()))
     }
 
     fn write_parametric(&self, heap: &mut Heap, args: &[&Repr]) -> Result<Value, Error> {
@@ -424,22 +455,19 @@ impl Repr {
     /// number of arguments.
     pub fn read(heap: &Heap, v: Value) -> Option<Repr> {
         match v {
-            Value::Symbol(id) => {
-                let name = heap.symbol_spelling(id);
-                Repr::SIMPLE.iter().find(|r| r.tag() == name).cloned()
-            }
+            Value::Symbol(id) => Repr::SIMPLE.iter().find(|r| id.is(r.tag_wk())).cloned(),
             Value::Cons(_) => {
                 let items = heap.list_to_vec(v).ok()?;
                 let head = match items.first()? {
-                    Value::Symbol(id) => heap.symbol_spelling(*id),
+                    Value::Symbol(id) => id.well_known(),
                     _ => return None,
                 };
                 let arg = |i: usize| Repr::read(heap, *items.get(i)?).map(Box::new);
                 match (head, items.len()) {
-                    ("scope", 2) => Some(Repr::Scope(arg(1)?)),
-                    ("vector", 2) => Some(Repr::Vector(arg(1)?)),
-                    ("hashtable", 3) => Some(Repr::HashTable(arg(1)?, arg(2)?)),
-                    ("niche", 2) => Some(Repr::Niche(arg(1)?)),
+                    (wk::REPR_SCOPE, 2) => Some(Repr::Scope(arg(1)?)),
+                    (wk::REPR_VECTOR, 2) => Some(Repr::Vector(arg(1)?)),
+                    (wk::REPR_HASHTABLE, 3) => Some(Repr::HashTable(arg(1)?, arg(2)?)),
+                    (wk::REPR_NICHE, 2) => Some(Repr::Niche(arg(1)?)),
                     _ => None,
                 }
             }

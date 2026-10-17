@@ -52,6 +52,7 @@
 //! [`build_island_bitcode`]'s own `install_island_bitcode(..., false)` call.
 
 use crate::check::core;
+use typelisp_mem::wk;
 use crate::compile::symbols::target_symbol_name;
 use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Reader, Value};
@@ -395,8 +396,8 @@ fn is_read_literal_box(heap: &Heap, id: typelisp_mem::BoxId) -> bool {
 /// else — the island is all `defun`s, and this is what names each one for
 /// `install_island_bitcode`'s symbol list.
 fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompileTarget>) -> Result<(), String> {
-    let tag = core::op(heap, tl).map(str::to_string).unwrap_or_default();
-    match tag.as_str() {
+    let tag = core::op_wk(heap, tl).unwrap_or(typelisp_mem::NOT_WELL_KNOWN);
+    match tag {
         // The same three shapes `aot::collect_aot_item` flattens, and for the
         // same reason: a `(module ...)` is a container, and the enclosing
         // module is already baked into each item's own path. The one that
@@ -409,17 +410,17 @@ fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompileTarget>) ->
         // function to call any generic vanished from the module along with it
         // — showing up as `get-function: no function named "tl_<caller>"` from
         // some *other* function's call site.
-        "module" => {
+        wk::MODULE => {
             for item in core::fields(heap, tl).map_err(|e| e.to_string())?.into_iter().skip(1) {
                 collect_island_items(heap, item, out)?;
             }
         }
-        "defun" => {
+        wk::DEFUN => {
             let path = core::path_field(heap, tl, 0)
                 .ok_or_else(|| "island: defun without a name".to_string())?;
             out.push(CompileTarget::Fn(path));
         }
-        "defmethod" => {
+        wk::DEFMETHOD => {
             let type_path = core::path_field(heap, tl, 0)
                 .ok_or_else(|| "island: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
@@ -429,11 +430,11 @@ fn collect_island_items(heap: &Heap, tl: Value, out: &mut Vec<CompileTarget>) ->
             out.push(CompileTarget::Method(type_path, method));
         }
         // Declares a signature and emits no body of its own.
-        "defsignature" => {}
-        other => {
+        wk::DEFSIGNATURE => {}
+        _ => {
             return Err(format!(
                 "island: the SOURCE grew a top-level `{}`, which this bootstrap does not know how to emit",
-                other
+                core::op_spelling(heap, tl).unwrap_or_default()
             ))
         }
     }

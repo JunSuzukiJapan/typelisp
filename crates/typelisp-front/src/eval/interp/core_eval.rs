@@ -2567,14 +2567,14 @@ mod tests {
         // Built with stress off: it is `DEPTH` nodes of setup, and collecting
         // at each of them would be quadratic for no added coverage. The
         // *evaluation* below is what runs under stress.
-        let mut form = core::tagged(&mut h, "int-any-width", &[Value::Int(7)]).unwrap();
+        let mut form = core::tagged(&mut h, wk::INT_ANY_WIDTH, &[Value::Int(7)]).unwrap();
         h.push_root(form);
         for _ in 0..DEPTH {
-            let cond = core::tagged(&mut h, "bool", &[Value::Bool(false)]).unwrap();
+            let cond = core::tagged(&mut h, wk::BOOL, &[Value::Bool(false)]).unwrap();
             h.push_root(cond);
-            let then = core::tagged(&mut h, "int-any-width", &[Value::Int(0)]).unwrap();
+            let then = core::tagged(&mut h, wk::INT_ANY_WIDTH, &[Value::Int(0)]).unwrap();
             h.push_root(then);
-            form = core::tagged(&mut h, "if", &[cond, then, form]).unwrap();
+            form = core::tagged(&mut h, wk::IF, &[cond, then, form]).unwrap();
             h.push_root(form);
         }
 
@@ -2593,11 +2593,11 @@ mod tests {
         let mut h = Heap::with_capacity(1 << 20);
         h.set_growth_limit(1 << 24);
 
-        let mut form = core::tagged(&mut h, "int-any-width", &[Value::Int(7)]).unwrap();
+        let mut form = core::tagged(&mut h, wk::INT_ANY_WIDTH, &[Value::Int(7)]).unwrap();
         h.push_root(form);
         for _ in 0..DEPTH {
             let empty = Value::Empty;
-            form = core::tagged(&mut h, "let", &[empty, form]).unwrap();
+            form = core::tagged(&mut h, wk::LET, &[empty, form]).unwrap();
             h.push_root(form);
         }
 

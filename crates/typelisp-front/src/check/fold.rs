@@ -36,7 +36,7 @@
 //! * A local bound to a literal — `(let ((x 5)) (+ x 1))` — which would need
 //!   constant propagation, not folding.
 
-use typelisp_mem::{Error, Heap, Value};
+use typelisp_mem::{wk, Error, Heap, Value};
 
 use crate::check::core::{self, Checked};
 use crate::eval::interp::eval_builtin_method;
@@ -49,8 +49,8 @@ use crate::types::{Path, Type};
 /// tag's single field, which for `int`/`int-any-width` is the `Value::Int`
 /// the interpreter yields and for the boxed literals is the box itself.
 fn literal_value(heap: &Heap, form: Value) -> Option<Value> {
-    match core::op(heap, form)? {
-        "int" | "int-any-width" | "float-any-width" | "bignum" | "ratio" | "char" | "bool" => {
+    match core::op_wk(heap, form)? {
+        wk::INT | wk::INT_ANY_WIDTH | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL => {
             core::field(heap, form, 0)
         }
         _ => None,
@@ -59,8 +59,8 @@ fn literal_value(heap: &Heap, form: Value) -> Option<Value> {
 
 /// The `bool` a checked form is, if it is a `(bool B)` node.
 pub(super) fn literal_bool(heap: &Heap, form: Value) -> Option<bool> {
-    match (core::op(heap, form)?, core::field(heap, form, 0)?) {
-        ("bool", Value::Bool(b)) => Some(b),
+    match (core::op_wk(heap, form)?, core::field(heap, form, 0)?) {
+        (wk::BOOL, Value::Bool(b)) => Some(b),
         _ => None,
     }
 }
@@ -140,18 +140,18 @@ pub(super) fn fold_builtin_method(
 /// call to leave unfolded.
 fn literal_node(heap: &mut Heap, value: Value, ret: &Type) -> Result<Value, Error> {
     let tag = match (ret, value) {
-        (Type::Int, Value::Int(_)) => "int",
-        (Type::Int, Value::Boxed(id)) if heap.is_bignum(id) => "bignum",
-        (t, Value::Int(_)) if t.is_integer() => "int-any-width",
-        (Type::F32, Value::Boxed(id)) if heap.is_f32(id) => "float-any-width",
-        (Type::F64, Value::Boxed(id)) if heap.is_f64(id) => "float-any-width",
-        (Type::Ratio, Value::Boxed(id)) if heap.is_ratio(id) => "ratio",
+        (Type::Int, Value::Int(_)) => wk::INT,
+        (Type::Int, Value::Boxed(id)) if heap.is_bignum(id) => wk::BIGNUM,
+        (t, Value::Int(_)) if t.is_integer() => wk::INT_ANY_WIDTH,
+        (Type::F32, Value::Boxed(id)) if heap.is_f32(id) => wk::FLOAT_ANY_WIDTH,
+        (Type::F64, Value::Boxed(id)) if heap.is_f64(id) => wk::FLOAT_ANY_WIDTH,
+        (Type::Ratio, Value::Boxed(id)) if heap.is_ratio(id) => wk::RATIO,
         // A `rational` is spelled as the `int` or `ratio` it is.
-        (Type::Rational, Value::Int(_)) => "int",
-        (Type::Rational, Value::Boxed(id)) if heap.is_bignum(id) => "bignum",
-        (Type::Rational, Value::Boxed(id)) if heap.is_ratio(id) => "ratio",
-        (Type::Char, Value::Char(_)) => "char",
-        (Type::Bool, Value::Bool(_)) => "bool",
+        (Type::Rational, Value::Int(_)) => wk::INT,
+        (Type::Rational, Value::Boxed(id)) if heap.is_bignum(id) => wk::BIGNUM,
+        (Type::Rational, Value::Boxed(id)) if heap.is_ratio(id) => wk::RATIO,
+        (Type::Char, Value::Char(_)) => wk::CHAR,
+        (Type::Bool, Value::Bool(_)) => wk::BOOL,
         (t, v) => unreachable!("constant folding produced {:?} for a `{:?}`-typed builtin", v, t),
     };
     core::tagged(heap, tag, &[value])

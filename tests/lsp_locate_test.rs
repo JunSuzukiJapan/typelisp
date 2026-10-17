@@ -185,7 +185,7 @@ fn bare_toplevel_atom_gets_its_span_from_the_reader() {
     let interp = Interp::new();
     let (v, loc) = forms[0].clone();
     let tl = chk.check_form_at(&mut h, &interp, v, Some(loc)).expect("check failed");
-    assert_eq!(core::op(&h, tl), Some("expr"));
+    assert!(core::op_is(&h, tl, typelisp::wk::EXPR));
     // The span lands on the wrapped node itself — `(int-any-width 42)` — since that is
     // what `check_at` builds and records `def_loc` on.
     let node = core::field(&h, tl, 0).expect("`(expr FORM)` always has its form");

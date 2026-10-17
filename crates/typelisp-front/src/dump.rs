@@ -956,9 +956,10 @@ pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8], ns: &str) -> Result<cr
 /// monomorphization bundle (whose specializations are real `defun`s compiled
 /// code may call by their mangled names) with one rule instead of four.
 pub fn record_definitions(heap: &crate::Heap, tl: crate::Value, out: &mut Vec<crate::Value>) {
+    use typelisp_mem::wk;
     if matches!(
-        crate::check::core::op(heap, tl),
-        Some("defun" | "defmethod" | "defvar" | "defstruct" | "defenum" | "defmacro" | "use" | "defffi")
+        crate::check::core::op_wk(heap, tl),
+        Some(wk::DEFUN | wk::DEFMETHOD | wk::DEFVAR | wk::DEFSTRUCT | wk::DEFENUM | wk::DEFMACRO | wk::USE | wk::DEFFFI)
     ) {
         out.push(tl);
     }

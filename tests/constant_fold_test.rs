@@ -248,7 +248,7 @@ fn every_scalar_builtin_with_a_literal_result_folds() {
             };
             // `(expr NODE)`: the node is the fold's output.
             let node = core::field(&s.heap, tl, 0).expect("an expr wraps one node");
-            let tag = core::op(&s.heap, node).expect("a node has a tag").to_string();
+            let tag = core::op_spelling(&s.heap, node).expect("a node has a tag").to_string();
             if !is_literal_tag(&tag) {
                 unfolded.push(format!("{} => {}", src, core::print(&s.heap, node)));
             }

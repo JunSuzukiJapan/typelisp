@@ -21,7 +21,7 @@ fn program(src: &str) -> Result<(String, Option<Type>), Error> {
     let mut tag = String::new();
     for v in vs {
         let tl = chk.check_form(&mut h, &interp, v)?;
-        tag = core::op(&h, tl).expect("every top-level form is a tagged list").to_string();
+        tag = core::op_spelling(&h, tl).expect("every top-level form is a tagged list").to_string();
     }
     Ok((tag, chk.expr_type().cloned()))
 }

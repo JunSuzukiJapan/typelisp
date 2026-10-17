@@ -75,9 +75,9 @@ impl Checker {
         callee: &Path,
     ) -> Result<Checked, Error> {
         let checked = self.check_at(heap, interp, env, arg, Some(fn_ty), loc.clone())?;
-        let target = match core::op(heap, checked.form) {
-            Some("lambda") => self.lift_lambda(heap, checked.form, fn_ty)?,
-            Some("fnref") => {
+        let target = match core::op_wk(heap, checked.form) {
+            Some(wk::LAMBDA) => self.lift_lambda(heap, checked.form, fn_ty)?,
+            Some(wk::FNREF) => {
                 let path = core::path_field(heap, checked.form, 0)
                     .ok_or_else(|| Error::TypeError("internal error: a fnref node without a path".into()))?;
                 if self.reg.fn_sig(&path).is_some_and(|s| s.builtin) {
@@ -89,7 +89,7 @@ impl Checker {
                 }
                 path
             }
-            Some("var") => {
+            Some(wk::VAR) => {
                 let name = match core::field(heap, checked.form, 0) {
                     Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
                     _ => return Err(Error::TypeError("internal error: a var node without a name".into())),
@@ -174,7 +174,7 @@ impl Checker {
         let p = forms::path_form(f.heap(), &path);
         f.push(p);
         f.extend(fields.iter().copied());
-        let form = f.finish("defun")?;
+        let form = f.finish(wk::DEFUN)?;
         let form = forms::rooted(heap, form);
         self.lifted.borrow_mut().push(LiftedCallback { path: path.clone(), sig: Self::lifted_sig(fn_ty), form });
         Ok(path)

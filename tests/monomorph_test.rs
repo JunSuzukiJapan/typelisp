@@ -60,7 +60,7 @@ fn check_all(src: &str) -> Result<(Heap, Vec<TopLevelForm>), Error> {
 /// The specialization forms bundled with `tl` — everything but the primary form
 /// the bundle ends with. Empty if `tl` isn't a monomorph bundle.
 fn bundled_specs(h: &Heap, tl: TopLevelForm) -> Vec<TopLevelForm> {
-    if core::op(h, tl) != Some("module") {
+    if core::op_spelling(h, tl) != Some("module") {
         return Vec::new();
     }
     // `(module PATH BODY...)` — the path decides whether this is *the* bundle.
@@ -79,7 +79,7 @@ fn bundled_specs(h: &Heap, tl: TopLevelForm) -> Vec<TopLevelForm> {
 
 /// A `(defun PATH ...)` form's name.
 fn defun_name(h: &Heap, tl: TopLevelForm) -> Path {
-    assert_eq!(core::op(h, tl), Some("defun"), "expected a defun form");
+    assert_eq!(core::op_spelling(h, tl), Some("defun"), "expected a defun form");
     match core::field(h, tl, 0).expect("a defun always names itself") {
         Value::Path(id) => typelisp::path_from_id(h, id),
         Value::Symbol(id) => Path::root(h.symbol_spelling(id)),
@@ -89,7 +89,7 @@ fn defun_name(h: &Heap, tl: TopLevelForm) -> Path {
 
 /// A `(defmethod PATH SYM ...)` form's method name.
 fn defmethod_name(h: &Heap, tl: TopLevelForm) -> Option<String> {
-    if core::op(h, tl) != Some("defmethod") {
+    if core::op_spelling(h, tl) != Some("defmethod") {
         return None;
     }
     match core::field(h, tl, 1).expect("a defmethod always names its method") {
@@ -106,7 +106,7 @@ fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
     // The generic definition itself has no core form at all: an erased body is
     // never executed, so it lowers to an empty `(module PATH)` — see
     // `Checker::defun_form_unless_generic`.
-    assert_eq!(core::op(&h, tls[0]), Some("module"));
+    assert_eq!(core::op_spelling(&h, tls[0]), Some("module"));
     assert_eq!(core::fields(&h, tls[0]).unwrap().len(), 1, "path only, no body");
     // The call comes back as [specialization, call] — one concrete defun.
     let specs = bundled_specs(&h, tls[1]);
@@ -142,7 +142,7 @@ fn calls_at_different_types_get_independent_specializations() {
 #[test]
 fn a_non_generic_call_is_not_bundled() {
     let (h, tls) = check_all("(defun id ((x int)) int x) (id 7)").unwrap();
-    assert_eq!(core::op(&h, tls[1]), Some("expr"));
+    assert_eq!(core::op_spelling(&h, tls[1]), Some("expr"));
 }
 
 // ---- evaluation through specializations --------------------------------------

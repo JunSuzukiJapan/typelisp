@@ -30,13 +30,13 @@ fn check(src: &str) -> Result<(String, Vec<String>), Error> {
         last = Some(chk.check_form(&mut h, &interp, v)?);
     }
     let tl = last.expect("no forms");
-    let tag = core::op(&h, tl).expect("every top-level form is a tagged list").to_string();
+    let tag = core::op_spelling(&h, tl).expect("every top-level form is a tagged list").to_string();
     let inner = if tag == "module" {
         // `(module PATH BODY...)` — skip the path.
         core::fields(&h, tl)
             .expect("a module's fields are a proper list")[1..]
             .iter()
-            .map(|f| core::op(&h, *f).unwrap_or("<atom>").to_string())
+            .map(|f| core::op_spelling(&h, *f).unwrap_or("<atom>").to_string())
             .collect()
     } else {
         Vec::new()

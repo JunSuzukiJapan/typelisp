@@ -31,7 +31,7 @@
 //! drops a frame's values) and the `set_state` that re-roots what the next
 //! state carries. Nothing in between touches the heap.
 
-use typelisp_mem::{Heap, SymRef, Value};
+use typelisp_mem::{wk, Heap, SymRef, Value};
 use typelisp_rt::sched::{self, chan_id_of, io_deadline, io_wait, task_id_of, ChanOp, Progress, SchedError, SelectOp, Waiting, Wake};
 
 use crate::check::core;
@@ -1440,7 +1440,7 @@ impl Interp {
                 for arm in &arms {
                     let parts = heap.list_to_vec(*arm).map_err(heap_err)?;
                     let tag = match parts.first() {
-                        Some(Value::Str(id)) => heap.string(*id).to_string(),
+                        Some(Value::Symbol(id)) => *id,
                         other => {
                             return Err(EvalError::Internal(format!(
                                 "eval: (select ..) arm tag is {:?}",
@@ -1448,8 +1448,8 @@ impl Interp {
                             )))
                         }
                     };
-                    match tag.as_str() {
-                        "recv" => {
+                    match tag.well_known() {
+                        wk::RECV => {
                             let Some(Value::Str(kid)) = parts.get(2) else {
                                 return Err(EvalError::Internal("eval: (select ..) recv arm has no key".into()));
                             };
@@ -1457,7 +1457,7 @@ impl Interp {
                             let chan = self.eval_leaf(heap, parts[3], env)?;
                             ops.push(SelectOp::Recv(chan_id_of(heap, Some(chan))?, key));
                         }
-                        "send" => {
+                        wk::SEND => {
                             let chan = self.eval_leaf(heap, parts[2], env)?;
                             let value = self.eval_leaf(heap, parts[3], env)?;
                             ops.push(SelectOp::Send(chan_id_of(heap, Some(chan))?, value));
@@ -1465,9 +1465,9 @@ impl Interp {
                         // Last, and carrying no operand — which is why the
                         // arm indices `ops` uses and the node's own agree up
                         // to this point, and why `ops.len()` names this one.
-                        "else" => has_else = true,
-                        other => {
-                            return Err(EvalError::Internal(format!("eval: (select ..) arm tag `{}`", other)))
+                        wk::KW_ELSE => has_else = true,
+                        _ => {
+                            return Err(EvalError::Internal(format!("eval: (select ..) arm tag `{}`", tag.spelling())))
                         }
                     }
                 }
@@ -2272,7 +2272,7 @@ impl Interp {
             let mut items = Vec::with_capacity(f.body.len() + 1);
             items.push(Value::Empty);
             items.extend_from_slice(&f.body);
-            let wrapped = core::tagged(heap, "let", &items)
+            let wrapped = core::tagged(heap, wk::LET, &items)
                 .map_err(|e| EvalError::Internal(format!("eval: watched call body: {}", e)))?;
             heap.truncate_roots(base);
             return Ok((State::Eval(wrapped, env), Some(w)));
@@ -2766,7 +2766,7 @@ impl Interp {
                 })?;
                 let parts = heap.list_to_vec(arm).map_err(heap_err)?;
                 let tag = match parts.first() {
-                    Some(Value::Str(id)) => heap.string(*id).to_string(),
+                    Some(Value::Symbol(id)) => *id,
                     other => {
                         return Err(EvalError::Internal(format!(
                             "eval: (select ..) arm tag is {:?}",
@@ -2774,10 +2774,10 @@ impl Interp {
                         )))
                     }
                 };
-                match tag.as_str() {
+                match tag.well_known() {
                     // The bound name sees the whole `Option<T>`: a closed
                     // channel is an answer, not a skipped arm.
-                    "recv" => {
+                    wk::RECV => {
                         let Some(Value::Symbol(sym)) = parts.get(1).copied() else {
                             return Err(EvalError::Internal("eval: (select ..) recv arm has no name".into()));
                         };
@@ -2787,19 +2787,19 @@ impl Interp {
                         let inner = extend_env(heap, &[(sym, payload)], env)?;
                         Ok((State::Eval(body, inner), None))
                     }
-                    "send" => {
+                    wk::SEND => {
                         let body = *parts.get(4).ok_or_else(|| {
                             EvalError::Internal("eval: (select ..) send arm has no body".to_string())
                         })?;
                         Ok((State::Eval(body, env), None))
                     }
-                    "else" => {
+                    wk::KW_ELSE => {
                         let body = *parts.get(1).ok_or_else(|| {
                             EvalError::Internal("eval: (select ..) else arm has no body".to_string())
                         })?;
                         Ok((State::Eval(body, env), None))
                     }
-                    other => Err(EvalError::Internal(format!("eval: (select ..) arm tag `{}`", other))),
+                    _ => Err(EvalError::Internal(format!("eval: (select ..) arm tag `{}`", tag.spelling()))),
                 }
             }
 

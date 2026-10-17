@@ -56,7 +56,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, SymRef, Value};
+use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, SymRef, Value, BUILTIN_SYMBOLS};
 
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
@@ -357,8 +357,8 @@ const MATCH_KIND_STRUCT: i64 = 2;
 /// This counted translated-vs-not as the conversion's progress measure while
 /// Phase 2 was running. That measure is spent; what the function is for now is
 /// the invariant.
-fn untranslated(tag: &str) -> Error {
-    Error::TypeError(format!("compile: the bridge has no translation for `{}` yet", tag))
+fn untranslated(heap: &Heap, form: Value) -> Error {
+    Error::TypeError(format!("compile: the bridge has no translation for `{}` yet", core::op_spelling(heap, form).unwrap_or_default()))
 }
 
 fn unbound(heap: &Heap, name: SymRef) -> Error {
@@ -379,15 +379,15 @@ pub fn to_island(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 
 /// [`to_island`] on the stack it is given.
 fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
-    let Some(tag) = core::op(heap, form).map(str::to_string) else {
+    let Some(tag) = core::op_wk(heap, form) else {
         return Err(malformed(heap, form));
     };
-    match tag.as_str() {
+    match tag {
         // ---- literals ----------------------------------------------------
         // Identical on both sides: the payload is a plain machine word the
         // island reads with `sexpr-bool`/`sexpr-char`. A `char` fits in 21
         // bits and a `bool` in one, so both cross whole.
-        "char" | "bool" => Ok(form),
+        wk::CHAR | wk::BOOL => Ok(form),
         // An `int` does *not*: the island reads a `Sexpr` int back through
         // its 3-bit tag, so only 61 bits survive, and a literal needing more
         // came out sign-extended from bit 60 — `4611686018427387903` compiled
@@ -396,7 +396,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // and let `compile-int` reassemble them in LLVM (where a full 64-bit
         // word is ordinary) rather than in the island's own tagged
         // arithmetic, where the shift would overflow again.
-        "int-any-width" => match core::field(heap, form, 0) {
+        wk::INT_ANY_WIDTH => match core::field(heap, form, 0) {
             Some(Value::Int(n)) => int_node(heap, n),
             _ => Err(malformed(heap, form)),
         },
@@ -404,18 +404,18 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // what tells `compile-int-literal` to hand back a *tagged* fixnum
         // rather than the raw word `compile-int-any-width` produces. The
         // island cannot tell the two apart from the number.
-        "int" => match core::field(heap, form, 0) {
-            Some(Value::Int(n)) => core::tagged(heap, "int", &[half((n as u64) >> 32), half(n as u64)]),
+        wk::INT => match core::field(heap, form, 0) {
+            Some(Value::Int(n)) => core::tagged(heap, wk::INT, &[half((n as u64) >> 32), half(n as u64)]),
             _ => Err(malformed(heap, form)),
         },
-        "unit" => core::tagged(heap, "unit", &[]),
+        wk::UNIT => core::tagged(heap, wk::UNIT, &[]),
         // The literal's payload is the *already rounded* number — an `f32`
         // literal arrives as the binary32 value widened into binary64 — so
         // the constant this emits is right for either width without the node
         // having to name one. What the width does decide is the box, and that
         // travels the other channel: `Repr::field_kind` (2 for `f64`, 11 for
         // `f32`), which is what `compile-sexpr-field` reads.
-        "float-any-width" => {
+        wk::FLOAT_ANY_WIDTH => {
             let bits = match core::field(heap, form, 0) {
                 Some(Value::Boxed(id)) => match heap.float_box(id) {
                     Some(typelisp_mem::FloatBox::F32(f)) => f64::from(f).to_bits(),
@@ -430,18 +430,18 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             // Each half fits, and `compile-float-any-width` reassembles them.
             core::tagged(
                 heap,
-                "float-any-width",
+                wk::FLOAT_ANY_WIDTH,
                 &[half(bits >> 32), half(bits)],
             )
         }
-        "bignum" => match core::field(heap, form, 0) {
+        wk::BIGNUM => match core::field(heap, form, 0) {
             Some(Value::Boxed(id)) if heap.is_bignum(id) => {
                 let n = heap.bignum_value(id).clone();
                 bignum_form(heap, &n)
             }
             _ => Err(malformed(heap, form)),
         },
-        "ratio" => match core::field(heap, form, 0) {
+        wk::RATIO => match core::field(heap, form, 0) {
             Some(Value::Boxed(id)) if heap.is_ratio(id) => {
                 let r = heap.ratio_value(id).clone();
                 let numer = bignum_form(heap, r.numer())?;
@@ -449,11 +449,11 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
                 f.push(numer);
                 let denom = bignum_form(f.heap(), r.denom())?;
                 f.push(denom);
-                f.finish("ratio")
+                f.finish(wk::RATIO)
             }
             _ => Err(malformed(heap, form)),
         },
-        "str" => match core::field(heap, form, 0) {
+        wk::STR => match core::field(heap, form, 0) {
             Some(Value::Str(id)) => {
                 let s = heap.string(id).to_string();
                 str_form(heap, &s)
@@ -462,7 +462,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         },
 
         // ---- variables ---------------------------------------------------
-        "var" => {
+        wk::VAR => {
             let Some(Value::Symbol(name)) = core::field(heap, form, 0) else {
                 return Err(malformed(heap, form));
             };
@@ -477,18 +477,18 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(name_v);
             if let Some(kind) = cell_kind {
                 f.push(Value::Int(kind));
-                f.finish("cellvar")
+                f.finish(wk::CELLVAR)
             } else {
                 // `is-fn`, which `compile-var` does not read — see the module
                 // comment on dead fields.
                 f.push(Value::Bool(false));
-                f.finish("var")
+                f.finish(wk::VAR)
             }
         }
 
         // ---- binding and control -----------------------------------------
-        "let" => translate_let(heap, form, cx),
-        "if" => {
+        wk::LET => translate_let(heap, form, cx),
+        wk::IF => {
             let parts = core::fields(heap, form)?;
             let [cond, then, els] = parts[..] else { return Err(malformed(heap, form)) };
             let mut f = Items::new(heap);
@@ -497,34 +497,34 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
                 let v = to_island(f.heap(), part, cx)?;
                 f.push(v);
             }
-            f.finish("if")
+            f.finish(wk::IF)
         }
-        "panic" => {
+        wk::PANIC => {
             let msg = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
             let v = to_island(f.heap(), msg, cx)?;
             f.push(v);
-            f.finish("panic")
+            f.finish(wk::PANIC)
         }
 
         // ---- calls -------------------------------------------------------
-        "task" => translate_spawn_call(heap, form, "spawn", cx),
-        "thread" => translate_spawn_call(heap, form, "spawn-thread", cx),
-        "spawn" => translate_spawn(heap, form, "rt_suspend_task", cx),
-        "spawn-thread" => translate_spawn(heap, form, "rt_suspend_thread", cx),
-        "tag" => translate_tag(heap, form, cx),
-        "call" => translate_call(heap, form, cx),
-        "assoc" => translate_assoc(heap, form, cx),
+        wk::TASK => translate_spawn_call(heap, form, wk::SPAWN, cx),
+        wk::THREAD => translate_spawn_call(heap, form, wk::SPAWN_THREAD, cx),
+        wk::SPAWN => translate_spawn(heap, form, "rt_suspend_task", cx),
+        wk::SPAWN_THREAD => translate_spawn(heap, form, "rt_suspend_thread", cx),
+        wk::TAG => translate_tag(heap, form, cx),
+        wk::CALL => translate_call(heap, form, cx),
+        wk::ASSOC => translate_assoc(heap, form, cx),
 
         // ---- assignment, loops and globals -------------------------------
-        "set" => translate_set(heap, form, cx),
+        wk::SET => translate_set(heap, form, cx),
         // `(loop REPR BODY...)` -> `(loop KIND BODY...)`. `KIND` is the
         // *binding* kind, not `field_kind`: the island passes it straight to
         // `binding-slot`, which asks only whether the collector may follow the
         // word in the loop's merge slot. That slot is live exactly while an
         // `unwind-protect` cleanup on the way out runs, and a cleanup can
         // allocate.
-        "loop" => {
+        wk::LOOP => {
             let kind = repr_binding_kind(heap, form, 0)?;
             let body = core::fields(heap, form)?;
             let mut f = Items::new(heap);
@@ -536,9 +536,9 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
                 let v = to_island(f.heap(), *e, cx)?;
                 f.push(v);
             }
-            f.finish("loop")
+            f.finish(wk::LOOP)
         }
-        "break" => core::tagged(heap, "break", &[]),
+        wk::BREAK => core::tagged(heap, wk::BREAK, &[]),
 
         // ---- named blocks ------------------------------------------------
         // `(block NAME BODY)` and `(return-from NAME [VALUE])` keep their
@@ -547,7 +547,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // island uses it to key a `Scope` while translating and to label a
         // basic block — never a value the generated code compares, which is
         // the whole difference from `catch`/`throw`'s tag.
-        "block" => {
+        wk::BLOCK => {
             let name = block_name(heap, form)?;
             let body = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
             // Trailing, where `loop`'s leads: this node's arity is fixed, so
@@ -560,9 +560,9 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             let b = to_island(f.heap(), body, cx)?;
             f.push(b);
             f.push(Value::Int(kind));
-            f.finish("block")
+            f.finish(wk::BLOCK)
         }
-        "return-from" => {
+        wk::RETURN_FROM => {
             let name = block_name(heap, form)?;
             let value = core::field(heap, form, 1);
             let mut f = Items::new(heap);
@@ -576,10 +576,10 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             // `compile-return-from` has one shape to handle — `return`'s rule.
             let v = match value {
                 Some(value) => to_island(f.heap(), value, cx)?,
-                None => core::tagged(f.heap(), "unit", &[])?,
+                None => core::tagged(f.heap(), wk::UNIT, &[])?,
             };
             f.push(v);
-            f.finish("return-from")
+            f.finish(wk::RETURN_FROM)
         }
 
         // ---- non-local exits ---------------------------------------------
@@ -617,7 +617,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // `alloca` was. Otherwise the tag pins the thrown type globally and
         // the catch's own type is the join of it and the body's, so one repr
         // describes both things the slot can hold.
-        "catch" => {
+        wk::CATCH => {
             let name = throw_tag_sym(heap, form)?;
             let kind = repr_kind(heap, form, 2)?;
             let bkind = repr_binding_kind(heap, form, 2)?;
@@ -629,9 +629,9 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             let b = to_island(f.heap(), body, cx)?;
             f.push(b);
             f.push(Value::Int(bkind));
-            f.finish("catch")
+            f.finish(wk::CATCH)
         }
-        "throw" => {
+        wk::THROW => {
             let name = throw_tag_sym(heap, form)?;
             let kind = repr_kind(heap, form, 2)?;
             let value = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
@@ -641,7 +641,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(Value::Int(kind));
             let v = to_island(f.heap(), value, cx)?;
             f.push(v);
-            f.finish("throw")
+            f.finish(wk::THROW)
         }
         // `(unwind-protect PROTECTED CLEANUP REPR)` -> the same two halves and
         // `KIND`. One repr, not two: the cleanup's value is discarded on every
@@ -649,7 +649,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // it waits in a slot *while the cleanup runs*, which is the one place
         // in the compiled output where a value is put away specifically so
         // that code which allocates can run.
-        "unwind-protect" => {
+        wk::UNWIND_PROTECT => {
             let protected = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let cleanup = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
             let kind = repr_binding_kind(heap, form, 2)?;
@@ -659,9 +659,9 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             let c = to_island(f.heap(), cleanup, cx)?;
             f.push(c);
             f.push(Value::Int(kind));
-            f.finish("unwind-protect")
+            f.finish(wk::UNWIND_PROTECT)
         }
-        "return" => {
+        wk::RETURN => {
             let value = core::field(heap, form, 0);
             let mut f = Items::new(heap);
             f.push(Value::Bool(false)); // `is-fn`, unread
@@ -669,16 +669,16 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             // a tag of its own, so `compile-return` has one shape to handle.
             let v = match value {
                 Some(value) => to_island(f.heap(), value, cx)?,
-                None => core::tagged(f.heap(), "unit", &[])?,
+                None => core::tagged(f.heap(), wk::UNIT, &[])?,
             };
             f.push(v);
-            f.finish("return")
+            f.finish(wk::RETURN)
         }
-        "global" => {
+        wk::GLOBAL => {
             let (id, kind) = global_id_and_kind(heap, form, cx)?;
-            core::tagged(heap, "global", &[Value::Int(id), Value::Int(kind)])
+            core::tagged(heap, wk::GLOBAL, &[Value::Int(id), Value::Int(kind)])
         }
-        "set-global" => {
+        wk::SET_GLOBAL => {
             let (id, kind) = global_id_and_kind(heap, form, cx)?;
             let value = core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
@@ -686,50 +686,50 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(Value::Int(kind));
             let v = to_island(f.heap(), value, cx)?;
             f.push(v);
-            f.finish("set-global")
+            f.finish(wk::SET_GLOBAL)
         }
 
         // ---- quoted data -------------------------------------------------
         // A quoted datum has no runtime representation to refer to — the
         // island builds it fresh — so both of these become the `construct`
         // nodes that build it. `sym` is exactly the one-symbol case.
-        "quote" => {
+        wk::QUOTE => {
             let datum = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             quoted_form(heap, datum)
         }
-        "sym" => {
+        wk::SYM => {
             let sym = symbol_field_sym(heap, form, 0)?;
             sym_form(heap, sym)
         }
 
         // ---- trait objects -----------------------------------------------
-        "dyn-new" => translate_dyn_new(heap, form, cx),
-        "dyn-upcast" => translate_dyn_upcast(heap, form, cx),
-        "dyn-call" => translate_dyn_call(heap, form, cx),
+        wk::DYN_NEW => translate_dyn_new(heap, form, cx),
+        wk::DYN_UPCAST => translate_dyn_upcast(heap, form, cx),
+        wk::DYN_CALL => translate_dyn_call(heap, form, cx),
         // Unwrapping a trait object: the operand is always one, by the
         // checker's own construction, and a trait object is an untraced word
         // at a binding boundary — so the kind is not something to look up.
-        "dyn-value" => {
+        wk::DYN_VALUE => {
             let inner = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
             let pair = dyn_operand(f.heap(), inner, cx)?;
             f.push(pair);
-            f.finish("dyn-value")
+            f.finish(wk::DYN_VALUE)
         }
         // The `int` boundary's two sides (`Checker::int_boundary_raw`): the
         // operand translated like any other, the tag kept, and the island
         // does the shift.
-        "untag-int" | "tag-int" => {
+        wk::UNTAG_INT | wk::TAG_INT => {
             let inner = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
             let v = to_island(f.heap(), inner, cx)?;
             f.push(v);
-            f.finish(&tag)
+            f.finish(tag)
         }
         // A niched `Option`'s `some`: `(some-of REPR E)` -> `(some-of KIND E)`.
         // The island tags `E`'s register value into its field word by
         // `KIND`, the same number a struct field of that type is tagged by.
-        "some-of" => {
+        wk::SOME_OF => {
             let repr = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let repr = Repr::read(heap, repr).ok_or_else(|| malformed(heap, form))?;
             let inner = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
@@ -737,11 +737,11 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(Value::Int(repr.field_kind()));
             let v = to_island(f.heap(), inner, cx)?;
             f.push(v);
-            f.finish("some-of")
+            f.finish(wk::SOME_OF)
         }
         // `(box-option KEY E)` -> `(box-option (str ...) E)`: the key crosses
         // as the island's string literal, the way every type identity does.
-        "box-option" => {
+        wk::BOX_OPTION => {
             let key = match core::field(heap, form, 0) {
                 Some(Value::Str(id)) => heap.string(id).to_string(),
                 _ => return Err(malformed(heap, form)),
@@ -752,7 +752,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(key);
             let v = to_island(f.heap(), inner, cx)?;
             f.push(v);
-            f.finish("box-option")
+            f.finish(wk::BOX_OPTION)
         }
 
         // Reflection: the REPL tool layer acts on the *running* interpreter's
@@ -766,11 +766,11 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         //
         // `room`/`dribble`/`ed` are deliberately absent from this list: they
         // are ordinary builtins, and a `defun` that calls one compiles.
-        "compile-fn" | "trace" | "untrace" | "step" | "disassemble-fn" => {
-            let what = match tag.as_str() {
-                "compile-fn" => "compile",
-                "disassemble-fn" => "disassemble",
-                other => other,
+        wk::COMPILE_FN | wk::TRACE | wk::UNTRACE | wk::STEP | wk::DISASSEMBLE_FN => {
+            let what = match tag {
+                wk::COMPILE_FN => "compile",
+                wk::DISASSEMBLE_FN => "disassemble",
+                other => BUILTIN_SYMBOLS[other as usize],
             };
             Err(Error::TypeError(format!(
                 "{}: `({} ...)` is an interpreter-only action and cannot itself be compiled",
@@ -779,20 +779,20 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         }
 
         // ---- functions ---------------------------------------------------
-        "lambda" => translate_lambda(heap, form, cx),
-        "labels" => translate_labels(heap, form, cx),
-        "apply" => translate_apply(heap, form, cx),
-        "fnref" => translate_fnref(heap, form, cx),
-        "methodref" => translate_methodref(heap, form, cx),
+        wk::LAMBDA => translate_lambda(heap, form, cx),
+        wk::LABELS => translate_labels(heap, form, cx),
+        wk::APPLY => translate_apply(heap, form, cx),
+        wk::FNREF => translate_fnref(heap, form, cx),
+        wk::METHODREF => translate_methodref(heap, form, cx),
 
         // ---- data --------------------------------------------------------
-        "construct" => translate_construct(heap, form, cx),
-        "field-get" => translate_field(heap, form, "field-get", cx),
-        "field-set" => translate_field(heap, form, "field-set", cx),
-        "match" => translate_match(heap, form, cx),
-        "select" => translate_select(heap, form, cx),
+        wk::CONSTRUCT => translate_construct(heap, form, cx),
+        wk::FIELD_GET => translate_field(heap, form, wk::FIELD_GET, cx),
+        wk::FIELD_SET => translate_field(heap, form, wk::FIELD_SET, cx),
+        wk::MATCH => translate_match(heap, form, cx),
+        wk::SELECT => translate_select(heap, form, cx),
 
-        other => Err(untranslated(other)),
+        _ => Err(untranslated(heap, form)),
     }
 }
 
@@ -809,11 +809,10 @@ fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     let mut f = Items::new(heap);
     for arm in &arms {
         let parts = f.heap().list_to_vec(*arm)?;
-        let Some(Value::Str(tag_id)) = parts.first() else { return Err(malformed(f.heap(), form)) };
-        let tag = f.heap().string(*tag_id).to_string();
+        let Some(Value::Symbol(tag)) = parts.first().copied() else { return Err(malformed(f.heap(), form)) };
         let mut a = Items::new(f.heap());
-        match tag.as_str() {
-            "recv" => {
+        match tag.well_known() {
+            wk::RECV => {
                 if parts.len() != 5 {
                     return Err(Error::TypeError("compile: malformed select receive arm".into()));
                 }
@@ -830,7 +829,7 @@ fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
                 let body = to_island(a.heap(), parts[4], cx)?;
                 a.push(body);
             }
-            "send" => {
+            wk::SEND => {
                 if parts.len() != 5 {
                     return Err(Error::TypeError("compile: malformed select send arm".into()));
                 }
@@ -843,7 +842,7 @@ fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
                 let body = to_island(a.heap(), parts[4], cx)?;
                 a.push(body);
             }
-            "else" => {
+            wk::KW_ELSE => {
                 if parts.len() != 2 {
                     return Err(Error::TypeError("compile: malformed select else arm".into()));
                 }
@@ -851,14 +850,14 @@ fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
                 let body = to_island(a.heap(), parts[1], cx)?;
                 a.push(body);
             }
-            other => {
-                return Err(Error::TypeError(format!("compile: select arm tag `{}`", other)));
+            _ => {
+                return Err(Error::TypeError(format!("compile: select arm tag `{}`", tag.spelling())));
             }
         }
         let arm = a.finish_list()?;
         f.push(arm);
     }
-    f.finish("select")
+    f.finish(wk::SELECT)
 }
 
 /// `(let ((SYM R E) ...) BODY...)` -> `(let (((SYM . kind) . form)...) body...)`.
@@ -910,7 +909,7 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
         let v = to_island(f.heap(), *e, cx)?;
         f.push(v);
     }
-    f.finish("let")
+    f.finish(wk::LET)
 }
 
 /// The leading fields of each call node — how many there are, and where the
@@ -919,16 +918,16 @@ fn translate_let(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// The *only* consumer is [`translate_spawn_call`], which takes the evaluated parts
 /// out of a call node and puts variables in their place. Everything else
 /// about these nodes is decided by their own translations.
-fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
+fn call_node_shape(tag: u32) -> Option<(usize, usize)> {
     match tag {
         // `(call PATH (R...) ARG...)`
-        "call" => Some((2, 1)),
+        wk::CALL => Some((2, 1)),
         // `(assoc PATH SYM INSTANCE RET-R (R...) RET-KEY ARG...)`
-        "assoc" => Some((6, 4)),
+        wk::ASSOC => Some((6, 4)),
         // `(dyn-call PATH SYM SLOT VTABLE (R...) ARG...)`
-        "dyn-call" => Some((5, 4)),
+        wk::DYN_CALL => Some((5, 4)),
         // `(apply CALLEE RET-R (R...) ARG...)`
-        "apply" => Some((3, 2)),
+        wk::APPLY => Some((3, 2)),
         _ => None,
     }
 }
@@ -962,13 +961,16 @@ fn call_node_shape(tag: &str) -> Option<(usize, usize)> {
 ///
 /// `(thread RET-R KEY CALL)` is the same rewriting with `spawn-thread` for
 /// `spawn` — `spawn` names which.
-fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> Result<Value, Error> {
+fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: u32, cx: Ctx) -> Result<Value, Error> {
     let ret_repr = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
     let key = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let call = core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?;
-    let tag = core::op(heap, call).ok_or_else(|| malformed(heap, form))?.to_string();
-    let (skip, repr_at) = call_node_shape(&tag).ok_or_else(|| {
-        Error::TypeError(format!("compile: `task` wraps a `{}`, which is not a call (internal error)", tag))
+    let tag = core::op_wk(heap, call).ok_or_else(|| malformed(heap, form))?;
+    let (skip, repr_at) = call_node_shape(tag).ok_or_else(|| {
+        Error::TypeError(format!(
+            "compile: `task` wraps a `{}`, which is not a call (internal error)",
+            core::op_spelling(heap, call).unwrap_or_default()
+        ))
     })?;
     let parts = core::fields(heap, call)?;
     if parts.len() < skip {
@@ -983,7 +985,7 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> R
     // Every evaluated part with the representation it is bound at: an
     // `apply`'s callee first (a function value), then the arguments.
     let mut hoisted: Vec<(Repr, Value)> = Vec::with_capacity(args.len() + 1);
-    if tag == "apply" {
+    if tag == wk::APPLY {
         hoisted.push((Repr::Fn, parts[0]));
     }
     hoisted.extend(reprs.iter().cloned().zip(args.iter().copied()));
@@ -1016,28 +1018,28 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: &str, cx: Ctx) -> R
     // g)`. An `apply`'s callee sits in field 0 of the head.
     let mut vars = Vec::with_capacity(names.len());
     for name in &names {
-        let v = core::tagged(&mut s, "var", &[Value::Symbol(*name)])?;
+        let v = core::tagged(&mut s, wk::VAR, &[Value::Symbol(*name)])?;
         s.push_root(v);
         vars.push(v);
     }
     let mut call_fields: Vec<Value> = parts[..skip].to_vec();
     let mut vars_iter = vars.iter().copied();
-    if tag == "apply" {
+    if tag == wk::APPLY {
         call_fields[0] = vars_iter.next().ok_or_else(|| malformed(&s, call))?;
     }
     call_fields.extend(vars_iter);
-    let call2 = core::tagged(&mut s, &tag, &call_fields)?;
+    let call2 = core::tagged(&mut s, tag, &call_fields)?;
     s.push_root(call2);
 
-    let tagged = core::tagged(&mut s, "tag", &[ret_repr, call2])?;
+    let tagged = core::tagged(&mut s, wk::TAG, &[ret_repr, call2])?;
     s.push_root(tagged);
     let no_params = core::list(&mut s, &[])?;
     s.push_root(no_params);
-    let lambda = core::tagged(&mut s, "lambda", &[no_params, ret_repr, tagged])?;
+    let lambda = core::tagged(&mut s, wk::LAMBDA, &[no_params, ret_repr, tagged])?;
     s.push_root(lambda);
     let spawn = core::tagged(&mut s, spawn, &[ret_repr, key, lambda])?;
     s.push_root(spawn);
-    let let_form = core::tagged(&mut s, "let", &[binds_list, spawn])?;
+    let let_form = core::tagged(&mut s, wk::LET, &[binds_list, spawn])?;
     s.push_root(let_form);
 
     let by_value: HashSet<SymRef> = cx.by_value.iter().copied().chain(names.iter().copied()).collect();
@@ -1090,7 +1092,7 @@ fn translate_tag(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
     f.push(Value::Int(kind));
     let e = to_island(f.heap(), expr, cx)?;
     f.push(e);
-    f.finish("tag")
+    f.finish(wk::TAG)
 }
 
 /// `(call PATH (R...) E...)` -> `(call "name" (kind . form)...)`.
@@ -1140,14 +1142,14 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     let mut f = Items::new(heap);
     f.push(name_v);
     arg_pairs(&mut f, &reprs, &args, cx)?;
-    let call = f.finish("call")?;
+    let call = f.finish(wk::CALL)?;
     let Some(to_main) = to_main else { return Ok(call) };
     heap.push_root(call);
     let mut seq = Items::new(heap);
     seq.push(Value::Empty);
     seq.push(to_main);
     seq.push(call);
-    let node = seq.finish("let");
+    let node = seq.finish(wk::LET);
     heap.pop_root();
     heap.pop_root();
     node
@@ -1198,7 +1200,7 @@ fn suspend_node(
         let pair = core::pair(f.heap(), Value::Int(Repr::Str.binding_kind()), island_form)?;
         f.push(pair);
     }
-    f.finish("suspend")
+    f.finish(wk::SUSPEND)
 }
 
 /// `(assoc PATH SYM INSTANCE HOME RET-R (R...) E...)` -> one of four nodes.
@@ -1275,7 +1277,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             let mut f = Items::new(heap);
             f.push(name_v);
             arg_pairs(&mut f, &reprs, &args, cx)?;
-            return f.finish("call");
+            return f.finish(wk::CALL);
         }
     }
     if let Some(key) = llvm_op_key(&type_name, &self_repr) {
@@ -1283,7 +1285,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         let mut f = Items::new(heap);
         f.push(opid);
         arg_pairs(&mut f, &reprs, &args, cx)?;
-        return f.finish("llvm-op");
+        return f.finish(wk::LLVM_OP);
     }
 
     // The generic path: `(assoc TYPE METHOD INSTANCE SYMBOL ARG...)`. The
@@ -1301,7 +1303,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     let symbol_v = f.heap().alloc_string(symbol);
     f.push(symbol_v);
     arg_pairs(&mut f, &reprs, &args, cx)?;
-    f.finish("assoc")
+    f.finish(wk::ASSOC)
 }
 
 /// Which `rt_llvm_call` dispatch key an `assoc` belongs to, or `None` for the
@@ -1369,7 +1371,7 @@ fn translate_vector_op(
         let name = str_form(f.heap(), ret_key)?;
         f.push(name);
     }
-    f.finish("vector-op")
+    f.finish(wk::VECTOR_OP)
 }
 
 /// A `HashTable<K,V>` builtin -> `(hashtable-op method key-kind val-kind
@@ -1408,7 +1410,7 @@ fn translate_hashtable_op(
             f.push(v);
         }
     }
-    f.finish("hashtable-op")
+    f.finish(wk::HASHTABLE_OP)
 }
 
 /// `(set SYM E)` -> `(set "name" kind value-form)`.
@@ -1441,7 +1443,7 @@ fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
     f.push(Value::Int(kind));
     let v = to_island(f.heap(), value, cx)?;
     f.push(v);
-    f.finish(if is_cell { "cellset" } else { "set" })
+    f.finish(if is_cell { wk::CELLSET } else { wk::SET })
 }
 
 /// The compiled-global id and kind shared by `(global ...)` and
@@ -1555,8 +1557,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
     if !matches!(form, Value::Cons(_)) {
         return Ok(());
     }
-    let tag = core::op(heap, form).map(|s| s.to_string());
-    let Some(tag) = tag else {
+    let Some(tag) = core::op_wk(heap, form) else {
         // A cons whose head is not a symbol: not a node but a *list* of them —
         // a `match` arm (`(PATTERN BODY...)`), a `labels` definition. Walk its
         // elements rather than treating it as a form with fields, which would
@@ -1566,27 +1567,27 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         }
         return Ok(());
     };
-    match tag.as_str() {
+    match tag {
         // The one fence in the whole walk. User data appears nowhere else, so
         // this is the only place a cons can be something other than a node —
         // and a quoted `(call ...)` datum is data, not a dependency.
-        "quote" => return Ok(()),
+        wk::QUOTE => return Ok(()),
         // `(call PATH (REPR...) ARG...)`, and `fnref`'s first field is the
         // same path — the bridge turns a `fnref` into a forwarding call, so
         // its target needs the same treatment.
-        "call" | "fnref" => {
+        wk::CALL | wk::FNREF => {
             if let Some(p) = core::path_field(heap, form, 0) {
                 push_unique(&mut t.calls, p);
             }
         }
         // `(assoc PATH SYM ...)` / `(methodref PATH SYM ...)`.
-        "assoc" | "methodref" => {
+        wk::ASSOC | wk::METHODREF => {
             if let (Some(p), Some(m)) = (core::path_field(heap, form, 0), core::sym_name_field(heap, form, 1)) {
                 push_unique(&mut t.methods, (p, m));
             }
         }
         // `(global PATH REPR)` and `set-global`'s same leading path.
-        "global" | "set-global" => {
+        wk::GLOBAL | wk::SET_GLOBAL => {
             if let Some(p) = core::path_field(heap, form, 0) {
                 push_unique(&mut t.globals, p);
             }
@@ -1594,7 +1595,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // Boxing a trait object is what pulls its whole vtable into the call
         // graph: the *call* through it has no statically known target, but
         // every target it could reach is right here in the slot list.
-        "dyn-new" => {
+        wk::DYN_NEW => {
             let key = match core::field(heap, form, 0) {
                 Some(Value::Str(id)) => heap.string(id).to_string(),
                 _ => return Ok(()),
@@ -1612,7 +1613,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // The conversion calls nothing — it swaps the box's table for one the
         // *boxing* site already registered. Only the target trait's id has to
         // be interned before translation.
-        "dyn-upcast" => {
+        wk::DYN_UPCAST => {
             if let Some(p) = core::path_field(heap, form, 0) {
                 push_unique(&mut t.dyn_upcasts, p);
             }
@@ -1620,7 +1621,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) (REPR...) ARG...)` — no
         // static target, but every implementation it could dispatch to must
         // exist natively before this body can run natively.
-        "dyn-call" => {
+        wk::DYN_CALL => {
             if let Some(p) = core::path_field(heap, form, 0) {
                 push_unique(&mut t.dyn_traits, p);
             }
@@ -1697,13 +1698,13 @@ fn supers_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, Vec<(Path,
 }
 
 pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Function>, Error> {
-    let Some(tag) = core::op(heap, form).map(str::to_string) else {
+    let Some(tag) = core::op_wk(heap, form) else {
         return Err(malformed(heap, form));
     };
     let parts = core::fields(heap, form)?;
-    let (name, params, body) = match tag.as_str() {
+    let (name, params, body) = match tag {
         // `(defun PATH ((SYM R)...) RET-R E...)`
-        "defun" => {
+        wk::DEFUN => {
             if parts.len() < 3 {
                 return Err(malformed(heap, form));
             }
@@ -1711,7 +1712,7 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
             (callee_symbol_name(&path), params_of(heap, parts[1])?, parts[3..].to_vec())
         }
         // `(defmethod PATH SYM INSTANCE ((SYM R)...) RET-R E...)`
-        "defmethod" => {
+        wk::DEFMETHOD => {
             if parts.len() < 5 {
                 return Err(malformed(heap, form));
             }
@@ -1796,7 +1797,7 @@ pub fn global_init(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Option<Value
     f.push(Value::Int(repr.field_kind()));
     let v = to_island(f.heap(), value, inner)?;
     f.push(v);
-    Ok(Some(f.finish("global-init")?))
+    Ok(Some(f.finish(wk::GLOBAL_INIT)?))
 }
 
 /// `sexpr`'s own variant numbers, which a quoted datum is built out of.
@@ -1822,7 +1823,7 @@ use crate::sexpr_variant::{
 fn sexpr_construct(heap: &mut Heap, variant: usize, fields: &[Value]) -> Result<Value, Error> {
     let mut items = vec![Value::Bool(true), Value::Bool(false), Value::Empty, Value::Int(variant as i64)];
     items.extend_from_slice(fields);
-    core::tagged(heap, "construct", &items)
+    core::tagged(heap, wk::CONSTRUCT, &items)
 }
 
 /// The same with one field, built by `leaf` while it stays rooted.
@@ -1885,9 +1886,9 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         // An `int` node's payload is the *tagged* word: the `(int HI LO)`
         // literal (a fixnum, `compile-int-literal`), never the raw
         // `int-any-width` one — the `int` variant passes its argument through.
-        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, "int", &[half((n as u64) >> 32), half(n as u64)])),
-        Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, "bool", &[Value::Bool(b)])),
-        Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, "char", &[Value::Char(c)])),
+        Value::Int(n) => sexpr_leaf(heap, SEXPR_INT, |h| core::tagged(h, wk::INT, &[half((n as u64) >> 32), half(n as u64)])),
+        Value::Bool(b) => sexpr_leaf(heap, SEXPR_BOOL, |h| core::tagged(h, wk::BOOL, &[Value::Bool(b)])),
+        Value::Char(c) => sexpr_leaf(heap, SEXPR_CHAR, |h| core::tagged(h, wk::CHAR, &[Value::Char(c)])),
         Value::Str(id) => {
             let text = heap.string(id).to_string();
             sexpr_leaf(heap, SEXPR_STR, |h| str_form(h, &text))
@@ -1909,7 +1910,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         Value::Boxed(id) if heap.is_f32(id) => {
             let bits = f64::from(heap.f32_value(id)).to_bits();
             sexpr_leaf(heap, SEXPR_F32, move |h| {
-                core::tagged(h, "float-any-width", &[half(bits >> 32), half(bits)])
+                core::tagged(h, wk::FLOAT_ANY_WIDTH, &[half(bits >> 32), half(bits)])
             })
         }
         Value::Boxed(id) if heap.is_f64(id) => {
@@ -1917,7 +1918,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             sexpr_leaf(heap, SEXPR_F64, move |h| {
                 core::tagged(
                     h,
-                    "float-any-width",
+                    wk::FLOAT_ANY_WIDTH,
                     &[half(bits >> 32), half(bits)],
                 )
             })
@@ -1935,7 +1936,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
                 f.push(numer);
                 let denom = bignum_form(f.heap(), r.denom())?;
                 f.push(denom);
-                f.finish("ratio")
+                f.finish(wk::RATIO)
             })
         }
         // `#(..)` and `#nA(..)`. Taken apart into lists like any other quoted
@@ -2063,7 +2064,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
     let mut f = Items::new(heap);
     f.push(Value::Int(id as i64));
     arg_pairs(&mut f, std::slice::from_ref(&repr), &[parts[5]], cx)?;
-    f.finish("dyn-new")
+    f.finish(wk::DYN_NEW)
 }
 
 /// `(dyn-upcast PATH E)` -> `(dyn-upcast trait-id (kind . value))`.
@@ -2084,7 +2085,7 @@ fn translate_dyn_upcast(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, 
     f.push(Value::Int(id as i64));
     let pair = dyn_operand(f.heap(), value, cx)?;
     f.push(pair);
-    f.finish("dyn-upcast")
+    f.finish(wk::DYN_UPCAST)
 }
 
 /// `(dyn-call PATH SYM N ((PATH SYM)...) (R...) E...)` -> `(dyn-call slot
@@ -2105,7 +2106,7 @@ fn translate_dyn_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Er
     let mut f = Items::new(heap);
     f.push(Value::Int(slot));
     arg_pairs(&mut f, &reprs, &args, cx)?;
-    f.finish("dyn-call")
+    f.finish(wk::DYN_CALL)
 }
 
 /// A `((SYM . kind) ...)` list — a lambda's parameters, or a captured
@@ -2159,7 +2160,7 @@ fn body_form(heap: &mut Heap, body: &[Value], cx: Ctx) -> Result<Value, Error> {
                 let v = to_island(f.heap(), *e, cx)?;
                 f.push(v);
             }
-            f.finish("let")
+            f.finish(wk::LET)
         }
     }
 }
@@ -2222,7 +2223,7 @@ fn translate_lambda(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     f.push(param_list);
     let body_v = body_form(f.heap(), &body, inner)?;
     f.push(body_v);
-    f.finish("lambda")
+    f.finish(wk::LAMBDA)
 }
 
 /// `(labels ((SYM ((SYM R)...) RET-R E...) ...) E...)` -> `(labels
@@ -2331,7 +2332,7 @@ fn translate_labels(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
     let trailing = Ctx { cell_names: &trailing_cells, ..base };
     let body_v = body_form(f.heap(), &body, trailing)?;
     f.push(body_v);
-    f.finish("labels")
+    f.finish(wk::LABELS)
 }
 
 /// `(apply E RET-R (R...) E...)` -> one of three island nodes, on the callee's
@@ -2353,21 +2354,21 @@ fn translate_apply(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     let reprs = repr_list(heap, parts[2])?;
     let args = parts[3..].to_vec();
 
-    match (core::op(heap, callee), core::field(heap, callee, 0)) {
-        (Some("var"), Some(Value::Symbol(name))) if cx.direct.contains(&name) => {
+    match (core::op_wk(heap, callee), core::field(heap, callee, 0)) {
+        (Some(wk::VAR), Some(Value::Symbol(name))) if cx.direct.contains(&name) => {
             let name_v = heap.alloc_string(heap.symbol_spelling(name).to_string());
             let mut f = Items::new(heap);
             f.push(name_v);
             arg_pairs(&mut f, &reprs, &args, cx)?;
-            f.finish("apply")
+            f.finish(wk::APPLY)
         }
-        (Some("lambda"), _) => translate_immediate_lambda_call(heap, callee, parts[2], &args, cx),
+        (Some(wk::LAMBDA), _) => translate_immediate_lambda_call(heap, callee, parts[2], &args, cx),
         _ => {
             let mut f = Items::new(heap);
             let callee_v = to_island(f.heap(), callee, cx)?;
             f.push(callee_v);
             arg_pairs(&mut f, &reprs, &args, cx)?;
-            f.finish("apply-indirect")
+            f.finish(wk::APPLY_INDIRECT)
         }
     }
 }
@@ -2409,15 +2410,15 @@ fn translate_immediate_lambda_call(
     // `(apply (var NAME) RET-R (R...) ARG...)`. The return representation comes
     // from the lambda's own declaration rather than being threaded in from the
     // outer `apply` — same value, and this is the authoritative side of it.
-    let callee = core::tagged(&mut s, "var", &[name])?;
+    let callee = core::tagged(&mut s, wk::VAR, &[name])?;
     s.push_root(callee);
     let call = {
         let mut items = vec![callee, ret, arg_reprs];
         items.extend(args.iter().copied());
-        core::tagged(&mut s, "apply", &items)?
+        core::tagged(&mut s, wk::APPLY, &items)?
     };
     s.push_root(call);
-    let block = core::tagged(&mut s, "labels", &[defs, call])?;
+    let block = core::tagged(&mut s, wk::LABELS, &[defs, call])?;
     s.push_root(block);
     translate_labels(&mut s, block, cx)
 }
@@ -2442,7 +2443,7 @@ fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
         let mut f = Items::new(heap);
         f.push(name_v);
         f.extend(forwarded.iter().copied());
-        f.finish("call")
+        f.finish(wk::CALL)
     })
 }
 
@@ -2466,7 +2467,7 @@ fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
         let symbol_v = f.heap().alloc_string(symbol);
         f.push(symbol_v);
         f.extend(forwarded.iter().copied());
-        f.finish("assoc")
+        f.finish(wk::ASSOC)
     })
 }
 
@@ -2511,7 +2512,7 @@ fn forwarding_lambda(
             let text = s.symbol_spelling(*name).to_string();
             let name_v = s.alloc_string(text);
             s.push_root(name_v);
-            let var = core::tagged(&mut s, "var", &[name_v, Value::Bool(false)])?;
+            let var = core::tagged(&mut s, wk::VAR, &[name_v, Value::Bool(false)])?;
             s.push_root(var);
             let pair = core::pair(&mut s, Value::Int(repr.binding_kind()), var)?;
             s.push_root(pair);
@@ -2527,7 +2528,7 @@ fn forwarding_lambda(
     // was built; the node's own fields are the first three plus the body.
     let mut items: Vec<Value> = f.as_slice()[..3].to_vec();
     items.push(body);
-    core::tagged(f.heap(), "lambda", &items)
+    core::tagged(f.heap(), wk::LAMBDA, &items)
 }
 
 /// `(construct PATH N MUTABLE E...)` -> `(construct is-sexpr mutable
@@ -2577,7 +2578,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
             let v = to_island(f.heap(), *a, cx)?;
             f.push(v);
         }
-        return f.finish("construct");
+        return f.finish(wk::CONSTRUCT);
     }
     if field_reprs.len() != args.len() {
         return Err(Error::TypeError(format!(
@@ -2592,7 +2593,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     // take `field_kind` — not `binding_kind`, which only says whether a root
     // is wanted. Here the exact tagged shape to build is what matters.
     arg_pairs_with(&mut f, &field_reprs, &args, Repr::field_kind, cx)?;
-    f.finish("construct")
+    f.finish(wk::CONSTRUCT)
 }
 
 /// `(field-get E N R)` -> `(field-get idx-list kind obj)`, and the same for
@@ -2603,11 +2604,11 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
 /// `i64`, with no narrowing primitive exposed to compiled code — but
 /// `sexpr-list-length` already returns `i32`, so a list of the right length
 /// sidesteps the missing conversion. Field indices are small.
-fn translate_field(heap: &mut Heap, form: Value, tag: &str, cx: Ctx) -> Result<Value, Error> {
+fn translate_field(heap: &mut Heap, form: Value, tag: u32, cx: Ctx) -> Result<Value, Error> {
     let parts = core::fields(heap, form)?;
     let (obj, idx, repr, value) = match parts[..] {
-        [obj, idx, repr] if tag == "field-get" => (obj, idx, repr, None),
-        [obj, idx, repr, value] if tag == "field-set" => (obj, idx, repr, Some(value)),
+        [obj, idx, repr] if tag == wk::FIELD_GET => (obj, idx, repr, None),
+        [obj, idx, repr, value] if tag == wk::FIELD_SET => (obj, idx, repr, Some(value)),
         _ => return Err(malformed(heap, form)),
     };
     let Value::Int(idx) = idx else { return Err(malformed(heap, form)) };
@@ -2705,7 +2706,7 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
                     let v = to_island(b.heap(), *e, arm_cx)?;
                     b.push(v);
                 }
-                b.finish("let")?
+                b.finish(wk::LET)?
             };
             s.push_root(body);
             let pair = core::pair(&mut s, pat, body)?;
@@ -2718,7 +2719,7 @@ fn translate_match(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // The trailing kind, which the island reads off each `pat-ctor` instead —
     // see the module comment on dead fields.
     f.push(Value::Int(kind));
-    f.finish("match")
+    f.finish(wk::MATCH)
 }
 
 /// `(((SYM . KIND) . (var "SYM" false))...)` — the `let` bindings that give a
@@ -2743,7 +2744,7 @@ fn cell_bindings(heap: &mut Heap, cells: &[(SymRef, Repr)], cx: Ctx) -> Result<V
         s.push_root(name_v);
         // `is-fn`, which `compile-var` does not read — the same trailing
         // field `translate_fnref`'s hand-built references carry.
-        let init = core::tagged(&mut s, "var", &[name_v, Value::Bool(false)])?;
+        let init = core::tagged(&mut s, wk::VAR, &[name_v, Value::Bool(false)])?;
         s.push_root(init);
         let pair = core::pair(&mut s, name_pair, init)?;
         s.push_root(pair);
@@ -2769,27 +2770,27 @@ fn pattern_bindings(
     cx: Ctx,
     out: &mut Vec<(SymRef, Repr)>,
 ) -> Result<(), Error> {
-    let Some(tag) = core::op(heap, pat).map(str::to_string) else { return Ok(()) };
-    match tag.as_str() {
-        "pat-bind" => out.push((symbol_field_sym(heap, pat, 0)?, value.clone())),
+    let Some(tag) = core::op_wk(heap, pat) else { return Ok(()) };
+    match tag {
+        wk::PAT_BIND => out.push((symbol_field_sym(heap, pat, 0)?, value.clone())),
         // The name the test reads the scrutinee through. Bound only while
         // that test runs, and at the same representation as the value under
         // test — the arm body cannot name it.
-        "pat-guard" => out.push((symbol_field_sym(heap, pat, 0)?, value.clone())),
+        wk::PAT_GUARD => out.push((symbol_field_sym(heap, pat, 0)?, value.clone())),
         // A guarded arm binds what its pattern binds; the test binds nothing.
-        "pat-when" => {
+        wk::PAT_WHEN => {
             let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
             pattern_bindings(heap, sub, value, cx, out)?;
         }
         // The niche: `(some P)` over a niched `Option<T>` applies `P` to the
         // payload read back at `T`'s representation — which the node carries.
-        "pat-some" => {
+        wk::PAT_SOME => {
             let repr = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
             let payload = Repr::read(heap, repr).ok_or_else(|| malformed(heap, pat))?;
             let sub = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
             pattern_bindings(heap, sub, &payload, cx, out)?;
         }
-        "pat-ctor" => {
+        wk::PAT_CTOR => {
             let parts = core::fields(heap, pat)?;
             if parts.len() < 5 {
                 return Err(malformed(heap, pat));
@@ -2802,7 +2803,7 @@ fn pattern_bindings(
         // The whole value, seen as the downcast target: the same word, whose
         // representation follows from what that type is — the same three-way
         // classification `translate_ctor_pattern` makes for its own kind.
-        "pat-typetest" => {
+        wk::PAT_TYPETEST => {
             let path = as_path(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
             let sub = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
@@ -2836,19 +2837,19 @@ fn pattern_bindings(
 /// the island instead would mean a second copy of [`Repr`]'s classification
 /// living in the self-hosted compiler.
 fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Result<Value, Error> {
-    let Some(tag) = core::op(heap, pat).map(str::to_string) else {
+    let Some(tag) = core::op_wk(heap, pat) else {
         return Err(malformed(heap, pat));
     };
-    match tag.as_str() {
-        "pat-wild" => core::tagged(heap, "pat-wild", &[]),
+    match tag {
+        wk::PAT_WILD => core::tagged(heap, wk::PAT_WILD, &[]),
         // Nothing to carry: the node *is* the test.
-        "pat-empty" => core::tagged(heap, "pat-empty", &[]),
+        wk::PAT_EMPTY => core::tagged(heap, wk::PAT_EMPTY, &[]),
         // `(pat-some REPR P)` -> `(pat-some KIND P)`: after the emptiness
         // test the island reads the payload back through `KIND` (a fixnum
         // untagged, a float box opened, a tagged word passed through) and
         // applies `P` to that — so `P` is translated at the payload's
         // representation, not the `Option`'s.
-        "pat-some" => {
+        wk::PAT_SOME => {
             let repr = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
             let payload = Repr::read(heap, repr).ok_or_else(|| malformed(heap, pat))?;
             let sub = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
@@ -2856,7 +2857,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             f.push(Value::Int(payload.field_kind()));
             let sub = translate_pattern(f.heap(), sub, &payload, cx)?;
             f.push(sub);
-            f.finish("pat-some")
+            f.finish(wk::PAT_SOME)
         }
         // `(pat-bind SYM)` -> `(pat-bind "SYM" KIND)`. The name crosses as a
         // string because the island's `env` is keyed by one; the kind is
@@ -2864,23 +2865,23 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
         // `bind-let-values` already take off their own nodes. Never a cell
         // (`10 +`): a captured arm binding is rebound by the `let` this match
         // arm's body is wrapped in, and the pattern binder stays a plain slot.
-        "pat-bind" => {
+        wk::PAT_BIND => {
             let name = symbol_field(heap, pat, 0)?;
             let name_v = heap.alloc_string(name);
             let mut f = Items::new(heap);
             f.push(name_v);
             f.push(Value::Int(value.binding_kind()));
-            f.finish("pat-bind")
+            f.finish(wk::PAT_BIND)
         }
         // The island compares against one `const-word`, whatever the literal's
         // kind, so the conversion happens here: there is no `char`/`bool` to
         // `i64` primitive in the compiled language to do it there.
-        "pat-lit" => {
+        wk::PAT_LIT => {
             let lit = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
-            let n = match (core::op(heap, lit), core::field(heap, lit, 0)) {
-                (Some("int-any-width"), Some(Value::Int(n))) => n,
-                (Some("bool"), Some(Value::Bool(b))) => i64::from(b),
-                (Some("char"), Some(Value::Char(c))) => c as i64,
+            let n = match (core::op_wk(heap, lit), core::field(heap, lit, 0)) {
+                (Some(wk::INT_ANY_WIDTH), Some(Value::Int(n))) => n,
+                (Some(wk::BOOL), Some(Value::Bool(b))) => i64::from(b),
+                (Some(wk::CHAR), Some(Value::Char(c))) => c as i64,
                 _ => return Err(malformed(heap, pat)),
             };
             // Two 32-bit halves, like every other integer crossing into the
@@ -2890,7 +2891,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             // halves" has no exceptions to remember.
             core::tagged(
                 heap,
-                "pat-lit",
+                wk::PAT_LIT,
                 &[half((n as u64) >> 32), half(n as u64)],
             )
         }
@@ -2899,7 +2900,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
         // island's `env` is keyed by `string` — and the test is an ordinary
         // expression, translated like any other. The kind is the value under
         // test's own, `pat-bind`'s trailing field for the same reason.
-        "pat-guard" => {
+        wk::PAT_GUARD => {
             let name = symbol_field(heap, pat, 0)?;
             let test = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
             let name_v = heap.alloc_string(name);
@@ -2908,14 +2909,14 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             let test = to_island(f.heap(), test, cx)?;
             f.push(test);
             f.push(Value::Int(value.binding_kind()));
-            f.finish("pat-guard")
+            f.finish(wk::PAT_GUARD)
         }
         // `(pat-when P TEST)` -> `(pat-when P' TEST')`. `cx` is the arm's,
         // so `P`'s bindings are already in it for `TEST` to read. A binding
         // a closure captures is read through a cell, and the body gets its
         // cells from a `let` that `translate_match` wraps it in; the test
         // runs before the body, so it is wrapped in the same `let` of its own.
-        "pat-when" => {
+        wk::PAT_WHEN => {
             let sub = core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?;
             let test = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
             let mut s = RootScope::new(heap);
@@ -2933,15 +2934,15 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
                 b.push(bindings);
                 let t = to_island(b.heap(), test, cx)?;
                 b.push(t);
-                b.finish("let")?
+                b.finish(wk::LET)?
             };
             s.push_root(test_t);
-            core::tagged(&mut s, "pat-when", &[sub_t, test_t])
+            core::tagged(&mut s, wk::PAT_WHEN, &[sub_t, test_t])
         }
         // Its sub-patterns bind at the per-field representations the node
         // carries, so the enclosing value's is not passed on.
-        "pat-ctor" => translate_ctor_pattern(heap, pat, cx),
-        "pat-typetest" => {
+        wk::PAT_CTOR => translate_ctor_pattern(heap, pat, cx),
+        wk::PAT_TYPETEST => {
             // The node's own key, not one rebuilt from the path: the checker
             // spelled the instantiation, and the island compares the string it
             // is given against the one `construct` wrote.
@@ -2966,9 +2967,9 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             f.push(name);
             let inner = translate_pattern(f.heap(), inner, &inner_repr, cx)?;
             f.push(inner);
-            f.finish("pat-typetest")
+            f.finish(wk::PAT_TYPETEST)
         }
-        other => Err(untranslated(other)),
+        _ => Err(untranslated(heap, pat)),
     }
 }
 
@@ -3042,7 +3043,7 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     // test it at run time.
     let type_name = if downcast { str_form(f.heap(), &key)? } else { Value::Empty };
     f.push(type_name);
-    f.finish("pat-ctor")
+    f.finish(wk::PAT_CTOR)
 }
 
 // ---- shared pieces --------------------------------------------------------
@@ -3193,7 +3194,7 @@ fn half(bits: u64) -> Value {
 fn int_node(heap: &mut Heap, n: i64) -> Result<Value, Error> {
     core::tagged(
         heap,
-        "int-any-width",
+        wk::INT_ANY_WIDTH,
         &[half((n as u64) >> 32), half(n as u64)],
     )
 }
@@ -3210,7 +3211,7 @@ fn str_form(heap: &mut Heap, s: &str) -> Result<Value, Error> {
         let node = int_node(f.heap(), c as i64)?;
         f.push(node);
     }
-    f.finish("str")
+    f.finish(wk::STR)
 }
 
 /// `(bignum (int sign) (int d0) ...)` — the sign and the base-2^32 digits,
@@ -3230,7 +3231,7 @@ fn bignum_form(heap: &mut Heap, n: &num_bigint::BigInt) -> Result<Value, Error> 
         let node = int_node(f.heap(), d as i64)?;
         f.push(node);
     }
-    f.finish("bignum")
+    f.finish(wk::BIGNUM)
 }
 
 #[cfg(test)]

@@ -13,7 +13,7 @@
 extern crate typelisp;
 
 use typelisp::check::core;
-use typelisp::{Heap, Loc, Value};
+use typelisp::{wk, Heap, Loc, Value};
 
 /// A heap in stress mode: every `cons` collects first.
 fn stress_heap() -> Heap {
@@ -27,10 +27,10 @@ fn stress_heap() -> Heap {
 #[test]
 fn tagged_builds_a_tagged_proper_list() {
     let mut h = stress_heap();
-    let node = core::tagged(&mut h, "int-any-width", &[Value::Int(42)]).unwrap();
+    let node = core::tagged(&mut h, wk::INT_ANY_WIDTH, &[Value::Int(42)]).unwrap();
     h.push_root(node);
 
-    assert_eq!(core::op(&h, node), Some("int-any-width"));
+    assert_eq!(core::op_spelling(&h, node), Some("int-any-width"));
     assert_eq!(core::fields(&h, node).unwrap(), vec![Value::Int(42)]);
     assert_eq!(core::field(&h, node, 0), Some(Value::Int(42)));
     assert_eq!(core::field(&h, node, 1), None);
@@ -40,10 +40,10 @@ fn tagged_builds_a_tagged_proper_list() {
 #[test]
 fn a_tag_with_no_fields_is_still_a_list() {
     let mut h = stress_heap();
-    let node = core::tagged(&mut h, "break", &[]).unwrap();
+    let node = core::tagged(&mut h, wk::BREAK, &[]).unwrap();
     h.push_root(node);
 
-    assert_eq!(core::op(&h, node), Some("break"));
+    assert_eq!(core::op_spelling(&h, node), Some("break"));
     assert!(core::fields(&h, node).unwrap().is_empty());
     assert_eq!(core::print(&h, node), "(break)");
 }
@@ -51,12 +51,12 @@ fn a_tag_with_no_fields_is_still_a_list() {
 #[test]
 fn op_rejects_things_that_are_not_nodes() {
     let mut h = stress_heap();
-    assert_eq!(core::op(&h, Value::Int(1)), None);
-    assert_eq!(core::op(&h, Value::Empty), None);
+    assert_eq!(core::op_spelling(&h, Value::Int(1)), None);
+    assert_eq!(core::op_spelling(&h, Value::Empty), None);
     // A list whose head is not a symbol is data, not a node.
     let data = core::list(&mut h, &[Value::Int(1), Value::Int(2)]).unwrap();
     h.push_root(data);
-    assert_eq!(core::op(&h, data), None);
+    assert_eq!(core::op_spelling(&h, data), None);
 }
 
 #[test]
@@ -77,13 +77,13 @@ fn items_keeps_every_sibling_alive_while_the_rest_are_built() {
 
     let node = {
         let mut f = core::Items::new(&mut h);
-        let cond = core::tagged(f.heap(), "bool", &[Value::Bool(true)]).unwrap();
+        let cond = core::tagged(f.heap(), wk::BOOL, &[Value::Bool(true)]).unwrap();
         f.push(cond);
-        let then = core::tagged(f.heap(), "int-any-width", &[Value::Int(1)]).unwrap();
+        let then = core::tagged(f.heap(), wk::INT_ANY_WIDTH, &[Value::Int(1)]).unwrap();
         f.push(then);
-        let els = core::tagged(f.heap(), "int-any-width", &[Value::Int(2)]).unwrap();
+        let els = core::tagged(f.heap(), wk::INT_ANY_WIDTH, &[Value::Int(2)]).unwrap();
         f.push(els);
-        f.finish("if").unwrap()
+        f.finish(wk::IF).unwrap()
     };
     h.push_root(node);
 
@@ -96,14 +96,14 @@ fn deeply_nested_nodes_survive_construction() {
 
     // Left-nested 30 deep: every level allocates while the previous level's
     // whole subtree is only reachable through the field being collected.
-    let mut acc = core::tagged(&mut h, "int-any-width", &[Value::Int(0)]).unwrap();
+    let mut acc = core::tagged(&mut h, wk::INT_ANY_WIDTH, &[Value::Int(0)]).unwrap();
     for i in 1..30i64 {
         h.push_root(acc);
         let mut f = core::Items::new(&mut h);
         f.push(acc);
-        let leaf = core::tagged(f.heap(), "int-any-width", &[Value::Int(i)]).unwrap();
+        let leaf = core::tagged(f.heap(), wk::INT_ANY_WIDTH, &[Value::Int(i)]).unwrap();
         f.push(leaf);
-        acc = f.finish("call").unwrap();
+        acc = f.finish(wk::CALL).unwrap();
         h.pop_root();
     }
     h.push_root(acc);
@@ -121,18 +121,18 @@ fn a_wide_node_survives_construction() {
     let node = {
         let mut f = core::Items::new(&mut h);
         for i in 0..64i64 {
-            let arg = core::tagged(f.heap(), "int-any-width", &[Value::Int(i)]).unwrap();
+            let arg = core::tagged(f.heap(), wk::INT_ANY_WIDTH, &[Value::Int(i)]).unwrap();
             f.push(arg);
         }
         assert_eq!(f.as_slice().len(), 64);
-        f.finish("call").unwrap()
+        f.finish(wk::CALL).unwrap()
     };
     h.push_root(node);
 
     let got = core::fields(&h, node).unwrap();
     assert_eq!(got.len(), 64);
     for (i, arg) in got.iter().enumerate() {
-        assert_eq!(core::op(&h, *arg), Some("int-any-width"));
+        assert_eq!(core::op_spelling(&h, *arg), Some("int-any-width"));
         assert_eq!(core::field(&h, *arg, 0), Some(Value::Int(i as i64)));
     }
 }
@@ -160,10 +160,10 @@ fn items_unwinds_its_roots() {
     {
         let mut f = core::Items::new(&mut h);
         for i in 0..5i64 {
-            let n = core::tagged(f.heap(), "int-any-width", &[Value::Int(i)]).unwrap();
+            let n = core::tagged(f.heap(), wk::INT_ANY_WIDTH, &[Value::Int(i)]).unwrap();
             f.push(n);
         }
-        let _ = f.finish("call").unwrap();
+        let _ = f.finish(wk::CALL).unwrap();
     }
     assert_eq!(h.root_count(), before, "builder leaked roots");
 }
@@ -175,13 +175,13 @@ fn tagged_at_records_a_location_the_interpreter_can_read_back() {
 
     let mut h = stress_heap();
     let loc = Loc::new(std::sync::Arc::from("f.typl"), 4, 7).with_end(4, 15);
-    let node = core::tagged_at(&mut h, "int-any-width", &[Value::Int(1)], Some(loc.clone())).unwrap();
+    let node = core::tagged_at(&mut h, wk::INT_ANY_WIDTH, &[Value::Int(1)], Some(loc.clone())).unwrap();
     h.push_root(node);
 
     assert_eq!(h.cons_loc(node), Some(loc));
 
     // A node built without one simply has none — synthesized nodes are normal.
-    let plain = core::tagged_at(&mut h, "int-any-width", &[Value::Int(2)], None).unwrap();
+    let plain = core::tagged_at(&mut h, wk::INT_ANY_WIDTH, &[Value::Int(2)], None).unwrap();
     h.push_root(plain);
     assert_eq!(h.cons_loc(plain), None);
 }
@@ -200,7 +200,7 @@ fn a_lowered_location_survives_collections() {
 
     let mut h = stress_heap();
     let loc = Loc::new(std::sync::Arc::from("f.typl"), 1, 1).with_end(1, 6);
-    let node = core::tagged_at(&mut h, "unit", &[], Some(loc.clone())).unwrap();
+    let node = core::tagged_at(&mut h, wk::UNIT, &[], Some(loc.clone())).unwrap();
     h.push_root(node);
 
     for i in 0..16 {
@@ -237,11 +237,11 @@ fn print_renders_every_atom_kind() {
         f.push(s);
         f.push(path);
         f.push(Value::Empty);
-        f.finish("mixed").unwrap()
+        f.finish(wk::CONSTRUCT).unwrap()
     };
     h.push_root(node);
 
-    assert_eq!(core::print(&h, node), r#"(mixed -3 false #\a "hi" m::f ())"#);
+    assert_eq!(core::print(&h, node), r#"(construct -3 false #\a "hi" m::f ())"#);
 }
 
 #[test]
@@ -263,26 +263,26 @@ fn print_reads_the_numeric_boxes_a_literal_carries() {
 
     let f = h.alloc_f64(1.5);
     h.push_root(f);
-    let node = core::tagged(&mut h, "float-any-width", &[f]).unwrap();
+    let node = core::tagged(&mut h, wk::FLOAT_ANY_WIDTH, &[f]).unwrap();
     h.push_root(node);
     assert_eq!(core::print(&h, node), "(float-any-width 1.5)");
 
     // An integral float keeps its point, so it cannot be confused with `(int-any-width 1)`.
     let whole = h.alloc_f64(1.0);
     h.push_root(whole);
-    let node = core::tagged(&mut h, "float-any-width", &[whole]).unwrap();
+    let node = core::tagged(&mut h, wk::FLOAT_ANY_WIDTH, &[whole]).unwrap();
     h.push_root(node);
     assert_eq!(core::print(&h, node), "(float-any-width 1.0)");
 
     let b = h.int_from_bigint("123456789012345678901234567890".parse().unwrap());
     h.push_root(b);
-    let node = core::tagged(&mut h, "bignum", &[b]).unwrap();
+    let node = core::tagged(&mut h, wk::BIGNUM, &[b]).unwrap();
     h.push_root(node);
     assert_eq!(core::print(&h, node), "(bignum 123456789012345678901234567890)");
 
     let r = h.alloc_ratio(num_rational::BigRational::new(1.into(), 3.into()));
     h.push_root(r);
-    let node = core::tagged(&mut h, "ratio", &[r]).unwrap();
+    let node = core::tagged(&mut h, wk::RATIO, &[r]).unwrap();
     h.push_root(node);
     assert_eq!(core::print(&h, node), "(ratio 1/3)");
 

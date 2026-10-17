@@ -30,7 +30,7 @@
 //! emits core IR, the evaluator and bridge that consume it, and the fasl that
 //! restores it.
 
-use typelisp_mem::{Error, Heap, Loc, RootScope, Value};
+use typelisp_mem::{wk, Error, Heap, Loc, RootScope, Value};
 
 use crate::types::Type;
 
@@ -91,11 +91,11 @@ pub fn pair(heap: &mut Heap, car: Value, cdr: Value) -> Result<Value, Error> {
 }
 
 /// Build the node `(tag field...)`. See [`list`] for the rooting contract.
-pub fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Error> {
+pub fn tagged(heap: &mut Heap, tag: u32, items: &[Value]) -> Result<Value, Error> {
     let mut s = RootScope::new(heap);
     let body = list(&mut s, items)?;
     s.push_root(body);
-    let tag_sym = s.intern_symbol(tag);
+    let tag_sym = Value::Symbol(typelisp_mem::symbols::well_known_symbol(tag));
     s.push_root(tag_sym);
     s.cons(tag_sym, body)
 }
@@ -110,7 +110,7 @@ pub fn tagged(heap: &mut Heap, tag: &str, items: &[Value]) -> Result<Value, Erro
 /// bulk-cleared per read batch while a lowered node — a registered function
 /// body — has to outlive its batch; nothing is cleared now, so nothing needs a
 /// table of its own.
-pub fn tagged_at(heap: &mut Heap, tag: &str, items: &[Value], loc: Option<Loc>) -> Result<Value, Error> {
+pub fn tagged_at(heap: &mut Heap, tag: u32, items: &[Value], loc: Option<Loc>) -> Result<Value, Error> {
     let node = tagged(heap, tag, items)?;
     if let (Some(loc), Value::Cons(cr)) = (loc, node) {
         heap.set_cons_loc(cr, loc);
@@ -131,7 +131,7 @@ pub fn tagged_at(heap: &mut Heap, tag: &str, items: &[Value], loc: Option<Loc>) 
 /// let mut f = Items::new(heap);
 /// let c = check(f.heap(), cond)?;   f.push(c);
 /// let t = check(f.heap(), then)?;   f.push(t);
-/// f.finish("if")                    // roots released here
+/// f.finish(wk::IF)                    // roots released here
 /// ```
 pub struct Items<'h> {
     scope: RootScope<'h>,
@@ -168,14 +168,14 @@ impl<'h> Items<'h> {
     }
 
     /// Build `(tag field...)` from the collected fields.
-    pub fn finish(mut self, tag: &str) -> Result<Value, Error> {
+    pub fn finish(mut self, tag: u32) -> Result<Value, Error> {
         let vals = std::mem::take(&mut self.vals);
         tagged(&mut self.scope, tag, &vals)
     }
 
     /// Build `(tag field...)` and record its source position — see
     /// [`tagged_at`].
-    pub fn finish_at(mut self, tag: &str, loc: Option<Loc>) -> Result<Value, Error> {
+    pub fn finish_at(mut self, tag: u32, loc: Option<Loc>) -> Result<Value, Error> {
         let vals = std::mem::take(&mut self.vals);
         tagged_at(&mut self.scope, tag, &vals, loc)
     }
@@ -213,9 +213,16 @@ pub fn op_is(heap: &Heap, form: Value, konst: u32) -> bool {
     op_sym(heap, form).is_some_and(|s| s.is(konst))
 }
 
+/// Which vocabulary member a node's tag is, or `None` if `form` is not a
+/// tagged list — for dispatching over the tags with a `match`.
+pub fn op_wk(heap: &Heap, form: Value) -> Option<u32> {
+    op_sym(heap, form).map(|s| s.well_known())
+}
+
 /// A node's tag *spelled out*, or `None` if `form` is not a tagged list — for
-/// error messages and diagnostics. To recognize a tag use [`op_sym`].
-pub fn op(heap: &Heap, form: Value) -> Option<&str> {
+/// error messages and diagnostics only. To recognize a tag use [`op_wk`] or
+/// [`op_is`].
+pub fn op_spelling(heap: &Heap, form: Value) -> Option<&str> {
     match heap.car(form).ok()? {
         Value::Symbol(id) => Some(heap.symbol_spelling(id)),
         _ => None,
@@ -248,7 +255,7 @@ pub fn tagged_module(heap: &mut Heap, path: &crate::Path, body: &[Value]) -> Res
     s.push_root(p);
     let mut items = vec![p];
     items.extend_from_slice(body);
-    tagged(&mut s, "module", &items)
+    tagged(&mut s, wk::MODULE, &items)
 }
 
 /// A node's fields, in order (everything after the tag).

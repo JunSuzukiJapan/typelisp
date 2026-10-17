@@ -70,7 +70,7 @@ use crate::check::core;
 use crate::compile::symbols::target_symbol_name;
 use crate::CompileTarget;
 use crate::{Checker, Heap, Interp, Path, Reader, TopLevelForm, Value};
-use typelisp_mem::ConcreteNames;
+use typelisp_mem::{wk, ConcreteNames};
 
 const ENTRY_POINT_NAME: &str = "main";
 
@@ -103,16 +103,16 @@ fn collect_aot_item(
     ffi_decls: &mut Vec<typelisp_front::eval::interp::FfiDecl>,
     entry_path: &Path,
 ) -> Result<(), String> {
-    let tag = core::op(heap, tl).map(str::to_string).unwrap_or_default();
-    if tag == "module" {
+    let tag = core::op_wk(heap, tl).unwrap_or(typelisp_mem::NOT_WELL_KNOWN);
+    if tag == wk::MODULE {
         let body = core::fields(heap, tl).map_err(|e| e.to_string())?;
         for item in body.into_iter().skip(1) {
             collect_aot_item(heap, interp, item, items, defvar_inits, ffi_decls, entry_path)?;
         }
         return Ok(());
     }
-    let defvar_meta = match tag.as_str() {
-        "defun" => {
+    let defvar_meta = match tag {
+        wk::DEFUN => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defun without a name".to_string())?;
             // A `defun main` other than the entry file's own is never called
             // — the entry point is always `entry_path` — so it is almost
@@ -131,7 +131,7 @@ fn collect_aot_item(
             items.push(CompileTarget::Fn(path));
             None
         }
-        "defmethod" => {
+        wk::DEFMETHOD => {
             let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
@@ -142,21 +142,21 @@ fn collect_aot_item(
         }
         // The whole form travels, not just the initializer: the global's
         // storage tagging is on the form (see `Interp::add_compiled_global_init`).
-        "defvar" => {
+        wk::DEFVAR => {
             let name = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defvar without a name".to_string())?;
             Some((name, tl))
         }
         // No codegen of their own. `exec` still runs: it records an enum's
         // variants and a struct's field representations, which
         // `collect_struct_and_enum_types` hands to the compile bridge.
-        "defenum" | "defstruct" => None,
+        wk::DEFENUM | wk::DEFSTRUCT => None,
         // Nothing to emit for either. A macro has done all its work by the
         // time anything is compiled: every use was expanded while its form
         // was checked. `exec` still registers the expander, so an `eval` in
         // the executable expands the same way the source did. A
         // `defsignature` only promised the checker a definition that a
         // later form supplies.
-        "defmacro" | "defsignature" => None,
+        wk::DEFMACRO | wk::DEFSIGNATURE => None,
         // A thunk to emit, but not through `add_compiled_function` — there is
         // no body to translate. Kept aside for the module-building step,
         // which puts it in before any body is translated (a compiled call
@@ -164,7 +164,7 @@ fn collect_aot_item(
         // it cannot find). `exec` below still runs, and building the JIT
         // thunk it builds is how a missing symbol is reported now rather than
         // by the linker later.
-        "defffi" => {
+        wk::DEFFFI => {
             ffi_decls.push(typelisp_front::eval::interp::read_ffi_decl(heap, tl).map_err(|e| e.to_string())?);
             None
         }
@@ -176,17 +176,17 @@ fn collect_aot_item(
         // was already loaded and its own items collected by the `Loader`
         // pass in `compile_file`, before this form is ever reached; this
         // form is only the using file's own record of having asked for it.
-        "use" => None,
+        wk::USE => None,
         // A bare `(main)` at top level is the line that starts the program
         // under `typl file.typl`; the executable calls `main` on its own, so
         // here it is read and dropped — which is what lets one source file
         // be run either way. No other expression is: there is nothing to run
         // it in.
-        "expr" if is_entry_call(heap, tl, entry_path) => return Ok(()),
-        other => {
+        wk::EXPR if is_entry_call(heap, tl, entry_path) => return Ok(()),
+        _ => {
             return Err(format!(
                 "compile-file only supports top-level `defun`/`defmethod`/`defvar`/`defparameter`/`defconstant`/`defmacro`/`defsignature`/`defstruct`/`defenum`/`defffi`/`use`/`module`/`impl`, found `{}`",
-                other
+                core::op_spelling(heap, tl).unwrap_or_default()
             ))
         }
     };
@@ -206,7 +206,7 @@ fn collect_aot_item(
 /// kind (the `eval` environment's replay, `compile::dump::capture_program_dump`,
 /// which must drop the same line).
 pub(crate) fn is_trailing_main(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
-    core::op(heap, tl) == Some("expr") && is_entry_call(heap, tl, entry_path)
+    core::op_is(heap, tl, wk::EXPR) && is_entry_call(heap, tl, entry_path)
 }
 
 /// The entry point of an entry file whose module path is `segs`: its own
@@ -222,7 +222,7 @@ pub(crate) fn entry_point_path(segs: &[String]) -> Path {
 /// arguments — the one expression an AOT source may carry.
 fn is_entry_call(heap: &Heap, tl: Value, entry_path: &Path) -> bool {
     let Some(form) = core::field(heap, tl, 0) else { return false };
-    if core::op(heap, form) != Some("call") {
+    if !core::op_is(heap, form, wk::CALL) {
         return false;
     }
     // `(call PATH (R...) ARG...)`: the resolved path, and no arguments past

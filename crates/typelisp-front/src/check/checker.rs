@@ -416,11 +416,19 @@ enum SpawnKind {
 }
 
 impl SpawnKind {
-    /// The form's name, which is also its node's tag.
+    /// The form's name, for diagnostics.
     fn form_name(self) -> &'static str {
         match self {
             SpawnKind::Task => "task",
             SpawnKind::Thread => "thread",
+        }
+    }
+
+    /// The form's node tag.
+    fn tag(self) -> u32 {
+        match self {
+            SpawnKind::Task => wk::TASK,
+            SpawnKind::Thread => wk::THREAD,
         }
     }
 }
@@ -914,12 +922,12 @@ fn string_list(heap: &mut Heap, items: &[String]) -> Result<Value, Error> {
 }
 
 fn untag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
-    core::tagged(heap, "untag-int", &[e])
+    core::tagged(heap, wk::UNTAG_INT, &[e])
 }
 
 /// `(tag-int E)` — see [`int_boundary_raw`].
 fn tag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
-    core::tagged(heap, "tag-int", &[e])
+    core::tagged(heap, wk::TAG_INT, &[e])
 }
 
 /// Where a `def-c-struct` may be written, for the errors that find one
@@ -1696,7 +1704,7 @@ impl Checker {
         f.push(path);
         let repr = self.repr_form(f.heap(), ty)?;
         f.push(repr);
-        let form = f.finish("global")?;
+        let form = f.finish(wk::GLOBAL)?;
         Ok(forms::rooted(heap, form))
     }
 
@@ -1708,7 +1716,7 @@ impl Checker {
         let repr = self.repr_form(f.heap(), ty)?;
         f.push(repr);
         f.push(value);
-        f.finish("set-global")
+        f.finish(wk::SET_GLOBAL)
     }
 
     /// `(let ((SYM REPR FORM)...) BODY...)`.
@@ -1728,7 +1736,7 @@ impl Checker {
         let binds = bs.finish_list()?;
         f.push(binds);
         f.extend(body.iter().copied());
-        f.finish("let")
+        f.finish(wk::LET)
     }
 
 
@@ -1762,7 +1770,7 @@ impl Checker {
             let form = if declared_int(i) { untag_int_form(f.heap(), a.form)? } else { a.form };
             f.push(form);
         }
-        let call = f.finish("call")?;
+        let call = f.finish(wk::CALL)?;
         match boundary {
             Some((_, Type::Int)) => tag_int_form(heap, call),
             _ => Ok(call),
@@ -1829,7 +1837,7 @@ impl Checker {
         // `HashTable::keys`) is a construction site with no `construct` node,
         // so the printer's specialization has to be asked for here too.
         self.request_print_object(ret);
-        let assoc = f.finish("assoc")?;
+        let assoc = f.finish(wk::ASSOC)?;
         match boundary {
             Some((_, Type::Int)) => tag_int_form(heap, assoc),
             _ => Ok(assoc),
@@ -1849,7 +1857,7 @@ impl Checker {
         f.push(path);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
-        f.finish("fnref")
+        f.finish(wk::FNREF)
     }
 
     /// `(methodref PATH SYM (PARAM-REPR...) RET-KEY)` — see
@@ -1881,7 +1889,7 @@ impl Checker {
         // Same reason as `Self::assoc_form`: called through a function value,
         // this method still builds the box.
         self.request_print_object(ret);
-        f.finish("methodref")
+        f.finish(wk::METHODREF)
     }
 
     /// `(apply CALLEE RET-REPR (REPR...) ARG...)` — applying a function *value*.
@@ -1901,7 +1909,7 @@ impl Checker {
         let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
         f.push(reprs);
         f.extend(args.iter().map(|a| a.form));
-        f.finish("apply")
+        f.finish(wk::APPLY)
     }
 
     /// The declared field types of `adt`'s variant `variant`, with `args`
@@ -1965,7 +1973,7 @@ impl Checker {
         let reprs = self.repr_forms(f.heap(), field_tys.iter().cloned())?;
         f.push(reprs);
         f.extend(args.iter().copied());
-        f.finish("construct")
+        f.finish(wk::CONSTRUCT)
     }
 
     /// `(field-get OBJ IDX REPR)`.
@@ -1979,7 +1987,7 @@ impl Checker {
         f.push(Value::Int(idx as i64));
         let repr = self.repr_form(f.heap(), field_ty)?;
         f.push(repr);
-        f.finish("field-get")
+        f.finish(wk::FIELD_GET)
     }
 
     /// `(field-set OBJ IDX REPR VALUE)` — see [`Self::field_get_form`].
@@ -1997,7 +2005,7 @@ impl Checker {
         let repr = self.repr_form(f.heap(), field_ty)?;
         f.push(repr);
         f.push(value);
-        f.finish("field-set")
+        f.finish(wk::FIELD_SET)
     }
 
     /// `(match SCRUT REPR (PAT BODY...)...)`.
@@ -2022,7 +2030,7 @@ impl Checker {
             let arm = a.finish_list()?;
             f.push(arm);
         }
-        f.finish("match")
+        f.finish(wk::MATCH)
     }
 
     /// `(pat-wild)` / `(pat-bind SYM)` / `(pat-lit LITERAL)` /
@@ -2040,28 +2048,28 @@ impl Checker {
     /// nothing read it.
     fn pattern_form(&self, heap: &mut Heap, pat: &Pattern) -> Result<Value, Error> {
         let form = match pat {
-            Pattern::Wildcard => core::tagged(heap, "pat-wild", &[])?,
+            Pattern::Wildcard => core::tagged(heap, wk::PAT_WILD, &[])?,
             Pattern::Bind(name) => {
                 let sym = heap.intern_symbol(name);
-                core::tagged(heap, "pat-bind", &[sym])?
+                core::tagged(heap, wk::PAT_BIND, &[sym])?
             }
             Pattern::Int(n) => {
-                let lit = core::tagged(heap, "int-any-width", &[Value::Int(*n)])?;
+                let lit = core::tagged(heap, wk::INT_ANY_WIDTH, &[Value::Int(*n)])?;
                 let mut s = RootScope::new(heap);
                 s.push_root(lit);
-                core::tagged(&mut s, "pat-lit", &[lit])?
+                core::tagged(&mut s, wk::PAT_LIT, &[lit])?
             }
             Pattern::Bool(b) => {
-                let lit = core::tagged(heap, "bool", &[Value::Bool(*b)])?;
+                let lit = core::tagged(heap, wk::BOOL, &[Value::Bool(*b)])?;
                 let mut s = RootScope::new(heap);
                 s.push_root(lit);
-                core::tagged(&mut s, "pat-lit", &[lit])?
+                core::tagged(&mut s, wk::PAT_LIT, &[lit])?
             }
             Pattern::Char(c) => {
-                let lit = core::tagged(heap, "char", &[Value::Char(*c)])?;
+                let lit = core::tagged(heap, wk::CHAR, &[Value::Char(*c)])?;
                 let mut s = RootScope::new(heap);
                 s.push_root(lit);
-                core::tagged(&mut s, "pat-lit", &[lit])?
+                core::tagged(&mut s, wk::PAT_LIT, &[lit])?
             }
             Pattern::Guard { name, form } => {
                 // The test form is already lowered — it came out of
@@ -2072,14 +2080,14 @@ impl Checker {
                 // `Pattern` on the Rust side across the allocations its
                 // siblings make.
                 let sym = heap.intern_symbol(name);
-                core::tagged(heap, "pat-guard", &[sym, *form])?
+                core::tagged(heap, wk::PAT_GUARD, &[sym, *form])?
             }
             // The test is rooted where `check_at` built it, as a guard's is.
             Pattern::When { pat, test } => {
                 let mut s = RootScope::new(heap);
                 let inner = self.pattern_form(&mut s, pat)?;
                 s.push_root(inner);
-                core::tagged(&mut s, "pat-when", &[inner, *test])?
+                core::tagged(&mut s, wk::PAT_WHEN, &[inner, *test])?
             }
             // A niched `Option<T>`'s two shapes (`check_ctor_pattern_fields`).
             // `none` is the empty-list word; `(some P)` is any other word,
@@ -2087,14 +2095,14 @@ impl Checker {
             // representation — which the node carries, since the island has
             // to untag a narrow payload and open a float box before `P` can
             // compare or bind it.
-            Pattern::Empty => core::tagged(heap, "pat-empty", &[])?,
+            Pattern::Empty => core::tagged(heap, wk::PAT_EMPTY, &[])?,
             Pattern::Some(payload, sub) => {
                 let repr = payload.write(heap)?;
                 let mut s = RootScope::new(heap);
                 s.push_root(repr);
                 let inner = self.pattern_form(&mut s, sub)?;
                 s.push_root(inner);
-                core::tagged(&mut s, "pat-some", &[repr, inner])?
+                core::tagged(&mut s, wk::PAT_SOME, &[repr, inner])?
             }
             // The empty list is its own pattern node, not `Sexpr`'s `nil` variant.
             // Today the two are the same test; they stop being the same when
@@ -2107,7 +2115,7 @@ impl Checker {
             Pattern::Ctor { type_name, variant: 0, args, downcast: false, .. }
                 if args.is_empty() && crate::types::path_is_builtin(type_name, "sexpr") =>
             {
-                core::tagged(heap, "pat-empty", &[])?
+                core::tagged(heap, wk::PAT_EMPTY, &[])?
             }
             Pattern::Ctor { type_name, targs, variant, args, field_types, downcast } => {
                 let mut f = Items::new(heap);
@@ -2133,7 +2141,7 @@ impl Checker {
                     let one = self.pattern_form(f.heap(), sub)?;
                     f.push(one);
                 }
-                f.finish("pat-ctor")?
+                f.finish(wk::PAT_CTOR)?
             }
             Pattern::TypeTest(ty, sub) => {
                 let path = nominal_path(ty)
@@ -2151,7 +2159,7 @@ impl Checker {
                 f.push(key);
                 let one = self.pattern_form(f.heap(), sub)?;
                 f.push(one);
-                f.finish("pat-typetest")?
+                f.finish(wk::PAT_TYPETEST)?
             }
         };
         Ok(forms::rooted(heap, form))
@@ -2171,7 +2179,7 @@ impl Checker {
         let r = self.repr_form(f.heap(), ret)?;
         f.push(r);
         f.extend(body.iter().copied());
-        f.finish("lambda")
+        f.finish(wk::LAMBDA)
     }
 
     /// `((SYM REPR)...)` — a parameter list, shared by `lambda`/`labels` and
@@ -2208,7 +2216,7 @@ impl Checker {
         let defs = ds.finish_list()?;
         f.push(defs);
         f.extend(body.iter().copied());
-        f.finish("labels")
+        f.finish(wk::LABELS)
     }
 
     /// `(dyn-new "KEY" TRAIT ((TYPE SYM)...) ((TRAIT ((TYPE SYM)...))...) REPR
@@ -2250,7 +2258,7 @@ impl Checker {
         let repr = self.repr_form(f.heap(), value_ty)?;
         f.push(repr);
         f.push(value);
-        f.finish("dyn-new")
+        f.finish(wk::DYN_NEW)
     }
 
 
@@ -2290,7 +2298,7 @@ impl Checker {
         let reprs = self.repr_forms(f.heap(), args.iter().map(|a| a.ty.clone()))?;
         f.push(reprs);
         f.extend(args.iter().map(|a| a.form));
-        f.finish("dyn-call")
+        f.finish(wk::DYN_CALL)
     }
 
 
@@ -2316,7 +2324,7 @@ impl Checker {
         let r = self.repr_form(f.heap(), ret)?;
         f.push(r);
         f.extend(body.iter().copied());
-        f.finish("defun")
+        f.finish(wk::DEFUN)
     }
 
     /// `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR (CTYPE...) RET-CTYPE)`.
@@ -2378,7 +2386,7 @@ impl Checker {
         f.push(ctypes);
         let rk = f.heap().intern_symbol(&ConcreteNames::type_key(ret));
         f.push(rk);
-        f.finish("defffi")
+        f.finish(wk::DEFFFI)
     }
 
     /// [`Self::defun_form`] unless this `defun` is *generic*, in which case an
@@ -2456,7 +2464,7 @@ impl Checker {
         let r = self.repr_form(f.heap(), ret)?;
         f.push(r);
         f.extend(body.iter().copied());
-        f.finish("defmethod")
+        f.finish(wk::DEFMETHOD)
     }
 
 
@@ -2491,7 +2499,7 @@ impl Checker {
         if reassign {
             f.push(Value::Bool(true));
         }
-        f.finish("defvar")
+        f.finish(wk::DEFVAR)
     }
 
     /// `(defstruct PATH (REPR...) (TEMPLATE...) (NAME...))` — the type's
@@ -2518,7 +2526,7 @@ impl Checker {
         f.push(templates);
         let names = string_list(f.heap(), names)?;
         f.push(names);
-        f.finish("defstruct")
+        f.finish(wk::DEFSTRUCT)
     }
 
     /// `(defenum PATH (SYM...) ((REPR...)...) ((TEMPLATE...)...))` — the
@@ -2545,7 +2553,7 @@ impl Checker {
         }
         let per_variant_templates = ts.finish_list()?;
         f.push(per_variant_templates);
-        f.finish("defenum")
+        f.finish(wk::DEFENUM)
     }
 
 
@@ -10678,7 +10686,7 @@ impl Checker {
                         .entry((l.line, l.col))
                         .or_insert_with(|| checked.ty.clone());
                 }
-                if let (Some("var"), Some(ref_loc)) = (core::op(heap, checked.form), loc) {
+                if let (Some(wk::VAR), Some(ref_loc)) = (core::op_wk(heap, checked.form), loc) {
                     if let Some(Value::Symbol(id)) = core::field(heap, checked.form, 0) {
                         let name = heap.symbol_spelling(id).to_string();
                         if let Some(bind_loc) = env.get_loc(&name) {
@@ -10736,7 +10744,7 @@ impl Checker {
                 // compiles to a raw word, and an `int` is a *tagged* one
                 // (`Repr::Int`). The kind is the node's, not something the
                 // island could read off the number.
-                let tag = if ty == Type::Int { "int" } else { "int-any-width" };
+                let tag = if ty == Type::Int { wk::INT } else { wk::INT_ANY_WIDTH };
                 Checked::new(core::tagged(heap, tag, &[Value::Int(n)])?, ty)
             }
             // A `Value::Boxed` read-literal is `Sexpr::f64`, `bignum` (an
@@ -10770,8 +10778,8 @@ impl Checker {
                 Some(Type::Int) => {
                     let fitted = i64::try_from(&*heap.bignum_value(id)).ok().filter(|v| typelisp_mem::fixnum_fits(*v));
                     match fitted {
-                        Some(v) => Checked::new(core::tagged(heap, "int", &[Value::Int(v)])?, Type::Int),
-                        None => Checked::new(core::tagged(heap, "bignum", &[Value::Boxed(id)])?, Type::Int),
+                        Some(v) => Checked::new(core::tagged(heap, wk::INT, &[Value::Int(v)])?, Type::Int),
+                        None => Checked::new(core::tagged(heap, wk::BIGNUM, &[Value::Boxed(id)])?, Type::Int),
                     }
                 }
                 Some(t) if t.is_integer() => {
@@ -10780,16 +10788,16 @@ impl Checker {
                         (i64::try_from(&*big).ok().filter(|v| int_lit_in_range(*v, t)), big.to_string())
                     };
                     match fitted {
-                        Some(v) => Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(v)])?, t.clone()),
+                        Some(v) => Checked::new(core::tagged(heap, wk::INT_ANY_WIDTH, &[Value::Int(v)])?, t.clone()),
                         None => return Err(int_lit_range_error(&text, t, false)),
                     }
                 }
                 // No expectation, or one this is not: the literal is an
                 // `int`, the type every unannotated integer literal has.
-                _ => Checked::new(core::tagged(heap, "bignum", &[Value::Boxed(id)])?, Type::Int),
+                _ => Checked::new(core::tagged(heap, wk::BIGNUM, &[Value::Boxed(id)])?, Type::Int),
             },
             Value::Boxed(id) if heap.is_ratio(id) => {
-                Checked::new(core::tagged(heap, "ratio", &[Value::Boxed(id)])?, Type::Ratio)
+                Checked::new(core::tagged(heap, wk::RATIO, &[Value::Boxed(id)])?, Type::Ratio)
             }
             // A float literal reads as an `f64` box, because a token cannot
             // know the type it will land in. Here that type is known: in an
@@ -10808,7 +10816,7 @@ impl Checker {
                 } else {
                     Value::Boxed(id)
                 };
-                Checked::new(core::tagged(heap, "float-any-width", &[boxed])?, ty)
+                Checked::new(core::tagged(heap, wk::FLOAT_ANY_WIDTH, &[boxed])?, ty)
             }
             // `#(..)` and `#nA(..)` written in source: a fresh collection
             // whose element type comes from the context.
@@ -10832,9 +10840,9 @@ impl Checker {
             // datum has — the checker knows it only as an object inside
             // S-expression data.
             Value::Boxed(_) => Checked::new(forms::quote_form(heap, v)?, sexpr_ty()),
-            Value::Bool(b) => Checked::new(core::tagged(heap, "bool", &[Value::Bool(b)])?, Type::Bool),
-            Value::Char(c) => Checked::new(core::tagged(heap, "char", &[Value::Char(c)])?, Type::Char),
-            Value::Str(s) => Checked::new(core::tagged(heap, "str", &[Value::Str(s)])?, Type::Str),
+            Value::Bool(b) => Checked::new(core::tagged(heap, wk::BOOL, &[Value::Bool(b)])?, Type::Bool),
+            Value::Char(c) => Checked::new(core::tagged(heap, wk::CHAR, &[Value::Char(c)])?, Type::Char),
+            Value::Str(s) => Checked::new(core::tagged(heap, wk::STR, &[Value::Str(s)])?, Type::Str),
             Value::Empty => {
                 // The empty list `()` is the `None` value of `Option<T>` when an
                 // option type is expected, the `Nil` value of `Sexpr` when a
@@ -10858,7 +10866,7 @@ impl Checker {
                     // S-expression" — so it falls through to `Unit` like any
                     // other non-option, non-sexpr context.
                 }
-                Checked::new(core::tagged(heap, "unit", &[])?, Type::Unit)
+                Checked::new(core::tagged(heap, wk::UNIT, &[])?, Type::Unit)
             }
             Value::Symbol(id) => {
                 let name = heap.symbol_spelling(id).to_string();
@@ -10867,7 +10875,7 @@ impl Checker {
                 // matched *before* every binding lookup below — it can never
                 // name a variable, global, function or method.
                 if id.is_keyword() {
-                    Checked::new(core::tagged(heap, "sym", &[Value::Symbol(id)])?, Type::Symbol)
+                    Checked::new(core::tagged(heap, wk::SYM, &[Value::Symbol(id)])?, Type::Symbol)
                 } else if let Some(t) = env.get(name) {
                     // A `symbol-macrolet` binding: the name is not a variable
                     // at all, it stands for a form, which is checked here in
@@ -11284,7 +11292,7 @@ impl Checker {
             wk::COMPILE => return self.check_compile(heap, args),
             wk::DOCUMENTATION => return self.check_documentation(heap, args),
             wk::ED => return self.check_ed(heap, args),
-            wk::TRACE | wk::UNTRACE => return self.check_trace(heap, head_sym.name(), args),
+            wk::TRACE | wk::UNTRACE => return self.check_trace(heap, head_sym, args),
             wk::STEP => return self.check_step(heap, interp, env, args, arg_locs, expected),
             wk::DISASSEMBLE => return self.check_disassemble(heap, args),
             wk::SOURCE_FILE => return self.check_source_file(heap, v, args),
@@ -12853,7 +12861,7 @@ impl Checker {
             SpawnKind::Thread => super::registry::thread_of(inner.ty),
         };
         let key = ConcreteNames::type_key(&ty);
-        let form = forms::spawn_form(heap, form_name, ret, &key, inner.form)?;
+        let form = forms::spawn_form(heap, kind.tag(), ret, &key, inner.form)?;
         Ok(Checked::new(form, ty))
     }
 
@@ -13387,7 +13395,8 @@ impl Checker {
     /// way. (The head is reserved in expression position regardless: this
     /// dispatch runs before the local-variable lookup, so a `let` binding
     /// named `trace` does *not* shadow the form. Same as `documentation`.)
-    fn check_trace(&self, heap: &mut Heap, tag: &str, args: &[Value]) -> Result<Checked, Error> {
+    fn check_trace(&self, heap: &mut Heap, head: typelisp_mem::SymRef, args: &[Value]) -> Result<Checked, Error> {
+        let tag = head.name();
         let mut targets = Vec::with_capacity(args.len());
         for a in args {
             let name = unevaluated_name(
@@ -13400,7 +13409,7 @@ impl Checker {
             )?;
             targets.push(self.resolve_callable(&name, tag)?);
         }
-        let form = forms::trace_form(heap, tag, &targets)?;
+        let form = forms::trace_form(heap, head.well_known(), &targets)?;
         Ok(Checked::new(form, sexpr_ty()))
     }
 
@@ -13470,7 +13479,7 @@ impl Checker {
         }
         let inner = self.check_at(heap, interp, env, args[0], expected, nth_loc(arg_locs, 0))?;
         let ty = inner.ty.clone();
-        let form = core::tagged(heap, "step", &[inner.form])?;
+        let form = core::tagged(heap, wk::STEP, &[inner.form])?;
         Ok(Checked::new(form, ty))
     }
 
@@ -13626,7 +13635,7 @@ impl Checker {
             .map(|sig| sig.ret.clone())
             .ok_or_else(|| Error::TypeError("ed: the `ed-open` builtin is not registered".into()))?;
         let file = Checked::new(forms::str_lit_form(heap, &file)?, Type::Str);
-        let line = Checked::new(core::tagged(heap, "int", &[Value::Int(line)])?, Type::Int);
+        let line = Checked::new(core::tagged(heap, wk::INT, &[Value::Int(line)])?, Type::Int);
         let r = Path::internal("ed-open");
         let node = self.call_form(heap, &r, &[file, line])?;
         Ok(Checked::new(node, ret))
@@ -15788,15 +15797,15 @@ impl Checker {
             ))
         };
         let form = checked.form;
-        let (target, first_arg) = match core::op(heap, form) {
-            Some("call") => {
+        let (target, first_arg) = match core::op_wk(heap, form) {
+            Some(wk::CALL) => {
                 let path = core::path_field(heap, form, 0).ok_or_else(not_a_definition)?;
                 if self.reg.fn_sig(&path).is_some_and(|sig| sig.builtin) {
                     return Err(not_a_definition());
                 }
                 (crate::CompileTarget::Fn(path), core::field(heap, form, 2))
             }
-            Some("assoc") => {
+            Some(wk::ASSOC) => {
                 let path = core::path_field(heap, form, 0).ok_or_else(not_a_definition)?;
                 let method = core::sym_name_field(heap, form, 1).ok_or_else(not_a_definition)?;
                 if self.reg.type_def(&path).and_then(|def| def.assoc.get(&method)).is_some_and(|af| af.builtin) {
@@ -15807,7 +15816,7 @@ impl Checker {
             _ => return Err(not_a_definition()),
         };
         let passed_as_is = first_arg.is_some_and(|a| {
-            core::op(heap, a) == Some("var") && core::sym_name_field(heap, a, 0).as_deref() == Some(ARG)
+            core::op_is(heap, a, wk::VAR) && core::sym_name_field(heap, a, 0).as_deref() == Some(ARG)
         });
         if !passed_as_is {
             return Err(not_a_definition());
@@ -16053,7 +16062,7 @@ impl Checker {
         // four.
         let colinc = match args.get(1) {
             Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I32), nth_loc(arg_locs, 1))?,
-            None => Checked::new(core::tagged(heap, "int-any-width", &[Value::Int(16)])?, Type::I32),
+            None => Checked::new(core::tagged(heap, wk::INT_ANY_WIDTH, &[Value::Int(16)])?, Type::I32),
         };
         let which = Checked::new(forms::str_lit_form(heap, form)?, Type::Str);
         let r = Path::root("pprint-rt");
@@ -16134,7 +16143,7 @@ impl Checker {
         // `(progn (open …) body… (close))`, represented the way `progn` is:
         // a `let` with no bindings. The block's own value is `unit` — the body
         // is run for its printing effect.
-        let flag = Checked::new(core::tagged(&mut s, "bool", &[Value::Bool(per_line)])?, Type::Bool);
+        let flag = Checked::new(core::tagged(&mut s, wk::BOOL, &[Value::Bool(per_line)])?, Type::Bool);
         s.push_root(flag.form);
         let start_r = Path::root("pprint-block-start-rt");
         let start = self.call_form(&mut s, &start_r, &[obj, prefix, flag, suffix])?;

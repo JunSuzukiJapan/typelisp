@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.2
+# ABI バージョン 0.3.3
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.2 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.3 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `cdb840bbaf65bfee`
+内容ハッシュ (FNV-1a 64): `a9123ca52716cd12`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -357,6 +357,27 @@
 | 238 | `ed` |
 | 239 | `%internal` |
 | 240 | `attribute` |
+| 241 | `apply-indirect` |
+| 242 | `cellvar` |
+| 243 | `cellset` |
+| 244 | `global-init` |
+| 245 | `hashtable-op` |
+| 246 | `llvm-op` |
+| 247 | `suspend` |
+| 248 | `vector-op` |
+| 249 | `handle` |
+| 250 | `raw-word` |
+| 251 | `rational` |
+| 252 | `random-state` |
+| 253 | `sexpr` |
+| 254 | `struct` |
+| 255 | `enum` |
+| 256 | `dyn` |
+| 257 | `scope` |
+| 258 | `vector` |
+| 259 | `hashtable` |
+| 260 | `niche` |
+| 261 | `none` |
 
 ## 組み込み型キー (typelisp_mem::BUILTIN_TYPE_KEYS)
 

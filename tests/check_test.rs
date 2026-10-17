@@ -13,7 +13,7 @@ use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, TopLeve
 /// specializations it needs come first). A form that instantiates no generic
 /// function is returned unchanged.
 fn primary(h: &Heap, tl: TopLevelForm) -> TopLevelForm {
-    if core::op(h, tl) != Some("module") {
+    if core::op_spelling(h, tl) != Some("module") {
         return tl;
     }
     // `(module PATH BODY...)` — the path decides whether this is *the* bundle.
@@ -48,7 +48,7 @@ struct Checked {
 fn finish(h: &Heap, chk: &Checker, tl: TopLevelForm) -> Checked {
     let tl = primary(h, tl);
     Checked {
-        tag: core::op(h, tl).expect("every top-level form is a tagged list").to_string(),
+        tag: core::op_spelling(h, tl).expect("every top-level form is a tagged list").to_string(),
         printed: core::print(h, tl),
         ty: chk.expr_type().cloned(),
     }

@@ -5807,8 +5807,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; `(select ARM...)` — wait until one of several channel operations can go,
 ;; and run that arm's body.
 ;;
-;; ARM is `("recv" VAR KEY-FORM CHAN-FORM BODY)`, `("send" VALUE-KIND
-;; CHAN-FORM VALUE-FORM BODY)` or `("else" BODY)`, and `else` is last.
+;; ARM is `(recv VAR KEY-FORM CHAN-FORM BODY)`, `(send VALUE-KIND
+;; CHAN-FORM VALUE-FORM BODY)` or `(:else BODY)`, and `:else` is last.
 ;;
 ;; **Nothing here evaluates a channel expression.** The checker bound every
 ;; operand in a `let` around this node, so `CHAN-FORM`/`VALUE-FORM` are
@@ -5825,13 +5825,13 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; being last matters — its index is the one past the channel arms.
 (defun select-arm-count ((arms Option<Sexpr>)) int
     (if (sexpr-consp arms)
-        (+ (if (equal (sexpr-str (sexpr-car (sexpr-car arms))) "else") 0 1)
+        (+ (if (equal (sexpr-car (sexpr-car arms)) (quote :else)) 0 1)
            (select-arm-count (sexpr-cdr arms)))
         0))
 
 (defun select-has-else ((arms Option<Sexpr>)) bool
     (if (sexpr-consp arms)
-        (if (equal (sexpr-str (sexpr-car (sexpr-car arms))) "else")
+        (if (equal (sexpr-car (sexpr-car arms)) (quote :else))
             true
             (select-has-else (sexpr-cdr arms)))
         false))
@@ -5842,12 +5842,12 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun fill-select-ops ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (idx int) (arms Option<Sexpr>)) ()
     (if (sexpr-consp arms)
         (let* ((arm (sexpr-car arms))
-               (tag (sexpr-str (sexpr-car arm)))
+               (tag (sexpr-car arm))
                (rest (sexpr-cdr arms)))
           (cond
-            ((equal tag "else")
+            ((equal tag (quote :else))
              (fill-select-ops m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr idx rest))
-            ((equal tag "recv")
+            ((equal tag (quote recv))
              (let* ((key-form (sexpr-car (sexpr-cdr (sexpr-cdr arm))))
                     (chan-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr arm))))))
                (store-arg builder args-ptr idx (const-word builder 0))
@@ -5880,7 +5880,7 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun compile-select-arms ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (idx-v llvm-value) (val-v llvm-value) (slot llvm-value) (merge-block llvm-basic-block) (i int) (arms Option<Sexpr>)) ()
     (if (sexpr-consp arms)
         (let* ((arm (sexpr-car arms))
-               (tag (sexpr-str (sexpr-car arm)))
+               (tag (sexpr-car arm))
                (rest (sexpr-cdr arms))
                (this-block (append-block cur-fn "select-arm"))
                (next-block (append-block cur-fn "select-next")))
@@ -5889,10 +5889,10 @@ const SOURCE_TEMPLATE: &str = r#"
           (push-frame env)
           ;; The receive arm sees the whole `Option<T>`, in a rooted slot: its
           ;; body allocates, and the box came out of the answer cons.
-          (if (equal tag "recv")
+          (if (equal tag (quote recv))
               (set env (sexpr-sym-name (sexpr-car (sexpr-cdr arm))) (spill builder m 2 val-v))
               ())
-          (let* ((body-form (if (equal tag "else")
+          (let* ((body-form (if (equal tag (quote :else))
                                 (sexpr-car (sexpr-cdr arm))
                                 (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr arm))))))) 
                  (v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup body-form)))

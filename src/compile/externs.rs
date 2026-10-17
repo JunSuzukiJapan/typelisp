@@ -1102,7 +1102,7 @@ mod scc_tests {
         for (name, callee) in [("a", "b"), ("b", "a")] {
             let path = heap.intern_symbol(callee);
             heap.push_root(path);
-            let call = core::tagged(&mut heap, "call", &[path, Value::Empty])
+            let call = core::tagged(&mut heap, typelisp_mem::wk::CALL, &[path, Value::Empty])
                 .expect("building a 2-field node cannot exhaust a 1<<16 heap");
             // Registered `FnDef` bodies are reachable only through
             // `Interp::fns`, which the collector does not scan — the same

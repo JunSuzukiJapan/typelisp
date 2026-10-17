@@ -255,9 +255,9 @@ fn walk_here(
         wk::SELECT => {
             for arm in core::fields(heap, form)? {
                 let items = heap.list_to_vec(arm)?;
-                let Some(Value::Str(tag_id)) = items.first() else { continue };
-                match &*heap.string(*tag_id) {
-                    "recv" => {
+                let Some(Value::Symbol(tag)) = items.first() else { continue };
+                match tag.well_known() {
+                    wk::RECV => {
                         if items.len() != 5 {
                             continue;
                         }
@@ -268,7 +268,7 @@ fn walk_here(
                         }
                         walk(heap, items[4], &inner, siblings, seen, order)?;
                     }
-                    "send" => {
+                    wk::SEND => {
                         if items.len() != 5 {
                             continue;
                         }
@@ -276,7 +276,7 @@ fn walk_here(
                         walk(heap, items[3], bound, siblings, seen, order)?;
                         walk(heap, items[4], bound, siblings, seen, order)?;
                     }
-                    "else"
+                    wk::KW_ELSE
                         if items.len() == 2 => {
                             walk(heap, items[1], bound, siblings, seen, order)?;
                         }

@@ -35,6 +35,7 @@
 use std::collections::BTreeMap;
 
 use crate::check::core;
+use typelisp_mem::wk;
 use crate::compile::symbols::target_symbol_name;
 use crate::CompileTarget;
 use crate::eval::interp::Uncompilable;
@@ -298,19 +299,19 @@ impl PreludePlan {
 /// lowers the same way — is an *empty* `(module PATH)`, so both flatten to
 /// nothing here without a test of their own.
 pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Result<(), String> {
-    let tag = core::op(heap, tl).map(str::to_string).unwrap_or_default();
-    match tag.as_str() {
-        "module" => {
+    let tag = core::op_wk(heap, tl).unwrap_or(typelisp_mem::NOT_WELL_KNOWN);
+    match tag {
+        wk::MODULE => {
             let body = core::fields(heap, tl).map_err(|e| e.to_string())?;
             for item in body.into_iter().skip(1) {
                 collect_item(heap, item, plan)?;
             }
         }
-        "defun" => {
+        wk::DEFUN => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defun without a name".to_string())?;
             plan.items.push(CompileTarget::Fn(path));
         }
-        "defmethod" => {
+        wk::DEFMETHOD => {
             let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
@@ -319,7 +320,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
             plan.items.push(CompileTarget::Method(type_path, method));
         }
         // `defconstant` lowers to the same core form.
-        "defvar" => {
+        wk::DEFVAR => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defvar without a name".to_string())?;
             plan.globals.push(path);
         }
@@ -331,7 +332,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         // missing (the other half, "expand before compiling the expansion",
         // was already true and then some: expansion finishes at check time,
         // before any codegen runs).
-        "defmacro" => {
+        wk::DEFMACRO => {
             let path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmacro without a name".to_string())?;
             plan.items.push(CompileTarget::Fn(path));
         }
@@ -342,13 +343,13 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         // symbol and hung a thunk on the `FnDef`, and there is nothing here to
         // compile. (The prelude itself declares no FFI — see `docs/ja/reference/syntax.md` §3.3
         // — but a dump replaying one reaches this walk.)
-        "defstruct" | "defenum" | "use" | "defffi" => {}
-        other => {
+        wk::DEFSTRUCT | wk::DEFENUM | wk::USE | wk::DEFFFI => {}
+        _ => {
             return Err(format!(
                 "prelude: top-level `{}` has no place in the compiled artifact — \
                  the prelude is definitions only (defun/defmethod/defvar/defconstant/\
                  defstruct/defenum/defmacro/deftrait/impl/module)",
-                other
+                core::op_spelling(heap, tl).unwrap_or_default()
             ))
         }
     }
