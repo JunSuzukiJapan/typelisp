@@ -11,6 +11,7 @@ pub mod forms;
 pub mod repr;
 pub mod registry;
 mod info;
+mod lower;
 pub mod checker;
 mod fold;
 pub mod loop_dsl;

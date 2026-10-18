@@ -47,11 +47,45 @@ use crate::types::Type;
 pub struct Checked {
     pub form: Value,
     pub ty: Type,
+    /// The expression as the analysis resolved it — the analyzed tree
+    /// (`docs/dev/explicit-symbols-plan.md`, 3.10) that checking reads.
+    /// `form` is lowered from it as it is built, until lowering moves to the
+    /// end of the form.
+    pub node: Node,
+}
+
+/// One node of the analyzed tree: an expression with what it refers to
+/// resolved. Its children are the [`Checked`] of each subexpression, whose
+/// `form` is what this node's lowering uses.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Node {
+    /// An expression of a kind not moved to the tree yet: only its lowered
+    /// `form` exists, which checking cannot look into.
+    Lowered,
+    /// `(if cond then else)`.
+    If { cond: Box<Checked>, then: Box<Checked>, els: Box<Checked> },
+    /// `(panic message)`.
+    Panic { message: Box<Checked> },
 }
 
 impl Checked {
+    /// An expression of a kind not moved to the tree yet ([`Node::Lowered`]).
     pub fn new(form: Value, ty: Type) -> Checked {
-        Checked { form, ty }
+        Checked { form, ty, node: Node::Lowered }
+    }
+
+    /// The same expression, seen at type `ty`: a widening that needs no
+    /// runtime work (a `Symbol` where a `Sexpr` is expected, ...). The node
+    /// and the form stay as they are.
+    pub fn retyped(self, ty: Type) -> Checked {
+        Checked { ty, ..self }
+    }
+
+    /// The expression `node` stands for, of type `ty`, with its form lowered
+    /// from it now.
+    pub fn of(heap: &mut Heap, node: Node, ty: Type) -> Result<Checked, Error> {
+        let form = super::lower::lower(heap, &node)?;
+        Ok(Checked { form, ty, node })
     }
 }
 

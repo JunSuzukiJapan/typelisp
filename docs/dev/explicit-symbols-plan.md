@@ -271,9 +271,12 @@ TypeShape = Named(SymRef, [TypeId])
 
 - 2a. 型情報の層を切り出す。`Env`・`Scope` と、レジストリへの問い合わせを `check/info.rs` に移し、
   チェッカーはそこを通して引く。振る舞いは変えない。
-- 2b. 木を入れる。`Checked` の中身を `Node` にし、`check_form` の最後で下ろす。最初は
-  `Node::Lowered(Value)`（組み立て済みの core IR）を許し、構文ごとに本物の節へ移す。全部移したら
-  `Lowered` を消す。
+- 2b. 木を入れる。`Checked` に節 `node: Node` を足す。移していない構文は `Node::Lowered`（IR
+  だけがある）。構文を移すときは節を作って `Checked::of` でその場で下ろす（`check/lower.rs`）。
+  節の子は子の `Checked` なので、下ろすときに子の IR を作り直さない。型だけを変える箇所は
+  `Checked::retyped` で節を残す。全部の構文が節になったら、IR はフォームの最後でまとめて下ろし、
+  `Checked.form` と `Lowered` を消す。型の一致の検査（2c）を移せるのはその後: `Lowered` の下の
+  子は検査から見えない。
 - 2c. 検査を移す。型の一致を見る箇所を、種類ごとに解析から `verify.rs` へ移す（引数と仮引数、
   戻り値、`if`/`match` の腕、代入、期待する型、トレイトの境界、網羅性、`pub`、`unsafe`、
   キーワードの束縛、トップレベル専用の位置、`setf` の場所）。解析は食い違いで止まらず、

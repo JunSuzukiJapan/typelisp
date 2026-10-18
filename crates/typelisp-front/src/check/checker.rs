@@ -16,7 +16,7 @@ use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
-use super::core::{self, Checked, Items};
+use super::core::{self, Checked, Items, Node};
 use super::fold;
 use super::forms;
 use super::repr::Repr;
@@ -3417,7 +3417,7 @@ impl Checker {
             if let Some(form) = self.box_niched_option(heap, elem_ty, e.form)? {
                 return Ok(Checked::new(form, sexpr_ty()));
             }
-            return Ok(Checked::new(e.form, sexpr_ty()));
+            return Ok(e.retyped(sexpr_ty()));
         }
         let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
             Error::TypeError(format!(
@@ -7633,7 +7633,7 @@ impl Checker {
         // Prefix layouts: the box is already a valid `:dyn to`, so nothing
         // below the checker learns that an upcast happened.
         if fdef.vtable_order.starts_with(&tdef.vtable_order) {
-            return Ok(Checked::new(value.form, to_ty));
+            return Ok(value.retyped(to_ty));
         }
         // Otherwise the target's slot numbering differs and the box has to
         // be re-made around `to`'s own table for this concrete type. Which
@@ -9897,7 +9897,7 @@ impl Checker {
             Some(want) => {
                 let data_ty = Type::Named(path, vec![option_of_sexpr(); elems.len()]);
                 let built = self.check_inner(&mut s, interp, env, form, Some(&data_ty))?;
-                Ok(Checked::new(built.form, want.clone()))
+                Ok(built.retyped(want.clone()))
             }
             None => self.check_inner(&mut s, interp, env, form, expected),
         }
@@ -10386,10 +10386,10 @@ impl Checker {
                 // empty list", which only a `match` (or `unwrap`) can
                 // discharge.
                 if is_option_of_sexpr(e) && typed.ty == sexpr_ty() {
-                    return Ok(Checked::new(typed.form, e.clone()));
+                    return Ok(typed.retyped(e.clone()));
                 }
                 if is_sexpr_expectation(e) && typed.ty == Type::Symbol {
-                    return Ok(Checked::new(typed.form, e.clone()));
+                    return Ok(typed.retyped(e.clone()));
                 }
                 // A user ADT instance (`defstruct`/`defenum`, `Vector<T>`,
                 // `HashTable<K,V>`, `cons-cell<K,V>`) is a valid `Sexpr` datum
@@ -10436,7 +10436,7 @@ impl Checker {
                     if let Some(form) = self.box_niched_option(heap, &typed.ty, typed.form)? {
                         return Ok(Checked::new(form, e.clone()));
                     }
-                    return Ok(Checked::new(typed.form, e.clone()));
+                    return Ok(typed.retyped(e.clone()));
                 }
                 // A scalar (`i32`/`f64`/`bignum`/`ratio`/`char`/`bool`/`Str`)
                 // has no shared runtime shape with `Sexpr`, so — unlike the
@@ -10465,7 +10465,7 @@ impl Checker {
                 // integer is always the `int`.
                 if *e == Type::Rational {
                     if typed.ty == Type::Int {
-                        return Ok(Checked::new(typed.form, Type::Rational));
+                        return Ok(typed.retyped(Type::Rational));
                     }
                     if typed.ty == Type::Ratio {
                         // `assoc_form` allocates before it roots its
@@ -12134,15 +12134,7 @@ impl Checker {
         let else_expected = non_never(&then.ty).or(expected);
         let els = self.check_at(heap, interp, env, args[2], else_expected, nth_loc(arg_locs, 2))?;
         let ty = join_types(&then.ty, &els.ty)?;
-        // A literal condition picks its branch now. Both branches were still
-        // checked above: a branch that can never run is still a program that
-        // has to be well-typed, and `ty` is still the join of the two.
-        let form = match fold::literal_bool(heap, cond.form) {
-            Some(true) => then.form,
-            Some(false) => els.form,
-            None => forms::if_form(heap, cond.form, then.form, els.form)?,
-        };
-        Ok(Checked::new(form, ty))
+        Checked::of(heap, Node::If { cond: Box::new(cond), then: Box::new(then), els: Box::new(els) }, ty)
     }
 
     fn check_panic(
@@ -12157,8 +12149,7 @@ impl Checker {
             return Err(Error::TypeError("panic: (panic message)".into()));
         }
         let msg = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
-        let form = forms::panic_form(heap, msg.form)?;
-        Ok(Checked::new(form, Type::Never))
+        Checked::of(heap, Node::Panic { message: Box::new(msg) }, Type::Never)
     }
 
     /// `(the Type expr)`: a type annotation, e.g. `(the i64 5)` to make an
@@ -12458,14 +12449,14 @@ impl Checker {
         }
         // An `int` *is* a `rational`, word for word.
         if src.ty == Type::Int && target == Type::Rational {
-            let widened = Checked::new(src.form, Type::Rational);
+            let widened = src.retyped(Type::Rational);
             return if try_variant { wrap_some(heap, self, widened, target) } else { Ok(widened) };
         }
         // A typed pointer forgets its pointee, to be handed to a C function
         // declared with `ptr` (`qsort`'s `void *`). The same word; there is
         // no way back.
         if matches!(src.ty, Type::PtrTo(_)) && target == Type::Ptr && !try_variant {
-            return Ok(Checked::new(src.form, Type::Ptr));
+            return Ok(src.retyped(Type::Ptr));
         }
         // Between two integer widths, or between the two float widths: a real
         // conversion. A type name means its width and its signedness
