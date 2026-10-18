@@ -116,7 +116,7 @@ impl Checker {
     /// address, as a raw word.
     fn callback_address_form(&self, heap: &mut Heap, key: &str) -> Result<Value, Error> {
         let arg = Checked::new(forms::str_lit_form(heap, key)?, Type::Str);
-        let form = self.call_form(heap, &Path::std(ADDRESS_BUILTIN), &[arg])?;
+        let form = self.info.call_form(heap, &Path::std(ADDRESS_BUILTIN), &[arg])?;
         Ok(forms::rooted(heap, form))
     }
 
@@ -281,12 +281,12 @@ impl Checker {
             args.push(Checked::new(forms::var_form(heap, n)?, t.clone()));
         }
         let callee = forms::var_form(heap, &p.name)?;
-        let call = self.apply_form(heap, callee, g_ret, &args)?;
+        let call = self.info.apply_form(heap, callee, g_ret, &args)?;
         let call = forms::rooted(heap, call);
         let kept: Vec<LabelsDef> = defs.iter().filter(|(n, _, _, _)| reached.contains(&n.as_str())).cloned().collect();
-        let block = self.labels_form(heap, &kept, &[call])?;
+        let block = self.info.labels_form(heap, &kept, &[call])?;
         let block = forms::rooted(heap, block);
-        let form = self.defun_form(heap, &p.lifted, &params, g_ret, &[block])?;
+        let form = self.info.defun_form(heap, &p.lifted, &params, g_ret, &[block])?;
         let form = forms::rooted(heap, form);
         self.lifted.borrow_mut().push(LiftedCallback { path: p.lifted.clone(), sig: Self::lifted_sig(&fn_ty), form });
         Ok(())

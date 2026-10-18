@@ -407,7 +407,7 @@ impl Checker {
                 ty
             )));
         }
-        let form = self.let_form(heap, &[], &body)?;
+        let form = self.info.let_form(heap, &[], &body)?;
         if !allocates {
             return Ok(Checked::new(form, ty));
         }
@@ -415,10 +415,10 @@ impl Checker {
         let open = self.c_call(heap, b::ARENA_OPEN, &[])?;
         let arena_var = forms::var_form(heap, b::ARENA_VAR)?;
         let close = self.c_call(heap, b::ARENA_CLOSE, &[Checked::new(arena_var, Type::CULong)])?;
-        let repr = self.repr_form(heap, &ty)?;
+        let repr = self.info.repr_form(heap, &ty)?;
         let protected = forms::unwind_protect_form(heap, form, close, repr)?;
         let protected = forms::rooted(heap, protected);
-        let wrapped = self.let_form(heap, &[(b::ARENA_VAR.to_string(), Type::CULong, open)], &[protected])?;
+        let wrapped = self.info.let_form(heap, &[(b::ARENA_VAR.to_string(), Type::CULong, open)], &[protected])?;
         Ok(Checked::new(wrapped, ty))
     }
 
@@ -485,7 +485,7 @@ impl Checker {
 
     /// A call to one of the internal builtins.
     fn c_call(&self, heap: &mut Heap, name: &str, args: &[Checked]) -> Result<Value, Error> {
-        let form = self.call_form(heap, &Path::std(name), args)?;
+        let form = self.info.call_form(heap, &Path::std(name), args)?;
         Ok(forms::rooted(heap, form))
     }
 
@@ -632,7 +632,7 @@ impl Checker {
         let kind_arg = self.c_word(heap, interp, kind as u64)?;
         let store = self.c_call(heap, b::STORE, &[addr, off, kind_arg, Checked::new(temp, ty.clone())])?;
         let answer = forms::var_form(heap, TEMP)?;
-        let form = self.let_form(heap, &[(TEMP.to_string(), ty.clone(), value.form)], &[store, answer])?;
+        let form = self.info.let_form(heap, &[(TEMP.to_string(), ty.clone(), value.form)], &[store, answer])?;
         Ok(Checked::new(form, ty.clone()))
     }
 
