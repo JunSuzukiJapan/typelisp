@@ -80,7 +80,7 @@ impl Checker {
             Some(wk::FNREF) => {
                 let path = core::path_field(heap, checked.form, 0)
                     .ok_or_else(|| Error::TypeError("internal error: a fnref node without a path".into()))?;
-                if self.reg.fn_sig(&path).is_some_and(|s| s.builtin) {
+                if self.info.reg.fn_sig(&path).is_some_and(|s| s.builtin) {
                     return Err(Error::TypeError(format!(
                         "{}: `{}` is a builtin, and a builtin has no body of its own to hand C. \
                          Pass a `lambda` that calls it instead.",
@@ -128,8 +128,8 @@ impl Checker {
             let n = self.callback_seq.get();
             self.callback_seq.set(n + 1);
             let name = format!("callback${}", n);
-            if !self.cur_ns().fns.contains_key(&name) {
-                return self.fq(&name);
+            if !self.info.cur_ns().fns.contains_key(&name) {
+                return self.info.fq(&name);
             }
         }
     }

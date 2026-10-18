@@ -10,6 +10,7 @@ pub mod freevars;
 pub mod forms;
 pub mod repr;
 pub mod registry;
+mod info;
 pub mod checker;
 mod fold;
 pub mod loop_dsl;

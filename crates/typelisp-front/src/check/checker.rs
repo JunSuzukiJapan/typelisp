@@ -20,6 +20,7 @@ use super::core::{self, Checked, Items};
 use super::fold;
 use super::forms;
 use super::repr::Repr;
+use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
 
 mod attribute;
@@ -180,12 +181,12 @@ type OptKeySpec = (String, Type, Option<Loc>, Option<Value>);
 type ParamsFull = (Vec<(String, Type)>, Vec<Option<Loc>>, Vec<OptKeySpec>, Option<RestParam>, Vec<OptKeySpec>);
 
 /// The call-site arity shape of a macro, derived from its [`MacroDef`] by
-/// [`Checker::resolve_macro`]/[`resolve_macro_path`](Checker::resolve_macro_path)
+/// [`Info::resolve_macro`]/[`resolve_macro_path`](Checker::resolve_macro_path)
 /// and consumed by [`Checker::check_macro_arity`]. Carries only what a raw
 /// argument *count* can be judged against — the `&key` names themselves aren't
 /// needed here (keyword validation happens in `Interp::expand_macro`).
 #[derive(Clone, Copy)]
-struct MacroShape {
+pub(super) struct MacroShape {
     required: usize,
     optional: usize,
     rest: bool,
@@ -198,17 +199,6 @@ impl MacroShape {
     }
 }
 
-/// The `Env` type a `symbol-macrolet` name is bound to. Not a type any
-/// program can write — a path segment cannot contain a space — so finding it
-/// in the environment means exactly one thing: this name stands for the form
-/// [`Checker::local_symbol_macros`] holds for it.
-///
-/// Binding the name at all is the point. It puts symbol macros in the same
-/// shadowing order as every other binding, instead of a second lookup that
-/// would have to reproduce the order by hand.
-fn symbol_macro_mark() -> Type {
-    Type::Named(Path::root(" symbol-macro"), Vec::new())
-}
 
 /// The variables a pattern binds: each `(name, type, name's source position)`,
 /// as returned by [`Checker::check_pattern`]/[`Checker::check_ctor_pattern`].
@@ -216,143 +206,10 @@ fn symbol_macro_mark() -> Type {
 /// goto-definition back to the binding site.
 type PatternBindings = Vec<(String, Type, Option<Loc>)>;
 
-/// One binding of a local: its name, type, and — where known — the source
-/// position of the name in its binding form (see [`Env::get_loc`]).
-type LocalBinding = (String, Type, Option<Loc>);
 
-/// The bindings one [`Env::extended_with_locs`] added, on top of the scope it
-/// extended. A chain rather than one flat list copied at every level: a body
-/// nested `n` binding forms deep would otherwise hold `n` copies of a list
-/// that grows to `n`, all alive at once down the recursion.
-struct Scope {
-    binds: Vec<LocalBinding>,
-    parent: Option<std::rc::Rc<Scope>>,
-    /// How many bindings the scopes above this one hold — what makes a
-    /// binding's [`Env::position`] stable down the chain.
-    start: usize,
-}
 
-/// A lexical environment mapping variable names to their types.
-#[derive(Clone)]
-struct Env {
-    /// Each binding's name, type, and — where known — the source position of
-    /// the name in its binding form (a `let`/`let*` binding, a `lambda`/
-    /// `labels`/`defun`/`defmethod` parameter or receiver name, a `labels`
-    /// function name, or a `match`-pattern binding). `None` for a binding
-    /// this checker doesn't bother tracking a position for
-    /// (monomorphization's synthesized re-checks) — consulted by
-    /// `Checker::check_at` to populate `DefLocs::local_refs` when a `Var`
-    /// reference resolves here.
-    vars: Option<std::rc::Rc<Scope>>,
-    /// Trait bounds on this function's own generic type parameters, declared
-    /// by a `(:where (Trait T (Assoc Concrete)...)...)` clause
-    /// (`Checker::check_defun`) — e.g. `{"t": [TraitBound { trait_path:
-    /// Path::std("iter"), assoc: {} }]}`. Fixed for the lifetime of one
-    /// function body (a nested `let`/`lambda` never introduces new type
-    /// parameters), so `extended` just carries the same `Rc` forward instead
-    /// of letting it vary per-binding the way `vars` does. Consulted only by
-    /// `Checker::receiver_method`'s bounded-type-variable step — see
-    /// its doc comment. The same bounds are also stored on the registered
-    /// `FnSig` (`Checker::check_defun`), for `Checker::check_call`'s
-    /// call-site validation — this copy exists only because body-checking
-    /// needs it readily available in `Env`, not threaded through `Registry`
-    /// lookups on every method call.
-    bounds: std::rc::Rc<BTreeMap<String, Vec<TraitBound>>>,
-}
 
-impl Env {
-    fn new() -> Env {
-        Env { vars: None, bounds: std::rc::Rc::new(BTreeMap::new()) }
-    }
 
-    /// The nearest binding of `name`, with where it sits counted from the
-    /// outermost binding.
-    fn lookup(&self, name: &str) -> Option<(usize, &LocalBinding)> {
-        let mut scope = self.vars.as_deref();
-        while let Some(s) = scope {
-            if let Some(i) = s.binds.iter().rposition(|(n, _, _)| n == name) {
-                return Some((s.start + i, &s.binds[i]));
-            }
-            scope = s.parent.as_deref();
-        }
-        None
-    }
-
-    fn get(&self, name: &str) -> Option<&Type> {
-        self.lookup(name).map(|(_, (_, t, _))| t)
-    }
-
-    /// Where the nearest binding of `name` sits, counted from the outermost
-    /// binding — stable down a chain of `extended` environments, which only
-    /// ever add.
-    fn position(&self, name: &str) -> Option<usize> {
-        self.lookup(name).map(|(i, _)| i)
-    }
-
-    /// How many bindings are in scope, shadowed ones included.
-    fn len(&self) -> usize {
-        self.vars.as_ref().map_or(0, |s| s.start + s.binds.len())
-    }
-
-    /// The nearest binding of `name`'s own recorded source position, if any —
-    /// see [`Self::vars`]'s doc comment. Consulted by `Checker::check_at`
-    /// alongside [`Self::get`] when a `Var` reference resolves to a local.
-    fn get_loc(&self, name: &str) -> Option<Loc> {
-        self.lookup(name).and_then(|(_, (_, _, l))| l.clone())
-    }
-
-    /// A child environment with `binds` added (later bindings shadow earlier),
-    /// with no recorded position for any of them — used by callers that don't
-    /// track individual binding positions (monomorphization's synthesized
-    /// re-checks). See [`Self::extended_with_locs`] for the counterpart that
-    /// does.
-    fn extended(&self, binds: Vec<(String, Type)>) -> Result<Env, Error> {
-        self.extended_with_locs(binds.into_iter().map(|(n, t)| (n, t, None)).collect())
-    }
-
-    /// Like [`Self::extended`], but each binding also carries the source
-    /// position of its name in the binding form — used by `let`/`let*`,
-    /// `lambda`/`labels` parameters, and `defun`/`defmethod` parameters and
-    /// receivers, so a later reference to the bound name can resolve back to
-    /// where it was bound (`Checker::check_at`, `DefLocs::local_refs`).
-    /// Every local binding in the language is made here — a `let`/`let*`
-    /// binding, a `lambda`/`labels`/`defun`/`defmethod` parameter or receiver,
-    /// a `labels` function name, a `match`-pattern binding — which is what
-    /// makes this the one place a reserved name can be refused.
-    fn extended_with_locs(&self, binds: Vec<(String, Type, Option<Loc>)>) -> Result<Env, Error> {
-        for (name, _, _) in &binds {
-            if is_reserved_name(name) {
-                return Err(Error::TypeError(format!("`{}` is a reserved word and cannot be bound", name)));
-            }
-        }
-        let start = self.len();
-        let vars = Some(std::rc::Rc::new(Scope { binds, parent: self.vars.clone(), start }));
-        Ok(Env { vars, bounds: self.bounds.clone() })
-    }
-
-    /// A child environment that additionally declares `bounds` (a function's
-    /// own `where`-clause trait bounds) — see the field's doc comment.
-    fn with_bounds(&self, bounds: BTreeMap<String, Vec<TraitBound>>) -> Env {
-        Env { vars: self.vars.clone(), bounds: std::rc::Rc::new(bounds) }
-    }
-}
-
-/// Names no binding may take.
-///
-/// `task` is always a special form in head position, so a variable called
-/// `task` could be bound but never called — a name that silently does nothing
-/// is worse than a rejected one. `thread` is `task`'s twin, closed for the
-/// same reason.
-///
-/// The other special forms are *not* here. `(let ((if f)) ...)` has been legal
-/// since the beginning and the prelude and tests lean on names like `list` and
-/// `format` being ordinary words; closing that is a separate, breaking change.
-/// `task` and `thread` were closed when they arrived, before anything had the
-/// chance to depend on them (`task` replaced `go` on 2026-09-25, when no
-/// program used `task` as a name).
-fn is_reserved_name(name: &str) -> bool {
-    name == "task" || name == "thread"
-}
 
 /// Which of the two task-starting forms [`Checker::check_spawn`] is checking.
 #[derive(Clone, Copy)]
@@ -921,27 +778,27 @@ fn defmethod_is_gone() -> Error {
 /// What a module-level name holds: a function or a global variable. A name
 /// has one value whichever kind it is, so it is never both
 /// (`Checker::check_value_clash`).
-enum ModuleValue {
+pub(super) enum ModuleValue {
     Fn(Path),
     Var(Path, VarInfo),
 }
 
 /// [`ModuleValue`] before its path is known, as one module's tables answer
 /// it, with whether it is `pub`.
-enum ModuleValueKind {
+pub(super) enum ModuleValueKind {
     Fn { public: bool },
     Var(VarInfo),
 }
 
 impl ModuleValueKind {
-    fn public(&self) -> bool {
+    pub(super) fn public(&self) -> bool {
         match self {
             ModuleValueKind::Fn { public } => *public,
             ModuleValueKind::Var(vi) => vi.public,
         }
     }
 
-    fn at(self, path: Path) -> ModuleValue {
+    pub(super) fn at(self, path: Path) -> ModuleValue {
         match self {
             ModuleValueKind::Fn { .. } => ModuleValue::Fn(path),
             ModuleValueKind::Var(vi) => ModuleValue::Var(path, vi),
@@ -961,13 +818,13 @@ fn module_value_in(m: &Namespace, name: &str) -> Option<ModuleValueKind> {
 /// variable or a macro. The three share one name space, so a module holds at
 /// most one of them under a name (`Checker::check_value_clash`), and the
 /// nearest module that holds any of them decides what the name is.
-enum ModuleEntry {
+pub(super) enum ModuleEntry {
     Value(ModuleValueKind),
     Macro { public: bool, shape: MacroShape },
 }
 
 impl ModuleEntry {
-    fn public(&self) -> bool {
+    pub(super) fn public(&self) -> bool {
         match self {
             ModuleEntry::Value(kind) => kind.public(),
             ModuleEntry::Macro { public, .. } => *public,
@@ -976,7 +833,7 @@ impl ModuleEntry {
 }
 
 /// What module `m` holds under `name`, if anything.
-fn module_entry_in(m: &Namespace, name: &str) -> Option<ModuleEntry> {
+pub(super) fn module_entry_in(m: &Namespace, name: &str) -> Option<ModuleEntry> {
     match m.macros.get(name) {
         Some(def) => Some(ModuleEntry::Macro { public: def.public, shape: MacroShape::of(def) }),
         None => module_value_in(m, name).map(ModuleEntry::Value),
@@ -985,14 +842,14 @@ fn module_entry_in(m: &Namespace, name: &str) -> Option<ModuleEntry> {
 
 /// A name as written at a use site: bare, or a `::` path.
 #[derive(Clone, Copy)]
-enum Written<'a> {
+pub(super) enum Written<'a> {
     Bare(&'a str),
     Path(&'a [String]),
 }
 
 /// What a written name resolves to — the one rule of
 /// `docs/dev/name-resolution.md` §3 ([`Checker::resolve_name`]).
-enum Resolved {
+pub(super) enum Resolved {
     /// A local binding: a `let`, a parameter, a `labels` function, a
     /// `symbol-macrolet` name.
     Local,
@@ -1009,7 +866,7 @@ enum Resolved {
 }
 
 /// The method a receiver answers a name with ([`Checker::receiver_method`]).
-enum MethodTarget {
+pub(super) enum MethodTarget {
     /// One of a trait object's trait's methods, through its vtable.
     Dyn { trait_path: Path, pins: Vec<Type> },
     /// `Sexpr`'s catalog, which a trait object answers to as the heap value
@@ -1033,32 +890,13 @@ enum MethodTarget {
 pub(crate) const STRUCT_CTOR: &str = "(make-instance)";
 
 pub struct Checker {
-    reg: Registry,
-    ns: Vec<String>,
+    /// What names mean where the checker is: the registry, the module
+    /// context, and the lexical scopes of type variables and local macros —
+    /// see [`Info`].
+    info: Info,
     /// Whether the forms being checked are the standard library's (the core
     /// macro layer and the prelude) — see [`Self::set_stdlib`].
     stdlib: bool,
-    /// Stack of enclosing *files'* own module paths, innermost last — set by
-    /// [`Self::enter_file_module`]/[`Self::exit_file_module`] (`project.rs`'s
-    /// file-level wrapping only, never [`Self::enter_module`]'s nested
-    /// `(module ...)` forms), so it stays fixed at "the loading file's own
-    /// path" even while `self.ns` grows deeper through a nested `module`
-    /// block inside that file. [`Self::find_module`]'s sibling-file
-    /// resolution tier reads the top of this stack (never `self.ns` itself)
-    /// so `(use foo)` inside a nested `module` block still resolves `foo`
-    /// relative to the *file's* directory, not that inner block's own
-    /// namespace (which has no filesystem counterpart to be a sibling of).
-    /// A recursively-loaded dependency pushes and fully pops its own frame
-    /// before the file that `use`s it resumes checking (`project.rs`'s
-    /// scan-before-check ordering), so this never needs more than simple
-    /// stack discipline.
-    file_ns: Vec<Vec<String>>,
-    /// Namespace lengths to restore on [`Self::exit_file_module`] /
-    /// [`Self::check_module`], innermost last. A closing form used to be
-    /// enough — every push had one — but `(in-module ...)` pushes segments
-    /// that stay in effect for the rest of the enclosing unit, so how far to
-    /// unwind is the saved base rather than a count of segments.
-    ns_base: Vec<usize>,
     /// Stack of enclosing loops' accumulated exit type, innermost last.
     /// `break`/`return` unify their (optional) value's type into the top
     /// frame; `while`/`dotimes`/`dolist` seed it with `Unit` (their fixed
@@ -1101,22 +939,6 @@ pub struct Checker {
     /// source that is not inside the `unsafe` that happened to trigger the
     /// instantiation. That is the same reason it clears `loop_stack`.
     unsafe_depth: Cell<u32>,
-    /// The type variables each enclosing definition binds, innermost last —
-    /// what lets [`Self::parse_type_here_at`] tell a type variable from a
-    /// type name that resolves to nothing.
-    ///
-    /// Both are a bare name `canon` cannot resolve, so without this an
-    /// unknown name was accepted as if it were a type variable and surfaced
-    /// much later, as a mismatch between two spellings of the same name.
-    /// Each definition pushes a frame of the variables its declaration part
-    /// introduces: the `<...>` of a `defun`/`defstruct`/`defenum`/`deftype`
-    /// name, the unresolved names of a `defmethod` receiver or an `impl`
-    /// target (plus `impl<T>`'s own), a `deftrait`'s `Self` and associated
-    /// types — and nothing for the forms that bind none. While the stack is
-    /// non-empty every name must be a type or one of the frames' variables.
-    /// [`Self::enter_specialization`] clears it for the same reason it clears
-    /// `loop_stack`: a specialization re-checks with every variable bound.
-    type_names: RefCell<Vec<HashSet<String>>>,
     /// The type each `catch`/`throw` symbol carries, learned from the first
     /// use of that symbol and enforced on every later one.
     ///
@@ -1173,7 +995,7 @@ pub struct Checker {
     /// [`Self::check_at`] whenever a `Var` reference resolves against an
     /// `Env` binding with a recorded position. A `RefCell` for the same
     /// reason as `loop_stack`/`warnings`: `check_at`/`check_inner` recurse
-    /// through `&self`, not `&mut self`. Flushed into `self.reg.def_locs.
+    /// through `&self`, not `&mut self`. Flushed into `self.info.reg.def_locs.
     /// local_refs` at the end of every [`Self::check_form`] (a `&mut self`
     /// boundary), so the registry's copy — the one the LSP snapshots — stays
     /// current without every recursive `check_*` helper needing `&mut self`.
@@ -1207,23 +1029,6 @@ pub struct Checker {
     /// form already produced, and `Interp::exec` silently overwriting the
     /// identical earlier registration — is compile-time-only.
     spec_memo: RefCell<HashSet<(Path, Option<String>)>>,
-    /// `macrolet` scopes, innermost last: each maps a locally bound macro
-    /// name to the synthesized global path its body was installed under and
-    /// the call-site arity shape [`Self::resolve_macro`] answers with.
-    ///
-    /// A `RefCell` because expression checking is `&self` — the whole reason
-    /// `macrolet` needed a table of its own rather than the registry's.
-    local_macros: RefCell<Vec<HashMap<String, (Path, MacroShape)>>>,
-    /// `symbol-macrolet` scopes, innermost last: name -> the form the name
-    /// stands for.
-    ///
-    /// Shadowing is not decided here. Each scope also binds its names in the
-    /// `Env` at [`SYMBOL_MACRO_MARK`], so an inner `let` of the same name
-    /// hides the symbol macro (it rebinds the name to a real type) and the
-    /// symbol macro hides an outer variable (it rebinds the name to the
-    /// mark) — which is exactly CL's rule, arrived at by the environment
-    /// doing what it already does.
-    local_symbol_macros: RefCell<Vec<HashMap<String, Value>>>,
     /// Makes each `macrolet` binding's synthesized name unique, so two
     /// occurrences of the same local macro name never share a body.
     local_macro_seq: Cell<u32>,
@@ -1325,9 +1130,9 @@ pub const SPECIAL_FORM_HEADS: &[u32] = &[
     wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
 ];
 
-/// The standard library's module, as the segments [`Checker::ns_ancestors`]
-/// and [`Checker::find_module`] search it under.
-static STD_SEGMENTS: std::sync::LazyLock<Vec<String>> =
+/// The standard library's module, as the segments [`Info::ns_ancestors`]
+/// and [`Info::find_module`] search it under.
+pub(super) static STD_SEGMENTS: std::sync::LazyLock<Vec<String>> =
     std::sync::LazyLock::new(|| vec![crate::types::STD_MODULE.to_string()]);
 
 const TOPLEVEL_FORM_HEADS: &[u32] = &[
@@ -1350,15 +1155,11 @@ impl Checker {
 
     pub fn new() -> Checker {
         Checker {
-            reg: Registry::with_builtins(),
-            ns: Vec::new(),
+            info: Info::new(),
             stdlib: false,
-            file_ns: Vec::new(),
-            ns_base: Vec::new(),
             loop_stack: RefCell::new(Vec::new()),
             block_stack: RefCell::new(Vec::new()),
             unsafe_depth: Cell::new(0),
-            type_names: RefCell::new(Vec::new()),
             throw_tags: RefCell::new(std::collections::BTreeMap::new()),
             redef_policy: RedefPolicy::default(),
             warnings: RefCell::new(Vec::new()),
@@ -1372,8 +1173,6 @@ impl Checker {
             generic_fn_templates: HashMap::new(),
             generic_method_templates: HashMap::new(),
             spec_memo: RefCell::new(HashSet::new()),
-            local_macros: RefCell::new(Vec::new()),
-            local_symbol_macros: RefCell::new(Vec::new()),
             local_macro_seq: Cell::new(0),
             spec_pending: RefCell::new(Vec::new()),
             type_var_bindings: BTreeMap::new(),
@@ -1409,9 +1208,9 @@ impl Checker {
     /// delta asks.
     pub fn signature(&self, heap: &Heap) -> Result<RegistrySignature, String> {
         let mut sig = crate::dump::signature(
-            &self.reg.root,
-            &self.reg.docs,
-            &self.reg.struct_defaults,
+            &self.info.reg.root,
+            &self.info.reg.docs,
+            &self.info.reg.struct_defaults,
             &self.throw_tags.borrow(),
             &self.sorted_predeclared(),
         )
@@ -1429,9 +1228,9 @@ impl Checker {
     /// than the whole world.
     pub fn capture_delta(&self, heap: &Heap, before: &RegistrySignature) -> Result<CheckerDelta, String> {
         let entries = crate::dump::delta(
-            &self.reg.root,
-            &self.reg.docs,
-            &self.reg.struct_defaults,
+            &self.info.reg.root,
+            &self.info.reg.docs,
+            &self.info.reg.struct_defaults,
             &self.throw_tags.borrow(),
             &self.sorted_predeclared(),
             before,
@@ -1462,9 +1261,9 @@ impl Checker {
     pub fn apply_delta(&mut self, delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
         let mut predeclared = std::mem::take(&mut self.predeclared);
         crate::dump::apply_entries(
-            &mut self.reg.root,
-            &mut self.reg.docs,
-            &mut self.reg.struct_defaults,
+            &mut self.info.reg.root,
+            &mut self.info.reg.docs,
+            &mut self.info.reg.struct_defaults,
             &mut self.throw_tags.borrow_mut(),
             &mut |name| {
                 predeclared.insert(name);
@@ -1589,7 +1388,7 @@ impl Checker {
     /// checks its own input, so REPL `eval` resolves against the root
     /// environment unchanged.
     pub fn set_current_ns(&mut self, ns: Vec<String>) {
-        self.ns = ns;
+        self.info.ns = ns;
         self.publish_name_view();
     }
 
@@ -1615,7 +1414,7 @@ impl Checker {
     /// checked, so a set snapshotted at entry would answer `None` for a type
     /// defined a few forms earlier.
     fn repr(&self, ty: &Type) -> Repr {
-        Repr::of_by(ty, &|p| self.reg.type_def(p).map(|d| d.kind))
+        Repr::of_by(ty, &|p| self.info.reg.type_def(p).map(|d| d.kind))
     }
 
     /// [`Self::repr`], written as the core IR spells it — for the repr
@@ -1705,7 +1504,7 @@ impl Checker {
         // A Rust-implemented builtin's `int`-typed parameters cross the
         // compiled boundary as raw machine words — see `int_boundary_raw`.
         let boundary = self
-            .reg
+            .info.reg
             .fn_sig(r)
             .filter(|sig| sig.builtin && !sig.ffi && !int_boundary_native_fn(r.last_segment()))
             .map(|sig| (sig.params.clone(), sig.ret.clone()));
@@ -1762,7 +1561,7 @@ impl Checker {
         // `Vector<int>`'s `get` takes an `int` index and returns a `T` that
         // happens to be `int`, and only the index is a machine word.
         let boundary = self
-            .reg
+            .info.reg
             .type_def(type_name)
             .and_then(|d| d.assoc.get(method))
             .filter(|af| af.builtin && int_boundary_raw(type_name, method))
@@ -1875,7 +1674,7 @@ impl Checker {
     /// is just the declaration. For a generic one it is the substitution that
     /// makes the answer meaningful at all — see `construct_form`'s doc comment.
     fn variant_field_tys(&self, adt: &Path, variant: usize, args: &[Type]) -> Vec<Type> {
-        let Some(def) = self.reg.type_def(adt) else { return Vec::new() };
+        let Some(def) = self.info.reg.type_def(adt) else { return Vec::new() };
         let Some(v) = def.variants.get(variant) else { return Vec::new() };
         let subst: BTreeMap<String, Type> =
             def.params.iter().cloned().zip(args.iter().cloned()).collect();
@@ -2617,7 +2416,7 @@ impl Checker {
     /// `kind` is what is being defined now (`"function"`, `"variable"` or
     /// `"macro"`).
     fn check_value_clash(&self, kind: &str, name: &str) -> Result<(), Error> {
-        let ns = self.cur_ns();
+        let ns = self.info.cur_ns();
         let other = [
             ("function", ns.fns.contains_key(name)),
             ("variable", ns.vars.contains_key(name)),
@@ -2648,8 +2447,8 @@ impl Checker {
     /// message points at the other table's occupant.
     fn check_type_trait_clash(&self, kind: &str, name: &str) -> Result<(), Error> {
         let (clashes, other) = match kind {
-            "trait" => (self.cur_ns().types.contains_key(name), "type"),
-            _ => (self.cur_ns().traits.contains_key(name), "trait"),
+            "trait" => (self.info.cur_ns().types.contains_key(name), "type"),
+            _ => (self.info.cur_ns().traits.contains_key(name), "trait"),
         };
         if clashes {
             return Err(Error::TypeError(format!(
@@ -2661,7 +2460,7 @@ impl Checker {
         // spelling *for* a type, so a later `defstruct`/`defenum`/`deftrait`
         // of that name would make the same written name mean two things
         // depending on which registration a lookup consulted first.
-        if kind != "type alias" && self.cur_ns().type_aliases.contains_key(name) {
+        if kind != "type alias" && self.info.cur_ns().type_aliases.contains_key(name) {
             return Err(Error::TypeError(format!(
                 "cannot define {} `{}`: a `deftype` alias of that name already exists here",
                 kind, name
@@ -2669,7 +2468,7 @@ impl Checker {
         }
         // A `def-c-struct` is in the same name space: `(ptr name)` would
         // otherwise mean one thing and `name` another.
-        if kind != "C struct" && self.cur_ns().c_structs.contains_key(name) {
+        if kind != "C struct" && self.info.cur_ns().c_structs.contains_key(name) {
             return Err(Error::TypeError(format!(
                 "cannot define {} `{}`: a `def-c-struct` of that name already exists here",
                 kind, name
@@ -2715,7 +2514,7 @@ impl Checker {
     /// around every form; a driver that reads before checking anything — a
     /// prelude or a dump just loaded — does it once first.
     pub fn publish_names(&self, heap: &Heap) {
-        self.reg.publish_names(&mut heap.names());
+        self.info.reg.publish_names(&mut heap.names());
     }
 
     fn check_one_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<TopLevelForm, Error> {
@@ -2787,8 +2586,8 @@ impl Checker {
         // point is still valid and worth keeping (mirrors how a partially-
         // checked form's earlier registry mutations, e.g. `def_locs.fns`,
         // aren't rolled back either).
-        self.reg.def_locs.local_refs.extend(self.local_refs.borrow_mut().drain());
-        self.reg.def_locs.node_types.extend(self.node_types.borrow_mut().drain());
+        self.info.reg.def_locs.local_refs.extend(self.local_refs.borrow_mut().drain());
+        self.info.reg.def_locs.node_types.extend(self.node_types.borrow_mut().drain());
         // Definitions lifted for C callbacks (`checker::ffi_callback`) join the
         // bundle after the instantiations — a lifted body may call one — and
         // ahead of the form that asked for them.
@@ -2797,7 +2596,7 @@ impl Checker {
             Ok((specs, tl)) if specs.is_empty() && lifted.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
                 for l in lifted {
-                    self.reg.root.module_mut(l.path.parent()).fns.insert(l.path.last_segment().to_string(), l.sig);
+                    self.info.reg.root.module_mut(l.path.parent()).fns.insert(l.path.last_segment().to_string(), l.sig);
                     specs.push(l.form);
                 }
                 specs.push(tl);
@@ -2903,7 +2702,7 @@ impl Checker {
         let (params, rest) = self.parse_signature_params(heap, parts[1], false)?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
 
-        let fq_name = self.fq(&name);
+        let fq_name = self.info.fq(&name);
         if self.predeclared.contains(&fq_name.to_string()) {
             return Err(Error::TypeError(format!("defsignature: `{}` is already declared", name)));
         }
@@ -2914,7 +2713,7 @@ impl Checker {
         // The redefinition path still runs for the built-in case, which has
         // its own message.
         self.check_value_clash("function", &name)?;
-        if let Some(existing) = self.cur_ns().fns.get(&name) {
+        if let Some(existing) = self.info.cur_ns().fns.get(&name) {
             if existing.builtin {
                 self.check_redef("function", &name, Some(existing))?;
             }
@@ -2936,7 +2735,7 @@ impl Checker {
             optionals: Vec::new(),
             keys: Vec::new(),
         };
-        self.reg.root.module_mut(&self.ns).fns.insert(name, sig);
+        self.info.reg.root.module_mut(&self.info.ns).fns.insert(name, sig);
         self.predeclared.insert(fq_name.to_string());
         forms::defsignature_form(heap)
     }
@@ -3077,7 +2876,7 @@ impl Checker {
         let library = Self::parse_defffi_options(heap, &parts[3..])?;
 
         self.check_value_clash("function", &name)?;
-        if let Some(existing) = self.cur_ns().fns.get(&name) {
+        if let Some(existing) = self.info.cur_ns().fns.get(&name) {
             if existing.builtin {
                 self.check_redef("function", &name, Some(existing))?;
             }
@@ -3099,8 +2898,8 @@ impl Checker {
             optionals: Vec::new(),
             keys: Vec::new(),
         };
-        self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
-        self.defffi_form(heap, &self.fq(&name), &c_symbol, library.as_deref(), &params, &ret)
+        self.info.reg.root.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
+        self.defffi_form(heap, &self.info.fq(&name), &c_symbol, library.as_deref(), &params, &ret)
     }
 
     /// A `defffi`'s name: either a bare symbol, used for both sides, or
@@ -3340,7 +3139,7 @@ impl Checker {
     /// can resolve an ADT variant's constructor name when printing an enum
     /// result (the box stores the variant index, not its name).
     pub fn registry(&self) -> &Registry {
-        &self.reg
+        &self.info.reg
     }
 
     /// `(pub defun ...)`, `(pub defstruct ...)` etc. — mark the next definition public.
@@ -3382,165 +3181,15 @@ impl Checker {
     // `::`-string decoding lives in the reader/parser. Resolution navigates the
     // namespace tree, current namespace first then root.
 
-    /// Qualify a bare name with the current namespace path.
-    fn fq(&self, name: &str) -> Path {
-        let mut segments = self.ns.clone();
-        segments.push(name.to_string());
-        Path::from_segments(segments)
-    }
 
-    /// The current namespace.
-    fn cur_ns(&self) -> &Namespace {
-        self.reg.root.module(&self.ns).expect("current namespace exists")
-    }
 
-    /// If `path` starts with an empty segment (reader-encoded `::foo` absolute
-    /// path), strip it and return `(true, rest)`.  Otherwise `(false, path)`.
-    fn split_abs<'a>(&self, path: &'a [String]) -> (bool, &'a [String]) {
-        if path.first().map(|s| s.is_empty()).unwrap_or(false) {
-            (true, &path[1..])
-        } else {
-            (false, path)
-        }
-    }
 
-    /// The current namespace's ancestor chain, nearest first, ending at root:
-    /// `self.ns`, `self.ns[..len-1]`, ..., `[]`. The module-tree analogue of
-    /// walking parent lexical-scope frames — every bare-name resolver walks
-    /// this instead of only checking "current module or literal root", so a
-    /// submodule sees not just its own definitions but every enclosing
-    /// module's too (including root's, however deeply nested the caller is).
-    fn ns_ancestors(&self) -> impl Iterator<Item = &[String]> {
-        // The standard library's module comes last: while its definitions are
-        // still resolved by name, this is what keeps them in scope from a
-        // module that is not inside it.
-        (0..=self.ns.len()).rev().map(move |k| &self.ns[..k]).chain(std::iter::once(STD_SEGMENTS.as_slice()))
-    }
 
-    /// The first hit `lookup` finds walking the ancestor chain, nearest module
-    /// first. `lookup` is given each module's absolute path along with it.
-    fn find_on_chain<T>(&self, mut lookup: impl FnMut(&[String], &Namespace) -> Option<T>) -> Option<T> {
-        self.ns_ancestors().find_map(|prefix| lookup(prefix, self.reg.root.module(prefix)?))
-    }
 
-    /// Looks up the last segment of `segs` in the module the other segments
-    /// name ([`Self::find_module`]), under the cross-module visibility rule:
-    /// a private item is found only from inside its own module. `lookup`
-    /// answers the item's visibility and value; the result carries the
-    /// item's absolute path.
-    fn find_in_module<T>(
-        &self,
-        segs: &[String],
-        lookup: impl FnOnce(&Namespace, &str) -> Option<(bool, T)>,
-    ) -> Option<(Path, T)> {
-        let (last, mods) = segs.split_last()?;
-        let (abs, m) = self.find_module(mods)?;
-        let (public, v) = lookup(m, last)?;
-        if !public && !self.in_scope(&abs) {
-            return None;
-        }
-        Some((item_path(&abs, last), v))
-    }
 
-    /// Whether `item_ns` (a definition's owning module) is visible from the
-    /// current namespace without needing `pub` — Rust-style module privacy:
-    /// the current module IS `item_ns`, or is nested inside it (a
-    /// descendant). Replaces the old exact-equality `same_module` check;
-    /// root (`item_ns == []`) is always an ancestor, so this also subsumes
-    /// the former "literal root caller" special case.
-    fn in_scope(&self, item_ns: &[String]) -> bool {
-        // The standard library's module is in scope everywhere, as the root
-        // it was moved out of was, while its names are still resolved by
-        // name.
-        item_ns.first().map(String::as_str) == Some(crate::types::STD_MODULE)
-            || (self.ns.len() >= item_ns.len() && self.ns[..item_ns.len()] == *item_ns)
-    }
 
-    /// Whether an associated function/method `af` of `type_fq` is reachable
-    /// from the current namespace: public, or in scope (declared in the
-    /// same module or an ancestor of it) — mirrors `resolve_module_value_path`'s
-    /// cross-module `public` check. Used at every call site that looks up
-    /// `def.assoc` directly (`try_field_access`, `check_field_set`,
-    /// `resolve_name`'s type-member step, `receiver_method`,
-    /// `receiver_method`) so a private member — including a
-    /// `defstruct` field whose accessor wasn't declared `pub` — is treated
-    /// as absent rather than merely forbidden, matching how a private free
-    /// function or constructor "doesn't resolve" instead of erroring with a
-    /// privacy-specific message.
-    fn assoc_visible(&self, type_fq: &Path, af: &AssocFn) -> bool {
-        af.sig.public || self.in_scope(type_fq.parent())
-    }
 
-    /// Locate a child-module `path`, resolving it relative to the current
-    /// namespace first, then the root, then via `mod_aliases`. Handles absolute
-    /// paths (leading empty segment) by going straight to root.
-    /// Returns `(absolute_segments, &Namespace)`.
-    fn find_module(&self, path: &[String]) -> Option<(Vec<String>, &Namespace)> {
-        let (is_abs, eff) = self.split_abs(path);
-        if is_abs {
-            return self.reg.root.module(eff).map(|m| (eff.to_vec(), m));
-        }
 
-        // 1. Child of the current namespace.
-        if let Some(m) = self.cur_ns().module(eff) {
-            let mut abs = self.ns.clone();
-            abs.extend_from_slice(eff);
-            return Some((abs, m));
-        }
-        // 2. Child of root.
-        if let Some(m) = self.reg.root.module(eff) {
-            return Some((eff.to_vec(), m));
-        }
-        // 2b. Child of the standard library's module — a library macro's
-        // expansion spells its helpers `%internal::name` wherever it lands.
-        let mut in_std = STD_SEGMENTS.clone();
-        in_std.extend_from_slice(eff);
-        if let Some(m) = self.reg.root.module(&in_std) {
-            return Some((in_std, m));
-        }
-        // 3. Module alias: expand the first segment via mod_aliases.
-        if !eff.is_empty() {
-            let first = &eff[0];
-            let rest = &eff[1..];
-            let alias = self
-                .cur_ns()
-                .mod_aliases
-                .get(first)
-                .or_else(|| self.reg.root.mod_aliases.get(first));
-            if let Some(base) = alias {
-                let mut expanded = base.clone();
-                expanded.extend_from_slice(rest);
-                if let Some(m) = self.reg.root.module(&expanded) {
-                    return Some((expanded, m));
-                }
-            }
-        }
-        // 4. Sibling of the current *file* (not `self.ns`, which may be
-        // deeper than the file's own path inside a nested `(module ...)`
-        // block — see `file_ns`'s doc comment): a file in the same directory
-        // as the one currently being checked, reached without spelling out
-        // its full root-relative path. Tried last so it never shadows an
-        // existing root-relative/current-namespace/alias resolution — see
-        // `docs/dev/language-design.md` §2.4.
-        if let Some(cur_file) = self.file_ns.last() {
-            if !cur_file.is_empty() {
-                let mut sib = cur_file[..cur_file.len() - 1].to_vec();
-                sib.extend_from_slice(eff);
-                if let Some(m) = self.reg.root.module(&sib) {
-                    return Some((sib, m));
-                }
-            }
-        }
-        None
-    }
-
-    /// A `use` alias for a bare `name`, looked up current namespace then root.
-    fn lookup_alias(&self, name: &str) -> Option<Vec<String>> {
-        if let Some(p) = self.cur_ns().aliases.get(name) {
-            return Some(p.clone());
-        }
-        self.reg.root.aliases.get(name).cloned()
-    }
 
     /// What `written` names at this use site — the one rule of
     /// `docs/dev/name-resolution.md` §3. Every place that resolves the name of
@@ -3550,7 +3199,7 @@ impl Checker {
     /// A bare name: a local, a macro, a constructor or static method brought
     /// in by `use`, a method of the receiver's type, then the module-level
     /// value (a function or a global). A module-level macro and value are one
-    /// name space ([`Self::resolve_module_entry`]): the macro step is taken
+    /// name space ([`Info::resolve_module_entry`]): the macro step is taken
     /// only when the nearest module defining the name defines a macro, and is
     /// tried that early because a macro's arguments are not expressions — the
     /// receiver's type cannot be learned from them. `receiver` gives the receiver's type —
@@ -3571,13 +3220,13 @@ impl Checker {
                 if env.get(name).is_some() {
                     return Some(Resolved::Local);
                 }
-                if let Some((path, shape)) = self.resolve_macro(name) {
+                if let Some((path, shape)) = self.info.resolve_macro(name) {
                     return Some(Resolved::Macro(path, shape));
                 }
-                if let Some((adt, idx)) = self.resolve_ctor(name) {
+                if let Some((adt, idx)) = self.info.resolve_ctor(name) {
                     return Some(Resolved::Ctor(adt, idx));
                 }
-                if let Some((type_fq, member)) = self.resolve_static_use(name) {
+                if let Some((type_fq, member)) = self.info.resolve_static_use(name) {
                     return Some(Resolved::Member(type_fq, member));
                 }
                 if let Some(ty) = receiver() {
@@ -3585,10 +3234,10 @@ impl Checker {
                         return Some(Resolved::Method(target));
                     }
                 }
-                self.resolve_module_value(name).map(Resolved::Value)
+                self.info.resolve_module_value(name).map(Resolved::Value)
             }
             Written::Path(segs) => {
-                match self.resolve_module_entry_path(segs) {
+                match self.info.resolve_module_entry_path(segs) {
                     Some((path, ModuleEntry::Macro { shape, .. })) => return Some(Resolved::Macro(path, shape)),
                     Some((path, ModuleEntry::Value(kind))) => return Some(Resolved::Value(kind.at(path))),
                     None => {}
@@ -3597,12 +3246,12 @@ impl Checker {
                 if type_segs.is_empty() {
                     return None;
                 }
-                let type_fq = self.resolve_type_path(type_segs)?;
-                let def = self.reg.type_def(&type_fq)?;
+                let type_fq = self.info.resolve_type_path(type_segs)?;
+                let def = self.info.reg.type_def(&type_fq)?;
                 if let Some(idx) = def.variants.iter().position(|v| &v.name == member) {
                     return Some(Resolved::Ctor(type_fq, idx));
                 }
-                if def.method_defs(member).any(|(af, _)| self.assoc_visible(&type_fq, af)) {
+                if def.method_defs(member).any(|(af, _)| self.info.assoc_visible(&type_fq, af)) {
                     Some(Resolved::Member(type_fq, member.clone()))
                 } else {
                     None
@@ -3611,96 +3260,12 @@ impl Checker {
         }
     }
 
-    /// What a bare module-level name means — a function, a global variable
-    /// or a macro, never two of them ([`Self::check_value_clash`]) — with its
-    /// absolute path, walking the current namespace's ancestor chain (see
-    /// [`Self::ns_ancestors`]), nearest module first. A name found anywhere on
-    /// that chain is in scope without needing `pub`, exactly like a
-    /// same-module reference.
-    ///
-    /// The one walk all three kinds share: a nearer definition hides a
-    /// further one of any kind, because a name has one meaning whichever kind
-    /// it is. A function in a module therefore hides a root macro of the same
-    /// name inside that module.
-    ///
-    /// A `use` import comes after this module's own definition of the name and
-    /// before everything further out: an import never beats a definition made
-    /// here, which is why `check_use` warns that such an import does nothing.
-    /// An import that names no function, global or macro (it names a type)
-    /// leaves the walk going, as [`Self::resolve_bare_type`] does for the
-    /// other name space.
-    fn resolve_module_entry(&self, name: &str) -> Option<(Path, ModuleEntry)> {
-        if let Some(entry) = module_entry_in(self.cur_ns(), name) {
-            return Some((item_path(&self.ns, name), entry));
-        }
-        if let Some(path) = self.lookup_alias(name) {
-            if let Some(found) = self.resolve_module_entry_path(&path) {
-                return Some(found);
-            }
-        }
-        self.find_on_chain(|prefix, m| module_entry_in(m, name).map(|entry| (item_path(prefix, name), entry)))
-    }
 
-    /// [`Self::resolve_module_entry`] for a qualified `module::...::name`.
-    fn resolve_module_entry_path(&self, segs: &[String]) -> Option<(Path, ModuleEntry)> {
-        self.find_in_module(segs, |m, n| module_entry_in(m, n).map(|entry| (entry.public(), entry)))
-    }
 
-    /// What a bare module-level name holds, if it is a function or a global
-    /// variable — see [`Self::resolve_module_entry`]. `None` when the nearest
-    /// definition is a macro, which hides any value further out.
-    fn resolve_module_value(&self, name: &str) -> Option<ModuleValue> {
-        match self.resolve_module_entry(name)? {
-            (path, ModuleEntry::Value(kind)) => Some(kind.at(path)),
-            (_, ModuleEntry::Macro { .. }) => None,
-        }
-    }
 
-    /// [`Self::resolve_module_value`] for a qualified `module::...::name`.
-    fn resolve_module_value_path(&self, segs: &[String]) -> Option<ModuleValue> {
-        match self.resolve_module_entry_path(segs)? {
-            (path, ModuleEntry::Value(kind)) => Some(kind.at(path)),
-            (_, ModuleEntry::Macro { .. }) => None,
-        }
-    }
 
-    /// The function a bare name holds, if what it holds is a function — see
-    /// [`Self::resolve_module_value`].
-    fn resolve_fn(&self, name: &str) -> Option<Path> {
-        match self.resolve_module_value(name)? {
-            ModuleValue::Fn(path) => Some(path),
-            ModuleValue::Var(..) => None,
-        }
-    }
 
-    /// Resolve a bare macro name to its absolute [`Path`] and the call-site
-    /// arity shape ([`MacroShape`]): a `macrolet` binding, or else the
-    /// module-level name, if the nearest definition of it is a macro
-    /// ([`Self::resolve_module_entry`]).
-    fn resolve_macro(&self, name: &str) -> Option<(Path, MacroShape)> {
-        // `macrolet` first, innermost scope first: a local macro shadows a
-        // global one of the same name for the extent of its body, which is
-        // what "lexically scoped macro definition" means.
-        for scope in self.local_macros.borrow().iter().rev() {
-            if let Some(found) = scope.get(name) {
-                return Some(found.clone());
-            }
-        }
-        match self.resolve_module_entry(name)? {
-            (path, ModuleEntry::Macro { shape, .. }) => Some((path, shape)),
-            (_, ModuleEntry::Value(_)) => None,
-        }
-    }
 
-    /// Resolve a module-qualified macro name (`mod::macro-name`) to its
-    /// absolute [`Path`] and call-site arity shape ([`MacroShape`]) — the
-    /// path-qualified counterpart of [`Self::resolve_macro`].
-    fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, MacroShape)> {
-        match self.resolve_module_entry_path(segs)? {
-            (path, ModuleEntry::Macro { shape, .. }) => Some((path, shape)),
-            (_, ModuleEntry::Value(_)) => None,
-        }
-    }
 
     /// Heads with built-in meaning — the expression special forms matched in
     /// [`Self::check_list`] and the top-level forms matched in
@@ -3714,8 +3279,8 @@ impl Checker {
     }
 
     /// If `v` is a compound form whose head resolves to a macro — a bare
-    /// name ([`Self::resolve_macro`], current namespace) or a `mod::name`
-    /// path ([`Self::resolve_macro_path`], cross-module) — expand it one
+    /// name ([`Info::resolve_macro`], current namespace) or a `mod::name`
+    /// path ([`Info::resolve_macro_path`], cross-module) — expand it one
     /// step against the unevaluated argument forms and return the expansion;
     /// `Ok(None)` when `v` is not a macro call. A bare built-in form head is
     /// never treated as a macro call — see [`Self::is_builtin_form_head`]
@@ -3740,7 +3305,7 @@ impl Checker {
                     return Ok(None);
                 }
                 let head = heap.symbol_spelling(*id).to_string();
-                match self.resolve_macro(&head) {
+                match self.info.resolve_macro(&head) {
                     Some((p, shape)) => (p, shape, head),
                     None => return Ok(None),
                 }
@@ -3748,7 +3313,7 @@ impl Checker {
             Some(Value::Path(pid)) => {
                 let segs: Vec<String> =
                     heap.path_segments(*pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
-                match self.resolve_macro_path(&segs) {
+                match self.info.resolve_macro_path(&segs) {
                     Some((p, shape)) => (p, shape, segs.join("::")),
                     None => return Ok(None),
                 }
@@ -3796,41 +3361,8 @@ impl Checker {
         Ok(())
     }
 
-    /// Resolve a bare constructor name to its `(type path, variant index)`,
-    /// walking the ancestor chain (see [`Self::ns_ancestors`]) — every ctor
-    /// found this way is in scope by construction, so no separate `public`
-    /// check is needed (mirrors [`Self::resolve_fn`]).
-    fn resolve_ctor(&self, name: &str) -> Option<(Path, usize)> {
-        self.find_on_chain(|_, m| m.ctors.get(name).cloned())
-    }
 
-    /// The `Sexpr` `cons` variant's `(type path, variant index)`, read from the
-    /// type definition directly rather than the bare-name `ctors` map — that
-    /// bare `cons` name was removed (Symbol/Sexpr redesign Phase 4b) so `(cons
-    /// a b)` resolves to the free `cons<T,U>` pair function. Internal `Sexpr`
-    /// cons construction (`list` literals, quasiquote) still needs the variant,
-    /// and reaches it through here.
-    fn sexpr_cons_ctor(&self) -> (Path, usize) {
-        let path = Path::root("sexpr");
-        let def = self.reg.type_def(&path).expect("sexpr is built in");
-        let idx = def
-            .variants
-            .iter()
-            .position(|v| v.name == "cons")
-            .expect("sexpr has a cons variant");
-        (path, idx)
-    }
 
-    /// Resolve a bare name snapshotted by `(use Type)` (see `Self::check_use`)
-    /// to the `(type path, method name)` of the static associated function it
-    /// names — the static-method counterpart of [`Self::resolve_ctor`],
-    /// checked the same way (current namespace then root).
-    fn resolve_static_use(&self, name: &str) -> Option<(Path, String)> {
-        if let Some(hit) = self.cur_ns().static_uses.get(name) {
-            return Some(hit.clone());
-        }
-        self.reg.root.static_uses.get(name).cloned()
-    }
 
     /// Wraps an already-checked `&rest` element `e` (statically `elem_ty`,
     /// already resolved to a concrete type — see [`Self::cons_rest_list`])
@@ -3893,7 +3425,7 @@ impl Checker {
                 elem_ty
             ))
         })?;
-        let (type_name, variant) = self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
+        let (type_name, variant) = self.info.resolve_ctor(ctor).expect("sexpr constructors are always registered");
         let field_tys = self.variant_field_tys(&type_name, variant, &[]);
         let form = self.construct_form(heap, &type_name, &[], variant, false, &field_tys, &[e.form])?;
         Ok(Checked::new(forms::rooted(heap, form), sexpr_ty()))
@@ -3924,85 +3456,10 @@ impl Checker {
         Ok(Checked::new(forms::rooted(heap, acc.form), acc.ty))
     }
 
-    /// Resolve a bare (unqualified) type name: this module's own type of that
-    /// name, then a `use` alias, then the rest of the ancestor chain (see
-    /// [`Self::ns_ancestors`]) — the order [`Self::resolve_module_value`]
-    /// gives a function or a global. Every place a bare type
-    /// name is written goes through here — a type annotation
-    /// ([`Self::resolve_type_name`]), the `Type` of `Type::member`
-    /// ([`Self::resolve_type_path`] with no module qualifier), a pattern head,
-    /// `compile`/`documentation` of `Type::method` — so a type brought in by
-    /// `(use m::point)` is the same `point` in all of them.
-    ///
-    /// An alias that names something other than a type (`(use m::f)`) does
-    /// not answer the question, and the chain is searched as for any name.
-    fn resolve_bare_type(&self, name: &str) -> Option<Path> {
-        if let Some(def) = self.cur_ns().types.get(name) {
-            return Some(def.name.clone());
-        }
-        if let Some(target) = self.lookup_alias(name) {
-            // A one-segment target is a root-level name; resolving it through
-            // `resolve_type_path` would come back here and consult the same
-            // alias again.
-            let found = match target.as_slice() {
-                [only] => self.resolve_unaliased_bare_type(only),
-                _ => self.resolve_type_path(&target),
-            };
-            if found.is_some() {
-                return found;
-            }
-        }
-        self.resolve_unaliased_bare_type(name)
-    }
 
-    /// [`Self::resolve_bare_type`] without the `use` alias: the ancestor
-    /// chain alone.
-    fn resolve_unaliased_bare_type(&self, name: &str) -> Option<Path> {
-        self.find_on_chain(|_, m| m.types.get(name).map(|def| def.name.clone()))
-    }
 
-    /// Resolve a `module::...::Type` segment path to the type's [`Path`].
-    fn resolve_type_path(&self, segs: &[String]) -> Option<Path> {
-        let (local, mods) = segs.split_last()?;
-        if mods.is_empty() {
-            // No module qualifier — `find_module(&[])` would just hand back
-            // the current namespace itself (its loop never runs), missing
-            // every ancestor including root; walk the chain instead.
-            return self.resolve_bare_type(local);
-        }
-        self.find_in_module(segs, |m, n| m.types.get(n).map(|def| (def.public, def.name.clone()))).map(|(_, name)| name)
-    }
 
-    /// Resolve a written type name to a `deftype` alias, if it names one.
-    ///
-    /// Searched exactly like a type ([`Self::resolve_bare_type`] /
-    /// [`Self::resolve_type_path`]), including `use` aliases and the
-    /// `pub`-visibility rule for a qualified name — an alias is a spelling
-    /// for a type and is reached the same ways one is.
-    fn resolve_type_alias(&self, path: &Path) -> Option<TypeAlias> {
-        if path.is_simple() {
-            let name = path.last_segment();
-            if let Some(a) = self.cur_ns().type_aliases.get(name) {
-                return Some(a.clone());
-            }
-            if let Some(target) = self.lookup_alias(name) {
-                if let Some(a) = self.resolve_type_alias_path(&target) {
-                    return Some(a);
-                }
-            }
-            return self.find_on_chain(|_, m| m.type_aliases.get(name).cloned());
-        }
-        self.resolve_type_alias_path(path.segments())
-    }
 
-    /// [`Self::resolve_type_alias`] for a `module::...::Name` segment path.
-    fn resolve_type_alias_path(&self, segs: &[String]) -> Option<TypeAlias> {
-        let (local, mods) = segs.split_last()?;
-        if mods.is_empty() {
-            return self.find_on_chain(|_, m| m.type_aliases.get(local).cloned());
-        }
-        self.find_in_module(segs, |m, n| m.type_aliases.get(n).map(|a| (a.public, a.clone()))).map(|(_, a)| a)
-    }
 
     /// Reject a `deftype` alias written with the wrong number of type
     /// arguments, before [`Self::canon`] silently declines to expand it.
@@ -4015,7 +3472,7 @@ impl Checker {
     fn check_type_alias_arity(&self, t: &Type) -> Result<(), Error> {
         match t {
             Type::Named(n, args) => {
-                if let Some(a) = self.resolve_type_alias(n) {
+                if let Some(a) = self.info.resolve_type_alias(n) {
                     if a.params.len() != args.len() {
                         return Err(Error::TypeError(format!(
                             "type alias `{}` takes {} type argument(s), got {}",
@@ -4042,24 +3499,7 @@ impl Checker {
         }
     }
 
-    /// Resolve a nominal type [`Path`] to its canonical (located) form if a
-    /// matching type exists; otherwise (type variables, unknown names) return it
-    /// unchanged.
-    fn resolve_type_name(&self, path: &Path) -> Path {
-        if path.is_simple() {
-            return self.resolve_bare_type(path.last_segment()).unwrap_or_else(|| path.clone());
-        }
-        self.resolve_type_path(path.segments()).unwrap_or_else(|| path.clone())
-    }
 
-    /// The global a bare name holds, if what it holds is a variable — see
-    /// [`Self::resolve_module_value`].
-    fn resolve_global(&self, name: &str) -> Option<(Path, VarInfo)> {
-        match self.resolve_module_value(name)? {
-            ModuleValue::Var(path, vi) => Some((path, vi)),
-            ModuleValue::Fn(_) => None,
-        }
-    }
 
     /// Build an `FnRef` node carrying the function's `(fn ...)` type.
     ///
@@ -4073,7 +3513,7 @@ impl Checker {
     /// check-time error (previously it produced a type-variable-ridden
     /// `FnRef` that could never be applied anyway).
     fn fn_ref_node(&self, heap: &mut Heap, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
-        let sig = self.reg.fn_sig(&fq).expect("resolved fn exists").clone();
+        let sig = self.info.reg.fn_sig(&fq).expect("resolved fn exists").clone();
         // An FFI declaration cannot be reified, in an `unsafe` or out of one.
         //
         // Not a permission question. `Interp::reify` builds an *interpreted*
@@ -4126,7 +3566,7 @@ impl Checker {
                     // The specialization's own mangled path, which is where
                     // `Interp::exec` registers it.
                     let r = self.request_fn_specialization(&fq, targs);
-                    let params = match self.reg.fn_sig(&r) {
+                    let params = match self.info.reg.fn_sig(&r) {
                         Some(sig) => ref_params(sig),
                         // The specialization is generated at the end of this
                         // form, so its signature may not be registered yet;
@@ -4176,7 +3616,7 @@ impl Checker {
     /// method keeps its own type, so a mismatch with `expected` is reported by
     /// `check`'s ordinary reconciliation.
     fn method_value(&self, heap: &mut Heap, type_fq: &Path, name: &str, expected: Option<&Type>) -> Result<Checked, Error> {
-        let def = self.reg.type_def(type_fq).expect("the resolution found the method on this type");
+        let def = self.info.reg.type_def(type_fq).expect("the resolution found the method on this type");
         // The receiver is the expected function's first parameter, which is
         // also how the resolution found this method.
         let receiver = match expected {
@@ -4268,7 +3708,7 @@ impl Checker {
                 Err(e) => return Some(Err(e)),
             }
         } else {
-            let (path, vi) = self.resolve_global(recv_name)?;
+            let (path, vi) = self.info.resolve_global(recv_name)?;
             let ty = vi.ty;
             let r = path;
             match self.global_form(heap, &r, &ty) {
@@ -4286,8 +3726,8 @@ impl Checker {
             Ok(None) => method.clone(),
             Err(e) => return Some(Err(e)),
         };
-        let af = self.reg.type_def(type_fq)?.method_at(method, targs)?;
-        if !af.instance || !self.assoc_visible(type_fq, af) {
+        let af = self.info.reg.type_def(type_fq)?.method_at(method, targs)?;
+        if !af.instance || !self.info.assoc_visible(type_fq, af) {
             return None;
         }
         let type_fq = type_fq.clone();
@@ -4325,7 +3765,7 @@ impl Checker {
                 // A wrong argument count declines to expand (this cannot
                 // fail) — `Self::check_type_alias_arity` reports it at the
                 // annotation instead.
-                if let Some(alias) = self.resolve_type_alias(n) {
+                if let Some(alias) = self.info.resolve_type_alias(n) {
                     if alias.params.len() == args.len() {
                         let subst: BTreeMap<String, Type> = alias
                             .params
@@ -4337,7 +3777,7 @@ impl Checker {
                     }
                 }
                 Type::Named(
-                    self.resolve_type_name(n),
+                    self.info.resolve_type_name(n),
                     args.iter().map(|a| self.canon(a)).collect(),
                 )
             }
@@ -4347,7 +3787,7 @@ impl Checker {
             // unknown name is left as written for `check_object_safe` to
             // report; `canon` itself never fails.
             Type::Dyn(trait_path, pins) => Type::Dyn(
-                self.resolve_trait_path(trait_path).unwrap_or_else(|| trait_path.clone()),
+                self.info.resolve_trait_path(trait_path).unwrap_or_else(|| trait_path.clone()),
                 pins.iter().map(|p| self.canon(p)).collect(),
             ),
             Type::Fn(ps, rest, r) => Type::Fn(
@@ -4398,12 +3838,12 @@ impl Checker {
     }
 
     /// Run `f` with the type variables `vars` in scope for
-    /// [`Self::reject_unknown_type_name`] — see [`Self::type_names`]. The
+    /// [`Self::reject_unknown_type_name`] — see [`Info::type_names`]. The
     /// frame is popped whether `f` succeeds or not.
     fn with_type_names<R>(&mut self, vars: Vec<String>, f: impl FnOnce(&mut Self) -> R) -> R {
-        self.type_names.borrow_mut().push(vars.into_iter().collect());
+        self.info.type_names.borrow_mut().push(vars.into_iter().collect());
         let r = f(self);
-        self.type_names.borrow_mut().pop();
+        self.info.type_names.borrow_mut().pop();
         r
     }
 
@@ -4431,7 +3871,7 @@ impl Checker {
         fn walk(c: &Checker, t: &Type, out: &mut Vec<String>) {
             match t {
                 Type::Named(p, args) => {
-                    if args.is_empty() && p.is_simple() && c.reg.type_def(p).is_none() {
+                    if args.is_empty() && p.is_simple() && c.info.reg.type_def(p).is_none() {
                         out.push(p.last_segment().to_string());
                     }
                     args.iter().for_each(|a| walk(c, a, out));
@@ -4456,12 +3896,12 @@ impl Checker {
 
     /// A written type that names something that is neither a type visible
     /// here nor a type variable of an enclosing definition's declaration
-    /// part (see [`Self::type_names`]). Every top-level definition that
+    /// part (see [`Info::type_names`]). Every top-level definition that
     /// writes types pushes a frame, so outside a definition — a bare
     /// top-level expression — nothing is checked here and the name simply
     /// fails later as the unresolved type it is.
     fn reject_unknown_type_name(&self, ty: &Type) -> Result<(), Error> {
-        if self.type_names.borrow().is_empty() {
+        if self.info.type_names.borrow().is_empty() {
             return Ok(());
         }
         match self.first_unknown_type_name(ty) {
@@ -4481,11 +3921,11 @@ impl Checker {
     fn first_unknown_type_name(&self, ty: &Type) -> Option<Path> {
         match ty {
             Type::Named(p, args) => {
-                let known = self.reg.type_def(p).is_some()
+                let known = self.info.reg.type_def(p).is_some()
                     || (p.is_simple() && {
                         let name = p.last_segment();
                         self.type_var_bindings.contains_key(name)
-                            || self.type_names.borrow().iter().any(|frame| frame.contains(name))
+                            || self.info.type_names.borrow().iter().any(|frame| frame.contains(name))
                     });
                 if !known {
                     return Some(p.clone());
@@ -4561,7 +4001,7 @@ impl Checker {
     /// generic template) records nothing.
     fn record_type_span(&self, span: &TypeNameSpan) {
         if span.dyn_head {
-            if let Some(fq) = self.resolve_trait_path(&span.path) {
+            if let Some(fq) = self.info.resolve_trait_path(&span.path) {
                 self.record_trait_use(&fq, span.loc.clone());
             }
             return;
@@ -4569,14 +4009,14 @@ impl Checker {
         if span.path.is_simple() && self.type_var_bindings.contains_key(span.path.last_segment()) {
             return;
         }
-        let fq = self.resolve_type_name(&span.path);
+        let fq = self.info.resolve_type_name(&span.path);
         self.record_type_use(&fq, span.loc.clone());
     }
 
     /// Record a resolved *type* name occurrence at `loc`, if `fq` names a
     /// non-builtin type.
     fn record_type_use(&self, fq: &Path, loc: Loc) {
-        if let Some(def) = self.reg.type_def(fq) {
+        if let Some(def) = self.info.reg.type_def(fq) {
             if def.builtin {
                 return;
             }
@@ -4593,7 +4033,7 @@ impl Checker {
     /// Record a resolved *trait* name occurrence at `loc`, if `fq` names a
     /// non-builtin trait.
     fn record_trait_use(&self, fq: &Path, loc: Loc) {
-        if let Some(def) = self.reg.trait_def(fq) {
+        if let Some(def) = self.info.reg.trait_def(fq) {
             if def.builtin {
                 return;
             }
@@ -4664,8 +4104,8 @@ impl Checker {
     fn reject_trait_in_type_position(&self, ty: &Type) -> Result<(), Error> {
         match ty {
             Type::Named(p, args) => {
-                if self.reg.type_def(p).is_none() && p.is_simple() {
-                    if let Ok(trait_path) = self.resolve_trait_name(p.last_segment()) {
+                if self.info.reg.type_def(p).is_none() && p.is_simple() {
+                    if let Ok(trait_path) = self.info.resolve_trait_name(p.last_segment()) {
                         return Err(Error::TypeError(format!(
                             "`{}` is a trait, not a type — write `:dyn {}` for a trait object",
                             trait_path.last_segment(),
@@ -4742,7 +4182,7 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         let (params, param_locs, rest, ret, bounds, body_start, doc) = self.parse_defun_sig(heap, parts, parts_locs)?;
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
-        let fq_name = self.fq(&name);
+        let fq_name = self.info.fq(&name);
 
         // Register the signature in the current namespace before checking the
         // body so self-recursion works. A signature a `defsignature` already
@@ -4753,9 +4193,9 @@ impl Checker {
         // declaration nobody can trust.
         self.check_value_clash("function", &name)?;
         let declared = if self.claim_predeclared(&fq_name.to_string()) {
-            self.cur_ns().fns.get(&name).cloned()
+            self.info.cur_ns().fns.get(&name).cloned()
         } else {
-            self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
+            self.check_redef("function", &name, self.info.cur_ns().fns.get(&name))?;
             None
         };
 
@@ -4771,7 +4211,7 @@ impl Checker {
             }
             self.generic_fn_templates.insert(
                 fq_name.clone(),
-                FnTemplate { parts: parts.to_vec(), ns: self.ns.clone(), type_params: type_params.clone() },
+                FnTemplate { parts: parts.to_vec(), ns: self.info.ns.clone(), type_params: type_params.clone() },
             );
         }
 
@@ -4790,12 +4230,12 @@ impl Checker {
         if let Some(decl) = &declared {
             signature_agrees(&name, decl, &sig)?;
         }
-        self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
+        self.info.reg.root.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
-            self.reg.def_locs.fns.insert(fq_name.clone(), loc);
+            self.info.reg.def_locs.fns.insert(fq_name.clone(), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.fns.insert(fq_name.clone(), doc);
+            self.info.reg.docs.fns.insert(fq_name.clone(), doc);
         }
 
         // The body additionally sees the `&rest` parameter (if any) bound to
@@ -4872,13 +4312,13 @@ impl Checker {
             return Err(Error::TypeError("defun: (defun name (params) ret body...)".into()));
         }
         let (name, type_params) = self.parse_defun_name(heap, parts[0])?;
-        let fq_name = self.fq(&name);
+        let fq_name = self.info.fq(&name);
         let (required, required_locs, optionals_raw, rest, keys_raw) = self.parse_defun_params_full(heap, parts[1])?;
         let ret = self.parse_type_here_at(heap, parts[2], parts_locs.get(2).and_then(|l| l.as_ref()))?;
         let (bounds, body_start, doc) = self.parse_where_and_docstring(heap, parts, 3)?;
 
         self.check_value_clash("function", &name)?;
-        self.check_redef("function", &name, self.cur_ns().fns.get(&name))?;
+        self.check_redef("function", &name, self.info.cur_ns().fns.get(&name))?;
 
         // A generic `&optional`/`&key` defun additionally retains its raw
         // source form for per-instantiation re-checking, exactly like
@@ -4892,7 +4332,7 @@ impl Checker {
             }
             self.generic_fn_templates.insert(
                 fq_name.clone(),
-                FnTemplate { parts: parts.to_vec(), ns: self.ns.clone(), type_params: type_params.clone() },
+                FnTemplate { parts: parts.to_vec(), ns: self.info.ns.clone(), type_params: type_params.clone() },
             );
         }
 
@@ -4937,12 +4377,12 @@ impl Checker {
             optionals: optionals.clone(),
             keys: keys.clone(),
         };
-        self.reg.root.module_mut(&self.ns).fns.insert(name.clone(), sig);
+        self.info.reg.root.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
-            self.reg.def_locs.fns.insert(fq_name.clone(), loc);
+            self.info.reg.def_locs.fns.insert(fq_name.clone(), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.fns.insert(fq_name.clone(), doc);
+            self.info.reg.docs.fns.insert(fq_name.clone(), doc);
         }
 
         // Runtime params, in declared order: required, then `&optional`
@@ -5120,7 +4560,7 @@ impl Checker {
     /// declared type-parameter names, which is what an impl's bounds are
     /// keyed by (see the `cons-cell` impls in the prelude).
     fn print_object_bounds_hold(&self, path: &Path, args: &[Type]) -> bool {
-        let Some(def) = self.reg.type_def(path) else { return false };
+        let Some(def) = self.info.reg.type_def(path) else { return false };
         let Some(af) = def.assoc.get("print-object") else { return false };
         if af.sig.bounds.is_empty() {
             return true;
@@ -5243,7 +4683,7 @@ impl Checker {
         ns: Vec<String>,
         bindings: BTreeMap<String, Type>,
     ) -> (Vec<String>, Escapes, BTreeMap<String, Type>) {
-        let saved_ns = std::mem::replace(&mut self.ns, ns);
+        let saved_ns = std::mem::replace(&mut self.info.ns, ns);
         let saved_loops = std::mem::take(&mut *self.loop_stack.borrow_mut());
         // Cleared alongside the loop stack, and for the same reason: a
         // specialization re-checks a *different* function's body, so an
@@ -5255,7 +4695,7 @@ impl Checker {
         // somewhere else entirely.
         let saved_unsafe = self.unsafe_depth.replace(0);
         let saved_arena = self.c_arena.replace(None);
-        let saved_type_names = std::mem::take(&mut *self.type_names.borrow_mut());
+        let saved_type_names = std::mem::take(&mut *self.info.type_names.borrow_mut());
         let saved_bindings = std::mem::replace(&mut self.type_var_bindings, bindings);
         (
             saved_ns,
@@ -5281,8 +4721,8 @@ impl Checker {
         *self.block_stack.borrow_mut() = saved.blocks;
         self.unsafe_depth.set(saved.unsafe_depth);
         self.c_arena.set(saved.c_arena);
-        *self.type_names.borrow_mut() = saved.type_names;
-        self.ns = saved_ns;
+        *self.info.type_names.borrow_mut() = saved.type_names;
+        self.info.ns = saved_ns;
     }
 
     /// Re-checks or re-synthesizes a generic-owner method at the owner's
@@ -5365,7 +4805,7 @@ impl Checker {
         mangled: &str,
         getter: bool,
     ) -> Result<TopLevelForm, Error> {
-        let def = self.reg.type_def(type_fq).expect("an accessor template implies the type exists");
+        let def = self.info.reg.type_def(type_fq).expect("an accessor template implies the type exists");
         let subst: BTreeMap<String, Type> =
             def.params.iter().cloned().zip(args.iter().cloned()).collect();
         let field_ty = subst_apply(&def.variants[0].fields[index], &subst);
@@ -5446,7 +4886,7 @@ impl Checker {
     /// node checked here has a genuinely concrete type — see the module's
     /// `check_defun_opt_key` doc comment for why that matters downstream.
     ///
-    /// The signature is not registered on `self.reg` — like
+    /// The signature is not registered on `self.info.reg` — like
     /// `Self::specialize_defun_body`, nothing besides `Interp`/the compile
     /// pipeline ever looks a specialization's `FnSig` up; `Self::check_call_opt_key`
     /// already validated the call site against the *unspecialized* generic
@@ -5563,7 +5003,7 @@ impl Checker {
         match ty {
             Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => true,
             Type::Named(p, _) if *p == Path::root("sexpr") || *p == Path::root("hashtable") => true,
-            Type::Named(p, _) => match self.reg.type_def(p) {
+            Type::Named(p, _) => match self.info.reg.type_def(p) {
                 Some(d) if d.kind == AdtKind::Struct => true,
                 Some(d) if d.kind == AdtKind::Sum && !d.variants.is_empty() => true,
                 _ => false,
@@ -5597,7 +5037,7 @@ impl Checker {
     fn type_is_open(&self, t: &Type) -> bool {
         match t {
             Type::Named(n, args) => {
-                (args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none())
+                (args.is_empty() && n.is_simple() && self.info.reg.type_def(n).is_none())
                     || args.iter().any(|a| self.type_is_open(a))
             }
             Type::Fn(ps, rest, r) => {
@@ -5619,7 +5059,7 @@ impl Checker {
     /// name, each optionally pinning one or more of that trait's associated
     /// types to a concrete type — see `TraitBound`'s doc comment for how
     /// pins are used. Trait names are resolved as bare root-module paths
-    /// (`Path::root`, not `Checker::resolve_trait_name`), mirroring
+    /// (`Path::root`, not `Info::resolve_trait_name`), mirroring
     /// `Checker::receiver_method`'s existing assumption that every
     /// trait lives at the root module — a pre-existing limitation, not new
     /// here.
@@ -5641,7 +5081,7 @@ impl Checker {
             // (every file is one) a bare `err2` would otherwise be stored as
             // root `err2` and match none of them.
             let trait_name = match parts[0] {
-                Value::Symbol(id) => self.resolve_trait_name(heap.symbol_spelling(id))?,
+                Value::Symbol(id) => self.info.resolve_trait_name(heap.symbol_spelling(id))?,
                 _ => return Err(Error::TypeError(":where: trait name must be a symbol".into())),
             };
             if let Some(l) = parts_locs[0].1.as_ref() {
@@ -5735,7 +5175,7 @@ impl Checker {
             };
             let trait_path = self.resolve_supertrait_name(heap, name, head, head_loc.as_ref())?;
             let assoc = self.parse_trait_bound_pins(heap, &pins, "deftrait")?;
-            if let Some(sdef) = self.reg.trait_def(&trait_path) {
+            if let Some(sdef) = self.info.reg.trait_def(&trait_path) {
                 for a in &sdef.assoc_types {
                     if !assoc.contains_key(a) {
                         return Err(Error::TypeError(format!(
@@ -5771,7 +5211,7 @@ impl Checker {
                 )))
             }
         };
-        let path = self.resolve_trait_name(written).map_err(|_| {
+        let path = self.info.resolve_trait_name(written).map_err(|_| {
             Error::TypeError(format!(
                 "deftrait {}: unknown supertrait `{}` — the form is (deftrait Name (Super...) items...), \
                  so the list right after the name is the supertrait list (write `()` for none)",
@@ -5821,7 +5261,7 @@ impl Checker {
         let mut order: Vec<String> = Vec::new();
         let mut owner: Vec<Path> = Vec::new();
         for sup in supertraits {
-            let Some(sdef) = self.reg.trait_def(&sup.trait_path) else {
+            let Some(sdef) = self.info.reg.trait_def(&sup.trait_path) else {
                 return Err(Error::TypeError(format!(
                     "deftrait {}: unknown supertrait `{}`",
                     name, sup.trait_path
@@ -5931,10 +5371,10 @@ impl Checker {
         }
         params.extend(key_specs.iter().map(|(n, _)| n.clone()));
 
-        let fq_name = self.fq(&name);
+        let fq_name = self.info.fq(&name);
         self.check_value_clash("macro", &name)?;
-        self.check_redef("macro", &name, self.cur_ns().macros.get(&name))?;
-        self.reg.root.module_mut(&self.ns).macros.insert(
+        self.check_redef("macro", &name, self.info.cur_ns().macros.get(&name))?;
+        self.info.reg.root.module_mut(&self.info.ns).macros.insert(
             name,
             MacroDef {
                 required: required_names.len(),
@@ -5946,12 +5386,12 @@ impl Checker {
             },
         );
         if let Some(loc) = def_loc {
-            self.reg.def_locs.macros.insert(fq_name.clone(), loc);
+            self.info.reg.def_locs.macros.insert(fq_name.clone(), loc);
         }
         let doc = take_leading_docstring(heap, parts, 2);
         let body_start = if doc.is_some() { 3 } else { 2 };
         if let Some(doc) = doc {
-            self.reg.docs.macros.insert(fq_name.clone(), doc);
+            self.info.reg.docs.macros.insert(fq_name.clone(), doc);
         }
         self.defmacro_body(
             heap, interp, parts, parts_locs, &fq_name, body_start,
@@ -5965,8 +5405,8 @@ impl Checker {
     ///
     /// Split out for `macrolet`, which needs exactly this and none of the
     /// registration — expression checking is `&self`, so a local macro cannot
-    /// reach `self.reg` at all, and does not want to: its scope is a table of
-    /// its own ([`Self::local_macros`]).
+    /// reach `self.info.reg` at all, and does not want to: its scope is a table of
+    /// its own ([`Info::local_macros`]).
     #[allow(clippy::too_many_arguments)]
     fn defmacro_body(
         &self,
@@ -6343,7 +5783,7 @@ impl Checker {
                 parent_ty
             )));
         };
-        let Some(def) = self.reg.type_def(parent_path) else {
+        let Some(def) = self.info.reg.type_def(parent_path) else {
             return Err(Error::TypeError(format!("defstruct: (:include {}) — unknown type", parent_path)));
         };
         if def.kind != AdtKind::Struct || def.variants.len() != 1 {
@@ -6361,7 +5801,7 @@ impl Checker {
             )));
         }
         let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(args.iter().cloned()).collect();
-        let defaults = self.reg.struct_defaults.get(parent_path);
+        let defaults = self.info.reg.struct_defaults.get(parent_path);
         let mut out = Vec::with_capacity(def.field_names.len());
         for (i, fname) in def.field_names.iter().enumerate() {
             // A slot's visibility lives on its accessor, which is where
@@ -6540,7 +5980,7 @@ impl Checker {
             Value::Symbol(id) => bound_name(id, "deftrait")?,
             _ => return Err(Error::TypeError("deftrait: name must be a symbol".into())),
         };
-        let fq_name = self.fq(&name);
+        let fq_name = self.info.fq(&name);
         // A docstring, right after the supertrait list and before the item
         // list — one per trait (CL's `defgeneric` docstring lives on the
         // generic function as a whole, not per method; individual `impl`
@@ -6550,7 +5990,7 @@ impl Checker {
             Some(Value::Str(id)) => (Some(heap.string(*id).to_string()), 3),
             _ => (None, 2),
         };
-        self.check_redef("trait", &name, self.cur_ns().traits.get(&name))?;
+        self.check_redef("trait", &name, self.info.cur_ns().traits.get(&name))?;
         self.check_type_trait_clash("trait", &name)?;
         // Parse the supertraits *before* the self-referential stub goes in,
         // so `(deftrait Foo (Foo) ...)` fails on an unknown trait rather than
@@ -6563,7 +6003,7 @@ impl Checker {
         // `Self::canon`/`resolve_trait_path`. Same device, same reason, as
         // `check_defstruct`'s self-referential-field stub; overwritten with
         // the fully parsed `TraitDef` below.
-        self.reg.root.module_mut(&self.ns).traits.insert(
+        self.info.reg.root.module_mut(&self.info.ns).traits.insert(
             name.clone(),
             TraitDef {
                 name: fq_name.clone(),
@@ -6645,12 +6085,12 @@ impl Checker {
                     .iter()
                     .map(|v| crate::owned_form::value_to_owned(heap, *v))
                     .collect::<Result<Vec<_>, _>>()?;
-                defaults.insert(head.clone(), TraitDefault { item, ns: self.ns.clone() });
+                defaults.insert(head.clone(), TraitDefault { item, ns: self.info.ns.clone() });
                 default_written
                     .push((elems.clone(), elem_locs.iter().map(|(_, l)| l.clone()).collect()));
             }
             if let Some(d) = mdoc {
-                self.reg.docs.trait_methods.insert((fq_name.clone(), head.clone()), d);
+                self.info.reg.docs.trait_methods.insert((fq_name.clone(), head.clone()), d);
             }
             method_order.push(head.clone());
             methods.insert(head, sig);
@@ -6658,7 +6098,7 @@ impl Checker {
         let (vtable_order, vtable_owner) =
             self.linearize_vtable(&name, &fq_name, &supertraits, &method_order)?;
         let assoc_names = assoc_types.clone();
-        self.reg.root.module_mut(&self.ns).traits.insert(
+        self.info.reg.root.module_mut(&self.info.ns).traits.insert(
             name.clone(),
             TraitDef {
                 name: fq_name.clone(),
@@ -6678,10 +6118,10 @@ impl Checker {
         // resolves through the entry just registered.
         self.precheck_trait_defaults(heap, interp, &fq_name, &assoc_names, &default_written)?;
         if let Some(loc) = def_loc {
-            self.reg.def_locs.traits.insert(fq_name.clone(), loc);
+            self.info.reg.def_locs.traits.insert(fq_name.clone(), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.traits.insert(fq_name.clone(), doc);
+            self.info.reg.docs.traits.insert(fq_name.clone(), doc);
         }
         self.record_def_name_use(
             &fq_name,
@@ -6753,7 +6193,7 @@ impl Checker {
     fn check_impl_inherent(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>]) -> Result<TopLevelForm, Error> {
         let target_ty = self.parse_type_here_at(heap, parts[0], parts_locs.first().and_then(|l| l.as_ref()))?;
         let (target_fq, stdlib) = match &target_ty {
-            Type::Named(n, _) => match self.reg.type_def(n) {
+            Type::Named(n, _) => match self.info.reg.type_def(n) {
                 Some(d) => (n.clone(), d.stdlib),
                 None => return Err(Error::TypeError(format!("impl: `{}` is not a type with methods", target_ty))),
             },
@@ -6852,7 +6292,7 @@ impl Checker {
         let segs = path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
         let written = Path::from_segments(segs.clone());
-        let trait_fq = self.resolve_trait_path(&written).ok_or_else(|| {
+        let trait_fq = self.info.resolve_trait_path(&written).ok_or_else(|| {
             Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::")))
         })?;
         if let Some(l) = parts_locs.first().and_then(|l| l.as_ref()) {
@@ -6861,14 +6301,14 @@ impl Checker {
         let target_ty = self.parse_type_here_at(heap, parts[1], parts_locs.get(1).and_then(|l| l.as_ref()))?;
         let target_fq =
             nominal_path(&target_ty).ok_or_else(|| Error::TypeError("impl: target must be a data type".into()))?;
-        if self.reg.type_def(&target_fq).is_none() {
+        if self.info.reg.type_def(&target_fq).is_none() {
             return Err(Error::TypeError(format!("impl: unknown type `{}`", target_fq)));
         }
         // An `impl` for one instantiation (`(impl Show Box<int> ...)`) is that
         // instantiation's own, so the trait may not also be implemented for
         // every instantiation — nor the other way round.
         let inst_args = self.written_instantiation(&target_ty);
-        if let Some(def) = self.reg.type_def(&target_fq) {
+        if let Some(def) = self.info.reg.type_def(&target_fq) {
             if inst_args.is_some() && def.impls.contains(&trait_fq) {
                 return Err(Error::TypeError(format!(
                     "impl {} {}: `{}` implements `{}` for every instantiation already, so `{}` cannot have \
@@ -6976,7 +6416,7 @@ impl Checker {
             })
             .collect::<Result<_, Error>>()?;
         let defaulted: Vec<(String, Vec<crate::owned_form::OwnedForm>, Vec<String>)> = self
-            .reg
+            .info.reg
             .trait_def(&trait_fq)
             .map(|t| {
                 t.method_order
@@ -7025,7 +6465,7 @@ impl Checker {
         }
         self.check_impl_conformance(&trait_fq, &target_fq, &target_ty, &written, &assoc_concrete)?;
         self.check_supertrait_impls(&trait_fq, &target_fq, inst_args.as_deref(), &assoc_concrete)?;
-        if let Some(def) = self.reg.type_def_mut(&target_fq) {
+        if let Some(def) = self.info.reg.type_def_mut(&target_fq) {
             match &inst_args {
                 Some(args) => {
                     let inst = def
@@ -7325,7 +6765,7 @@ impl Checker {
         written: &[String],
         assoc_concrete: &BTreeMap<String, Type>,
     ) -> Result<(), Error> {
-        let Some(tdef) = self.reg.trait_def(trait_fq) else { return Ok(()) };
+        let Some(tdef) = self.info.reg.trait_def(trait_fq) else { return Ok(()) };
         for (i, m) in written.iter().enumerate() {
             if !tdef.method_order.contains(m) {
                 let hint = if tdef.vtable_order.contains(m) {
@@ -7356,7 +6796,7 @@ impl Checker {
         // `Self` and the associated types, as this `impl` binds them, so a
         // template can be compared against what was actually registered.
         let mut subst: BTreeMap<String, Type> = assoc_concrete.clone();
-        let Some(def) = self.reg.type_def(target_fq) else { return Ok(()) };
+        let Some(def) = self.info.reg.type_def(target_fq) else { return Ok(()) };
         // The *parsed* target type, not one rebuilt from `target_fq`: a
         // primitive target is `Type::I32`, never `Named("i32")`, and the two
         // do not compare equal even though they print the same.
@@ -7432,7 +6872,7 @@ impl Checker {
     /// Returns the trait path; the caller reads the signature template off it
     /// and requests materialization.
     fn blanket_method_owner(&self, ty: &Type, type_fq: &Path, method: &str) -> Option<Path> {
-        self.reg.type_def(type_fq)?;
+        self.info.reg.type_def(type_fq)?;
         fn walk(ns: &Namespace, out: &mut Vec<Path>) {
             out.extend(ns.blanket_impls.iter().map(|b| b.trait_path.clone()));
             for c in ns.modules.values() {
@@ -7440,7 +6880,7 @@ impl Checker {
             }
         }
         let mut candidates = Vec::new();
-        walk(&self.reg.root, &mut candidates);
+        walk(&self.info.reg.root, &mut candidates);
         if candidates.is_empty() {
             // The overwhelmingly common case: no blanket impl anywhere, so
             // this is a plain "no such method" and the tree walk above is the
@@ -7452,7 +6892,7 @@ impl Checker {
         candidates.sort_by_key(|p| p.to_string());
         let mut found: Option<Path> = None;
         for tp in candidates {
-            let Some(tdef) = self.reg.trait_def(&tp) else { continue };
+            let Some(tdef) = self.info.reg.trait_def(&tp) else { continue };
             if !tdef.vtable_order.iter().any(|m| m == method) {
                 continue;
             }
@@ -7486,10 +6926,10 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let tdef = self
-            .reg
+            .info.reg
             .trait_def(trait_path)
             .ok_or_else(|| Error::TypeError(format!("unknown trait `{}`", trait_path)))?;
-        let (_, sig) = self.reg.trait_method(tdef, method).ok_or_else(|| {
+        let (_, sig) = self.info.reg.trait_method(tdef, method).ok_or_else(|| {
             Error::TypeError(format!("`{}` is not a method of `{}`", method, trait_path))
         })?;
         let mut subst: BTreeMap<String, Type> = BTreeMap::new();
@@ -7531,7 +6971,7 @@ impl Checker {
         trait_path: &Path,
         target: &Type,
     ) -> Result<Vec<TopLevelForm>, Error> {
-        let Some(b) = self.reg.blanket_impl(trait_path) else { return Ok(Vec::new()) };
+        let Some(b) = self.info.reg.blanket_impl(trait_path) else { return Ok(Vec::new()) };
         let (target_var, ns) = (b.target_var.clone(), b.ns.clone());
         let mut items: Vec<Vec<crate::owned_form::OwnedForm>> = Vec::new();
         for (aname, ty) in &b.assoc {
@@ -7619,7 +7059,7 @@ impl Checker {
             }
         }
         let type_fq = nominal_path(ty);
-        if let Some(def) = type_fq.as_ref().and_then(|p| self.reg.type_def(p)) {
+        if let Some(def) = type_fq.as_ref().and_then(|p| self.info.reg.type_def(p)) {
             let args = match ty {
                 Type::Named(_, args) => args.as_slice(),
                 _ => &[],
@@ -7628,7 +7068,7 @@ impl Checker {
                 return true;
             }
         }
-        let Some(blanket) = self.reg.blanket_impl(&tb.trait_path) else { return false };
+        let Some(blanket) = self.info.reg.blanket_impl(&tb.trait_path) else { return false };
         // The blanket's own bounds, read at `ty`: every bound on the target
         // variable must hold, recursively.
         // No bound on the target variable means the blanket covers every
@@ -7728,7 +7168,7 @@ impl Checker {
         let target_var = match parts[1] {
             Value::Symbol(id) => {
                 let n = heap.symbol_spelling(id).to_string();
-                (head_params.contains(&n) && self.reg.type_def(&Path::root(&n)).is_none()).then_some(n)
+                (head_params.contains(&n) && self.info.reg.type_def(&Path::root(&n)).is_none()).then_some(n)
             }
             _ => None,
         };
@@ -7763,7 +7203,7 @@ impl Checker {
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
         let written = Path::from_segments(segs.clone());
         let trait_fq = self
-            .resolve_trait_path(&written)
+            .info.resolve_trait_path(&written)
             .ok_or_else(|| Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::"))))?;
         if let Some(l) = parts_locs.first().and_then(|l| l.as_ref()) {
             self.record_trait_use(&trait_fq, l.clone());
@@ -7772,7 +7212,7 @@ impl Checker {
         // it rejects two blankets whose bounds could never both apply — but
         // it is decidable without a whole-program view, which on-demand
         // materialization is never going to have.
-        if let Some(prev) = self.reg.blanket_impl(&trait_fq) {
+        if let Some(prev) = self.info.reg.blanket_impl(&trait_fq) {
             return Err(Error::TypeError(format!(
                 "impl<{}> {} {}: `{}` already has a blanket impl — a trait may have at most one, \
                  since which of two applies to a given type could depend on bounds established later",
@@ -7837,13 +7277,13 @@ impl Checker {
         // one of this very blanket's siblings on a covered type resolves —
         // the same "signature first, body second" order every definition form
         // here follows for self-recursion.
-        self.reg.root.module_mut(&self.ns).blanket_impls.push(BlanketImpl {
+        self.info.reg.root.module_mut(&self.info.ns).blanket_impls.push(BlanketImpl {
             trait_path: trait_fq.clone(),
             target_var: target_var.clone(),
             bounds,
             assoc,
             methods,
-            ns: self.ns.clone(),
+            ns: self.info.ns.clone(),
         });
         self.precheck_blanket_impl(
             heap,
@@ -7854,7 +7294,7 @@ impl Checker {
             &assoc_written,
             &method_forms,
         )?;
-        let path = self.fq("impl");
+        let path = self.info.fq("impl");
         forms::module_form(heap, &path, &[])
     }
 
@@ -8022,11 +7462,11 @@ impl Checker {
         inst_args: Option<&[Type]>,
         assoc_concrete: &BTreeMap<String, Type>,
     ) -> Result<(), Error> {
-        let Some(tdef) = self.reg.trait_def(trait_fq) else { return Ok(()) };
+        let Some(tdef) = self.info.reg.trait_def(trait_fq) else { return Ok(()) };
         if tdef.supertraits.is_empty() {
             return Ok(());
         }
-        let Some(def) = self.reg.type_def(target_fq) else { return Ok(()) };
+        let Some(def) = self.info.reg.type_def(target_fq) else { return Ok(()) };
         // An `impl` for one instantiation needs the supertrait at that
         // instantiation (its own `impl`, or one for every instantiation); an
         // `impl` for every instantiation needs one for every instantiation.
@@ -8083,43 +7523,7 @@ impl Checker {
         Ok(())
     }
 
-    /// Resolve a `deftrait`-defined trait's bare name to its fully-qualified
-    /// [`Path`] — mirrors `Checker::resolve_type_name`, but for the separate
-    /// `traits` table (traits aren't types and don't share its namespace).
-    fn resolve_trait_name(&self, name: &str) -> Result<Path, Error> {
-        let mut ns = self.ns.clone();
-        loop {
-            if let Some(td) = self.reg.root.module(&ns).and_then(|m| m.traits.get(name)) {
-                return Ok(td.name.clone());
-            }
-            if ns.is_empty() {
-                break;
-            }
-            ns.pop();
-        }
-        // The standard library's module last, as `Self::ns_ancestors` has it.
-        if let Some(td) = self.reg.root.module(&STD_SEGMENTS).and_then(|m| m.traits.get(name)) {
-            return Ok(td.name.clone());
-        }
-        Err(Error::TypeError(format!("impl: unknown trait `{}`", name)))
-    }
 
-    /// [`Self::resolve_trait_name`] for a written [`Path`], returning `None`
-    /// instead of an error: a bare name searches the ancestor module chain
-    /// (the same walk), a qualified one is looked up in the named module.
-    /// Used by `canon` to normalize a [`Type::Dyn`]'s trait head, which must
-    /// not fail — an unresolvable trait is reported later, with a message
-    /// about the trait object rather than about an `impl`.
-    fn resolve_trait_path(&self, p: &Path) -> Option<Path> {
-        if p.is_simple() {
-            return self.resolve_trait_name(p.last_segment()).ok();
-        }
-        self.reg
-            .root
-            .module(p.parent())
-            .and_then(|m| m.traits.get(p.last_segment()))
-            .map(|td| td.name.clone())
-    }
 
     /// Every implementation of `trait_path`'s `method` currently registered,
     /// as `(owning type, method name)` — what a compiled `:dyn` call site
@@ -8134,8 +7538,8 @@ impl Checker {
     /// name.
     fn dyn_impl_targets(&self, trait_path: &Path, method: &str) -> Vec<(Path, String)> {
         let mut out = Vec::new();
-        for ty in self.reg.trait_impls(trait_path) {
-            let Some(def) = self.reg.type_def(&ty) else { continue };
+        for ty in self.info.reg.trait_impls(trait_path) {
+            let Some(def) = self.info.reg.type_def(&ty) else { continue };
             if def.params.is_empty() && def.impls.contains(trait_path) && def.assoc.contains_key(method) {
                 out.push((ty.clone(), method.to_string()));
             }
@@ -8154,7 +7558,7 @@ impl Checker {
     /// `method` — how a trait-object receiver decides between dispatching
     /// through its vtable and falling back to the `Sexpr` catalog.
     fn sexpr_has_instance_method(&self, method: &str) -> bool {
-        self.reg
+        self.info.reg
             .type_def(&Path::root("sexpr"))
             .and_then(|d| d.assoc.get(method))
             .is_some_and(|af| af.instance)
@@ -8249,7 +7653,7 @@ impl Checker {
         let mut out: Vec<Path> = Vec::new();
         let mut stack = vec![trait_path.clone()];
         while let Some(p) = stack.pop() {
-            let Some(def) = self.reg.trait_def(&p) else { continue };
+            let Some(def) = self.info.reg.trait_def(&p) else { continue };
             for sup in &def.supertraits {
                 if !out.contains(&sup.trait_path) {
                     out.push(sup.trait_path.clone());
@@ -8279,7 +7683,7 @@ impl Checker {
     ) -> Vec<(Path, Vec<(Path, String)>)> {
         let mut out = Vec::new();
         for sup in self.supertrait_closure(trait_path) {
-            let Some(sdef) = self.reg.trait_def(&sup) else { continue };
+            let Some(sdef) = self.info.reg.trait_def(&sup) else { continue };
             let mut sup_slots = Vec::with_capacity(sdef.vtable_order.len());
             for m in &sdef.vtable_order {
                 match order.iter().position(|x| x == m).and_then(|i| slots.get(i)) {
@@ -8344,7 +7748,7 @@ impl Checker {
         // heap-representation rule, and the associated-type bindings are all
         // verified there, on the concrete type).
         if let Type::Named(p, targs) = &value.ty {
-            let is_tvar = targs.is_empty() && p.is_simple() && self.reg.type_def(p).is_none();
+            let is_tvar = targs.is_empty() && p.is_simple() && self.info.reg.type_def(p).is_none();
             if is_tvar && env.bounds.get(p.last_segment()).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
                 let what = format!("as :dyn {}", trait_path);
                 let form = forms::erased_generic_form(heap, &what)?;
@@ -8398,7 +7802,7 @@ impl Checker {
             )));
         };
         let decl = &tdef.vtable_owner[slot];
-        let Some((_, sig)) = self.reg.trait_method(tdef, method) else {
+        let Some((_, sig)) = self.info.reg.trait_method(tdef, method) else {
             return Err(Error::TypeError(format!(
                 "{}::{}: inherited from `{}`, which has no registered signature",
                 trait_path, method, decl
@@ -8450,7 +7854,7 @@ impl Checker {
     /// each message says which. Returns the `TraitDef` so callers that need
     /// it next (slot layout, method lookup) don't re-fetch it.
     fn check_object_safe(&self, trait_path: &Path) -> Result<&TraitDef, Error> {
-        let Some(tdef) = self.reg.trait_def(trait_path) else {
+        let Some(tdef) = self.info.reg.trait_def(trait_path) else {
             return Err(Error::TypeError(format!("dyn: unknown trait `{}`", trait_path)));
         };
         if tdef.vtable_order.is_empty() {
@@ -8464,7 +7868,7 @@ impl Checker {
         // names the declaring trait when it isn't `trait_path` itself, since
         // that's where the offending signature has to be fixed.
         for (m, decl) in tdef.vtable_order.iter().zip(tdef.vtable_owner.iter()) {
-            let Some((_, sig)) = self.reg.trait_method(tdef, m) else {
+            let Some((_, sig)) = self.info.reg.trait_method(tdef, m) else {
                 return Err(Error::TypeError(format!(
                     "dyn {}: method `{}`, inherited from `{}`, has no registered signature",
                     trait_path, m, decl
@@ -8548,7 +7952,7 @@ impl Checker {
             return Some(own.clone());
         }
         for sup in &tdef.supertraits {
-            let sdef = self.reg.trait_def(&sup.trait_path)?;
+            let sdef = self.info.reg.trait_def(&sup.trait_path)?;
             let next: BTreeMap<String, Type> =
                 sup.assoc.iter().map(|(k, v)| (k.clone(), subst_apply(v, own))).collect();
             if let Some(found) = self.trait_assoc_subst_for(sdef, &next, target) {
@@ -8564,7 +7968,7 @@ impl Checker {
         if sub == sup {
             return true;
         }
-        let Some(sdef) = self.reg.trait_def(sub) else { return false };
+        let Some(sdef) = self.info.reg.trait_def(sub) else { return false };
         sdef.supertraits.iter().any(|b| self.trait_inherits(&b.trait_path, sup))
     }
 
@@ -8598,7 +8002,7 @@ impl Checker {
             Type::Named(_, args) => args.clone(),
             _ => Vec::new(),
         };
-        let Some(def) = self.reg.type_def(&type_fq) else {
+        let Some(def) = self.info.reg.type_def(&type_fq) else {
             return Err(Error::TypeError(format!("dyn {}: unknown type `{}`", trait_path, type_fq)));
         };
         if !self.type_implements(concrete, &TraitBound { trait_path: trait_path.clone(), assoc: BTreeMap::new() }, 0) {
@@ -8683,7 +8087,7 @@ impl Checker {
                 // only a name, resolved when the vtable is published.
                 // `m` is declared by `decl`, so only `decl`'s blanket impl
                 // can be the one supplying it.
-                if self.reg.blanket_impl(decl).is_none() {
+                if self.info.reg.blanket_impl(decl).is_none() {
                     return Err(Error::TypeError(format!(
                         "`{}`'s `impl {}` is missing method `{}`",
                         type_fq, decl, m
@@ -8759,7 +8163,7 @@ impl Checker {
         // Saved before entering: an `(in-module ...)` in this body pushes
         // segments of its own that no closing form pops, so the body's end is
         // what restores the namespace — see `Checker::ns_base`.
-        let base = self.ns.len();
+        let base = self.info.ns.len();
         let path = self.enter_module(&segs)?;
 
         let mut body = Vec::new();
@@ -8791,7 +8195,7 @@ impl Checker {
                 }
             }
         }
-        self.ns.truncate(base);
+        self.info.ns.truncate(base);
         self.publish_name_view();
         result?;
         forms::module_form(heap, &path, &body)
@@ -8812,24 +8216,24 @@ impl Checker {
     /// package), which owns every keyword and nothing else, so no module may
     /// take its place.
     pub fn enter_module(&mut self, segs: &[String]) -> Result<Path, Error> {
-        if self.ns.is_empty() && segs.first().is_some_and(|s| s.eq_ignore_ascii_case(typelisp_mem::symbols::KEYWORD_MODULE)) {
+        if self.info.ns.is_empty() && segs.first().is_some_and(|s| s.eq_ignore_ascii_case(typelisp_mem::symbols::KEYWORD_MODULE)) {
             return Err(Error::TypeError(format!(
                 "module `{}` is the keyword namespace, which holds the keywords and nothing else — choose another name",
                 typelisp_mem::symbols::KEYWORD_MODULE
             )));
         }
         for s in segs {
-            self.ns.push(s.clone());
+            self.info.ns.push(s.clone());
         }
-        self.reg.root.module_mut(&self.ns);
+        self.info.reg.root.module_mut(&self.info.ns);
         self.publish_name_view();
-        Ok(Path::from_segments(self.ns.clone()))
+        Ok(Path::from_segments(self.info.ns.clone()))
     }
 
     /// Pop `depth` segments pushed by [`Self::enter_module`].
     pub fn exit_module(&mut self, depth: usize) {
         for _ in 0..depth {
-            self.ns.pop();
+            self.info.ns.pop();
         }
         self.publish_name_view();
     }
@@ -8840,19 +8244,19 @@ impl Checker {
     /// and before each form, since a form can bring a type in.
     fn publish_name_view(&self) {
         let mut imports = std::collections::HashMap::new();
-        let own = self.reg.root.module(&self.ns);
+        let own = self.info.reg.root.module(&self.info.ns);
         if let Some(m) = own {
             for (bare, segs) in &m.aliases {
-                if let Some(target) = self.resolve_type_path(segs) {
+                if let Some(target) = self.info.resolve_type_path(segs) {
                     imports.insert(bare.clone(), target.to_string());
                 }
             }
         }
         // While the standard library's names are still resolved by name, its
-        // types are in scope everywhere (`Self::in_scope`), so they are
+        // types are in scope everywhere (`Info::in_scope`), so they are
         // written as if brought in — except where this module's own
         // definition or import takes the name.
-        if let Some(std_ns) = self.reg.root.module(&STD_SEGMENTS) {
+        if let Some(std_ns) = self.info.reg.root.module(&STD_SEGMENTS) {
             for name in std_ns.types.keys().chain(std_ns.traits.keys()) {
                 if own.is_some_and(|m| m.types.contains_key(name) || m.traits.contains_key(name)) {
                     continue;
@@ -8860,11 +8264,11 @@ impl Checker {
                 imports.entry(name.clone()).or_insert_with(|| item_path(&STD_SEGMENTS, name).to_string());
             }
         }
-        typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(self.ns.clone(), imports));
+        typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(self.info.ns.clone(), imports));
     }
 
     /// [`Self::enter_module`], plus recording `segs` as the file currently
-    /// being loaded's own module path — see [`Self::file_ns`]'s doc comment.
+    /// being loaded's own module path — see [`Info::file_ns`]'s doc comment.
     /// `project.rs` calls this (never [`Self::enter_module`] directly) when
     /// wrapping a file's whole content in the module its location derives
     /// to; a nested `(module ...)` form inside that file still goes through
@@ -8873,13 +8277,13 @@ impl Checker {
     /// the one the next form has to be read in for its names to be this
     /// module's.
     pub fn current_module(&self) -> typelisp_mem::NsId {
-        typelisp_mem::symbols::ns_of(&self.ns)
+        typelisp_mem::symbols::ns_of(&self.info.ns)
     }
 
     pub fn enter_file_module(&mut self, segs: &[String]) -> Result<Path, Error> {
         let path = self.enter_module(segs)?;
-        self.ns_base.push(self.ns.len() - segs.len());
-        self.file_ns.push(self.ns.clone());
+        self.info.ns_base.push(self.info.ns.len() - segs.len());
+        self.info.file_ns.push(self.info.ns.clone());
         Ok(path)
     }
 
@@ -8893,15 +8297,15 @@ impl Checker {
     /// namespace. The argument stays because a caller passing the wrong
     /// depth is a bug worth catching.
     pub fn exit_file_module(&mut self, depth: usize) {
-        let base = self.ns_base.pop().unwrap_or(0);
+        let base = self.info.ns_base.pop().unwrap_or(0);
         debug_assert!(
-            self.ns.len() >= base + depth,
+            self.info.ns.len() >= base + depth,
             "exit_file_module({}) below the {} segments it entered",
             depth,
-            self.ns.len() - base
+            self.info.ns.len() - base
         );
-        self.ns.truncate(base);
-        self.file_ns.pop();
+        self.info.ns.truncate(base);
+        self.info.file_ns.pop();
         self.publish_name_view();
     }
 
@@ -8914,8 +8318,8 @@ impl Checker {
     /// `Loader::load_source_inner`. Pair with [`Self::resume_ns_context`].
     pub fn suspend_ns_context(&mut self) -> NsContext {
         NsContext {
-            ns: std::mem::take(&mut self.ns),
-            file_ns: std::mem::take(&mut self.file_ns),
+            ns: std::mem::take(&mut self.info.ns),
+            file_ns: std::mem::take(&mut self.info.file_ns),
         }
     }
 
@@ -8925,11 +8329,11 @@ impl Checker {
     /// — see `load_source_inner`).
     pub fn resume_ns_context(&mut self, saved: NsContext) {
         debug_assert!(
-            self.ns.is_empty() && self.file_ns.is_empty(),
+            self.info.ns.is_empty() && self.info.file_ns.is_empty(),
             "dependency load left an unbalanced namespace context"
         );
-        self.ns = saved.ns;
-        self.file_ns = saved.file_ns;
+        self.info.ns = saved.ns;
+        self.info.file_ns = saved.file_ns;
         self.publish_name_view();
     }
 
@@ -9017,7 +8421,7 @@ impl Checker {
             Type::Named(_, targs) if !targs.is_empty() => targs
                 .iter()
                 .filter_map(|t| match t {
-                    Type::Named(n, a) if a.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() => {
+                    Type::Named(n, a) if a.is_empty() && n.is_simple() && self.info.reg.type_def(n).is_none() => {
                         Some(n.last_segment().to_string())
                     }
                     _ => None,
@@ -9025,7 +8429,7 @@ impl Checker {
                 .collect(),
             _ => Vec::new(),
         };
-        let owner_params = self.reg.type_def(&type_fq).map(|d| d.params.len()).unwrap_or(0);
+        let owner_params = self.info.reg.type_def(&type_fq).map(|d| d.params.len()).unwrap_or(0);
         let generic_owner = !written_vars.is_empty()
             && written_vars.len() == owner_params
             && matches!(&recv_ty, Type::Named(_, targs) if targs.len() == written_vars.len())
@@ -9041,7 +8445,7 @@ impl Checker {
         // and the declaration's, which the registered signature is renamed
         // into below.
         if !own_params.is_empty() {
-            let declared: Vec<String> = self.reg.type_def(&type_fq).map(|d| d.params.clone()).unwrap_or_default();
+            let declared: Vec<String> = self.info.reg.type_def(&type_fq).map(|d| d.params.clone()).unwrap_or_default();
             for (i, p) in own_params.iter().enumerate() {
                 if own_params[..i].contains(p) {
                     return Err(Error::TypeError(format!(
@@ -9076,7 +8480,7 @@ impl Checker {
                 recv_ty,
                 type_fq,
                 type_fq,
-                self.reg.type_def(&type_fq).map(|d| d.params.join(",")).unwrap_or_default()
+                self.info.reg.type_def(&type_fq).map(|d| d.params.join(",")).unwrap_or_default()
             )));
         }
         // A receiver that spells out every type argument of a generic type
@@ -9089,7 +8493,7 @@ impl Checker {
             Some(args) => ConcreteNames::specialization(&method, args),
             None => method.clone(),
         };
-        if let Some(def) = self.reg.type_def(&type_fq) {
+        if let Some(def) = self.info.reg.type_def(&type_fq) {
             if inst_args.is_some() && def.assoc.contains_key(&method) {
                 return Err(Error::TypeError(format!(
                     "method {}::{}: `{}` has a `{}` for every instantiation already, so an `impl` of `{}` \
@@ -9133,7 +8537,7 @@ impl Checker {
                 (type_fq.clone(), def_name.clone()),
                 MethodTemplate::Form {
                     parts: parts.to_vec(),
-                    ns: self.ns.clone(),
+                    ns: self.info.ns.clone(),
                     written_vars: template_vars.clone(),
                     own_vars: own_params.clone(),
                 },
@@ -9155,7 +8559,7 @@ impl Checker {
         // in the written names below, since that is what its text says, and
         // `MethodTemplate::Form` keeps `written_vars` for the same reason.
         let owner_rename: BTreeMap<String, Type> = if generic_owner {
-            self.reg
+            self.info.reg
                 .type_def(&type_fq)
                 .map(|d| {
                     written_vars
@@ -9192,7 +8596,7 @@ impl Checker {
         // unrestricted — its omitted value is an `Option::none` built fresh
         // at the call's own resolved type.
         let mut owner_param_set: HashSet<String> = self
-            .reg
+            .info.reg
             .type_def(&type_fq)
             .map(|d| d.params.iter().cloned().collect())
             .unwrap_or_default();
@@ -9260,12 +8664,12 @@ impl Checker {
             optionals: sig_optionals,
             keys: sig_keys,
         };
-        let previous = self.reg.type_def(&type_fq).and_then(|d| match &inst_args {
+        let previous = self.info.reg.type_def(&type_fq).and_then(|d| match &inst_args {
             Some(args) => d.insts.get(&ConcreteNames::type_args(args)).and_then(|i| i.assoc.get(&method)),
             None => d.assoc.get(&method),
         });
         self.check_redef("method", &method, previous)?;
-        if let Some(def) = self.reg.type_def_mut(&type_fq) {
+        if let Some(def) = self.info.reg.type_def_mut(&type_fq) {
             let af = AssocFn { sig, instance, builtin: false };
             match &inst_args {
                 Some(args) => {
@@ -9281,10 +8685,10 @@ impl Checker {
             }
         }
         if let Some(loc) = def_loc {
-            self.reg.def_locs.methods.insert((type_fq.clone(), def_name.clone()), loc);
+            self.info.reg.def_locs.methods.insert((type_fq.clone(), def_name.clone()), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.methods.insert((type_fq.clone(), def_name.clone()), doc);
+            self.info.reg.docs.methods.insert((type_fq.clone(), def_name.clone()), doc);
         }
 
         let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
@@ -9400,7 +8804,7 @@ impl Checker {
         let type_fq = nominal_path(&recv_ty).ok_or_else(|| {
             Error::TypeError(format!("impl: method `{}`: the receiver's type must be a data type", method))
         })?;
-        if !abstract_receiver && self.reg.type_def(&type_fq).is_none() {
+        if !abstract_receiver && self.info.reg.type_def(&type_fq).is_none() {
             return Err(Error::TypeError(format!("impl: method `{}`: unknown type `{}`", method, type_fq)));
         }
         let (required, required_locs, optionals, rest, keys) =
@@ -9515,9 +8919,9 @@ impl Checker {
             _ => (None, 1),
         };
 
-        self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
+        self.check_redef("type", &name, self.info.cur_ns().types.get(&name))?;
         self.check_type_trait_clash("type", &name)?;
-        let type_fq = self.fq(&name);
+        let type_fq = self.info.fq(&name);
         // Pre-register a stub under `type_fq` *before* parsing field types, so
         // a self-referential field (e.g. a linked-list-style `(next Vector<node>)`
         // inside `node`'s own definition) resolves its bare `node` reference
@@ -9526,7 +8930,7 @@ impl Checker {
         // and `canon` falling back to an unqualified guess that could never
         // match the real registration below. Overwritten with the fully
         // parsed `AdtDef` once fields are known.
-        self.reg.root.module_mut(&self.ns).add_type(AdtDef {
+        self.info.reg.root.module_mut(&self.info.ns).add_type(AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
@@ -9686,12 +9090,12 @@ impl Checker {
             trait_assoc: BTreeMap::new(),
             insts: BTreeMap::new(),
         };
-        self.reg.root.module_mut(&self.ns).add_type(def);
+        self.info.reg.root.module_mut(&self.info.ns).add_type(def);
         if let Some(loc) = def_loc.clone() {
-            self.reg.def_locs.types.insert(type_fq.clone(), loc);
+            self.info.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.types.insert(type_fq.clone(), doc);
+            self.info.reg.docs.types.insert(type_fq.clone(), doc);
         }
         self.record_def_name_use(
             &type_fq,
@@ -9711,7 +9115,7 @@ impl Checker {
                     None => None,
                 });
             }
-            self.reg.struct_defaults.insert(type_fq.clone(), owned);
+            self.info.reg.struct_defaults.insert(type_fq.clone(), owned);
         }
 
         // The copier, *after* the type is registered: unlike the accessors
@@ -9903,13 +9307,13 @@ impl Checker {
         // would leave *both* registered, with the alias silently winning at
         // every use site. Refuse outright, the way a trait of that name is
         // refused.
-        if self.cur_ns().types.contains_key(&name) {
+        if self.info.cur_ns().types.contains_key(&name) {
             return Err(Error::TypeError(format!(
                 "cannot define type alias `{}`: a type of that name already exists here",
                 name
             )));
         }
-        self.check_redef("type alias", &name, self.cur_ns().type_aliases.get(&name))?;
+        self.check_redef("type alias", &name, self.info.cur_ns().type_aliases.get(&name))?;
         self.check_type_trait_clash("type alias", &name)?;
 
         let body = self.parse_type_here_at(heap, parts[body_at], parts_locs.get(body_at).and_then(|l| l.as_ref()))?;
@@ -9927,17 +9331,17 @@ impl Checker {
             )));
         }
 
-        let fq = self.fq(&name);
-        self.reg
+        let fq = self.info.fq(&name);
+        self.info.reg
             .root
-            .module_mut(&self.ns)
+            .module_mut(&self.info.ns)
             .type_aliases
             .insert(name.clone(), TypeAlias { name: fq.clone(), params, body, public });
         if let Some(loc) = def_loc {
-            self.reg.def_locs.types.insert(fq.clone(), loc);
+            self.info.reg.def_locs.types.insert(fq.clone(), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.types.insert(fq.clone(), doc);
+            self.info.reg.docs.types.insert(fq.clone(), doc);
         }
         forms::module_form(heap, &fq, &[])
     }
@@ -9978,9 +9382,9 @@ impl Checker {
             _ => (None, 1),
         };
 
-        self.check_redef("type", &name, self.cur_ns().types.get(&name))?;
+        self.check_redef("type", &name, self.info.cur_ns().types.get(&name))?;
         self.check_type_trait_clash("type", &name)?;
-        let type_fq = self.fq(&name);
+        let type_fq = self.info.fq(&name);
         // Pre-register a stub under `type_fq` *before* parsing variant field
         // types, so a self-referential field (e.g. `(node i32 tree tree)`
         // inside `tree`'s own definition) resolves its bare `tree` reference
@@ -9989,7 +9393,7 @@ impl Checker {
         // `canon` falling back to an unqualified guess that could never
         // match the real registration below. Overwritten with the fully
         // parsed `AdtDef` once variants are known.
-        self.reg.root.module_mut(&self.ns).add_type(AdtDef {
+        self.info.reg.root.module_mut(&self.info.ns).add_type(AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
@@ -10056,12 +9460,12 @@ impl Checker {
             trait_assoc: BTreeMap::new(),
             insts: BTreeMap::new(),
         };
-        self.reg.root.module_mut(&self.ns).add_type(def);
+        self.info.reg.root.module_mut(&self.info.ns).add_type(def);
         if let Some(loc) = def_loc {
-            self.reg.def_locs.types.insert(type_fq.clone(), loc);
+            self.info.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.types.insert(type_fq.clone(), doc);
+            self.info.reg.docs.types.insert(type_fq.clone(), doc);
         }
         self.record_def_name_use(
             &type_fq,
@@ -10139,16 +9543,16 @@ impl Checker {
         if shadowing {
             return Ok(());
         }
-        let ns = self.cur_ns();
+        let ns = self.info.cur_ns();
         // A path that names this namespace's own definition of `bare` —
         // `(use tree)` after `(defenum tree ...)`, the way to bring a type's
         // constructors into bare scope — collides with nothing: the alias and
         // the definition are the same thing, and the constructors it brings in
         // are what the form is for.
         let own = target.len() == 1 && target[0] == bare
-            || (target.len() == self.ns.len() + 1
-                && target[..self.ns.len()] == self.ns[..]
-                && target[self.ns.len()] == bare);
+            || (target.len() == self.info.ns.len() + 1
+                && target[..self.info.ns.len()] == self.info.ns[..]
+                && target[self.info.ns.len()] == bare);
         if own {
             return Ok(());
         }
@@ -10256,7 +9660,7 @@ impl Checker {
         // The bundle's path is the namespace the imports landed in — the
         // wrapper only groups, and `Interp::exec` on a `use` does nothing
         // either way (the whole effect was the checker's).
-        let path = Path::from_segments(self.ns.clone());
+        let path = Path::from_segments(self.info.ns.clone());
         forms::module_form(heap, &path, &nodes)
     }
 
@@ -10276,13 +9680,13 @@ impl Checker {
 
         // Try: a module-level value — a function or a global, one or the
         // other, since a name has one value.
-        if let Some(value) = self.resolve_module_value_path(&segs) {
+        if let Some(value) = self.info.resolve_module_value_path(&segs) {
             let target = match value {
                 ModuleValue::Fn(path) | ModuleValue::Var(path, _) => path,
             };
             self.report_import_collision(&bare, &segs, shadowing)?;
-            self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
-            let alias = self.fq(&bare);
+            self.info.reg.root.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target);
         }
         // Try: type. Beyond the usual alias (so the bare name also resolves
@@ -10293,25 +9697,25 @@ impl Checker {
         // callable bare, exactly like `option::some`/`option::none` (see
         // `check_path_call`, which already treats a variant and a
         // non-instance `assoc` entry as the same kind of "static member").
-        if let Some(target) = self.resolve_type_path(&segs) {
+        if let Some(target) = self.info.resolve_type_path(&segs) {
             // Unlike `rect::new`, a `use` path's *last* segment is the type
             // itself — the import names it and nothing else.
             self.report_import_collision(&bare, &segs, shadowing)?;
             self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
-            self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
-            let def = self.reg.type_def(&target).expect("resolved type exists").clone();
+            self.info.reg.root.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
             for (i, v) in def.variants.iter().enumerate() {
                 let is_builtin = self
-                    .cur_ns()
+                    .info.cur_ns()
                     .ctors
                     .get(&v.name)
-                    .and_then(|(owner, _)| self.reg.type_def(owner))
+                    .and_then(|(owner, _)| self.info.reg.type_def(owner))
                     .map(|d| d.builtin)
                     .unwrap_or(false);
-                if self.cur_ns().ctors.contains_key(&v.name) {
+                if self.info.cur_ns().ctors.contains_key(&v.name) {
                     self.check_redef_outcome("constructor", &v.name, is_builtin)?;
                 }
-                self.reg.root.module_mut(&self.ns).ctors.insert(v.name.clone(), (target.clone(), i));
+                self.info.reg.root.module_mut(&self.info.ns).ctors.insert(v.name.clone(), (target.clone(), i));
             }
             // Every static method, whether written for every instantiation or
             // for one: which one a call means is decided at the call
@@ -10323,41 +9727,41 @@ impl Checker {
                     continue;
                 }
                 let is_builtin = self
-                    .cur_ns()
+                    .info.cur_ns()
                     .static_uses
                     .get(name)
-                    .and_then(|(owner, m)| self.reg.type_def(owner).and_then(|d| d.assoc.get(m)))
+                    .and_then(|(owner, m)| self.info.reg.type_def(owner).and_then(|d| d.assoc.get(m)))
                     .map(|af| af.builtin)
                     .unwrap_or(false);
-                if self.cur_ns().static_uses.contains_key(name) {
+                if self.info.cur_ns().static_uses.contains_key(name) {
                     self.check_redef_outcome("static method", name, is_builtin)?;
                 }
-                self.reg
+                self.info.reg
                     .root
-                    .module_mut(&self.ns)
+                    .module_mut(&self.info.ns)
                     .static_uses
                     .insert(name.clone(), (target.clone(), name.clone()));
             }
             self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Type(crate::check::registry::definition_symbol(&target)));
-            let alias = self.fq(&bare);
+            let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target);
         }
         // Try: `deftype` alias. Only the name is imported — an alias has no
         // constructors or static methods of its own (whatever its *body*
         // names keeps its own name). The `aliases` entry is what
         // `resolve_type_alias`'s bare-name branch follows.
-        if let Some(a) = self.resolve_type_alias_path(&segs) {
+        if let Some(a) = self.info.resolve_type_alias_path(&segs) {
             self.report_import_collision(&bare, &segs, shadowing)?;
-            self.reg.root.module_mut(&self.ns).aliases.insert(bare.clone(), segs);
-            let alias = self.fq(&bare);
+            self.info.reg.root.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &a.name);
         }
         // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
-        if let Some((abs, _)) = self.find_module(&segs) {
+        if let Some((abs, _)) = self.info.find_module(&segs) {
             let target_path = Path::from_segments(abs.clone());
             self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Module(typelisp_mem::symbols::ns_of(&abs)));
-            self.reg.root.module_mut(&self.ns).mod_aliases.insert(bare.clone(), abs);
-            let alias = self.fq(&bare);
+            self.info.reg.root.module_mut(&self.info.ns).mod_aliases.insert(bare.clone(), abs);
+            let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target_path);
         }
         // Not a known function, type, or module. The path may name a module
@@ -10377,9 +9781,9 @@ impl Checker {
     /// nothing is left for `check_use` to report.
     pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[String]) {
         let Some(bare) = path.last() else { return };
-        let what = if let Some(target) = self.resolve_type_path(path) {
+        let what = if let Some(target) = self.info.resolve_type_path(path) {
             typelisp_mem::symbols::Import::Type(crate::check::registry::definition_symbol(&target))
-        } else if let Some((abs, _)) = self.find_module(path) {
+        } else if let Some((abs, _)) = self.info.find_module(path) {
             typelisp_mem::symbols::Import::Module(typelisp_mem::symbols::ns_of(&abs))
         } else {
             return;
@@ -10391,7 +9795,7 @@ impl Checker {
     /// forms read after it can read a path through it (`point::origin-x`
     /// after `(use geo::point)`). Until the reader handles `use` itself.
     fn import_for_reading(&self, heap: &Heap, bare: &str, what: typelisp_mem::symbols::Import) {
-        let here = typelisp_mem::symbols::ns_of(&self.ns);
+        let here = typelisp_mem::symbols::ns_of(&self.info.ns);
         heap.names().import_name(here, typelisp_mem::symbols::intern_in(here, bare), what);
     }
 
@@ -11083,7 +10487,7 @@ impl Checker {
                 if is_sexpr_expectation(e) {
                     if let Some(ctor) = sexpr_ctor_for(&typed.ty) {
                         let (type_name, variant) =
-                            self.resolve_ctor(ctor).expect("sexpr constructors are always registered");
+                            self.info.resolve_ctor(ctor).expect("sexpr constructors are always registered");
                         let field_tys = self.variant_field_tys(&type_name, variant, &[]);
                         let form =
                             self.construct_form(heap, &type_name, &[], variant, false, &field_tys, &[typed.form])?;
@@ -11142,7 +10546,7 @@ impl Checker {
             let segs = value_member_segments(heap, v)?;
             let typed = match self.try_field_access(heap, interp, env, &segs) {
                 Some(r) => r?,
-                None if env.get(&segs[0]).is_none() && self.resolve_global(&segs[0]).is_none() => {
+                None if env.get(&segs[0]).is_none() && self.info.resolve_global(&segs[0]).is_none() => {
                     return Err(Error::TypeError(format!(
                         "unresolved path: {} (`{}` is not a variable, and no module or type `{}` is visible here)",
                         segs.join("::"),
@@ -11384,7 +10788,7 @@ impl Checker {
             self.check_variadic_cmp(heap, interp, env, head, args)
         } else if head == "append" && args.len() > 2 {
             self.check_variadic_append(heap, interp, env, args, expected)
-        } else if head == "concatenate" && self.resolve_fn(head).is_none() {
+        } else if head == "concatenate" && self.info.resolve_fn(head).is_none() {
             self.check_concatenate(heap, interp, env, args, expected)
         } else if head == "aref" && !args.is_empty() {
             self.check_aref(heap, interp, env, args[0], &args[1..], None, expected)
@@ -11462,8 +10866,8 @@ impl Checker {
     /// Each binding is checked by exactly the machinery a top-level
     /// `defmacro` uses ([`Self::defmacro_body`]), installed under a
     /// synthesized name no source can write, and recorded in
-    /// [`Self::local_macros`] for the extent of the body. Expansion then
-    /// needs nothing new: [`Self::resolve_macro`] finds the local binding
+    /// [`Info::local_macros`] for the extent of the body. Expansion then
+    /// needs nothing new: [`Info::resolve_macro`] finds the local binding
     /// first, and the call site expands and re-checks the way it always has.
     ///
     /// **Sibling bindings do not see each other**, as in CL — `macrolet`, not
@@ -11537,9 +10941,9 @@ impl Checker {
             installed.map_err(|e| Error::TypeError(format!("macrolet `{}`: {}", name, e)))?;
             scope.insert(name, (path, shape));
         }
-        self.local_macros.borrow_mut().push(scope);
+        self.info.local_macros.borrow_mut().push(scope);
         let result = self.check_seq(heap, interp, env, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected);
-        self.local_macros.borrow_mut().pop();
+        self.info.local_macros.borrow_mut().pop();
         let (body, ty) = result?;
         let form = self.let_form(heap, &[], &body)?;
         Ok(Checked::new(form, ty))
@@ -11600,10 +11004,10 @@ impl Checker {
             heap.push_root(*form);
         }
         let n = scope.len();
-        self.local_symbol_macros.borrow_mut().push(scope);
+        self.info.local_symbol_macros.borrow_mut().push(scope);
         let child = env.extended(binds)?;
         let result = self.check_seq(heap, interp, &child, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected);
-        self.local_symbol_macros.borrow_mut().pop();
+        self.info.local_symbol_macros.borrow_mut().pop();
         for _ in 0..n {
             heap.pop_root();
         }
@@ -11615,7 +11019,7 @@ impl Checker {
     /// The form `name` stands for, if a `symbol-macrolet` scope in view binds
     /// it. Innermost scope first, the way `Env` itself resolves.
     fn symbol_macro_form(&self, name: &str) -> Option<Value> {
-        for scope in self.local_symbol_macros.borrow().iter().rev() {
+        for scope in self.info.local_symbol_macros.borrow().iter().rev() {
             if let Some(form) = scope.get(name) {
                 return Some(*form);
             }
@@ -11896,7 +11300,7 @@ impl Checker {
             Some(Resolved::Member(type_fq, member)) => {
                 self.record_path_type_use(segs, &type_fq, head_loc);
                 let instance = self
-                    .reg
+                    .info.reg
                     .type_def(&type_fq)
                     .is_some_and(|d| d.method_defs(&member).all(|(af, _)| af.instance));
                 if instance {
@@ -11920,9 +11324,9 @@ impl Checker {
             None => {
                 // `Type::name` whose type resolved but has no such member.
                 if let Some((member, type_segs)) = segs.split_last().filter(|(_, t)| !t.is_empty()) {
-                    if let Some(type_fq) = self.resolve_type_path(type_segs) {
+                    if let Some(type_fq) = self.info.resolve_type_path(type_segs) {
                         self.record_path_type_use(segs, &type_fq, head_loc);
-                        let def = self.reg.type_def(&type_fq).expect("resolved type exists");
+                        let def = self.info.reg.type_def(&type_fq).expect("resolved type exists");
                         if def.kind == AdtKind::Struct && !def.builtin {
                             return Err(Error::TypeError(format!(
                                 "`{}` has no static method `{}`; a struct's methods are written in its `impl`, \
@@ -11943,7 +11347,7 @@ impl Checker {
     /// without shadowing `Option`'s own methods — see the receiver match in
     /// [`Self::receiver_method`].
     fn sexpr_has_method(&self, method: &str) -> bool {
-        self.reg
+        self.info.reg
             .type_def(&Path::root("sexpr"))
             .is_some_and(|d| d.assoc.get(method).is_some_and(|af| af.instance))
     }
@@ -11982,18 +11386,18 @@ impl Checker {
     /// trait method of a `where`-bounded type variable.
     fn receiver_method(&self, env: &Env, ty: &Type, name: &str) -> Option<MethodTarget> {
         if let Type::Dyn(trait_path, pins) = ty {
-            if self.reg.trait_def(trait_path).is_some_and(|t| t.vtable_order.iter().any(|m| m == name)) {
+            if self.info.reg.trait_def(trait_path).is_some_and(|t| t.vtable_order.iter().any(|m| m == name)) {
                 return Some(MethodTarget::Dyn { trait_path: trait_path.clone(), pins: pins.clone() });
             }
             return self.sexpr_has_instance_method(name).then_some(MethodTarget::DynSexpr);
         }
         let type_fq = self.assoc_receiver_path(ty, name)?;
-        if let Some(def) = self.reg.type_def(&type_fq) {
+        if let Some(def) = self.info.reg.type_def(&type_fq) {
             let args = match ty {
                 Type::Named(n, args) if *n == type_fq => args.as_slice(),
                 _ => &[],
             };
-            if def.method_at(name, args).is_some_and(|af| af.instance && self.assoc_visible(&type_fq, af)) {
+            if def.method_at(name, args).is_some_and(|af| af.instance && self.info.assoc_visible(&type_fq, af)) {
                 return Some(MethodTarget::Assoc(type_fq));
             }
         }
@@ -12020,7 +11424,7 @@ impl Checker {
     fn bound_method(&self, env: &Env, type_var: &Path, name: &str) -> Option<(TraitBound, String)> {
         let bounds = env.bounds.get(type_var.last_segment())?;
         let declares = |m: &str| {
-            bounds.iter().any(|tb| self.reg.trait_def(&tb.trait_path).is_some_and(|t| self.reg.trait_method(t, m).is_some()))
+            bounds.iter().any(|tb| self.info.reg.trait_def(&tb.trait_path).is_some_and(|t| self.info.reg.trait_method(t, m).is_some()))
         };
         let method = match trait_operator_method(name) {
             Some(alias) if !declares(name) => alias,
@@ -12028,7 +11432,7 @@ impl Checker {
         };
         bounds
             .iter()
-            .find(|tb| self.reg.trait_def(&tb.trait_path).is_some_and(|t| self.reg.trait_method(t, method).is_some()))
+            .find(|tb| self.info.reg.trait_def(&tb.trait_path).is_some_and(|t| self.info.reg.trait_method(t, method).is_some()))
             .map(|tb| (tb.clone(), method.to_string()))
     }
 
@@ -12137,10 +11541,10 @@ impl Checker {
             // type is resolved at runtime instead of here.
             MethodTarget::Bound { bound, method } => {
                 let tdef = self
-                    .reg
+                    .info.reg
                     .trait_def(&bound.trait_path)
                     .ok_or_else(|| Error::TypeError(format!("unknown trait `{}`", bound.trait_path)))?;
-                let (decl, sig) = self.reg.trait_method(tdef, &method).ok_or_else(|| {
+                let (decl, sig) = self.info.reg.trait_method(tdef, &method).ok_or_else(|| {
                     Error::TypeError(format!("`{}` is not a method of `{}`", method, bound.trait_path))
                 })?;
                 let decl_path = decl.name.clone();
@@ -12213,7 +11617,7 @@ impl Checker {
             // `where` bounds give it, so that is what to say — which concrete
             // types happen to have the name is beside the point.
             if let Type::Named(p, targs) = &recv_ty {
-                if targs.is_empty() && p.is_simple() && self.reg.type_def(p).is_none() {
+                if targs.is_empty() && p.is_simple() && self.info.reg.type_def(p).is_none() {
                     return Err(Error::TypeError(format!(
                         "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",
                         method, recv_ty, method
@@ -12270,7 +11674,7 @@ impl Checker {
             }
         }
         let mut out = Vec::new();
-        walk(&self.reg.root, method, &mut out);
+        walk(&self.info.reg.root, method, &mut out);
         out.sort();
         out.dedup();
         out
@@ -12283,9 +11687,9 @@ impl Checker {
     /// trait) is one instantiation's own.
     fn written_instantiation(&self, ty: &Type) -> Option<Vec<Type>> {
         let Type::Named(n, args) = ty else { return None };
-        let def = self.reg.type_def(n)?;
+        let def = self.info.reg.type_def(n)?;
         let is_var =
-            |t: &Type| matches!(t, Type::Named(p, a) if a.is_empty() && p.is_simple() && self.reg.type_def(p).is_none());
+            |t: &Type| matches!(t, Type::Named(p, a) if a.is_empty() && p.is_simple() && self.info.reg.type_def(p).is_none());
         (!def.params.is_empty() && args.len() == def.params.len() && !args.iter().any(is_var)).then(|| args.clone())
     }
 
@@ -12403,7 +11807,7 @@ impl Checker {
     ) -> Result<Checked, Error> {
         let AssocCall { type_fq, method, receiver, expected, mut first_arg } = call;
         let instance = receiver.is_some();
-        let def = self.reg.type_def(type_fq).expect("assoc type exists").clone();
+        let def = self.info.reg.type_def(type_fq).expect("assoc type exists").clone();
         let (af, inst) = self.select_method(&def, method, receiver.as_ref().map(|r| &r.ty), expected)?;
 
         let mut subst: BTreeMap<String, Type> = BTreeMap::new();
@@ -13218,7 +12622,7 @@ impl Checker {
     /// it. Several instantiations writing it need the name to say which, as
     /// `Type<args>::member` ([`Self::instantiated_member`]).
     fn member_body_name(&self, type_fq: &Path, member: &str, who: &str) -> Result<String, Error> {
-        let def = self.reg.type_def(type_fq).expect("the resolution found the member on this type");
+        let def = self.info.reg.type_def(type_fq).expect("the resolution found the member on this type");
         if def.assoc.contains_key(member) {
             return Ok(member.to_string());
         }
@@ -13253,7 +12657,7 @@ impl Checker {
             other => return Err(Error::TypeError(format!("{}: `{}` is not a generic type", who, other))),
         };
         let def = self
-            .reg
+            .info.reg
             .type_def(type_fq)
             .ok_or_else(|| Error::TypeError(format!("{}: no type `{}` is visible from here", who, type_fq)))?;
         if def.insts.get(&ConcreteNames::type_args(args)).is_some_and(|i| i.assoc.contains_key(member)) {
@@ -13338,7 +12742,7 @@ impl Checker {
                 // Whether the *type* half resolved is what tells "this type has
                 // no such method" apart from "this names nothing at all".
                 let type_path = match segs.split_last() {
-                    Some((_, type_segs)) if !type_segs.is_empty() => self.resolve_type_path(type_segs),
+                    Some((_, type_segs)) if !type_segs.is_empty() => self.info.resolve_type_path(type_segs),
                     _ => None,
                 };
                 Err(Error::TypeError(match (&type_path, segs.last()) {
@@ -13479,16 +12883,16 @@ impl Checker {
             "documentation",
             "documentation: expected a symbol or path naming a definition, e.g. (documentation foo) or (documentation point::x) — not a string",
         )?;
-        // Resolved to the docstring first, then built — `self.reg` lookups
+        // Resolved to the docstring first, then built — `self.info.reg` lookups
         // borrow `self` while `doc_option` needs `heap` mutably, so the two
         // cannot be nested.
         let doc = match self.resolve_definition(&name, "documentation")? {
-            DefRef::Var(p) => self.reg.docs.vars.get(&p).cloned(),
-            DefRef::Fn(p) => self.reg.docs.fns.get(&p).cloned(),
-            DefRef::Type(p) => self.reg.docs.types.get(&p).cloned(),
-            DefRef::Trait(p) => self.reg.docs.traits.get(&p).cloned(),
-            DefRef::Macro(p) => self.reg.docs.macros.get(&p).cloned(),
-            DefRef::Method(t, m) => self.reg.docs.methods.get(&(t, m)).cloned(),
+            DefRef::Var(p) => self.info.reg.docs.vars.get(&p).cloned(),
+            DefRef::Fn(p) => self.info.reg.docs.fns.get(&p).cloned(),
+            DefRef::Type(p) => self.info.reg.docs.types.get(&p).cloned(),
+            DefRef::Trait(p) => self.info.reg.docs.traits.get(&p).cloned(),
+            DefRef::Macro(p) => self.info.reg.docs.macros.get(&p).cloned(),
+            DefRef::Method(t, m) => self.info.reg.docs.methods.get(&(t, m)).cloned(),
         };
         self.doc_option(heap, doc)
     }
@@ -13540,15 +12944,15 @@ impl Checker {
         }
         // Types and traits are a name space of their own.
         if let [name] = segs.as_slice() {
-            if let Some(path) = self.resolve_bare_type(name) {
+            if let Some(path) = self.info.resolve_bare_type(name) {
                 return Ok(DefRef::Type(path));
             }
-            if let Some(alias) = self.resolve_type_alias(&Path::of(&[name])) {
+            if let Some(alias) = self.info.resolve_type_alias(&Path::of(&[name])) {
                 // A `deftype` alias keeps its docstring and location in the
                 // type columns, under its own fully-qualified name.
                 return Ok(DefRef::Type(alias.name));
             }
-            if let Ok(path) = self.resolve_trait_name(name) {
+            if let Ok(path) = self.info.resolve_trait_name(name) {
                 return Ok(DefRef::Trait(path));
             }
         }
@@ -13587,12 +12991,12 @@ impl Checker {
             "ed: expected a symbol or path naming a definition, or a string naming a file, e.g. (ed foo) or (ed \"x.typl\")",
                 )?;
                 let loc = match self.resolve_definition(&name, "ed")? {
-                    DefRef::Var(p) => self.reg.def_locs.vars.get(&p).cloned(),
-                    DefRef::Fn(p) => self.reg.def_locs.fns.get(&p).cloned(),
-                    DefRef::Type(p) => self.reg.def_locs.types.get(&p).cloned(),
-                    DefRef::Trait(p) => self.reg.def_locs.traits.get(&p).cloned(),
-                    DefRef::Macro(p) => self.reg.def_locs.macros.get(&p).cloned(),
-                    DefRef::Method(t, m) => self.reg.def_locs.methods.get(&(t, m)).cloned(),
+                    DefRef::Var(p) => self.info.reg.def_locs.vars.get(&p).cloned(),
+                    DefRef::Fn(p) => self.info.reg.def_locs.fns.get(&p).cloned(),
+                    DefRef::Type(p) => self.info.reg.def_locs.types.get(&p).cloned(),
+                    DefRef::Trait(p) => self.info.reg.def_locs.traits.get(&p).cloned(),
+                    DefRef::Macro(p) => self.info.reg.def_locs.macros.get(&p).cloned(),
+                    DefRef::Method(t, m) => self.info.reg.def_locs.methods.get(&(t, m)).cloned(),
                 };
                 match loc {
                     Some(loc) => (loc.file.to_string(), loc.line as i64),
@@ -13613,7 +13017,7 @@ impl Checker {
         // The result type is read back out of the registry rather than
         // rebuilt here, so the form and the builtin cannot drift apart.
         let ret = self
-            .reg
+            .info.reg
             .fn_sig(&Path::internal("ed-open"))
             .map(|sig| sig.ret.clone())
             .ok_or_else(|| Error::TypeError("ed: the `ed-open` builtin is not registered".into()))?;
@@ -13727,7 +13131,7 @@ impl Checker {
     /// 3-element `progn`, not a `progn` wrapping one 3-element list). Since
     /// `x`'s length isn't known until runtime, this can't be expressed as a
     /// static `cons` nest like the non-splicing case — it desugars to a call
-    /// to the prelude's `sexpr-append` (`Checker::resolve_fn`, the same lookup
+    /// to the prelude's `sexpr-append` (`Info::resolve_fn`, the same lookup
     /// `check_call`'s caller uses), joining `x` with the recursively
     /// desugared rest of the list. This means `,@` requires the prelude to
     /// be loaded (`sexpr-append` registered) — acceptable since the macros that
@@ -13765,7 +13169,7 @@ impl Checker {
                         if heap.cdr(car_cdr)?.is_empty() {
                             let spliced = self.check(heap, interp, env, x, Some(&sexpr_ty))?;
                             let rest = self.check_qq_template(heap, interp, env, cdr)?;
-                            let append_fq = self.resolve_fn("sexpr-append").ok_or_else(|| {
+                            let append_fq = self.info.resolve_fn("sexpr-append").ok_or_else(|| {
                                 Error::TypeError(
                                     "unquote-splicing (,@) requires the prelude's `sexpr-append` to be loaded"
                                         .into(),
@@ -13789,7 +13193,7 @@ impl Checker {
             }
             let car_t = self.check_qq_template(heap, interp, env, car)?;
             let cdr_t = self.check_qq_template(heap, interp, env, cdr)?;
-            let (adt, cons_idx) = self.sexpr_cons_ctor();
+            let (adt, cons_idx) = self.info.sexpr_cons_ctor();
             let field_tys = self.variant_field_tys(&adt, cons_idx, &[]);
             let form =
                 self.construct_form(heap, &adt, &[], cons_idx, false, &field_tys, &[car_t.form, cdr_t.form])?;
@@ -13977,7 +13381,7 @@ impl Checker {
             let form = forms::set_form(heap, &name, value.form)?;
             return Ok(Checked::new(form, ty));
         }
-        if let Some((path, vi)) = self.resolve_global(&name) {
+        if let Some((path, vi)) = self.info.resolve_global(&name) {
             if !vi.mutable {
                 return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
             }
@@ -14012,7 +13416,7 @@ impl Checker {
         let recv = if let Some(ty) = env.get(recv_name).cloned() {
             let form = forms::var_form(heap, recv_name)?;
             Checked::new(form, ty)
-        } else if let Some((path, vi)) = self.resolve_global(recv_name) {
+        } else if let Some((path, vi)) = self.info.resolve_global(recv_name) {
             let r = path;
             let form = self.global_form(heap, &r, &vi.ty)?;
             Checked::new(form, vi.ty)
@@ -14030,10 +13434,10 @@ impl Checker {
         let field = tuple_element_field(&recv.ty, field)?.unwrap_or_else(|| field.clone());
         let setter = format!("set-{}", field);
         let is_field_setter = self
-            .reg
+            .info.reg
             .type_def(type_fq)
             .and_then(|d| d.method_at(&setter, targs))
-            .is_some_and(|af| af.instance && self.assoc_visible(type_fq, af));
+            .is_some_and(|af| af.instance && self.info.assoc_visible(type_fq, af));
         if !is_field_setter {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", type_fq, field)));
         }
@@ -14116,10 +13520,10 @@ impl Checker {
         // `method_at`, not the type's own table: a setter an `impl` for one
         // instantiation defines is that instantiation's.
         let setter = candidates.iter().find(|name| {
-            self.reg
+            self.info.reg
                 .type_def(&type_fq)
                 .and_then(|d| d.method_at(name.as_str(), &targs))
-                .is_some_and(|af| af.instance && self.assoc_visible(&type_fq, af))
+                .is_some_and(|af| af.instance && self.info.assoc_visible(&type_fq, af))
         });
         let Some(setter) = setter else {
             let tried = candidates.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(" or ");
@@ -14239,7 +13643,7 @@ impl Checker {
             Type::Named(n, targs) => (n.clone(), !targs.is_empty()),
             _ => return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", ty))),
         };
-        let def = match self.reg.type_def(&type_fq) {
+        let def = match self.info.reg.type_def(&type_fq) {
             Some(d) if d.kind == AdtKind::Struct && !d.builtin => d,
             _ => return Err(Error::TypeError(format!("make-instance: `{}` is not a struct type", ty))),
         };
@@ -14284,7 +13688,7 @@ impl Checker {
             if given[i].is_some() {
                 return Err(Error::TypeError(format!("make-instance {}: slot `{}` is given twice", tname, slot)));
             }
-            let visible = def.assoc.get(&slot).map(|af| self.assoc_visible(&type_fq, af)).unwrap_or(false);
+            let visible = def.assoc.get(&slot).map(|af| self.info.assoc_visible(&type_fq, af)).unwrap_or(false);
             if !visible {
                 return Err(Error::TypeError(format!(
                     "make-instance {}: slot `{}` is not `pub`, so it can be given only inside module `{}`",
@@ -14317,7 +13721,7 @@ impl Checker {
                 given[i] = Some(tmp);
             }
         }
-        let defaults = self.reg.struct_defaults.get(&type_fq).cloned();
+        let defaults = self.info.reg.struct_defaults.get(&type_fq).cloned();
         let ctor = forms::path_form(&mut s, &type_fq.child(STRUCT_CTOR));
         s.push_root(ctor);
         let mut call: Vec<(Value, Option<Loc>)> = vec![(ctor, None)];
@@ -14843,7 +14247,7 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let fq = self
-            .resolve_fn(name)
+            .info.resolve_fn(name)
             .ok_or_else(|| Error::TypeError(format!("{}: the prelude's `{}` is not loaded", name, name)))?;
         self.check_call(heap, interp, env, &fq, args, arg_locs)
     }
@@ -14951,18 +14355,18 @@ impl Checker {
         let value = self.check(heap, interp, &Env::new(), parts[1], Some(&ann))?;
         let ty = ann;
         self.check_value_clash("variable", &name)?;
-        self.check_redef("variable", &name, self.cur_ns().vars.get(&name))?;
-        self.reg
+        self.check_redef("variable", &name, self.info.cur_ns().vars.get(&name))?;
+        self.info.reg
             .root
-            .module_mut(&self.ns)
+            .module_mut(&self.info.ns)
             .vars
             .insert(name.clone(), VarInfo { ty: ty.clone(), mutable, public, builtin: false });
-        let fq_name = self.fq(&name);
+        let fq_name = self.info.fq(&name);
         if let Some(loc) = def_loc {
-            self.reg.def_locs.vars.insert(fq_name.clone(), loc);
+            self.info.reg.def_locs.vars.insert(fq_name.clone(), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.vars.insert(fq_name.clone(), doc);
+            self.info.reg.docs.vars.insert(fq_name.clone(), doc);
         }
         self.defvar_form(heap, &fq_name, &ty, mutable, value.form, reassign)
     }
@@ -15532,7 +14936,7 @@ impl Checker {
         // and the result are `Option<Sexpr>` — the empty list this starts
         // from is exactly `none`.
         let sexpr_ty = option_of_sexpr();
-        let (adt, cons_idx) = self.sexpr_cons_ctor();
+        let (adt, cons_idx) = self.info.sexpr_cons_ctor();
         let cons_tys = self.variant_field_tys(&adt, cons_idx, &[]);
         // The empty list, built straight from `Sexpr`'s reserved `nil` variant:
         // `resolve_ctor("nil")` cannot answer any more (`nil` is gone from
@@ -15625,7 +15029,7 @@ impl Checker {
                     Type::Named(p, _) if crate::types::path_is_builtin(p, "sexpr") => ArgKind::Sexpr,
                     // A type variable: no definition to ask until this body is
                     // specialized, and the specialization is checked again.
-                    Type::Named(p, _) if self.reg.type_def(p).is_none() => ArgKind::Unknown,
+                    Type::Named(p, _) if self.info.reg.type_def(p).is_none() => ArgKind::Unknown,
                     _ => ArgKind::Other,
                 };
                 ArgType { kind, shown: item.ty.to_string() }
@@ -15784,7 +15188,7 @@ impl Checker {
         let (target, first_arg) = match core::op_wk(heap, form) {
             Some(wk::CALL) => {
                 let path = core::path_field(heap, form, 0).ok_or_else(not_a_definition)?;
-                if self.reg.fn_sig(&path).is_some_and(|sig| sig.builtin) {
+                if self.info.reg.fn_sig(&path).is_some_and(|sig| sig.builtin) {
                     return Err(not_a_definition());
                 }
                 (crate::CompileTarget::Fn(path), core::field(heap, form, 2))
@@ -15792,7 +15196,7 @@ impl Checker {
             Some(wk::ASSOC) => {
                 let path = core::path_field(heap, form, 0).ok_or_else(not_a_definition)?;
                 let method = core::sym_name_field(heap, form, 1).ok_or_else(not_a_definition)?;
-                if self.reg.type_def(&path).and_then(|def| def.assoc.get(&method)).is_some_and(|af| af.builtin) {
+                if self.info.reg.type_def(&path).and_then(|def| def.assoc.get(&method)).is_some_and(|af| af.builtin) {
                     return Err(not_a_definition());
                 }
                 (crate::CompileTarget::Method(path, method), core::field(heap, form, 6))
@@ -15893,7 +15297,7 @@ impl Checker {
         // whether *it* implements `CharOutput` is settled by its `where`
         // clause where the call resolves, not here.
         let concrete =
-            prim_type_path(dest_ty).is_some() || matches!(dest_ty, Type::Named(p, _) if self.reg.type_def(p).is_some());
+            prim_type_path(dest_ty).is_some() || matches!(dest_ty, Type::Named(p, _) if self.info.reg.type_def(p).is_some());
         if concrete
             // Lowercase: symbol names are interned case-folded, so that is how
             // the prelude's `CharOutput` is spelled in the registry.
@@ -16250,7 +15654,7 @@ impl Checker {
             // `A` resolves to `elt`'s own, still-open `A`; both become
             // concrete together once the enclosing function is specialized).
             if let Type::Named(n, args) = &concrete {
-                if args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() {
+                if args.is_empty() && n.is_simple() && self.info.reg.type_def(n).is_none() {
                     let var_name = n.last_segment();
                     if let Some(caller_tbs) = env.bounds.get(var_name) {
                         for tb in trait_bounds {
@@ -16270,12 +15674,12 @@ impl Checker {
                 }
             }
             let type_fq = match &concrete {
-                Type::Named(n, _) if n.is_simple() && self.reg.type_def(n).is_none() => None,
+                Type::Named(n, _) if n.is_simple() && self.info.reg.type_def(n).is_none() => None,
                 Type::Named(n, _) => Some(n.clone()),
                 other => prim_type_path(other),
             };
             let Some(type_fq) = type_fq else { continue };
-            let Some(def) = self.reg.type_def(&type_fq) else { continue };
+            let Some(def) = self.info.reg.type_def(&type_fq) else { continue };
             let concrete_args: &[Type] = match &concrete {
                 Type::Named(_, args) => args.as_slice(),
                 _ => &[],
@@ -16301,12 +15705,12 @@ impl Checker {
         args: &[Value],
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
-        let sig = self.reg.fn_sig(name).expect("caller checked presence").clone();
+        let sig = self.info.reg.fn_sig(name).expect("caller checked presence").clone();
         // `(intern NAME)`: CL's current package is the module the call is
         // written in, which only the checker knows, so it becomes the second
         // argument here — the module's path as `intern` reads one.
         if sig.builtin && args.len() == 1 && *name == Path::std("intern") {
-            let ns = heap.alloc_string(self.ns.join("::"));
+            let ns = heap.alloc_string(self.info.ns.join("::"));
             heap.push_root(ns);
             let r = self.check_call(heap, interp, env, name, &[args[0], ns], &[arg_locs[0].clone(), None]);
             heap.pop_root();
@@ -16700,7 +16104,7 @@ impl Checker {
         for (tparam, trait_bounds) in bounds {
             let Some(concrete) = subst.get(tparam) else { continue };
             if let Type::Named(n, args) = concrete {
-                if args.is_empty() && n.is_simple() && self.reg.type_def(n).is_none() {
+                if args.is_empty() && n.is_simple() && self.info.reg.type_def(n).is_none() {
                     let var_name = n.last_segment();
                     let declared = caller_bounds.get(var_name);
                     for tb in trait_bounds {
@@ -16715,7 +16119,7 @@ impl Checker {
                                 if !self.trait_inherits(&caller_tb.trait_path, &tb.trait_path) {
                                     return false;
                                 }
-                                let Some(cdef) = self.reg.trait_def(&caller_tb.trait_path) else {
+                                let Some(cdef) = self.info.reg.trait_def(&caller_tb.trait_path) else {
                                     return false;
                                 };
                                 let Some(at) = self.trait_assoc_subst_for(
@@ -16779,7 +16183,7 @@ impl Checker {
                 }
                 continue;
             };
-            let def = self.reg.type_def(&type_fq).ok_or_else(|| {
+            let def = self.info.reg.type_def(&type_fq).ok_or_else(|| {
                 Error::TypeError(format!(
                     "{}: type `{}` does not implement a trait required by `:where` clause on type parameter `{}`",
                     name, concrete, tparam
@@ -16832,7 +16236,7 @@ impl Checker {
         Ok(())
     }
 
-    /// `ctor` is `(type path, variant index)` — the same pair [`Self::resolve_ctor`]
+    /// `ctor` is `(type path, variant index)` — the same pair [`Info::resolve_ctor`]
     /// returns, bundled into one parameter to keep the arity down.
     // Same invariant checking context as `check_path_call` — see its comment.
     #[allow(clippy::too_many_arguments)]
@@ -16853,7 +16257,7 @@ impl Checker {
         if is_retired_bignum(adt_name, variant) {
             return Err(Error::TypeError(BIGNUM_IS_GONE.to_string()));
         }
-        let def = self.reg.type_def(adt_name).expect("indexed adt exists").clone();
+        let def = self.info.reg.type_def(adt_name).expect("indexed adt exists").clone();
         let fields = &def.variants[variant].fields;
         if args.len() != fields.len() {
             return Err(Error::TypeError(format!(
@@ -17011,7 +16415,7 @@ impl Checker {
         // `variants.len()` with nothing subtracted.
         let sexpr_sugar = is_option_of_sexpr(&scrut.ty);
         let sexpr_variants =
-            || self.reg.type_def(&Path::root("sexpr")).expect("sexpr is always registered").variants.len();
+            || self.info.reg.type_def(&Path::root("sexpr")).expect("sexpr is always registered").variants.len();
         // The retired `bignum` slot (`SEXPR_RETIRED_BIGNUM`) is neither writable
         // nor matchable, so it too is off the universe — one less than the
         // table says, in both the flat and the plain form.
@@ -17019,7 +16423,7 @@ impl Checker {
             sexpr_variants() - 1
         } else {
             adt_name.as_ref().map_or(0, |n| {
-                let all = self.reg.type_def(n).expect("adt exists").variants.len();
+                let all = self.info.reg.type_def(n).expect("adt exists").variants.len();
                 if crate::types::path_is_builtin(n, "sexpr") { all - 2 } else { all }
             })
         };
@@ -17542,7 +16946,7 @@ impl Checker {
             return Ok(None);
         }
         let Ok((adt_name, targs)) = self.expect_adt(expected) else { return Ok(None) };
-        let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+        let def = self.info.reg.type_def(&adt_name).expect("adt exists").clone();
         let Some(variant) = def.variants.iter().position(|vr| vr.name == name) else { return Ok(None) };
         self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, false).map(Some)
     }
@@ -17681,7 +17085,7 @@ impl Checker {
                 if crate::sexpr_variant::is_ctor_name(&heap.symbol_spelling(id)));
             if !is_builtin_head {
                 if let Some((adt_name, targs, variant)) = self.resolve_sexpr_downcast_ctor(heap, parts[0], parts_locs[0].1.as_ref())? {
-                    if self.reg.type_def(&adt_name).is_some_and(|d| d.kind == AdtKind::Struct) {
+                    if self.info.reg.type_def(&adt_name).is_some_and(|d| d.kind == AdtKind::Struct) {
                         let parts_locs = self.struct_pattern_parts(heap, &adt_name, &parts_locs)?;
                         let parts: Vec<Value> = parts_locs.iter().map(|(v, _)| *v).collect();
                         return self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &parts, &parts_locs, true);
@@ -17720,14 +17124,14 @@ impl Checker {
         // The constructor is resolved against the scrutinee's type (its
         // variants), not the namespace — the type context disambiguates it.
         let (adt_name, targs) = self.expect_adt(expected)?;
-        let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+        let def = self.info.reg.type_def(&adt_name).expect("adt exists").clone();
         if def.kind == AdtKind::Struct && !def.builtin {
             let head_ty = match parts[0] {
-                Value::Symbol(id) => self.resolve_bare_type(heap.symbol_spelling(id)),
+                Value::Symbol(id) => self.info.resolve_bare_type(heap.symbol_spelling(id)),
                 Value::Path(pid) => {
                     let segs: Vec<String> =
                         heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
-                    self.resolve_type_path(&segs)
+                    self.info.resolve_type_path(&segs)
                 }
                 _ => None,
             };
@@ -17763,7 +17167,7 @@ impl Checker {
         adt_name: &Path,
         parts_locs: &[(Value, Option<Loc>)],
     ) -> Result<Vec<(Value, Option<Loc>)>, Error> {
-        let def = self.reg.type_def(adt_name).expect("adt exists");
+        let def = self.info.reg.type_def(adt_name).expect("adt exists");
         let field_names = def.field_names.clone();
         let shape = |got: &str| {
             Error::TypeError(format!(
@@ -17821,10 +17225,10 @@ impl Checker {
     /// variant index)`: a registered `defstruct` type's bare name
     /// (field-destructuring, its sole `new` variant, index 0 — e.g. `(point
     /// x y)`), a bare enum variant name (resolved exactly like a bare
-    /// constructor *expression* is — [`Self::resolve_ctor`], in scope only
+    /// constructor *expression* is — [`Info::resolve_ctor`], in scope only
     /// after `(use EnumType)`), or a `::`-qualified enum variant (`(color::
     /// red)`, the escape hatch for a bare-name collision between two
-    /// visible enums — `Self::resolve_type_path` on the prefix, the variant
+    /// visible enums — `Info::resolve_type_path` on the prefix, the variant
     /// name as the last segment). `None` means the head names neither,
     /// letting the caller fall through to the ordinary (non-downcast)
     /// "not a constructor of Sexpr" error.
@@ -17848,8 +17252,8 @@ impl Checker {
         match head {
             Value::Symbol(id) => {
                 let name = heap.symbol_spelling(id);
-                if let Some(type_fq) = self.resolve_bare_type(name) {
-                    if let Some(def) = self.reg.type_def(&type_fq) {
+                if let Some(type_fq) = self.info.resolve_bare_type(name) {
+                    if let Some(def) = self.info.reg.type_def(&type_fq) {
                         if def.kind == AdtKind::Struct {
                             no_generics(&type_fq, def)?;
                             // The pattern head *is* the type name — its
@@ -17861,9 +17265,9 @@ impl Checker {
                         }
                     }
                 }
-                if let Some((adt, idx)) = self.resolve_ctor(name) {
+                if let Some((adt, idx)) = self.info.resolve_ctor(name) {
                     if adt != Path::root("sexpr") {
-                        let def = self.reg.type_def(&adt).expect("resolved ctor's type is registered");
+                        let def = self.info.reg.type_def(&adt).expect("resolved ctor's type is registered");
                         no_generics(&adt, def)?;
                         return Ok(Some((adt, Vec::new(), idx)));
                     }
@@ -17877,8 +17281,8 @@ impl Checker {
                     return Ok(None);
                 }
                 let (type_segs, member) = segs.split_at(segs.len() - 1);
-                if let Some(type_fq) = self.resolve_type_path(type_segs) {
-                    if let Some(def) = self.reg.type_def(&type_fq) {
+                if let Some(type_fq) = self.info.resolve_type_path(type_segs) {
+                    if let Some(def) = self.info.reg.type_def(&type_fq) {
                         if let Some(idx) = def.variants.iter().position(|vr| vr.name == member[0]) {
                             no_generics(&type_fq, def)?;
                             // `color::red` — the type sits in the token's
@@ -17940,7 +17344,7 @@ impl Checker {
                 _ => return Err(must_name()),
             };
             let (adt_name, targs) = self.expect_adt(&ty)?;
-            let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+            let def = self.info.reg.type_def(&adt_name).expect("adt exists").clone();
             let variant = def.variants.iter().position(|vr| vr.name == ctor).ok_or_else(must_name)?;
             let (pat, binds) =
                 self.check_ctor_pattern_fields(heap, interp, env, adt_name, targs, variant, &sub, &sub_locs, true)?;
@@ -17972,7 +17376,7 @@ impl Checker {
         if is_retired_bignum(&adt_name, variant) {
             return Err(Error::TypeError(BIGNUM_IS_GONE.to_string()));
         }
-        let def = self.reg.type_def(&adt_name).expect("adt exists").clone();
+        let def = self.info.reg.type_def(&adt_name).expect("adt exists").clone();
         let subst: BTreeMap<String, Type> = def.params.iter().cloned().zip(targs.iter().cloned()).collect();
 
         let fields = &def.variants[variant].fields;
@@ -18072,7 +17476,7 @@ impl Checker {
     /// Require `ty` to be a registered data type, returning its path and args.
     fn expect_adt(&self, ty: &Type) -> Result<(Path, Vec<Type>), Error> {
         match ty {
-            Type::Named(n, args) if self.reg.type_def(n).is_some() => Ok((n.clone(), args.clone())),
+            Type::Named(n, args) if self.info.reg.type_def(n).is_some() => Ok((n.clone(), args.clone())),
             other => Err(Error::TypeError(format!(
                 "expected a data type, found `{}`",
                 other
@@ -18966,7 +18370,7 @@ fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(),
 }
 
 /// The absolute path of the item `name` defined in module `module`.
-fn item_path(module: &[String], name: &str) -> Path {
+pub(super) fn item_path(module: &[String], name: &str) -> Path {
     let mut segs = module.to_vec();
     segs.push(name.to_string());
     Path::from_segments(segs)

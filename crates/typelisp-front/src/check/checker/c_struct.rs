@@ -151,22 +151,22 @@ impl Checker {
         if parts.len() <= fields_at {
             return Err(Error::TypeError(format!("def-c-struct {}: a C struct needs at least one field", name)));
         }
-        let ns = self.cur_ns();
+        let ns = self.info.cur_ns();
         if ns.types.contains_key(&name) || ns.type_aliases.contains_key(&name) {
             return Err(Error::TypeError(format!(
                 "cannot define C struct `{}`: a type of that name already exists here",
                 name
             )));
         }
-        self.check_redef("C struct", &name, self.cur_ns().c_structs.get(&name))?;
+        self.check_redef("C struct", &name, self.info.cur_ns().c_structs.get(&name))?;
         self.check_type_trait_clash("C struct", &name)?;
-        let fq = self.fq(&name);
+        let fq = self.info.fq(&name);
         // Registered with no fields while its own fields are read, so that a
         // field can point at the struct being defined (`(next (ptr node))`).
         let placeholder = CStructDef { name: fq.clone(), fields: Vec::new(), size: 0, align: 1, public };
-        let previous = self.reg.root.module_mut(&self.ns).c_structs.insert(name.clone(), placeholder);
+        let previous = self.info.reg.root.module_mut(&self.info.ns).c_structs.insert(name.clone(), placeholder);
         let result = self.c_struct_fields(heap, &name, &fq, &parts[fields_at..], &parts_locs[fields_at.min(parts_locs.len())..]);
-        let ns = self.reg.root.module_mut(&self.ns);
+        let ns = self.info.reg.root.module_mut(&self.info.ns);
         let (fields, size, align) = match result {
             Ok(laid_out) => laid_out,
             Err(e) => {
@@ -179,10 +179,10 @@ impl Checker {
         };
         ns.c_structs.insert(name, CStructDef { name: fq.clone(), fields, size, align, public });
         if let Some(loc) = def_loc {
-            self.reg.def_locs.types.insert(fq.clone(), loc);
+            self.info.reg.def_locs.types.insert(fq.clone(), loc);
         }
         if let Some(doc) = doc {
-            self.reg.docs.types.insert(fq.clone(), doc);
+            self.info.reg.docs.types.insert(fq.clone(), doc);
         }
         Ok(fq)
     }
@@ -254,7 +254,7 @@ impl Checker {
     pub(super) fn resolve_c_struct(&self, path: &Path) -> Option<CStructDef> {
         if path.is_simple() {
             let name = path.last_segment();
-            if let Some(target) = self.lookup_alias(name) {
+            if let Some(target) = self.info.lookup_alias(name) {
                 if let Some(d) = self.resolve_c_struct_segs(&target) {
                     return Some(d);
                 }
@@ -267,13 +267,13 @@ impl Checker {
         let (mods, local) = segs.split_at(segs.len().checked_sub(1)?);
         if mods.is_empty() {
             return self
-                .ns_ancestors()
+                .info.ns_ancestors()
                 .into_iter()
-                .find_map(|prefix| self.reg.root.module(prefix)?.c_structs.get(&local[0]).cloned());
+                .find_map(|prefix| self.info.reg.root.module(prefix)?.c_structs.get(&local[0]).cloned());
         }
-        let (abs, m) = self.find_module(mods)?;
+        let (abs, m) = self.info.find_module(mods)?;
         let d = m.c_structs.get(&local[0])?;
-        if !d.public && !self.in_scope(&abs) {
+        if !d.public && !self.info.in_scope(&abs) {
             return None;
         }
         Some(d.clone())
@@ -283,7 +283,7 @@ impl Checker {
     fn c_struct_def(&self, fq: &Path) -> Result<CStructDef, Error> {
         let segs = fq.segments();
         let (mods, local) = segs.split_at(segs.len() - 1);
-        self.reg
+        self.info.reg
             .root
             .module(mods)
             .and_then(|m| m.c_structs.get(&local[0]))

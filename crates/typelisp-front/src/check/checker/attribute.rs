@@ -83,7 +83,7 @@ impl Checker {
     /// A top-level form that does nothing: the module being checked, with
     /// nothing in it. What a left-out form is checked into.
     pub(super) fn nothing_form(&self, heap: &mut Heap) -> Result<TopLevelForm, Error> {
-        forms::module_form(heap, &Path::from_segments(self.ns.clone()), &[])
+        forms::module_form(heap, &Path::from_segments(self.info.ns.clone()), &[])
     }
 
     /// `(%internal::attribute (ATTR...) FORM)`.
@@ -139,7 +139,7 @@ impl Checker {
             return Err(Error::TypeError(format!("`#[test]` function `{}` cannot take parameters", name)));
         }
         let tl = self.check_defun(heap, interp, &elems[1..], &locs[1..], false, loc.clone())?;
-        let ret = &self.cur_ns().fns.get(&name).expect("check_defun registered the function").ret;
+        let ret = &self.info.cur_ns().fns.get(&name).expect("check_defun registered the function").ret;
         let returns = match ret {
             Type::Unit => TestReturn::Unit,
             Type::Named(p, args) if crate::types::path_is_builtin(p, "result") && args.len() == 2 && args[0] == Type::Unit => {
@@ -169,7 +169,7 @@ impl Checker {
             }
         };
         if self.test_forms == TestForms::Collect {
-            self.tests.push(TestCase { path: self.fq(&name), ns: self.ns.clone(), name: elems[1], returns, loc });
+            self.tests.push(TestCase { path: self.info.fq(&name), ns: self.info.ns.clone(), name: elems[1], returns, loc });
         }
         Ok(tl)
     }
