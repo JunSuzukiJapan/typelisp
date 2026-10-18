@@ -34,29 +34,24 @@ use typelisp_mem::{wk, Error, Heap, Loc, RootScope, Value};
 
 use crate::types::Type;
 
-/// What checking one expression produces: the lowered core form, and the type
-/// the checker proved for it.
+/// What analyzing one expression produces: the expression as the analysis
+/// resolved it — a node of the analyzed tree (`docs/dev/explicit-symbols-plan.md`,
+/// 3.10) — and the type it was proved to have.
 ///
 /// The type is the checker's own working value — it drives the next inference
-/// step, the next arity check, the next `Repr` — and it stops here. It is not
-/// written into `form`, and nothing downstream of the checker can ask for it.
-/// That is the whole distinction between this and the `Typed` node it replaces:
-/// `Typed` carried a `Type` into evaluation and compilation, so both had to be
-/// prepared to read one back.
+/// step, the next arity check, the next `Repr` — and it stops here: lowering
+/// (`check::lower`) writes only representations into the core form, and
+/// nothing downstream of the checker can ask for a type.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Checked {
-    pub form: Value,
     pub ty: Type,
-    /// The expression as the analysis resolved it — the analyzed tree
-    /// (`docs/dev/explicit-symbols-plan.md`, 3.10) that checking reads.
-    /// `form` is lowered from it as it is built, until lowering moves to the
-    /// end of the form.
     pub node: Node,
+    /// Where the expression was written, which its lowered form carries.
+    pub loc: Option<Loc>,
 }
 
 /// One node of the analyzed tree: an expression with what it refers to
-/// resolved. Its children are the [`Checked`] of each subexpression, whose
-/// `form` is what this node's lowering uses.
+/// resolved. Its children are the [`Checked`] of each subexpression.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
     /// `(if cond then else)`.
@@ -196,26 +191,19 @@ impl Drop for Checked {
 impl Checked {
     /// The same expression, seen at type `ty`: a widening that needs no
     /// runtime work (a `Symbol` where a `Sexpr` is expected, ...). The node
-    /// and the form stay as they are.
+    /// stays as it is.
     pub fn retyped(mut self, ty: Type) -> Checked {
         self.ty = ty;
         self
     }
 
-    /// The lowered forms of `cs`, in order.
-    pub fn forms(cs: &[Checked]) -> Vec<Value> {
-        cs.iter().map(|c| c.form).collect()
-    }
-
-    /// The expression `node` stands for, of type `ty`, with its form lowered
-    /// from it now.
-    pub(super) fn of(heap: &mut Heap, info: &super::info::Info, node: Node, ty: Type) -> Result<Checked, Error> {
-        // Rooted until the end of the top-level form, as every form `check_at`
-        // hands back is: the parent that holds it allocates before it is
-        // built in.
-        let form = super::lower::lower(heap, info, &node)?;
-        heap.push_root(form);
-        Ok(Checked { form, ty, node })
+    /// The expression `node` stands for, of type `ty`.
+    ///
+    /// A heap value the node holds (a literal's box, a quoted datum) has to
+    /// stay rooted until the tree is lowered; `Checker::literal` and
+    /// `Checker::quoted` build those nodes.
+    pub(super) fn of(node: Node, ty: Type) -> Checked {
+        Checked { ty, node, loc: None }
     }
 }
 

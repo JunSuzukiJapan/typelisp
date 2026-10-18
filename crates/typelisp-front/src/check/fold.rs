@@ -38,7 +38,8 @@
 
 use typelisp_mem::{wk, Error, Heap, Value};
 
-use crate::check::core::{self, Checked};
+use crate::check::core;
+use crate::check::lower::Arg;
 use crate::eval::interp::eval_builtin_method;
 use crate::eval::EvalError;
 use crate::types::{Path, Type};
@@ -100,7 +101,7 @@ pub(super) fn fold_builtin_method(
     heap: &mut Heap,
     type_name: &Path,
     method: &str,
-    args: &[Checked],
+    args: &[Arg],
     ret: &Type,
 ) -> Result<Option<Value>, Error> {
     if !foldable_receiver(type_name) || !has_literal_node(ret) {

@@ -17,7 +17,7 @@ use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
 use super::core::{self, Checked, Items, Node, SelectArm};
-use super::forms;
+use super::{forms, lower};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
 
@@ -1094,10 +1094,12 @@ pub struct Checker {
     /// at the start of a function body), `Some(allocated)` inside — see
     /// `checker::c_struct`.
     c_arena: Cell<Option<bool>>,
-    /// Nodes of this top-level form whose value is a typed pointer, which a
-    /// `task`/`thread` must not be handed. Compared by identity only; every
-    /// node stays rooted until the form is done, so none is reused meanwhile.
-    typed_ptr_nodes: RefCell<Vec<Value>>,
+    /// The root stack holding the heap values the analyzed tree of the
+    /// top-level form being checked refers to ([`Self::hold`]), while one is.
+    /// A stack of its own rather than the running one: the tree is lowered at
+    /// the end of the form, after the `RootScope`s opened to check its parts
+    /// have truncated the running stack.
+    tree_roots: Cell<Option<typelisp_mem::RootStackId>>,
     /// Holes ([`Self::infer_probe`]) made and still standing in the tree
     /// checked so far. Snapshotted around each probe and restored when the
     /// probed subtree is thrown away, so it counts holes in *retained* output
@@ -1185,7 +1187,7 @@ impl Checker {
             labels_scopes: RefCell::new(Vec::new()),
             callback_seq: Cell::new(0),
             c_arena: Cell::new(None),
-            typed_ptr_nodes: RefCell::new(Vec::new()),
+            tree_roots: Cell::new(None),
         }
     }
 
@@ -1408,11 +1410,11 @@ impl Checker {
     /// pass-through in strict mode, and in `recover` mode it records a failing
     /// sub-check's error (tagged with `loc` if it lacks a more specific one)
     /// and substitutes a [`Self::hole`] so checking continues.
-    fn recovered(&self, heap: &mut Heap, r: Result<Checked, Error>, loc: Option<Loc>) -> Result<Checked, Error> {
+    fn recovered(&self, r: Result<Checked, Error>, loc: Option<Loc>) -> Result<Checked, Error> {
         match r {
             Err(e) if self.recover => {
                 self.push_recovered(e, loc.clone());
-                self.hole(heap, loc)
+                Ok(self.hole(loc))
             }
             other => other,
         }
@@ -1623,7 +1625,8 @@ impl Checker {
         // Belongs to *this* form: a definition must not report the previous
         // form's expression type — see [`Self::expr_type`].
         self.expr_ty = None;
-        self.typed_ptr_nodes.borrow_mut().clear();
+        let tree_roots = heap.new_root_stack();
+        let outer_tree_roots = self.tree_roots.replace(Some(tree_roots));
         self.c_arena.set(None);
         self.publish_name_view();
         let primary = self.check_form_dispatch(heap, interp, v, loc.clone());
@@ -1711,8 +1714,8 @@ impl Checker {
             Err(e) if self.recover => {
                 self.spec_pending.borrow_mut().clear();
                 self.errors.borrow_mut().push(e);
-                let hole = self.hole(heap, loc)?;
-                forms::expr_form(heap, hole.form)
+                let hole = lower::lower_rooted(heap, &self.info, &self.hole(loc))?;
+                forms::expr_form(heap, hole)
             }
             other => other,
         };
@@ -1721,6 +1724,9 @@ impl Checker {
         // (which roots it) or to a `fasl` writer. A caller that allocates in
         // between must root it first.
         heap.truncate_roots(roots_base);
+        heap.clear_root_stack(tree_roots);
+        heap.drop_root_stack(tree_roots);
+        self.tree_roots.set(outer_tree_roots);
         result
     }
 
@@ -2206,7 +2212,8 @@ impl Checker {
         // from the form itself (see `core::Checked`), so record it here — see
         // [`Self::expr_type`].
         self.expr_ty = Some(t.ty.clone());
-        forms::expr_form(heap, t.form)
+        let form = lower::lower_rooted(heap, &self.info, &t)?;
+        forms::expr_form(heap, form)
     }
 
     /// The type the last [`Self::check_form_at`] proved for its top-level
@@ -2470,7 +2477,7 @@ impl Checker {
     /// this can't happen any earlier than this, since a generic `&rest`'s
     /// declared type may only resolve to something concrete at a given call
     /// site (see `Self::check_call`'s `subst_apply`).
-    fn wrap_rest_elem(&self, heap: &mut Heap, elem_ty: &Type, e: Checked) -> Result<Checked, Error> {
+    fn wrap_rest_elem(&self, elem_ty: &Type, e: Checked) -> Result<Checked, Error> {
         if is_sexpr_expectation(elem_ty) {
             return Ok(e);
         }
@@ -2502,7 +2509,7 @@ impl Checker {
             // datum. Every other heap-repr type is a retype, not a node: the
             // form is unchanged and only the checker's own view of its type
             // widens.
-            return self.heap_value_as_sexpr(heap, e, sexpr_ty());
+            return self.heap_value_as_sexpr(e, sexpr_ty());
         }
         let ctor = sexpr_ctor_for(elem_ty).ok_or_else(|| {
             Error::TypeError(format!(
@@ -2513,9 +2520,7 @@ impl Checker {
         let (type_name, variant) = self.info.resolve_ctor(ctor).expect("sexpr constructors are always registered");
         let field_tys = self.info.variant_field_tys(&type_name, variant, &[]);
         let node = Node::Construct { owner: type_name, targs: Vec::new(), variant, mutable: false, field_tys, args: vec![e] };
-        let c = Checked::of(heap, &self.info, node, sexpr_ty())?;
-        forms::rooted(heap, c.form);
-        Ok(c)
+        Ok(Checked::of(node, sexpr_ty()))
     }
 
     /// Collects already-checked `&rest` elements into one `Sexpr` list
@@ -2530,15 +2535,11 @@ impl Checker {
         // `Sexpr`, built through the island cons layer.
         let cons_path = Path::std("sexpr-cons");
         let r = cons_path;
-        let mut acc = Checked::of(heap, &self.info, Node::Quote { datum: Value::Empty }, option_of_sexpr())?;
+        let mut acc = self.quoted(heap, Value::Empty, option_of_sexpr());
         for item in items.into_iter().rev() {
-            let mut s = RootScope::new(heap);
-            s.push_root(acc.form);
-            let item = self.wrap_rest_elem(&mut s, elem_ty, item)?;
-            s.push_root(item.form);
-            acc = Checked::of(&mut s, &self.info, Node::Call { path: r.clone(), args: vec![item, acc] }, option_of_sexpr())?;
+            let item = self.wrap_rest_elem(elem_ty, item)?;
+            acc = Checked::of(Node::Call { path: r.clone(), args: vec![item, acc] }, option_of_sexpr());
         }
-        forms::rooted(heap, acc.form);
         Ok(acc)
     }
 
@@ -2598,7 +2599,7 @@ impl Checker {
     /// like a direct call's. With no expectation to resolve from this is a
     /// check-time error (previously it produced a type-variable-ridden
     /// `FnRef` that could never be applied anyway).
-    fn fn_ref_node(&self, heap: &mut Heap, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
+    fn fn_ref_node(&self, fq: Path, expected: Option<&Type>) -> Result<Checked, Error> {
         let sig = self.info.reg.fn_sig(&fq).expect("resolved fn exists").clone();
         // An FFI declaration cannot be reified, in an `unsafe` or out of one.
         //
@@ -2637,7 +2638,7 @@ impl Checker {
             ps
         };
         if sig.type_params.is_empty() {
-            return Checked::of(heap, &self.info, Node::FnRef { params: ref_params(&sig), path: fq }, tmpl_ty);
+            return Ok(Checked::of(Node::FnRef { params: ref_params(&sig), path: fq }, tmpl_ty));
         }
         if let Some(exp) = expected {
             let params: HashSet<String> = sig.type_params.iter().cloned().collect();
@@ -2667,17 +2668,17 @@ impl Checker {
                             _ => Vec::new(),
                         },
                     };
-                    return Checked::of(heap, &self.info, Node::FnRef { path: r, params }, resolved_ty);
+                    return Ok(Checked::of(Node::FnRef { path: r, params }, resolved_ty));
                 }
                 // Open type arguments: we're inside another generic
                 // function's diagnostics-only body check — the node is never
                 // executed, and that function's own specialization will
                 // re-check this reference with the types concrete.
-                return Checked::of(heap, &self.info, Node::FnRef { params: ref_params(&sig), path: fq }, resolved_ty);
+                return Ok(Checked::of(Node::FnRef { params: ref_params(&sig), path: fq }, resolved_ty));
             }
             // Shape mismatch: hand back the generic node so `check`'s
             // ordinary expected-vs-actual reconciliation reports it.
-            return Checked::of(heap, &self.info, Node::FnRef { params: ref_params(&sig), path: fq }, tmpl_ty);
+            return Ok(Checked::of(Node::FnRef { params: ref_params(&sig), path: fq }, tmpl_ty));
         }
         Err(Error::TypeError(format!(
             "generic function `{}` used as a value needs a concrete function-type context \
@@ -2697,7 +2698,7 @@ impl Checker {
     /// the specialization, mirroring [`Self::fn_ref_node`]. A non-generic
     /// method keeps its own type, so a mismatch with `expected` is reported by
     /// `check`'s ordinary reconciliation.
-    fn method_value(&self, heap: &mut Heap, type_fq: &Path, name: &str, expected: Option<&Type>) -> Result<Checked, Error> {
+    fn method_value(&self, type_fq: &Path, name: &str, expected: Option<&Type>) -> Result<Checked, Error> {
         let def = self.info.reg.type_def(type_fq).expect("the resolution found the method on this type");
         // The receiver is the expected function's first parameter, which is
         // also how the resolution found this method.
@@ -2722,7 +2723,7 @@ impl Checker {
             // Called through a function value, this method still builds the box.
             self.request_print_object(&ret);
             let node = Node::MethodRef { owner: type_fq.clone(), method: template.into(), params, ret };
-            return Checked::of(heap, &self.info, node, ty);
+            return Ok(Checked::of(node, ty));
         }
         let not_here = || {
             Error::TypeError(format!(
@@ -2755,7 +2756,7 @@ impl Checker {
         // Called through a function value, this method still builds the box.
         self.request_print_object(&ret);
         let node = Node::MethodRef { owner: type_fq.clone(), method: mangled.into(), params, ret };
-        Checked::of(heap, &self.info, node, resolved_ty)
+        Ok(Checked::of(node, resolved_ty))
     }
 
     /// `var::field`: if `segs` is `[recv, method]` and `recv` names a bound
@@ -2789,14 +2790,14 @@ impl Checker {
         // exactly this reason; see `var_form`'s doc comment.
         let recv = if let Some(t) = env.get(recv_name) {
             let ty = t.clone();
-            match Checked::of(heap, &self.info, Node::Local { name: recv_name.as_str().into() }, ty) {
+            match Ok(Checked::of(Node::Local { name: recv_name.as_str().into() }, ty)) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(e)),
             }
         } else {
             let (path, vi) = self.info.resolve_global(recv_name)?;
             let ty = vi.ty;
-            match Checked::of(heap, &self.info, Node::Global { path, ty: ty.clone() }, ty) {
+            match Ok(Checked::of(Node::Global { path, ty: ty.clone() }, ty)) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(e)),
             }
@@ -3347,7 +3348,8 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
             self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
-        self.info.definition_form(heap, &fq_name, &type_params, &params, &ret, &Checked::forms(&body))
+        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        self.info.definition_form(heap, &fq_name, &type_params, &params, &ret, &lowered)
     }
 
     /// The `&optional`/`&key` `defun` path — `Self::check_defun` routes here
@@ -3498,7 +3500,8 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
             self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
-        self.info.definition_form(heap, &fq_name, &type_params, &params, &ret, &Checked::forms(&body))
+        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        self.info.definition_form(heap, &fq_name, &type_params, &params, &ret, &lowered)
     }
 
     /// Checks one `&optional`/`&key` default-value form (or none) for
@@ -3521,7 +3524,8 @@ impl Checker {
                 let checked = self.check(heap, interp, &env, form, Some(decl_ty))?;
                 // Detached from the heap right here — see `OptKeyParam::
                 // default` for why the signature cannot hold a `Value`.
-                Ok(Some(crate::owned_form::value_to_owned(heap, checked.form)?))
+                let form = lower::lower_rooted(heap, &self.info, &checked)?;
+                Ok(Some(crate::owned_form::value_to_owned(heap, form)?))
             }
         }
     }
@@ -3874,7 +3878,8 @@ impl Checker {
         // The *written* name, not the mangled one: the body's own
         // `(return-from NAME ...)` was written against the name in the source.
         let body = self.check_definition_body(heap, interp, &env, &parts[body_start..], &[], &method, &ret)?;
-        self.info.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, &Checked::forms(&body))
+        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        self.info.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, &lowered)
     }
 
     /// Builds a concrete accessor `TopLevel::Defmethod` for a generic
@@ -3950,7 +3955,8 @@ impl Checker {
         let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
-        self.info.defun_form(heap, mangled, &params, &ret, &Checked::forms(&body))
+        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        self.info.defun_form(heap, mangled, &params, &ret, &lowered)
     }
 
     /// [`Self::specialize_defun_body`]'s `&optional`/`&key` counterpart —
@@ -4021,7 +4027,8 @@ impl Checker {
         let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
-        self.info.defun_form(heap, mangled, &params, &ret, &Checked::forms(&body))
+        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        self.info.defun_form(heap, mangled, &params, &ret, &lowered)
     }
 
     /// Whether a declared type's *runtime representation* is a heap value —
@@ -4049,7 +4056,7 @@ impl Checker {
     /// (`(some x)`, an omitted `&optional`/`&key`, `try-as`, `(as :dyn ..)`'s
     /// `source`) comes here, so the pattern side's `Pattern::Some`/`Empty`
     /// and this can never disagree on a type.
-    fn option_value(&self, heap: &mut Heap, ty: &Type, payload: Option<Checked>) -> Result<Checked, Error> {
+    fn option_value(&self, ty: &Type, payload: Option<Checked>) -> Result<Checked, Error> {
         let Type::Named(name, targs) = ty else {
             return Err(Error::TypeError(format!("option_value: `{}` is not an Option type", ConcreteNames::type_key(ty))));
         };
@@ -4088,7 +4095,7 @@ impl Checker {
                 },
             }
         };
-        Checked::of(heap, &self.info, node, ty.clone())
+        Ok(Checked::of(node, ty.clone()))
     }
 
     /// `e`, a value of a heap-represented type, seen as the `Sexpr` datum
@@ -4098,12 +4105,12 @@ impl Checker {
     /// have been; `KEY` is the instantiation's own identity, so the box prints
     /// and downcasts as any boxed `Option` does. Every other heap value is
     /// already its datum, and only its type widens.
-    fn heap_value_as_sexpr(&self, heap: &mut Heap, e: Checked, to: Type) -> Result<Checked, Error> {
+    fn heap_value_as_sexpr(&self, e: Checked, to: Type) -> Result<Checked, Error> {
         if self.info.repr(&e.ty).niche_payload().is_none() {
             return Ok(e.retyped(to));
         }
         let key = ConcreteNames::type_key(&e.ty).into();
-        Checked::of(heap, &self.info, Node::BoxOption { key, value: Box::new(e) }, to)
+        Ok(Checked::of(Node::BoxOption { key, value: Box::new(e) }, to))
     }
 
     /// The checker-side twin of `Interp::is_heap_repr_ty`, used to bake
@@ -4565,7 +4572,8 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&sexpr_ty))?;
         let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
-        forms::defmacro_form(heap, fq_name, params, rest, &lambda, &Checked::forms(&body))
+        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        forms::defmacro_form(heap, fq_name, params, rest, &lambda, &lowered)
     }
 
     /// Check one `&optional`/`&key` default-value form (or none) against
@@ -4585,7 +4593,7 @@ impl Checker {
             Some(form) => {
                 let env = Env::new().extended(bindings.to_vec())?;
                 let checked = self.check(heap, interp, &env, form, Some(sexpr_ty))?;
-                Ok(vec![checked.form])
+                Ok(vec![lower::lower_rooted(heap, &self.info, &checked)?])
             }
         }
     }
@@ -6066,7 +6074,7 @@ impl Checker {
         // so the printer's specialization has to be asked for here too.
         self.request_print_object(&ty);
         let node = Node::Assoc { owner: type_fq.clone(), method: name.into(), instance: true, ret: ty.clone(), args: typed };
-        Checked::of(heap, &self.info, node, ty)
+        Ok(Checked::of(node, ty))
     }
 
     /// Generate a blanket `impl` at one concrete target type.
@@ -6697,7 +6705,6 @@ impl Checker {
     /// concrete type.
     fn upcast_dyn(
         &self,
-        heap: &mut Heap,
         value: Checked,
         from: &Path,
         from_pins: &[Type],
@@ -6754,7 +6761,7 @@ impl Checker {
         // table that is depends on the value, not on this site, so the node
         // only names the target trait and the swap is a runtime lookup on
         // the box's vtable id.
-        Checked::of(heap, &self.info, Node::DynUpcast { to: to.clone(), value: Box::new(value) }, to_ty)
+        Ok(Checked::of(Node::DynUpcast { to: to.clone(), value: Box::new(value) }, to_ty))
     }
 
     /// Every transitive supertrait of `trait_path`, nearest first, without
@@ -6829,7 +6836,6 @@ impl Checker {
     /// `where`-bounded type variable, which has no vtable to lay out *yet*.
     fn coerce_to_dyn(
         &self,
-        heap: &mut Heap,
         env: &Env,
         value: Checked,
         trait_path: &Path,
@@ -6847,7 +6853,7 @@ impl Checker {
         // Any other target needs a second vtable the source box cannot
         // supply, because the concrete type is gone by then.
         if let Type::Dyn(from, from_pins) = value.ty.clone() {
-            return self.upcast_dyn(heap, value, &from, &from_pins, trait_path, pins);
+            return self.upcast_dyn(value, &from, &from_pins, trait_path, pins);
         }
         // Boxing a `where`-bounded type variable (`(defun f<E> ... (:where (Error E))
         // ... (as :dyn Error e))`): which vtable to build is only knowable once
@@ -6864,7 +6870,7 @@ impl Checker {
             let is_tvar = targs.is_empty() && p.is_simple() && self.info.reg.type_def(p).is_none();
             if is_tvar && env.bounds.get(p.last_segment()).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
                 let what = format!("as :dyn {}", trait_path).into();
-                return Checked::of(heap, &self.info, Node::ErasedGeneric { what }, Type::Dyn(trait_path.clone(), pins.to_vec()));
+                return Ok(Checked::of(Node::ErasedGeneric { what }, Type::Dyn(trait_path.clone(), pins.to_vec())));
             }
         }
         let slots = self.dyn_vtable_slots(&value.ty, trait_path, pins)?;
@@ -6876,7 +6882,7 @@ impl Checker {
         let supers = self.dyn_super_vtables(trait_path, order, &slots);
         let key = ConcreteNames::type_key(&value.ty).into();
         let node = Node::DynNew { key, trait_path: trait_path.clone(), slots, supers, value: Box::new(value) };
-        Checked::of(heap, &self.info, node, Type::Dyn(trait_path.clone(), pins.to_vec()))
+        Ok(Checked::of(node, Type::Dyn(trait_path.clone(), pins.to_vec())))
     }
 
     /// Check `(method dyn-receiver args...)` — a call through a trait
@@ -6943,7 +6949,7 @@ impl Checker {
         }
         let targets = self.dyn_impl_targets(trait_path, method);
         let node = Node::DynCall { trait_path: trait_path.clone(), method: method.into(), slot, targets, args: typed };
-        Checked::of(heap, &self.info, node, ret)
+        Ok(Checked::of(node, ret))
     }
 
     /// Whether trait `trait_path` can be used as a trait object (`:dyn
@@ -7832,7 +7838,8 @@ impl Checker {
             all.push((s.clone(), recv_ty));
         }
         all.extend(params);
-        self.info.method_definition_form(heap, &type_fq, &def_name, instance, &type_params, &all, &ret, &Checked::forms(&body))
+        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        self.info.method_definition_form(heap, &type_fq, &def_name, instance, &type_params, &all, &ret, &lowered)
     }
 
     /// Parses a `defmethod` form's name, receiver, parameters, and return
@@ -8638,8 +8645,8 @@ impl Checker {
     /// type, so a hole flowing into a typed position never produces a cascade
     /// of follow-on errors. `loc` is recorded on the node so `locate_node` can
     /// still land the cursor on it for completion/hover.
-    pub(super) fn hole(&self, heap: &mut Heap, loc: Option<Loc>) -> Result<Checked, Error> {
-        Checked::of(heap, &self.info, Node::Hole { loc }, Type::Never)
+    pub(super) fn hole(&self, loc: Option<Loc>) -> Checked {
+        Checked::of(Node::Hole { loc }, Type::Never)
     }
 
     /// An `&optional`/`&key` default's checked form, rebuilt into *this* call
@@ -8650,15 +8657,35 @@ impl Checker {
     /// is the type the default was checked against, so it is the type the
     /// spliced argument has (`OptKeyParam::effective_ty` is `decl_ty` exactly
     /// when a default exists).
-    fn splice_default(&self, heap: &mut Heap, default: &crate::owned_form::OwnedForm, decl_ty: &Type) -> Result<Checked, Error> {
-        Checked::of(heap, &self.info, Node::Default { form: default.clone() }, decl_ty.clone())
+    fn splice_default(&self, default: &crate::owned_form::OwnedForm, decl_ty: &Type) -> Result<Checked, Error> {
+        Ok(Checked::of(Node::Default { form: default.clone() }, decl_ty.clone()))
     }
 
     /// A string literal the checker writes rather than reads.
     pub(super) fn str_literal(&self, heap: &mut Heap, text: &str) -> Result<Checked, Error> {
         let text = heap.alloc_string(text.to_string());
-        let text = forms::rooted(heap, text);
-        Checked::of(heap, &self.info, Node::Literal { tag: wk::STR, value: Some(text) }, Type::Str)
+        Ok(self.literal(heap, wk::STR, Some(text), Type::Str))
+    }
+
+    /// `v`, kept rooted until the end of the top-level form, when the tree
+    /// that refers to it is lowered (`tree_roots`).
+    fn hold(&self, heap: &mut Heap, v: Value) -> Value {
+        let id = self.tree_roots.get().expect("a tree is built only while a top-level form is checked");
+        heap.push_root_on(id, v);
+        v
+    }
+
+    /// A literal node: its core tag and its value, which is held for the
+    /// tree.
+    pub(super) fn literal(&self, heap: &mut Heap, tag: u32, value: Option<Value>, ty: Type) -> Checked {
+        let value = value.map(|v| self.hold(heap, v));
+        Checked::of(Node::Literal { tag, value }, ty)
+    }
+
+    /// `(quote datum)`, with the datum held for the tree.
+    pub(super) fn quoted(&self, heap: &mut Heap, datum: Value, ty: Type) -> Checked {
+        let datum = self.hold(heap, datum);
+        Checked::of(Node::Quote { datum }, ty)
     }
 
     /// Report an import that takes a bare name the current namespace already
@@ -9106,16 +9133,11 @@ impl Checker {
     ) -> Result<Checked, Error> {
         let loc = heap.cons_loc(v).or(loc_hint);
         match self.check_inner(heap, interp, env, v, expected) {
-            // Record `v`'s location on the lowered node so the interpreter can
-            // report a *runtime* error there too. A recursive `check` on a
-            // sub-form already tagged its own node, so only fill an empty slot.
-            //
-            // The position goes in `Heap`'s `code_locs` table, keyed by the
-            // node's own cons cell, rather than in a `loc` field of the node —
-            // there is no field any more, and a core form is data whose shape
-            // is fixed by the vocabulary. `core::tagged_at` is the same act
-            // performed at build time by a site that has the position in hand.
-            Ok(checked) => {
+            // Record `v`'s location on the node, which lowering puts on the
+            // lowered form so the interpreter can report a *runtime* error
+            // there too. A recursive `check` on a sub-form already gave its own
+            // node one, so only fill an empty slot.
+            Ok(mut checked) => {
                 // Rule B: a raw word may only be a value inside `(unsafe ...)`.
                 //
                 // Here because this is the one place an expression and the
@@ -9142,28 +9164,8 @@ impl Checker {
                         None => e,
                     });
                 }
-                self.note_typed_ptr_node(&checked);
-                // Root the node for the rest of this top-level form, with no
-                // matching pop of its own (`check_form_at` truncates the stack
-                // back to where it started).
-                //
-                // This is what makes the checker GC-safe by construction
-                // rather than by discipline. A node lives in a Rust local
-                // between being built here and being pushed into its parent's
-                // `core::Items`, and `Heap::cons` can collect at any point in
-                // between — that window is precisely where the four historical
-                // root leaks in this file were (`subst_value`,
-                // `list_from_vec_locs`, `subst_method_sig`,
-                // `merge_where_clauses`). An enclosing `Items`/`RootScope`
-                // truncating past this push is harmless: by then the node is
-                // rooted by that scope, or reachable from the finished parent.
-                heap.push_root(checked.form);
-                if let Value::Cons(cr) = checked.form {
-                    if heap.cons_loc(checked.form).is_none() {
-                        if let Some(loc) = loc.clone() {
-                            heap.set_cons_loc(cr, loc);
-                        }
-                    }
+                if checked.loc.is_none() {
+                    checked.loc = loc.clone();
                 }
                 // A local-variable reference that resolved against an `Env`
                 // binding with a recorded position: record the reference's own
@@ -9183,12 +9185,9 @@ impl Checker {
                         .entry((l.line, l.col))
                         .or_insert_with(|| checked.ty.clone());
                 }
-                if let (Some(wk::VAR), Some(ref_loc)) = (core::op_wk(heap, checked.form), loc) {
-                    if let Some(Value::Symbol(id)) = core::field(heap, checked.form, 0) {
-                        let name = heap.symbol_spelling(id).to_string();
-                        if let Some(bind_loc) = env.get_loc(&name) {
-                            self.local_refs.borrow_mut().insert((ref_loc.line, ref_loc.col), bind_loc);
-                        }
+                if let (Node::Local { name }, Some(ref_loc)) = (&checked.node, loc) {
+                    if let Some(bind_loc) = env.get_loc(name) {
+                        self.local_refs.borrow_mut().insert((ref_loc.line, ref_loc.col), bind_loc);
                     }
                 }
                 Ok(checked)
@@ -9215,7 +9214,7 @@ impl Checker {
         typelisp_mem::grow_stack(|| match v {
             Value::Cons(_) => {
                 let typed = self.check_list(heap, interp, env, v, expected)?;
-                self.reconcile_expected(heap, env, typed, expected)
+                self.reconcile_expected(env, typed, expected)
             }
             _ => self.check_atom(heap, interp, env, v, expected),
         })
@@ -9242,7 +9241,7 @@ impl Checker {
                 // (`Repr::Int`). The kind is the node's, not something the
                 // island could read off the number.
                 let tag = if ty == Type::Int { wk::INT } else { wk::INT_ANY_WIDTH };
-                Checked::of(heap, &self.info, Node::Literal { tag, value: Some(Value::Int(n)) }, ty)?
+                self.literal(heap, tag, Some(Value::Int(n)), ty)
             }
             // A `Value::Boxed` read-literal is `Sexpr::f64`, `bignum` (an
             // integer literal past `i32`'s range), or `ratio` (`n/d` syntax)
@@ -9275,8 +9274,8 @@ impl Checker {
                 Some(Type::Int) => {
                     let fitted = i64::try_from(&*heap.bignum_value(id)).ok().filter(|v| typelisp_mem::fixnum_fits(*v));
                     match fitted {
-                        Some(v) => Checked::of(heap, &self.info, Node::Literal { tag: wk::INT, value: Some(Value::Int(v)) }, Type::Int)?,
-                        None => Checked::of(heap, &self.info, Node::Literal { tag: wk::BIGNUM, value: Some(Value::Boxed(id)) }, Type::Int)?,
+                        Some(v) => self.literal(heap, wk::INT, Some(Value::Int(v)), Type::Int),
+                        None => self.literal(heap, wk::BIGNUM, Some(Value::Boxed(id)), Type::Int),
                     }
                 }
                 Some(t) if t.is_integer() => {
@@ -9285,16 +9284,16 @@ impl Checker {
                         (i64::try_from(&*big).ok().filter(|v| int_lit_in_range(*v, t)), big.to_string())
                     };
                     match fitted {
-                        Some(v) => Checked::of(heap, &self.info, Node::Literal { tag: wk::INT_ANY_WIDTH, value: Some(Value::Int(v)) }, t.clone())?,
+                        Some(v) => self.literal(heap, wk::INT_ANY_WIDTH, Some(Value::Int(v)), t.clone()),
                         None => return Err(int_lit_range_error(&text, t, false)),
                     }
                 }
                 // No expectation, or one this is not: the literal is an
                 // `int`, the type every unannotated integer literal has.
-                _ => Checked::of(heap, &self.info, Node::Literal { tag: wk::BIGNUM, value: Some(Value::Boxed(id)) }, Type::Int)?,
+                _ => self.literal(heap, wk::BIGNUM, Some(Value::Boxed(id)), Type::Int),
             },
             Value::Boxed(id) if heap.is_ratio(id) => {
-                Checked::of(heap, &self.info, Node::Literal { tag: wk::RATIO, value: Some(Value::Boxed(id)) }, Type::Ratio)?
+                self.literal(heap, wk::RATIO, Some(Value::Boxed(id)), Type::Ratio)
             }
             // A float literal reads as an `f64` box, because a token cannot
             // know the type it will land in. Here that type is known: in an
@@ -9309,12 +9308,11 @@ impl Checker {
                 let ty = float_lit_ty(expected);
                 let boxed = if ty == Type::F32 && heap.is_f64(id) {
                     let f = heap.f64_value(id);
-                    let boxed = heap.alloc_f32(f as f32);
-                    forms::rooted(heap, boxed)
+                    heap.alloc_f32(f as f32)
                 } else {
                     Value::Boxed(id)
                 };
-                Checked::of(heap, &self.info, Node::Literal { tag: wk::FLOAT_ANY_WIDTH, value: Some(boxed) }, ty)?
+                self.literal(heap, wk::FLOAT_ANY_WIDTH, Some(boxed), ty)
             }
             // `#(..)` and `#nA(..)` written in source: a fresh collection
             // whose element type comes from the context.
@@ -9337,10 +9335,10 @@ impl Checker {
             // itself: the same node, and the same type a quote of a non-empty
             // datum has — the checker knows it only as an object inside
             // S-expression data.
-            Value::Boxed(_) => Checked::of(heap, &self.info, Node::Quote { datum: v }, sexpr_ty())?,
-            Value::Bool(b) => Checked::of(heap, &self.info, Node::Literal { tag: wk::BOOL, value: Some(Value::Bool(b)) }, Type::Bool)?,
-            Value::Char(c) => Checked::of(heap, &self.info, Node::Literal { tag: wk::CHAR, value: Some(Value::Char(c)) }, Type::Char)?,
-            Value::Str(s) => Checked::of(heap, &self.info, Node::Literal { tag: wk::STR, value: Some(Value::Str(s)) }, Type::Str)?,
+            Value::Boxed(_) => self.quoted(heap, v, sexpr_ty()),
+            Value::Bool(b) => self.literal(heap, wk::BOOL, Some(Value::Bool(b)), Type::Bool),
+            Value::Char(c) => self.literal(heap, wk::CHAR, Some(Value::Char(c)), Type::Char),
+            Value::Str(s) => self.literal(heap, wk::STR, Some(Value::Str(s)), Type::Str),
             Value::Empty => {
                 // The empty list `()` is the `None` value of `Option<T>` when an
                 // option type is expected, the `Nil` value of `Sexpr` when a
@@ -9364,7 +9362,7 @@ impl Checker {
                     // S-expression" — so it falls through to `Unit` like any
                     // other non-option, non-sexpr context.
                 }
-                Checked::of(heap, &self.info, Node::Literal { tag: wk::UNIT, value: None }, Type::Unit)?
+                self.literal(heap, wk::UNIT, None, Type::Unit)
             }
             Value::Symbol(id) => {
                 let name = heap.symbol_spelling(id).to_string();
@@ -9373,7 +9371,7 @@ impl Checker {
                 // matched *before* every binding lookup below — it can never
                 // name a variable, global, function or method.
                 if id.is_keyword() {
-                    Checked::of(heap, &self.info, Node::Literal { tag: wk::SYM, value: Some(Value::Symbol(id)) }, Type::Symbol)?
+                    self.literal(heap, wk::SYM, Some(Value::Symbol(id)), Type::Symbol)
                 } else if let Some(t) = env.get(name) {
                     // A `symbol-macrolet` binding: the name is not a variable
                     // at all, it stands for a form, which is checked here in
@@ -9389,7 +9387,7 @@ impl Checker {
                         return self.check(heap, interp, env, form, expected);
                     }
                     let t = t.clone();
-                    Checked::of(heap, &self.info, Node::Local { name: name.into() }, t)?
+                    Checked::of(Node::Local { name: name.into() }, t)
                 } else {
                     // The one resolution rule (`Self::resolve_name`). A value's
                     // receiver is the first parameter of the function it is
@@ -9400,13 +9398,13 @@ impl Checker {
                     };
                     match self.resolve_name(env, Written::Bare(name), &mut receiver) {
                         Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
-                            Checked::of(heap, &self.info, Node::Global { path, ty: vi.ty.clone() }, vi.ty)?
+                            Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty)
                         }
                         Some(Resolved::Value(ModuleValue::Fn(fq))) => {
-                            self.fn_ref_node(heap, fq, expected)?
+                            self.fn_ref_node(fq, expected)?
                         }
                         Some(Resolved::Method(MethodTarget::Assoc(type_fq))) => {
-                            self.method_value(heap, &type_fq, name, expected)?
+                            self.method_value(&type_fq, name, expected)?
                         }
                         Some(Resolved::Method(_)) => {
                             return Err(Error::TypeError(format!(
@@ -9459,9 +9457,9 @@ impl Checker {
                 {
                     match self.resolve_name(env, Written::Path(&segs), &mut || None) {
                         Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
-                            Checked::of(heap, &self.info, Node::Global { path, ty: vi.ty.clone() }, vi.ty)?
+                            Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty)
                         }
-                        Some(Resolved::Value(ModuleValue::Fn(fq))) => self.fn_ref_node(heap, fq, expected)?,
+                        Some(Resolved::Value(ModuleValue::Fn(fq))) => self.fn_ref_node(fq, expected)?,
                         Some(Resolved::Macro(..)) => {
                             return Err(Error::TypeError(format!("`{}` is a macro, which has no value", segs.join("::"))))
                         }
@@ -9479,7 +9477,7 @@ impl Checker {
                 }
             }
         };
-        self.reconcile_expected(heap, env, typed, expected)
+        self.reconcile_expected(env, typed, expected)
     }
 
     /// Reconcile synthesized types against the expectation. Literal and
@@ -9487,7 +9485,7 @@ impl Checker {
     /// genuine mismatch. `Never` (a diverging expression) satisfies any
     /// expected type.
     #[inline(never)]
-    fn reconcile_expected(&self, heap: &mut Heap, env: &Env, typed: Checked, expected: Option<&Type>) -> Result<Checked, Error> {
+    fn reconcile_expected(&self, env: &Env, typed: Checked, expected: Option<&Type>) -> Result<Checked, Error> {
         if let Some(e) = expected {
             if typed.ty != Type::Never && &typed.ty != e {
                 // A `Symbol` is a valid `Sexpr` datum wherever a `Sexpr` is
@@ -9547,7 +9545,7 @@ impl Checker {
                 // about. Checked before the general `is_heap_repr` retype
                 // below, which would otherwise claim it.
                 if is_sexpr_expectation(e) && matches!(typed.ty, Type::Dyn(..)) {
-                    return Checked::of(heap, &self.info, Node::DynValue { value: Box::new(typed) }, e.clone());
+                    return Ok(Checked::of(Node::DynValue { value: Box::new(typed) }, e.clone()));
                 }
                 // `Option<Sexpr>` is excluded: it *is* heap-repr by
                 // `is_heap_repr`'s reckoning (an `option` is a `Sum` with
@@ -9563,7 +9561,7 @@ impl Checker {
                     // A niched `Option` (`Option<int>`, say) has no box for
                     // the slot to hold; `box-option` builds the one a boxed
                     // `Option` would have been. See `wrap_rest_elem`.
-                    return self.heap_value_as_sexpr(heap, typed, e.clone());
+                    return self.heap_value_as_sexpr(typed, e.clone());
                 }
                 // A scalar (`i32`/`f64`/`bignum`/`ratio`/`char`/`bool`/`Str`)
                 // has no shared runtime shape with `Sexpr`, so — unlike the
@@ -9584,7 +9582,7 @@ impl Checker {
                 // return position, an annotated `let`), never a bare
                 // `(let ((x obj)) ...)`, which has no expectation at all.
                 if let Type::Dyn(trait_path, pins) = e {
-                    return self.coerce_to_dyn(heap, env, typed, trait_path, pins);
+                    return self.coerce_to_dyn(env, typed, trait_path, pins);
                 }
                 // An `int` or a `ratio` is a `rational`. The `int`'s word
                 // already is one; a `ratio` is normalized on the way in
@@ -9595,10 +9593,6 @@ impl Checker {
                         return Ok(typed.retyped(Type::Rational));
                     }
                     if typed.ty == Type::Ratio {
-                        // `assoc_form` allocates before it roots its
-                        // arguments, and `typed` may be a node nothing roots
-                        // yet (a folded literal).
-                        forms::rooted(heap, typed.form);
                         // A literal widens to the literal it normalizes to,
                         // so arithmetic over it folds on (`lower_assoc`).
                         // A built-in that hands back a generic box (`Vector::new`,
@@ -9612,9 +9606,7 @@ impl Checker {
                             ret: Type::Rational,
                             args: vec![typed],
                         };
-                        let c = Checked::of(heap, &self.info, node, Type::Rational)?;
-                        forms::rooted(heap, c.form);
-                        return Ok(c);
+                        return Ok(Checked::of(node, Type::Rational));
                     }
                 }
                 if is_sexpr_expectation(e) {
@@ -9624,7 +9616,7 @@ impl Checker {
                         let field_tys = self.info.variant_field_tys(&type_name, variant, &[]);
                         let node =
                             Node::Construct { owner: type_name, targs: Vec::new(), variant, mutable: false, field_tys, args: vec![typed] };
-                        return Checked::of(heap, &self.info, node, e.clone());
+                        return Ok(Checked::of(node, e.clone()));
                     }
                 }
                 return Err(Error::TypeError(format!(
@@ -9689,7 +9681,7 @@ impl Checker {
                 }
                 None => return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::")))),
             };
-            return self.reconcile_expected(heap, env, typed, expected);
+            return self.reconcile_expected(env, typed, expected);
         }
         let head = heap.symbol_spelling(head_sym).to_string();
         // A top-level-only form reaching expression position — written in a
@@ -9734,7 +9726,7 @@ impl Checker {
             wk::PROGN => {
                 let (body, ty) = self.check_seq(heap, interp, env, args, arg_locs, expected)?;
                 // Represent progn as a let with no bindings.
-                return Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, ty);
+                return Ok(Checked::of(Node::Let { binds: Vec::new(), body }, ty));
             }
             // `(unsafe body...)` — a `progn` that also grants permission to
             // write the operations this compiler cannot check: an FFI call
@@ -9763,7 +9755,7 @@ impl Checker {
             wk::CATCH => return self.check_catch(heap, interp, env, args, arg_locs, expected),
             wk::THROW => return self.check_throw(heap, interp, env, args, arg_locs),
             wk::UNWIND_PROTECT => return self.check_unwind_protect(heap, interp, env, args, arg_locs, expected),
-            wk::BREAK => return self.check_break(heap, args),
+            wk::BREAK => return self.check_break(args),
             wk::RETURN => return self.check_return(heap, interp, env, args, arg_locs),
             wk::LIST => return self.check_list_lit(heap, interp, env, args, arg_locs),
             wk::FORMAT => return self.check_format(heap, interp, env, args, arg_locs),
@@ -9881,7 +9873,7 @@ impl Checker {
                 self.check_call(heap, interp, env, &fq, args, arg_locs)
             }
             Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
-                let callee = Checked::of(heap, &self.info, Node::Global { path, ty: vi.ty.clone() }, vi.ty)?;
+                let callee = Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty);
                 self.check_apply(heap, interp, env, callee, args, arg_locs)
             }
             None => self.report_unresolved_call(heap, interp, env, &head, args, arg_locs),
@@ -9985,8 +9977,9 @@ impl Checker {
         self.loop_stack.replace(saved);
         let (body, _) = result?;
         let bound: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
-        self.reject_captured_typed_ptrs(heap, env, &Checked::forms(&body), &bound, "a `lambda`")?;
-        Checked::of(heap, &self.info, Node::Lambda { params, ret, body }, fn_ty)
+        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        self.reject_captured_typed_ptrs(heap, env, &lowered, &bound, "a `lambda`")?;
+        Ok(Checked::of(Node::Lambda { params, ret, body }, fn_ty))
     }
 
     /// `(macrolet ((name (params) body...)...) body...)` — CL's `macrolet`,
@@ -10074,7 +10067,7 @@ impl Checker {
         let result = self.check_seq(heap, interp, env, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected);
         self.info.local_macros.borrow_mut().pop();
         let (body, ty) = result?;
-        Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, ty)
+        Ok(Checked::of(Node::Let { binds: Vec::new(), body }, ty))
     }
 
     /// `(symbol-macrolet ((name form)...) body...)` — CL's
@@ -10140,7 +10133,7 @@ impl Checker {
             heap.pop_root();
         }
         let (body, ty) = result?;
-        Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, ty)
+        Ok(Checked::of(Node::Let { binds: Vec::new(), body }, ty))
     }
 
     /// The form `name` stands for, if a `symbol-macrolet` scope in view binds
@@ -10246,8 +10239,9 @@ impl Checker {
                 self.loop_stack.replace(saved);
                 let (body, _, used) = result?;
                 let bound: Vec<String> = params.iter().map(|(n, _)| n.clone()).chain(names.iter().cloned()).collect();
-                self.reject_captured_typed_ptrs(heap, env, &Checked::forms(&body), &bound, &format!("the `labels` function `{}`", name))?;
-                let body = self.implicit_block(heap, &name, &ret, body, used)?;
+                let lowered = lower::lower_all(heap, &self.info, &body)?;
+                self.reject_captured_typed_ptrs(heap, env, &lowered, &bound, &format!("the `labels` function `{}`", name))?;
+                let body = self.implicit_block(&name, &ret, body, used)?;
                 defs.push((name, params, ret, body));
             }
             let (body, ty) = self.check_seq(heap, interp, &labels_env, &args[1..], &arg_locs[1..], expected)?;
@@ -10256,7 +10250,7 @@ impl Checker {
         match checked {
             Ok((defs, body, ty)) => {
                 self.close_labels_scope(heap, Some(&defs))?;
-                Checked::of(heap, &self.info, Node::Labels { defs, body }, ty)
+                Ok(Checked::of(Node::Labels { defs, body }, ty))
             }
             Err(e) => {
                 self.close_labels_scope(heap, None)?;
@@ -10314,7 +10308,7 @@ impl Checker {
             typed.push(self.cons_rest_list(heap, elem_ty, rest_typed)?);
         }
         let node = Node::Apply { callee: Box::new(callee), ret: ret.clone(), args: typed };
-        Checked::of(heap, &self.info, node, ret)
+        Ok(Checked::of(node, ret))
     }
 
     /// `(apply f arg1 ... argN rest-list)`: call the *variadic* function
@@ -10367,7 +10361,7 @@ impl Checker {
         let list_loc = nth_loc(arg_locs, args.len() - 1);
         typed.push(self.check_at(heap, interp, env, list_arg[0], Some(&option_of_sexpr()), list_loc)?);
         let node = Node::Apply { callee: Box::new(callee), ret: ret.clone(), args: typed };
-        Checked::of(heap, &self.info, node, ret)
+        Ok(Checked::of(node, ret))
     }
 
     /// A `::`-qualified call, resolved by [`Self::resolve_name`]: a
@@ -10404,7 +10398,7 @@ impl Checker {
             }
             Some(Resolved::Value(ModuleValue::Fn(fq))) => self.check_call(heap, interp, env, &fq, args, arg_locs),
             Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
-                let callee = Checked::of(heap, &self.info, Node::Global { path, ty: vi.ty.clone() }, vi.ty)?;
+                let callee = Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty);
                 self.check_apply(heap, interp, env, callee, args, arg_locs)
             }
             Some(Resolved::Ctor(type_fq, variant)) => {
@@ -10594,7 +10588,7 @@ impl Checker {
             (own.clone(), recv.clone())
         } else {
             let owner = crate::types::prim_type_path(&Type::Rational).expect("rational is a primitive type");
-            (owner, self.reconcile_expected(heap, env, recv.clone(), Some(&Type::Rational))?)
+            (owner, self.reconcile_expected(env, recv.clone(), Some(&Type::Rational))?)
         };
         self.check_assoc_call(
             heap,
@@ -10627,7 +10621,7 @@ impl Checker {
                 self.check_dyn_call(heap, interp, env, recv, &trait_path, &pins, method, args, arg_locs)
             }
             MethodTarget::DynSexpr => {
-                let recv = Checked::of(heap, &self.info, Node::DynValue { value: Box::new(recv) }, sexpr_ty())?;
+                let recv = Checked::of(Node::DynValue { value: Box::new(recv) }, sexpr_ty());
                 let type_fq = Path::root("sexpr");
                 self.check_assoc_call(
                     heap,
@@ -10695,7 +10689,7 @@ impl Checker {
                 // (other Self)) Self)` — returns the receiver's type.
                 assoc.insert("self".to_string(), recv.ty.clone());
                 let ret_ty = subst_apply(&sig.ret, &assoc);
-                Checked::of(heap, &self.info, Node::ErasedGeneric { what: method.as_str().into() }, ret_ty)
+                Ok(Checked::of(Node::ErasedGeneric { what: method.as_str().into() }, ret_ty))
             }
         }
     }
@@ -10978,7 +10972,7 @@ impl Checker {
                 let st = subst_apply(pty, &subst);
                 let exp = if type_has_param(&st, &tparams) { None } else { Some(st) };
                 let ta = match first_arg.take() {
-                    Some(checked) => self.reconcile_expected(heap, env, checked, exp.as_ref())?,
+                    Some(checked) => self.reconcile_expected(env, checked, exp.as_ref())?,
                     None => self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?,
                 };
                 unify(&tparams, pty, &ta.ty, &mut subst)?;
@@ -11063,7 +11057,7 @@ impl Checker {
         // so the printer's specialization has to be asked for here too.
         self.request_print_object(&ty);
         let node = Node::Assoc { owner: type_fq.clone(), method: method_name.into(), instance, ret: ty.clone(), args: typed };
-        Checked::of(heap, &self.info, node, ty)
+        Ok(Checked::of(node, ty))
     }
 
     /// [`Self::check_assoc_call`]'s `&optional`/`&key`/`&rest` path — the
@@ -11156,12 +11150,12 @@ impl Checker {
                             checked
                         } else {
                             let target = checked.ty.clone();
-                            wrap_some(heap, self, checked, target)?
+                            wrap_some(self, checked, target)?
                         }
                     }
                     None => match &key.default {
-                        Some(d) => self.splice_default(heap, d, &key.decl_ty)?,
-                        None => option_none(heap, self, subst_apply(&key.effective_ty(), subst))?,
+                        Some(d) => self.splice_default(d, &key.decl_ty)?,
+                        None => option_none(self, subst_apply(&key.effective_ty(), subst))?,
                     },
                 };
                 typed.push(val);
@@ -11210,12 +11204,12 @@ impl Checker {
                     checked
                 } else {
                     let target = checked.ty.clone();
-                    wrap_some(heap, self, checked, target)?
+                    wrap_some(self, checked, target)?
                 }
             } else {
                 match &opt.default {
-                    Some(d) => self.splice_default(heap, d, &opt.decl_ty)?,
-                    None => option_none(heap, self, subst_apply(&opt.effective_ty(), subst))?,
+                    Some(d) => self.splice_default(d, &opt.decl_ty)?,
+                    None => option_none(self, subst_apply(&opt.effective_ty(), subst))?,
                 }
             };
             typed.push(val);
@@ -11245,7 +11239,7 @@ impl Checker {
         let else_expected = non_never(&then.ty).or(expected);
         let els = self.check_at(heap, interp, env, args[2], else_expected, nth_loc(arg_locs, 2))?;
         let ty = join_types(&then.ty, &els.ty)?;
-        Checked::of(heap, &self.info, Node::If { cond: Box::new(cond), then: Box::new(then), els: Box::new(els) }, ty)
+        Ok(Checked::of(Node::If { cond: Box::new(cond), then: Box::new(then), els: Box::new(els) }, ty))
     }
 
     fn check_panic(
@@ -11260,7 +11254,7 @@ impl Checker {
             return Err(Error::TypeError("panic: (panic message)".into()));
         }
         let msg = self.check_at(heap, interp, env, args[0], Some(&Type::Str), nth_loc(arg_locs, 0))?;
-        Checked::of(heap, &self.info, Node::Panic { message: Box::new(msg) }, Type::Never)
+        Ok(Checked::of(Node::Panic { message: Box::new(msg) }, Type::Never))
     }
 
     /// `(the Type expr)`: a type annotation, e.g. `(the i64 5)` to make an
@@ -11323,21 +11317,24 @@ impl Checker {
         let inner = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
         // A macro can expand into something that is not a call even when what
         // was written looked like one, so the node itself is the last word.
+        // What it lowers to says, too: a builtin call over literals folds to
+        // its value, and one answering an `int` crosses back through a tag.
+        let lowered = lower::lower(heap, &self.info, &inner)?;
         let is_call = matches!(
-            heap.car(inner.form),
+            heap.car(lowered),
             Ok(Value::Symbol(id))
                 if matches!(heap.symbol_spelling(id), "call" | "assoc" | "dyn-call" | "apply")
         );
         if !is_call {
             return Err(Error::TypeError(format!("`{}` needs a call, and this is not one. {}", form_name, shape)));
         }
-        self.reject_typed_ptr_task_args(heap, inner.form, form_name)?;
+        self.reject_typed_ptr_task_args(&inner, form_name)?;
         let ty = match kind {
             SpawnKind::Task => super::registry::task_of(inner.ty.clone()),
             SpawnKind::Thread => super::registry::thread_of(inner.ty.clone()),
         };
         let key = ConcreteNames::type_key(&ty).into();
-        Checked::of(heap, &self.info, Node::Spawn { tag: kind.tag(), key, call: Box::new(inner) }, ty)
+        Ok(Checked::of(Node::Spawn { tag: kind.tag(), key, call: Box::new(inner) }, ty))
     }
 
     /// `(select ((v (recv ch)) body...) ((send ch x) body...) (:else body...))`
@@ -11403,7 +11400,7 @@ impl Checker {
                     Some(t) => join_types(&t, &body_ty)?,
                     None => body_ty.clone(),
                 });
-                let body = Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, body_ty)?;
+                let body = Checked::of(Node::Let { binds: Vec::new(), body }, body_ty);
                 arms.push(SelectArm::Else { body });
                 continue;
             }
@@ -11441,9 +11438,9 @@ impl Checker {
                     Some(t) => join_types(&t, &body_ty)?,
                     None => body_ty.clone(),
                 });
-                let body = Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, body_ty)?;
-                let chan = Checked::of(heap, &self.info, Node::Local { name: chan_name.into() }, chan_ty)?;
-                let value = Checked::of(heap, &self.info, Node::Local { name: value_name.into() }, elem)?;
+                let body = Checked::of(Node::Let { binds: Vec::new(), body }, body_ty);
+                let chan = Checked::of(Node::Local { name: chan_name.into() }, chan_ty);
+                let value = Checked::of(Node::Local { name: value_name.into() }, elem);
                 SelectArm::Send { kind, chan, value, body }
             } else {
                 // `((v (recv ch)) body...)`
@@ -11478,8 +11475,8 @@ impl Checker {
                     Some(t) => join_types(&t, &body_ty)?,
                     None => body_ty.clone(),
                 });
-                let body = Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, body_ty)?;
-                let chan = Checked::of(heap, &self.info, Node::Local { name: chan_name.into() }, chan_ty)?;
+                let body = Checked::of(Node::Let { binds: Vec::new(), body }, body_ty);
+                let chan = Checked::of(Node::Local { name: chan_name.into() }, chan_ty);
                 SelectArm::Recv { var: var.into(), key: key.into(), chan, body }
             };
             arms.push(arm_form);
@@ -11490,8 +11487,8 @@ impl Checker {
             ));
         }
         let ty = ty.expect("at least one arm was checked");
-        let select = Checked::of(heap, &self.info, Node::Select { arms }, ty.clone())?;
-        Checked::of(heap, &self.info, Node::Let { binds, body: vec![select] }, ty)
+        let select = Checked::of(Node::Select { arms }, ty.clone());
+        Ok(Checked::of(Node::Let { binds, body: vec![select] }, ty))
     }
 
     /// `T` of a `Chan<T>`, or a type error naming the operation.
@@ -11553,12 +11550,12 @@ impl Checker {
 
         // Identity: same type, a no-op cast.
         if src.ty == target {
-            return if try_variant { wrap_some(heap, self, src, target) } else { Ok(src) };
+            return if try_variant { wrap_some(self, src, target) } else { Ok(src) };
         }
         // An `int` *is* a `rational`, word for word.
         if src.ty == Type::Int && target == Type::Rational {
             let widened = src.retyped(Type::Rational);
-            return if try_variant { wrap_some(heap, self, widened, target) } else { Ok(widened) };
+            return if try_variant { wrap_some(self, widened, target) } else { Ok(widened) };
         }
         // A typed pointer forgets its pointee, to be handed to a C function
         // declared with `ptr` (`qsort`'s `void *`). The same word; there is
@@ -11595,7 +11592,7 @@ impl Checker {
                     ConcreteNames::type_key(&target)
                 )));
             }
-            return self.coerce_to_dyn(heap, env, src, trait_path, pins);
+            return self.coerce_to_dyn(env, src, trait_path, pins);
         }
 
         let (panic_method, try_method) = as_conversion(&src.ty, &target).ok_or_else(|| {
@@ -11633,7 +11630,7 @@ impl Checker {
                     } else {
                         called
                     };
-                    wrap_some(heap, self, called, target)
+                    wrap_some(self, called, target)
                 }
             }
         } else if narrower {
@@ -11710,7 +11707,7 @@ impl Checker {
             "compile: expected a symbol or path naming a function, e.g. (compile foo) or (compile point::x) — not a string",
         )?;
         let target = self.resolve_callable(&name, "compile")?;
-        Checked::of(heap, &self.info, Node::Compile { target }, Type::Bool)
+        Ok(Checked::of(Node::Compile { target }, Type::Bool))
     }
 
     /// The one body a written `Type::member` names for a tool that wants one
@@ -11888,7 +11885,7 @@ impl Checker {
             )?;
             targets.push(self.resolve_callable(&name, tag)?);
         }
-        Checked::of(heap, &self.info, Node::Trace { tag: head.well_known(), targets }, sexpr_ty())
+        Ok(Checked::of(Node::Trace { tag: head.well_known(), targets }, sexpr_ty()))
     }
 
     /// `(disassemble name)` / `(disassemble name true)` — CLHS 25.2.
@@ -11932,7 +11929,7 @@ impl Checker {
             "disassemble: expected a symbol or path naming a function, e.g. (disassemble foo) or (disassemble point::x) — not a string",
         )?;
         let target = self.resolve_callable(&name, "disassemble")?;
-        Checked::of(heap, &self.info, Node::Disassemble { target, llvm_ir }, Type::Unit)
+        Ok(Checked::of(Node::Disassemble { target, llvm_ir }, Type::Unit))
     }
 
     /// `(step form)` — CLHS 25.2's stepper. Evaluates `form` and returns its
@@ -11957,7 +11954,7 @@ impl Checker {
         }
         let inner = self.check_at(heap, interp, env, args[0], expected, nth_loc(arg_locs, 0))?;
         let ty = inner.ty.clone();
-        Checked::of(heap, &self.info, Node::Step { inner: Box::new(inner) }, ty)
+        Ok(Checked::of(Node::Step { inner: Box::new(inner) }, ty))
     }
 
     /// `(documentation name)` / `(documentation Type::method)`: like
@@ -12117,8 +12114,8 @@ impl Checker {
             .map(|sig| sig.ret.clone())
             .ok_or_else(|| Error::TypeError("ed: the `ed-open` builtin is not registered".into()))?;
         let file = self.str_literal(heap, &file)?;
-        let line = Checked::of(heap, &self.info, Node::Literal { tag: wk::INT, value: Some(Value::Int(line)) }, Type::Int)?;
-        Checked::of(heap, &self.info, Node::Call { path: Path::internal("ed-open"), args: vec![file, line] }, ret)
+        let line = self.literal(heap, wk::INT, Some(Value::Int(line)), Type::Int);
+        Ok(Checked::of(Node::Call { path: Path::internal("ed-open"), args: vec![file, line] }, ret))
     }
 
     /// `(documentation ...)`'s result baked in: `Option::some` of the
@@ -12127,11 +12124,11 @@ impl Checker {
         match doc {
             Some(d) => {
                 let inner = self.str_literal(heap, &d)?;
-                wrap_some(heap, self, inner, Type::Str)
+                wrap_some(self, inner, Type::Str)
             }
             None => {
                 let ty = Type::Named(Path::root("option"), vec![Type::Str]);
-                option_none(heap, self, ty)
+                option_none(self, ty)
             }
         }
     }
@@ -12149,7 +12146,7 @@ impl Checker {
         if args.len() != 1 {
             return Err(Error::TypeError("quote: (quote datum)".into()));
         }
-        let quoted = Node::Quote { datum: args[0] };
+
         // A quoted *symbol* is a `Symbol`, not S-expression data.
         //
         // For every other atom there is an unquoted spelling that already
@@ -12172,7 +12169,7 @@ impl Checker {
         // width its context asks for (`the_overrides_an_integer_literals_
         // default_type`). A symbol has no such ambiguity.
         if matches!(args[0], Value::Symbol(_)) {
-            return Checked::of(heap, &self.info, quoted, Type::Symbol);
+            return Ok(self.quoted(heap, args[0], Type::Symbol));
         }
         // Everything else is S-expression data: `Option<Sexpr>`, not
         // `Sexpr`, because `'()` is a datum a quote may produce and the
@@ -12180,7 +12177,7 @@ impl Checker {
         // writable literal, and there is no implicit coercion to widen it
         // back (the checker has no subtyping — see `coerce_to_dyn`, the only
         // conversion it does).
-        Checked::of(heap, &self.info, quoted, option_of_sexpr())
+        Ok(self.quoted(heap, args[0], option_of_sexpr()))
     }
 
     /// `(quasiquote template)`: like `quote`, but `(unquote x)` sub-forms are
@@ -12268,7 +12265,7 @@ impl Checker {
                                 )
                             })?;
                             let node = Node::Call { path: append_fq, args: vec![spliced, rest] };
-                            return Checked::of(heap, &self.info, node, sexpr_ty);
+                            return Ok(Checked::of(node, sexpr_ty));
                         }
                     }
                     return Err(Error::TypeError("unquote-splicing: (unquote-splicing datum)".into()));
@@ -12280,11 +12277,11 @@ impl Checker {
             let field_tys = self.info.variant_field_tys(&adt, cons_idx, &[]);
             let node =
                 Node::Construct { owner: adt, targs: Vec::new(), variant: cons_idx, mutable: false, field_tys, args: vec![car_t, cdr_t] };
-            return Checked::of(heap, &self.info, node, sexpr_ty);
+            return Ok(Checked::of(node, sexpr_ty));
         }
         // A leaf of the template: literal data, so the datum travels as the
         // reader's own value — see `forms::quote_form`.
-        Checked::of(heap, &self.info, Node::Quote { datum: v }, sexpr_ty)
+        Ok(self.quoted(heap, v, sexpr_ty))
     }
 
     fn check_let(
@@ -12323,7 +12320,7 @@ impl Checker {
             // available to completion.
             let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
             let checked = self.check_at(heap, interp, env, pair[1], None, val_loc.clone());
-            let val = self.recovered(heap, checked, val_loc)?;
+            let val = self.recovered(checked, val_loc)?;
             binds.push((name, val));
         }
         let env_binds: Vec<(String, Type, Option<Loc>)> = binds
@@ -12334,7 +12331,7 @@ impl Checker {
         let child = env.extended_with_locs(env_binds)?;
         let (body, ty) = self.check_seq(heap, interp, &child, &args[1..], &arg_locs[1..], expected)?;
         let binds = binds.into_iter().map(|(n, c)| (n, c.ty.clone(), c)).collect();
-        Checked::of(heap, &self.info, Node::Let { binds, body }, ty)
+        Ok(Checked::of(Node::Let { binds, body }, ty))
     }
 
     /// `let*`: like `let` but each binding sees the earlier ones. Desugars to
@@ -12375,9 +12372,7 @@ impl Checker {
         // is not (see [`Self::rooted`]).
         if binds.is_empty() {
             let (body, ty) = self.check_seq(heap, interp, env, body, body_locs, expected)?;
-            let c = Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, ty)?;
-            forms::rooted(heap, c.form);
-            return Ok(c);
+            return Ok(Checked::of(Node::Let { binds: Vec::new(), body }, ty));
         }
         let pair_locs = heap.list_to_vec_locs(binds[0])?;
         let pair: Vec<Value> = pair_locs.iter().map(|(v, _)| *v).collect();
@@ -12392,13 +12387,11 @@ impl Checker {
         let val_loc = pair_locs.get(1).and_then(|(_, l)| l.clone());
         // Recovery boundary (B4): see `check_let`.
         let checked = self.check_at(heap, interp, env, pair[1], None, val_loc.clone());
-        let val = self.recovered(heap, checked, val_loc)?;
+        let val = self.recovered(checked, val_loc)?;
         let child = env.extended_with_locs(vec![(name.clone(), val.ty.clone(), name_loc)])?;
         let inner = self.let_star_rec(heap, interp, &child, &binds[1..], body, body_locs, expected)?;
         let ty = inner.ty.clone();
-        let c = Checked::of(heap, &self.info, Node::Let { binds: vec![(name, val.ty.clone(), val)], body: vec![inner] }, ty)?;
-        forms::rooted(heap, c.form);
-        Ok(c)
+        Ok(Checked::of(Node::Let { binds: vec![(name, val.ty.clone(), val)], body: vec![inner] }, ty))
     }
 
     /// `(setf place value)`: three kinds of `place` are recognized — a bound
@@ -12460,7 +12453,7 @@ impl Checker {
                 return self.check_setf(heap, interp, env, &[place, args[1]], arg_locs);
             }
             let value = self.check_at(heap, interp, env, args[1], Some(&ty), value_loc)?;
-            return Checked::of(heap, &self.info, Node::Set { name: name.into(), value: Box::new(value) }, ty);
+            return Ok(Checked::of(Node::Set { name: name.into(), value: Box::new(value) }, ty));
         }
         if let Some((path, vi)) = self.info.resolve_global(&name) {
             if !vi.mutable {
@@ -12468,7 +12461,7 @@ impl Checker {
             }
             let value = self.check_at(heap, interp, env, args[1], Some(&vi.ty), value_loc)?;
             let node = Node::SetGlobal { path, ty: vi.ty.clone(), value: Box::new(value) };
-            return Checked::of(heap, &self.info, node, vi.ty);
+            return Ok(Checked::of(node, vi.ty));
         }
         Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
     }
@@ -12494,9 +12487,9 @@ impl Checker {
             return Err(Error::TypeError(format!("setf: unresolved path: {}", segs.join("::"))));
         };
         let recv = if let Some(ty) = env.get(recv_name).cloned() {
-            Checked::of(heap, &self.info, Node::Local { name: recv_name.as_str().into() }, ty)?
+            Checked::of(Node::Local { name: recv_name.as_str().into() }, ty)
         } else if let Some((path, vi)) = self.info.resolve_global(recv_name) {
-            Checked::of(heap, &self.info, Node::Global { path, ty: vi.ty.clone() }, vi.ty)?
+            Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty)
         } else {
             return Err(Error::TypeError(format!("setf: unbound variable: {}", recv_name)));
         };
@@ -13445,7 +13438,8 @@ impl Checker {
         if let Some(doc) = doc {
             self.info.reg.docs.vars.insert(fq_name.clone(), doc);
         }
-        self.info.defvar_form(heap, &fq_name, &ty, mutable, value.form, reassign)
+        let value = lower::lower_rooted(heap, &self.info, &value)?;
+        self.info.defvar_form(heap, &fq_name, &ty, mutable, value, reassign)
     }
 
     /// `(loop body...)`: an infinite loop, exited via `break`/`return`. Its
@@ -13466,7 +13460,7 @@ impl Checker {
             return self.check_loop_dsl(heap, interp, env, args, arg_locs, expected);
         }
         let (body, ty) = self.check_loop_body(heap, interp, env, args, arg_locs, Type::Never)?;
-        Checked::of(heap, &self.info, Node::Loop { ty: ty.clone(), body }, ty)
+        Ok(Checked::of(Node::Loop { ty: ty.clone(), body }, ty))
     }
 
     /// CL's extended `loop` (cl-parity-plan.md Stage 4b). Two passes, and
@@ -13709,7 +13703,7 @@ impl Checker {
         // falls off its end normally, and what crosses the boundary is what the
         // throw carried.
         let carried = self.throw_tags.borrow().get(&tag).cloned().unwrap_or_else(|| ty.clone());
-        Checked::of(heap, &self.info, Node::Catch { tag: sym, carried, body: Box::new(body) }, ty)
+        Ok(Checked::of(Node::Catch { tag: sym, carried, body: Box::new(body) }, ty))
     }
 
     /// `(throw 'tag value)`: leave for the nearest dynamically enclosing
@@ -13733,7 +13727,7 @@ impl Checker {
         let expected = self.throw_tags.borrow().get(&tag).cloned();
         let value = self.check_at(heap, interp, env, args[1], expected.as_ref(), nth_loc(arg_locs, 1))?;
         self.unify_throw_tag(&tag, &value.ty, "throw")?;
-        Checked::of(heap, &self.info, Node::Throw { tag: sym, value: Box::new(value) }, Type::Never)
+        Ok(Checked::of(Node::Throw { tag: sym, value: Box::new(value) }, Type::Never))
     }
 
     /// `(unwind-protect protected cleanup)`: run `protected`, then `cleanup`
@@ -13758,17 +13752,17 @@ impl Checker {
         let cleanup = self.check_at(heap, interp, env, args[1], None, nth_loc(arg_locs, 1))?;
         let ty = protected.ty.clone();
         let node = Node::UnwindProtect { protected: Box::new(protected), cleanup: Box::new(cleanup) };
-        Checked::of(heap, &self.info, node, ty)
+        Ok(Checked::of(node, ty))
     }
 
     /// `(break)`: exit the nearest enclosing loop with no value (`Unit`). Type
     /// `Never` (diverges; satisfies any expectation).
-    fn check_break(&self, heap: &mut Heap, args: &[Value]) -> Result<Checked, Error> {
+    fn check_break(&self, args: &[Value]) -> Result<Checked, Error> {
         if !args.is_empty() {
             return Err(Error::TypeError("break: (break), takes no arguments".into()));
         }
         self.contribute_loop_exit(Type::Unit)?;
-        Checked::of(heap, &self.info, Node::Break, Type::Never)
+        Ok(Checked::of(Node::Break, Type::Never))
     }
 
     /// `(return)` / `(return value)`: exit the nearest enclosing loop,
@@ -13797,7 +13791,7 @@ impl Checker {
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
         self.contribute_loop_exit(ty)?;
-        Checked::of(heap, &self.info, Node::Return { value: value.map(Box::new) }, Type::Never)
+        Ok(Checked::of(Node::Return { value: value.map(Box::new) }, Type::Never))
     }
 
     /// `(block NAME BODY...)` — CL's lexical named escape. The value is the
@@ -13835,10 +13829,10 @@ impl Checker {
             // the island a basic block, a slot and a root-depth read, for an
             // escape that provably cannot happen. A binding-less `let` is how
             // this vocabulary spells a sequence (see the `progn` arm).
-            return Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, ty);
+            return Ok(Checked::of(Node::Let { binds: Vec::new(), body }, ty));
         }
-        let seq = Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, ty.clone())?;
-        Checked::of(heap, &self.info, Node::Block { name: name.as_str().into(), ty: ty.clone(), body: Box::new(seq) }, ty)
+        let seq = Checked::of(Node::Let { binds: Vec::new(), body }, ty.clone());
+        Ok(Checked::of(Node::Block { name: name.as_str().into(), ty: ty.clone(), body: Box::new(seq) }, ty))
     }
 
     /// Check a body sequence with a fresh [`Self::block_stack`] frame named
@@ -13889,18 +13883,18 @@ impl Checker {
     ) -> Result<Vec<Checked>, Error> {
         let (body, _, used) =
             self.check_block_body(heap, interp, env, body, body_locs, name, ret.clone(), Some(ret))?;
-        self.implicit_block(heap, name, ret, body, used)
+        self.implicit_block(name, ret, body, used)
     }
 
     /// A definition's checked `body` inside its implicit block `name`, which
     /// is a node only when a `return-from` `used` it.
-    fn implicit_block(&self, heap: &mut Heap, name: &str, ret: &Type, body: Vec<Checked>, used: bool) -> Result<Vec<Checked>, Error> {
+    fn implicit_block(&self, name: &str, ret: &Type, body: Vec<Checked>, used: bool) -> Result<Vec<Checked>, Error> {
         if !used {
             return Ok(body);
         }
-        let seq = Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, ret.clone())?;
+        let seq = Checked::of(Node::Let { binds: Vec::new(), body }, ret.clone());
         let block = Node::Block { name: name.into(), ty: ret.clone(), body: Box::new(seq) };
-        Ok(vec![Checked::of(heap, &self.info, block, ret.clone())?])
+        Ok(vec![Checked::of(block, ret.clone())])
     }
 
     /// `(return-from NAME)` / `(return-from NAME value)`: leave the enclosing
@@ -13935,7 +13929,7 @@ impl Checker {
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
         self.contribute_block_exit(&name, ty)?;
         let node = Node::ReturnFrom { name: name.as_str().into(), value: value.map(Box::new) };
-        Checked::of(heap, &self.info, node, Type::Never)
+        Ok(Checked::of(node, Type::Never))
     }
 
     /// The bare symbol a `block`/`return-from` names.
@@ -14006,7 +14000,7 @@ impl Checker {
             field_tys: Vec::new(),
             args: Vec::new(),
         };
-        let mut acc = Checked::of(heap, &self.info, nil, sexpr_ty.clone())?;
+        let mut acc = Checked::of(nil, sexpr_ty.clone());
         for (i, &elem) in args.iter().enumerate().rev() {
             let e = self.check_at(heap, interp, env, elem, Some(&sexpr_ty), nth_loc(arg_locs, i))?;
             let cons = Node::Construct {
@@ -14017,7 +14011,7 @@ impl Checker {
                 field_tys: cons_tys.clone(),
                 args: vec![e, acc],
             };
-            acc = Checked::of(heap, &self.info, cons, sexpr_ty.clone())?;
+            acc = Checked::of(cons, sexpr_ty.clone());
         }
         Ok(acc)
     }
@@ -14032,11 +14026,11 @@ impl Checker {
     /// a bad `&rest` element gets), then `sexpr-cons`-ed together back-to-front.
     fn cons_hetero_sexpr(&self, heap: &mut Heap, items: Vec<Checked>) -> Result<Checked, Error> {
         let r = Path::std("sexpr-cons");
-        let mut acc = Checked::of(heap, &self.info, Node::Quote { datum: Value::Empty }, option_of_sexpr())?;
+        let mut acc = self.quoted(heap, Value::Empty, option_of_sexpr());
         for item in items.into_iter().rev() {
             let elem_ty = item.ty.clone();
-            let item = self.wrap_rest_elem(heap, &elem_ty, item)?;
-            acc = Checked::of(heap, &self.info, Node::Call { path: r.clone(), args: vec![item, acc] }, option_of_sexpr())?;
+            let item = self.wrap_rest_elem(&elem_ty, item)?;
+            acc = Checked::of(Node::Call { path: r.clone(), args: vec![item, acc] }, option_of_sexpr());
         }
         Ok(acc)
     }
@@ -14247,28 +14241,22 @@ impl Checker {
                 what, shown, as_call
             ))
         };
-        let form = checked.form;
-        let (target, first_arg) = match core::op_wk(heap, form) {
-            Some(wk::CALL) => {
-                let path = core::path_field(heap, form, 0).ok_or_else(not_a_definition)?;
-                if self.info.reg.fn_sig(&path).is_some_and(|sig| sig.builtin) {
+        let (target, first_arg) = match &checked.node {
+            Node::Call { path, args } => {
+                if self.info.reg.fn_sig(path).is_some_and(|sig| sig.builtin) {
                     return Err(not_a_definition());
                 }
-                (crate::CompileTarget::Fn(path), core::field(heap, form, 2))
+                (crate::CompileTarget::Fn(path.clone()), args.first())
             }
-            Some(wk::ASSOC) => {
-                let path = core::path_field(heap, form, 0).ok_or_else(not_a_definition)?;
-                let method = core::sym_name_field(heap, form, 1).ok_or_else(not_a_definition)?;
-                if self.info.reg.type_def(&path).and_then(|def| def.assoc.get(&method)).is_some_and(|af| af.builtin) {
+            Node::Assoc { owner, method, args, .. } => {
+                if self.info.reg.type_def(owner).and_then(|def| def.assoc.get(&**method)).is_some_and(|af| af.builtin) {
                     return Err(not_a_definition());
                 }
-                (crate::CompileTarget::Method(path, method), core::field(heap, form, 6))
+                (crate::CompileTarget::Method(owner.clone(), method.to_string()), args.first())
             }
             _ => return Err(not_a_definition()),
         };
-        let passed_as_is = first_arg.is_some_and(|a| {
-            core::op_is(heap, a, wk::VAR) && core::sym_name_field(heap, a, 0).as_deref() == Some(ARG)
-        });
+        let passed_as_is = first_arg.is_some_and(|a| matches!(&a.node, Node::Local { name } if &**name == ARG));
         if !passed_as_is {
             return Err(not_a_definition());
         }
@@ -14320,7 +14308,7 @@ impl Checker {
         let control =
             self.resolve_format_calls(heap, interp, env, "format", &control_text, control, &items, nth_loc(arg_locs, 1))?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        Checked::of(heap, &self.info, Node::Call { path: Path::std("format-rt"), args: vec![dest, control, list] }, Type::Str)
+        Ok(Checked::of(Node::Call { path: Path::std("format-rt"), args: vec![dest, control, list] }, Type::Str))
     }
 
     /// `(format stream control args…)` — CL's stream destination.
@@ -14468,7 +14456,7 @@ impl Checker {
         let control =
             self.resolve_format_calls(heap, interp, env, what, &control_text, control, &items, nth_loc(arg_locs, 0))?;
         let list = self.cons_hetero_sexpr(heap, items)?;
-        Checked::of(heap, &self.info, Node::Call { path: Path::std(builtin), args: vec![control, list] }, ret)
+        Ok(Checked::of(Node::Call { path: Path::std(builtin), args: vec![control, list] }, ret))
     }
 
     /// The `pprint` family — `(pprint x)`, `(pprint-fill x)`,
@@ -14503,16 +14491,16 @@ impl Checker {
         }
         let value = self.check_at(heap, interp, env, args[0], None, nth_loc(arg_locs, 0))?;
         let elem_ty = value.ty.clone();
-        let value = self.wrap_rest_elem(heap, &elem_ty, value)?;
+        let value = self.wrap_rest_elem(&elem_ty, value)?;
         // The column width is only meaningful to `pprint-tabular`, whose CL
         // default is 16; the other three ignore it, so one builtin serves all
         // four.
         let colinc = match args.get(1) {
             Some(a) => self.check_at(heap, interp, env, *a, Some(&Type::I32), nth_loc(arg_locs, 1))?,
-            None => Checked::of(heap, &self.info, Node::Literal { tag: wk::INT_ANY_WIDTH, value: Some(Value::Int(16)) }, Type::I32)?,
+            None => self.literal(heap, wk::INT_ANY_WIDTH, Some(Value::Int(16)), Type::I32),
         };
         let which = self.str_literal(heap, form)?;
-        Checked::of(heap, &self.info, Node::Call { path: Path::std("pprint-rt"), args: vec![which, value, colinc] }, Type::Unit)
+        Ok(Checked::of(Node::Call { path: Path::std("pprint-rt"), args: vec![which, value, colinc] }, Type::Unit))
     }
 
     /// `(pprint-logical-block (obj :prefix "(" :suffix ")") body…)` — CLHS
@@ -14586,15 +14574,15 @@ impl Checker {
         // `(progn (open …) body… (close))`, represented the way `progn` is:
         // a `let` with no bindings. The block's own value is `unit` — the body
         // is run for its printing effect.
-        let flag = Checked::of(&mut s, &self.info, Node::Literal { tag: wk::BOOL, value: Some(Value::Bool(per_line)) }, Type::Bool)?;
+        let flag = self.literal(&mut s, wk::BOOL, Some(Value::Bool(per_line)), Type::Bool);
         let start = Node::Call { path: Path::std("pprint-block-start-rt"), args: vec![obj, prefix, flag, suffix] };
-        let mut seq = vec![Checked::of(&mut s, &self.info, start, Type::Unit)?];
+        let mut seq = vec![Checked::of(start, Type::Unit)];
         for (i, &form) in args[1..].iter().enumerate() {
             seq.push(self.check_at(&mut s, interp, env, form, None, nth_loc(arg_locs, 1 + i))?);
         }
         let end = Node::Call { path: Path::std("pprint-block-end-rt"), args: Vec::new() };
-        seq.push(Checked::of(&mut s, &self.info, end, Type::Unit)?);
-        Checked::of(&mut s, &self.info, Node::Let { binds: Vec::new(), body: seq }, Type::Unit)
+        seq.push(Checked::of(end, Type::Unit));
+        Ok(Checked::of(Node::Let { binds: Vec::new(), body: seq }, Type::Unit))
     }
 
     // Same invariant checking context as `check_path_call` — see its comment.
@@ -14828,7 +14816,7 @@ impl Checker {
         }
         let r = self.resolve_call_target(env, name, &sig, &params, &mut subst)?;
         let ty = subst_apply(&sig.ret, &subst);
-        let call = Checked::of(heap, &self.info, Node::Call { path: r, args: typed }, ty.clone())?;
+        let call = Checked::of(Node::Call { path: r, args: typed }, ty.clone());
         // A typed pointer a C function returned has to point into memory an
         // `unsafe` here allocated.
         if let (true, Type::PtrTo(pointee)) = (sig.ffi, &ty) {
@@ -15068,12 +15056,12 @@ impl Checker {
                             checked
                         } else {
                             let target = checked.ty.clone();
-                            wrap_some(heap, self, checked, target)?
+                            wrap_some(self, checked, target)?
                         }
                     }
                     None => match &key.default {
-                        Some(d) => self.splice_default(heap, d, &key.decl_ty)?,
-                        None => option_none(heap, self, subst_apply(&key.effective_ty(), &subst))?,
+                        Some(d) => self.splice_default(d, &key.decl_ty)?,
+                        None => option_none(self, subst_apply(&key.effective_ty(), &subst))?,
                     },
                 };
                 typed.push(val);
@@ -15087,12 +15075,12 @@ impl Checker {
                         checked
                     } else {
                         let target = checked.ty.clone();
-                        wrap_some(heap, self, checked, target)?
+                        wrap_some(self, checked, target)?
                     }
                 } else {
                     match &opt.default {
-                        Some(d) => self.splice_default(heap, d, &opt.decl_ty)?,
-                        None => option_none(heap, self, subst_apply(&opt.effective_ty(), &subst))?,
+                        Some(d) => self.splice_default(d, &opt.decl_ty)?,
+                        None => option_none(self, subst_apply(&opt.effective_ty(), &subst))?,
                     }
                 };
                 typed.push(val);
@@ -15104,7 +15092,7 @@ impl Checker {
         }
 
         let ty = subst_apply(&sig.ret, &subst);
-        Checked::of(heap, &self.info, Node::Call { path: r, args: typed }, ty)
+        Ok(Checked::of(Node::Call { path: r, args: typed }, ty))
     }
 
     /// Call-site `where`-bound validation shared by [`Self::check_call`]
@@ -15378,7 +15366,7 @@ impl Checker {
         let result_ty = Type::Named(adt_name.clone(), result_args.clone());
         if crate::types::path_is_builtin(adt_name, "option") {
             let payload = if variant == OPTION_SOME { typed_args.into_iter().next() } else { None };
-            return self.option_value(heap, &result_ty, payload);
+            return self.option_value(&result_ty, payload);
         }
         // A generic type whose `print-object` the *printer* will look up needs
         // that specialization to exist, and nothing else asks for one: the
@@ -15396,7 +15384,7 @@ impl Checker {
             field_tys,
             args: typed_args,
         };
-        Checked::of(heap, &self.info, node, result_ty)
+        Ok(Checked::of(node, result_ty))
     }
 
     // ---- match / if-let ---------------------------------------------------
@@ -15423,7 +15411,7 @@ impl Checker {
         // catch-all arm is required — which falls out of `Sexpr`'s own
         // `Sexpr`-variant exhaustiveness rule with nothing added.
         if let Type::Dyn(..) = scrut.ty {
-            scrut = Checked::of(heap, &self.info, Node::DynValue { value: Box::new(scrut) }, sexpr_ty())?;
+            scrut = Checked::of(Node::DynValue { value: Box::new(scrut) }, sexpr_ty());
         }
         // A scrutinee that is *not* a data type is matched by value alone:
         // its arms can only be literals, `(:= expr)` guards, and a catch-all,
@@ -15582,7 +15570,7 @@ impl Checker {
                             checked.ty
                         ))));
                     }
-                    Pattern::When { pat: Box::new(pat), test: checked.form }
+                    Pattern::When { pat: Box::new(pat), test: Box::new(checked) }
                 }
             };
             match &pat {
@@ -15799,7 +15787,7 @@ impl Checker {
             None => return Err(Error::TypeError("match: no arms".into())),
         };
         let arms = arms.into_iter().flatten().collect();
-        Checked::of(heap, &self.info, Node::Match { scrut: Box::new(scrut), arms }, ty)
+        Ok(Checked::of(Node::Match { scrut: Box::new(scrut), arms }, ty))
     }
 
     /// Check a pattern against the type of the value it matches, returning the
@@ -16036,7 +16024,7 @@ impl Checker {
                 checked.ty
             )));
         }
-        Ok((Pattern::Guard { name: MATCH_SCRUT.to_string(), form: checked.form }, Vec::new()))
+        Ok((Pattern::Guard { name: MATCH_SCRUT.to_string(), form: Box::new(checked) }, Vec::new()))
     }
 
     /// Whether `ty` can be compared with `equals` — the same two lookups
@@ -16508,7 +16496,7 @@ impl Checker {
             // `defun`/`defmethod`/`defmacro`/`lambda`/`let`/`labels`/`loop`
             // bodies and `match` arm bodies alike.
             let one = self.check_at(heap, interp, env, *expr, exp, loc.clone());
-            let checked = self.recovered(heap, one, loc)?;
+            let checked = self.recovered(one, loc)?;
             ty = checked.ty.clone();
             out.push(checked);
         }
@@ -16779,9 +16767,9 @@ pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, String)]) -> Result<V
 
 /// `Some(inner)` as a [`Checked`] — `Checker::check_as`'s `try-as` wrapper for a
 /// total conversion's already-computed result.
-fn wrap_some(heap: &mut Heap, checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
+fn wrap_some(checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
     let ty = Type::Named(Path::root("option"), vec![target.clone()]);
-    checker.option_value(heap, &ty, Some(inner))
+    checker.option_value(&ty, Some(inner))
 }
 
 /// `Option::none` as a [`Checked`], already at `ty` (an `Option<_>` type) —
@@ -16789,11 +16777,11 @@ fn wrap_some(heap: &mut Heap, checker: &Checker, inner: Checked, target: Type) -
 /// argument that has no default. `variant: 1` is `option`'s `none` variant
 /// (see `check::registry::option_def`), the CL-`nil` counterpart of
 /// `wrap_some`'s `variant: 0`.
-fn option_none(heap: &mut Heap, checker: &Checker, ty: Type) -> Result<Checked, Error> {
+fn option_none(checker: &Checker, ty: Type) -> Result<Checked, Error> {
     // `none` carries no field, but the *value* is still an `Option<T>` and its
     // runtime identity says which `T` — so the instantiation comes off `ty`,
     // the only place it is written here.
-    checker.option_value(heap, &ty, None)
+    checker.option_value(&ty, None)
 }
 
 

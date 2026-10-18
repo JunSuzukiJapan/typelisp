@@ -75,27 +75,22 @@ impl Checker {
         callee: &Path,
     ) -> Result<Checked, Error> {
         let checked = self.check_at(heap, interp, env, arg, Some(fn_ty), loc.clone())?;
-        let target = match core::op_wk(heap, checked.form) {
-            Some(wk::LAMBDA) => self.lift_lambda(heap, checked.form, fn_ty)?,
-            Some(wk::FNREF) => {
-                let path = core::path_field(heap, checked.form, 0)
-                    .ok_or_else(|| Error::TypeError("internal error: a fnref node without a path".into()))?;
-                if self.info.reg.fn_sig(&path).is_some_and(|s| s.builtin) {
+        let target = match &checked.node {
+            Node::Lambda { .. } => {
+                let lambda = lower::lower_rooted(heap, &self.info, &checked)?;
+                self.lift_lambda(heap, lambda, fn_ty)?
+            }
+            Node::FnRef { path, .. } => {
+                if self.info.reg.fn_sig(path).is_some_and(|s| s.builtin) {
                     return Err(Error::TypeError(format!(
                         "{}: `{}` is a builtin, and a builtin has no body of its own to hand C. \
                          Pass a `lambda` that calls it instead.",
                         callee, path
                     )));
                 }
-                path
+                path.clone()
             }
-            Some(wk::VAR) => {
-                let name = match core::field(heap, checked.form, 0) {
-                    Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
-                    _ => return Err(Error::TypeError("internal error: a var node without a name".into())),
-                };
-                self.pend_labels_callback(env, &name, loc.as_ref(), callee)?
-            }
+            Node::Local { name } => self.pend_labels_callback(env, name, loc.as_ref(), callee)?,
             _ => {
                 return Err(Error::TypeError(format!(
                     "{}: a C callback must be written where it is passed — the name of a function, \
@@ -111,7 +106,7 @@ impl Checker {
         // `(call PATH (REPR) (str KEY))` to the address builtin — the
         // entry's address, as a raw word.
         let arg = self.str_literal(heap, &key)?;
-        Checked::of(heap, &self.info, Node::Call { path: Path::std(ADDRESS_BUILTIN), args: vec![arg] }, Type::Ptr)
+        Ok(Checked::of(Node::Call { path: Path::std(ADDRESS_BUILTIN), args: vec![arg] }, Type::Ptr))
     }
 
     /// A path for a lifted definition, in the current namespace, that names
@@ -229,7 +224,8 @@ impl Checker {
         let mut refs: HashMap<&str, (Vec<String>, Vec<String>)> = HashMap::new();
         for (name, params, _, body) in defs {
             let bound: HashSet<SymRef> = params.iter().map(|(n, _)| typelisp_mem::symbols::intern(n)).collect();
-            let free = crate::check::freevars::free_vars(heap, &Checked::forms(body), &bound, &HashSet::new())?;
+            let lowered = lower::lower_all(heap, &self.info, body)?;
+            let free = crate::check::freevars::free_vars(heap, &lowered, &bound, &HashSet::new())?;
             let (sibs, caps): (Vec<String>, Vec<String>) = free
                 .iter()
                 .map(|s| s.name().to_string())
@@ -272,13 +268,14 @@ impl Checker {
             g_params.iter().enumerate().map(|(i, (_, t))| (format!(" a{}", i), t.clone())).collect();
         let mut args = Vec::with_capacity(params.len());
         for (n, t) in &params {
-            args.push(Checked::of(heap, &self.info, Node::Local { name: n.as_str().into() }, t.clone())?);
+            args.push(Checked::of(Node::Local { name: n.as_str().into() }, t.clone()));
         }
-        let callee = Checked::of(heap, &self.info, Node::Local { name: p.name.as_str().into() }, fn_ty.clone())?;
-        let call = Checked::of(heap, &self.info, Node::Apply { callee: Box::new(callee), ret: g_ret.clone(), args }, g_ret.clone())?;
+        let callee = Checked::of(Node::Local { name: p.name.as_str().into() }, fn_ty.clone());
+        let call = Checked::of(Node::Apply { callee: Box::new(callee), ret: g_ret.clone(), args }, g_ret.clone());
         let kept: Vec<LabelsDef> = defs.iter().filter(|(n, _, _, _)| reached.contains(&n.as_str())).cloned().collect();
-        let block = Checked::of(heap, &self.info, Node::Labels { defs: kept, body: vec![call] }, g_ret.clone())?;
-        let form = self.info.defun_form(heap, &p.lifted, &params, g_ret, &[block.form])?;
+        let block = Checked::of(Node::Labels { defs: kept, body: vec![call] }, g_ret.clone());
+        let block = lower::lower_rooted(heap, &self.info, &block)?;
+        let form = self.info.defun_form(heap, &p.lifted, &params, g_ret, &[block])?;
         let form = forms::rooted(heap, form);
         self.lifted.borrow_mut().push(LiftedCallback { path: p.lifted.clone(), sig: Self::lifted_sig(&fn_ty), form });
         Ok(())

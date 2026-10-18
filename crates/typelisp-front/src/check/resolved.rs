@@ -12,7 +12,6 @@
 //! is that the tree went and these three did not, so Stage D renamed it rather
 //! than leave a file called `ast` in a checker that builds no AST.
 
-use typelisp_mem::Value;
 
 use crate::check::repr::Repr;
 use crate::{Path, Type};
@@ -71,7 +70,7 @@ pub enum Pattern {
     /// form), so two guards in one pattern never read each other's value.
     Guard {
         name: String,
-        form: Value,
+        form: Box<crate::check::core::Checked>,
     },
     /// A guarded arm, `(pat :when test body...)`: `pat` must match, and then
     /// `test` — an already-checked `bool` expression that sees `pat`'s
@@ -79,7 +78,7 @@ pub enum Pattern {
     /// the whole of an arm's pattern, never nested inside one.
     When {
         pat: Box<Pattern>,
-        test: Value,
+        test: Box<crate::check::core::Checked>,
     },
     /// A constructor pattern, e.g. `(Some v)` / `(Cons a d)`.
     Ctor {

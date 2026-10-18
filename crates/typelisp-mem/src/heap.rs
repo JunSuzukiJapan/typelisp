@@ -1151,6 +1151,33 @@ impl Heap {
         self.current = &mut **stack;
     }
 
+    /// Pushes `v` onto the root stack `id` without making it the running one.
+    ///
+    /// For a holder whose values must outlive every [`RootScope`] opened on the
+    /// running stack meanwhile: the analyzed tree of a top-level form keeps
+    /// heap values until the form is lowered at its end, while the scopes
+    /// opened to check its parts close one by one.
+    pub fn push_root_on(&mut self, id: RootStackId, v: Value) {
+        if self.gc_stress() {
+            self.assert_not_freed("push_root_on", v);
+        }
+        let mut root_stacks = self.shared.root_stacks.lock().unwrap();
+        let Some(stack) = root_stacks.get_mut(id.0).and_then(|s| s.as_mut()) else {
+            panic!("push_root_on: {:?} is not a live stack", id);
+        };
+        stack.roots.push(v);
+    }
+
+    /// Empties the root stack `id`, which must not be the running one.
+    pub fn clear_root_stack(&mut self, id: RootStackId) {
+        assert_ne!(id.0, self.current_stack, "clear_root_stack: that stack is running");
+        let mut root_stacks = self.shared.root_stacks.lock().unwrap();
+        let Some(stack) = root_stacks.get_mut(id.0).and_then(|s| s.as_mut()) else {
+            panic!("clear_root_stack: {:?} is not a live stack", id);
+        };
+        stack.roots.clear();
+    }
+
     /// Frees a finished task's stack.
     ///
     /// It must not be the running one. A non-empty stack here means the task
