@@ -24,7 +24,7 @@
 use typelisp_mem::{wk, Error, Heap, Loc, RootScope, Value};
 
 use crate::check::checker::MacroLambda;
-use crate::check::core::{self, Checked, Items};
+use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
 use crate::check::resolved::CompileTarget;
 use crate::types::{Path, Type};
@@ -75,12 +75,6 @@ pub(super) fn if_form(heap: &mut Heap, cond: Value, then: Value, els: Value) -> 
 /// baked into an `Expr`).
 pub(super) fn quote_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::QUOTE, &[datum])
-}
-
-/// `(quote ())` — the empty list as a `sexpr` datum, the base case every
-/// list construction ends in.
-pub(super) fn quote_nil(heap: &mut Heap) -> Result<Value, Error> {
-    quote_form(heap, Value::Empty)
 }
 
 /// `(str "TEXT")` — a string literal node the checker synthesizes rather
@@ -576,30 +570,12 @@ fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Val
 /// expected type, so a hole flowing into a typed position never produces a
 /// cascade of follow-on errors. `loc` is recorded on the node so
 /// `locate_node` can still land the cursor on it for completion/hover.
-pub(super) fn hole(heap: &mut Heap, loc: Option<Loc>) -> Result<Checked, Error> {
+pub(super) fn hole_form(heap: &mut Heap, loc: Option<Loc>) -> Result<Value, Error> {
     let msg = heap.alloc_string("<check-error>".to_string());
     let mut f = Items::new(heap);
     let text = core::tagged(f.heap(), wk::STR, &[msg])?;
     f.push(text);
-    let form = f.finish_at(wk::PANIC, loc)?;
-    Ok(Checked::new(form, Type::Never))
-}
-
-/// Rebuild an `&optional`/`&key` default's checked form into *this* call
-/// site's own cells — the read side of [`Self::check_opt_key_default`].
-///
-/// A fresh subtree per site, not a shared one: the sites are independent
-/// programs and a shared subtree would give them one identity. `decl_ty` is
-/// the type the default was checked against, so it is the type the spliced
-/// argument has (`OptKeyParam::effective_ty` is `decl_ty` exactly when a
-/// default exists).
-pub(super) fn splice_default(
-    heap: &mut Heap,
-    default: &crate::owned_form::OwnedForm,
-    decl_ty: &Type,
-) -> Result<Checked, Error> {
-    let form = crate::owned_form::owned_to_value(heap, default)?;
-    Ok(Checked::new(rooted(heap, form), decl_ty.clone()))
+    f.finish_at(wk::PANIC, loc)
 }
 
 /// Emit a [`Type`] as the type *syntax* that parses back to it — the inverse

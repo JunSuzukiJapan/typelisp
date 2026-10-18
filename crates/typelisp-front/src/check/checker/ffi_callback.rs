@@ -108,16 +108,10 @@ impl Checker {
             .ok_or_else(|| Error::TypeError(format!("internal error: `{}` is not a callback type", fn_ty)))?;
         let key = sig.key();
         self.callback_keys.borrow_mut().insert(key.clone());
-        let form = self.callback_address_form(heap, &key)?;
-        Ok(Checked::new(form, Type::Ptr))
-    }
-
-    /// `(call PATH (REPR) (str KEY))` to the address builtin — the entry's
-    /// address, as a raw word.
-    fn callback_address_form(&self, heap: &mut Heap, key: &str) -> Result<Value, Error> {
-        let arg = Checked::new(forms::str_lit_form(heap, key)?, Type::Str);
-        let form = self.info.call_form(heap, &Path::std(ADDRESS_BUILTIN), &[arg])?;
-        Ok(forms::rooted(heap, form))
+        // `(call PATH (REPR) (str KEY))` to the address builtin — the
+        // entry's address, as a raw word.
+        let arg = self.str_literal(heap, &key)?;
+        Checked::of(heap, &self.info, Node::Call { path: Path::std(ADDRESS_BUILTIN), args: vec![arg] }, Type::Ptr)
     }
 
     /// A path for a lifted definition, in the current namespace, that names
@@ -235,7 +229,7 @@ impl Checker {
         let mut refs: HashMap<&str, (Vec<String>, Vec<String>)> = HashMap::new();
         for (name, params, _, body) in defs {
             let bound: HashSet<SymRef> = params.iter().map(|(n, _)| typelisp_mem::symbols::intern(n)).collect();
-            let free = crate::check::freevars::free_vars(heap, body, &bound, &HashSet::new())?;
+            let free = crate::check::freevars::free_vars(heap, &Checked::forms(body), &bound, &HashSet::new())?;
             let (sibs, caps): (Vec<String>, Vec<String>) = free
                 .iter()
                 .map(|s| s.name().to_string())
@@ -278,15 +272,13 @@ impl Checker {
             g_params.iter().enumerate().map(|(i, (_, t))| (format!(" a{}", i), t.clone())).collect();
         let mut args = Vec::with_capacity(params.len());
         for (n, t) in &params {
-            args.push(Checked::new(forms::var_form(heap, n)?, t.clone()));
+            args.push(Checked::of(heap, &self.info, Node::Local { name: n.as_str().into() }, t.clone())?);
         }
-        let callee = forms::var_form(heap, &p.name)?;
-        let call = self.info.apply_form(heap, callee, g_ret, &args)?;
-        let call = forms::rooted(heap, call);
+        let callee = Checked::of(heap, &self.info, Node::Local { name: p.name.as_str().into() }, fn_ty.clone())?;
+        let call = Checked::of(heap, &self.info, Node::Apply { callee: Box::new(callee), ret: g_ret.clone(), args }, g_ret.clone())?;
         let kept: Vec<LabelsDef> = defs.iter().filter(|(n, _, _, _)| reached.contains(&n.as_str())).cloned().collect();
-        let block = self.info.labels_form(heap, &kept, &[call])?;
-        let block = forms::rooted(heap, block);
-        let form = self.info.defun_form(heap, &p.lifted, &params, g_ret, &[block])?;
+        let block = Checked::of(heap, &self.info, Node::Labels { defs: kept, body: vec![call] }, g_ret.clone())?;
+        let form = self.info.defun_form(heap, &p.lifted, &params, g_ret, &[block.form])?;
         let form = forms::rooted(heap, form);
         self.lifted.borrow_mut().push(LiftedCallback { path: p.lifted.clone(), sig: Self::lifted_sig(&fn_ty), form });
         Ok(())

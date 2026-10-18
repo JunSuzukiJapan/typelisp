@@ -59,32 +59,162 @@ pub struct Checked {
 /// `form` is what this node's lowering uses.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Node {
-    /// An expression of a kind not moved to the tree yet: only its lowered
-    /// `form` exists, which checking cannot look into.
-    Lowered,
     /// `(if cond then else)`.
     If { cond: Box<Checked>, then: Box<Checked>, els: Box<Checked> },
     /// `(panic message)`.
     Panic { message: Box<Checked> },
+    /// A literal: its core tag (`int`, `int-any-width`, `bignum`, `ratio`,
+    /// `float-any-width`, `bool`, `char`, `str`, `sym`, `unit`) and its value,
+    /// none for `unit`. The tag is the node's, decided from the literal's
+    /// type, not something lowering could read off the value.
+    Literal { tag: u32, value: Option<Value> },
+    /// `(quote datum)`, also a self-evaluating object of no reader syntax.
+    Quote { datum: Value },
+    /// A local binding.
+    Local { name: Box<str> },
+    /// A module's global variable, by its full path, read at its declared
+    /// type `ty`.
+    Global { path: crate::Path, ty: Type },
+    /// A named free function reified as a value, with the parameter types of
+    /// the function it names.
+    FnRef { path: crate::Path, params: Vec<Type> },
+    /// A method of `owner` reified as a value: `method` is the name it is
+    /// registered under (a specialization's own name for a generic one).
+    MethodRef { owner: crate::Path, method: Box<str>, params: Vec<Type>, ret: Type },
+    /// A call of the free function at `path`.
+    Call { path: crate::Path, args: Vec<Checked> },
+    /// A value of variant `variant` of `owner<targs>`; `field_tys` are the
+    /// variant's declared field types with `targs` substituted in.
+    Construct { owner: crate::Path, targs: Vec<Type>, variant: usize, mutable: bool, field_tys: Vec<Type>, args: Vec<Checked> },
+    /// A niched `Option` put into the box a `Sexpr` holds it as; `key` is the
+    /// `Option`'s runtime identity.
+    BoxOption { key: Box<str>, value: Box<Checked> },
+    /// The concrete value inside a trait object, as a `Sexpr` datum.
+    DynValue { value: Box<Checked> },
+    /// A call of the method `method` of `owner` (`args[0]` is the receiver
+    /// when `instance`), returning `ret`. A builtin's call over literal
+    /// arguments lowers to its value.
+    Assoc { owner: crate::Path, method: Box<str>, instance: bool, ret: Type, args: Vec<Checked> },
+    /// A trait object re-made around the table of the trait `to`.
+    DynUpcast { to: crate::Path, value: Box<Checked> },
+    /// The body of a generic function where `what` needs the type arguments:
+    /// never executed, since every specialization checks the site again.
+    ErasedGeneric { what: Box<str> },
+    /// `value` boxed as a trait object of `trait_path`; `key` is its concrete
+    /// type's identity, `slots` and `supers` the vtables.
+    DynNew {
+        key: Box<str>,
+        trait_path: crate::Path,
+        slots: Vec<(crate::Path, String)>,
+        supers: Vec<(crate::Path, Vec<(crate::Path, String)>)>,
+        value: Box<Checked>,
+    },
+    /// A call through a trait object's vtable slot `slot`; `targets` are the
+    /// bodies it may reach.
+    DynCall { trait_path: crate::Path, method: Box<str>, slot: usize, targets: Vec<(crate::Path, String)>, args: Vec<Checked> },
+    /// `binds` in scope for `body`, which runs in order; each binding is its
+    /// name, its type and its value. With no bindings this is `progn`.
+    Let { binds: Vec<(String, Type, Checked)>, body: Vec<Checked> },
+    /// An assignment to the local `name`.
+    Set { name: Box<str>, value: Box<Checked> },
+    /// An assignment to the global at `path`, declared `ty`.
+    SetGlobal { path: crate::Path, ty: Type, value: Box<Checked> },
+    /// Applying the function value `callee`, which returns `ret`.
+    Apply { callee: Box<Checked>, ret: Type, args: Vec<Checked> },
+    /// An anonymous function.
+    Lambda { params: Vec<(String, Type)>, ret: Type, body: Vec<Checked> },
+    /// Local functions in scope for each other and for `body`.
+    Labels { defs: Vec<super::checker::LabelsDef>, body: Vec<Checked> },
+    /// `(loop body...)`, whose exits deliver a `ty`.
+    Loop { ty: Type, body: Vec<Checked> },
+    /// Leaving the nearest loop with no value.
+    Break,
+    /// Leaving the nearest loop, with `value` or none.
+    Return { value: Option<Box<Checked>> },
+    /// A named escape target of value `ty`.
+    Block { name: Box<str>, ty: Type, body: Box<Checked> },
+    /// Leaving the enclosing block `name`, with `value` or none.
+    ReturnFrom { name: Box<str>, value: Option<Box<Checked>> },
+    /// `body`, or the value a `throw` to the symbol `tag` delivers; `carried`
+    /// is the type the tag carries.
+    Catch { tag: Value, carried: Type, body: Box<Checked> },
+    /// Leaving for the nearest `catch` on the symbol `tag` with `value`.
+    Throw { tag: Value, value: Box<Checked> },
+    /// `protected`, then `cleanup` on every way out of it.
+    UnwindProtect { protected: Box<Checked>, cleanup: Box<Checked> },
+    /// An `int`'s raw machine word.
+    UntagInt { value: Box<Checked> },
+    /// Waiting until one of the channel operations `arms` can go, and running
+    /// that arm. Its operands are locals bound around it.
+    Select { arms: Vec<SelectArm> },
+    /// `(match scrut arms...)`: the first arm whose pattern matches runs.
+    Match { scrut: Box<Checked>, arms: Vec<(super::resolved::Pattern, Vec<Checked>)> },
+    /// A niched `Option` of type `ty` holding `value`: `value` as a tagged
+    /// field word, with no box.
+    SomeOf { ty: Type, value: Box<Checked> },
+    /// Running `call` as a task or a thread (`tag`); `key` is the identity
+    /// of the handle it answers.
+    Spawn { tag: u32, key: Box<str>, call: Box<Checked> },
+    /// `(compile name)`.
+    Compile { target: super::resolved::CompileTarget },
+    /// `(trace ...)` or `(untrace ...)` (`tag`).
+    Trace { tag: u32, targets: Vec<super::resolved::CompileTarget> },
+    /// `(disassemble name)`, as LLVM IR when `llvm_ir`.
+    Disassemble { target: super::resolved::CompileTarget, llvm_ir: bool },
+    /// `(step form)`.
+    Step { inner: Box<Checked> },
+    /// What stands for a subexpression that failed to check, written at
+    /// `loc`.
+    Hole { loc: Option<Loc> },
+    /// An `&optional`/`&key` default, checked once with its definition and
+    /// copied into each call that omits the argument.
+    Default { form: crate::owned_form::OwnedForm },
+}
+
+/// One arm of a [`Node::Select`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum SelectArm {
+    /// `((var (recv chan)) body...)`; `key` is the identity of the
+    /// `Option` `var` is bound to.
+    Recv { var: Box<str>, key: Box<str>, chan: Checked, body: Checked },
+    /// `((send chan value) body...)`; `kind` is how the value is stored.
+    Send { kind: i64, chan: Checked, value: Checked, body: Checked },
+    /// `(:else body...)`.
+    Else { body: Checked },
+}
+
+/// A tree is as deep as the expression it was analyzed from, and dropping it
+/// visits it recursively: each level grows the stack when it runs short, as
+/// the walks that built it do.
+impl Drop for Checked {
+    fn drop(&mut self) {
+        let node = std::mem::replace(&mut self.node, Node::Break);
+        typelisp_mem::grow_stack(move || drop(node));
+    }
 }
 
 impl Checked {
-    /// An expression of a kind not moved to the tree yet ([`Node::Lowered`]).
-    pub fn new(form: Value, ty: Type) -> Checked {
-        Checked { form, ty, node: Node::Lowered }
-    }
-
     /// The same expression, seen at type `ty`: a widening that needs no
     /// runtime work (a `Symbol` where a `Sexpr` is expected, ...). The node
     /// and the form stay as they are.
-    pub fn retyped(self, ty: Type) -> Checked {
-        Checked { ty, ..self }
+    pub fn retyped(mut self, ty: Type) -> Checked {
+        self.ty = ty;
+        self
+    }
+
+    /// The lowered forms of `cs`, in order.
+    pub fn forms(cs: &[Checked]) -> Vec<Value> {
+        cs.iter().map(|c| c.form).collect()
     }
 
     /// The expression `node` stands for, of type `ty`, with its form lowered
     /// from it now.
-    pub fn of(heap: &mut Heap, node: Node, ty: Type) -> Result<Checked, Error> {
-        let form = super::lower::lower(heap, &node)?;
+    pub(super) fn of(heap: &mut Heap, info: &super::info::Info, node: Node, ty: Type) -> Result<Checked, Error> {
+        // Rooted until the end of the top-level form, as every form `check_at`
+        // hands back is: the parent that holds it allocates before it is
+        // built in.
+        let form = super::lower::lower(heap, info, &node)?;
+        heap.push_root(form);
         Ok(Checked { form, ty, node })
     }
 }

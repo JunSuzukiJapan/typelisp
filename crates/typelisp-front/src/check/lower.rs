@@ -14,7 +14,7 @@ use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, Value};
 use crate::nominal_path;
 use crate::types::{Path, Type};
 use super::checker::*;
-use super::core::{self, Checked, Items, Node};
+use super::core::{self, Checked, Items, Node, SelectArm};
 use super::info::Info;
 use super::registry::Variant;
 use super::repr::Repr;
@@ -22,11 +22,125 @@ use super::resolved::Pattern;
 use super::{fold, forms};
 
 /// `node`'s core form.
-pub(super) fn lower(heap: &mut Heap, node: &Node) -> Result<Value, Error> {
+pub(super) fn lower(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error> {
     match node {
-        Node::Lowered => unreachable!("a `Lowered` expression is built with its form"),
         Node::If { cond, then, els } => lower_if(heap, cond, then, els),
         Node::Panic { message } => forms::panic_form(heap, message.form),
+        Node::Literal { tag, value } => match value {
+            Some(v) => core::tagged(heap, *tag, &[*v]),
+            None => core::tagged(heap, *tag, &[]),
+        },
+        Node::Quote { datum } => forms::quote_form(heap, *datum),
+        Node::Local { name } => forms::var_form(heap, name),
+        Node::Global { path, ty } => info.global_form(heap, path, ty),
+        Node::FnRef { path, params } => info.fnref_form(heap, path, params),
+        Node::MethodRef { owner, method, params, ret } => info.methodref_form(heap, owner, method, params, ret),
+        Node::Call { path, args } => info.call_form(heap, path, args),
+        Node::Construct { owner, targs, variant, mutable, field_tys, args } => {
+            let forms: Vec<Value> = args.iter().map(|a| a.form).collect();
+            info.construct_form(heap, owner, targs, *variant, *mutable, field_tys, &forms)
+        }
+        Node::BoxOption { key, value } => forms::box_option_form(heap, key, value.form),
+        Node::DynValue { value } => forms::dyn_value_form(heap, value.form),
+        Node::Assoc { owner, method, instance, ret, args } => lower_assoc(heap, info, owner, method, *instance, ret, args),
+        Node::DynUpcast { to, value } => forms::dyn_upcast_form(heap, to, value.form),
+        Node::ErasedGeneric { what } => forms::erased_generic_form(heap, what),
+        Node::DynNew { key, trait_path, slots, supers, value } => {
+            info.dyn_new_form(heap, key, trait_path, slots, supers, &value.ty, value.form)
+        }
+        Node::DynCall { trait_path, method, slot, targets, args } => {
+            info.dyn_call_form(heap, trait_path, method, *slot, targets, args)
+        }
+        Node::Let { binds, body } => {
+            let binds: Vec<(String, Type, Value)> = binds.iter().map(|(n, t, c)| (n.clone(), t.clone(), c.form)).collect();
+            info.let_form(heap, &binds, &Checked::forms(body))
+        }
+        Node::Set { name, value } => forms::set_form(heap, name, value.form),
+        Node::SetGlobal { path, ty, value } => info.set_global_form(heap, path, ty, value.form),
+        Node::Apply { callee, ret, args } => info.apply_form(heap, callee.form, ret, args),
+        Node::Lambda { params, ret, body } => info.lambda_form(heap, params, ret, &Checked::forms(body)),
+        Node::Labels { defs, body } => info.labels_form(heap, defs, &Checked::forms(body)),
+        Node::Loop { ty, body } => {
+            let repr = info.repr_form(heap, ty)?;
+            let mut s = RootScope::new(heap);
+            s.push_root(repr);
+            forms::loop_form(&mut s, repr, &Checked::forms(body))
+        }
+        Node::Break => forms::break_form(heap),
+        Node::Return { value } => forms::return_form(heap, value.as_ref().map(|v| v.form)),
+        Node::Block { name, ty, body } => {
+            let repr = info.repr_form(heap, ty)?;
+            let mut s = RootScope::new(heap);
+            s.push_root(repr);
+            forms::block_form(&mut s, name, body.form, repr)
+        }
+        Node::ReturnFrom { name, value } => forms::return_from_form(heap, name, value.as_ref().map(|v| v.form)),
+        Node::Catch { tag, carried, body } => {
+            let tag = forms::quote_form(heap, *tag)?;
+            let mut s = RootScope::new(heap);
+            s.push_root(tag);
+            let repr = info.repr_form(&mut s, carried)?;
+            s.push_root(repr);
+            forms::catch_form(&mut s, tag, body.form, repr)
+        }
+        Node::Throw { tag, value } => {
+            let tag = forms::quote_form(heap, *tag)?;
+            let mut s = RootScope::new(heap);
+            s.push_root(tag);
+            let repr = info.repr_form(&mut s, &value.ty)?;
+            s.push_root(repr);
+            forms::throw_form(&mut s, tag, value.form, repr)
+        }
+        Node::UntagInt { value } => untag_int_form(heap, value.form),
+        Node::Match { scrut, arms } => {
+            // `pattern_form` roots each node it returns, so the ones built
+            // earlier survive the allocations the later ones make.
+            let mut lowered: Vec<(Value, Vec<Value>)> = Vec::with_capacity(arms.len());
+            for (pat, body) in arms {
+                let pat_form = info.pattern_form(heap, pat)?;
+                lowered.push((pat_form, Checked::forms(body)));
+            }
+            info.match_form(heap, scrut.form, &scrut.ty, &lowered)
+        }
+        Node::SomeOf { ty, value } => {
+            let repr = info.repr(ty);
+            let payload = repr.niche_payload().expect("a `SomeOf` is built only for a niched `Option`");
+            forms::some_of_form(heap, payload, value.form)
+        }
+        Node::Spawn { tag, key, call } => {
+            let ret = info.repr_form(heap, &call.ty)?;
+            let mut s = RootScope::new(heap);
+            s.push_root(ret);
+            forms::spawn_form(&mut s, *tag, ret, key, call.form)
+        }
+        Node::Compile { target } => forms::compile_fn_form(heap, target),
+        Node::Trace { tag, targets } => forms::trace_form(heap, *tag, targets),
+        Node::Disassemble { target, llvm_ir } => forms::disassemble_fn_form(heap, target, *llvm_ir),
+        Node::Step { inner } => core::tagged(heap, wk::STEP, &[inner.form]),
+        Node::Hole { loc } => forms::hole_form(heap, loc.clone()),
+        Node::Default { form } => crate::owned_form::owned_to_value(heap, form),
+        Node::Select { arms } => {
+            let mut s = RootScope::new(heap);
+            let mut forms = Vec::with_capacity(arms.len());
+            for arm in arms {
+                let form = match arm {
+                    SelectArm::Recv { var, key, chan, body } => forms::select_recv_arm(&mut s, var, key, chan.form, body.form)?,
+                    SelectArm::Send { kind, chan, value, body } => {
+                        forms::select_send_arm(&mut s, *kind, chan.form, value.form, body.form)?
+                    }
+                    SelectArm::Else { body } => forms::select_else_arm(&mut s, body.form)?,
+                };
+                s.push_root(form);
+                forms.push(form);
+            }
+            forms::select_form(&mut s, &forms)
+        }
+        Node::UnwindProtect { protected, cleanup } => {
+            let repr = info.repr_form(heap, &protected.ty)?;
+            let mut s = RootScope::new(heap);
+            s.push_root(repr);
+            forms::unwind_protect_form(&mut s, protected.form, cleanup.form, repr)
+        }
     }
 }
 
@@ -39,6 +153,27 @@ fn lower_if(heap: &mut Heap, cond: &Checked, then: &Checked, els: &Checked) -> R
         Some(false) => Ok(els.form),
         None => forms::if_form(heap, cond.form, then.form, els.form),
     }
+}
+
+/// A scalar builtin over literal arguments has one possible value, so the
+/// call lowers to that value's literal node (`fold`'s module doc says why
+/// here, and why the evaluator's own arithmetic computes it).
+fn lower_assoc(
+    heap: &mut Heap,
+    info: &Info,
+    owner: &Path,
+    method: &str,
+    instance: bool,
+    ret: &Type,
+    args: &[Checked],
+) -> Result<Value, Error> {
+    let builtin = info.reg.type_def(owner).and_then(|d| d.assoc.get(method)).is_some_and(|af| af.builtin);
+    if builtin {
+        if let Some(folded) = fold::fold_builtin_method(heap, owner, method, args, ret)? {
+            return Ok(folded);
+        }
+    }
+    info.assoc_form(heap, owner, method, instance, ret, args)
 }
 
 /// The core-form builders: one per tag in `tests/core_vocabulary_test.rs`.
@@ -81,8 +216,6 @@ impl Info {
     // consumers' own readers. Every one of them builds through `core::Items`,
     // which keeps each finished field rooted until the node is assembled — see
     // `check::core`'s module doc comment for why that is not optional.
-
-
 
     /// `(global PATH REPR)` — `PATH` is the global the checker resolved the
     /// name to, and every consumer reads it as is: nothing after checking
@@ -587,6 +720,7 @@ impl Info {
         let mut f = Items::new(heap);
         let mut ds = Items::new(f.heap());
         for (name, params, ret, def_body) in defs {
+            let def_body = Checked::forms(def_body);
             let mut d = Items::new(ds.heap());
             let sym = d.heap().intern_symbol(name);
             d.push(sym);
@@ -645,16 +779,6 @@ impl Info {
         f.push(value);
         f.finish(wk::DYN_NEW)
     }
-
-
-
-
-
-
-
-
-
-
 
     /// `(dyn-call TRAIT SYM SLOT ((TYPE SYM)...) (REPR...) ARG...)` — a call
     /// through a trait object's vtable, `args[0]` the receiver.

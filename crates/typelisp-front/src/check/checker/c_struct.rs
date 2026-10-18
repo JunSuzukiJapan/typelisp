@@ -407,19 +407,17 @@ impl Checker {
                 ty
             )));
         }
-        let form = self.info.let_form(heap, &[], &body)?;
+        let body = Checked::of(heap, &self.info, Node::Let { binds: Vec::new(), body }, ty.clone())?;
         if !allocates {
-            return Ok(Checked::new(form, ty));
+            return Ok(body);
         }
-        let form = forms::rooted(heap, form);
-        let open = self.c_call(heap, b::ARENA_OPEN, &[])?;
-        let arena_var = forms::var_form(heap, b::ARENA_VAR)?;
-        let close = self.c_call(heap, b::ARENA_CLOSE, &[Checked::new(arena_var, Type::CULong)])?;
-        let repr = self.info.repr_form(heap, &ty)?;
-        let protected = forms::unwind_protect_form(heap, form, close, repr)?;
-        let protected = forms::rooted(heap, protected);
-        let wrapped = self.info.let_form(heap, &[(b::ARENA_VAR.to_string(), Type::CULong, open)], &[protected])?;
-        Ok(Checked::new(wrapped, ty))
+        let open = self.c_call(heap, b::ARENA_OPEN, vec![], Type::CULong)?;
+        let arena_var = self.c_arena_var(heap)?;
+        let close = self.c_call(heap, b::ARENA_CLOSE, vec![arena_var], Type::Unit)?;
+        let node = Node::UnwindProtect { protected: Box::new(body), cleanup: Box::new(close) };
+        let protected = Checked::of(heap, &self.info, node, ty.clone())?;
+        let node = Node::Let { binds: vec![(b::ARENA_VAR.to_string(), Type::CULong, open)], body: vec![protected] };
+        Checked::of(heap, &self.info, node, ty)
     }
 
     /// Runs `f` — the checking of a function body — with no owning `unsafe`
@@ -483,10 +481,15 @@ impl Checker {
 
     // ---- expressions -------------------------------------------------------------
 
-    /// A call to one of the internal builtins.
-    fn c_call(&self, heap: &mut Heap, name: &str, args: &[Checked]) -> Result<Value, Error> {
-        let form = self.info.call_form(heap, &Path::std(name), args)?;
-        Ok(forms::rooted(heap, form))
+    /// A call to one of the internal builtins, which answers a `ret`. They
+    /// are not in the registry (`crate::c_struct`): no program can name one.
+    fn c_call(&self, heap: &mut Heap, name: &str, args: Vec<Checked>, ret: Type) -> Result<Checked, Error> {
+        Checked::of(heap, &self.info, Node::Call { path: Path::std(name), args }, ret)
+    }
+
+    /// The `unsafe`'s arena, a local of its own.
+    fn c_arena_var(&self, heap: &mut Heap) -> Result<Checked, Error> {
+        Checked::of(heap, &self.info, Node::Local { name: b::ARENA_VAR.into() }, Type::CULong)
     }
 
     /// A raw-word constant argument.
@@ -494,23 +497,18 @@ impl Checker {
         self.check(heap, interp, &Env::new(), Value::Int(n as i64), Some(&Type::I32))
     }
 
-    fn c_text(&self, heap: &mut Heap, text: &str) -> Result<Checked, Error> {
-        let form = forms::str_lit_form(heap, text)?;
-        Ok(Checked::new(forms::rooted(heap, form), Type::Str))
-    }
-
-    /// `(" c-ptr-check" FORM KEY)` — `form`, a typed pointer to `pointee`
+    /// `(" c-ptr-check" FORM KEY)` — `value`, a typed pointer to `pointee`
     /// that came from C, once it is known to point into live memory.
-    pub(super) fn c_checked_from_c(&self, heap: &mut Heap, form: Value, pointee: &Type) -> Result<Value, Error> {
-        let key = self.c_text(heap, &typelisp_mem::ConcreteNames::type_key(pointee))?;
-        self.c_call(heap, b::PTR_CHECK, &[Checked::new(form, Type::Ptr), key])
+    pub(super) fn c_checked_from_c(&self, heap: &mut Heap, value: Checked, pointee: &Type) -> Result<Checked, Error> {
+        let key = self.str_literal(heap, &typelisp_mem::ConcreteNames::type_key(pointee))?;
+        let ty = value.ty.clone();
+        self.c_call(heap, b::PTR_CHECK, vec![value.retyped(Type::Ptr), key], ty)
     }
 
     /// An `int` argument, as the raw word the builtin reads.
     fn c_int_arg(&self, heap: &mut Heap, interp: &dyn MacroExpander, env: &Env, v: Value, loc: Option<&Loc>) -> Result<Checked, Error> {
         let n = self.check_at(heap, interp, env, v, Some(&Type::Int), loc.cloned())?;
-        let form = untag_int_form(heap, n.form)?;
-        Ok(Checked::new(forms::rooted(heap, form), Type::I32))
+        Checked::of(heap, &self.info, Node::UntagInt { value: Box::new(n) }, Type::I32)
     }
 
     /// A typed pointer argument.
@@ -562,11 +560,10 @@ impl Checker {
             None => self.c_word(heap, interp, 1)?,
         };
         let desc = self.c_desc(&elem)?;
-        let desc = self.c_text(heap, &desc)?;
-        let arena = Checked::new(forms::var_form(heap, b::ARENA_VAR)?, Type::CULong);
+        let desc = self.str_literal(heap, &desc)?;
+        let arena = self.c_arena_var(heap)?;
         self.c_arena.set(Some(true));
-        let form = self.c_call(heap, b::ALLOC, &[arena, count, desc])?;
-        Ok(Checked::new(form, ptr_ty))
+        self.c_call(heap, b::ALLOC, vec![arena, count, desc], ptr_ty)
     }
 
     /// `(c-ref p i)`: a pointer to the `i`th element from `p`, which must
@@ -587,9 +584,8 @@ impl Checker {
         let i = self.c_int_arg(heap, interp, env, args[1], nth_loc(arg_locs, 1).as_ref())?;
         let (size, _) = self.c_layout(&elem)?;
         let size = self.c_word(heap, interp, size)?;
-        let key = self.c_text(heap, &typelisp_mem::ConcreteNames::type_key(&elem))?;
-        let form = self.c_call(heap, b::INDEX, &[p, i, size, key])?;
-        Ok(Checked::new(form, ty))
+        let key = self.str_literal(heap, &typelisp_mem::ConcreteNames::type_key(&elem))?;
+        self.c_call(heap, b::INDEX, vec![p, i, size, key], ty)
     }
 
     /// The value a load of `ty` at `addr + offset` answers.
@@ -597,19 +593,17 @@ impl Checker {
         if let Type::CStruct(_) = ty {
             // A struct held by value: its address, not a load.
             let off = self.c_word(heap, interp, offset)?;
-            let form = self.c_call(heap, b::OFFSET, &[addr, off])?;
-            return Ok(Checked::new(form, Type::PtrTo(Box::new(ty.clone()))));
+            return self.c_call(heap, b::OFFSET, vec![addr, off], Type::PtrTo(Box::new(ty.clone())));
         }
         let kind = c_kind(ty).ok_or_else(|| Error::TypeError(format!("internal error: no load for `{}`", ty)))?;
         let off = self.c_word(heap, interp, offset)?;
         let kind_arg = self.c_word(heap, interp, kind as u64)?;
-        let form = self.c_call(heap, b::LOAD, &[addr, off, kind_arg])?;
-        let form = match ty {
+        let loaded = self.c_call(heap, b::LOAD, vec![addr, off, kind_arg], ty.clone())?;
+        match ty {
             // A pointer read back from memory C may have written.
-            Type::PtrTo(pointee) => self.c_checked_from_c(heap, form, pointee)?,
-            _ => form,
-        };
-        Ok(Checked::new(form, ty.clone()))
+            Type::PtrTo(pointee) => self.c_checked_from_c(heap, loaded, pointee),
+            _ => Ok(loaded),
+        }
     }
 
     /// Stores `value` (already checked against `ty`) at `addr + offset`, and
@@ -627,13 +621,13 @@ impl Checker {
             Error::TypeError(format!("setf: a field holding a struct by value (`{}`) cannot be assigned as a whole — assign its fields", ty))
         })?;
         const TEMP: &str = " c-value";
-        let temp = forms::var_form(heap, TEMP)?;
+        let temp = Checked::of(heap, &self.info, Node::Local { name: TEMP.into() }, ty.clone())?;
         let off = self.c_word(heap, interp, offset)?;
         let kind_arg = self.c_word(heap, interp, kind as u64)?;
-        let store = self.c_call(heap, b::STORE, &[addr, off, kind_arg, Checked::new(temp, ty.clone())])?;
-        let answer = forms::var_form(heap, TEMP)?;
-        let form = self.info.let_form(heap, &[(TEMP.to_string(), ty.clone(), value.form)], &[store, answer])?;
-        Ok(Checked::new(form, ty.clone()))
+        let store = self.c_call(heap, b::STORE, vec![addr, off, kind_arg, temp], Type::Unit)?;
+        let answer = Checked::of(heap, &self.info, Node::Local { name: TEMP.into() }, ty.clone())?;
+        let node = Node::Let { binds: vec![(TEMP.to_string(), ty.clone(), value)], body: vec![store, answer] };
+        Checked::of(heap, &self.info, node, ty.clone())
     }
 
     /// `(c-deref p)`: the scalar `p` points at.
