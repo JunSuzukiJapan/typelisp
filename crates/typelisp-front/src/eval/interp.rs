@@ -5055,4 +5055,14 @@ impl typelisp_read::reader::ReadEval for Interp {
     ) -> Result<(Value, usize), String> {
         self.call_reader_macro_fn(heap, f, ch, rest)
     }
+
+    /// The session's checker registers what the `use` names; a session
+    /// driven this way (the REPL) loads no files.
+    fn bring_in(&self, heap: &mut Heap, ns: typelisp_mem::NsId, path: &[String]) -> Result<(), String> {
+        let Some(checker) = self.checker.as_ref() else {
+            return Err(format!("`(use {})` needs a checker handle, and this session has none", path.join("::")));
+        };
+        checker.borrow().register_use_for_reading(heap, ns, path);
+        Ok(())
+    }
 }

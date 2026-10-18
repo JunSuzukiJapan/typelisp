@@ -71,6 +71,17 @@ fn show(h: &Heap, v: Value) -> String {
 
 fn read1(src: &str) -> (Heap, Value) {
     let mut h = Heap::with_capacity(4096);
+    // What the examples' paths read through: the modules `std::process` and
+    // `geometry`, and a type `point` with a member `new`. A path is read one
+    // segment at a time through what the session has.
+    {
+        use typelisp::mem::symbols::{intern_in, ns_of};
+        let mut names = h.names();
+        names.declare_module(ns_of(&["std".to_string(), "process".to_string()]));
+        names.declare_module(ns_of(&["geometry".to_string()]));
+        let point = intern_in(typelisp::NsId::ROOT, "point");
+        names.declare_member(point, intern_in(typelisp::NsId::ROOT, "new"));
+    }
     let r = Reader::new();
     let v = r.read(&mut h, src).expect("read failed");
     (h, v)

@@ -21,9 +21,10 @@ use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value};
 /// helper's own `Heap`, which dies with the call.
 fn check(src: &str) -> Result<(String, Vec<String>), Error> {
     let mut h = Heap::with_capacity(8192);
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     let mut last = None;
     for v in vs {
@@ -48,9 +49,10 @@ fn check(src: &str) -> Result<(String, Vec<String>), Error> {
 /// return the last value produced.
 fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(8192);
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
@@ -73,9 +75,10 @@ fn eval_ok(src: &str) -> Value {
 /// plan's Stage 2) rather than its own `RtValue` variant.
 fn run_with_heap(src: &str) -> Result<(Heap, Value), EvalError> {
     let mut h = Heap::with_capacity(8192);
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
@@ -127,8 +130,11 @@ fn a_struct_has_no_constructor_under_a_bare_name() {
 /// and without one the error says where to write it.
 #[test]
 fn a_struct_has_no_new_until_its_impl_writes_one() {
-    let msg = format!("{:?}", check("(defstruct point (x int) (y int)) (point::new 1 2)").unwrap_err());
-    assert!(msg.contains("has no static method `new`") && msg.contains("(impl point"), "{}", msg);
+    // `point`'s table holds its fields by now, and no `new`: the path is
+    // already unreadable.
+    let mut h = Heap::with_capacity(8192);
+    let msg = format!("{:?}", Reader::new().read_all(&mut h, "(defstruct point (x int) (y int)) (point::new 1 2)").unwrap_err());
+    assert!(msg.contains("type `point` has no member `new`"), "{}", msg);
     let src = "(defstruct point (x int) (y int)) \
                (impl point (new ((x int)) point (make-instance 'point :x x :y 0))) \
                (y (point::new 1))";
@@ -160,11 +166,12 @@ fn redefining_a_struct_type_warns_by_default() {
     // `tests/redefine_test.rs`) — exercised here through `defstruct`'s own
     // `check_redef("type", ...)` call.
     let mut h = Heap::with_capacity(8192);
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let r = Reader::new();
     let vs = r
         .read_all(&mut h, "(defstruct point (x int)) (defstruct point (x int) (y int))")
         .expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     for v in vs {
         chk.check_form(&mut h, &interp, v).expect("check failed");
@@ -324,6 +331,7 @@ fn method_redefinition_on_a_struct_warns_by_default() {
         )
         .expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     for v in vs {
         chk.check_form(&mut h, &interp, v).expect("check failed");

@@ -70,6 +70,9 @@ use typelisp::{Heap, Reader};
 fn round_trips(src: &str) {
     let mut h = Heap::with_capacity(1 << 14);
     h.set_gc_stress(true);
+    // The examples name their definitions in a module `m`, which this
+    // session is told it has, so `m::f` reads as the path it is.
+    h.names().declare_module(typelisp::mem::symbols::ns_of(&["m".to_string()]));
     let r = Reader::new();
     let mut vs = r.read_all(&mut h, src).expect("read failed");
     assert_eq!(vs.len(), 1, "expected exactly one form in {:?}", src);

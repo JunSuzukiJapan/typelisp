@@ -14,9 +14,10 @@ use typelisp::{Checker, Error, Heap, Interp, Path, Reader, Type};
 /// output for the same reason it is on the checker — see `Checker::expr_type`.
 fn program(src: &str) -> Result<(String, Option<Type>), Error> {
     let mut h = Heap::with_capacity(8192);
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     let mut tag = String::new();
     for v in vs {

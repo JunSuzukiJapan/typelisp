@@ -28,14 +28,15 @@ fn run_inner(src: &str, with_island: bool) -> Result<Value, Error> {
     let mut h = Heap::with_capacity(1 << 18);
     let r = Reader::new();
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let mut interp = Interp::new();
     if with_island {
         load_prelude(&mut h, &mut chk, &mut interp);
         load_compiler(&mut h, &mut chk, &mut interp);
     }
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
@@ -64,10 +65,11 @@ fn eval_string(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 18);
     let r = Reader::new();
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
@@ -91,11 +93,12 @@ fn expect_err(src: &str) -> String {
 fn warnings_of(src: &str) -> Vec<String> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut out = Vec::new();
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         out.extend(chk.take_warnings());
         interp.exec(&mut h, tl).expect("eval failed");

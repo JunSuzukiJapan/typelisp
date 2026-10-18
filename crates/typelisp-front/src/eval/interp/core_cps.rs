@@ -3092,6 +3092,9 @@ mod tests {
 
     fn read1(heap: &mut Heap, src: &str) -> Value {
         let r = Reader::new();
+        // The built-in helpers live in `std::%internal`, a module of every
+        // session the registry is published into; there is no registry here.
+        heap.names().declare_module(typelisp_mem::symbols::ns_of(&["std".to_string(), crate::INTERNAL_MODULE.to_string()]));
         // Core IR, read in the core IR's module so its tags are the IR's own.
         let mut vs: Vec<Value> = r
             .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)

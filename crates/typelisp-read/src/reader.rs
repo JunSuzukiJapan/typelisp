@@ -126,6 +126,17 @@ pub trait ReadEval {
         ch: char,
         rest: &str,
     ) -> Result<(Value, usize), String>;
+
+    /// Bring in what a `(use PATH)` written in the module `ns` names, now:
+    /// load the file behind it if one is and nothing has loaded it yet, and
+    /// register what it brings in in the session's table of names
+    /// (`Heap::names`) — so the forms read after it, the rest of a
+    /// `(module ...)` body included, can read a path through it. `path` is
+    /// the `use`'s path as written, segment by segment.
+    ///
+    /// Asked only for a `use` read as a top-level form, and only when the
+    /// path does not already lead to a module or type the session has.
+    fn bring_in(&self, heap: &mut Heap, ns: NsId, path: &[String]) -> Result<(), String>;
 }
 
 /// Everything a read carries besides the cursor: which `#+` features are on,
@@ -139,6 +150,28 @@ struct Ctx<'a> {
     features: &'a Features,
     ns: NsId,
     eval: Option<&'a dyn ReadEval>,
+    /// How a `::` path read right here is read — see [`PathMode`].
+    paths: PathMode,
+    /// Whether what is read here is a form a program runs at its top level:
+    /// a top-level form, or a form of a `(module ...)` body. Only there is
+    /// `(defstruct point ...)` a definition and `(use m)` an import; the same
+    /// list inside a quotation is data.
+    toplevel: bool,
+}
+
+/// How a `::` path is read.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PathMode {
+    /// A reference: stepped through the module tree and the type tables
+    /// (`SessionNames::read_path`), or `(%value-member p x)` after a value.
+    Resolve,
+    /// The `PATH` of `(module PATH` / `(in-module PATH`, which names the
+    /// module it opens: each segment is a child module of the one before,
+    /// made if new.
+    Declare,
+    /// The path a `use` names, which may be a module not loaded yet: each
+    /// segment is read in the current module, and the `use` resolves it.
+    Raw,
 }
 
 pub struct Reader {
@@ -192,7 +225,7 @@ impl Reader {
         eval: Option<&dyn ReadEval>,
     ) -> Result<Value, Error> {
         let mut cur = Cursor::new(file, src);
-        read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval }).map_err(|e| e.at(cur.loc()))
+        read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval, paths: PathMode::Resolve, toplevel: false }).map_err(|e| e.at(cur.loc()))
     }
 
     /// Read one datum starting at character index `start`, and say where
@@ -231,7 +264,7 @@ impl Reader {
     ) -> Result<(Value, usize), Error> {
         let mut cur = Cursor::new("<input>", src);
         cur.seek(start);
-        let v = read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval }).map_err(|e| e.at(cur.loc()))?;
+        let v = read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval, paths: PathMode::Resolve, toplevel: false }).map_err(|e| e.at(cur.loc()))?;
         if !preserve_whitespace {
             if let Some(c) = cur.peek() {
                 if c.is_whitespace() {
@@ -375,7 +408,9 @@ impl Forms<'_> {
         heap: &mut Heap,
         eval: Option<&dyn ReadEval>,
     ) -> Result<Option<(Value, Loc)>, Error> {
-        let ctx = Ctx { features: self.features, ns: self.ns, eval };
+        let ctx = Ctx { features: self.features, ns: self.ns, eval, paths: PathMode::Resolve, toplevel: true };
+        // Reading a text in a module makes it one of this session's modules.
+        heap.names().declare_module(self.ns);
         if let Err(e) = skip_ws_comments(&mut self.cur, heap, ctx) {
             return Err(e.at(self.cur.loc()));
         }
@@ -713,7 +748,7 @@ fn read_datum_here(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Va
         Some('#') => read_hash(cur, heap, ctx),
         Some(_) => {
             let start = cur.loc();
-            let v = read_atom(cur, heap, ctx.ns)?;
+            let v = read_atom(cur, heap, ctx.ns, ctx.paths)?;
             // `:dyn Trait` (the trait-object type) is written as two
             // whitespace-separated words, so the reader joins them into the
             // single datum `(:dyn Trait)` — exactly the treatment `'x` gets.
@@ -849,7 +884,175 @@ fn module_body_ns(heap: &Heap, ns: NsId, head: Value, path: Value) -> Option<NsI
         }
         cur = symbols::child_ns(cur, seg);
     }
+    heap.names().declare_module(cur);
     Some(cur)
+}
+
+/// What a definition form makes readable through a type, registered as soon
+/// as that part of it has been read — so the rest of the same form, and of
+/// the `(module ...)` around it, can already write `point::new` or
+/// `color::red`. `elems` is the list read so far, its last element just read.
+///
+/// - `(defstruct point`, `(defenum color`, `(deftrait shape`, `(deftype t`,
+///   `(def-c-struct s`: the name is a type.
+/// - each variant of a `defenum`, each field of a `defstruct` or a
+///   `def-c-struct`, each method of a `deftrait`: a member of that type.
+/// - each item of an `impl`: a member of the type the `impl` is for.
+///
+/// The names are the symbols as read here, in the module being read. A
+/// definition a macro expansion makes is registered the same way by the
+/// analysis that expands it.
+fn note_definition(heap: &Heap, ns: NsId, elems: &[Value]) {
+    let rest = match elems.first() {
+        Some(Value::Symbol(s)) if s.is(wk::PUB) => &elems[1..],
+        _ => elems,
+    };
+    let Some(&head) = rest.first() else { return };
+    let Some(&last) = rest.last() else { return };
+    let head_sym = match head {
+        Value::Symbol(s) => s,
+        Value::Cons(_) if is_marked(heap, head, wk::TYPE_APPLY) => match heap.list_to_vec(head).ok().and_then(|v| v.get(1).copied()) {
+            Some(Value::Symbol(s)) if s.is(wk::IMPL) => s,
+            _ => return,
+        },
+        _ => return,
+    };
+    match head_sym.well_known() {
+        wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::DEFTYPE | wk::DEF_C_STRUCT if rest.len() == 2 => {
+            if let Some(ty) = defined_type_name(heap, last) {
+                heap.names().declare_type(ty);
+            }
+        }
+        // A `deftrait`'s third element is its list of supertraits.
+        wk::DEFENUM | wk::DEFSTRUCT | wk::DEF_C_STRUCT | wk::DEFTRAIT
+            if rest.len() > 2 && !(head_sym.is(wk::DEFTRAIT) && rest.len() == 3) =>
+        {
+            if let (Some(ty), Some(m)) = (defined_type_name(heap, rest[1]), member_name(heap, last)) {
+                heap.names().declare_member(ty, m);
+            }
+        }
+        wk::IMPL if rest.len() > 2 => {
+            // `(impl Type item...)` or `(impl Trait Type item...)`: the type
+            // is what stands just before the first item.
+            let Some(first_item) = rest.iter().position(|&e| impl_item_name(heap, e).is_some()) else { return };
+            let Some(name) = impl_item_name(heap, last) else { return };
+            if let Some(ty) = rest.get(first_item - 1).and_then(|&t| impl_target(heap, ns, t)) {
+                heap.names().declare_member(ty, name);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The name a variant, a field or a trait method is written under: `red`,
+/// `(blue int)`, `(x int)`, `(pub x int)`, `(area ((self Self)) int)`. A
+/// docstring or a keyword option is no member.
+fn member_name(heap: &Heap, v: Value) -> Option<SymRef> {
+    let name = match v {
+        Value::Symbol(s) => s,
+        Value::Cons(_) => match heap.list_to_vec(v).ok()?.as_slice() {
+            [Value::Symbol(p), Value::Symbol(n), ..] if p.is(wk::PUB) => *n,
+            [Value::Symbol(n), ..] => *n,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    (!name.is_keyword()).then_some(name)
+}
+
+/// Whether `head` begins a form that brings names in: `use`, `import`,
+/// `shadowing-import`.
+fn is_use_head(head: SymRef) -> bool {
+    head.is(wk::USE) || head.is(wk::IMPORT) || head.is(wk::SHADOWING_IMPORT)
+}
+
+/// What a `(use path...)` form brings in, brought in as soon as each path
+/// has been read — so the rest of the same form, and of the `(module ...)`
+/// around it, can read through it (`point::origin-x` after
+/// `(use geo::point)`). A path to a module or type the session has is
+/// registered here; anything else is the evaluator's to bring in
+/// (`ReadEval::bring_in`), which loads the file behind it. Without an
+/// evaluator nothing can be loaded, and the `use` reports the path when it
+/// is checked.
+fn note_use(heap: &mut Heap, ctx: Ctx<'_>, elems: &[Value]) -> Result<(), Error> {
+    let (Some(Value::Symbol(head)), Some(&last)) = (elems.first(), elems.last()) else { return Ok(()) };
+    if elems.len() < 2 || !is_use_head(*head) {
+        return Ok(());
+    }
+    let segs: Vec<&'static str> = match last {
+        Value::Symbol(s) => vec![s.name()],
+        Value::Path(id) => heap.path_segments(id).iter().map(|s| s.name()).collect(),
+        _ => return Ok(()),
+    };
+    if heap.names().import_written(ctx.ns, &segs) {
+        return Ok(());
+    }
+    match ctx.eval {
+        Some(eval) => {
+            let segs: Vec<String> = segs.iter().map(|s| s.to_string()).collect();
+            eval.bring_in(heap, ctx.ns, &segs).map_err(Error::ReadError)
+        }
+        None => Ok(()),
+    }
+}
+
+/// Whether `v` is a list headed by the vocabulary entry `marker`.
+fn is_marked(heap: &Heap, v: Value, marker: u32) -> bool {
+    matches!(heap.car(v), Ok(Value::Symbol(s)) if s.is(marker))
+}
+
+/// The type a definition's name or an `impl`'s target names: `point`,
+/// `m::point`, `(point options...)` or `point<T>` (`(%type-apply point T)`).
+fn defined_type_name(heap: &Heap, v: Value) -> Option<SymRef> {
+    match v {
+        Value::Symbol(s) => Some(s),
+        Value::Path(id) => heap.path_segments(id).last().copied(),
+        Value::Cons(_) if is_marked(heap, v, wk::TYPE_APPLY) => defined_type_name(heap, heap.list_to_vec(v).ok()?.get(1).copied()?),
+        Value::Cons(_) => defined_type_name(heap, heap.car(v).ok()?),
+        _ => None,
+    }
+}
+
+/// The type an `impl` is for, as its target names it: a plain name refers to
+/// a type the way a path's first segment does (`SessionNames::type_named`); a
+/// path has been read to the type's own symbol already. `None` when the
+/// target names no type the reader knows of — a type parameter, or a type a
+/// macro has yet to define.
+fn impl_target(heap: &Heap, ns: NsId, v: Value) -> Option<SymRef> {
+    match v {
+        Value::Symbol(s) => heap.names().type_named(ns, s.name()),
+        Value::Path(id) => heap.path_segments(id).last().copied(),
+        Value::Cons(_) if is_marked(heap, v, wk::TYPE_APPLY) => impl_target(heap, ns, heap.list_to_vec(v).ok()?.get(1).copied()?),
+        _ => None,
+    }
+}
+
+/// The name an `impl` item defines: `(name (params...) ...)`,
+/// `(name<U> (params...) ...)` or `(pub name ...)`. A type argument list or
+/// a `(:where ...)` clause is no item.
+fn impl_item_name(heap: &Heap, v: Value) -> Option<SymRef> {
+    if !matches!(v, Value::Cons(_)) || is_marked(heap, v, wk::TYPE_APPLY) {
+        return None;
+    }
+    let items = heap.list_to_vec(v).ok()?;
+    let (written, rest) = match items.as_slice() {
+        [Value::Symbol(p), n, rest @ ..] if p.is(wk::PUB) => (*n, rest),
+        [n, rest @ ..] => (*n, rest),
+        [] => return None,
+    };
+    let name = match written {
+        Value::Symbol(n) => n,
+        // `name<U>`: a method with type parameters of its own.
+        Value::Cons(_) if is_marked(heap, written, wk::TYPE_APPLY) => match heap.list_to_vec(written).ok()?.get(1) {
+            Some(Value::Symbol(n)) => *n,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    if !matches!(rest.first(), Some(Value::Cons(_) | Value::Empty)) {
+        return None;
+    }
+    (!name.is_keyword()).then_some(name)
 }
 
 fn read_list(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, Error> {
@@ -861,6 +1064,8 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
     // after `PATH` belongs to that module — see `module_body_ns`. Nesting is
     // lexical, so one pass settles it with no dynamic `*package*` to bind.
     let mut body_ns = ctx.ns;
+    // Whether this list turned out to be `(module PATH body...)`.
+    let mut module_body = false;
     let mut elems: Vec<Value> = Vec::new();
     // Source location of each element in `elems`, captured just before reading
     // it — parallel to `elems`, so the build loop below can tag each spine
@@ -911,7 +1116,14 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
                 break;
             }
             Some(_) => {
-                let (e, elem_loc) = match read_datum_spanned(cur, heap, Ctx { ns: body_ns, ..ctx }) {
+                let paths = match elems.first() {
+                    Some(Value::Symbol(h)) if is_use_head(*h) => PathMode::Raw,
+                    Some(Value::Symbol(h)) if elems.len() == 1 && (h.is(wk::MODULE) || h.is(wk::IN_MODULE)) => PathMode::Declare,
+                    _ => PathMode::Resolve,
+                };
+                // A `(module PATH form...)` body's forms are top-level forms too.
+                let toplevel = ctx.toplevel && module_body;
+                let (e, elem_loc) = match read_datum_spanned(cur, heap, Ctx { ns: body_ns, paths, toplevel, ..ctx }) {
                     Ok(pair) => pair,
                     Err(err) => {
                         restore_roots(heap, mark);
@@ -924,6 +1136,14 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
                 if elems.len() == 2 {
                     if let Some(inner) = module_body_ns(heap, ctx.ns, elems[0], elems[1]) {
                         body_ns = inner;
+                        module_body = true;
+                    }
+                }
+                if ctx.toplevel {
+                    note_definition(heap, ctx.ns, &elems);
+                    if let Err(err) = note_use(heap, ctx, &elems) {
+                        restore_roots(heap, mark);
+                        return Err(err);
                     }
                 }
             }
@@ -1422,9 +1642,18 @@ fn read_char(cur: &mut Cursor) -> Result<Value, Error> {
 // Atoms: numbers & symbols
 // ----------------------------------------------------------------------
 
-fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error> {
+fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId, paths: PathMode) -> Result<Value, Error> {
     let start = cur.loc();
     let (tok, escaped) = lex_token(cur, false)?;
+    if paths != PathMode::Resolve && !escaped && tok.contains("::") && !tok.starts_with(':') {
+        return path_as_named(heap, ns, &tok, paths);
+    }
+    if let Some(r) = read_value_member(heap, ns, &tok, escaped, &start) {
+        if cur.peek() == Some('<') && cur.peek2().is_some_and(starts_type) {
+            return Err(Error::ReadError(format!("`{}` is a member of a value, so it takes no `<..>`", tok)));
+        }
+        return r;
+    }
     let head = token_value(heap, ns, &tok, escaped)?;
     // A name followed directly by `<` and a type is a generic type: what
     // follows, up to the matching `>`, is its type arguments (`read_type_application`).
@@ -1467,6 +1696,66 @@ fn read_atom(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<Value, Error
         return Err(Error::ReadError(format!("unexpected `{}` after the type arguments of `{}`", cur.peek().unwrap_or(' '), tok)));
     }
     Ok(applied)
+}
+
+/// A path read in a position that names it rather than refers through it
+/// ([`PathMode::Declare`], [`PathMode::Raw`]).
+fn path_as_named(heap: &mut Heap, ns: NsId, tok: &str, paths: PathMode) -> Result<Value, Error> {
+    let parts: Vec<&str> = tok.split("::").collect();
+    if parts[1..].iter().any(|p| p.is_empty()) {
+        return Err(Error::ReadError(format!("malformed path: {}", tok)));
+    }
+    let mut at = ns;
+    let mut segs = Vec::with_capacity(parts.len());
+    for (i, part) in parts.iter().enumerate() {
+        if i == 0 && part.is_empty() {
+            segs.push(symbols::intern_in(NsId::ROOT, ""));
+            at = NsId::ROOT;
+            continue;
+        }
+        segs.push(symbols::intern_in(at, part));
+        if paths == PathMode::Declare {
+            at = symbols::child_ns(at, part);
+        }
+    }
+    if paths == PathMode::Declare {
+        heap.names().declare_module(at);
+    }
+    Ok(heap.intern_path(&segs))
+}
+
+/// `p::x` as `(%value-member p x)`, when `p` names neither a module nor a
+/// type (`SessionNames::names_scope`): a member of a value. Which `x` it is
+/// depends on `p`'s type, and `p`'s binding exists only once the analysis
+/// has registered it — after expanding the macros around it — so the reader
+/// hands both names on as written, each read in the current module. `None`
+/// when `tok` is not such a token.
+fn read_value_member(heap: &mut Heap, ns: NsId, tok: &str, escaped: bool, start: &Loc) -> Option<Result<Value, Error>> {
+    if escaped {
+        return None;
+    }
+    let (head, member) = tok.split_once("::")?;
+    if tok.starts_with(':') || member.contains("::") || member.is_empty() || heap.names().names_scope(ns, head) {
+        return None;
+    }
+    let head_end = start.col + head.chars().count() as u32;
+    let member_col = head_end + 2;
+    let end = member_col + member.chars().count() as u32;
+    let head_loc = start.clone().with_end(start.line, head_end);
+    let mut member_loc = start.clone();
+    member_loc.col = member_col;
+    let member_loc = member_loc.with_end(start.line, end);
+    let head = heap.intern_symbol_in(ns, head);
+    let member = heap.intern_symbol_in(ns, member);
+    Some(located_list(
+        heap,
+        &[
+            (Value::Symbol(symbols::well_known_symbol(wk::VALUE_MEMBER)), start.clone().with_end(start.line, start.col)),
+            (head, head_loc),
+            (member, member_loc),
+        ],
+        start.clone().with_end(start.line, end),
+    ))
 }
 
 /// One token's characters, up to a delimiter — and, in a type argument
@@ -1537,17 +1826,9 @@ fn token_value(heap: &mut Heap, ns: NsId, tok: &str, escaped: bool) -> Result<Va
                 if parts[1..].iter().any(|p| p.is_empty()) {
                     return Err(Error::ReadError(format!("malformed path: {}", tok)));
                 }
-                // A written path's segments stay plain root names: which
-                // module `m::foo` means is a resolution question (`m` may be
-                // relative to wherever this is written), and the reader does
-                // not resolve. Only *bare* symbols, whose module is lexical,
-                // are placed in one.
-                let mut segs: Vec<SymRef> = Vec::with_capacity(parts.len());
-                for p in &parts {
-                    if let Value::Symbol(id) = heap.intern_symbol(p) {
-                        segs.push(id);
-                    }
-                }
+                // `foo::bar::zot` is `foo`'s `bar`'s `zot`: each segment is
+                // read where the one before it led (`SessionNames::read_path`).
+                let segs: Vec<SymRef> = heap.names().read_path(ns, &parts).map_err(Error::ReadError)?;
                 return Ok(heap.intern_path(&segs));
             }
             Ok(heap.intern_symbol_in(ns, tok))

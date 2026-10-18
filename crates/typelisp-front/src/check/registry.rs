@@ -3051,3 +3051,63 @@ fn rational_assoc() -> BTreeMap<String, AssocFn> {
 fn tvar(name: &str) -> Type {
     Type::Named(Path::root(name), vec![])
 }
+
+/// The symbol a definition's path names it by: its last segment, read in the
+/// module the rest of the path names.
+pub fn definition_symbol(path: &Path) -> typelisp_mem::SymRef {
+    typelisp_mem::symbols::intern_in(typelisp_mem::symbols::ns_of(path.parent()), path.last_segment())
+}
+
+impl Registry {
+    /// Writes into the session's table of what names mean (`Heap::names`)
+    /// the modules, types and traits this registry defines, so the forms
+    /// read next can read a path through them. Called by the checker around
+    /// every top-level form; the table only grows, so writing what it holds
+    /// already changes nothing.
+    pub fn publish_names(&self, names: &mut typelisp_mem::symbols::SessionNames) {
+        fn walk(ns: &Namespace, path: &mut Vec<String>, names: &mut typelisp_mem::symbols::SessionNames) {
+            names.declare_module(typelisp_mem::symbols::ns_of(path));
+            for def in ns.types.values() {
+                publish_type(def, names);
+            }
+            for def in ns.traits.values() {
+                publish_trait(def, names);
+            }
+            for (name, child) in &ns.modules {
+                path.push(name.clone());
+                walk(child, path, names);
+                path.pop();
+            }
+        }
+        walk(&self.root, &mut Vec::new(), names);
+    }
+}
+
+/// Tells the session that `def` is a type, and what its members are called,
+/// so a path can be read through it (`point::new`). Its members' names read
+/// as they do in the type's own module.
+fn publish_type(def: &AdtDef, names: &mut typelisp_mem::symbols::SessionNames) {
+    let ty = definition_symbol(&def.name);
+    names.declare_type(ty);
+    let home = typelisp_mem::symbols::ns_of(def.name.parent());
+    let members = def
+        .variants
+        .iter()
+        .map(|v| v.name.as_str())
+        .chain(def.field_names.iter().map(String::as_str))
+        .chain(def.assoc.keys().map(String::as_str))
+        .chain(def.insts.values().flat_map(|i| i.assoc.keys().map(String::as_str)));
+    for name in members {
+        names.declare_member(ty, typelisp_mem::symbols::intern_in(home, name));
+    }
+}
+
+/// [`publish_type`] for a trait: its methods are its members.
+fn publish_trait(def: &TraitDef, names: &mut typelisp_mem::symbols::SessionNames) {
+    let tr = definition_symbol(&def.name);
+    names.declare_type(tr);
+    let home = typelisp_mem::symbols::ns_of(def.name.parent());
+    for name in def.methods.keys() {
+        names.declare_member(tr, typelisp_mem::symbols::intern_in(home, name));
+    }
+}

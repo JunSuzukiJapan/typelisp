@@ -7480,21 +7480,20 @@ user-visible capacity."
 ;;
 ;; `x` is a `symbol-macrolet` alias for the *place*, not a copy, so
 ;; `(setf x 42)` replaces the value inside the mutex — which is the reason CL
-;; has symbol macros at all. Building `g::v` for a `gensym`-fresh `g` is what
-;; `Sexpr::path` is for here: a `,g::v` inside the template would read as a
-;; path whose first segment is the literal name `g`.
+;; has symbol macros at all. `g::v` for a `gensym`-fresh `g` is written as
+;; the list the reader makes of `p::x`, `(%value-member ,g v)`: a `,g::v`
+;; inside the template would read as the member `v` of the literal name `g`.
 (pub defmacro with-lock (spec &rest body)
   "`(with-lock (x m) body...)` -- lock `m`, bind `x` to what it holds, and
    unlock however the body is left. `x` is a place: `(setf x v)` writes
    through to the mutex."
   (let* ((var (sexpr-car spec))
          (m (sexpr-car (sexpr-cdr spec)))
-         (g (gensym))
-         (place (Sexpr::path (sexpr-cons g (sexpr-cons (Sexpr::sym (string->symbol "v")) ())))))
+         (g (gensym)))
     `(let ((,g ,m))
        (lock ,g)
        (unwind-protect
-           (symbol-macrolet ((,var ,place)) (progn ,@body))
+           (symbol-macrolet ((,var (%value-member ,g v))) (progn ,@body))
          (unlock ,g)))))
 
 

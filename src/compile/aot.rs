@@ -333,7 +333,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let mut entry_forms: Vec<TopLevelForm> = Vec::new();
     loop {
         let next = {
-            let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &interp);
+            let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &mut interp);
             forms.next_form_with(&mut heap, Some(&hook)).map_err(|e| e.to_string())?
         };
         let Some((v, loc)) = next else { break };

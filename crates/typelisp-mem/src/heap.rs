@@ -669,6 +669,11 @@ pub struct HeapShared {
     // hold a guard and then write — writing takes `&mut self` — so recursive
     // reads are the whole of what one thread can do to itself here.
     interning: RwLock<Interning>,
+    // What names mean in this session — `Heap::names`. A lock of its own:
+    // the reader consults it per path, which must not wait on the arena.
+    // Lock order: this one, then the symbol table's (`SessionNames`' methods
+    // take that one while this is held), never the other way round.
+    names: parking_lot::Mutex<symbols::SessionNames>,
     // Same `parking_lot::RwLock`-for-mapped-guards reasoning as `interning`,
     // for `Heap::string`'s return.
     strings: RwLock<StrStore>,
@@ -801,6 +806,7 @@ impl Heap {
             root_stacks: Mutex::new(vec![Some(home)]),
             permanent_roots: Mutex::new(Slab::new()),
             interning: RwLock::new(Interning::default()),
+            names: parking_lot::Mutex::new(symbols::SessionNames::new()),
             strings: RwLock::new(StrStore::default()),
             boxes: RwLock::new(SlotStore::default()),
             cell_registry: Mutex::new(Vec::new()),
@@ -1346,6 +1352,12 @@ impl Heap {
     /// (lowercase) spelling.
     pub fn intern_symbol(&mut self, name: &str) -> Value {
         Value::Symbol(symbols::intern(name))
+    }
+
+    /// What names mean in this session: its modules, its types and their
+    /// members, what its `use`s brought in. Shared by every view of the heap.
+    pub fn names(&self) -> parking_lot::MutexGuard<'_, symbols::SessionNames> {
+        self.shared.names.lock()
     }
 
     /// Intern a symbol as written inside module `ns` — the reader's entry

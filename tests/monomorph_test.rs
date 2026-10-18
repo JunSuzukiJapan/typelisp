@@ -18,6 +18,7 @@ use typelisp::{
 fn run(src: &str) -> Result<Value, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let mut interp = Interp::new();
     // Load the prelude then the native compiler island *before* reading the
     // program: a generic function used as a value reifies to an `FnRef`
@@ -26,9 +27,9 @@ fn run(src: &str) -> Result<Value, Error> {
     load_prelude(&mut h, &mut chk, &mut interp);
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
@@ -47,11 +48,12 @@ fn eval_ok(src: &str) -> Value {
 fn check_all(src: &str) -> Result<(Heap, Vec<TopLevelForm>), Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut tls = Vec::new();
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         tls.push(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
     Ok((h, tls))
@@ -431,11 +433,12 @@ fn the_erased_generic_body_is_not_registered_in_the_interpreter() {
     // exec-side guarantee.)
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, "(defun identity<T> ((x T)) T x) (compile identity)").expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut failed = false;
-    for v in vs {
+    let mut forms = r.forms("(defun identity<T> ((x T)) T x) (compile identity)");
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         match chk.check_form(&mut h, &interp, v) {
             Ok(tl) => {
                 if interp.exec(&mut h, tl).is_err() {

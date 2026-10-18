@@ -3,12 +3,26 @@
 extern crate typelisp;
 use typelisp::{parse_type, Heap, Path, Reader, Type, Value};
 
+/// A heap whose session has the modules the examples' paths name —
+/// `geo`, `geometry`, `shapes` — since a path is read one segment at a time
+/// through what the session has.
+fn session() -> Heap {
+    let h = Heap::with_capacity(256);
+    {
+        let mut names = h.names();
+        for m in ["geo", "geometry", "shapes"] {
+            names.declare_module(typelisp::mem::symbols::ns_of(&[m.to_string()]));
+        }
+    }
+    h
+}
+
 fn parse(src: &str) -> Type {
     parse_result(src).expect("parse_type failed")
 }
 
 fn parse_result(src: &str) -> Result<Type, typelisp::Error> {
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let r = Reader::new();
     let v = r.read(&mut h, src).expect("read failed");
     parse_type(&h, v)
@@ -72,7 +86,7 @@ fn a_less_than_with_no_type_after_it_is_part_of_the_name() {
     // the plain name `result<` — as `string<` is — which no type has; that is
     // the checker's to report. It used to reach `Path::from_segments` with
     // zero segments.
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let v = Reader::new().read(&mut h, "Result<").expect("read failed");
     assert_eq!(parse_type(&h, v).unwrap(), Type::Named(Path::root("result<"), vec![]));
 }
@@ -152,7 +166,7 @@ fn variadic_function_types() {
 
 #[test]
 fn rest_not_last_in_a_function_type_is_an_error() {
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let r = Reader::new();
     let v = r.read(&mut h, "(fn (&rest int int) int)").expect("read failed");
     assert!(parse_type(&h, v).is_err());
@@ -160,7 +174,7 @@ fn rest_not_last_in_a_function_type_is_an_error() {
 
 #[test]
 fn rest_with_no_element_type_in_a_function_type_is_an_error() {
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let r = Reader::new();
     let v = r.read(&mut h, "(fn (&rest) int)").expect("read failed");
     assert!(parse_type(&h, v).is_err());
@@ -220,7 +234,7 @@ fn dyn_in_a_function_type_parses() {
 
 #[test]
 fn dyn_must_be_followed_by_a_trait_name() {
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let r = Reader::new();
     // A primitive is not a trait name.
     let v = r.read(&mut h, ":dyn i32").expect("read failed");
@@ -239,7 +253,7 @@ fn dyn_must_be_followed_by_a_trait_name() {
 /// for a type annotation) and return the names `parse_type_spanned` recorded,
 /// each as `(text at that span, 1-based start column)`.
 fn spans(src: &str) -> Vec<(String, u32)> {
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let r = Reader::new();
     let read = r.read_all_in_spanned(&mut h, "t.typl", src).expect("read failed");
     let (v, loc) = read[0].clone();
@@ -296,7 +310,7 @@ fn the_head_is_recorded_before_its_arguments() {
 
 #[test]
 fn a_dyn_head_is_flagged_as_a_trait() {
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let r = Reader::new();
     let read = r.read_all_in_spanned(&mut h, "t.typl", ":dyn shape").expect("read failed");
     let (v, loc) = read[0].clone();
@@ -312,7 +326,7 @@ fn a_dyn_head_is_flagged_as_a_trait() {
 #[test]
 fn a_nested_dyn_is_flagged_and_located_inside_its_token() {
     // `vector<:dyn shape>` is a single token; the trait sits at column 13.
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let r = Reader::new();
     let read = r.read_all_in_spanned(&mut h, "t.typl", "vector<:dyn shape>").expect("read failed");
     let (v, loc) = read[0].clone();
@@ -329,7 +343,7 @@ fn without_a_span_the_parse_still_succeeds_and_records_nothing() {
     // The checker hands `None` wherever a form has no recorded position (a
     // macro-synthesized annotation); parsing must not depend on it.
     // Built here, as such a form is, so no element has a position either.
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     let rect = h.intern_symbol("rect");
     let vector = h.intern_symbol("vector");
     let apply = h.intern_symbol("%type-apply");
@@ -384,7 +398,7 @@ fn an_applied_generic_carries_an_argument_no_name_can_spell() {
     );
     // The reader's type grammar has no parenthesized type but `()`, so this
     // spelling does not even read.
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     assert!(Reader::new().read(&mut h, "Vector<(fn (int) int)>").is_err());
 }
 
@@ -403,6 +417,6 @@ fn an_applied_generic_is_rejected_without_arguments_or_with_an_applied_head() {
 fn a_member_of_an_instantiation_is_not_a_type() {
     assert_eq!(parse("vector<char>"), Type::Named(Path::root("vector"), vec![Type::Char]));
     assert!(parse_result("vector<t>::new").is_err());
-    let mut h = Heap::with_capacity(256);
+    let mut h = session();
     assert!(Reader::new().read(&mut h, "vector<char>>").is_err());
 }

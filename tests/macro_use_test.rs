@@ -157,12 +157,12 @@ fn macro_generated_use_resolves_a_sibling_file() {
     let result = run_project(
         "macro-use-sibling",
         &[
-            ("geo/vector.typl", "(pub defun unit-x () int 8)"),
+            ("geo/arrow.typl", "(pub defun unit-x () int 8)"),
             (
                 "geo/point.typl",
-                "(defmacro import-vec () '(use vector))\n\
+                "(defmacro import-vec () '(use arrow))\n\
                  (import-vec)\n\
-                 (pub defun call-it () int (vector::unit-x))",
+                 (pub defun call-it () int (arrow::unit-x))",
             ),
             ("main.typl", "(use geo::point)\n(point::call-it)"),
         ],

@@ -9,11 +9,12 @@ use typelisp::{Checker, Error, EvalError, Heap, Interp, Reader, Value, TopLevelF
 fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut last = None;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         last = Some(chk.check_form(&mut h, &interp, v)?);
     }
     Ok(last.expect("no forms"))
@@ -22,11 +23,12 @@ fn check(src: &str) -> Result<TopLevelForm, Error> {
 fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl)? {
             last = v;
@@ -47,11 +49,12 @@ fn eval_ok(src: &str) -> Value {
 fn eval_string(src: &str) -> String {
     let mut h = Heap::with_capacity(8192);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;

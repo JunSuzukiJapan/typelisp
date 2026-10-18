@@ -72,4 +72,11 @@ impl ReadEval for HookEval {
             None => Err(format!("`{}` is a reader macro, and no evaluator is registered on this thread", ch)),
         }
     }
+
+    /// Never asked: this evaluator serves `read` and its relatives, which
+    /// read data, and a `use` is brought in only where it is read as a
+    /// top-level form of a program (`Forms`).
+    fn bring_in(&self, _heap: &mut Heap, _ns: typelisp_mem::NsId, path: &[String]) -> Result<(), String> {
+        unreachable!("`(use {})` brought in by a data read", path.join("::"))
+    }
 }

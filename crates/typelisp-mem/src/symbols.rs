@@ -58,7 +58,7 @@
 //! all. The tagged compiled-code representation carries the address directly
 //! (`typelisp-abi`'s `encode`), exactly as it already does for `Cons`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 // ---- the well-known vocabulary ------------------------------------------
@@ -593,6 +593,11 @@ well_known_symbols! {
      name ever holds a type or a path. Reserved: no program binds them."
     TYPE_APPLY => "%type-apply"
     TYPE_MEMBER => "%type-member"
+
+    "How the reader writes a member of a value: `p::x`, where `p` is neither
+     a module nor a type, reads as `(%value-member p x)`. Which `x` it is
+     depends on `p`'s type, so the analysis resolves it. Reserved."
+    VALUE_MEMBER => "%value-member"
 }
 
 
@@ -812,6 +817,25 @@ struct NsNode {
     name: Option<SymRef>,
 }
 
+/// What a module's symbol stands for after a `use` brought something in
+/// under it — see [`SessionNames::import_name`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Import {
+    Module(NsId),
+    /// A type, by its own name's symbol.
+    Type(SymRef),
+    /// A function, global or macro, by its own name's symbol.
+    Item(SymRef),
+}
+
+/// Where a path's segment led: into a module, or to a type, whose members
+/// the next segment names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PathStep {
+    Module(NsId),
+    Type(SymRef),
+}
+
 struct SymTable {
     nodes: Vec<NsNode>,
     /// What [`NsId::STD`] exports, by name: the symbols every module sees
@@ -929,6 +953,44 @@ impl SymTable {
         id
     }
 
+    /// Where the segment `name`, read in the module `ns`, leads in the
+    /// session `names`: a child module of `ns` the session has, or a type.
+    fn step_down(&mut self, names: &SessionNames, ns: NsId, name: &str) -> Option<(SymRef, PathStep)> {
+        let sym = self.read(ns, name);
+        if let Some(id) = self.nodes[ns.0 as usize].children.get(&sym) {
+            if names.modules.contains(id) {
+                return Some((sym, PathStep::Module(*id)));
+            }
+        }
+        names.types.contains_key(&sym).then_some((sym, PathStep::Type(sym)))
+    }
+
+    /// Where the name `name` written in `ns` leads, as a path's first step:
+    /// a child module of `ns`, or what a `use` brought in under it, or a type
+    /// named by it.
+    fn step_in(&mut self, names: &SessionNames, ns: NsId, name: &str) -> Option<(SymRef, PathStep)> {
+        let sym = self.read(ns, name);
+        match names.imports.get(&(ns, sym)) {
+            Some(Import::Module(id)) => return Some((sym, PathStep::Module(*id))),
+            Some(Import::Type(t)) => return Some((sym, PathStep::Type(*t))),
+            _ => {}
+        }
+        self.step_down(names, ns, name)
+    }
+
+    /// Where the first segment `name` of a path read in `ns` leads: from
+    /// `ns`, else from the root, else — while the standard library's names
+    /// are still resolved by name — from `std`.
+    fn first_step(&mut self, names: &SessionNames, ns: NsId, name: &str) -> Option<(SymRef, PathStep)> {
+        let mut found = self.step_in(names, ns, name);
+        for outer in [NsId::ROOT, NsId::STD] {
+            if found.is_none() && ns != outer {
+                found = self.step_in(names, outer, name);
+            }
+        }
+        found
+    }
+
     fn path(&self, ns: NsId) -> Vec<String> {
         let mut segs = Vec::new();
         let mut cur = Some(ns);
@@ -1041,6 +1103,174 @@ pub fn import(into: NsId, sym: SymRef) {
 /// The module reached from `parent` by `segment`, creating it if new.
 pub fn child_ns(parent: NsId, segment: &str) -> NsId {
     table().child(parent, &segment.to_lowercase())
+}
+
+/// What names mean in one session: which modules the session has, which
+/// names are types and what their members are, and what each `use` brought
+/// in. The symbols themselves, and the tree of module names they belong to,
+/// are the process's (see the module documentation); a name means something
+/// only in the session that defined it. One per heap (`Heap::names`).
+#[derive(Debug, Default)]
+pub struct SessionNames {
+    /// The modules this session has: the fixed ones, every module a form was
+    /// read in, every `(module ...)` read or checked, and their ancestors.
+    modules: HashSet<NsId>,
+    /// The types this session has, by their names' symbols, each with the
+    /// names of its members (constructors, field accessors, static methods,
+    /// methods): member name -> the member's symbol. A type is not a module;
+    /// this is what `Type::member` is read against.
+    types: HashMap<SymRef, HashMap<Box<str>, SymRef>>,
+    /// What `use` brought into a module, by the module and the symbol it was
+    /// brought in under (that module's own).
+    imports: HashMap<(NsId, SymRef), Import>,
+}
+
+impl SessionNames {
+    /// A session with the fixed modules and nothing defined.
+    pub fn new() -> SessionNames {
+        let mut names = SessionNames::default();
+        for ns in [NsId::ROOT, NsId::KEYWORD, NsId::STD, NsId::CORE] {
+            names.modules.insert(ns);
+        }
+        names
+    }
+
+    /// Records `ns`, and every module it is inside, as modules of this
+    /// session.
+    pub fn declare_module(&mut self, ns: NsId) {
+        let t = table();
+        let mut cur = Some(ns);
+        while let Some(id) = cur {
+            if !self.modules.insert(id) {
+                break;
+            }
+            cur = t.nodes[id.0 as usize].parent;
+        }
+    }
+
+    /// Records `ty` — a type's name, owned by the module that defines the
+    /// type — as a type, so a path can step into it (`ty::member`).
+    pub fn declare_type(&mut self, ty: SymRef) {
+        self.types.entry(ty).or_default();
+    }
+
+    /// Records `member` as one of type `ty`'s members, under its name.
+    pub fn declare_member(&mut self, ty: SymRef, member: SymRef) {
+        self.types.entry(ty).or_default().insert(member.name().into(), member);
+    }
+
+    /// Records that `local` — `into`'s own symbol — stands for `what` in
+    /// `into`, as a `use` there says.
+    pub fn import_name(&mut self, into: NsId, local: SymRef, what: Import) {
+        self.imports.insert((into, local), what);
+    }
+
+    /// Registers what a `use` written in `ns` brings in, when its path —
+    /// `segments`, as written — leads to a module or a type this session
+    /// has: under the path's last segment, read in `ns`. `false` when it
+    /// leads to neither (a definition, or a module not loaded yet), which
+    /// the `use` registers once it has resolved the path itself.
+    pub fn import_written(&mut self, ns: NsId, segments: &[&str]) -> bool {
+        let lower: Vec<String> = segments.iter().map(|s| s.to_lowercase()).collect();
+        let Some(last) = lower.last() else { return false };
+        let (local, what) = {
+            let mut t = table();
+            let mut at: Option<PathStep> = None;
+            for (i, seg) in lower.iter().enumerate() {
+                let here = match at {
+                    None if i == 0 && seg.is_empty() => {
+                        at = Some(PathStep::Module(NsId::ROOT));
+                        continue;
+                    }
+                    None => t.first_step(self, ns, seg),
+                    Some(PathStep::Module(m)) => t.step_down(self, m, seg),
+                    Some(PathStep::Type(_)) => None,
+                };
+                match here {
+                    Some((_, step)) => at = Some(step),
+                    None => return false,
+                }
+            }
+            let what = match at {
+                Some(PathStep::Module(id)) => Import::Module(id),
+                Some(PathStep::Type(ty)) => Import::Type(ty),
+                None => return false,
+            };
+            (t.read(ns, last), what)
+        };
+        self.import_name(ns, local, what);
+        true
+    }
+
+    /// What `local` stands for in `ns` by a `use`, if anything.
+    pub fn imported(&self, ns: NsId, local: SymRef) -> Option<Import> {
+        self.imports.get(&(ns, local)).copied()
+    }
+
+    /// The symbols a path written in `ns` reads as: `segments` taken one
+    /// step at a time, each read in what the step before led to.
+    ///
+    /// The first segment leads where its name does in `ns` (an import, a
+    /// child module, a type), else where it does in the root; an empty first
+    /// segment is the root itself (`::name`). Every segment after it but the
+    /// last must lead into a module, or to a type, after which only the last
+    /// — a member of that type — may follow. The last is read in the module
+    /// the path reached, or looked up among the type's members. A path that
+    /// cannot be followed is an error that says where it stopped.
+    pub fn read_path(&self, ns: NsId, segments: &[&str]) -> Result<Vec<SymRef>, String> {
+        let mut t = table();
+        let lower: Vec<String> = segments.iter().map(|s| s.to_lowercase()).collect();
+        let (last, steps) = lower.split_last().ok_or_else(|| "an empty path".to_string())?;
+        let mut out = Vec::with_capacity(lower.len());
+        let mut at: Option<PathStep> = None;
+        for (i, seg) in steps.iter().enumerate() {
+            let here = match at {
+                None if seg.is_empty() => {
+                    // `::a::b`: from the root. The empty segment stays a
+                    // segment of the path, for the checker's "from root"
+                    // reading.
+                    out.push(t.read(NsId::ROOT, ""));
+                    at = Some(PathStep::Module(NsId::ROOT));
+                    continue;
+                }
+                None => t.first_step(self, ns, seg),
+                Some(PathStep::Module(m)) => t.step_down(self, m, seg),
+                Some(PathStep::Type(_)) => {
+                    return Err(format!("`{}`: a type's member has no members of its own", segments[..=i].join("::")))
+                }
+            };
+            let (sym, step) = here.ok_or_else(|| {
+                format!("`{}`: no module or type `{}` is visible here", segments.join("::"), segments[..=i].join("::"))
+            })?;
+            out.push(sym);
+            at = Some(step);
+        }
+        let last_sym = match at.expect("a path has at least two segments") {
+            PathStep::Module(m) => t.read(m, last),
+            PathStep::Type(ty) => *self.types[&ty].get(last.as_str()).ok_or_else(|| {
+                format!("`{}`: type `{}` has no member `{}`", segments.join("::"), ty.name(), last)
+            })?,
+        };
+        out.push(last_sym);
+        Ok(out)
+    }
+
+    /// Whether `name`, read in `ns` as the first segment of a path, names a
+    /// module or a type — what [`Self::read_path`] can step into. Anything
+    /// else before a `::` names a value (`p::x`), whose type only the
+    /// analysis knows.
+    pub fn names_scope(&self, ns: NsId, name: &str) -> bool {
+        name.is_empty() || table().first_step(self, ns, &name.to_lowercase()).is_some()
+    }
+
+    /// The type `name`, read in `ns`, refers to — found the way the first
+    /// segment of a path is ([`Self::read_path`]) — if it refers to one.
+    pub fn type_named(&self, ns: NsId, name: &str) -> Option<SymRef> {
+        match table().first_step(self, ns, &name.to_lowercase())? {
+            (_, PathStep::Type(t)) => Some(t),
+            (_, PathStep::Module(_)) => None,
+        }
+    }
 }
 
 /// The module `segments` names, relative to the root.

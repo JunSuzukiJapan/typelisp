@@ -36,12 +36,13 @@ fn run_coroutine_entry(engine: &JitCode, heap: &mut Heap, name: &str, args: &[i6
 fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let interp = Interp::new();
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
@@ -66,6 +67,7 @@ fn check_error(src: &str) -> Error {
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let interp = Interp::new();
     let result = vs
@@ -93,12 +95,13 @@ fn read_str(h: &Heap, v: Value) -> String {
 fn eval_string(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let interp = Interp::new();
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
@@ -152,6 +155,9 @@ fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Error> {
 /// Core IR written as text, read in the core IR's module so its tags are the
 /// IR's own symbols.
 fn read_core_result(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Error> {
+    // The hand-written forms name their definitions in a module `m`, which
+    // this session is told it has, so `m::f` reads as the path it is.
+    h.names().declare_module(typelisp::mem::symbols::ns_of(&["m".to_string()]));
     Ok(Reader::new()
         .read_all_in_spanned_within(h, "<core>", src, typelisp::NsId::CORE)?
         .into_iter()
@@ -183,13 +189,14 @@ fn run_with_compiler(src: &str) -> Result<Value, EvalError> {
 fn run_with_compiler_and_capacity(src: &str, capacity: usize) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
@@ -207,13 +214,14 @@ fn eval_ok_with_compiler(src: &str) -> Value {
 fn eval_string_with_compiler_and_capacity(src: &str, capacity: usize) -> String {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
@@ -232,6 +240,7 @@ fn eval_string_with_compiler(src: &str) -> String {
 fn eval_ok_in_island(src: &str) -> Value {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
@@ -249,6 +258,7 @@ fn eval_ok_in_island(src: &str) -> Value {
 fn eval_string_in_island(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
@@ -293,14 +303,15 @@ fn run_with_compiler_and_prelude_and_capacity(src: &str, capacity: usize) -> Res
 fn run_and_read<R>(src: &str, capacity: usize, f: impl FnOnce(&Heap, Value) -> R) -> Result<R, EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     load_compiler(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = val;
@@ -2875,10 +2886,12 @@ fn compile_of_an_unresolvable_name_is_a_check_time_error() {
         other => panic!("expected a TypeError, got {:?}", other),
     }
 
-    // The type resolves; it just has no such member.
-    match check_error("(defstruct point (x int) (y int)) (compile point::bogus)") {
-        Error::TypeError(m) => {
-            assert!(m.contains("has no associated function or method `bogus`"), "message was: {}", m)
+    // The type resolves; it just has no such member — which the path's
+    // reading already finds.
+    let mut h = Heap::with_capacity(1 << 12);
+    match Reader::new().read_all(&mut h, "(defstruct point (x int) (y int)) (compile point::bogus)").map_err(Error::into_kind) {
+        Err(Error::ReadError(m)) => {
+            assert!(m.contains("type `point` has no member `bogus`"), "message was: {}", m)
         }
         other => panic!("expected a TypeError, got {:?}", other),
     }
@@ -3313,6 +3326,7 @@ fn compile_let_does_not_emit_instructions_after_an_early_return_from_its_body() 
 fn compile_return_truncates_a_sexpr_lets_gc_root_on_every_call_not_just_the_first() {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_compiler(&mut h, &mut chk, &mut interp);
@@ -3898,6 +3912,7 @@ fn compile_extracts_a_narrow_integer_payload_at_its_own_width() {
 #[test]
 fn compiled_sexpr_tag_tests_agree_with_the_interpreter_for_every_variant() {
     let program = r#"
+        (module a)
         (defun tag ((s Option<Sexpr>)) int
           (match s
             ((none) 1) ((int _) 2) ((f64 _) 3) ((char _) 4) ((bool _) 5)
@@ -3986,7 +4001,11 @@ fn compile_match_dispatches_and_extracts_the_path_variant() {
         (defun path-segs ((s Option<Sexpr>)) Option<Sexpr>
           (match s ((path segs) segs) (_ (panic "not a path"))))
         (compile path-segs)
-        (equal (path-segs (quote dep::head)) (list (quote dep) (quote head)))
+        (module dep)
+        (let ((segs (path-segs (quote dep::head))))
+          (if (equal (sexpr-car segs) (quote dep))
+              (equal (sexpr-sym-name (sexpr-car (sexpr-cdr segs))) "head")
+              false))
         "#,
     );
     assert_eq!(v, Value::Bool(true));
@@ -4487,6 +4506,7 @@ fn compile_of_a_function_quoting_a_list_of_symbols_round_trips() {
 fn compile_of_a_function_quoting_a_path_round_trips() {
     let v = eval_ok_with_compiler(
         r#"
+        (module dep)
         (defun q () Option<Sexpr> (quote dep::head))
         (compile q)
         (eq (q) (quote dep::head))
@@ -5756,6 +5776,7 @@ fn compile_and_interpret_agree_on_a_trait_object_match() {
 fn a_macro_expander_can_be_compiled() {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     typelisp::compile::install_llvm_backend();
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);

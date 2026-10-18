@@ -293,8 +293,8 @@ fn without_a_manifest_the_entry_directory_is_the_root() {
     assert_eq!(result, Ok(Some(Value::Int(3))));
 }
 
-/// A `use` inside `geo/point.typl` names a sibling `geo/vector.typl` by its
-/// bare name (`vector`), without spelling out the `geo::` directory prefix —
+/// A `use` inside `geo/point.typl` names a sibling `geo/arrow.typl` by its
+/// bare name (`arrow`), without spelling out the `geo::` directory prefix —
 /// the sibling-relative resolution `Loader::ensure_loaded`'s doc comment and
 /// `Checker::find_module`'s file-sibling tier add.
 #[test]
@@ -302,8 +302,8 @@ fn use_resolves_a_sibling_file_by_its_bare_name() {
     let result = run_project(
         "sibling-bare-name",
         &[
-            ("geo/vector.typl", "(pub defun unit-x () int 1)"),
-            ("geo/point.typl", "(use vector)\n(pub defun call-it () int (vector::unit-x))"),
+            ("geo/arrow.typl", "(pub defun unit-x () int 1)"),
+            ("geo/point.typl", "(use arrow)\n(pub defun call-it () int (arrow::unit-x))"),
             ("main.typl", "(use geo::point)\n(point::call-it)"),
         ],
         "main.typl",
@@ -339,8 +339,8 @@ fn use_inside_a_nested_module_still_resolves_against_the_files_directory() {
     let result = run_project(
         "sibling-nested-module",
         &[
-            ("geo/vector.typl", "(pub defun unit-x () int 5)"),
-            ("geo/point.typl", "(module inner (use vector)\n(pub defun call-it () int (vector::unit-x)))"),
+            ("geo/arrow.typl", "(pub defun unit-x () int 5)"),
+            ("geo/point.typl", "(module inner (use arrow)\n(pub defun call-it () int (arrow::unit-x)))"),
             ("main.typl", "(use geo::point::inner)\n(inner::call-it)"),
         ],
         "main.typl",

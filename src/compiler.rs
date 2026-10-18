@@ -4914,12 +4914,11 @@ const SOURCE_TEMPLATE: &str = r#"
 
 ;; `(construct true false empty 101 seg-form...)` — a
 ;; quoted `::`-path literal (`core_bridge::quoted_form`'s
-;; `Path` arm, `QUOTE_PATH_MARKER`), one `(str ...)`
+;; `Path` arm, `QUOTE_PATH_MARKER`), one quoted-symbol
 ;; node per segment. `compile-construct-path-segs`
-;; interns each segment (`rt_intern_symbol`, same as
-;; `compile-construct-sym`) into a fresh `args-ptr`
-;; array, then `rt_intern_path` combines them into the
-;; final tagged `Sexpr::Path`.
+;; compiles each segment's symbol into a fresh
+;; `args-ptr` array, then `rt_intern_path` combines them
+;; into the final tagged `Sexpr::Path`.
 (defun compile-construct-path ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (arg-forms Option<Sexpr>))llvm-value
     (let* ((n (sexpr-list-length arg-forms))
            (args-ptr (frame-slots builder m 2 n)))
@@ -4927,17 +4926,13 @@ const SOURCE_TEMPLATE: &str = r#"
       (build-call builder (get-function m "rt_intern_path") args-ptr n)))
 
 ;; Fills a `compile-construct-path`-allocated array,
-;; one interned segment `Sexpr::Symbol` per slot —
-;; the path-literal analogue of `store-str-chars`.
+;; one segment `Sexpr::Symbol` per slot, each built by
+;; its own quoted-symbol node.
 (defun compile-construct-path-segs ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (args-ptr llvm-value) (forms Option<Sexpr>) (idx int))()
     (if (sexpr-consp forms)
         (let ((form (sexpr-car forms)) (rest (sexpr-cdr forms)))
-          (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup form))
-                 (seg-args-ptr (alloca-args builder 1)))
-            (store-arg builder seg-args-ptr 0 name-v)
-            (let ((sym-v (build-call builder (get-function m "rt_intern_symbol") seg-args-ptr 1)))
-              (store-arg builder args-ptr idx sym-v)
-              (compile-construct-path-segs m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr rest (+ idx 1)))))
+          (store-arg builder args-ptr idx (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup form))
+          (compile-construct-path-segs m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup args-ptr rest (+ idx 1)))
         ()))
 
 ;; Builds a `BoxedObj::Struct` (Stage 3 of the

@@ -57,9 +57,10 @@ fn finish(h: &Heap, chk: &Checker, tl: TopLevelForm) -> Checked {
 /// Read one datum and check it as a single top-level form.
 fn form(src: &str) -> Result<Checked, Error> {
     let mut h = Heap::with_capacity(1024);
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let r = Reader::new();
     let v = r.read(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     // Strip any source-location wrapper so kind-based assertions still match.
     let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
@@ -71,11 +72,12 @@ fn form(src: &str) -> Result<Checked, Error> {
 fn program(src: &str) -> Result<Checked, Error> {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut last = None;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
     Ok(finish(&h, &chk, last.expect("no forms")))
@@ -88,12 +90,13 @@ fn program(src: &str) -> Result<Checked, Error> {
 fn program_with_prelude(src: &str) -> Result<Checked, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = None;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
     Ok(finish(&h, &chk, last.expect("no forms")))
@@ -106,11 +109,12 @@ fn program_with_prelude(src: &str) -> Result<Checked, Error> {
 fn ret_of(src: &str, name: &str) -> Type {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         chk.check_form(&mut h, &interp, v).expect("check failed");
     }
     chk.registry()
@@ -505,11 +509,12 @@ fn setf_unbound_variable_errors() {
 fn cannot_assign_to_constant() {
     let mut h = typelisp::Heap::with_capacity(1024);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, "(defconstant (k int) 5) (setf k 6)").unwrap();
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = typelisp::Interp::new();
     let mut result = Ok(());
-    for v in vs {
+    let mut forms = r.forms("(defconstant (k int) 5) (setf k 6)");
+    while let Some((v, _)) = forms.next_form(&mut h).unwrap() {
         if let Err(e) = chk.check_form(&mut h, &interp, v) {
             result = Err(e.into_kind());
         }
@@ -529,11 +534,12 @@ fn a_definition_inside_a_body_is_refused_for_its_place() {
     ] {
         let mut h = typelisp::Heap::with_capacity(1 << 14);
         let r = Reader::new();
-        let vs = r.read_all(&mut h, src).unwrap();
         let mut chk = Checker::new();
+        chk.publish_names(&h);
         let interp = typelisp::Interp::new();
         let mut result = Ok(());
-        for v in vs {
+        let mut forms = r.forms(src);
+        while let Some((v, _)) = forms.next_form(&mut h).unwrap() {
             if let Err(e) = chk.check_form(&mut h, &interp, v) {
                 result = Err(e.into_kind());
             }
@@ -926,6 +932,7 @@ fn type_error_carries_source_location() {
         .read_all_in(&mut h, "prog.typl", "(defun f ((x int)) int\n  (+ x \"oops\"))")
         .expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut err = None;
     for v in vs {

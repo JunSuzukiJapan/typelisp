@@ -14,10 +14,11 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Ty
 fn check(src: &str) -> Result<Option<Type>, Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
     }
     Ok(chk.expr_type().cloned())
@@ -26,11 +27,12 @@ fn check(src: &str) -> Result<Option<Type>, Error> {
 fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(v) = interp.exec(&mut h, tl).map_err(EvalError::into_kind)? {
             last = v;
@@ -51,12 +53,13 @@ fn eval_ok(src: &str) -> Value {
 fn eval_ok_with_prelude(src: &str) -> Value {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
@@ -73,11 +76,12 @@ fn eval_ok_with_prelude(src: &str) -> Value {
 fn check_with_prelude(src: &str) -> Result<Option<Type>, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let mut interp = Interp::new();
     load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
     }
     Ok(chk.expr_type().cloned())

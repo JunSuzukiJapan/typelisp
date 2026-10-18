@@ -3226,8 +3226,8 @@ impl Renderer {
 }
 
 /// The reader's structure for a generic type or a member of one, which
-/// prints as it is written: `(%type-apply Name A B)` is `Name<A,B>` and
-/// `(%type-member T m)` is `T::m`.
+/// prints as it is written: `(%type-apply Name A B)` is `Name<A,B>`,
+/// `(%type-member T m)` is `T::m` and `(%value-member p x)` is `p::x`.
 pub(crate) enum TypeSyntax {
     Apply(Value, Vec<Value>),
     Member(Value, Value),
@@ -3238,7 +3238,7 @@ pub(crate) enum TypeSyntax {
 pub(crate) fn type_syntax(heap: &Heap, v: Value) -> Option<TypeSyntax> {
     let Ok(Value::Symbol(head)) = heap.car(v) else { return None };
     let marker = head.well_known();
-    if marker != typelisp_mem::wk::TYPE_APPLY && marker != typelisp_mem::wk::TYPE_MEMBER {
+    if marker != typelisp_mem::wk::TYPE_APPLY && marker != typelisp_mem::wk::TYPE_MEMBER && marker != typelisp_mem::wk::VALUE_MEMBER {
         return None;
     }
     let mut rest = Vec::new();

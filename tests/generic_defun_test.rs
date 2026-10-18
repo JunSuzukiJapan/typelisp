@@ -13,11 +13,12 @@ use typelisp::{Checker, Error, Heap, Interp, Reader, Value, TopLevelForm};
 fn run(src: &str) -> Result<(Value, Heap), Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
@@ -35,12 +36,13 @@ fn eval_ok(src: &str) -> Value {
 fn eval_ok_with_prelude(src: &str) -> Value {
     let mut h = Heap::with_capacity(1 << 18);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let mut interp = Interp::new();
     typelisp::load_prelude(&mut h, &mut chk, &mut interp);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut last = Value::Empty;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         let tl = chk.check_form(&mut h, &interp, v).expect("check failed");
         if let Some(val) = interp.exec(&mut h, tl).expect("eval failed") {
             last = val;
@@ -55,11 +57,12 @@ fn eval_ok_with_prelude(src: &str) -> Value {
 fn check_program(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut last = None;
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         last = Some(chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?);
     }
     Ok(last.expect("no forms"))

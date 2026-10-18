@@ -15,11 +15,12 @@ use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, Type, V
 fn program(src: &str) -> Result<(String, Option<Type>), Error> {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let mut tag = String::new();
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         // Strip any source-location wrapper so kind-based assertions
         // (`Err(Error::TypeError(_))`) still match.
         let tl = chk.check_form(&mut h, &interp, v).map_err(Error::into_kind)?;
@@ -40,10 +41,11 @@ fn ty(src: &str) -> Type {
 fn ret_of(src: &str, name: &str) -> Type {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
-    for v in vs {
+    let mut forms = r.forms(src);
+    while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         chk.check_form(&mut h, &interp, v).expect("check failed");
     }
     chk.registry()
@@ -149,6 +151,7 @@ fn with_ctx<R>(f: impl FnOnce(&mut Heap, &mut Checker, &mut Interp) -> R) -> R {
         let (h, chk, interp) = opt.get_or_insert_with(|| {
             let mut h = Heap::with_capacity(1 << 16);
             let mut chk = Checker::new();
+            chk.publish_names(&h);
             let mut interp = Interp::new();
             load_prelude(&mut h, &mut chk, &mut interp);
             (h, chk, interp)

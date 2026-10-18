@@ -344,7 +344,7 @@ impl Loader {
             // `(in-module ...)` above it moved there.
             forms.set_module(checker.current_module());
             let read = {
-                let hook = crate::read::DriverReadEval::new(checker, interp);
+                let hook = crate::read::DriverReadEval::with_loader(checker, interp, self, reader, segs);
                 forms.next_form_with(heap, Some(&hook))
             };
             let read = match read {
@@ -561,7 +561,7 @@ impl Loader {
     /// (`file_ns`), which resolves the *name* `(use vector)` binds once this
     /// has loaded the file under its true root-derived path (`geo::vector`,
     /// never a synthetic relative one).
-    fn ensure_loaded(
+    pub(crate) fn ensure_loaded(
         &mut self,
         heap: &mut Heap,
         reader: &Reader,

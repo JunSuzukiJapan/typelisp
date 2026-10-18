@@ -20,12 +20,42 @@ pub use reader::*;
 /// `read_eval` takes `&self` because that is what the reader can offer.
 pub struct DriverReadEval<'a> {
     checker: std::cell::RefCell<&'a mut crate::Checker>,
-    interp: &'a crate::Interp,
+    interp: std::cell::RefCell<&'a mut crate::Interp>,
+    /// What loads the file behind a `use`, when this driver loads files.
+    files: Option<std::cell::RefCell<Files<'a>>>,
+}
+
+/// A project loader, lent for one read: what [`DriverReadEval::bring_in`]
+/// loads a `use`'s file with.
+struct Files<'a> {
+    loader: &'a mut crate::project::Loader,
+    reader: &'a Reader,
+    /// The module path of the file being read — what a sibling file is
+    /// found relative to.
+    file_module: &'a [String],
 }
 
 impl<'a> DriverReadEval<'a> {
-    pub fn new(checker: &'a mut crate::Checker, interp: &'a crate::Interp) -> Self {
-        DriverReadEval { checker: std::cell::RefCell::new(checker), interp }
+    /// A driver that reads one text and loads no other: a `use` is resolved
+    /// against what the session has.
+    pub fn new(checker: &'a mut crate::Checker, interp: &'a mut crate::Interp) -> Self {
+        DriverReadEval { checker: std::cell::RefCell::new(checker), interp: std::cell::RefCell::new(interp), files: None }
+    }
+
+    /// A driver that loads the file behind a `use` with `loader`, the file
+    /// being read being the module `file_module`.
+    pub fn with_loader(
+        checker: &'a mut crate::Checker,
+        interp: &'a mut crate::Interp,
+        loader: &'a mut crate::project::Loader,
+        reader: &'a Reader,
+        file_module: &'a [String],
+    ) -> Self {
+        DriverReadEval {
+            checker: std::cell::RefCell::new(checker),
+            interp: std::cell::RefCell::new(interp),
+            files: Some(std::cell::RefCell::new(Files { loader, reader, file_module })),
+        }
     }
 }
 
@@ -35,17 +65,18 @@ impl reader::ReadEval for DriverReadEval<'_> {
         heap: &mut crate::Heap,
         form: crate::Value,
     ) -> Result<crate::Value, String> {
-        self.interp.read_eval_allowed(heap)?;
+        let interp = self.interp.borrow();
+        interp.read_eval_allowed(heap)?;
         // The same discipline `Interp::read_eval_form` follows: root the form
         // across checking (which allocates), release before `exec`.
         let mark = heap.root_count();
         heap.push_root(form);
-        let checked = self.checker.borrow_mut().check_form_at(heap, self.interp, form, None);
+        let checked = self.checker.borrow_mut().check_form_at(heap, &**interp, form, None);
         while heap.root_count() > mark {
             heap.pop_root();
         }
         let tl = checked.map_err(|e| e.to_string())?;
-        match self.interp.exec(heap, tl) {
+        match interp.exec(heap, tl) {
             Ok(Some(v)) => Ok(v),
             Ok(None) => Ok(crate::Value::Empty),
             Err(e) => Err(e.to_string()),
@@ -63,6 +94,21 @@ impl reader::ReadEval for DriverReadEval<'_> {
         ch: char,
         rest: &str,
     ) -> Result<(crate::Value, usize), String> {
-        self.interp.call_reader_macro_fn(heap, f, ch, rest)
+        self.interp.borrow().call_reader_macro_fn(heap, f, ch, rest)
+    }
+
+    /// The file behind the path, loaded if this driver loads files and
+    /// nothing has loaded it yet; then the checker registers what the `use`
+    /// brings in.
+    fn bring_in(&self, heap: &mut crate::Heap, ns: crate::NsId, path: &[String]) -> Result<(), String> {
+        if let Some(files) = &self.files {
+            let mut files = files.borrow_mut();
+            let Files { loader, reader, file_module } = &mut *files;
+            loader
+                .ensure_loaded(heap, reader, &mut self.checker.borrow_mut(), &mut self.interp.borrow_mut(), path, file_module)
+                .map_err(|e| e.to_string())?;
+        }
+        self.checker.borrow().register_use_for_reading(heap, ns, path);
+        Ok(())
     }
 }

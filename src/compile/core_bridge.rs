@@ -1894,14 +1894,15 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             sexpr_leaf(heap, SEXPR_STR, |h| str_form(h, &text))
         }
         Value::Symbol(id) => sym_form(heap, id),
-        // A path's segments become one string literal each, interned back into
-        // a path at run time.
+        // A path's segments become one symbol node each — named as a quoted
+        // symbol is, by the module that owns it — combined into a path at run
+        // time. `dep::head`'s `head` is `dep`'s, not whichever `head` its
+        // spelling would intern to.
         Value::Path(id) => {
-            let segs: Vec<String> =
-                heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
+            let segs: Vec<SymRef> = heap.path_segments(id).to_vec();
             let mut f = Items::new(heap);
-            for seg in &segs {
-                let v = str_form(f.heap(), seg)?;
+            for seg in segs {
+                let v = sym_form(f.heap(), seg)?;
                 f.push(v);
             }
             let fields = f.as_slice().to_vec();
@@ -3240,7 +3241,11 @@ mod tests {
 
     /// Core IR written as text, read in the core IR's module so its tags are
     /// the IR's own symbols.
+    /// Core IR, read in the core IR's module. The hand-written forms name
+    /// their definitions in a module `m`, which this session is told it has,
+    /// so `m::f` reads as the path it is.
     fn read_core(r: &crate::Reader, h: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
+        h.names().declare_module(typelisp_mem::symbols::ns_of(&["m".to_string()]));
         Ok(r.read_all_in_spanned_within(h, "<core>", src, typelisp_mem::NsId::CORE)?.into_iter().map(|(v, _)| v).collect())
     }
     use crate::Reader;
@@ -3922,10 +3927,12 @@ mod tests {
              (str (int-any-width 0 37) (int-any-width 0 99) (int-any-width 0 111) (int-any-width 0 114) (int-any-width 0 101)))"
         );
         assert_eq!(bridged("(sym foo)"), bridged("(quote foo)"));
-        // A path's segments each become a string, interned back at run time.
+        // A path's segments each become a symbol, named by its module as a
+        // quoted symbol is: `m` the root's, `x` `m`'s.
         assert_eq!(
             bridged("(quote m::x)"),
-            "(construct true false () 101 (str (int-any-width 0 109)) (str (int-any-width 0 120)))"
+            "(construct true false () 101 (construct true false () 100 (str (int-any-width 0 109))) \
+             (construct true false () 100 (str (int-any-width 0 120)) (str (int-any-width 0 109))))"
         );
     }
 

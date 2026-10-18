@@ -762,6 +762,18 @@ pub(super) fn numeric_identity_literal(heap: &mut Heap, expected: Option<&Type>,
     }
 }
 
+/// `recv::member` as the reader writes it, `(%value-member recv member)`:
+/// the member of a value, which the checker resolves by the value's type.
+pub(super) fn value_member_form(heap: &mut Heap, recv: &str, member: &str) -> Result<Value, Error> {
+    let mut items = Items::new(heap);
+    items.push(Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::VALUE_MEMBER)));
+    let r = items.heap().intern_symbol(recv);
+    items.push(r);
+    let m = items.heap().intern_symbol(member);
+    items.push(m);
+    items.finish_list()
+}
+
 /// A path, as a core form field writes one: a bare symbol for a single
 /// segment, a `::` path for more.
 ///

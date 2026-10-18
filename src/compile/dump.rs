@@ -72,6 +72,9 @@ fn load_unit_with(
     let items: Vec<CompileTarget> = state.items.clone();
 
     apply_types(heap, chk, interp, state)?;
+    // What the unit defined is what the session's names mean from here on:
+    // the forms read next can read a path through its modules and types.
+    chk.publish_names(heap);
 
     // Storage for the unit's globals, created here and in the recorded order:
     // `typelisp_rt`'s table hands ids out sequentially from zero per `Interp`,
@@ -194,7 +197,7 @@ pub fn capture_program_dump(
     chk.enter_file_module(entry_segs).map_err(|e| e.to_string())?;
     loop {
         let next = {
-            let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &interp);
+            let hook = typelisp_front::read::DriverReadEval::new(&mut chk, &mut interp);
             program.next_form_with(heap, Some(&hook)).map_err(|e| e.to_string())?
         };
         let Some((v, _)) = next else { break };

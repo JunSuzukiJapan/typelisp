@@ -16,9 +16,10 @@ use typelisp::{load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
 fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {

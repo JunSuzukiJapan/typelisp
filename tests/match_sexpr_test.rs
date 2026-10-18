@@ -201,15 +201,17 @@ fn match_dispatches_and_destructures_the_path_arm() {
     // A quoted `::`-path evaluates to `Value::Path` at runtime; `(path s)`
     // binds `s : Sexpr`, a fresh proper list of the segments as `sym`s (the
     // same shape a quoted `'(dep head)` list already has).
+    // `dep` is a module, so `dep::head` reads as a path: `dep` read at the
+    // root, `head` read in `dep`.
     assert_eq!(
         eval_ok(
-            "(match (quote dep::head) ((path s) (equal s (list (quote dep) (quote head)))) (_ false))"
+            "(module dep) (match (quote dep::head) ((path s) (if (equal (sexpr-car s) (quote dep)) (equal (sexpr-sym-name (sexpr-car (sexpr-cdr s))) \"head\") false)) (_ false))"
         ),
         Value::Bool(true)
     );
     // Segments stay real `sym`s, not re-stringified text: the first one is
     // reachable through ordinary list access.
-    assert_eq!(eval_string("(match (quote dep::head) ((path s) (sexpr-sym-name (sexpr-car s))) (_ \"no\"))"), "dep");
+    assert_eq!(eval_string("(module dep) (match (quote dep::head) ((path s) (sexpr-sym-name (sexpr-car s))) (_ \"no\"))"), "dep");
     // `Path` also constructs one back from a segment list — the inverse of
     // the match arm above.
     assert_eq!(

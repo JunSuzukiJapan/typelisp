@@ -2701,6 +2701,24 @@ impl Checker {
     /// alongside the value (`Reader::read_all_in_spanned`) and this is where
     /// it enters the checker. Mirrors [`Self::check_at`] vs [`Self::check`].
     pub fn check_form_at(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<TopLevelForm, Error> {
+        // What the registry defines is what the session's names mean, before
+        // this form (a registry built without this heap, or a dump) and after
+        // it (what it defined), for the forms read next.
+        self.publish_names(heap);
+        let r = self.check_one_form(heap, interp, v, loc_hint);
+        self.publish_names(heap);
+        r
+    }
+
+    /// Writes what the registry defines into `heap`'s table of what names
+    /// mean (`Registry::publish_names`). [`Self::check_form_at`] does it
+    /// around every form; a driver that reads before checking anything — a
+    /// prelude or a dump just loaded — does it once first.
+    pub fn publish_names(&self, heap: &Heap) {
+        self.reg.publish_names(&mut heap.names());
+    }
+
+    fn check_one_form(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<TopLevelForm, Error> {
         debug_assert!(
             self.spec_pending.borrow().is_empty(),
             "specialization requests must never leak across check_form calls"
@@ -9802,8 +9820,7 @@ impl Checker {
             for field in fields {
                 // `self::slot` — the accessor sugar, so the copier reads
                 // exactly what the getter does.
-                let acc = Path::from_segments(vec!["self".to_string(), field.name.clone()]);
-                let read = forms::path_form(call.heap(), &acc);
+                let read = forms::value_member_form(call.heap(), "self", &field.name)?;
                 call.push(read);
             }
             call.finish_list()?
@@ -10321,6 +10338,7 @@ impl Checker {
                     .static_uses
                     .insert(name.clone(), (target.clone(), name.clone()));
             }
+            self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Type(crate::check::registry::definition_symbol(&target)));
             let alias = self.fq(&bare);
             return forms::use_form(heap, &alias, &target);
         }
@@ -10337,6 +10355,7 @@ impl Checker {
         // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
         if let Some((abs, _)) = self.find_module(&segs) {
             let target_path = Path::from_segments(abs.clone());
+            self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Module(typelisp_mem::symbols::ns_of(&abs)));
             self.reg.root.module_mut(&self.ns).mod_aliases.insert(bare.clone(), abs);
             let alias = self.fq(&bare);
             return forms::use_form(heap, &alias, &target_path);
@@ -10348,6 +10367,32 @@ impl Checker {
         // checker, and retry. Displays as "use: unresolved `...`" when no
         // driver handles it.
         Err(Error::ModuleNotLoaded(segs))
+    }
+
+    /// What a `(use PATH)` written in the module `ns` brings in, registered
+    /// in `heap`'s table of names for the forms read after it — the reader's
+    /// `use`, once the file behind `path` (if any) is loaded. Resolved as
+    /// [`Self::check_use`] resolves it, a type before a module; a definition
+    /// brings in no path to read through, and a path that resolves to
+    /// nothing is left for `check_use` to report.
+    pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[String]) {
+        let Some(bare) = path.last() else { return };
+        let what = if let Some(target) = self.resolve_type_path(path) {
+            typelisp_mem::symbols::Import::Type(crate::check::registry::definition_symbol(&target))
+        } else if let Some((abs, _)) = self.find_module(path) {
+            typelisp_mem::symbols::Import::Module(typelisp_mem::symbols::ns_of(&abs))
+        } else {
+            return;
+        };
+        heap.names().import_name(ns, typelisp_mem::symbols::intern_in(ns, bare), what);
+    }
+
+    /// Tells the symbol table what a `use` brought in under `bare`, so the
+    /// forms read after it can read a path through it (`point::origin-x`
+    /// after `(use geo::point)`). Until the reader handles `use` itself.
+    fn import_for_reading(&self, heap: &Heap, bare: &str, what: typelisp_mem::symbols::Import) {
+        let here = typelisp_mem::symbols::ns_of(&self.ns);
+        heap.names().import_name(here, typelisp_mem::symbols::intern_in(here, bare), what);
     }
 
     // ---- expressions ------------------------------------------------------
@@ -10872,14 +10917,9 @@ impl Checker {
                     .iter()
                     .map(|s| heap.symbol_spelling(*s).to_string())
                     .collect();
-                // `var::field` — sugar for `(field var)`, a field accessor's
-                // ordinary instance-method call (`Checker::check_defstruct`
-                // synthesizes one getter method per field). Tried first:
-                // `segs[0]` here names a *value* (a bound local/global), not
-                // a module/type segment the way `resolve_name` below expects.
-                if let Some(result) = self.try_field_access(heap, interp, env, &segs) {
-                    result?
-                } else {
+                // A path's first segment names a module or a type: the reader
+                // reads `var::field` as `(%value-member var field)` instead.
+                {
                     match self.resolve_name(env, Written::Path(&segs), &mut || None) {
                         Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
                             let ty = vi.ty;
@@ -11097,6 +11137,23 @@ impl Checker {
                 return self.check_apply(heap, interp, env, callee, args, arg_locs);
             }
         };
+        // `p::x`, read as `(%value-member p x)`: the member `x` of `p`'s type.
+        if head_sym.is(wk::VALUE_MEMBER) {
+            let segs = value_member_segments(heap, v)?;
+            let typed = match self.try_field_access(heap, interp, env, &segs) {
+                Some(r) => r?,
+                None if env.get(&segs[0]).is_none() && self.resolve_global(&segs[0]).is_none() => {
+                    return Err(Error::TypeError(format!(
+                        "unresolved path: {} (`{}` is not a variable, and no module or type `{}` is visible here)",
+                        segs.join("::"),
+                        segs[0],
+                        segs[0]
+                    )))
+                }
+                None => return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::")))),
+            };
+            return self.reconcile_expected(heap, env, typed, expected);
+        }
         let head = heap.symbol_spelling(head_sym).to_string();
         // A top-level-only form reaching expression position — written in a
         // function body, or produced there by a macro. Without this it would
@@ -13146,6 +13203,7 @@ impl Checker {
         let name = unevaluated_name(
             heap,
             args[0],
+            "compile",
             "compile: expected a symbol or path naming a function, e.g. (compile foo) or (compile point::x) — not a string",
         )?;
         let target = self.resolve_callable(&name, "compile")?;
@@ -13320,6 +13378,7 @@ impl Checker {
             let name = unevaluated_name(
                 heap,
                 *a,
+                tag,
                 &format!(
                     "{}: expected symbols or `::`-paths naming functions, e.g. ({} foo point::x) — not a string",
                     tag, tag
@@ -13368,6 +13427,7 @@ impl Checker {
         let name = unevaluated_name(
             heap,
             *name_arg,
+            "disassemble",
             "disassemble: expected a symbol or path naming a function, e.g. (disassemble foo) or (disassemble point::x) — not a string",
         )?;
         let target = self.resolve_callable(&name, "disassemble")?;
@@ -13416,6 +13476,7 @@ impl Checker {
         let name = unevaluated_name(
             heap,
             args[0],
+            "documentation",
             "documentation: expected a symbol or path naming a definition, e.g. (documentation foo) or (documentation point::x) — not a string",
         )?;
         // Resolved to the docstring first, then built — `self.reg` lookups
@@ -13520,9 +13581,10 @@ impl Checker {
             [Value::Str(id)] => (heap.string(*id).to_string(), 0),
             [one] => {
                 let name = unevaluated_name(
-                    heap,
-                    *one,
-                    "ed: expected a symbol or path naming a definition, or a string naming a file, e.g. (ed foo) or (ed \"x.typl\")",
+            heap,
+            *one,
+            "ed",
+            "ed: expected a symbol or path naming a definition, or a string naming a file, e.g. (ed foo) or (ed \"x.typl\")",
                 )?;
                 let loc = match self.resolve_definition(&name, "ed")? {
                     DefRef::Var(p) => self.reg.def_locs.vars.get(&p).cloned(),
@@ -13877,13 +13939,17 @@ impl Checker {
             return Err(Error::TypeError("setf: (setf place value)".into()));
         }
         let value_loc = nth_loc(arg_locs, 1);
+        if is_value_member(heap, args[0]) {
+            let segs = value_member_segments(heap, args[0])?;
+            return self.check_field_set(heap, interp, env, &segs, args[1], value_loc);
+        }
         if let Value::Path(pid) = args[0] {
             let segs: Vec<String> = heap
                 .path_segments(pid)
                 .iter()
                 .map(|s| heap.symbol_spelling(*s).to_string())
                 .collect();
-            return self.check_field_set(heap, interp, env, &segs, args[1], value_loc);
+            return Err(Error::TypeError(format!("setf: `{}` is not a place", segs.join("::"))));
         }
         if let Value::Cons(_) = args[0] {
             return self.check_setf_call_place(heap, interp, env, args[0], args[1]);
@@ -14101,6 +14167,7 @@ impl Checker {
     fn place_dedup(&self, heap: &mut Heap, place: Value) -> Result<(Vec<(Value, Value)>, Value), Error> {
         match place {
             Value::Symbol(_) | Value::Path(_) => Ok((Vec::new(), place)),
+            Value::Cons(_) if is_value_member(heap, place) => Ok((Vec::new(), place)),
             Value::Cons(_) => {
                 let items = heap
                     .list_to_vec(place)
@@ -18750,8 +18817,18 @@ fn unify(
 /// unevaluated symbol, or a `::`-path rejoined with the separator the reader
 /// split it on. A string is not a second spelling of the same thing and is
 /// rejected with `msg`, which says what this particular form wanted.
-fn unevaluated_name(heap: &Heap, v: Value, msg: &str) -> Result<WrittenName, Error> {
+fn unevaluated_name(heap: &Heap, v: Value, who: &str, msg: &str) -> Result<WrittenName, Error> {
     match v {
+        // `a::b` with `a` neither a module nor a type: no definition's name.
+        Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::VALUE_MEMBER)) => {
+            let segs = value_member_segments(heap, v)?;
+            Err(Error::TypeError(format!(
+                "{}: `{}` names neither a type's method nor a function (`{}` is no module or type visible here)",
+                who,
+                segs.join("::"),
+                segs[0]
+            )))
+        }
         Value::Symbol(id) => Ok(WrittenName::Segments(vec![heap.symbol_spelling(id).to_string()])),
         Value::Path(pid) => Ok(WrittenName::Segments(
             heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
@@ -18800,6 +18877,21 @@ enum DefRef {
     Trait(Path),
     Macro(Path),
     Method(Path, String),
+}
+
+/// Whether `v` is `(%value-member p x)`, the reader's `p::x`.
+fn is_value_member(heap: &Heap, v: Value) -> bool {
+    matches!(v, Value::Cons(_)) && matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::VALUE_MEMBER))
+}
+
+/// The two names of `(%value-member p x)`: `[p, x]`.
+fn value_member_segments(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
+    match heap.list_to_vec(v)?.as_slice() {
+        [_, Value::Symbol(recv), Value::Symbol(member)] => {
+            Ok(vec![heap.symbol_spelling(*recv).to_string(), heap.symbol_spelling(*member).to_string()])
+        }
+        _ => Err(Error::TypeError("a member of a value is written `value::member`".into())),
+    }
 }
 
 /// The lowercase segments of a module/use path (a symbol or a `Value::Path`).
