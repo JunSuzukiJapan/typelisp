@@ -73,3 +73,13 @@ fn an_undecided_type_parameter_is_reported() {
     let e = mismatch(r#"(defun make<T> () Vector<T> (vector::new)) (make)"#);
     assert!(e.contains("cannot infer type parameter `t` for `make`"), "{}", e);
 }
+
+#[test]
+fn an_unmet_where_bound_is_reported() {
+    let e = mismatch(
+        r#"(deftrait shout () (loud ((self Self)) i32))
+           (defun f<T> ((x T)) i32 (:where (shout T)) 1)
+           (f 5)"#,
+    );
+    assert!(e.contains("f: type `int` does not implement trait `shout` required by `:where` clause on type parameter `t`"), "{}", e);
+}

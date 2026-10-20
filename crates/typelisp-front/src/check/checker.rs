@@ -16,7 +16,7 @@ use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
-use super::core::{self, Checked, Disagreement, Items, Node, SelectArm};
+use super::core::{self, Checked, Disagreement, Items, Node, SelectArm, Unmet};
 use super::{forms, lower};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
@@ -869,6 +869,8 @@ enum CallTarget {
     Resolved(Path),
     /// A type parameter none of them decided.
     Open(String),
+    /// A `where` bound the types they decided do not meet.
+    Unmet(Disagreement),
 }
 
 /// The method a receiver answers a name with ([`Checker::receiver_method`]).
@@ -11062,8 +11064,10 @@ impl Checker {
         // `Eq` impl is rejected here with a real "does not implement trait"
         // error instead of an opaque `NoSuchFunction` from deep inside the
         // specialization drain.
-        if !af.sig.bounds.is_empty() {
-            self.validate_where_bounds(&format!("{}::{}", type_fq, method), &af.sig.bounds, &subst, &env.bounds)?;
+        if let Some(what) = self.validate_where_bounds(&format!("{}::{}", type_fq, method), &af.sig.bounds, &subst, &env.bounds) {
+            let ty = subst_apply(&af.sig.ret, &subst);
+            let node = Node::Assoc { owner: type_fq.clone(), method: method.into(), instance, ret: ty.clone(), args: typed };
+            return Ok(disagreeing(Checked::of(node, ty.clone()), what, ty));
         }
         // Monomorphization, method side: a call on a generic owner whose
         // type arguments are fully concrete is rewritten to the specialized
@@ -14720,7 +14724,9 @@ impl Checker {
         if let Some(p) = sig.type_params.iter().find(|p| !subst.contains_key(*p)) {
             return Ok(CallTarget::Open(p.clone()));
         }
-        self.validate_where_bounds(&name.to_string(), &sig.bounds, subst, &env.bounds)?;
+        if let Some(what) = self.validate_where_bounds(&name.to_string(), &sig.bounds, subst, &env.bounds) {
+            return Ok(CallTarget::Unmet(what));
+        }
 
         if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
             let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
@@ -14882,6 +14888,10 @@ impl Checker {
             CallTarget::Resolved(r) => r,
             CallTarget::Open(p) => {
                 return Ok(uninferred(Node::Call { path: name.clone(), args: typed }, "type parameter", &p, name.to_string()))
+            }
+            CallTarget::Unmet(what) => {
+                let ty = subst_apply(&sig.ret, &subst);
+                return Ok(disagreeing(Checked::of(Node::Call { path: name.clone(), args: typed }, ty.clone()), what, ty));
             }
         };
         let ty = subst_apply(&sig.ret, &subst);
@@ -15117,6 +15127,13 @@ impl Checker {
                 typed.extend(rest_typed);
                 return Ok(uninferred(Node::Call { path: name.clone(), args: typed }, "type parameter", &p, name.to_string()));
             }
+            CallTarget::Unmet(what) => {
+                typed.extend(sig.keys.iter().filter_map(|k| supplied_keys.remove(&k.name)));
+                typed.extend(opt_supplied);
+                typed.extend(rest_typed);
+                let ty = subst_apply(&sig.ret, &subst);
+                return Ok(disagreeing(Checked::of(Node::Call { path: name.clone(), args: typed }, ty.clone()), what, ty));
+            }
         };
 
         // Pass 2: fill in whatever pass 1 left out, now that `subst` is
@@ -15176,7 +15193,8 @@ impl Checker {
     /// (free functions) and [`Self::check_assoc_call`] (methods): for each
     /// bounded type parameter, check the concrete type `subst` resolved it
     /// to actually implements every required trait (and that any pinned
-    /// associated type matches). `name` is only for error messages
+    /// associated type matches). The first bound that is not met, for
+    /// checking to report; `name` is what it calls the callee
     /// (`fn-name` / `type::method`).
     ///
     /// Two cases where `concrete` isn't (fully) resolved, both arising when
@@ -15210,7 +15228,7 @@ impl Checker {
         bounds: &BTreeMap<String, Vec<TraitBound>>,
         subst: &BTreeMap<String, Type>,
         caller_bounds: &BTreeMap<String, Vec<TraitBound>>,
-    ) -> Result<(), Error> {
+    ) -> Option<Disagreement> {
         for (tparam, trait_bounds) in bounds {
             let Some(concrete) = subst.get(tparam) else { continue };
             if let Type::Named(n, args) = concrete {
@@ -15262,12 +15280,8 @@ impl Checker {
                             })
                         });
                         if !satisfied {
-                            return Err(Error::TypeError(format!(
-                                "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
-                                 which has no `where` bound declaring it implements `{}` — the enclosing function's \
-                                 signature needs a matching `:where` clause on `{}`",
-                                name, tparam, var_name, tb.trait_path, var_name
-                            )));
+                            let unmet = Unmet::Undeclared { var: var_name.to_string(), trait_path: tb.trait_path.clone() };
+                            return Some(bound_unmet(name, tparam, unmet));
                         }
                     }
                     continue;
@@ -15284,30 +15298,23 @@ impl Checker {
                 if *concrete != Type::Never {
                     for tb in trait_bounds {
                         if !self.type_implements(concrete, tb, 0) {
-                            return Err(Error::TypeError(format!(
-                                "{}: type `{}` does not implement trait `{}` required by `:where` clause on type parameter `{}`",
-                                name, concrete, tb.trait_path, tparam
-                            )));
+                            let unmet = Unmet::Unimplemented { ty: concrete.clone(), trait_path: tb.trait_path.clone() };
+                            return Some(bound_unmet(name, tparam, unmet));
                         }
                     }
                 }
                 continue;
             };
-            let def = self.info.reg.type_def(&type_fq).ok_or_else(|| {
-                Error::TypeError(format!(
-                    "{}: type `{}` does not implement a trait required by `:where` clause on type parameter `{}`",
-                    name, concrete, tparam
-                ))
-            })?;
+            let Some(def) = self.info.reg.type_def(&type_fq) else {
+                return Some(bound_unmet(name, tparam, Unmet::NoImpls { ty: concrete.clone() }));
+            };
             for tb in trait_bounds {
                 // `type_implements` rather than a bare `def.impls` scan, so a
                 // blanket impl covering `concrete` counts (and gets queued for
                 // materialization).
                 if !self.type_implements(concrete, tb, 0) {
-                    return Err(Error::TypeError(format!(
-                        "{}: type `{}` does not implement trait `{}` required by `:where` clause on type parameter `{}`",
-                        name, concrete, tb.trait_path, tparam
-                    )));
+                    let unmet = Unmet::Unimplemented { ty: concrete.clone(), trait_path: tb.trait_path.clone() };
+                    return Some(bound_unmet(name, tparam, unmet));
                 }
                 let concrete_args: &[Type] = match concrete {
                     Type::Named(_, args) => args.as_slice(),
@@ -15330,20 +15337,15 @@ impl Checker {
                         Some(actual) if actual == declared_ty => {}
                         Some(actual) if self.type_is_open(&actual) => {}
                         actual => {
-                            return Err(Error::TypeError(format!(
-                                "{}: type `{}`'s associated type `{}` is `{}`, but `:where` clause requires `{}`",
-                                name,
-                                concrete,
-                                assoc_name,
-                                actual.map(|t| t.to_string()).unwrap_or_else(|| "undefined".to_string()),
-                                declared_ty
-                            )));
+                            let unmet =
+                                Unmet::Assoc { ty: concrete.clone(), assoc: assoc_name.clone(), actual, required: declared_ty };
+                            return Some(bound_unmet(name, tparam, unmet));
                         }
                     }
                 }
             }
         }
-        Ok(())
+        None
     }
 
     /// `ctor` is `(type path, variant index)` — the same pair [`Info::resolve_ctor`]
@@ -16900,6 +16902,11 @@ fn unified(params: &HashSet<String>, tmpl: &Type, arg: Checked, subst: &mut BTre
             disagreeing(arg, what, ty)
         }
     }
+}
+
+/// The bound of `of` on `param` that `unmet` falls short of.
+fn bound_unmet(of: &str, param: &str, unmet: Unmet) -> Disagreement {
+    Disagreement::Bound { of: of.to_string(), param: param.to_string(), unmet }
 }
 
 /// `node`, a call none of whose arguments decided the type parameter `param`

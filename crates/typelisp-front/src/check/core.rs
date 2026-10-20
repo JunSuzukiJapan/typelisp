@@ -187,6 +187,24 @@ pub enum Disagreement {
     /// A call none of whose arguments decided the type parameter `param` of
     /// `of`; `noun` is how the parameter is spoken of there.
     Uninferred { noun: &'static str, param: String, of: String },
+    /// A `where` bound of `of` on its type parameter `param` that the type
+    /// the call decided for it does not meet.
+    Bound { of: String, param: String, unmet: Unmet },
+}
+
+/// How a type decided for a bounded type parameter falls short of the bound.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Unmet {
+    /// It is the enclosing function's own type parameter `var`, which its
+    /// `where` clause does not bound by `trait_path`.
+    Undeclared { var: String, trait_path: crate::Path },
+    /// `ty` does not implement `trait_path`.
+    Unimplemented { ty: Type, trait_path: crate::Path },
+    /// `ty` names no type, so it has no impls.
+    NoImpls { ty: Type },
+    /// `ty`'s associated type `assoc` is `actual` (`None`: it has none), not
+    /// the `required` one.
+    Assoc { ty: Type, assoc: String, actual: Option<Type>, required: Type },
 }
 
 impl Node {

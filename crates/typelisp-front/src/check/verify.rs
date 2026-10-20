@@ -7,7 +7,7 @@
 
 use typelisp_mem::{Error, Loc};
 
-use super::core::{Checked, Disagreement, Node};
+use super::core::{Checked, Disagreement, Node, Unmet};
 
 /// The disagreements in `c`, each at the innermost position written for it,
 /// in the order the analysis met them: a subexpression's before the
@@ -35,6 +35,30 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
                 // there is to report.
                 Disagreement::Uninferred { .. } if out.len() > before => return,
                 Disagreement::Uninferred { noun, param, of } => format!("cannot infer {} `{}` for `{}`", noun, param, of),
+                Disagreement::Bound { of, param, unmet } => match unmet {
+                    Unmet::Undeclared { var, trait_path } => format!(
+                        "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
+                         which has no `where` bound declaring it implements `{}` — the enclosing function's \
+                         signature needs a matching `:where` clause on `{}`",
+                        of, param, var, trait_path, var
+                    ),
+                    Unmet::Unimplemented { ty, trait_path } => format!(
+                        "{}: type `{}` does not implement trait `{}` required by `:where` clause on type parameter `{}`",
+                        of, ty, trait_path, param
+                    ),
+                    Unmet::NoImpls { ty } => format!(
+                        "{}: type `{}` does not implement a trait required by `:where` clause on type parameter `{}`",
+                        of, ty, param
+                    ),
+                    Unmet::Assoc { ty, assoc, actual, required } => format!(
+                        "{}: type `{}`'s associated type `{}` is `{}`, but `:where` clause requires `{}`",
+                        of,
+                        ty,
+                        assoc,
+                        actual.as_ref().map(|t| t.to_string()).unwrap_or_else(|| "undefined".to_string()),
+                        required
+                    ),
+                },
             });
             out.push(match loc {
                 Some(l) => e.at(l.clone()),
