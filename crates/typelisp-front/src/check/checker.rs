@@ -9028,6 +9028,10 @@ impl Checker {
     /// Check `v` as an expression, tagging the resulting node (and any error)
     /// with `v`'s source location.
     ///
+    /// Given `expected`, the result's type is `expected` or `!`: what does not
+    /// fit is wrapped as disagreeing with it (`Self::reconcile_expected`), so
+    /// a caller has nothing left to compare.
+    ///
     /// A list form carries its own recorded location (`heap.cons_loc`, the
     /// opening paren); a bare atom has none of its own (interned symbols are
     /// shared — see `check::locate`'s module doc comment), so `loc_hint` — the
@@ -11446,15 +11450,6 @@ impl Checker {
                 let chan = self.check_at(heap, interp, env, op[1], None, loc.clone())?;
                 let elem = self.chan_element(&chan.ty, "send")?;
                 let value = self.check_at(heap, interp, env, op[2], Some(&elem), loc.clone())?;
-                // `check_at` was given the element type as its expectation,
-                // so a literal is already coerced; this catches what it lets
-                // through. `Never` is a value that never arrives.
-                if value.ty != elem && value.ty != Type::Never {
-                    return Err(Error::TypeError(format!(
-                        "select: this channel carries `{}`, and the value sent is `{}`",
-                        elem, value.ty
-                    )));
-                }
                 let kind = self.info.repr(&elem).field_kind();
                 let chan_ty = chan.ty.clone();
                 let chan_name = format!("select operand {}", binds.len());
@@ -15622,12 +15617,6 @@ impl Checker {
                 None => pat,
                 Some((test, test_loc)) => {
                     let checked = recover_arm!(self.check_at(heap, interp, &arm_env, *test, Some(&Type::Bool), test_loc.clone()));
-                    if checked.ty != Type::Bool && checked.ty != Type::Never {
-                        recover_arm!(Err(Error::TypeError(format!(
-                            "match: the `:when` condition is `{}`, not a bool",
-                            checked.ty
-                        ))));
-                    }
                     Pattern::When { pat: Box::new(pat), test: Box::new(checked) }
                 }
             };
@@ -16079,12 +16068,6 @@ impl Checker {
         let guard_env =
             env.extended_with_locs(vec![(MATCH_SCRUT.to_string(), expected.clone(), None)])?;
         let checked = self.check_at(heap, interp, &guard_env, form, Some(&Type::Bool), loc)?;
-        if checked.ty != Type::Bool && checked.ty != Type::Never {
-            return Err(Error::TypeError(format!(
-                "pattern: comparing with `equals` produced `{}`, not a bool",
-                checked.ty
-            )));
-        }
         Ok((Pattern::Guard { name: MATCH_SCRUT.to_string(), form: Box::new(checked) }, Vec::new()))
     }
 
