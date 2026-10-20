@@ -75,6 +75,19 @@ fn an_undecided_type_parameter_is_reported() {
 }
 
 #[test]
+fn an_undecided_type_parameter_stops_before_its_use_complains() {
+    let e = mismatch(r#"(defun make<T> () Vector<T> (vector::new)) (let ((v (make))) (len v))"#);
+    assert!(e.contains("cannot infer type parameter `t` for `make`"), "{}", e);
+}
+
+#[test]
+fn the_argument_that_decided_nothing_is_reported_before_its_use() {
+    let e = mismatch(r#"(defun first<T> ((v Vector<T>)) T (get v 0)) (let ((x (first 5))) (+ x 1))"#);
+    assert!(e.contains("type mismatch: expected `Vector<t>`, found `int`"), "{}", e);
+    assert!(e.contains(":1:62:"), "{}", e);
+}
+
+#[test]
 fn an_unmet_where_bound_is_reported() {
     let e = mismatch(
         r#"(deftrait shout () (loud ((self Self)) i32))
@@ -116,4 +129,10 @@ fn an_assignment_to_a_struct_held_by_value_is_reported() {
            (unsafe (let ((s (c-alloc seg 1))) (setf s::a (panic "x")) 0))"#,
     );
     assert!(e.contains("setf: a field holding a struct by value (`point`) cannot be assigned as a whole"), "{}", e);
+}
+
+#[test]
+fn an_empty_body_where_a_value_is_expected_is_reported() {
+    let e = mismatch(r#"(defun f () i32)"#);
+    assert!(e.contains("empty body has type Unit, expected `i32`"), "{}", e);
 }

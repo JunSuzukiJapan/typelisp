@@ -184,9 +184,8 @@ pub enum Disagreement {
     /// A type parameter an earlier argument bound to the first type, and this
     /// one to the second.
     Conflict(String, Type, Type),
-    /// A call none of whose arguments decided the type parameter `param` of
-    /// `of`; `noun` is how the parameter is spoken of there.
-    Uninferred { noun: &'static str, param: String, of: String },
+    /// An empty body, whose value is `()`, where the type is to be this one.
+    EmptyBody(Type),
     /// A `where` bound of `of` on its type parameter `param` that the type
     /// the call decided for it does not meet.
     Bound { of: String, param: String, unmet: Unmet },

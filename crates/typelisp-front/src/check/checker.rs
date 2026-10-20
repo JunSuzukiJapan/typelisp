@@ -11014,12 +11014,9 @@ impl Checker {
                 heap, interp, env, &who, &af.sig, offset, &tparams, &mut subst, args, arg_locs, &mut typed,
             )?;
         }
-        let uninferred_assoc = |noun, p: &str, typed| {
-            let node = Node::Assoc { owner: type_fq.clone(), method: method.into(), instance, ret: Type::Never, args: typed };
-            uninferred(node, noun, p, format!("{}::{}", type_fq, method))
-        };
+        let uninferred_assoc = |noun, p: &str, typed: Vec<Checked>| uninferred(&typed, noun, p, format!("{}::{}", type_fq, method));
         if let Some(p) = af.sig.type_params.iter().find(|p| !subst.contains_key(*p)) {
-            return Ok(uninferred_assoc("type parameter", p, typed));
+            return Err(uninferred_assoc("type parameter", p, typed));
         }
         for p in &def.params {
             if subst.contains_key(p) {
@@ -11039,7 +11036,7 @@ impl Checker {
                 subst.insert(p.clone(), Type::Unit);
                 continue;
             }
-            return Ok(uninferred_assoc("type argument", p, typed));
+            return Err(uninferred_assoc("type argument", p, typed));
         }
         // Method-side `where`-bound validation — the mirror of
         // `check_call`'s. A bounded method's bounds are keyed by the owner's
@@ -14872,7 +14869,7 @@ impl Checker {
         let r = match self.resolve_call_target(env, name, &sig, &params, &mut subst)? {
             CallTarget::Resolved(r) => r,
             CallTarget::Open(p) => {
-                return Ok(uninferred(Node::Call { path: name.clone(), args: typed }, "type parameter", &p, name.to_string()))
+                return Err(uninferred(&typed, "type parameter", &p, name.to_string()))
             }
             CallTarget::Unmet(what) => {
                 let ty = subst_apply(&sig.ret, &subst);
@@ -15110,7 +15107,7 @@ impl Checker {
                 typed.extend(sig.keys.iter().filter_map(|k| supplied_keys.remove(&k.name)));
                 typed.extend(opt_supplied);
                 typed.extend(rest_typed);
-                return Ok(uninferred(Node::Call { path: name.clone(), args: typed }, "type parameter", &p, name.to_string()));
+                return Err(uninferred(&typed, "type parameter", &p, name.to_string()));
             }
             CallTarget::Unmet(what) => {
                 typed.extend(sig.keys.iter().filter_map(|k| supplied_keys.remove(&k.name)));
@@ -15404,8 +15401,7 @@ impl Checker {
                     result_args.push(Type::Never);
                 }
                 None => {
-                    let node = Node::Call { path: adt_name.clone(), args: typed_args };
-                    return Ok(uninferred(node, "type argument", p, adt_name.to_string()));
+                    return Err(uninferred(&typed_args, "type argument", p, adt_name.to_string()));
                 }
             }
         }
@@ -16535,10 +16531,8 @@ impl Checker {
         if body.is_empty() {
             if let Some(e) = expected {
                 if *e != Type::Unit {
-                    return Err(Error::TypeError(format!(
-                        "empty body has type Unit, expected `{}`",
-                        e
-                    )));
+                    let unit = self.literal(heap, wk::UNIT, None, Type::Unit);
+                    return Ok((vec![disagreeing(unit, Disagreement::EmptyBody(e.clone()), e.clone())], e.clone()));
                 }
             }
             return Ok((Vec::new(), Type::Unit));
@@ -16871,11 +16865,16 @@ fn bound_unmet(of: &str, param: &str, unmet: Unmet) -> Disagreement {
     Disagreement::Bound { of: of.to_string(), param: param.to_string(), unmet }
 }
 
-/// `node`, a call none of whose arguments decided the type parameter `param`
-/// of `of`. It stands for no value; what it lacks is left for checking.
-fn uninferred(node: Node, noun: &'static str, param: &str, of: String) -> Checked {
-    let what = Disagreement::Uninferred { noun, param: param.to_string(), of };
-    disagreeing(Checked::of(node, Type::Never), what, Type::Never)
+/// What a call stops at when none of its arguments `args` decided the type
+/// parameter `param` of `of`: there is no type to take and go on with, and
+/// whatever came after would complain about the missing one instead. An
+/// argument that disagrees is why nothing was decided, so the first of those
+/// comes first.
+fn uninferred(args: &[Checked], noun: &str, param: &str, of: String) -> Error {
+    match args.iter().flat_map(super::verify::disagreements).next() {
+        Some(e) => e,
+        None => Error::TypeError(format!("cannot infer {} `{}` for `{}`", noun, param, of)),
+    }
 }
 
 /// `value`, seen as the `ty` settled before it, with what it disagrees with
