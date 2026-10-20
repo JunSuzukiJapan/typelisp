@@ -195,6 +195,20 @@ pub enum Disagreement {
     /// A `make-instance` of `ty` that gives `slot`, which is not `pub` and is
     /// given outside `module`, where `ty` is defined.
     HiddenSlot { ty: String, slot: String, module: String },
+    /// What needs `(unsafe ...)`, outside one.
+    Unsafe(Unsafe),
+}
+
+/// What only `(unsafe ...)` permits, or what it cannot answer.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Unsafe {
+    /// A call to the C function `name` a `defffi` declared.
+    CCall { name: crate::Path },
+    /// A value of `ty`, which mentions a raw machine word from the C FFI.
+    RawWord { ty: Type },
+    /// An `(unsafe ...)` answering `ty`, which mentions a typed pointer into
+    /// memory freed when the `unsafe` is left.
+    TypedPtrAnswer { ty: Type },
 }
 
 /// What a `match`'s arms leave unmatched.

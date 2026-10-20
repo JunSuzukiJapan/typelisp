@@ -296,6 +296,9 @@ TypeShape = Named(SymRef, [TypeId])
   `pub` も移した。`make-instance` が `pub` でないスロットを渡す誤りは節に、`defsignature` と定義の
   照合（`pub`・仮引数・戻り値・`&rest`）は `verify::signature_agrees` に。他のモジュールの非公開の名前は
   解決で見えないので、解析が止まるエラー（名前が解決できない）のまま。
+  `unsafe` も移した。`unsafe` の外の C 関数の呼び出しは、許可の誤りを形の誤りより先に出すため引数を
+  見ず、戻り値の型の穴を節で包む。`unsafe` の外の生のマシン語の値は型を残して包む（値になる場所ごとに
+  `unsafe` が要るので、それぞれ報告する）。
 - 2d. 名前を分ける。残った歩き方を解析（`analyze.rs` ほか）とし、マクロの展開、`macrolet`・
   `symbol-macrolet` の登録、`(%value-member p x)` の解決が型情報の層を通ることを確かめる。
 

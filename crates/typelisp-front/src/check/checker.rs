@@ -16,7 +16,7 @@ use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
-use super::core::{self, Checked, Disagreement, Items, Node, SelectArm, Uncovered, Unmet};
+use super::core::{self, Checked, Disagreement, Items, Node, SelectArm, Uncovered, Unmet, Unsafe};
 use super::{forms, lower};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
@@ -9201,15 +9201,11 @@ impl Checker {
                     && type_mentions_raw_word(&checked.ty)
                     && !is_unsafe_form(heap, v)
                 {
-                    let e = Error::TypeError(format!(
-                        "a `{}` is a raw machine word from the C FFI and can only be a value \
-                         inside `(unsafe ...)` — nothing here can check that it points at anything",
-                        ConcreteNames::type_key(&checked.ty)
-                    ));
-                    return Err(match &loc {
-                        Some(l) => e.at(l.clone()),
-                        None => e,
-                    });
+                    // Each place a raw word is a value is a place of its own
+                    // that needs the `unsafe`, so the type stays.
+                    let ty = checked.ty.clone();
+                    let what = Disagreement::Unsafe(Unsafe::RawWord { ty: ty.clone() });
+                    checked = disagreeing(checked, what, ty);
                 }
                 if checked.loc.is_none() {
                     checked.loc = loc.clone();
@@ -14829,16 +14825,13 @@ impl Checker {
         }
         // Rule A. Before the arity check, so the message a caller gets is the
         // one about permission rather than one about the shape of a call it
-        // was never allowed to write. Ahead of the `&optional`/`&key`
-        // delegation too, though a `defffi` declares neither.
+        // was never allowed to write: its arguments are not looked at, and it
+        // stands for a value of the declared return type. Ahead of the
+        // `&optional`/`&key` delegation too, though a `defffi` declares
+        // neither.
         if sig.ffi && self.unsafe_depth.get() == 0 {
-            return Err(Error::TypeError(format!(
-                "`{}` is a C function declared by `defffi`, so calling it needs `(unsafe ...)`. \
-                 Whether its declared signature is the one the C function really has is not \
-                 something this compiler can check — `unsafe` is where that is taken on. Wrap the \
-                 call, or wrap it once inside a `defun` that offers a checked signature.",
-                name
-            )));
+            let what = Disagreement::Unsafe(Unsafe::CCall { name: name.clone() });
+            return Ok(disagreeing(self.hole(None), what, sig.ret.clone()));
         }
         if !sig.optionals.is_empty() || !sig.keys.is_empty() {
             return self.check_call_opt_key(heap, interp, env, name, &sig, args, arg_locs);

@@ -399,15 +399,11 @@ impl Checker {
             self.c_arena.set(None);
         }
         let (body, ty) = result?;
+        let mut body = Checked::of(Node::Let { binds: Vec::new(), body }, ty.clone());
         if type_mentions_typed_ptr(&ty) {
-            return Err(Error::TypeError(format!(
-                "an `(unsafe ...)` cannot answer `{}`: the memory a typed pointer points at is freed \
-                 when the `unsafe` that allocated it is left. Copy what is needed into ordinary \
-                 values (a `defstruct`, numbers) inside the `unsafe`, and answer those.",
-                ty
-            )));
+            let what = Disagreement::Unsafe(Unsafe::TypedPtrAnswer { ty: ty.clone() });
+            body = disagreeing(body, what, ty.clone());
         }
-        let body = Checked::of(Node::Let { binds: Vec::new(), body }, ty.clone());
         if !allocates {
             return Ok(body);
         }

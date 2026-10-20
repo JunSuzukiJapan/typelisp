@@ -8,11 +8,11 @@
 //! A definition and what declared it ahead are checked here too, once the
 //! definition is analyzed.
 
-use typelisp_mem::{Error, Loc};
+use typelisp_mem::{ConcreteNames, Error, Loc};
 
 use crate::types::Type;
 
-use super::core::{Checked, Disagreement, Node, Uncovered, Unmet};
+use super::core::{Checked, Disagreement, Node, Uncovered, Unmet, Unsafe};
 use super::registry::FnSig;
 
 /// The disagreements in `c`, each at the innermost position written for it,
@@ -55,6 +55,24 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
                 Disagreement::HiddenSlot { ty, slot, module } => format!(
                     "make-instance {}: slot `{}` is not `pub`, so it can be given only inside module `{}`",
                     ty, slot, module
+                ),
+                Disagreement::Unsafe(Unsafe::CCall { name }) => format!(
+                    "`{}` is a C function declared by `defffi`, so calling it needs `(unsafe ...)`. \
+                     Whether its declared signature is the one the C function really has is not \
+                     something this compiler can check — `unsafe` is where that is taken on. Wrap the \
+                     call, or wrap it once inside a `defun` that offers a checked signature.",
+                    name
+                ),
+                Disagreement::Unsafe(Unsafe::RawWord { ty }) => format!(
+                    "a `{}` is a raw machine word from the C FFI and can only be a value \
+                     inside `(unsafe ...)` — nothing here can check that it points at anything",
+                    ConcreteNames::type_key(ty)
+                ),
+                Disagreement::Unsafe(Unsafe::TypedPtrAnswer { ty }) => format!(
+                    "an `(unsafe ...)` cannot answer `{}`: the memory a typed pointer points at is freed \
+                     when the `unsafe` that allocated it is left. Copy what is needed into ordinary \
+                     values (a `defstruct`, numbers) inside the `unsafe`, and answer those.",
+                    ty
                 ),
                 Disagreement::Bound { of, param, unmet } => match unmet {
                     Unmet::Undeclared { var, trait_path } => format!(
