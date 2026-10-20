@@ -233,7 +233,7 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
         Node::Default { form } => crate::owned_form::owned_to_value(s, form),
         // Reported by checking (`check::verify`) before anything is lowered
         // to run; what recover mode keeps lowered is a hole.
-        Node::Mismatch { .. } => forms::hole_form(s, None),
+        Node::Disagree { .. } => forms::hole_form(s, None),
         Node::Select { arms } => {
             let mut forms = Vec::with_capacity(arms.len());
             for arm in arms {

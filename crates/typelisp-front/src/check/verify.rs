@@ -7,7 +7,7 @@
 
 use typelisp_mem::{Error, Loc};
 
-use super::core::{Checked, Node};
+use super::core::{Checked, Disagreement, Node};
 
 /// The disagreements in `c`, each at the innermost position written for it,
 /// in the order the analysis met them: a subexpression's before the
@@ -24,8 +24,11 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
         for child in c.node.children() {
             walk(child, loc, out);
         }
-        if let Node::Mismatch { expected, value } = &c.node {
-            let e = Error::TypeError(format!("type mismatch: expected `{}`, found `{}`", expected, value.ty));
+        if let Node::Disagree { what, value } = &c.node {
+            let e = Error::TypeError(match what {
+                Disagreement::Expected(expected) => format!("type mismatch: expected `{}`, found `{}`", expected, value.ty),
+                Disagreement::Branches(a, b) => format!("branches have incompatible types: `{}` vs `{}`", a, b),
+            });
             out.push(match loc {
                 Some(l) => e.at(l.clone()),
                 None => e,

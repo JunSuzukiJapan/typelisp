@@ -49,3 +49,15 @@ fn the_inner_mismatch_is_reported_first() {
     let e = mismatch(r#"(defun g ((x i32)) i32 x) (defun f () i32 (g "no"))"#);
     assert!(e.contains("type mismatch: expected `i32`, found `string`"), "{}", e);
 }
+
+#[test]
+fn a_mismatch_between_branches_is_reported() {
+    let e = mismatch(r#"(if true 1 "no")"#);
+    assert!(e.contains("type mismatch: expected `int`, found `string`"), "{}", e);
+}
+
+#[test]
+fn incompatible_block_exits_are_reported() {
+    let e = mismatch(r#"(block b (if true (return-from b 1) 2) "no")"#);
+    assert!(e.contains("branches have incompatible types"), "{}", e);
+}

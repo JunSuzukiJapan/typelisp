@@ -164,10 +164,20 @@ pub enum Node {
     /// An `&optional`/`&key` default, checked once with its definition and
     /// copied into each call that omits the argument.
     Default { form: crate::owned_form::OwnedForm },
-    /// `value` where an `expected` it is not was required, and no widening
-    /// reconciles the two. The analysis goes on as if it were an `expected`;
-    /// checking reports it (`check::verify`).
-    Mismatch { expected: Type, value: Box<Checked> },
+    /// `value`, which disagrees with what was settled before it. The analysis
+    /// goes on with the type settled first; checking reports `what`
+    /// (`check::verify`).
+    Disagree { what: Disagreement, value: Box<Checked> },
+}
+
+/// What a [`Node::Disagree`] disagrees with.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Disagreement {
+    /// An expected type the value is not, and no widening reconciles.
+    Expected(Type),
+    /// Two ways out of one expression — branches, arms, a block's end and its
+    /// `return-from`s — whose types have nothing in common.
+    Branches(Type, Type),
 }
 
 impl Node {
@@ -192,7 +202,7 @@ impl Node {
             | Node::SomeOf { value: c, .. }
             | Node::Spawn { call: c, .. }
             | Node::Step { inner: c }
-            | Node::Mismatch { value: c, .. } => one(c),
+            | Node::Disagree { value: c, .. } => one(c),
             Node::Call { args, .. } | Node::Construct { args, .. } | Node::Assoc { args, .. } | Node::DynCall { args, .. } => {
                 args.iter().collect()
             }

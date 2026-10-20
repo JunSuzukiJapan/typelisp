@@ -16,7 +16,7 @@ use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
-use super::core::{self, Checked, Items, Node, SelectArm};
+use super::core::{self, Checked, Disagreement, Items, Node, SelectArm};
 use super::{forms, lower};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
@@ -9656,7 +9656,7 @@ impl Checker {
                         return Ok(Checked::of(node, e.clone()));
                     }
                 }
-                return Ok(Checked::of(Node::Mismatch { expected: e.clone(), value: Box::new(typed) }, e.clone()));
+                return Ok(disagreeing(typed, Disagreement::Expected(e.clone()), e.clone()));
             }
         }
         Ok(typed)
@@ -11273,8 +11273,9 @@ impl Checker {
         // A diverging (`Never`) then branch must not constrain the else branch.
         let else_expected = non_never(&then.ty).or(expected);
         let els = self.check_at(heap, interp, env, args[2], else_expected, nth_loc(arg_locs, 2))?;
-        let ty = join_types(&then.ty, &els.ty)?;
-        Ok(Checked::of(Node::If { cond: Box::new(cond), then: Box::new(then), els: Box::new(els) }, ty))
+        let (ty, split) = join_or_first(&then.ty, &els.ty);
+        let node = Checked::of(Node::If { cond: Box::new(cond), then: Box::new(then), els: Box::new(els) }, ty);
+        Ok(disagreeing_if(node, split))
     }
 
     fn check_panic(
@@ -11432,11 +11433,12 @@ impl Checker {
             if matches!(head, Value::Symbol(id) if id.is(wk::KW_ELSE)) {
                 saw_else = true;
                 let (body, body_ty) = self.check_seq(heap, interp, env, rest, &vec![None; rest.len()], expected)?;
-                ty = Some(match ty {
-                    Some(t) => join_types(&t, &body_ty)?,
-                    None => body_ty.clone(),
-                });
-                let body = Checked::of(Node::Let { binds: Vec::new(), body }, body_ty);
+                let (joined, split) = match &ty {
+                    Some(t) => join_or_first(t, &body_ty),
+                    None => (body_ty.clone(), None),
+                };
+                ty = Some(joined);
+                let body = disagreeing_if(Checked::of(Node::Let { binds: Vec::new(), body }, body_ty), split);
                 arms.push(SelectArm::Else { body });
                 continue;
             }
@@ -11470,11 +11472,12 @@ impl Checker {
                 let value_name = format!("select operand {}", binds.len());
                 binds.push((value_name.clone(), value.ty.clone(), value));
                 let (body, body_ty) = self.check_seq(heap, interp, env, rest, &vec![None; rest.len()], expected)?;
-                ty = Some(match ty {
-                    Some(t) => join_types(&t, &body_ty)?,
-                    None => body_ty.clone(),
-                });
-                let body = Checked::of(Node::Let { binds: Vec::new(), body }, body_ty);
+                let (joined, split) = match &ty {
+                    Some(t) => join_or_first(t, &body_ty),
+                    None => (body_ty.clone(), None),
+                };
+                ty = Some(joined);
+                let body = disagreeing_if(Checked::of(Node::Let { binds: Vec::new(), body }, body_ty), split);
                 let chan = Checked::of(Node::Local { name: chan_name.into() }, chan_ty);
                 let value = Checked::of(Node::Local { name: value_name.into() }, elem);
                 SelectArm::Send { kind, chan, value, body }
@@ -11507,11 +11510,12 @@ impl Checker {
                 binds.push((chan_name.clone(), chan.ty.clone(), chan));
                 let child = env.extended_with_locs(vec![(var.clone(), bound, loc.clone())])?;
                 let (body, body_ty) = self.check_seq(heap, interp, &child, rest, &vec![None; rest.len()], expected)?;
-                ty = Some(match ty {
-                    Some(t) => join_types(&t, &body_ty)?,
-                    None => body_ty.clone(),
-                });
-                let body = Checked::of(Node::Let { binds: Vec::new(), body }, body_ty);
+                let (joined, split) = match &ty {
+                    Some(t) => join_or_first(t, &body_ty),
+                    None => (body_ty.clone(), None),
+                };
+                ty = Some(joined);
+                let body = disagreeing_if(Checked::of(Node::Let { binds: Vec::new(), body }, body_ty), split);
                 let chan = Checked::of(Node::Local { name: chan_name.into() }, chan_ty);
                 SelectArm::Recv { var: var.into(), key: key.into(), chan, body }
             };
@@ -13735,17 +13739,17 @@ impl Checker {
         self.unify_throw_tag(&tag, &body.ty, "catch")?;
         // Joined with the tag's own type, not simply `body`'s: a body that
         // only throws has type `Never`, yet the form still produces whatever
-        // the throw delivered. `join_types` leaves the ordinary case alone,
+        // the throw delivered. `join_or_first` leaves the ordinary case alone,
         // since `Never` joins away and an agreeing tag joins to the same type.
-        let ty = match self.throw_tags.borrow().get(&tag) {
-            Some(carried) => join_types(&body.ty, carried)?,
-            None => body.ty.clone(),
+        let (ty, split) = match self.throw_tags.borrow().get(&tag) {
+            Some(carried) => join_or_first(&body.ty, carried),
+            None => (body.ty.clone(), None),
         };
         // The *tag's* type, not the form's: those differ exactly when the body
         // falls off its end normally, and what crosses the boundary is what the
         // throw carried.
         let carried = self.throw_tags.borrow().get(&tag).cloned().unwrap_or_else(|| ty.clone());
-        Ok(Checked::of(Node::Catch { tag: sym, carried, body: Box::new(body) }, ty))
+        Ok(disagreeing_if(Checked::of(Node::Catch { tag: sym, carried, body: Box::new(body) }, ty), split))
     }
 
     /// `(throw 'tag value)`: leave for the nearest dynamically enclosing
@@ -13803,8 +13807,8 @@ impl Checker {
         if !args.is_empty() {
             return Err(Error::TypeError("break: (break), takes no arguments".into()));
         }
-        self.contribute_loop_exit(Type::Unit)?;
-        Ok(Checked::of(Node::Break, Type::Never))
+        let split = self.contribute_loop_exit(Type::Unit)?;
+        Ok(disagreeing_if(Checked::of(Node::Break, Type::Never), split))
     }
 
     /// `(return)` / `(return value)`: exit the nearest enclosing loop,
@@ -13832,8 +13836,8 @@ impl Checker {
             None => None,
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
-        self.contribute_loop_exit(ty)?;
-        Ok(Checked::of(Node::Return { value: value.map(Box::new) }, Type::Never))
+        let split = self.contribute_loop_exit(ty)?;
+        Ok(disagreeing_if(Checked::of(Node::Return { value: value.map(Box::new) }, Type::Never), split))
     }
 
     /// `(block NAME BODY...)` — CL's lexical named escape. The value is the
@@ -13901,8 +13905,17 @@ impl Checker {
         self.block_stack.borrow_mut().push(BlockFrame { name: name.to_string(), ty: seed, used: false });
         let result = self.check_seq(heap, interp, env, body, body_locs, expected);
         let frame = self.block_stack.borrow_mut().pop().expect("pushed above");
-        let (body, body_ty) = result?;
-        let ty = join_types(&frame.ty, &body_ty)?;
+        let (mut body, body_ty) = result?;
+        // The block's end disagreeing with its `return-from`s is left on the
+        // body's last form, where the end is.
+        let (ty, split) = join_or_first(&frame.ty, &body_ty);
+        if let Some(what) = split {
+            let last = match body.pop() {
+                Some(last) => last,
+                None => self.literal(heap, wk::UNIT, None, Type::Unit),
+            };
+            body.push(disagreeing(last, what, ty.clone()));
+        }
         Ok((body, ty, frame.used))
     }
 
@@ -13969,9 +13982,9 @@ impl Checker {
             None => None,
         };
         let ty = value.as_ref().map(|t| t.ty.clone()).unwrap_or(Type::Unit);
-        self.contribute_block_exit(&name, ty)?;
+        let split = self.contribute_block_exit(&name, ty)?;
         let node = Node::ReturnFrom { name: name.as_str().into(), value: value.map(Box::new) };
-        Ok(Checked::of(node, Type::Never))
+        Ok(disagreeing_if(Checked::of(node, Type::Never), split))
     }
 
     /// The bare symbol a `block`/`return-from` names.
@@ -13989,28 +14002,31 @@ impl Checker {
 
     /// Unify a `return-from` value's type into the named block's accumulated
     /// exit type — [`Self::contribute_loop_exit`]'s named counterpart.
-    fn contribute_block_exit(&self, name: &str, ty: Type) -> Result<(), Error> {
+    /// What the types disagree on, if they do, is left for checking.
+    fn contribute_block_exit(&self, name: &str, ty: Type) -> Result<Option<Disagreement>, Error> {
         let mut stack = self.block_stack.borrow_mut();
         let frame = stack
             .iter_mut()
             .rev()
             .find(|f| f.name == name)
             .ok_or_else(|| Error::TypeError(format!("return-from: no enclosing block named `{}`", name)))?;
-        frame.ty = join_types(&frame.ty, &ty)?;
+        let (joined, split) = join_or_first(&frame.ty, &ty);
+        frame.ty = joined;
         frame.used = true;
-        Ok(())
+        Ok(split)
     }
 
     /// Unify a `break`/`return` value's type into the nearest enclosing loop's
-    /// accumulated exit type, erroring if there is no enclosing loop or the
-    /// types disagree (mirrors how `match`/`cond` arms must agree).
-    fn contribute_loop_exit(&self, ty: Type) -> Result<(), Error> {
+    /// accumulated exit type, erroring if there is no enclosing loop. Types
+    /// that disagree (as `match`/`cond` arms can) are left for checking.
+    fn contribute_loop_exit(&self, ty: Type) -> Result<Option<Disagreement>, Error> {
         let mut stack = self.loop_stack.borrow_mut();
         let top = stack
             .last_mut()
             .ok_or_else(|| Error::TypeError("break/return: not inside a loop".into()))?;
-        *top = join_types(&*top, &ty)?;
-        Ok(())
+        let (joined, split) = join_or_first(&*top, &ty);
+        *top = joined;
+        Ok(split)
     }
 
     /// `(list e1 e2 ... en)`: build a `Sexpr` cons-list from `Sexpr`-typed
@@ -15725,20 +15741,10 @@ impl Checker {
                 continue;
             }
             let (body, body_ty) = recover_arm!(checked);
-            result_ty = Some(match result_ty {
-                None => body_ty,
-                // A body that disagrees with the other arms' type: record it in
-                // recover mode but keep this arm (its subtree is valid, only the
-                // type join failed) and the previously-agreed result type.
-                Some(r) => match join_types(&r, &body_ty) {
-                    Ok(joined) => joined,
-                    Err(e) if self.recover => {
-                        self.push_recovered(e, arm_loc.clone());
-                        r
-                    }
-                    Err(e) => return Err(e),
-                },
-            });
+            // A body that disagrees with the other arms' type keeps the
+            // previously agreed result type, and is left for checking.
+            let (body, joined) = self.join_arm(heap, result_ty, body, body_ty, &arm_loc);
+            result_ty = Some(joined);
             if let Some(r) = &result_ty {
                 probe_ty = Some(match probe_ty {
                     None => r.clone(),
@@ -15774,17 +15780,8 @@ impl Checker {
                 }
                 Err(e) => return Err(e),
             };
-            result_ty = Some(match result_ty {
-                None => body_ty,
-                Some(r) => match join_types(&r, &body_ty) {
-                    Ok(joined) => joined,
-                    Err(e) if self.recover => {
-                        self.push_recovered(e, d.arm_loc.clone());
-                        r
-                    }
-                    Err(e) => return Err(e),
-                },
-            });
+            let (body, joined) = self.join_arm(heap, result_ty, body, body_ty, &d.arm_loc);
+            result_ty = Some(joined);
             arms[d.slot] = Some((d.pat, body));
         }
 
@@ -15836,6 +15833,35 @@ impl Checker {
         };
         let arms = arms.into_iter().flatten().collect();
         Ok(Checked::of(Node::Match { scrut: Box::new(scrut), arms }, ty))
+    }
+
+    /// A `match` arm's `body`, of type `body_ty`, joined with the arms before
+    /// it (`agreed`). When the two have nothing in common the agreed type
+    /// stands and the body's last form carries what checking will report — at
+    /// the arm in recover mode, where the other arms go on being useful, and
+    /// at the `match` otherwise.
+    fn join_arm(
+        &self,
+        heap: &mut Heap,
+        agreed: Option<Type>,
+        mut body: Vec<Checked>,
+        body_ty: Type,
+        arm_loc: &Option<Loc>,
+    ) -> (Vec<Checked>, Type) {
+        let Some(r) = agreed else { return (body, body_ty) };
+        let (joined, split) = join_or_first(&r, &body_ty);
+        if let Some(what) = split {
+            let last = match body.pop() {
+                Some(last) => last,
+                None => self.literal(heap, wk::UNIT, None, Type::Unit),
+            };
+            let mut d = disagreeing(last, what, joined.clone());
+            if self.recover {
+                d.loc = arm_loc.clone();
+            }
+            body.push(d);
+        }
+        (body, joined)
     }
 
     /// Check a pattern against the type of the value it matches, returning the
@@ -16842,13 +16868,30 @@ fn non_never(t: &Type) -> Option<&Type> {
     }
 }
 
-/// Join two branch types: [`merge_holes`], with a diagnostic when they don't
-/// merge. `Never` is absorbed by the other side, so a diverging branch never
-/// constrains the result.
-fn join_types(a: &Type, b: &Type) -> Result<Type, Error> {
-    merge_holes(a, b).ok_or_else(|| {
-        Error::TypeError(format!("branches have incompatible types: `{}` vs `{}`", a, b))
-    })
+/// The join of `a`, settled first, and `b` — or `a` and what checking will
+/// report, when they have nothing in common.
+fn join_or_first(a: &Type, b: &Type) -> (Type, Option<Disagreement>) {
+    match merge_holes(a, b) {
+        Some(t) => (t, None),
+        None => (a.clone(), Some(Disagreement::Branches(a.clone(), b.clone()))),
+    }
+}
+
+/// `value`, seen as the `ty` settled before it, with what it disagrees with
+/// left for checking (`check::verify`).
+fn disagreeing(value: Checked, what: Disagreement, ty: Type) -> Checked {
+    Checked::of(Node::Disagree { what, value: Box::new(value) }, ty)
+}
+
+/// `c`, or `c` disagreeing with `what` when there is something.
+fn disagreeing_if(c: Checked, what: Option<Disagreement>) -> Checked {
+    match what {
+        Some(what) => {
+            let ty = c.ty.clone();
+            disagreeing(c, what, ty)
+        }
+        None => c,
+    }
 }
 
 /// Fill each side's inference holes from the other, or `None` if they
