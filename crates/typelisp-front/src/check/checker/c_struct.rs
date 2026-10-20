@@ -608,9 +608,10 @@ impl Checker {
         ty: &Type,
         value: Checked,
     ) -> Result<Checked, Error> {
-        let kind = c_kind(ty).ok_or_else(|| {
-            Error::TypeError(format!("setf: a field holding a struct by value (`{}`) cannot be assigned as a whole — assign its fields", ty))
-        })?;
+        let Some(kind) = c_kind(ty) else {
+            let what = Disagreement::Unassignable(Unassignable::WholeCStruct { ty: ty.clone() });
+            return Ok(disagreeing(value, what, ty.clone()));
+        };
         const TEMP: &str = " c-value";
         let temp = Checked::of(Node::Local { name: TEMP.into() }, ty.clone());
         let off = self.c_word(heap, interp, offset)?;

@@ -101,3 +101,19 @@ fn a_top_level_form_in_expression_position_is_reported() {
     let e = mismatch(r#"(defun f () i32 (defun g () i32 1) 2)"#);
     assert!(e.contains("defun: only allowed at top level, not in expression position — define a local function with `labels`"), "{}", e);
 }
+
+#[test]
+fn an_assignment_to_a_constant_is_reported() {
+    let e = mismatch(r#"(defconstant (k i32) 5) (setf k 6)"#);
+    assert!(e.contains("setf: cannot assign to constant `k`"), "{}", e);
+}
+
+#[test]
+fn an_assignment_to_a_struct_held_by_value_is_reported() {
+    let e = mismatch(
+        r#"(unsafe (def-c-struct point (x i32) (y i32))
+                   (def-c-struct seg (a point) (b point)))
+           (unsafe (let ((s (c-alloc seg 1))) (setf s::a (panic "x")) 0))"#,
+    );
+    assert!(e.contains("setf: a field holding a struct by value (`point`) cannot be assigned as a whole"), "{}", e);
+}

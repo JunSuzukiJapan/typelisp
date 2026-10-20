@@ -18,7 +18,7 @@ use typelisp_mem::{ConcreteNames, Error, Loc};
 use crate::types::Type;
 use crate::wk;
 
-use super::core::{Checked, Disagreement, Node, Uncovered, Unmet, Unsafe};
+use super::core::{Checked, Disagreement, Node, Unassignable, Uncovered, Unmet, Unsafe};
 use super::registry::FnSig;
 
 /// The disagreements in `c`, each at the innermost position written for it,
@@ -78,6 +78,13 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
                     "an `(unsafe ...)` cannot answer `{}`: the memory a typed pointer points at is freed \
                      when the `unsafe` that allocated it is left. Copy what is needed into ordinary \
                      values (a `defstruct`, numbers) inside the `unsafe`, and answer those.",
+                    ty
+                ),
+                Disagreement::Unassignable(Unassignable::Constant { name }) => {
+                    format!("setf: cannot assign to constant `{}`", name)
+                }
+                Disagreement::Unassignable(Unassignable::WholeCStruct { ty }) => format!(
+                    "setf: a field holding a struct by value (`{}`) cannot be assigned as a whole — assign its fields",
                     ty
                 ),
                 Disagreement::Bound { of, param, unmet } => match unmet {

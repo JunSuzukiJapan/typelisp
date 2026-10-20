@@ -16,7 +16,7 @@ use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
-use super::core::{self, Checked, Disagreement, Items, Node, SelectArm, Uncovered, Unmet, Unsafe};
+use super::core::{self, Checked, Disagreement, Items, Node, SelectArm, Unassignable, Uncovered, Unmet, Unsafe};
 use super::{forms, lower};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
@@ -12489,12 +12489,10 @@ impl Checker {
             return Ok(Checked::of(Node::Set { name: name.into(), value: Box::new(value) }, ty));
         }
         if let Some((path, vi)) = self.info.resolve_global(&name) {
-            if !vi.mutable {
-                return Err(Error::TypeError(format!("setf: cannot assign to constant `{}`", name)));
-            }
             let value = self.check_at(heap, interp, env, args[1], Some(&vi.ty), value_loc)?;
             let node = Node::SetGlobal { path, ty: vi.ty.clone(), value: Box::new(value) };
-            return Ok(Checked::of(node, vi.ty));
+            let what = (!vi.mutable).then(|| Disagreement::Unassignable(Unassignable::Constant { name }));
+            return Ok(disagreeing_if(Checked::of(node, vi.ty), what));
         }
         Err(Error::TypeError(format!("setf: unbound variable: {}", name)))
     }

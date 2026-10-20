@@ -197,6 +197,18 @@ pub enum Disagreement {
     HiddenSlot { ty: String, slot: String, module: String },
     /// What needs `(unsafe ...)`, outside one.
     Unsafe(Unsafe),
+    /// A `setf` of a place that cannot be assigned.
+    Unassignable(Unassignable),
+}
+
+/// Why a place a `setf` names cannot be assigned.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Unassignable {
+    /// The global `name`, a constant.
+    Constant { name: String },
+    /// A C struct field holding a struct of `ty` by value, whose own fields
+    /// are what is assigned.
+    WholeCStruct { ty: Type },
 }
 
 /// What only `(unsafe ...)` permits, or what it cannot answer.
