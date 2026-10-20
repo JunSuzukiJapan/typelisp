@@ -77,7 +77,7 @@ impl Checker {
         let checked = self.check_at(heap, interp, env, arg, Some(fn_ty), loc.clone())?;
         let target = match &checked.node {
             Node::Lambda { .. } => {
-                let lambda = lower::lower_rooted(heap, &self.info, &checked)?;
+                let lambda = self.lowered(heap, &checked)?;
                 self.lift_lambda(heap, lambda, fn_ty)?
             }
             Node::FnRef { path, .. } => {
@@ -224,7 +224,7 @@ impl Checker {
         let mut refs: HashMap<&str, (Vec<String>, Vec<String>)> = HashMap::new();
         for (name, params, _, body) in defs {
             let bound: HashSet<SymRef> = params.iter().map(|(n, _)| typelisp_mem::symbols::intern(n)).collect();
-            let lowered = lower::lower_all(heap, &self.info, body)?;
+            let lowered = self.lowered_all(heap, body)?;
             let free = crate::check::freevars::free_vars(heap, &lowered, &bound, &HashSet::new())?;
             let (sibs, caps): (Vec<String>, Vec<String>) = free
                 .iter()
@@ -274,7 +274,7 @@ impl Checker {
         let call = Checked::of(Node::Apply { callee: Box::new(callee), ret: g_ret.clone(), args }, g_ret.clone());
         let kept: Vec<LabelsDef> = defs.iter().filter(|(n, _, _, _)| reached.contains(&n.as_str())).cloned().collect();
         let block = Checked::of(Node::Labels { defs: kept, body: vec![call] }, g_ret.clone());
-        let block = lower::lower_rooted(heap, &self.info, &block)?;
+        let block = self.lowered(heap, &block)?;
         let form = self.info.defun_form(heap, &p.lifted, &params, g_ret, &[block])?;
         let form = forms::rooted(heap, form);
         self.lifted.borrow_mut().push(LiftedCallback { path: p.lifted.clone(), sig: Self::lifted_sig(&fn_ty), form });

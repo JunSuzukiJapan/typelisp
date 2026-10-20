@@ -1714,7 +1714,7 @@ impl Checker {
             Err(e) if self.recover => {
                 self.spec_pending.borrow_mut().clear();
                 self.errors.borrow_mut().push(e);
-                let hole = lower::lower_rooted(heap, &self.info, &self.hole(loc))?;
+                let hole = self.lowered(heap, &self.hole(loc))?;
                 forms::expr_form(heap, hole)
             }
             other => other,
@@ -2212,7 +2212,7 @@ impl Checker {
         // from the form itself (see `core::Checked`), so record it here — see
         // [`Self::expr_type`].
         self.expr_ty = Some(t.ty.clone());
-        let form = lower::lower_rooted(heap, &self.info, &t)?;
+        let form = self.lowered(heap, &t)?;
         forms::expr_form(heap, form)
     }
 
@@ -3348,7 +3348,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
             self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
-        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        let lowered = self.lowered_all(heap, &body)?;
         self.info.definition_form(heap, &fq_name, &type_params, &params, &ret, &lowered)
     }
 
@@ -3500,7 +3500,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let body =
             self.check_definition_body(heap, interp, &env, &parts[body_start..], body_locs, &name, &ret)?;
-        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        let lowered = self.lowered_all(heap, &body)?;
         self.info.definition_form(heap, &fq_name, &type_params, &params, &ret, &lowered)
     }
 
@@ -3524,7 +3524,7 @@ impl Checker {
                 let checked = self.check(heap, interp, &env, form, Some(decl_ty))?;
                 // Detached from the heap right here — see `OptKeyParam::
                 // default` for why the signature cannot hold a `Value`.
-                let form = lower::lower_rooted(heap, &self.info, &checked)?;
+                let form = self.lowered(heap, &checked)?;
                 Ok(Some(crate::owned_form::value_to_owned(heap, form)?))
             }
         }
@@ -3878,7 +3878,7 @@ impl Checker {
         // The *written* name, not the mangled one: the body's own
         // `(return-from NAME ...)` was written against the name in the source.
         let body = self.check_definition_body(heap, interp, &env, &parts[body_start..], &[], &method, &ret)?;
-        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        let lowered = self.lowered_all(heap, &body)?;
         self.info.defmethod_form(heap, &type_fq, mangled, instance, &all, &ret, &lowered)
     }
 
@@ -3955,7 +3955,7 @@ impl Checker {
         let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
-        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        let lowered = self.lowered_all(heap, &body)?;
         self.info.defun_form(heap, mangled, &params, &ret, &lowered)
     }
 
@@ -4027,7 +4027,7 @@ impl Checker {
         let (name, _) = self.parse_defun_name(heap, tmpl.parts[0])?;
         let body =
             self.check_definition_body(heap, interp, &env, &tmpl.parts[body_start..], &[], &name, &ret)?;
-        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        let lowered = self.lowered_all(heap, &body)?;
         self.info.defun_form(heap, mangled, &params, &ret, &lowered)
     }
 
@@ -4572,7 +4572,7 @@ impl Checker {
         let body_locs = parts_locs.get(body_start..).unwrap_or(&[]);
         let (body, _) = self.check_seq(heap, interp, &env, &parts[body_start..], body_locs, Some(&sexpr_ty))?;
         let lambda = MacroLambda { required: required_names.len(), optionals: opt_defaults, keys: key_defaults };
-        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        let lowered = self.lowered_all(heap, &body)?;
         forms::defmacro_form(heap, fq_name, params, rest, &lambda, &lowered)
     }
 
@@ -4593,7 +4593,7 @@ impl Checker {
             Some(form) => {
                 let env = Env::new().extended(bindings.to_vec())?;
                 let checked = self.check(heap, interp, &env, form, Some(sexpr_ty))?;
-                Ok(vec![lower::lower_rooted(heap, &self.info, &checked)?])
+                Ok(vec![self.lowered(heap, &checked)?])
             }
         }
     }
@@ -6493,7 +6493,10 @@ impl Checker {
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
             let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
             let body_locs = locs.get(body_start..).unwrap_or(&[]);
-            self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
+            let body = self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
+            for c in &body {
+                self.verified(c)?;
+            }
         }
         Ok(())
     }
@@ -6557,7 +6560,10 @@ impl Checker {
             binds.extend(params.iter().cloned().zip(param_locs).map(|((n, t), l)| (n, t, l)));
             let env = Env::new().with_bounds(bounds).extended_with_locs(binds)?;
             let body_locs = locs.get(body_start..).unwrap_or(&[]);
-            self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
+            let body = self.check_definition_body(heap, interp, &env, &elems[body_start..], body_locs, &method, &ret)?;
+            for c in &body {
+                self.verified(c)?;
+            }
         }
         Ok(())
     }
@@ -7838,7 +7844,7 @@ impl Checker {
             all.push((s.clone(), recv_ty));
         }
         all.extend(params);
-        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        let lowered = self.lowered_all(heap, &body)?;
         self.info.method_definition_form(heap, &type_fq, &def_name, instance, &type_params, &all, &ret, &lowered)
     }
 
@@ -8635,6 +8641,37 @@ impl Checker {
             None => "<unknown>".to_string(),
         };
         self.str_literal(heap, &file)
+    }
+
+    /// Checks the tree `c` (`check::verify`): in strict mode its first
+    /// disagreement is the error, and in recover mode each one is recorded.
+    pub(super) fn verified(&self, c: &Checked) -> Result<(), Error> {
+        let found = super::verify::disagreements(c);
+        if self.recover {
+            for e in found {
+                self.push_recovered(e, None);
+            }
+            return Ok(());
+        }
+        match found.into_iter().next() {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+
+    /// `c` checked and lowered, its form rooted until the end of the
+    /// top-level form.
+    pub(super) fn lowered(&self, heap: &mut Heap, c: &Checked) -> Result<Value, Error> {
+        self.verified(c)?;
+        lower::lower_rooted(heap, &self.info, c)
+    }
+
+    /// [`Self::lowered`] of each of `cs`, in order.
+    pub(super) fn lowered_all(&self, heap: &mut Heap, cs: &[Checked]) -> Result<Vec<Value>, Error> {
+        for c in cs {
+            self.verified(c)?;
+        }
+        lower::lower_all(heap, &self.info, cs)
     }
 
     /// A `Never`-typed placeholder for a sub-expression that failed to check.
@@ -9619,10 +9656,7 @@ impl Checker {
                         return Ok(Checked::of(node, e.clone()));
                     }
                 }
-                return Err(Error::TypeError(format!(
-                    "type mismatch: expected `{}`, found `{}`",
-                    e, typed.ty
-                )));
+                return Ok(Checked::of(Node::Mismatch { expected: e.clone(), value: Box::new(typed) }, e.clone()));
             }
         }
         Ok(typed)
@@ -9977,7 +10011,7 @@ impl Checker {
         self.loop_stack.replace(saved);
         let (body, _) = result?;
         let bound: Vec<String> = params.iter().map(|(n, _)| n.clone()).collect();
-        let lowered = lower::lower_all(heap, &self.info, &body)?;
+        let lowered = self.lowered_all(heap, &body)?;
         self.reject_captured_typed_ptrs(heap, env, &lowered, &bound, "a `lambda`")?;
         Ok(Checked::of(Node::Lambda { params, ret, body }, fn_ty))
     }
@@ -10239,7 +10273,7 @@ impl Checker {
                 self.loop_stack.replace(saved);
                 let (body, _, used) = result?;
                 let bound: Vec<String> = params.iter().map(|(n, _)| n.clone()).chain(names.iter().cloned()).collect();
-                let lowered = lower::lower_all(heap, &self.info, &body)?;
+                let lowered = self.lowered_all(heap, &body)?;
                 self.reject_captured_typed_ptrs(heap, env, &lowered, &bound, &format!("the `labels` function `{}`", name))?;
                 let body = self.implicit_block(&name, &ret, body, used)?;
                 defs.push((name, params, ret, body));
@@ -10668,9 +10702,10 @@ impl Checker {
                     )));
                 }
                 // Checked for their own diagnostics only — the node they used
-                // to fill is never executed, so the lowered forms are dropped.
+                // to fill is never executed, so the trees are dropped.
                 for (i, a) in args.iter().enumerate() {
-                    self.check_at(heap, interp, env, *a, None, nth_loc(arg_locs, i))?;
+                    let arg = self.check_at(heap, interp, env, *a, None, nth_loc(arg_locs, i))?;
+                    self.verified(&arg)?;
                 }
                 // The bound's associated-type pins (`(Item i32)`) resolve the
                 // trait method template's otherwise-opaque associated-type
@@ -11319,6 +11354,7 @@ impl Checker {
         // was written looked like one, so the node itself is the last word.
         // What it lowers to says, too: a builtin call over literals folds to
         // its value, and one answering an `int` crosses back through a tag.
+        self.verified(&inner)?;
         let lowered = lower::lower(heap, &self.info, &inner)?;
         let is_call = matches!(
             heap.car(lowered),
@@ -12975,7 +13011,13 @@ impl Checker {
     ) -> Result<Checked, Error> {
         let expansion = self.aref_expansion(heap, recv, subs, value)?;
         heap.push_root(expansion);
-        let result = self.check(heap, interp, env, expansion, expected);
+        // Checked here rather than with the rest of the form: the sentence
+        // below is about this failure, and only this function knows `aref`
+        // was written.
+        let result = self.check(heap, interp, env, expansion, expected).and_then(|c| {
+            self.verified(&c)?;
+            Ok(c)
+        });
         heap.pop_root();
         let Err(err) = result else { return result };
         // The rewritten form is not what the user wrote, so a type error
@@ -13438,7 +13480,7 @@ impl Checker {
         if let Some(doc) = doc {
             self.info.reg.docs.vars.insert(fq_name.clone(), doc);
         }
-        let value = lower::lower_rooted(heap, &self.info, &value)?;
+        let value = self.lowered(heap, &value)?;
         self.info.defvar_form(heap, &fq_name, &ty, mutable, value, reassign)
     }
 
@@ -14227,7 +14269,11 @@ impl Checker {
         // Rooted for the rest of the top-level form — see
         // `resolve_format_calls`.
         heap.push_root(call);
-        let checked = self.check_at(heap, interp, &env, call, Some(&Type::Str), loc).map_err(|e| {
+        let checked = self.check_at(heap, interp, &env, call, Some(&Type::Str), loc).and_then(|c| {
+            self.verified(&c)?;
+            Ok(c)
+        });
+        let checked = checked.map_err(|e| {
             let inner = match e.kind() {
                 Error::TypeError(m) => m.clone(),
                 other => other.to_string(),
@@ -15653,7 +15699,9 @@ impl Checker {
             let outer_probe = self.infer_probe.replace(probing);
             let checked = self.check_seq(heap, interp, &arm_env, &parts[body_start..], &body_locs, arm_expected);
             self.infer_probe.set(outer_probe);
-            let settled = checked.is_ok()
+            // A disagreement in the body is a failure here too: a sibling's
+            // type may equally well fix it.
+            let settled = checked.as_ref().is_ok_and(|(body, _)| body.iter().all(|c| super::verify::disagreements(c).is_empty()))
                 && self.probe_holes.get() == holes
                 && self.errors.borrow().len() == mark.errors;
             if probing && !settled {

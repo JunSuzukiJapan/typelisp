@@ -164,6 +164,75 @@ pub enum Node {
     /// An `&optional`/`&key` default, checked once with its definition and
     /// copied into each call that omits the argument.
     Default { form: crate::owned_form::OwnedForm },
+    /// `value` where an `expected` it is not was required, and no widening
+    /// reconciles the two. The analysis goes on as if it were an `expected`;
+    /// checking reports it (`check::verify`).
+    Mismatch { expected: Type, value: Box<Checked> },
+}
+
+impl Node {
+    /// The node's subexpressions, in the order they are written.
+    pub fn children(&self) -> Vec<&Checked> {
+        fn one(c: &Checked) -> Vec<&Checked> {
+            vec![c]
+        }
+        match self {
+            Node::If { cond, then, els } => vec![cond, then, els],
+            Node::Panic { message: c }
+            | Node::BoxOption { value: c, .. }
+            | Node::DynValue { value: c }
+            | Node::DynUpcast { value: c, .. }
+            | Node::DynNew { value: c, .. }
+            | Node::Set { value: c, .. }
+            | Node::SetGlobal { value: c, .. }
+            | Node::Block { body: c, .. }
+            | Node::Catch { body: c, .. }
+            | Node::Throw { value: c, .. }
+            | Node::UntagInt { value: c }
+            | Node::SomeOf { value: c, .. }
+            | Node::Spawn { call: c, .. }
+            | Node::Step { inner: c }
+            | Node::Mismatch { value: c, .. } => one(c),
+            Node::Call { args, .. } | Node::Construct { args, .. } | Node::Assoc { args, .. } | Node::DynCall { args, .. } => {
+                args.iter().collect()
+            }
+            Node::Let { binds, body } => binds.iter().map(|(_, _, c)| c).chain(body).collect(),
+            Node::Apply { callee, args, .. } => std::iter::once(&**callee).chain(args).collect(),
+            Node::Lambda { body, .. } | Node::Loop { body, .. } => body.iter().collect(),
+            Node::Labels { defs, body } => defs.iter().flat_map(|(_, _, _, b)| b).chain(body).collect(),
+            Node::Return { value } | Node::ReturnFrom { value, .. } => value.iter().map(|c| &**c).collect(),
+            Node::UnwindProtect { protected, cleanup } => vec![protected, cleanup],
+            Node::Select { arms } => arms
+                .iter()
+                .flat_map(|arm| match arm {
+                    SelectArm::Recv { chan, body, .. } => vec![chan, body],
+                    SelectArm::Send { chan, value, body, .. } => vec![chan, value, body],
+                    SelectArm::Else { body } => vec![body],
+                })
+                .collect(),
+            Node::Match { scrut, arms } => {
+                let mut out = vec![&**scrut];
+                for (pat, body) in arms {
+                    pat.guards(&mut out);
+                    out.extend(body);
+                }
+                out
+            }
+            Node::Literal { .. }
+            | Node::Quote { .. }
+            | Node::Local { .. }
+            | Node::Global { .. }
+            | Node::FnRef { .. }
+            | Node::MethodRef { .. }
+            | Node::ErasedGeneric { .. }
+            | Node::Break
+            | Node::Compile { .. }
+            | Node::Trace { .. }
+            | Node::Disassemble { .. }
+            | Node::Hole { .. }
+            | Node::Default { .. } => Vec::new(),
+        }
+    }
 }
 
 /// One arm of a [`Node::Select`].

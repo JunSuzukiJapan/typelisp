@@ -12,6 +12,7 @@ pub mod repr;
 pub mod registry;
 mod info;
 mod lower;
+mod verify;
 pub mod checker;
 mod fold;
 pub mod loop_dsl;

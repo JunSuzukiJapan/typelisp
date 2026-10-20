@@ -34,6 +34,22 @@ pub enum CompileTarget {
     Method(Path, String),
 }
 
+impl Pattern {
+    /// The expressions the pattern tests with, in the order they are written.
+    pub fn guards<'a>(&'a self, out: &mut Vec<&'a crate::check::core::Checked>) {
+        match self {
+            Pattern::Guard { form, .. } => out.push(form),
+            Pattern::When { pat, test } => {
+                pat.guards(out);
+                out.push(test);
+            }
+            Pattern::Ctor { args, .. } => args.iter().for_each(|p| p.guards(out)),
+            Pattern::Some(_, sub) | Pattern::TypeTest(_, sub) => sub.guards(out),
+            Pattern::Wildcard | Pattern::Bind(_) | Pattern::Int(_) | Pattern::Bool(_) | Pattern::Char(_) | Pattern::Empty => {}
+        }
+    }
+}
+
 /// A match pattern.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Pattern {
