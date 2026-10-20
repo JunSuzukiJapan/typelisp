@@ -190,6 +190,19 @@ pub enum Disagreement {
     /// A `where` bound of `of` on its type parameter `param` that the type
     /// the call decided for it does not meet.
     Bound { of: String, param: String, unmet: Unmet },
+    /// A `match` whose arms leave values of the type it matches on unmatched.
+    Uncovered(Uncovered),
+}
+
+/// What a `match`'s arms leave unmatched.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Uncovered {
+    /// Some of the `total` variants of `adt`; the arms cover `covered`.
+    Variants { adt: crate::Path, covered: usize, total: usize },
+    /// One of the two `bool`s, `missing`.
+    Bool { missing: bool },
+    /// Values of `ty`, which has no variants, so only a `_` arm covers it.
+    ByValue { ty: Type },
 }
 
 /// How a type decided for a bounded type parameter falls short of the bound.

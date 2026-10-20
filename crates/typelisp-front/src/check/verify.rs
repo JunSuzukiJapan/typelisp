@@ -7,7 +7,7 @@
 
 use typelisp_mem::{Error, Loc};
 
-use super::core::{Checked, Disagreement, Node, Unmet};
+use super::core::{Checked, Disagreement, Node, Uncovered, Unmet};
 
 /// The disagreements in `c`, each at the innermost position written for it,
 /// in the order the analysis met them: a subexpression's before the
@@ -35,6 +35,17 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
                 // there is to report.
                 Disagreement::Uninferred { .. } if out.len() > before => return,
                 Disagreement::Uninferred { noun, param, of } => format!("cannot infer {} `{}` for `{}`", noun, param, of),
+                Disagreement::Uncovered(Uncovered::Variants { adt, covered, total }) => {
+                    format!("non-exhaustive match on `{}`: {}/{} variants covered", adt, covered, total)
+                }
+                Disagreement::Uncovered(Uncovered::Bool { missing }) => {
+                    format!("non-exhaustive match on Bool: `{}` is not covered — write that arm or a `_` arm", missing)
+                }
+                Disagreement::Uncovered(Uncovered::ByValue { ty }) => format!(
+                    "non-exhaustive match on `{}`: a type with no variants can only be matched \
+                     by value, so a `_` arm is required",
+                    ty
+                ),
                 Disagreement::Bound { of, param, unmet } => match unmet {
                     Unmet::Undeclared { var, trait_path } => format!(
                         "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \

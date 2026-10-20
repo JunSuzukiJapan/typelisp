@@ -16,7 +16,7 @@ use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
-use super::core::{self, Checked, Disagreement, Items, Node, SelectArm, Unmet};
+use super::core::{self, Checked, Disagreement, Items, Node, SelectArm, Uncovered, Unmet};
 use super::{forms, lower};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
@@ -15800,45 +15800,29 @@ impl Checker {
             arms[d.slot] = Some((d.pat, body));
         }
 
-        // Exhaustiveness (B1): in `recover` mode a non-exhaustive `match`
-        // records the error but still returns a fully-typed `Match` node (every
-        // arm was already checked) — this is exactly what lets completion work
-        // inside a non-catchall arm, where truncating the source deletes the
-        // arms that would have made the match exhaustive. Suppressed when an
-        // arm was skipped (B2), since coverage is then unknown.
+        // Exhaustiveness (B1): a non-exhaustive `match` is still a fully-typed
+        // `Match` node (every arm was already checked), left for checking to
+        // report — this is exactly what lets completion work inside a
+        // non-catchall arm in `recover` mode, where truncating the source
+        // deletes the arms that would have made the match exhaustive.
+        // Suppressed when an arm was skipped (B2), since coverage is then
+        // unknown.
         // A type with no variants is never covered by its arms: there is
         // nothing to enumerate, so only a catch-all closes the match.
         let covers_every_variant = adt_name.is_some() && covered.len() == total_variants;
         let covers_both_bools = scrut.ty == Type::Bool && bools_covered.len() == 2;
-        if !catchall && !arm_recovered && !covers_every_variant && !covers_both_bools {
-            let e = Error::TypeError(match &adt_name {
-                Some(adt_name) => format!(
-                    "non-exhaustive match on `{}`: {}/{} variants covered",
-                    adt_name,
-                    covered.len(),
-                    total_variants
-                ),
+        let uncovered = (!catchall && !arm_recovered && !covers_every_variant && !covers_both_bools).then(|| {
+            match &adt_name {
+                Some(adt_name) => Uncovered::Variants { adt: adt_name.clone(), covered: covered.len(), total: total_variants },
                 // `bool` is the one primitive whose value universe is small
                 // enough to enumerate, so say which of the two is missing
                 // rather than demanding a `_` arm that is not required.
-                None if scrut.ty == Type::Bool => format!(
-                    "non-exhaustive match on Bool: `{}` is not covered — write that arm or a `_` arm",
-                    if bools_covered.contains(&true) { "false" } else { "true" }
-                ),
+                None if scrut.ty == Type::Bool => Uncovered::Bool { missing: !bools_covered.contains(&true) },
                 // No variants to count: every arm was a value test, and a
                 // value test can only ever be a partial answer.
-                None => format!(
-                    "non-exhaustive match on `{}`: a type with no variants can only be matched \
-                     by value, so a `_` arm is required",
-                    scrut.ty
-                ),
-            });
-            if self.recover {
-                self.push_recovered(e, nth_loc(arg_locs, 0));
-            } else {
-                return Err(e);
+                None => Uncovered::ByValue { ty: scrut.ty.clone() },
             }
-        }
+        });
         let ty = match result_ty {
             Some(ty) => ty,
             // No arms survived (all skipped in recover mode, or a genuinely
@@ -15847,7 +15831,14 @@ impl Checker {
             None => return Err(Error::TypeError("match: no arms".into())),
         };
         let arms = arms.into_iter().flatten().collect();
-        Ok(Checked::of(Node::Match { scrut: Box::new(scrut), arms }, ty))
+        let matched = Checked::of(Node::Match { scrut: Box::new(scrut), arms }, ty.clone());
+        let Some(uncovered) = uncovered else { return Ok(matched) };
+        let mut d = disagreeing(matched, Disagreement::Uncovered(uncovered), ty);
+        // At the scrutinee in `recover` mode, at the `match` otherwise.
+        if self.recover {
+            d.loc = nth_loc(arg_locs, 0);
+        }
+        Ok(d)
     }
 
     /// A `match` arm's `body`, of type `body_ty`, joined with the arms before

@@ -83,3 +83,9 @@ fn an_unmet_where_bound_is_reported() {
     );
     assert!(e.contains("f: type `int` does not implement trait `shout` required by `:where` clause on type parameter `t`"), "{}", e);
 }
+
+#[test]
+fn a_non_exhaustive_match_is_reported() {
+    let e = mismatch(r#"(match true (true 1))"#);
+    assert!(e.contains("non-exhaustive match on Bool: `false` is not covered"), "{}", e);
+}

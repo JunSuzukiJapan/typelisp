@@ -12,7 +12,7 @@ use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, Value};
 use crate::nominal_path;
 use crate::types::{Path, Type};
 use super::checker::*;
-use super::core::{self, Checked, Items, Node, SelectArm};
+use super::core::{self, Checked, Disagreement, Items, Node, SelectArm};
 use super::info::Info;
 use super::registry::Variant;
 use super::repr::Repr;
@@ -232,7 +232,10 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
         Node::Hole { loc } => forms::hole_form(s, loc.clone()),
         Node::Default { form } => crate::owned_form::owned_to_value(s, form),
         // Reported by checking (`check::verify`) before anything is lowered
-        // to run; what recover mode keeps lowered is a hole.
+        // to run. What recover mode keeps lowered is a hole, except for a
+        // `match` its arms do not cover, which is still a well-typed `match`
+        // whose arms' bindings completion offers.
+        Node::Disagree { what: Disagreement::Uncovered(_), value } => sub(s, info, value),
         Node::Disagree { .. } => forms::hole_form(s, None),
         Node::Select { arms } => {
             let mut forms = Vec::with_capacity(arms.len());
