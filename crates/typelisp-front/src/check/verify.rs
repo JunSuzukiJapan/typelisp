@@ -4,10 +4,16 @@
 //! The analysis takes the type that was settled first and goes on; what it
 //! could not reconcile stays in the tree as a node of its own. This reads
 //! them back, after the expressions they sit in are analyzed.
+//!
+//! A definition and what declared it ahead are checked here too, once the
+//! definition is analyzed.
 
 use typelisp_mem::{Error, Loc};
 
+use crate::types::Type;
+
 use super::core::{Checked, Disagreement, Node, Uncovered, Unmet};
+use super::registry::FnSig;
 
 /// The disagreements in `c`, each at the innermost position written for it,
 /// in the order the analysis met them: a subexpression's before the
@@ -46,6 +52,10 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
                      by value, so a `_` arm is required",
                     ty
                 ),
+                Disagreement::HiddenSlot { ty, slot, module } => format!(
+                    "make-instance {}: slot `{}` is not `pub`, so it can be given only inside module `{}`",
+                    ty, slot, module
+                ),
                 Disagreement::Bound { of, param, unmet } => match unmet {
                     Unmet::Undeclared { var, trait_path } => format!(
                         "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
@@ -77,4 +87,60 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
             });
         }
     })
+}
+
+/// Rejects a `defun` that disagrees with the `defsignature` that promised it.
+///
+/// A declaration is only worth writing if it is binding: a call checked
+/// against the declaration and then dispatched to a definition of another
+/// shape is exactly the kind of quiet mismatch static types exist to stop.
+/// The old implicit pre-pass could not do this — it *derived* the signature
+/// from the definition, so the two agreed by construction.
+///
+/// Docstrings, parameter *names* and the body play no part: a signature is
+/// the types, `pub`, and the `&rest` tail.
+pub(super) fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(), Error> {
+    let show_rest = |r: &Option<Type>| match r {
+        Some(t) => format!("`&rest {}`", t),
+        None => "none".to_string(),
+    };
+    let mismatch = |what: &str, decl: String, def: String| {
+        Err(Error::TypeError(format!(
+            "`{}` does not match its `defsignature`: {} declared as {}, defined as {}",
+            name, what, decl, def
+        )))
+    };
+    if declared.params.len() != defined.params.len() {
+        return mismatch(
+            "parameter count",
+            declared.params.len().to_string(),
+            defined.params.len().to_string(),
+        );
+    }
+    for (i, (d, f)) in declared.params.iter().zip(&defined.params).enumerate() {
+        if d != f {
+            return mismatch(&format!("parameter {}", i + 1), format!("`{}`", d), format!("`{}`", f));
+        }
+    }
+    if declared.ret != defined.ret {
+        return mismatch("return type", format!("`{}`", declared.ret), format!("`{}`", defined.ret));
+    }
+    if declared.rest != defined.rest {
+        return mismatch("`&rest`", show_rest(&declared.rest), show_rest(&defined.rest));
+    }
+    if !defined.type_params.is_empty() {
+        return mismatch("type parameters", "none".to_string(), format!("{:?}", defined.type_params));
+    }
+    if !defined.optionals.is_empty() || !defined.keys.is_empty() {
+        return mismatch(
+            "parameter kinds",
+            "required only".to_string(),
+            "`&optional`/`&key`".to_string(),
+        );
+    }
+    if declared.public != defined.public {
+        let vis = |p: bool| if p { "`pub`".to_string() } else { "private".to_string() };
+        return mismatch("visibility", vis(declared.public), vis(defined.public));
+    }
+    Ok(())
 }

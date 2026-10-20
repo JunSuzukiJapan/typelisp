@@ -3324,7 +3324,7 @@ impl Checker {
             keys: Vec::new(),
         };
         if let Some(decl) = &declared {
-            signature_agrees(&name, decl, &sig)?;
+            super::verify::signature_agrees(&name, decl, &sig)?;
         }
         self.info.reg.root.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
@@ -12775,6 +12775,8 @@ impl Checker {
         let mut given: Vec<Option<Value>> = vec![None; field_names.len()];
         let mut bindings: Vec<(Value, Value)> = Vec::new();
         let mut written_order: Vec<usize> = Vec::new();
+        // The first slot given that is not visible here, left for checking.
+        let mut hidden: Option<String> = None;
         let rest = &args[1..];
         let mut k = 0;
         while k < rest.len() {
@@ -12807,13 +12809,8 @@ impl Checker {
                 return Err(Error::TypeError(format!("make-instance {}: slot `{}` is given twice", tname, slot)));
             }
             let visible = def.assoc.get(&slot).map(|af| self.info.assoc_visible(&type_fq, af)).unwrap_or(false);
-            if !visible {
-                return Err(Error::TypeError(format!(
-                    "make-instance {}: slot `{}` is not `pub`, so it can be given only inside module `{}`",
-                    tname,
-                    slot,
-                    type_fq.parent().join("::")
-                )));
+            if !visible && hidden.is_none() {
+                hidden = Some(slot);
             }
             written_order.push(i);
             given[i] = Some(value);
@@ -12872,7 +12869,15 @@ impl Checker {
         }
         let expansion = forms::wrap_let_star(&mut s, bindings, body)?;
         s.push_root(expansion);
-        self.check(&mut s, interp, env, expansion, expected)
+        let made = self.check(&mut s, interp, env, expansion, expected)?;
+        Ok(match hidden {
+            Some(slot) => {
+                let what = Disagreement::HiddenSlot { ty: tname.to_string(), slot, module: type_fq.parent().join("::") };
+                let ty = made.ty.clone();
+                disagreeing(made, what, ty)
+            }
+            None => made,
+        })
     }
 
     fn check_incf_decf(
@@ -17449,63 +17454,6 @@ fn path_to_segs(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
     }
 }
 
-/// Whether `v` is a `(:where ...)` clause (vs. an ordinary body form) —
-/// `Checker::check_defun` peeks at this to decide whether to consume it.
-/// Rejects a `defun` that disagrees with the `defsignature` that promised it.
-///
-/// A declaration is only worth writing if it is binding: a call checked
-/// against the declaration and then dispatched to a definition of another
-/// shape is exactly the kind of quiet mismatch static types exist to stop.
-/// The old implicit pre-pass could not do this — it *derived* the signature
-/// from the definition, so the two agreed by construction.
-///
-/// Docstrings, parameter *names* and the body play no part: a signature is
-/// the types, `pub`, and the `&rest` tail.
-fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) -> Result<(), Error> {
-    let show_rest = |r: &Option<Type>| match r {
-        Some(t) => format!("`&rest {}`", t),
-        None => "none".to_string(),
-    };
-    let mismatch = |what: &str, decl: String, def: String| {
-        Err(Error::TypeError(format!(
-            "`{}` does not match its `defsignature`: {} declared as {}, defined as {}",
-            name, what, decl, def
-        )))
-    };
-    if declared.params.len() != defined.params.len() {
-        return mismatch(
-            "parameter count",
-            declared.params.len().to_string(),
-            defined.params.len().to_string(),
-        );
-    }
-    for (i, (d, f)) in declared.params.iter().zip(&defined.params).enumerate() {
-        if d != f {
-            return mismatch(&format!("parameter {}", i + 1), format!("`{}`", d), format!("`{}`", f));
-        }
-    }
-    if declared.ret != defined.ret {
-        return mismatch("return type", format!("`{}`", declared.ret), format!("`{}`", defined.ret));
-    }
-    if declared.rest != defined.rest {
-        return mismatch("`&rest`", show_rest(&declared.rest), show_rest(&defined.rest));
-    }
-    if !defined.type_params.is_empty() {
-        return mismatch("type parameters", "none".to_string(), format!("{:?}", defined.type_params));
-    }
-    if !defined.optionals.is_empty() || !defined.keys.is_empty() {
-        return mismatch(
-            "parameter kinds",
-            "required only".to_string(),
-            "`&optional`/`&key`".to_string(),
-        );
-    }
-    if declared.public != defined.public {
-        let vis = |p: bool| if p { "`pub`".to_string() } else { "private".to_string() };
-        return mismatch("visibility", vis(declared.public), vis(defined.public));
-    }
-    Ok(())
-}
 
 /// The absolute path of the item `name` defined in module `module`.
 pub(super) fn item_path(module: &[String], name: &str) -> Path {
@@ -17514,6 +17462,8 @@ pub(super) fn item_path(module: &[String], name: &str) -> Path {
     Path::from_segments(segs)
 }
 
+/// Whether `v` is a `(:where ...)` clause (vs. an ordinary body form) —
+/// `Checker::check_defun` peeks at this to decide whether to consume it.
 fn is_where_clause(heap: &Heap, v: Value) -> Result<bool, Error> {
     Ok(matches!(v, Value::Cons(_)) && heap.list_to_vec(v)?.first().is_some_and(|h| is_symbol(*h, wk::KW_WHERE)))
 }

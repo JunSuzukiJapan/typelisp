@@ -89,3 +89,9 @@ fn a_non_exhaustive_match_is_reported() {
     let e = mismatch(r#"(match true (true 1))"#);
     assert!(e.contains("non-exhaustive match on Bool: `false` is not covered"), "{}", e);
 }
+
+#[test]
+fn a_definition_unlike_its_signature_is_reported() {
+    let e = mismatch(r#"(defsignature f (i32) i32) (defun f ((x i32)) string "no")"#);
+    assert!(e.contains("`f` does not match its `defsignature`: return type declared as `i32`, defined as `string`"), "{}", e);
+}

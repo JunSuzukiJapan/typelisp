@@ -192,6 +192,9 @@ pub enum Disagreement {
     Bound { of: String, param: String, unmet: Unmet },
     /// A `match` whose arms leave values of the type it matches on unmatched.
     Uncovered(Uncovered),
+    /// A `make-instance` of `ty` that gives `slot`, which is not `pub` and is
+    /// given outside `module`, where `ty` is defined.
+    HiddenSlot { ty: String, slot: String, module: String },
 }
 
 /// What a `match`'s arms leave unmatched.
