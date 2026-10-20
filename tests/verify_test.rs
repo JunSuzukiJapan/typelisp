@@ -61,3 +61,15 @@ fn incompatible_block_exits_are_reported() {
     let e = mismatch(r#"(block b (if true (return-from b 1) 2) "no")"#);
     assert!(e.contains("branches have incompatible types"), "{}", e);
 }
+
+#[test]
+fn an_argument_that_does_not_fit_a_generic_parameter_is_reported() {
+    let e = mismatch(r#"(defun first<T> ((v Vector<T>)) i32 1) (first 5)"#);
+    assert!(e.contains("type mismatch: expected `Vector<t>`, found `int`"), "{}", e);
+}
+
+#[test]
+fn an_undecided_type_parameter_is_reported() {
+    let e = mismatch(r#"(defun make<T> () Vector<T> (vector::new)) (make)"#);
+    assert!(e.contains("cannot infer type parameter `t` for `make`"), "{}", e);
+}

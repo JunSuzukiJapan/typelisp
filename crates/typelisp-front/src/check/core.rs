@@ -178,6 +178,15 @@ pub enum Disagreement {
     /// Two ways out of one expression — branches, arms, a block's end and its
     /// `return-from`s — whose types have nothing in common.
     Branches(Type, Type),
+    /// A part of an argument's type, found, where its parameter's type has
+    /// the expected one.
+    Mismatch(Type, Type),
+    /// A type parameter an earlier argument bound to the first type, and this
+    /// one to the second.
+    Conflict(String, Type, Type),
+    /// A call none of whose arguments decided the type parameter `param` of
+    /// `of`; `noun` is how the parameter is spoken of there.
+    Uninferred { noun: &'static str, param: String, of: String },
 }
 
 impl Node {

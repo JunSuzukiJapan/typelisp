@@ -863,6 +863,14 @@ pub(super) enum Resolved {
     Value(ModuleValue),
 }
 
+/// What a call's arguments settle ([`Checker::resolve_call_target`]).
+enum CallTarget {
+    /// The function to call.
+    Resolved(Path),
+    /// A type parameter none of them decided.
+    Open(String),
+}
+
 /// The method a receiver answers a name with ([`Checker::receiver_method`]).
 pub(super) enum MethodTarget {
     /// One of a trait object's trait's methods, through its vtable.
@@ -11010,7 +11018,7 @@ impl Checker {
                     Some(checked) => self.reconcile_expected(env, checked, exp.as_ref())?,
                     None => self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?,
                 };
-                unify(&tparams, pty, &ta.ty, &mut subst)?;
+                let ta = unified(&tparams, pty, ta, &mut subst);
                 typed.push(ta);
             }
         } else {
@@ -11019,13 +11027,12 @@ impl Checker {
                 heap, interp, env, &who, &af.sig, offset, &tparams, &mut subst, args, arg_locs, &mut typed,
             )?;
         }
-        for p in &af.sig.type_params {
-            if !subst.contains_key(p) {
-                return Err(Error::TypeError(format!(
-                    "cannot infer type parameter `{}` for `{}::{}`",
-                    p, type_fq, method
-                )));
-            }
+        let uninferred_assoc = |noun, p: &str, typed| {
+            let node = Node::Assoc { owner: type_fq.clone(), method: method.into(), instance, ret: Type::Never, args: typed };
+            uninferred(node, noun, p, format!("{}::{}", type_fq, method))
+        };
+        if let Some(p) = af.sig.type_params.iter().find(|p| !subst.contains_key(*p)) {
+            return Ok(uninferred_assoc("type parameter", p, typed));
         }
         for p in &def.params {
             if subst.contains_key(p) {
@@ -11045,10 +11052,7 @@ impl Checker {
                 subst.insert(p.clone(), Type::Unit);
                 continue;
             }
-            return Err(Error::TypeError(format!(
-                "cannot infer type argument `{}` for `{}::{}`",
-                p, type_fq, method
-            )));
+            return Ok(uninferred_assoc("type argument", p, typed));
         }
         // Method-side `where`-bound validation — the mirror of
         // `check_call`'s. A bounded method's bounds are keyed by the owner's
@@ -11135,7 +11139,7 @@ impl Checker {
             let st = subst_apply(pty, subst);
             let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
             let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
-            unify(tparams, pty, &ta.ty, subst)?;
+            let ta = unified(tparams, pty, ta, subst);
             typed.push(ta);
         }
         let tail = &args[required.len()..];
@@ -11174,7 +11178,7 @@ impl Checker {
                 let st = subst_apply(&key.decl_ty, subst);
                 let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
                 let checked = self.check_at(heap, interp, env, tail[i + 1], exp.as_ref(), nth_loc(tail_locs, i + 1))?;
-                unify(tparams, &key.decl_ty, &checked.ty, subst)?;
+                let checked = unified(tparams, &key.decl_ty, checked, subst);
                 supplied.insert(kw, checked);
                 i += 2;
             }
@@ -11205,7 +11209,7 @@ impl Checker {
             let st = subst_apply(&opt.decl_ty, subst);
             let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
             let checked = self.check_at(heap, interp, env, tail[i], exp.as_ref(), nth_loc(tail_locs, i))?;
-            unify(tparams, &opt.decl_ty, &checked.ty, subst)?;
+            let checked = unified(tparams, &opt.decl_ty, checked, subst);
             supplied.push(checked);
         }
         let after = &tail[supplied_n..];
@@ -11217,7 +11221,7 @@ impl Checker {
                     let st = subst_apply(elem_ty, subst);
                     let exp = if type_has_param(&st, tparams) { None } else { Some(st) };
                     let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(after_locs, i))?;
-                    unify(tparams, elem_ty, &ta.ty, subst)?;
+                    let ta = unified(tparams, elem_ty, ta, subst);
                     rest_typed.push(ta);
                 }
             }
@@ -14711,22 +14715,20 @@ impl Checker {
         sig: &FnSig,
         params: &HashSet<String>,
         subst: &mut BTreeMap<String, Type>,
-    ) -> Result<Path, Error> {
+    ) -> Result<CallTarget, Error> {
         self.infer_pinned_assoc_types(env, sig, params, subst);
-        for p in &sig.type_params {
-            if !subst.contains_key(p) {
-                return Err(Error::TypeError(format!("cannot infer type parameter `{}` for `{}`", p, name)));
-            }
+        if let Some(p) = sig.type_params.iter().find(|p| !subst.contains_key(*p)) {
+            return Ok(CallTarget::Open(p.clone()));
         }
         self.validate_where_bounds(&name.to_string(), &sig.bounds, subst, &env.bounds)?;
 
         if !sig.type_params.is_empty() && self.generic_fn_templates.contains_key(name) {
             let targs: Vec<Type> = sig.type_params.iter().map(|p| subst[p.as_str()].clone()).collect();
             if !targs.iter().any(|t| self.type_is_open(t)) {
-                return Ok(self.request_fn_specialization(name, targs));
+                return Ok(CallTarget::Resolved(self.request_fn_specialization(name, targs)));
             }
         }
-        Ok(name.clone())
+        Ok(CallTarget::Resolved(name.clone()))
     }
 
     fn infer_pinned_assoc_types(
@@ -14870,13 +14872,18 @@ impl Checker {
                 let st = subst_apply(elem_ty, &subst);
                 let exp = if type_has_param(&st, &params) { None } else { Some(st) };
                 let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, fixed + i))?;
-                unify(&params, elem_ty, &ta.ty, &mut subst)?;
+                let ta = unified(&params, elem_ty, ta, &mut subst);
                 rest_typed.push(ta);
             }
             let resolved = subst_apply(elem_ty, &subst);
             typed.push(self.cons_rest_list(heap, &resolved, rest_typed)?);
         }
-        let r = self.resolve_call_target(env, name, &sig, &params, &mut subst)?;
+        let r = match self.resolve_call_target(env, name, &sig, &params, &mut subst)? {
+            CallTarget::Resolved(r) => r,
+            CallTarget::Open(p) => {
+                return Ok(uninferred(Node::Call { path: name.clone(), args: typed }, "type parameter", &p, name.to_string()))
+            }
+        };
         let ty = subst_apply(&sig.ret, &subst);
         let call = Checked::of(Node::Call { path: r, args: typed }, ty.clone());
         // A typed pointer a C function returned has to point into memory an
@@ -14953,7 +14960,7 @@ impl Checker {
                 }
                 let exp = if type_has_param(&st, params) { None } else { Some(st) };
                 let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
-                unify(params, pty, &ta.ty, subst)?;
+                let ta = unified(params, pty, ta, subst);
                 slots[i] = Some(ta);
             }
         }
@@ -15061,7 +15068,7 @@ impl Checker {
                 let st = subst_apply(&key.decl_ty, &subst);
                 let exp = if type_has_param(&st, &params) { None } else { Some(st) };
                 let checked = self.check_at(heap, interp, env, tail[i + 1], exp.as_ref(), val_loc)?;
-                unify(&params, &key.decl_ty, &checked.ty, &mut subst)?;
+                let checked = unified(&params, &key.decl_ty, checked, &mut subst);
                 supplied_keys.insert(kw_name, checked);
                 i += 2;
             }
@@ -15075,7 +15082,7 @@ impl Checker {
                 let st = subst_apply(&opt.decl_ty, &subst);
                 let exp = if type_has_param(&st, &params) { None } else { Some(st) };
                 let checked = self.check_at(heap, interp, env, tail[i], exp.as_ref(), nth_loc(tail_locs, i))?;
-                unify(&params, &opt.decl_ty, &checked.ty, &mut subst)?;
+                let checked = unified(&params, &opt.decl_ty, checked, &mut subst);
                 opt_supplied.push(checked);
             }
             let after_optionals = &tail[opt_supplied_n..];
@@ -15086,7 +15093,7 @@ impl Checker {
                         let st = subst_apply(elem_ty, &subst);
                         let exp = if type_has_param(&st, &params) { None } else { Some(st) };
                         let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(after_optionals_locs, i))?;
-                        unify(&params, elem_ty, &ta.ty, &mut subst)?;
+                        let ta = unified(&params, elem_ty, ta, &mut subst);
                         rest_typed.push(ta);
                     }
                 }
@@ -15102,7 +15109,15 @@ impl Checker {
             }
         }
 
-        let r = self.resolve_call_target(env, name, sig, &params, &mut subst)?;
+        let r = match self.resolve_call_target(env, name, sig, &params, &mut subst)? {
+            CallTarget::Resolved(r) => r,
+            CallTarget::Open(p) => {
+                typed.extend(sig.keys.iter().filter_map(|k| supplied_keys.remove(&k.name)));
+                typed.extend(opt_supplied);
+                typed.extend(rest_typed);
+                return Ok(uninferred(Node::Call { path: name.clone(), args: typed }, "type parameter", &p, name.to_string()));
+            }
+        };
 
         // Pass 2: fill in whatever pass 1 left out, now that `subst` is
         // final — a default expression's `.ty` is already concrete (`Self::
@@ -15380,7 +15395,7 @@ impl Checker {
             let st = subst_apply(field, &subst);
             let exp = if type_has_param(&st, &params) { None } else { Some(st) };
             let ta = self.check_at(heap, interp, env, *arg, exp.as_ref(), nth_loc(arg_locs, i))?;
-            unify(&params, field, &ta.ty, &mut subst)?;
+            let ta = unified(&params, field, ta, &mut subst);
             typed_args.push(ta);
         }
 
@@ -15396,16 +15411,14 @@ impl Checker {
                 // not yet an error: leave an inference hole for the arm's
                 // siblings to fill, and let `check_match` re-check this arm
                 // once they have. Anywhere else there is no second source of
-                // information, so it is exactly as fatal as it always was.
+                // information, and the construction stands for no value.
                 None if self.infer_probe.get() => {
                     self.probe_holes.set(self.probe_holes.get() + 1);
                     result_args.push(Type::Never);
                 }
                 None => {
-                    return Err(Error::TypeError(format!(
-                        "cannot infer type argument `{}` for `{}`",
-                        p, adt_name
-                    )))
+                    let node = Node::Call { path: adt_name.clone(), args: typed_args };
+                    return Ok(uninferred(node, "type argument", p, adt_name.to_string()));
                 }
             }
         }
@@ -16877,6 +16890,25 @@ fn join_or_first(a: &Type, b: &Type) -> (Type, Option<Disagreement>) {
     }
 }
 
+/// `arg`, unified with the type `tmpl` of the parameter it is passed for;
+/// what does not unify is left for checking (`check::verify`).
+fn unified(params: &HashSet<String>, tmpl: &Type, arg: Checked, subst: &mut BTreeMap<String, Type>) -> Checked {
+    match unify(params, tmpl, &arg.ty, subst) {
+        Ok(()) => arg,
+        Err(what) => {
+            let ty = arg.ty.clone();
+            disagreeing(arg, what, ty)
+        }
+    }
+}
+
+/// `node`, a call none of whose arguments decided the type parameter `param`
+/// of `of`. It stands for no value; what it lacks is left for checking.
+fn uninferred(node: Node, noun: &'static str, param: &str, of: String) -> Checked {
+    let what = Disagreement::Uninferred { noun, param: param.to_string(), of };
+    disagreeing(Checked::of(node, Type::Never), what, Type::Never)
+}
+
 /// `value`, seen as the `ty` settled before it, with what it disagrees with
 /// left for checking (`check::verify`).
 fn disagreeing(value: Checked, what: Disagreement, ty: Type) -> Checked {
@@ -17272,7 +17304,7 @@ fn unify(
     tmpl: &Type,
     actual: &Type,
     subst: &mut BTreeMap<String, Type>,
-) -> Result<(), Error> {
+) -> Result<(), Disagreement> {
     // A diverging value (`Never`) unifies with any template without binding.
     if *actual == Type::Never {
         return Ok(());
@@ -17282,10 +17314,7 @@ fn unify(
             let key = n.last_segment().to_string();
             return match subst.get(&key) {
                 Some(bound) if bound == actual => Ok(()),
-                Some(bound) => Err(Error::TypeError(format!(
-                    "conflicting types for `{}`: `{}` vs `{}`",
-                    key, bound, actual
-                ))),
+                Some(bound) => Err(Disagreement::Conflict(key, bound.clone(), actual.clone())),
                 None => {
                     subst.insert(key, actual.clone());
                     Ok(())
@@ -17316,20 +17345,12 @@ fn unify(
             match (rest1, rest2) {
                 (Some(t1), Some(t2)) => unify(params, t1, t2, subst)?,
                 (None, None) => {}
-                _ => {
-                    return Err(Error::TypeError(format!(
-                        "type mismatch: expected `{}`, found `{}`",
-                        tmpl, actual
-                    )))
-                }
+                _ => return Err(Disagreement::Mismatch(tmpl.clone(), actual.clone())),
             }
             unify(params, r1, r2, subst)
         }
         _ if tmpl == actual => Ok(()),
-        _ => Err(Error::TypeError(format!(
-            "type mismatch: expected `{}`, found `{}`",
-            tmpl, actual
-        ))),
+        _ => Err(Disagreement::Mismatch(tmpl.clone(), actual.clone())),
     }
 }
 

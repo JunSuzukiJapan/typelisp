@@ -21,6 +21,7 @@ pub(super) fn disagreements(c: &Checked) -> Vec<Error> {
 fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
     typelisp_mem::grow_stack(|| {
         let loc = c.loc.as_ref().or(outer);
+        let before = out.len();
         for child in c.node.children() {
             walk(child, loc, out);
         }
@@ -28,6 +29,12 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
             let e = Error::TypeError(match what {
                 Disagreement::Expected(expected) => format!("type mismatch: expected `{}`, found `{}`", expected, value.ty),
                 Disagreement::Branches(a, b) => format!("branches have incompatible types: `{}` vs `{}`", a, b),
+                Disagreement::Mismatch(expected, found) => format!("type mismatch: expected `{}`, found `{}`", expected, found),
+                Disagreement::Conflict(param, a, b) => format!("conflicting types for `{}`: `{}` vs `{}`", param, a, b),
+                // An argument that disagrees decides nothing; that is what
+                // there is to report.
+                Disagreement::Uninferred { .. } if out.len() > before => return,
+                Disagreement::Uninferred { noun, param, of } => format!("cannot infer {} `{}` for `{}`", noun, param, of),
             });
             out.push(match loc {
                 Some(l) => e.at(l.clone()),
