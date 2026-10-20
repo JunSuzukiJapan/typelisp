@@ -16,7 +16,7 @@ use typelisp_mem::ConcreteNames;
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
-use super::core::{self, Checked, Disagreement, Items, Node, SelectArm, Unassignable, Uncovered, Unmet, Unsafe};
+use super::core::{self, Checked, Disagreement, Items, Node, NotDyn, SelectArm, Unassignable, Uncovered, Unmet, Unsafe};
 use super::{forms, lower};
 use super::info::*;
 use crate::dump::{CheckerDelta, RegistrySignature};
@@ -6727,44 +6727,31 @@ impl Checker {
         to: &Path,
         to_pins: &[Type],
     ) -> Result<Checked, Error> {
-        let from_ty = Type::Dyn(from.clone(), from_pins.to_vec());
         let to_ty = Type::Dyn(to.clone(), to_pins.to_vec());
-        let mismatch = |why: &str| {
-            Error::TypeError(format!(
-                "cannot convert `{}` to `{}` — {}; box the concrete value as `:dyn {}` instead",
-                ConcreteNames::type_key(&from_ty),
-                ConcreteNames::type_key(&to_ty),
-                why,
-                to
-            ))
+        let refused = |value: Checked, why: NotDyn| {
+            let what = Disagreement::NotDyn { ty: value.ty.clone(), trait_path: to.clone(), pins: to_pins.to_vec(), why };
+            Ok(disagreeing(value, what, to_ty.clone()))
         };
+        let from_path = from.clone();
         if !self.trait_inherits(from, to) {
-            return Err(mismatch(&format!("`{}` does not inherit `{}`", from, to)));
+            return refused(value, NotDyn::NotInherited { from: from_path });
         }
         let fdef = self.check_object_safe(from)?;
         let own = self.dyn_assoc_subst(from, from_pins)?;
         // The target's pins must be what `from`'s pins imply for it — an
         // upcast may not silently reinterpret an associated type.
         let Some(implied) = self.trait_assoc_subst_for(fdef, &own, to) else {
-            return Err(mismatch(&format!("`{}` is not in `{}`'s supertrait chain", to, from)));
+            return refused(value, NotDyn::OutsideChain { from: from_path });
         };
         let tdef = self.check_object_safe(to)?;
         for (name, want) in tdef.assoc_types.iter().zip(to_pins.iter()) {
             match implied.get(name) {
                 Some(actual) if actual == want => {}
                 Some(actual) => {
-                    return Err(mismatch(&format!(
-                        "`{}` pins `{}`'s `{}` to `{}`, not `{}`",
-                        from,
-                        to,
-                        name,
-                        ConcreteNames::type_key(actual),
-                        ConcreteNames::type_key(want)
-                    )))
+                    let why = NotDyn::PinDiffers { from: from_path, name: name.clone(), actual: actual.clone(), want: want.clone() };
+                    return refused(value, why);
                 }
-                None => {
-                    return Err(mismatch(&format!("`{}`'s `{}` is not pinned by `{}`", to, name, from)))
-                }
+                None => return refused(value, NotDyn::Unpinned { from: from_path, name: name.clone() }),
             }
         }
         // Prefix layouts: the box is already a valid `:dyn to`, so nothing
@@ -6889,7 +6876,13 @@ impl Checker {
                 return Ok(Checked::of(Node::ErasedGeneric { what }, Type::Dyn(trait_path.clone(), pins.to_vec())));
             }
         }
-        let slots = self.dyn_vtable_slots(&value.ty, trait_path, pins)?;
+        let slots = match self.dyn_vtable_slots(&value.ty, trait_path, pins)? {
+            Ok(slots) => slots,
+            Err(why) => {
+                let what = Disagreement::NotDyn { ty: value.ty.clone(), trait_path: trait_path.clone(), pins: pins.to_vec(), why };
+                return Ok(disagreeing(value, what, Type::Dyn(trait_path.clone(), pins.to_vec())));
+            }
+        };
         // The supertraits' tables, laid out here because this is the last
         // point where both halves of a vtable's identity — the concrete type
         // and the trait — are in hand. A later `dyn-upcast` of this box
@@ -7104,7 +7097,8 @@ impl Checker {
     ///
     /// This is also where a trait object is *admitted*: the concrete type
     /// must implement the trait, have a heap representation to box, and bind
-    /// the associated types the pins claim. A generic owner's methods are
+    /// the associated types the pins claim. A type that is not admitted is
+    /// the inner `Err`, for the value to be left disagreeing. A generic owner's methods are
     /// requested for specialization here (`request_method_specialization`),
     /// so the name recorded in the slot is the monomorphized one — the
     /// "generics are specialized before code generation" rule, applied to
@@ -7114,15 +7108,11 @@ impl Checker {
         concrete: &Type,
         trait_path: &Path,
         pins: &[Type],
-    ) -> Result<Vec<(Path, String)>, Error> {
+    ) -> Result<Result<Vec<(Path, String)>, NotDyn>, Error> {
         self.dyn_assoc_subst(trait_path, pins)?;
         let tdef = self.check_object_safe(trait_path)?;
         let Some(type_fq) = nominal_path(concrete) else {
-            return Err(Error::TypeError(format!(
-                "`{}` cannot be used as `:dyn {}`: it is not a nominal type",
-                ConcreteNames::type_key(concrete),
-                trait_path
-            )));
+            return Ok(Err(NotDyn::NotNominal));
         };
         let targs: Vec<Type> = match concrete {
             Type::Named(_, args) => args.clone(),
@@ -7132,10 +7122,7 @@ impl Checker {
             return Err(Error::TypeError(format!("dyn {}: unknown type `{}`", trait_path, type_fq)));
         };
         if !self.type_implements(concrete, &TraitBound { trait_path: trait_path.clone(), assoc: BTreeMap::new() }, 0) {
-            return Err(Error::TypeError(format!(
-                "`{}` does not implement `{}`, so it cannot be used as `:dyn {}`",
-                concrete, trait_path, trait_path
-            )));
+            return Ok(Err(NotDyn::Unimplemented));
         }
         // The fat box holds one `Value`, so the concrete value must have a
         // heap representation (`is_heap_repr`). That admits `int`/`f64`/
@@ -7143,11 +7130,7 @@ impl Checker {
         // `symbol`, even though those can carry `impl`s (`impl Eq i32`) —
         // hence a per-*type* rule rather than a per-trait one.
         if !self.is_heap_repr(concrete) {
-            return Err(Error::TypeError(format!(
-                "`{}` has no heap representation (its values are not `Sexpr`-encodable), so it cannot be boxed as `:dyn {}`",
-                ConcreteNames::type_key(concrete),
-                trait_path
-            )));
+            return Ok(Err(NotDyn::NoHeapRepr));
         }
         // A niched `Option` is heap-repr by the reckoning above (an `option`
         // is a `Sum` with variants) but has no box of its own: the fat box
@@ -7156,11 +7139,7 @@ impl Checker {
         // downcasts — reads the key off the value inside. Refused, like a
         // primitive, rather than boxed into a value nothing can identify.
         if self.info.repr(concrete).niche_payload().is_some() {
-            return Err(Error::TypeError(format!(
-                "`{}` is a niche-represented Option with no box to carry a type key, so it cannot be boxed as `:dyn {}`",
-                ConcreteNames::type_key(concrete),
-                trait_path
-            )));
+            return Ok(Err(NotDyn::NichedOption));
         }
         // What this `impl` actually binds each associated type to, with the
         // owner's own type parameters resolved for *this* instantiation.
@@ -7168,16 +7147,7 @@ impl Checker {
             match resolve_trait_assoc_type(def, trait_path, name, &targs) {
                 Some(actual) if actual == *pin => {}
                 Some(actual) => {
-                    return Err(Error::TypeError(format!(
-                        "`{}` implements `{}` with `{} = {}`, but `:dyn {}` requires `{} = {}`",
-                        type_fq,
-                        trait_path,
-                        name,
-                        ConcreteNames::type_key(&actual),
-                        trait_path,
-                        name,
-                        ConcreteNames::type_key(pin)
-                    )))
+                    return Ok(Err(NotDyn::Assoc { owner: type_fq, name: name.clone(), actual, pin: pin.clone() }));
                 }
                 None => {
                     return Err(Error::TypeError(format!(
@@ -7242,7 +7212,7 @@ impl Checker {
             }
             slots.push((type_fq.clone(), name));
         }
-        Ok(slots)
+        Ok(Ok(slots))
     }
 
 

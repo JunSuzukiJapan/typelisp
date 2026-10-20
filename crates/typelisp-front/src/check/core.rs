@@ -198,6 +198,35 @@ pub enum Disagreement {
     Unsafe(Unsafe),
     /// A `setf` of a place that cannot be assigned.
     Unassignable(Unassignable),
+    /// A value of `ty` reaching `:dyn trait_path<pins>`, which it can be
+    /// neither boxed as nor converted to.
+    NotDyn { ty: Type, trait_path: crate::Path, pins: Vec<Type>, why: NotDyn },
+}
+
+/// Why a value is not admitted as a trait object.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NotDyn {
+    /// Its type is not a nominal type.
+    NotNominal,
+    /// Its type does not implement the trait.
+    Unimplemented,
+    /// Its type has no heap representation for the box to hold.
+    NoHeapRepr,
+    /// Its type is a niched `Option`, with no box to carry a type key.
+    NichedOption,
+    /// `owner`'s `impl` binds the associated type `name` to `actual`, and
+    /// the `:dyn` pins it to `pin`.
+    Assoc { owner: crate::Path, name: String, actual: Type, pin: Type },
+    /// It is a `:dyn from` already, and `from` does not inherit the trait.
+    NotInherited { from: crate::Path },
+    /// It is a `:dyn from` already, and the trait is not in `from`'s
+    /// supertrait chain.
+    OutsideChain { from: crate::Path },
+    /// It is a `:dyn from` already, whose pins make the trait's `name`
+    /// `actual`, and the `:dyn` pins it to `want`.
+    PinDiffers { from: crate::Path, name: String, actual: Type, want: Type },
+    /// It is a `:dyn from` already, whose pins leave the trait's `name` open.
+    Unpinned { from: crate::Path, name: String },
 }
 
 /// Why a place a `setf` names cannot be assigned.

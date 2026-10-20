@@ -136,3 +136,24 @@ fn an_empty_body_where_a_value_is_expected_is_reported() {
     let e = mismatch(r#"(defun f () i32)"#);
     assert!(e.contains("empty body has type Unit, expected `i32`"), "{}", e);
 }
+
+#[test]
+fn a_value_not_admitted_as_a_trait_object_is_reported() {
+    let e = mismatch(
+        r#"(deftrait speak () (say ((self Self)) string))
+           (defun hear ((s :dyn speak)) string (say s))
+           (hear "x")"#,
+    );
+    assert!(e.contains("`string` does not implement `speak`, so it cannot be used as `:dyn speak`"), "{}", e);
+}
+
+#[test]
+fn a_trait_object_converted_to_a_trait_it_does_not_inherit_is_reported() {
+    let e = mismatch(
+        r#"(deftrait speak () (say ((self Self)) string))
+           (deftrait walk () (pace ((self Self)) i32))
+           (defun go ((w :dyn walk)) i32 (pace w))
+           (defun f ((s :dyn speak)) i32 (go s))"#,
+    );
+    assert!(e.contains("cannot convert `dyn speak` to `dyn walk` — `speak` does not inherit `walk`"), "{}", e);
+}

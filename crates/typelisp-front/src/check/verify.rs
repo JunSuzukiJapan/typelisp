@@ -18,7 +18,7 @@ use typelisp_mem::{ConcreteNames, Error, Loc};
 use crate::types::Type;
 use crate::wk;
 
-use super::core::{Checked, Disagreement, Node, Unassignable, Uncovered, Unmet, Unsafe};
+use super::core::{Checked, Disagreement, Node, NotDyn, Unassignable, Uncovered, Unmet, Unsafe};
 use super::registry::FnSig;
 
 /// The disagreements in `c`, each at the innermost position written for it,
@@ -83,6 +83,7 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
                     "setf: a field holding a struct by value (`{}`) cannot be assigned as a whole — assign its fields",
                     ty
                 ),
+                Disagreement::NotDyn { ty, trait_path, pins, why } => not_dyn(ty, trait_path, pins, why),
                 Disagreement::Bound { of, param, unmet } => match unmet {
                     Unmet::Undeclared { var, trait_path } => format!(
                         "{}: type parameter `{}` is only known here as the enclosing function's own `{}`, \
@@ -116,6 +117,64 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
             });
         }
     })
+}
+
+fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &NotDyn) -> String {
+    let key = ConcreteNames::type_key;
+    let converts = |why: String| {
+        let to = Type::Dyn(trait_path.clone(), pins.to_vec());
+        format!(
+            "cannot convert `{}` to `{}` — {}; box the concrete value as `:dyn {}` instead",
+            key(ty),
+            key(&to),
+            why,
+            trait_path
+        )
+    };
+    match why {
+        NotDyn::NotNominal => {
+            format!("`{}` cannot be used as `:dyn {}`: it is not a nominal type", key(ty), trait_path)
+        }
+        NotDyn::Unimplemented => format!(
+            "`{}` does not implement `{}`, so it cannot be used as `:dyn {}`",
+            ty, trait_path, trait_path
+        ),
+        NotDyn::NoHeapRepr => format!(
+            "`{}` has no heap representation (its values are not `Sexpr`-encodable), so it cannot be boxed as `:dyn {}`",
+            key(ty),
+            trait_path
+        ),
+        NotDyn::NichedOption => format!(
+            "`{}` is a niche-represented Option with no box to carry a type key, so it cannot be boxed as `:dyn {}`",
+            key(ty),
+            trait_path
+        ),
+        NotDyn::Assoc { owner, name, actual, pin } => format!(
+            "`{}` implements `{}` with `{} = {}`, but `:dyn {}` requires `{} = {}`",
+            owner,
+            trait_path,
+            name,
+            key(actual),
+            trait_path,
+            name,
+            key(pin)
+        ),
+        NotDyn::NotInherited { from } => converts(format!("`{}` does not inherit `{}`", from, trait_path)),
+        NotDyn::OutsideChain { from } => {
+            converts(format!("`{}` is not in `{}`'s supertrait chain", trait_path, from))
+        }
+        NotDyn::PinDiffers { from, name, actual, want } => converts(format!(
+            "`{}` pins `{}`'s `{}` to `{}`, not `{}`",
+            from,
+            trait_path,
+            name,
+            key(actual),
+            key(want)
+        )),
+        NotDyn::Unpinned { from, name } => {
+            converts(format!("`{}`'s `{}` is not pinned by `{}`", trait_path, name, from))
+        }
+    }
 }
 
 /// Rejects a `defun` that disagrees with the `defsignature` that promised it.
