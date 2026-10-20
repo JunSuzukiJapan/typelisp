@@ -4447,7 +4447,7 @@ impl Checker {
             other => Some(other),
         };
         if let Some(Value::Symbol(id)) = name_sym {
-            bound_name(id, "a definition")?;
+            super::verify::bound_name(id, "a definition")?;
         }
         generic_header(heap, v)
     }
@@ -4474,7 +4474,7 @@ impl Checker {
             return Err(Error::TypeError("defmacro: (defmacro name (params) body...)".into()));
         }
         let name = match parts[0] {
-            Value::Symbol(id) => bound_name(id, "defmacro")?,
+            Value::Symbol(id) => super::verify::bound_name(id, "defmacro")?,
             _ => return Err(Error::TypeError("defmacro: name must be a symbol".into())),
         };
         // Parse the CL-style lambda list into its four ordered regions:
@@ -4715,7 +4715,7 @@ impl Checker {
                 return Err(Error::TypeError("parameter must be (name type)".into()));
             }
             let name = match pair[0] {
-                Value::Symbol(id) => bound_name(id, "a parameter")?,
+                Value::Symbol(id) => super::verify::bound_name(id, "a parameter")?,
                 _ => return Err(Error::TypeError("parameter name must be a symbol".into())),
             };
             out.push((name, self.parse_type_here_at(heap, pair[1], pair_locs.get(1).and_then(|(_, l)| l.as_ref()))?));
@@ -4741,7 +4741,7 @@ impl Checker {
             )));
         }
         let name = match items_locs[0].0 {
-            Value::Symbol(id) => bound_name(id, "a parameter")?,
+            Value::Symbol(id) => super::verify::bound_name(id, "a parameter")?,
             _ => return Err(Error::TypeError(format!("{}: {} parameter name must be a symbol", what, section))),
         };
         let name_loc = items_locs[0].1.clone();
@@ -4882,7 +4882,7 @@ impl Checker {
                 ));
             }
             let name = match rest[0] {
-                Value::Symbol(id) => bound_name(id, "defstruct")?,
+                Value::Symbol(id) => super::verify::bound_name(id, "defstruct")?,
                 _ => return Err(Error::TypeError("defstruct: field name must be a symbol".into())),
             };
             out.push(StructField {
@@ -5105,7 +5105,7 @@ impl Checker {
             ));
         }
         let name = match parts[0] {
-            Value::Symbol(id) => bound_name(id, "deftrait")?,
+            Value::Symbol(id) => super::verify::bound_name(id, "deftrait")?,
             _ => return Err(Error::TypeError("deftrait: name must be a symbol".into())),
         };
         let fq_name = self.info.fq(&name);
@@ -5167,7 +5167,7 @@ impl Checker {
                     return Err(Error::TypeError("deftrait: (:type AssocName)".into()));
                 }
                 let aname = match elems[1] {
-                    Value::Symbol(id) => bound_name(id, "deftrait")?,
+                    Value::Symbol(id) => super::verify::bound_name(id, "deftrait")?,
                     _ => return Err(Error::TypeError("deftrait: associated type name must be a symbol".into())),
                 };
                 assoc_types.push(aname);
@@ -5522,7 +5522,7 @@ impl Checker {
                     return Err(Error::TypeError("impl: (:type AssocName Type)".into()));
                 }
                 let aname = match elems[1] {
-                    Value::Symbol(id) => bound_name(id, "impl")?,
+                    Value::Symbol(id) => super::verify::bound_name(id, "impl")?,
                     _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
                 };
                 assoc_concrete.insert(aname.clone(), self.parse_type_here_at(heap, elems[2], elem_locs[2].1.as_ref())?);
@@ -6395,7 +6395,7 @@ impl Checker {
                     return Err(Error::TypeError("impl: (:type AssocName Type)".into()));
                 }
                 let aname = match elems[1] {
-                    Value::Symbol(id) => bound_name(id, "impl")?,
+                    Value::Symbol(id) => super::verify::bound_name(id, "impl")?,
                     _ => return Err(Error::TypeError("impl: associated type name must be a symbol".into())),
                 };
                 assoc_written.push((aname.clone(), elems[2]));
@@ -7910,7 +7910,7 @@ impl Checker {
                     return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method)));
                 }
                 let sname = match recv[0] {
-                    Value::Symbol(id) => bound_name(id, "defmethod")?,
+                    Value::Symbol(id) => super::verify::bound_name(id, "defmethod")?,
                     _ => {
                         return Err(Error::TypeError(format!(
                             "impl: method `{}`: the receiver's name must be a symbol",
@@ -9723,24 +9723,13 @@ impl Checker {
             };
             return self.reconcile_expected(env, typed, expected);
         }
-        let head = heap.symbol_spelling(head_sym).to_string();
         // A top-level-only form reaching expression position — written in a
         // function body, or produced there by a macro. Without this it would
         // be read as a call, and the first complaint would be about its
         // arguments (the name being defined is not a bound variable) rather
         // than about where it was written.
-        if TOPLEVEL_FORM_HEADS.contains(&head_sym.well_known()) {
-            let hint = match head_sym.well_known() {
-                wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT => " — bind a local value with `let`",
-                wk::DEFUN => " — define a local function with `labels`",
-                wk::DEFMACRO => " — define a local macro with `macrolet`",
-                _ => "",
-            };
-            return Err(Error::TypeError(format!(
-                "{}: only allowed at top level, not in expression position{}",
-                head, hint
-            )));
-        }
+        super::verify::expression_head(head_sym, TOPLEVEL_FORM_HEADS)?;
+        let head = heap.symbol_spelling(head_sym).to_string();
         // SPECIAL-FORM DISPATCH BEGIN
         // The arms below are the authoritative list of special forms. They have
         // no runtime representation to enumerate, so `tests/editor_keyword_sync_test.rs`
@@ -10066,7 +10055,7 @@ impl Checker {
                 return Err(Error::TypeError("macrolet: each binding is (name (params) body...)".into()));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => bound_name(id, "macrolet")?,
+                Value::Symbol(id) => super::verify::bound_name(id, "macrolet")?,
                 _ => return Err(Error::TypeError("macrolet: the binding name must be a symbol".into())),
             };
             let param_vals = heap.list_to_vec(parts[1])?;
@@ -10147,7 +10136,7 @@ impl Checker {
                 return Err(Error::TypeError("symbol-macrolet: each binding is (name form)".into()));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => bound_name(id, "symbol-macrolet")?,
+                Value::Symbol(id) => super::verify::bound_name(id, "symbol-macrolet")?,
                 _ => {
                     return Err(Error::TypeError(
                         "symbol-macrolet: the binding name must be a symbol".into(),
@@ -10237,7 +10226,7 @@ impl Checker {
                 ));
             }
             let name = match parts[0] {
-                Value::Symbol(id) => bound_name(id, "labels")?,
+                Value::Symbol(id) => super::verify::bound_name(id, "labels")?,
                 _ => return Err(Error::TypeError("labels: name must be a symbol".into())),
             };
             let name_loc = parts_locs.first().and_then(|(_, l)| l.clone());
@@ -12353,7 +12342,7 @@ impl Checker {
                 return Err(Error::TypeError("let: binding must be (name val)".into()));
             }
             let name = match pair[0] {
-                Value::Symbol(id) => bound_name(id, "let")?,
+                Value::Symbol(id) => super::verify::bound_name(id, "let")?,
                 _ => return Err(Error::TypeError("let: binding name must be a symbol".into())),
             };
             name_locs.push(pair_locs.first().and_then(|(_, l)| l.clone()));
@@ -12424,7 +12413,7 @@ impl Checker {
             return Err(Error::TypeError("let*: binding must be (name val)".into()));
         }
         let name = match pair[0] {
-            Value::Symbol(id) => bound_name(id, "let*")?,
+            Value::Symbol(id) => super::verify::bound_name(id, "let*")?,
             _ => return Err(Error::TypeError("let*: binding name must be a symbol".into())),
         };
         let name_loc = pair_locs.first().and_then(|(_, l)| l.clone());
@@ -12478,7 +12467,7 @@ impl Checker {
             return self.check_setf_call_place(heap, interp, env, args[0], args[1]);
         }
         let name = match args[0] {
-            Value::Symbol(id) => bound_name(id, "setf")?,
+            Value::Symbol(id) => super::verify::bound_name(id, "setf")?,
             _ => return Err(Error::TypeError(
                 "setf: target must be a variable, `var::field`, or a `(get recv key...)` call form".into(),
             )),
@@ -13461,7 +13450,7 @@ impl Checker {
                     return Err(Error::TypeError("defvar: name must be (name Type)".into()));
                 }
                 let name = match pair[0] {
-                    Value::Symbol(id) => bound_name(id, "defvar")?,
+                    Value::Symbol(id) => super::verify::bound_name(id, "defvar")?,
                     _ => return Err(Error::TypeError("defvar: name must be a symbol".into())),
                 };
                 (name, self.parse_type_here_at(heap, pair[1], pair_locs[1].1.as_ref())?)
@@ -16626,26 +16615,12 @@ fn sexpr_variant_for_literal(heap: &Heap, v: Value) -> &'static str {
     }
 }
 
-/// Whether `v` is the interned symbol `sym`.
+
+/// Whether `v` is the pre-interned symbol numbered `konst`.
 ///
-/// Takes a [`SymRef`] rather than a name: the syntax words this asks about are
+/// Takes the number rather than a name: the syntax words this asks about are
 /// pre-interned (`BUILTIN_SYMBOLS`), so the test is an integer comparison and
 /// there is no spelling to get wrong.
-/// The name a binding or a definition introduces with the symbol `id`. A
-/// keyword cannot be one: CL makes every keyword a constant variable naming
-/// itself, so it can be neither bound nor assigned, and no definition takes
-/// its name either.
-fn bound_name(id: typelisp_mem::SymRef, who: &str) -> Result<String, Error> {
-    if id.is_keyword() {
-        return Err(Error::TypeError(format!(
-            "{}: `{}` is a keyword — a constant that names itself — so it cannot be bound, assigned or defined",
-            who,
-            id.spelling()
-        )));
-    }
-    Ok(id.spelling().to_string())
-}
-
 fn is_symbol(v: Value, konst: u32) -> bool {
     matches!(v, Value::Symbol(id) if id.is(konst))
 }

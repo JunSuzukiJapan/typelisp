@@ -6,11 +6,17 @@
 //! them back, after the expressions they sit in are analyzed.
 //!
 //! A definition and what declared it ahead are checked here too, once the
-//! definition is analyzed.
+//! definition is analyzed, and so is the name a binding or a definition
+//! introduces, before the analysis registers it, and so is the head of a
+//! form in expression position, before the analysis reads it as a call: the
+//! rules are about what is written, and nothing analyzed later bears on
+//! them. A form that breaks one is not analyzed on, since what it would have
+//! registered is missing and what follows would complain about that instead.
 
 use typelisp_mem::{ConcreteNames, Error, Loc};
 
 use crate::types::Type;
+use crate::wk;
 
 use super::core::{Checked, Disagreement, Node, Uncovered, Unmet, Unsafe};
 use super::registry::FnSig;
@@ -161,4 +167,39 @@ pub(super) fn signature_agrees(name: &str, declared: &FnSig, defined: &FnSig) ->
         return mismatch("visibility", vis(declared.public), vis(defined.public));
     }
     Ok(())
+}
+
+/// The name a binding or a definition introduces with the symbol `id`. A
+/// keyword cannot be one: CL makes every keyword a constant variable naming
+/// itself, so it can be neither bound nor assigned, and no definition takes
+/// its name either.
+pub(super) fn bound_name(id: typelisp_mem::SymRef, who: &str) -> Result<String, Error> {
+    if id.is_keyword() {
+        return Err(Error::TypeError(format!(
+            "{}: `{}` is a keyword — a constant that names itself — so it cannot be bound, assigned or defined",
+            who,
+            id.spelling()
+        )));
+    }
+    Ok(id.spelling().to_string())
+}
+
+/// Refuses `head` as the head of a form in expression position when it is
+/// one of `top_level`, the heads written only at top level.
+pub(super) fn expression_head(head: typelisp_mem::SymRef, top_level: &[u32]) -> Result<(), Error> {
+    let k = head.well_known();
+    if !top_level.contains(&k) {
+        return Ok(());
+    }
+    let hint = match k {
+        wk::DEFVAR | wk::DEFPARAMETER | wk::DEFCONSTANT => " — bind a local value with `let`",
+        wk::DEFUN => " — define a local function with `labels`",
+        wk::DEFMACRO => " — define a local macro with `macrolet`",
+        _ => "",
+    };
+    Err(Error::TypeError(format!(
+        "{}: only allowed at top level, not in expression position{}",
+        head.spelling(),
+        hint
+    )))
 }

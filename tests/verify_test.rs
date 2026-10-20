@@ -95,3 +95,9 @@ fn a_definition_unlike_its_signature_is_reported() {
     let e = mismatch(r#"(defsignature f (i32) i32) (defun f ((x i32)) string "no")"#);
     assert!(e.contains("`f` does not match its `defsignature`: return type declared as `i32`, defined as `string`"), "{}", e);
 }
+
+#[test]
+fn a_top_level_form_in_expression_position_is_reported() {
+    let e = mismatch(r#"(defun f () i32 (defun g () i32 1) 2)"#);
+    assert!(e.contains("defun: only allowed at top level, not in expression position — define a local function with `labels`"), "{}", e);
+}
