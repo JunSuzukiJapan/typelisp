@@ -22,8 +22,8 @@ fn root_names() -> BTreeSet<String> {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
-    let root = chk.registry().root.module(&[typelisp::STD_MODULE.to_string()]).expect("the standard library's module");
-    root.fns.keys().chain(root.macros.keys()).chain(root.vars.keys()).cloned().collect()
+    let root = chk.registry().module(&[typelisp::STD_MODULE.to_string()]).expect("the standard library's module");
+    root.fns.keys().chain(root.macros.keys()).chain(root.vars.keys()).map(str::to_string).collect()
 }
 
 fn markdown_under(dir: &FsPath, out: &mut String) {

@@ -518,51 +518,51 @@ pub struct CompletionCandidate {
 pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<CompletionCandidate> {
     let mut out = Vec::new();
     for k in (0..=module_path.len()).rev() {
-        if let Some(ns) = reg.root.module(&module_path[..k]) {
-            push_namespace(ns, &mut out);
+        if let Some(ns) = reg.module(&module_path[..k]) {
+            push_namespace(reg, ns, &mut out);
         }
     }
     out
 }
 
 /// Push every name in `ns` into `out`.
-fn push_namespace(ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>) {
+fn push_namespace(reg: &Registry, ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>) {
     for (name, sig) in &ns.fns {
         out.push(CompletionCandidate {
-            name: name.clone(),
+            name: name.to_string(),
             kind: CompletionKind::Function,
             detail: format!("({:?}) -> {:?}", sig.params, sig.ret),
         });
     }
     for name in ns.macros.keys() {
-        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Macro, detail: "macro".to_string() });
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Macro, detail: "macro".to_string() });
     }
     for name in ns.types.keys() {
-        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Type, detail: "type".to_string() });
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Type, detail: "type".to_string() });
     }
     for (name, vi) in &ns.vars {
         out.push(CompletionCandidate {
-            name: name.clone(),
+            name: name.to_string(),
             kind: CompletionKind::Variable,
             detail: format!("{:?}", vi.ty),
         });
     }
     for name in ns.traits.keys() {
-        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Trait, detail: "trait".to_string() });
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Trait, detail: "trait".to_string() });
     }
-    for name in ns.modules.keys() {
-        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Module, detail: "module".to_string() });
+    for (name, _) in reg.children(ns.ns) {
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Module, detail: "module".to_string() });
     }
     for name in ns.ctors.keys() {
-        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Function, detail: "constructor".to_string() });
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Function, detail: "constructor".to_string() });
     }
     for name in ns.aliases.keys() {
-        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Function, detail: "use".to_string() });
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Function, detail: "use".to_string() });
     }
     for name in ns.mod_aliases.keys() {
-        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Module, detail: "use".to_string() });
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Module, detail: "use".to_string() });
     }
     for name in ns.static_uses.keys() {
-        out.push(CompletionCandidate { name: name.clone(), kind: CompletionKind::Method, detail: "use".to_string() });
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Method, detail: "use".to_string() });
     }
 }

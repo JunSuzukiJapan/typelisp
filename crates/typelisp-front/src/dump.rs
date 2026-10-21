@@ -38,7 +38,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::check::registry::{AdtDef, BlanketImpl, CStructDef, Docs, FnSig, MacroDef, Namespace, TraitDef, TypeAlias, VarInfo};
+use crate::check::registry::{AdtDef, BlanketImpl, CStructDef, FnSig, MacroDef, Namespace, Registry, TraitDef, TypeAlias, VarInfo};
 use crate::owned_form::OwnedForm;
 use crate::types::Path;
 use crate::Type;
@@ -321,14 +321,13 @@ fn key_of(ns: &[String], name: &str) -> String {
 type Visit<'a> = dyn FnMut(u8, &[String], &str, Vec<u8>, u64) -> Result<(), String> + 'a;
 
 fn walk(
-    root: &Namespace,
-    docs: &Docs,
-    struct_defaults: &BTreeMap<Path, Vec<Option<OwnedForm>>>,
+    reg: &Registry,
     throw_tags: &BTreeMap<String, Type>,
     predeclared: &[String],
     visit: &mut Visit<'_>,
 ) -> Result<(), String> {
-    walk_ns(root, &mut Vec::new(), visit)?;
+    let (docs, struct_defaults) = (&reg.docs, &reg.struct_defaults);
+    walk_ns(reg, reg.root(), &mut Vec::new(), visit)?;
 
     // Keyed absolutely, like the doc tables — this one hangs off the
     // `Registry`, not off any namespace.
@@ -367,6 +366,7 @@ fn walk(
 }
 
 fn walk_ns(
+    reg: &Registry,
     ns: &Namespace,
     path: &mut Vec<String>,
     visit: &mut Visit<'_>,
@@ -377,10 +377,10 @@ fn walk_ns(
     // build for no change in content.
     macro_rules! table {
         ($cat:expr, $map:expr) => {
-            let mut names: Vec<&String> = $map.keys().collect();
-            names.sort();
-            for name in names {
-                let (bytes, hash) = wire(&$map[name])?;
+            let mut rows: Vec<_> = $map.iter().collect();
+            rows.sort_by_key(|(name, _)| *name);
+            for (name, v) in rows {
+                let (bytes, hash) = wire(v)?;
                 visit($cat, path, name, bytes, hash)?;
             }
         };
@@ -403,16 +403,15 @@ fn walk_ns(
         visit(cat::BLANKET, path, &i.to_string(), bytes, hash)?;
     }
 
-    let mut module_names: Vec<&String> = ns.modules.keys().collect();
-    module_names.sort();
-    for name in module_names {
-        let child = &ns.modules[name];
+    let mut children = reg.children(ns.ns);
+    children.sort_by_key(|(name, _)| *name);
+    for (name, child) in children {
         // Emitted before its contents so `apply` creates the module first —
         // and so a module that is *only* a container still appears.
         let (bytes, hash) = wire(&())?;
         visit(cat::MODULE, path, name, bytes, hash)?;
-        path.push(name.clone());
-        walk_ns(child, path, visit)?;
+        path.push(name.to_string());
+        walk_ns(reg, child, path, visit)?;
         path.pop();
     }
     Ok(())
@@ -420,14 +419,12 @@ fn walk_ns(
 
 /// Every entry's content hash, as of now.
 pub fn signature(
-    root: &Namespace,
-    docs: &Docs,
-    struct_defaults: &BTreeMap<Path, Vec<Option<OwnedForm>>>,
+    reg: &Registry,
     throw_tags: &BTreeMap<String, Type>,
     predeclared: &[String],
 ) -> Result<RegistrySignature, String> {
     let mut sig = RegistrySignature::default();
-    walk(root, docs, struct_defaults, throw_tags, predeclared, &mut |cat, ns, name, _bytes, hash| {
+    walk(reg, throw_tags, predeclared, &mut |cat, ns, name, _bytes, hash| {
         sig.record(cat, key_of(ns, name), hash);
         Ok(())
     })?;
@@ -436,15 +433,13 @@ pub fn signature(
 
 /// Every entry that is new or different since `before`.
 pub fn delta(
-    root: &Namespace,
-    docs: &Docs,
-    struct_defaults: &BTreeMap<Path, Vec<Option<OwnedForm>>>,
+    reg: &Registry,
     throw_tags: &BTreeMap<String, Type>,
     predeclared: &[String],
     before: &RegistrySignature,
 ) -> Result<Vec<Entry>, String> {
     let mut entries = Vec::new();
-    walk(root, docs, struct_defaults, throw_tags, predeclared, &mut |cat, ns, name, bytes, hash| {
+    walk(reg, throw_tags, predeclared, &mut |cat, ns, name, bytes, hash| {
         if !before.unchanged(cat, &key_of(ns, name), hash) {
             entries.push(Entry { cat, ns: ns.to_vec(), name: name.to_string(), payload: bytes });
         }
@@ -462,9 +457,7 @@ pub fn delta(
 /// information.
 #[allow(clippy::too_many_arguments)]
 pub fn apply_entries(
-    root: &mut Namespace,
-    docs: &mut Docs,
-    struct_defaults: &mut BTreeMap<Path, Vec<Option<OwnedForm>>>,
+    reg: &mut Registry,
     throw_tags: &mut BTreeMap<String, Type>,
     predeclared: &mut dyn FnMut(String),
     entries: Vec<Entry>,
@@ -474,62 +467,62 @@ pub fn apply_entries(
             cat::MODULE => {
                 let mut p = e.ns.clone();
                 p.push(e.name);
-                root.module_mut(&p);
+                reg.module_mut(&p);
             }
             cat::FN => {
                 let v: FnSig = bincode::deserialize(&e.payload).map_err(|err| read_failed("function signature", err))?;
-                root.module_mut(&e.ns).fns.insert(e.name, v);
+                reg.module_mut(&e.ns).fns.insert(e.name, v);
             }
             cat::TYPE => {
                 let v: AdtDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("type", err))?;
-                root.module_mut(&e.ns).types.insert(e.name, v);
+                reg.module_mut(&e.ns).types.insert(e.name, v);
             }
             cat::TRAIT => {
                 let v: TraitDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("trait", err))?;
-                root.module_mut(&e.ns).traits.insert(e.name, v);
+                reg.module_mut(&e.ns).traits.insert(e.name, v);
             }
             cat::MACRO => {
                 let v: MacroDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("macro", err))?;
-                root.module_mut(&e.ns).macros.insert(e.name, v);
+                reg.module_mut(&e.ns).macros.insert(e.name, v);
             }
             cat::CTOR => {
                 let v: (Path, usize) = bincode::deserialize(&e.payload).map_err(|err| read_failed("constructor", err))?;
-                root.module_mut(&e.ns).ctors.insert(e.name, v);
+                reg.module_mut(&e.ns).ctors.insert(e.name, v);
             }
             cat::VAR => {
                 let v: VarInfo = bincode::deserialize(&e.payload).map_err(|err| read_failed("global", err))?;
-                root.module_mut(&e.ns).vars.insert(e.name, v);
+                reg.module_mut(&e.ns).vars.insert(e.name, v);
             }
             cat::ALIAS => {
                 let v: Vec<String> = bincode::deserialize(&e.payload).map_err(|err| read_failed("use alias", err))?;
-                root.module_mut(&e.ns).aliases.insert(e.name, v);
+                reg.module_mut(&e.ns).aliases.insert(e.name, v);
             }
             cat::MOD_ALIAS => {
                 let v: Vec<String> = bincode::deserialize(&e.payload).map_err(|err| read_failed("module alias", err))?;
-                root.module_mut(&e.ns).mod_aliases.insert(e.name, v);
+                reg.module_mut(&e.ns).mod_aliases.insert(e.name, v);
             }
             cat::STATIC_USE => {
                 let v: (Path, String) = bincode::deserialize(&e.payload).map_err(|err| read_failed("static use", err))?;
-                root.module_mut(&e.ns).static_uses.insert(e.name, v);
+                reg.module_mut(&e.ns).static_uses.insert(e.name, v);
             }
             cat::TYPE_ALIAS => {
                 let v: TypeAlias = bincode::deserialize(&e.payload).map_err(|err| read_failed("type alias", err))?;
-                root.module_mut(&e.ns).type_aliases.insert(e.name, v);
+                reg.module_mut(&e.ns).type_aliases.insert(e.name, v);
             }
             cat::C_STRUCT => {
                 let v: CStructDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("C struct", err))?;
-                root.module_mut(&e.ns).c_structs.insert(e.name, v);
+                reg.module_mut(&e.ns).c_structs.insert(e.name, v);
             }
             cat::STRUCT_DEFAULT => {
                 let v: Vec<Option<OwnedForm>> =
                     bincode::deserialize(&e.payload).map_err(|err| read_failed("struct slot defaults", err))?;
-                struct_defaults.insert(parse_path(&e.name), v);
+                reg.struct_defaults.insert(parse_path(&e.name), v);
             }
             cat::BLANKET => {
                 let v: BlanketImpl = bincode::deserialize(&e.payload).map_err(|err| read_failed("blanket impl", err))?;
                 let index: usize =
                     e.name.parse().map_err(|_| format!("dump: blanket impl index `{}` is not a number", e.name))?;
-                let list = &mut root.module_mut(&e.ns).blanket_impls;
+                let list = &mut reg.module_mut(&e.ns).blanket_impls;
                 if index < list.len() {
                     list[index] = v;
                 } else if index == list.len() {
@@ -548,25 +541,25 @@ pub fn apply_entries(
             }
             cat::PREDECLARED => predeclared(e.name),
             cat::DOC_FN => {
-                docs.fns.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                reg.docs.fns.insert(parse_path(&e.name), doc_text(&e.payload)?);
             }
             cat::DOC_TYPE => {
-                docs.types.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                reg.docs.types.insert(parse_path(&e.name), doc_text(&e.payload)?);
             }
             cat::DOC_VAR => {
-                docs.vars.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                reg.docs.vars.insert(parse_path(&e.name), doc_text(&e.payload)?);
             }
             cat::DOC_TRAIT => {
-                docs.traits.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                reg.docs.traits.insert(parse_path(&e.name), doc_text(&e.payload)?);
             }
             cat::DOC_MACRO => {
-                docs.macros.insert(parse_path(&e.name), doc_text(&e.payload)?);
+                reg.docs.macros.insert(parse_path(&e.name), doc_text(&e.payload)?);
             }
             cat::DOC_METHOD => {
-                docs.methods.insert(parse_method_key(&e.name)?, doc_text(&e.payload)?);
+                reg.docs.methods.insert(parse_method_key(&e.name)?, doc_text(&e.payload)?);
             }
             cat::DOC_TRAIT_METHOD => {
-                docs.trait_methods.insert(parse_method_key(&e.name)?, doc_text(&e.payload)?);
+                reg.docs.trait_methods.insert(parse_method_key(&e.name)?, doc_text(&e.payload)?);
             }
             other => return Err(format!("dump: entry category {} is not one this build knows", other)),
         }

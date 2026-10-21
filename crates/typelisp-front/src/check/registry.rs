@@ -6,6 +6,7 @@
 use std::collections::{BTreeMap, HashMap};
 
 use crate::{Loc, Path, Type};
+use typelisp_mem::symbols::{self, NsId, SymRef};
 use typelisp_mem::ConcreteNames;
 
 /// One constructor of a data type: a name and its field types. Field types may
@@ -502,14 +503,18 @@ pub struct TypeAlias {
     pub public: bool,
 }
 
-#[derive(Default, serde::Serialize, serde::Deserialize, Clone)]
+/// One module's definitions. The module's children are not here: what
+/// modules exist, and which is inside which, is the symbol table's tree
+/// ([`typelisp_mem::symbols`]); [`Registry`] holds one of these per module
+/// of that tree the session has.
+#[derive(Clone)]
 pub struct Namespace {
-    /// Child modules, keyed by their (unqualified) name.
-    pub modules: HashMap<String, Namespace>,
+    /// The module these are the definitions of.
+    pub ns: NsId,
     /// Free functions defined directly here, keyed by unqualified name.
-    pub fns: HashMap<String, FnSig>,
+    pub fns: Names<FnSig>,
     /// `deftrait`s defined directly here, keyed by unqualified name.
-    pub traits: HashMap<String, TraitDef>,
+    pub traits: Names<TraitDef>,
     /// Blanket `impl`s declared directly here (`(impl<T> Clamp T (:where (Ord
     /// T)) ...)`) — kept in declaration order, which is not consulted for
     /// resolution (at most one may cover any trait) but keeps diagnostics
@@ -518,24 +523,24 @@ pub struct Namespace {
     /// `defmacro`s defined directly here, keyed by unqualified name. Kept
     /// separate from `fns` so the checker's head-symbol dispatch can tell a
     /// macro call (expand, then re-check) from an ordinary function call.
-    pub macros: HashMap<String, MacroDef>,
+    pub macros: Names<MacroDef>,
     /// Types defined directly here, keyed by unqualified name. `AdtDef::name`
     /// holds the fully-qualified name used as the type's identity.
-    pub types: HashMap<String, AdtDef>,
+    pub types: Names<AdtDef>,
     /// Constructor (unqualified) name -> (owning type path, variant index).
-    pub ctors: HashMap<String, (Path, usize)>,
+    pub ctors: Names<(Path, usize)>,
     /// Global variables/constants defined directly here, by unqualified name.
-    pub vars: HashMap<String, VarInfo>,
+    pub vars: Names<VarInfo>,
     /// `use` aliases for items: unqualified name -> absolute path (from the root).
-    pub aliases: HashMap<String, Vec<String>>,
+    pub aliases: Names<Vec<String>>,
     /// `use` aliases for modules: short name -> absolute module path.
-    pub mod_aliases: HashMap<String, Vec<String>>,
+    pub mod_aliases: Names<Vec<String>>,
     /// `deftype` aliases defined directly here, keyed by unqualified name.
     /// Kept apart from `types`: an alias is not a type, it is a *spelling*
     /// that `Checker::canon` rewrites away, so nothing past the type parser
     /// ever sees one (`ConcreteNames::type_key`, the fasl, the compile pipeline, an error
     /// message — all show the expansion).
-    pub type_aliases: HashMap<String, TypeAlias>,
+    pub type_aliases: Names<TypeAlias>,
     /// Bare names snapshotted from a `(use Type)` of a type's *static*
     /// associated functions (`instance: false`, e.g. `HashTable::new`) —
     /// unqualified name -> (owning type path, method name). Mirrors `ctors`
@@ -543,33 +548,112 @@ pub struct Namespace {
     /// separate since a constructor and a static method are looked up
     /// through different machinery (`check_construct` vs `check_assoc_call`)
     /// — see `Checker::check_use`/`Checker::check_list`.
-    pub static_uses: HashMap<String, (Path, String)>,
+    pub static_uses: Names<(Path, String)>,
     /// `def-c-struct`s defined directly here, keyed by unqualified name. In
     /// the type/trait name space ([`Self::types`] and [`Self::type_aliases`]
     /// refuse the same name), but a table of its own: a C struct is not a
     /// type any value has — only a typed pointer's pointee.
-    pub c_structs: HashMap<String, CStructDef>,
+    pub c_structs: Names<CStructDef>,
+}
+
+/// One of a [`Namespace`]'s tables: definitions keyed by the symbol their
+/// name reads as in the module ([`symbols::intern_exact`]), the same symbol a
+/// [`Path`] to the definition holds.
+///
+/// Looked up by a name as written, too: [`Names::get`] finds the symbol
+/// without creating one, so asking about a name nothing defines leaves
+/// nothing behind.
+#[derive(Clone)]
+pub struct Names<T> {
+    ns: NsId,
+    map: HashMap<SymRef, T>,
+}
+
+impl<T> Names<T> {
+    pub fn new(ns: NsId) -> Names<T> {
+        Names { ns, map: HashMap::new() }
+    }
+
+    fn key(&self, name: &str) -> Option<SymRef> {
+        symbols::find_exact(self.ns, name)
+    }
+
+    /// The definition named by `sym`, a symbol read in this module.
+    pub fn get_sym(&self, sym: SymRef) -> Option<&T> {
+        self.map.get(&sym)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&T> {
+        self.map.get(&self.key(name)?)
+    }
+
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.get(name).is_some()
+    }
+
+    pub fn insert(&mut self, name: impl AsRef<str>, value: T) -> Option<T> {
+        self.map.insert(symbols::intern_exact(self.ns, name.as_ref()), value)
+    }
+
+    pub fn remove(&mut self, name: &str) -> Option<T> {
+        let key = self.key(name)?;
+        self.map.remove(&key)
+    }
+
+    pub fn entry(&mut self, name: impl AsRef<str>) -> std::collections::hash_map::Entry<'_, SymRef, T> {
+        self.map.entry(symbols::intern_exact(self.ns, name.as_ref()))
+    }
+
+    /// The names defined, in no particular order.
+    pub fn keys(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.map.keys().map(SymRef::name)
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &T> {
+        self.map.values()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&'static str, &T)> {
+        self.into_iter()
+    }
+
+    /// The same definitions keyed in the module `ns` instead, each under the
+    /// symbol its name reads as there.
+    pub fn moved_to(self, ns: NsId) -> Names<T> {
+        let mut out = Names::new(ns);
+        for (k, v) in self.map {
+            out.insert(k.name(), v);
+        }
+        out
+    }
+}
+
+impl<'a, T> IntoIterator for &'a Names<T> {
+    type Item = (&'static str, &'a T);
+    type IntoIter = std::iter::Map<std::collections::hash_map::Iter<'a, SymRef, T>, fn((&'a SymRef, &'a T)) -> (&'static str, &'a T)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.map.iter().map(|(k, v)| (k.name(), v))
+    }
 }
 
 impl Namespace {
-    /// Descend through child modules along `path`; `None` if any segment is not
-    /// a module.
-    pub fn module(&self, path: &[String]) -> Option<&Namespace> {
-        let mut ns = self;
-        for seg in path {
-            ns = ns.modules.get(seg)?;
+    pub fn new(ns: NsId) -> Namespace {
+        Namespace {
+            ns,
+            fns: Names::new(ns),
+            traits: Names::new(ns),
+            blanket_impls: Vec::new(),
+            macros: Names::new(ns),
+            types: Names::new(ns),
+            ctors: Names::new(ns),
+            vars: Names::new(ns),
+            aliases: Names::new(ns),
+            mod_aliases: Names::new(ns),
+            type_aliases: Names::new(ns),
+            static_uses: Names::new(ns),
+            c_structs: Names::new(ns),
         }
-        Some(ns)
-    }
-
-    /// Descend through child modules along `path`, creating empty modules as
-    /// needed.
-    pub fn module_mut(&mut self, path: &[String]) -> &mut Namespace {
-        let mut ns = self;
-        for seg in path {
-            ns = ns.modules.entry(seg.clone()).or_default();
-        }
-        ns
     }
 
     /// Register a type here. Does *not* index its constructors as bare names
@@ -667,9 +751,9 @@ pub struct Docs {
     pub trait_methods: HashMap<(Path, String), String>,
 }
 
-/// The checker's symbol table: a tree of namespaces rooted at [`Registry::root`].
+/// The checker's symbol table: one [`Namespace`] per module the session has.
 pub struct Registry {
-    pub root: Namespace,
+    modules: HashMap<NsId, Namespace>,
     pub def_locs: DefLocs,
     pub docs: Docs,
     /// Per-`defstruct` slot default forms, keyed by the type's path and
@@ -693,7 +777,8 @@ impl Registry {
     /// the concrete error types/`Sexpr` and the i32 arithmetic/comparison
     /// operators.
     pub fn with_builtins() -> Registry {
-        let mut root = Namespace::default();
+        let mut root = Namespace::new(NsId::ROOT);
+        let mut internal = Namespace::new(crate::types::internal_ns());
         for def in builtin_sum_defs() {
             root.add_type(def);
         }
@@ -780,7 +865,6 @@ impl Registry {
         // `random-state` has nowhere else to hang an `&optional` parameter
         // off of, since `check_call_opt_key` only resolves `&optional`/`&key`
         // for a `defun`'s own `FnSig`, not an ad hoc native one.
-        let internal = internal_ns(&mut root);
         internal.fns.insert("make-random-state-fresh".to_string(), FnSig::builtin(vec![], Type::RandomState));
         internal.fns.insert("random-state-copy".to_string(), FnSig::builtin(vec![Type::RandomState], Type::RandomState));
         internal.fns.insert("random-state-next".to_string(), FnSig::builtin(vec![Type::RandomState, Type::Int], Type::Int));
@@ -827,9 +911,9 @@ impl Registry {
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
-        register_stream_builtins(internal_ns(&mut root));
-        register_net_builtins(internal_ns(&mut root));
-        register_system_builtins(&mut root);
+        register_stream_builtins(&mut internal);
+        register_net_builtins(&mut internal);
+        register_system_builtins(&mut root, &mut internal);
         register_readtable_builtins(&mut root);
         root.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
         // `read-datum-at`: one datum from a string starting at a character
@@ -839,7 +923,7 @@ impl Registry {
         // `read-from-string-preserving-whitespace` are this with the two
         // `preserve` settings and a default `start`; the primitive keeps a
         // name of its own because the CL one is the prelude's.
-        internal_ns(&mut root).fns.insert(
+        internal.fns.insert(
             "read-datum-at".to_string(),
             FnSig::builtin(vec![Type::Str, Type::Int, Type::Bool], result_of( Type::Named(Path::std("cons-cell"), vec![option_of(sexpr()), Type::Int]), error_ty(READ_ERROR), )),
         );
@@ -1021,36 +1105,70 @@ impl Registry {
         // internal module, belongs to the standard library's module. Built at
         // the root and moved, so each registration above names its builtin
         // the way a call to it is written.
-        let fns = std::mem::take(&mut root.fns);
-        let vars = std::mem::take(&mut root.vars);
-        let internal = root.modules.remove(crate::INTERNAL_MODULE);
-        let std_ns = root.module_mut(&[crate::types::STD_MODULE.to_string()]);
-        std_ns.fns = fns;
-        std_ns.vars = vars;
-        if let Some(internal) = internal {
-            std_ns.modules.insert(crate::INTERNAL_MODULE.to_string(), internal);
+        let mut std_ns = Namespace::new(NsId::STD);
+        std_ns.fns = std::mem::replace(&mut root.fns, Names::new(NsId::ROOT)).moved_to(NsId::STD);
+        std_ns.vars = std::mem::replace(&mut root.vars, Names::new(NsId::ROOT)).moved_to(NsId::STD);
+        let modules = [root, std_ns, internal].into_iter().map(|m| (m.ns, m)).collect();
+        Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
+    }
+
+    /// The root module's definitions.
+    pub fn root(&self) -> &Namespace {
+        &self.modules[&NsId::ROOT]
+    }
+
+    /// The module `path` names from the root, if the session has it.
+    pub fn module(&self, path: &[String]) -> Option<&Namespace> {
+        self.module_at(symbols::find_ns(path)?)
+    }
+
+    pub fn module_at(&self, ns: NsId) -> Option<&Namespace> {
+        self.modules.get(&ns)
+    }
+
+    /// The module `path` names from the root, added to the session — with
+    /// every module it is written inside — if new.
+    pub fn module_mut(&mut self, path: &[String]) -> &mut Namespace {
+        let mut ns = NsId::ROOT;
+        for seg in path {
+            ns = symbols::child_ns(ns, seg);
+            self.modules.entry(ns).or_insert_with(|| Namespace::new(ns));
         }
-        Registry { root, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
+        self.modules.get_mut(&ns).expect("the registry always has the root module")
+    }
+
+    pub fn module_at_mut(&mut self, ns: NsId) -> Option<&mut Namespace> {
+        self.modules.get_mut(&ns)
+    }
+
+    /// The child modules of `ns` the session has, by the name of each.
+    pub fn children(&self, ns: NsId) -> Vec<(&'static str, &Namespace)> {
+        symbols::ns_children(ns).into_iter().filter_map(|(name, id)| Some((name, self.modules.get(&id)?))).collect()
+    }
+
+    /// Every module the session has, in no particular order.
+    pub fn namespaces(&self) -> impl Iterator<Item = &Namespace> {
+        self.modules.values()
     }
 
     /// Look up a type by its fully-qualified [`Path`] (e.g. `geo::point`).
     pub fn type_def(&self, path: &Path) -> Option<&AdtDef> {
-        self.root.module(&path.parent())?.types.get(path.last_segment())
+        self.module_at(path.ns())?.types.get_sym(path.name_symbol())
     }
 
     /// Mutable lookup of a type by its fully-qualified [`Path`].
     pub fn type_def_mut(&mut self, path: &Path) -> Option<&mut AdtDef> {
-        self.root.module_mut(&path.parent()).types.get_mut(path.last_segment())
+        self.module_at_mut(path.ns())?.types.map.get_mut(&path.name_symbol())
     }
 
     /// Look up a free function by its fully-qualified [`Path`].
     pub fn fn_sig(&self, path: &Path) -> Option<&FnSig> {
-        self.root.module(&path.parent())?.fns.get(path.last_segment())
+        self.module_at(path.ns())?.fns.get_sym(path.name_symbol())
     }
 
     /// Look up a `deftrait` by its fully-qualified [`Path`].
     pub fn trait_def(&self, path: &Path) -> Option<&TraitDef> {
-        self.root.module(&path.parent())?.traits.get(path.last_segment())
+        self.module_at(path.ns())?.traits.get_sym(path.name_symbol())
     }
 
     /// Resolve `method` against `tdef` *including inherited methods*,
@@ -1083,13 +1201,7 @@ impl Registry {
     /// (`Checker::check_impl` rejects a second), which is what makes this
     /// answer independent of module walk order.
     pub fn blanket_impl(&self, trait_path: &Path) -> Option<&BlanketImpl> {
-        fn walk<'a>(ns: &'a Namespace, t: &Path) -> Option<&'a BlanketImpl> {
-            ns.blanket_impls
-                .iter()
-                .find(|b| b.trait_path == *t)
-                .or_else(|| ns.modules.values().find_map(|c| walk(c, t)))
-        }
-        walk(&self.root, trait_path)
+        self.namespaces().find_map(|ns| ns.blanket_impls.iter().find(|b| b.trait_path == *trait_path))
     }
 
     /// Every type that has an `impl` for `trait_path` — the reverse of
@@ -1103,24 +1215,14 @@ impl Registry {
     /// iteration order varies between runs — an unsorted result would make
     /// diagnostics and generated-code ordering nondeterministic.
     pub fn trait_impls(&self, trait_path: &Path) -> Vec<Path> {
-        let mut out = Vec::new();
-        collect_trait_impls(&self.root, trait_path, &mut out);
+        let mut out: Vec<Path> = self
+            .namespaces()
+            .flat_map(|ns| ns.types.values())
+            .filter(|def| def.impls.contains(trait_path) || def.insts.values().any(|i| i.impls.contains(trait_path)))
+            .map(|def| def.name.clone())
+            .collect();
         out.sort_by_key(|a| a.to_string());
         out
-    }
-}
-
-/// Depth-first walk of the module tree collecting types with an `impl` of
-/// `trait_path`, for every instantiation or for one —
-/// [`Registry::trait_impls`]'s recursion.
-fn collect_trait_impls(ns: &Namespace, trait_path: &Path, out: &mut Vec<Path>) {
-    for def in ns.types.values() {
-        if def.impls.contains(trait_path) || def.insts.values().any(|i| i.impls.contains(trait_path)) {
-            out.push(def.name.clone());
-        }
-    }
-    for child in ns.modules.values() {
-        collect_trait_impls(child, trait_path, out);
     }
 }
 
@@ -1210,12 +1312,6 @@ pub const FILE_ERROR: &str = "fileerror";
 pub const NET_ERROR: &str = "neterror";
 pub const BUILTIN_ERROR_TYPES: [&str; 6] =
     [PARSE_INT_ERROR, PARSE_FLOAT_ERROR, READ_ERROR, EVAL_ERROR, FILE_ERROR, NET_ERROR];
-
-/// The module the library's internal helpers are registered in
-/// ([`crate::INTERNAL_MODULE`]).
-fn internal_ns(root: &mut Namespace) -> &mut Namespace {
-    root.module_mut(&[crate::INTERNAL_MODULE.to_string()])
-}
 
 /// The `stream-*` / `file-*` primitives (`eval::interp::Interp::
 /// eval_stream_builtin`). Deliberately minimal and untyped-looking: a stream
@@ -1456,7 +1552,7 @@ fn register_net_builtins(ns: &mut Namespace) {
 /// `lisp-implementation-type` is deliberately *not* here — it is a constant
 /// string, so the prelude defines it in typelisp rather than spending a
 /// builtin on it.
-fn register_system_builtins(root: &mut Namespace) {
+fn register_system_builtins(root: &mut Namespace, internal: &mut Namespace) {
     let mut native = |name: &str, params: Vec<Type>, ret: Type| {
         root.fns.insert(
             name.to_string(),
@@ -1517,7 +1613,6 @@ fn register_system_builtins(root: &mut Namespace) {
     // `dribble` itself is a prelude `defun` with an `&optional` path; these
     // two are the halves it dispatches to. Both `Result`, since both touch a
     // file — and stopping *flushes*, which is where a full disk is found.
-    let internal = internal_ns(root);
     internal.fns.insert("dribble-start".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::Unit, file_err.clone())));
     internal.fns.insert("dribble-stop".to_string(), FnSig::builtin(vec![], result_of(Type::Unit, file_err.clone())));
     // The runtime half of the `ed` special form, which resolved the name at
@@ -3052,12 +3147,6 @@ fn tvar(name: &str) -> Type {
     Type::Var(name.to_string())
 }
 
-/// The symbol a definition's path names it by: its last segment, read in the
-/// module the rest of the path names.
-pub fn definition_symbol(path: &Path) -> typelisp_mem::SymRef {
-    typelisp_mem::symbols::intern_in(typelisp_mem::symbols::ns_of(&path.parent()), path.last_segment())
-}
-
 impl Registry {
     /// Writes into the session's table of what names mean (`Heap::names`)
     /// the modules, types and traits this registry defines, so the forms
@@ -3065,21 +3154,15 @@ impl Registry {
     /// every top-level form; the table only grows, so writing what it holds
     /// already changes nothing.
     pub fn publish_names(&self, names: &mut typelisp_mem::symbols::SessionNames) {
-        fn walk(ns: &Namespace, path: &mut Vec<String>, names: &mut typelisp_mem::symbols::SessionNames) {
-            names.declare_module(typelisp_mem::symbols::ns_of(path));
+        for ns in self.namespaces() {
+            names.declare_module(ns.ns);
             for def in ns.types.values() {
                 publish_type(def, names);
             }
             for def in ns.traits.values() {
                 publish_trait(def, names);
             }
-            for (name, child) in &ns.modules {
-                path.push(name.clone());
-                walk(child, path, names);
-                path.pop();
-            }
         }
-        walk(&self.root, &mut Vec::new(), names);
     }
 }
 
@@ -3087,9 +3170,9 @@ impl Registry {
 /// so a path can be read through it (`point::new`). Its members' names read
 /// as they do in the type's own module.
 fn publish_type(def: &AdtDef, names: &mut typelisp_mem::symbols::SessionNames) {
-    let ty = definition_symbol(&def.name);
+    let ty = def.name.name_symbol();
     names.declare_type(ty);
-    let home = typelisp_mem::symbols::ns_of(&def.name.parent());
+    let home = def.name.ns();
     let members = def
         .variants
         .iter()
@@ -3104,9 +3187,9 @@ fn publish_type(def: &AdtDef, names: &mut typelisp_mem::symbols::SessionNames) {
 
 /// [`publish_type`] for a trait: its methods are its members.
 fn publish_trait(def: &TraitDef, names: &mut typelisp_mem::symbols::SessionNames) {
-    let tr = definition_symbol(&def.name);
+    let tr = def.name.name_symbol();
     names.declare_type(tr);
-    let home = typelisp_mem::symbols::ns_of(&def.name.parent());
+    let home = def.name.ns();
     for name in def.methods.keys() {
         names.declare_member(tr, typelisp_mem::symbols::intern_in(home, name));
     }

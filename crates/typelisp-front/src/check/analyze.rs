@@ -1224,9 +1224,7 @@ impl Checker {
     /// delta asks.
     pub fn signature(&self, heap: &Heap) -> Result<RegistrySignature, String> {
         let mut sig = crate::dump::signature(
-            &self.info.reg.root,
-            &self.info.reg.docs,
-            &self.info.reg.struct_defaults,
+            &self.info.reg,
             &self.throw_tags.borrow(),
             &self.sorted_predeclared(),
         )
@@ -1244,9 +1242,7 @@ impl Checker {
     /// than the whole world.
     pub fn capture_delta(&self, heap: &Heap, before: &RegistrySignature) -> Result<CheckerDelta, String> {
         let entries = crate::dump::delta(
-            &self.info.reg.root,
-            &self.info.reg.docs,
-            &self.info.reg.struct_defaults,
+            &self.info.reg,
             &self.throw_tags.borrow(),
             &self.sorted_predeclared(),
             before,
@@ -1277,9 +1273,7 @@ impl Checker {
     pub fn apply_delta(&mut self, delta: CheckerDelta, heap: &mut Heap) -> Result<(), String> {
         let mut predeclared = std::mem::take(&mut self.predeclared);
         crate::dump::apply_entries(
-            &mut self.info.reg.root,
-            &mut self.info.reg.docs,
-            &mut self.info.reg.struct_defaults,
+            &mut self.info.reg,
             &mut self.throw_tags.borrow_mut(),
             &mut |name| {
                 predeclared.insert(name);
@@ -1703,7 +1697,7 @@ impl Checker {
             Ok((specs, tl)) if specs.is_empty() && lifted.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
                 for l in lifted {
-                    self.info.reg.root.module_mut(&l.path.parent()).fns.insert(l.path.last_segment().to_string(), l.sig);
+                    self.info.reg.module_mut(&l.path.parent()).fns.insert(l.path.last_segment().to_string(), l.sig);
                     specs.push(l.form);
                 }
                 specs.push(tl);
@@ -1845,7 +1839,7 @@ impl Checker {
             optionals: Vec::new(),
             keys: Vec::new(),
         };
-        self.info.reg.root.module_mut(&self.info.ns).fns.insert(name, sig);
+        self.info.reg.module_mut(&self.info.ns).fns.insert(name, sig);
         self.predeclared.insert(fq_name.to_string());
         forms::defsignature_form(heap)
     }
@@ -2008,7 +2002,7 @@ impl Checker {
             optionals: Vec::new(),
             keys: Vec::new(),
         };
-        self.info.reg.root.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
+        self.info.reg.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
         self.info.defffi_form(heap, &self.info.fq(&name), &c_symbol, library.as_deref(), &params, &ret)
     }
 
@@ -3338,7 +3332,7 @@ impl Checker {
         if let Some(decl) = &declared {
             super::verify::signature_agrees(&name, decl, &sig)?;
         }
-        self.info.reg.root.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
+        self.info.reg.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
             self.info.reg.def_locs.fns.insert(fq_name.clone(), loc);
         }
@@ -3486,7 +3480,7 @@ impl Checker {
             optionals: optionals.clone(),
             keys: keys.clone(),
         };
-        self.info.reg.root.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
+        self.info.reg.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
             self.info.reg.def_locs.fns.insert(fq_name.clone(), loc);
         }
@@ -4512,7 +4506,7 @@ impl Checker {
         let fq_name = self.info.fq(&name);
         self.check_value_clash("macro", &name)?;
         self.check_redef("macro", &name, self.info.cur_ns().macros.get(&name))?;
-        self.info.reg.root.module_mut(&self.info.ns).macros.insert(
+        self.info.reg.module_mut(&self.info.ns).macros.insert(
             name,
             MacroDef {
                 required: required_names.len(),
@@ -5142,7 +5136,7 @@ impl Checker {
         // `Self::canon`/`resolve_trait_path`. Same device, same reason, as
         // `check_defstruct`'s self-referential-field stub; overwritten with
         // the fully parsed `TraitDef` below.
-        self.info.reg.root.module_mut(&self.info.ns).traits.insert(
+        self.info.reg.module_mut(&self.info.ns).traits.insert(
             name.clone(),
             TraitDef {
                 name: fq_name.clone(),
@@ -5237,7 +5231,7 @@ impl Checker {
         let (vtable_order, vtable_owner) =
             self.linearize_vtable(&name, &fq_name, &supertraits, &method_order)?;
         let assoc_names = assoc_types.clone();
-        self.info.reg.root.module_mut(&self.info.ns).traits.insert(
+        self.info.reg.module_mut(&self.info.ns).traits.insert(
             name.clone(),
             TraitDef {
                 name: fq_name.clone(),
@@ -6012,14 +6006,8 @@ impl Checker {
     /// and requests materialization.
     fn blanket_method_owner(&self, ty: &Type, type_fq: &Path, method: &str) -> Option<Path> {
         self.info.reg.type_def(type_fq)?;
-        fn walk(ns: &Namespace, out: &mut Vec<Path>) {
-            out.extend(ns.blanket_impls.iter().map(|b| b.trait_path.clone()));
-            for c in ns.modules.values() {
-                walk(c, out);
-            }
-        }
-        let mut candidates = Vec::new();
-        walk(&self.info.reg.root, &mut candidates);
+        let mut candidates: Vec<Path> =
+            self.info.reg.namespaces().flat_map(|ns| ns.blanket_impls.iter().map(|b| b.trait_path.clone())).collect();
         if candidates.is_empty() {
             // The overwhelmingly common case: no blanket impl anywhere, so
             // this is a plain "no such method" and the tree walk above is the
@@ -6420,7 +6408,7 @@ impl Checker {
         // one of this very blanket's siblings on a covered type resolves —
         // the same "signature first, body second" order every definition form
         // here follows for self-recursion.
-        self.info.reg.root.module_mut(&self.info.ns).blanket_impls.push(BlanketImpl {
+        self.info.reg.module_mut(&self.info.ns).blanket_impls.push(BlanketImpl {
             trait_path: trait_fq.clone(),
             target_var: target_var.clone(),
             bounds,
@@ -7330,7 +7318,7 @@ impl Checker {
         for s in segs {
             self.info.ns.push(s.clone());
         }
-        self.info.reg.root.module_mut(&self.info.ns);
+        self.info.reg.module_mut(&self.info.ns);
         self.publish_name_view();
         Ok(Path::from_segments(self.info.ns.clone()))
     }
@@ -7349,11 +7337,11 @@ impl Checker {
     /// and before each form, since a form can bring a type in.
     fn publish_name_view(&self) {
         let mut imports = std::collections::HashMap::new();
-        let own = self.info.reg.root.module(&self.info.ns);
+        let own = self.info.reg.module(&self.info.ns);
         if let Some(m) = own {
             for (bare, segs) in &m.aliases {
                 if let Some(target) = self.info.resolve_type_path(segs) {
-                    imports.insert(bare.clone(), target.to_string());
+                    imports.insert(bare.to_string(), target.to_string());
                 }
             }
         }
@@ -7361,12 +7349,12 @@ impl Checker {
         // types are in scope everywhere (`Info::in_scope`), so they are
         // written as if brought in — except where this module's own
         // definition or import takes the name.
-        if let Some(std_ns) = self.info.reg.root.module(&STD_SEGMENTS) {
+        if let Some(std_ns) = self.info.reg.module(&STD_SEGMENTS) {
             for name in std_ns.types.keys().chain(std_ns.traits.keys()) {
                 if own.is_some_and(|m| m.types.contains_key(name) || m.traits.contains_key(name)) {
                     continue;
                 }
-                imports.entry(name.clone()).or_insert_with(|| item_path(&STD_SEGMENTS, name).to_string());
+                imports.entry(name.to_string()).or_insert_with(|| item_path(&STD_SEGMENTS, name).to_string());
             }
         }
         typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(self.info.ns.clone(), imports));
@@ -8041,7 +8029,7 @@ impl Checker {
         // and `canon` falling back to an unqualified guess that could never
         // match the real registration below. Overwritten with the fully
         // parsed `AdtDef` once fields are known.
-        self.info.reg.root.module_mut(&self.info.ns).add_type(AdtDef {
+        self.info.reg.module_mut(&self.info.ns).add_type(AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
@@ -8201,7 +8189,7 @@ impl Checker {
             trait_assoc: BTreeMap::new(),
             insts: BTreeMap::new(),
         };
-        self.info.reg.root.module_mut(&self.info.ns).add_type(def);
+        self.info.reg.module_mut(&self.info.ns).add_type(def);
         if let Some(loc) = def_loc.clone() {
             self.info.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
@@ -8443,7 +8431,7 @@ impl Checker {
 
         let fq = self.info.fq(&name);
         self.info.reg
-            .root
+            
             .module_mut(&self.info.ns)
             .type_aliases
             .insert(name.clone(), TypeAlias { name: fq.clone(), params, body, public });
@@ -8503,7 +8491,7 @@ impl Checker {
         // `canon` falling back to an unqualified guess that could never
         // match the real registration below. Overwritten with the fully
         // parsed `AdtDef` once variants are known.
-        self.info.reg.root.module_mut(&self.info.ns).add_type(AdtDef {
+        self.info.reg.module_mut(&self.info.ns).add_type(AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
@@ -8570,7 +8558,7 @@ impl Checker {
             trait_assoc: BTreeMap::new(),
             insts: BTreeMap::new(),
         };
-        self.info.reg.root.module_mut(&self.info.ns).add_type(def);
+        self.info.reg.module_mut(&self.info.ns).add_type(def);
         if let Some(loc) = def_loc {
             self.info.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
@@ -8876,7 +8864,7 @@ impl Checker {
                 ModuleValue::Fn(path) | ModuleValue::Var(path, _) => path,
             };
             self.report_import_collision(&bare, &segs, shadowing)?;
-            self.info.reg.root.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
             let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target);
         }
@@ -8893,7 +8881,7 @@ impl Checker {
             // itself — the import names it and nothing else.
             self.report_import_collision(&bare, &segs, shadowing)?;
             self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
-            self.info.reg.root.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
             let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
             for (i, v) in def.variants.iter().enumerate() {
                 let is_builtin = self
@@ -8906,7 +8894,7 @@ impl Checker {
                 if self.info.cur_ns().ctors.contains_key(&v.name) {
                     self.check_redef_outcome("constructor", &v.name, is_builtin)?;
                 }
-                self.info.reg.root.module_mut(&self.info.ns).ctors.insert(v.name.clone(), (target.clone(), i));
+                self.info.reg.module_mut(&self.info.ns).ctors.insert(v.name.clone(), (target.clone(), i));
             }
             // Every static method, whether written for every instantiation or
             // for one: which one a call means is decided at the call
@@ -8928,12 +8916,12 @@ impl Checker {
                     self.check_redef_outcome("static method", name, is_builtin)?;
                 }
                 self.info.reg
-                    .root
+                    
                     .module_mut(&self.info.ns)
                     .static_uses
                     .insert(name.clone(), (target.clone(), name.clone()));
             }
-            self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Type(crate::check::registry::definition_symbol(&target)));
+            self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Type(target.name_symbol()));
             let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target);
         }
@@ -8943,7 +8931,7 @@ impl Checker {
         // `resolve_type_alias`'s bare-name branch follows.
         if let Some(a) = self.info.resolve_type_alias_path(&segs) {
             self.report_import_collision(&bare, &segs, shadowing)?;
-            self.info.reg.root.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
             let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &a.name);
         }
@@ -8951,7 +8939,7 @@ impl Checker {
         if let Some((abs, _)) = self.info.find_module(&segs) {
             let target_path = Path::from_segments(abs.clone());
             self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Module(typelisp_mem::symbols::ns_of(&abs)));
-            self.info.reg.root.module_mut(&self.info.ns).mod_aliases.insert(bare.clone(), abs);
+            self.info.reg.module_mut(&self.info.ns).mod_aliases.insert(bare.clone(), abs);
             let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target_path);
         }
@@ -8973,7 +8961,7 @@ impl Checker {
     pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[String]) {
         let Some(bare) = path.last() else { return };
         let what = if let Some(target) = self.info.resolve_type_path(path) {
-            typelisp_mem::symbols::Import::Type(crate::check::registry::definition_symbol(&target))
+            typelisp_mem::symbols::Import::Type(target.name_symbol())
         } else if let Some((abs, _)) = self.info.find_module(path) {
             typelisp_mem::symbols::Import::Module(typelisp_mem::symbols::ns_of(&abs))
         } else {
@@ -10765,30 +10753,24 @@ impl Checker {
     /// program writes them: bare for a root type, qualified otherwise.
     /// Sorted, so the message is the same from run to run.
     fn types_with_instance_method(&self, method: &str) -> Vec<String> {
-        fn walk(ns: &Namespace, method: &str, out: &mut Vec<String>) {
-            for def in ns.types.values() {
-                let name = if def.name.parent().is_empty() {
-                    def.name.last_segment().to_string()
-                } else {
-                    def.name.segments().join("::")
-                };
-                if def.assoc.get(method).is_some_and(|af| af.instance) {
-                    out.push(name.clone());
-                }
-                // A method an instantiation's own `impl` wrote is that
-                // instantiation's, and is named with it.
-                for i in def.insts.values() {
-                    if i.assoc.get(method).is_some_and(|af| af.instance) {
-                        out.push(ConcreteNames::instantiated_type(&name, &i.args));
-                    }
-                }
+        let mut out = Vec::new();
+        for def in self.info.reg.namespaces().flat_map(|ns| ns.types.values()) {
+            let name = if def.name.parent().is_empty() {
+                def.name.last_segment().to_string()
+            } else {
+                def.name.segments().join("::")
+            };
+            if def.assoc.get(method).is_some_and(|af| af.instance) {
+                out.push(name.clone());
             }
-            for child in ns.modules.values() {
-                walk(child, method, out);
+            // A method an instantiation's own `impl` wrote is that
+            // instantiation's, and is named with it.
+            for i in def.insts.values() {
+                if i.assoc.get(method).is_some_and(|af| af.instance) {
+                    out.push(ConcreteNames::instantiated_type(&name, &i.args));
+                }
             }
         }
-        let mut out = Vec::new();
-        walk(&self.info.reg.root, method, &mut out);
         out.sort();
         out.dedup();
         out
@@ -13431,7 +13413,7 @@ impl Checker {
         self.check_value_clash("variable", &name)?;
         self.check_redef("variable", &name, self.info.cur_ns().vars.get(&name))?;
         self.info.reg
-            .root
+            
             .module_mut(&self.info.ns)
             .vars
             .insert(name.clone(), VarInfo { ty: ty.clone(), mutable, public, builtin: false });

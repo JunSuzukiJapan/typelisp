@@ -164,9 +164,9 @@ impl Checker {
         // Registered with no fields while its own fields are read, so that a
         // field can point at the struct being defined (`(next (ptr node))`).
         let placeholder = CStructDef { name: fq.clone(), fields: Vec::new(), size: 0, align: 1, public };
-        let previous = self.info.reg.root.module_mut(&self.info.ns).c_structs.insert(name.clone(), placeholder);
+        let previous = self.info.reg.module_mut(&self.info.ns).c_structs.insert(name.clone(), placeholder);
         let result = self.c_struct_fields(heap, &name, &fq, &parts[fields_at..], &parts_locs[fields_at.min(parts_locs.len())..]);
-        let ns = self.info.reg.root.module_mut(&self.info.ns);
+        let ns = self.info.reg.module_mut(&self.info.ns);
         let (fields, size, align) = match result {
             Ok(laid_out) => laid_out,
             Err(e) => {
@@ -269,7 +269,7 @@ impl Checker {
             return self
                 .info.ns_ancestors()
                 .into_iter()
-                .find_map(|prefix| self.info.reg.root.module(prefix)?.c_structs.get(&local[0]).cloned());
+                .find_map(|prefix| self.info.reg.module(prefix)?.c_structs.get(&local[0]).cloned());
         }
         let (abs, m) = self.info.find_module(mods)?;
         let d = m.c_structs.get(&local[0])?;
@@ -284,7 +284,7 @@ impl Checker {
         let segs = fq.segments();
         let (mods, local) = segs.split_at(segs.len() - 1);
         self.info.reg
-            .root
+            
             .module(mods)
             .and_then(|m| m.c_structs.get(&local[0]))
             .cloned()

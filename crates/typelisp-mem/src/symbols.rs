@@ -930,15 +930,21 @@ impl SymTable {
     /// What `name` reads as in `ns` — [`intern_in`]'s rule, with the lock
     /// already held. `name` is already lowercase.
     fn read(&mut self, ns: NsId, name: &str) -> SymRef {
-        if let Some(s) = self.lookup(ns, name) {
-            return s;
+        match self.find(ns, name) {
+            Some(s) => s,
+            None => self.create(ns, name, NOT_WELL_KNOWN),
         }
-        if ns != NsId::KEYWORD {
-            if let Some(s) = self.std_exports.get(name) {
-                return *s;
-            }
-        }
-        self.create(ns, name, NOT_WELL_KNOWN)
+    }
+
+    /// The symbol `name` would read as in `ns`, if it exists yet.
+    fn find(&self, ns: NsId, name: &str) -> Option<SymRef> {
+        self.lookup(ns, name).or_else(|| if ns == NsId::KEYWORD { None } else { self.std_exports.get(name).copied() })
+    }
+
+    /// `parent`'s child module named `segment`, if it exists.
+    fn find_child(&self, parent: NsId, segment: &str) -> Option<NsId> {
+        let name = self.find(parent, segment)?;
+        self.nodes[parent.0 as usize].children.get(&name).copied()
     }
 
     /// `parent`'s child module named `segment`, created if new. The child is
@@ -1113,6 +1119,29 @@ pub fn import(into: NsId, sym: SymRef) {
 /// The module reached from `parent` by `segment`, creating it if new.
 pub fn child_ns(parent: NsId, segment: &str) -> NsId {
     table().child(parent, &segment.to_lowercase())
+}
+
+/// What [`intern_exact`] would return, without creating a symbol when there
+/// is none: for looking a written name up in a table keyed by symbols, where
+/// a name nothing defined must not leave a symbol behind.
+pub fn find_exact(ns: NsId, name: &str) -> Option<SymRef> {
+    table().find(ns, name)
+}
+
+/// The module `segments` names from the root, if every segment exists — the
+/// lookup [`ns_of`] makes, without creating modules.
+pub fn find_ns(segments: &[String]) -> Option<NsId> {
+    let t = table();
+    let mut ns = NsId::ROOT;
+    for s in segments {
+        ns = t.find_child(ns, &s.to_lowercase())?;
+    }
+    Some(ns)
+}
+
+/// `ns`'s child modules, by the name of each, in no particular order.
+pub fn ns_children(ns: NsId) -> Vec<(&'static str, NsId)> {
+    table().nodes[ns.0 as usize].children.iter().map(|(name, id)| (name.name(), *id)).collect()
 }
 
 /// What names mean in one session: which modules the session has, which

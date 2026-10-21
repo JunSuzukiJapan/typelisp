@@ -156,7 +156,7 @@ fn module_ns<'a>(segments: impl Iterator<Item = &'a str>) -> NsId {
 }
 
 /// The library's internal module, `std::%internal`.
-fn internal_ns() -> NsId {
+pub(crate) fn internal_ns() -> NsId {
     static NS: std::sync::OnceLock<NsId> = std::sync::OnceLock::new();
     *NS.get_or_init(|| symbols::child_ns(NsId::STD, INTERNAL_MODULE))
 }

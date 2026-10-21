@@ -351,10 +351,9 @@ fn internal_builtins() -> &'static std::collections::HashSet<String> {
     NAMES.get_or_init(|| {
         let reg = typelisp_front::check::Registry::with_builtins();
         let ns = reg
-            .root
             .module(&typelisp_front::types::internal_module_segments())
             .expect("the registry keeps its internal builtins in their own module");
-        ns.fns.iter().filter(|(_, sig)| sig.builtin).map(|(name, _)| name.clone()).collect()
+        ns.fns.iter().filter(|(_, sig)| sig.builtin).map(|(name, _)| name.to_string()).collect()
     })
 }
 
@@ -1257,7 +1256,7 @@ mod native_method_list_tests {
         for (_, type_locals) in PRIMITIVES {
             for type_local in *type_locals {
                 let def = registry
-                    .root
+                    .root()
                     .types
                     .get(*type_local)
                     .unwrap_or_else(|| panic!("`{}` is not a built-in type in the registry", type_local));

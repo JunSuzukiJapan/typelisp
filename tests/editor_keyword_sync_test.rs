@@ -34,7 +34,7 @@ use common::{repo_root};
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path as FsPath, PathBuf};
 
-use typelisp::check::registry::Namespace;
+use typelisp::check::registry::{Namespace, Registry};
 use typelisp::{load_prelude, Checker, Heap, Interp, BUILTIN_SYMBOLS, INTERNAL_MODULE, SPECIAL_FORM_HEADS};
 
 // ---------------------------------------------------------------- the truth
@@ -84,33 +84,33 @@ fn build_collected() -> Collected {
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
 
-    let root = &chk.registry().root;
+    let reg = chk.registry();
     let mut names = BTreeSet::new();
     let mut fields = BTreeSet::new();
-    collect_namespace(root, &mut names, &mut fields);
-    let internal_ns = root.module(&typelisp::internal_module_segments()).expect("the library's internal module");
+    collect_namespace(reg, reg.root(), &mut names, &mut fields);
+    let internal_ns = reg.module(&typelisp::internal_module_segments()).expect("the library's internal module");
     let internal = internal_ns
         .fns
         .keys()
         .chain(internal_ns.macros.keys())
         .chain(internal_ns.vars.keys())
-        .cloned()
+        .map(str::to_string)
         .collect();
     Collected { names, fields, internal }
 }
 
-fn collect_namespace(ns: &Namespace, out: &mut BTreeSet<String>, fields: &mut BTreeSet<String>) {
+fn collect_namespace(reg: &Registry, ns: &Namespace, out: &mut BTreeSet<String>, fields: &mut BTreeSet<String>) {
     // Everything, without filtering on `public`. That flag answers "is this
     // visible outside its defining module", which is a different question: the
     // prelude defines `unwrap`, `map`, `filter` and `car` at the root without a
     // `pub` marker, since the ancestor-chain rule already makes root visible
     // everywhere. Filtering on it silently dropped 52 of the 214 registered
     // names — including most of the catalog this test exists to guard.
-    out.extend(ns.fns.keys().cloned());
-    out.extend(ns.macros.keys().cloned());
-    out.extend(ns.vars.keys().cloned());
+    out.extend(ns.fns.keys().map(str::to_string));
+    out.extend(ns.macros.keys().map(str::to_string));
+    out.extend(ns.vars.keys().map(str::to_string));
     for (name, def) in &ns.types {
-        out.insert(name.clone());
+        out.insert(name.to_string());
         out.extend(def.assoc.keys().cloned());
         for field in &def.field_names {
             fields.insert(field.clone());
@@ -118,12 +118,12 @@ fn collect_namespace(ns: &Namespace, out: &mut BTreeSet<String>, fields: &mut BT
         }
     }
     for (name, def) in &ns.traits {
-        out.insert(name.clone());
+        out.insert(name.to_string());
         out.extend(def.methods.keys().cloned());
     }
-    for (name, child) in &ns.modules {
+    for (name, child) in reg.children(ns.ns) {
         if name != INTERNAL_MODULE {
-            collect_namespace(child, out, fields);
+            collect_namespace(reg, child, out, fields);
         }
     }
 }

@@ -142,7 +142,9 @@ pub fn describe() -> String {
     vocabulary(&mut out);
     let reg = Registry::with_builtins();
     let mut defs = Defs::default();
-    collect(&reg.root, &mut Vec::new(), &mut defs);
+    for ns in reg.namespaces() {
+        collect(ns, &mut defs);
+    }
     reprs(&mut out, &defs);
     shims(&mut out);
     types(&mut out, &defs);
@@ -225,20 +227,13 @@ struct Defs {
     fns: BTreeMap<String, (Path, FnSig)>,
 }
 
-fn collect(ns: &Namespace, at: &mut Vec<String>, defs: &mut Defs) {
+fn collect(ns: &Namespace, defs: &mut Defs) {
     for def in ns.types.values().filter(|d| d.builtin) {
         defs.types.insert(def.name.to_string(), def.clone());
     }
     for (name, sig) in ns.fns.iter().filter(|(_, s)| s.builtin) {
-        let mut segs = at.clone();
-        segs.push(name.clone());
-        let path = Path::from_segments(segs);
+        let path = Path::in_ns(ns.ns, name);
         defs.fns.insert(path.to_string(), (path, sig.clone()));
-    }
-    for (name, child) in &ns.modules {
-        at.push(name.clone());
-        collect(child, at, defs);
-        at.pop();
     }
 }
 

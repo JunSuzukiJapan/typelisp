@@ -243,7 +243,7 @@ impl Info {
 
     /// The current namespace.
     pub(super) fn cur_ns(&self) -> &Namespace {
-        self.reg.root.module(&self.ns).expect("current namespace exists")
+        self.reg.module(&self.ns).expect("current namespace exists")
     }
 
     /// If `path` starts with an empty segment (reader-encoded `::foo` absolute
@@ -272,7 +272,7 @@ impl Info {
     /// The first hit `lookup` finds walking the ancestor chain, nearest module
     /// first. `lookup` is given each module's absolute path along with it.
     pub(super) fn find_on_chain<T>(&self, mut lookup: impl FnMut(&[String], &Namespace) -> Option<T>) -> Option<T> {
-        self.ns_ancestors().find_map(|prefix| lookup(prefix, self.reg.root.module(prefix)?))
+        self.ns_ancestors().find_map(|prefix| lookup(prefix, self.reg.module(prefix)?))
     }
 
     /// Looks up the last segment of `segs` in the module the other segments
@@ -330,24 +330,24 @@ impl Info {
     pub(super) fn find_module(&self, path: &[String]) -> Option<(Vec<String>, &Namespace)> {
         let (is_abs, eff) = self.split_abs(path);
         if is_abs {
-            return self.reg.root.module(eff).map(|m| (eff.to_vec(), m));
+            return self.reg.module(eff).map(|m| (eff.to_vec(), m));
         }
 
         // 1. Child of the current namespace.
-        if let Some(m) = self.cur_ns().module(eff) {
-            let mut abs = self.ns.clone();
-            abs.extend_from_slice(eff);
+        let mut abs = self.ns.clone();
+        abs.extend_from_slice(eff);
+        if let Some(m) = self.reg.module(&abs) {
             return Some((abs, m));
         }
         // 2. Child of root.
-        if let Some(m) = self.reg.root.module(eff) {
+        if let Some(m) = self.reg.module(eff) {
             return Some((eff.to_vec(), m));
         }
         // 2b. Child of the standard library's module — a library macro's
         // expansion spells its helpers `%internal::name` wherever it lands.
         let mut in_std = STD_SEGMENTS.clone();
         in_std.extend_from_slice(eff);
-        if let Some(m) = self.reg.root.module(&in_std) {
+        if let Some(m) = self.reg.module(&in_std) {
             return Some((in_std, m));
         }
         // 3. Module alias: expand the first segment via mod_aliases.
@@ -358,11 +358,11 @@ impl Info {
                 .cur_ns()
                 .mod_aliases
                 .get(first)
-                .or_else(|| self.reg.root.mod_aliases.get(first));
+                .or_else(|| self.reg.root().mod_aliases.get(first));
             if let Some(base) = alias {
                 let mut expanded = base.clone();
                 expanded.extend_from_slice(rest);
-                if let Some(m) = self.reg.root.module(&expanded) {
+                if let Some(m) = self.reg.module(&expanded) {
                     return Some((expanded, m));
                 }
             }
@@ -378,7 +378,7 @@ impl Info {
             if !cur_file.is_empty() {
                 let mut sib = cur_file[..cur_file.len() - 1].to_vec();
                 sib.extend_from_slice(eff);
-                if let Some(m) = self.reg.root.module(&sib) {
+                if let Some(m) = self.reg.module(&sib) {
                     return Some((sib, m));
                 }
             }
@@ -391,7 +391,7 @@ impl Info {
         if let Some(p) = self.cur_ns().aliases.get(name) {
             return Some(p.clone());
         }
-        self.reg.root.aliases.get(name).cloned()
+        self.reg.root().aliases.get(name).cloned()
     }
 
     /// What a bare module-level name means — a function, a global variable
@@ -547,7 +547,7 @@ impl Info {
         if let Some(hit) = self.cur_ns().static_uses.get(name) {
             return Some(hit.clone());
         }
-        self.reg.root.static_uses.get(name).cloned()
+        self.reg.root().static_uses.get(name).cloned()
     }
 
     /// Resolve a bare (unqualified) type name: this module's own type of that
@@ -655,7 +655,7 @@ impl Info {
     pub(super) fn resolve_trait_name(&self, name: &str) -> Result<Path, Error> {
         let mut ns = self.ns.clone();
         loop {
-            if let Some(td) = self.reg.root.module(&ns).and_then(|m| m.traits.get(name)) {
+            if let Some(td) = self.reg.module(&ns).and_then(|m| m.traits.get(name)) {
                 return Ok(td.name.clone());
             }
             if ns.is_empty() {
@@ -664,7 +664,7 @@ impl Info {
             ns.pop();
         }
         // The standard library's module last, as `Self::ns_ancestors` has it.
-        if let Some(td) = self.reg.root.module(&STD_SEGMENTS).and_then(|m| m.traits.get(name)) {
+        if let Some(td) = self.reg.module(&STD_SEGMENTS).and_then(|m| m.traits.get(name)) {
             return Ok(td.name.clone());
         }
         Err(Error::TypeError(format!("impl: unknown trait `{}`", name)))
@@ -681,7 +681,7 @@ impl Info {
             return self.resolve_trait_name(p.last_segment()).ok();
         }
         self.reg
-            .root
+            
             .module(&p.parent())
             .and_then(|m| m.traits.get(p.last_segment()))
             .map(|td| td.name.clone())
