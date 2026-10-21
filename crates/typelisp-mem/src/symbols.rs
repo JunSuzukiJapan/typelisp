@@ -1162,6 +1162,10 @@ pub struct SessionNames {
     /// What `use` brought into a module, by the module and the symbol it was
     /// brought in under (that module's own).
     imports: HashMap<(NsId, SymRef), Import>,
+    /// What every module reads a name as without bringing it in: the
+    /// standard library's definitions, by name. Consulted by [`Self::read`]
+    /// after what the module brought in itself.
+    exports: HashMap<&'static str, SymRef>,
 }
 
 impl SessionNames {
@@ -1239,6 +1243,39 @@ impl SessionNames {
         };
         self.import_name(ns, local, what);
         true
+    }
+
+    /// Makes every module read `sym`'s name as `sym` ([`Self::read`]).
+    ///
+    /// Panics if another symbol of the same name is already exported: one
+    /// name read in a module is one symbol, so the library cannot offer two.
+    pub fn export(&mut self, sym: SymRef) {
+        let prev = *self.exports.entry(sym.name()).or_insert(sym);
+        assert!(prev == sym, "two definitions offered to every module as `{}`: {:?} and {:?}", sym.name(), prev, sym);
+    }
+
+    /// What the name `name`, written in `ns`, reads as: a member of the fixed
+    /// vocabulary `ns` holds under it, or what a `use` in `ns` brought in
+    /// under it; else what the standard library offers every module under it
+    /// ([`Self::export`]); else [`intern_in`]'s symbol.
+    ///
+    /// Any other symbol `ns`'s table holds under the name was made by reading
+    /// it there earlier, which is no reason for it to stand in front of the
+    /// library's.
+    pub fn read(&self, ns: NsId, name: &str) -> SymRef {
+        let key = name.to_lowercase();
+        let mut t = table();
+        if ns != NsId::KEYWORD {
+            if let Some(own) = t.lookup(ns, &key) {
+                if own.well_known() != NOT_WELL_KNOWN || self.imports.contains_key(&(ns, own)) {
+                    return own;
+                }
+            }
+            if let Some(sym) = self.exports.get(key.as_str()) {
+                return *sym;
+            }
+        }
+        t.read(ns, &key)
     }
 
     /// What `local` stands for in `ns` by a `use`, if anything.

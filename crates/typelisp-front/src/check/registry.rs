@@ -604,6 +604,11 @@ impl<T> Names<T> {
         self.map.entry(symbols::intern_exact(self.ns, name.as_ref()))
     }
 
+    /// The symbols the definitions are keyed by, in no particular order.
+    pub fn symbols(&self) -> impl Iterator<Item = SymRef> + '_ {
+        self.map.keys().copied()
+    }
+
     /// The names defined, in no particular order.
     pub fn keys(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.map.keys().map(SymRef::name)
@@ -638,6 +643,21 @@ impl<'a, T> IntoIterator for &'a Names<T> {
 }
 
 impl Namespace {
+    /// The symbols of what this module defines that a name refers to: its
+    /// functions, globals, macros, types, traits, type aliases, C structs and
+    /// bare constructor names — not what its `use`s brought in.
+    fn defined_symbols(&self) -> impl Iterator<Item = SymRef> + '_ {
+        self.fns
+            .symbols()
+            .chain(self.vars.symbols())
+            .chain(self.macros.symbols())
+            .chain(self.types.symbols())
+            .chain(self.traits.symbols())
+            .chain(self.type_aliases.symbols())
+            .chain(self.c_structs.symbols())
+            .chain(self.ctors.symbols())
+    }
+
     pub fn new(ns: NsId) -> Namespace {
         Namespace {
             ns,
@@ -754,6 +774,10 @@ pub struct Docs {
 /// The checker's symbol table: one [`Namespace`] per module the session has.
 pub struct Registry {
     modules: HashMap<NsId, Namespace>,
+    /// What [`Self::with_builtins`] defined at the root: the built-in types
+    /// and `Sexpr`'s bare constructors, which every module reads as the
+    /// root's (see [`Self::publish_names`]).
+    builtin_root: Vec<SymRef>,
     pub def_locs: DefLocs,
     pub docs: Docs,
     /// Per-`defstruct` slot default forms, keyed by the type's path and
@@ -1108,8 +1132,9 @@ impl Registry {
         let mut std_ns = Namespace::new(NsId::STD);
         std_ns.fns = std::mem::replace(&mut root.fns, Names::new(NsId::ROOT)).moved_to(NsId::STD);
         std_ns.vars = std::mem::replace(&mut root.vars, Names::new(NsId::ROOT)).moved_to(NsId::STD);
+        let builtin_root = root.defined_symbols().collect();
         let modules = [root, std_ns, internal].into_iter().map(|m| (m.ns, m)).collect();
-        Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
+        Registry { modules, builtin_root, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
     }
 
     /// The root module's definitions.
@@ -3150,10 +3175,22 @@ fn tvar(name: &str) -> Type {
 impl Registry {
     /// Writes into the session's table of what names mean (`Heap::names`)
     /// the modules, types and traits this registry defines, so the forms
-    /// read next can read a path through them. Called by the checker around
-    /// every top-level form; the table only grows, so writing what it holds
+    /// read next can read a path through them, and what the standard library
+    /// makes every module read as its own: everything `std` defines and the
+    /// built-in definitions at the root. Called by the checker around every
+    /// top-level form; the table only grows, so writing what it holds
     /// already changes nothing.
     pub fn publish_names(&self, names: &mut typelisp_mem::symbols::SessionNames) {
+        let std_ns = self.module_at(NsId::STD).expect("the registry always has the standard library's module");
+        for sym in std_ns.defined_symbols() {
+            names.export(sym);
+        }
+        // Under the standard library's symbol of the name, which is what the
+        // name reads as once these move into `std`; a name `std` defines too
+        // (`tuple`, `array`) then reads as one symbol for both.
+        for sym in &self.builtin_root {
+            names.export(symbols::intern_exact(NsId::STD, sym.name()));
+        }
         for ns in self.namespaces() {
             names.declare_module(ns.ns);
             for def in ns.types.values() {

@@ -1745,7 +1745,7 @@ fn read_value_member(heap: &mut Heap, ns: NsId, tok: &str, escaped: bool, start:
     let mut member_loc = start.clone();
     member_loc.col = member_col;
     let member_loc = member_loc.with_end(start.line, end);
-    let head = heap.intern_symbol_in(ns, head);
+    let head = Value::Symbol(heap.names().read(ns, head));
     let member = heap.intern_symbol_in(ns, member);
     Some(located_list(
         heap,
@@ -1831,7 +1831,8 @@ fn token_value(heap: &mut Heap, ns: NsId, tok: &str, escaped: bool) -> Result<Va
                 let segs: Vec<SymRef> = heap.names().read_path(ns, &parts).map_err(Error::ReadError)?;
                 return Ok(heap.intern_path(&segs));
             }
-            Ok(heap.intern_symbol_in(ns, tok))
+            let sym = heap.names().read(ns, tok);
+            Ok(Value::Symbol(sym))
         }
     }
 }
