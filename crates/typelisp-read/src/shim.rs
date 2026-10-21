@@ -64,7 +64,8 @@ pub fn read_builtin(heap: &mut Heap, source: &str) -> Value {
 pub fn read_builtin_with(heap: &mut Heap, source: &str, eval: Option<&dyn crate::reader::ReadEval>) -> Value {
     let reader = Reader::new();
     let key = heap.intern_type_key(READ_RESULT_KEY);
-    match reader.read_in_with(heap, "<input>", source, eval) {
+    let ns = heap.names().current_module();
+    match reader.read_in_with(heap, "<input>", source, ns, eval) {
         Ok(v) => heap.alloc_enum(key, 0, vec![v]),
         Err(e) => {
             let msg = heap.alloc_string(format!("read: {}", e));
@@ -98,7 +99,8 @@ pub fn read_datum_at_builtin_with(
     let start = if start < 0 { 0usize } else { start as usize };
     let key = heap.intern_type_key(READ_DATUM_RESULT_KEY);
     let pair_key = heap.intern_type_key(READ_DATUM_PAIR_KEY);
-    match reader.read_from_with(heap, source, start, preserve, eval) {
+    let ns = heap.names().current_module();
+    match reader.read_from_with(heap, source, start, preserve, ns, eval) {
         Ok((v, end)) => {
             heap.push_root(v);
             let pair = heap.alloc_struct(pair_key, vec![v, Value::Int(end as i64)]);

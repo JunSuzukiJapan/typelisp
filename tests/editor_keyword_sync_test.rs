@@ -101,11 +101,9 @@ fn build_collected() -> Collected {
 
 fn collect_namespace(reg: &Registry, ns: &Namespace, out: &mut BTreeSet<String>, fields: &mut BTreeSet<String>) {
     // Everything, without filtering on `public`. That flag answers "is this
-    // visible outside its defining module", which is a different question: the
-    // prelude defines `unwrap`, `map`, `filter` and `car` at the root without a
-    // `pub` marker, since the ancestor-chain rule already makes root visible
-    // everywhere. Filtering on it silently dropped 52 of the 214 registered
-    // names — including most of the catalog this test exists to guard.
+    // visible by its path outside its defining module", which is a different
+    // question: the standard library offers its names to every module whether
+    // or not they are marked `pub`.
     out.extend(ns.fns.keys().map(str::to_string));
     out.extend(ns.macros.keys().map(str::to_string));
     out.extend(ns.vars.keys().map(str::to_string));

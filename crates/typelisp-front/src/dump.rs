@@ -494,7 +494,7 @@ pub fn apply_entries(
                 reg.module_mut(&e.ns).vars.insert(e.name, v);
             }
             cat::ALIAS => {
-                let v: Vec<String> = bincode::deserialize(&e.payload).map_err(|err| read_failed("use alias", err))?;
+                let v: Path = bincode::deserialize(&e.payload).map_err(|err| read_failed("use alias", err))?;
                 reg.module_mut(&e.ns).aliases.insert(e.name, v);
             }
             cat::MOD_ALIAS => {

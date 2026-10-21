@@ -616,6 +616,12 @@ impl Loader {
         }
         let display = module_segs.join("::");
         if let Some(pos) = self.loading.iter().position(|m| *m == display) {
+            // The file being read names its own definitions — an enclosing
+            // module's, from a module nested in it. There is nothing to load:
+            // the `use` resolves when it is checked, after what precedes it.
+            if pos + 1 == self.loading.len() {
+                return Ok(true);
+            }
             let mut chain: Vec<&str> = self.loading[pos..].iter().map(String::as_str).collect();
             chain.push(&display);
             return Err(Error::TypeError(format!(

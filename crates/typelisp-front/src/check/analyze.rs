@@ -608,7 +608,7 @@ fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Resu
     let bindings = forms::list_from_vec_locs(&mut s, &[(binding, None)])?;
     s.push_root(bindings);
     let let_sym = s.intern_symbol("let");
-    let push = s.intern_symbol("push");
+    let push = s.intern_symbol_in(typelisp_mem::NsId::STD, "push");
     let mut items: Vec<(Value, Option<Loc>)> = vec![(let_sym, None), (bindings, None)];
     for &e in elems {
         let ef = literal_element_form(&mut s, e, data)?;
@@ -844,10 +844,23 @@ pub(super) fn module_entry_in(m: &Namespace, name: &str) -> Option<ModuleEntry> 
     }
 }
 
-/// A name as written at a use site: bare, or a `::` path.
+/// What module `m` holds under the symbol `sym`, if anything — the
+/// [`Info::find_named`] counterpart of [`module_entry_in`].
+pub(super) fn module_entry_of(m: &Namespace, sym: typelisp_mem::SymRef) -> Option<ModuleEntry> {
+    match m.macros.get_sym(sym) {
+        Some(def) => Some(ModuleEntry::Macro { public: def.public, shape: MacroShape::of(def) }),
+        None => match m.fns.get_sym(sym) {
+            Some(sig) => Some(ModuleEntry::Value(ModuleValueKind::Fn { public: sig.public })),
+            None => m.vars.get_sym(sym).map(|vi| ModuleEntry::Value(ModuleValueKind::Var(vi.clone()))),
+        },
+    }
+}
+
+/// A name as written at a use site: bare, as the symbol it was read as, or a
+/// `::` path.
 #[derive(Clone, Copy)]
 pub(super) enum Written<'a> {
-    Bare(&'a str),
+    Bare(typelisp_mem::SymRef),
     Path(&'a [String]),
 }
 
@@ -1602,8 +1615,11 @@ impl Checker {
     pub fn check_form_at(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, v: Value, loc_hint: Option<Loc>) -> Result<TopLevelForm, Error> {
         // What the registry defines is what the session's names mean, before
         // this form (a registry built without this heap, or a dump) and after
-        // it (what it defined), for the forms read next.
+        // it (what it defined), for the forms read next. The form is run in
+        // the module it is checked in, which is where a `read` it makes at
+        // run time reads.
         self.publish_names(heap);
+        heap.names().enter_module(self.current_module());
         let r = self.check_one_form(heap, interp, v, loc_hint);
         self.publish_names(heap);
         r
@@ -2353,17 +2369,18 @@ impl Checker {
         receiver: &mut dyn FnMut() -> Option<Type>,
     ) -> Option<Resolved> {
         match written {
-            Written::Bare(name) => {
+            Written::Bare(sym) => {
+                let name = sym.name();
                 if env.get(name).is_some() {
                     return Some(Resolved::Local);
                 }
-                if let Some((path, shape)) = self.info.resolve_macro(name) {
+                if let Some((path, shape)) = self.info.resolve_macro(sym) {
                     return Some(Resolved::Macro(path, shape));
                 }
-                if let Some((adt, idx)) = self.info.resolve_ctor(name) {
+                if let Some((adt, idx)) = self.info.resolve_ctor(sym) {
                     return Some(Resolved::Ctor(adt, idx));
                 }
-                if let Some((type_fq, member)) = self.info.resolve_static_use(name) {
+                if let Some((type_fq, member)) = self.info.resolve_static_use(sym) {
                     return Some(Resolved::Member(type_fq, member));
                 }
                 if let Some(ty) = receiver() {
@@ -2371,7 +2388,7 @@ impl Checker {
                         return Some(Resolved::Method(target));
                     }
                 }
-                self.info.resolve_module_value(name).map(Resolved::Value)
+                self.info.resolve_module_value(sym).map(Resolved::Value)
             }
             Written::Path(segs) => {
                 match self.info.resolve_module_entry_path(segs) {
@@ -2442,7 +2459,7 @@ impl Checker {
                     return Ok(None);
                 }
                 let head = heap.symbol_spelling(*id).to_string();
-                match self.info.resolve_macro(&head) {
+                match self.info.resolve_macro(*id) {
                     Some((p, shape)) => (p, shape, head),
                     None => return Ok(None),
                 }
@@ -2559,7 +2576,7 @@ impl Checker {
                 elem_ty
             ))
         })?;
-        let (type_name, variant) = self.info.resolve_ctor(ctor).expect("sexpr constructors are always registered");
+        let (type_name, variant) = self.info.sexpr_variant(ctor);
         let field_tys = self.info.variant_field_tys(&type_name, variant, &[]);
         let node = Node::Construct { owner: type_name, targs: Vec::new(), variant, mutable: false, field_tys, args: vec![e] };
         Ok(Checked::of(node, sexpr_ty()))
@@ -2823,21 +2840,22 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        segs: &[String],
+        recv_sym: typelisp_mem::SymRef,
+        method: &str,
     ) -> Option<Result<Checked, Error>> {
-        let [recv_name, method] = segs else { return None };
+        let recv_name = recv_sym.name();
         // The receiver is held across the whole of `check_assoc_call`, which
         // allocates plenty before `assoc_form` finally pushes it — so it has to
         // stay rooted. `var_form`/`global_form` root what they return for
         // exactly this reason; see `var_form`'s doc comment.
         let recv = if let Some(t) = env.get(recv_name) {
             let ty = t.clone();
-            match Ok(Checked::of(Node::Local { name: recv_name.as_str().into() }, ty)) {
+            match Ok(Checked::of(Node::Local { name: recv_name.into() }, ty)) {
                 Ok(c) => c,
                 Err(e) => return Some(Err(e)),
             }
         } else {
-            let (path, vi) = self.info.resolve_global(recv_name)?;
+            let (path, vi) = self.info.resolve_global(recv_sym)?;
             let ty = vi.ty;
             match Ok(Checked::of(Node::Global { path, ty: ty.clone() }, ty)) {
                 Ok(c) => c,
@@ -2851,7 +2869,7 @@ impl Checker {
         let Type::Named(type_fq, targs) = &recv.ty else { return None };
         let method = &match tuple_element_field(&recv.ty, method) {
             Ok(Some(field)) => field,
-            Ok(None) => method.clone(),
+            Ok(None) => method.to_string(),
             Err(e) => return Some(Err(e)),
         };
         let af = self.info.reg.type_def(type_fq)?.method_at(method, targs)?;
@@ -7374,8 +7392,8 @@ impl Checker {
         let mut imports = std::collections::HashMap::new();
         let own = self.info.reg.module(&self.info.ns);
         if let Some(m) = own {
-            for (bare, segs) in &m.aliases {
-                if let Some(target) = self.info.resolve_type_path(segs) {
+            for (bare, target) in &m.aliases {
+                if self.info.reg.type_def(target).is_some() {
                     imports.insert(bare.to_string(), target.to_string());
                 }
             }
@@ -8756,26 +8774,32 @@ impl Checker {
     /// `shadowing-import` exists to make deliberate — it cannot actually win
     /// against a definition (nothing un-defines one), but it says so, and the
     /// import that merely replaces an earlier import does win.
-    fn report_import_collision(&self, bare: &str, target: &[String], shadowing: bool) -> Result<(), Error> {
+    ///
+    /// The import is of the definition `def`, or else of the module `module`
+    /// (its segments from the root).
+    fn report_import_collision(&self, bare: &str, def: Option<Path>, module: Option<&[String]>, shadowing: bool) -> Result<(), Error> {
         if shadowing {
             return Ok(());
         }
         let ns = self.info.cur_ns();
-        // A path that names this namespace's own definition of `bare` —
-        // `(use tree)` after `(defenum tree ...)`, the way to bring a type's
+        // An import of this namespace's own definition of `bare` — `(use
+        // tree)` after `(defenum tree ...)`, the way to bring a type's
         // constructors into bare scope — collides with nothing: the alias and
         // the definition are the same thing, and the constructors it brings in
-        // are what the form is for.
-        let own = target.len() == 1 && target[0] == bare
-            || (target.len() == self.info.ns.len() + 1
-                && target[..self.info.ns.len()] == self.info.ns[..]
-                && target[self.info.ns.len()] == bare);
+        // are what the form is for. The same for a module of that name here.
+        let own = def.is_some_and(|p| p.ns() == ns.ns && p.last_segment() == bare)
+            || module.is_some_and(|abs| {
+                abs.len() == 1 && abs[0] == bare
+                    || (abs.len() == self.info.ns.len() + 1
+                        && abs[..self.info.ns.len()] == self.info.ns[..]
+                        && abs[self.info.ns.len()] == bare)
+            });
         if own {
             return Ok(());
         }
-        // The same path imported again binds what is already bound.
-        if ns.aliases.get(bare).map(|a| a.as_slice()) == Some(target)
-            || ns.mod_aliases.get(bare).map(|a| a.as_slice()) == Some(target)
+        // The same definition imported again binds what is already bound.
+        if def.is_some() && ns.aliases.get(bare).copied() == def
+            || module.is_some() && ns.mod_aliases.get(bare).map(|a| a.as_slice()) == module
         {
             return Ok(());
         }
@@ -8902,8 +8926,9 @@ impl Checker {
             let target = match value {
                 ModuleValue::Fn(path) | ModuleValue::Var(path, _) => path,
             };
-            self.report_import_collision(&bare, &segs, shadowing)?;
-            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            self.report_import_collision(&bare, Some(target), None, shadowing)?;
+            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), target);
+            self.register_use_for_reading(heap, self.info.cur_ns().ns, &segs);
             let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target);
         }
@@ -8918,9 +8943,9 @@ impl Checker {
         if let Some(target) = self.info.resolve_type_path(&segs) {
             // Unlike `rect::new`, a `use` path's *last* segment is the type
             // itself — the import names it and nothing else.
-            self.report_import_collision(&bare, &segs, shadowing)?;
+            self.report_import_collision(&bare, Some(target), None, shadowing)?;
             self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
-            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), target);
             let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
             for (i, v) in def.variants.iter().enumerate() {
                 let is_builtin = self
@@ -8960,7 +8985,7 @@ impl Checker {
                     .static_uses
                     .insert(name.clone(), (target.clone(), name.clone()));
             }
-            self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Type(target.name_symbol()));
+            self.register_use_for_reading(heap, self.info.cur_ns().ns, &segs);
             let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target);
         }
@@ -8969,15 +8994,16 @@ impl Checker {
         // names keeps its own name). The `aliases` entry is what
         // `resolve_type_alias`'s bare-name branch follows.
         if let Some(a) = self.info.resolve_type_alias_path(&segs) {
-            self.report_import_collision(&bare, &segs, shadowing)?;
-            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), segs);
+            self.report_import_collision(&bare, Some(a.name), None, shadowing)?;
+            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), a.name);
+            self.register_use_for_reading(heap, self.info.cur_ns().ns, &segs);
             let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &a.name);
         }
         // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
         if let Some((abs, _)) = self.info.find_module(&segs) {
             let target_path = Path::from_segments(abs.clone());
-            self.import_for_reading(heap, &bare, typelisp_mem::symbols::Import::Module(typelisp_mem::symbols::ns_of(&abs)));
+            self.register_use_for_reading(heap, self.info.cur_ns().ns, &segs);
             self.info.reg.module_mut(&self.info.ns).mod_aliases.insert(bare.clone(), abs);
             let alias = self.info.fq(&bare);
             return forms::use_form(heap, &alias, &target_path);
@@ -8993,28 +9019,35 @@ impl Checker {
 
     /// What a `(use PATH)` written in the module `ns` brings in, registered
     /// in `heap`'s table of names for the forms read after it — the reader's
-    /// `use`, once the file behind `path` (if any) is loaded. Resolved as
-    /// [`Self::check_use`] resolves it, a type before a module; a definition
-    /// brings in no path to read through, and a path that resolves to
-    /// nothing is left for `check_use` to report.
+    /// `use`, once the file behind `path` (if any) is loaded — so they read
+    /// each name it brings in as `ns`'s own symbol, the one the import is
+    /// recorded under, rather than as whatever the standard library offers
+    /// under the same name. Resolved as [`Self::check_use`] resolves it: a
+    /// function or a global, a type (with its constructors and public static
+    /// methods), a `deftype` alias, a module. A path that resolves to nothing
+    /// is left for `check_use` to report.
     pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[String]) {
+        use typelisp_mem::symbols::Import;
         let Some(bare) = path.last() else { return };
-        let what = if let Some(target) = self.info.resolve_type_path(path) {
-            typelisp_mem::symbols::Import::Type(target.name_symbol())
+        let mut names = Vec::new();
+        if let Some(value) = self.info.resolve_module_value_path(path) {
+            let (ModuleValue::Fn(target) | ModuleValue::Var(target, _)) = value;
+            names.push((bare.clone(), Import::Item(target.name_symbol())));
+        } else if let Some(target) = self.info.resolve_type_path(path) {
+            let ty = target.name_symbol();
+            names.push((bare.clone(), Import::Type(ty)));
+            let def = self.info.reg.type_def(&target).expect("resolved type exists");
+            names.extend(def.variants.iter().map(|v| (v.name.clone(), Import::Member(ty))));
+            let statics = def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter());
+            names.extend(statics.filter(|(_, af)| !af.instance && af.sig.public).map(|(name, _)| (name.clone(), Import::Member(ty))));
+        } else if let Some(a) = self.info.resolve_type_alias_path(path) {
+            names.push((bare.clone(), Import::Item(a.name.name_symbol())));
         } else if let Some((abs, _)) = self.info.find_module(path) {
-            typelisp_mem::symbols::Import::Module(typelisp_mem::symbols::ns_of(&abs))
-        } else {
-            return;
-        };
-        heap.names().import_name(ns, typelisp_mem::symbols::intern_in(ns, bare), what);
-    }
-
-    /// Tells the symbol table what a `use` brought in under `bare`, so the
-    /// forms read after it can read a path through it (`point::origin-x`
-    /// after `(use geo::point)`). Until the reader handles `use` itself.
-    fn import_for_reading(&self, heap: &Heap, bare: &str, what: typelisp_mem::symbols::Import) {
-        let here = typelisp_mem::symbols::ns_of(&self.info.ns);
-        heap.names().import_name(here, typelisp_mem::symbols::intern_in(here, bare), what);
+            names.push((bare.clone(), Import::Module(typelisp_mem::symbols::ns_of(&abs))));
+        }
+        for (name, what) in names {
+            heap.names().import_name(ns, typelisp_mem::symbols::intern_in(ns, &name), what);
+        }
     }
 
     // ---- expressions ------------------------------------------------------
@@ -9453,7 +9486,7 @@ impl Checker {
                         Some(Type::Fn(params, _, _)) => params.first().cloned(),
                         _ => None,
                     };
-                    match self.resolve_name(env, Written::Bare(name), &mut receiver) {
+                    match self.resolve_name(env, Written::Bare(id), &mut receiver) {
                         Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
                             Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty)
                         }
@@ -9668,8 +9701,7 @@ impl Checker {
                 }
                 if is_sexpr_expectation(e) {
                     if let Some(ctor) = sexpr_ctor_for(&typed.ty) {
-                        let (type_name, variant) =
-                            self.info.resolve_ctor(ctor).expect("sexpr constructors are always registered");
+                        let (type_name, variant) = self.info.sexpr_variant(ctor);
                         let field_tys = self.info.variant_field_tys(&type_name, variant, &[]);
                         let node =
                             Node::Construct { owner: type_name, targs: Vec::new(), variant, mutable: false, field_tys, args: vec![typed] };
@@ -9722,18 +9754,19 @@ impl Checker {
         };
         // `p::x`, read as `(%value-member p x)`: the member `x` of `p`'s type.
         if head_sym.is(wk::VALUE_MEMBER) {
-            let segs = value_member_segments(heap, v)?;
-            let typed = match self.try_field_access(heap, interp, env, &segs) {
+            let (recv, member) = value_member_segments(heap, v)?;
+            let typed = match self.try_field_access(heap, interp, env, recv, member.name()) {
                 Some(r) => r?,
-                None if env.get(&segs[0]).is_none() && self.info.resolve_global(&segs[0]).is_none() => {
+                None if env.get(recv.name()).is_none() && self.info.resolve_global(recv).is_none() => {
                     return Err(Error::TypeError(format!(
-                        "unresolved path: {} (`{}` is not a variable, and no module or type `{}` is visible here)",
-                        segs.join("::"),
-                        segs[0],
-                        segs[0]
+                        "unresolved path: {}::{} (`{}` is not a variable, and no module or type `{}` is visible here)",
+                        recv.name(),
+                        member.name(),
+                        recv.name(),
+                        recv.name()
                     )))
                 }
-                None => return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::")))),
+                None => return Err(Error::TypeError(format!("unresolved path: {}::{}", recv.name(), member.name()))),
             };
             return self.reconcile_expected(env, typed, expected);
         }
@@ -9848,7 +9881,7 @@ impl Checker {
         // name to resolve, so it is tried before the resolution below; a local
         // binding of the same name still wins, as it does over every name.
         if env.get(&head).is_none() {
-            if let Some(result) = self.check_call_sugar(heap, interp, env, &head, args, arg_locs, expected) {
+            if let Some(result) = self.check_call_sugar(heap, interp, env, head_sym, args, arg_locs, expected) {
                 return result;
             }
         }
@@ -9869,7 +9902,7 @@ impl Checker {
                 peeked = Some(c);
                 Some(ty)
             };
-            self.resolve_name(env, Written::Bare(&head), &mut receiver)
+            self.resolve_name(env, Written::Bare(head_sym), &mut receiver)
         };
         match resolved {
             // A local variable holding a function value is applied directly.
@@ -9935,11 +9968,12 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        head: &str,
+        head_sym: typelisp_mem::SymRef,
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Option<Result<Checked, Error>> {
+        let head = head_sym.name();
         Some(if args.len() <= 1
             && matches!(
                 head,
@@ -9953,7 +9987,7 @@ impl Checker {
             self.check_variadic_cmp(heap, interp, env, head, args)
         } else if head == "append" && args.len() > 2 {
             self.check_variadic_append(heap, interp, env, args, expected)
-        } else if head == "concatenate" && self.info.resolve_fn(head).is_none() {
+        } else if head == "concatenate" && self.info.resolve_fn(head_sym).is_none() {
             self.check_concatenate(heap, interp, env, args, expected)
         } else if head == "aref" && !args.is_empty() {
             self.check_aref(heap, interp, env, args[0], &args[1..], None, expected)
@@ -11826,14 +11860,14 @@ impl Checker {
             }
             Ok(CompileTarget::Method(type_fq, method))
         };
-        let segs = match written_name {
+        let (segs, written) = match written_name {
             WrittenName::Instantiated(ty, member) => {
                 let (type_fq, method) = self.instantiated_member(ty, member, who)?;
                 return method_target(type_fq, method);
             }
-            WrittenName::Segments(segs) => segs,
+            WrittenName::Bare(sym) => (vec![sym.name().to_string()], Written::Bare(*sym)),
+            WrittenName::Segments(segs) => (segs.clone(), Written::Path(segs)),
         };
-        let written = if segs.len() == 1 { Written::Bare(&segs[0]) } else { Written::Path(segs) };
         match self.resolve_name(&Env::new(), written, &mut || None) {
             Some(Resolved::Value(ModuleValue::Fn(path))) | Some(Resolved::Macro(path, _)) => fn_target(path),
             Some(Resolved::Member(type_fq, member)) => {
@@ -12023,14 +12057,14 @@ impl Checker {
         let name = written_name.display();
         // A function, a global, a macro or a type's member: the one resolution
         // rule (`Self::resolve_name`), with no receiver.
-        let segs = match written_name {
+        let (segs, written) = match written_name {
             WrittenName::Instantiated(ty, member) => {
                 let (type_fq, method) = self.instantiated_member(ty, member, who)?;
                 return Ok(DefRef::Method(type_fq, method));
             }
-            WrittenName::Segments(segs) => segs,
+            WrittenName::Bare(sym) => (vec![sym.name().to_string()], Written::Bare(*sym)),
+            WrittenName::Segments(segs) => (segs.clone(), Written::Path(segs)),
         };
-        let written = if segs.len() == 1 { Written::Bare(&segs[0]) } else { Written::Path(segs) };
         match self.resolve_name(&Env::new(), written, &mut || None) {
             Some(Resolved::Value(ModuleValue::Var(path, _))) => return Ok(DefRef::Var(path)),
             Some(Resolved::Value(ModuleValue::Fn(path))) => return Ok(DefRef::Fn(path)),
@@ -12274,7 +12308,7 @@ impl Checker {
                         if heap.cdr(car_cdr)?.is_empty() {
                             let spliced = self.check(heap, interp, env, x, Some(&sexpr_ty))?;
                             let rest = self.check_qq_template(heap, interp, env, cdr)?;
-                            let append_fq = self.info.resolve_fn("sexpr-append").ok_or_else(|| {
+                            let append_fq = self.info.offered_fn("sexpr-append").ok_or_else(|| {
                                 Error::TypeError(
                                     "unquote-splicing (,@) requires the prelude's `sexpr-append` to be loaded"
                                         .into(),
@@ -12435,8 +12469,8 @@ impl Checker {
         }
         let value_loc = nth_loc(arg_locs, 1);
         if is_value_member(heap, args[0]) {
-            let segs = value_member_segments(heap, args[0])?;
-            return self.check_field_set(heap, interp, env, &segs, args[1], value_loc);
+            let (recv, field) = value_member_segments(heap, args[0])?;
+            return self.check_field_set(heap, interp, env, recv, field.name(), args[1], value_loc);
         }
         if let Value::Path(pid) = args[0] {
             let segs: Vec<String> = heap
@@ -12449,8 +12483,8 @@ impl Checker {
         if let Value::Cons(_) = args[0] {
             return self.check_setf_call_place(heap, interp, env, args[0], args[1]);
         }
-        let name = match args[0] {
-            Value::Symbol(id) => super::verify::bound_name(id, "setf")?,
+        let (name_sym, name) = match args[0] {
+            Value::Symbol(id) => (id, super::verify::bound_name(id, "setf")?),
             _ => return Err(Error::TypeError(
                 "setf: target must be a variable, `var::field`, or a `(get recv key...)` call form".into(),
             )),
@@ -12471,7 +12505,7 @@ impl Checker {
             let value = self.check_at(heap, interp, env, args[1], Some(&ty), value_loc)?;
             return Ok(Checked::of(Node::Set { name: name.into(), value: Box::new(value) }, ty));
         }
-        if let Some((path, vi)) = self.info.resolve_global(&name) {
+        if let Some((path, vi)) = self.info.resolve_global(name_sym) {
             let value = self.check_at(heap, interp, env, args[1], Some(&vi.ty), value_loc)?;
             let node = Node::SetGlobal { path, ty: vi.ty.clone(), value: Box::new(value) };
             let what = (!vi.mutable).then(|| Disagreement::Unassignable(Unassignable::Constant { name }));
@@ -12493,16 +12527,15 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
-        segs: &[String],
+        recv_sym: typelisp_mem::SymRef,
+        field: &str,
         value: Value,
         value_loc: Option<Loc>,
     ) -> Result<Checked, Error> {
-        let [recv_name, field] = segs else {
-            return Err(Error::TypeError(format!("setf: unresolved path: {}", segs.join("::"))));
-        };
+        let recv_name = recv_sym.name();
         let recv = if let Some(ty) = env.get(recv_name).cloned() {
-            Checked::of(Node::Local { name: recv_name.as_str().into() }, ty)
-        } else if let Some((path, vi)) = self.info.resolve_global(recv_name) {
+            Checked::of(Node::Local { name: recv_name.into() }, ty)
+        } else if let Some((path, vi)) = self.info.resolve_global(recv_sym) {
             Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty)
         } else {
             return Err(Error::TypeError(format!("setf: unbound variable: {}", recv_name)));
@@ -12515,7 +12548,7 @@ impl Checker {
         let Type::Named(type_fq, targs) = &recv.ty else {
             return Err(Error::TypeError(format!("setf: `{}` has no field `{}`", recv_name, field)));
         };
-        let field = tuple_element_field(&recv.ty, field)?.unwrap_or_else(|| field.clone());
+        let field = tuple_element_field(&recv.ty, field)?.unwrap_or_else(|| field.to_string());
         let setter = format!("set-{}", field);
         let is_field_setter = self
             .info.reg
@@ -13038,10 +13071,10 @@ impl Checker {
         let idx = heap.intern_symbol(&self.gensym_place());
         let empty = self.the_form(heap, "vector", &Type::Int, "new")?;
         let empty = forms::rooted(heap, empty);
-        let push = heap.intern_symbol("push");
+        let push = heap.intern_symbol_in(typelisp_mem::NsId::STD, "push");
         let progn = heap.intern_symbol("progn");
-        let getter = heap.intern_symbol("get");
-        let setter = heap.intern_symbol("set");
+        let getter = heap.intern_symbol_in(typelisp_mem::NsId::STD, "get");
+        let setter = heap.intern_symbol_in(typelisp_mem::NsId::STD, "set");
         // Rooted as each lands: these are freshly built syntax lists held
         // only in a `Vec<Value>`, and every later iteration allocates more.
         let mut body: Vec<(Value, Option<Loc>)> = vec![(progn, None)];
@@ -13114,8 +13147,8 @@ impl Checker {
     /// a b) c)` for strings, `(append (iter (append a b)) c)` for sequences.
     /// `args` holds at least two operands.
     fn append_fold(&self, heap: &mut Heap, args: &[Value], strings: bool) -> Result<Value, Error> {
-        let append = heap.intern_symbol("append");
-        let iter = heap.intern_symbol("iter");
+        let append = heap.intern_symbol_in(typelisp_mem::NsId::STD, "append");
+        let iter = heap.intern_symbol_in(typelisp_mem::NsId::STD, "iter");
         let mut acc = args[0];
         for (i, next) in args[1..].iter().enumerate() {
             if i > 0 && !strings {
@@ -13160,7 +13193,7 @@ impl Checker {
             ("string", 0) => heap.alloc_string(String::new()),
             ("string", 1) => {
                 let the = heap.intern_symbol("the");
-                let string = heap.intern_symbol("string");
+                let string = heap.intern_symbol_in(typelisp_mem::NsId::STD, "string");
                 forms::list_from_vec_locs(heap, &[(the, None), (string, None), (seqs[0], None)])?
             }
             ("string", _) => self.append_fold(heap, seqs, true)?,
@@ -13171,7 +13204,7 @@ impl Checker {
                 )))
             }
             ("vector", 1) => {
-                let copy = heap.intern_symbol("copy-seq");
+                let copy = heap.intern_symbol_in(typelisp_mem::NsId::STD, "copy-seq");
                 forms::list_from_vec_locs(heap, &[(copy, None), (seqs[0], None)])?
             }
             ("vector", _) => self.append_fold(heap, seqs, false)?,
@@ -13310,7 +13343,7 @@ impl Checker {
             // every type that has a binary `gcd`, so this expands rather than
             // passing through the way `+`/`max` do.
             "gcd" | "lcm" => {
-                let abs_sym = heap.intern_symbol("abs");
+                let abs_sym = heap.intern_symbol_in(typelisp_mem::NsId::STD, "abs");
                 let expansion = forms::list_from_vec_locs(heap, &[(abs_sym, None), (x, None)])?;
                 heap.push_root(expansion);
                 let result = self.check(heap, interp, env, expansion, expected);
@@ -13342,7 +13375,7 @@ impl Checker {
         arg_locs: &[Option<Loc>],
     ) -> Result<Checked, Error> {
         let fq = self
-            .info.resolve_fn(name)
+            .info.offered_fn(name)
             .ok_or_else(|| Error::TypeError(format!("{}: the prelude's `{}` is not loaded", name, name)))?;
         self.check_call(heap, interp, env, &fq, args, arg_locs)
     }
@@ -13364,10 +13397,10 @@ impl Checker {
         args: &[Value],
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
-        let log_sym = heap.intern_symbol("log");
+        let log_sym = heap.intern_symbol_in(typelisp_mem::NsId::STD, "log");
         let log_number = forms::list_from_vec_locs(heap, &[(log_sym, None), (args[0], None)])?;
         let log_base = forms::list_from_vec_locs(heap, &[(log_sym, None), (args[1], None)])?;
-        let div_sym = heap.intern_symbol("/");
+        let div_sym = heap.intern_symbol_in(typelisp_mem::NsId::STD, "/");
         let expansion = forms::list_from_vec_locs(heap, &[(div_sym, None), (log_number, None), (log_base, None)])?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, expected);
@@ -14255,7 +14288,9 @@ impl Checker {
             let path = Path::from_segments(site.name.split("::").map(str::to_string).collect());
             Value::Path(crate::types::intern_path_id(heap, &path))
         } else {
-            heap.intern_symbol(&site.name)
+            // Read as the control string's module reads it.
+            let sym = heap.names().read(self.info.cur_ns().ns, &site.name);
+            Value::Symbol(sym)
         };
         let arg = heap.intern_symbol(ARG);
         let call = forms::list_from_vec_locs(
@@ -14403,13 +14438,13 @@ impl Checker {
         // `(format false control args…)`, as source: the same special form,
         // one destination over.
         let mut inner: Vec<(Value, Option<Loc>)> =
-            vec![(heap.intern_symbol("format"), None), (Value::Bool(false), None)];
+            vec![(heap.intern_symbol_in(typelisp_mem::NsId::STD, "format"), None), (Value::Bool(false), None)];
         for (i, &a) in args[1..].iter().enumerate() {
             inner.push((a, nth_loc(arg_locs, 1 + i)));
         }
         let inner = forms::list_from_vec_locs(heap, &inner)?;
         heap.push_root(inner);
-        let write_string = heap.intern_symbol("write-string");
+        let write_string = heap.intern_symbol_in(typelisp_mem::NsId::STD, "write-string");
         let form =
             forms::list_from_vec_locs(heap, &[(write_string, None), (args[0], nth_loc(arg_locs, 0)), (inner, None)]);
         let result = form.and_then(|form| {
@@ -14450,7 +14485,7 @@ impl Checker {
             text.push_str("~%");
         }
         let mut items: Vec<(Value, Option<Loc>)> =
-            vec![(heap.intern_symbol("format"), None), (heap.intern_symbol("*error-output*"), None)];
+            vec![(heap.intern_symbol_in(typelisp_mem::NsId::STD, "format"), None), (heap.intern_symbol_in(typelisp_mem::NsId::STD, "*error-output*"), None)];
         let mut s = RootScope::new(heap);
         let control = s.alloc_string(text);
         s.push_root(control);
@@ -16043,7 +16078,7 @@ impl Checker {
         }
         let form = {
             let mut s = RootScope::new(heap);
-            let equals = s.intern_symbol("equals");
+            let equals = s.intern_symbol_in(typelisp_mem::NsId::STD, "equals");
             let scrut = s.intern_symbol(MATCH_SCRUT);
             core::list(&mut s, &[equals, scrut, expr])?
         };
@@ -16114,7 +16149,7 @@ impl Checker {
                 let home = typelisp_mem::symbols::ns_path(id.home()).join("::");
                 let expr = {
                     let mut s = RootScope::new(heap);
-                    let f = s.intern_symbol("intern");
+                    let f = s.intern_symbol_in(typelisp_mem::NsId::STD, "intern");
                     let name = s.alloc_string(id.name().to_string());
                     s.push_root(name);
                     let home = s.alloc_string(home);
@@ -16321,7 +16356,7 @@ impl Checker {
                         }
                     }
                 }
-                if let Some((adt, idx)) = self.info.resolve_ctor(name) {
+                if let Some((adt, idx)) = self.info.resolve_ctor(id) {
                     if adt != Path::root("sexpr") {
                         let def = self.info.reg.type_def(&adt).expect("resolved ctor's type is registered");
                         no_generics(&adt, def)?;
@@ -17286,15 +17321,16 @@ fn unevaluated_name(heap: &Heap, v: Value, who: &str, msg: &str) -> Result<Writt
     match v {
         // `a::b` with `a` neither a module nor a type: no definition's name.
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::VALUE_MEMBER)) => {
-            let segs = value_member_segments(heap, v)?;
+            let (recv, member) = value_member_segments(heap, v)?;
             Err(Error::TypeError(format!(
-                "{}: `{}` names neither a type's method nor a function (`{}` is no module or type visible here)",
+                "{}: `{}::{}` names neither a type's method nor a function (`{}` is no module or type visible here)",
                 who,
-                segs.join("::"),
-                segs[0]
+                recv.name(),
+                member.name(),
+                recv.name()
             )))
         }
-        Value::Symbol(id) => Ok(WrittenName::Segments(vec![heap.symbol_spelling(id).to_string()])),
+        Value::Symbol(id) => Ok(WrittenName::Bare(id)),
         Value::Path(pid) => Ok(WrittenName::Segments(
             heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
         )),
@@ -17315,6 +17351,9 @@ fn unevaluated_name(heap: &Heap, v: Value, who: &str, msg: &str) -> Result<Writt
 /// `trace`, `documentation`, ...): a symbol or `::` path, as its segments,
 /// or `Name<Args>::member`, a member of one instantiation.
 enum WrittenName {
+    /// A symbol, as read.
+    Bare(typelisp_mem::SymRef),
+    /// A `::` path, by its segments.
     Segments(Vec<String>),
     Instantiated(Type, String),
 }
@@ -17323,6 +17362,7 @@ impl WrittenName {
     /// How the name reads in a message.
     fn display(&self) -> String {
         match self {
+            WrittenName::Bare(sym) => sym.name().to_string(),
             WrittenName::Segments(segs) => segs.join("::"),
             WrittenName::Instantiated(ty, member) => format!("{}::{}", ty, member),
         }
@@ -17349,12 +17389,10 @@ fn is_value_member(heap: &Heap, v: Value) -> bool {
     matches!(v, Value::Cons(_)) && matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::VALUE_MEMBER))
 }
 
-/// The two names of `(%value-member p x)`: `[p, x]`.
-fn value_member_segments(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
+/// The two names of `(%value-member p x)`: `p` and `x`, as read.
+fn value_member_segments(heap: &Heap, v: Value) -> Result<(typelisp_mem::SymRef, typelisp_mem::SymRef), Error> {
     match heap.list_to_vec(v)?.as_slice() {
-        [_, Value::Symbol(recv), Value::Symbol(member)] => {
-            Ok(vec![heap.symbol_spelling(*recv).to_string(), heap.symbol_spelling(*member).to_string()])
-        }
+        [_, Value::Symbol(recv), Value::Symbol(member)] => Ok((*recv, *member)),
         _ => Err(Error::TypeError("a member of a value is written `value::member`".into())),
     }
 }

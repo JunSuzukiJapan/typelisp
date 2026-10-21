@@ -531,8 +531,9 @@ pub struct Namespace {
     pub ctors: Names<(Path, usize)>,
     /// Global variables/constants defined directly here, by unqualified name.
     pub vars: Names<VarInfo>,
-    /// `use` aliases for items: unqualified name -> absolute path (from the root).
-    pub aliases: Names<Vec<String>>,
+    /// `use` imports of definitions (a function, a global, a macro, a type, a
+    /// `deftype` alias): the name it is brought in under -> the definition.
+    pub aliases: Names<Path>,
     /// `use` aliases for modules: short name -> absolute module path.
     pub mod_aliases: Names<Vec<String>>,
     /// `deftype` aliases defined directly here, keyed by unqualified name.
@@ -774,10 +775,11 @@ pub struct Docs {
 /// The checker's symbol table: one [`Namespace`] per module the session has.
 pub struct Registry {
     modules: HashMap<NsId, Namespace>,
-    /// What [`Self::with_builtins`] defined at the root: the built-in types
-    /// and `Sexpr`'s bare constructors, which every module reads as the
-    /// root's (see [`Self::publish_names`]).
-    builtin_root: Vec<SymRef>,
+    /// What [`Self::with_builtins`] defined at the root — the built-in types
+    /// and `Sexpr`'s bare constructors — by the standard library's symbol of
+    /// each name, which is the one every module reads the name as (see
+    /// [`Self::publish_names`]): offered symbol -> the root's.
+    offered_root: HashMap<SymRef, SymRef>,
     pub def_locs: DefLocs,
     pub docs: Docs,
     /// Per-`defstruct` slot default forms, keyed by the type's path and
@@ -1132,9 +1134,16 @@ impl Registry {
         let mut std_ns = Namespace::new(NsId::STD);
         std_ns.fns = std::mem::replace(&mut root.fns, Names::new(NsId::ROOT)).moved_to(NsId::STD);
         std_ns.vars = std::mem::replace(&mut root.vars, Names::new(NsId::ROOT)).moved_to(NsId::STD);
-        let builtin_root = root.defined_symbols().collect();
+        let offered_root = root.defined_symbols().map(|sym| (symbols::intern_exact(NsId::STD, sym.name()), sym)).collect();
         let modules = [root, std_ns, internal].into_iter().map(|m| (m.ns, m)).collect();
-        Registry { modules, builtin_root, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
+        Registry { modules, offered_root, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
+    }
+
+    /// The root's built-in definition every module reads `sym` as, if `sym`
+    /// is the symbol the standard library offers for one
+    /// ([`Self::publish_names`]).
+    pub fn offered_root(&self, sym: SymRef) -> Option<SymRef> {
+        self.offered_root.get(&sym).copied()
     }
 
     /// The root module's definitions.
@@ -3188,8 +3197,8 @@ impl Registry {
         // Under the standard library's symbol of the name, which is what the
         // name reads as once these move into `std`; a name `std` defines too
         // (`tuple`, `array`) then reads as one symbol for both.
-        for sym in &self.builtin_root {
-            names.export(symbols::intern_exact(NsId::STD, sym.name()));
+        for sym in self.offered_root.keys() {
+            names.export(*sym);
         }
         for ns in self.namespaces() {
             names.declare_module(ns.ns);

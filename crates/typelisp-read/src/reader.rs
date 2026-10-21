@@ -210,22 +210,24 @@ impl Reader {
     /// Like [`Reader::read`], but `file` names the source (used in the location
     /// prefix of any error message).
     pub fn read_in(&self, heap: &mut Heap, file: &str, src: &str) -> Result<Value, Error> {
-        self.read_in_with(heap, file, src, None)
+        self.read_in_with(heap, file, src, NsId::ROOT, None)
     }
 
     /// [`Reader::read_in`] with an evaluator, so `#.` and macro characters
     /// work. The `read` *builtin* takes this path — CL's `read` consults the
     /// readtable, and a program that installed a macro character means it to
-    /// apply to its own reads too.
+    /// apply to its own reads too. Names are read in `ns`: the builtin passes
+    /// the session's current module, CL's `*package*`.
     pub fn read_in_with(
         &self,
         heap: &mut Heap,
         file: &str,
         src: &str,
+        ns: NsId,
         eval: Option<&dyn ReadEval>,
     ) -> Result<Value, Error> {
         let mut cur = Cursor::new(file, src);
-        read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval, paths: PathMode::Resolve, toplevel: false }).map_err(|e| e.at(cur.loc()))
+        read_datum(&mut cur, heap, Ctx { features: &self.features, ns, eval, paths: PathMode::Resolve, toplevel: false }).map_err(|e| e.at(cur.loc()))
     }
 
     /// Read one datum starting at character index `start`, and say where
@@ -250,7 +252,7 @@ impl Reader {
         start: usize,
         preserve_whitespace: bool,
     ) -> Result<(Value, usize), Error> {
-        self.read_from_with(heap, src, start, preserve_whitespace, None)
+        self.read_from_with(heap, src, start, preserve_whitespace, NsId::ROOT, None)
     }
 
     /// [`Reader::read_from`] with an evaluator — see [`Reader::read_in_with`].
@@ -260,11 +262,12 @@ impl Reader {
         src: &str,
         start: usize,
         preserve_whitespace: bool,
+        ns: NsId,
         eval: Option<&dyn ReadEval>,
     ) -> Result<(Value, usize), Error> {
         let mut cur = Cursor::new("<input>", src);
         cur.seek(start);
-        let v = read_datum(&mut cur, heap, Ctx { features: &self.features, ns: NsId::ROOT, eval, paths: PathMode::Resolve, toplevel: false }).map_err(|e| e.at(cur.loc()))?;
+        let v = read_datum(&mut cur, heap, Ctx { features: &self.features, ns, eval, paths: PathMode::Resolve, toplevel: false }).map_err(|e| e.at(cur.loc()))?;
         if !preserve_whitespace {
             if let Some(c) = cur.peek() {
                 if c.is_whitespace() {

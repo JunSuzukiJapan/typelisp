@@ -99,15 +99,23 @@ impl Session {
     /// that means to observe a *checker* error.
     pub fn eval(&mut self, src: &str) -> Result<Value, EvalError> {
         let r = Reader::new();
-        let vs = r.read_all(&mut self.heap, src).expect("read failed");
+        let mut forms = r.forms(src);
         let mut last = Value::Empty;
-        for v in vs {
-            let tl = self.checker.check_form(&mut self.heap, &self.interp, v).expect("check failed");
-            if let Some(val) = self.interp.exec(&mut self.heap, tl)? {
+        loop {
+            // Each form is read in the module the checker is in by now, as a
+            // driver reads a file.
+            forms.set_module(self.checker.current_module());
+            let mark = self.heap.root_count();
+            let Some((v, loc)) = forms.next_form(&mut self.heap).expect("read failed") else {
+                return Ok(last);
+            };
+            let tl = self.checker.check_form_at(&mut self.heap, &self.interp, v, Some(loc)).expect("check failed");
+            let out = self.interp.exec(&mut self.heap, tl);
+            self.heap.truncate_roots(mark);
+            if let Some(val) = out? {
                 last = val;
             }
         }
-        Ok(last)
     }
 
     /// [`Self::eval`] with the failure's source position stripped
@@ -133,11 +141,17 @@ impl Session {
     /// whose subject is a definition several forms in.
     pub fn check_all(&mut self, src: &str) -> Result<(), Error> {
         let r = Reader::new();
-        let vs = r.read_all(&mut self.heap, src).expect("read failed");
-        for v in vs {
-            self.checker.check_form(&mut self.heap, &self.interp, v).map_err(Error::into_kind)?;
+        let mut forms = r.forms(src);
+        loop {
+            forms.set_module(self.checker.current_module());
+            let mark = self.heap.root_count();
+            let Some((v, loc)) = forms.next_form(&mut self.heap).expect("read failed") else {
+                return Ok(());
+            };
+            let checked = self.checker.check_form_at(&mut self.heap, &self.interp, v, Some(loc));
+            self.heap.truncate_roots(mark);
+            checked.map_err(Error::into_kind)?;
         }
-        Ok(())
     }
 
     /// The text of a `string` result, read out of this session's heap.

@@ -2919,14 +2919,8 @@ fn compile_of_a_private_name_from_outside_its_module_is_a_check_time_error() {
     }
 }
 
-/// `(compile name)`'s bare-name argument must resolve against the *calling*
-/// form's own lexical module — not just the root — the same ancestor-chain
-/// resolution an ordinary bare `Call` already gets (`Checker::resolve_fn`).
-/// Before this fix, `Interp`'s own runtime resolution of a bare (non-`::`)
-/// `(compile name)` argument only ever looked the name up at the root
-/// (`Path::root(name)`), so `(compile helper)` from inside a module whose
-/// `helper` was never registered at root would fail with `NoSuchFunction`
-/// even though `helper` is genuinely in scope and callable from there.
+/// `(compile name)`'s bare-name argument resolves against the *calling*
+/// form's own module, as an ordinary bare call's head does.
 #[test]
 fn compile_resolves_a_bare_name_against_its_own_module_not_just_root() {
     let v = eval_ok_with_compiler(
@@ -2944,8 +2938,7 @@ fn compile_resolves_a_bare_name_against_its_own_module_not_just_root() {
 /// two sibling modules each define their own `tag`, and `(compile tag)`
 /// written inside `a` must resolve — and actually dispatch — to `a`'s own
 /// `tag`, never `b`'s same-named one, even though nothing here is `pub`: the
-/// checker resolves the name from `a`, whose ancestor chain never reaches `b`,
-/// and the runtime uses that answer as is.
+/// checker resolves the name in `a`, and the runtime uses that answer as is.
 #[test]
 fn compile_bare_name_prefers_the_callers_own_module_over_a_same_named_sibling() {
     let v = eval_ok_with_compiler(

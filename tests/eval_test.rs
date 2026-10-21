@@ -379,8 +379,9 @@ fn nested_loop_factorial_via_return() {
 fn eval_sexpr(src: &str) -> (Heap, Value) {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
@@ -530,7 +531,6 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
     let src = "(let ((kept (cons (int 1) (the Option<Sexpr> ())))) \
                  (dotimes (i 50) (cons (int 2) (the Option<Sexpr> ()))) \
                  (car kept))";
-    let vs = r.read_all(&mut src_heap, src).expect("read failed");
     let mut chk = Checker::new();
     let mut check_interp = Interp::new();
     // `dotimes` is a `defmacro` (see `src/prelude.rs`), expanded during
@@ -548,6 +548,7 @@ fn runtime_cons_cells_survive_gc_when_rooted() {
     // as an explicit argument), so reusing it here doesn't tie this test's
     // GC-pressure heap to the large one `load_prelude` ran against above.
     load_prelude(&mut src_heap, &mut chk, &mut check_interp);
+    let vs = r.read_all(&mut src_heap, src).expect("read failed");
     let tls: Vec<_> = vs
         .into_iter()
         .map(|v| chk.check_form(&mut src_heap, &check_interp, v).expect("check failed"))
@@ -923,8 +924,9 @@ fn runtime_error_carries_source_location() {
     // The `(panic ...)` is on line 2; calling `risky` on line 3 must still
     // report line 2 (where the error actually arose), not the call site.
     let src = "(defun risky ((n int)) int\n  (panic \"boom\"))\n(risky 5)";
-    let vs = r.read_all_in(&mut h, "prog.typl", src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all_in(&mut h, "prog.typl", src).expect("read failed");
     let interp = Interp::new();
     let mut err = None;
     for v in vs {

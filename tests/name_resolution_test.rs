@@ -19,10 +19,10 @@ fn a_function_and_a_variable_in_one_module_cannot_share_a_name() {
     assert!(msg.contains("cannot define function `f`"), "{}", msg);
 }
 
-/// A variable in a nearer module hides a function of the same name further
-/// out — in a call as well as in a value.
+/// A module's variable is what its name means there — in a call as well as
+/// in a value — whatever the root defines under the name.
 #[test]
-fn a_nearer_variable_hides_a_function_further_out() {
+fn a_modules_variable_is_what_its_name_means_there() {
     let src = "(defun f () int 1)
                (module m
                  (defvar (f int) 5)
@@ -38,9 +38,9 @@ fn a_nearer_variable_hides_a_function_further_out() {
     assert!(msg.contains("value is not callable: `int`"), "{}", msg);
 }
 
-/// And a function in a nearer module hides a variable further out.
+/// And a module's function, whatever the root defines under the name.
 #[test]
-fn a_nearer_function_hides_a_variable_further_out() {
+fn a_modules_function_is_what_its_name_means_there() {
     let src = "(defvar (f int) 5)
                (module m
                  (defun f () int 1)
@@ -70,10 +70,10 @@ fn a_macro_and_a_function_or_variable_in_one_module_cannot_share_a_name() {
     assert!(msg.contains("cannot define variable `f`: a macro of that name already exists here"), "{}", msg);
 }
 
-/// A function in a nearer module hides a macro further out: inside `m`,
-/// `(twice 5)` calls `m`'s function, not the root macro.
+/// A module's function is what its name means there even when the root
+/// defines a macro of the name: inside `m`, `(twice 5)` calls `m`'s function.
 #[test]
-fn a_nearer_function_hides_a_macro_further_out() {
+fn a_modules_function_is_what_its_name_means_over_a_root_macro() {
     let src = "(defmacro twice (x) `(+ ,x ,x 1))
                (module m
                  (defun twice ((x int)) int (* x 2))
@@ -82,10 +82,10 @@ fn a_nearer_function_hides_a_macro_further_out() {
     assert_eq!(eval_ok(src), Value::Int(10));
 }
 
-/// And a macro in a nearer module hides a function further out — in a call,
-/// where it expands, and as a value, where a macro has none.
+/// And a module's macro, over a root function of the name — in a call, where
+/// it expands, and as a value, where a macro has none.
 #[test]
-fn a_nearer_macro_hides_a_function_further_out() {
+fn a_modules_macro_is_what_its_name_means_over_a_root_function() {
     let src = "(defun twice ((x int)) int (* x 2))
                (module m
                  (defmacro twice (x) `(+ ,x ,x 1))
@@ -99,18 +99,4 @@ fn a_nearer_macro_hides_a_function_further_out() {
            (defun g () (fn (int) int) twice))",
     );
     assert!(msg.contains("`twice` is a macro, which has no value"), "{}", msg);
-}
-
-/// A `use` that imports a type says nothing about functions, globals or
-/// macros of that name: the lookup goes on outward and finds the root
-/// function, as a type lookup goes on past an import that names no type.
-#[test]
-fn an_import_of_a_type_does_not_hide_a_function_further_out() {
-    let src = "(defun circle () int 7)
-               (module geo (pub defstruct circle (r int)))
-               (module m
-                 (use geo::circle)
-                 (pub defun g () int (circle)))
-               (m::g)";
-    assert_eq!(eval_ok(src), Value::Int(7));
 }

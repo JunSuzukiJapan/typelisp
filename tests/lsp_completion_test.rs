@@ -23,8 +23,9 @@ const FILE: &str = "test.typl";
 fn check(src: &str) -> Checker {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
     let interp = Interp::new();
     for v in vs {
         chk.check_form(&mut h, &interp, v).expect("check failed");
@@ -38,8 +39,9 @@ fn check(src: &str) -> Checker {
 fn program(src: &str) -> (Heap, Vec<TopLevelForm>) {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
     let interp = Interp::new();
     let body = vs.into_iter().map(|v| chk.check_form(&mut h, &interp, v).expect("check failed")).collect();
     (h, body)
@@ -55,8 +57,9 @@ fn program(src: &str) -> (Heap, Vec<TopLevelForm>) {
 fn program_recover(src: &str) -> (Heap, Vec<TopLevelForm>, Vec<Error>) {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all_in(&mut h, FILE, src).expect("read failed");
     chk.set_recover(true);
     let interp = Interp::new();
     let body: Vec<TopLevelForm> = vs
@@ -95,22 +98,24 @@ fn a_submodules_own_definition_is_visible_from_inside_it_but_not_from_root() {
 }
 
 #[test]
-fn a_public_root_function_is_visible_from_inside_a_submodule() {
-    let chk = check("(pub defun helper () int 1)\n(module m (defun main () int (helper)))\n");
-    let inside = completion_candidates(chk.registry(), &["m".to_string()]);
-    assert!(has(CompletionKind::Function, &inside, "helper"));
-    assert!(has(CompletionKind::Function, &inside, "main"));
+fn a_root_function_is_not_offered_inside_a_submodule() {
+    // A module sees an ancestor's definitions only by bringing them in with
+    // `use`, so a root-level function is not a bare name inside `m`.
+    for src in ["(pub defun helper () int 1)\n(module m (defun main () int 1))\n", "(defun helper () int 1)\n(module m (defun main () int 1))\n"] {
+        let chk = check(src);
+        let inside = completion_candidates(chk.registry(), &["m".to_string()]);
+        assert!(!has(CompletionKind::Function, &inside, "helper"), "{}", src);
+        assert!(has(CompletionKind::Function, &inside, "main"), "{}", src);
+    }
 }
 
 #[test]
-fn a_private_root_function_is_visible_from_inside_a_submodule() {
-    // Root is always an ancestor of every submodule (Rust-style module
-    // privacy — see `Checker::ns_ancestors`/`in_scope`), so a non-`pub`
-    // root-level function is offered inside `m` too, not just `pub` ones.
-    let chk = check("(defun helper () int 1)\n(module m (defun main () int 1))\n");
-    let inside = completion_candidates(chk.registry(), &["m".to_string()]);
-    assert!(has(CompletionKind::Function, &inside, "helper"));
-    assert!(has(CompletionKind::Function, &inside, "main"));
+fn the_standard_librarys_functions_are_offered_in_every_module() {
+    let chk = check("(module m (defun main () int 1))\n");
+    for path in [vec![], vec!["m".to_string()]] {
+        let candidates = completion_candidates(chk.registry(), &path);
+        assert!(has(CompletionKind::Function, &candidates, "sexpr-cons"), "{:?}", path);
+    }
 }
 
 #[test]

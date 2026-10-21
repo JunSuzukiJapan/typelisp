@@ -18,8 +18,9 @@ use typelisp::{load_compiler, Checker, Error, EvalError, Heap, Interp, Reader, T
 fn check(src: &str) -> Result<Option<Type>, Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let interp = Interp::new();
     for v in vs {
         chk.check_form(&mut h, &interp, v)?;
@@ -30,8 +31,9 @@ fn check(src: &str) -> Result<Option<Type>, Error> {
 fn run_with_heap(src: &str) -> Result<(Heap, Value), EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {

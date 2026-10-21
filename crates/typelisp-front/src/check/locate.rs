@@ -28,7 +28,7 @@
 //! descent is uniform and both tables are gone. The one thing a walk must
 //! still know is where data stops being program: [`is_opaque`].
 
-use typelisp_mem::{wk, Heap, Value};
+use typelisp_mem::{symbols, wk, Heap, NsId, Value};
 
 use crate::check::core;
 use crate::{DefLocs, Docs, Loc, Registry, SymRef, TopLevelForm};
@@ -506,55 +506,36 @@ pub struct CompletionCandidate {
 }
 
 /// Every bare name visible for completion while checking module
-/// `module_path`: that module's own definitions, plus every ancestor
-/// module's (root's included) — the same ancestor-chain walk
-/// `Checker::resolve_fn`/`resolve_global`/etc. use at name-resolution time
-/// (see `Checker::ns_ancestors`), just enumerated instead of looked up by
-/// one name. A name found on this chain is in scope without needing `pub`,
-/// exactly like at check time, so every table is offered in full at every
-/// level. Best-effort like the rest of this module: a `use`-imported bare
-/// name (`Namespace::aliases`/`mod_aliases`/`static_uses`) is only offered
-/// from its own defining module, same as before.
+/// `module_path`, as `Checker::find_named` reaches one: that module's own
+/// definitions and what its `use`s brought in, then what every module is
+/// offered — the standard library's definitions and the root's builtins.
+/// An ancestor's definitions are not visible without a `use`, so none are
+/// offered.
 pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<CompletionCandidate> {
     let mut out = Vec::new();
-    for k in (0..=module_path.len()).rev() {
-        if let Some(ns) = reg.module(&module_path[..k]) {
-            push_namespace(reg, ns, &mut out);
+    let Some(here) = reg.module(module_path) else {
+        return out;
+    };
+    push_namespace(reg, here, &mut out);
+    if here.ns != NsId::STD {
+        if let Some(std_ns) = reg.module_at(NsId::STD) {
+            push_definitions(std_ns, |_| true, &mut out);
+        }
+    }
+    if here.ns != NsId::ROOT {
+        if let Some(root) = reg.module_at(NsId::ROOT) {
+            push_definitions(root, |name| symbols::find_exact(NsId::STD, name).is_some_and(|sym| reg.offered_root(sym).is_some()), &mut out);
         }
     }
     out
 }
 
-/// Push every name in `ns` into `out`.
+/// Push every name in `ns` into `out`: its definitions, its child modules and
+/// what its `use`s brought in.
 fn push_namespace(reg: &Registry, ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>) {
-    for (name, sig) in &ns.fns {
-        out.push(CompletionCandidate {
-            name: name.to_string(),
-            kind: CompletionKind::Function,
-            detail: format!("({:?}) -> {:?}", sig.params, sig.ret),
-        });
-    }
-    for name in ns.macros.keys() {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Macro, detail: "macro".to_string() });
-    }
-    for name in ns.types.keys() {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Type, detail: "type".to_string() });
-    }
-    for (name, vi) in &ns.vars {
-        out.push(CompletionCandidate {
-            name: name.to_string(),
-            kind: CompletionKind::Variable,
-            detail: format!("{:?}", vi.ty),
-        });
-    }
-    for name in ns.traits.keys() {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Trait, detail: "trait".to_string() });
-    }
+    push_definitions(ns, |_| true, out);
     for (name, _) in reg.children(ns.ns) {
         out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Module, detail: "module".to_string() });
-    }
-    for name in ns.ctors.keys() {
-        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Function, detail: "constructor".to_string() });
     }
     for name in ns.aliases.keys() {
         out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Function, detail: "use".to_string() });
@@ -564,5 +545,35 @@ fn push_namespace(reg: &Registry, ns: &crate::Namespace, out: &mut Vec<Completio
     }
     for name in ns.static_uses.keys() {
         out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Method, detail: "use".to_string() });
+    }
+}
+
+/// Push the names of what `ns` defines, those `keep` accepts, into `out`.
+fn push_definitions(ns: &crate::Namespace, keep: impl Fn(&str) -> bool, out: &mut Vec<CompletionCandidate>) {
+    for (name, sig) in ns.fns.iter().filter(|(name, _)| keep(name)) {
+        out.push(CompletionCandidate {
+            name: name.to_string(),
+            kind: CompletionKind::Function,
+            detail: format!("({:?}) -> {:?}", sig.params, sig.ret),
+        });
+    }
+    for name in ns.macros.keys().filter(|name| keep(name)) {
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Macro, detail: "macro".to_string() });
+    }
+    for name in ns.types.keys().filter(|name| keep(name)) {
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Type, detail: "type".to_string() });
+    }
+    for (name, vi) in ns.vars.iter().filter(|(name, _)| keep(name)) {
+        out.push(CompletionCandidate {
+            name: name.to_string(),
+            kind: CompletionKind::Variable,
+            detail: format!("{:?}", vi.ty),
+        });
+    }
+    for name in ns.traits.keys().filter(|name| keep(name)) {
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Trait, detail: "trait".to_string() });
+    }
+    for name in ns.ctors.keys().filter(|name| keep(name)) {
+        out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Function, detail: "constructor".to_string() });
     }
 }

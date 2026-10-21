@@ -255,9 +255,9 @@ impl Checker {
     pub(super) fn resolve_c_struct(&self, path: &Path) -> Option<CStructDef> {
         if path.is_simple() {
             let name = path.last_segment();
-            if let Some(target) = self.info.lookup_alias(name) {
-                if let Some(d) = self.resolve_c_struct_segs(&target) {
-                    return Some(d);
+            if let Some(target) = self.info.import_of(name) {
+                if let Some(d) = self.info.reg.module_at(target.ns()).and_then(|m| m.c_structs.get_sym(target.name_symbol())) {
+                    return Some(d.clone());
                 }
             }
         }

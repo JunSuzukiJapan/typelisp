@@ -71,6 +71,7 @@ fn a_restored_prelude_unit_can_check_and_run_a_program() {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     dump::apply_types(&mut heap, &mut chk, &mut interp, unit).expect("applying the prelude unit");
+    chk.publish_names(&heap);
 
     // `length<I,A> (:where (Iter I (Item A)))` is one of the 61 generic prelude
     // `defun`s the checker retains as a *template* rather than a signature, so
@@ -102,6 +103,7 @@ fn a_prelude_macro_survives_the_round_trip() {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     dump::apply_types(&mut heap, &mut chk, &mut interp, unit).expect("applying the prelude unit");
+    chk.publish_names(&heap);
 
     let src = r#"(length (with-output-to-string (s) (write-string s "hello")))"#;
     let r = typelisp::Reader::new();

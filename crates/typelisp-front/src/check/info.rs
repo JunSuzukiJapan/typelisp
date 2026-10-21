@@ -7,6 +7,9 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use typelisp_mem::symbols::{self, NOT_WELL_KNOWN};
+use typelisp_mem::{NsId, SymRef};
+
 use crate::{Error, Loc, Path, Type, Value};
 use super::registry::{AssocFn, Namespace, Registry, TraitBound, TypeAlias, VarInfo};
 use super::analyze::*;
@@ -386,42 +389,62 @@ impl Info {
         None
     }
 
-    /// A `use` alias for a bare `name`, looked up current namespace then root.
-    pub(super) fn lookup_alias(&self, name: &str) -> Option<Vec<String>> {
-        if let Some(p) = self.cur_ns().aliases.get(name) {
-            return Some(p.clone());
-        }
-        self.reg.root().aliases.get(name).cloned()
-    }
-
-    /// What a bare module-level name means — a function, a global variable
-    /// or a macro, never two of them ([`Checker::check_value_clash`]) — with its
-    /// absolute path, walking the current namespace's ancestor chain (see
-    /// [`Self::ns_ancestors`]), nearest module first. A name found anywhere on
-    /// that chain is in scope without needing `pub`, exactly like a
-    /// same-module reference.
+    /// What `sym` — a bare name as read in the current module — names, as
+    /// `lookup` finds it among one module's definitions (`lookup` is given
+    /// the module and the symbol to look up there), with the definition's
+    /// path.
     ///
-    /// The one walk all three kinds share: a nearer definition hides a
-    /// further one of any kind, because a name has one meaning whichever kind
-    /// it is. A function in a module therefore hides a root macro of the same
-    /// name inside that module.
+    /// This module's own definition comes first, then what a `use` here
+    /// brought in under the name, then the definition in the module the
+    /// symbol belongs to (a name a macro's expansion carried in from the
+    /// macro's module), then what the standard library offers every module
+    /// under it (`std`'s own, and the built-in definitions at the root). No
+    /// enclosing module is consulted: a module sees what it defines and what
+    /// it brings in (`docs/dev/explicit-symbols-plan.md`, 3.3).
     ///
-    /// A `use` import comes after this module's own definition of the name and
-    /// before everything further out: an import never beats a definition made
-    /// here, which is why `check_use` warns that such an import does nothing.
-    /// An import that names no function, global or macro (it names a type)
-    /// leaves the walk going, as [`Self::resolve_bare_type`] does for the
-    /// other name space.
-    pub(super) fn resolve_module_entry(&self, name: &str) -> Option<(Path, ModuleEntry)> {
-        if let Some(entry) = module_entry_in(self.cur_ns(), name) {
-            return Some((item_path(&self.ns, name), entry));
+    /// An import of something `lookup` does not find (a type, where a
+    /// function is asked for) leaves the search going.
+    pub(super) fn find_named<T>(&self, sym: SymRef, mut lookup: impl FnMut(&Namespace, SymRef) -> Option<T>) -> Option<(Path, T)> {
+        let mut at = |ns: NsId, key: SymRef| -> Option<(Path, T)> {
+            let m = self.reg.module_at(ns)?;
+            lookup(m, key).map(|v| (Path::of_symbol(ns, key), v))
+        };
+        let here = self.cur_ns();
+        if let Some(found) = at(here.ns, sym) {
+            return Some(found);
         }
-        if let Some(path) = self.lookup_alias(name) {
-            if let Some(found) = self.resolve_module_entry_path(&path) {
+        if let Some(target) = here.aliases.get_sym(sym) {
+            if let Some(found) = at(target.ns(), target.name_symbol()) {
                 return Some(found);
             }
         }
-        self.find_on_chain(|prefix, m| module_entry_in(m, name).map(|entry| (item_path(prefix, name), entry)))
+        // A member of the fixed vocabulary belongs to every module alike, so
+        // where it was made says nothing about which definition it names.
+        if sym.home() != here.ns && sym.well_known() == NOT_WELL_KNOWN {
+            if let Some(found) = at(sym.home(), sym) {
+                return Some(found);
+            }
+        }
+        if let Some(root) = self.reg.offered_root(sym) {
+            if let Some(found) = at(NsId::ROOT, root) {
+                return Some(found);
+            }
+        }
+        at(NsId::STD, sym)
+    }
+
+    /// The definition a `use` in the current module brought in under `name`.
+    pub(super) fn import_of(&self, name: &str) -> Option<Path> {
+        self.cur_ns().aliases.get(name).copied()
+    }
+
+    /// What a bare module-level name means — a function, a global variable
+    /// or a macro, never two of them ([`Checker::check_value_clash`]) — with
+    /// its path ([`Self::find_named`]). The three are one name space: a
+    /// function defined here hides a macro of the same name the standard
+    /// library offers.
+    pub(super) fn resolve_module_entry(&self, sym: SymRef) -> Option<(Path, ModuleEntry)> {
+        self.find_named(sym, module_entry_of)
     }
 
     /// [`Self::resolve_module_entry`] for a qualified `module::...::name`.
@@ -432,8 +455,8 @@ impl Info {
     /// What a bare module-level name holds, if it is a function or a global
     /// variable — see [`Self::resolve_module_entry`]. `None` when the nearest
     /// definition is a macro, which hides any value further out.
-    pub(super) fn resolve_module_value(&self, name: &str) -> Option<ModuleValue> {
-        match self.resolve_module_entry(name)? {
+    pub(super) fn resolve_module_value(&self, sym: SymRef) -> Option<ModuleValue> {
+        match self.resolve_module_entry(sym)? {
             (path, ModuleEntry::Value(kind)) => Some(kind.at(path)),
             (_, ModuleEntry::Macro { .. }) => None,
         }
@@ -449,8 +472,8 @@ impl Info {
 
     /// The function a bare name holds, if what it holds is a function — see
     /// [`Self::resolve_module_value`].
-    pub(super) fn resolve_fn(&self, name: &str) -> Option<Path> {
-        match self.resolve_module_value(name)? {
+    pub(super) fn resolve_fn(&self, sym: SymRef) -> Option<Path> {
+        match self.resolve_module_value(sym)? {
             ModuleValue::Fn(path) => Some(path),
             ModuleValue::Var(..) => None,
         }
@@ -460,16 +483,16 @@ impl Info {
     /// arity shape ([`MacroShape`]): a `macrolet` binding, or else the
     /// module-level name, if the nearest definition of it is a macro
     /// ([`Self::resolve_module_entry`]).
-    pub(super) fn resolve_macro(&self, name: &str) -> Option<(Path, MacroShape)> {
+    pub(super) fn resolve_macro(&self, sym: SymRef) -> Option<(Path, MacroShape)> {
         // `macrolet` first, innermost scope first: a local macro shadows a
         // global one of the same name for the extent of its body, which is
         // what "lexically scoped macro definition" means.
         for scope in self.local_macros.borrow().iter().rev() {
-            if let Some(found) = scope.get(name) {
+            if let Some(found) = scope.get(sym.name()) {
                 return Some(found.clone());
             }
         }
-        match self.resolve_module_entry(name)? {
+        match self.resolve_module_entry(sym)? {
             (path, ModuleEntry::Macro { shape, .. }) => Some((path, shape)),
             (_, ModuleEntry::Value(_)) => None,
         }
@@ -514,12 +537,33 @@ impl Info {
         }
     }
 
-    /// Resolve a bare constructor name to its `(type path, variant index)`,
-    /// walking the ancestor chain (see [`Self::ns_ancestors`]) — every ctor
-    /// found this way is in scope by construction, so no separate `public`
-    /// check is needed (mirrors [`Self::resolve_fn`]).
-    pub(super) fn resolve_ctor(&self, name: &str) -> Option<(Path, usize)> {
-        self.find_on_chain(|_, m| m.ctors.get(name).cloned())
+    /// Resolve a bare constructor name to its `(type path, variant index)`
+    /// ([`Self::find_named`]): `Sexpr`'s, which the standard library offers,
+    /// or one a `(use Type)` brought in.
+    pub(super) fn resolve_ctor(&self, sym: SymRef) -> Option<(Path, usize)> {
+        self.find_named(sym, |m, k| m.ctors.get_sym(k).cloned()).map(|(_, ctor)| ctor)
+    }
+
+    /// The `Sexpr` variant `name` — the one a value of a type with a `Sexpr`
+    /// encoding is wrapped in — as `(type path, variant index)`.
+    pub(super) fn sexpr_variant(&self, name: &str) -> (Path, usize) {
+        let path = Path::root("sexpr");
+        let def = self.reg.type_def(&path).expect("sexpr is built in");
+        let idx = def.variants.iter().position(|v| v.name == name).expect("sexpr has the variant");
+        (path, idx)
+    }
+
+    /// The function the standard library offers every module as `name` — for
+    /// a form the checker rewrites into a call of a library function, which
+    /// means the library's whatever the module defines.
+    pub(super) fn offered_fn(&self, name: &str) -> Option<Path> {
+        let sym = symbols::intern_exact(NsId::STD, name);
+        let in_std = Path::of_symbol(NsId::STD, sym);
+        if self.reg.fn_sig(&in_std).is_some() {
+            return Some(in_std);
+        }
+        let root = Path::of_symbol(NsId::ROOT, self.reg.offered_root(sym)?);
+        self.reg.fn_sig(&root).is_some().then_some(root)
     }
 
     /// The `Sexpr` `cons` variant's `(type path, variant index)`, read from the
@@ -529,25 +573,15 @@ impl Info {
     /// cons construction (`list` literals, quasiquote) still needs the variant,
     /// and reaches it through here.
     pub(super) fn sexpr_cons_ctor(&self) -> (Path, usize) {
-        let path = Path::root("sexpr");
-        let def = self.reg.type_def(&path).expect("sexpr is built in");
-        let idx = def
-            .variants
-            .iter()
-            .position(|v| v.name == "cons")
-            .expect("sexpr has a cons variant");
-        (path, idx)
+        self.sexpr_variant("cons")
     }
 
     /// Resolve a bare name snapshotted by `(use Type)` (see `Self::check_use`)
     /// to the `(type path, method name)` of the static associated function it
     /// names — the static-method counterpart of [`Self::resolve_ctor`],
-    /// checked the same way (current namespace then root).
-    pub(super) fn resolve_static_use(&self, name: &str) -> Option<(Path, String)> {
-        if let Some(hit) = self.cur_ns().static_uses.get(name) {
-            return Some(hit.clone());
-        }
-        self.reg.root().static_uses.get(name).cloned()
+    /// found the same way.
+    pub(super) fn resolve_static_use(&self, sym: SymRef) -> Option<(Path, String)> {
+        self.find_named(sym, |m, k| m.static_uses.get_sym(k).cloned()).map(|(_, member)| member)
     }
 
     /// Resolve a bare (unqualified) type name: this module's own type of that
@@ -566,16 +600,9 @@ impl Info {
         if let Some(def) = self.cur_ns().types.get(name) {
             return Some(def.name.clone());
         }
-        if let Some(target) = self.lookup_alias(name) {
-            // A one-segment target is a root-level name; resolving it through
-            // `resolve_type_path` would come back here and consult the same
-            // alias again.
-            let found = match target.as_slice() {
-                [only] => self.resolve_unaliased_bare_type(only),
-                _ => self.resolve_type_path(&target),
-            };
-            if found.is_some() {
-                return found;
+        if let Some(target) = self.import_of(name) {
+            if self.reg.type_def(&target).is_some() {
+                return Some(target);
             }
         }
         self.resolve_unaliased_bare_type(name)
@@ -611,9 +638,9 @@ impl Info {
             if let Some(a) = self.cur_ns().type_aliases.get(name) {
                 return Some(a.clone());
             }
-            if let Some(target) = self.lookup_alias(name) {
-                if let Some(a) = self.resolve_type_alias_path(&target) {
-                    return Some(a);
+            if let Some(target) = self.import_of(name) {
+                if let Some(a) = self.reg.module_at(target.ns()).and_then(|m| m.type_aliases.get_sym(target.name_symbol())) {
+                    return Some(a.clone());
                 }
             }
             return self.find_on_chain(|_, m| m.type_aliases.get(name).cloned());
@@ -642,8 +669,8 @@ impl Info {
 
     /// The global a bare name holds, if what it holds is a variable — see
     /// [`Self::resolve_module_value`].
-    pub(super) fn resolve_global(&self, name: &str) -> Option<(Path, VarInfo)> {
-        match self.resolve_module_value(name)? {
+    pub(super) fn resolve_global(&self, sym: SymRef) -> Option<(Path, VarInfo)> {
+        match self.resolve_module_value(sym)? {
             ModuleValue::Var(path, vi) => Some((path, vi)),
             ModuleValue::Fn(_) => None,
         }

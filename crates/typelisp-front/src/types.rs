@@ -61,6 +61,12 @@ impl Path {
         Path { ns, name: symbols::intern_exact(ns, name) }
     }
 
+    /// The definition `name` names in the module `ns`: `name` is a symbol
+    /// that reads as itself there — a key of one of `ns`'s tables.
+    pub fn of_symbol(ns: NsId, name: SymRef) -> Path {
+        Path { ns, name }
+    }
+
     /// Build a path from explicit segments.
     pub fn of(segments: &[&str]) -> Path {
         let (name, modules) = segments.split_last().expect("a path must have at least one segment");

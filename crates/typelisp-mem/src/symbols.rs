@@ -834,6 +834,9 @@ pub enum Import {
     Type(SymRef),
     /// A function, global or macro, by its own name's symbol.
     Item(SymRef),
+    /// A constructor or a static method of a type, which `(use Type)` brings
+    /// in bare, by the type's name's symbol.
+    Member(SymRef),
 }
 
 /// Where a path's segment led: into a module, or to a type, whose members
@@ -1157,7 +1160,7 @@ pub fn ns_children(ns: NsId) -> Vec<(&'static str, NsId)> {
 /// in. The symbols themselves, and the tree of module names they belong to,
 /// are the process's (see the module documentation); a name means something
 /// only in the session that defined it. One per heap (`Heap::names`).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct SessionNames {
     /// The modules this session has: the fixed ones, every module a form was
     /// read in, every `(module ...)` read or checked, and their ancestors.
@@ -1176,16 +1179,38 @@ pub struct SessionNames {
     exports: HashMap<&'static str, SymRef>,
     /// The symbols a `(shadow ...)` made their modules' own ([`Self::shadow`]).
     shadowed: HashSet<SymRef>,
+    /// The module of the top-level form being checked and run — CL's
+    /// `*package*`: what a `read` at run time reads its names in.
+    current: NsId,
 }
 
 impl SessionNames {
     /// A session with the fixed modules and nothing defined.
     pub fn new() -> SessionNames {
-        let mut names = SessionNames::default();
+        let mut names = SessionNames {
+            modules: HashSet::new(),
+            types: HashMap::new(),
+            imports: HashMap::new(),
+            exports: HashMap::new(),
+            shadowed: HashSet::new(),
+            current: NsId::ROOT,
+        };
         for ns in [NsId::ROOT, NsId::KEYWORD, NsId::STD, NsId::CORE] {
             names.modules.insert(ns);
         }
         names
+    }
+
+    /// The module a `read` at run time reads its names in: the one the last
+    /// [`Self::enter_module`] named.
+    pub fn current_module(&self) -> NsId {
+        self.current
+    }
+
+    /// Makes `ns` the module of the top-level form about to be checked and
+    /// run.
+    pub fn enter_module(&mut self, ns: NsId) {
+        self.current = ns;
     }
 
     /// Records `ns`, and every module it is inside, as modules of this

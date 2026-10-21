@@ -12,8 +12,9 @@ fn run(src: &str) -> Result<(Value, Heap), EvalError> {
 fn run_with_capacity(src: &str, capacity: usize) -> Result<(Value, Heap), EvalError> {
     let mut h = Heap::with_capacity(capacity);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
@@ -275,10 +276,11 @@ fn macro_used_in_same_batch_as_its_definition() {
 fn macro_arity_mismatch_is_a_type_error() {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let vs = r
         .read_all(&mut h, "(defmacro double (x) `(+ ,x ,x)) (double 1 2)")
         .expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     let mut last_err = None;
     for v in vs {
@@ -391,10 +393,11 @@ fn rest_macro_can_be_called_with_no_extra_args() {
 fn rest_macro_too_few_fixed_args_is_a_type_error() {
     let mut h = Heap::with_capacity(4096);
     let r = Reader::new();
+    let mut chk = Checker::new();
+    chk.publish_names(&h);
     let vs = r
         .read_all(&mut h, "(defmacro capture (a &rest rest) rest) (capture)")
         .expect("read failed");
-    let mut chk = Checker::new();
     let interp = Interp::new();
     let mut last_err = None;
     for v in vs {
@@ -561,8 +564,9 @@ fn cond_with_no_matching_clause_and_no_else_is_unit() {
 fn run_expect_err(src: &str) -> Result<(), String> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let interp = Interp::new();
     for v in vs {
         match chk.check_form(&mut h, &interp, v) {

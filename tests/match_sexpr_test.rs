@@ -13,8 +13,9 @@ use typelisp::{load_prelude, Checker, Error, EvalError, Heap, Interp, Reader, Va
 fn run(src: &str) -> Result<Value, EvalError> {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
@@ -38,6 +39,7 @@ fn eval_ok(src: &str) -> Value {
 fn eval_string(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");
@@ -60,8 +62,9 @@ fn eval_string(src: &str) -> String {
 fn eval_f64(src: &str) -> f64 {
     let mut h = Heap::with_capacity(1 << 16);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let interp = Interp::new();
     let mut last = Value::Empty;
     for v in vs {
@@ -103,8 +106,9 @@ fn eval_ok_with_prelude(src: &str) -> Value {
 fn check(src: &str) -> Result<TopLevelForm, Error> {
     let mut h = Heap::with_capacity(8192);
     let r = Reader::new();
-    let vs = r.read_all(&mut h, src).expect("read failed");
     let mut chk = Checker::new();
+    chk.publish_names(&h);
+    let vs = r.read_all(&mut h, src).expect("read failed");
     let interp = Interp::new();
     let mut last = None;
     for v in vs {
