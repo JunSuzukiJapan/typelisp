@@ -542,7 +542,7 @@ impl Build<'_, '_> {
 
     /// A `::` name, from its segments — as the reader reads `a::b`.
     fn path(&mut self, segments: &[&str]) -> Value {
-        forms::path_form(self.s, &crate::Path::of(segments))
+        forms::segments_form(self.s, segments)
     }
 
     fn call(&mut self, head: &str, args: &[Value]) -> Result<Value, Error> {

@@ -760,11 +760,24 @@ pub(super) fn value_member_form(heap: &mut Heap, recv: &str, member: &str) -> Re
 /// a symbol, so a form would not survive its own round trip
 /// (`tests/core_vocabulary_test.rs`). Both consumers accept either spelling.
 pub(super) fn path_form(heap: &mut Heap, p: &Path) -> Value {
-    let segs = p.segments();
-    if segs.len() == 1 {
-        return heap.intern_symbol(&segs[0]);
+    segments_form(heap, &p.segments())
+}
+
+/// `TYPE::MEMBER` — a member of the type `type_path` (a constructor, a
+/// static method), as written. Not a [`Path`]: a type is not a module, so its
+/// members are not definitions of one.
+pub(super) fn member_form(heap: &mut Heap, type_path: &Path, member: &str) -> Value {
+    let mut segs = type_path.segments();
+    segs.push(member.to_string());
+    segments_form(heap, &segs)
+}
+
+/// A name written as `segments`: a bare symbol for one, a `::` path for more.
+pub(super) fn segments_form<S: AsRef<str>>(heap: &mut Heap, segments: &[S]) -> Value {
+    if let [only] = segments {
+        return heap.intern_symbol(only.as_ref());
     }
-    let ids: Vec<_> = segs.iter().map(|s| match heap.intern_symbol(s) {
+    let ids: Vec<_> = segments.iter().map(|s| match heap.intern_symbol(s.as_ref()) {
         Value::Symbol(id) => id,
         _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
     }).collect();

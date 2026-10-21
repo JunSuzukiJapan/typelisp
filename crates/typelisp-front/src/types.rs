@@ -138,11 +138,6 @@ impl Path {
         symbols::ns_path(self.ns)
     }
 
-    /// Extend the path with another segment.
-    pub fn child(&self, name: &str) -> Path {
-        Path::in_ns(symbols::child_ns(self.ns, self.last_segment()), name)
-    }
-
     /// True for a root-level name.
     pub fn is_simple(&self) -> bool {
         self.ns == NsId::ROOT

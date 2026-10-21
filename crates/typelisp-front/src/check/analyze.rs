@@ -597,7 +597,7 @@ fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Resu
     let var = s.intern_symbol(VECTOR_LITERAL_VAR);
     let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::root("vector"), vec![elem_ty.clone()]))?;
     s.push_root(vec_ty);
-    let new = forms::path_form(&mut s, &Path::root("vector").child("new"));
+    let new = forms::member_form(&mut s, &Path::root("vector"), "new");
     let new_call = forms::list_from_vec_locs(&mut s, &[(new, None)])?;
     s.push_root(new_call);
     let the = s.intern_symbol("the");
@@ -8329,8 +8329,7 @@ impl Checker {
 
         let body = {
             let mut call = Items::new(out.heap());
-            let ctor_path = Path::from_segments(vec![name.to_string(), STRUCT_CTOR.to_string()]);
-            let head = forms::path_form(call.heap(), &ctor_path);
+            let head = forms::segments_form(call.heap(), &[name, STRUCT_CTOR]);
             call.push(head);
             for field in fields {
                 // `self::slot` — the accessor sugar, so the copier reads
@@ -9080,7 +9079,7 @@ impl Checker {
         let path = crate::types::tuple_path(elems.len());
         let data = expected.filter(|t| is_sexpr_expectation(t));
         let mut s = RootScope::new(heap);
-        let new = forms::path_form(&mut s, &path.child(STRUCT_CTOR));
+        let new = forms::member_form(&mut s, &path, STRUCT_CTOR);
         let mut items: Vec<(Value, Option<Loc>)> = vec![(new, None)];
         for &e in &elems {
             let ef = literal_element_form(&mut s, e, data.is_some())?;
@@ -12783,7 +12782,7 @@ impl Checker {
             }
         }
         let defaults = self.info.reg.struct_defaults.get(&type_fq).cloned();
-        let ctor = forms::path_form(&mut s, &type_fq.child(STRUCT_CTOR));
+        let ctor = forms::member_form(&mut s, &type_fq, STRUCT_CTOR);
         s.push_root(ctor);
         let mut call: Vec<(Value, Option<Loc>)> = vec![(ctor, None)];
         for (i, f) in field_names.iter().enumerate() {
@@ -13585,7 +13584,7 @@ impl Checker {
             )));
         }
         let the = heap.intern_symbol("the");
-        let ctor_sym = forms::path_form(heap, &Path::of(&[outer, ctor]));
+        let ctor_sym = forms::segments_form(heap, &[outer, ctor]);
         let call = forms::list_from_vec_locs(heap, &[(ctor_sym, None)])?;
         let call = forms::rooted(heap, call);
         forms::list_from_vec_locs(heap, &[(the, None), (ty_form, None), (call, None)])
