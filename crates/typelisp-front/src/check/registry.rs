@@ -1035,22 +1035,22 @@ impl Registry {
 
     /// Look up a type by its fully-qualified [`Path`] (e.g. `geo::point`).
     pub fn type_def(&self, path: &Path) -> Option<&AdtDef> {
-        self.root.module(path.parent())?.types.get(path.last_segment())
+        self.root.module(&path.parent())?.types.get(path.last_segment())
     }
 
     /// Mutable lookup of a type by its fully-qualified [`Path`].
     pub fn type_def_mut(&mut self, path: &Path) -> Option<&mut AdtDef> {
-        self.root.module_mut(path.parent()).types.get_mut(path.last_segment())
+        self.root.module_mut(&path.parent()).types.get_mut(path.last_segment())
     }
 
     /// Look up a free function by its fully-qualified [`Path`].
     pub fn fn_sig(&self, path: &Path) -> Option<&FnSig> {
-        self.root.module(path.parent())?.fns.get(path.last_segment())
+        self.root.module(&path.parent())?.fns.get(path.last_segment())
     }
 
     /// Look up a `deftrait` by its fully-qualified [`Path`].
     pub fn trait_def(&self, path: &Path) -> Option<&TraitDef> {
-        self.root.module(path.parent())?.traits.get(path.last_segment())
+        self.root.module(&path.parent())?.traits.get(path.last_segment())
     }
 
     /// Resolve `method` against `tdef` *including inherited methods*,
@@ -3055,7 +3055,7 @@ fn tvar(name: &str) -> Type {
 /// The symbol a definition's path names it by: its last segment, read in the
 /// module the rest of the path names.
 pub fn definition_symbol(path: &Path) -> typelisp_mem::SymRef {
-    typelisp_mem::symbols::intern_in(typelisp_mem::symbols::ns_of(path.parent()), path.last_segment())
+    typelisp_mem::symbols::intern_in(typelisp_mem::symbols::ns_of(&path.parent()), path.last_segment())
 }
 
 impl Registry {
@@ -3089,7 +3089,7 @@ impl Registry {
 fn publish_type(def: &AdtDef, names: &mut typelisp_mem::symbols::SessionNames) {
     let ty = definition_symbol(&def.name);
     names.declare_type(ty);
-    let home = typelisp_mem::symbols::ns_of(def.name.parent());
+    let home = typelisp_mem::symbols::ns_of(&def.name.parent());
     let members = def
         .variants
         .iter()
@@ -3106,7 +3106,7 @@ fn publish_type(def: &AdtDef, names: &mut typelisp_mem::symbols::SessionNames) {
 fn publish_trait(def: &TraitDef, names: &mut typelisp_mem::symbols::SessionNames) {
     let tr = definition_symbol(&def.name);
     names.declare_type(tr);
-    let home = typelisp_mem::symbols::ns_of(def.name.parent());
+    let home = typelisp_mem::symbols::ns_of(&def.name.parent());
     for name in def.methods.keys() {
         names.declare_member(tr, typelisp_mem::symbols::intern_in(home, name));
     }

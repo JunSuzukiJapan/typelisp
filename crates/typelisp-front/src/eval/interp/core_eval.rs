@@ -1795,7 +1795,7 @@ impl Interp {
                 };
                 self.root
                     .borrow_mut()
-                    .get_or_create(type_name.parent())
+                    .get_or_create(&type_name.parent())
                     .methods
                     .insert((type_name.last_segment().to_string(), method), Rc::new(def));
                 self.printer_tables_changed();
@@ -1838,7 +1838,7 @@ impl Interp {
                 };
                 self.root
                     .borrow_mut()
-                    .get_or_create(name.parent())
+                    .get_or_create(&name.parent())
                     .fns
                     .insert(name.last_segment().to_string(), Rc::new(def));
                 Ok(None)
@@ -1871,7 +1871,7 @@ impl Interp {
                 let slot = self.slot(&mut s, v);
                 self.root
                     .borrow_mut()
-                    .get_or_create(name.parent())
+                    .get_or_create(&name.parent())
                     .globals
                     .insert(name.last_segment().to_string(), slot);
                 drop(s);
@@ -1900,7 +1900,7 @@ impl Interp {
                         names.len()
                     )));
                 }
-                self.root.borrow_mut().get_or_create(name.parent()).types.insert(
+                self.root.borrow_mut().get_or_create(&name.parent()).types.insert(
                     name.last_segment().to_string(),
                     scope::TypeEntry::Struct {
                         reprs: fields,
@@ -1964,7 +1964,7 @@ impl Interp {
             // that outlives this call. The module's own spine does not.
             "module" => {
                 let path = path_field(heap, tl, 0, "module")?;
-                self.root.borrow_mut().get_or_create(path.segments());
+                self.root.borrow_mut().get_or_create(&path.segments());
                 let body = body_forms(heap, tl, 1, "module")?;
                 let mut s = RootScope::new(heap);
                 s.push_root(tl);
@@ -2011,7 +2011,7 @@ impl Interp {
                 };
                 self.root
                     .borrow_mut()
-                    .get_or_create(name.parent())
+                    .get_or_create(&name.parent())
                     .fns
                     .insert(name.last_segment().to_string(), Rc::new(def));
                 Ok(None)
@@ -2122,7 +2122,7 @@ impl Interp {
             FnDef { ffi: false, name: name.to_string(), params, body, rest, lambda, sig: Some((param_reprs, ret)), compiled: RefCell::new(None) };
         self.root
             .borrow_mut()
-            .get_or_create(name.parent())
+            .get_or_create(&name.parent())
             .fns
             .insert(name.last_segment().to_string(), Rc::new(def));
     }

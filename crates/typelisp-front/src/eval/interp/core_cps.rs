@@ -2114,7 +2114,7 @@ impl Interp {
                 };
                 self.root
                     .borrow_mut()
-                    .get_or_create(path.parent())
+                    .get_or_create(&path.parent())
                     .fns
                     .insert(path.last_segment().to_string(), Rc::new(def));
                 self.thread_entries.borrow_mut().insert(key, path.clone());

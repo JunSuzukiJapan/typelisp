@@ -260,7 +260,7 @@ impl Checker {
                 }
             }
         }
-        self.resolve_c_struct_segs(path.segments())
+        self.resolve_c_struct_segs(&path.segments())
     }
 
     fn resolve_c_struct_segs(&self, segs: &[String]) -> Option<CStructDef> {

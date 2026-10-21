@@ -1055,6 +1055,16 @@ pub fn intern_at_home(ns: NsId, name: &str) -> SymRef {
     t.create(ns, &key, NOT_WELL_KNOWN)
 }
 
+/// What `name` reads as in `ns` by [`intern_in`]'s rule, with `name` taken
+/// exactly as given rather than folded to lowercase.
+///
+/// For a definition's name, which the compiler may build with characters a
+/// reader never produces (a specialization's `name <args>`): folding would
+/// turn two definitions into one.
+pub fn intern_exact(ns: NsId, name: &str) -> SymRef {
+    table().read(ns, name)
+}
+
 /// [`intern_at_home`] for a home given as segments from the root.
 pub fn intern_at_home_path(segments: &[String], name: &str) -> SymRef {
     intern_at_home(ns_of(segments), name)

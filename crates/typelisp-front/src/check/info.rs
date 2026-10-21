@@ -320,7 +320,7 @@ impl Info {
     /// function or constructor "doesn't resolve" instead of erroring with a
     /// privacy-specific message.
     pub(super) fn assoc_visible(&self, type_fq: &Path, af: &AssocFn) -> bool {
-        af.sig.public || self.in_scope(type_fq.parent())
+        af.sig.public || self.in_scope(&type_fq.parent())
     }
 
     /// Locate a child-module `path`, resolving it relative to the current
@@ -618,7 +618,7 @@ impl Info {
             }
             return self.find_on_chain(|_, m| m.type_aliases.get(name).cloned());
         }
-        self.resolve_type_alias_path(path.segments())
+        self.resolve_type_alias_path(&path.segments())
     }
 
     /// [`Self::resolve_type_alias`] for a `module::...::Name` segment path.
@@ -637,7 +637,7 @@ impl Info {
         if path.is_simple() {
             return self.resolve_bare_type(path.last_segment()).unwrap_or_else(|| path.clone());
         }
-        self.resolve_type_path(path.segments()).unwrap_or_else(|| path.clone())
+        self.resolve_type_path(&path.segments()).unwrap_or_else(|| path.clone())
     }
 
     /// The global a bare name holds, if what it holds is a variable — see
@@ -682,7 +682,7 @@ impl Info {
         }
         self.reg
             .root
-            .module(p.parent())
+            .module(&p.parent())
             .and_then(|m| m.traits.get(p.last_segment()))
             .map(|td| td.name.clone())
     }

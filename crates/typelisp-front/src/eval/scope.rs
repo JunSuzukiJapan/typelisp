@@ -118,7 +118,7 @@ impl ModuleScope {
     /// error types, which are registered with the checker but never `exec`'d)
     /// call this rather than inserting into `types` themselves.
     pub(crate) fn register_enum(&mut self, name: &Path, def: EnumDef) {
-        self.get_or_create(name.parent()).types.insert(name.last_segment().to_string(), TypeEntry::Enum(def));
+        self.get_or_create(&name.parent()).types.insert(name.last_segment().to_string(), TypeEntry::Enum(def));
     }
 
     /// The type registered at `name`, walking down the module chain directly
@@ -129,7 +129,7 @@ impl ModuleScope {
         let unknown = || format!("internal error: no type `{}` is registered", name);
         let mut ns = self;
         for seg in name.parent() {
-            ns = ns.children.get(seg).ok_or_else(unknown)?;
+            ns = ns.children.get(&seg).ok_or_else(unknown)?;
         }
         ns.types.get(name.last_segment()).ok_or_else(unknown)
     }
@@ -206,7 +206,7 @@ impl ModuleScope {
     /// search for: `MacroExpander::expand_macro`'s checker-driven lookup,
     /// and the JIT/SCC machinery's "is this already compiled" checks.
     pub fn get_fn(&self, path: &Path) -> Option<Rc<FnDef>> {
-        self.find(path.parent())?.fns.get(path.last_segment()).cloned()
+        self.find(&path.parent())?.fns.get(path.last_segment()).cloned()
     }
 
     /// A global's own `Slot`, found by direct descent to its already-fully-
@@ -215,12 +215,12 @@ impl ModuleScope {
     /// result, i.e. an already-resolved absolute path, never a bare name to
     /// search for).
     pub(crate) fn get_global(&self, path: &Path) -> Option<Slot> {
-        self.find(path.parent())?.globals.get(path.last_segment()).cloned()
+        self.find(&path.parent())?.globals.get(path.last_segment()).cloned()
     }
 
     /// [`Self::get_fn`]'s twin for a `(type, method)` pair.
     pub fn get_method(&self, type_name: &Path, method: &str) -> Option<Rc<FnDef>> {
-        self.find(type_name.parent())?.methods.get(&(type_name.last_segment().to_string(), method.to_string())).cloned()
+        self.find(&type_name.parent())?.methods.get(&(type_name.last_segment().to_string(), method.to_string())).cloned()
     }
 
     /// Whether `path`'s `FnDef` already has a JIT/AOT-compiled form — the

@@ -1703,7 +1703,7 @@ impl Checker {
             Ok((specs, tl)) if specs.is_empty() && lifted.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
                 for l in lifted {
-                    self.info.reg.root.module_mut(l.path.parent()).fns.insert(l.path.last_segment().to_string(), l.sig);
+                    self.info.reg.root.module_mut(&l.path.parent()).fns.insert(l.path.last_segment().to_string(), l.sig);
                     specs.push(l.form);
                 }
                 specs.push(tl);
@@ -3617,7 +3617,7 @@ impl Checker {
     /// [`Self::drain_specializations`], because this runs inside expression
     /// checking (`&self`) which cannot re-enter definition checking.
     fn request_fn_specialization(&self, base: &Path, args: Vec<Type>) -> Path {
-        let mangled = Path::from_segments(ConcreteNames::specialized_path(base.segments(), &args));
+        let mangled = Path::from_segments(ConcreteNames::specialized_path(&base.segments(), &args));
         let mut memo = self.spec_memo.borrow_mut();
         if memo.insert((mangled.clone(), None)) {
             self.spec_pending.borrow_mut().push(SpecRequest::Fn {

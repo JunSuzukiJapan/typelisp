@@ -42,12 +42,13 @@ use typelisp_mem::{ConcreteNames, TypeKey};
 /// How `p` is spelled when interned as (or looked up among) type identities.
 /// The one place a type identity *name* is produced.
 ///
-/// Borrowed for a single-segment path — the common case, and the one where
+/// Borrowed for a root-level name — the common case, and the one where
 /// joining would allocate a copy of a string that already exists.
-pub fn type_key_of(p: &Path) -> Cow<'_, str> {
-    match p.segments() {
-        [only] => Cow::Borrowed(only.as_str()),
-        segs => Cow::Owned(segs.join("::")),
+pub fn type_key_of(p: &Path) -> Cow<'static, str> {
+    if p.is_simple() {
+        Cow::Borrowed(p.last_segment())
+    } else {
+        Cow::Owned(p.segments().join("::"))
     }
 }
 

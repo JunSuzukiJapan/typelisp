@@ -13,6 +13,7 @@
 use std::fmt;
 
 use crate::{wk, Error, Heap, Loc, PathId, SymRef, Value};
+use typelisp_mem::symbols::{self, NsId};
 
 /// The standard library's module, the root's child `std`: the prelude, the
 /// natives and the core macro layer are defined in it.
@@ -33,65 +34,87 @@ pub fn internal_module_segments() -> Vec<String> {
     vec![STD_MODULE.to_string(), INTERNAL_MODULE.to_string()]
 }
 
-/// A structured, fully-qualified path identifying a type, free function, or
-/// module — a sequence of lowercase segments (e.g. `geo::point` is
-/// `["geo", "point"]`). Used instead of a joined `"a::b"` string so identity is
-/// never re-parsed; the only place `::` strings are split is the reader/parser
-/// (surface syntax). A single-segment path is also how type *variables* and
-/// root-level names are represented.
-/// `Ord` so a `Path`-keyed table can be a `BTreeMap`: several of the
-/// registry's are, because a dump hashes what a table *would serialize to* to
-/// decide what changed, and a `HashMap` serializes in an order that differs
-/// run to run (`std`'s `RandomState`) — which would make every entry look
-/// modified.
-#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, serde::Serialize, serde::Deserialize)]
-pub struct Path(Vec<String>);
+/// The name of a definition: the module it is in and the symbol its name
+/// reads as there.
+///
+/// Compared by pointer: two paths are the same when their modules are the
+/// same node of the module tree ([`NsId`]) and their names the same symbol.
+/// A module's symbol table never changes what a name already reads as, so a
+/// path built twice from the same segments is the same path. The segments
+/// (`geo::point` is `["geo", "point"]`) are not stored; they are read back
+/// from the tree, for display and for writing a path out of the process.
+///
+/// `Ord` compares the segments, so a `Path`-keyed table can be a `BTreeMap`
+/// whose order is the same in every run: several of the registry's are,
+/// because a dump hashes what a table *would serialize to* to decide what
+/// changed, and an order that differs run to run (a `HashMap`'s, or the
+/// symbols' addresses) would make every entry look modified.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Path {
+    ns: NsId,
+    name: SymRef,
+}
 
 impl Path {
-    /// Build a path from explicit segments.
-    pub fn of(segments: &[&str]) -> Path {
-        Path(segments.iter().map(|s| s.to_string()).collect())
+    /// `name` in the module `ns`.
+    pub fn in_ns(ns: NsId, name: &str) -> Path {
+        Path { ns, name: symbols::intern_exact(ns, name) }
     }
 
-    /// A single-segment path (a root-level name or a type variable).
+    /// Build a path from explicit segments.
+    pub fn of(segments: &[&str]) -> Path {
+        let (name, modules) = segments.split_last().expect("a path must have at least one segment");
+        Path::in_ns(module_ns(modules.iter().copied()), name)
+    }
+
+    /// A root-level name.
     pub fn root(name: &str) -> Path {
-        Path(vec![name.to_string()])
+        Path::in_ns(NsId::ROOT, name)
     }
 
     /// `name` inside the library's internal module (`std::%internal`).
     pub fn internal(name: &str) -> Path {
-        Path(vec![STD_MODULE.to_string(), INTERNAL_MODULE.to_string(), name.to_string()])
+        Path::in_ns(internal_ns(), name)
     }
 
     /// `name` inside the standard library's module, `std::name`.
     pub fn std(name: &str) -> Path {
-        Path(vec![STD_MODULE.to_string(), name.to_string()])
+        Path::in_ns(NsId::STD, name)
     }
 
     /// The name of the free builtin this path names, if it names one where
     /// builtins are registered: `std::name` or `std::%internal::name`. The
     /// same last segment anywhere else is somebody's own definition.
-    pub fn std_builtin_name(&self) -> Option<&str> {
-        match self.0.as_slice() {
-            [s, name] if s == STD_MODULE => Some(name),
-            [s, i, name] if s == STD_MODULE && i == INTERNAL_MODULE => Some(name),
-            _ => None,
-        }
+    pub fn std_builtin_name(&self) -> Option<&'static str> {
+        (self.ns == NsId::STD || self.ns == internal_ns()).then(|| self.last_segment())
     }
 
     /// Whether this path is directly inside the library's internal module.
     pub fn is_internal(&self) -> bool {
-        matches!(self.0.as_slice(), [s, i, _] if s == STD_MODULE && i == INTERNAL_MODULE)
+        self.ns == internal_ns()
     }
 
     /// Build a path from owned segments (must be non-empty).
     pub fn from_segments(segments: Vec<String>) -> Path {
-        debug_assert!(!segments.is_empty(), "a path must have at least one segment");
-        Path(segments)
+        let (name, modules) = segments.split_last().expect("a path must have at least one segment");
+        Path::in_ns(module_ns(modules.iter().map(String::as_str)), name)
     }
 
-    pub fn segments(&self) -> &[String] {
-        &self.0
+    /// The segments from the root: the module's, then the name.
+    pub fn segments(&self) -> Vec<String> {
+        let mut segs = symbols::ns_path(self.ns);
+        segs.push(self.last_segment().to_string());
+        segs
+    }
+
+    /// The module the definition is in.
+    pub fn ns(&self) -> NsId {
+        self.ns
+    }
+
+    /// The symbol the name reads as in [`Self::ns`].
+    pub fn name_symbol(&self) -> SymRef {
+        self.name
     }
 
     /// The final segment on its own — **not** the type's identity.
@@ -102,30 +125,93 @@ impl Path {
     /// `crate::type_key`), so this is deliberately named after what it
     /// returns rather than "the local name". Legitimate uses are name-table
     /// lookups paired with [`Path::parent`] (a module's tables are keyed by
-    /// last segment), type-*variable* names (single-segment by construction),
-    /// and display/derived names.
+    /// last segment), and display/derived names.
     ///
     /// To ask "is this the built-in `X`?" use [`path_is_builtin`]; to spell a
     /// type's runtime identity use `crate::type_key::type_key_of`.
-    pub fn last_segment(&self) -> &str {
-        self.0.last().expect("a path has at least one segment")
+    pub fn last_segment(&self) -> &'static str {
+        self.name.name()
     }
 
-    /// The module prefix (everything but the final segment).
-    pub fn parent(&self) -> &[String] {
-        &self.0[..self.0.len() - 1]
+    /// The module's segments (everything but the final segment).
+    pub fn parent(&self) -> Vec<String> {
+        symbols::ns_path(self.ns)
     }
 
     /// Extend the path with another segment.
     pub fn child(&self, name: &str) -> Path {
-        let mut segments = self.0.clone();
-        segments.push(name.to_string());
-        Path(segments)
+        Path::in_ns(symbols::child_ns(self.ns, self.last_segment()), name)
     }
 
-    /// True for a single-segment path (a root name or type variable).
+    /// True for a root-level name.
     pub fn is_simple(&self) -> bool {
-        self.0.len() == 1
+        self.ns == NsId::ROOT
+    }
+}
+
+/// The module `segments` names from the root. A module's segments are names
+/// the reader wrote, which are already lowercase.
+fn module_ns<'a>(segments: impl Iterator<Item = &'a str>) -> NsId {
+    let mut ns = NsId::ROOT;
+    for seg in segments {
+        debug_assert!(seg.chars().all(|c| !c.is_uppercase()), "module segment `{}` is not lowercase", seg);
+        ns = symbols::child_ns(ns, seg);
+    }
+    ns
+}
+
+/// The library's internal module, `std::%internal`.
+fn internal_ns() -> NsId {
+    static NS: std::sync::OnceLock<NsId> = std::sync::OnceLock::new();
+    *NS.get_or_init(|| symbols::child_ns(NsId::STD, INTERNAL_MODULE))
+}
+
+impl PartialOrd for Path {
+    fn partial_cmp(&self, other: &Path) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Path {
+    fn cmp(&self, other: &Path) -> std::cmp::Ordering {
+        if self == other {
+            return std::cmp::Ordering::Equal;
+        }
+        self.segments().cmp(&other.segments())
+    }
+}
+
+impl fmt::Debug for Path {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Path").field(&self.segments()).finish()
+    }
+}
+
+/// Written out as its segments, the one form that means the same thing in
+/// another process.
+impl serde::Serialize for Path {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_newtype_struct("Path", &self.segments())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Path {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Path, D::Error> {
+        struct Segments;
+        impl<'de> serde::de::Visitor<'de> for Segments {
+            type Value = Path;
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "a path's segments")
+            }
+            fn visit_newtype_struct<D: serde::Deserializer<'de>>(self, d: D) -> Result<Path, D::Error> {
+                let segs: Vec<String> = serde::Deserialize::deserialize(d)?;
+                if segs.is_empty() {
+                    return Err(serde::de::Error::custom("a path with no segments"));
+                }
+                Ok(Path::from_segments(segs))
+            }
+        }
+        d.deserialize_newtype_struct("Path", Segments)
     }
 }
 
@@ -134,7 +220,7 @@ impl Path {
 /// registry key, an error message) uses this, never [`Path::last_segment`].
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.0.join("::"))
+        write!(f, "{}", self.segments().join("::"))
     }
 }
 
