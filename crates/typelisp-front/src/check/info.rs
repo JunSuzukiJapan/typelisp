@@ -208,7 +208,7 @@ pub(super) struct Info {
     ///
     /// A `RefCell` because expression checking is `&self` — the whole reason
     /// `macrolet` needed a table of its own rather than the registry's.
-    pub(super) local_macros: RefCell<Vec<HashMap<String, (Path, MacroShape)>>>,
+    local_macros: RefCell<Vec<HashMap<String, (Path, MacroShape)>>>,
     /// `symbol-macrolet` scopes, innermost last: name -> the form the name
     /// stands for.
     ///
@@ -218,7 +218,7 @@ pub(super) struct Info {
     /// symbol macro hides an outer variable (it rebinds the name to the
     /// mark) — which is exactly CL's rule, arrived at by the environment
     /// doing what it already does.
-    pub(super) local_symbol_macros: RefCell<Vec<HashMap<String, Value>>>,
+    local_symbol_macros: RefCell<Vec<HashMap<String, Value>>>,
 }
 
 impl Info {
@@ -473,6 +473,35 @@ impl Info {
             (path, ModuleEntry::Macro { shape, .. }) => Some((path, shape)),
             (_, ModuleEntry::Value(_)) => None,
         }
+    }
+
+    /// Runs `body` with `scope`'s `macrolet` bindings in view, innermost.
+    pub(super) fn with_local_macros<R>(&self, scope: HashMap<String, (Path, MacroShape)>, body: impl FnOnce() -> R) -> R {
+        self.local_macros.borrow_mut().push(scope);
+        let result = body();
+        self.local_macros.borrow_mut().pop();
+        result
+    }
+
+    /// Runs `body` with `scope`'s `symbol-macrolet` bindings in view,
+    /// innermost. The forms are heap values this table holds where the
+    /// collector cannot see them, so the caller roots them for as long.
+    pub(super) fn with_symbol_macros<R>(&self, scope: HashMap<String, Value>, body: impl FnOnce() -> R) -> R {
+        self.local_symbol_macros.borrow_mut().push(scope);
+        let result = body();
+        self.local_symbol_macros.borrow_mut().pop();
+        result
+    }
+
+    /// The form `name` stands for, if a `symbol-macrolet` scope in view binds
+    /// it. Innermost scope first, the way `Env` itself resolves.
+    pub(super) fn symbol_macro_form(&self, name: &str) -> Option<Value> {
+        for scope in self.local_symbol_macros.borrow().iter().rev() {
+            if let Some(form) = scope.get(name) {
+                return Some(*form);
+            }
+        }
+        None
     }
 
     /// Resolve a module-qualified macro name (`mod::macro-name`) to its

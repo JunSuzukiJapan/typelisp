@@ -9399,7 +9399,7 @@ impl Checker {
                     // the use site's own environment (CL's rule — the
                     // expansion is not closed over the binding site).
                     if *t == symbol_macro_mark() {
-                        let Some(form) = self.symbol_macro_form(name) else {
+                        let Some(form) = self.info.symbol_macro_form(name) else {
                             return Err(Error::TypeError(format!(
                                 "symbol macro `{}` has no expansion in scope",
                                 name
@@ -10070,9 +10070,9 @@ impl Checker {
             installed.map_err(|e| Error::TypeError(format!("macrolet `{}`: {}", name, e)))?;
             scope.insert(name, (path, shape));
         }
-        self.info.local_macros.borrow_mut().push(scope);
-        let result = self.check_seq(heap, interp, env, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected);
-        self.info.local_macros.borrow_mut().pop();
+        let result = self.info.with_local_macros(scope, || {
+            self.check_seq(heap, interp, env, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected)
+        });
         let (body, ty) = result?;
         Ok(Checked::of(Node::Let { binds: Vec::new(), body }, ty))
     }
@@ -10132,26 +10132,16 @@ impl Checker {
             heap.push_root(*form);
         }
         let n = scope.len();
-        self.info.local_symbol_macros.borrow_mut().push(scope);
-        let child = env.extended(binds)?;
-        let result = self.check_seq(heap, interp, &child, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected);
-        self.info.local_symbol_macros.borrow_mut().pop();
+        let result = env.extended(binds).and_then(|child| {
+            self.info.with_symbol_macros(scope, || {
+                self.check_seq(heap, interp, &child, &args[1..], arg_locs.get(1..).unwrap_or(&[]), expected)
+            })
+        });
         for _ in 0..n {
             heap.pop_root();
         }
         let (body, ty) = result?;
         Ok(Checked::of(Node::Let { binds: Vec::new(), body }, ty))
-    }
-
-    /// The form `name` stands for, if a `symbol-macrolet` scope in view binds
-    /// it. Innermost scope first, the way `Env` itself resolves.
-    fn symbol_macro_form(&self, name: &str) -> Option<Value> {
-        for scope in self.info.local_symbol_macros.borrow().iter().rev() {
-            if let Some(form) = scope.get(name) {
-                return Some(*form);
-            }
-        }
-        None
     }
 
     /// `(labels ((name (params) ret body...)...) body...)`: like several
@@ -12443,7 +12433,7 @@ impl Checker {
             // the *form* it stands for — CL says so, and it is the reason the
             // form exists: an alias you can only read is a `let`.
             if ty == symbol_macro_mark() {
-                let Some(place) = self.symbol_macro_form(&name) else {
+                let Some(place) = self.info.symbol_macro_form(&name) else {
                     return Err(Error::TypeError(format!(
                         "symbol macro `{}` has no expansion in scope",
                         name
