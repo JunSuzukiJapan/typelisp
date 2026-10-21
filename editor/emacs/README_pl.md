@@ -157,7 +157,7 @@ cargo test --test editor_keyword_sync_test
 
 Faktycznie ładuje prelude, przechodzi po rejestrze i zgłasza **nazwy, których któryś z edytorów nie
 zna**. Formy specjalne nie mają reprezentacji w czasie działania, więc są odczytywane spomiędzy
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` w `crates/typelisp-front/src/check/checker.rs` (nie usuwaj
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` w `crates/typelisp-front/src/check/analyze.rs` (nie usuwaj
 tych komentarzy). Jeśli test zawiedzie, dodaj zgłoszone nazwy do **obu** definicji edytorów.
 
 Ten sam test porównuje także legendę tokenów semantycznych (`SEMANTIC_TOKEN_TYPES` w

@@ -141,7 +141,7 @@ cargo test --test editor_keyword_sync_test
 ```
 
 它实际加载 prelude，遍历注册表，报告**任一编辑器不认识的名字**。
-特殊形式没有运行时表示，因此从 `crates/typelisp-front/src/check/checker.rs` 中
+特殊形式没有运行时表示，因此从 `crates/typelisp-front/src/check/analyze.rs` 中
 `// SPECIAL-FORM DISPATCH BEGIN` / `END` 之间读取（不要删除这些注释）。
 失败时，把报告的名字加到**两个**编辑器定义中。
 

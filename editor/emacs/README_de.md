@@ -161,7 +161,7 @@ cargo test --test editor_keyword_sync_test
 
 Er lädt tatsächlich das Prelude, durchläuft die Registry und meldet **Namen, die einer der beiden
 Editoren nicht kennt**. Spezialformen haben keine Laufzeitdarstellung, daher werden sie zwischen
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` in `crates/typelisp-front/src/check/checker.rs` gelesen
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` in `crates/typelisp-front/src/check/analyze.rs` gelesen
 (diese Kommentare nicht löschen). Schlägt er fehl, die gemeldeten Namen in **beide**
 Editordefinitionen eintragen.
 

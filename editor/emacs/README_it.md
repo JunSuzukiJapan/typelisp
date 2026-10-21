@@ -159,7 +159,7 @@ cargo test --test editor_keyword_sync_test
 
 Carica davvero il prelude, percorre il registro e segnala **i nomi che uno dei due editor non
 conosce**. Le forme speciali non hanno una rappresentazione a runtime, quindi vengono lette tra
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` in `crates/typelisp-front/src/check/checker.rs` (non
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` in `crates/typelisp-front/src/check/analyze.rs` (non
 cancellare questi commenti). Se il test fallisce, aggiungi i nomi segnalati a **entrambe** le
 definizioni degli editor.
 

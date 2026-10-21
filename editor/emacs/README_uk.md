@@ -155,7 +155,7 @@ cargo test --test editor_keyword_sync_test
 
 Він справді завантажує prelude, обходить реєстр і повідомляє про **імена, яких не знає котрийсь із
 редакторів**. Спеціальні форми не мають представлення під час виконання, тому їх читають між
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` у `crates/typelisp-front/src/check/checker.rs` (не видаляйте ці
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` у `crates/typelisp-front/src/check/analyze.rs` (не видаляйте ці
 коментарі). Якщо тест падає, додайте названі імена до **обох** визначень редакторів.
 
 Той самий тест порівнює також легенду семантичних токенів (`SEMANTIC_TOKEN_TYPES` у

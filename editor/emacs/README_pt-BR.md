@@ -160,7 +160,7 @@ cargo test --test editor_keyword_sync_test
 
 Ele carrega de fato o prelude, percorre o registro e informa **os nomes que algum dos editores não
 conhece**. Formas especiais não têm representação em tempo de execução, então são lidas de entre
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` em `crates/typelisp-front/src/check/checker.rs` (não apague
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` em `crates/typelisp-front/src/check/analyze.rs` (não apague
 esses comentários). Se falhar, adicione os nomes informados a **ambas** as definições de editor.
 
 O mesmo teste também compara a legenda de semantic tokens (`SEMANTIC_TOKEN_TYPES` em

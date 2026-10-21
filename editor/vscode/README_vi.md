@@ -1,4 +1,4 @@
-<!-- translated-from: editor/vscode/README_JP.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: editor/vscode/README_JP.md @ 780f6990794a89e31342008f3f37a55a97f150f9 -->
 # typelisp (VS Code)
 
 Một phần mở rộng VS Code để soạn thảo mã nguồn typelisp (`.typl`).

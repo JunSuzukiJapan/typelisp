@@ -152,7 +152,7 @@ cargo test --test editor_keyword_sync_test
 
 Nó thực sự nạp prelude, duyệt registry, và báo cáo **các tên mà một trong hai trình soạn thảo không biết**. Các
 dạng đặc biệt không có biểu diễn lúc chạy, nên chúng được đọc từ giữa `// SPECIAL-FORM DISPATCH BEGIN` / `END`
-trong `crates/typelisp-front/src/check/checker.rs` (đừng xóa các chú thích này). Nếu nó thất bại, hãy thêm các
+trong `crates/typelisp-front/src/check/analyze.rs` (đừng xóa các chú thích này). Nếu nó thất bại, hãy thêm các
 tên được báo vào **cả hai** định nghĩa trình soạn thảo.
 
 Cùng bài kiểm thử đó cũng so sánh chú giải semantic token (`SEMANTIC_TOKEN_TYPES` trong `src/bin/lsp.rs` và các

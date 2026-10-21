@@ -141,7 +141,7 @@ cargo test --test editor_keyword_sync_test
 ```
 
 它實際載入 prelude，走訪登錄表，回報**任一編輯器不認識的名稱**。
-特殊形式沒有執行期表示，因此從 `crates/typelisp-front/src/check/checker.rs` 中
+特殊形式沒有執行期表示，因此從 `crates/typelisp-front/src/check/analyze.rs` 中
 `// SPECIAL-FORM DISPATCH BEGIN` / `END` 之間讀取（不要刪除這些註解）。
 失敗時，把回報的名稱加到**兩個**編輯器定義中。
 
