@@ -1,4 +1,4 @@
-<!-- translated-from: editor/emacs/README_JP.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: editor/emacs/README_JP.md @ 3923ee05f35c6e43363c5615e3f6ca914df05f47 -->
 # typelisp-mode (Emacs)
 
 typelisp 소스(`.typl`)를 편집하기 위한 Emacs 메이저 모드입니다.
