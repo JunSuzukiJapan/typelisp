@@ -61,6 +61,7 @@ fn a_literal_past_63_bits_is_an_int_bignum_in_both_tiers() {
 fn int_typed_builtins_cross_the_boundary_in_both_tiers() {
     const DEFS: &str = r#"
         (defun len ((s string)) int (length s))
+        (shadow sub)
         (defun sub ((s string) (a int) (b int)) string (substring s a b))
         (defun at ((s string) (i int)) char (ref s i))
         (defun code ((c char)) int (char->int c))

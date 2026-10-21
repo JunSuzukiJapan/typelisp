@@ -3820,7 +3820,7 @@ fn compile_of_a_user_function_spelled_like_a_builtin_calls_the_users_function() 
     let v = eval_ok_with_compiler(
         r#"
         (defun stream-describe ((h i32)) int 40)
-        (module m (pub defun getenv ((s string)) int 2))
+        (module m (shadow getenv) (pub defun getenv ((s string)) int 2))
         (defun both () int (+ (stream-describe 7) (m::getenv "x")))
         (compile both)
         (both)
@@ -5643,6 +5643,7 @@ fn compile_indexes_inherited_vtable_slots_before_the_subtraits_own() {
         (deftrait Base ()
           (base-a ((self Self)) int)
           (base-b ((self Self)) int))
+        (shadow sub)
         (deftrait Sub (Base)
           (sub-c ((self Self)) int))
         (defstruct tri (n int))
@@ -6056,6 +6057,7 @@ fn a_module_type_named_vector_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
+          (shadow vector)
           (pub defstruct vector (pub a int))
           (impl vector (pub len (self) int (* 100 self::a)))
           (pub defun call-len ((v vector)) int (len v)))
@@ -6074,6 +6076,7 @@ fn a_module_type_named_hashtable_keeps_its_own_methods_when_compiled() {
     let v = run_with_compiler_and_prelude(
         r#"
         (module m
+          (shadow hashtable)
           (pub defstruct hashtable (pub a int) (pub b int))
           (impl hashtable (pub count (self) int (+ self::a self::b)))
           (pub defun call-count ((h hashtable)) int (count h)))

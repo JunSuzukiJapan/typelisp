@@ -996,6 +996,25 @@ fn note_use(heap: &mut Heap, ctx: Ctx<'_>, elems: &[Value]) -> Result<(), Error>
     }
 }
 
+/// A `(shadow name...)` form's latest name: made the module's own as soon as
+/// it has been read, so the rest of the module reads it so, and put in the
+/// form as that symbol.
+fn note_shadow(heap: &mut Heap, ns: NsId, elems: &mut [Value]) -> Result<(), Error> {
+    let [Value::Symbol(head), .., last] = elems else { return Ok(()) };
+    if !head.is(wk::SHADOW) {
+        return Ok(());
+    }
+    let Value::Symbol(name) = *last else {
+        return Err(Error::ReadError("shadow: expected names".to_string()));
+    };
+    if name.is_keyword() {
+        return Err(Error::ReadError(format!("shadow: `{}` is a keyword, which no module can make its own", name.spelling())));
+    }
+    let own = heap.names().shadow(ns, name.name()).map_err(Error::ReadError)?;
+    *last = Value::Symbol(own);
+    Ok(())
+}
+
 /// Whether `v` is a list headed by the vocabulary entry `marker`.
 fn is_marked(heap: &Heap, v: Value, marker: u32) -> bool {
     matches!(heap.car(v), Ok(Value::Symbol(s)) if s.is(marker))
@@ -1140,6 +1159,10 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
                     }
                 }
                 if ctx.toplevel {
+                    if let Err(err) = note_shadow(heap, ctx.ns, &mut elems) {
+                        restore_roots(heap, mark);
+                        return Err(err);
+                    }
                     note_definition(heap, ctx.ns, &elems);
                     if let Err(err) = note_use(heap, ctx, &elems) {
                         restore_roots(heap, mark);

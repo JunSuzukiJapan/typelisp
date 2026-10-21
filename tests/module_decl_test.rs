@@ -6,9 +6,10 @@
 //! already *is* a module (its path derives one), so there is nothing for a
 //! form to select, and what a form can usefully do — nest further — is a
 //! module operation and carries a module's name. And an import brings in one
-//! named item rather than a package's whole exported set, so CL's `shadow`
-//! and `unuse-package`, which exist to manage bulk inheritance, have nothing
-//! to manage. See docs/dev/cl-parity-plan.md Stage 9a.
+//! named item rather than a package's whole exported set, so CL's
+//! `unuse-package`, which exists to manage bulk inheritance, has nothing to
+//! manage. See docs/dev/cl-parity-plan.md Stage 9a. (`shadow` does exist, for
+//! the names the standard library offers every module: tests/shadow_test.rs.)
 
 use std::path::PathBuf;
 

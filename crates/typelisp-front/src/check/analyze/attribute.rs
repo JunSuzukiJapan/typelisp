@@ -80,10 +80,12 @@ impl Checker {
             && !crate::project::needs_immediate_exec(heap, tl)
     }
 
-    /// A top-level form that does nothing: the module being checked, with
-    /// nothing in it. What a left-out form is checked into.
+    /// A top-level form that does nothing: an empty group, labelled with a
+    /// name in the module being checked (a `Path` names something in a
+    /// module, so it cannot name the root module itself). What a left-out
+    /// form is checked into.
     pub(super) fn nothing_form(&self, heap: &mut Heap) -> Result<TopLevelForm, Error> {
-        forms::module_form(heap, &Path::from_segments(self.info.ns.clone()), &[])
+        forms::module_form(heap, &self.info.fq("nothing"), &[])
     }
 
     /// `(%internal::attribute (ATTR...) FORM)`.

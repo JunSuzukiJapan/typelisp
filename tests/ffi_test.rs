@@ -529,7 +529,7 @@ fn a_declaration_in_a_module_may_share_a_builtin_s_name() {
     assert_eq!(
         int(
             r#"
-            (module m (pub defffi (sexpr-car "abs") (i32) i32))
+            (module m (shadow sexpr-car) (pub defffi (sexpr-car "abs") (i32) i32))
             (defun f ((n i32)) i32 (unsafe (m::sexpr-car n)))
             (compile f)
             (f -7)

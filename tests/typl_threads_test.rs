@@ -305,6 +305,7 @@ fn an_interpreted_thread_runs_its_callee_compiled_on_its_own_thread() {
     same_on_one_and_four_threads(
         "typl_interpreted_thread",
         r#"(defun whoami () int (Thread::current-id))
+           (shadow add)
            (defun add ((a int) (b int)) int (+ a b))
            (defun positive ((a int)) bool (> a 0))
            (defun greet ((who string)) string (format false "hello ~a" who))

@@ -110,7 +110,7 @@ fn a_value_of_one_width_cannot_be_passed_where_another_is_expected() {
 
 #[test]
 fn f64_arithmetic() {
-    let src = "(defun add ((a f64) (b f64)) f64 (+ a b)) (add 1.5 2.5)";
+    let src = "(shadow add) (defun add ((a f64) (b f64)) f64 (+ a b)) (add 1.5 2.5)";
     assert_eq!(as_f64(eval_ok(src)), 4.0);
 }
 

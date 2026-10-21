@@ -3903,6 +3903,9 @@ user-visible capacity."
 ;; field is bound to a local before the call: `(self::f x)` would read as a
 ;; path, not a call.
 (module lazy
+  ;; The eager versions are the standard library's, which every module reads
+  ;; these names as; the lazy ones are this module's own.
+  (shadow map filter take)
   (pub defstruct map-iter<I,A,U> (src I) (f (fn (A) U)))
   (impl Iter map-iter<I,A,U> (:where (Iter I (Item A)))
     (:type Item U)

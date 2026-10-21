@@ -14,6 +14,7 @@ use typelisp::Value;
 /// `(bits "1011")` builds a bit vector from a written bit pattern, and
 /// `(show v)` reads one back — CL would write both as `#*1011`.
 const HELPERS: &str = r#"
+(shadow bits)
 (defun bits ((s string)) BitVector
   (let ((v (BitVector::new (length s))) (i 0))
     (progn

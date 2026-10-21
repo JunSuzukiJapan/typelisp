@@ -3,6 +3,9 @@
 ;; 構文木 (lexpr) の評価。env は変数名 -> 値 の環境(セッション全体で使い回し、
 ;; define で書き加えていく)。
 (use ast::lexpr)
+;; `eval` is also a standard library function, so this module makes the name its own.
+;; `eval` は標準ライブラリの関数の名前でもあるので、このモジュールの名前にする。
+(shadow eval)
 
 (pub defun eval ((e lexpr) (env HashTable<string,int>)) int
   (match e

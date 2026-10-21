@@ -145,6 +145,7 @@ fn conversions_and_bit_ops_agree_in_both_tiers() {
         (defun bnot ((a int)) int (lognot a))
         (defun shl ((a int) (n int)) int (ash a n))
         (defun bit ((a int) (n int)) bool (logbitp a n))
+        (shadow bits)
         (defun bits ((a int)) int (logcount a))
         (defun len ((a int)) int (integer-length a))
     "#;

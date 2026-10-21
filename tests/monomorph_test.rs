@@ -104,7 +104,7 @@ fn defmethod_name(h: &Heap, tl: TopLevelForm) -> Option<String> {
 
 #[test]
 fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
-    let (h, tls) = check_all("(defun identity<T> ((x T)) T x) (identity 42)").unwrap();
+    let (h, tls) = check_all("(defun id-fn<T> ((x T)) T x) (id-fn 42)").unwrap();
     // The generic definition itself has no core form at all: an erased body is
     // never executed, so it lowers to an empty `(module PATH)` — see
     // `Checker::defun_form_unless_generic`.
@@ -124,8 +124,8 @@ fn an_instantiating_call_comes_back_bundled_with_its_specialization() {
 #[test]
 fn two_calls_at_the_same_type_in_one_form_share_one_specialization() {
     let (h, tls) = check_all(
-        "(defun identity<T> ((x T)) T x) \
-         (defun use2 () int (+ (identity 1) (identity 2)))",
+        "(defun id-fn<T> ((x T)) T x) \
+         (defun use2 () int (+ (id-fn 1) (id-fn 2)))",
     )
     .unwrap();
     assert_eq!(bundled_specs(&h, tls[1]).len(), 1);
@@ -134,8 +134,8 @@ fn two_calls_at_the_same_type_in_one_form_share_one_specialization() {
 #[test]
 fn calls_at_different_types_get_independent_specializations() {
     let (h, tls) = check_all(
-        "(defun identity<T> ((x T)) T x) \
-         (defun use2 () int (if (identity true) (identity 1) 0))",
+        "(defun id-fn<T> ((x T)) T x) \
+         (defun use2 () int (if (id-fn true) (id-fn 1) 0))",
     )
     .unwrap();
     assert_eq!(bundled_specs(&h, tls[1]).len(), 2);
@@ -151,8 +151,8 @@ fn a_non_generic_call_is_not_bundled() {
 
 #[test]
 fn a_generic_call_evaluates_through_its_specialization() {
-    assert_eq!(eval_ok("(defun identity<T> ((x T)) T x) (identity 42)"), Value::Int(42));
-    assert_eq!(eval_ok("(defun identity<T> ((x T)) T x) (identity true)"), Value::Bool(true));
+    assert_eq!(eval_ok("(defun id-fn<T> ((x T)) T x) (id-fn 42)"), Value::Int(42));
+    assert_eq!(eval_ok("(defun id-fn<T> ((x T)) T x) (id-fn true)"), Value::Bool(true));
 }
 
 #[test]
@@ -197,8 +197,8 @@ fn generic_body_calling_another_generic_specializes_transitively() {
 #[test]
 fn a_generic_instantiated_from_a_defvar_initializer_works() {
     let src = r#"
-        (defun identity<T> ((x T)) T x)
-        (defvar (g int) (identity 11))
+        (defun id-fn<T> ((x T)) T x)
+        (defvar (g int) (id-fn 11))
         g
     "#;
     assert_eq!(eval_ok(src), Value::Int(11));
@@ -208,8 +208,8 @@ fn a_generic_instantiated_from_a_defvar_initializer_works() {
 fn a_generic_instantiated_inside_a_module_works() {
     let src = r#"
         (module m
-          (pub defun identity<T> ((x T)) T x)
-          (pub defun use-it () int (identity 3)))
+          (pub defun id-fn<T> ((x T)) T x)
+          (pub defun use-it () int (id-fn 3)))
         (m::use-it)
     "#;
     assert_eq!(eval_ok(src), Value::Int(3));
@@ -217,12 +217,12 @@ fn a_generic_instantiated_inside_a_module_works() {
 
 #[test]
 fn a_generic_instantiated_from_a_macro_body_works() {
-    // The defmacro's body calls `identity` at T=Sexpr; its bundle is exec'd
+    // The defmacro's body calls `id-fn` at T=Sexpr; its bundle is exec'd
     // like any other form here, so the later use of the macro (expanding at
     // check time via MacroExpander) finds the specialization registered.
     let src = r#"
-        (defun identity<T> ((x T)) T x)
-        (defmacro pass (x) (identity x))
+        (defun id-fn<T> ((x T)) T x)
+        (defmacro pass (x) (id-fn x))
         (pass 42)
     "#;
     assert_eq!(eval_ok(src), Value::Int(42));
@@ -244,8 +244,8 @@ fn a_type_parameter_shadows_a_user_type_of_the_same_name() {
     // template's annotations during specialization.
     let src = r#"
         (defstruct t (v int))
-        (defun identity<T> ((x T)) T x)
-        (identity 42)
+        (defun id-fn<T> ((x T)) T x)
+        (id-fn 42)
     "#;
     assert_eq!(eval_ok(src), Value::Int(42));
 }
@@ -358,9 +358,9 @@ fn a_vector_of_sexpr_element_returns_the_datum() {
 #[test]
 fn a_generic_function_passed_as_an_argument_specializes_from_the_parameter_type() {
     let src = r#"
-        (defun identity<T> ((x T)) T x)
+        (defun id-fn<T> ((x T)) T x)
         (defun call-it ((f (fn (int) int)) (n int)) int (f n))
-        (call-it identity 41)
+        (call-it id-fn 41)
     "#;
     assert_eq!(eval_ok(src), Value::Int(41));
 }
@@ -368,9 +368,9 @@ fn a_generic_function_passed_as_an_argument_specializes_from_the_parameter_type(
 #[test]
 fn a_generic_function_annotated_with_the_specializes() {
     let src = r#"
-        (defun identity<T> ((x T)) T x)
+        (defun id-fn<T> ((x T)) T x)
         (defun apply1 ((f (fn (bool) bool))) bool (f true))
-        (apply1 (the (fn (bool) bool) identity))
+        (apply1 (the (fn (bool) bool) id-fn))
     "#;
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
@@ -393,7 +393,7 @@ fn a_generic_function_value_without_type_context_is_a_check_error() {
     // resolve T from — there is no erased generic value to fall back to
     // anymore. (`defvar` can't even express the untyped case: its type
     // annotation is mandatory.)
-    match check_all("(defun identity<T> ((x T)) T x) (let ((f identity)) 0)") {
+    match check_all("(defun id-fn<T> ((x T)) T x) (let ((f id-fn)) 0)") {
         Err(Error::TypeError(msg)) => assert!(msg.contains("generic function"), "unexpected: {}", msg),
         Err(other) => panic!("expected TypeError, got {:?}", other),
         Ok(_) => panic!("expected TypeError, got a successful check"),
@@ -406,8 +406,8 @@ fn a_generic_function_value_in_a_typed_defvar_specializes() {
     // function value needs: `f`'s declared `(fn (int) int)` resolves T=int
     // and the global ends up holding the specialization.
     let src = r#"
-        (defun identity<T> ((x T)) T x)
-        (defvar (f (fn (int) int)) identity)
+        (defun id-fn<T> ((x T)) T x)
+        (defvar (f (fn (int) int)) id-fn)
         (f 41)
     "#;
     assert_eq!(eval_ok(src), Value::Int(41));
@@ -415,7 +415,7 @@ fn a_generic_function_value_in_a_typed_defvar_specializes() {
 
 #[test]
 fn compiling_a_generic_function_is_a_check_error() {
-    match check_all("(defun identity<T> ((x T)) T x) (compile identity)") {
+    match check_all("(defun id-fn<T> ((x T)) T x) (compile id-fn)") {
         Err(Error::TypeError(msg)) => assert!(msg.contains("generic"), "unexpected: {}", msg),
         Err(other) => panic!("expected TypeError, got {:?}", other),
         Ok(_) => panic!("expected TypeError, got a successful check"),
@@ -426,7 +426,7 @@ fn compiling_a_generic_function_is_a_check_error() {
 
 #[test]
 fn the_erased_generic_body_is_not_registered_in_the_interpreter() {
-    // `(compile identity)` needs `Interp::fns["identity"]`; a generic defun
+    // `(compile id-fn)` needs `Interp::fns["id-fn"]`; a generic defun
     // deliberately never registers its erased body, so this must fail (at
     // check or at exec) rather than compile a type-erased twin. (The
     // checker-side FnRef story for generics is a later stage; this pins the
@@ -437,7 +437,7 @@ fn the_erased_generic_body_is_not_registered_in_the_interpreter() {
     chk.publish_names(&h);
     let interp = Interp::new();
     let mut failed = false;
-    let mut forms = r.forms("(defun identity<T> ((x T)) T x) (compile identity)");
+    let mut forms = r.forms("(defun id-fn<T> ((x T)) T x) (compile id-fn)");
     while let Some((v, _)) = forms.next_form(&mut h).expect("read failed") {
         match chk.check_form(&mut h, &interp, v) {
             Ok(tl) => {

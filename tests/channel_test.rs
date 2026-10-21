@@ -435,7 +435,8 @@ fn the_element_type_is_checked() {
 #[test]
 fn two_instantiations_are_different_types() {
     let e = check_err(
-        r#"(defun take ((ch Chan<int>)) () ())
+        r#"(shadow take)
+           (defun take ((ch Chan<int>)) () ())
            (defun main () () (take (the Chan<string> (Chan::new 1))))"#,
     );
     assert!(e.contains("Chan<int>") && e.contains("Chan<string>"), "got: {}", e);

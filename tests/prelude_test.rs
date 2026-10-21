@@ -580,6 +580,7 @@ fn compose_applies_g_then_f() {
 #[test]
 fn flip_swaps_the_argument_order() {
     let src = r#"
+        (shadow sub)
         (defun sub ((a int) (b int)) int (- a b))
         ((flip sub) 3 10)
     "#;

@@ -1155,7 +1155,7 @@ const TOPLEVEL_FORM_HEADS: &[u32] = &[
     wk::PUB, wk::DEFUN, wk::DEFSIGNATURE, wk::DEFFFI, wk::DEFVAR, wk::DEFPARAMETER,
     wk::DEFCONSTANT, wk::DEFMACRO, wk::MODULE, wk::DEFMETHOD, wk::DEFSTRUCT, wk::DEFENUM,
     wk::DEFTRAIT, wk::DEFTYPE, wk::IMPL, wk::USE, wk::LOAD, wk::IMPORT,
-    wk::SHADOWING_IMPORT, wk::IN_MODULE, wk::DEF_C_STRUCT,
+    wk::SHADOWING_IMPORT, wk::IN_MODULE, wk::DEF_C_STRUCT, wk::SHADOW,
 ];
 
 impl Checker {
@@ -1743,6 +1743,7 @@ impl Checker {
     /// [`Self::check_defsignature_form`] with its type variables (a `defsignature` binds none) in scope for
     /// [`Self::reject_unknown_type_name`].
     fn check_defsignature(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool) -> Result<TopLevelForm, Error> {
+        self.refuse_offered_name(heap, parts.first(), "defsignature")?;
         let vars = Vec::new();
         self.with_type_names(vars, |c| c.check_defsignature_form(heap, parts, parts_locs, public))
     }
@@ -1960,6 +1961,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
     ) -> Result<TopLevelForm, Error> {
+        self.refuse_offered_name(heap, parts.first(), "defffi")?;
         if parts.len() < 3 {
             return Err(Error::TypeError(
                 "defffi: (defffi name (param-type...) return-type [:library \"name\"])".into(),
@@ -2196,6 +2198,8 @@ impl Checker {
                     wk::SHADOWING_IMPORT => {
                         return self.check_use_forms(heap, &elems[1..], parts_locs, true)
                     }
+                    // The reader made each name the module's own.
+                    wk::SHADOW => return self.nothing_form(heap),
                     wk::IN_MODULE => return self.check_in_module(heap, &elems[1..]),
                     wk::LOAD => return self.check_load(heap, &elems[1..]),
                     _ => {}
@@ -2245,6 +2249,34 @@ impl Checker {
     /// result (the box stores the variant index, not its name).
     pub fn registry(&self) -> &Registry {
         &self.info.reg
+    }
+
+    /// Refuses a definition, written in any module but `std`, of a name the
+    /// standard library offers every module: such a name reads as the
+    /// library's symbol, so the module must first make it its own with
+    /// `(shadow name)`. `name_form` is what the definition form names —
+    /// `name`, `(name options...)`, `(name Type)` or `name<T>`.
+    fn refuse_offered_name(&self, heap: &Heap, name_form: Option<&Value>, who: &str) -> Result<(), Error> {
+        let mut form = name_form.copied();
+        let name = loop {
+            match form {
+                Some(Value::Symbol(s)) => break s,
+                Some(v @ Value::Cons(_)) => {
+                    let at = if crate::types::is_type_application(heap, v) { 1 } else { 0 };
+                    form = heap.list_to_vec(v)?.get(at).copied();
+                }
+                _ => return Ok(()),
+            }
+        };
+        if self.current_module() == typelisp_mem::NsId::STD || !heap.names().offers(name) {
+            return Ok(());
+        }
+        Err(Error::TypeError(format!(
+            "{}: `{}` is a name the standard library offers every module; write `(shadow {})` before defining it here",
+            who,
+            name.name(),
+            name.name()
+        )))
     }
 
     /// `(pub defun ...)`, `(pub defstruct ...)` etc. — mark the next definition public.
@@ -3256,6 +3288,7 @@ impl Checker {
             Some(&name) => self.parse_defun_name(heap, name)?.1,
             None => Vec::new(),
         };
+        self.refuse_offered_name(heap, parts.first(), "defun")?;
         self.with_type_names(vars, |c| {
             if parts.len() >= 2 && params_declare_opt_key(heap, parts[1])? {
                 return c.check_defun_opt_key(heap, interp, parts, parts_locs, public, def_loc);
@@ -4475,6 +4508,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevelForm, Error> {
+        self.refuse_offered_name(heap, parts.first(), "defmacro")?;
         if parts.len() < 2 {
             return Err(Error::TypeError("defmacro: (defmacro name (params) body...)".into()));
         }
@@ -5062,6 +5096,7 @@ impl Checker {
         public: bool,
         def_loc: Option<Loc>,
     ) -> Result<TopLevelForm, Error> {
+        self.refuse_offered_name(heap, parts.first(), "deftrait")?;
         let mut vars = vec!["self".to_string()];
         for item in parts.iter().skip(2) {
             let Ok(elems) = heap.list_to_vec(*item) else { continue };
@@ -7950,6 +7985,7 @@ impl Checker {
     /// [`Self::check_defstruct_form`] with its type variables (the `<...>` of the struct's name) in scope for
     /// [`Self::reject_unknown_type_name`].
     fn check_defstruct(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
+        self.refuse_offered_name(heap, parts.first(), "defstruct")?;
         let vars = Self::header_type_vars(heap, parts.first());
         self.with_type_names(vars, |c| c.check_defstruct_form(heap, interp, parts, parts_locs, public, def_loc))
     }
@@ -8335,6 +8371,7 @@ impl Checker {
     /// [`Self::reject_unknown_type_name`]. The alias's own name is let through
     /// too, so that an alias that mentions itself is reported as exactly that.
     fn check_deftype(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
+        self.refuse_offered_name(heap, parts.first(), "deftype")?;
         let mut vars = Self::header_type_vars(heap, parts.first());
         if let Some(Ok((name, _))) = parts.first().map(|v| generic_header(heap, *v)) {
             vars.push(name);
@@ -8447,6 +8484,7 @@ impl Checker {
     /// [`Self::check_defenum_form`] with its type variables (the `<...>` of the enum's name) in scope for
     /// [`Self::reject_unknown_type_name`].
     fn check_defenum(&mut self, heap: &mut Heap, parts: &[Value], parts_locs: &[Option<Loc>], public: bool, def_loc: Option<Loc>) -> Result<TopLevelForm, Error> {
+        self.refuse_offered_name(heap, parts.first(), "defenum")?;
         let vars = Self::header_type_vars(heap, parts.first());
         self.with_type_names(vars, |c| c.check_defenum_form(heap, parts, parts_locs, public, def_loc))
     }
@@ -8836,10 +8874,11 @@ impl Checker {
             let node = self.check_use(heap, std::slice::from_ref(p), &[loc], shadowing)?;
             nodes.push(forms::rooted(heap, node));
         }
-        // The bundle's path is the namespace the imports landed in — the
-        // wrapper only groups, and `Interp::exec` on a `use` does nothing
-        // either way (the whole effect was the checker's).
-        let path = Path::from_segments(self.info.ns.clone());
+        // Labelled with a name in the module the imports landed in (a `Path`
+        // cannot name the root module itself) — the wrapper only groups, and
+        // `Interp::exec` on a `use` does nothing either way (the whole effect
+        // was the checker's).
+        let path = self.info.fq("use");
         forms::module_form(heap, &path, &nodes)
     }
 
@@ -13339,6 +13378,7 @@ impl Checker {
     /// [`Self::check_defvar_form`] with its type variables (a global binds none) in scope for
     /// [`Self::reject_unknown_type_name`].
     fn check_defvar(&mut self, heap: &mut Heap, interp: &dyn MacroExpander, parts: &[Value], mutable: bool, public: bool, def_loc: Option<Loc>, reassign: bool) -> Result<TopLevelForm, Error> {
+        self.refuse_offered_name(heap, parts.first(), "defvar")?;
         let vars = Vec::new();
         self.with_type_names(vars, |c| c.check_defvar_form(heap, interp, parts, mutable, public, def_loc, reassign))
     }

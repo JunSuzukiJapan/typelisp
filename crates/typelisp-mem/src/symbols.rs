@@ -360,8 +360,9 @@ well_known_symbols! {
     "Appended for Stage 9a (2026-09-04), again at the very end. `in-module` is
      the flat form of `(module ...)`; `import` is the CL-compatible spelling of
      `use`, and `shadowing-import` the one that means to take a bare name
-     another binding already holds. CL's `shadow` and `unuse-package` have no
-     entries because they are not adopted — see cl-parity-plan.md Stage 9a."
+     another binding already holds. CL's `unuse-package` has no entry because
+     it is not adopted — see cl-parity-plan.md Stage 9a. `shadow` came later
+     (the last section)."
     IN_MODULE => "in-module"
     IMPORT => "import"
     SHADOWING_IMPORT => "shadowing-import"
@@ -598,6 +599,13 @@ well_known_symbols! {
      a module nor a type, reads as `(%value-member p x)`. Which `x` it is
      depends on `p`'s type, so the analysis resolves it. Reserved."
     VALUE_MEMBER => "%value-member"
+
+    "Appended for the explicit-symbols plan's stage 4b (2026-10-21). CL's
+     `shadow`: `(shadow name...)` makes each name, from there on in the module
+     it is written in, read as that module's own symbol rather than the one
+     the standard library offers every module — which a module must do
+     before it defines one of those names."
+    SHADOW => "shadow"
 }
 
 
@@ -1166,6 +1174,8 @@ pub struct SessionNames {
     /// standard library's definitions, by name. Consulted by [`Self::read`]
     /// after what the module brought in itself.
     exports: HashMap<&'static str, SymRef>,
+    /// The symbols a `(shadow ...)` made their modules' own ([`Self::shadow`]).
+    shadowed: HashSet<SymRef>,
 }
 
 impl SessionNames {
@@ -1254,9 +1264,35 @@ impl SessionNames {
         assert!(prev == sym, "two definitions offered to every module as `{}`: {:?} and {:?}", sym.name(), prev, sym);
     }
 
+    /// Whether every module reads `sym`'s name as `sym` ([`Self::export`]).
+    pub fn offers(&self, sym: SymRef) -> bool {
+        self.exports.get(sym.name()) == Some(&sym)
+    }
+
+    /// Makes `ns` read `name` as its own symbol from now on, in front of what
+    /// the standard library offers every module under it — what
+    /// `(shadow name)` written in `ns` says. The symbol is the one `ns`
+    /// already owns under the name, else a new one.
+    ///
+    /// A reserved word cannot be shadowed: every module holds the same one,
+    /// which is what lets a definition form mean the same thing everywhere.
+    pub fn shadow(&mut self, ns: NsId, name: &str) -> Result<SymRef, String> {
+        let key = name.to_lowercase();
+        let mut t = table();
+        let own = match t.lookup(ns, &key) {
+            Some(s) if s.home() == NsId::SYSTEM => {
+                return Err(format!("shadow: `{}` is a reserved word, which every module shares", key));
+            }
+            Some(s) if s.home() == ns => s,
+            _ => t.create(ns, &key, NOT_WELL_KNOWN),
+        };
+        self.shadowed.insert(own);
+        Ok(own)
+    }
+
     /// What the name `name`, written in `ns`, reads as: a member of the fixed
-    /// vocabulary `ns` holds under it, or what a `use` in `ns` brought in
-    /// under it; else what the standard library offers every module under it
+    /// vocabulary `ns` holds under it, what a `(shadow ...)` in `ns` made its
+    /// own, or what a `use` in `ns` brought in under it; else what the standard library offers every module under it
     /// ([`Self::export`]); else [`intern_in`]'s symbol.
     ///
     /// Any other symbol `ns`'s table holds under the name was made by reading
@@ -1267,7 +1303,7 @@ impl SessionNames {
         let mut t = table();
         if ns != NsId::KEYWORD {
             if let Some(own) = t.lookup(ns, &key) {
-                if own.well_known() != NOT_WELL_KNOWN || self.imports.contains_key(&(ns, own)) {
+                if own.well_known() != NOT_WELL_KNOWN || self.shadowed.contains(&own) || self.imports.contains_key(&(ns, own)) {
                     return own;
                 }
             }

@@ -37,6 +37,7 @@ fn typl(dir: &Path, args: &[&str]) -> (i32, String, String) {
 }
 
 const MATH: &str = r#"
+(shadow add)
 (pub defun add ((a int) (b int)) int (+ a b))
 
 #[test]
