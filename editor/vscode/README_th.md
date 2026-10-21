@@ -159,7 +159,7 @@ cargo test --test editor_keyword_sync_test
 
 มันโหลด prelude จริง เดินผ่านทะเบียน และรายงาน **ชื่อที่โปรแกรมแก้ไขข้อความตัวใดตัวหนึ่งไม่
 รู้จัก** ฟอร์มพิเศษไม่มีการแสดงผลตอนรัน จึงถูกอ่านจากระหว่าง
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` ใน `crates/typelisp-front/src/check/checker.rs` (อย่า
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` ใน `crates/typelisp-front/src/check/analyze.rs` (อย่า
 ลบคอมเมนต์เหล่านี้) หากล้มเหลว ให้เพิ่มชื่อที่รายงานลงในการนิยามของ **ทั้งสอง** โปรแกรมแก้ไขข้อความ
 
 การทดสอบเดียวกันนี้ยังเปรียบเทียบ legend ของ semantic token ด้วย (`SEMANTIC_TOKEN_TYPES` ใน

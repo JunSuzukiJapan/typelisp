@@ -119,7 +119,7 @@ pub enum Node {
     /// An anonymous function.
     Lambda { params: Vec<(String, Type)>, ret: Type, body: Vec<Checked> },
     /// Local functions in scope for each other and for `body`.
-    Labels { defs: Vec<super::checker::LabelsDef>, body: Vec<Checked> },
+    Labels { defs: Vec<super::analyze::LabelsDef>, body: Vec<Checked> },
     /// `(loop body...)`, whose exits deliver a `ty`.
     Loop { ty: Type, body: Vec<Checked> },
     /// Leaving the nearest loop with no value.

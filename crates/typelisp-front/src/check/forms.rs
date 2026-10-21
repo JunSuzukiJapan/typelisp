@@ -23,7 +23,7 @@
 
 use typelisp_mem::{wk, Error, Heap, Loc, RootScope, Value};
 
-use crate::check::checker::MacroLambda;
+use crate::check::analyze::MacroLambda;
 use crate::check::core::{self, Items};
 use crate::check::repr::Repr;
 use crate::check::resolved::CompileTarget;

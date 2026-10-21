@@ -3,7 +3,7 @@
 //! The checker turns `(c-alloc T n)`, `(c-ref p i)`, `(c-deref p)`, `p::field`
 //! and their `setf`s into calls to these, and wraps the `(unsafe ...)` that
 //! owns the allocations in an arena opened and closed around it
-//! (`checker::c_struct`). Every name starts with a space, so no program can
+//! (`analyze::c_struct`). Every name starts with a space, so no program can
 //! write one; each maps to one `typelisp_rt::c_mem` shim for compiled code
 //! (`compile::externs`) and is answered by [`eval`] in the interpreter. Both
 //! run the same `c_mem` functions.

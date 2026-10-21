@@ -162,7 +162,7 @@ cargo test --test editor_keyword_sync_test
 
 Det läser faktiskt in prelude, går igenom registret och rapporterar **namn som någondera editorn inte
 känner till**. Specialformer har ingen representation vid körning, så de läses från mellan
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` i `crates/typelisp-front/src/check/checker.rs` (ta inte bort
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` i `crates/typelisp-front/src/check/analyze.rs` (ta inte bort
 dessa kommentarer). Om det misslyckas, lägg till de rapporterade namnen i **båda** editordefinitionerna.
 
 Samma test jämför också legenden för semantiska tokens (`SEMANTIC_TOKEN_TYPES` i

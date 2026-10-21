@@ -163,7 +163,7 @@ cargo test --test editor_keyword_sync_test
 
 Ze laadt echt de prelude, doorloopt het register en meldt **namen die een van beide editors niet kent**.
 Speciale vormen hebben geen runtime-representatie, dus ze worden gelezen uit het gedeelte tussen
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` in `crates/typelisp-front/src/check/checker.rs` (verwijder deze
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` in `crates/typelisp-front/src/check/analyze.rs` (verwijder deze
 commentaren niet). Als ze faalt, voeg dan de gemelde namen aan **beide** editordefinities toe.
 
 Dezelfde test vergelijkt ook de legenda van de semantic tokens (`SEMANTIC_TOKEN_TYPES` in

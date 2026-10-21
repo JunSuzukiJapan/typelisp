@@ -647,7 +647,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let result = {
         let m = module.borrow();
-        // One entry per C callback the program passes (`checker::ffi_callback`),
+        // One entry per C callback the program passes (`analyze::ffi_callback`),
         // each running a function compiled into this module; the generated
         // `main` registers them before anything runs.
         let mut callback_entries = Vec::new();

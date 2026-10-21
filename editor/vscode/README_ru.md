@@ -162,7 +162,7 @@ cargo test --test editor_keyword_sync_test
 
 Он действительно загружает prelude, обходит реестр и сообщает **имена, которые неизвестны одному из
 редакторов**. У специальных форм нет представления во время выполнения, поэтому они читаются между
-`// SPECIAL-FORM DISPATCH BEGIN` / `END` в `crates/typelisp-front/src/check/checker.rs` (не удаляйте
+`// SPECIAL-FORM DISPATCH BEGIN` / `END` в `crates/typelisp-front/src/check/analyze.rs` (не удаляйте
 эти комментарии). Если тест не проходит, добавьте названные имена в определения **обоих**
 редакторов.
 

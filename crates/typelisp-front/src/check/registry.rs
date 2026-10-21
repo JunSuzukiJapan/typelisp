@@ -53,7 +53,7 @@ pub struct FnSig {
     /// Registered by `Registry::with_builtins` (Rust-implemented), as opposed
     /// to a user (or prelude) `defun` — see [`Definable`]/`Checker::check_redef`.
     /// Redefining a builtin is always an error; redefining anything else
-    /// follows the configurable [`crate::check::checker::RedefPolicy`].
+    /// follows the configurable [`crate::check::analyze::RedefPolicy`].
     pub builtin: bool,
     /// Declared by `(defffi ...)`: the body is a C function, reached through
     /// a thunk (`crate::compile::ffi`) rather than through typelisp code.

@@ -1,9 +1,13 @@
-//! The type checker: lowers read `Sexpr` values into a typed AST while checking.
+//! Analysis: expands macros, registers definitions and bindings, resolves
+//! names and infers types over read `Sexpr` values, and builds the analyzed
+//! tree (`Checked`). What does not agree stays in the tree for checking
+//! (`check::verify`); the tree is lowered to core IR by `check::lower`.
 //!
-//! Checking is bidirectional in a small way: literal and constructor nodes may
-//! be checked *against* an expected type (so integer literals adopt the expected
-//! integer type and a nullary `None` learns its type argument), while everything
-//! else synthesizes its own type and is reconciled against the expectation.
+//! Inference is bidirectional in a small way: literal and constructor nodes
+//! may be analyzed *against* an expected type (so integer literals adopt the
+//! expected integer type and a nullary `None` learns its type argument), while
+//! everything else synthesizes its own type and is reconciled against the
+//! expectation.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -1094,7 +1098,7 @@ pub struct Checker {
     /// [`Self::ffi_callback_keys`].
     callback_keys: RefCell<BTreeSet<String>>,
     /// Definitions lifted out of this form for a C callback, placed ahead of
-    /// it by [`Self::check_form_at`] — see `checker::ffi_callback`.
+    /// it by [`Self::check_form_at`] — see `analyze::ffi_callback`.
     lifted: RefCell<Vec<ffi_callback::LiftedCallback>>,
     /// The `labels` blocks whose names are in scope, innermost last.
     labels_scopes: RefCell<Vec<ffi_callback::LabelsScope>>,
@@ -1102,7 +1106,7 @@ pub struct Checker {
     callback_seq: Cell<u64>,
     /// The `(unsafe ...)` that owns `c-alloc`s here: `None` outside one (or
     /// at the start of a function body), `Some(allocated)` inside — see
-    /// `checker::c_struct`.
+    /// `analyze::c_struct`.
     c_arena: Cell<Option<bool>>,
     /// The root stack holding the heap values the analyzed tree of the
     /// top-level form being checked refers to ([`Self::hold`]), while one is.
@@ -1689,7 +1693,7 @@ impl Checker {
         // aren't rolled back either).
         self.info.reg.def_locs.local_refs.extend(self.local_refs.borrow_mut().drain());
         self.info.reg.def_locs.node_types.extend(self.node_types.borrow_mut().drain());
-        // Definitions lifted for C callbacks (`checker::ffi_callback`) join the
+        // Definitions lifted for C callbacks (`analyze::ffi_callback`) join the
         // bundle after the instantiations — a lifted body may call one — and
         // ahead of the form that asked for them.
         let lifted = std::mem::take(&mut *self.lifted.borrow_mut());
@@ -1891,7 +1895,7 @@ impl Checker {
     /// A `defffi` parameter type: [`Self::parse_type_here_at`]'s, except
     /// that a function type — a callback C will call — may take and answer
     /// raw words. It never lands in a tagged slot: the argument crosses to C
-    /// as the address of an entry (`checker::ffi_callback`), and the raw
+    /// as the address of an entry (`analyze::ffi_callback`), and the raw
     /// words inside it are the C arguments and answer of that entry.
     ///
     /// Whether each type inside can be spelled in C is the backend's question,
@@ -9740,9 +9744,9 @@ impl Checker {
             // `unsafe` was ever written. Permission is a question about the
             // source, and it is answered here. The one exception is the
             // `unsafe` that owns `c-alloc`s: it frees them when it is left,
-            // which does need a node (`checker::c_struct`).
+            // which does need a node (`analyze::c_struct`).
             wk::UNSAFE => return self.check_unsafe(heap, interp, env, args, arg_locs, expected),
-            // The typed-pointer forms — `checker::c_struct`.
+            // The typed-pointer forms — `analyze::c_struct`.
             wk::C_ALLOC => return self.check_c_alloc(heap, interp, env, args, arg_locs),
             wk::C_REF => return self.check_c_ref(heap, interp, env, args, arg_locs),
             wk::C_DEREF => return self.check_c_deref(heap, interp, env, args, arg_locs),
@@ -10221,7 +10225,7 @@ impl Checker {
         let labels_env = env.extended_with_locs(sigs)?;
         // Open while every body and the trailing body are checked, so a C
         // callback naming one of these functions can be told apart from a
-        // variable — see `checker::ffi_callback`.
+        // variable — see `analyze::ffi_callback`.
         self.open_labels_scope(env.len(), names.clone());
         let checked = (|| -> Result<(Vec<LabelsDef>, Vec<Checked>, Type), Error> {
             let mut defs = Vec::new();

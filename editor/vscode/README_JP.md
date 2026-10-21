@@ -148,7 +148,7 @@ cargo test --test editor_keyword_sync_test
 ```
 
 prelude を実際にロードしてレジストリを走査し、**どちらかのエディタが知らない名前**を報告する。
-特殊形は実行時表現を持たないので、`crates/typelisp-front/src/check/checker.rs` の
+特殊形は実行時表現を持たないので、`crates/typelisp-front/src/check/analyze.rs` の
 `// SPECIAL-FORM DISPATCH BEGIN` / `END` の間から読み出す（このコメントは消さないこと）。
 失敗したら、報告された名前を**両方**のエディタ定義に追加する。
 

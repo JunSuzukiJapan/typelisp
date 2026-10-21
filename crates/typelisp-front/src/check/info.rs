@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{Error, Loc, Path, Type, Value};
 use super::registry::{AssocFn, Namespace, Registry, TraitBound, TypeAlias, VarInfo};
-use super::checker::*;
+use super::analyze::*;
 
 /// The `Env` type a `symbol-macrolet` name is bound to. Not a type any
 /// program can write — a path segment cannot contain a space — so finding it

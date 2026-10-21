@@ -3709,7 +3709,7 @@ user-visible capacity."
 ;; out of scope altogether, decided in Phase 3c.)
 ;;
 ;; These expand to `setf`, which a `defmacro` may *produce* even though it may
-;; not *call* one of the protected builtin forms (checker.rs's note by
+;; not *call* one of the protected builtin forms (analyze.rs's note by
 ;; `check_setf`): the expansion is handed back to the checker and checked
 ;; there, which is how `do` above already steps its variables.
 

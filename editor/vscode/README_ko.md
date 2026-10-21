@@ -150,7 +150,7 @@ cargo test --test editor_keyword_sync_test
 ```
 
 prelude를 실제로 로드해 레지스트리를 훑고, **어느 한쪽 에디터가 모르는 이름**을 보고합니다.
-특수 형식은 실행 시 표현을 가지지 않으므로 `crates/typelisp-front/src/check/checker.rs`의
+특수 형식은 실행 시 표현을 가지지 않으므로 `crates/typelisp-front/src/check/analyze.rs`의
 `// SPECIAL-FORM DISPATCH BEGIN` / `END` 사이에서 읽어 냅니다(이 주석은 지우지 마십시오).
 실패하면 보고된 이름을 **양쪽** 에디터 정의에 추가합니다.
 

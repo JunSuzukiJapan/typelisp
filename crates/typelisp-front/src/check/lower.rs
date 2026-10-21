@@ -11,7 +11,7 @@ use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, Value};
 
 use crate::nominal_path;
 use crate::types::{Path, Type};
-use super::checker::*;
+use super::analyze::*;
 use super::core::{self, Checked, Disagreement, Items, Node, SelectArm};
 use super::info::Info;
 use super::registry::Variant;

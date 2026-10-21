@@ -5,7 +5,7 @@
 //!
 //! Both desugar to an existing `registry.rs` instance method
 //! (`int_assoc`/`float_assoc`/`bignum_assoc`/`ratio_assoc`/`char_assoc`) —
-//! see `as_conversion`'s doc comment in `src/check/checker.rs` for the exact
+//! see `as_conversion`'s doc comment in `src/check/analyze.rs` for the exact
 //! table, and `Checker::width_cast` for the same-family width casts it
 //! chains onto the result.
 

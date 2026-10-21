@@ -412,7 +412,7 @@ fn a_defaulted_method_parameter_may_not_mention_the_owners_type_parameter() {
 
 // ---- what has no named callee -------------------------------------------
 //
-// See `checker::OPT_KEY_NEEDS_A_NAME`: filling an omitted argument in needs
+// See `analyze::OPT_KEY_NEEDS_A_NAME`: filling an omitted argument in needs
 // the callee's *checked default expression*, which lives on its signature
 // and is reachable only by resolving the callee by name. A `lambda`/`labels`
 // function is reached through its value, described by `Type::Fn` alone.
@@ -476,7 +476,7 @@ fn an_inherent_method_with_sections_cannot_be_adopted_as_a_trait_method() {
 // in from the declaration. A function *value* has no name to look that up by,
 // so its `Type::Fn` states the whole arity — required, `&optional`, `&key` —
 // and its caller passes every argument itself (`fn_value_params` in
-// `checker.rs`). Until this was fixed such a reference type-checked at the
+// `analyze.rs`). Until this was fixed such a reference type-checked at the
 // *required* arity and then failed at run time with an arity mismatch, since
 // the runtime function has one parameter per declared name whatever region it
 // was declared in.

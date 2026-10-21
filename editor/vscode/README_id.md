@@ -166,7 +166,7 @@ cargo test --test editor_keyword_sync_test
 Pengujian itu benar-benar memuat prelude, menelusuri registry, dan melaporkan **nama yang tidak
 dikenal oleh salah satu editor**. Bentuk khusus tidak memiliki representasi saat dijalankan, sehingga
 dibaca dari antara `// SPECIAL-FORM DISPATCH BEGIN` / `END` di
-`crates/typelisp-front/src/check/checker.rs` (jangan hapus komentar ini). Jika gagal, tambahkan nama
+`crates/typelisp-front/src/check/analyze.rs` (jangan hapus komentar ini). Jika gagal, tambahkan nama
 yang dilaporkan ke **kedua** definisi editor.
 
 Pengujian yang sama juga membandingkan legenda semantic token (`SEMANTIC_TOKEN_TYPES` di

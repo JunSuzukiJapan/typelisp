@@ -162,7 +162,7 @@ cargo test --test editor_keyword_sync_test
 
 Prelude'ü gerçekten yükler, kayıt defterinde gezinir ve **editörlerden birinin bilmediği adları**
 bildirir. Özel formların çalışma zamanı gösterimi yoktur; bu yüzden
-`crates/typelisp-front/src/check/checker.rs` içindeki `// SPECIAL-FORM DISPATCH BEGIN` / `END`
+`crates/typelisp-front/src/check/analyze.rs` içindeki `// SPECIAL-FORM DISPATCH BEGIN` / `END`
 arasından okunurlar (bu yorumları silmeyin). Başarısız olursa bildirilen adları **her iki** editör
 tanımına da ekleyin.
 

@@ -208,7 +208,7 @@ pub fn field_key_template(params: &[String], field: &Type) -> String {
         .enumerate()
         .map(|(i, p)| (p.clone(), Type::Named(Path::root(&ConcreteNames::template_param(i)), Vec::new())))
         .collect();
-    ConcreteNames::type_key(&crate::check::checker::subst_apply(field, &subst))
+    ConcreteNames::type_key(&crate::check::analyze::subst_apply(field, &subst))
 }
 
 /// How a type is spelled as a runtime identity: the whole path, plus its type
