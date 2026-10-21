@@ -455,7 +455,9 @@ struct MethodSig {
     /// use of `Env::extended_with_locs`.
     self_name_loc: Option<Loc>,
     recv_ty: Type,
-    type_fq: Path,
+    /// The path of the type the receiver names; `None` for an abstract
+    /// receiver, whose type is a type variable.
+    type_fq: Option<Path>,
     /// The method's *runtime* parameters, receiver excluded: the required
     /// ones, then one per `&optional` at its effective type, then the
     /// `&rest` name (a plain `Sexpr` list), then one per `&key` — the same
@@ -2854,8 +2856,14 @@ impl Checker {
         match t {
             Type::Named(n, args) => {
                 if args.is_empty() && n.is_simple() {
-                    if let Some(bound) = self.type_var_bindings.get(n.last_segment()) {
+                    let name = n.last_segment();
+                    if let Some(bound) = self.type_var_bindings.get(name) {
                         return bound.clone();
+                    }
+                    // A type variable a declaration part introduced hides a
+                    // type of the same name for the extent of the definition.
+                    if self.info.type_names.borrow().iter().any(|frame| frame.contains(name)) {
+                        return Type::Var(name.to_string());
                     }
                 }
                 // A `deftype` alias is a spelling, not a type: rewrite it away
@@ -2876,11 +2884,16 @@ impl Checker {
                         return subst_apply(&alias.body, &subst);
                     }
                 }
-                Type::Named(
-                    self.info.resolve_type_name(n),
-                    args.iter().map(|a| self.canon(a)).collect(),
-                )
+                let resolved = self.info.resolve_type_name(n);
+                // A bare name that names no type is a type variable: a
+                // declaration part introduced it, or nothing did and
+                // `Self::reject_unknown_type_name` says so.
+                if args.is_empty() && resolved.is_simple() && self.info.reg.type_def(&resolved).is_none() {
+                    return Type::Var(resolved.last_segment().to_string());
+                }
+                Type::Named(resolved, args.iter().map(|a| self.canon(a)).collect())
             }
+            Type::Var(name) => self.type_var_bindings.get(name).cloned().unwrap_or_else(|| t.clone()),
             // A trait object's head names a *trait*, which lives in
             // `Namespace::traits` rather than `types` — so it resolves
             // through `resolve_trait_name`, not `resolve_type_name`. An
@@ -2970,12 +2983,8 @@ impl Checker {
     fn written_type_vars(&self, heap: &Heap, v: Value) -> Vec<String> {
         fn walk(c: &Checker, t: &Type, out: &mut Vec<String>) {
             match t {
-                Type::Named(p, args) => {
-                    if args.is_empty() && p.is_simple() && c.info.reg.type_def(p).is_none() {
-                        out.push(p.last_segment().to_string());
-                    }
-                    args.iter().for_each(|a| walk(c, a, out));
-                }
+                Type::Var(name) => out.push(name.clone()),
+                Type::Named(_, args) => args.iter().for_each(|a| walk(c, a, out)),
                 Type::Dyn(_, pins) => pins.iter().for_each(|a| walk(c, a, out)),
                 Type::Fn(ps, rest, r) => {
                     ps.iter().for_each(|a| walk(c, a, out));
@@ -3018,17 +3027,16 @@ impl Checker {
         }
     }
 
-    fn first_unknown_type_name(&self, ty: &Type) -> Option<Path> {
+    fn first_unknown_type_name(&self, ty: &Type) -> Option<String> {
         match ty {
+            Type::Var(name) => {
+                let known = self.type_var_bindings.contains_key(name)
+                    || self.info.type_names.borrow().iter().any(|frame| frame.contains(name));
+                (!known).then(|| name.clone())
+            }
             Type::Named(p, args) => {
-                let known = self.info.reg.type_def(p).is_some()
-                    || (p.is_simple() && {
-                        let name = p.last_segment();
-                        self.type_var_bindings.contains_key(name)
-                            || self.info.type_names.borrow().iter().any(|frame| frame.contains(name))
-                    });
-                if !known {
-                    return Some(p.clone());
+                if self.info.reg.type_def(p).is_none() {
+                    return Some(p.to_string());
                 }
                 args.iter().find_map(|a| self.first_unknown_type_name(a))
             }
@@ -3203,16 +3211,16 @@ impl Checker {
     /// in scope is a trait object written without its `:dyn`.
     fn reject_trait_in_type_position(&self, ty: &Type) -> Result<(), Error> {
         match ty {
-            Type::Named(p, args) => {
-                if self.info.reg.type_def(p).is_none() && p.is_simple() {
-                    if let Ok(trait_path) = self.info.resolve_trait_name(p.last_segment()) {
-                        return Err(Error::TypeError(format!(
-                            "`{}` is a trait, not a type — write `:dyn {}` for a trait object",
-                            trait_path.last_segment(),
-                            trait_path.last_segment()
-                        )));
-                    }
+            Type::Var(name) => {
+                if let Ok(trait_path) = self.info.resolve_trait_name(name) {
+                    return Err(Error::TypeError(format!(
+                        "`{}` is a trait, not a type — write `:dyn {}` for a trait object",
+                        trait_path.last_segment(),
+                        trait_path.last_segment()
+                    )));
                 }
+            }
+            Type::Named(_, args) => {
                 for a in args {
                     self.reject_trait_in_type_position(a)?;
                 }
@@ -3877,6 +3885,7 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
             self.parse_defmethod_sig(heap, parts, &[])?;
+        let type_fq = type_fq.expect("a receiver that is not abstract names a type");
         // The receiver is the first parameter, not a field beside them: the
         // core form binds what the body binds, in order.
         let mut all: Vec<(String, Type)> = Vec::new();
@@ -4167,10 +4176,8 @@ impl Checker {
     /// no instantiation can be generated yet.
     fn type_is_open(&self, t: &Type) -> bool {
         match t {
-            Type::Named(n, args) => {
-                (args.is_empty() && n.is_simple() && self.info.reg.type_def(n).is_none())
-                    || args.iter().any(|a| self.type_is_open(a))
-            }
+            Type::Var(_) => true,
+            Type::Named(_, args) => args.iter().any(|a| self.type_is_open(a)),
             Type::Fn(ps, rest, r) => {
                 ps.iter().any(|p| self.type_is_open(p))
                     || matches!(rest, Some(t) if self.type_is_open(t))
@@ -6555,7 +6562,7 @@ impl Checker {
         }
         let pins = assoc_types
             .iter()
-            .map(|a| (a.clone(), Type::Named(Path::root(a), vec![])))
+            .map(|a| (a.clone(), Type::Var(a.clone())))
             .collect();
         let self_bound = TraitBound { trait_path: trait_fq.clone(), assoc: pins };
         for (elems, locs) in items {
@@ -6564,8 +6571,7 @@ impl Checker {
                 method, self_name, self_name_loc, recv_ty, params, param_locs, ret, mut bounds, body_start, ..
             } = sig;
             // Keyed by the type variable's name, which for `Self` is `"self"`
-            // — what `is_self_tvar` matches and what `Type::Named`'s single
-            // segment holds once the reader has case-folded it.
+            // once the reader has case-folded it — what `is_self_tvar` matches.
             bounds.entry("self".to_string()).or_default().push(self_bound.clone());
             let mut binds: Vec<(String, Type, Option<Loc>)> = Vec::new();
             if let Some(s) = &self_name {
@@ -6614,7 +6620,7 @@ impl Checker {
         // `impl` for every instantiation needs one for every instantiation.
         let targs: Vec<Type> = match inst_args {
             Some(args) => args.to_vec(),
-            None => def.params.iter().map(|p| Type::Named(Path::root(p), vec![])).collect(),
+            None => def.params.iter().map(|p| Type::Var(p.clone())).collect(),
         };
         let target_ty = Type::Named(target_fq.clone(), targs.clone());
         for sup in &tdef.supertraits {
@@ -6873,9 +6879,8 @@ impl Checker {
         // conversion is guaranteed to be layable-out later (the pins, the
         // heap-representation rule, and the associated-type bindings are all
         // verified there, on the concrete type).
-        if let Type::Named(p, targs) = &value.ty {
-            let is_tvar = targs.is_empty() && p.is_simple() && self.info.reg.type_def(p).is_none();
-            if is_tvar && env.bounds.get(p.last_segment()).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
+        if let Type::Var(name) = &value.ty {
+            if env.bounds.get(name).is_some_and(|bs| bs.iter().any(|b| b.trait_path == *trait_path)) {
                 let what = format!("as :dyn {}", trait_path).into();
                 return Ok(Checked::of(Node::ErasedGeneric { what }, Type::Dyn(trait_path.clone(), pins.to_vec())));
             }
@@ -7504,6 +7509,7 @@ impl Checker {
             body_start,
             doc,
         } = self.parse_defmethod_sig(heap, parts, parts_locs)?;
+        let type_fq = type_fq.expect("a receiver that is not abstract names a type");
         // How many of `params` are required — the rest are the `&optional`
         // /`&rest`/`&key` region, which the registered signature carries
         // separately (see the `FnSig` built below) rather than as parameters.
@@ -7521,9 +7527,7 @@ impl Checker {
             Type::Named(_, targs) if !targs.is_empty() => targs
                 .iter()
                 .filter_map(|t| match t {
-                    Type::Named(n, a) if a.is_empty() && n.is_simple() && self.info.reg.type_def(n).is_none() => {
-                        Some(n.last_segment().to_string())
-                    }
+                    Type::Var(name) => Some(name.clone()),
                     _ => None,
                 })
                 .collect(),
@@ -7665,7 +7669,7 @@ impl Checker {
                     written_vars
                         .iter()
                         .cloned()
-                        .zip(d.params.iter().map(|p| Type::Named(Path::root(p), Vec::new())))
+                        .zip(d.params.iter().map(|p| Type::Var(p.clone())))
                         .filter(|(w, t)| !matches!(t, Type::Named(p, _) if p.last_segment() == w))
                         .collect()
                 })
@@ -7845,11 +7849,10 @@ impl Checker {
     /// [`Self::parse_defmethod_sig`], with the "receiver must name a
     /// registered type" rejection optionally lifted.
     ///
-    /// `abstract_receiver` is set only by [`Self::precheck_blanket_impl`],
-    /// whose receiver *is* the blanket's target type variable and so names no
-    /// type by construction — `type_fq` then holds that variable's name, the
-    /// same unresolved single-segment [`Path`] a generic `defun`'s type
-    /// parameter parses to.
+    /// `abstract_receiver` is set only by [`Self::precheck_blanket_impl`] and
+    /// a `deftrait`'s default bodies, whose receiver *is* a type variable (the
+    /// blanket's target, `Self`) and so names no type by construction —
+    /// `type_fq` is then `None`.
     fn parse_defmethod_sig_inner(
         &self,
         heap: &mut Heap,
@@ -7902,12 +7905,19 @@ impl Checker {
             _ => return Err(Error::TypeError(format!("impl: method `{}`: the receiver is (self Type)", method))),
         };
         let recv_ty = self.parse_type_here_at(heap, type_expr, type_expr_loc.as_ref())?;
-        let type_fq = nominal_path(&recv_ty).ok_or_else(|| {
-            Error::TypeError(format!("impl: method `{}`: the receiver's type must be a data type", method))
-        })?;
-        if !abstract_receiver && self.info.reg.type_def(&type_fq).is_none() {
-            return Err(Error::TypeError(format!("impl: method `{}`: unknown type `{}`", method, type_fq)));
-        }
+        let type_fq = match nominal_path(&recv_ty) {
+            Some(fq) if self.info.reg.type_def(&fq).is_none() => {
+                return Err(Error::TypeError(format!("impl: method `{}`: unknown type `{}`", method, fq)));
+            }
+            Some(fq) => Some(fq),
+            None if abstract_receiver && matches!(recv_ty, Type::Var(_)) => None,
+            None => {
+                return Err(Error::TypeError(format!(
+                    "impl: method `{}`: the receiver's type must be a data type",
+                    method
+                )))
+            }
+        };
         let (required, required_locs, optionals, rest, keys) =
             self.parse_params_full(heap, &sig_list[1..], &format!("impl: method `{}`", method))?;
         // Runtime params, in the order `MethodSig::params` documents. With no
@@ -8073,7 +8083,7 @@ impl Checker {
                 return Err(Error::TypeError(format!("defstruct: duplicate field `{}`", n)));
             }
         }
-        let recv_targs: Vec<Type> = type_params.iter().map(|p| Type::Named(Path::root(p), Vec::new())).collect();
+        let recv_targs: Vec<Type> = type_params.iter().map(|p| Type::Var(p.clone())).collect();
         let recv_ty = Type::Named(type_fq.clone(), recv_targs);
 
         let mut assoc = BTreeMap::new();
@@ -10499,6 +10509,9 @@ impl Checker {
             }
             return self.sexpr_has_instance_method(name).then_some(MethodTarget::DynSexpr);
         }
+        if let Type::Var(var) = ty {
+            return self.bound_method(env, var, name).map(|(bound, method)| MethodTarget::Bound { bound, method });
+        }
         let type_fq = self.assoc_receiver_path(ty, name)?;
         if let Some(def) = self.info.reg.type_def(&type_fq) {
             let args = match ty {
@@ -10510,16 +10523,13 @@ impl Checker {
             }
         }
         // A method no `impl` put on the type, but a blanket impl provides.
-        if let Some(trait_path) = self.blanket_method_owner(ty, &type_fq, name) {
-            return Some(MethodTarget::Blanket { type_fq, trait_path });
-        }
-        self.bound_method(env, &type_fq, name).map(|(bound, method)| MethodTarget::Bound { bound, method })
+        let trait_path = self.blanket_method_owner(ty, &type_fq, name)?;
+        Some(MethodTarget::Blanket { type_fq, trait_path })
     }
 
     /// The `where` bound of the type variable `type_var` (keyed in
-    /// `Env::bounds` by its lowercase name, which is what `last_segment()` of
-    /// a bare type variable is) whose trait has `name`, and the trait's name
-    /// for it.
+    /// `Env::bounds` by its lowercase name) whose trait has `name`, and the
+    /// trait's name for it.
     ///
     /// An operator on a bounded type variable means its trait's method:
     /// `(+ a b)` under `(:where (Add T))` is `(add a b)`. The trait cannot
@@ -10529,8 +10539,8 @@ impl Checker {
     /// always wins: this is a fallback for a name no bound has, never a rename.
     /// Inherited methods count: bounding `T` by `Ord` makes `Eq`'s `equals`
     /// callable on it, since `Ord` obliges every implementor to implement `Eq`.
-    fn bound_method(&self, env: &Env, type_var: &Path, name: &str) -> Option<(TraitBound, String)> {
-        let bounds = env.bounds.get(type_var.last_segment())?;
+    fn bound_method(&self, env: &Env, type_var: &str, name: &str) -> Option<(TraitBound, String)> {
+        let bounds = env.bounds.get(type_var)?;
         let declares = |m: &str| {
             bounds.iter().any(|tb| self.info.reg.trait_def(&tb.trait_path).is_some_and(|t| self.info.reg.trait_method(t, m).is_some()))
         };
@@ -10723,13 +10733,11 @@ impl Checker {
             // A type variable (a generic body's `T`) has exactly the methods its
             // `where` bounds give it, so that is what to say — which concrete
             // types happen to have the name is beside the point.
-            if let Type::Named(p, targs) = &recv_ty {
-                if targs.is_empty() && p.is_simple() && self.info.reg.type_def(p).is_none() {
-                    return Err(Error::TypeError(format!(
-                        "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",
-                        method, recv_ty, method
-                    )));
-                }
+            if let Type::Var(_) = &recv_ty {
+                return Err(Error::TypeError(format!(
+                    "no method `{}` for type variable `{}`: none of the traits in its `:where` bounds provides `{}`",
+                    method, recv_ty, method
+                )));
             }
             return Err(Error::TypeError(format!(
                 "no method `{}` for type `{}` (the type of the first argument, which selects the method); `{}` is a method of {}",
@@ -10795,8 +10803,7 @@ impl Checker {
     fn written_instantiation(&self, ty: &Type) -> Option<Vec<Type>> {
         let Type::Named(n, args) = ty else { return None };
         let def = self.info.reg.type_def(n)?;
-        let is_var =
-            |t: &Type| matches!(t, Type::Named(p, a) if a.is_empty() && p.is_simple() && self.info.reg.type_def(p).is_none());
+        let is_var = |t: &Type| matches!(t, Type::Var(_));
         (!def.params.is_empty() && args.len() == def.params.len() && !args.iter().any(is_var)).then(|| args.clone())
     }
 
@@ -14096,7 +14103,7 @@ impl Checker {
                     Type::Named(p, _) if crate::types::path_is_builtin(p, "sexpr") => ArgKind::Sexpr,
                     // A type variable: no definition to ask until this body is
                     // specialized, and the specialization is checked again.
-                    Type::Named(p, _) if self.info.reg.type_def(p).is_none() => ArgKind::Unknown,
+                    Type::Var(_) => ArgKind::Unknown,
                     _ => ArgKind::Other,
                 };
                 ArgType { kind, shown: item.ty.to_string() }
@@ -14703,31 +14710,24 @@ impl Checker {
             // I` forwards `elt`'s own `(Iter I (Item A))` pin so `nth`'s own
             // `A` resolves to `elt`'s own, still-open `A`; both become
             // concrete together once the enclosing function is specialized).
-            if let Type::Named(n, args) = &concrete {
-                if args.is_empty() && n.is_simple() && self.info.reg.type_def(n).is_none() {
-                    let var_name = n.last_segment();
-                    if let Some(caller_tbs) = env.bounds.get(var_name) {
-                        for tb in trait_bounds {
-                            let Some(caller_tb) =
-                                caller_tbs.iter().find(|c| c.trait_path == tb.trait_path)
-                            else {
-                                continue;
-                            };
-                            for (assoc_name, declared_ty) in &tb.assoc {
-                                if let Some(caller_ty) = caller_tb.assoc.get(assoc_name) {
-                                    let _ = unify(params, declared_ty, caller_ty, subst);
-                                }
+            if let Type::Var(var_name) = &concrete {
+                if let Some(caller_tbs) = env.bounds.get(var_name) {
+                    for tb in trait_bounds {
+                        let Some(caller_tb) =
+                            caller_tbs.iter().find(|c| c.trait_path == tb.trait_path)
+                        else {
+                            continue;
+                        };
+                        for (assoc_name, declared_ty) in &tb.assoc {
+                            if let Some(caller_ty) = caller_tb.assoc.get(assoc_name) {
+                                let _ = unify(params, declared_ty, caller_ty, subst);
                             }
                         }
                     }
-                    continue;
                 }
+                continue;
             }
-            let type_fq = match &concrete {
-                Type::Named(n, _) if n.is_simple() && self.info.reg.type_def(n).is_none() => None,
-                Type::Named(n, _) => Some(n.clone()),
-                other => prim_type_path(other),
-            };
+            let type_fq = nominal_path(&concrete);
             let Some(type_fq) = type_fq else { continue };
             let Some(def) = self.info.reg.type_def(&type_fq) else { continue };
             let concrete_args: &[Type] = match &concrete {
@@ -15172,61 +15172,58 @@ impl Checker {
     ) -> Option<Disagreement> {
         for (tparam, trait_bounds) in bounds {
             let Some(concrete) = subst.get(tparam) else { continue };
-            if let Type::Named(n, args) = concrete {
-                if args.is_empty() && n.is_simple() && self.info.reg.type_def(n).is_none() {
-                    let var_name = n.last_segment();
-                    let declared = caller_bounds.get(var_name);
-                    for tb in trait_bounds {
-                        // A caller bound discharges this one when it names
-                        // the same trait *or a subtrait of it*: `(:where (Ord
-                        // T))` already obliges `T` to implement `Eq`, so it
-                        // satisfies a callee's `(:where (Eq T))`. The pins are
-                        // composed down the chain for the same reason
-                        // `check_dyn_call` composes them.
-                        let satisfied = declared.is_some_and(|caller_tbs| {
-                            caller_tbs.iter().any(|caller_tb| {
-                                if !self.trait_inherits(&caller_tb.trait_path, &tb.trait_path) {
-                                    return false;
-                                }
-                                let Some(cdef) = self.info.reg.trait_def(&caller_tb.trait_path) else {
-                                    return false;
-                                };
-                                let Some(at) = self.trait_assoc_subst_for(
-                                    cdef,
-                                    &caller_tb.assoc,
-                                    &tb.trait_path,
-                                ) else {
-                                    return false;
-                                };
-                                // `tb` is the *callee's declared* bound, so
-                                // its pins are written in the callee's own
-                                // type parameters (`find-if`'s `(Item A)`).
-                                // `at` holds the caller's, in the caller's.
-                                // Comparing them raw only agreed when the two
-                                // functions happened to spell the variable
-                                // with the same letter — which is why the
-                                // prelude's `elt` could delegate to `nth`
-                                // (both say `A`) while the identical shape
-                                // spelled `B` could not, and why no pin that
-                                // is a *structured* type (`(Item
-                                // cons-cell<K,V>)`) ever matched. Resolving
-                                // the callee's side through the call's own
-                                // `subst` first puts both in the caller's
-                                // vocabulary. A parameter `subst` never bound
-                                // is left as-is by `subst_apply`, which is
-                                // exactly the previous behavior.
-                                tb.assoc
-                                    .iter()
-                                    .all(|(k, v)| at.get(k) == Some(&subst_apply(v, subst)))
-                            })
-                        });
-                        if !satisfied {
-                            let unmet = Unmet::Undeclared { var: var_name.to_string(), trait_path: tb.trait_path.clone() };
-                            return Some(bound_unmet(name, tparam, unmet));
-                        }
+            if let Type::Var(var_name) = concrete {
+                let declared = caller_bounds.get(var_name);
+                for tb in trait_bounds {
+                    // A caller bound discharges this one when it names
+                    // the same trait *or a subtrait of it*: `(:where (Ord
+                    // T))` already obliges `T` to implement `Eq`, so it
+                    // satisfies a callee's `(:where (Eq T))`. The pins are
+                    // composed down the chain for the same reason
+                    // `check_dyn_call` composes them.
+                    let satisfied = declared.is_some_and(|caller_tbs| {
+                        caller_tbs.iter().any(|caller_tb| {
+                            if !self.trait_inherits(&caller_tb.trait_path, &tb.trait_path) {
+                                return false;
+                            }
+                            let Some(cdef) = self.info.reg.trait_def(&caller_tb.trait_path) else {
+                                return false;
+                            };
+                            let Some(at) = self.trait_assoc_subst_for(
+                                cdef,
+                                &caller_tb.assoc,
+                                &tb.trait_path,
+                            ) else {
+                                return false;
+                            };
+                            // `tb` is the *callee's declared* bound, so
+                            // its pins are written in the callee's own
+                            // type parameters (`find-if`'s `(Item A)`).
+                            // `at` holds the caller's, in the caller's.
+                            // Comparing them raw only agreed when the two
+                            // functions happened to spell the variable
+                            // with the same letter — which is why the
+                            // prelude's `elt` could delegate to `nth`
+                            // (both say `A`) while the identical shape
+                            // spelled `B` could not, and why no pin that
+                            // is a *structured* type (`(Item
+                            // cons-cell<K,V>)`) ever matched. Resolving
+                            // the callee's side through the call's own
+                            // `subst` first puts both in the caller's
+                            // vocabulary. A parameter `subst` never bound
+                            // is left as-is by `subst_apply`, which is
+                            // exactly the previous behavior.
+                            tb.assoc
+                                .iter()
+                                .all(|(k, v)| at.get(k) == Some(&subst_apply(v, subst)))
+                        })
+                    });
+                    if !satisfied {
+                        let unmet = Unmet::Undeclared { var: var_name.to_string(), trait_path: tb.trait_path.clone() };
+                        return Some(bound_unmet(name, tparam, unmet));
                     }
-                    continue;
                 }
+                continue;
             }
             let type_fq = nominal_path(concrete);
             // A type with no name — a trait object, `()`, a function, a
@@ -17083,17 +17080,11 @@ fn float_lit_ty(expected: Option<&Type>) -> Type {
     }
 }
 
-/// Whether `path` is a type variable in `params` (a single-segment name).
-fn is_param(path: &crate::Path, params: &HashSet<String>) -> bool {
-    path.is_simple() && params.contains(path.last_segment())
-}
-
 /// Whether `t` mentions any type parameter in `params`.
 fn type_has_param(t: &Type, params: &HashSet<String>) -> bool {
     match t {
-        Type::Named(n, args) => {
-            (args.is_empty() && is_param(n, params)) || args.iter().any(|a| type_has_param(a, params))
-        }
+        Type::Var(name) => params.contains(name),
+        Type::Named(_, args) => args.iter().any(|a| type_has_param(a, params)),
         Type::Fn(ps, rest, r) => {
             ps.iter().any(|p| type_has_param(p, params))
                 || matches!(rest, Some(t) if type_has_param(t, params))
@@ -17141,7 +17132,7 @@ fn fn_value_type(sig: &FnSig) -> Type {
 /// compiled global (`Interp::enum_defs`).
 pub(crate) fn subst_apply(t: &Type, subst: &BTreeMap<String, Type>) -> Type {
     match t {
-        Type::Named(n, args) if args.is_empty() && n.is_simple() => match subst.get(n.last_segment()) {
+        Type::Var(name) => match subst.get(name) {
             Some(bound) => bound.clone(),
             None => t.clone(),
         },
@@ -17168,14 +17159,9 @@ pub(crate) fn subst_apply(t: &Type, subst: &BTreeMap<String, Type>) -> Type {
 /// signatures. `None` if `def` has no recorded binding for that trait/name
 /// pair.
 /// Whether `t` is a trait signature template's `Self` type variable. Written
-/// `Self` in source; the reader case-folds it, so it canonicalizes to
-/// the single-segment path `self` — there is no type by that name, so no real
-/// type can collide with it.
+/// `Self` in source; the reader case-folds it to `self`.
 fn is_self_tvar(t: &Type) -> bool {
-    // type-identity-ok: `Self` is a type *variable*, not a built-in type — a trait
-    // signature's `Self` parses to the single-segment `Type::Named` every type variable
-    // does, so `is_simple` here is the variable-ness test, not a built-in test.
-    matches!(t, Type::Named(p, args) if args.is_empty() && p.is_simple() && p.last_segment() == "self")
+    matches!(t, Type::Var(name) if name == "self")
 }
 
 /// Whether `t` mentions `Self` anywhere — [`is_self_tvar`] applied
@@ -17224,14 +17210,13 @@ fn unify(
     if *actual == Type::Never {
         return Ok(());
     }
-    if let Type::Named(n, args) = tmpl {
-        if args.is_empty() && is_param(n, params) {
-            let key = n.last_segment().to_string();
-            return match subst.get(&key) {
+    if let Type::Var(key) = tmpl {
+        if params.contains(key) {
+            return match subst.get(key) {
                 Some(bound) if bound == actual => Ok(()),
-                Some(bound) => Err(Disagreement::Conflict(key, bound.clone(), actual.clone())),
+                Some(bound) => Err(Disagreement::Conflict(key.clone(), bound.clone(), actual.clone())),
                 None => {
-                    subst.insert(key, actual.clone());
+                    subst.insert(key.clone(), actual.clone());
                     Ok(())
                 }
             };

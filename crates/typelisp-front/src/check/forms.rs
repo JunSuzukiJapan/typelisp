@@ -596,6 +596,7 @@ pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
         Type::Unit => Ok(Value::Empty),
         // Not in `prim_type_path` (`!` has no method table), so spelled here.
         Type::Never => Ok(heap.intern_symbol("!")),
+        Type::Var(name) => Ok(heap.intern_symbol(name)),
         Type::Named(p, args) if args.is_empty() => Ok(type_name_value(heap, p)),
         // `(%type-apply Name Arg...)`, the reader's structure for `Name<Arg,...>`.
         Type::Named(p, args) => {

@@ -279,9 +279,13 @@ pub enum Type {
     /// forms). It is compatible with — and absorbed by — any expected type.
     Never,
     /// A nominal type with type arguments: `Option<T>`, `Vec<T>`, `Sexpr`,
-    /// user structs, and (during checking) generic type variables (a
-    /// single-segment [`Path`]).
+    /// user structs.
     Named(Path, Vec<Type>),
+    /// A type variable, by the name its declaration wrote: a definition's
+    /// `<T>`, a `defmethod` receiver's or an `impl` target's variables, a
+    /// `deftrait`'s `Self` and `(:type Item)`. Never a definition, so never
+    /// a [`Path`].
+    Var(String),
     /// A trait object `:dyn Trait` / `:dyn Trait<Pin,...>` — a value whose
     /// concrete type is only known at run time, dispatched through a vtable
     /// (`docs/dev/language-design.md` §5.2). The [`Path`] is the *trait*'s
@@ -393,6 +397,7 @@ impl fmt::Display for Type {
                 }
                 if ts.is_empty() { Ok(()) } else { args(f, ts) }
             }
+            Type::Var(name) => write!(f, "{}", name),
             Type::Dyn(p, pins) => {
                 write!(f, ":dyn {}", view.path(&p.to_string()))?;
                 if pins.is_empty() { Ok(()) } else { args(f, pins) }
@@ -622,7 +627,7 @@ pub fn prim_type_path(ty: &Type) -> Option<Path> {
         Type::Char => "char",
         Type::Str => "string",
         Type::Symbol => "symbol",
-        Type::Unit | Type::Never | Type::Named(..) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) => {
+        Type::Unit | Type::Never | Type::Named(..) | Type::Var(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) => {
             return None
         }
     };

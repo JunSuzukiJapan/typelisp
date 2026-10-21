@@ -206,7 +206,7 @@ pub fn field_key_template(params: &[String], field: &Type) -> String {
     let subst: std::collections::BTreeMap<String, Type> = params
         .iter()
         .enumerate()
-        .map(|(i, p)| (p.clone(), Type::Named(Path::root(&ConcreteNames::template_param(i)), Vec::new())))
+        .map(|(i, p)| (p.clone(), Type::Var(ConcreteNames::template_param(i))))
         .collect();
     ConcreteNames::type_key(&crate::check::analyze::subst_apply(field, &subst))
 }
@@ -254,6 +254,7 @@ impl TypeKey for Type {
             Type::PtrTo(t) => ConcreteNames::ptr_type(&**t),
             Type::CStruct(p) => p.to_string(),
             Type::Named(p, args) => ConcreteNames::instantiated_type(&p.to_string(), args),
+            Type::Var(name) => name.clone(),
             Type::Dyn(p, pins) => ConcreteNames::dyn_type(&p.to_string(), pins),
             Type::Fn(ps, rest, r) => ConcreteNames::fn_type(ps, rest.as_deref(), &**r),
         }

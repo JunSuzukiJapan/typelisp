@@ -360,7 +360,7 @@ pub struct TraitDef {
     pub assoc_types: Vec<String>,
     /// Method signature templates, keyed by (unqualified) method name. Each
     /// signature's `params`/`ret` may mention `Self` and `assoc_types` as
-    /// type variables (`Type::Named(Path::root("self"), [])` etc.).
+    /// type variables (`Type::Var("self")` etc.).
     pub methods: BTreeMap<String, FnSig>,
     /// This trait's *own* method names in `deftrait` source order. Always the
     /// same length as `methods`. Not the vtable layout — see
@@ -3049,7 +3049,7 @@ fn rational_assoc() -> BTreeMap<String, AssocFn> {
 
 /// A type-parameter reference, e.g. `t` in `Option<T>`'s field list.
 fn tvar(name: &str) -> Type {
-    Type::Named(Path::root(name), vec![])
+    Type::Var(name.to_string())
 }
 
 /// The symbol a definition's path names it by: its last segment, read in the
