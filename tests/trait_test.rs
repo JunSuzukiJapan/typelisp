@@ -543,7 +543,7 @@ fn a_default_body_resolves_names_in_the_traits_module() {
     let src = "
         (module m
           (defun helper ((n int)) int (* n 2))
-          (deftrait Doubler ()
+          (pub deftrait Doubler ()
             (base ((self Self)) int)
             (doubled ((self Self)) int (helper (base self)))))
         (defstruct box (n int))
@@ -579,7 +579,7 @@ fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
           (differs ((self Self) (other Self)) bool (if (same self other) false true)))
         (module m
           (pub defstruct point (pub x int))
-          (impl Eq3 point (same ((self Self) (other Self)) bool (= self::x other::x))))
+          (impl ::Eq3 point (same ((self Self) (other Self)) bool (= self::x other::x))))
         (differs (make-instance 'm::point :x 1) (make-instance 'm::point :x 2))";
     assert_eq!(eval_ok(src), Value::Bool(true));
 }
@@ -591,7 +591,7 @@ fn a_trait_method_is_callable_from_outside_the_implementing_module() {
           (label ((self Self)) string))
         (module m
           (pub defstruct tag (pub n int))
-          (impl Named tag (label ((self Self)) string \"tag\")))
+          (impl ::Named tag (label ((self Self)) string \"tag\")))
         (label (make-instance 'm::tag :n 1))";
     assert_eq!(eval_string(src), "tag");
 }

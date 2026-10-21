@@ -1915,13 +1915,13 @@ impl Checker {
     /// as it is for every other `defffi` type.
     fn parse_callback_type_at(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
         let mut spans = Vec::new();
-        let written = parse_type_spanned(heap, v, loc, &mut spans)?;
+        let written = parse_type_spanned(heap, self.info.cur_ns().ns, v, loc, &mut spans)?;
         self.check_type_alias_arity(&written)?;
+        self.reject_trait_in_type_position(&written)?;
         let ty = self.canon(&written);
         for span in &spans {
             self.record_type_span(span);
         }
-        self.reject_trait_in_type_position(&ty)?;
         self.reject_unknown_type_name(&ty)?;
         match &ty {
             Type::Fn(params, rest, ret) => {
@@ -2315,6 +2315,7 @@ impl Checker {
                 wk::DEFMETHOD => return Err(defmethod_is_gone()),
                 wk::DEFSTRUCT => return self.check_defstruct(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFENUM => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
+                wk::DEFTRAIT => return self.check_deftrait(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFTYPE => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
                 _ => {}
             }
@@ -2323,7 +2324,7 @@ impl Checker {
             }
         }
         Err(Error::TypeError(
-            "pub: expected defun/defsignature/defffi/defmacro/defstruct/defenum/deftype/defvar/defparameter/defconstant"
+            "pub: expected defun/defsignature/defffi/defmacro/defstruct/defenum/deftrait/deftype/defvar/defparameter/defconstant"
                 .into(),
         ))
     }
@@ -2618,7 +2619,7 @@ impl Checker {
     fn check_type_alias_arity(&self, t: &Type) -> Result<(), Error> {
         match t {
             Type::Named(n, args) => {
-                if let Some(a) = self.info.resolve_type_alias(n) {
+                if let Some(a) = self.info.type_alias_at(n) {
                     if a.params.len() != args.len() {
                         return Err(Error::TypeError(format!(
                             "type alias `{}` takes {} type argument(s), got {}",
@@ -2899,7 +2900,10 @@ impl Checker {
     fn canon(&self, t: &Type) -> Type {
         match t {
             Type::Named(n, args) => {
-                if args.is_empty() && n.is_simple() {
+                // A name written bare in the current module, which is what a
+                // type variable is written as.
+                let bare_here = args.is_empty() && n.ns() == self.info.cur_ns().ns;
+                if bare_here {
                     let name = n.last_segment();
                     if let Some(bound) = self.type_var_bindings.get(name) {
                         return bound.clone();
@@ -2917,7 +2921,7 @@ impl Checker {
                 // A wrong argument count declines to expand (this cannot
                 // fail) — `Self::check_type_alias_arity` reports it at the
                 // annotation instead.
-                if let Some(alias) = self.info.resolve_type_alias(n) {
+                if let Some(alias) = self.info.type_alias_at(n) {
                     if alias.params.len() == args.len() {
                         let subst: BTreeMap<String, Type> = alias
                             .params
@@ -2932,7 +2936,7 @@ impl Checker {
                 // A bare name that names no type is a type variable: a
                 // declaration part introduced it, or nothing did and
                 // `Self::reject_unknown_type_name` says so.
-                if args.is_empty() && resolved.is_simple() && self.info.reg.type_def(&resolved).is_none() {
+                if bare_here && self.info.reg.type_def(&resolved).is_none() {
                     return Type::Var(resolved.last_segment().to_string());
                 }
                 Type::Named(resolved, args.iter().map(|a| self.canon(a)).collect())
@@ -2940,11 +2944,11 @@ impl Checker {
             Type::Var(name) => self.type_var_bindings.get(name).cloned().unwrap_or_else(|| t.clone()),
             // A trait object's head names a *trait*, which lives in
             // `Namespace::traits` rather than `types` — so it resolves
-            // through `resolve_trait_name`, not `resolve_type_name`. An
+            // through `Info::trait_at`, not `resolve_type_name`. An
             // unknown name is left as written for `check_object_safe` to
             // report; `canon` itself never fails.
             Type::Dyn(trait_path, pins) => Type::Dyn(
-                self.info.resolve_trait_path(trait_path).unwrap_or_else(|| trait_path.clone()),
+                self.info.trait_at(trait_path).unwrap_or(*trait_path),
                 pins.iter().map(|p| self.canon(p)).collect(),
             ),
             Type::Fn(ps, rest, r) => Type::Fn(
@@ -2981,13 +2985,13 @@ impl Checker {
     /// where no span is available.
     fn parse_type_here_at(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
         let mut spans = Vec::new();
-        let written = parse_type_spanned(heap, v, loc, &mut spans)?;
+        let written = parse_type_spanned(heap, self.info.cur_ns().ns, v, loc, &mut spans)?;
         self.check_type_alias_arity(&written)?;
+        self.reject_trait_in_type_position(&written)?;
         let ty = self.canon(&written);
         for span in &spans {
             self.record_type_span(span);
         }
-        self.reject_trait_in_type_position(&ty)?;
         self.reject_unknown_type_name(&ty)?;
         Self::reject_raw_word_nested(&ty)?;
         self.reject_bad_pointee(&ty)?;
@@ -3041,7 +3045,7 @@ impl Checker {
             }
         }
         let mut out = Vec::new();
-        if let Ok(t) = crate::types::parse_type(heap, v) {
+        if let Ok(t) = crate::types::parse_type(heap, self.info.cur_ns().ns, v) {
             walk(self, &self.canon(&t), &mut out);
         }
         out
@@ -3153,12 +3157,12 @@ impl Checker {
     /// generic template) records nothing.
     fn record_type_span(&self, span: &TypeNameSpan) {
         if span.dyn_head {
-            if let Some(fq) = self.info.resolve_trait_path(&span.path) {
+            if let Some(fq) = self.info.trait_at(&span.path) {
                 self.record_trait_use(&fq, span.loc.clone());
             }
             return;
         }
-        if span.path.is_simple() && self.type_var_bindings.contains_key(span.path.last_segment()) {
+        if span.path.ns() == self.info.cur_ns().ns && self.type_var_bindings.contains_key(span.path.last_segment()) {
             return;
         }
         let fq = self.info.resolve_type_name(&span.path);
@@ -3251,20 +3255,21 @@ impl Checker {
     }
 
     /// [`Self::parse_type_here_at`]'s check, applied to every `Type::Named` head
-    /// inside `ty`: a name that resolves to no type but *does* name a trait
-    /// in scope is a trait object written without its `:dyn`.
+    /// inside the *written* `ty`: a name that is no type and no type variable
+    /// but *does* name a trait in scope is a trait object written without its
+    /// `:dyn`.
     fn reject_trait_in_type_position(&self, ty: &Type) -> Result<(), Error> {
         match ty {
-            Type::Var(name) => {
-                if let Ok(trait_path) = self.info.resolve_trait_name(name) {
-                    return Err(Error::TypeError(format!(
-                        "`{}` is a trait, not a type — write `:dyn {}` for a trait object",
-                        trait_path.last_segment(),
-                        trait_path.last_segment()
-                    )));
+            Type::Named(n, args) => {
+                if args.is_empty() && matches!(self.canon(ty), Type::Var(_)) {
+                    if let Some(trait_path) = self.info.trait_at(n) {
+                        return Err(Error::TypeError(format!(
+                            "`{}` is a trait, not a type — write `:dyn {}` for a trait object",
+                            trait_path.last_segment(),
+                            trait_path.last_segment()
+                        )));
+                    }
                 }
-            }
-            Type::Named(_, args) => {
                 for a in args {
                     self.reject_trait_in_type_position(a)?;
                 }
@@ -4241,11 +4246,8 @@ impl Checker {
     /// bounds on a generic `defun`'s type parameters, keyed by parameter
     /// name, each optionally pinning one or more of that trait's associated
     /// types to a concrete type — see `TraitBound`'s doc comment for how
-    /// pins are used. Trait names are resolved as bare root-module paths
-    /// (`Path::root`, not `Info::resolve_trait_name`), mirroring
-    /// `Checker::receiver_method`'s existing assumption that every
-    /// trait lives at the root module — a pre-existing limitation, not new
-    /// here.
+    /// pins are used. A trait name is looked up as any written trait name
+    /// is (`Info::trait_at`).
     fn parse_where_clause(&self, heap: &Heap, v: Value) -> Result<BTreeMap<String, Vec<TraitBound>>, Error> {
         let elems = heap.list_to_vec(v)?;
         let mut bounds: BTreeMap<String, Vec<TraitBound>> = BTreeMap::new();
@@ -4264,7 +4266,9 @@ impl Checker {
             // (every file is one) a bare `err2` would otherwise be stored as
             // root `err2` and match none of them.
             let trait_name = match parts[0] {
-                Value::Symbol(id) => self.info.resolve_trait_name(heap.symbol_spelling(id))?,
+                Value::Symbol(id) => self.info.trait_at(&Path::of_symbol(self.info.cur_ns().ns, id)).ok_or_else(|| {
+                    Error::TypeError(format!("impl: unknown trait `{}`", heap.symbol_spelling(id)))
+                })?,
                 _ => return Err(Error::TypeError(":where: trait name must be a symbol".into())),
             };
             if let Some(l) = parts_locs[0].1.as_ref() {
@@ -4385,8 +4389,8 @@ impl Checker {
         v: Value,
         loc: Option<&Loc>,
     ) -> Result<Path, Error> {
-        let written = match v {
-            Value::Symbol(id) => heap.symbol_spelling(id),
+        let (written, sym) = match v {
+            Value::Symbol(id) => (heap.symbol_spelling(id), id),
             _ => {
                 return Err(Error::TypeError(format!(
                     "deftrait {}: supertrait name must be a symbol",
@@ -4394,7 +4398,7 @@ impl Checker {
                 )))
             }
         };
-        let path = self.info.resolve_trait_name(written).map_err(|_| {
+        let path = self.info.trait_at(&Path::of_symbol(self.info.cur_ns().ns, sym)).ok_or_else(|| {
             Error::TypeError(format!(
                 "deftrait {}: unknown supertrait `{}` — the form is (deftrait Name (Super...) items...), \
                  so the list right after the name is the supertrait list (write `()` for none)",
@@ -5186,7 +5190,7 @@ impl Checker {
         // signatures, so a method that mentions a trait object of the very
         // trait being defined (`(source ((self Self)) Option<:dyn Error>)` in
         // the prelude's `Error`) resolves its own name through
-        // `Self::canon`/`resolve_trait_path`. Same device, same reason, as
+        // `Self::canon`/`Info::trait_at`. Same device, same reason, as
         // `check_defstruct`'s self-referential-field stub; overwritten with
         // the fully parsed `TraitDef` below.
         self.info.reg.module_mut(&self.info.ns).traits.insert(
@@ -5477,10 +5481,10 @@ impl Checker {
         // that lives somewhere other than an ancestor of the `impl`.
         let segs = path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
-        let written = Path::from_segments(segs.clone());
-        let trait_fq = self.info.resolve_trait_path(&written).ok_or_else(|| {
-            Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::")))
-        })?;
+        let written = crate::types::written_path(heap, self.info.cur_ns().ns, parts[0])?;
+        let trait_fq = self
+            .info.trait_at(&written)
+            .ok_or_else(|| Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::"))))?;
         if let Some(l) = parts_locs.first().and_then(|l| l.as_ref()) {
             self.record_trait_use(&trait_fq, l.clone());
         }
@@ -6385,9 +6389,9 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         let segs = path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
-        let written = Path::from_segments(segs.clone());
+        let written = crate::types::written_path(heap, self.info.cur_ns().ns, parts[0])?;
         let trait_fq = self
-            .info.resolve_trait_path(&written)
+            .info.trait_at(&written)
             .ok_or_else(|| Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::"))))?;
         if let Some(l) = parts_locs.first().and_then(|l| l.as_ref()) {
             self.record_trait_use(&trait_fq, l.clone());
@@ -8078,8 +8082,8 @@ impl Checker {
         // Pre-register a stub under `type_fq` *before* parsing field types, so
         // a self-referential field (e.g. a linked-list-style `(next Vector<node>)`
         // inside `node`'s own definition) resolves its bare `node` reference
-        // via `Self::canon`/`resolve_bare_type` to this struct's own
-        // qualified path, instead of `resolve_bare_type` finding nothing yet
+        // via `Self::canon`/`Info::type_at` to this struct's own
+        // qualified path, instead of `type_at` finding nothing yet
         // and `canon` falling back to an unqualified guess that could never
         // match the real registration below. Overwritten with the fully
         // parsed `AdtDef` once fields are known.
@@ -8542,8 +8546,8 @@ impl Checker {
         // Pre-register a stub under `type_fq` *before* parsing variant field
         // types, so a self-referential field (e.g. `(node i32 tree tree)`
         // inside `tree`'s own definition) resolves its bare `tree` reference
-        // via `Self::canon`/`resolve_bare_type` to this enum's own qualified
-        // path, instead of `resolve_bare_type` finding nothing yet and
+        // via `Self::canon`/`Info::type_at` to this enum's own qualified
+        // path, instead of `type_at` finding nothing yet and
         // `canon` falling back to an unqualified guess that could never
         // match the real registration below. Overwritten with the fully
         // parsed `AdtDef` once variants are known.
@@ -8992,7 +8996,7 @@ impl Checker {
         // Try: `deftype` alias. Only the name is imported — an alias has no
         // constructors or static methods of its own (whatever its *body*
         // names keeps its own name). The `aliases` entry is what
-        // `resolve_type_alias`'s bare-name branch follows.
+        // `Info::type_alias_at` follows for a bare name.
         if let Some(a) = self.info.resolve_type_alias_path(&segs) {
             self.report_import_collision(&bare, Some(a.name), None, shadowing)?;
             self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), a.name);
@@ -11752,6 +11756,7 @@ impl Checker {
         }
         let name = unevaluated_name(
             heap,
+            self.info.cur_ns().ns,
             args[0],
             "compile",
             "compile: expected a symbol or path naming a function, e.g. (compile foo) or (compile point::x) — not a string",
@@ -11926,6 +11931,7 @@ impl Checker {
         for a in args {
             let name = unevaluated_name(
                 heap,
+                self.info.cur_ns().ns,
                 *a,
                 tag,
                 &format!(
@@ -11974,6 +11980,7 @@ impl Checker {
         };
         let name = unevaluated_name(
             heap,
+            self.info.cur_ns().ns,
             *name_arg,
             "disassemble",
             "disassemble: expected a symbol or path naming a function, e.g. (disassemble foo) or (disassemble point::x) — not a string",
@@ -12021,6 +12028,7 @@ impl Checker {
         }
         let name = unevaluated_name(
             heap,
+            self.info.cur_ns().ns,
             args[0],
             "documentation",
             "documentation: expected a symbol or path naming a definition, e.g. (documentation foo) or (documentation point::x) — not a string",
@@ -12057,13 +12065,13 @@ impl Checker {
         let name = written_name.display();
         // A function, a global, a macro or a type's member: the one resolution
         // rule (`Self::resolve_name`), with no receiver.
-        let (segs, written) = match written_name {
+        let written = match written_name {
             WrittenName::Instantiated(ty, member) => {
                 let (type_fq, method) = self.instantiated_member(ty, member, who)?;
                 return Ok(DefRef::Method(type_fq, method));
             }
-            WrittenName::Bare(sym) => (vec![sym.name().to_string()], Written::Bare(*sym)),
-            WrittenName::Segments(segs) => (segs.clone(), Written::Path(segs)),
+            WrittenName::Bare(sym) => Written::Bare(*sym),
+            WrittenName::Segments(segs) => Written::Path(segs),
         };
         match self.resolve_name(&Env::new(), written, &mut || None) {
             Some(Resolved::Value(ModuleValue::Var(path, _))) => return Ok(DefRef::Var(path)),
@@ -12085,16 +12093,17 @@ impl Checker {
             None => {}
         }
         // Types and traits are a name space of their own.
-        if let [name] = segs.as_slice() {
-            if let Some(path) = self.info.resolve_bare_type(name) {
+        if let WrittenName::Bare(sym) = written_name {
+            let written = Path::of_symbol(self.info.cur_ns().ns, *sym);
+            if let Some(path) = self.info.type_at(&written) {
                 return Ok(DefRef::Type(path));
             }
-            if let Some(alias) = self.info.resolve_type_alias(&Path::of(&[name])) {
+            if let Some(alias) = self.info.type_alias_at(&written) {
                 // A `deftype` alias keeps its docstring and location in the
                 // type columns, under its own fully-qualified name.
                 return Ok(DefRef::Type(alias.name));
             }
-            if let Ok(path) = self.info.resolve_trait_name(name) {
+            if let Some(path) = self.info.trait_at(&written) {
                 return Ok(DefRef::Trait(path));
             }
         }
@@ -12128,6 +12137,7 @@ impl Checker {
             [one] => {
                 let name = unevaluated_name(
             heap,
+            self.info.cur_ns().ns,
             *one,
             "ed",
             "ed: expected a symbol or path naming a definition, or a string naming a file, e.g. (ed foo) or (ed \"x.typl\")",
@@ -16218,7 +16228,7 @@ impl Checker {
         let def = self.info.reg.type_def(&adt_name).expect("adt exists").clone();
         if def.kind == AdtKind::Struct && !def.builtin {
             let head_ty = match parts[0] {
-                Value::Symbol(id) => self.info.resolve_bare_type(heap.symbol_spelling(id)),
+                Value::Symbol(id) => self.info.type_at(&Path::of_symbol(self.info.cur_ns().ns, id)),
                 Value::Path(pid) => {
                     let segs: Vec<String> =
                         heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
@@ -16342,8 +16352,7 @@ impl Checker {
         };
         match head {
             Value::Symbol(id) => {
-                let name = heap.symbol_spelling(id);
-                if let Some(type_fq) = self.info.resolve_bare_type(name) {
+                if let Some(type_fq) = self.info.type_at(&Path::of_symbol(self.info.cur_ns().ns, id)) {
                     if let Some(def) = self.info.reg.type_def(&type_fq) {
                         if def.kind == AdtKind::Struct {
                             no_generics(&type_fq, def)?;
@@ -17316,8 +17325,9 @@ fn unify(
 /// One spelling, so a definition cannot be named two incompatible ways: an
 /// unevaluated symbol, or a `::`-path rejoined with the separator the reader
 /// split it on. A string is not a second spelling of the same thing and is
-/// rejected with `msg`, which says what this particular form wanted.
-fn unevaluated_name(heap: &Heap, v: Value, who: &str, msg: &str) -> Result<WrittenName, Error> {
+/// rejected with `msg`, which says what this particular form wanted. `ns`
+/// is the module the name is written in.
+fn unevaluated_name(heap: &Heap, ns: typelisp_mem::NsId, v: Value, who: &str, msg: &str) -> Result<WrittenName, Error> {
     match v {
         // `a::b` with `a` neither a module nor a type: no definition's name.
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::VALUE_MEMBER)) => {
@@ -17338,7 +17348,7 @@ fn unevaluated_name(heap: &Heap, v: Value, who: &str, msg: &str) -> Result<Writt
             let parts = heap.list_to_vec(v)?;
             match parts.as_slice() {
                 [_, ty, Value::Symbol(member)] => {
-                    Ok(WrittenName::Instantiated(crate::types::parse_type(heap, *ty)?, heap.symbol_spelling(*member).to_string()))
+                    Ok(WrittenName::Instantiated(crate::types::parse_type(heap, ns, *ty)?, heap.symbol_spelling(*member).to_string()))
                 }
                 _ => Err(Error::TypeError(msg.into())),
             }

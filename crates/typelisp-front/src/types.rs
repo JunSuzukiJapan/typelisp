@@ -740,9 +740,10 @@ pub struct TypeNameSpan {
     pub loc: Loc,
 }
 
-/// Parse a type expression (a read `Value`) into a [`Type`].
-pub fn parse_type(heap: &Heap, v: Value) -> Result<Type, Error> {
-    parse_type_spanned(heap, v, None, &mut Vec::new())
+/// Parse a type expression (a read `Value`) into a [`Type`]. `ns` is the
+/// module it is written in: a name in it is that module's ([`written_path`]).
+pub fn parse_type(heap: &Heap, ns: NsId, v: Value) -> Result<Type, Error> {
+    parse_type_spanned(heap, ns, v, None, &mut Vec::new())
 }
 
 /// [`parse_type`], additionally recording a [`TypeNameSpan`] for every
@@ -754,34 +755,36 @@ pub fn parse_type(heap: &Heap, v: Value) -> Result<Type, Error> {
 /// parse still succeeds — the names just go unrecorded.
 pub fn parse_type_spanned(
     heap: &Heap,
+    ns: NsId,
     v: Value,
     loc: Option<&Loc>,
     out: &mut Vec<TypeNameSpan>,
 ) -> Result<Type, Error> {
     match v {
         Value::Empty => Ok(Type::Unit),
-        Value::Symbol(_) | Value::Path(_) => {
-            let segs = name_segments(heap, v)?;
-            Ok(named_or_primitive(record_name(segs, loc, false, out), Vec::new()))
-        }
+        Value::Symbol(sym) => match primitive_by_name(sym.name()) {
+            Some(t) => Ok(t),
+            None => Ok(Type::Named(record_name(Path::of_symbol(ns, sym), loc, false, out), Vec::new())),
+        },
+        Value::Path(_) => Ok(Type::Named(record_name(written_path(heap, ns, v)?, loc, false, out), Vec::new())),
         // `(:dyn Trait)` — the reader's joined form of the two-word `:dyn
         // Trait` spelling (`read::reader::read_datum`). Checked before
         // the `(fn ...)` case since both are lists.
-        Value::Cons(_) if is_dyn_form(heap, v) => parse_dyn_type(heap, v, out),
-        Value::Cons(_) if is_fn_form(heap, v) => parse_fn_type(heap, v, out),
-        Value::Cons(_) if is_ptr_form(heap, v) => parse_ptr_type(heap, v, out),
-        Value::Cons(_) if is_type_application(heap, v) => parse_type_application(heap, v, out),
+        Value::Cons(_) if is_dyn_form(heap, v) => parse_dyn_type(heap, ns, v, out),
+        Value::Cons(_) if is_fn_form(heap, v) => parse_fn_type(heap, ns, v, out),
+        Value::Cons(_) if is_ptr_form(heap, v) => parse_ptr_type(heap, ns, v, out),
+        Value::Cons(_) if is_type_application(heap, v) => parse_type_application(heap, ns, v, out),
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
             Err(Error::TypeError("`Name<Args>::member` names a member of a type, not a type".to_string()))
         }
-        Value::Cons(_) => parse_applied_type(heap, v, out),
+        Value::Cons(_) => parse_applied_type(heap, ns, v, out),
         // `#{int string}` — the tuple type, written the way its values are.
         // The reader hands the elements over as a `#{..}` datum, whose
         // elements carry no source positions of their own.
         Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => {
             let n = heap.struct_field_count(id);
             let args = (0..n)
-                .map(|i| parse_type_spanned(heap, heap.struct_field(id, i), None, out))
+                .map(|i| parse_type_spanned(heap, ns, heap.struct_field(id, i), None, out))
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(Type::Named(tuple_path(n), args))
         }
@@ -808,12 +811,12 @@ fn is_ptr_form(heap: &Heap, v: Value) -> bool {
 
 /// Parse `(ptr T)` into [`Type::PtrTo`]. What `T` may be is the checker's
 /// question (it needs the `def-c-struct` table); this only reads the shape.
-fn parse_ptr_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+fn parse_ptr_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
     let elems = heap.list_to_vec_locs(v)?;
     if elems.len() != 2 {
         return Err(Error::TypeError("a typed pointer is written (ptr T), with exactly one type".to_string()));
     }
-    let pointee = parse_type_spanned(heap, elems[1].0, elems[1].1.as_ref(), out)?;
+    let pointee = parse_type_spanned(heap, ns, elems[1].0, elems[1].1.as_ref(), out)?;
     Ok(Type::PtrTo(Box::new(pointee)))
 }
 
@@ -834,14 +837,14 @@ fn parse_ptr_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<
 /// (`geo::pair`) works and its span is recorded like any other name; it must
 /// come out as a nominal type with no arguments of its own, since its
 /// arguments are exactly what the list supplies.
-fn parse_applied_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+fn parse_applied_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
     let elems = heap.list_to_vec_locs(v)?;
     if elems.len() < 2 {
         return Err(Error::TypeError(
             "a type application must be (Name Arg...), with at least one argument".to_string(),
         ));
     }
-    let head = match parse_type_spanned(heap, elems[0].0, elems[0].1.as_ref(), out)? {
+    let head = match parse_type_spanned(heap, ns, elems[0].0, elems[0].1.as_ref(), out)? {
         Type::Named(p, args) if args.is_empty() => p,
         other => {
             return Err(Error::TypeError(format!(
@@ -852,7 +855,7 @@ fn parse_applied_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Res
     };
     let mut args = Vec::with_capacity(elems.len() - 1);
     for (a, l) in &elems[1..] {
-        args.push(parse_type_spanned(heap, *a, l.as_ref(), out)?);
+        args.push(parse_type_spanned(heap, ns, *a, l.as_ref(), out)?);
     }
     Ok(Type::Named(head, args))
 }
@@ -861,7 +864,7 @@ fn parse_applied_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Res
 /// trait name is parsed with the ordinary type-name grammar, so a qualified
 /// and/or generic-looking spelling works; its "generic arguments" are the
 /// associated-type pins, not type arguments (see [`Type::Dyn`]).
-fn parse_dyn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+fn parse_dyn_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
     let elems = heap.list_to_vec_locs(v)?;
     if elems.len() != 2 {
         return Err(Error::TypeError("`:dyn` must be followed by exactly one trait name".to_string()));
@@ -871,7 +874,7 @@ fn parse_dyn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<
     // its first entry — recorded as an ordinary `Named` head — is exactly the
     // name the `:dyn` reinterprets as a trait.
     let mut tmp = Vec::new();
-    match parse_type_spanned(heap, elems[1].0, elems[1].1.as_ref(), &mut tmp)? {
+    match parse_type_spanned(heap, ns, elems[1].0, elems[1].1.as_ref(), &mut tmp)? {
         Type::Named(trait_path, pins) => {
             if let Some(head) = tmp.first_mut() {
                 head.dyn_head = true;
@@ -886,7 +889,7 @@ fn parse_dyn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<
 /// Parse a `(fn (param-types...) ret-type)` list. The parameter-type list may
 /// end in `&rest elem-type` to write a variadic function type, mirroring
 /// `Checker::parse_params_rest`'s `defun`/`lambda` parameter syntax.
-fn parse_fn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+fn parse_fn_type(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
     let elems = heap.list_to_vec_locs(v)?;
     if elems.len() != 3 {
         return Err(Error::TypeError("fn type must be (fn (params) ret)".to_string()));
@@ -897,10 +900,10 @@ fn parse_fn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<T
     }
     let (params, rest) = match elems[1].0 {
         Value::Empty => (Vec::new(), None),
-        Value::Cons(_) => parse_fn_params(heap, &heap.list_to_vec_locs(elems[1].0)?, out)?,
+        Value::Cons(_) => parse_fn_params(heap, ns, &heap.list_to_vec_locs(elems[1].0)?, out)?,
         _ => return Err(Error::TypeError("fn parameter list must be a list".to_string())),
     };
-    let ret = parse_type_spanned(heap, elems[2].0, elems[2].1.as_ref(), out)?;
+    let ret = parse_type_spanned(heap, ns, elems[2].0, elems[2].1.as_ref(), out)?;
     Ok(Type::Fn(params, rest, Box::new(ret)))
 }
 
@@ -909,6 +912,7 @@ fn parse_fn_type(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<T
 /// the type-expression counterpart of `Checker::parse_params_rest`.
 fn parse_fn_params(
     heap: &Heap,
+    ns: NsId,
     ps: &[(Value, Option<Loc>)],
     out: &mut Vec<TypeNameSpan>,
 ) -> Result<(Vec<Type>, Option<Box<Type>>), Error> {
@@ -924,48 +928,56 @@ fn parse_fn_params(
             }
             let params = ps[..i]
                 .iter()
-                .map(|(p, l)| parse_type_spanned(heap, *p, l.as_ref(), out))
+                .map(|(p, l)| parse_type_spanned(heap, ns, *p, l.as_ref(), out))
                 .collect::<Result<_, _>>()?;
-            let rest = parse_type_spanned(heap, ps[i + 1].0, ps[i + 1].1.as_ref(), out)?;
+            let rest = parse_type_spanned(heap, ns, ps[i + 1].0, ps[i + 1].1.as_ref(), out)?;
             Ok((params, Some(Box::new(rest))))
         }
         None => {
             let params = ps
                 .iter()
-                .map(|(p, l)| parse_type_spanned(heap, *p, l.as_ref(), out))
+                .map(|(p, l)| parse_type_spanned(heap, ns, *p, l.as_ref(), out))
                 .collect::<Result<_, _>>()?;
             Ok((params, None))
         }
     }
 }
 
-/// The segments a type name is written with: a symbol's name, or a path's
-/// segments in order (a leading empty one for `::name`, from the root).
-fn name_segments(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
+/// The path a type name written in `ns` stands for, before the analysis
+/// looks it up: a bare name is its symbol in `ns`, where the lookup starts
+/// (`Info::find_written`); a `::` path is its last symbol in the module the
+/// path leads to, followed the way the reader follows it.
+pub fn written_path(heap: &Heap, ns: NsId, v: Value) -> Result<Path, Error> {
     match v {
-        Value::Symbol(id) => Ok(vec![heap.symbol_spelling(id).to_string()]),
-        Value::Path(id) => Ok(heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect()),
+        Value::Symbol(sym) => Ok(Path::of_symbol(ns, sym)),
+        Value::Path(id) => {
+            let segs: Vec<&str> = heap.path_segments(id).iter().map(|s| s.name()).collect();
+            match heap.names().follow_path(ns, &segs).map_err(Error::TypeError)? {
+                (syms, symbols::PathStep::Module(m)) => Ok(Path::of_symbol(m, *syms.last().expect("a path has a last segment"))),
+                (_, symbols::PathStep::Type(_)) => {
+                    Err(Error::TypeError(format!("`{}` names a member of a type, not a type", segs.join("::"))))
+                }
+            }
+        }
         other => Err(Error::TypeError(format!("not a type name: {:?}", other))),
     }
 }
 
-/// Records where a written type name's last segment is — the name proper —
-/// unless the name is a primitive's, which is not a nominal type; gives the
-/// segments back. `loc` is the whole name's span; the last segment is its
-/// tail on the same line.
-fn record_name(segs: Vec<String>, loc: Option<&Loc>, dyn_head: bool, out: &mut Vec<TypeNameSpan>) -> Vec<String> {
-    let primitive = segs.len() == 1 && primitive_by_name(&segs[0]).is_some();
-    if let (Some(l), false) = (loc, primitive) {
-        let last = segs.last().expect("a name has a segment").chars().count() as u32;
+/// Records where a written type name's last segment is — the name proper;
+/// gives the path back. `loc` is the whole name's span; the last segment is
+/// its tail on the same line.
+fn record_name(path: Path, loc: Option<&Loc>, dyn_head: bool, out: &mut Vec<TypeNameSpan>) -> Path {
+    if let Some(l) = loc {
+        let last = path.last_segment().chars().count() as u32;
         if l.end_line == l.line && l.end_col >= l.col + last {
             out.push(TypeNameSpan {
-                path: Path::from_segments(segs.clone()),
+                path,
                 dyn_head,
                 loc: Loc::new(std::sync::Arc::clone(&l.file), l.line, l.end_col - last).with_end(l.line, l.end_col),
             });
         }
     }
-    segs
+    path
 }
 
 /// Whether `v` is the reader's `(%type-apply Name Arg...)` — what
@@ -978,22 +990,21 @@ pub fn is_type_application(heap: &Heap, v: Value) -> bool {
 /// type. The name is recorded ahead of its arguments, so a recorded sequence
 /// lists an outer name before everything nested in it (`parse_dyn_type`
 /// relies on that).
-fn parse_type_application(heap: &Heap, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
+fn parse_type_application(heap: &Heap, ns: NsId, v: Value, out: &mut Vec<TypeNameSpan>) -> Result<Type, Error> {
     let elems = heap.list_to_vec_locs(v)?;
     if elems.len() < 3 {
         return Err(Error::TypeError("a generic type is written Name<Arg,...>, with at least one argument".to_string()));
     }
-    let segs = record_name(name_segments(heap, elems[1].0)?, elems[1].1.as_ref(), false, out);
+    let head = record_name(written_path(heap, ns, elems[1].0)?, elems[1].1.as_ref(), false, out);
     let mut args = Vec::with_capacity(elems.len() - 2);
     for (a, l) in &elems[2..] {
-        args.push(parse_type_spanned(heap, *a, l.as_ref(), out)?);
+        args.push(parse_type_spanned(heap, ns, *a, l.as_ref(), out)?);
     }
-    Ok(Type::Named(Path::from_segments(segs), args))
+    Ok(Type::Named(head, args))
 }
 
-/// The primitive type a bare single-segment name denotes, if any — the one
-/// authoritative name table behind [`named_or_primitive`] and the span
-/// recorder's "is this a nominal name at all" test.
+/// The primitive type a bare name denotes, if any — the one authoritative
+/// name table behind [`parse_type`]'s "is this a nominal name at all" test.
 ///
 /// Public because the registry builds the width-conversion methods
 /// (`int->u8` and friends) by walking [`INT_TYPE_NAMES`]: those names have to
@@ -1025,15 +1036,4 @@ pub fn primitive_by_name(name: &str) -> Option<Type> {
         "c-ulong" => Type::CULong,
         _ => return None,
     })
-}
-
-/// A non-generic, single-segment name names a primitive; anything else is a
-/// nominal [`Type::Named`].
-fn named_or_primitive(segs: Vec<String>, args: Vec<Type>) -> Type {
-    if args.is_empty() && segs.len() == 1 {
-        if let Some(t) = primitive_by_name(&segs[0]) {
-            return t;
-        }
-    }
-    Type::Named(Path::from_segments(segs), args)
 }

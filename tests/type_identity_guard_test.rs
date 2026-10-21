@@ -447,6 +447,31 @@ fn the_builtin_symbols_report_their_own_wk_constant() {
     }
 }
 
+/// No `%core` vocabulary member is spelled as a name the standard library
+/// offers every module.
+///
+/// In `%core` a member of its own vocabulary reads as itself, before what the
+/// library offers, so such a spelling there would name the IR tag where the
+/// island means the definition: `scope<v>` named no type at all. A tag
+/// spelled like an offered name belongs to `std`'s vocabulary, where the tag
+/// and the name are one symbol.
+#[test]
+fn no_core_vocabulary_member_is_spelled_as_an_offered_name() {
+    use typelisp::{load_prelude, Checker, Interp, BUILTIN_SYMBOLS};
+
+    let mut heap = typelisp::Heap::with_capacity(1 << 18);
+    let mut chk = Checker::new();
+    let mut interp = Interp::new();
+    load_prelude(&mut heap, &mut chk, &mut interp);
+    let names = heap.names();
+    let offered: Vec<&str> = typelisp::mem::symbols::CORE_VOCABULARY
+        .iter()
+        .map(|i| BUILTIN_SYMBOLS[*i as usize])
+        .filter(|name| names.offers(names.read(typelisp::NsId::ROOT, name)))
+        .collect();
+    assert!(offered.is_empty(), "`%core` vocabulary members spelled as names `std` offers: {:?}", offered);
+}
+
 /// The scan is only worth anything if it actually looks at the files the two
 /// bugs were in — a walk that silently found nothing would pass both rules.
 #[test]

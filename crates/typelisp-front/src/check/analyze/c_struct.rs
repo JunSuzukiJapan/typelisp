@@ -233,7 +233,7 @@ impl Checker {
     /// A field type: a C type, a typed pointer, or a `def-c-struct` by name
     /// (held by value).
     fn parse_c_field_type(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
-        let written = crate::types::parse_type_spanned(heap, v, loc, &mut Vec::new())?;
+        let written = crate::types::parse_type_spanned(heap, self.info.cur_ns().ns, v, loc, &mut Vec::new())?;
         if let Type::Named(n, args) = &written {
             if args.is_empty() {
                 if let Some(def) = self.resolve_c_struct(n) {
@@ -249,45 +249,18 @@ impl Checker {
         Ok(ty)
     }
 
-    /// The `def-c-struct` `path` names, resolved the way a type name is:
-    /// `use` aliases, then the current module and its ancestors; a qualified
-    /// name must be `pub` unless it is in scope.
+    /// The `def-c-struct` a written name `path` names, found the way a type
+    /// name is ([`Info::find_written`]).
     pub(super) fn resolve_c_struct(&self, path: &Path) -> Option<CStructDef> {
-        if path.is_simple() {
-            let name = path.last_segment();
-            if let Some(target) = self.info.import_of(name) {
-                if let Some(d) = self.info.reg.module_at(target.ns()).and_then(|m| m.c_structs.get_sym(target.name_symbol())) {
-                    return Some(d.clone());
-                }
-            }
-        }
-        self.resolve_c_struct_segs(&path.segments())
-    }
-
-    fn resolve_c_struct_segs(&self, segs: &[String]) -> Option<CStructDef> {
-        let (mods, local) = segs.split_at(segs.len().checked_sub(1)?);
-        if mods.is_empty() {
-            return self
-                .info.ns_ancestors()
-                .into_iter()
-                .find_map(|prefix| self.info.reg.module(prefix)?.c_structs.get(&local[0]).cloned());
-        }
-        let (abs, m) = self.info.find_module(mods)?;
-        let d = m.c_structs.get(&local[0])?;
-        if !d.public && !self.info.in_scope(&abs) {
-            return None;
-        }
-        Some(d.clone())
+        self.info.find_written(path, |m, k| m.c_structs.get_sym(k).map(|d| (d.public, d.clone()))).map(|(_, d)| d)
     }
 
     /// The definition behind a resolved [`Type::CStruct`].
     fn c_struct_def(&self, fq: &Path) -> Result<CStructDef, Error> {
-        let segs = fq.segments();
-        let (mods, local) = segs.split_at(segs.len() - 1);
-        self.info.reg
-            
-            .module(mods)
-            .and_then(|m| m.c_structs.get(&local[0]))
+        self.info
+            .reg
+            .module_at(fq.ns())
+            .and_then(|m| m.c_structs.get_sym(fq.name_symbol()))
             .cloned()
             .ok_or_else(|| Error::TypeError(format!("internal error: C struct `{}` is not registered", fq)))
     }
@@ -543,7 +516,7 @@ impl Checker {
                     .into(),
             ));
         }
-        let written = crate::types::parse_type(heap, args[0])?;
+        let written = crate::types::parse_type(heap, self.info.cur_ns().ns, args[0])?;
         let elem = self.canon_pointee(&written);
         let ptr_ty = Type::PtrTo(Box::new(elem.clone()));
         self.reject_bad_pointee(&ptr_ty)?;

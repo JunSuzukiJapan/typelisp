@@ -777,28 +777,36 @@ impl NsId {
 /// The vocabulary members owned by [`NsId::STD`] rather than the system
 /// module: names the standard library defines, which a module may define for
 /// itself only after declaring so (`shadow`). Exported by `std`.
+///
+/// The second group are IR tags spelled as a name the standard library
+/// offers — a type, a function — so the IR's tag and the name the island
+/// writes for that definition are one symbol.
 pub const STD_VOCABULARY: &[u32] = &[
     wk::COND, wk::AND, wk::OR, wk::WHEN, wk::UNLESS, wk::WHILE, wk::UNTIL, wk::CASE,
     wk::DOLIST, wk::DOTIMES, wk::DOITER, wk::DO, wk::NOT, wk::INTERN,
+    wk::INT, wk::BIGNUM, wk::RATIO, wk::CHAR, wk::BOOL, wk::STR, wk::ASSOC, wk::SYM, wk::NIL,
+    wk::CONS, wk::PATH, wk::I32, wk::F64, wk::F32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32,
+    wk::REPR_RATIONAL, wk::REPR_RANDOM_STATE, wk::REPR_SEXPR, wk::REPR_SCOPE, wk::REPR_VECTOR,
+    wk::REPR_HASHTABLE,
 ];
 
 /// The vocabulary members owned by [`NsId::CORE`]: core-IR tags with no
 /// meaning in source, the value representations the IR names, the names
-/// retired from the vocabulary, and the reader's attribute head.
+/// retired from the vocabulary, and the reader's attribute head. None is
+/// spelled as a name the standard library offers (those are in
+/// [`STD_VOCABULARY`]): in `%core` such a spelling would read as the tag, not
+/// as the definition.
 pub const CORE_VOCABULARY: &[u32] = &[
-    wk::RETIRED_WHERE, wk::RETIRED_EQUALS, wk::INT, wk::RETIRED_FLOAT, wk::BIGNUM, wk::RATIO, wk::CHAR,
-    wk::BOOL, wk::STR, wk::UNIT, wk::VAR, wk::SET, wk::GLOBAL, wk::SET_GLOBAL, wk::CALL, wk::ASSOC,
-    wk::CONSTRUCT, wk::FIELD_GET, wk::FIELD_SET, wk::DYN_NEW, wk::DYN_UPCAST, wk::DYN_CALL, wk::DYN_VALUE,
-    wk::SYM, wk::FNREF, wk::METHODREF, wk::COMPILE_FN, wk::METHOD, wk::PAT_WILD, wk::PAT_EMPTY,
-    wk::RETIRED_PAT_NONEMPTY, wk::PAT_BIND, wk::PAT_LIT, wk::PAT_GUARD, wk::PAT_CTOR, wk::PAT_TYPETEST,
-    wk::EXPR, wk::NIL, wk::CONS, wk::PATH, wk::INT_ANY_WIDTH, wk::FLOAT_ANY_WIDTH,
-    wk::I32, wk::F64, wk::F32, wk::I8, wk::I16, wk::U8, wk::U16, wk::U32, wk::DISASSEMBLE_FN,
+    wk::RETIRED_WHERE, wk::RETIRED_EQUALS, wk::RETIRED_FLOAT, wk::UNIT, wk::VAR, wk::SET, wk::GLOBAL,
+    wk::SET_GLOBAL, wk::CALL, wk::CONSTRUCT, wk::FIELD_GET, wk::FIELD_SET, wk::DYN_NEW, wk::DYN_UPCAST,
+    wk::DYN_CALL, wk::DYN_VALUE, wk::FNREF, wk::METHODREF, wk::COMPILE_FN, wk::METHOD, wk::PAT_WILD,
+    wk::PAT_EMPTY, wk::RETIRED_PAT_NONEMPTY, wk::PAT_BIND, wk::PAT_LIT, wk::PAT_GUARD, wk::PAT_CTOR,
+    wk::PAT_TYPETEST, wk::EXPR, wk::INT_ANY_WIDTH, wk::FLOAT_ANY_WIDTH, wk::DISASSEMBLE_FN,
     wk::RETIRED_GO, wk::UNTAG_INT, wk::TAG_INT, wk::SOME_OF, wk::PAT_SOME, wk::BOX_OPTION,
     wk::RETIRED_ELSE, wk::SPAWN, wk::TAG, wk::SPAWN_THREAD, wk::PAT_WHEN, wk::INTERNAL_MODULE_NAME,
     wk::ATTRIBUTE, wk::APPLY_INDIRECT, wk::CELLVAR, wk::CELLSET, wk::GLOBAL_INIT, wk::HASHTABLE_OP,
-    wk::LLVM_OP, wk::SUSPEND, wk::VECTOR_OP, wk::REPR_HANDLE, wk::REPR_RAW_WORD, wk::REPR_RATIONAL,
-    wk::REPR_RANDOM_STATE, wk::REPR_SEXPR, wk::REPR_STRUCT, wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_SCOPE,
-    wk::REPR_VECTOR, wk::REPR_HASHTABLE, wk::REPR_NICHE, wk::REPR_NONE,
+    wk::LLVM_OP, wk::SUSPEND, wk::VECTOR_OP, wk::REPR_HANDLE, wk::REPR_RAW_WORD, wk::REPR_STRUCT,
+    wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_NICHE, wk::REPR_NONE,
 ];
 
 /// The standard library module's segment under the root.
@@ -1355,6 +1363,12 @@ impl SessionNames {
     /// the path reached, or looked up among the type's members. A path that
     /// cannot be followed is an error that says where it stopped.
     pub fn read_path(&self, ns: NsId, segments: &[&str]) -> Result<Vec<SymRef>, String> {
+        self.follow_path(ns, segments).map(|(syms, _)| syms)
+    }
+
+    /// [`Self::read_path`], with where the last segment was read: the module
+    /// the path reached, or the type whose member it names.
+    pub fn follow_path(&self, ns: NsId, segments: &[&str]) -> Result<(Vec<SymRef>, PathStep), String> {
         let mut t = table();
         let lower: Vec<String> = segments.iter().map(|s| s.to_lowercase()).collect();
         let (last, steps) = lower.split_last().ok_or_else(|| "an empty path".to_string())?;
@@ -1382,14 +1396,15 @@ impl SessionNames {
             out.push(sym);
             at = Some(step);
         }
-        let last_sym = match at.expect("a path has at least two segments") {
+        let reached = at.expect("a path has at least two segments");
+        let last_sym = match reached {
             PathStep::Module(m) => t.read(m, last),
             PathStep::Type(ty) => *self.types[&ty].get(last.as_str()).ok_or_else(|| {
                 format!("`{}`: type `{}` has no member `{}`", segments.join("::"), ty.name(), last)
             })?,
         };
         out.push(last_sym);
-        Ok(out)
+        Ok((out, reached))
     }
 
     /// Whether `name`, read in `ns` as the first segment of a path, names a

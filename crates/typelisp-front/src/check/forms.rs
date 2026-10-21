@@ -21,7 +21,7 @@
 //! the rooting discipline comes from [`crate::check::core`] (see its module doc
 //! comment for why a raw `cons` is not enough).
 
-use typelisp_mem::{wk, Error, Heap, Loc, RootScope, Value};
+use typelisp_mem::{wk, Error, Heap, Loc, NsId, RootScope, Value};
 
 use crate::check::analyze::MacroLambda;
 use crate::check::core::{self, Items};
@@ -655,15 +655,25 @@ pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
     }
 }
 
-/// A type name as the reader would have produced it: one symbol for a plain
-/// name, an interned path for a `::`-qualified one. Both tables are
-/// permanent, so the result needs no rooting of its own.
+/// A type name as the reader would have produced it for the type `p`,
+/// wherever it is read again: the definition's own symbol, which leads to
+/// its module from anywhere (`Info::find_named`), or — for a name of the
+/// fixed vocabulary, which belongs to no one module — a path from the root.
+/// Both tables are permanent, so the result needs no rooting of its own.
 fn type_name_value(heap: &mut Heap, p: &Path) -> Value {
-    if p.is_simple() {
-        heap.intern_symbol(p.last_segment())
-    } else {
-        Value::Path(crate::types::intern_path_id(heap, p))
+    let sym = p.name_symbol();
+    if p.ns() == NsId::ROOT || sym.home() == p.ns() {
+        return Value::Symbol(sym);
     }
+    let segs: Vec<String> = std::iter::once(String::new()).chain(p.segments()).collect();
+    let syms: Vec<typelisp_mem::SymRef> = segs
+        .iter()
+        .map(|s| match heap.intern_symbol(s) {
+            Value::Symbol(id) => id,
+            _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
+        })
+        .collect();
+    heap.intern_path(&syms)
 }
 
 /// Build a proper list `Value` from `items`, in order — the inverse of

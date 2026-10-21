@@ -25,7 +25,7 @@ fn parse_result(src: &str) -> Result<Type, typelisp::Error> {
     let mut h = session();
     let r = Reader::new();
     let v = r.read(&mut h, src).expect("read failed");
-    parse_type(&h, v)
+    parse_type(&h, typelisp::mem::NsId::ROOT, v)
 }
 
 #[test]
@@ -88,7 +88,7 @@ fn a_less_than_with_no_type_after_it_is_part_of_the_name() {
     // zero segments.
     let mut h = session();
     let v = Reader::new().read(&mut h, "Result<").expect("read failed");
-    assert_eq!(parse_type(&h, v).unwrap(), Type::Named(Path::root("result<"), vec![]));
+    assert_eq!(parse_type(&h, typelisp::mem::NsId::ROOT, v).unwrap(), Type::Named(Path::root("result<"), vec![]));
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn rest_not_last_in_a_function_type_is_an_error() {
     let mut h = session();
     let r = Reader::new();
     let v = r.read(&mut h, "(fn (&rest int int) int)").expect("read failed");
-    assert!(parse_type(&h, v).is_err());
+    assert!(parse_type(&h, typelisp::mem::NsId::ROOT, v).is_err());
 }
 
 #[test]
@@ -177,7 +177,7 @@ fn rest_with_no_element_type_in_a_function_type_is_an_error() {
     let mut h = session();
     let r = Reader::new();
     let v = r.read(&mut h, "(fn (&rest) int)").expect("read failed");
-    assert!(parse_type(&h, v).is_err());
+    assert!(parse_type(&h, typelisp::mem::NsId::ROOT, v).is_err());
 }
 
 // ---- trait objects (`:dyn Trait`) ---------------------------------------
@@ -238,7 +238,7 @@ fn dyn_must_be_followed_by_a_trait_name() {
     let r = Reader::new();
     // A primitive is not a trait name.
     let v = r.read(&mut h, ":dyn i32").expect("read failed");
-    assert!(parse_type(&h, v).is_err(), "`:dyn int` must not parse as a trait object");
+    assert!(parse_type(&h, typelisp::mem::NsId::ROOT, v).is_err(), "`:dyn int` must not parse as a trait object");
 }
 
 // ---- recorded name spans (semantic highlighting) ------------------------
@@ -258,7 +258,7 @@ fn spans(src: &str) -> Vec<(String, u32)> {
     let read = r.read_all_in_spanned(&mut h, "t.typl", src).expect("read failed");
     let (v, loc) = read[0].clone();
     let mut out = Vec::new();
-    typelisp::parse_type_spanned(&h, v, Some(&loc), &mut out).expect("parse failed");
+    typelisp::parse_type_spanned(&h, typelisp::mem::NsId::ROOT, v, Some(&loc), &mut out).expect("parse failed");
     let chars: Vec<char> = src.chars().collect();
     out.iter()
         .map(|s| {
@@ -315,7 +315,7 @@ fn a_dyn_head_is_flagged_as_a_trait() {
     let read = r.read_all_in_spanned(&mut h, "t.typl", ":dyn shape").expect("read failed");
     let (v, loc) = read[0].clone();
     let mut out = Vec::new();
-    typelisp::parse_type_spanned(&h, v, Some(&loc), &mut out).expect("parse failed");
+    typelisp::parse_type_spanned(&h, typelisp::mem::NsId::ROOT, v, Some(&loc), &mut out).expect("parse failed");
     assert_eq!(out.len(), 1);
     assert!(out[0].dyn_head, "the `:dyn` head names a trait, not a type");
     // Column 6: past `:dyn `, on the trait name itself.
@@ -331,7 +331,7 @@ fn a_nested_dyn_is_flagged_and_located_inside_its_token() {
     let read = r.read_all_in_spanned(&mut h, "t.typl", "vector<:dyn shape>").expect("read failed");
     let (v, loc) = read[0].clone();
     let mut out = Vec::new();
-    typelisp::parse_type_spanned(&h, v, Some(&loc), &mut out).expect("parse failed");
+    typelisp::parse_type_spanned(&h, typelisp::mem::NsId::ROOT, v, Some(&loc), &mut out).expect("parse failed");
     let dyn_heads: Vec<&typelisp::TypeNameSpan> = out.iter().filter(|s| s.dyn_head).collect();
     assert_eq!(dyn_heads.len(), 1, "recorded: {:?}", out);
     assert_eq!(dyn_heads[0].loc.col, 13);
@@ -351,7 +351,7 @@ fn without_a_span_the_parse_still_succeeds_and_records_nothing() {
     let tail = h.cons(vector, tail).unwrap();
     let v = h.cons(apply, tail).unwrap();
     let mut out = Vec::new();
-    let ty = typelisp::parse_type_spanned(&h, v, None, &mut out).expect("parse failed");
+    let ty = typelisp::parse_type_spanned(&h, typelisp::mem::NsId::ROOT, v, None, &mut out).expect("parse failed");
     assert_eq!(ty, Type::Named(Path::root("vector"), vec![Type::Named(Path::root("rect"), vec![])]));
     assert!(out.is_empty());
 }

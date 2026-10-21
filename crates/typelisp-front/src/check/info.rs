@@ -584,71 +584,77 @@ impl Info {
         self.find_named(sym, |m, k| m.static_uses.get_sym(k).cloned()).map(|(_, member)| member)
     }
 
-    /// Resolve a bare (unqualified) type name: this module's own type of that
-    /// name, then a `use` alias, then the rest of the ancestor chain (see
-    /// [`Self::ns_ancestors`]) — the order [`Self::resolve_module_value`]
-    /// gives a function or a global. Every place a bare type
-    /// name is written goes through here — a type annotation
-    /// ([`Self::resolve_type_name`]), the `Type` of `Type::member`
-    /// ([`Self::resolve_type_path`] with no module qualifier), a pattern head,
-    /// `compile`/`documentation` of `Type::method` — so a type brought in by
-    /// `(use m::point)` is the same `point` in all of them.
+    /// What a written name `p` names ([`crate::types::written_path`]), as
+    /// `lookup` finds it among one module's definitions; `lookup` answers the
+    /// definition's visibility along with it.
     ///
-    /// An alias that names something other than a type (`(use m::f)`) does
-    /// not answer the question, and the chain is searched as for any name.
-    pub(super) fn resolve_bare_type(&self, name: &str) -> Option<Path> {
+    /// The definition at `p` itself comes first: a path's, which must be
+    /// `pub` unless it is in scope, or the current module's own. A name of
+    /// the current module that it does not define is then looked up as a
+    /// bare name is ([`Self::find_named`]). A path into another module that
+    /// leads to nothing names nothing.
+    pub(super) fn find_written<T>(
+        &self,
+        p: &Path,
+        mut lookup: impl FnMut(&Namespace, SymRef) -> Option<(bool, T)>,
+    ) -> Option<(Path, T)> {
+        if let Some((public, v)) = self.reg.module_at(p.ns()).and_then(|m| lookup(m, p.name_symbol())) {
+            return (public || self.in_scope(&p.parent())).then_some((*p, v));
+        }
+        if p.ns() != self.cur_ns().ns {
+            return None;
+        }
+        self.find_named(p.name_symbol(), |m, k| lookup(m, k).map(|(_, v)| v))
+    }
+
+    /// The type a written name names ([`Self::find_written`]). Every place a
+    /// type name is written goes through here — a type annotation
+    /// ([`Self::resolve_type_name`]), a pattern head, `compile`/`documentation`
+    /// of a type — so a type brought in by `(use m::point)` is the same
+    /// `point` in all of them.
+    pub(super) fn type_at(&self, p: &Path) -> Option<Path> {
+        self.find_written(p, |m, k| m.types.get_sym(k).map(|def| (def.public, def.name))).map(|(_, name)| name)
+    }
+
+    /// The `deftrait` trait a written name names ([`Self::find_written`]).
+    /// Traits are not types, and have a table of their own.
+    pub(super) fn trait_at(&self, p: &Path) -> Option<Path> {
+        self.find_written(p, |m, k| m.traits.get_sym(k).map(|td| (td.public, td.name))).map(|(_, name)| name)
+    }
+
+    /// The `deftype` alias a written name names, if it names one
+    /// ([`Self::find_written`]): an alias is a spelling for a type and is
+    /// reached the same ways one is.
+    pub(super) fn type_alias_at(&self, p: &Path) -> Option<TypeAlias> {
+        self.find_written(p, |m, k| m.type_aliases.get_sym(k).map(|a| (a.public, a.clone()))).map(|(_, a)| a)
+    }
+
+    /// The type a bare name in a `Type::member` path names: this module's
+    /// own type of that name, then a `use` alias, then the rest of the
+    /// ancestor chain (see [`Self::ns_ancestors`]). A path is still taken
+    /// apart into its segments' names, so the name is looked up by name.
+    fn resolve_bare_type_named(&self, name: &str) -> Option<Path> {
         if let Some(def) = self.cur_ns().types.get(name) {
-            return Some(def.name.clone());
+            return Some(def.name);
         }
         if let Some(target) = self.import_of(name) {
             if self.reg.type_def(&target).is_some() {
                 return Some(target);
             }
         }
-        self.resolve_unaliased_bare_type(name)
-    }
-
-    /// [`Self::resolve_bare_type`] without the `use` alias: the ancestor
-    /// chain alone.
-    pub(super) fn resolve_unaliased_bare_type(&self, name: &str) -> Option<Path> {
-        self.find_on_chain(|_, m| m.types.get(name).map(|def| def.name.clone()))
+        self.find_on_chain(|_, m| m.types.get(name).map(|def| def.name))
     }
 
     /// Resolve a `module::...::Type` segment path to the type's [`Path`].
     pub(super) fn resolve_type_path(&self, segs: &[String]) -> Option<Path> {
         let (local, mods) = segs.split_last()?;
         if mods.is_empty() {
-            // No module qualifier — `find_module(&[])` would just hand back
-            // the current namespace itself (its loop never runs), missing
-            // every ancestor including root; walk the chain instead.
-            return self.resolve_bare_type(local);
+            return self.resolve_bare_type_named(local);
         }
-        self.find_in_module(segs, |m, n| m.types.get(n).map(|def| (def.public, def.name.clone()))).map(|(_, name)| name)
+        self.find_in_module(segs, |m, n| m.types.get(n).map(|def| (def.public, def.name))).map(|(_, name)| name)
     }
 
-    /// Resolve a written type name to a `deftype` alias, if it names one.
-    ///
-    /// Searched exactly like a type ([`Self::resolve_bare_type`] /
-    /// [`Self::resolve_type_path`]), including `use` aliases and the
-    /// `pub`-visibility rule for a qualified name — an alias is a spelling
-    /// for a type and is reached the same ways one is.
-    pub(super) fn resolve_type_alias(&self, path: &Path) -> Option<TypeAlias> {
-        if path.is_simple() {
-            let name = path.last_segment();
-            if let Some(a) = self.cur_ns().type_aliases.get(name) {
-                return Some(a.clone());
-            }
-            if let Some(target) = self.import_of(name) {
-                if let Some(a) = self.reg.module_at(target.ns()).and_then(|m| m.type_aliases.get_sym(target.name_symbol())) {
-                    return Some(a.clone());
-                }
-            }
-            return self.find_on_chain(|_, m| m.type_aliases.get(name).cloned());
-        }
-        self.resolve_type_alias_path(&path.segments())
-    }
-
-    /// [`Self::resolve_type_alias`] for a `module::...::Name` segment path.
+    /// [`Self::type_alias_at`] for a `module::...::Name` segment path.
     pub(super) fn resolve_type_alias_path(&self, segs: &[String]) -> Option<TypeAlias> {
         let (local, mods) = segs.split_last()?;
         if mods.is_empty() {
@@ -657,14 +663,10 @@ impl Info {
         self.find_in_module(segs, |m, n| m.type_aliases.get(n).map(|a| (a.public, a.clone()))).map(|(_, a)| a)
     }
 
-    /// Resolve a nominal type [`Path`] to its canonical (located) form if a
-    /// matching type exists; otherwise (type variables, unknown names) return it
-    /// unchanged.
+    /// Resolve a nominal type [`Path`] to the type it names if there is one;
+    /// otherwise (type variables, unknown names) return it unchanged.
     pub(super) fn resolve_type_name(&self, path: &Path) -> Path {
-        if path.is_simple() {
-            return self.resolve_bare_type(path.last_segment()).unwrap_or_else(|| path.clone());
-        }
-        self.resolve_type_path(&path.segments()).unwrap_or_else(|| path.clone())
+        self.type_at(path).unwrap_or(*path)
     }
 
     /// The global a bare name holds, if what it holds is a variable — see
@@ -674,43 +676,5 @@ impl Info {
             ModuleValue::Var(path, vi) => Some((path, vi)),
             ModuleValue::Fn(_) => None,
         }
-    }
-
-    /// Resolve a `deftrait`-defined trait's bare name to its fully-qualified
-    /// [`Path`] — mirrors `Checker::resolve_type_name`, but for the separate
-    /// `traits` table (traits aren't types and don't share its namespace).
-    pub(super) fn resolve_trait_name(&self, name: &str) -> Result<Path, Error> {
-        let mut ns = self.ns.clone();
-        loop {
-            if let Some(td) = self.reg.module(&ns).and_then(|m| m.traits.get(name)) {
-                return Ok(td.name.clone());
-            }
-            if ns.is_empty() {
-                break;
-            }
-            ns.pop();
-        }
-        // The standard library's module last, as `Self::ns_ancestors` has it.
-        if let Some(td) = self.reg.module(&STD_SEGMENTS).and_then(|m| m.traits.get(name)) {
-            return Ok(td.name.clone());
-        }
-        Err(Error::TypeError(format!("impl: unknown trait `{}`", name)))
-    }
-
-    /// [`Self::resolve_trait_name`] for a written [`Path`], returning `None`
-    /// instead of an error: a bare name searches the ancestor module chain
-    /// (the same walk), a qualified one is looked up in the named module.
-    /// Used by `canon` to normalize a [`Type::Dyn`]'s trait head, which must
-    /// not fail — an unresolvable trait is reported later, with a message
-    /// about the trait object rather than about an `impl`.
-    pub(super) fn resolve_trait_path(&self, p: &Path) -> Option<Path> {
-        if p.is_simple() {
-            return self.resolve_trait_name(p.last_segment()).ok();
-        }
-        self.reg
-            
-            .module(&p.parent())
-            .and_then(|m| m.traits.get(p.last_segment()))
-            .map(|td| td.name.clone())
     }
 }
