@@ -221,7 +221,7 @@ pub fn capture_program_dump(
         }
         interp.exec(heap, tl).map_err(|e| e.to_string())?;
     }
-    chk.exit_file_module(entry_segs.len());
+    chk.exit_file_module();
     // Every dependency's own bundle (`Loader::pending`, one `(module PATH
     // body...)` wrapper per file — `Interp::exec` already knows how to run
     // one of those directly, the same way `compile_file`'s flattening

@@ -430,7 +430,7 @@ impl Loader {
                 }
             }
         }
-        checker.exit_file_module(segs.len());
+        checker.exit_file_module();
         if let Some(e) = check_err {
             pop_roots_to(heap, mark);
             return Err(e);
@@ -798,11 +798,7 @@ pub fn needs_immediate_exec(heap: &Heap, tl: TopLevelForm) -> bool {
         // `lambda`, or comes from the prelude. See `docs/ja/reference/syntax.md` §11.
         Some(wk::EXPR) => core::field(heap, tl, 0).map(|e| is_readtable_registration(heap, e)).unwrap_or(false),
         Some(wk::MODULE) => {
-            let bundle = match core::field(heap, tl, 0) {
-                Some(Value::Path(id)) => crate::types::path_from_id(heap, id) == Path::root(MONO_BUNDLE_MODULE),
-                Some(Value::Symbol(id)) => id.is(wk::MONO_BUNDLE),
-                _ => false,
-            };
+            let bundle = core::path_field(heap, tl, 0) == Some(Path::root(MONO_BUNDLE_MODULE));
             bundle
                 && core::fields(heap, tl)
                     .map(|fs| fs.iter().skip(1).any(|f| needs_immediate_exec(heap, *f)))

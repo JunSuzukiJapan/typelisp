@@ -372,7 +372,7 @@ struct FnTemplate {
     /// The namespace the `defun` was defined in — specialization re-checks
     /// the body under the *defining* module's name resolution, not the
     /// caller's.
-    ns: Vec<String>,
+    ns: typelisp_mem::NsId,
     type_params: Vec<String>,
 }
 
@@ -431,7 +431,7 @@ enum MethodTemplate {
     ///
     /// `own_vars` are the method's own type parameters, bound to the
     /// instantiation arguments after the owner's.
-    Form { parts: Vec<Value>, ns: Vec<String>, written_vars: Vec<String>, own_vars: Vec<String> },
+    Form { parts: Vec<Value>, ns: typelisp_mem::NsId, written_vars: Vec<String>, own_vars: Vec<String> },
     /// A generic `defstruct` field getter — there is no raw form to
     /// re-check (`check_defstruct` synthesizes accessor ASTs directly), so
     /// specialization re-synthesizes the `FieldGet` with the field type
@@ -766,8 +766,8 @@ type MacroLambdaList = (Vec<String>, Vec<(String, Option<Value>)>, Option<String
 
 /// Opaque saved namespace context — see [`Checker::suspend_ns_context`].
 pub struct NsContext {
-    ns: Vec<String>,
-    file_ns: Vec<Vec<String>>,
+    ns: typelisp_mem::NsId,
+    file_ns: Vec<typelisp_mem::NsId>,
 }
 
 /// What writing `defmethod` says: methods are written in the type's `impl`.
@@ -1152,10 +1152,6 @@ pub const SPECIAL_FORM_HEADS: &[u32] = &[
     wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
 ];
 
-/// The standard library's module, as its segments from the root.
-pub(super) static STD_SEGMENTS: std::sync::LazyLock<Vec<String>> =
-    std::sync::LazyLock::new(|| vec![crate::types::STD_MODULE.to_string()]);
-
 const TOPLEVEL_FORM_HEADS: &[u32] = &[
     wk::PUB, wk::DEFUN, wk::DEFSIGNATURE, wk::DEFFFI, wk::DEFVAR, wk::DEFPARAMETER,
     wk::DEFCONSTANT, wk::DEFMACRO, wk::MODULE, wk::DEFMETHOD, wk::DEFSTRUCT, wk::DEFENUM,
@@ -1299,12 +1295,12 @@ impl Checker {
         for (path, t) in delta.fn_templates {
             let parts = rebuild(&t.parts, heap)?;
             self.generic_fn_templates
-                .insert(path, FnTemplate { parts, ns: t.ns, type_params: t.type_params });
+                .insert(path, FnTemplate { parts, ns: typelisp_mem::symbols::ns_of(&t.ns), type_params: t.type_params });
         }
         for (key, t) in delta.method_templates {
             let restored = match t {
                 crate::dump::WireMethodTemplate::Form { parts, ns, written_vars, own_vars } => {
-                    MethodTemplate::Form { parts: rebuild(&parts, heap)?, ns, written_vars, own_vars }
+                    MethodTemplate::Form { parts: rebuild(&parts, heap)?, ns: typelisp_mem::symbols::ns_of(&ns), written_vars, own_vars }
                 }
                 crate::dump::WireMethodTemplate::Getter { index } => MethodTemplate::Getter { index },
                 crate::dump::WireMethodTemplate::Setter { index } => MethodTemplate::Setter { index },
@@ -1346,7 +1342,7 @@ impl Checker {
         for (path, t) in fns {
             let w = crate::dump::WireFnTemplate {
                 parts: owned(&t.parts)?,
-                ns: t.ns.clone(),
+                ns: typelisp_mem::symbols::ns_path(t.ns),
                 type_params: t.type_params.clone(),
             };
             let (bytes, hash) = crate::dump::wire(&w)?;
@@ -1360,7 +1356,7 @@ impl Checker {
             let w = match t {
                 MethodTemplate::Form { parts, ns, written_vars, own_vars } => crate::dump::WireMethodTemplate::Form {
                     parts: owned(parts)?,
-                    ns: ns.clone(),
+                    ns: typelisp_mem::symbols::ns_path(*ns),
                     written_vars: written_vars.clone(),
                     own_vars: own_vars.clone(),
                 },
@@ -1399,10 +1395,8 @@ impl Checker {
     /// `(eval ...)` in the script's own file-derived module (so the script's
     /// module-scoped globals/functions resolve from an eval'd form, and
     /// eval-defined names register there too), matching how those forms were
-    /// checked at load time. The REPL leaves this at the root (`[]`), where it
-    /// checks its own input, so REPL `eval` resolves against the root
-    /// environment unchanged.
-    pub fn set_current_ns(&mut self, ns: Vec<String>) {
+    /// checked at load time.
+    pub fn set_current_ns(&mut self, ns: typelisp_mem::NsId) {
         self.info.ns = ns;
         self.publish_name_view();
     }
@@ -1705,7 +1699,7 @@ impl Checker {
             Ok((specs, tl)) if specs.is_empty() && lifted.is_empty() => Ok(tl),
             Ok((mut specs, tl)) => {
                 for l in lifted {
-                    self.info.reg.module_mut(&l.path.parent()).fns.insert(l.path.last_segment().to_string(), l.sig);
+                    self.info.reg.module_mut(l.path.ns()).fns.insert(l.path.last_segment().to_string(), l.sig);
                     specs.push(l.form);
                 }
                 specs.push(tl);
@@ -1848,7 +1842,7 @@ impl Checker {
             optionals: Vec::new(),
             keys: Vec::new(),
         };
-        self.info.reg.module_mut(&self.info.ns).fns.insert(name, sig);
+        self.info.reg.module_mut(self.info.ns).fns.insert(name, sig);
         self.predeclared.insert(fq_name.to_string());
         forms::defsignature_form(heap)
     }
@@ -1907,7 +1901,7 @@ impl Checker {
     /// as it is for every other `defffi` type.
     fn parse_callback_type_at(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
         let mut spans = Vec::new();
-        let written = parse_type_spanned(heap, self.info.cur_ns().ns, v, loc, &mut spans)?;
+        let written = parse_type_spanned(heap, self.info.ns, v, loc, &mut spans)?;
         self.check_type_alias_arity(&written)?;
         self.reject_trait_in_type_position(&written)?;
         let ty = self.canon(&written);
@@ -2012,7 +2006,7 @@ impl Checker {
             optionals: Vec::new(),
             keys: Vec::new(),
         };
-        self.info.reg.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
+        self.info.reg.module_mut(self.info.ns).fns.insert(name.clone(), sig);
         self.info.defffi_form(heap, &self.info.fq(&name), &c_symbol, library.as_deref(), &params, &ret)
     }
 
@@ -2453,7 +2447,7 @@ impl Checker {
                     None => return Ok(None),
                 }
             }
-            Some(Value::Path(pid)) => match crate::types::path_target(heap, self.info.cur_ns().ns, *pid)? {
+            Some(Value::Path(pid)) => match crate::types::path_target(heap, self.info.ns, *pid)? {
                 PathTarget::In(written) => match self.info.macro_at(&written) {
                     Some((p, shape)) => (p, shape, crate::types::path_spelling(heap, *pid)),
                     None => return Ok(None),
@@ -2889,7 +2883,7 @@ impl Checker {
             Type::Named(n, args) => {
                 // A name written bare in the current module, which is what a
                 // type variable is written as.
-                let bare_here = args.is_empty() && n.ns() == self.info.cur_ns().ns;
+                let bare_here = args.is_empty() && n.ns() == self.info.ns;
                 if bare_here {
                     let name = n.last_segment();
                     if let Some(bound) = self.type_var_bindings.get(name) {
@@ -2972,7 +2966,7 @@ impl Checker {
     /// where no span is available.
     fn parse_type_here_at(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
         let mut spans = Vec::new();
-        let written = parse_type_spanned(heap, self.info.cur_ns().ns, v, loc, &mut spans)?;
+        let written = parse_type_spanned(heap, self.info.ns, v, loc, &mut spans)?;
         self.check_type_alias_arity(&written)?;
         self.reject_trait_in_type_position(&written)?;
         let ty = self.canon(&written);
@@ -3032,7 +3026,7 @@ impl Checker {
             }
         }
         let mut out = Vec::new();
-        if let Ok(t) = crate::types::parse_type(heap, self.info.cur_ns().ns, v) {
+        if let Ok(t) = crate::types::parse_type(heap, self.info.ns, v) {
             walk(self, &self.canon(&t), &mut out);
         }
         out
@@ -3149,7 +3143,7 @@ impl Checker {
             }
             return;
         }
-        if span.path.ns() == self.info.cur_ns().ns && self.type_var_bindings.contains_key(span.path.last_segment()) {
+        if span.path.ns() == self.info.ns && self.type_var_bindings.contains_key(span.path.last_segment()) {
             return;
         }
         let fq = self.info.resolve_type_name(&span.path);
@@ -3356,7 +3350,7 @@ impl Checker {
             }
             self.generic_fn_templates.insert(
                 fq_name.clone(),
-                FnTemplate { parts: parts.to_vec(), ns: self.info.ns.clone(), type_params: type_params.clone() },
+                FnTemplate { parts: parts.to_vec(), ns: self.info.ns, type_params: type_params.clone() },
             );
         }
 
@@ -3375,7 +3369,7 @@ impl Checker {
         if let Some(decl) = &declared {
             super::verify::signature_agrees(&name, decl, &sig)?;
         }
-        self.info.reg.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
+        self.info.reg.module_mut(self.info.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
             self.info.reg.def_locs.fns.insert(fq_name.clone(), loc);
         }
@@ -3478,7 +3472,7 @@ impl Checker {
             }
             self.generic_fn_templates.insert(
                 fq_name.clone(),
-                FnTemplate { parts: parts.to_vec(), ns: self.info.ns.clone(), type_params: type_params.clone() },
+                FnTemplate { parts: parts.to_vec(), ns: self.info.ns, type_params: type_params.clone() },
             );
         }
 
@@ -3523,7 +3517,7 @@ impl Checker {
             optionals: optionals.clone(),
             keys: keys.clone(),
         };
-        self.info.reg.module_mut(&self.info.ns).fns.insert(name.clone(), sig);
+        self.info.reg.module_mut(self.info.ns).fns.insert(name.clone(), sig);
         if let Some(loc) = def_loc {
             self.info.reg.def_locs.fns.insert(fq_name.clone(), loc);
         }
@@ -3814,7 +3808,7 @@ impl Checker {
             .clone();
         let bindings: BTreeMap<String, Type> =
             tmpl.type_params.iter().cloned().zip(args.iter().cloned()).collect();
-        let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(tmpl.ns.clone(), bindings);
+        let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(tmpl.ns, bindings);
         let result = self.specialize_defun_body(heap, interp, &tmpl, mangled);
         self.exit_specialization(saved_ns, saved_loops, saved_bindings);
         result
@@ -3828,9 +3822,9 @@ impl Checker {
     /// for [`Self::exit_specialization`] to restore.
     fn enter_specialization(
         &mut self,
-        ns: Vec<String>,
+        ns: typelisp_mem::NsId,
         bindings: BTreeMap<String, Type>,
-    ) -> (Vec<String>, Escapes, BTreeMap<String, Type>) {
+    ) -> (typelisp_mem::NsId, Escapes, BTreeMap<String, Type>) {
         let saved_ns = std::mem::replace(&mut self.info.ns, ns);
         let saved_loops = std::mem::take(&mut *self.loop_stack.borrow_mut());
         // Cleared alongside the loop stack, and for the same reason: a
@@ -3860,7 +3854,7 @@ impl Checker {
 
     fn exit_specialization(
         &mut self,
-        saved_ns: Vec<String>,
+        saved_ns: typelisp_mem::NsId,
         saved: Escapes,
         saved_bindings: BTreeMap<String, Type>,
     ) {
@@ -4253,7 +4247,7 @@ impl Checker {
             // (every file is one) a bare `err2` would otherwise be stored as
             // root `err2` and match none of them.
             let trait_name = match parts[0] {
-                Value::Symbol(id) => self.info.trait_at(&Path::of_symbol(self.info.cur_ns().ns, id)).ok_or_else(|| {
+                Value::Symbol(id) => self.info.trait_at(&Path::of_symbol(self.info.ns, id)).ok_or_else(|| {
                     Error::TypeError(format!("impl: unknown trait `{}`", heap.symbol_spelling(id)))
                 })?,
                 _ => return Err(Error::TypeError(":where: trait name must be a symbol".into())),
@@ -4385,7 +4379,7 @@ impl Checker {
                 )))
             }
         };
-        let path = self.info.trait_at(&Path::of_symbol(self.info.cur_ns().ns, sym)).ok_or_else(|| {
+        let path = self.info.trait_at(&Path::of_symbol(self.info.ns, sym)).ok_or_else(|| {
             Error::TypeError(format!(
                 "deftrait {}: unknown supertrait `{}` — the form is (deftrait Name (Super...) items...), \
                  so the list right after the name is the supertrait list (write `()` for none)",
@@ -4549,7 +4543,7 @@ impl Checker {
         let fq_name = self.info.fq(&name);
         self.check_value_clash("macro", &name)?;
         self.check_redef("macro", &name, self.info.cur_ns().macros.get(&name))?;
-        self.info.reg.module_mut(&self.info.ns).macros.insert(
+        self.info.reg.module_mut(self.info.ns).macros.insert(
             name,
             MacroDef {
                 required: required_names.len(),
@@ -5180,7 +5174,7 @@ impl Checker {
         // `Self::canon`/`Info::trait_at`. Same device, same reason, as
         // `check_defstruct`'s self-referential-field stub; overwritten with
         // the fully parsed `TraitDef` below.
-        self.info.reg.module_mut(&self.info.ns).traits.insert(
+        self.info.reg.module_mut(self.info.ns).traits.insert(
             name.clone(),
             TraitDef {
                 name: fq_name.clone(),
@@ -5262,7 +5256,7 @@ impl Checker {
                     .iter()
                     .map(|v| crate::owned_form::value_to_owned(heap, *v))
                     .collect::<Result<Vec<_>, _>>()?;
-                defaults.insert(head.clone(), TraitDefault { item, ns: self.info.ns.clone() });
+                defaults.insert(head.clone(), TraitDefault { item, ns: self.info.ns });
                 default_written
                     .push((elems.clone(), elem_locs.iter().map(|(_, l)| l.clone()).collect()));
             }
@@ -5275,7 +5269,7 @@ impl Checker {
         let (vtable_order, vtable_owner) =
             self.linearize_vtable(&name, &fq_name, &supertraits, &method_order)?;
         let assoc_names = assoc_types.clone();
-        self.info.reg.module_mut(&self.info.ns).traits.insert(
+        self.info.reg.module_mut(self.info.ns).traits.insert(
             name.clone(),
             TraitDef {
                 name: fq_name.clone(),
@@ -5467,7 +5461,7 @@ impl Checker {
         // the trait's module outright.
         let segs = path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
-        let written = crate::types::written_path(heap, self.info.cur_ns().ns, parts[0])?;
+        let written = crate::types::written_path(heap, self.info.ns, parts[0])?;
         let trait_fq = self
             .info.trait_at(&written)
             .ok_or_else(|| Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::"))))?;
@@ -5591,7 +5585,7 @@ impl Checker {
                 _ => Err(Error::TypeError("impl: method name must be a symbol".into())),
             })
             .collect::<Result<_, Error>>()?;
-        let defaulted: Vec<(String, Vec<crate::owned_form::OwnedForm>, Vec<String>)> = self
+        let defaulted: Vec<(String, Vec<crate::owned_form::OwnedForm>, typelisp_mem::NsId)> = self
             .info.reg
             .trait_def(&trait_fq)
             .map(|t| {
@@ -5604,7 +5598,7 @@ impl Checker {
                     .collect()
             })
             .unwrap_or_default();
-        let mut default_ns: Vec<Option<Vec<String>>> = vec![None; method_forms.len()];
+        let mut default_ns: Vec<Option<typelisp_mem::NsId>> = vec![None; method_forms.len()];
         for (_, item, ns) in &defaulted {
             let form = Self::owned_item_to_form(heap, item)?;
             // The written items are reachable from the enclosing top-level
@@ -5613,7 +5607,7 @@ impl Checker {
             // `MethodTemplate::Form` besides.
             heap.push_permanent_root(form);
             method_forms.push(form);
-            default_ns.push(Some(ns.clone()));
+            default_ns.push(Some(*ns));
         }
 
         let mut body = Vec::new();
@@ -5627,7 +5621,7 @@ impl Checker {
                 &new_elems_locs,
                 true, // see this function's doc comment
                 method_loc,
-                default_ns[mi].clone(),
+                default_ns[mi],
             )?;
             // Rooted as it lands: `body` is a `Vec<Value>`, which the collector
             // cannot see, and the *next* method's checking allocates heavily.
@@ -6146,12 +6140,12 @@ impl Checker {
         target: &Type,
     ) -> Result<Vec<TopLevelForm>, Error> {
         let Some(b) = self.info.reg.blanket_impl(trait_path) else { return Ok(Vec::new()) };
-        let (target_var, ns) = (b.target_var.clone(), b.ns.clone());
+        let (target_var, ns) = (b.target_var.clone(), b.ns);
         let mut items: Vec<Vec<crate::owned_form::OwnedForm>> = Vec::new();
         for (aname, ty) in &b.assoc {
             items.push(vec![
                 crate::owned_form::OwnedForm::Keyword("type".into()),
-                crate::owned_form::OwnedForm::Sym(aname.clone(), ns.clone()),
+                crate::owned_form::OwnedForm::Sym(aname.clone(), typelisp_mem::symbols::ns_path(ns)),
                 ty.clone(),
             ]);
         }
@@ -6365,7 +6359,7 @@ impl Checker {
     ) -> Result<TopLevelForm, Error> {
         let segs = path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
-        let written = crate::types::written_path(heap, self.info.cur_ns().ns, parts[0])?;
+        let written = crate::types::written_path(heap, self.info.ns, parts[0])?;
         let trait_fq = self
             .info.trait_at(&written)
             .ok_or_else(|| Error::TypeError(format!("impl: unknown trait `{}`", segs.join("::"))))?;
@@ -6441,13 +6435,13 @@ impl Checker {
         // one of this very blanket's siblings on a covered type resolves —
         // the same "signature first, body second" order every definition form
         // here follows for self-recursion.
-        self.info.reg.module_mut(&self.info.ns).blanket_impls.push(BlanketImpl {
+        self.info.reg.module_mut(self.info.ns).blanket_impls.push(BlanketImpl {
             trait_path: trait_fq.clone(),
             target_var: target_var.clone(),
             bounds,
             assoc,
             methods,
-            ns: self.info.ns.clone(),
+            ns: self.info.ns,
         });
         self.precheck_blanket_impl(
             heap,
@@ -7286,10 +7280,10 @@ impl Checker {
             return Err(Error::TypeError("module: (module path body...)".into()));
         }
         let segs = path_to_segs(heap, parts[0])?;
-        // Saved before entering: an `(in-module ...)` in this body pushes
-        // segments of its own that no closing form pops, so the body's end is
-        // what restores the namespace — see `Checker::ns_base`.
-        let base = self.info.ns.len();
+        // Saved before entering: an `(in-module ...)` in this body moves the
+        // module with no closing form, so the body's end is what restores it
+        // — see `Info::ns_base`.
+        let base = self.info.ns;
         let path = self.enter_module(&segs)?;
 
         let mut body = Vec::new();
@@ -7321,47 +7315,36 @@ impl Checker {
                 }
             }
         }
-        self.info.ns.truncate(base);
+        self.info.ns = base;
         self.publish_name_view();
         result?;
         forms::module_form(heap, &path, &body)
     }
 
-    /// Push `segs` onto the current namespace path and ensure the (possibly
-    /// empty) module namespace exists, returning the resulting absolute
-    /// [`Path`]. Public so a filesystem-aware driver (`crate::project`) can
+    /// Move into the module `segs` names from the current one, one child per
+    /// segment, and ensure the (possibly empty) module namespace exists,
+    /// returning the module as a [`Path`]. Public so a filesystem-aware driver (`crate::project`) can
     /// check a file's forms inside the module its path derives to — the
     /// file's whole content is implicitly wrapped in that module without
-    /// synthesizing a `(module ...)` form around the read values. Every
-    /// `enter_module` must be paired with an [`Self::exit_module`] of the
-    /// same segment count, even on a check error in between (mirroring
-    /// [`Self::check_module`], which pops before propagating its body's
-    /// first error).
+    /// synthesizing a `(module ...)` form around the read values. The caller
+    /// restores the module it was in, even on a check error in between
+    /// ([`Self::check_module`] does it before propagating its body's first
+    /// error).
     ///
     /// The root's `keyword` is the keyword namespace (CL's `KEYWORD`
     /// package), which owns every keyword and nothing else, so no module may
     /// take its place.
     pub fn enter_module(&mut self, segs: &[String]) -> Result<Path, Error> {
-        if self.info.ns.is_empty() && segs.first().is_some_and(|s| s.eq_ignore_ascii_case(typelisp_mem::symbols::KEYWORD_MODULE)) {
+        if self.info.ns == typelisp_mem::NsId::ROOT && segs.first().is_some_and(|s| s.eq_ignore_ascii_case(typelisp_mem::symbols::KEYWORD_MODULE)) {
             return Err(Error::TypeError(format!(
                 "module `{}` is the keyword namespace, which holds the keywords and nothing else — choose another name",
                 typelisp_mem::symbols::KEYWORD_MODULE
             )));
         }
-        for s in segs {
-            self.info.ns.push(s.clone());
-        }
-        self.info.reg.module_mut(&self.info.ns);
+        self.info.ns = segs.iter().fold(self.info.ns, |ns, s| typelisp_mem::symbols::child_ns(ns, s));
+        self.info.reg.module_mut(self.info.ns);
         self.publish_name_view();
-        Ok(Path::from_segments(self.info.ns.clone()))
-    }
-
-    /// Pop `depth` segments pushed by [`Self::enter_module`].
-    pub fn exit_module(&mut self, depth: usize) {
-        for _ in 0..depth {
-            self.info.ns.pop();
-        }
-        self.publish_name_view();
+        Ok(Path::of_module(self.info.ns))
     }
 
     /// Makes the printer write paths for the module being checked now
@@ -7370,7 +7353,7 @@ impl Checker {
     /// and before each form, since a form can bring a type in.
     fn publish_name_view(&self) {
         let mut imports = std::collections::HashMap::new();
-        let own = self.info.reg.module(&self.info.ns);
+        let own = self.info.reg.module_at(self.info.ns);
         if let Some(m) = own {
             for (bare, target) in &m.aliases {
                 if self.info.reg.type_def(target).is_some() {
@@ -7381,15 +7364,15 @@ impl Checker {
         // The standard library offers its types to every module, so they
         // are written as if brought in — except where this module's own
         // definition or import takes the name.
-        if let Some(std_ns) = self.info.reg.module(&STD_SEGMENTS) {
+        if let Some(std_ns) = self.info.reg.module_at(typelisp_mem::NsId::STD) {
             for name in std_ns.types.keys().chain(std_ns.traits.keys()) {
                 if own.is_some_and(|m| m.types.contains_key(name) || m.traits.contains_key(name)) {
                     continue;
                 }
-                imports.entry(name.to_string()).or_insert_with(|| item_path(&STD_SEGMENTS, name).to_string());
+                imports.entry(name.to_string()).or_insert_with(|| Path::std(name).to_string());
             }
         }
-        typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(self.info.ns.clone(), imports));
+        typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(typelisp_mem::symbols::ns_path(self.info.ns), imports));
     }
 
     /// [`Self::enter_module`], plus recording `segs` as the file currently
@@ -7402,34 +7385,22 @@ impl Checker {
     /// the one the next form has to be read in for its names to be this
     /// module's.
     pub fn current_module(&self) -> typelisp_mem::NsId {
-        typelisp_mem::symbols::ns_of(&self.info.ns)
+        self.info.ns
     }
 
     pub fn enter_file_module(&mut self, segs: &[String]) -> Result<Path, Error> {
+        let base = self.info.ns;
         let path = self.enter_module(segs)?;
-        self.info.ns_base.push(self.info.ns.len() - segs.len());
-        self.info.file_ns.push(self.info.ns.clone());
+        self.info.ns_base.push(base);
+        self.info.file_ns.push(self.info.ns);
         Ok(path)
     }
 
-    /// Undo [`Self::enter_file_module`]: restore the namespace this file was
-    /// entered from and drop its `file_ns` frame.
-    ///
-    /// `depth` is the number of segments the matching `enter_file_module`
-    /// pushed. It is no longer what decides how far to unwind — an
-    /// `(in-module ...)` in the file pushes further segments that have no
-    /// closing form to pop them, so the saved base is what restores the
-    /// namespace. The argument stays because a caller passing the wrong
-    /// depth is a bug worth catching.
-    pub fn exit_file_module(&mut self, depth: usize) {
-        let base = self.info.ns_base.pop().unwrap_or(0);
-        debug_assert!(
-            self.info.ns.len() >= base + depth,
-            "exit_file_module({}) below the {} segments it entered",
-            depth,
-            self.info.ns.len() - base
-        );
-        self.info.ns.truncate(base);
+    /// Undo [`Self::enter_file_module`]: return to the module this file was
+    /// entered from (an `(in-module ...)` in the file may have moved the
+    /// current one anywhere) and drop its `file_ns` frame.
+    pub fn exit_file_module(&mut self) {
+        self.info.ns = self.info.ns_base.pop().expect("exit_file_module without enter_file_module");
         self.info.file_ns.pop();
         self.publish_name_view();
     }
@@ -7443,7 +7414,7 @@ impl Checker {
     /// `Loader::load_source_inner`. Pair with [`Self::resume_ns_context`].
     pub fn suspend_ns_context(&mut self) -> NsContext {
         NsContext {
-            ns: std::mem::take(&mut self.info.ns),
+            ns: std::mem::replace(&mut self.info.ns, typelisp_mem::NsId::ROOT),
             file_ns: std::mem::take(&mut self.info.file_ns),
         }
     }
@@ -7454,7 +7425,7 @@ impl Checker {
     /// — see `load_source_inner`).
     pub fn resume_ns_context(&mut self, saved: NsContext) {
         debug_assert!(
-            self.info.ns.is_empty() && self.info.file_ns.is_empty(),
+            self.info.ns == typelisp_mem::NsId::ROOT && self.info.file_ns.is_empty(),
             "dependency load left an unbalanced namespace context"
         );
         self.info.ns = saved.ns;
@@ -7477,7 +7448,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
-        body_ns: Option<Vec<String>>,
+        body_ns: Option<typelisp_mem::NsId>,
     ) -> Result<TopLevelForm, Error> {
         let recv = parts.get(1).and_then(|ps| heap.list_to_vec(*ps).ok()).and_then(|ps| ps.first().copied());
         let recv_ty = match recv {
@@ -7509,7 +7480,7 @@ impl Checker {
         parts_locs: &[Option<Loc>],
         public: bool,
         def_loc: Option<Loc>,
-        body_ns: Option<Vec<String>>,
+        body_ns: Option<typelisp_mem::NsId>,
     ) -> Result<TopLevelForm, Error> {
         let MethodSig {
             method,
@@ -7661,7 +7632,7 @@ impl Checker {
                 (type_fq.clone(), def_name.clone()),
                 MethodTemplate::Form {
                     parts: parts.to_vec(),
-                    ns: self.info.ns.clone(),
+                    ns: self.info.ns,
                     written_vars: template_vars.clone(),
                     own_vars: own_params.clone(),
                 },
@@ -8062,7 +8033,7 @@ impl Checker {
         // and `canon` falling back to an unqualified guess that could never
         // match the real registration below. Overwritten with the fully
         // parsed `AdtDef` once fields are known.
-        self.info.reg.module_mut(&self.info.ns).add_type(AdtDef {
+        self.info.reg.module_mut(self.info.ns).add_type(AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
@@ -8222,7 +8193,7 @@ impl Checker {
             trait_assoc: BTreeMap::new(),
             insts: BTreeMap::new(),
         };
-        self.info.reg.module_mut(&self.info.ns).add_type(def);
+        self.info.reg.module_mut(self.info.ns).add_type(def);
         if let Some(loc) = def_loc.clone() {
             self.info.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
@@ -8466,7 +8437,7 @@ impl Checker {
         let fq = self.info.fq(&name);
         self.info.reg
             
-            .module_mut(&self.info.ns)
+            .module_mut(self.info.ns)
             .type_aliases
             .insert(name.clone(), TypeAlias { name: fq.clone(), params, body, public });
         if let Some(loc) = def_loc {
@@ -8526,7 +8497,7 @@ impl Checker {
         // `canon` falling back to an unqualified guess that could never
         // match the real registration below. Overwritten with the fully
         // parsed `AdtDef` once variants are known.
-        self.info.reg.module_mut(&self.info.ns).add_type(AdtDef {
+        self.info.reg.module_mut(self.info.ns).add_type(AdtDef {
             name: type_fq.clone(),
             params: type_params.clone(),
             variants: Vec::new(),
@@ -8593,7 +8564,7 @@ impl Checker {
             trait_assoc: BTreeMap::new(),
             insts: BTreeMap::new(),
         };
-        self.info.reg.module_mut(&self.info.ns).add_type(def);
+        self.info.reg.module_mut(self.info.ns).add_type(def);
         if let Some(loc) = def_loc {
             self.info.reg.def_locs.types.insert(type_fq.clone(), loc);
         }
@@ -8754,9 +8725,8 @@ impl Checker {
     /// against a definition (nothing un-defines one), but it says so, and the
     /// import that merely replaces an earlier import does win.
     ///
-    /// The import is of the definition `def`, or else of the module `module`
-    /// (its segments from the root).
-    fn report_import_collision(&self, bare: &str, def: Option<Path>, module: Option<&[String]>, shadowing: bool) -> Result<(), Error> {
+    /// The import is of the definition `def`.
+    fn report_import_collision(&self, bare: &str, def: Path, shadowing: bool) -> Result<(), Error> {
         if shadowing {
             return Ok(());
         }
@@ -8765,21 +8735,12 @@ impl Checker {
         // tree)` after `(defenum tree ...)`, the way to bring a type's
         // constructors into bare scope — collides with nothing: the alias and
         // the definition are the same thing, and the constructors it brings in
-        // are what the form is for. The same for a module of that name here.
-        let own = def.is_some_and(|p| p.ns() == ns.ns && p.last_segment() == bare)
-            || module.is_some_and(|abs| {
-                abs.len() == 1 && abs[0] == bare
-                    || (abs.len() == self.info.ns.len() + 1
-                        && abs[..self.info.ns.len()] == self.info.ns[..]
-                        && abs[self.info.ns.len()] == bare)
-            });
-        if own {
+        // are what the form is for.
+        if def.ns() == ns.ns && def.last_segment() == bare {
             return Ok(());
         }
         // The same definition imported again binds what is already bound.
-        if def.is_some() && ns.aliases.get(bare).copied() == def
-            || module.is_some() && ns.mod_aliases.get(bare).map(|a| a.as_slice()) == module
-        {
+        if ns.aliases.get(bare).copied() == Some(def) {
             return Ok(());
         }
         // Which side loses says which message is true, so they are not one
@@ -8908,9 +8869,9 @@ impl Checker {
             // A module-level value — a function or a global, one or the
             // other, since a name has one value.
             Some(UseTarget::Value(target)) => {
-                self.report_import_collision(&bare, Some(target), None, shadowing)?;
-                self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), target);
-                self.register_use_for_reading(heap, self.info.cur_ns().ns, &syms);
+                self.report_import_collision(&bare, target, shadowing)?;
+                self.info.reg.module_mut(self.info.ns).aliases.insert(bare.clone(), target);
+                self.register_use_for_reading(heap, self.info.ns, &syms);
                 forms::use_form(heap, &alias, &target)
             }
             // A type. Beyond the usual alias (so the bare name also resolves
@@ -8924,9 +8885,9 @@ impl Checker {
             Some(UseTarget::Type(target)) => {
                 // Unlike `rect::new`, a `use` path's *last* segment is the type
                 // itself — the import names it and nothing else.
-                self.report_import_collision(&bare, Some(target), None, shadowing)?;
+                self.report_import_collision(&bare, target, shadowing)?;
                 self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
-                self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), target);
+                self.info.reg.module_mut(self.info.ns).aliases.insert(bare.clone(), target);
                 let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
                 for (i, v) in def.variants.iter().enumerate() {
                     let is_builtin = self
@@ -8939,7 +8900,7 @@ impl Checker {
                     if self.info.cur_ns().ctors.contains_key(&v.name) {
                         self.check_redef_outcome("constructor", &v.name, is_builtin)?;
                     }
-                    self.info.reg.module_mut(&self.info.ns).ctors.insert(v.name.clone(), (target, i));
+                    self.info.reg.module_mut(self.info.ns).ctors.insert(v.name.clone(), (target, i));
                 }
                 // Every static method, whether written for every instantiation or
                 // for one: which one a call means is decided at the call
@@ -8960,9 +8921,9 @@ impl Checker {
                     if self.info.cur_ns().static_uses.contains_key(name) {
                         self.check_redef_outcome("static method", name, is_builtin)?;
                     }
-                    self.info.reg.module_mut(&self.info.ns).static_uses.insert(name.clone(), (target, name.clone()));
+                    self.info.reg.module_mut(self.info.ns).static_uses.insert(name.clone(), (target, name.clone()));
                 }
-                self.register_use_for_reading(heap, self.info.cur_ns().ns, &syms);
+                self.register_use_for_reading(heap, self.info.ns, &syms);
                 forms::use_form(heap, &alias, &target)
             }
             // A `deftype` alias. Only the name is imported — an alias has no
@@ -8970,17 +8931,16 @@ impl Checker {
             // names keeps its own name). The `aliases` entry is what
             // `Info::type_alias_at` follows for a bare name.
             Some(UseTarget::Alias(a)) => {
-                self.report_import_collision(&bare, Some(a.name), None, shadowing)?;
-                self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), a.name);
-                self.register_use_for_reading(heap, self.info.cur_ns().ns, &syms);
+                self.report_import_collision(&bare, a.name, shadowing)?;
+                self.info.reg.module_mut(self.info.ns).aliases.insert(bare.clone(), a.name);
+                self.register_use_for_reading(heap, self.info.ns, &syms);
                 forms::use_form(heap, &alias, &a.name)
             }
             // A module alias — `(use std::math)` makes `math` a short name for `std::math`.
             Some(UseTarget::Module(ns)) => {
-                let abs = typelisp_mem::symbols::ns_path(ns);
-                let target_path = Path::from_segments(abs.clone());
-                self.register_use_for_reading(heap, self.info.cur_ns().ns, &syms);
-                self.info.reg.module_mut(&self.info.ns).mod_aliases.insert(bare.clone(), abs);
+                let target_path = Path::of_module(ns);
+                self.register_use_for_reading(heap, self.info.ns, &syms);
+                self.info.reg.module_mut(self.info.ns).mod_aliases.insert(bare.clone(), ns);
                 forms::use_form(heap, &alias, &target_path)
             }
             // Not a known function, type, or module. The path may name a module
@@ -9009,7 +8969,7 @@ impl Checker {
     /// no directory of its own.
     fn use_target(&self, heap: &Heap, syms: &[typelisp_mem::SymRef]) -> Option<UseTarget> {
         use typelisp_mem::symbols::PathStep;
-        let cur = self.info.cur_ns().ns;
+        let cur = self.info.ns;
         let spelled: Vec<&str> = syms.iter().map(|s| s.name()).collect();
         let (first, rest) = syms.split_first()?;
         if rest.is_empty() {
@@ -9024,7 +8984,7 @@ impl Checker {
         } else if let Some(found) = self.use_target_in(heap, cur, &spelled) {
             return Some(found);
         }
-        let file = typelisp_mem::symbols::find_ns(self.info.file_ns.last()?)?;
+        let file = *self.info.file_ns.last()?;
         let dir = typelisp_mem::symbols::ns_parent(file)?;
         let sibling = typelisp_mem::symbols::find_exact(dir, first.name())?;
         let PathStep::Module(m) = heap.names().reached(dir, &[sibling]).ok()? else { return None };
@@ -9584,7 +9544,7 @@ impl Checker {
                 // A bare `::` path as an expression: a qualified global or a
                 // qualified function used as a value.
                 let display = crate::types::path_spelling(heap, pid);
-                let target = crate::types::path_target(heap, self.info.cur_ns().ns, pid)?;
+                let target = crate::types::path_target(heap, self.info.ns, pid)?;
                 // A path's first segment names a module or a type: the reader
                 // reads `var::field` as `(%value-member var field)` instead.
                 {
@@ -9783,7 +9743,7 @@ impl Checker {
         // `(%type-member TYPE MEMBER)`, a member of a named type, as a form
         // the checker writes ([`forms::member_form`]).
         if let Some((ty, member)) = named_type_member(heap, elems[0])? {
-            let written = crate::types::written_path(heap, self.info.cur_ns().ns, ty)?;
+            let written = crate::types::written_path(heap, self.info.ns, ty)?;
             let display = format!("{}::{}", written, member.name());
             let target = PathTarget::Member(written, member);
             return self.check_target_call(heap, interp, env, target, &display, &[], None, args, arg_locs, expected);
@@ -10500,7 +10460,7 @@ impl Checker {
         let display = crate::types::path_spelling(heap, pid);
         // The segments as spelled, for where in the token each one is.
         let segs: Vec<String> = heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
-        let target = crate::types::path_target(heap, self.info.cur_ns().ns, pid)?;
+        let target = crate::types::path_target(heap, self.info.ns, pid)?;
         self.check_target_call(heap, interp, env, target, &display, &segs, head_loc, args, arg_locs, expected)
     }
 
@@ -11822,7 +11782,7 @@ impl Checker {
         }
         let name = unevaluated_name(
             heap,
-            self.info.cur_ns().ns,
+            self.info.ns,
             args[0],
             "compile",
             "compile: expected a symbol or path naming a function, e.g. (compile foo) or (compile point::x) — not a string",
@@ -11997,7 +11957,7 @@ impl Checker {
         for a in args {
             let name = unevaluated_name(
                 heap,
-                self.info.cur_ns().ns,
+                self.info.ns,
                 *a,
                 tag,
                 &format!(
@@ -12046,7 +12006,7 @@ impl Checker {
         };
         let name = unevaluated_name(
             heap,
-            self.info.cur_ns().ns,
+            self.info.ns,
             *name_arg,
             "disassemble",
             "disassemble: expected a symbol or path naming a function, e.g. (disassemble foo) or (disassemble point::x) — not a string",
@@ -12094,7 +12054,7 @@ impl Checker {
         }
         let name = unevaluated_name(
             heap,
-            self.info.cur_ns().ns,
+            self.info.ns,
             args[0],
             "documentation",
             "documentation: expected a symbol or path naming a definition, e.g. (documentation foo) or (documentation point::x) — not a string",
@@ -12160,7 +12120,7 @@ impl Checker {
         }
         // Types and traits are a name space of their own.
         if let WrittenName::Bare(sym) = written_name {
-            let written = Path::of_symbol(self.info.cur_ns().ns, *sym);
+            let written = Path::of_symbol(self.info.ns, *sym);
             if let Some(path) = self.info.type_at(&written) {
                 return Ok(DefRef::Type(path));
             }
@@ -12203,7 +12163,7 @@ impl Checker {
             [one] => {
                 let name = unevaluated_name(
             heap,
-            self.info.cur_ns().ns,
+            self.info.ns,
             *one,
             "ed",
             "ed: expected a symbol or path naming a definition, or a string naming a file, e.g. (ed foo) or (ed \"x.typl\")",
@@ -13558,7 +13518,7 @@ impl Checker {
         self.check_redef("variable", &name, self.info.cur_ns().vars.get(&name))?;
         self.info.reg
             
-            .module_mut(&self.info.ns)
+            .module_mut(self.info.ns)
             .vars
             .insert(name.clone(), VarInfo { ty: ty.clone(), mutable, public, builtin: false });
         let fq_name = self.info.fq(&name);
@@ -14360,13 +14320,13 @@ impl Checker {
             // Read as the control string's module reads a path: segment by
             // segment (`SessionNames::read_path`).
             let parts: Vec<&str> = site.name.split("::").collect();
-            let syms = heap.names().read_path(self.info.cur_ns().ns, &parts).map_err(|e| {
+            let syms = heap.names().read_path(self.info.ns, &parts).map_err(|e| {
                 Error::TypeError(format!("{}: {}: {}", what, shown, e))
             })?;
             heap.intern_path(&syms)
         } else {
             // Read as the control string's module reads it.
-            let sym = heap.names().read(self.info.cur_ns().ns, &site.name);
+            let sym = heap.names().read(self.info.ns, &site.name);
             Value::Symbol(sym)
         };
         let arg = heap.intern_symbol(ARG);
@@ -14893,7 +14853,7 @@ impl Checker {
         // written in, which only the checker knows, so it becomes the second
         // argument here — the module's path as `intern` reads one.
         if sig.builtin && args.len() == 1 && *name == Path::std("intern") {
-            let ns = heap.alloc_string(self.info.ns.join("::"));
+            let ns = heap.alloc_string(typelisp_mem::symbols::ns_path(self.info.ns).join("::"));
             heap.push_root(ns);
             let r = self.check_call(heap, interp, env, name, &[args[0], ns], &[arg_locs[0].clone(), None]);
             heap.pop_root();
@@ -16295,8 +16255,8 @@ impl Checker {
         let def = self.info.reg.type_def(&adt_name).expect("adt exists").clone();
         if def.kind == AdtKind::Struct && !def.builtin {
             let head_ty = match parts[0] {
-                Value::Symbol(id) => self.info.type_at(&Path::of_symbol(self.info.cur_ns().ns, id)),
-                Value::Path(_) => self.info.type_at(&crate::types::written_path(heap, self.info.cur_ns().ns, parts[0])?),
+                Value::Symbol(id) => self.info.type_at(&Path::of_symbol(self.info.ns, id)),
+                Value::Path(_) => self.info.type_at(&crate::types::written_path(heap, self.info.ns, parts[0])?),
                 _ => None,
             };
             if head_ty.as_ref() != Some(&adt_name) {
@@ -16415,7 +16375,7 @@ impl Checker {
         };
         match head {
             Value::Symbol(id) => {
-                if let Some(type_fq) = self.info.type_at(&Path::of_symbol(self.info.cur_ns().ns, id)) {
+                if let Some(type_fq) = self.info.type_at(&Path::of_symbol(self.info.ns, id)) {
                     if let Some(def) = self.info.reg.type_def(&type_fq) {
                         if def.kind == AdtKind::Struct {
                             no_generics(&type_fq, def)?;
@@ -16438,7 +16398,7 @@ impl Checker {
                 Ok(None)
             }
             Value::Path(pid) => {
-                let PathTarget::Member(ty, member) = crate::types::path_target(heap, self.info.cur_ns().ns, pid)? else {
+                let PathTarget::Member(ty, member) = crate::types::path_target(heap, self.info.ns, pid)? else {
                     return Ok(None);
                 };
                 // The segments as spelled, for where in the token each one is.
@@ -17494,13 +17454,6 @@ fn path_to_segs(heap: &Heap, v: Value) -> Result<Vec<String>, Error> {
     }
 }
 
-
-/// The absolute path of the item `name` defined in module `module`.
-pub(super) fn item_path(module: &[String], name: &str) -> Path {
-    let mut segs = module.to_vec();
-    segs.push(name.to_string());
-    Path::from_segments(segs)
-}
 
 /// Whether `v` is a `(:where ...)` clause (vs. an ordinary body form) —
 /// `Checker::check_defun` peeks at this to decide whether to consume it.

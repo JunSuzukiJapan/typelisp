@@ -28,12 +28,6 @@ pub const USER_MODULE: &str = "user";
 /// name out of the way of a user's own modules.
 pub const INTERNAL_MODULE: &str = "%internal";
 
-/// The segments of the module the library's internal helpers live in:
-/// `std::%internal`.
-pub fn internal_module_segments() -> Vec<String> {
-    vec![STD_MODULE.to_string(), INTERNAL_MODULE.to_string()]
-}
-
 /// The name of a definition: the module it is in and the symbol its name
 /// reads as there.
 ///
@@ -65,6 +59,12 @@ impl Path {
     /// that reads as itself there — a key of one of `ns`'s tables.
     pub fn of_symbol(ns: NsId, name: SymRef) -> Path {
         Path { ns, name }
+    }
+
+    /// The module `ns`, named as a definition of the module it is a child of.
+    pub fn of_module(ns: NsId) -> Path {
+        let parent = symbols::ns_parent(ns).expect("the root and the system module are not named");
+        Path { ns: parent, name: symbols::ns_name(ns).expect("a module with a parent has a name") }
     }
 
     /// Build a path from explicit segments.
@@ -150,6 +150,22 @@ impl Path {
     }
 }
 
+/// A module field of a serialized struct, written as the module's segments
+/// from the root — the one form that means the same thing in another
+/// process, as with [`Path`]. For `#[serde(with = "ns_as_segments")]`.
+pub mod ns_as_segments {
+    use typelisp_mem::symbols::{self, NsId};
+
+    pub fn serialize<S: serde::Serializer>(ns: &NsId, s: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&symbols::ns_path(*ns), s)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<NsId, D::Error> {
+        let segments: Vec<String> = serde::Deserialize::deserialize(d)?;
+        Ok(symbols::ns_of(&segments))
+    }
+}
+
 /// The module `segments` names from the root. A module's segments are names
 /// the reader wrote, which are already lowercase.
 fn module_ns<'a>(segments: impl Iterator<Item = &'a str>) -> NsId {
@@ -162,7 +178,7 @@ fn module_ns<'a>(segments: impl Iterator<Item = &'a str>) -> NsId {
 }
 
 /// The library's internal module, `std::%internal`.
-pub(crate) fn internal_ns() -> NsId {
+pub fn internal_ns() -> NsId {
     static NS: std::sync::OnceLock<NsId> = std::sync::OnceLock::new();
     *NS.get_or_init(|| symbols::child_ns(NsId::STD, INTERNAL_MODULE))
 }
@@ -225,35 +241,39 @@ impl fmt::Display for Path {
     }
 }
 
-/// `p` as an interned heap [`PathId`] — the segments interned as symbols,
-/// then the sequence interned as a path. Both tables are permanent, so the id
-/// stays valid for the heap's lifetime and equal paths always share one id.
+/// `p` as an interned heap [`PathId`]: the symbols its module and the
+/// modules around it are named by in the module tree, then its name's
+/// symbol. Both tables are permanent, so the id stays valid for the heap's
+/// lifetime and equal paths always share one id.
 ///
-/// This is the *structural* Path↔heap correspondence (the one the reader
-/// itself produces for a `::`-qualified token), deliberately not the
-/// `type_key.rs` string form: it addresses a name, not a heap value's type
-/// identity, so nothing here may be compared against a stored type key.
+/// It addresses a name, not a heap value's type identity (the `type_key.rs`
+/// string form), so nothing here may be compared against a stored type key.
 pub fn intern_path_id(heap: &mut Heap, p: &Path) -> PathId {
-    let segs: Vec<SymRef> = p
-        .segments()
-        .iter()
-        .map(|s| match heap.intern_symbol(s) {
-            Value::Symbol(id) => id,
-            _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-        })
-        .collect();
-    match heap.intern_path(&segs) {
+    match heap.intern_path(&path_symbols(p)) {
         Value::Path(id) => id,
         _ => unreachable!("Heap::intern_path always returns Value::Path"),
     }
 }
 
-/// The [`Path`] an interned heap path spells — the inverse of
-/// [`intern_path_id`].
+/// The symbols [`intern_path_id`] interns for `p`.
+pub fn path_symbols(p: &Path) -> Vec<SymRef> {
+    let mut segs = symbols::ns_names(p.ns());
+    segs.push(p.name_symbol());
+    segs
+}
+
+/// The [`Path`] an interned heap path names — the inverse of
+/// [`intern_path_id`]: each module is the child its symbol names in the one
+/// before, from the root.
 pub fn path_from_id(heap: &Heap, id: PathId) -> Path {
-    Path::from_segments(
-        heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
-    )
+    let segments = heap.path_segments(id);
+    let (name, modules) = segments.split_last().expect("an interned path has a segment");
+    let ns = modules.iter().fold(NsId::ROOT, |ns, m| {
+        symbols::child_ns_named(ns, *m).unwrap_or_else(|| {
+            panic!("`{}` is not a module of `{}`: the path was not written by `intern_path_id`", m.name(), symbols::ns_path(ns).join("::"))
+        })
+    });
+    Path::of_symbol(ns, *name)
 }
 
 /// Whether `p` is the built-in type `name`.
@@ -520,9 +540,7 @@ impl fmt::Display for Type {
 /// trait impls — is a tuple's too.
 pub fn tuple_path(arity: usize) -> Path {
     debug_assert!((1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&arity), "no tuple type of arity {}", arity);
-    let mut segs = internal_module_segments();
-    segs.push(format!("tuple{}", arity));
-    Path::from_segments(segs)
+    Path::internal(&format!("tuple{}", arity))
 }
 
 /// The arity of the tuple type `path` names, or `None` when it names some

@@ -167,13 +167,14 @@ pub(super) fn is_reserved_name(name: &str) -> bool {
 /// See the module documentation.
 pub(super) struct Info {
     pub(super) reg: Registry,
-    pub(super) ns: Vec<String>,
-    /// Stack of enclosing *files'* own module paths, innermost last — set by
+    /// The module forms are checked in now.
+    pub(super) ns: NsId,
+    /// Stack of enclosing *files'* own modules, innermost last — set by
     /// [`Checker::enter_file_module`]/[`Checker::exit_file_module`] (`project.rs`'s
     /// file-level wrapping only, never [`Checker::enter_module`]'s nested
     /// `(module ...)` forms), so it stays fixed at "the loading file's own
-    /// path" even while `self.ns` grows deeper through a nested `module`
-    /// block inside that file. `Checker::use_target`'s sibling-file
+    /// module" even while `self.ns` moves into a nested `module` block inside
+    /// that file. `Checker::use_target`'s sibling-file
     /// resolution reads the top of this stack (never `self.ns` itself)
     /// so `(use foo)` inside a nested `module` block still resolves `foo`
     /// relative to the *file's* directory, not that inner block's own
@@ -182,13 +183,12 @@ pub(super) struct Info {
     /// before the file that `use`s it resumes checking (`project.rs`'s
     /// scan-before-check ordering), so this never needs more than simple
     /// stack discipline.
-    pub(super) file_ns: Vec<Vec<String>>,
-    /// Namespace lengths to restore on [`Checker::exit_file_module`] /
-    /// [`Checker::check_module`], innermost last. A closing form used to be
-    /// enough — every push had one — but `(in-module ...)` pushes segments
-    /// that stay in effect for the rest of the enclosing unit, so how far to
-    /// unwind is the saved base rather than a count of segments.
-    pub(super) ns_base: Vec<usize>,
+    pub(super) file_ns: Vec<NsId>,
+    /// The modules to return to on [`Checker::exit_file_module`], innermost
+    /// last: `(in-module ...)` moves the current module for the rest of the
+    /// enclosing unit with no closing form, so leaving the unit restores the
+    /// module it was entered from.
+    pub(super) ns_base: Vec<NsId>,
     /// The type variables each enclosing definition binds, innermost last —
     /// what lets [`Checker::parse_type_here_at`] tell a type variable from a
     /// type name that resolves to nothing.
@@ -228,7 +228,7 @@ impl Info {
     pub(super) fn new() -> Info {
         Info {
             reg: Registry::with_builtins(),
-            ns: Vec::new(),
+            ns: NsId::ROOT,
             file_ns: Vec::new(),
             ns_base: Vec::new(),
             type_names: RefCell::new(Vec::new()),
@@ -237,16 +237,14 @@ impl Info {
         }
     }
 
-    /// Qualify a bare name with the current namespace path.
+    /// `name` defined in the current module.
     pub(super) fn fq(&self, name: &str) -> Path {
-        let mut segments = self.ns.clone();
-        segments.push(name.to_string());
-        Path::from_segments(segments)
+        Path::in_ns(self.ns, name)
     }
 
     /// The current namespace.
     pub(super) fn cur_ns(&self) -> &Namespace {
-        self.reg.module(&self.ns).expect("current namespace exists")
+        self.reg.module_at(self.ns).expect("current namespace exists")
     }
 
     /// Whether a definition of the module `item_ns` is visible from the
@@ -261,7 +259,7 @@ impl Info {
     /// the root's private built-ins, the layer under `HashTable`'s
     /// `get`/`set`.
     pub(super) fn in_scope(&self, item_ns: NsId) -> bool {
-        let cur = self.cur_ns().ns;
+        let cur = self.ns;
         item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)
     }
 

@@ -144,19 +144,12 @@ unsafe fn function<F: Copy>(code: &JitCode, name: &str) -> F {
     std::mem::transmute_copy::<usize, F>(&addr)
 }
 
-/// `src`, read and checked inside the island's own module (`%core`), where
-/// the island's functions are and where `var`/`call`/`let` are the core IR's
-/// tags — the module a test calling `compile-function` on hand-written IR has
-/// to be written in.
-fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Error> {
-    read_core_result(h, src)
-}
-
 /// Core IR written as text, read in the core IR's module so its tags are the
-/// IR's own symbols.
-fn read_core_result(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Error> {
-    // The hand-written forms name their definitions in a module `m`, which
-    // this session is told it has, so `m::f` reads as the path it is.
+/// IR's own symbols. A definition is named by its path from the root (`::f`,
+/// `::m::f`), as the checker writes it (`core::path_form`); the hand-written
+/// forms put theirs at the root or in a module `m`, which this session is
+/// told it has.
+fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Error> {
     h.names().declare_module(typelisp::mem::symbols::ns_of(&["m".to_string()]));
     Ok(Reader::new()
         .read_all_in_spanned_within(h, "<core>", src, typelisp::NsId::CORE)?
@@ -165,6 +158,10 @@ fn read_core_result(h: &mut Heap, src: &str) -> Result<Vec<Value>, typelisp::Err
         .collect())
 }
 
+/// `src`, read inside the island's own module (`%core`), where the island's
+/// functions are and where `var`/`call`/`let` are the core IR's tags — the
+/// module a test calling `compile-function` on hand-written IR has to be
+/// written in.
 fn read_in_island(h: &mut Heap, chk: &mut Checker, src: &str) -> Vec<Value> {
     let r = Reader::new();
     let vs = r
@@ -6280,7 +6277,7 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
 /// node, which is a later stage. Only the *body* is bridged here.
 #[test]
 fn the_island_compiles_a_body_the_new_bridge_produced() {
-    let body = bridge_to_island_text("(assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))");
+    let body = bridge_to_island_text("(assoc ::i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))");
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
@@ -6306,9 +6303,9 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
 #[test]
 fn the_island_compiles_a_bridged_let_and_if() {
     let body = bridge_to_island_text(
-        "(let ((d int-any-width (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))))
-           (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var d) (int-any-width 0))
-               (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 0) (var d))
+        "(let ((d int-any-width (assoc ::i32 - true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))))
+           (if (assoc ::i32 < true bool (int-any-width int-any-width) \"bool\" (var d) (int-any-width 0))
+               (assoc ::i32 - true int-any-width (int-any-width int-any-width) \"i32\" (int-any-width 0) (var d))
                (var d)))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&format!(
@@ -6355,13 +6352,13 @@ fn compile_function_source(name: &str, params: &str, body: &str) -> String {
 /// LLVM validated the module that came out.
 #[test]
 fn the_island_accepts_a_bridged_construct_field_and_match() {
-    let defs = ["(defstruct point (int-any-width int-any-width))", "(defenum maybe-int (none some) (() (int-any-width)))"];
+    let defs = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::maybe-int (none some) (() (int-any-width)))"];
     let body = bridge_to_island_text_with(
         &defs,
-        "(let ((p struct (construct point \"point\" 0 true (int-any-width int-any-width) (var a) (var b))))
-           (match (construct maybe-int \"maybe-int\" 1 false (int-any-width) (field-get (var p) 1 int-any-width)) enum
-             ((pat-ctor maybe-int \"maybe-int\" 0 false ()) (int-any-width -1))
-             ((pat-ctor maybe-int \"maybe-int\" 1 false (int-any-width) (pat-bind x)) (var x))))",
+        "(let ((p struct (construct ::point \"point\" 0 true (int-any-width int-any-width) (var a) (var b))))
+           (match (construct ::maybe-int \"maybe-int\" 1 false (int-any-width) (field-get (var p) 1 int-any-width)) enum
+             ((pat-ctor ::maybe-int \"maybe-int\" 0 false ()) (int-any-width -1))
+             ((pat-ctor ::maybe-int \"maybe-int\" 1 false (int-any-width) (pat-bind x)) (var x))))",
     );
     let src = compile_function_source("second", "((a . 0) (b . 0))", &body);
     let ir = eval_string_in_island(&format!("(to-string {})", src));
@@ -6391,11 +6388,11 @@ fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
         "(let ((acc int-any-width (int-any-width 0)) (i int-any-width (int-any-width 0)))
            (loop unit
-             (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var i) (var b))
+             (if (assoc ::i32 < true bool (int-any-width int-any-width) \"bool\" (var i) (var b))
                  (unit)
                  (break))
-             (set acc (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var a)))
-             (set i (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var i) (int-any-width 1))))
+             (set acc (assoc ::i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var a)))
+             (set i (assoc ::i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var i) (int-any-width 1))))
            (var acc))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
@@ -6428,11 +6425,11 @@ fn the_island_runs_a_bridged_loop() {
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
         "(labels ((rec ((n int-any-width) (acc int-any-width)) int-any-width
-                    (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var n) (int-any-width 1))
+                    (if (assoc ::i32 < true bool (int-any-width int-any-width) \"bool\" (var n) (int-any-width 1))
                         (var acc)
                         (apply (var rec) int-any-width (int-any-width int-any-width)
-                          (assoc i32 - true int-any-width (int-any-width int-any-width) \"i32\" (var n) (int-any-width 1))
-                          (assoc i32 * true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
+                          (assoc ::i32 - true int-any-width (int-any-width int-any-width) \"i32\" (var n) (int-any-width 1))
+                          (assoc ::i32 * true int-any-width (int-any-width int-any-width) \"i32\" (var acc) (var n))))))
            (apply (var rec) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
@@ -6464,7 +6461,7 @@ fn the_island_runs_a_bridged_labels_block() {
 fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
         "(let ((n int-any-width (var a)))
-           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var x) (var n)))))
+           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc ::i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var x) (var n)))))
              (apply (var f) int-any-width (int-any-width) (int-any-width 1))))",
     );
     // The capture really is a cell on both sides of the boundary.
@@ -6524,12 +6521,12 @@ fn the_island_runs_a_whole_bridged_defun() {
     h.set_gc_stress(true);
     let definitions = Definitions::new();
     let globals = HashMap::new();
-    let form = read_core_result(
+    let form = read_core(
             &mut h,
-            "(defun m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width
-               (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var x) (var lo))
+            "(defun ::m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width
+               (if (assoc ::i32 < true bool (int-any-width int-any-width) \"bool\" (var x) (var lo))
                    (var lo)
-                   (if (assoc i32 < true bool (int-any-width int-any-width) \"bool\" (var hi) (var x))
+                   (if (assoc ::i32 < true bool (int-any-width int-any-width) \"bool\" (var hi) (var x))
                        (var hi)
                        (var x))))",
         )

@@ -351,7 +351,7 @@ fn internal_builtins() -> &'static std::collections::HashSet<String> {
     NAMES.get_or_init(|| {
         let reg = typelisp_front::check::Registry::with_builtins();
         let ns = reg
-            .module(&typelisp_front::types::internal_module_segments())
+            .module_at(typelisp_front::types::internal_ns())
             .expect("the registry keeps its internal builtins in their own module");
         ns.fns.iter().filter(|(_, sig)| sig.builtin).map(|(name, _)| name.to_string()).collect()
     })
@@ -1101,7 +1101,7 @@ mod scc_tests {
         // restriction never comes into play. Each body is a single
         // `(call NAME ())`: no arguments, hence no argument reprs.
         for (name, callee) in [("a", "b"), ("b", "a")] {
-            let path = heap.intern_symbol(callee);
+            let path = crate::check::core::path_form(&mut heap, &Path::root(callee));
             heap.push_root(path);
             let call = core::tagged(&mut heap, typelisp_mem::wk::CALL, &[path, Value::Empty])
                 .expect("building a 2-field node cannot exhaust a 1<<16 heap");

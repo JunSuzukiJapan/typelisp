@@ -16,7 +16,7 @@
 //! caught the moment it is registered, whichever layer defines it.
 //!
 //! The library's internal helpers live in their own module
-//! (`std::%internal`, `typelisp::internal_module_segments`), out of every user's scope, and are left out
+//! (`std::%internal`, `typelisp::internal_ns`), out of every user's scope, and are left out
 //! of the walk: an editor must not paint them as builtins, which the last test
 //! here checks the other way round.
 //!
@@ -88,7 +88,7 @@ fn build_collected() -> Collected {
     let mut names = BTreeSet::new();
     let mut fields = BTreeSet::new();
     collect_namespace(reg, reg.root(), &mut names, &mut fields);
-    let internal_ns = reg.module(&typelisp::internal_module_segments()).expect("the library's internal module");
+    let internal_ns = reg.module_at(typelisp::internal_ns()).expect("the library's internal module");
     let internal = internal_ns
         .fns
         .keys()

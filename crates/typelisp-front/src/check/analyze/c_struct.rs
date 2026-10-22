@@ -165,9 +165,9 @@ impl Checker {
         // Registered with no fields while its own fields are read, so that a
         // field can point at the struct being defined (`(next (ptr node))`).
         let placeholder = CStructDef { name: fq.clone(), fields: Vec::new(), size: 0, align: 1, public };
-        let previous = self.info.reg.module_mut(&self.info.ns).c_structs.insert(name.clone(), placeholder);
+        let previous = self.info.reg.module_mut(self.info.ns).c_structs.insert(name.clone(), placeholder);
         let result = self.c_struct_fields(heap, &name, &fq, &parts[fields_at..], &parts_locs[fields_at.min(parts_locs.len())..]);
-        let ns = self.info.reg.module_mut(&self.info.ns);
+        let ns = self.info.reg.module_mut(self.info.ns);
         let (fields, size, align) = match result {
             Ok(laid_out) => laid_out,
             Err(e) => {
@@ -233,7 +233,7 @@ impl Checker {
     /// A field type: a C type, a typed pointer, or a `def-c-struct` by name
     /// (held by value).
     fn parse_c_field_type(&self, heap: &Heap, v: Value, loc: Option<&Loc>) -> Result<Type, Error> {
-        let written = crate::types::parse_type_spanned(heap, self.info.cur_ns().ns, v, loc, &mut Vec::new())?;
+        let written = crate::types::parse_type_spanned(heap, self.info.ns, v, loc, &mut Vec::new())?;
         if let Type::Named(n, args) = &written {
             if args.is_empty() {
                 if let Some(def) = self.resolve_c_struct(n) {
@@ -516,7 +516,7 @@ impl Checker {
                     .into(),
             ));
         }
-        let written = crate::types::parse_type(heap, self.info.cur_ns().ns, args[0])?;
+        let written = crate::types::parse_type(heap, self.info.ns, args[0])?;
         let elem = self.canon_pointee(&written);
         let ptr_ty = Type::PtrTo(Box::new(elem.clone()));
         self.reject_bad_pointee(&ptr_ty)?;

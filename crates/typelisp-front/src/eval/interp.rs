@@ -2716,13 +2716,7 @@ impl Interp {
             // `defmethod` names its owner there and the method in field 1.
             Some(wk::DEFUN) | Some(wk::DEFVAR) | Some(wk::DEFMACRO) | Some(wk::DEFSTRUCT)
             | Some(wk::DEFENUM) => {
-                match core::field(heap, tl, 0) {
-                    Some(Value::Path(id)) => {
-                        Some(crate::types::path_from_id(heap, id).last_segment().to_string())
-                    }
-                    Some(Value::Symbol(id)) => Some(heap.symbol_spelling(id).to_string()),
-                    _ => None,
-                }
+                core::path_field(heap, tl, 0).map(|p| p.last_segment().to_string())
             }
             Some(wk::DEFMETHOD) => match core::field(heap, tl, 1) {
                 Some(Value::Symbol(id)) => Some(heap.symbol_spelling(id).to_string()),

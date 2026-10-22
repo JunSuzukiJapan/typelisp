@@ -513,7 +513,7 @@ pub struct CompletionCandidate {
 /// offered.
 pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<CompletionCandidate> {
     let mut out = Vec::new();
-    let Some(here) = reg.module(module_path) else {
+    let Some(here) = symbols::find_ns(module_path).and_then(|ns| reg.module_at(ns)) else {
         return out;
     };
     push_namespace(reg, here, &mut out);

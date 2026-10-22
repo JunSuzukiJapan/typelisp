@@ -110,7 +110,7 @@ pub fn build_island_artifact() -> Result<Vec<u8>, String> {
         checked.push(tl);
         interp.exec(&mut heap, tl).map_err(|e| format!("island exec failed: {}", e))?;
     }
-    chk.exit_file_module(island_segs.len());
+    chk.exit_file_module();
     let delta = chk.capture_delta(&heap, &before)?;
 
     // Install the *committed* island bitcode so the compile loop below drives

@@ -1160,6 +1160,12 @@ pub fn find_exact(ns: NsId, name: &str) -> Option<SymRef> {
     table().find(ns, name)
 }
 
+/// The child module of `parent` whose name in `parent` is the symbol `name`
+/// — the tree's own key, as [`ns_names`] gives it — if there is one.
+pub fn child_ns_named(parent: NsId, name: SymRef) -> Option<NsId> {
+    table().nodes[parent.0 as usize].children.get(&name).copied()
+}
+
 /// The module `ns` is a child of; `None` for the root and the system module.
 pub fn ns_parent(ns: NsId) -> Option<NsId> {
     table().nodes[ns.0 as usize].parent
@@ -1502,6 +1508,12 @@ pub fn ns_of(segments: &[String]) -> NsId {
         ns = child_ns(ns, s);
     }
     ns
+}
+
+/// The symbol `ns` is named by in the module it is a child of; `None` for
+/// the root and the system module.
+pub fn ns_name(ns: NsId) -> Option<SymRef> {
+    table().nodes[ns.0 as usize].name
 }
 
 /// The names of `ns` and of the modules above it, from the root down: the

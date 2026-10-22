@@ -567,19 +567,7 @@ pub fn tagged_module(heap: &mut Heap, path: &crate::Path, body: &[Value]) -> Res
     for form in body {
         s.push_root(*form);
     }
-    let segs = path.segments();
-    let p = if segs.len() == 1 {
-        s.intern_symbol(&segs[0])
-    } else {
-        let ids: Vec<_> = segs
-            .iter()
-            .map(|seg| match s.intern_symbol(seg) {
-                Value::Symbol(id) => id,
-                _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-            })
-            .collect();
-        s.intern_path(&ids)
-    };
+    let p = path_form(&mut s, path);
     s.push_root(p);
     let mut items = vec![p];
     items.extend_from_slice(body);
@@ -600,19 +588,46 @@ pub fn field(heap: &Heap, form: Value, i: usize) -> Option<Value> {
     heap.car(cur).ok()
 }
 
-/// A node's `i`th field read as a [`crate::Path`].
+/// A path, as a core form field writes one: the path from the root, as the
+/// reader reads `::a::b::name` — the root's empty-named symbol, then each
+/// module's symbol in the tree, then the name's. [`path_value`] reads it back.
 ///
-/// A single-segment path reads back as a bare symbol — the reader only builds a
-/// `Value::Path` when it sees `::` — so both spellings have to be accepted, and
-/// forgetting the symbol case fails only for definitions at the root, which is
-/// most of them. Shared by everything that walks *checked* top-level forms
-/// looking for what they define (`compile::aot`, `compile::prelude_bootstrap`).
+/// A definition at the root is `::name` too, not its bare symbol, so a form
+/// printed and read back in any module names the same definitions: a bare
+/// name is read as the reading module's own symbol.
+pub fn path_form(heap: &mut Heap, p: &crate::Path) -> Value {
+    let mut segs = vec![typelisp_mem::symbols::intern_exact(typelisp_mem::NsId::ROOT, "")];
+    segs.extend(crate::types::path_symbols(p));
+    heap.intern_path(&segs)
+}
+
+/// A node's `i`th field read as a [`crate::Path`] ([`path_value`]). Shared by
+/// everything that walks *checked* top-level forms looking for what they
+/// define (`compile::aot`, `compile::prelude_bootstrap`).
 pub fn path_field(heap: &Heap, form: Value, i: usize) -> Option<crate::Path> {
-    match field(heap, form, i)? {
-        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
-        Value::Symbol(id) => Some(crate::Path::root(heap.symbol_spelling(id))),
-        _ => None,
+    path_value(heap, field(heap, form, i)?)
+}
+
+/// The definition a core form names with `v`, as [`path_form`] writes one.
+/// `None` when `v` is not a path from the root.
+pub fn path_value(heap: &Heap, v: Value) -> Option<crate::Path> {
+    let Value::Path(id) = v else { return None };
+    let segments = heap.path_segments(id);
+    let (root, segs) = segments.split_first()?;
+    if *root != typelisp_mem::symbols::intern_exact(typelisp_mem::NsId::ROOT, "") {
+        return None;
     }
+    let (name, modules) = segs.split_last()?;
+    let ns = modules.iter().fold(typelisp_mem::NsId::ROOT, |ns, m| {
+        typelisp_mem::symbols::child_ns_named(ns, *m).unwrap_or_else(|| {
+            panic!(
+                "`{}` is not a module of `{}`: the path was not written by `path_form`",
+                m.name(),
+                typelisp_mem::symbols::ns_path(ns).join("::")
+            )
+        })
+    });
+    Some(crate::Path::of_symbol(ns, *name))
 }
 
 /// A node's `i`th field read as a symbol's name, or `None` if it is not a

@@ -39,7 +39,7 @@ fn eval_in(h: &mut Heap, chk: &mut Checker, interp: &mut Interp, src: &str) -> R
             last = val;
         }
     }
-    chk.exit_file_module(typelisp::compiler::island_module_segments().len());
+    chk.exit_file_module();
     Ok(last)
 }
 

@@ -22,7 +22,7 @@ fn root_names() -> BTreeSet<String> {
     let mut chk = Checker::new();
     let mut interp = Interp::new();
     load_prelude(&mut heap, &mut chk, &mut interp);
-    let root = chk.registry().module(&[typelisp::STD_MODULE.to_string()]).expect("the standard library's module");
+    let root = chk.registry().module_at(typelisp::NsId::STD).expect("the standard library's module");
     root.fns.keys().chain(root.macros.keys()).chain(root.vars.keys()).map(str::to_string).collect()
 }
 

@@ -419,7 +419,8 @@ pub struct TraitDefault {
     /// The namespace the `deftrait` was checked in. The body must resolve
     /// names *there* — a default written against the trait's module-private
     /// helpers has to keep working at an `impl` in some other module.
-    pub ns: Vec<String>,
+    #[serde(with = "crate::types::ns_as_segments")]
+    pub ns: NsId,
 }
 
 /// A blanket `impl` — one written over a bare type variable rather than a
@@ -448,7 +449,8 @@ pub struct BlanketImpl {
     pub methods: Vec<Vec<crate::owned_form::OwnedForm>>,
     /// The namespace the `impl` was written in, which its method bodies and
     /// type annotations must be re-checked under.
-    pub ns: Vec<String>,
+    #[serde(with = "crate::types::ns_as_segments")]
+    pub ns: NsId,
 }
 
 /// A namespace (module): a container of free functions, types, constructors,
@@ -534,8 +536,8 @@ pub struct Namespace {
     /// `use` imports of definitions (a function, a global, a macro, a type, a
     /// `deftype` alias): the name it is brought in under -> the definition.
     pub aliases: Names<Path>,
-    /// `use` aliases for modules: short name -> absolute module path.
-    pub mod_aliases: Names<Vec<String>>,
+    /// `use` aliases for modules: short name -> the module.
+    pub mod_aliases: Names<NsId>,
     /// `deftype` aliases defined directly here, keyed by unqualified name.
     /// Kept apart from `types`: an alias is not a type, it is a *spelling*
     /// that `Checker::canon` rewrites away, so nothing past the type parser
@@ -1151,24 +1153,22 @@ impl Registry {
         &self.modules[&NsId::ROOT]
     }
 
-    /// The module `path` names from the root, if the session has it.
-    pub fn module(&self, path: &[String]) -> Option<&Namespace> {
-        self.module_at(symbols::find_ns(path)?)
-    }
-
     pub fn module_at(&self, ns: NsId) -> Option<&Namespace> {
         self.modules.get(&ns)
     }
 
-    /// The module `path` names from the root, added to the session — with
-    /// every module it is written inside — if new.
-    pub fn module_mut(&mut self, path: &[String]) -> &mut Namespace {
-        let mut ns = NsId::ROOT;
-        for seg in path {
-            ns = symbols::child_ns(ns, seg);
-            self.modules.entry(ns).or_insert_with(|| Namespace::new(ns));
+    /// The module `ns`, added to the session — with every module it is
+    /// written inside — if new.
+    pub fn module_mut(&mut self, ns: NsId) -> &mut Namespace {
+        let mut at = Some(ns);
+        while let Some(m) = at {
+            if self.modules.contains_key(&m) {
+                break;
+            }
+            self.modules.insert(m, Namespace::new(m));
+            at = symbols::ns_parent(m);
         }
-        self.modules.get_mut(&ns).expect("the registry always has the root module")
+        self.modules.get_mut(&ns).expect("just added")
     }
 
     pub fn module_at_mut(&mut self, ns: NsId) -> Option<&mut Namespace> {
@@ -3230,8 +3230,7 @@ impl Registry {
             names.import_name(ns.ns, local, what);
         }
         for local in ns.mod_aliases.symbols() {
-            let abs = ns.mod_aliases.get_sym(local).expect("a key of the table");
-            let module = symbols::find_ns(abs).expect("a `use`d module exists");
+            let module = *ns.mod_aliases.get_sym(local).expect("a key of the table");
             names.import_name(ns.ns, local, Import::Module(module));
         }
         // A `(use Type)`'s variants and static methods, bare.

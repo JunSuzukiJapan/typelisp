@@ -51,7 +51,7 @@ pub struct TestCase {
     pub path: Path,
     /// The module it is defined in. A test need not be `pub`, so it is
     /// called from inside that module.
-    pub ns: Vec<String>,
+    pub ns: typelisp_mem::NsId,
     /// The name as written, a symbol of that module: calling the test is
     /// checking `(NAME)` there.
     pub name: Value,
@@ -171,7 +171,7 @@ impl Checker {
             }
         };
         if self.test_forms == TestForms::Collect {
-            self.tests.push(TestCase { path: self.info.fq(&name), ns: self.info.ns.clone(), name: elems[1], returns, loc });
+            self.tests.push(TestCase { path: self.info.fq(&name), ns: self.info.ns, name: elems[1], returns, loc });
         }
         Ok(tl)
     }

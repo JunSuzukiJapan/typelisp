@@ -428,11 +428,10 @@ fn run_file(file: &str, heap_cells: usize, features: Vec<String>, image: Option<
     // Place a runtime `(eval ...)` in the script's own file-derived module, so
     // the script's module-scoped globals/functions resolve from an eval'd form
     // (and eval-defined names register there) — the load phase checked the
-    // file's forms in this same module, but left the checker at the root. A
-    // path that can't derive a module (shouldn't happen — the load above
-    // already used it) falls back to the root.
-    let entry_ns = typelisp::project::module_segs_for(&file, &src_root).unwrap_or_default();
-    checker.set_current_ns(entry_ns);
+    // file's forms in this same module, but left the checker at the root.
+    let entry_segs = typelisp::project::module_segs_for(&file, &src_root)
+        .expect("the load above derived the entry file's module from this path");
+    checker.set_current_ns(typelisp::symbols::ns_of(&entry_segs));
     // Hand the interpreter a shared handle to the now-fully-loaded checker so
     // any top-level `(eval ...)` in the queued forms can type-check the code
     // it's given against this program's own global environment

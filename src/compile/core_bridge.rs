@@ -120,13 +120,13 @@ impl Definitions {
             wk::DEFSTRUCT => {
                 let parts = core::fields(heap, form)?;
                 let [path, ..] = parts[..] else { return Err(malformed(heap, form)) };
-                let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
+                let path = core::path_value(heap, path).ok_or_else(|| malformed(heap, form))?;
                 self.structs.insert(path);
             }
             wk::DEFENUM => {
                 let parts = core::fields(heap, form)?;
                 let [path, _variants, _fields] = parts[..] else { return Err(malformed(heap, form)) };
-                let path = as_path(heap, path).ok_or_else(|| malformed(heap, form))?;
+                let path = core::path_value(heap, path).ok_or_else(|| malformed(heap, form))?;
                 self.enums.insert(path);
             }
             // A module's children are top-level forms too, and a type defined
@@ -1109,7 +1109,7 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
     if parts.len() < 2 {
         return Err(malformed(heap, form));
     }
-    let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, parts[1])?;
     let args = parts[2..].to_vec();
 
@@ -1219,7 +1219,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     if parts.len() < 6 {
         return Err(malformed(heap, form));
     }
-    let type_name = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let type_name = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
     let method = symbol_field(heap, form, 1)?;
     let Value::Bool(instance) = parts[2] else { return Err(malformed(heap, form)) };
     let ret = Repr::read(heap, parts[3]).ok_or_else(|| malformed(heap, form))?;
@@ -1458,7 +1458,7 @@ fn translate_set(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> 
 /// struct field read already does, and writing one needs the same tagging.
 fn global_id_and_kind(heap: &Heap, form: Value, cx: Ctx) -> Result<(i64, i64), Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| as_path(heap, v))
+        .and_then(|v| core::path_value(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
     let repr = core::field(heap, form, 1)
         .and_then(|v| Repr::read(heap, v))
@@ -1663,11 +1663,7 @@ fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, String)>, Error> {
     for entry in heap.list_to_vec(list)? {
         let parts = heap.list_to_vec(entry)?;
         if let [ty, m] = parts.as_slice() {
-            let path = match ty {
-                Value::Path(id) => crate::types::path_from_id(heap, *id),
-                Value::Symbol(id) => Path::root(heap.symbol_spelling(*id)),
-                _ => continue,
-            };
+            let Some(path) = core::path_value(heap, *ty) else { continue };
             if let Value::Symbol(id) = m {
                 out.push((path, heap.symbol_spelling(*id).to_string()));
             }
@@ -1684,11 +1680,7 @@ fn supers_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, Vec<(Path,
     for entry in heap.list_to_vec(list)? {
         let parts = heap.list_to_vec(entry)?;
         if let [ty, slots] = parts.as_slice() {
-            let path = match ty {
-                Value::Path(id) => crate::types::path_from_id(heap, *id),
-                Value::Symbol(id) => Path::root(heap.symbol_spelling(*id)),
-                _ => continue,
-            };
+            let Some(path) = core::path_value(heap, *ty) else { continue };
             // The already-destructured element, not `core::field(entry, 1)` —
             // see [`vtable_of`].
             out.push((path, vtable_of(heap, *slots)?));
@@ -1708,7 +1700,7 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
             if parts.len() < 3 {
                 return Err(malformed(heap, form));
             }
-            let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+            let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
             (callee_symbol_name(&path), params_of(heap, parts[1])?, parts[3..].to_vec())
         }
         // `(defmethod PATH SYM INSTANCE ((SYM R)...) RET-R E...)`
@@ -1716,7 +1708,7 @@ pub fn top_level_function(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Optio
             if parts.len() < 5 {
                 return Err(malformed(heap, form));
             }
-            let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+            let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
             let method = symbol_field(heap, form, 1)?;
             (ConcreteNames::method_symbol(&path, &method), params_of(heap, parts[3])?, parts[5..].to_vec())
         }
@@ -2054,7 +2046,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
     }
     let Value::Str(key_id) = parts[0] else { return Err(malformed(heap, form)) };
     let concrete_key = heap.string(key_id).to_string();
-    let trait_path = as_path(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
+    let trait_path = core::path_value(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
     let repr = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
     let id = *cx.dyn_tables.vtables.get(&(concrete_key.clone(), trait_path.clone())).ok_or_else(|| {
         Error::TypeError(format!(
@@ -2076,7 +2068,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
 /// through the mapping the boxing site registered.
 fn translate_dyn_upcast(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let to_trait = core::field(heap, form, 0)
-        .and_then(|v| as_path(heap, v))
+        .and_then(|v| core::path_value(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
     let value = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let id = *cx.dyn_tables.trait_ids.get(&to_trait).ok_or_else(|| {
@@ -2435,7 +2427,7 @@ fn translate_immediate_lambda_call(
 /// parameter is simply the last one.
 fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| as_path(heap, v))
+        .and_then(|v| core::path_value(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
     let reprs = repr_list(heap, core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?)?;
     let target = callee_symbol_name(&path);
@@ -2453,7 +2445,7 @@ fn translate_fnref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
 /// same convention an ordinary method call uses.
 fn translate_methodref(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
     let path = core::field(heap, form, 0)
-        .and_then(|v| as_path(heap, v))
+        .and_then(|v| core::path_value(heap, v))
         .ok_or_else(|| malformed(heap, form))?;
     let method = symbol_field(heap, form, 1)?;
     let reprs = repr_list(heap, core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?)?;
@@ -2553,7 +2545,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     if parts.len() < 5 {
         return Err(malformed(heap, form));
     }
-    let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
     let Value::Str(key_id) = parts[1] else { return Err(malformed(heap, form)) };
     let Value::Int(variant) = parts[2] else { return Err(malformed(heap, form)) };
     let Value::Bool(mutable) = parts[3] else { return Err(malformed(heap, form)) };
@@ -2805,7 +2797,7 @@ fn pattern_bindings(
         // representation follows from what that type is — the same three-way
         // classification `translate_ctor_pattern` makes for its own kind.
         wk::PAT_TYPETEST => {
-            let path = as_path(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
+            let path = core::path_value(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
             let sub = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
             let repr = if path == Path::root("sexpr") {
@@ -2954,7 +2946,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             // binds at *that* type's representation rather than the enclosing
             // value's — the three-way classification `pattern_bindings` makes
             // for this node, made once more here.
-            let path = as_path(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
+            let path = core::path_value(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
             let inner_repr = if path == Path::root("sexpr") {
                 Repr::Sexpr
@@ -2981,7 +2973,7 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     if parts.len() < 5 {
         return Err(malformed(heap, pat));
     }
-    let path = as_path(heap, parts[0]).ok_or_else(|| malformed(heap, pat))?;
+    let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, pat))?;
     let Value::Str(key_id) = parts[1] else { return Err(malformed(heap, pat)) };
     let Value::Int(variant) = parts[2] else { return Err(malformed(heap, pat)) };
     let Value::Bool(downcast) = parts[3] else { return Err(malformed(heap, pat)) };
@@ -3103,15 +3095,7 @@ fn repr_list(heap: &Heap, list: Value) -> Result<Vec<Repr>, Error> {
         .collect()
 }
 
-/// A field holding a path. A one-segment path reads back as a bare symbol,
-/// since the reader only builds a `Value::Path` when it sees `::`.
-fn as_path(heap: &Heap, v: Value) -> Option<Path> {
-    match v {
-        Value::Path(id) => Some(crate::types::path_from_id(heap, id)),
-        Value::Symbol(id) => Some(Path::root(heap.symbol_spelling(id))),
-        _ => None,
-    }
-}
+
 
 /// The block name a `block`/`return-from` node's first field carries — a
 /// `(str "...")` node, the shape `forms::block_form` builds.
@@ -3240,15 +3224,18 @@ mod tests {
     use super::*;
 
     /// Core IR written as text, read in the core IR's module so its tags are
-    /// the IR's own symbols.
-    /// Core IR, read in the core IR's module. The hand-written forms name
-    /// their definitions in a module `m`, which this session is told it has,
-    /// so `m::f` reads as the path it is.
-    fn read_core(r: &crate::Reader, h: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
+    /// the IR's own symbols. A definition is named by its path from the root
+    /// (`::f`, `::m::f`), as the checker writes it (`core::path_form`); the
+    /// hand-written forms put theirs at the root or in a module `m`, which
+    /// this session is told it has.
+    fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
         h.names().declare_module(typelisp_mem::symbols::ns_of(&["m".to_string()]));
-        Ok(r.read_all_in_spanned_within(h, "<core>", src, typelisp_mem::NsId::CORE)?.into_iter().map(|(v, _)| v).collect())
+        Ok(crate::Reader::new()
+            .read_all_in_spanned_within(h, "<core>", src, typelisp_mem::NsId::CORE)?
+            .into_iter()
+            .map(|(v, _)| v)
+            .collect())
     }
-    use crate::Reader;
     use std::collections::HashMap;
 
     /// Translate one hand-written core form and print the island form.
@@ -3266,7 +3253,6 @@ mod tests {
     fn bridged_with_dyn(src: &str) -> String {
         let mut h = Heap::with_capacity(1 << 16);
         h.set_gc_stress(true);
-        let r = Reader::new();
         let definitions = Definitions::new();
         let globals = globals();
         let vtables: HashMap<(String, Path), u32> =
@@ -3277,7 +3263,7 @@ mod tests {
             &globals,
             DynTables { vtables: &vtables, trait_ids: &trait_ids },
         );
-        let mut vs = read_core(&r, &mut h, src).expect("read failed");
+        let mut vs = read_core(&mut h, src).expect("read failed");
         let form = vs.pop().unwrap();
         h.push_root(form);
         let island = to_island(&mut h, form, cx).unwrap_or_else(|e| panic!("{:?} did not translate: {}", src, e));
@@ -3296,10 +3282,9 @@ mod tests {
     fn bridged_with(defs: &[&str], src: &str) -> String {
         let mut h = Heap::with_capacity(1 << 16);
         h.set_gc_stress(true);
-        let r = Reader::new();
-        let definitions = record_all(&mut h, &r, defs);
+        let definitions = record_all(&mut h, defs);
         let globals = globals();
-        let mut vs = read_core(&r, &mut h, src).expect("read failed");
+        let mut vs = read_core(&mut h, src).expect("read failed");
         assert_eq!(vs.len(), 1, "expected one form in {:?}", src);
         let core_form = vs.pop().unwrap();
         h.push_root(core_form);
@@ -3313,10 +3298,10 @@ mod tests {
         core::print(&h, island)
     }
 
-    fn record_all(h: &mut Heap, r: &Reader, defs: &[&str]) -> Definitions {
+    fn record_all(h: &mut Heap, defs: &[&str]) -> Definitions {
         let mut definitions = Definitions::new();
         for d in defs {
-            let vs = read_core(&r, h, d).expect("read failed");
+            let vs = read_core(h, d).expect("read failed");
             for v in vs {
                 definitions.record(h, v).expect("recording the definition failed");
             }
@@ -3330,11 +3315,10 @@ mod tests {
 
     fn refused_with(defs: &[&str], src: &str) -> String {
         let mut h = Heap::with_capacity(1 << 16);
-        let r = Reader::new();
-        let definitions = record_all(&mut h, &r, defs);
+        let definitions = record_all(&mut h, defs);
         let globals = globals();
         let cx = Ctx::new(&definitions, &globals);
-        let mut vs = read_core(&r, &mut h, src).expect("read failed");
+        let mut vs = read_core(&mut h, src).expect("read failed");
         let core_form = vs.pop().unwrap();
         match to_island(&mut h, core_form, cx) {
             Ok(v) => panic!("{:?} unexpectedly translated to {}", src, core::print(&h, v)),
@@ -3344,7 +3328,7 @@ mod tests {
 
     /// A `point` with two int fields and an `option` over a `sexpr`, which is
     /// enough to show both a struct's and an enum's field kinds.
-    const DEFS: [&str; 2] = ["(defstruct point (int-any-width int-any-width))", "(defenum option (none some) (() (sexpr)))"];
+    const DEFS: [&str; 2] = ["(defstruct ::point (int-any-width int-any-width))", "(defenum ::option (none some) (() (sexpr)))"];
 
     #[test]
     fn the_word_sized_literals_pass_through_unchanged() {
@@ -3428,25 +3412,25 @@ mod tests {
     #[test]
     fn a_call_tags_every_argument_with_its_kind() {
         assert_eq!(
-            bridged("(call f (int-any-width sexpr) (int-any-width 1) (int-any-width 2))"),
+            bridged("(call ::f (int-any-width sexpr) (int-any-width 1) (int-any-width 2))"),
             r#"(call "tl_f" (0 int-any-width 0 1) (2 int-any-width 0 2))"#
         );
-        assert_eq!(bridged("(call f ())"), r#"(call "tl_f")"#);
+        assert_eq!(bridged("(call ::f ())"), r#"(call "tl_f")"#);
         // A module-qualified callee mangles by its full path, so `m::inc` and
         // a root `inc` cannot collide on one symbol.
-        assert_eq!(bridged("(call m::inc ())"), r#"(call "tl_m::inc")"#);
+        assert_eq!(bridged("(call ::m::inc ())"), r#"(call "tl_m::inc")"#);
         // A free builtin with no typelisp body is named for the runtime shim
         // that *is* its implementation, not mangled — and the naming happens
         // here, so the island has nothing to re-derive
         // (`interp::rt_builtin_symbol`).
         assert_eq!(
-            bridged("(call std::sexpr-car (sexpr) (var xs))"),
+            bridged("(call ::std::sexpr-car (sexpr) (var xs))"),
             r#"(call "rt_car" (2 var "xs" false))"#
         );
         // (`sym`'s kind is `0`: an interned symbol is a tagged word the
         // collector never reclaims, so it needs no root — `Repr::class`.)
         assert_eq!(
-            bridged("(call std::symbol->string (sym) (var s))"),
+            bridged("(call ::std::symbol->string (sym) (var s))"),
             r#"(call "rt_sym_name" (0 var "s" false))"#
         );
     }
@@ -3454,11 +3438,11 @@ mod tests {
     #[test]
     fn an_ordinary_method_call_keeps_its_qualified_type_name() {
         assert_eq!(
-            bridged("(assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))"),
+            bridged("(assoc ::i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))"),
             r#"(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
-            bridged("(assoc m::point area true int-any-width (struct) \"i32\" (var p))"),
+            bridged("(assoc ::m::point area true int-any-width (struct) \"i32\" (var p))"),
             r#"(assoc "m::point" "area" true "tl_m::point''area" (2 var "p" false))"#
         );
     }
@@ -3468,18 +3452,18 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc vector get true int-any-width ((vector int-any-width) int-any-width) \"i32\" (var v) (int-any-width 0))"),
+            bridged("(assoc ::vector get true int-any-width ((vector int-any-width) int-any-width) \"i32\" (var v) (int-any-width 0))"),
             r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
-            bridged("(assoc vector push true unit ((vector sexpr) sexpr) \"()\" (var v) (var x))"),
+            bridged("(assoc ::vector push true unit ((vector sexpr) sexpr) \"()\" (var v) (var x))"),
             r#"(vector-op "push" 6 (var "v" false) (var "x" false))"#
         );
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc vector new false (vector int-any-width) () \"vector<i32>\")"),
+            bridged("(assoc ::vector new false (vector int-any-width) () \"vector<i32>\")"),
             r#"(vector-op "new" 0 (str (int-any-width 0 118) (int-any-width 0 101) (int-any-width 0 99) (int-any-width 0 116) (int-any-width 0 111) (int-any-width 0 114) (int-any-width 0 60) (int-any-width 0 105) (int-any-width 0 51) (int-any-width 0 50) (int-any-width 0 62)))"#
         );
     }
@@ -3491,13 +3475,13 @@ mod tests {
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc hashtable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) \"()\" (var h) (var n) (var i) (var k) (var x))"),
+            bridged("(assoc ::hashtable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) \"()\" (var h) (var n) (var i) (var k) (var x))"),
             r#"(hashtable-op "bucket-put" 6 1 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
         );
         // A bucket read builds no box, so the name slot stays empty; the
         // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc hashtable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) \"i32\" (var h) (var n) (var i))"),
+            bridged("(assoc ::hashtable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) \"i32\" (var h) (var n) (var i))"),
             r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
@@ -3507,7 +3491,7 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc llvm-builder const-word true handle (handle int-any-width) \"llvm-value\" (var b) (int-any-width 42))");
+        let printed = bridged("(assoc ::llvm-builder const-word true handle (handle int-any-width) \"llvm-value\" (var b) (int-any-width 42))");
         assert_eq!(
             printed,
             format!(
@@ -3523,10 +3507,10 @@ mod tests {
     /// `Repr::Scope` carries one.
     #[test]
     fn a_scope_routes_on_what_it_holds() {
-        let printed = bridged("(assoc scope get true enum ((scope handle) str) \"option<llvm-value>\" (var e) (var n))");
+        let printed = bridged("(assoc ::scope get true enum ((scope handle) str) \"option<llvm-value>\" (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc scope get true enum ((scope int-any-width) str) \"option<i32>\" (var e) (var n))"),
+            bridged("(assoc ::scope get true enum ((scope int-any-width) str) \"option<i32>\" (var e) (var n))"),
             r#"(assoc "scope" "get" true "tl_scope''get" (2 var "e" false) (2 var "n" false))"#
         );
     }
@@ -3539,19 +3523,19 @@ mod tests {
     #[test]
     fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
-            bridged_with(&DEFS, "(construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
+            bridged_with(&DEFS, "(construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
             r#"(construct false true (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) 0 (1 int-any-width 0 1) (1 int-any-width 0 2))"#
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
         assert_eq!(
-            bridged_with(&DEFS, "(construct option \"option<sexpr>\" 1 false (sexpr) (var x))"),
+            bridged_with(&DEFS, "(construct ::option \"option<sexpr>\" 1 false (sexpr) (var x))"),
             r#"(construct false false (str (int-any-width 0 111) (int-any-width 0 112) (int-any-width 0 116) (int-any-width 0 105) (int-any-width 0 111) (int-any-width 0 110) (int-any-width 0 60) (int-any-width 0 115) (int-any-width 0 101) (int-any-width 0 120) (int-any-width 0 112) (int-any-width 0 114) (int-any-width 0 62)) 1 (6 var "x" false))"#
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
         assert_eq!(
-            bridged_with(&DEFS, &format!("(construct sexpr \"sexpr\" {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
+            bridged_with(&DEFS, &format!("(construct ::sexpr \"sexpr\" {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
             format!("(construct true false () {SEXPR_CONS} (int-any-width 0 1) (int-any-width 0 2))")
         );
     }
@@ -3561,7 +3545,7 @@ mod tests {
     #[test]
     fn a_construct_needs_no_definition_recorded() {
         assert_eq!(
-            bridged_with(&[], "(construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
+            bridged_with(&[], "(construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
             r#"(construct false true (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) 0 (1 int-any-width 0 1) (1 int-any-width 0 2))"#
         );
     }
@@ -3571,7 +3555,7 @@ mod tests {
     /// kind.
     #[test]
     fn a_construct_whose_arity_disagrees_with_its_representations_is_refused() {
-        let e = refused_with(&DEFS, "(construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1))");
+        let e = refused_with(&DEFS, "(construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1))");
         assert!(e.contains("has 2 fields, constructed with 1"), "{}", e);
     }
 
@@ -3582,7 +3566,7 @@ mod tests {
     /// wrong box shape.
     #[test]
     fn a_pattern_on_an_unrecorded_type_is_refused() {
-        let e = refused_with(&[], "(match (var v) struct ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let e = refused_with(&[], "(match (var v) struct ((pat-ctor ::point \"point\" 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(e.contains("no definition recorded"), "{}", e);
     }
 
@@ -3611,13 +3595,13 @@ mod tests {
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor option \"option<sexpr>\" 0 false ()) (int-any-width 0)) ((pat-ctor option \"option<sexpr>\" 1 false (sexpr) (pat-bind x)) (var x)))"),
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::option \"option<sexpr>\" 0 false ()) (int-any-width 0)) ((pat-ctor ::option \"option<sexpr>\" 1 false (sexpr) (pat-bind x)) (var x)))"),
             r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 0 0) ((pat-ctor 1 ((pat-bind "x" 2)) 1 (6) false ()) var "x" false)) 2)"#
         );
         // A struct scrutinee: pattern kind 2, and the field kinds come from
         // the `defstruct`.
         assert_eq!(
-            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-wild)) (var a)))"),
+            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor ::point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-wild)) (var a)))"),
             r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a" 0) (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
         );
     }
@@ -3652,12 +3636,12 @@ mod tests {
     /// placeholder.
     #[test]
     fn only_a_downcast_pattern_carries_a_type_name() {
-        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point \"point\" 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
-        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor point \"point\" 0 true (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point \"point\" 0 true (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(down.contains("true (str (int-any-width 0 112)"), "{}", down);
         // A whole-value type test always tests, so it always carries one.
-        let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest point \"point\" (pat-bind p)) (var p)))");
+        let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest ::point \"point\" (pat-bind p)) (var p)))");
         assert!(tt.contains(r#"(pat-typetest (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) (pat-bind "p" 2))"#), "{}", tt);
     }
 
@@ -3683,7 +3667,7 @@ mod tests {
     fn a_value_pattern_crosses_as_a_name_and_a_test() {
         let printed = bridged_with(
             &DEFS,
-            r#"(match (var s) str ((pat-guard $match-scrut (assoc string equals true bool (str str) "bool" (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
+            r#"(match (var s) str ((pat-guard $match-scrut (assoc ::string equals true bool (str str) "bool" (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
         );
         assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true "tl_string''equals""#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
@@ -3771,10 +3755,10 @@ mod tests {
     /// time, and a kind that says how to untag the stored value.
     #[test]
     fn a_global_becomes_its_promoted_id_and_kind() {
-        assert_eq!(bridged("(global counter int-any-width)"), "(global 3 1)");
-        assert_eq!(bridged("(global m::total sexpr)"), "(global 7 6)");
+        assert_eq!(bridged("(global ::counter int-any-width)"), "(global 3 1)");
+        assert_eq!(bridged("(global ::m::total sexpr)"), "(global 7 6)");
         assert_eq!(
-            bridged("(set-global counter int-any-width (int-any-width 5))"),
+            bridged("(set-global ::counter int-any-width (int-any-width 5))"),
             "(set-global 3 1 (int-any-width 0 5))"
         );
     }
@@ -3783,7 +3767,7 @@ mod tests {
     /// and this walk have gone out of step.
     #[test]
     fn an_unpromoted_global_is_refused() {
-        let e = refused("(global missing int-any-width)");
+        let e = refused("(global ::missing int-any-width)");
         assert!(e.contains("was not promoted before translation"), "{}", e);
     }
 
@@ -3883,7 +3867,7 @@ mod tests {
     /// a second runtime representation.
     #[test]
     fn a_function_reference_becomes_a_forwarding_closure() {
-        let printed = bridged("(fnref f (int-any-width int-any-width))");
+        let printed = bridged("(fnref ::f (int-any-width int-any-width))");
         assert!(
             printed.ends_with(
                 r#" () ((arg0 . 0) (arg1 . 0)) (call "tl_f" (0 var "arg0" false) (0 var "arg1" false)))"#
@@ -3895,7 +3879,7 @@ mod tests {
 
     #[test]
     fn a_method_reference_forwards_onto_the_method() {
-        let printed = bridged("(methodref point area (struct) \"i32\")");
+        let printed = bridged("(methodref ::point area (struct) \"i32\")");
         assert!(
             printed.ends_with(r#" () ((arg0 . 2)) (assoc "point" "area" true "tl_point''area" (2 var "arg0" false)))"#),
             "{}",
@@ -3951,9 +3935,9 @@ mod tests {
     /// resolved at run time.
     #[test]
     fn a_trait_object_carries_the_ids_interned_for_it() {
-        let printed = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () struct (var p))"#);
+        let printed = bridged_with_dyn(r#"(dyn-new "point" ::shape ((::point area)) () struct (var p))"#);
         assert_eq!(printed, r#"(dyn-new 11 (2 var "p" false))"#);
-        assert_eq!(bridged_with_dyn("(dyn-upcast drawable (var d))"), r#"(dyn-upcast 22 (2 var "d" false))"#);
+        assert_eq!(bridged_with_dyn("(dyn-upcast ::drawable (var d))"), r#"(dyn-upcast 22 (2 var "d" false))"#);
         assert_eq!(
             bridged_with_dyn("(dyn-call shape area 0 ((point area)) (dyn) (var d))"),
             r#"(dyn-call 0 (2 var "d" false))"#
@@ -3972,9 +3956,9 @@ mod tests {
     /// that was always meant.
     #[test]
     fn the_boxed_values_kind_follows_its_representation() {
-        let as_struct = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () struct (var p))"#);
-        let as_enum = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () enum (var p))"#);
-        let as_int = bridged_with_dyn(r#"(dyn-new "point" shape ((point area)) () int-any-width (var p))"#);
+        let as_struct = bridged_with_dyn(r#"(dyn-new "point" ::shape ((::point area)) () struct (var p))"#);
+        let as_enum = bridged_with_dyn(r#"(dyn-new "point" ::shape ((::point area)) () enum (var p))"#);
+        let as_int = bridged_with_dyn(r#"(dyn-new "point" ::shape ((::point area)) () int-any-width (var p))"#);
         assert!(as_struct.contains("(2 var"), "{}", as_struct);
         assert!(as_enum.contains("(2 var"), "{}", as_enum);
         assert!(as_int.contains("(0 var"), "{}", as_int);
@@ -3984,7 +3968,7 @@ mod tests {
     /// heap and scope tree, which the compiled program does not have.
     #[test]
     fn compiling_a_compile_form_is_refused() {
-        let e = refused("(compile-fn (fn f))");
+        let e = refused("(compile-fn (fn ::f))");
         assert!(e.contains("interpreter-only"), "{}", e);
     }
 
@@ -3994,11 +3978,10 @@ mod tests {
     fn top_level(defs: &[&str], src: &str) -> Option<(String, String, String)> {
         let mut h = Heap::with_capacity(1 << 16);
         h.set_gc_stress(true);
-        let r = Reader::new();
-        let definitions = record_all(&mut h, &r, defs);
+        let definitions = record_all(&mut h, defs);
         let globals = globals();
         let cx = Ctx::new(&definitions, &globals);
-        let mut vs = read_core(&r, &mut h, src).expect("read failed");
+        let mut vs = read_core(&mut h, src).expect("read failed");
         let form = vs.pop().unwrap();
         h.push_root(form);
         let f = top_level_function(&mut h, form, cx).expect("translation failed")?;
@@ -4011,13 +3994,13 @@ mod tests {
     #[test]
     fn a_defun_becomes_the_boundary_triple() {
         let (name, params, body) =
-            top_level(&[], "(defun m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b)))")
+            top_level(&[], "(defun ::m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc ::i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b)))")
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
         assert_eq!(body, r#"(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#);
         // The same mangling a call to it produces.
-        assert!(bridged("(call m::add ())").contains(r#""tl_m::add""#));
+        assert!(bridged("(call ::m::add ())").contains(r#""tl_m::add""#));
     }
 
     /// A method mangles through the type path, so two same-named types in
@@ -4025,7 +4008,7 @@ mod tests {
     #[test]
     fn a_defmethod_mangles_through_its_type() {
         let (name, params, body) =
-            top_level(&[], "(defmethod m::point area false ((self struct)) int-any-width (field-get (var self) 0 int-any-width))")
+            top_level(&[], "(defmethod ::m::point area false ((self struct)) int-any-width (field-get (var self) 0 int-any-width))")
                 .expect("a defmethod is compiled");
         assert_eq!(name, "tl_m::point''area");
         assert_eq!(params, "((self . 2))");
@@ -4035,7 +4018,7 @@ mod tests {
     /// A multi-form body collapses to a `progn`, the same as everywhere else.
     #[test]
     fn a_multi_form_body_collapses() {
-        let (_, _, body) = top_level(&[], "(defun f () unit (int-any-width 1) (unit))").expect("compiled");
+        let (_, _, body) = top_level(&[], "(defun ::f () unit (int-any-width 1) (unit))").expect("compiled");
         assert_eq!(body, "(let () (int-any-width 0 1) (unit))");
     }
 
@@ -4045,7 +4028,7 @@ mod tests {
     #[test]
     fn a_parameter_a_closure_captures_is_a_cell_without_being_told() {
         let (_, params, body) =
-            top_level(&[], "(defun f ((n int-any-width)) fn (lambda () int-any-width (var n)))").expect("compiled");
+            top_level(&[], "(defun ::f ((n int-any-width)) fn (lambda () int-any-width (var n)))").expect("compiled");
         assert_eq!(params, "((n . 11))", "the parameter should be bound as a cell");
         assert!(body.contains(r#"(cellvar "n" 1)"#), "{}", body);
     }
@@ -4057,13 +4040,13 @@ mod tests {
     #[test]
     fn the_rest_of_the_top_level_is_not_compiled() {
         for src in [
-            "(defstruct point (int-any-width int-any-width))",
-            "(defenum m::color (red green blue) (() () ()))",
+            "(defstruct ::point (int-any-width int-any-width))",
+            "(defenum ::m::color (red green blue) (() () ()))",
             "(defmacro m::when (c body) true (1 () ()) (quote ()))",
-            "(use m::helper other::helper)",
+            "(use ::m::helper other::helper)",
             r#"(load "lib.typl")"#,
             "(expr (int-any-width 0 42))",
-            "(module m (expr (int-any-width 0 1)))",
+            "(module ::m (expr (int-any-width 0 1)))",
         ] {
             assert!(top_level(&[], src).is_none(), "{} should not be compiled as a function", src);
         }
@@ -4075,16 +4058,15 @@ mod tests {
     fn a_defvar_becomes_a_global_initializer() {
         let mut h = Heap::with_capacity(1 << 16);
         h.set_gc_stress(true);
-        let r = Reader::new();
         let definitions = Definitions::new();
         let globals = globals();
         let cx = Ctx::new(&definitions, &globals);
-        let form = read_core(&r, &mut h, "(defvar m::total sexpr true (quote ()))").expect("read failed")[0];
+        let form = read_core(&mut h, "(defvar ::m::total sexpr true (quote ()))").expect("read failed")[0];
         h.push_root(form);
         let node = global_init(&mut h, form, cx).expect("translation failed").expect("a defvar has one");
         assert_eq!(core::print(&h, node), "(global-init 6 (construct true false () 0))");
         // Nothing else is one.
-        let other = read_core(&r, &mut h, "(defun f () unit (unit))").expect("read failed")[0];
+        let other = read_core(&mut h, "(defun ::f () unit (unit))").expect("read failed")[0];
         assert!(global_init(&mut h, other, cx).expect("translation failed").is_none());
     }
 
@@ -4094,8 +4076,8 @@ mod tests {
     fn a_type_inside_a_module_is_recorded_too() {
         assert!(
             bridged_with(
-                &["(module m (defstruct m::point (int-any-width sexpr)))"],
-                "(construct m::point \"m::point\" 0 true (int-any-width sexpr) (int-any-width 1) (quote ()))"
+                &["(module ::m (defstruct ::m::point (int-any-width sexpr)))"],
+                "(construct ::m::point \"m::point\" 0 true (int-any-width sexpr) (int-any-width 1) (quote ()))"
             )
             .contains("(1 int-any-width 0 1)")
         );
@@ -4111,9 +4093,9 @@ mod tests {
     /// misread. The count of these is the progress measure.
     #[test]
     fn an_untranslated_tag_names_itself() {
-        assert!(refused("(defun m::f () unit (unit))").contains("`defun`"));
-        assert!(refused("(defvar m::x int-any-width true (int-any-width 0))").contains("`defvar`"));
-        assert!(refused("(module m (expr (int-any-width 1)))").contains("`module`"));
+        assert!(refused("(defun ::m::f () unit (unit))").contains("`defun`"));
+        assert!(refused("(defvar ::m::x int-any-width true (int-any-width 0))").contains("`defvar`"));
+        assert!(refused("(module ::m (expr (int-any-width 1)))").contains("`module`"));
     }
 
     /// A mismatched representation list is an internal error, not something
@@ -4121,7 +4103,7 @@ mod tests {
     /// argument.
     #[test]
     fn an_argument_list_that_disagrees_with_its_representations_is_refused() {
-        let e = refused("(call f (int-any-width) (int-any-width 1) (int-any-width 2))");
+        let e = refused("(call ::f (int-any-width) (int-any-width 1) (int-any-width 2))");
         assert!(e.contains("1 argument representations for 2 arguments"), "{}", e);
     }
 }

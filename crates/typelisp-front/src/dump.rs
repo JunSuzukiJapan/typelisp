@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 24;
+pub const FORMAT_VERSION: u32 = 25;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -392,7 +392,13 @@ fn walk_ns(
     table!(cat::CTOR, ns.ctors);
     table!(cat::VAR, ns.vars);
     table!(cat::ALIAS, ns.aliases);
-    table!(cat::MOD_ALIAS, ns.mod_aliases);
+    // A module is written as its segments from the root, as a `Path` is.
+    let mut rows: Vec<_> = ns.mod_aliases.iter().collect();
+    rows.sort_by_key(|(name, _)| *name);
+    for (name, m) in rows {
+        let (bytes, hash) = wire(&typelisp_mem::symbols::ns_path(*m))?;
+        visit(cat::MOD_ALIAS, path, name, bytes, hash)?;
+    }
     table!(cat::STATIC_USE, ns.static_uses);
     table!(cat::TYPE_ALIAS, ns.type_aliases);
     table!(cat::C_STRUCT, ns.c_structs);
@@ -463,55 +469,54 @@ pub fn apply_entries(
     entries: Vec<Entry>,
 ) -> Result<(), String> {
     for e in entries {
+        let module = typelisp_mem::symbols::ns_of(&e.ns);
         match e.cat {
             cat::MODULE => {
-                let mut p = e.ns.clone();
-                p.push(e.name);
-                reg.module_mut(&p);
+                reg.module_mut(typelisp_mem::symbols::child_ns(module, &e.name));
             }
             cat::FN => {
                 let v: FnSig = bincode::deserialize(&e.payload).map_err(|err| read_failed("function signature", err))?;
-                reg.module_mut(&e.ns).fns.insert(e.name, v);
+                reg.module_mut(module).fns.insert(e.name, v);
             }
             cat::TYPE => {
                 let v: AdtDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("type", err))?;
-                reg.module_mut(&e.ns).types.insert(e.name, v);
+                reg.module_mut(module).types.insert(e.name, v);
             }
             cat::TRAIT => {
                 let v: TraitDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("trait", err))?;
-                reg.module_mut(&e.ns).traits.insert(e.name, v);
+                reg.module_mut(module).traits.insert(e.name, v);
             }
             cat::MACRO => {
                 let v: MacroDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("macro", err))?;
-                reg.module_mut(&e.ns).macros.insert(e.name, v);
+                reg.module_mut(module).macros.insert(e.name, v);
             }
             cat::CTOR => {
                 let v: (Path, usize) = bincode::deserialize(&e.payload).map_err(|err| read_failed("constructor", err))?;
-                reg.module_mut(&e.ns).ctors.insert(e.name, v);
+                reg.module_mut(module).ctors.insert(e.name, v);
             }
             cat::VAR => {
                 let v: VarInfo = bincode::deserialize(&e.payload).map_err(|err| read_failed("global", err))?;
-                reg.module_mut(&e.ns).vars.insert(e.name, v);
+                reg.module_mut(module).vars.insert(e.name, v);
             }
             cat::ALIAS => {
                 let v: Path = bincode::deserialize(&e.payload).map_err(|err| read_failed("use alias", err))?;
-                reg.module_mut(&e.ns).aliases.insert(e.name, v);
+                reg.module_mut(module).aliases.insert(e.name, v);
             }
             cat::MOD_ALIAS => {
                 let v: Vec<String> = bincode::deserialize(&e.payload).map_err(|err| read_failed("module alias", err))?;
-                reg.module_mut(&e.ns).mod_aliases.insert(e.name, v);
+                reg.module_mut(module).mod_aliases.insert(e.name, typelisp_mem::symbols::ns_of(&v));
             }
             cat::STATIC_USE => {
                 let v: (Path, String) = bincode::deserialize(&e.payload).map_err(|err| read_failed("static use", err))?;
-                reg.module_mut(&e.ns).static_uses.insert(e.name, v);
+                reg.module_mut(module).static_uses.insert(e.name, v);
             }
             cat::TYPE_ALIAS => {
                 let v: TypeAlias = bincode::deserialize(&e.payload).map_err(|err| read_failed("type alias", err))?;
-                reg.module_mut(&e.ns).type_aliases.insert(e.name, v);
+                reg.module_mut(module).type_aliases.insert(e.name, v);
             }
             cat::C_STRUCT => {
                 let v: CStructDef = bincode::deserialize(&e.payload).map_err(|err| read_failed("C struct", err))?;
-                reg.module_mut(&e.ns).c_structs.insert(e.name, v);
+                reg.module_mut(module).c_structs.insert(e.name, v);
             }
             cat::STRUCT_DEFAULT => {
                 let v: Vec<Option<OwnedForm>> =
@@ -522,7 +527,7 @@ pub fn apply_entries(
                 let v: BlanketImpl = bincode::deserialize(&e.payload).map_err(|err| read_failed("blanket impl", err))?;
                 let index: usize =
                     e.name.parse().map_err(|_| format!("dump: blanket impl index `{}` is not a number", e.name))?;
-                let list = &mut reg.module_mut(&e.ns).blanket_impls;
+                let list = &mut reg.module_mut(module).blanket_impls;
                 if index < list.len() {
                     list[index] = v;
                 } else if index == list.len() {
@@ -931,7 +936,7 @@ pub fn restore_dump(heap: &mut crate::Heap, bytes: &[u8], ns: &str) -> Result<cr
     }
 
     chk.take_warnings();
-    chk.set_current_ns(ns.split("::").map(str::to_string).collect());
+    chk.set_current_ns(typelisp_mem::symbols::ns_of(&ns.split("::").map(str::to_string).collect::<Vec<_>>()));
     interp.set_checker(std::rc::Rc::new(std::cell::RefCell::new(chk)));
     Ok(interp)
 }

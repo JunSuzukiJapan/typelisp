@@ -7629,6 +7629,6 @@ pub fn load_interpreted_with(
         on_checked(heap, tl);
         interp.exec(heap, tl).expect("prelude: eval failed");
     }
-    chk.exit_file_module(std_segments.len());
+    chk.exit_file_module();
     chk.set_stdlib(false);
 }

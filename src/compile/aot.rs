@@ -365,7 +365,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         heap.push_root(tl);
         entry_forms.push(tl);
     }
-    chk.exit_file_module(entry_segs.len());
+    chk.exit_file_module();
     for w in chk.take_warnings() {
         eprintln!("{}", w);
     }

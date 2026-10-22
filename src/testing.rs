@@ -215,7 +215,7 @@ fn run_one(heap: &mut Heap, checker: &Rc<RefCell<Checker>>, interp: &mut Interp,
     // checker again.
     let tl = {
         let mut c = checker.borrow_mut();
-        c.set_current_ns(t.ns.clone());
+        c.set_current_ns(t.ns);
         let tl = c.check_form(heap, &*interp, call);
         for w in c.take_warnings() {
             eprintln!("{}", w);

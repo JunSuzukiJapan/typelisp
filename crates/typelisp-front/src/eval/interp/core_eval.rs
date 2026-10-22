@@ -1569,11 +1569,8 @@ fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, String), Eval
     let [ty, name] = parts[..] else {
         return Err(EvalError::Internal(format!("eval: vtable slot is not (PATH SYM): {}", core::print(heap, entry))));
     };
-    let ty = match ty {
-        Value::Path(id) => crate::types::path_from_id(heap, id),
-        Value::Symbol(id) => crate::Path::root(heap.symbol_spelling(id)),
-        other => return Err(EvalError::Internal(format!("eval: vtable slot type is {:?}", other))),
-    };
+    let ty = core::path_value(heap, ty)
+        .ok_or_else(|| EvalError::Internal(format!("eval: vtable slot type is {:?}", ty)))?;
     let Value::Symbol(name) = name else {
         return Err(EvalError::Internal(format!("eval: vtable slot method is {:?}", name)));
     };
@@ -1603,11 +1600,8 @@ pub(super) fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<Super
                     core::print(heap, *e)
                 )));
             };
-            let path = match path {
-                Value::Path(id) => crate::types::path_from_id(heap, id),
-                Value::Symbol(id) => crate::Path::root(heap.symbol_spelling(id)),
-                other => return Err(EvalError::Internal(format!("eval: (dyn-new ..) supertrait path is {:?}", other))),
-            };
+            let path = core::path_value(heap, path)
+                .ok_or_else(|| EvalError::Internal(format!("eval: (dyn-new ..) supertrait path is {:?}", path)))?;
             let slots = heap
                 .list_to_vec(slots)
                 .map_err(|err| EvalError::Internal(format!("eval: (dyn-new ..) supertrait slots: {}", err)))?;
@@ -1649,17 +1643,11 @@ pub(super) fn param_reprs(heap: &Heap, params: Value) -> Result<Vec<Repr>, EvalE
         .collect()
 }
 
-/// A field holding an absolute path, as a [`crate::Path`].
-///
-/// A single-segment path reads back as a bare `Value::Symbol` rather than a
-/// `Value::Path` — the reader only builds the latter when it sees `::` — so
-/// both spellings are accepted and mean the same one-segment path.
+/// A field naming a definition, as a [`crate::Path`] (`core::path_value`).
 pub(super) fn path_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<crate::Path, EvalError> {
-    match core::field(heap, form, i) {
-        Some(Value::Path(id)) => Ok(crate::types::path_from_id(heap, id)),
-        Some(Value::Symbol(id)) => Ok(crate::Path::root(heap.symbol_spelling(id))),
-        other => Err(EvalError::Internal(format!("eval: ({} ..) field {} is not a path: {:?}", what, i, other))),
-    }
+    let v = core::field(heap, form, i);
+    v.and_then(|v| core::path_value(heap, v))
+        .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) field {} is not a path: {:?}", what, i, v)))
 }
 
 /// A field holding an integer.
@@ -2317,7 +2305,6 @@ mod tests {
     fn core_symbol(name: &str) -> Value {
         Value::Symbol(typelisp_mem::symbols::intern_in(typelisp_mem::NsId::CORE, name))
     }
-    use crate::Reader;
     use crate::sexpr_variant::{CONS, INT, NIL, PATH, STR};
 
     /// A heap in stress mode: every `cons` collects first, so a value the
@@ -2332,9 +2319,8 @@ mod tests {
     /// Read exactly one core form. The reader conses, so this already runs
     /// under `gc_stress` when the heap is one of ours.
     fn read1(heap: &mut Heap, src: &str) -> Value {
-        let r = Reader::new();
         // Core IR, read in the core IR's module so its tags are the IR's own.
-        let mut vs: Vec<Value> = r
+        let mut vs: Vec<Value> = crate::Reader::new()
             .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
             .expect("read failed")
             .into_iter()
@@ -2508,9 +2494,9 @@ mod tests {
         let v = eval_ok(
             &mut h,
             "(let ((x int-any-width (int-any-width 7)) (y int-any-width (int-any-width 8)))
-               (call std::sexpr-cons (sexpr sexpr)
-                 (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
-                 (call std::sexpr-cons (sexpr sexpr) (var x) (var y))))",
+               (call ::std::sexpr-cons (sexpr sexpr)
+                 (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
+                 (call ::std::sexpr-cons (sexpr sexpr) (var x) (var y))))",
         );
         let tail = h.cdr(v).unwrap();
         assert_eq!(h.car(tail).unwrap(), Value::Int(7));
@@ -2525,7 +2511,7 @@ mod tests {
         let v = eval_ok(
             &mut h,
             "(let ((x int-any-width (int-any-width 7)))
-               (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
+               (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
                (var x))",
         );
         assert_eq!(v, Value::Int(7));
@@ -2624,14 +2610,14 @@ mod tests {
     #[test]
     fn a_builtin_call_evaluates_its_arguments_and_applies() {
         let mut h = stress_heap();
-        let v = eval_ok(&mut h, "(call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))");
+        let v = eval_ok(&mut h, "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))");
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
         // Arguments are themselves core forms, evaluated left to right.
         let v = eval_ok(
             &mut h,
-            "(let ((a int-any-width (int-any-width 5))) (call std::sexpr-cons (sexpr sexpr) (var a) (call std::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))))",
+            "(let ((a int-any-width (int-any-width 5))) (call ::std::sexpr-cons (sexpr sexpr) (var a) (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(5));
         let rest = h.cdr(v).unwrap();
@@ -2641,7 +2627,7 @@ mod tests {
     #[test]
     fn a_call_to_nothing_says_so() {
         let mut h = stress_heap();
-        let e = eval_src(&mut h, "(call no-such-thing ())").unwrap_err();
+        let e = eval_src(&mut h, "(call ::no-such-thing ())").unwrap_err();
         assert!(matches!(e.kind(), EvalError::NoSuchFunction(n) if n == "no-such-thing"), "{:?}", e);
     }
 
@@ -2718,13 +2704,13 @@ mod tests {
     fn a_struct_is_built_read_and_written_through_the_same_box() {
         let mut h = stress_heap();
         assert_eq!(
-            eval_ok(&mut h, "(field-get (construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2)) 1 int-any-width)"),
+            eval_ok(&mut h, "(field-get (construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2)) 1 int-any-width)"),
             Value::Int(2)
         );
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((p sexpr (construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))))
+                "(let ((p sexpr (construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))))
                    (let ((q sexpr (var p)))
                      (field-set (var q) 0 int-any-width (int-any-width 9))
                      (field-get (var p) 0 int-any-width)))",
@@ -2741,9 +2727,9 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((p sexpr (construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))))
-                   (field-set (var p) 0 sexpr (call std::sexpr-cons (sexpr sexpr) (int-any-width 8) (unit)))
-                   (call std::sexpr-car (sexpr) (field-get (var p) 0 int-any-width)))",
+                "(let ((p sexpr (construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))))
+                   (field-set (var p) 0 sexpr (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 8) (unit)))
+                   (call ::std::sexpr-car (sexpr) (field-get (var p) 0 int-any-width)))",
             ),
             Value::Int(8)
         );
@@ -2754,7 +2740,7 @@ mod tests {
     #[test]
     fn an_enum_carries_its_variant_and_fields() {
         let mut h = stress_heap();
-        let v = eval_ok(&mut h, "(construct my-enum \"my-enum\" 2 false (int-any-width bool) (int-any-width 41) (bool true))");
+        let v = eval_ok(&mut h, "(construct ::my-enum \"my-enum\" 2 false (int-any-width bool) (int-any-width 41) (bool true))");
         match v {
             Value::Boxed(id) => {
                 assert!(h.is_enum(id), "expected an enum box");
@@ -2767,16 +2753,16 @@ mod tests {
         }
     }
 
-    /// `(construct sexpr N ...)` builds a datum rather than a box. The
+    /// `(construct ::sexpr N ...)` builds a datum rather than a box. The
     /// pass-through arms are the interesting ones: the argument box *is* the
     /// datum, which is what makes `eq` hold across the construction.
     #[test]
     fn constructing_a_sexpr_datum() {
         let mut h = stress_heap();
-        assert_eq!(eval_ok(&mut h, &format!("(construct sexpr \"sexpr\" {NIL} false ())")), Value::Empty);
-        assert_eq!(eval_ok(&mut h, &format!("(construct sexpr \"sexpr\" {INT} false (int-any-width) (int-any-width 3))")), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, &format!("(construct ::sexpr \"sexpr\" {NIL} false ())")), Value::Empty);
+        assert_eq!(eval_ok(&mut h, &format!("(construct ::sexpr \"sexpr\" {INT} false (int-any-width) (int-any-width 3))")), Value::Int(3));
 
-        let v = eval_ok(&mut h, &format!("(construct sexpr \"sexpr\" {CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"));
+        let v = eval_ok(&mut h, &format!("(construct ::sexpr \"sexpr\" {CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))"));
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
 
@@ -2784,7 +2770,7 @@ mod tests {
         // datum is `eq` to the string it was built from.
         let v = eval_ok(
             &mut h,
-            &format!(r#"(let ((s sexpr (str "hi"))) (call std::sexpr-cons (sexpr sexpr) (var s) (construct sexpr "sexpr" {STR} false (str) (var s))))"#),
+            &format!(r#"(let ((s sexpr (str "hi"))) (call ::std::sexpr-cons (sexpr sexpr) (var s) (construct ::sexpr "sexpr" {STR} false (str) (var s))))"#),
         );
         assert_eq!(h.car(v).unwrap(), h.cdr(v).unwrap());
     }
@@ -2847,17 +2833,17 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2)) struct
-                   ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-bind b)) (var b)))",
+                "(match (construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2)) struct
+                   ((pat-ctor ::point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-bind b)) (var b)))",
             ),
             Value::Int(2)
         );
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct my-enum \"my-enum\" 1 false (int-any-width) (int-any-width 42)) struct
-                   ((pat-ctor my-enum \"my-enum\" 0 false (int-any-width) (pat-bind x)) (int-any-width 0))
-                   ((pat-ctor my-enum \"my-enum\" 1 false (int-any-width) (pat-bind x)) (var x)))",
+                "(match (construct ::my-enum \"my-enum\" 1 false (int-any-width) (int-any-width 42)) struct
+                   ((pat-ctor ::my-enum \"my-enum\" 0 false (int-any-width) (pat-bind x)) (int-any-width 0))
+                   ((pat-ctor ::my-enum \"my-enum\" 1 false (int-any-width) (pat-bind x)) (var x)))",
             ),
             Value::Int(42)
         );
@@ -2872,8 +2858,8 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(match (construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1)) struct
-                   ((pat-ctor other \"other\" 0 false (int-any-width) (pat-bind a)) (int-any-width 10))
+                "(match (construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1)) struct
+                   ((pat-ctor ::other \"other\" 0 false (int-any-width) (pat-bind a)) (int-any-width 10))
                    ((pat-wild) (int-any-width 99)))",
             ),
             Value::Int(99)
@@ -2886,14 +2872,14 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                &format!("(match (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)) sexpr
-                   ((pat-ctor sexpr \"sexpr\" {NIL} false ()) (int-any-width 100))
-                   ((pat-ctor sexpr \"sexpr\" {CONS} false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))"),
+                &format!("(match (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)) sexpr
+                   ((pat-ctor ::sexpr \"sexpr\" {NIL} false ()) (int-any-width 100))
+                   ((pat-ctor ::sexpr \"sexpr\" {CONS} false (sexpr sexpr) (pat-bind a) (pat-bind d)) (var d)))"),
             ),
             Value::Int(2)
         );
         assert_eq!(
-            eval_ok(&mut h, &format!("(match (unit) unit ((pat-ctor sexpr \"sexpr\" {NIL} false ()) (int-any-width 100)) ((pat-wild) (int-any-width 0)))")),
+            eval_ok(&mut h, &format!("(match (unit) unit ((pat-ctor ::sexpr \"sexpr\" {NIL} false ()) (int-any-width 100)) ((pat-wild) (int-any-width 0)))")),
             Value::Int(100)
         );
     }
@@ -2929,8 +2915,8 @@ mod tests {
 
         let form = read1(
             &mut h,
-            &format!("(match (var p) sexpr ((pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind segs))
-               (call std::sexpr-cons (sexpr sexpr) (int-any-width 0) (var segs))))"),
+            &format!("(match (var p) sexpr ((pat-ctor ::sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind segs))
+               (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 0) (var segs))))"),
         );
         h.push_root(form);
 
@@ -2976,10 +2962,10 @@ mod tests {
         let form = read1(
             &mut h,
             &format!("(match (var v) sexpr
-               ((pat-ctor sexpr \"sexpr\" {CONS} false (sexpr sexpr)
-                  (pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind l))
-                  (pat-ctor sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind r)))
-                 (call std::sexpr-cons (sexpr sexpr) (var l) (var r))))"),
+               ((pat-ctor ::sexpr \"sexpr\" {CONS} false (sexpr sexpr)
+                  (pat-ctor ::sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind l))
+                  (pat-ctor ::sexpr \"sexpr\" {PATH} false (sexpr) (pat-bind r)))
+                 (call ::std::sexpr-cons (sexpr sexpr) (var l) (var r))))"),
         );
         h.push_root(form);
 
@@ -3001,10 +2987,10 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(match (construct point \"point\" 0 true (int-any-width int-any-width) (int-any-width 7) (int-any-width 8)) struct
-               ((pat-ctor point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-bind b))
-                 (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
-                 (call std::sexpr-cons (sexpr sexpr) (var a) (var b))))",
+            "(match (construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 7) (int-any-width 8)) struct
+               ((pat-ctor ::point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-bind b))
+                 (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))
+                 (call ::std::sexpr-cons (sexpr sexpr) (var a) (var b))))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(7));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(8));
@@ -3083,14 +3069,14 @@ mod tests {
         assert_eq!(
             eval_ok(
                 &mut h,
-                "(let ((xs sexpr (call std::sexpr-cons (sexpr sexpr) (int-any-width 1)
-                                   (call std::sexpr-cons (sexpr sexpr) (int-any-width 2)
-                                     (call std::sexpr-cons (sexpr sexpr) (int-any-width 3) (unit)))))
+                "(let ((xs sexpr (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1)
+                                   (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 2)
+                                     (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 3) (unit)))))
                        (last sexpr (unit)))
                    (loop unit
-                     (if (call std::sexpr-null (sexpr) (var xs)) (break) (unit))
-                     (set last (call std::sexpr-car (sexpr) (var xs)))
-                     (set xs (call std::sexpr-cdr (sexpr) (var xs))))
+                     (if (call ::std::sexpr-null (sexpr) (var xs)) (break) (unit))
+                     (set last (call ::std::sexpr-car (sexpr) (var xs)))
+                     (set xs (call ::std::sexpr-cdr (sexpr) (var xs))))
                    (var last))",
             ),
             Value::Int(3)
@@ -3141,9 +3127,9 @@ mod tests {
             &mut h,
             "(let ((xs sexpr (unit)) (n sexpr (unit)))
                (loop unit
-                 (if (call std::sexpr-null (sexpr) (var n)) (unit) (break))
-                 (set xs (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (unit)))
-                 (set n (call std::sexpr-car (sexpr) (var xs)))))",
+                 (if (call ::std::sexpr-null (sexpr) (var n)) (unit) (break))
+                 (set xs (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (unit)))
+                 (set n (call ::std::sexpr-car (sexpr) (var xs)))))",
         );
         h.push_root(form);
         let before = h.root_count();
@@ -3244,11 +3230,11 @@ mod tests {
             eval_ok(
                 &mut h,
                 "(labels ((f ((xs sexpr)) sexpr
-                            (if (call std::sexpr-null (sexpr) (var xs))
+                            (if (call ::std::sexpr-null (sexpr) (var xs))
                                 (int-any-width 0)
-                                (apply (var f) sexpr (sexpr) (call std::sexpr-cdr (sexpr) (var xs))))))
-                   (apply (var f) sexpr (sexpr) (call std::sexpr-cons (sexpr sexpr) (int-any-width 1)
-                                    (call std::sexpr-cons (sexpr sexpr) (int-any-width 2) (unit)))))",
+                                (apply (var f) sexpr (sexpr) (call ::std::sexpr-cdr (sexpr) (var xs))))))
+                   (apply (var f) sexpr (sexpr) (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1)
+                                    (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 2) (unit)))))",
             ),
             Value::Int(0)
         );
@@ -3284,9 +3270,9 @@ mod tests {
         let form = read1(
             &mut h,
             "(labels ((walk ((l sexpr)) sexpr
-                        (if (call std::sexpr-null (sexpr) (var l))
+                        (if (call ::std::sexpr-null (sexpr) (var l))
                             (int-any-width 0)
-                            (apply (var walk) sexpr (sexpr) (call std::sexpr-cdr (sexpr) (var l))))))
+                            (apply (var walk) sexpr (sexpr) (call ::std::sexpr-cdr (sexpr) (var l))))))
                (apply (var walk) sexpr (sexpr) (var xs)))",
         );
         h.push_root(form);
@@ -3423,7 +3409,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            r#"(dyn-new "point" shape ((point area)) () struct (construct point "point" 0 true (int-any-width int-any-width) (int-any-width 3)))"#,
+            r#"(dyn-new "point" ::shape ((::point area)) () struct (construct ::point "point" 0 true (int-any-width int-any-width) (int-any-width 3)))"#,
         );
         h.push_root(v);
         match v {
@@ -3432,7 +3418,7 @@ mod tests {
         }
         let inner = eval_ok(
             &mut h,
-            r#"(field-get (dyn-value (dyn-new "point" shape ((point area)) () struct (construct point "point" 0 true (int-any-width int-any-width) (int-any-width 3)))) 0 int-any-width)"#,
+            r#"(field-get (dyn-value (dyn-new "point" ::shape ((::point area)) () struct (construct ::point "point" 0 true (int-any-width int-any-width) (int-any-width 3)))) 0 int-any-width)"#,
         );
         assert_eq!(inner, Value::Int(3));
     }
@@ -3446,8 +3432,8 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            r#"(dyn-upcast named
-                 (dyn-new "point" shape ((point area)) ((named ((point name)))) struct (construct point "point" 0 true (int-any-width int-any-width) (int-any-width 3))))"#,
+            r#"(dyn-upcast ::named
+                 (dyn-new "point" ::shape ((::point area)) ((::named ((::point name)))) struct (construct ::point "point" 0 true (int-any-width int-any-width) (int-any-width 3))))"#,
         );
         h.push_root(v);
         let inner = match v {
@@ -3476,9 +3462,9 @@ mod tests {
         let mut h = stress_heap();
         let form = read1(
             &mut h,
-            r#"(let ((b sexpr (dyn-new "point" shape ((point area)) ((named ((point name))))
-                                struct (construct point "point" 0 true (int-any-width int-any-width) (int-any-width 3)))))
-                 (call std::sexpr-cons (sexpr sexpr) (var b) (dyn-upcast shape (var b))))"#,
+            r#"(let ((b sexpr (dyn-new "point" ::shape ((::point area)) ((::named ((::point name))))
+                                struct (construct ::point "point" 0 true (int-any-width int-any-width) (int-any-width 3)))))
+                 (call ::std::sexpr-cons (sexpr sexpr) (var b) (dyn-upcast ::shape (var b))))"#,
         );
         h.push_root(form);
         let interp = Interp::new();
@@ -3495,9 +3481,9 @@ mod tests {
         let mut h = stress_heap();
         let e = eval_src(
             &mut h,
-            r#"(dyn-upcast never-registered
-                 (dyn-new "point" shape ((point area)) ((named ((point name))))
-                   struct (construct point "point" 0 true (int-any-width int-any-width) (int-any-width 3))))"#,
+            r#"(dyn-upcast ::never-registered
+                 (dyn-new "point" ::shape ((::point area)) ((::named ((::point name))))
+                   struct (construct ::point "point" 0 true (int-any-width int-any-width) (int-any-width 3))))"#,
         )
         .unwrap_err();
         assert!(

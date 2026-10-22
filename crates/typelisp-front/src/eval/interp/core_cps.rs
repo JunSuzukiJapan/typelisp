@@ -3077,7 +3077,6 @@ mod tests {
     fn core_symbol(name: &str) -> Value {
         Value::Symbol(typelisp_mem::symbols::intern_in(typelisp_mem::NsId::CORE, name))
     }
-    use crate::Reader;
 
     /// A heap in stress mode: every `cons` collects first, so a value a frame
     /// holds without rooting dies at the very next allocation rather than one
@@ -3091,12 +3090,11 @@ mod tests {
     }
 
     fn read1(heap: &mut Heap, src: &str) -> Value {
-        let r = Reader::new();
         // The built-in helpers live in `std::%internal`, a module of every
         // session the registry is published into; there is no registry here.
         heap.names().declare_module(typelisp_mem::symbols::ns_of(&["std".to_string(), crate::INTERNAL_MODULE.to_string()]));
         // Core IR, read in the core IR's module so its tags are the IR's own.
-        let mut vs: Vec<Value> = r
+        let mut vs: Vec<Value> = crate::Reader::new()
             .read_all_in_spanned_within(heap, "<core>", src, typelisp_mem::NsId::CORE)
             .expect("read failed")
             .into_iter()
@@ -3316,7 +3314,7 @@ mod tests {
         let mut h = stress_heap();
         let v = agrees(
             &mut h,
-            "(call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
+            "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
         );
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
@@ -3329,7 +3327,7 @@ mod tests {
         let mut h = stress_heap();
         let v = eval_ok(
             &mut h,
-            "(call std::%internal::make-random-state-fresh ())",
+            "(call ::std::%internal::make-random-state-fresh ())",
         );
         assert!(matches!(v, Value::Boxed(_)), "expected a random-state box, got {:?}", v);
     }
@@ -3339,9 +3337,9 @@ mod tests {
     #[test]
     fn an_argument_that_is_itself_a_call_suspends_the_outer_one() {
         let mut h = stress_heap();
-        let src = "(call std::sexpr-cons (sexpr sexpr) \
+        let src = "(call ::std::sexpr-cons (sexpr sexpr) \
                      (str \"first\") \
-                     (call std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
+                     (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
         let v = agrees(&mut h, src);
         match h.car(v).unwrap() {
             Value::Str(id) => assert_eq!(&*h.string(id), "first"),
@@ -3358,7 +3356,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..30).rev() {
             src = format!(
-                "(call std::sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
+                "(call ::std::sexpr-cons (sexpr sexpr) (str \"a{}\") {})",
                 i, src
             );
         }
@@ -3377,7 +3375,7 @@ mod tests {
     #[test]
     fn construct_builds_a_struct_and_field_get_reads_it() {
         let mut h = stress_heap();
-        let point = "(construct point \"point\" 0 true (int-any-width int-any-width) \
+        let point = "(construct ::point \"point\" 0 true (int-any-width int-any-width) \
                        (int-any-width 1) (int-any-width 2))";
         assert_eq!(
             agrees(&mut h, &format!("(field-get {} 1 int-any-width)", point)),
@@ -3394,10 +3392,10 @@ mod tests {
     #[test]
     fn a_nested_construction_does_not_lose_the_outer_fields() {
         let mut h = stress_heap();
-        let inner = "(construct point \"point\" 0 true (int-any-width int-any-width) \
+        let inner = "(construct ::point \"point\" 0 true (int-any-width int-any-width) \
                        (int-any-width 3) (int-any-width 4))";
         let outer = format!(
-            "(construct pair \"pair\" 0 true (str point) (str \"tag\") {})",
+            "(construct ::pair \"pair\" 0 true (str point) (str \"tag\") {})",
             inner
         );
         let src = format!("(field-get (field-get {} 1 point) 0 int-any-width)", outer);
@@ -3409,7 +3407,7 @@ mod tests {
     #[test]
     fn a_struct_survives_being_bound_and_read_back() {
         let mut h = stress_heap();
-        let src = "(let ((p sexpr (construct point \"point\" 0 true (int-any-width int-any-width) \
+        let src = "(let ((p sexpr (construct ::point \"point\" 0 true (int-any-width int-any-width) \
                                     (int-any-width 5) (int-any-width 6))))
                      (field-get (var p) 1 int-any-width))";
         assert_eq!(agrees(&mut h, src), Value::Int(6));
@@ -3455,7 +3453,7 @@ mod tests {
     #[test]
     fn a_builtin_can_be_applied_as_a_value() {
         let mut h = stress_heap();
-        let src = "(apply (fnref std::sexpr-cons (sexpr sexpr)) sexpr (sexpr sexpr) \
+        let src = "(apply (fnref ::std::sexpr-cons (sexpr sexpr)) sexpr (sexpr sexpr) \
                      (int-any-width 1) (int-any-width 2))";
         let v = agrees(&mut h, src);
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
@@ -3483,12 +3481,12 @@ mod tests {
         let mut h = Heap::with_capacity(1 << 20);
 
         let src = "(labels ((build ((n int-any-width)) sexpr
-                        (if (call std::sexpr-null (sexpr) (var n))
+                        (if (call ::std::sexpr-null (sexpr) (var n))
                             (unit)
-                            (call std::sexpr-cons (sexpr sexpr)
+                            (call ::std::sexpr-cons (sexpr sexpr)
                               (int-any-width 1)
                               (apply (var build) sexpr (sexpr)
-                                (call std::sexpr-cdr (sexpr) (var n)))))))
+                                (call ::std::sexpr-cdr (sexpr) (var n)))))))
                (apply (var build) sexpr (sexpr) (var xs)))".to_string();
 
         // `xs` is a list of DEPTH elements, built on the Rust side so the
@@ -3573,7 +3571,7 @@ mod tests {
     #[test]
     fn field_set_writes_through_the_struct() {
         let mut h = stress_heap();
-        let src = "(let ((p sexpr (construct point \"point\" 0 true (int-any-width int-any-width) \
+        let src = "(let ((p sexpr (construct ::point \"point\" 0 true (int-any-width int-any-width) \
                                     (int-any-width 1) (int-any-width 2))))
                      (field-set (var p) 1 int-any-width (int-any-width 42))
                      (field-get (var p) 1 int-any-width))";
@@ -3585,7 +3583,7 @@ mod tests {
     #[test]
     fn the_object_survives_an_allocating_value_expression() {
         let mut h = stress_heap();
-        let src = r#"(let ((p sexpr (construct point "point" 0 true (int-any-width str)
+        let src = r#"(let ((p sexpr (construct ::point "point" 0 true (int-any-width str)
                                       (int-any-width 1) (str "old"))))
                        (field-set (var p) 1 str (str "new"))
                        (field-get (var p) 1 str))"#;
@@ -3628,7 +3626,7 @@ mod tests {
         let mut src = String::from("(unit)");
         for i in (0..n).rev() {
             src = format!(
-                "(call std::sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
+                "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width {}) {})",
                 i, src
             );
         }
@@ -3641,9 +3639,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call std::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call std::sexpr-car (sexpr) (var lst)))
-                     (set lst (call std::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr-car (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(5)
         );
@@ -3673,9 +3671,9 @@ mod tests {
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
                      (loop unit (break))
-                     (if (call std::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call std::sexpr-car (sexpr) (var lst)))
-                     (set lst (call std::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr-car (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(3)
         );
@@ -3690,9 +3688,9 @@ mod tests {
         let src = format!(
             "(let ((lst r {}) (seen r (int-any-width 0)))
                (loop unit
-                     (if (call std::sexpr-null (sexpr) (var lst)) (break) (unit))
-                     (set seen (call std::sexpr-car (sexpr) (var lst)))
-                     (set lst (call std::sexpr-cdr (sexpr) (var lst))))
+                     (if (call ::std::sexpr-null (sexpr) (var lst)) (break) (unit))
+                     (set seen (call ::std::sexpr-car (sexpr) (var lst)))
+                     (set lst (call ::std::sexpr-cdr (sexpr) (var lst))))
                (var seen))",
             countdown_list(300)
         );
@@ -3818,8 +3816,8 @@ mod tests {
                          (unwind-protect
                            (unwind-protect
                              (throw (quote done) (int-any-width 0))
-                             (set trail (call std::sexpr-cons (sexpr sexpr) (str "i") (var trail))))
-                           (set trail (call std::sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
+                             (set trail (call ::std::sexpr-cons (sexpr sexpr) (str "i") (var trail))))
+                           (set trail (call ::std::sexpr-cons (sexpr sexpr) (str "o") (var trail)))))
                        (var trail))"#;
         let v = eval_ok(&mut h, src);
         let head = h.car(v).unwrap();
@@ -3936,8 +3934,8 @@ mod tests {
         let mut h = stress_heap();
         let build = |tag: i64| {
             format!(
-                "(call std::sexpr-cons (sexpr sexpr) (int-any-width {}) \
-                   (call std::sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
+                "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width {}) \
+                   (call ::std::sexpr-cons (sexpr sexpr) (int-any-width {}) (unit)))",
                 tag,
                 tag + 1
             )
@@ -3977,8 +3975,8 @@ mod tests {
             &mut h,
             &[
                 "(throw (quote escaped) \
-                   (call std::sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
-                "(call std::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
+                   (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 5) (unit)))",
+                "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width 6) (unit))",
             ],
         );
         // Allocating now would collect an unrooted carried value.

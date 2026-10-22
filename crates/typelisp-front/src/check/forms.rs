@@ -740,17 +740,7 @@ pub(super) fn value_member_form(heap: &mut Heap, recv: &str, member: &str) -> Re
     items.finish_list()
 }
 
-/// A path, as a core form field writes one: a bare symbol for a single
-/// segment, a `::` path for more.
-///
-/// The asymmetry is the reader's, not a choice made here — reading `point`
-/// yields a `Value::Symbol` and only `a::b` yields a `Value::Path`. Writing a
-/// one-segment path as a `Value::Path` would print as `point` and read back as
-/// a symbol, so a form would not survive its own round trip
-/// (`tests/core_vocabulary_test.rs`). Both consumers accept either spelling.
-pub(super) fn path_form(heap: &mut Heap, p: &Path) -> Value {
-    segments_form(heap, &p.segments())
-}
+pub(super) use super::core::path_form;
 
 /// The name the reader reads for the definition `p` from any module, for a
 /// form the checker writes and checks again: the definition's own symbol
@@ -763,15 +753,7 @@ pub(super) fn name_form(heap: &mut Heap, p: &Path) -> Value {
     if p.ns() == NsId::ROOT || sym.home() == p.ns() {
         return Value::Symbol(sym);
     }
-    heap.intern_path(&path_from_root(p))
-}
-
-/// The symbols of `p` read as a path from the root (`::m::name`).
-fn path_from_root(p: &Path) -> Vec<typelisp_mem::SymRef> {
-    let mut segs = vec![typelisp_mem::symbols::intern_in(NsId::ROOT, "")];
-    segs.extend(typelisp_mem::symbols::ns_names(p.ns()));
-    segs.push(p.name_symbol());
-    segs
+    path_form(heap, p)
 }
 
 /// `(%type-member TYPE MEMBER)` — a member of the type `type_path` (a
@@ -787,18 +769,6 @@ pub(super) fn member_form(heap: &mut Heap, type_path: &Path, member: &str) -> Re
     items.push(ty);
     items.push(Value::Symbol(typelisp_mem::symbols::intern_in(type_path.ns(), member)));
     items.finish_list()
-}
-
-/// A name written as `segments`: a bare symbol for one, a `::` path for more.
-fn segments_form<S: AsRef<str>>(heap: &mut Heap, segments: &[S]) -> Value {
-    if let [only] = segments {
-        return heap.intern_symbol(only.as_ref());
-    }
-    let ids: Vec<_> = segments.iter().map(|s| match heap.intern_symbol(s.as_ref()) {
-        Value::Symbol(id) => id,
-        _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-    }).collect();
-    heap.intern_path(&ids)
 }
 
 /// `(a b c)` — a list of symbols, one per name.

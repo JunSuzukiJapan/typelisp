@@ -6,7 +6,7 @@
 
 extern crate typelisp;
 use typelisp::check::core;
-use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, TopLevelForm, Type, Value, MONO_BUNDLE_MODULE};
+use typelisp::{load_prelude, Checker, Error, Heap, Interp, Path, Reader, TopLevelForm, Type, MONO_BUNDLE_MODULE};
 
 /// Peels the checker's synthetic monomorphization bundle (if any), returning
 /// the primary form — always the bundle's *last* element (the
@@ -18,11 +18,7 @@ fn primary(h: &Heap, tl: TopLevelForm) -> TopLevelForm {
     }
     // `(module PATH BODY...)` — the path decides whether this is *the* bundle.
     let fields = core::fields(h, tl).expect("a module's fields are a proper list");
-    let is_bundle = match fields[0] {
-        Value::Path(id) => typelisp::path_from_id(h, id) == Path::root(MONO_BUNDLE_MODULE),
-        Value::Symbol(id) => h.symbol_spelling(id) == MONO_BUNDLE_MODULE,
-        _ => false,
-    };
+    let is_bundle = core::path_value(h, fields[0]) == Some(Path::root(MONO_BUNDLE_MODULE));
     if is_bundle {
         *fields.last().expect("a monomorph bundle always ends with its primary form")
     } else {

@@ -7,34 +7,32 @@
 ## 1. 今の位置
 
 - ブランチ: `feature/keyword-markers`。main には入れていない。
-- 計画の段階 4c-3（パスを読んだシンボルで引き、祖先の連鎖と `std` の段を消す）は済み。
-  全体テストが通り、警告は 0。4c-3 のコミットは `wip:` で始まるバックアップのコミットと、
-  それを仕上げるコミットの 2 つに分かれている（push 済みの履歴は書き換えない）。
-  4c-3 で変えたことは計画の 4c-3 の項にある。
-- 次は段階 4d。
+- 計画の段階 4（名前の解決をポインタにする）は 4d まで済み。4d で変えたことは計画の 4d の項に
+  ある。要点は、解析が今のモジュールを `NsId` で持つことと、IR の中の定義の名前をルートからの
+  パス（`::f`、`::m::f`）で読み書きすること（`core::path_form` / `core::path_value`）。ダンプの形式は 25、
+  ABI は 0.3.14。
+- 次は段階 5。
 
-## 2. 4c-3 の終わりに見つけて直したこと
+## 2. 4d で知っておくこと
 
-- `use_target` が `heap.names()` のロックを握ったまま `use_target_in` を呼び、同じロックを
-  もう一度取って止まっていた（examples_check_test が 5 時間止まった）。`Heap::names` は
-  `NamesGuard` を返し、同じスレッドが二度取ろうとしたらその場で panic する。
-- ルートからのパス（`(use ::main::f)`）で、ローダーが先頭の空の段をファイルの綴りに入れ、
-  読み込み中のファイルを別の名前のモジュールとしてもう一度読み込んでいた。
-  `Loader::ensure_loaded` が空の段を飛ばし、`try_load_module` は空の段を受け取ると panic する。
-  回帰テストは `tests/module_file_test.rs` の末尾の 2 本。
-- ファイルの一番外側はモジュール `main`（ファイル名から）、REPL の一番外側は `user` で、
-  どちらもルートではない。子のモジュールから親の定義を使うには `::main::f` のように
-  ルートからのパスで書く。`docs/ja/reference/syntax.md` の例を `::geo::f` に直した。
+- IR の定義の名前は `core::path_form` で書き、`core::path_value`（`core::path_field`）で読む。
+  読む側は木の子をシンボルでたどるので、`core::path_form` を通らずに組んだパス（綴りから
+  intern したシンボルの並び）を渡すと panic する。
+- 手書きの IR のテストは、定義を `::f`、`::m::f`、`(assoc ::int ...)` のように書き、`%core` で
+  そのまま読む。読んだあとにシンボルを付け替える補助関数は作らない。印字した IR を比べる
+  テストの期待値も同じ形になる。
+- ダンプの中のパスのシンボルの意味が変わったので、島と prelude の成果物を作り直した。
+  ダンプを読む処理を変えたら、島 → prelude → ABI の順に作り直す（スキル commit-check の 2 節）。
+- `Checker::exit_file_module` は引数を取らない（戻り先は `enter_file_module` が積む）。
+- 綴りの並びから `Path` を作り直す処理は、型キーの文字列（`type_key.rs`、`ConcreteNames`）と
+  評価器の表（`eval/scope.rs`、`eval/interp.rs`）に残っている。段階 5 と 7 の対象。
 
 ## 3. 次にすること（順に）
 
-1. 翻訳。`docs/ja/reference/syntax.md` の例を `::f` から `::geo::f` に、「ルートからの」を足して
-   直した。そのコミットのハッシュで、全言語の `reference/syntax.md` の同じ文を直し、1 行目の
-   translated-from を進める。`scripts/check-translations.sh` で確かめる（pre-push も検査する）。
-2. 段階 4d。文字列で解決する処理の残りを消す。対象は `path_form`、`segments_form`、
-   `path_from_id`、`intern_path_id`、`core.rs` の `path_field`、`Info::ns`、`fq`、`enter_module`、
-   `mod_aliases`。
-3. そのあと段階 5〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
+1. 段階 5。実行時の型の識別を `TypeShape` の登録にする（計画 3.5）。型キーの文字列、
+   `ConcreteNames` の切り戻し、手書きのキー、印字の表の文字列キー、`rt_print_*` の文字列登録を
+   消す。`NameView` を定義のシンボルから作る形に書き直す。島と成果物を作り直す。
+2. そのあと段階 6〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
    段階 6 で `Info::in_scope` の移行のための広い規則
    （`item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)`）を狭める。
 
