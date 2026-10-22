@@ -597,10 +597,10 @@ pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
         // Not in `prim_type_path` (`!` has no method table), so spelled here.
         Type::Never => Ok(heap.intern_symbol("!")),
         Type::Var(name) => Ok(heap.intern_symbol(name)),
-        Type::Named(p, args) if args.is_empty() => Ok(type_name_value(heap, p)),
+        Type::Named(p, args) if args.is_empty() => Ok(name_form(heap, p)),
         // `(%type-apply Name Arg...)`, the reader's structure for `Name<Arg,...>`.
         Type::Named(p, args) => {
-            let head = type_name_value(heap, p);
+            let head = name_form(heap, p);
             let mut s = RootScope::new(heap);
             s.push_root(head);
             let marker = Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::TYPE_APPLY));
@@ -650,30 +650,9 @@ pub(super) fn type_to_form(heap: &mut Heap, t: &Type) -> Result<Value, Error> {
         prim => {
             let p = crate::types::prim_type_path(prim)
                 .expect("every remaining `Type` variant is a primitive with a path");
-            Ok(type_name_value(heap, &p))
+            Ok(name_form(heap, &p))
         }
     }
-}
-
-/// A type name as the reader would have produced it for the type `p`,
-/// wherever it is read again: the definition's own symbol, which leads to
-/// its module from anywhere (`Info::find_named`), or — for a name of the
-/// fixed vocabulary, which belongs to no one module — a path from the root.
-/// Both tables are permanent, so the result needs no rooting of its own.
-fn type_name_value(heap: &mut Heap, p: &Path) -> Value {
-    let sym = p.name_symbol();
-    if p.ns() == NsId::ROOT || sym.home() == p.ns() {
-        return Value::Symbol(sym);
-    }
-    let segs: Vec<String> = std::iter::once(String::new()).chain(p.segments()).collect();
-    let syms: Vec<typelisp_mem::SymRef> = segs
-        .iter()
-        .map(|s| match heap.intern_symbol(s) {
-            Value::Symbol(id) => id,
-            _ => unreachable!("Heap::intern_symbol always returns Value::Symbol"),
-        })
-        .collect();
-    heap.intern_path(&syms)
 }
 
 /// Build a proper list `Value` from `items`, in order — the inverse of
@@ -773,17 +752,45 @@ pub(super) fn path_form(heap: &mut Heap, p: &Path) -> Value {
     segments_form(heap, &p.segments())
 }
 
-/// `TYPE::MEMBER` — a member of the type `type_path` (a constructor, a
-/// static method), as written. Not a [`Path`]: a type is not a module, so its
-/// members are not definitions of one.
-pub(super) fn member_form(heap: &mut Heap, type_path: &Path, member: &str) -> Value {
-    let mut segs = type_path.segments();
-    segs.push(member.to_string());
-    segments_form(heap, &segs)
+/// The name the reader reads for the definition `p` from any module, for a
+/// form the checker writes and checks again: the definition's own symbol
+/// where that leads to it (`Info::find_named` — a definition at the root,
+/// or one named by its module's own symbol), or else the path from the root,
+/// each module by its name in the one before. Both tables are permanent, so
+/// the result needs no rooting of its own.
+pub(super) fn name_form(heap: &mut Heap, p: &Path) -> Value {
+    let sym = p.name_symbol();
+    if p.ns() == NsId::ROOT || sym.home() == p.ns() {
+        return Value::Symbol(sym);
+    }
+    heap.intern_path(&path_from_root(p))
+}
+
+/// The symbols of `p` read as a path from the root (`::m::name`).
+fn path_from_root(p: &Path) -> Vec<typelisp_mem::SymRef> {
+    let mut segs = vec![typelisp_mem::symbols::intern_in(NsId::ROOT, "")];
+    segs.extend(typelisp_mem::symbols::ns_names(p.ns()));
+    segs.push(p.name_symbol());
+    segs
+}
+
+/// `(%type-member TYPE MEMBER)` — a member of the type `type_path` (a
+/// constructor, a static method), for a form the checker writes and checks
+/// again: the type as [`name_form`] writes it, the member as its type's
+/// module reads it. Not a `TYPE::MEMBER` path: each segment of a path before
+/// the last is a module, so a module named like the type beside it would
+/// take the path.
+pub(super) fn member_form(heap: &mut Heap, type_path: &Path, member: &str) -> Result<Value, Error> {
+    let mut items = Items::new(heap);
+    items.push(Value::Symbol(typelisp_mem::symbols::well_known_symbol(wk::TYPE_MEMBER)));
+    let ty = name_form(items.heap(), type_path);
+    items.push(ty);
+    items.push(Value::Symbol(typelisp_mem::symbols::intern_in(type_path.ns(), member)));
+    items.finish_list()
 }
 
 /// A name written as `segments`: a bare symbol for one, a `::` path for more.
-pub(super) fn segments_form<S: AsRef<str>>(heap: &mut Heap, segments: &[S]) -> Value {
+fn segments_form<S: AsRef<str>>(heap: &mut Heap, segments: &[S]) -> Value {
     if let [only] = segments {
         return heap.intern_symbol(only.as_ref());
     }

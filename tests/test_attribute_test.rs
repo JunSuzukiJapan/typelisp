@@ -135,7 +135,7 @@ fn a_test_in_a_module_of_the_file_is_found_there() {
         &dir,
         "geo.typl",
         r#"
-(defun area ((w int) (h int)) int (* w h))
+(pub defun area ((w int) (h int)) int (* w h))
 (module tests
   #[test]
   (defun square () () (assert-eq (geo::area 3 3) 9)))

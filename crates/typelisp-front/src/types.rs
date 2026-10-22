@@ -943,22 +943,50 @@ fn parse_fn_params(
     }
 }
 
+/// Where a `::` path leads: its last segment as read in the module the
+/// segments before it reached, or a member of the type they reached.
+#[derive(Clone, Copy, Debug)]
+pub enum PathTarget {
+    In(Path),
+    /// The type, and the member's symbol.
+    Member(Path, SymRef),
+}
+
+/// Where the `::` path `id`, written in `ns`, leads — followed by the
+/// symbols it was read as (`SessionNames::reached`), never by its spelling.
+pub fn path_target(heap: &Heap, ns: NsId, id: PathId) -> Result<PathTarget, Error> {
+    let segs = heap.path_segments(id);
+    let (last, prefix) = segs.split_last().expect("a path has a last segment");
+    let names = heap.names();
+    match names.reached(ns, prefix).map_err(Error::TypeError)? {
+        symbols::PathStep::Module(m) => Ok(PathTarget::In(Path::of_symbol(m, *last))),
+        symbols::PathStep::Type(ty) => {
+            let home = names.type_home(ty).ok_or_else(|| {
+                Error::TypeError(format!("`{}`: `{}` is a type no module defines", path_spelling(heap, id), ty.name()))
+            })?;
+            Ok(PathTarget::Member(Path::of_symbol(home, ty), *last))
+        }
+    }
+}
+
+/// How the path `id` is written, for messages.
+pub fn path_spelling(heap: &Heap, id: PathId) -> String {
+    heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s)).collect::<Vec<_>>().join("::")
+}
+
 /// The path a type name written in `ns` stands for, before the analysis
 /// looks it up: a bare name is its symbol in `ns`, where the lookup starts
 /// (`Info::find_written`); a `::` path is its last symbol in the module the
-/// path leads to, followed the way the reader follows it.
+/// path leads to ([`path_target`]).
 pub fn written_path(heap: &Heap, ns: NsId, v: Value) -> Result<Path, Error> {
     match v {
         Value::Symbol(sym) => Ok(Path::of_symbol(ns, sym)),
-        Value::Path(id) => {
-            let segs: Vec<&str> = heap.path_segments(id).iter().map(|s| s.name()).collect();
-            match heap.names().follow_path(ns, &segs).map_err(Error::TypeError)? {
-                (syms, symbols::PathStep::Module(m)) => Ok(Path::of_symbol(m, *syms.last().expect("a path has a last segment"))),
-                (_, symbols::PathStep::Type(_)) => {
-                    Err(Error::TypeError(format!("`{}` names a member of a type, not a type", segs.join("::"))))
-                }
+        Value::Path(id) => match path_target(heap, ns, id)? {
+            PathTarget::In(p) => Ok(p),
+            PathTarget::Member(..) => {
+                Err(Error::TypeError(format!("`{}` names a member of a type, not a type", path_spelling(heap, id))))
             }
-        }
+        },
         other => Err(Error::TypeError(format!("not a type name: {:?}", other))),
     }
 }

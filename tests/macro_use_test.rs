@@ -9,7 +9,7 @@
 //!
 //! Also covers two related features added the same day:
 //! `mod::macro-name`-qualified cross-module macro calls
-//! (`Checker::resolve_macro_path`), and `::`-qualified paths inside quoted
+//! (`Info::macro_at`), and `::`-qualified paths inside quoted
 //! data (`QuotedSexpr::Path`, e.g. a macro body's `'(dep::head)`) — both
 //! documented as part of the `defmacro` spec in
 //! `docs/dev/language-design.md`.
@@ -224,7 +224,7 @@ fn macro_generated_defun_defines_a_callable_function() {
     assert_eq!(result, Ok(Value::Int(40)));
 }
 
-// ---- cross-module macro calls (`Checker::resolve_macro_path`) -------------
+// ---- cross-module macro calls (`Info::macro_at`) --------------------------
 
 /// A `pub defmacro` in one file is callable from another via a `mod::name`
 /// path, in expression position, without any `use` aliasing (mirrors an

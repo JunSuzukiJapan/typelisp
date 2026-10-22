@@ -13,6 +13,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 
+use crate::types::PathTarget;
 use crate::{wk, nominal_path, parse_type_spanned, prim_type_path, Error, Heap, Loc, Path, RootScope, Type, TypeNameSpan, Value};
 
 use super::loop_dsl;
@@ -183,7 +184,7 @@ type OptKeySpec = (String, Type, Option<Loc>, Option<Value>);
 type ParamsFull = (Vec<(String, Type)>, Vec<Option<Loc>>, Vec<OptKeySpec>, Option<RestParam>, Vec<OptKeySpec>);
 
 /// The call-site arity shape of a macro, derived from its [`MacroDef`] by
-/// [`Info::resolve_macro`]/[`resolve_macro_path`](Checker::resolve_macro_path)
+/// [`Info::resolve_macro`]/[`Info::macro_at`]
 /// and consumed by [`Checker::check_macro_arity`]. Carries only what a raw
 /// argument *count* can be judged against — the `&key` names themselves aren't
 /// needed here (keyword validation happens in `Interp::expand_macro`).
@@ -597,7 +598,8 @@ fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Resu
     let var = s.intern_symbol(VECTOR_LITERAL_VAR);
     let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::root("vector"), vec![elem_ty.clone()]))?;
     s.push_root(vec_ty);
-    let new = forms::member_form(&mut s, &Path::root("vector"), "new");
+    let new = forms::member_form(&mut s, &Path::root("vector"), "new")?;
+    s.push_root(new);
     let new_call = forms::list_from_vec_locs(&mut s, &[(new, None)])?;
     s.push_root(new_call);
     let the = s.intern_symbol("the");
@@ -810,14 +812,6 @@ impl ModuleValueKind {
     }
 }
 
-/// What module `m` holds under `name` among functions and globals.
-fn module_value_in(m: &Namespace, name: &str) -> Option<ModuleValueKind> {
-    match m.fns.get(name) {
-        Some(sig) => Some(ModuleValueKind::Fn { public: sig.public }),
-        None => m.vars.get(name).map(|vi| ModuleValueKind::Var(vi.clone())),
-    }
-}
-
 /// What a module-level name means in one module: a function, a global
 /// variable or a macro. The three share one name space, so a module holds at
 /// most one of them under a name (`Checker::check_value_clash`), and the
@@ -836,16 +830,7 @@ impl ModuleEntry {
     }
 }
 
-/// What module `m` holds under `name`, if anything.
-pub(super) fn module_entry_in(m: &Namespace, name: &str) -> Option<ModuleEntry> {
-    match m.macros.get(name) {
-        Some(def) => Some(ModuleEntry::Macro { public: def.public, shape: MacroShape::of(def) }),
-        None => module_value_in(m, name).map(ModuleEntry::Value),
-    }
-}
-
-/// What module `m` holds under the symbol `sym`, if anything — the
-/// [`Info::find_named`] counterpart of [`module_entry_in`].
+/// What module `m` holds under the symbol `sym`, if anything.
 pub(super) fn module_entry_of(m: &Namespace, sym: typelisp_mem::SymRef) -> Option<ModuleEntry> {
     match m.macros.get_sym(sym) {
         Some(def) => Some(ModuleEntry::Macro { public: def.public, shape: MacroShape::of(def) }),
@@ -857,11 +842,19 @@ pub(super) fn module_entry_of(m: &Namespace, sym: typelisp_mem::SymRef) -> Optio
 }
 
 /// A name as written at a use site: bare, as the symbol it was read as, or a
-/// `::` path.
+/// `::` path, as where it leads.
 #[derive(Clone, Copy)]
-pub(super) enum Written<'a> {
+pub(super) enum Written {
     Bare(typelisp_mem::SymRef),
-    Path(&'a [String]),
+    Path(PathTarget),
+}
+
+/// What a `use` path names ([`Checker::use_target`]).
+enum UseTarget {
+    Value(Path),
+    Type(Path),
+    Alias(TypeAlias),
+    Module(typelisp_mem::NsId),
 }
 
 /// What a written name resolves to — the one rule of
@@ -1159,8 +1152,7 @@ pub const SPECIAL_FORM_HEADS: &[u32] = &[
     wk::UNTRACE, wk::STEP, wk::DISASSEMBLE, wk::ED,
 ];
 
-/// The standard library's module, as the segments [`Info::ns_ancestors`]
-/// and [`Info::find_module`] search it under.
+/// The standard library's module, as its segments from the root.
 pub(super) static STD_SEGMENTS: std::sync::LazyLock<Vec<String>> =
     std::sync::LazyLock::new(|| vec![crate::types::STD_MODULE.to_string()]);
 
@@ -2366,7 +2358,7 @@ impl Checker {
     fn resolve_name(
         &self,
         env: &Env,
-        written: Written<'_>,
+        written: Written,
         receiver: &mut dyn FnMut() -> Option<Type>,
     ) -> Option<Resolved> {
         match written {
@@ -2391,23 +2383,19 @@ impl Checker {
                 }
                 self.info.resolve_module_value(sym).map(Resolved::Value)
             }
-            Written::Path(segs) => {
-                match self.info.resolve_module_entry_path(segs) {
-                    Some((path, ModuleEntry::Macro { shape, .. })) => return Some(Resolved::Macro(path, shape)),
-                    Some((path, ModuleEntry::Value(kind))) => return Some(Resolved::Value(kind.at(path))),
-                    None => {}
-                }
-                let (member, type_segs) = segs.split_last()?;
-                if type_segs.is_empty() {
-                    return None;
-                }
-                let type_fq = self.info.resolve_type_path(type_segs)?;
+            Written::Path(PathTarget::In(p)) => match self.info.module_entry_at(&p)? {
+                (path, ModuleEntry::Macro { shape, .. }) => Some(Resolved::Macro(path, shape)),
+                (path, ModuleEntry::Value(kind)) => Some(Resolved::Value(kind.at(path))),
+            },
+            Written::Path(PathTarget::Member(ty, member)) => {
+                let type_fq = self.info.type_at(&ty)?;
                 let def = self.info.reg.type_def(&type_fq)?;
-                if let Some(idx) = def.variants.iter().position(|v| &v.name == member) {
+                let member = member.name();
+                if let Some(idx) = def.variants.iter().position(|v| v.name == member) {
                     return Some(Resolved::Ctor(type_fq, idx));
                 }
                 if def.method_defs(member).any(|(af, _)| self.info.assoc_visible(&type_fq, af)) {
-                    Some(Resolved::Member(type_fq, member.clone()))
+                    Some(Resolved::Member(type_fq, member.to_string()))
                 } else {
                     None
                 }
@@ -2435,7 +2423,7 @@ impl Checker {
 
     /// If `v` is a compound form whose head resolves to a macro — a bare
     /// name ([`Info::resolve_macro`], current namespace) or a `mod::name`
-    /// path ([`Info::resolve_macro_path`], cross-module) — expand it one
+    /// path ([`Info::macro_at`], cross-module) — expand it one
     /// step against the unevaluated argument forms and return the expansion;
     /// `Ok(None)` when `v` is not a macro call. A bare built-in form head is
     /// never treated as a macro call — see [`Self::is_builtin_form_head`]
@@ -2465,14 +2453,13 @@ impl Checker {
                     None => return Ok(None),
                 }
             }
-            Some(Value::Path(pid)) => {
-                let segs: Vec<String> =
-                    heap.path_segments(*pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
-                match self.info.resolve_macro_path(&segs) {
-                    Some((p, shape)) => (p, shape, segs.join("::")),
+            Some(Value::Path(pid)) => match crate::types::path_target(heap, self.info.cur_ns().ns, *pid)? {
+                PathTarget::In(written) => match self.info.macro_at(&written) {
+                    Some((p, shape)) => (p, shape, crate::types::path_spelling(heap, *pid)),
                     None => return Ok(None),
-                }
-            }
+                },
+                PathTarget::Member(..) => return Ok(None),
+            },
             _ => return Ok(None),
         };
         let args = &elems[1..];
@@ -5476,9 +5463,8 @@ impl Checker {
         if parts.len() < 2 {
             return Err(Error::TypeError("impl: (impl TraitName TargetType (:type AssocName Type)... (method ...)...)".into()));
         }
-        // A bare name searches the ancestor module chain; a `::` path names
-        // the module outright, which is the only way to implement a trait
-        // that lives somewhere other than an ancestor of the `impl`.
+        // A bare name is looked up as any bare name is; a `::` path names
+        // the trait's module outright.
         let segs = path_to_segs(heap, parts[0])
             .map_err(|_| Error::TypeError("impl: trait name must be a name or `::` path".into()))?;
         let written = crate::types::written_path(heap, self.info.cur_ns().ns, parts[0])?;
@@ -6178,18 +6164,8 @@ impl Checker {
         let mut subst: HashMap<String, Value> = HashMap::new();
         subst.insert(target_var, target_written);
 
-        // As a `Value::Path` when qualified: a *symbol* spelled `a::b` is one
-        // segment, and `check_impl` would look for a trait of that literal
-        // name.
-        let segs: Vec<String> = trait_path.segments().to_vec();
-        let trait_v = crate::owned_form::owned_to_value(
-            heap,
-            &if segs.len() > 1 {
-                crate::owned_form::OwnedForm::Path(segs)
-            } else {
-                crate::owned_form::OwnedForm::Sym(trait_path.last_segment().to_string(), ns.clone())
-            },
-        )?;
+        // The trait's name as the reader reads it from wherever this lands.
+        let trait_v = forms::name_form(heap, &trait_path);
         heap.push_permanent_root(trait_v);
         let mut parts: Vec<Value> = vec![trait_v, target_written];
         for item in &items {
@@ -7402,9 +7378,8 @@ impl Checker {
                 }
             }
         }
-        // While the standard library's names are still resolved by name, its
-        // types are in scope everywhere (`Info::in_scope`), so they are
-        // written as if brought in — except where this module's own
+        // The standard library offers its types to every module, so they
+        // are written as if brought in — except where this module's own
         // definition or import takes the name.
         if let Some(std_ns) = self.info.reg.module(&STD_SEGMENTS) {
             for name in std_ns.types.keys().chain(std_ns.traits.keys()) {
@@ -8375,7 +8350,7 @@ impl Checker {
 
         let body = {
             let mut call = Items::new(out.heap());
-            let head = forms::segments_form(call.heap(), &[name, STRUCT_CTOR]);
+            let head = forms::member_form(call.heap(), &self.info.fq(name), STRUCT_CTOR)?;
             call.push(head);
             for field in fields {
                 // `self::slot` — the accessor sugar, so the copier reads
@@ -8921,104 +8896,174 @@ impl Checker {
             return Err(Error::TypeError("use: (use path)".into()));
         }
         let segs = path_to_segs(heap, parts[0])?;
+        let syms: Vec<typelisp_mem::SymRef> = match parts[0] {
+            Value::Symbol(id) => vec![id],
+            Value::Path(id) => heap.path_segments(id).to_vec(),
+            _ => unreachable!("`path_to_segs` takes only a symbol or a path"),
+        };
         let bare = segs.last().cloned().unwrap();
         let path_loc = parts_locs.first().and_then(|l| l.as_ref());
+        let alias = self.info.fq(&bare);
+        match self.use_target(heap, &syms) {
+            // A module-level value — a function or a global, one or the
+            // other, since a name has one value.
+            Some(UseTarget::Value(target)) => {
+                self.report_import_collision(&bare, Some(target), None, shadowing)?;
+                self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), target);
+                self.register_use_for_reading(heap, self.info.cur_ns().ns, &syms);
+                forms::use_form(heap, &alias, &target)
+            }
+            // A type. Beyond the usual alias (so the bare name also resolves
+            // in a type-annotation position, e.g. `(x Option)` — see
+            // `resolve_type_name`), this snapshots the type's *current*
+            // constructors and public static methods as bare names in the
+            // current namespace — e.g. `(use option)` makes `some`/`none`
+            // callable bare, exactly like `option::some`/`option::none` (see
+            // `check_path_call`, which already treats a variant and a
+            // non-instance `assoc` entry as the same kind of "static member").
+            Some(UseTarget::Type(target)) => {
+                // Unlike `rect::new`, a `use` path's *last* segment is the type
+                // itself — the import names it and nothing else.
+                self.report_import_collision(&bare, Some(target), None, shadowing)?;
+                self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
+                self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), target);
+                let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
+                for (i, v) in def.variants.iter().enumerate() {
+                    let is_builtin = self
+                        .info.cur_ns()
+                        .ctors
+                        .get(&v.name)
+                        .and_then(|(owner, _)| self.info.reg.type_def(owner))
+                        .map(|d| d.builtin)
+                        .unwrap_or(false);
+                    if self.info.cur_ns().ctors.contains_key(&v.name) {
+                        self.check_redef_outcome("constructor", &v.name, is_builtin)?;
+                    }
+                    self.info.reg.module_mut(&self.info.ns).ctors.insert(v.name.clone(), (target, i));
+                }
+                // Every static method, whether written for every instantiation or
+                // for one: which one a call means is decided at the call
+                // (`Self::select_method`).
+                let statics: BTreeMap<&String, &AssocFn> =
+                    def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter()).collect();
+                for (name, af) in statics {
+                    if af.instance || !af.sig.public {
+                        continue;
+                    }
+                    let is_builtin = self
+                        .info.cur_ns()
+                        .static_uses
+                        .get(name)
+                        .and_then(|(owner, m)| self.info.reg.type_def(owner).and_then(|d| d.assoc.get(m)))
+                        .map(|af| af.builtin)
+                        .unwrap_or(false);
+                    if self.info.cur_ns().static_uses.contains_key(name) {
+                        self.check_redef_outcome("static method", name, is_builtin)?;
+                    }
+                    self.info.reg.module_mut(&self.info.ns).static_uses.insert(name.clone(), (target, name.clone()));
+                }
+                self.register_use_for_reading(heap, self.info.cur_ns().ns, &syms);
+                forms::use_form(heap, &alias, &target)
+            }
+            // A `deftype` alias. Only the name is imported — an alias has no
+            // constructors or static methods of its own (whatever its *body*
+            // names keeps its own name). The `aliases` entry is what
+            // `Info::type_alias_at` follows for a bare name.
+            Some(UseTarget::Alias(a)) => {
+                self.report_import_collision(&bare, Some(a.name), None, shadowing)?;
+                self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), a.name);
+                self.register_use_for_reading(heap, self.info.cur_ns().ns, &syms);
+                forms::use_form(heap, &alias, &a.name)
+            }
+            // A module alias — `(use std::math)` makes `math` a short name for `std::math`.
+            Some(UseTarget::Module(ns)) => {
+                let abs = typelisp_mem::symbols::ns_path(ns);
+                let target_path = Path::from_segments(abs.clone());
+                self.register_use_for_reading(heap, self.info.cur_ns().ns, &syms);
+                self.info.reg.module_mut(&self.info.ns).mod_aliases.insert(bare.clone(), abs);
+                forms::use_form(heap, &alias, &target_path)
+            }
+            // Not a known function, type, or module. The path may name a module
+            // in a source file that simply hasn't been loaded yet — surface a
+            // structured error so a filesystem-aware driver (`crate::project`)
+            // can map the segments to a `.typl` file, load it into this same
+            // checker, and retry. Displays as "use: unresolved `...`" when no
+            // driver handles it.
+            None => Err(Error::ModuleNotLoaded(segs)),
+        }
+    }
 
-        // Try: a module-level value — a function or a global, one or the
-        // other, since a name has one value.
-        if let Some(value) = self.info.resolve_module_value_path(&segs) {
-            let target = match value {
-                ModuleValue::Fn(path) | ModuleValue::Var(path, _) => path,
-            };
-            self.report_import_collision(&bare, Some(target), None, shadowing)?;
-            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), target);
-            self.register_use_for_reading(heap, self.info.cur_ns().ns, &segs);
-            let alias = self.info.fq(&bare);
-            return forms::use_form(heap, &alias, &target);
-        }
-        // Try: type. Beyond the usual alias (so the bare name also resolves
-        // in a type-annotation position, e.g. `(x Option)` — see
-        // `resolve_type_name`), this snapshots the type's *current*
-        // constructors and public static methods as bare names in the
-        // current namespace — e.g. `(use option)` makes `some`/`none`
-        // callable bare, exactly like `option::some`/`option::none` (see
-        // `check_path_call`, which already treats a variant and a
-        // non-instance `assoc` entry as the same kind of "static member").
-        if let Some(target) = self.info.resolve_type_path(&segs) {
-            // Unlike `rect::new`, a `use` path's *last* segment is the type
-            // itself — the import names it and nothing else.
-            self.report_import_collision(&bare, Some(target), None, shadowing)?;
-            self.record_path_seg_use(&segs, segs.len() - 1, &target, path_loc);
-            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), target);
-            let def = self.info.reg.type_def(&target).expect("resolved type exists").clone();
-            for (i, v) in def.variants.iter().enumerate() {
-                let is_builtin = self
-                    .info.cur_ns()
-                    .ctors
-                    .get(&v.name)
-                    .and_then(|(owner, _)| self.info.reg.type_def(owner))
-                    .map(|d| d.builtin)
-                    .unwrap_or(false);
-                if self.info.cur_ns().ctors.contains_key(&v.name) {
-                    self.check_redef_outcome("constructor", &v.name, is_builtin)?;
-                }
-                self.info.reg.module_mut(&self.info.ns).ctors.insert(v.name.clone(), (target.clone(), i));
+    /// What a `use` path written in the current module names: a function
+    /// or a global, a type, a `deftype` alias, or a module. A one-segment
+    /// path is a bare name. A longer one is read here, segment by segment as
+    /// the reader reads any path (`SessionNames::follow_path`): the reader
+    /// leaves a `use`'s path unread (`PathMode::Raw`), since the module it
+    /// names may be loaded only by the `use`. It names its last segment in
+    /// the module the others lead to, or the module the whole path leads to.
+    ///
+    /// A path whose first segment names no module here may start at a file
+    /// in the same directory: `(use arrow)` or `(use arrow::head)` in
+    /// `geo/point.typl` names the module `arrow` of `geo/arrow.typl`, a
+    /// module of the file's parent module, and is read from there. The
+    /// file's directory, also inside a `(module ...)` block in it, which has
+    /// no directory of its own.
+    fn use_target(&self, heap: &Heap, syms: &[typelisp_mem::SymRef]) -> Option<UseTarget> {
+        use typelisp_mem::symbols::PathStep;
+        let cur = self.info.cur_ns().ns;
+        let names = heap.names();
+        let spelled: Vec<&str> = syms.iter().map(|s| s.name()).collect();
+        let (first, rest) = syms.split_first()?;
+        if rest.is_empty() {
+            if let Some(found) = self.use_target_at(&Path::of_symbol(cur, *first)) {
+                return Some(found);
             }
-            // Every static method, whether written for every instantiation or
-            // for one: which one a call means is decided at the call
-            // (`Self::select_method`).
-            let statics: BTreeMap<&String, &AssocFn> =
-                def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter()).collect();
-            for (name, af) in statics {
-                if af.instance || !af.sig.public {
-                    continue;
-                }
-                let is_builtin = self
-                    .info.cur_ns()
-                    .static_uses
-                    .get(name)
-                    .and_then(|(owner, m)| self.info.reg.type_def(owner).and_then(|d| d.assoc.get(m)))
-                    .map(|af| af.builtin)
-                    .unwrap_or(false);
-                if self.info.cur_ns().static_uses.contains_key(name) {
-                    self.check_redef_outcome("static method", name, is_builtin)?;
-                }
-                self.info.reg
-                    
-                    .module_mut(&self.info.ns)
-                    .static_uses
-                    .insert(name.clone(), (target.clone(), name.clone()));
+            match names.first_segment(cur, spelled[0]) {
+                Some(PathStep::Module(m)) => return Some(UseTarget::Module(m)),
+                Some(PathStep::Type(_)) => return None,
+                None => {}
             }
-            self.register_use_for_reading(heap, self.info.cur_ns().ns, &segs);
-            let alias = self.info.fq(&bare);
-            return forms::use_form(heap, &alias, &target);
+        } else if let Some(found) = self.use_target_in(heap, cur, &spelled) {
+            return Some(found);
         }
-        // Try: `deftype` alias. Only the name is imported — an alias has no
-        // constructors or static methods of its own (whatever its *body*
-        // names keeps its own name). The `aliases` entry is what
-        // `Info::type_alias_at` follows for a bare name.
-        if let Some(a) = self.info.resolve_type_alias_path(&segs) {
-            self.report_import_collision(&bare, Some(a.name), None, shadowing)?;
-            self.info.reg.module_mut(&self.info.ns).aliases.insert(bare.clone(), a.name);
-            self.register_use_for_reading(heap, self.info.cur_ns().ns, &segs);
-            let alias = self.info.fq(&bare);
-            return forms::use_form(heap, &alias, &a.name);
+        let file = typelisp_mem::symbols::find_ns(self.info.file_ns.last()?)?;
+        let dir = typelisp_mem::symbols::ns_parent(file)?;
+        let sibling = typelisp_mem::symbols::find_exact(dir, first.name())?;
+        let PathStep::Module(m) = names.reached(dir, &[sibling]).ok()? else { return None };
+        if rest.is_empty() {
+            return Some(UseTarget::Module(m));
         }
-        // Try: module alias — `(use std::math)` makes `math` a short name for `std::math`.
-        if let Some((abs, _)) = self.info.find_module(&segs) {
-            let target_path = Path::from_segments(abs.clone());
-            self.register_use_for_reading(heap, self.info.cur_ns().ns, &segs);
-            self.info.reg.module_mut(&self.info.ns).mod_aliases.insert(bare.clone(), abs);
-            let alias = self.info.fq(&bare);
-            return forms::use_form(heap, &alias, &target_path);
+        self.use_target_in(heap, dir, &spelled)
+    }
+
+    /// [`Self::use_target`] for a path of two or more segments, read from
+    /// the module `from`.
+    fn use_target_in(&self, heap: &Heap, from: typelisp_mem::NsId, spelled: &[&str]) -> Option<UseTarget> {
+        use typelisp_mem::symbols::PathStep;
+        let names = heap.names();
+        let (walked, step) = names.follow_path(from, spelled).ok()?;
+        let last = *walked.last().expect("a path has a last segment");
+        if let PathStep::Module(m) = step {
+            if let Some(found) = self.use_target_at(&Path::of_symbol(m, last)) {
+                return Some(found);
+            }
         }
-        // Not a known function, type, or module. The path may name a module
-        // in a source file that simply hasn't been loaded yet — surface a
-        // structured error so a filesystem-aware driver (`crate::project`)
-        // can map the segments to a `.typl` file, load it into this same
-        // checker, and retry. Displays as "use: unresolved `...`" when no
-        // driver handles it.
-        Err(Error::ModuleNotLoaded(segs))
+        match names.reached(from, &walked).ok()? {
+            PathStep::Module(m) => Some(UseTarget::Module(m)),
+            PathStep::Type(_) => None,
+        }
+    }
+
+    /// The definition a `use` path names at `p`: a function or a global, a
+    /// type, or a `deftype` alias.
+    fn use_target_at(&self, p: &Path) -> Option<UseTarget> {
+        if let Some(value) = self.info.module_value_at(p) {
+            let (ModuleValue::Fn(target) | ModuleValue::Var(target, _)) = value;
+            return Some(UseTarget::Value(target));
+        }
+        if let Some(target) = self.info.type_at(p) {
+            return Some(UseTarget::Type(target));
+        }
+        self.info.type_alias_at(p).map(UseTarget::Alias)
     }
 
     /// What a `(use PATH)` written in the module `ns` brings in, registered
@@ -9026,28 +9071,26 @@ impl Checker {
     /// `use`, once the file behind `path` (if any) is loaded — so they read
     /// each name it brings in as `ns`'s own symbol, the one the import is
     /// recorded under, rather than as whatever the standard library offers
-    /// under the same name. Resolved as [`Self::check_use`] resolves it: a
-    /// function or a global, a type (with its constructors and public static
-    /// methods), a `deftype` alias, a module. A path that resolves to nothing
-    /// is left for `check_use` to report.
-    pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[String]) {
+    /// under the same name. Resolved as [`Self::check_use`] resolves it
+    /// ([`Self::use_target`]). A path that resolves to nothing is left for
+    /// `check_use` to report.
+    pub fn register_use_for_reading(&self, heap: &Heap, ns: typelisp_mem::NsId, path: &[typelisp_mem::SymRef]) {
         use typelisp_mem::symbols::Import;
-        let Some(bare) = path.last() else { return };
+        let Some(bare) = path.last().map(|s| s.name().to_string()) else { return };
         let mut names = Vec::new();
-        if let Some(value) = self.info.resolve_module_value_path(path) {
-            let (ModuleValue::Fn(target) | ModuleValue::Var(target, _)) = value;
-            names.push((bare.clone(), Import::Item(target.name_symbol())));
-        } else if let Some(target) = self.info.resolve_type_path(path) {
-            let ty = target.name_symbol();
-            names.push((bare.clone(), Import::Type(ty)));
-            let def = self.info.reg.type_def(&target).expect("resolved type exists");
-            names.extend(def.variants.iter().map(|v| (v.name.clone(), Import::Member(ty))));
-            let statics = def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter());
-            names.extend(statics.filter(|(_, af)| !af.instance && af.sig.public).map(|(name, _)| (name.clone(), Import::Member(ty))));
-        } else if let Some(a) = self.info.resolve_type_alias_path(path) {
-            names.push((bare.clone(), Import::Item(a.name.name_symbol())));
-        } else if let Some((abs, _)) = self.info.find_module(path) {
-            names.push((bare.clone(), Import::Module(typelisp_mem::symbols::ns_of(&abs))));
+        match self.use_target(heap, path) {
+            Some(UseTarget::Value(target)) => names.push((bare, Import::Item(target.name_symbol()))),
+            Some(UseTarget::Type(target)) => {
+                let ty = target.name_symbol();
+                names.push((bare, Import::Type(ty)));
+                let def = self.info.reg.type_def(&target).expect("resolved type exists");
+                names.extend(def.variants.iter().map(|v| (v.name.clone(), Import::Member(ty))));
+                let statics = def.insts.values().flat_map(|i| i.assoc.iter()).chain(def.assoc.iter());
+                names.extend(statics.filter(|(_, af)| !af.instance && af.sig.public).map(|(name, _)| (name.clone(), Import::Member(ty))));
+            }
+            Some(UseTarget::Alias(a)) => names.push((bare, Import::Item(a.name.name_symbol()))),
+            Some(UseTarget::Module(m)) => names.push((bare, Import::Module(m))),
+            None => {}
         }
         for (name, what) in names {
             heap.names().import_name(ns, typelisp_mem::symbols::intern_in(ns, &name), what);
@@ -9143,7 +9186,8 @@ impl Checker {
         let path = crate::types::tuple_path(elems.len());
         let data = expected.filter(|t| is_sexpr_expectation(t));
         let mut s = RootScope::new(heap);
-        let new = forms::member_form(&mut s, &path, STRUCT_CTOR);
+        let new = forms::member_form(&mut s, &path, STRUCT_CTOR)?;
+        s.push_root(new);
         let mut items: Vec<(Value, Option<Loc>)> = vec![(new, None)];
         for &e in &elems {
             let ef = literal_element_form(&mut s, e, data.is_some())?;
@@ -9190,7 +9234,7 @@ impl Checker {
         s.push_root(dims_form);
         let data_form = vector_literal_form(&mut s, &elem_ty, &data)?;
         s.push_root(data_form);
-        let make = forms::path_form(&mut s, &Path::internal("array-from-row-major"));
+        let make = forms::name_form(&mut s, &Path::internal("array-from-row-major"));
         let form = forms::list_from_vec_locs(&mut s, &[(make, None), (dims_form, None), (data_form, None)])?;
         s.push_root(form);
         self.check_inner(&mut s, interp, env, form, expected)
@@ -9541,32 +9585,29 @@ impl Checker {
             Value::Path(pid) => {
                 // A bare `::` path as an expression: a qualified global or a
                 // qualified function used as a value.
-                let segs: Vec<String> = heap
-                    .path_segments(pid)
-                    .iter()
-                    .map(|s| heap.symbol_spelling(*s).to_string())
-                    .collect();
+                let display = crate::types::path_spelling(heap, pid);
+                let target = crate::types::path_target(heap, self.info.cur_ns().ns, pid)?;
                 // A path's first segment names a module or a type: the reader
                 // reads `var::field` as `(%value-member var field)` instead.
                 {
-                    match self.resolve_name(env, Written::Path(&segs), &mut || None) {
+                    match self.resolve_name(env, Written::Path(target), &mut || None) {
                         Some(Resolved::Value(ModuleValue::Var(path, vi))) => {
                             Checked::of(Node::Global { path, ty: vi.ty.clone() }, vi.ty)
                         }
                         Some(Resolved::Value(ModuleValue::Fn(fq))) => self.fn_ref_node(fq, expected)?,
                         Some(Resolved::Macro(..)) => {
-                            return Err(Error::TypeError(format!("`{}` is a macro, which has no value", segs.join("::"))))
+                            return Err(Error::TypeError(format!("`{}` is a macro, which has no value", display)))
                         }
                         Some(Resolved::Ctor(..)) | Some(Resolved::Member(..)) => {
                             return Err(Error::TypeError(format!(
                                 "`{}` is a constructor or a type's function, which is called rather than taken as a value",
-                                segs.join("::")
+                                display
                             )))
                         }
                         Some(Resolved::Local) | Some(Resolved::Method(_)) => {
                             unreachable!("a path resolves to neither a local nor a receiver's method")
                         }
-                        None => return Err(Error::TypeError(format!("unresolved path: {}", segs.join("::")))),
+                        None => return Err(Error::TypeError(format!("unresolved path: {}", display))),
                     }
                 }
             }
@@ -9739,12 +9780,15 @@ impl Checker {
         // A `::`-path head is a module-qualified function or a `Type::method`
         // static associated function.
         if let Value::Path(pid) = elems[0] {
-            let segs: Vec<String> = heap
-                .path_segments(pid)
-                .iter()
-                .map(|s| heap.symbol_spelling(*s).to_string())
-                .collect();
-            return self.check_path_call(heap, interp, env, &segs, nth_loc(&elem_locs, 0).as_ref(), args, arg_locs, expected);
+            return self.check_path_call(heap, interp, env, pid, nth_loc(&elem_locs, 0).as_ref(), args, arg_locs, expected);
+        }
+        // `(%type-member TYPE MEMBER)`, a member of a named type, as a form
+        // the checker writes ([`forms::member_form`]).
+        if let Some((ty, member)) = named_type_member(heap, elems[0])? {
+            let written = crate::types::written_path(heap, self.info.cur_ns().ns, ty)?;
+            let display = format!("{}::{}", written, member.name());
+            let target = PathTarget::Member(written, member);
+            return self.check_target_call(heap, interp, env, target, &display, &[], None, args, arg_locs, expected);
         }
 
         // A non-symbol head (e.g. a `lambda` literal or any expression) is
@@ -10449,14 +10493,37 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         env: &Env,
+        pid: crate::PathId,
+        head_loc: Option<&Loc>,
+        args: &[Value],
+        arg_locs: &[Option<Loc>],
+        expected: Option<&Type>,
+    ) -> Result<Checked, Error> {
+        let display = crate::types::path_spelling(heap, pid);
+        // The segments as spelled, for where in the token each one is.
+        let segs: Vec<String> = heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
+        let target = crate::types::path_target(heap, self.info.cur_ns().ns, pid)?;
+        self.check_target_call(heap, interp, env, target, &display, &segs, head_loc, args, arg_locs, expected)
+    }
+
+    /// [`Self::check_path_call`] once the head's target is known. `segs` are
+    /// the head's segments as spelled, for the spans of the type it names —
+    /// none for a head the checker wrote.
+    #[allow(clippy::too_many_arguments)]
+    fn check_target_call(
+        &self,
+        heap: &mut Heap,
+        interp: &dyn MacroExpander,
+        env: &Env,
+        target: PathTarget,
+        display: &str,
         segs: &[String],
         head_loc: Option<&Loc>,
         args: &[Value],
         arg_locs: &[Option<Loc>],
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
-        let display = segs.join("::");
-        match self.resolve_name(env, Written::Path(segs), &mut || None) {
+        match self.resolve_name(env, Written::Path(target), &mut || None) {
             Some(Resolved::Macro(macro_path, shape)) => {
                 Self::check_macro_arity(&display, shape, args.len())?;
                 let expanded = interp
@@ -10505,8 +10572,9 @@ impl Checker {
             }
             None => {
                 // `Type::name` whose type resolved but has no such member.
-                if let Some((member, type_segs)) = segs.split_last().filter(|(_, t)| !t.is_empty()) {
-                    if let Some(type_fq) = self.info.resolve_type_path(type_segs) {
+                if let PathTarget::Member(ty, member) = target {
+                    let member = member.name();
+                    if let Some(type_fq) = self.info.type_at(&ty) {
                         self.record_path_type_use(segs, &type_fq, head_loc);
                         let def = self.info.reg.type_def(&type_fq).expect("resolved type exists");
                         if def.kind == AdtKind::Struct && !def.builtin {
@@ -11865,13 +11933,13 @@ impl Checker {
             }
             Ok(CompileTarget::Method(type_fq, method))
         };
-        let (segs, written) = match written_name {
+        let (target, written) = match written_name {
             WrittenName::Instantiated(ty, member) => {
                 let (type_fq, method) = self.instantiated_member(ty, member, who)?;
                 return method_target(type_fq, method);
             }
-            WrittenName::Bare(sym) => (vec![sym.name().to_string()], Written::Bare(*sym)),
-            WrittenName::Segments(segs) => (segs.clone(), Written::Path(segs)),
+            WrittenName::Bare(sym) => (None, Written::Bare(*sym)),
+            WrittenName::Path(target, _) => (Some(*target), Written::Path(*target)),
         };
         match self.resolve_name(&Env::new(), written, &mut || None) {
             Some(Resolved::Value(ModuleValue::Fn(path))) | Some(Resolved::Macro(path, _)) => fn_target(path),
@@ -11891,15 +11959,15 @@ impl Checker {
             None => {
                 // Whether the *type* half resolved is what tells "this type has
                 // no such method" apart from "this names nothing at all".
-                let type_path = match segs.split_last() {
-                    Some((_, type_segs)) if !type_segs.is_empty() => self.info.resolve_type_path(type_segs),
+                let type_path = match target {
+                    Some(PathTarget::Member(ty, method)) => self.info.type_at(&ty).map(|tp| (tp, method)),
                     _ => None,
                 };
-                Err(Error::TypeError(match (&type_path, segs.last()) {
-                    (Some(tp), Some(method)) => {
-                        format!("{}: type `{}` has no associated function or method `{}`", who, tp, method)
+                Err(Error::TypeError(match (&type_path, target) {
+                    (Some((tp, method)), _) => {
+                        format!("{}: type `{}` has no associated function or method `{}`", who, tp, method.name())
                     }
-                    _ if segs.len() == 1 => format!("{}: no function `{}` is visible from here", who, name),
+                    (None, None) => format!("{}: no function `{}` is visible from here", who, name),
                     _ => format!("{}: `{}` names neither a type's method nor a function visible from here", who, name),
                 }))
             }
@@ -12071,7 +12139,7 @@ impl Checker {
                 return Ok(DefRef::Method(type_fq, method));
             }
             WrittenName::Bare(sym) => Written::Bare(*sym),
-            WrittenName::Segments(segs) => Written::Path(segs),
+            WrittenName::Path(target, _) => Written::Path(*target),
         };
         match self.resolve_name(&Env::new(), written, &mut || None) {
             Some(Resolved::Value(ModuleValue::Var(path, _))) => return Ok(DefRef::Var(path)),
@@ -12483,12 +12551,7 @@ impl Checker {
             return self.check_field_set(heap, interp, env, recv, field.name(), args[1], value_loc);
         }
         if let Value::Path(pid) = args[0] {
-            let segs: Vec<String> = heap
-                .path_segments(pid)
-                .iter()
-                .map(|s| heap.symbol_spelling(*s).to_string())
-                .collect();
-            return Err(Error::TypeError(format!("setf: `{}` is not a place", segs.join("::"))));
+            return Err(Error::TypeError(format!("setf: `{}` is not a place", crate::types::path_spelling(heap, pid))));
         }
         if let Value::Cons(_) = args[0] {
             return self.check_setf_call_place(heap, interp, env, args[0], args[1]);
@@ -12846,7 +12909,7 @@ impl Checker {
             }
         }
         let defaults = self.info.reg.struct_defaults.get(&type_fq).cloned();
-        let ctor = forms::member_form(&mut s, &type_fq, STRUCT_CTOR);
+        let ctor = forms::member_form(&mut s, &type_fq, STRUCT_CTOR)?;
         s.push_root(ctor);
         let mut call: Vec<(Value, Option<Loc>)> = vec![(ctor, None)];
         for (i, f) in field_names.iter().enumerate() {
@@ -13649,8 +13712,9 @@ impl Checker {
             )));
         }
         let the = heap.intern_symbol("the");
-        let ctor_sym = forms::segments_form(heap, &[outer, ctor]);
-        let call = forms::list_from_vec_locs(heap, &[(ctor_sym, None)])?;
+        let ctor = forms::member_form(heap, &Path::root(outer), ctor)?;
+        let ctor = forms::rooted(heap, ctor);
+        let call = forms::list_from_vec_locs(heap, &[(ctor, None)])?;
         let call = forms::rooted(heap, call);
         forms::list_from_vec_locs(heap, &[(the, None), (ty_form, None), (call, None)])
     }
@@ -14295,8 +14359,13 @@ impl Checker {
         let as_call = format!("({} arg colon at) with arg a `{}`", site.name, ty);
         let env = env.extended(vec![(ARG.to_string(), ty.clone())])?;
         let head = if site.name.contains("::") {
-            let path = Path::from_segments(site.name.split("::").map(str::to_string).collect());
-            Value::Path(crate::types::intern_path_id(heap, &path))
+            // Read as the control string's module reads a path: segment by
+            // segment (`SessionNames::read_path`).
+            let parts: Vec<&str> = site.name.split("::").collect();
+            let syms = heap.names().read_path(self.info.cur_ns().ns, &parts).map_err(|e| {
+                Error::TypeError(format!("{}: {}: {}", what, shown, e))
+            })?;
+            heap.intern_path(&syms)
         } else {
             // Read as the control string's module reads it.
             let sym = heap.names().read(self.info.cur_ns().ns, &site.name);
@@ -16229,11 +16298,7 @@ impl Checker {
         if def.kind == AdtKind::Struct && !def.builtin {
             let head_ty = match parts[0] {
                 Value::Symbol(id) => self.info.type_at(&Path::of_symbol(self.info.cur_ns().ns, id)),
-                Value::Path(pid) => {
-                    let segs: Vec<String> =
-                        heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
-                    self.info.resolve_type_path(&segs)
-                }
+                Value::Path(_) => self.info.type_at(&crate::types::written_path(heap, self.info.cur_ns().ns, parts[0])?),
                 _ => None,
             };
             if head_ty.as_ref() != Some(&adt_name) {
@@ -16329,7 +16394,7 @@ impl Checker {
     /// constructor *expression* is — [`Info::resolve_ctor`], in scope only
     /// after `(use EnumType)`), or a `::`-qualified enum variant (`(color::
     /// red)`, the escape hatch for a bare-name collision between two
-    /// visible enums — `Info::resolve_type_path` on the prefix, the variant
+    /// visible enums — the type the path's prefix leads to, the variant
     /// name as the last segment). `None` means the head names neither,
     /// letting the caller fall through to the ordinary (non-downcast)
     /// "not a constructor of Sexpr" error.
@@ -16375,15 +16440,15 @@ impl Checker {
                 Ok(None)
             }
             Value::Path(pid) => {
+                let PathTarget::Member(ty, member) = crate::types::path_target(heap, self.info.cur_ns().ns, pid)? else {
+                    return Ok(None);
+                };
+                // The segments as spelled, for where in the token each one is.
                 let segs: Vec<String> =
                     heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
-                if segs.len() < 2 {
-                    return Ok(None);
-                }
-                let (type_segs, member) = segs.split_at(segs.len() - 1);
-                if let Some(type_fq) = self.info.resolve_type_path(type_segs) {
+                if let Some(type_fq) = self.info.type_at(&ty) {
                     if let Some(def) = self.info.reg.type_def(&type_fq) {
-                        if let Some(idx) = def.variants.iter().position(|vr| vr.name == member[0]) {
+                        if let Some(idx) = def.variants.iter().position(|vr| vr.name == member.name()) {
                             no_generics(&type_fq, def)?;
                             // `color::red` — the type sits in the token's
                             // second-to-last segment.
@@ -17341,9 +17406,7 @@ fn unevaluated_name(heap: &Heap, ns: typelisp_mem::NsId, v: Value, who: &str, ms
             )))
         }
         Value::Symbol(id) => Ok(WrittenName::Bare(id)),
-        Value::Path(pid) => Ok(WrittenName::Segments(
-            heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
-        )),
+        Value::Path(pid) => Ok(WrittenName::Path(crate::types::path_target(heap, ns, pid)?, crate::types::path_spelling(heap, pid))),
         Value::Cons(_) if matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) => {
             let parts = heap.list_to_vec(v)?;
             match parts.as_slice() {
@@ -17358,13 +17421,13 @@ fn unevaluated_name(heap: &Heap, ns: typelisp_mem::NsId, v: Value, who: &str, ms
 }
 
 /// A definition's name as a form that names one writes it (`compile`,
-/// `trace`, `documentation`, ...): a symbol or `::` path, as its segments,
-/// or `Name<Args>::member`, a member of one instantiation.
+/// `trace`, `documentation`, ...): a symbol or `::` path, or
+/// `Name<Args>::member`, a member of one instantiation.
 enum WrittenName {
     /// A symbol, as read.
     Bare(typelisp_mem::SymRef),
-    /// A `::` path, by its segments.
-    Segments(Vec<String>),
+    /// A `::` path: where it leads, and how it is spelled.
+    Path(PathTarget, String),
     Instantiated(Type, String),
 }
 
@@ -17373,7 +17436,7 @@ impl WrittenName {
     fn display(&self) -> String {
         match self {
             WrittenName::Bare(sym) => sym.name().to_string(),
-            WrittenName::Segments(segs) => segs.join("::"),
+            WrittenName::Path(_, spelled) => spelled.clone(),
             WrittenName::Instantiated(ty, member) => format!("{}::{}", ty, member),
         }
     }
@@ -17404,6 +17467,19 @@ fn value_member_segments(heap: &Heap, v: Value) -> Result<(typelisp_mem::SymRef,
     match heap.list_to_vec(v)?.as_slice() {
         [_, Value::Symbol(recv), Value::Symbol(member)] => Ok((*recv, *member)),
         _ => Err(Error::TypeError("a member of a value is written `value::member`".into())),
+    }
+}
+
+/// The type and the member of `(%type-member TYPE MEMBER)` whose type is a
+/// name (a symbol or a `::` path), as [`forms::member_form`] writes it; `None`
+/// for any other value — `Name<Args>::member` included, whose type is applied.
+fn named_type_member(heap: &Heap, v: Value) -> Result<Option<(Value, typelisp_mem::SymRef)>, Error> {
+    if !matches!(v, Value::Cons(_)) || !matches!(heap.car(v), Ok(Value::Symbol(id)) if id.is(wk::TYPE_MEMBER)) {
+        return Ok(None);
+    }
+    match heap.list_to_vec(v)?.as_slice() {
+        [_, ty @ (Value::Symbol(_) | Value::Path(_)), Value::Symbol(member)] => Ok(Some((*ty, *member))),
+        _ => Ok(None),
     }
 }
 

@@ -574,7 +574,7 @@ fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
     // `impl` failed to check. Nothing about an `impl` is private —  `pub`
     // cannot even be written on one.
     let src = "
-        (deftrait Eq3 ()
+        (pub deftrait Eq3 ()
           (same ((self Self) (other Self)) bool)
           (differs ((self Self) (other Self)) bool (if (same self other) false true)))
         (module m
@@ -587,7 +587,7 @@ fn a_default_body_reaches_the_impls_own_methods_across_module_lines() {
 #[test]
 fn a_trait_method_is_callable_from_outside_the_implementing_module() {
     let src = "
-        (deftrait Named ()
+        (pub deftrait Named ()
           (label ((self Self)) string))
         (module m
           (pub defstruct tag (pub n int))

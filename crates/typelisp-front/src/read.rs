@@ -100,12 +100,14 @@ impl reader::ReadEval for DriverReadEval<'_> {
     /// The file behind the path, loaded if this driver loads files and
     /// nothing has loaded it yet; then the checker registers what the `use`
     /// brings in.
-    fn bring_in(&self, heap: &mut crate::Heap, ns: crate::NsId, path: &[String]) -> Result<(), String> {
+    fn bring_in(&self, heap: &mut crate::Heap, ns: crate::NsId, path: &[crate::SymRef]) -> Result<(), String> {
         if let Some(files) = &self.files {
             let mut files = files.borrow_mut();
             let Files { loader, reader, file_module } = &mut *files;
+            // A file is found by the path's spelling.
+            let spelled: Vec<String> = path.iter().map(|s| heap.symbol_spelling(*s).to_string()).collect();
             loader
-                .ensure_loaded(heap, reader, &mut self.checker.borrow_mut(), &mut self.interp.borrow_mut(), path, file_module)
+                .ensure_loaded(heap, reader, &mut self.checker.borrow_mut(), &mut self.interp.borrow_mut(), &spelled, file_module)
                 .map_err(|e| e.to_string())?;
         }
         self.checker.borrow().register_use_for_reading(heap, ns, path);

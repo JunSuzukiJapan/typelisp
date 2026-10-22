@@ -296,7 +296,7 @@ fn without_a_manifest_the_entry_directory_is_the_root() {
 /// A `use` inside `geo/point.typl` names a sibling `geo/arrow.typl` by its
 /// bare name (`arrow`), without spelling out the `geo::` directory prefix —
 /// the sibling-relative resolution `Loader::ensure_loaded`'s doc comment and
-/// `Checker::find_module`'s file-sibling tier add.
+/// `Checker::use_target`'s file-sibling tier add.
 #[test]
 fn use_resolves_a_sibling_file_by_its_bare_name() {
     let result = run_project(

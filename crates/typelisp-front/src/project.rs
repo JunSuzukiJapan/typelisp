@@ -557,7 +557,7 @@ impl Loader {
     /// candidate (`<src-root>/<cur_segs' directory>/a/b/c.typl`) is tried, so
     /// `(use vector)` inside `geo/point.typl` can also reach a sibling
     /// `geo/vector.typl` without spelling out `(use geo::vector)`. Mirrored
-    /// on the checker side by `Checker::find_module`'s own sibling tier
+    /// on the checker side by `Checker::use_target`'s own sibling tier
     /// (`file_ns`), which resolves the *name* `(use vector)` binds once this
     /// has loaded the file under its true root-derived path (`geo::vector`,
     /// never a synthetic relative one).

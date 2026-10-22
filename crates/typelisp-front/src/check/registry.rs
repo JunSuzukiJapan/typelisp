@@ -1965,8 +1965,9 @@ fn hashtable_def() -> AdtDef {
     // index the caller got from `bucket-count`; `bucket-put` also accepts the
     // count itself, which appends.
     // Not `public`: these are the layer under `get`/`set`/`remove`, not API.
-    // The prelude reaches them because it is the root module, where the table
-    // itself lives; nothing outside can, and nothing outside should.
+    // The prelude reaches them because `std` sees the root's private
+    // built-ins (`Info::in_scope`); nothing outside can, and nothing outside
+    // should.
     let bucket = |params: Vec<Type>, ret: Type| AssocFn {
         sig: FnSig { public: false, ..FnSig::builtin(params, ret) },
         instance: true,
@@ -3209,6 +3210,41 @@ impl Registry {
                 publish_trait(def, names);
             }
         }
+        for ns in self.namespaces() {
+            self.publish_imports(ns, names);
+        }
+    }
+
+    /// Tells the session what the `use`s of `ns` brought in, as
+    /// `Checker::register_use_for_reading` did when each was checked, so a
+    /// registry that was not checked here — a dump an executable's `eval`
+    /// starts from — reads the module's names as its own checking did.
+    fn publish_imports(&self, ns: &Namespace, names: &mut typelisp_mem::symbols::SessionNames) {
+        use typelisp_mem::symbols::Import;
+        for local in ns.aliases.symbols() {
+            let target = ns.aliases.get_sym(local).expect("a key of the table");
+            let what = match self.type_def(target) {
+                Some(_) => Import::Type(target.name_symbol()),
+                None => Import::Item(target.name_symbol()),
+            };
+            names.import_name(ns.ns, local, what);
+        }
+        for local in ns.mod_aliases.symbols() {
+            let abs = ns.mod_aliases.get_sym(local).expect("a key of the table");
+            let module = symbols::find_ns(abs).expect("a `use`d module exists");
+            names.import_name(ns.ns, local, Import::Module(module));
+        }
+        // A `(use Type)`'s variants and static methods, bare.
+        for local in ns.ctors.symbols() {
+            let (ty, _) = ns.ctors.get_sym(local).expect("a key of the table");
+            if ty.ns() != ns.ns {
+                names.import_name(ns.ns, local, Import::Member(ty.name_symbol()));
+            }
+        }
+        for local in ns.static_uses.symbols() {
+            let (ty, _) = ns.static_uses.get_sym(local).expect("a key of the table");
+            names.import_name(ns.ns, local, Import::Member(ty.name_symbol()));
+        }
     }
 }
 
@@ -3217,8 +3253,8 @@ impl Registry {
 /// as they do in the type's own module.
 fn publish_type(def: &AdtDef, names: &mut typelisp_mem::symbols::SessionNames) {
     let ty = def.name.name_symbol();
-    names.declare_type(ty);
     let home = def.name.ns();
+    names.declare_type(home, ty);
     let members = def
         .variants
         .iter()
@@ -3234,8 +3270,8 @@ fn publish_type(def: &AdtDef, names: &mut typelisp_mem::symbols::SessionNames) {
 /// [`publish_type`] for a trait: its methods are its members.
 fn publish_trait(def: &TraitDef, names: &mut typelisp_mem::symbols::SessionNames) {
     let tr = def.name.name_symbol();
-    names.declare_type(tr);
     let home = def.name.ns();
+    names.declare_type(home, tr);
     for name in def.methods.keys() {
         names.declare_member(tr, typelisp_mem::symbols::intern_in(home, name));
     }

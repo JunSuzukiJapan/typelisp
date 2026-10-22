@@ -173,8 +173,8 @@ pub(super) struct Info {
     /// file-level wrapping only, never [`Checker::enter_module`]'s nested
     /// `(module ...)` forms), so it stays fixed at "the loading file's own
     /// path" even while `self.ns` grows deeper through a nested `module`
-    /// block inside that file. [`Self::find_module`]'s sibling-file
-    /// resolution tier reads the top of this stack (never `self.ns` itself)
+    /// block inside that file. `Checker::use_target`'s sibling-file
+    /// resolution reads the top of this stack (never `self.ns` itself)
     /// so `(use foo)` inside a nested `module` block still resolves `foo`
     /// relative to the *file's* directory, not that inner block's own
     /// namespace (which has no filesystem counterpart to be a sibling of).
@@ -249,71 +249,25 @@ impl Info {
         self.reg.module(&self.ns).expect("current namespace exists")
     }
 
-    /// If `path` starts with an empty segment (reader-encoded `::foo` absolute
-    /// path), strip it and return `(true, rest)`.  Otherwise `(false, path)`.
-    pub(super) fn split_abs<'a>(&self, path: &'a [String]) -> (bool, &'a [String]) {
-        if path.first().map(|s| s.is_empty()).unwrap_or(false) {
-            (true, &path[1..])
-        } else {
-            (false, path)
-        }
-    }
-
-    /// The current namespace's ancestor chain, nearest first, ending at root:
-    /// `self.ns`, `self.ns[..len-1]`, ..., `[]`. The module-tree analogue of
-    /// walking parent lexical-scope frames — every bare-name resolver walks
-    /// this instead of only checking "current module or literal root", so a
-    /// submodule sees not just its own definitions but every enclosing
-    /// module's too (including root's, however deeply nested the caller is).
-    pub(super) fn ns_ancestors(&self) -> impl Iterator<Item = &[String]> {
-        // The standard library's module comes last: while its definitions are
-        // still resolved by name, this is what keeps them in scope from a
-        // module that is not inside it.
-        (0..=self.ns.len()).rev().map(move |k| &self.ns[..k]).chain(std::iter::once(STD_SEGMENTS.as_slice()))
-    }
-
-    /// The first hit `lookup` finds walking the ancestor chain, nearest module
-    /// first. `lookup` is given each module's absolute path along with it.
-    pub(super) fn find_on_chain<T>(&self, mut lookup: impl FnMut(&[String], &Namespace) -> Option<T>) -> Option<T> {
-        self.ns_ancestors().find_map(|prefix| lookup(prefix, self.reg.module(prefix)?))
-    }
-
-    /// Looks up the last segment of `segs` in the module the other segments
-    /// name ([`Self::find_module`]), under the cross-module visibility rule:
-    /// a private item is found only from inside its own module. `lookup`
-    /// answers the item's visibility and value; the result carries the
-    /// item's absolute path.
-    pub(super) fn find_in_module<T>(
-        &self,
-        segs: &[String],
-        lookup: impl FnOnce(&Namespace, &str) -> Option<(bool, T)>,
-    ) -> Option<(Path, T)> {
-        let (last, mods) = segs.split_last()?;
-        let (abs, m) = self.find_module(mods)?;
-        let (public, v) = lookup(m, last)?;
-        if !public && !self.in_scope(&abs) {
-            return None;
-        }
-        Some((item_path(&abs, last), v))
-    }
-
-    /// Whether `item_ns` (a definition's owning module) is visible from the
-    /// current namespace without needing `pub` — Rust-style module privacy:
-    /// the current module IS `item_ns`, or is nested inside it (a
-    /// descendant). Replaces the old exact-equality `same_module` check;
-    /// root (`item_ns == []`) is always an ancestor, so this also subsumes
-    /// the former "literal root caller" special case.
-    pub(super) fn in_scope(&self, item_ns: &[String]) -> bool {
-        // The standard library's module is in scope everywhere, as the root
-        // it was moved out of was, while its names are still resolved by
-        // name.
-        item_ns.first().map(String::as_str) == Some(crate::types::STD_MODULE)
-            || (self.ns.len() >= item_ns.len() && self.ns[..item_ns.len()] == *item_ns)
+    /// Whether a definition of the module `item_ns` is visible from the
+    /// current module without `pub`: only from that module itself. An
+    /// enclosing or an enclosed module is another module.
+    ///
+    /// Until the standard library is sorted into its own modules and the
+    /// built-in definitions at the root move into it
+    /// (`docs/dev/explicit-symbols-plan.md`, stage 6), the library is in
+    /// scope everywhere, as the root it was moved out of was — its private
+    /// layer (`%internal`, a stream's handle) included — and its modules see
+    /// the root's private built-ins, the layer under `HashTable`'s
+    /// `get`/`set`.
+    pub(super) fn in_scope(&self, item_ns: NsId) -> bool {
+        let cur = self.cur_ns().ns;
+        item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)
     }
 
     /// Whether an associated function/method `af` of `type_fq` is reachable
     /// from the current namespace: public, or in scope (declared in the
-    /// same module or an ancestor of it) — mirrors `resolve_module_value_path`'s
+    /// same module, [`Self::in_scope`]) — mirrors [`Self::find_written`]'s
     /// cross-module `public` check. Used at every call site that looks up
     /// `def.assoc` directly (`try_field_access`, `check_field_set`,
     /// `resolve_name`'s type-member step, `receiver_method`,
@@ -323,70 +277,7 @@ impl Info {
     /// function or constructor "doesn't resolve" instead of erroring with a
     /// privacy-specific message.
     pub(super) fn assoc_visible(&self, type_fq: &Path, af: &AssocFn) -> bool {
-        af.sig.public || self.in_scope(&type_fq.parent())
-    }
-
-    /// Locate a child-module `path`, resolving it relative to the current
-    /// namespace first, then the root, then via `mod_aliases`. Handles absolute
-    /// paths (leading empty segment) by going straight to root.
-    /// Returns `(absolute_segments, &Namespace)`.
-    pub(super) fn find_module(&self, path: &[String]) -> Option<(Vec<String>, &Namespace)> {
-        let (is_abs, eff) = self.split_abs(path);
-        if is_abs {
-            return self.reg.module(eff).map(|m| (eff.to_vec(), m));
-        }
-
-        // 1. Child of the current namespace.
-        let mut abs = self.ns.clone();
-        abs.extend_from_slice(eff);
-        if let Some(m) = self.reg.module(&abs) {
-            return Some((abs, m));
-        }
-        // 2. Child of root.
-        if let Some(m) = self.reg.module(eff) {
-            return Some((eff.to_vec(), m));
-        }
-        // 2b. Child of the standard library's module — a library macro's
-        // expansion spells its helpers `%internal::name` wherever it lands.
-        let mut in_std = STD_SEGMENTS.clone();
-        in_std.extend_from_slice(eff);
-        if let Some(m) = self.reg.module(&in_std) {
-            return Some((in_std, m));
-        }
-        // 3. Module alias: expand the first segment via mod_aliases.
-        if !eff.is_empty() {
-            let first = &eff[0];
-            let rest = &eff[1..];
-            let alias = self
-                .cur_ns()
-                .mod_aliases
-                .get(first)
-                .or_else(|| self.reg.root().mod_aliases.get(first));
-            if let Some(base) = alias {
-                let mut expanded = base.clone();
-                expanded.extend_from_slice(rest);
-                if let Some(m) = self.reg.module(&expanded) {
-                    return Some((expanded, m));
-                }
-            }
-        }
-        // 4. Sibling of the current *file* (not `self.ns`, which may be
-        // deeper than the file's own path inside a nested `(module ...)`
-        // block — see `file_ns`'s doc comment): a file in the same directory
-        // as the one currently being checked, reached without spelling out
-        // its full root-relative path. Tried last so it never shadows an
-        // existing root-relative/current-namespace/alias resolution — see
-        // `docs/dev/language-design.md` §2.4.
-        if let Some(cur_file) = self.file_ns.last() {
-            if !cur_file.is_empty() {
-                let mut sib = cur_file[..cur_file.len() - 1].to_vec();
-                sib.extend_from_slice(eff);
-                if let Some(m) = self.reg.module(&sib) {
-                    return Some((sib, m));
-                }
-            }
-        }
-        None
+        af.sig.public || self.in_scope(type_fq.ns())
     }
 
     /// What `sym` — a bare name as read in the current module — names, as
@@ -433,11 +324,6 @@ impl Info {
         at(NsId::STD, sym)
     }
 
-    /// The definition a `use` in the current module brought in under `name`.
-    pub(super) fn import_of(&self, name: &str) -> Option<Path> {
-        self.cur_ns().aliases.get(name).copied()
-    }
-
     /// What a bare module-level name means — a function, a global variable
     /// or a macro, never two of them ([`Checker::check_value_clash`]) — with
     /// its path ([`Self::find_named`]). The three are one name space: a
@@ -447,9 +333,11 @@ impl Info {
         self.find_named(sym, module_entry_of)
     }
 
-    /// [`Self::resolve_module_entry`] for a qualified `module::...::name`.
-    pub(super) fn resolve_module_entry_path(&self, segs: &[String]) -> Option<(Path, ModuleEntry)> {
-        self.find_in_module(segs, |m, n| module_entry_in(m, n).map(|entry| (entry.public(), entry)))
+    /// [`Self::resolve_module_entry`] for a written name ([`Self::find_written`]):
+    /// the last segment of a `module::...::name` path, in the module the path
+    /// reached.
+    pub(super) fn module_entry_at(&self, p: &Path) -> Option<(Path, ModuleEntry)> {
+        self.find_written(p, |m, k| module_entry_of(m, k).map(|entry| (entry.public(), entry)))
     }
 
     /// What a bare module-level name holds, if it is a function or a global
@@ -462,9 +350,9 @@ impl Info {
         }
     }
 
-    /// [`Self::resolve_module_value`] for a qualified `module::...::name`.
-    pub(super) fn resolve_module_value_path(&self, segs: &[String]) -> Option<ModuleValue> {
-        match self.resolve_module_entry_path(segs)? {
+    /// [`Self::resolve_module_value`] for a written name ([`Self::module_entry_at`]).
+    pub(super) fn module_value_at(&self, p: &Path) -> Option<ModuleValue> {
+        match self.module_entry_at(p)? {
             (path, ModuleEntry::Value(kind)) => Some(kind.at(path)),
             (_, ModuleEntry::Macro { .. }) => None,
         }
@@ -527,11 +415,11 @@ impl Info {
         None
     }
 
-    /// Resolve a module-qualified macro name (`mod::macro-name`) to its
-    /// absolute [`Path`] and call-site arity shape ([`MacroShape`]) — the
-    /// path-qualified counterpart of [`Self::resolve_macro`].
-    pub(super) fn resolve_macro_path(&self, segs: &[String]) -> Option<(Path, MacroShape)> {
-        match self.resolve_module_entry_path(segs)? {
+    /// The macro a written name names ([`Self::module_entry_at`]), with its
+    /// call-site arity shape ([`MacroShape`]) — the written-name counterpart
+    /// of [`Self::resolve_macro`].
+    pub(super) fn macro_at(&self, p: &Path) -> Option<(Path, MacroShape)> {
+        match self.module_entry_at(p)? {
             (path, ModuleEntry::Macro { shape, .. }) => Some((path, shape)),
             (_, ModuleEntry::Value(_)) => None,
         }
@@ -599,7 +487,7 @@ impl Info {
         mut lookup: impl FnMut(&Namespace, SymRef) -> Option<(bool, T)>,
     ) -> Option<(Path, T)> {
         if let Some((public, v)) = self.reg.module_at(p.ns()).and_then(|m| lookup(m, p.name_symbol())) {
-            return (public || self.in_scope(&p.parent())).then_some((*p, v));
+            return (public || self.in_scope(p.ns())).then_some((*p, v));
         }
         if p.ns() != self.cur_ns().ns {
             return None;
@@ -629,40 +517,6 @@ impl Info {
         self.find_written(p, |m, k| m.type_aliases.get_sym(k).map(|a| (a.public, a.clone()))).map(|(_, a)| a)
     }
 
-    /// The type a bare name in a `Type::member` path names: this module's
-    /// own type of that name, then a `use` alias, then the rest of the
-    /// ancestor chain (see [`Self::ns_ancestors`]). A path is still taken
-    /// apart into its segments' names, so the name is looked up by name.
-    fn resolve_bare_type_named(&self, name: &str) -> Option<Path> {
-        if let Some(def) = self.cur_ns().types.get(name) {
-            return Some(def.name);
-        }
-        if let Some(target) = self.import_of(name) {
-            if self.reg.type_def(&target).is_some() {
-                return Some(target);
-            }
-        }
-        self.find_on_chain(|_, m| m.types.get(name).map(|def| def.name))
-    }
-
-    /// Resolve a `module::...::Type` segment path to the type's [`Path`].
-    pub(super) fn resolve_type_path(&self, segs: &[String]) -> Option<Path> {
-        let (local, mods) = segs.split_last()?;
-        if mods.is_empty() {
-            return self.resolve_bare_type_named(local);
-        }
-        self.find_in_module(segs, |m, n| m.types.get(n).map(|def| (def.public, def.name))).map(|(_, name)| name)
-    }
-
-    /// [`Self::type_alias_at`] for a `module::...::Name` segment path.
-    pub(super) fn resolve_type_alias_path(&self, segs: &[String]) -> Option<TypeAlias> {
-        let (local, mods) = segs.split_last()?;
-        if mods.is_empty() {
-            return self.find_on_chain(|_, m| m.type_aliases.get(local).cloned());
-        }
-        self.find_in_module(segs, |m, n| m.type_aliases.get(n).map(|a| (a.public, a.clone()))).map(|(_, a)| a)
-    }
-
     /// Resolve a nominal type [`Path`] to the type it names if there is one;
     /// otherwise (type variables, unknown names) return it unchanged.
     pub(super) fn resolve_type_name(&self, path: &Path) -> Path {
@@ -677,4 +531,9 @@ impl Info {
             ModuleValue::Fn(_) => None,
         }
     }
+}
+
+/// Whether `ns` is the standard library's module or one inside it.
+fn in_std(ns: NsId) -> bool {
+    std::iter::successors(Some(ns), |m| symbols::ns_parent(*m)).any(|m| m == NsId::STD)
 }

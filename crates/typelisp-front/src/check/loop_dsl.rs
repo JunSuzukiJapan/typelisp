@@ -542,10 +542,6 @@ impl Build<'_, '_> {
         Ok(out)
     }
 
-    /// A `::` name, from its segments — as the reader reads `a::b`.
-    fn path(&mut self, segments: &[&str]) -> Value {
-        forms::segments_form(self.s, segments)
-    }
 
     fn call(&mut self, head: &str, args: &[Value]) -> Result<Value, Error> {
         let h = self.sym(head);
@@ -555,9 +551,10 @@ impl Build<'_, '_> {
         self.list(&items)
     }
 
-    /// [`Self::call`] with a `::` head.
-    fn call_path(&mut self, head: &[&str], args: &[Value]) -> Result<Value, Error> {
-        let h = self.path(head);
+    /// [`Self::call`] with a member of a type as its head ([`forms::member_form`]).
+    fn call_member(&mut self, ty: &crate::Path, member: &str, args: &[Value]) -> Result<Value, Error> {
+        let h = forms::member_form(self.s, ty, member)?;
+        self.s.push_root(h);
         let mut items = Vec::with_capacity(args.len() + 1);
         items.push(h);
         items.extend_from_slice(args);
@@ -923,12 +920,12 @@ fn build_accumulate(b: &mut Build, acc: Acc, expr: Value, into: &str) -> Result<
 
             let cmp = b.call(op, &[tmp_sym, best_sym])?;
             let pick = b.if_(cmp, tmp_sym, best_sym)?;
-            let some_pick = b.call_path(&["option", "some"], &[pick])?;
+            let some_pick = b.call_member(&crate::Path::root("option"), "some", &[pick])?;
             let some_head = b.sym("some");
             let some_pat = b.list(&[some_head, best_sym])?;
             let some_arm = b.list(&[some_pat, some_pick])?;
 
-            let some_tmp = b.call_path(&["option", "some"], &[tmp_sym])?;
+            let some_tmp = b.call_member(&crate::Path::root("option"), "some", &[tmp_sym])?;
             let none_head = b.sym("none");
             let none_pat = b.list(&[none_head])?;
             let none_arm = b.list(&[none_pat, some_tmp])?;

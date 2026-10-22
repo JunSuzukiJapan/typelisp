@@ -54,8 +54,9 @@ pub enum OwnedForm {
     Keyword(String),
     /// A string, by content (re-allocated on load).
     Str(String),
-    /// A `::`-path, by segment names (re-interned on load).
-    Path(Vec<String>),
+    /// A `::`-path, by its segments' symbols, each as [`Self::Sym`] keeps
+    /// one: the path stays the symbols it was read as.
+    Path(Vec<(String, Vec<String>)>),
     /// One variant per float width. Not one `Float(f64)` with the width left
     /// to the reader: a dump is a round trip, and a round trip that widens an
     /// `f32` gives back a value whose box no longer matches its type.
@@ -194,7 +195,10 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Symbol(id) => OwnedForm::Sym(id.name().to_string(), typelisp_mem::symbols::ns_path(id.home())),
         Value::Str(id) => OwnedForm::Str(heap.string(id).to_string()),
         Value::Path(id) => OwnedForm::Path(
-            heap.path_segments(id).iter().map(|s| heap.symbol_spelling(*s).to_string()).collect(),
+            heap.path_segments(id)
+                .iter()
+                .map(|s| (s.name().to_string(), typelisp_mem::symbols::ns_path(s.home())))
+                .collect(),
         ),
         Value::Cons(_) => {
             // The spine iteratively; only the elements recurse.
@@ -272,13 +276,7 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         OwnedForm::Path(segs) => {
             // Symbols are permanent (never collected), so the intermediate
             // `SymRef`s need no rooting while later segments intern.
-            let ids: Vec<_> = segs
-                .iter()
-                .map(|s| match heap.intern_symbol(s) {
-                    Value::Symbol(id) => id,
-                    other => unreachable!("intern_symbol returned {:?}", other),
-                })
-                .collect();
+            let ids: Vec<_> = segs.iter().map(|(name, home)| typelisp_mem::symbols::intern_at_home_path(home, name)).collect();
             heap.intern_path(&ids)
         }
         OwnedForm::F32(x) => heap.alloc_f32(*x),

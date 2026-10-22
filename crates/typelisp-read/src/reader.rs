@@ -132,11 +132,11 @@ pub trait ReadEval {
     /// register what it brings in in the session's table of names
     /// (`Heap::names`) — so the forms read after it, the rest of a
     /// `(module ...)` body included, can read a path through it. `path` is
-    /// the `use`'s path as written, segment by segment.
+    /// the `use`'s path as read, the symbols of its segments.
     ///
     /// Asked only for a `use` read as a top-level form, and only when the
     /// path does not already lead to a module or type the session has.
-    fn bring_in(&self, heap: &mut Heap, ns: NsId, path: &[String]) -> Result<(), String>;
+    fn bring_in(&self, heap: &mut Heap, ns: NsId, path: &[SymRef]) -> Result<(), String>;
 }
 
 /// Everything a read carries besides the cursor: which `#+` features are on,
@@ -922,15 +922,18 @@ fn note_definition(heap: &Heap, ns: NsId, elems: &[Value]) {
     };
     match head_sym.well_known() {
         wk::DEFSTRUCT | wk::DEFENUM | wk::DEFTRAIT | wk::DEFTYPE | wk::DEF_C_STRUCT if rest.len() == 2 => {
-            if let Some(ty) = defined_type_name(heap, last) {
-                heap.names().declare_type(ty);
+            // Only a name that is the module's own symbol: one the standard
+            // library offers, defined without `shadow`, is refused when the
+            // definition is checked.
+            if let Some((home, ty)) = defined_type_name(heap, ns, last).filter(|(home, ty)| ty.home() == *home) {
+                heap.names().declare_type(home, ty);
             }
         }
         // A `deftrait`'s third element is its list of supertraits.
         wk::DEFENUM | wk::DEFSTRUCT | wk::DEF_C_STRUCT | wk::DEFTRAIT
             if rest.len() > 2 && !(head_sym.is(wk::DEFTRAIT) && rest.len() == 3) =>
         {
-            if let (Some(ty), Some(m)) = (defined_type_name(heap, rest[1]), member_name(heap, last)) {
+            if let (Some(ty), Some(m)) = (defined_type_name(heap, ns, rest[1]).map(|(_, ty)| ty), member_name(heap, last)) {
                 heap.names().declare_member(ty, m);
             }
         }
@@ -982,19 +985,17 @@ fn note_use(heap: &mut Heap, ctx: Ctx<'_>, elems: &[Value]) -> Result<(), Error>
     if elems.len() < 2 || !is_use_head(*head) {
         return Ok(());
     }
-    let segs: Vec<&'static str> = match last {
-        Value::Symbol(s) => vec![s.name()],
-        Value::Path(id) => heap.path_segments(id).iter().map(|s| s.name()).collect(),
+    let syms: Vec<SymRef> = match last {
+        Value::Symbol(s) => vec![s],
+        Value::Path(id) => heap.path_segments(id).to_vec(),
         _ => return Ok(()),
     };
+    let segs: Vec<&'static str> = syms.iter().map(|s| s.name()).collect();
     if heap.names().import_written(ctx.ns, &segs) {
         return Ok(());
     }
     match ctx.eval {
-        Some(eval) => {
-            let segs: Vec<String> = segs.iter().map(|s| s.to_string()).collect();
-            eval.bring_in(heap, ctx.ns, &segs).map_err(Error::ReadError)
-        }
+        Some(eval) => eval.bring_in(heap, ctx.ns, &syms).map_err(Error::ReadError),
         None => Ok(()),
     }
 }
@@ -1023,14 +1024,22 @@ fn is_marked(heap: &Heap, v: Value, marker: u32) -> bool {
     matches!(heap.car(v), Ok(Value::Symbol(s)) if s.is(marker))
 }
 
-/// The type a definition's name or an `impl`'s target names: `point`,
-/// `m::point`, `(point options...)` or `point<T>` (`(%type-apply point T)`).
-fn defined_type_name(heap: &Heap, v: Value) -> Option<SymRef> {
+/// The type a definition's name names, written in `ns`: `point`,
+/// `m::point`, `(point options...)` or `point<T>` (`(%type-apply point T)`),
+/// with the module it is defined in.
+fn defined_type_name(heap: &Heap, ns: NsId, v: Value) -> Option<(NsId, SymRef)> {
     match v {
-        Value::Symbol(s) => Some(s),
-        Value::Path(id) => heap.path_segments(id).last().copied(),
-        Value::Cons(_) if is_marked(heap, v, wk::TYPE_APPLY) => defined_type_name(heap, heap.list_to_vec(v).ok()?.get(1).copied()?),
-        Value::Cons(_) => defined_type_name(heap, heap.car(v).ok()?),
+        Value::Symbol(s) => Some((ns, s)),
+        Value::Path(id) => {
+            let segs = heap.path_segments(id);
+            let (last, prefix) = segs.split_last()?;
+            match heap.names().reached(ns, prefix).ok()? {
+                symbols::PathStep::Module(m) => Some((m, *last)),
+                symbols::PathStep::Type(_) => None,
+            }
+        }
+        Value::Cons(_) if is_marked(heap, v, wk::TYPE_APPLY) => defined_type_name(heap, ns, heap.list_to_vec(v).ok()?.get(1).copied()?),
+        Value::Cons(_) => defined_type_name(heap, ns, heap.car(v).ok()?),
         _ => None,
     }
 }
