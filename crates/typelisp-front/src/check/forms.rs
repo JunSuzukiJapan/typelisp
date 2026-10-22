@@ -24,7 +24,7 @@
 use typelisp_mem::{wk, Error, Heap, Loc, NsId, RootScope, Value};
 
 use crate::check::analyze::MacroLambda;
-use crate::check::core::{self, Items};
+use crate::check::core::{self, path_form, Items};
 use crate::check::repr::Repr;
 use crate::check::resolved::CompileTarget;
 use crate::types::{Path, Type};
@@ -739,8 +739,6 @@ pub(super) fn value_member_form(heap: &mut Heap, recv: &str, member: &str) -> Re
     items.push(m);
     items.finish_list()
 }
-
-pub(super) use super::core::path_form;
 
 /// The name the reader reads for the definition `p` from any module, for a
 /// form the checker writes and checks again: the definition's own symbol

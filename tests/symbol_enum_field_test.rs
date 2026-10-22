@@ -1,34 +1,10 @@
 //! A `Symbol`-typed `defenum` field, across the interpreted and compiled tiers.
 //!
-//! `Type::Symbol` is the one scalar that no representability predicate names.
-//! It is not a `Type::Named`, so it falls past every arm of `is_heap_repr_seen`
-//! onto that function's `_ => false`, and it is absent from
-//! `is_boxable_scalar`'s explicit list (integers, floats, `Bool`/`Char`/`Str`/
-//! `Bignum`/`Ratio`) too — so `enum_field_storable` answers `false` for it. The
-//! same "`Symbol` is not a `Type::Named`, so the predicate misses it" slip is
-//! already recorded once at `Interp::decode_compiled_return`'s `Type::Symbol`
-//! arm, which exists because `is_boxed_sexpr_type` misses a bare `Symbol`
-//! return for that very reason.
-//!
-//! These tests exist because that `false` looks like it should be a bug and is
-//! not — three separate mechanisms decide an enum's representation, and only
-//! one of them consults that predicate:
-//!
-//! * **Construction** (`build_enum_value`) is value-driven: it boxes onto the
-//!   heap whenever every field converts through `rtvalue_to_struct_field`. A
-//!   `Symbol` is carried as `RtValue::Sexpr(Value::Symbol)`, so it converts.
-//! * **The compiled-return decode** (`is_boxed_sexpr_type`) tests
-//!   `is_enum_path` alone — any enum decodes as a box, whatever its fields are.
-//! * **Binding-slot routing** (`is_heap_repr_ty`) is the one that does consult
-//!   it, and answers "native". A `Slot::Native` holds an `RtValue::Sexpr` per-
-//!   fectly well and `collect_sexpr_roots` roots it, so this costs a `sync_roots`
-//!   pass rather than correctness.
-//!
-//! So the three disagree and nothing observable breaks. Pinning that here keeps
-//! it from being "fixed" by adding `Symbol` to the predicate, which would treat
-//! the symptom: the real defect is that construction decides a *static* question
-//! from a runtime value shape at all, and it goes away structurally when
-//! `RtValue::Data` — the thing it falls back to — is deleted.
+//! A symbol is a `Value::Symbol` wherever it is held, so an enum carrying one
+//! is a heap enum box like any other (`type_key::alloc_typed_enum`): its field
+//! is a heap reference a collection has to keep reachable, and a compiled
+//! function returning the enum hands back the box, read by the callee's
+//! declared return representation.
 
 use typelisp::{load_compiler, load_prelude, Checker, EvalError, Heap, Interp, Reader, Value};
 
@@ -69,7 +45,7 @@ fn assert_named(h: &Heap, v: &Value, expected: &str) {
     }
 }
 
-// ---- interpreted tier: already correct, because construction is value-driven
+// ---- interpreted tier ----------------------------------------------------
 
 #[test]
 fn an_interpreted_enum_with_a_symbol_field_is_a_heap_box() {
@@ -120,11 +96,9 @@ fn a_stored_symbol_survives_constant_collection() {
 // ---- compiled tier ---------------------------------------------------------
 
 /// A compiled function *returning* the enum. This is the crossing where a
-/// mis-decode would be silent rather than loud: `decode_compiled_return` hands
-/// a tagged word back as a bare `RtValue::Int` for any type
-/// `is_boxed_sexpr_type` doesn't recognize, and every later read of it is then
-/// wrong. It passes because that predicate tests `is_enum_path` alone — not
-/// because the `Symbol` field is classified storable, which it is not.
+/// mis-decode would be silent rather than loud: the returned word is read by
+/// the declared return representation alone, and a wrong one makes every
+/// later read of the value wrong.
 #[test]
 fn a_compiled_function_returning_the_enum_decodes_it_as_an_enum() {
     let (mut h, mut chk, mut interp) = env();

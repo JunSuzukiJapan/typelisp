@@ -536,7 +536,7 @@ impl CpsStack {
 /// One unit of execution: a continuation stack, the state it is in, and the
 /// bottom of the roots that belong to it.
 ///
-/// [`Interp::eval_cps`] starts one and runs it straight through. A task
+/// [`Interp::eval_core`] starts one and runs it straight through. A task
 /// is this same structure *kept across suspensions* instead — which
 /// is the whole reason the evaluator moved off the Rust stack, since a Rust
 /// recursion cannot be stopped between two steps and picked up later.
@@ -618,11 +618,6 @@ impl Task {
             pending => State::Adopted { drive, pending },
         };
         Task { sbase, stack: CpsStack::new(), state, compiled: chain, parked_unwind }
-    }
-
-    /// The failure `e` is once it has left the task it happened in.
-    pub(crate) fn failure_left_task(e: EvalError) -> EvalError {
-        escaped_task_failure(e)
     }
 }
 
@@ -706,7 +701,7 @@ impl Task {
 /// A `throw` that leaves a task has no catch to reach — a tag does not cross a
 /// task boundary — and a panic is not recoverable by definition. Either way the
 /// program stops, which is Go's rule for an unrecovered panic.
-fn escaped_task_failure(e: EvalError) -> EvalError {
+pub(super) fn escaped_task_failure(e: EvalError) -> EvalError {
     match e {
         EvalError::Throw(tag, _) => EvalError::Panic(format!("`throw` of `{}` left its task", tag.spelling())),
         other => other,
@@ -851,13 +846,18 @@ fn bind_parts(heap: &Heap, b: Value) -> Result<(SymRef, Value), EvalError> {
 }
 
 impl Interp {
-    /// Evaluate `form` in `env` with no Rust recursion.
+    /// Evaluate the core form `form` in environment `env`, with no Rust
+    /// recursion.
     ///
-    /// What [`Interp::eval_core`](super::Interp::eval_core) is: the depth of a
-    /// Lisp computation costs continuation frames on the heap-side stack, not
-    /// Rust frames. Every `Op` is handled here — `step_cps` matches without a
+    /// `env` may be [`Value::Empty`] for a form with no free variables. Both
+    /// arguments are rooted here for the duration, so a caller holding them
+    /// only in a Rust local is safe; a caller that *keeps* them past the call
+    /// must root them itself.
+    ///
+    /// The depth of a Lisp computation costs continuation frames on the
+    /// heap-side stack, not Rust frames. Every `Op` is handled here — `step_cps` matches without a
     /// catch-all, so a tag with no frame fails to build.
-    pub(crate) fn eval_cps(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
+    pub(crate) fn eval_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         if self.driving.get() {
             // Nested: a Rust frame is waiting on this call. `Interp::apply`
             // and the public API, the `eval` builtin, a `print-object`
@@ -898,12 +898,12 @@ impl Interp {
 
     /// Runs an `eval`-carrying AOT program's own initialisers and entry
     /// point, each as the main task of one drive of *this* `Interp`'s
-    /// scheduler — the shape `eval_cps` gives one evaluation, so a program
+    /// scheduler — the shape `eval_core` gives one evaluation, so a program
     /// that calls `eval` and the tasks its own `(task ...)`s admit share one
     /// scheduler, one queue, one clock, rather than the AOT scheduler and
     /// the `Interp`'s running as two that never see each other.
     ///
-    /// Unlike `eval_cps` this is only ever the outermost call — the
+    /// Unlike `eval_core` this is only ever the outermost call — the
     /// generated `main` of an `eval`-carrying executable calls
     /// [`crate::shim::rt_run_program_interp`] once, from Rust, with nothing
     /// else on this thread's stack — so nothing is driving when it starts,
@@ -931,7 +931,7 @@ impl Interp {
     }
 
     /// Runs one evaluation to its end on the caller's root stack, with no
-    /// scheduling. What a nested `eval_cps` does.
+    /// scheduling. What a nested `eval_core` does.
     fn run_to_completion(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
         let mut task = Task::start(heap, form, env);
         let out = loop {
@@ -2438,7 +2438,8 @@ impl Interp {
                         None => return Err(EvalError::NoSuchFunction(name)),
                     },
                     Some(pid) => {
-                        let type_name = crate::types::path_from_id(heap, pid);
+                        let type_name = crate::check::core::path_value(heap, Value::Path(pid))
+                            .expect("a builtin's receiver is written by `core::path_form`");
                         let ret_key = heap.builtin_fn_ret_key(id).to_string();
                         match super::eval_builtin_method(heap, &type_name, &name, &argv, &ret_key) {
                             Some(r) => r?,
@@ -3114,8 +3115,8 @@ mod tests {
         heap.push_root(form);
         let before = heap.root_count();
         let interp = Interp::new();
-        let out = interp.eval_cps(heap, form, Value::Empty);
-        assert_eq!(heap.root_count(), before, "eval_cps leaked or over-popped roots on {:?}", src);
+        let out = interp.eval_core(heap, form, Value::Empty);
+        assert_eq!(heap.root_count(), before, "eval_core leaked or over-popped roots on {:?}", src);
         out
     }
 
@@ -3133,42 +3134,16 @@ mod tests {
         eval_src(heap, src).unwrap_or_else(|e| panic!("{:?} failed to evaluate: {}", src, e))
     }
 
-    /// The same form through both evaluators, asserting they agree. The whole
-    /// premise of the rewrite is that it changes no program's meaning, so most
-    /// tests here should be able to say exactly this.
-    ///
-    /// **Not for forms that produce a freshly allocated value.** `Value`
-    /// compares strings and boxes by identity, and a string literal allocates
-    /// a new string every time it is evaluated (deliberately — see
-    /// `a_string_literal_is_a_fresh_string_every_time` in `core_eval`), so the
-    /// two runs would differ on the id even when they agree on the content.
-    /// Use `eval_ok` and compare what is inside.
-    fn agrees(heap: &mut Heap, src: &str) -> Value {
-        let form = read1(heap, src);
-        heap.push_root(form);
-        let interp = Interp::new();
-        let old = interp.eval_core(heap, form, Value::Empty);
-        let new = interp.eval_cps(heap, form, Value::Empty);
-        match (old, new) {
-            (Ok(a), Ok(b)) => {
-                assert_eq!(a, b, "the two evaluators disagree on {:?}", src);
-                b
-            }
-            (Err(a), Err(b)) => panic!("both failed on {:?}: {} / {}", src, a, b),
-            (a, b) => panic!("only one evaluator failed on {:?}: {:?} / {:?}", src, a, b),
-        }
-    }
-
     // ---- leaves ----------------------------------------------------------
 
     #[test]
     fn leaves_reach_a_value_without_a_frame() {
         let mut h = stress_heap();
-        assert_eq!(agrees(&mut h, "(int-any-width 42)"), Value::Int(42));
-        assert_eq!(agrees(&mut h, "(bool true)"), Value::Bool(true));
-        assert_eq!(agrees(&mut h, r"(char #\a)"), Value::Char('a'));
-        assert_eq!(agrees(&mut h, "(unit)"), Value::Empty);
-        assert!(matches!(agrees(&mut h, "(sym foo)"), Value::Symbol(_)));
+        assert_eq!(eval_ok(&mut h, "(int-any-width 42)"), Value::Int(42));
+        assert_eq!(eval_ok(&mut h, "(bool true)"), Value::Bool(true));
+        assert_eq!(eval_ok(&mut h, r"(char #\a)"), Value::Char('a'));
+        assert_eq!(eval_ok(&mut h, "(unit)"), Value::Empty);
+        assert!(matches!(eval_ok(&mut h, "(sym foo)"), Value::Symbol(_)));
     }
 
     // ---- if: the first form that needs a frame ---------------------------
@@ -3176,8 +3151,8 @@ mod tests {
     #[test]
     fn if_takes_the_branch_the_condition_names() {
         let mut h = stress_heap();
-        assert_eq!(agrees(&mut h, "(if (bool true) (int-any-width 1) (int-any-width 2))"), Value::Int(1));
-        assert_eq!(agrees(&mut h, "(if (bool false) (int-any-width 1) (int-any-width 2))"), Value::Int(2));
+        assert_eq!(eval_ok(&mut h, "(if (bool true) (int-any-width 1) (int-any-width 2))"), Value::Int(1));
+        assert_eq!(eval_ok(&mut h, "(if (bool false) (int-any-width 1) (int-any-width 2))"), Value::Int(2));
     }
 
     /// The branch not taken is never evaluated — `panic` in the dead branch
@@ -3198,7 +3173,7 @@ mod tests {
     fn a_condition_that_is_itself_an_if_stacks_two_frames() {
         let mut h = stress_heap();
         let src = "(if (if (bool false) (bool false) (bool true)) (int-any-width 7) (int-any-width 9))";
-        assert_eq!(agrees(&mut h, src), Value::Int(7));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(7));
     }
 
     /// Deeply nested conditions: 200 frames, each holding a form and an
@@ -3230,7 +3205,7 @@ mod tests {
     #[test]
     fn let_binds_and_the_body_sees_the_binding() {
         let mut h = stress_heap();
-        assert_eq!(agrees(&mut h, "(let ((x r (int-any-width 5))) (var x))"), Value::Int(5));
+        assert_eq!(eval_ok(&mut h, "(let ((x r (int-any-width 5))) (var x))"), Value::Int(5));
     }
 
     /// Bindings are parallel: every initialiser runs in the *outer*
@@ -3250,9 +3225,9 @@ mod tests {
     #[test]
     fn an_empty_binding_list_is_progn() {
         let mut h = stress_heap();
-        assert_eq!(agrees(&mut h, "(let () (int-any-width 1) (int-any-width 2))"), Value::Int(2));
-        assert_eq!(agrees(&mut h, "(let () (int-any-width 9))"), Value::Int(9));
-        assert_eq!(agrees(&mut h, "(let ())"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(let () (int-any-width 1) (int-any-width 2))"), Value::Int(2));
+        assert_eq!(eval_ok(&mut h, "(let () (int-any-width 9))"), Value::Int(9));
+        assert_eq!(eval_ok(&mut h, "(let ())"), Value::Empty);
     }
 
     /// `set` writes through the binding's cell and returns the value assigned.
@@ -3260,9 +3235,9 @@ mod tests {
     fn set_writes_through_the_cell_and_returns_the_value() {
         let mut h = stress_heap();
         let src = "(let ((x r (int-any-width 1))) (set x (int-any-width 42)) (var x))";
-        assert_eq!(agrees(&mut h, src), Value::Int(42));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(42));
         let src = "(let ((x r (int-any-width 1))) (set x (int-any-width 42)))";
-        assert_eq!(agrees(&mut h, src), Value::Int(42));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(42));
     }
 
     /// Many bindings, each initialiser allocating, with a collection between
@@ -3312,7 +3287,7 @@ mod tests {
     #[test]
     fn a_builtin_call_evaluates_its_arguments_then_applies() {
         let mut h = stress_heap();
-        let v = agrees(
+        let v = eval_ok(
             &mut h,
             "(call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2))",
         );
@@ -3340,7 +3315,7 @@ mod tests {
         let src = "(call ::std::sexpr-cons (sexpr sexpr) \
                      (str \"first\") \
                      (call ::std::sexpr-cons (sexpr sexpr) (int-any-width 1) (int-any-width 2)))";
-        let v = agrees(&mut h, src);
+        let v = eval_ok(&mut h, src);
         match h.car(v).unwrap() {
             Value::Str(id) => assert_eq!(&*h.string(id), "first"),
             other => panic!("the first argument did not survive the nested call: {:?}", other),
@@ -3378,11 +3353,11 @@ mod tests {
         let point = "(construct ::point \"point\" 0 true (int-any-width int-any-width) \
                        (int-any-width 1) (int-any-width 2))";
         assert_eq!(
-            agrees(&mut h, &format!("(field-get {} 1 int-any-width)", point)),
+            eval_ok(&mut h, &format!("(field-get {} 1 int-any-width)", point)),
             Value::Int(2)
         );
         assert_eq!(
-            agrees(&mut h, &format!("(field-get {} 0 int-any-width)", point)),
+            eval_ok(&mut h, &format!("(field-get {} 0 int-any-width)", point)),
             Value::Int(1)
         );
     }
@@ -3399,7 +3374,7 @@ mod tests {
             inner
         );
         let src = format!("(field-get (field-get {} 1 point) 0 int-any-width)", outer);
-        assert_eq!(agrees(&mut h, &src), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, &src), Value::Int(3));
     }
 
     /// `set` on a struct field's binding, then reading it back: the value
@@ -3410,7 +3385,7 @@ mod tests {
         let src = "(let ((p sexpr (construct ::point \"point\" 0 true (int-any-width int-any-width) \
                                     (int-any-width 5) (int-any-width 6))))
                      (field-get (var p) 1 int-any-width))";
-        assert_eq!(agrees(&mut h, src), Value::Int(6));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(6));
     }
 
     // ---- labels / apply --------------------------------------------------
@@ -3420,9 +3395,9 @@ mod tests {
         let mut h = stress_heap();
         let src = "(apply (lambda ((x int-any-width)) int-any-width (var x)) int-any-width \
                      (int-any-width) (int-any-width 5))";
-        assert_eq!(agrees(&mut h, src), Value::Int(5));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(5));
         assert_eq!(
-            agrees(&mut h, "(apply (lambda () int-any-width (int-any-width 7)) int-any-width ())"),
+            eval_ok(&mut h, "(apply (lambda () int-any-width (int-any-width 7)) int-any-width ())"),
             Value::Int(7)
         );
     }
@@ -3433,7 +3408,7 @@ mod tests {
         let mut h = stress_heap();
         let src = "(let ((n int-any-width (int-any-width 3)))
                      (apply (lambda () int-any-width (var n)) int-any-width ()))";
-        assert_eq!(agrees(&mut h, src), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(3));
     }
 
     /// `labels` siblings see each other — the placeholder pass is what makes
@@ -3445,7 +3420,7 @@ mod tests {
                               (apply (var g) int-any-width (int-any-width) (var x))) \
                             (g ((y int-any-width)) int-any-width (var y))) \
                      (apply (var f) int-any-width (int-any-width) (int-any-width 3)))";
-        assert_eq!(agrees(&mut h, src), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(3));
     }
 
     /// A builtin used as a function value goes through the same dispatch a
@@ -3455,7 +3430,7 @@ mod tests {
         let mut h = stress_heap();
         let src = "(apply (fnref ::std::sexpr-cons (sexpr sexpr)) sexpr (sexpr sexpr) \
                      (int-any-width 1) (int-any-width 2))";
-        let v = agrees(&mut h, src);
+        let v = eval_ok(&mut h, src);
         assert_eq!(h.car(v).unwrap(), Value::Int(1));
         assert_eq!(h.cdr(v).unwrap(), Value::Int(2));
     }
@@ -3509,7 +3484,7 @@ mod tests {
 
         let interp = Interp::new();
         let v = interp
-            .eval_cps(&mut h, form, env)
+            .eval_core(&mut h, form, env)
             .expect("deep non-tail recursion failed");
 
         // The result is a list of DEPTH ones.
@@ -3532,7 +3507,7 @@ mod tests {
                      ((pat-lit (int-any-width 1)) (int-any-width 10)) \
                      ((pat-lit (int-any-width 2)) (int-any-width 20)) \
                      ((pat-wild) (int-any-width 99)))";
-        assert_eq!(agrees(&mut h, src), Value::Int(20));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(20));
     }
 
     #[test]
@@ -3541,7 +3516,7 @@ mod tests {
         let src = "(match (int-any-width 7) int-any-width \
                      ((pat-lit (int-any-width 1)) (int-any-width 10)) \
                      ((pat-wild) (int-any-width 99)))";
-        assert_eq!(agrees(&mut h, src), Value::Int(99));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(99));
     }
 
     /// A binding pattern extends the environment the arm's body runs in.
@@ -3549,7 +3524,7 @@ mod tests {
     fn a_binding_pattern_is_visible_in_the_arm() {
         let mut h = stress_heap();
         assert_eq!(
-            agrees(&mut h, "(match (int-any-width 5) int-any-width ((pat-bind x) (var x)))"),
+            eval_ok(&mut h, "(match (int-any-width 5) int-any-width ((pat-bind x) (var x)))"),
             Value::Int(5)
         );
     }
@@ -3575,7 +3550,7 @@ mod tests {
                                     (int-any-width 1) (int-any-width 2))))
                      (field-set (var p) 1 int-any-width (int-any-width 42))
                      (field-get (var p) 1 int-any-width))";
-        assert_eq!(agrees(&mut h, src), Value::Int(42));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(42));
     }
 
     /// The object is evaluated before the value, and has to stay reachable
@@ -3646,7 +3621,7 @@ mod tests {
             countdown_list(5)
         );
         // The last element seen before the list ran out.
-        assert_eq!(agrees(&mut h, &src), Value::Int(4));
+        assert_eq!(eval_ok(&mut h, &src), Value::Int(4));
     }
 
     /// `return` carries a value out of the nearest loop; `break` carries unit.
@@ -3655,9 +3630,9 @@ mod tests {
         let mut h = stress_heap();
         // `loop`'s leading field is its own `Repr` -- positional, so unlike
         // `catch`'s trailing one it cannot be left out of a hand-written form.
-        assert_eq!(agrees(&mut h, "(loop int-any-width (return (int-any-width 7)))"), Value::Int(7));
-        assert_eq!(agrees(&mut h, "(loop unit (break))"), Value::Empty);
-        assert_eq!(agrees(&mut h, "(loop unit (return))"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(loop int-any-width (return (int-any-width 7)))"), Value::Int(7));
+        assert_eq!(eval_ok(&mut h, "(loop unit (break))"), Value::Empty);
+        assert_eq!(eval_ok(&mut h, "(loop unit (return))"), Value::Empty);
     }
 
     /// The *nearest* loop claims the exit, so an inner `break` leaves the
@@ -3677,7 +3652,7 @@ mod tests {
                (var seen))",
             countdown_list(3)
         );
-        assert_eq!(agrees(&mut h, &src), Value::Int(2));
+        assert_eq!(eval_ok(&mut h, &src), Value::Int(2));
     }
 
     /// A loop of any length costs one frame: it is rebuilt, not stacked. 300
@@ -3703,7 +3678,7 @@ mod tests {
     fn return_from_leaves_the_named_block() {
         let mut h = stress_heap();
         assert_eq!(
-            agrees(&mut h, r#"(block (str "b") (let () (return-from (str "b") (int-any-width 3)) (int-any-width 9)))"#),
+            eval_ok(&mut h, r#"(block (str "b") (let () (return-from (str "b") (int-any-width 3)) (int-any-width 9)))"#),
             Value::Int(3)
         );
     }
@@ -3712,7 +3687,7 @@ mod tests {
     #[test]
     fn a_block_without_an_exit_is_its_body() {
         let mut h = stress_heap();
-        assert_eq!(agrees(&mut h, r#"(block (str "b") (int-any-width 4))"#), Value::Int(4));
+        assert_eq!(eval_ok(&mut h, r#"(block (str "b") (int-any-width 4))"#), Value::Int(4));
     }
 
     /// The exit passes through the inner block, which does not claim it.
@@ -3722,7 +3697,7 @@ mod tests {
         let src = r#"(block (str "outer")
                        (block (str "inner")
                          (return-from (str "outer") (int-any-width 8))))"#;
-        assert_eq!(agrees(&mut h, src), Value::Int(8));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(8));
     }
 
     // ---- catch / throw ---------------------------------------------------
@@ -3730,14 +3705,14 @@ mod tests {
     #[test]
     fn a_catch_without_a_throw_is_its_body() {
         let mut h = stress_heap();
-        assert_eq!(agrees(&mut h, "(catch (quote done) (int-any-width 3))"), Value::Int(3));
+        assert_eq!(eval_ok(&mut h, "(catch (quote done) (int-any-width 3))"), Value::Int(3));
     }
 
     #[test]
     fn a_throw_reaches_the_catch_on_its_tag() {
         let mut h = stress_heap();
         let src = "(catch (quote done) (let () (throw (quote done) (int-any-width 42)) (int-any-width 9)))";
-        assert_eq!(agrees(&mut h, src), Value::Int(42));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(42));
     }
 
     /// A throw on another tag keeps travelling — the bug CL's `eq` tag
@@ -3748,7 +3723,7 @@ mod tests {
         let src = "(catch (quote outer)
                      (catch (quote inner)
                        (throw (quote outer) (int-any-width 5))))";
-        assert_eq!(agrees(&mut h, src), Value::Int(5));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(5));
     }
 
     /// The thrown value stays rooted for the whole flight. Under `gc_stress`
@@ -3777,9 +3752,9 @@ mod tests {
         let src = "(let ((n r (int-any-width 0)))
                      (unwind-protect (int-any-width 1) (set n (int-any-width 99)))
                      (var n))";
-        assert_eq!(agrees(&mut h, src), Value::Int(99));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(99));
         assert_eq!(
-            agrees(&mut h, "(unwind-protect (int-any-width 1) (int-any-width 2))"),
+            eval_ok(&mut h, "(unwind-protect (int-any-width 1) (int-any-width 2))"),
             Value::Int(1)
         );
     }
@@ -3791,7 +3766,7 @@ mod tests {
         let src = "(let ((n r (int-any-width 0)))
                      (loop unit (unwind-protect (break) (set n (int-any-width 7))))
                      (var n))";
-        assert_eq!(agrees(&mut h, src), Value::Int(7));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(7));
     }
 
     /// The protected form's value survives a cleanup that allocates — the one
@@ -3842,7 +3817,7 @@ mod tests {
                        (unwind-protect
                          (throw (quote inner) (int-any-width 1))
                          (throw (quote outer) (int-any-width 2)))))";
-        assert_eq!(agrees(&mut h, src), Value::Int(2));
+        assert_eq!(eval_ok(&mut h, src), Value::Int(2));
     }
 
     // ---- tasks -----------------------------------------------------------
@@ -3854,7 +3829,7 @@ mod tests {
     /// its own steps, and under `stress_heap` that includes a collection per
     /// `cons`. This is the harshest arrangement the scheduler will ever see.
     ///
-    /// `sched::drive_main` is the driver here — the same one `eval_cps` uses —
+    /// `sched::drive_main` is the driver here — the same one `eval_core` uses —
     /// so what these tests exercise is the loop that ships. It returns when
     /// *its* task finishes, and the others keep running meanwhile, so a task
     /// named later may already be `Done` by the time its turn comes (and

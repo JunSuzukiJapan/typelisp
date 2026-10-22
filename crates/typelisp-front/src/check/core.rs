@@ -597,7 +597,8 @@ pub fn field(heap: &Heap, form: Value, i: usize) -> Option<Value> {
 /// name is read as the reading module's own symbol.
 pub fn path_form(heap: &mut Heap, p: &crate::Path) -> Value {
     let mut segs = vec![typelisp_mem::symbols::intern_exact(typelisp_mem::NsId::ROOT, "")];
-    segs.extend(crate::types::path_symbols(p));
+    segs.extend(typelisp_mem::symbols::ns_names(p.ns()));
+    segs.push(p.name_symbol());
     heap.intern_path(&segs)
 }
 

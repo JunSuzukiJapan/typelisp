@@ -232,7 +232,7 @@ unsafe fn expand_shim(
 /// The reason this exists at all rather than reusing `rt_run_program`: an
 /// executable that calls `eval` has an `Interp`, and `(task ...)` inside an
 /// eval'd form is admitted to *that* `Interp`'s scheduler
-/// (`Interp::eval_cps`) — a second, bare `Scheduler<CompiledTask>` running
+/// (`Interp::eval_core`) — a second, bare `Scheduler<CompiledTask>` running
 /// the program's own initialisers and `main` would be a scheduler the
 /// eval'd tasks are invisible to, and vice versa. `compile-file` decides
 /// which of the two shims the generated `main` calls by whether the program

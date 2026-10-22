@@ -16834,7 +16834,7 @@ fn called_width(ty: &Type) -> Type {
 pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, String)]) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for (ty, method) in slots {
-        let tp = forms::path_form(f.heap(), ty);
+        let tp = core::path_form(f.heap(), ty);
         let m = f.heap().intern_symbol(method);
         let one = core::list(f.heap(), &[tp, m])?;
         f.push(one);

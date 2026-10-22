@@ -107,12 +107,6 @@ pub fn arena_close(arena: u64) -> Result<(), String> {
     })
 }
 
-/// The number of blocks alive in every arena — for tests that check an
-/// `unsafe` freed what it allocated.
-pub fn live_blocks() -> usize {
-    with_state(|s| s.blocks.len())
-}
-
 /// A parsed allocation descriptor: element size, alignment, positions.
 fn parse_desc(desc: &str) -> Result<(usize, usize, Vec<(usize, String)>), String> {
     let bad = || format!("c-alloc: malformed layout descriptor {:?}", desc);

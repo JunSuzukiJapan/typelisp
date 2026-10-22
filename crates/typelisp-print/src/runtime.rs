@@ -513,10 +513,6 @@ fn arg_keyword(args: &[Value], i: usize, who: &str) -> Result<SymRef, PrintError
 /// `pprint` and `pprint-logical-block` are special forms, and what survives
 /// checking is a call to one of the names below.
 pub fn print_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, PrintError>> {
-    print_builtin_inner(heap, name, args)
-}
-
-fn print_builtin_inner(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result<Value, PrintError>> {
     let r = match name {
         // `format`'s `bool` destination: builds the text, and additionally
         // writes it when the destination is `true` (CL's `t`). The string it

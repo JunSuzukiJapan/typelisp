@@ -223,23 +223,6 @@ pub(super) enum StepCmd {
 }
 
 impl Interp {
-    /// Evaluate the core form `form` in environment `env`.
-    ///
-    /// `env` may be [`Value::Empty`] for a form with no free variables. Both
-    /// arguments are rooted here for the duration, so a caller holding them
-    /// only in a Rust local is safe; a caller that *keeps* them past the call
-    /// must root them itself.
-    ///
-    /// **The evaluation itself now happens in `core_cps`**, over a continuation
-    /// stack rather than the Rust stack. This entry point is kept so the ~50
-    /// call sites below (and `Interp::exec`, and the re-entry from compiled
-    /// code) do not each have to change; the recursive body underneath it is
-    /// dead except for the leaf tags `step_cps` still routes here, and comes
-    /// out with the rest of the move.
-    pub(crate) fn eval_core(&self, heap: &mut Heap, form: Value, env: Value) -> Result<Value, EvalError> {
-        self.eval_cps(heap, form, env)
-    }
-
     /// Evaluate a *leaf* core form — one with no subexpression, so it reaches
     /// its value without a continuation.
     ///
@@ -619,7 +602,9 @@ impl Interp {
         match f {
             Some(f) => self.reify(heap, &f),
             None => {
-                let recv = crate::types::intern_path_id(heap, &type_name);
+                let Value::Path(recv) = crate::check::core::path_form(heap, &type_name) else {
+                    unreachable!("Heap::intern_path always returns Value::Path")
+                };
                 let ret_key = str_field(heap, form, 3, "methodref")?;
                 Ok(heap.alloc_builtin_fn(Some(recv), &method, &ret_key))
             }
@@ -3355,7 +3340,9 @@ mod tests {
         let mut h = stress_heap();
         let form = read1(&mut h, "(apply (var f) int-any-width (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))");
         h.push_root(form);
-        let recv = crate::types::intern_path_id(&mut h, &crate::Path::root("i32"));
+        let Value::Path(recv) = crate::check::core::path_form(&mut h, &crate::Path::root("i32")) else {
+            unreachable!("Heap::intern_path always returns Value::Path")
+        };
         let plus = h.alloc_builtin_fn(Some(recv), "+", "i32");
         h.push_root(plus);
         let name = match core_symbol("f") {

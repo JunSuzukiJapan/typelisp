@@ -241,41 +241,6 @@ impl fmt::Display for Path {
     }
 }
 
-/// `p` as an interned heap [`PathId`]: the symbols its module and the
-/// modules around it are named by in the module tree, then its name's
-/// symbol. Both tables are permanent, so the id stays valid for the heap's
-/// lifetime and equal paths always share one id.
-///
-/// It addresses a name, not a heap value's type identity (the `type_key.rs`
-/// string form), so nothing here may be compared against a stored type key.
-pub fn intern_path_id(heap: &mut Heap, p: &Path) -> PathId {
-    match heap.intern_path(&path_symbols(p)) {
-        Value::Path(id) => id,
-        _ => unreachable!("Heap::intern_path always returns Value::Path"),
-    }
-}
-
-/// The symbols [`intern_path_id`] interns for `p`.
-pub fn path_symbols(p: &Path) -> Vec<SymRef> {
-    let mut segs = symbols::ns_names(p.ns());
-    segs.push(p.name_symbol());
-    segs
-}
-
-/// The [`Path`] an interned heap path names — the inverse of
-/// [`intern_path_id`]: each module is the child its symbol names in the one
-/// before, from the root.
-pub fn path_from_id(heap: &Heap, id: PathId) -> Path {
-    let segments = heap.path_segments(id);
-    let (name, modules) = segments.split_last().expect("an interned path has a segment");
-    let ns = modules.iter().fold(NsId::ROOT, |ns, m| {
-        symbols::child_ns_named(ns, *m).unwrap_or_else(|| {
-            panic!("`{}` is not a module of `{}`: the path was not written by `intern_path_id`", m.name(), symbols::ns_path(ns).join("::"))
-        })
-    });
-    Path::of_symbol(ns, *name)
-}
-
 /// Whether `p` is the built-in type `name`.
 ///
 /// Every built-in (`vector`/`hashtable`/`option`/`result`/`llvm-*`/`scope`/the

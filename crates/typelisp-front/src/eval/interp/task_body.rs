@@ -154,7 +154,7 @@ impl TaskBody for TyplBody {
     }
 
     fn failure_left_task(e: EvalError) -> EvalError {
-        Task::failure_left_task(e)
+        super::core_cps::escaped_task_failure(e)
     }
 }
 

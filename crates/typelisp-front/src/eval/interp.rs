@@ -4313,27 +4313,6 @@ impl crate::CompileTarget {
 
 
 
-/// Builds an enum value (`Option`/`Result`/user `defenum`) for `type_name`'s
-/// `variant`, from already-evaluated `fields` — the encode-direction
-/// counterpart of `match_pattern`'s boxed-enum decode.
-///
-/// Every enum value is a GC-heap `BoxedObj::Enum`. There is no second
-/// representation: this used to fall back to a Rust-side `RtValue::Data`
-/// whenever a field held something the heap could not carry — an LLVM handle,
-/// a native `Scope<V>`, a built-in function value, a `random-state` — and each
-/// of those has since been given a heap form, so nothing can fail the
-/// conversion any more. A failure here is therefore an interpreter bug, not a
-/// tier decision, and is reported as one.
-///
-/// Losing that fallback is what makes an enum's representation a *static*
-/// property again. While it existed, the tier was decided from the value in
-/// hand, so `is_heap_repr_ty` had to predict the same answer from the type
-/// alone (`enum_fields_representable`) and the two could — and did — disagree
-/// without anything observable breaking, which is a bad place to be.
-fn build_enum_value(heap: &mut Heap, type_name: Path, variant: usize, fields: Vec<Value>) -> Value {
-    alloc_typed_enum(heap, &type_name, variant, fields)
-}
-
 impl Interp {
     /// The `stream-*` / `file-*` built-ins: a thin adapter over
     /// [`typelisp_rt::stream_builtin::stream_builtin`], which is
@@ -4403,7 +4382,7 @@ fn result_ok(heap: &mut Heap, key: &str, v: Value) -> Value {
 /// test against.
 fn result_err(heap: &mut Heap, result_key: &str, err_type: &str, msg: String) -> Value {
     let msg_val = str_rt(heap, msg);
-    let err_val = build_enum_value(heap, Path::root(err_type), 0, vec![msg_val]);
+    let err_val = alloc_typed_enum(heap, &Path::root(err_type), 0, vec![msg_val]);
     // The `Result`'s own key, not the bare path: a value's identity carries
     // its instantiation, and `result` matches no `result<option<sexpr>,
     // evalerror>` pattern. `err_type` needs no such treatment — a concrete
@@ -4468,25 +4447,16 @@ fn hashtable_clear(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> 
     Ok(Value::Empty)
 }
 
-/// Builds a `Vector<T>` runtime value (the boxed-struct variable-length
-/// `"vector"` representation, see `vector_def`'s doc comment) directly out of
-/// already-encoded `mem::Value` fields — the shared tail of `hashtable_keys`/
-/// `hashtable_values`/`hashtable_entries`, whose fields come straight from
-/// `Heap::hashtable_pairs` and so need no conversion on the way out.
-fn vector_of_raw(heap: &mut Heap, key: &str, fields: Vec<Value>) -> Value {
-    crate::type_key::alloc_struct_keyed(heap, key, fields)
-}
-
 fn hashtable_keys(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let fields = heap.hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
-    Ok(vector_of_raw(heap, ret_key, fields))
+    Ok(crate::type_key::alloc_struct_keyed(heap, ret_key, fields))
 }
 
 fn hashtable_values(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let fields = heap.hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
-    Ok(vector_of_raw(heap, ret_key, fields))
+    Ok(crate::type_key::alloc_struct_keyed(heap, ret_key, fields))
 }
 
 /// Each entry becomes a `cons-cell<K,V>` (`prelude.rs`'s generic `car`/`cdr`
@@ -4510,7 +4480,7 @@ fn hashtable_entries(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<V
         .into_iter()
         .map(|(k, v)| crate::type_key::alloc_struct_keyed(heap, &cell_key, vec![k, v]))
         .collect();
-    Ok(vector_of_raw(heap, ret_key, fields))
+    Ok(crate::type_key::alloc_struct_keyed(heap, ret_key, fields))
 }
 
 /// The `BoxId` behind a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance —

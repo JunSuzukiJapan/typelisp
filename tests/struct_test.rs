@@ -544,14 +544,12 @@ fn match_reads_the_fields_beside_a_unit_one_correctly() {
 
 #[test]
 fn a_unit_payload_keeps_an_enum_heap_representable() {
-    // The motivating case. Before `()` had a field encoding,
-    // `build_enum_value` couldn't convert the payload and fell back to the
-    // native `RtValue::Data` — which is what kept `Result<(), E>` from
-    // crossing into compiled code. A heap-repr enum is `RtValue::Sexpr`.
+    // `()` has a field encoding, so `Result<(), E>` is a heap enum box like
+    // any other and can cross into compiled code.
     let src = "(defun f () Result<(), string> (result::ok ())) (f)";
     assert!(
         matches!(eval_ok(src), Value::Boxed(_)),
-        "a `()` payload must not send the enum down the native-repr fallback"
+        "a `()` payload must leave the enum a heap box"
     );
 }
 

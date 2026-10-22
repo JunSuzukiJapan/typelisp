@@ -14,11 +14,6 @@ extern crate typelisp;
 mod common;
 use common::{check_err, eval_err, eval_string, run};
 
-/// The string the last form produced, panicking on any check/eval error.
-fn fmt(src: &str) -> String {
-    eval_string(src)
-}
-
 /// Runs `src` through the `typl` binary and returns its stdout — the only way
 /// to observe the operators that print rather than return a string.
 fn stdout_of(src: &str) -> String {
@@ -58,7 +53,7 @@ fn pretty_printing_is_off_by_default() {
         (setf *print-right-margin* 10)
         (format false "~a" '(1 2 3 4 5 6 7 8 9 10))
     "#;
-    assert_eq!(fmt(src), "(1 2 3 4 5 6 7 8 9 10)");
+    assert_eq!(eval_string(src), "(1 2 3 4 5 6 7 8 9 10)");
 }
 
 #[test]
@@ -71,7 +66,7 @@ fn print_pretty_makes_a_over_long_list_wrap_at_the_right_margin() {
     // The trailing space before each conditional newline is part of the
     // section being measured (it is trimmed only if the break is taken), which
     // is why `4` rather than `5` ends the first line.
-    assert_eq!(fmt(src), "(1 2 3 4\n 5 6 7 8\n 9 10)");
+    assert_eq!(eval_string(src), "(1 2 3 4\n 5 6 7 8\n 9 10)");
 }
 
 #[test]
@@ -81,7 +76,7 @@ fn a_wide_right_margin_leaves_everything_on_one_line() {
         (setf *print-right-margin* 200)
         (format false "~a" '(1 2 3 4 5 6 7 8 9 10))
     "#;
-    assert_eq!(fmt(src), "(1 2 3 4 5 6 7 8 9 10)");
+    assert_eq!(eval_string(src), "(1 2 3 4 5 6 7 8 9 10)");
 }
 
 #[test]
@@ -94,7 +89,7 @@ fn miser_width_turns_fill_newlines_into_linear_ones() {
         (setf *print-miser-width* 12)
         (format false "~a" '(11 22 33 44))
     "#;
-    assert_eq!(fmt(src), "(11\n 22\n 33\n 44)");
+    assert_eq!(eval_string(src), "(11\n 22\n 33\n 44)");
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +104,7 @@ fn logical_block_directive_wraps_its_body() {
         (format false "~:<~a ~:_~a ~:_~a~:>" '(alpha beta gamma))
     "#;
     // `~:<` supplies the `(`/`)` prefix and suffix; `~:_` is a fill newline.
-    assert_eq!(fmt(src), "(alpha beta\n gamma)");
+    assert_eq!(eval_string(src), "(alpha beta\n gamma)");
 }
 
 #[test]
@@ -119,7 +114,7 @@ fn logical_block_directive_takes_explicit_prefix_and_suffix_segments() {
         (setf *print-right-margin* 10)
         (format false "~<[~;~a ~_~a~;]~:>" '(alpha beta))
     "#;
-    assert_eq!(fmt(src), "[alpha\n beta]");
+    assert_eq!(eval_string(src), "[alpha\n beta]");
 }
 
 #[test]
@@ -128,7 +123,7 @@ fn a_per_line_prefix_segment_starts_every_line() {
         (setf *print-pretty* true)
         (format false "~<;; ~@;~a~:@_~a~:>" '(one two))
     "#;
-    assert_eq!(fmt(src), ";; one\n;; two");
+    assert_eq!(eval_string(src), ";; one\n;; two");
 }
 
 #[test]
@@ -137,19 +132,19 @@ fn indent_directive_moves_the_continuation_lines() {
         (setf *print-pretty* true)
         (format false "~<(~;~4i~a~:@_~a~;)~:>" '(head body))
     "#;
-    assert_eq!(fmt(src), "(head\n    body)");
+    assert_eq!(eval_string(src), "(head\n    body)");
 }
 
 #[test]
 fn the_justification_form_of_the_same_opener_is_untouched() {
     // `~<…~>` (no `:` on the closer) is still justification, not a block.
-    assert_eq!(fmt(r#"(format false "~10<~a~;~a~>" "ab" "cd")"#), "ab      cd");
+    assert_eq!(eval_string(r#"(format false "~10<~a~;~a~>" "ab" "cd")"#), "ab      cd");
 }
 
 #[test]
 fn pretty_directives_are_no_ops_when_print_pretty_is_false() {
     let src = r#"(format false "~:<~a ~:_~a~:>" '(alpha beta))"#;
-    assert_eq!(fmt(src), "(alpha beta)");
+    assert_eq!(eval_string(src), "(alpha beta)");
 }
 
 #[test]
@@ -165,7 +160,7 @@ fn w_directive_pretty_prints_and_keeps_reader_syntax() {
         (setf *print-right-margin* 12)
         (format false "~w" '("aa" "bb" "cc"))
     "#;
-    assert_eq!(fmt(src), "(\"aa\" \"bb\"\n \"cc\")");
+    assert_eq!(eval_string(src), "(\"aa\" \"bb\"\n \"cc\")");
 }
 
 #[test]
@@ -178,7 +173,7 @@ fn an_explicitly_padded_a_directive_stays_flat() {
         (setf *print-right-margin* 4)
         (format false "~12a|" '(1 2 3 4))
     "#;
-    assert_eq!(fmt(src), "(1 2 3 4)   |");
+    assert_eq!(eval_string(src), "(1 2 3 4)   |");
 }
 
 // ---------------------------------------------------------------------------

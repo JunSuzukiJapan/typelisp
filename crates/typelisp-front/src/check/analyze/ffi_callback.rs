@@ -160,7 +160,7 @@ impl Checker {
         }
         let path = self.fresh_callback_path();
         let mut f = Items::new(heap);
-        let p = forms::path_form(f.heap(), &path);
+        let p = core::path_form(f.heap(), &path);
         f.push(p);
         f.extend(fields.iter().copied());
         let form = f.finish(wk::DEFUN)?;

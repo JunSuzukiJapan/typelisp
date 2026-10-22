@@ -17,11 +17,6 @@ extern crate typelisp;
 mod common;
 use common::{eval_err, eval_string};
 
-/// The string the last form produced, panicking on any check/eval error.
-fn fmt(src: &str) -> String {
-    eval_string(src)
-}
-
 /// A self-referential type plus a constructor that ties the knot: `(cycle)`
 /// returns a `node` whose `next` points back at itself. Prepended to the
 /// sources that need one.
@@ -41,8 +36,8 @@ const CYCLE_DEFS: &str = r#"
 fn every_limit_is_off_by_default() {
     // CL's initial state for all three, and what keeps existing programs'
     // output byte-for-byte what it was.
-    assert_eq!(fmt(r#"(format false "~a" '(1 (2 (3 (4 (5))))))"#), "(1 (2 (3 (4 (5)))))");
-    assert_eq!(fmt(r#"(format false "~a" '(1 2 3 4 5 6 7 8 9 10))"#), "(1 2 3 4 5 6 7 8 9 10)");
+    assert_eq!(eval_string(r#"(format false "~a" '(1 (2 (3 (4 (5))))))"#), "(1 (2 (3 (4 (5)))))");
+    assert_eq!(eval_string(r#"(format false "~a" '(1 2 3 4 5 6 7 8 9 10))"#), "(1 2 3 4 5 6 7 8 9 10)");
 }
 
 #[test]
@@ -54,7 +49,7 @@ fn zero_means_unlimited() {
         (setf *print-length* 0)
         (format false "~a" '(1 (2 (3 (4)))))
     "#;
-    assert_eq!(fmt(src), "(1 (2 (3 (4))))");
+    assert_eq!(eval_string(src), "(1 (2 (3 (4))))");
 }
 
 #[test]
@@ -87,7 +82,7 @@ fn print_level_replaces_deeper_objects_with_hash() {
     "#;
     // The object handed to the printer is at level 0, so with a limit of 2
     // the third list down is the one that collapses.
-    assert_eq!(fmt(src), "(1 (2 #))");
+    assert_eq!(eval_string(src), "(1 (2 #))");
 }
 
 #[test]
@@ -96,7 +91,7 @@ fn print_level_one_keeps_only_the_outermost_list() {
         (setf *print-level* 1)
         (format false "~a" '(1 (2) (3)))
     "#;
-    assert_eq!(fmt(src), "(1 # #)");
+    assert_eq!(eval_string(src), "(1 # #)");
 }
 
 #[test]
@@ -107,7 +102,7 @@ fn print_level_leaves_atoms_alone() {
         (setf *print-level* 1)
         (format false "~a" '(1 two "three" #\f))
     "#;
-    assert_eq!(fmt(src), "(1 two three f)");
+    assert_eq!(eval_string(src), "(1 two three f)");
 }
 
 #[test]
@@ -118,7 +113,7 @@ fn print_level_applies_to_struct_and_enum_values() {
         (setf *print-level* 1)
         (format false "~a" (make-instance 'pair :a (make-instance 'pt :x 1 :y 2) :b (make-instance 'pt :x 3 :y 4)))
     "#;
-    assert_eq!(fmt(src), "#<pair a: # b: #>");
+    assert_eq!(eval_string(src), "#<pair a: # b: #>");
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +126,7 @@ fn print_length_truncates_a_list_with_an_ellipsis() {
         (setf *print-length* 4)
         (format false "~a" '(1 2 3 4 5 6 7 8))
     "#;
-    assert_eq!(fmt(src), "(1 2 3 4 ...)");
+    assert_eq!(eval_string(src), "(1 2 3 4 ...)");
 }
 
 #[test]
@@ -140,7 +135,7 @@ fn print_length_applies_at_every_level() {
         (setf *print-length* 2)
         (format false "~a" '(1 2 3 (4 5 6)))
     "#;
-    assert_eq!(fmt(src), "(1 2 ...)");
+    assert_eq!(eval_string(src), "(1 2 ...)");
 }
 
 #[test]
@@ -157,8 +152,8 @@ fn a_dotted_tail_within_the_limit_still_prints() {
         (setf *print-length* 2)
         (format false "~a" '(1 2 . 3))
     "#;
-    assert_eq!(fmt(flat), "(1 2 . 3)");
-    assert_eq!(fmt(pretty), "(1 2 . 3)");
+    assert_eq!(eval_string(flat), "(1 2 . 3)");
+    assert_eq!(eval_string(pretty), "(1 2 . 3)");
 }
 
 #[test]
@@ -167,7 +162,7 @@ fn a_list_shorter_than_the_limit_is_untouched() {
         (setf *print-length* 5)
         (format false "~a" '(1 2 3))
     "#;
-    assert_eq!(fmt(src), "(1 2 3)");
+    assert_eq!(eval_string(src), "(1 2 3)");
 }
 
 #[test]
@@ -177,7 +172,7 @@ fn print_length_truncates_struct_fields() {
         (setf *print-length* 2)
         (format false "~a" (make-instance 'quad :a 1 :b 2 :c 3 :d 4))
     "#;
-    assert_eq!(fmt(src), "#<quad a: 1 b: 2 ...>");
+    assert_eq!(eval_string(src), "#<quad a: 1 b: 2 ...>");
 }
 
 #[test]
@@ -187,7 +182,7 @@ fn print_length_truncates_enum_fields() {
         (setf *print-length* 2)
         (format false "~a" (shape::tri 3 4 5))
     "#;
-    assert_eq!(fmt(src), "(tri 3 4 ...)");
+    assert_eq!(eval_string(src), "(tri 3 4 ...)");
 }
 
 #[test]
@@ -197,7 +192,7 @@ fn level_and_length_compose() {
         (setf *print-length* 2)
         (format false "~a" '(1 (2 3) 4 5))
     "#;
-    assert_eq!(fmt(src), "(1 # ...)");
+    assert_eq!(eval_string(src), "(1 # ...)");
 }
 
 // ---------------------------------------------------------------------------
@@ -214,7 +209,7 @@ fn a_circular_structure_prints_with_labels_instead_of_recursing() {
     "#
     );
     // `#1=` marks the definition, `#1#` the reference back to it.
-    assert_eq!(fmt(&src), "#1=#<node val: 1 next: (some #1#)>");
+    assert_eq!(eval_string(&src), "#1=#<node val: 1 next: (some #1#)>");
 }
 
 #[test]
@@ -226,15 +221,15 @@ fn print_circle_labels_substructure_that_is_merely_shared() {
         (let ((x '(1 2)))
           (format false "~a" (list x x)))
     "#;
-    assert_eq!(fmt(src), "(#1=(1 2) #1#)");
+    assert_eq!(eval_string(src), "(#1=(1 2) #1#)");
 }
 
 #[test]
 fn print_circle_leaves_an_unshared_value_exactly_as_it_was() {
     // The scan finds nothing reached twice, so no label appears anywhere —
     // turning the flag on must not perturb ordinary output.
-    let plain = fmt(r#"(format false "~a" '(1 (2 3) 4))"#);
-    let circled = fmt(
+    let plain = eval_string(r#"(format false "~a" '(1 (2 3) 4))"#);
+    let circled = eval_string(
         r#"
         (setf *print-circle* true)
         (format false "~a" '(1 (2 3) 4))
@@ -252,7 +247,7 @@ fn each_argument_is_labelled_from_one() {
         (let ((x '(1 2)))
           (format false "~a ~a" (list x x) (list x x)))
     "#;
-    assert_eq!(fmt(src), "(#1=(1 2) #1#) (#1=(1 2) #1#)");
+    assert_eq!(eval_string(src), "(#1=(1 2) #1#) (#1=(1 2) #1#)");
 }
 
 #[test]
@@ -263,7 +258,7 @@ fn labels_work_under_standard_syntax_too() {
         (let ((x '("a")))
           (format false "~s" (list x x)))
     "#;
-    assert_eq!(fmt(src), "(#1=(\"a\") #1#)");
+    assert_eq!(eval_string(src), "(#1=(\"a\") #1#)");
 }
 
 #[test]
@@ -276,7 +271,7 @@ fn a_cycle_reached_through_two_paths_gets_one_label() {
           (format false "~a" (list a a)))
     "#
     );
-    assert_eq!(fmt(&src), "(#1=#<node val: 1 next: (some #1#)> #1#)");
+    assert_eq!(eval_string(&src), "(#1=#<node val: 1 next: (some #1#)> #1#)");
 }
 
 // ---------------------------------------------------------------------------
@@ -293,7 +288,7 @@ fn the_pretty_path_of_a_honors_the_limits_too() {
         (setf *print-length* 3)
         (format false "~a" '(1 2 3 4 (5 (6))))
     "#;
-    assert_eq!(fmt(src), "(1 2 3 ...)");
+    assert_eq!(eval_string(src), "(1 2 3 ...)");
 }
 
 #[test]
@@ -306,7 +301,7 @@ fn the_ellipsis_wraps_with_the_elements_it_replaces() {
         (setf *print-length* 4)
         (format false "~a" '(111 222 333 444 555 666))
     "#;
-    assert_eq!(fmt(fits), "(111\n 222\n 333\n 444 ...)");
+    assert_eq!(eval_string(fits), "(111\n 222\n 333\n 444 ...)");
 
     // …and breaks onto the next line when it does not.
     let breaks = r#"
@@ -315,7 +310,7 @@ fn the_ellipsis_wraps_with_the_elements_it_replaces() {
         (setf *print-length* 1)
         (format false "~a" '(111111 222222))
     "#;
-    assert_eq!(fmt(breaks), "(111111\n ...)");
+    assert_eq!(eval_string(breaks), "(111111\n ...)");
 }
 
 #[test]
@@ -328,7 +323,7 @@ fn circle_labels_survive_the_pretty_walker() {
         (let ((x '(1 2)))
           (format false "~a" (list x x)))
     "#;
-    assert_eq!(fmt(src), "(#1=(1 2) #1#)");
+    assert_eq!(eval_string(src), "(#1=(1 2) #1#)");
 }
 
 #[test]
