@@ -102,7 +102,14 @@
   コミットのたびに push する（バックアップのため）。
 - 実行時間を計測して数字を出さない。
 
-## 5. 落とし穴
+## 5. コミット前の確認
+
+- クローンしたら最初に `git config core.hooksPath scripts/git-hooks` を打つ。pre-commit フックが、
+  翻訳の鮮度（CI の Translations と同じ検査）と、足した行の絶対パス・絵文字を毎回確かめる。
+- コミットや push の前の残りの確認（警告 0 の `cargo check`、生成物の再生成の判断、全体テストの
+  判定、翻訳の直し方）は、スキル `.claude/skills/commit-check/SKILL.md` にまとめてある。
+
+## 6. 落とし穴
 
 - デバッグ用の行を消すのに `git checkout <file>` を使わない。未コミットの変更がすべて消える
   （このセッションで `crates/typelisp-mem/src/symbols.rs` を一度消し、会話の記録から復元した）。

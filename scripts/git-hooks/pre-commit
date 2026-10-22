@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Stops a commit that CI's Translations job would reject, or that adds a
+# machine-specific absolute path or an emoji. Only checks that take seconds
+# belong here; the rest are listed in .claude/skills/commit-check/SKILL.md.
+#
+# Enable it once per clone:
+#
+#   git config core.hooksPath scripts/git-hooks
+#
+# `git commit --no-verify` skips it.
+set -uo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+failed=0
+
+if ! out="$(scripts/check-translations.sh 2>&1)"; then
+    echo "pre-commit: translations are out of date (CI / Translations fails on this):" >&2
+    echo "$out" | grep -v '^all ' >&2
+    failed=1
+fi
+
+# Lines this commit adds, with the file each one is in.
+added="$(git diff --cached -U0 --no-color --diff-filter=AM | awk '
+    /^\+\+\+ b\// { file = substr($0, 7); next }
+    /^\+/ && !/^\+\+\+/ { print file ": " substr($0, 2) }
+')"
+
+paths="$(printf '%s\n' "$added" | grep -E '(/Users/|/home/)[A-Za-z0-9._-]+/' || true)"
+if [ -n "$paths" ]; then
+    echo "pre-commit: machine-specific absolute paths:" >&2
+    echo "$paths" >&2
+    failed=1
+fi
+
+emoji="$(printf '%s\n' "$added" | perl -CSD -ne 'print if /[\x{1F000}-\x{1FFFF}\x{2600}-\x{27BF}]/' || true)"
+if [ -n "$emoji" ]; then
+    echo "pre-commit: emoji or icon symbols:" >&2
+    echo "$emoji" >&2
+    failed=1
+fi
+
+exit $failed
