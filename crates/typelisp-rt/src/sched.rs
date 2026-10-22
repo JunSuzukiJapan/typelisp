@@ -2095,18 +2095,15 @@ pub fn sleep_wait(secs: f64) -> Result<Waiting, SchedError> {
     Ok(Waiting::Until(std::time::Instant::now() + d))
 }
 
-/// A type key a compiled suspension site appended as its second word — a
-/// tagged string the bridge put there, because a word on its own does not
+/// The type key of the type form a compiled suspension site appended as its
+/// second word — the bridge put it there, because a word on its own does not
 /// name the type the answer is built as. `what` is the operation and `ty` the
-/// type the key spells, for the message a malformed site gets.
+/// type the form writes, for the message a malformed site gets.
 fn key_word(heap: &Heap, word: i64, what: &str, ty: &str) -> Result<String, SchedError> {
-    match typelisp_abi::decode(word) {
-        Value::Str(id) => Ok(heap.string(id).to_string()),
-        other => Err(SchedError::Internal(format!(
-            "a compiled {} carried {:?} where its {} key should be",
-            what, other, ty
-        ))),
-    }
+    let form = typelisp_abi::decode(word);
+    typelisp_mem::type_key_of_form(heap, form).ok_or_else(|| {
+        SchedError::Internal(format!("a compiled {} carried {:?} where its {} type should be", what, form, ty))
+    })
 }
 
 /// What a compiled frame that just returned `STATUS_SUSPEND` is waiting for,
@@ -2162,15 +2159,15 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // own `Repr::field_kind` because the driver has only a word.
         // The capacity is an ordinary `i32` argument, so it crosses raw — the
         // suspension site tags only what the driver could not otherwise read.
-        // The second word is the channel's type key, a string the bridge
-        // appended at the site (as `recv`'s `Option<T>` key is).
+        // The second word is the channel's type, a type form the bridge
+        // appended at the site (as `recv`'s `Option<T>` is).
         cs::SUSPEND_CHAN_NEW => {
             let key = key_word(heap, second, "`Chan::new`", "`Chan<T>`")?;
             Ok((Waiting::Chan(ChanOp::New(payload, key)), Wake::Tagged))
         }
         // The closure is tagged, and the answer — the handle — comes back
         // tagged like every other typed wake value. The second word is the
-        // handle's type key, appended by the bridge.
+        // handle's type, a type form appended by the bridge.
         cs::SUSPEND_TASK => {
             let key = key_word(heap, second, "`task`", "`Task<T>`")?;
             Ok((Waiting::Spawn(typelisp_abi::decode(payload), key), Wake::Tagged))
@@ -2225,19 +2222,10 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
             for i in 0..n {
                 let base = 2 + 3 * i;
                 let c = chan_id_of(heap, Some(typelisp_abi::decode(words[base + 1])))?;
-                let extra = typelisp_abi::decode(words[base + 2]);
                 ops.push(if untag(words[base]) == 0 {
-                    match extra {
-                        Value::Str(id) => SelectOp::Recv(c, heap.string(id).to_string()),
-                        other => {
-                            return Err(SchedError::Internal(format!(
-                                "a compiled `select` receive arm carried {:?} where its key should be",
-                                other
-                            )))
-                        }
-                    }
+                    SelectOp::Recv(c, key_word(heap, words[base + 2], "`select` receive arm", "`Option<T>`")?)
                 } else {
-                    SelectOp::Send(c, extra)
+                    SelectOp::Send(c, typelisp_abi::decode(words[base + 2]))
                 });
             }
             Ok((Waiting::Select { ops, has_else }, Wake::Tagged))

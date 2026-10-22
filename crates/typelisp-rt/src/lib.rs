@@ -1145,47 +1145,36 @@ pub unsafe extern "C" fn rt_ratio_denominator(args: *const i64, argc: u32) -> i6
     encode(active_heap().int_from_bigint(r.denom().clone()))
 }
 
-// ---- Sexpr/RtValue unification, Stage 1: boxed objects (Struct) --------
+// ---- boxed objects (Struct) ------------------------------------------------
 //
 // `BoxedObj::Struct` (`typelisp-mem`) is the shared runtime shape behind a
 // `defstruct` instance, `Vector<T>`, and `cons-cell<K,V>` alike — see its
-// doc comment. This mem/rt-layer plumbing is deliberately unwired from
-// `compiler.rs`/the interpreter for now (that's Stage 2/3 of the
-// unification plan, per `docs/dev/implementation-log.md`'s "Sexpr/RtValue
-// 内部表現統合 実装計画"): these three functions exist so the
-// representation itself can be exercised and tested in isolation first.
+// doc comment.
 
-/// The interned type identity named by a tagged `Sexpr` `Str` argument.
+/// The interned type identity named by a tagged type-form argument.
 ///
-/// Compiled code has no `Path`, so it hands these shims the type's *name* —
-/// the literal `core_bridge` compiled from `type_key::type_key_of`. This is
-/// where that name crosses back into the heap's type-key table, and the one
-/// place in this crate where an identity is minted.
+/// Compiled code has no `Type`, so it hands these shims the type written as
+/// the core IR writes it (`(type-named ::point)`), rebuilt at run time from
+/// the nodes `core_bridge` compiled it to. This is where that form crosses
+/// back into the heap's type-key table, and the one place in this crate where
+/// an identity is minted.
 ///
-/// The lookup runs first so the steady state allocates nothing: a type is
+/// The lookup runs first so the steady state mints nothing: a type is
 /// interned once (by the checker, or by the first value compiled code builds
 /// of it) and every later instance finds the id already there.
 ///
 /// # Safety
 ///
-/// `raw` must decode to a `Value::Str`; a `Heap` must be registered on this
+/// `raw` must decode to a type form; a `Heap` must be registered on this
 /// thread.
 unsafe fn type_key_arg(raw: i64, who: &str) -> TypeKeyId {
-    if let Some(key) = existing_type_key_arg(raw, who) {
-        return key;
-    }
-    let sid = match decode(raw) {
-        Value::Str(id) => id,
-        _ => unreachable!("existing_type_key_arg already rejected a non-Str"),
-    };
     let heap = active_heap();
-    let name = heap.string(sid).to_string();
-    heap.intern_type_key(&name)
+    let key = type_key_of_arg(heap, raw, who);
+    heap.intern_type_key(&key)
 }
 
-/// The interned identity named by a tagged `Sexpr` `Str` argument, or `None`
-/// if this heap has never seen that type — [`type_key_arg`] without the
-/// minting.
+/// The interned identity named by a tagged type-form argument, or `None` if
+/// this heap has never seen that type — [`type_key_arg`] without the minting.
 ///
 /// What an instance *test* wants: a type no value here has ever had answers
 /// the question by itself, and minting an id for it would only grow a
@@ -1195,18 +1184,22 @@ unsafe fn type_key_arg(raw: i64, who: &str) -> TypeKeyId {
 ///
 /// Same as [`type_key_arg`].
 unsafe fn existing_type_key_arg(raw: i64, who: &str) -> Option<TypeKeyId> {
-    let sid = match decode(raw) {
-        Value::Str(id) => id,
-        _ => fatal(&format!("{}: type name argument is not a Str", who)),
-    };
     let heap = active_heap();
-    heap.type_key_id(&heap.string(sid))
+    let key = type_key_of_arg(heap, raw, who);
+    heap.type_key_id(&key)
+}
+
+/// The type key a tagged type-form argument spells.
+fn type_key_of_arg(heap: &Heap, raw: i64, who: &str) -> String {
+    let form = decode(raw);
+    typelisp_mem::type_key_of_form(heap, form)
+        .unwrap_or_else(|| fatal(&format!("{}: type argument is not a type form: {:?}", who, form)))
 }
 
 /// `(rt-struct-new type-name field0 field1 ...)` for compiled code —
-/// allocates a boxed `Sexpr` struct. `args[0]` is a tagged `Sexpr` `Str`
-/// (the struct's type name, interned into a `TypeKeyId` here rather than
-/// kept as a live `Sexpr` reference — the box stores the id, not the name);
+/// allocates a boxed `Sexpr` struct. `args[0]` is a tagged type form (the
+/// struct's type, interned into a `TypeKeyId` here rather than kept as a live
+/// `Sexpr` reference — the box stores the id, not the form);
 /// `args[1..argc]` are the
 /// field values, already-tagged `Sexpr`s copied into the new struct's field
 /// vector unchanged (this function doesn't interpret them, same as
@@ -1215,12 +1208,12 @@ unsafe fn existing_type_key_arg(raw: i64, who: &str) -> Option<TypeKeyId> {
 /// # Safety
 ///
 /// `argc` must be `>= 1`, `args` must point to at least `argc` valid `i64`s,
-/// and `args[0]` must decode to a `Value::Str`; a `Heap` must already be
+/// and `args[0]` must decode to a type form; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        fatal("rt_struct_new: expected at least 1 argument (the type name)");
+        fatal("rt_struct_new: expected at least 1 argument (the type)");
     }
     let type_key = type_key_arg(*args, "rt_struct_new");
     let mut fields = Vec::with_capacity(argc as usize - 1);
@@ -1293,20 +1286,20 @@ pub unsafe extern "C-unwind" fn rt_struct_field_get(args: *const i64, argc: u32)
 // invariant stays intact.
 
 /// `(rt-data-new type-name variant field0 field1 ...)` for compiled code —
-/// allocates a boxed enum value. `args[0]` is a tagged `Sexpr` `Str` (the
-/// enum's type name, interned like [`rt_struct_new`]'s), `args[1]` is the
+/// allocates a boxed enum value. `args[0]` is a tagged type form (the
+/// enum's type, interned like [`rt_struct_new`]'s), `args[1]` is the
 /// *raw* (untagged) variant index, `args[2..argc]` are the variant's field
 /// values, already-tagged `Sexpr`s stored unchanged.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 2`, `args` must point to at least `argc` valid
-/// `i64`s, and `args[0]` must decode to a `Value::Str`; a `Heap` must
+/// `i64`s, and `args[0]` must decode to a type form; a `Heap` must
 /// already be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_data_new(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
-        fatal("rt_data_new: expected at least 2 arguments (type name, variant)");
+        fatal("rt_data_new: expected at least 2 arguments (type, variant)");
     }
     let type_key = type_key_arg(*args, "rt_data_new");
     let variant = *args.add(1);
@@ -1378,7 +1371,7 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
 /// against a `Sexpr` scrutinee — `compiler.rs`'s `compile-sexpr-instance-
 /// test`, `core_bridge::translate_pattern`'s `downcast`/`pat-typetest`
 /// encoding). Tests whether tagged `Sexpr` value `args[0]` is a boxed
-/// struct or enum whose own `type_name` matches the `Str` `args[1]`, and —
+/// struct or enum whose own type is the one the type form `args[1]` writes, and —
 /// for an enum — whose variant also matches the *raw* `args[2]` (`-1` skips
 /// the variant check, for a struct downcast or a `(the T p)` whole-enum
 /// bind, where any variant of `T` matches).
@@ -1395,7 +1388,7 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
 /// # Safety
 ///
 /// `argc` must be `>= 3`, `args` must point to at least 3 valid `i64`s, and
-/// `args[1]` must decode to a `Value::Str`; a `Heap` must already be
+/// `args[1]` must decode to a type form; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_sexpr_instance_test(args: *const i64, argc: u32) -> i64 {
@@ -2023,17 +2016,17 @@ pub unsafe extern "C" fn rt_struct_pop_field(args: *const i64, argc: u32) -> i64
 // the `rt_struct_*` family above; every key and value crossing them is
 // already tagged, exactly as a struct field is.
 
-/// `(rt-hashtable-new key)` for compiled code — an empty `HashTable<K,V>`
-/// under the runtime identity `key` spells.
+/// `(rt-hashtable-new type)` for compiled code — an empty `HashTable<K,V>`
+/// under the runtime identity of the type form `type`.
 ///
 /// # Safety
 ///
 /// A `Heap` must already be registered on this thread, and `args[0]` must be
-/// a tagged string.
+/// a tagged type form.
 #[no_mangle]
 pub unsafe extern "C" fn rt_hashtable_new(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
-        fatal("rt_hashtable_new: expected 1 argument (the type key)");
+        fatal("rt_hashtable_new: expected 1 argument (the type)");
     }
     // The table's own runtime identity, spelled by the checker and handed
     // down through the island (`Checker::assoc_form` -> `hashtable-op`'s name
@@ -2199,7 +2192,7 @@ unsafe fn hashtable_arg(args: *const i64, argc: u32, who: &str) -> BoxId {
 #[no_mangle]
 pub unsafe extern "C" fn rt_hashtable_keys(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_keys");
-    // `args[1]` is the result's own key — a `Vector<K>`, whose instantiation
+    // `args[1]` is the result's own type — a `Vector<K>`, whose instantiation
     // no value here carries. See `rt_hashtable_new`.
     let key = type_key_arg(*args.add(1), "rt_hashtable_keys");
     let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
@@ -2235,17 +2228,16 @@ pub unsafe extern "C" fn rt_hashtable_values(args: *const i64, argc: u32) -> i64
 pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_entries");
     // Two identities, one handed in: the result is a `Vector<cons-cell<K,V>>`,
-    // so each cell's key is one level inside the vector's
-    // (`typelisp_mem::ConcreteNames::single_type_arg`, shared with the interpreted side so the
-    // two spell the cells the same).
-    let vec_key_name = match decode(*args.add(1)) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        other => fatal(&format!("rt_hashtable_entries: the result key is not a string: {:?}", other)),
-    };
-    let cell_key_name = match typelisp_mem::ConcreteNames::single_type_arg(&vec_key_name) {
-        Some(k) => k.to_string(),
-        None => fatal("rt_hashtable_entries: the result key is not a one-argument container key"),
-    };
+    // so each cell's type is the vector form's one argument,
+    // `(type-named ::vector CELL)`.
+    let heap = active_heap();
+    let vec_form = decode(*args.add(1));
+    let vec_key_name = type_key_of_arg(heap, *args.add(1), "rt_hashtable_entries");
+    let cell_key_name = match heap.list_to_vec(vec_form).as_deref() {
+        Ok([_, _, cell]) => typelisp_mem::type_key_of_form(heap, *cell),
+        _ => None,
+    }
+    .unwrap_or_else(|| fatal(&format!("rt_hashtable_entries: the result type is not a one-argument container: {}", vec_key_name)));
     let vec_key = active_heap().intern_type_key(&vec_key_name);
     let cell_key = active_heap().intern_type_key(&cell_key_name);
     let pairs = active_heap().hashtable_pairs(id);
@@ -5546,6 +5538,29 @@ mod tests {
     /// path (here, another `rt_*` call) rather than reborrowing the original
     /// `&mut heap` binding directly, which Stacked Borrows treats as
     /// invalidating the raw pointer.
+    /// `(type-named PATH ARG...)`, tagged — the type form compiled code hands
+    /// the shims. `path` is walked down the module tree from the root.
+    fn make_type(path: &[&str], args: &[i64]) -> i64 {
+        use typelisp_mem::symbols::{child_ns, intern_exact, well_known_symbol, wk, NsId};
+        let heap = unsafe { active_heap() };
+        let mut segs = vec![intern_exact(NsId::ROOT, "")];
+        let mut ns = NsId::ROOT;
+        for (i, seg) in path.iter().enumerate() {
+            segs.push(intern_exact(ns, seg));
+            if i + 1 < path.len() {
+                ns = child_ns(ns, seg);
+            }
+        }
+        let mut form = Value::Empty;
+        for arg in args.iter().rev() {
+            form = heap.cons(decode(*arg), form).expect("cons");
+        }
+        let path = heap.intern_path(&segs);
+        form = heap.cons(path, form).expect("cons");
+        form = heap.cons(Value::Symbol(well_known_symbol(wk::TYPE_NAMED)), form).expect("cons");
+        encode(form)
+    }
+
     fn make_str(s: &str) -> i64 {
         let args: Vec<i64> = s.chars().map(|c| c as i64).collect();
         unsafe { rt_str_new(args.as_ptr(), args.len() as u32) }
@@ -5663,7 +5678,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let type_name = make_str("point");
+        let type_name = make_type(&["point"], &[]);
         let x = encode(Value::Int(1));
         let y = encode(Value::Int(2));
         let args = [type_name, x, y];
@@ -5689,7 +5704,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let type_name = make_str("unit-struct");
+        let type_name = make_type(&["unit-struct"], &[]);
         let args = [type_name];
         let tagged = unsafe { rt_struct_new(args.as_ptr(), 1) };
 
@@ -5704,7 +5719,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let type_name = make_str("option");
+        let type_name = make_type(&["option"], &[]);
         let payload = encode(Value::Int(42));
         // args = [type-name, raw variant index, field0]
         let args = [type_name, 0, payload];
@@ -5731,7 +5746,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let type_name = make_str("option");
+        let type_name = make_type(&["option"], &[]);
         let args = [type_name, 1];
         let tagged = unsafe { rt_data_new(args.as_ptr(), 2) };
 
@@ -5755,7 +5770,7 @@ mod tests {
         set_active_heap(&mut heap as *mut Heap);
 
         let cell = heap.cons(Value::Int(7), Value::Empty).expect("cons");
-        let type_name = make_str("option");
+        let type_name = make_type(&["option"], &[]);
         let args = [type_name, 0, encode(cell)];
         let tagged = unsafe { rt_data_new(args.as_ptr(), 3) };
         let boxed = decode(tagged);
@@ -5874,7 +5889,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let type_name = make_str("point");
+        let type_name = make_type(&["point"], &[]);
         let args = [type_name, encode(Value::Int(1)), encode(Value::Int(2))];
         let tagged = unsafe { rt_struct_new(args.as_ptr(), 3) };
 
@@ -5892,10 +5907,10 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let empty = unsafe { rt_struct_new([make_str("vector")].as_ptr(), 1) };
+        let empty = unsafe { rt_struct_new([make_type(&["vector"], &[])].as_ptr(), 1) };
         assert_eq!(unsafe { rt_struct_field_count([empty].as_ptr(), 1) }, 0, "empty vector has length 0");
 
-        let three = [make_str("vector"), encode(Value::Int(10)), encode(Value::Int(20)), encode(Value::Int(30))];
+        let three = [make_type(&["vector"], &[]), encode(Value::Int(10)), encode(Value::Int(20)), encode(Value::Int(30))];
         let tagged = unsafe { rt_struct_new(three.as_ptr(), 4) };
         assert_eq!(unsafe { rt_struct_field_count([tagged].as_ptr(), 1) }, 3, "raw count, not a tagged Sexpr Int");
     }
@@ -5905,7 +5920,7 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new([make_str("hashtable<i32,i32>")].as_ptr(), 1) };
+        let ht = unsafe { rt_hashtable_new([make_type(&["hashtable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])].as_ptr(), 1) };
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 0, "a fresh map is empty");
 
         // Two int->int entries (keys/values as raw tagged `Sexpr` ints). The
@@ -5919,14 +5934,14 @@ mod tests {
         assert_eq!(unsafe { rt_hashtable_count([ht].as_ptr(), 1) }, 2, "two distinct keys");
 
         // `keys` builds a `Vector` whose field count matches the entry count.
-        let keys = unsafe { rt_hashtable_keys([ht, make_str("vector<i32>")].as_ptr(), 2) };
+        let keys = unsafe { rt_hashtable_keys([ht, make_type(&["vector"], &[make_type(&["i32"], &[])])].as_ptr(), 2) };
         match decode(keys) {
             Value::Boxed(id) => assert_eq!(unsafe { active_heap() }.struct_field_count(id), 2),
             other => panic!("expected a boxed vector, got {:?}", other),
         }
 
         // `entries` builds a `Vector` of `cons-cell`s, one per entry.
-        let entries = unsafe { rt_hashtable_entries([ht, make_str("vector<std::cons-cell<i32,i32>>")].as_ptr(), 2) };
+        let entries = unsafe { rt_hashtable_entries([ht, make_type(&["vector"], &[make_type(&["std", "cons-cell"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])])].as_ptr(), 2) };
         match decode(entries) {
             Value::Boxed(id) => {
                 let h = unsafe { active_heap() };
@@ -5949,7 +5964,7 @@ mod tests {
         let mut heap = Heap::with_capacity(64);
         set_active_heap(&mut heap as *mut Heap);
 
-        let ht = unsafe { rt_hashtable_new([make_str("hashtable<i32,i32>")].as_ptr(), 1) };
+        let ht = unsafe { rt_hashtable_new([make_type(&["hashtable"], &[make_type(&["i32"], &[]), make_type(&["i32"], &[])])].as_ptr(), 1) };
         let hash = 5;
         assert_eq!(unsafe { rt_hashtable_bucket_count([ht, hash].as_ptr(), 2) }, 0, "no bucket yet");
 
@@ -5974,7 +5989,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let tagged = unsafe { rt_struct_new([make_str("vector")].as_ptr(), 1) };
+        let tagged = unsafe { rt_struct_new([make_type(&["vector"], &[])].as_ptr(), 1) };
         assert_eq!(unsafe { rt_struct_push_field([tagged, encode(Value::Int(7))].as_ptr(), 2) }, 0, "push returns Unit (0)");
         assert_eq!(unsafe { rt_struct_push_field([tagged, encode(Value::Int(8))].as_ptr(), 2) }, 0);
 
@@ -5988,7 +6003,7 @@ mod tests {
         let mut heap = Heap::with_capacity(8);
         set_active_heap(&mut heap as *mut Heap);
 
-        let tagged = unsafe { rt_struct_new([make_str("vector")].as_ptr(), 1) };
+        let tagged = unsafe { rt_struct_new([make_type(&["vector"], &[])].as_ptr(), 1) };
         unsafe { rt_struct_push_field([tagged, encode(Value::Int(7))].as_ptr(), 2) };
         unsafe { rt_struct_push_field([tagged, encode(Value::Int(8))].as_ptr(), 2) };
 
@@ -6017,7 +6032,7 @@ mod tests {
         let inner_args = [encode(Value::Int(111)), encode(Value::Int(222))];
         let inner_cons = unsafe { rt_cons(inner_args.as_ptr(), 2) };
 
-        let type_name = make_str("wrapper");
+        let type_name = make_type(&["wrapper"], &[]);
         let struct_args = [type_name, inner_cons];
         let boxed = unsafe { rt_struct_new(struct_args.as_ptr(), 2) };
         unsafe { rt_push_sexpr_root(&boxed as *const i64, 1) };
@@ -6048,7 +6063,7 @@ mod tests {
         let inner_args = [encode(Value::Int(111)), encode(Value::Int(222))];
         let inner_cons = unsafe { rt_cons(inner_args.as_ptr(), 2) };
 
-        let type_name = make_str("wrapper");
+        let type_name = make_type(&["wrapper"], &[]);
         let struct_args = [type_name, inner_cons];
         let _boxed = unsafe { rt_struct_new(struct_args.as_ptr(), 2) };
         // Deliberately not rooted.

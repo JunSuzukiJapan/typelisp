@@ -11,8 +11,8 @@
   ある。要点は、解析が今のモジュールを `NsId` で持つことと、IR の中の定義の名前をルートからの
   パス（`::f`、`::m::f`）で読み書きすること（`core::path_form` / `core::path_value`）。ダンプの形式は 25、
   ABI は 0.3.14。
-- 段階 5 は 5a の前半まで済み。IR の型キーの欄が型のフォームになった（計画の 5a の項）。
-  ダンプの形式は 26、ABI は 0.3.15。
+- 段階 5 は 5a まで済み。IR とコンパイル済みコードが型をフォームで運ぶ（計画の 5a の項）。
+  ダンプの形式は 26、ABI は 0.3.16。
 
 ## 2. 4d で知っておくこと
 
@@ -30,13 +30,11 @@
 
 ## 3. 次にすること（順に）
 
-1. 5a の後半。コンパイル済みコードが型のフォームを定数として `rt_*` に渡す
-   （`rt_data_new`・`rt_struct_new`・`rt_hashtable_new`・`rt_sexpr_instance_test`・
-   `rt_hashtable_keys`/`values`・task/thread の shim）。ランタイム側（`typelisp-rt` の
-   `type_key_arg`・`existing_type_key_arg`）は `type_key_of_form` で読む。ブリッジが島へ渡して
-   いる文字列もフォームにする。残っている文字列のキーの作り手は、deffi の C 型（`lower.rs`）、
-   `c_struct.rs`、`fold.rs` の `ret_key`、組み込みの enum の雛形（`type_key::field_key_template`）。
-2. そのあと 5b〜5e（計画の段階 5 の項）。
+1. 5b。表を形にする（計画の段階 5 の項）。文字列のキーの作り手で残っているのは、ランタイムの
+   手書きのキー（`net_builtin.rs`・`stream_builtin.rs`・`sys_builtin.rs` の表、`"vector<string>"`
+   など）、deffi の C 型（`lower.rs`）、`c_struct.rs`、`fold.rs` の `ret_key`、組み込みの enum の
+   雛形（`type_key::field_key_template`）、ブリッジの `:dyn` の vtable の表。
+2. そのあと 5c〜5e（計画の段階 5 の項）。
 3. そのあと段階 6〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
    段階 6 で `Info::in_scope` の移行のための広い規則
    （`item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)`）を狭める。

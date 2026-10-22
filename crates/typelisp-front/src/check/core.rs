@@ -833,3 +833,39 @@ fn write_form(heap: &Heap, v: Value, out: &mut String) {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use typelisp_mem::{type_key_of_form, Heap, TypeKey};
+
+    use super::type_form;
+    use crate::types::{Path, Type};
+
+    /// A type written as a form and read back is the key the type spells
+    /// itself as — the one property that lets the interpreter and the compiled
+    /// code's runtime read the IR's types without spelling one type two ways.
+    #[test]
+    fn a_type_form_reads_back_as_the_types_own_key() {
+        let mut heap = Heap::with_capacity(64);
+        let point = Path::of(&["m", "point"]);
+        let types = [
+            Type::I32,
+            Type::Int,
+            Type::Str,
+            Type::Unit,
+            Type::Never,
+            Type::Named(point.clone(), vec![]),
+            Type::Named(Path::std("vector"), vec![Type::Named(point.clone(), vec![Type::Char])]),
+            Type::Named(Path::std("hashtable"), vec![Type::Str, Type::I32]),
+            Type::Dyn(Path::root("shape"), vec![]),
+            Type::Fn(vec![Type::I32, Type::Str], Some(Box::new(Type::Int)), Box::new(Type::Bool)),
+            Type::Fn(vec![], None, Box::new(Type::Unit)),
+            Type::PtrTo(Box::new(Type::U8)),
+            Type::CStruct(Path::root("timeval")),
+        ];
+        for ty in &types {
+            let form = type_form(&mut heap, ty, &[]).expect("type form");
+            assert_eq!(type_key_of_form(&heap, form).as_deref(), Some(ty.type_key().as_str()), "{:?}", ty);
+        }
+    }
+}

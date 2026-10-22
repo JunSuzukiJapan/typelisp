@@ -2219,12 +2219,13 @@ const SOURCE_TEMPLATE: &str = r#"
 (defun compile-untag-int ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (untag-int-value builder m cur-fn (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr e)))))
 
-;; `(box-option (str ...) E)` -- a niched `Option` value put into the
+;; `(box-option TYPE E)` -- a niched `Option` value put into the
 ;; `BoxedObj::Enum` box a `Sexpr` slot holds it as, under the instantiation's
-;; own name: `none` (the empty-list word) becomes variant 1 with no field,
+;; own type: `none` (the empty-list word) becomes variant 1 with no field,
 ;; anything else variant 0 around that same word (already a tagged field
-;; word, which is `rt_data_new`'s contract). The value is spilled to a rooted
-;; slot first: the name literal allocates, and a payload box must survive it.
+;; word, which is `rt_data_new`'s contract). `TYPE` builds the type form at
+;; run time. The value is spilled to a rooted slot first: building the form
+;; allocates, and a payload box must survive it.
 (defun compile-box-option ((m llvm-module) (fn-name string) (builder llvm-builder) (env Scope<llvm-value>) (fn-env Scope<llvm-function>) (captured Option<Sexpr>) (cur-fn llvm-function) (loop-exit Option<llvm-basic-block>) (loop-slot Option<llvm-value>) (block-names string) (block-exits Scope<llvm-basic-block>) (block-slots Scope<llvm-value>) (protect Option<llvm-basic-block>) (exit-cleanup Option<llvm-basic-block>) (e Option<Sexpr>))llvm-value
     (let* ((v-slot (spill builder m 2 (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr e))))))
            (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr e))))
@@ -4606,11 +4607,10 @@ const SOURCE_TEMPLATE: &str = r#"
     (let ((v-slot (spill builder m 2 v)))
       (compile-ctor-subpatterns m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup v-slot scrut-kind variant field-kinds subpats 0 fail-block))))
 
-;; Compiles `type-name-form` (a compile-time-known
-;; `(str (int c)...)` literal, `str_literal_form`'s
-;; shape -- see `translate_construct`'s own
-;; `type-name-form` doc comment) into a real runtime
-;; `Sexpr::Str`, then calls `rt_sexpr_instance_test`
+;; Compiles `type-name-form` (the nodes that build a
+;; type form at run time -- see `translate_construct`'s
+;; own `type-name-form` doc comment) into the runtime
+;; form, then calls `rt_sexpr_instance_test`
 ;; to test scrutinee `v` against it (and, when
 ;; `variant >= 0`, that variant too -- `-1` skips the
 ;; check, for a struct downcast or a `(the T p)`
@@ -4945,14 +4945,12 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; either side constructs interoperates with the
 ;; other (unlike `compile-construct-box`'s
 ;; never-GC-tracked `malloc`'d array). `type-name-form`
-;; is `translate_construct`'s own `(str (int c)...)`
-;; literal form for the struct's local type name
-;; (`str_literal_form` — never a pre-allocated
-;; `Value::Str`, since AOT's target program shares no
-;; `Heap`/`StrId` table with this one), compiled once
-;; and passed as `rt_struct_new`'s own `args[0]`
-;; (that function's doc comment: a tagged `Sexpr`
-;; `Str`, exactly what `compile-str` already produces).
+;; is `translate_construct`'s nodes that build the
+;; struct's type form at run time (never a pre-built
+;; value, since AOT's target program shares no heap
+;; with this one), compiled once and passed as
+;; `rt_struct_new`'s own `args[0]` (that function's doc
+;; comment: a tagged type form).
 ;; Each remaining field is compiled then re-tagged by
 ;; `compile-tag-struct-field` per its own
 ;; `Repr::field_kind`
@@ -5024,8 +5022,8 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; via `rt_data_new` now, not the un-GC-managed
 ;; `build-malloc`'d array this used to leak. Mirrors
 ;; `compile-construct-boxed-struct` exactly, with one
-;; extra header slot: `args[0]` the type name (built
-;; from `type-name-form`, the same `str_literal_form`
+;; extra header slot: `args[0]` the type (built
+;; from `type-name-form`, the same type-form nodes
 ;; `translate_construct` now builds for every non-
 ;; `Sexpr` construct, not just a `mutable` one),
 ;; `args[1]` the raw variant index, `args[2 + i]` the
@@ -5399,9 +5397,8 @@ const SOURCE_TEMPLATE: &str = r#"
     (let ((method (sexpr-str (sexpr-car (sexpr-cdr e)))))
       (if (equal method "new")
           ;; The table's own runtime identity travels in the name slot: a type
-          ;; key includes its instantiation now, and an empty table has no
-          ;; field to read one off. `rt_hashtable_new` interns what it is
-          ;; given.
+          ;; includes its instantiation, and an empty table has no field to
+          ;; read one off. `rt_hashtable_new` interns what it is given.
           (let* ((name-form (sexpr-car (sexpr-cdr (sexpr-cdr (sexpr-cdr (sexpr-cdr e))))))
                  (name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup name-form))
                  (args-ptr (alloca-args builder 1)))
@@ -5475,7 +5472,7 @@ const SOURCE_TEMPLATE: &str = r#"
                  (const-word builder 0))))
             ;; `keys`/`values`/`entries`, each of which builds a `Vector<_>`
             ;; whose instantiation only the checker knows — so the name slot's
-            ;; key goes with the table as a second argument.
+            ;; type goes with the table as a second argument.
             (:else (let* ((name-v (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup option-type-name-form))
                          (args-ptr (alloca-args builder 2)))
                      (store-arg builder args-ptr 0 (load-raw builder ht-slot 0))
@@ -5813,7 +5810,7 @@ const SOURCE_TEMPLATE: &str = r#"
 ;; The descriptor is `[n, has-else, kind, chan, extra]...` in a rooted frame
 ;; slot array, **every word tagged** — the collector walks those slots, so a
 ;; raw integer in one would be read as a pointer. `extra` is the receive arm's
-;; `Option<T>` key or the send arm's value.
+;; `Option<T>` type or the send arm's value.
 ;;
 ;; The answer is a tagged `(ARM . VALUE)` cons: which arm won, and what it
 ;; answered with. The index is the whole of the dispatch, which is why `else`

@@ -739,14 +739,15 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(v);
             f.finish(wk::SOME_OF)
         }
-        // `(box-option KEY E)` -> `(box-option (str ...) E)`: the key crosses
-        // as the island's string literal, the way every type identity does.
+        // `(box-option TYPE E)` -> `(box-option TYPE' E)`: the type crosses
+        // as the nodes that rebuild its form at run time, the way every type
+        // identity does.
         wk::BOX_OPTION => {
-            let key = core::field(heap, form, 0).and_then(|k| typelisp_mem::type_key_of_form(heap, k)).ok_or_else(|| malformed(heap, form))?;
+            let ty = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let inner = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
-            let key = str_form(f.heap(), &key)?;
-            f.push(key);
+            let ty = quoted_form(f.heap(), ty)?;
+            f.push(ty);
             let v = to_island(f.heap(), inner, cx)?;
             f.push(v);
             f.finish(wk::BOX_OPTION)
@@ -796,9 +797,9 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
 /// `(select ARM...)` -> the same, with the forms inside each arm translated.
 ///
 /// Two of the arm's fields change shape on the way. The receive arm's
-/// `Option<T>` key is plain data in the core node — both readers want the
-/// string — but the island needs it as a **value at run time**, so it becomes
-/// a `(str ...)` node to compile, exactly as `vector-op`'s `pop` carries one.
+/// `Option<T>` is a type form, plain data in the core node, but the island
+/// needs it as a **value at run time**, so it becomes the nodes that rebuild
+/// that form, exactly as `vector-op`'s `pop` carries one.
 /// The bound name stays plain: the island binds it at compile time, into its
 /// own scope, and never needs it as a value.
 fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
@@ -813,13 +814,10 @@ fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
                 if parts.len() != 5 {
                     return Err(Error::TypeError("compile: malformed select receive arm".into()));
                 }
-                let Some(key) = typelisp_mem::type_key_of_form(a.heap(), parts[2]) else {
-                    return Err(Error::TypeError("compile: a select receive arm has no type".into()));
-                };
                 a.push(parts[0]);
                 a.push(parts[1]);
-                let key_form = str_form(a.heap(), &key)?;
-                a.push(key_form);
+                let ty = quoted_form(a.heap(), parts[2])?;
+                a.push(ty);
                 let chan = to_island(a.heap(), parts[3], cx)?;
                 a.push(chan);
                 let body = to_island(a.heap(), parts[4], cx)?;
@@ -928,9 +926,9 @@ fn call_node_shape(tag: u32) -> Option<(usize, usize)> {
     }
 }
 
-/// `(task RET-R KEY CALL)` -> `(let ((g R E)...) (spawn RET-R KEY (lambda ()
-/// RET-R (tag RET-R CALL'))))`, and from there to the island. `KEY` is the
-/// handle's type key, carried through for [`translate_spawn`].
+/// `(task RET-R TYPE CALL)` -> `(let ((g R E)...) (spawn RET-R TYPE (lambda ()
+/// RET-R (tag RET-R CALL'))))`, and from there to the island. `TYPE` is the
+/// handle's type form, carried through for [`translate_spawn`].
 ///
 /// **The call happens in a task, and what a task runs is a compiled
 /// closure.** So a compiled `task` does what the interpreted one does *up to*
@@ -1043,9 +1041,9 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: u32, cx: Ctx) -> Re
     translate_let(&mut s, let_form, inner)
 }
 
-/// `(spawn RET-R KEY LAMBDA)` -> `(suspend "rt_suspend_task" KIND -1 0 (2 .
-/// LAMBDA') (KIND . KEY'))`: build the closure, hand it to the scheduler with
-/// the handle's type key, and wake with the task's handle.
+/// `(spawn RET-R TYPE LAMBDA)` -> `(suspend "rt_suspend_task" KIND -1 0 (2 .
+/// LAMBDA') (KIND . TYPE'))`: build the closure, hand it to the scheduler with
+/// the handle's type, and wake with the task's handle.
 ///
 /// The island's ordinary suspension node, so the site is a `(suspend ...)`
 /// like `wait`'s: the shim records the closure, the activation ends with
@@ -1058,9 +1056,9 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: u32, cx: Ctx) -> Re
 /// `(spawn-thread RET-R KEY LAMBDA)` is the same with `rt_suspend_thread`,
 /// and wakes with a `Thread<T>` handle — `shim` names which.
 fn translate_spawn(heap: &mut Heap, form: Value, shim: &str, cx: Ctx) -> Result<Value, Error> {
-    let key = core::field(heap, form, 1).and_then(|k| typelisp_mem::type_key_of_form(heap, k)).ok_or_else(|| malformed(heap, form))?;
+    let ty = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let lambda = core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?;
-    let key = str_form(heap, &key)?;
+    let key = quoted_form(heap, ty)?;
     heap.push_root(key);
     let kind = Repr::Struct.field_kind();
     let node = suspend_node(heap, shim, kind, None, &[Repr::Fn], &[lambda], cx, Some(key));
@@ -1169,10 +1167,10 @@ fn translate_call(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
 /// that *does* know tags it, per `Repr::field_kind`, exactly as a value going
 /// into a struct field is tagged.
 ///
-/// `trailing` is an argument that is **already an island form** — a type key
+/// `trailing` is an argument that is **already an island form** — the type
 /// the answer is built under (`recv`'s `Option<T>`, `Chan::new`'s `Chan<T>`,
-/// a `task`'s `Task<T>`), which the core IR carries as a plain string and
-/// which therefore has no core form to translate. It is appended as one more
+/// a `task`'s `Task<T>`), which the core IR carries as plain data and which
+/// therefore has no core form to translate. It is appended as one more
 /// ordinary argument.
 fn suspend_node(
     heap: &mut Heap,
@@ -1222,17 +1220,17 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // The result's runtime identity — see `Checker::assoc_form`. A container
     // op that builds a box hands this to the shim that builds it; everything
     // else ignores it.
-    let ret_key = typelisp_mem::type_key_of_form(heap, parts[5]).ok_or_else(|| malformed(heap, form))?;
+    let ret_type = parts[5];
     let args = parts[6..].to_vec();
     // The receiver is `args[0]` by the same convention the checker builds an
     // instance call with, so its representation is the first of the list.
     let self_repr = if instance { reprs.first().unwrap_or(&ret) } else { &ret }.clone();
 
     if path_is_builtin(&type_name, "vector") && VECTOR_BUILTIN_METHODS.contains(&method.as_str()) {
-        return translate_vector_op(heap, &method, &self_repr, &ret_key, &args, cx);
+        return translate_vector_op(heap, &method, &self_repr, ret_type, &args, cx);
     }
     if path_is_builtin(&type_name, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&method.as_str()) {
-        return translate_hashtable_op(heap, &method, &self_repr, &ret_key, &args, cx);
+        return translate_hashtable_op(heap, &method, &self_repr, ret_type, &args, cx);
     }
     // `(wait t)` — the method-shaped member of the suspending set. Its answer
     // is *typed* (`Task<T>` -> `T`), which is the whole reason suspension is a
@@ -1256,7 +1254,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             // the handle is built by the scheduler, which has no type to read
             // `T` off.
             if method == "recv" || method == "new" {
-                let key = str_form(heap, &ret_key)?;
+                let key = quoted_form(heap, ret_type)?;
                 return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, Some(key));
             }
             return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, None);
@@ -1329,14 +1327,13 @@ fn llvm_op_key(type_name: &Path, self_repr: &Repr) -> Option<&'static str> {
 /// call; `compile-vector-op` emits the `rt_struct_*` calls directly. `kind` is
 /// `T`'s, since every one of the methods either reads or writes a `T` across
 /// the boxed-struct boundary. `new` has no receiver to read `T` from and no
-/// element to tag, so it carries `0` and a `"vector"` type-name literal
-/// instead; `pop` returns `Option<T>` and needs an `"option"` literal to build
-/// the result with.
+/// element to tag, so it carries `0` and the vector's own type instead; `pop`
+/// returns `Option<T>` and needs that type to build the result with.
 fn translate_vector_op(
     heap: &mut Heap,
     method: &str,
     self_repr: &Repr,
-    ret_key: &str,
+    ret_type: Value,
     args: &[Value],
     cx: Ctx,
 ) -> Result<Value, Error> {
@@ -1349,10 +1346,10 @@ fn translate_vector_op(
     f.push(method_v);
     f.push(Value::Int(kind));
     if method == "new" {
-        // The instantiated key, not the bare `vector`: this string *is* the
+        // The instantiated type, not the bare `vector`: this *is* the
         // value's runtime identity, and a pattern that tests it was compiled
-        // from the same spelling (`Checker::pattern_form`).
-        let name = str_form(f.heap(), ret_key)?;
+        // from the same type (`Checker::pattern_form`).
+        let name = quoted_form(f.heap(), ret_type)?;
         f.push(name);
     } else {
         for a in args {
@@ -1361,8 +1358,8 @@ fn translate_vector_op(
         }
     }
     if method == "pop" {
-        // `pop`'s result *is* the `Option<T>` this key spells.
-        let name = str_form(f.heap(), ret_key)?;
+        // `pop`'s result *is* this `Option<T>`.
+        let name = quoted_form(f.heap(), ret_type)?;
         f.push(name);
     }
     f.finish(wk::VECTOR_OP)
@@ -1378,7 +1375,7 @@ fn translate_hashtable_op(
     heap: &mut Heap,
     method: &str,
     self_repr: &Repr,
-    ret_key: &str,
+    ret_type: Value,
     args: &[Value],
     cx: Ctx,
 ) -> Result<Value, Error> {
@@ -1396,7 +1393,7 @@ fn translate_hashtable_op(
     // `keys`/`values`/`entries` build a `Vector<_>`. The ops that build
     // nothing (`count`, `clear`, and the whole bucket family) leave it empty.
     let builds_a_box = matches!(method, "new" | "keys" | "values" | "entries");
-    let result_name = if builds_a_box { str_form(f.heap(), ret_key)? } else { Value::Empty };
+    let result_name = if builds_a_box { quoted_form(f.heap(), ret_type)? } else { Value::Empty };
     f.push(result_name);
     if method != "new" {
         for a in args {
@@ -2536,7 +2533,6 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
         return Err(malformed(heap, form));
     }
     let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
-    let key = typelisp_mem::type_key_of_form(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
     let Value::Int(variant) = parts[2] else { return Err(malformed(heap, form)) };
     let Value::Bool(mutable) = parts[3] else { return Err(malformed(heap, form)) };
     let field_reprs = repr_list(heap, parts[4])?;
@@ -2544,11 +2540,10 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     let is_sexpr = path == Path::root("sexpr");
 
     // The value's runtime type identity, taken from the node rather than
-    // rebuilt from the path: the checker spelled it where the instantiation
-    // was known, and interpreted and compiled code have to agree on it down to
-    // the character — `gen<i32>` here and `gen` there is exactly the split
-    // this field exists to prevent.
-    let type_name = if is_sexpr { Value::Empty } else { str_form(heap, &key)? };
+    // rebuilt from the path: the checker wrote it where the instantiation was
+    // known, and interpreted and compiled code have to agree on it — `gen<i32>`
+    // here and `gen` there is exactly the split this field exists to prevent.
+    let type_name = if is_sexpr { Value::Empty } else { quoted_form(heap, parts[1])? };
     let mut f = Items::new(heap);
     f.push(Value::Bool(is_sexpr));
     f.push(Value::Bool(mutable));
@@ -2925,10 +2920,10 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
         // carries, so the enclosing value's is not passed on.
         wk::PAT_CTOR => translate_ctor_pattern(heap, pat, cx),
         wk::PAT_TYPETEST => {
-            // The node's own key, not one rebuilt from the path: the checker
-            // spelled the instantiation, and the island compares the string it
-            // is given against the one `construct` wrote.
-            let key = core::field(heap, pat, 1).and_then(|k| typelisp_mem::type_key_of_form(heap, k)).ok_or_else(|| malformed(heap, pat))?;
+            // The node's own type, not one rebuilt from the path: the checker
+            // wrote the instantiation, and the test compares it against the
+            // one `construct` wrote.
+            let ty = core::field(heap, pat, 1).ok_or_else(|| malformed(heap, pat))?;
             let inner = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
             // The same word seen as the downcast target, so the inner pattern
             // binds at *that* type's representation rather than the enclosing
@@ -2943,7 +2938,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             } else {
                 Repr::Enum
             };
-            let name = str_form(heap, &key)?;
+            let name = quoted_form(heap, ty)?;
             let mut f = Items::new(heap);
             f.push(name);
             let inner = translate_pattern(f.heap(), inner, &inner_repr, cx)?;
@@ -2962,7 +2957,6 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
         return Err(malformed(heap, pat));
     }
     let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, pat))?;
-    let key = typelisp_mem::type_key_of_form(heap, parts[1]).ok_or_else(|| malformed(heap, pat))?;
     let Value::Int(variant) = parts[2] else { return Err(malformed(heap, pat)) };
     let Value::Bool(downcast) = parts[3] else { return Err(malformed(heap, pat)) };
     let field_reprs = repr_list(heap, parts[4])?;
@@ -3021,7 +3015,7 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     // Only compiled when `downcast` is true: an ordinary pattern already knows
     // the scrutinee's type from its static type, and only a downcast has to
     // test it at run time.
-    let type_name = if downcast { str_form(f.heap(), &key)? } else { Value::Empty };
+    let type_name = if downcast { quoted_form(f.heap(), parts[1])? } else { Value::Empty };
     f.push(type_name);
     f.finish(wk::PAT_CTOR)
 }
@@ -3285,6 +3279,16 @@ mod tests {
         core::print(&h, island)
     }
 
+    /// The island nodes that rebuild the type form `src` at run time — what a
+    /// site that hands the runtime a type carries.
+    fn type_nodes(src: &str) -> String {
+        let mut h = Heap::with_capacity(1 << 16);
+        let form = read_core(&mut h, src).expect("read failed").pop().unwrap();
+        h.push_root(form);
+        let nodes = quoted_form(&mut h, form).unwrap_or_else(|e| panic!("{:?} did not quote: {}", src, e));
+        core::print(&h, nodes)
+    }
+
     fn record_all(h: &mut Heap, defs: &[&str]) -> Definitions {
         let mut definitions = Definitions::new();
         for d in defs {
@@ -3451,7 +3455,7 @@ mod tests {
         // says it is a vector at all.
         assert_eq!(
             bridged("(assoc ::vector new false (vector int-any-width) () (type-named ::vector (type-named ::i32)))"),
-            r#"(vector-op "new" 0 (str (int-any-width 0 118) (int-any-width 0 101) (int-any-width 0 99) (int-any-width 0 116) (int-any-width 0 111) (int-any-width 0 114) (int-any-width 0 60) (int-any-width 0 105) (int-any-width 0 51) (int-any-width 0 50) (int-any-width 0 62)))"#
+            format!(r#"(vector-op "new" 0 {})"#, type_nodes("(type-named ::vector (type-named ::i32))"))
         );
     }
 
@@ -3511,13 +3515,13 @@ mod tests {
     fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
             bridged_with(&DEFS, "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
-            r#"(construct false true (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) 0 (1 int-any-width 0 1) (1 int-any-width 0 2))"#
+            format!("(construct false true {} 0 (1 int-any-width 0 1) (1 int-any-width 0 2))", type_nodes("(type-named ::point)"))
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
         assert_eq!(
             bridged_with(&DEFS, "(construct ::option (type-named ::option (type-named ::sexpr)) 1 false (sexpr) (var x))"),
-            r#"(construct false false (str (int-any-width 0 111) (int-any-width 0 112) (int-any-width 0 116) (int-any-width 0 105) (int-any-width 0 111) (int-any-width 0 110) (int-any-width 0 60) (int-any-width 0 115) (int-any-width 0 101) (int-any-width 0 120) (int-any-width 0 112) (int-any-width 0 114) (int-any-width 0 62)) 1 (6 var "x" false))"#
+            format!(r#"(construct false false {} 1 (6 var "x" false))"#, type_nodes("(type-named ::option (type-named ::sexpr))"))
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
@@ -3533,7 +3537,7 @@ mod tests {
     fn a_construct_needs_no_definition_recorded() {
         assert_eq!(
             bridged_with(&[], "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
-            r#"(construct false true (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) 0 (1 int-any-width 0 1) (1 int-any-width 0 2))"#
+            format!("(construct false true {} 0 (1 int-any-width 0 1) (1 int-any-width 0 2))", type_nodes("(type-named ::point)"))
         );
     }
 
@@ -3618,7 +3622,7 @@ mod tests {
         assert!(printed.contains("(pat-lit 0 65)"), "{}", printed);
     }
 
-    /// A downcast pattern carries the type name it has to test at run time;
+    /// A downcast pattern carries the type it has to test at run time;
     /// an ordinary one already knows the type statically and carries a
     /// placeholder.
     #[test]
@@ -3626,10 +3630,10 @@ mod tests {
         let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
         let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 true (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
-        assert!(down.contains("true (str (int-any-width 0 112)"), "{}", down);
+        assert!(down.contains(&format!("true {})", type_nodes("(type-named ::point)"))), "{}", down);
         // A whole-value type test always tests, so it always carries one.
         let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest ::point (type-named ::point) (pat-bind p)) (var p)))");
-        assert!(tt.contains(r#"(pat-typetest (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) (pat-bind "p" 2))"#), "{}", tt);
+        assert!(tt.contains(&format!(r#"(pat-typetest {} (pat-bind "p" 2))"#, type_nodes("(type-named ::point)"))), "{}", tt);
     }
 
     /// A scalar scrutinee translates, and asks for no GC root.

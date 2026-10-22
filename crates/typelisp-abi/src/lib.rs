@@ -30,7 +30,7 @@ pub mod dribble;
 // `concat!` takes literals only. `scripts/regen-abi-version.sh` is what
 // rewrites them, and only when that description changed or the typelisp
 // version's MAJOR.MINOR did.
-macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 15) }; }
+macro_rules! with_abi_version { ($then:ident) => { $then!(0, 3, 16) }; }
 
 macro_rules! dotted { ($major:literal, $minor:literal, $patch:literal) => { concat!($major, ".", $minor, ".", $patch) }; }
 
@@ -563,7 +563,7 @@ pub mod call_state {
     /// what it is).
     pub const SUSPEND_CHAN_SEND: i64 = 8;
     /// `(recv ch)` — take a value, waiting for one. Payloads: the handle and
-    /// the `Option<T>` type key the answer is built with.
+    /// the `Option<T>` type form the answer is built with.
     pub const SUSPEND_CHAN_RECV: i64 = 9;
     /// `(select ...)` — any one of several channel operations. The arms
     /// travel in [`take_pending_select`] rather than in the payload words:

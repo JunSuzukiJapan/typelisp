@@ -502,7 +502,9 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      定義の本体の中の型引数。本体は下ろすが実行しない）・`type-unit`・`type-never` で、
      `%core` にある。書くのは `core::type_form`、読むのは `typelisp_mem::type_key_of_form`。
      IR の欄は済み（ダンプの形式は 26）。`DynNew` と `BoxOption` はキーを持たなくなった（値の型
-     そのものだった）。ブリッジは島へまだ文字列を渡す。
+     そのものだった）。コンパイル済みコードは、ブリッジが `quoted_form` でフォームを実行時に組み
+     直す節にして `rt_*` に渡し、ランタイムは `type_key_of_form` で読む（ABI 0.3.16）。
+     ブリッジの中で表を引く `:dyn` の vtable の表だけが、まだキーの文字列で引く。
    - 5b. 表を形にする。`TypeShape` と `Heap::intern_type`（形 → `TypeId`）を置き、
      `TypeKeyId` を `TypeId` にする。5a の 1 か所はフォーム → 形になる。型から作る側
      （チェッカーの `Type`、ランタイムの手書きのキー、固定の型）も形を作る。型の名前の文字列は
