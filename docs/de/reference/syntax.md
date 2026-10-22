@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1061,8 +1061,10 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
   5. Wenn der Modulname `n` eine Funktion oder eine globale Variable ist, diese (bei einer globalen
      Variable wird die Funktion aufgerufen, die ihr Wert ist)
 
-  Ein Modulname wird im aktuellen Modul, dann in den `use`-Aliasen, dann in den Elternmodulen (bis zur
-  Wurzel) gesucht und steht mit dem ersten Fund fest. Dieselbe Regel gilt, wo eine Funktion als Wert
+  Ein Modulname wird in den eigenen Definitionen des aktuellen Moduls, dann in den `use`-Aliasen, dann in
+  den Namen, die die Standardbibliothek anbietet, gesucht und steht mit dem ersten Fund fest. Elternmodule
+  werden nicht durchsucht. Um eine Definition eines Elternmoduls zu verwenden, schreibt man eine
+  Definition, die `pub` trägt, als Pfad wie `::f` oder holt sie mit `use` herein. Dieselbe Regel gilt, wo eine Funktion als Wert
   übergeben wird; „der Typ des ersten Arguments“ in Schritt 4 ist dann der erste Parametertyp des dort
   erwarteten Funktionstyps (`norm` an einer Stelle, die `(fn (pt) int)` erwartet, ergibt die Methode `norm`
   von `pt`). Steht der erwartete Typ noch nicht fest, wird Schritt 4 übersprungen.
@@ -1141,10 +1143,11 @@ ein Segment, im Stil von Rust / Python). Ein ausdrückliches `(module bar ...)` 
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` kann nur an die zehn obigen Arten gesetzt werden (nicht an `module`/`use`/`deftrait`/`impl`). Es wird
+`pub` kann nur an die elf obigen Arten gesetzt werden (nicht an `module`/`use`/`impl`). Es wird
 geschrieben, indem das Definitionsschlüsselwort direkt auf `pub` folgt, nicht in der Form `(pub (defun ...))`,
 die die Definition in Klammern einschließt. Ein `pub` macht genau eine Definition öffentlich (mehrere
 Definitionen können nicht auf einmal markiert werden).

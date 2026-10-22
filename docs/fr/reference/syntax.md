@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1040,8 +1040,10 @@ telles valeurs via `:dyn`, enveloppez-les dans une structure, comme `(defstruct 
   5. Si le nom de module `n` est une fonction ou une variable globale, celle-ci (pour une variable globale,
      la fonction qui est sa valeur est appelée)
 
-  Un nom de module se cherche dans le module courant, puis dans les alias de `use`, puis dans les modules
-  parents (jusqu'à la racine), et il est fixé par le premier trouvé. La même règle s'applique là où une
+  Un nom de module se cherche dans les définitions propres du module courant, puis dans les alias de
+  `use`, puis dans les noms qu'offre la bibliothèque standard, et il est fixé par le premier trouvé. Les
+  modules parents ne sont pas parcourus. Pour utiliser une définition d'un module parent, écrivez une
+  définition portant `pub` sous forme de chemin comme `::f`, ou importez-la avec `use`. La même règle s'applique là où une
   fonction est passée comme valeur ; « le type du premier argument » de l'étape 4 est alors le type du
   premier paramètre du type de fonction attendu à cet endroit (écrire `norm` là où `(fn (pt) int)` est
   attendu donne la méthode `norm` de `pt`). Si le type attendu n'est pas encore fixé, l'étape 4 est sautée.
@@ -1117,10 +1119,11 @@ l'intérieur** (`geo::point::bar`) ; le chemin dérivé et une déclaration expl
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` ne peut se mettre que sur les dix sortes ci-dessus (pas sur `module`/`use`/`deftrait`/`impl`). On l'écrit
+`pub` ne peut se mettre que sur les onze sortes ci-dessus (pas sur `module`/`use`/`impl`). On l'écrit
 avec le mot-clé de définition juste après `pub`, et non sous la forme `(pub (defun ...))` qui entoure la
 définition de parenthèses. Un `pub` rend publique exactement une définition (on ne peut pas en marquer
 plusieurs d'un coup).

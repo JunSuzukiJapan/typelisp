@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Moduler och filuppdelning
 
 Den här guiden förklarar hur man sätter ihop ett program som består av flera filer. De detaljerade
@@ -76,7 +76,7 @@ typl main.typl        # => 25
 
 ### Vad som görs publikt
 
-- Funktioner, structar, enums, globala variabler och makron syns från andra moduler bara när de har `pub`.
+- Funktioner, structar, enums, traits, globala variabler och makron syns från andra moduler bara när de har `pub`.
   Sätt `pub` direkt före definitionen, som i `(pub defun ...)`.
 - Av metoderna som skrivs i en `impl` kan bara de som skrivits `(pub new ...)`, post för post, användas
   utifrån.
@@ -123,8 +123,9 @@ modulnamnet.
 Metoder i ett traits `impl` är alltid publika, även utan `pub`. Av metoderna i en inneboende `impl`
 (`(impl point ...)`) är bara de med `pub` publika.
 
-Ett trait i sig kan inte göras publikt för andra moduler. Håll ett traits definition, `impl`erna för det
-och koden som använder det via `:dyn` i en enda modul.
+Även traits syns från andra moduler bara när de skrivs som `(pub deftrait ...)`. I andra moduler skriver
+man ett trait som en sökväg som `shapes::Shape` eller tar in det med `use`, och skriver det så i en
+`impl`.
 
 ## 5. Dela upp namnrymder inom en fil
 

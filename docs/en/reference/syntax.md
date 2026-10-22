@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1027,8 +1027,10 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
   5. If the module name `n` is a function or a global variable, that (for a global variable, the
      function that is its value is called)
 
-  A module name is looked up in the current module, then the `use` aliases, then the parent modules
-  (up to the root), and is settled by the first one found. The same rule applies where a function is
+  A module name is looked up in the current module's own definitions, then the `use` aliases, then the
+  names the standard library offers, and is settled by the first one found. Parent modules are not
+  searched. To use a parent module's definition, write a definition that carries `pub` as a path such as
+  `::f`, or bring it in with `use`. The same rule applies where a function is
   passed as a value, with "the first argument's type" in step 4 being the first parameter type of the
   function type expected there (writing `norm` where `(fn (pt) int)` is expected gives `pt`'s method
   `norm`). If the expected type is not settled yet, step 4 is skipped.
@@ -1104,10 +1106,11 @@ nests **inside** it (`geo::point::bar`), so the derived path and an explicit dec
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` can be put only on the ten kinds above (not on `module`/`use`/`deftrait`/`impl`). It is written
+`pub` can be put only on the eleven kinds above (not on `module`/`use`/`impl`). It is written
 with the definition keyword right after `pub`, not in the form `(pub (defun ...))` wrapping the definition
 in parentheses. One `pub` makes exactly one definition public (several definitions cannot be marked at
 once).

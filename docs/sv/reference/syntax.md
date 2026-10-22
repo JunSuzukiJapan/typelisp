@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1026,8 +1026,10 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
   5. Om modulnamnet `n` är en funktion eller en global variabel, den (för en global variabel anropas
      funktionen som är dess värde)
 
-  Ett modulnamn söks i den aktuella modulen, sedan i `use`-aliasen, sedan i föräldramodulerna (upp till
-  roten), och bestäms av den första träffen. Samma regel gäller där en funktion skickas som värde; "typen
+  Ett modulnamn söks i den aktuella modulens egna definitioner, sedan i `use`-aliasen, sedan i de namn som
+  standardbiblioteket erbjuder, och bestäms av den första träffen. Föräldramoduler genomsöks inte. För att
+  använda en föräldramoduls definition skriver man en definition som har `pub` som en sökväg som `::f`,
+  eller tar in den med `use`. Samma regel gäller där en funktion skickas som värde; "typen
   för det första argumentet" i steg 4 är då den första parametertypen i den funktionstyp som förväntas där
   (att skriva `norm` där `(fn (pt) int)` förväntas ger metoden `norm` hos `pt`). Är den förväntade typen
   inte bestämd än hoppas steg 4 över.
@@ -1103,10 +1105,11 @@ aldrig.
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` kan bara sättas på de tio sorterna ovan (inte på `module`/`use`/`deftrait`/`impl`). Det skrivs med
+`pub` kan bara sättas på de elva sorterna ovan (inte på `module`/`use`/`impl`). Det skrivs med
 definitionens nyckelord direkt efter `pub`, inte i formen `(pub (defun ...))` som omsluter definitionen med
 parenteser. Ett `pub` gör exakt en definition publik (flera definitioner kan inte markeras på en gång).
 

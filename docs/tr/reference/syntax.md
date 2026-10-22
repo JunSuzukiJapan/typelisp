@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1025,8 +1025,9 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
   5. `n` modül adı bir fonksiyon veya global değişkense, o (global değişkende değeri olan fonksiyon
      çağrılır)
 
-  Bir modül adı geçerli modülde, sonra `use` takma adlarında, sonra üst modüllerde (köke kadar) aranır ve
-  ilk bulunanla belirlenir. Bir fonksiyonun değer olarak geçirildiği yerde de aynı kural geçerlidir;
+  Bir modül adı geçerli modülün kendi tanımlarında, sonra `use` takma adlarında, sonra standart
+  kütüphanenin sunduğu adlarda aranır ve ilk bulunanla belirlenir. Üst modüllerde aranmaz. Bir üst modülün
+  tanımını kullanmak için `pub` taşıyan bir tanımı `::f` gibi bir yolla yazın ya da `use` ile içeri alın. Bir fonksiyonun değer olarak geçirildiği yerde de aynı kural geçerlidir;
   4. adımdaki "ilk argümanın türü" o zaman orada beklenen fonksiyon türünün ilk parametresinin türüdür
   (`(fn (pt) int)` beklenen yere `norm` yazmak `pt`'nin `norm` metodunu verir). Beklenen tür henüz
   belirlenmediyse 4. adım atlanır.
@@ -1100,10 +1101,11 @@ bu yüzden türetilen yol ile açık bir bildirim asla çakışmaz.
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` yalnızca yukarıdaki on türe konabilir (`module`/`use`/`deftrait`/`impl`'e konamaz). Tanım anahtar
+`pub` yalnızca yukarıdaki on bir türe konabilir (`module`/`use`/`impl`'e konamaz). Tanım anahtar
 sözcüğü `pub`'ın hemen ardından gelecek şekilde yazılır; tanımı parantez içine alan `(pub (defun ...))`
 biçiminde değil. Bir `pub` tam olarak bir tanımı açık yapar (birden fazla tanım bir kerede işaretlenemez).
 

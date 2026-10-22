@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # 模組與檔案結構
 
 本指南說明如何組織由多個檔案構成的程式。詳細的語法規則見[語法參考](../reference/syntax.md#310-module--use--命名空間)的 3.10 至 3.13 節。
@@ -74,7 +74,7 @@ typl main.typl        # => 25
 
 ### 公開的單位
 
-- 函式、結構、列舉、全域變數、巨集，各自只有加了 `pub` 的才能被其他模組看到。寫法是像 `(pub defun ...)`
+- 函式、結構、列舉、trait、全域變數、巨集，各自只有加了 `pub` 的才能被其他模組看到。寫法是像 `(pub defun ...)`
   這樣，把 `pub` 放在定義之前。
 - 寫在 `impl` 中的方法，只有依項目寫成 `(pub new ...)` 的才能從外部使用。
 - 結構的**型別公開與欄位公開是分開的**。`(pub defstruct point ...)` 使型別可見，各欄位只有寫成
@@ -112,7 +112,7 @@ typl main.typl        # => 25
 trait 的 `impl` 的方法即使不寫 `pub` 也總是公開的。固有 `impl`（`(impl point ...)`）的方法只有加了 `pub`
 的才公開。
 
-trait 本身不能公開給其他模組。請把 trait 的定義、對它的 `impl`，以及透過 `:dyn` 使用該 trait 的程式碼放在同一個模組中。
+trait 也只有寫成 `(pub deftrait ...)` 的才能被其他模組看到。在其他模組中，像 `shapes::Shape` 這樣用路徑來寫，或者用 `use` 引入，再寫到 `impl` 中。
 
 ## 5. 在檔案內劃分命名空間
 

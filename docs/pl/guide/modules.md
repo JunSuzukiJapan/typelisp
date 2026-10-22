@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Moduły i układ plików
 
 Ten przewodnik wyjaśnia, jak złożyć program składający się z kilku plików. Szczegółowe reguły znajdują się w
@@ -78,7 +78,7 @@ wcześniej.
 
 ### Co jest udostępniane
 
-- Funkcje, struktury, enumy, zmienne globalne i makra są widoczne z innych modułów tylko wtedy, gdy mają
+- Funkcje, struktury, enumy, traity, zmienne globalne i makra są widoczne z innych modułów tylko wtedy, gdy mają
   `pub`. Postaw `pub` tuż przed definicją, jak w `(pub defun ...)`.
 - Spośród metod zapisanych w `impl` z zewnątrz można używać tylko tych, które zapisano element po elemencie
   jako `(pub new ...)`.
@@ -125,8 +125,9 @@ wywołuje się je bez nazwy modułu.
 Metody w `impl` traitu są zawsze publiczne, nawet bez `pub`. Spośród metod własnego `impl` typu
 (`(impl point ...)`) publiczne są tylko te z `pub`.
 
-Samego traitu nie można udostępnić innym modułom. Definicję traitu, jego `impl` oraz kod
-używający go przez `:dyn` trzymaj w jednym module.
+Również traity są widoczne z innych modułów tylko wtedy, gdy zapisano je jako `(pub deftrait ...)`. W
+innych modułach trait zapisuje się ścieżką, jak `shapes::Shape`, albo sprowadza przez `use`, i tak wpisuje
+do `impl`.
 
 ## 5. Dzielenie przestrzeni nazw w obrębie pliku
 

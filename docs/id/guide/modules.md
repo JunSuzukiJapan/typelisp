@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Modul dan Tata Letak Berkas
 
 Panduan ini menjelaskan cara menyusun program yang terdiri dari beberapa berkas. Aturan terperinci
@@ -77,7 +77,7 @@ typl main.typl        # => 25
 
 ### Apa saja yang dipublikasikan
 
-- Fungsi, struct, enum, variabel global, dan makro hanya terlihat dari modul lain jika diberi `pub`. Letakkan
+- Fungsi, struct, enum, trait, variabel global, dan makro hanya terlihat dari modul lain jika diberi `pub`. Letakkan
   `pub` tepat sebelum definisi, seperti `(pub defun ...)`.
 - Dari metode yang ditulis di `impl`, hanya yang ditulis `(pub new ...)`, per item, yang dapat dipakai dari
   luar.
@@ -126,8 +126,8 @@ dipanggil tanpa nama modul.
 Metode di `impl` sebuah trait selalu publik, bahkan tanpa `pub`. Dari metode `impl` inheren
 (`(impl point ...)`), hanya yang memakai `pub` yang publik.
 
-Trait itu sendiri tidak dapat dipublikasikan ke modul lain. Simpan definisi trait, `impl` untuknya,
-dan kode yang memakainya melalui `:dyn` dalam satu modul.
+Trait juga hanya terlihat dari modul lain jika ditulis sebagai `(pub deftrait ...)`. Di modul lain, tulis
+trait dengan path seperti `shapes::Shape` atau bawa masuk dengan `use`, lalu tulis di `impl`.
 
 ## 5. Memisahkan ruang nama di dalam satu berkas
 

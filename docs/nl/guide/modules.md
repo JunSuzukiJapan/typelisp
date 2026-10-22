@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Modules en bestandsindeling
 
 Deze handleiding legt uit hoe je een programma samenstelt dat uit meerdere bestanden bestaat. De
@@ -79,7 +79,7 @@ laden.
 
 ### Wat openbaar wordt gemaakt
 
-- Functies, structs, enums, globale variabelen en macro's zijn alleen vanuit andere modules zichtbaar als ze
+- Functies, structs, enums, traits, globale variabelen en macro's zijn alleen vanuit andere modules zichtbaar als ze
   `pub` dragen. Zet `pub` direct voor de definitie, zoals in `(pub defun ...)`.
 - Van de methoden die in een `impl` staan, zijn alleen de items die als `(pub new ...)` zijn geschreven van
   buiten bruikbaar.
@@ -127,8 +127,9 @@ module, en worden dus zonder modulenaam aangeroepen.
 Methoden in de `impl` van een trait zijn altijd publiek, ook zonder `pub`. Van de methoden in een inherente
 `impl` (`(impl point ...)`) zijn alleen die met `pub` publiek.
 
-Een trait zelf kan niet openbaar worden gemaakt voor andere modules. Houd de definitie van een trait,
-de `impl`s ervoor en de code die hem via `:dyn` gebruikt in één enkele module.
+Ook traits zijn alleen vanuit andere modules zichtbaar als ze als `(pub deftrait ...)` zijn geschreven. In
+andere modules schrijf je een trait als pad zoals `shapes::Shape` of haal je hem binnen met `use`, en zo
+zet je hem in een `impl`.
 
 ## 5. Namespaces binnen een bestand opsplitsen
 

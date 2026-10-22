@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Module và cách bố trí tệp
 
 Tài liệu này giải thích cách ghép một chương trình gồm nhiều tệp. Các quy tắc chi tiết nằm ở các mục
@@ -77,7 +77,7 @@ typl main.typl        # => 25
 
 ### Những gì được công khai
 
-- Hàm, struct, enum, biến toàn cục và macro chỉ nhìn thấy được từ các module khác khi có `pub`. Đặt `pub`
+- Hàm, struct, enum, trait, biến toàn cục và macro chỉ nhìn thấy được từ các module khác khi có `pub`. Đặt `pub`
   ngay trước định nghĩa, như `(pub defun ...)`.
 - Trong các phương thức viết trong `impl`, chỉ những mục viết `(pub new ...)` mới dùng được từ bên ngoài.
 - Với struct, **công khai kiểu và công khai trường là hai việc riêng**. `(pub defstruct point ...)` làm kiểu
@@ -122,8 +122,8 @@ chúng được gọi mà không cần tên module.
 Các phương thức trong `impl` của trait luôn công khai, kể cả khi không có `pub`. Trong các phương thức của
 `impl` cố hữu (`(impl point ...)`), chỉ những phương thức có `pub` mới công khai.
 
-Bản thân trait không thể được công khai cho các module khác. Hãy giữ định nghĩa của trait, các `impl`
-cho nó và mã dùng nó qua `:dyn` trong cùng một module.
+Trait cũng chỉ nhìn thấy được từ các module khác khi được viết là `(pub deftrait ...)`. Ở module khác, hãy
+viết trait bằng đường dẫn như `shapes::Shape` hoặc đưa vào bằng `use`, rồi viết trong `impl`.
 
 ## 5. Chia không gian tên bên trong một tệp
 

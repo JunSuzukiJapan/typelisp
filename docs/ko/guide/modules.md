@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # 모듈과 파일 구성
 
 이 가이드에서는 여러 파일로 된 프로그램을 구성하는 방법을 설명한다. 자세한 규칙은
@@ -75,7 +75,7 @@ typl main.typl        # => 25
 
 ### 공개되는 것
 
-- 함수·구조체·열거형·전역 변수·매크로는 각각 `pub`을 붙인 것만 다른 모듈에서 보인다. `(pub defun ...)`처럼
+- 함수·구조체·열거형·트레이트·전역 변수·매크로는 각각 `pub`을 붙인 것만 다른 모듈에서 보인다. `(pub defun ...)`처럼
   정의 바로 앞에 `pub`을 둔다.
 - `impl`에 쓴 메서드는 항목마다 `(pub new ...)`라고 쓴 것만 밖에서 쓸 수 있다.
 - 구조체는 **타입의 공개와 필드의 공개가 별개**다. `(pub defstruct point ...)`로 타입이 보이게 되고, 각 필드는
@@ -114,8 +114,7 @@ typl main.typl        # => 25
 트레이트의 `impl`의 메서드는 `pub`을 쓰지 않아도 항상 공개된다. 고유 `impl`(`(impl point ...)`)의 메서드는
 `pub`을 붙인 것만 공개된다.
 
-트레이트 자체를 다른 모듈에 공개할 수는 없다. 트레이트의 정의, 그 `impl`, `:dyn`을 통해 그것을 쓰는 코드는 하나의
-모듈에 둔다.
+트레이트도 `(pub deftrait ...)`라고 쓴 것만 다른 모듈에서 보인다. 다른 모듈에서는 `shapes::Shape`처럼 경로로 쓰거나 `use`로 가져와서 `impl`에 쓴다.
 
 ## 5. 파일 안에서 이름공간 나누기
 

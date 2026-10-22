@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Modüller ve Dosya Düzeni
 
 Bu kılavuz, birkaç dosyadan oluşan bir programın nasıl bir araya getirileceğini anlatır. Ayrıntılı
@@ -78,7 +78,7 @@ typl main.typl        # => 25
 
 ### Neler genel yapılır
 
-- Fonksiyonlar, yapılar, enum'lar, global değişkenler ve makrolar yalnızca `pub` taşıdıklarında diğer
+- Fonksiyonlar, yapılar, enum'lar, trait'ler, global değişkenler ve makrolar yalnızca `pub` taşıdıklarında diğer
   modüllerden görünür. `pub`'ı `(pub defun ...)`'daki gibi tanımın hemen önüne koyun.
 - Bir `impl`'e yazılan metotlardan yalnızca öğe öğe `(pub new ...)` diye yazılanlar dışarıdan
   kullanılabilir.
@@ -125,8 +125,9 @@ yüzden modül adı olmadan çağrılırlar.
 Bir trait'in `impl`'indeki metotlar `pub` olmadan da her zaman açıktır. İçsel bir `impl`'in
 (`(impl point ...)`) metotlarından yalnızca `pub` olanlar açıktır.
 
-Bir trait'in kendisi diğer modüllere açık hale getirilemez. Bir trait'in tanımını, onun `impl`'lerini
-ve onu `:dyn` ile kullanan kodu tek bir modülde tutun.
+Trait'ler de yalnızca `(pub deftrait ...)` olarak yazıldıklarında diğer modüllerden görünür. Diğer
+modüllerde bir trait `shapes::Shape` gibi bir yolla yazılır ya da `use` ile içeri alınır ve böylece
+`impl`'e yazılır.
 
 ## 5. Bir dosya içinde ad alanlarını bölme
 

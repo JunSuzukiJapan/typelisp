@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -998,8 +998,10 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
   5. Nếu tên module `n` là một hàm hoặc biến toàn cục, thì đó (với biến toàn cục, hàm là giá trị của nó
      được gọi)
 
-  Tên module được tìm trong module hiện tại, rồi trong các bí danh `use`, rồi trong các module cha (đến
-  gốc), và được xác định bởi cái tìm thấy đầu tiên. Quy tắc này cũng áp dụng ở nơi một hàm được truyền
+  Tên module được tìm trong các định nghĩa của chính module hiện tại, rồi trong các bí danh `use`, rồi
+  trong các tên mà thư viện chuẩn cung cấp, và được xác định bởi cái tìm thấy đầu tiên. Không tìm trong
+  các module cha. Để dùng định nghĩa của module cha, hãy viết định nghĩa có `pub` bằng đường dẫn như
+  `::f`, hoặc đưa vào bằng `use`. Quy tắc này cũng áp dụng ở nơi một hàm được truyền
   như giá trị; khi đó "kiểu của đối số đầu tiên" ở bước 4 là kiểu tham số đầu tiên của kiểu hàm được mong
   đợi ở đó (viết `norm` ở nơi mong đợi `(fn (pt) int)` sẽ cho phương thức `norm` của `pt`). Nếu kiểu mong
   đợi chưa được xác định, bỏ qua bước 4.
@@ -1071,10 +1073,11 @@ không bao giờ va chạm.
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` chỉ đặt được cho mười loại ở trên (không cho `module`/`use`/`deftrait`/`impl`). Nó được viết với từ
+`pub` chỉ đặt được cho mười một loại ở trên (không cho `module`/`use`/`impl`). Nó được viết với từ
 khóa định nghĩa ngay sau `pub`, không phải dạng `(pub (defun ...))` bọc định nghĩa trong ngoặc. Một `pub`
 công khai đúng một định nghĩa (không thể đánh dấu nhiều định nghĩa cùng lúc).
 

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Módulos e organização de arquivos
 
 Este guia explica como montar um programa composto por vários arquivos. As regras detalhadas estão nas
@@ -77,7 +77,7 @@ typl main.typl        # => 25
 
 ### O que se torna público
 
-- Funções, estruturas, enums, variáveis globais e macros só são visíveis de outros módulos quando levam
+- Funções, estruturas, enums, traits, variáveis globais e macros só são visíveis de outros módulos quando levam
   `pub`. Ponha `pub` logo antes da definição, como em `(pub defun ...)`.
 - Dos métodos escritos num `impl`, só os escritos como `(pub new ...)`, item a item, podem ser usados de
   fora.
@@ -125,8 +125,9 @@ o nome do módulo.
 Os métodos do `impl` de um trait são sempre públicos, mesmo sem `pub`. Dos métodos de um `impl` inerente
 (`(impl point ...)`), só os que têm `pub` são públicos.
 
-Um trait em si não pode ser tornado público para outros módulos. Mantenha a definição de um trait, seus
-`impl` e o código que o usa via `:dyn` em um único módulo.
+Os traits também só são visíveis de outros módulos quando escritos como `(pub deftrait ...)`. Em outros
+módulos, escreva um trait com um caminho como `shapes::Shape` ou traga-o com `use`, e assim ponha-o em um
+`impl`.
 
 ## 5. Dividir namespaces dentro de um arquivo
 

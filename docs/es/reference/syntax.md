@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Referencia de sintaxis de typelisp
 
 typelisp es un Lisp con tipado estático que se escribe en expresiones S. Para la lista de funciones y métodos
@@ -1044,8 +1044,10 @@ valores mediante `:dyn`, envuélvelos en una estructura, como en `(defstruct fla
   5. Si el nombre de módulo `n` es una función o una variable global, eso (para una variable global, se
      llama a la función que es su valor)
 
-  Un nombre de módulo se busca en el módulo actual, luego en los alias de `use` y luego en los módulos
-  padre (hasta la raíz), y queda fijado por el primero que se encuentre. La misma regla se aplica donde una
+  Un nombre de módulo se busca en las definiciones propias del módulo actual, luego en los alias de `use`
+  y luego en los nombres que ofrece la biblioteca estándar, y queda fijado por el primero que se
+  encuentre. Los módulos padre no se buscan. Para usar una definición de un módulo padre, escribe una
+  definición que lleve `pub` como ruta, como `::f`, o tráela con `use`. La misma regla se aplica donde una
   función se pasa como valor, y "el tipo del primer argumento" del paso 4 es el tipo del primer parámetro
   del tipo de función esperado allí (escribir `norm` donde se espera `(fn (pt) int)` da el método `norm` de
   `pt`). Si el tipo esperado aún no está fijado, se omite el paso 4.
@@ -1122,10 +1124,11 @@ segmento, al estilo de Rust / Python). Un `(module bar ...)` explícito en el ar
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` solo se puede poner en los diez tipos de arriba (no en `module`/`use`/`deftrait`/`impl`). Se escribe
+`pub` solo se puede poner en los once tipos de arriba (no en `module`/`use`/`impl`). Se escribe
 con la palabra clave de la definición justo después de `pub`, no en la forma `(pub (defun ...))` que envuelve
 la definición entre paréntesis. Un `pub` hace pública exactamente una definición (no se pueden marcar varias
 a la vez).

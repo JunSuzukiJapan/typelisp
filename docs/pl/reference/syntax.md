@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1027,8 +1027,10 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
   5. Jeśli nazwa modułu `n` jest funkcją lub zmienną globalną, to ona (dla zmiennej globalnej wywoływana
      jest funkcja będąca jej wartością)
 
-  Nazwy modułu szuka się w bieżącym module, potem w aliasach `use`, potem w modułach nadrzędnych (aż do
-  korzenia), a ustala ją pierwsze znalezisko. Ta sama reguła obowiązuje tam, gdzie funkcję przekazuje się
+  Nazwy modułu szuka się we własnych definicjach bieżącego modułu, potem w aliasach `use`, potem w nazwach
+  udostępnianych przez bibliotekę standardową, a ustala ją pierwsze znalezisko. Modułów nadrzędnych się
+  nie przeszukuje. Aby użyć definicji modułu nadrzędnego, zapisz definicję mającą `pub` ścieżką, jak
+  `::f`, albo sprowadź ją przez `use`. Ta sama reguła obowiązuje tam, gdzie funkcję przekazuje się
   jako wartość; „typ pierwszego argumentu” z kroku 4 jest wtedy typem pierwszego parametru oczekiwanego
   tam typu funkcji (napisanie `norm` tam, gdzie oczekiwane jest `(fn (pt) int)`, daje metodę `norm` typu
   `pt`). Jeśli oczekiwany typ nie jest jeszcze ustalony, krok 4 jest pomijany.
@@ -1104,10 +1106,11 @@ zagnieżdża się **wewnątrz** niego (`geo::point::bar`), więc wyprowadzona ś
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` można postawić tylko przy dziesięciu rodzajach powyżej (nie przy `module`/`use`/`deftrait`/`impl`).
+`pub` można postawić tylko przy jedenastu rodzajach powyżej (nie przy `module`/`use`/`impl`).
 Zapisuje się go tak, że słowo kluczowe definicji następuje tuż po `pub`, a nie w formie `(pub (defun ...))`
 otaczającej definicję nawiasami. Jeden `pub` czyni publiczną dokładnie jedną definicję (nie można oznaczyć
 kilku naraz).

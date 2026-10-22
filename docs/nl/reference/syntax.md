@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1068,8 +1068,10 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
   5. Als de modulenaam `n` een functie of een globale variabele is, die (bij een globale variabele wordt de
      functie aangeroepen die haar waarde is)
 
-  Een modulenaam wordt gezocht in de huidige module, dan in de `use`-aliassen, dan in de oudermodules (tot
-  aan de wortel), en ligt vast bij de eerste vondst. Dezelfde regel geldt waar een functie als waarde wordt
+  Een modulenaam wordt gezocht in de eigen definities van de huidige module, dan in de `use`-aliassen, dan
+  in de namen die de standaardbibliotheek aanbiedt, en ligt vast bij de eerste vondst. Oudermodules worden
+  niet doorzocht. Om een definitie van een oudermodule te gebruiken, schrijf je een definitie die `pub`
+  draagt als pad zoals `::f`, of haal je haar binnen met `use`. Dezelfde regel geldt waar een functie als waarde wordt
   doorgegeven; "het type van het eerste argument" in stap 4 is dan het eerste parametertype van het daar
   verwachte functietype (`norm` schrijven waar `(fn (pt) int)` wordt verwacht, geeft de methode `norm` van
   `pt`). Ligt het verwachte type nog niet vast, dan wordt stap 4 overgeslagen.
@@ -1150,10 +1152,11 @@ nooit.
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` kan alleen op de tien soorten hierboven staan (niet op `module`/`use`/`deftrait`/`impl`). Het wordt
+`pub` kan alleen op de elf soorten hierboven staan (niet op `module`/`use`/`impl`). Het wordt
 geschreven met het definitiesleutelwoord direct na `pub`, niet in de vorm `(pub (defun ...))` die de definitie
 tussen haakjes zet. Eén `pub` maakt precies één definitie publiek (meerdere definities tegelijk markeren kan
 niet).

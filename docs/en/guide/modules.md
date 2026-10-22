@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Modules and File Layout
 
 This guide explains how to put together a program made of several files. The detailed rules are in
@@ -78,7 +78,7 @@ beforehand.
 
 ### What is made public
 
-- Functions, structs, enums, global variables and macros are visible from other modules only when they
+- Functions, structs, enums, traits, global variables and macros are visible from other modules only when they
   carry `pub`. Put `pub` right before the definition, as in `(pub defun ...)`.
 - Of the methods written in an `impl`, only those written as `(pub new ...)`, item by item, can be used
   from outside.
@@ -125,8 +125,8 @@ called without the module name.
 Methods in a trait's `impl` are always public, even without `pub`. Of the methods in an inherent `impl`
 (`(impl point ...)`), only those with `pub` are public.
 
-A trait itself cannot be made public to other modules. Keep a trait's definition, the `impl`s for it
-and the code that uses it through `:dyn` in a single module.
+Traits too are visible from other modules only when written as `(pub deftrait ...)`. In other modules,
+name a trait with a path such as `shapes::Shape`, or bring it in with `use`, and write it in an `impl`.
 
 ## 5. Splitting namespaces within a file
 

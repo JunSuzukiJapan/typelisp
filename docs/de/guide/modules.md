@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Module und Dateiaufteilung
 
 Dieser Leitfaden erklärt, wie man ein Programm aus mehreren Dateien zusammenstellt. Die genauen Regeln stehen
@@ -78,7 +78,7 @@ werden.
 
 ### Was öffentlich wird
 
-- Funktionen, Strukturen, Enums, globale Variablen und Makros sind von anderen Modulen aus nur sichtbar,
+- Funktionen, Strukturen, Enums, Traits, globale Variablen und Makros sind von anderen Modulen aus nur sichtbar,
   wenn sie `pub` tragen. Setze `pub` direkt vor die Definition, wie in `(pub defun ...)`.
 - Von den in einem `impl` geschriebenen Methoden sind nur die von außen verwendbar, die Eintrag für
   Eintrag als `(pub new ...)` geschrieben sind.
@@ -126,8 +126,9 @@ und werden daher ohne den Modulnamen aufgerufen.
 Methoden im `impl` eines Traits sind immer öffentlich, auch ohne `pub`. Von den Methoden eines inhärenten
 `impl` (`(impl point ...)`) sind nur die mit `pub` öffentlich.
 
-Ein Trait selbst lässt sich nicht für andere Module öffentlich machen. Die Definition eines Traits, seine
-`impl`s und der Code, der ihn über `:dyn` verwendet, gehören in ein einziges Modul.
+Auch Traits sind von anderen Modulen aus nur sichtbar, wenn sie als `(pub deftrait ...)` geschrieben sind.
+In anderen Modulen schreibt man einen Trait als Pfad wie `shapes::Shape` oder holt ihn mit `use` herein
+und schreibt ihn so in ein `impl`.
 
 ## 5. Namensräume innerhalb einer Datei aufteilen
 

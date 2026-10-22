@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ 919605e85abc17d3889701183c762718842ab3b4 -->
+<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1066,8 +1066,10 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
   5. Jika nama modul `n` adalah fungsi atau variabel global, itulah (untuk variabel global, fungsi yang
      menjadi nilainya dipanggil)
 
-  Nama modul dicari di modul saat ini, lalu di alias `use`, lalu di modul induk (sampai akar), dan
-  ditetapkan oleh yang pertama ditemukan. Aturan yang sama berlaku di tempat fungsi diteruskan sebagai
+  Nama modul dicari di definisi milik modul saat ini sendiri, lalu di alias `use`, lalu di nama yang
+  ditawarkan pustaka standar, dan ditetapkan oleh yang pertama ditemukan. Modul induk tidak dicari. Untuk
+  memakai definisi modul induk, tulis definisi yang diberi `pub` dengan path seperti `::f`, atau bawa
+  masuk dengan `use`. Aturan yang sama berlaku di tempat fungsi diteruskan sebagai
   nilai; "tipe argumen pertama" pada langkah 4 lalu adalah tipe parameter pertama dari tipe fungsi yang
   diharapkan di sana (menulis `norm` di tempat yang mengharapkan `(fn (pt) int)` memberi metode `norm`
   milik `pt`). Jika tipe yang diharapkan belum ditetapkan, langkah 4 dilewati.
@@ -1146,10 +1148,11 @@ path turunan dan deklarasi eksplisit tidak pernah bertabrakan.
 (pub defmacro ...)
 (pub defstruct ...)
 (pub defenum ...)
+(pub deftrait ...)
 (pub deftype ...)
 ```
 
-`pub` hanya dapat dipasang pada sepuluh jenis di atas (tidak pada `module`/`use`/`deftrait`/`impl`). Ia ditulis
+`pub` hanya dapat dipasang pada sebelas jenis di atas (tidak pada `module`/`use`/`impl`). Ia ditulis
 dengan kata kunci definisi tepat setelah `pub`, bukan dalam bentuk `(pub (defun ...))` yang membungkus
 definisi dengan tanda kurung. Satu `pub` membuat tepat satu definisi menjadi publik (beberapa definisi tidak
 dapat ditandai sekaligus).

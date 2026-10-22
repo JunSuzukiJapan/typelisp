@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # Modules et découpage en fichiers
 
 Ce guide explique comment assembler un programme composé de plusieurs fichiers. Les règles détaillées se trouvent
@@ -79,7 +79,7 @@ préalable.
 
 ### Ce qui est rendu public
 
-- Les fonctions, structures, énumérations, variables globales et macros ne sont visibles depuis les autres
+- Les fonctions, structures, énumérations, traits, variables globales et macros ne sont visibles depuis les autres
   modules que si elles portent `pub`. Placez `pub` juste avant la définition, comme dans `(pub defun ...)`.
 - Parmi les méthodes écrites dans un `impl`, seules celles écrites `(pub new ...)`, élément par élément,
   sont utilisables de l'extérieur.
@@ -127,8 +127,9 @@ donc sans le nom du module.
 Les méthodes de l'`impl` d'un trait sont toujours publiques, même sans `pub`. Parmi les méthodes d'un
 `impl` inhérent (`(impl point ...)`), seules celles qui portent `pub` sont publiques.
 
-Un trait lui-même ne peut pas être rendu public pour d'autres modules. Gardez la définition d'un trait, ses `impl`
-et le code qui l'utilise via `:dyn` dans un seul module.
+Les traits aussi ne sont visibles depuis les autres modules que s'ils sont écrits `(pub deftrait ...)`.
+Dans les autres modules, on écrit un trait avec un chemin comme `shapes::Shape` ou on l'importe avec
+`use`, et on le met ainsi dans un `impl`.
 
 ## 5. Découper les espaces de noms à l'intérieur d'un fichier
 

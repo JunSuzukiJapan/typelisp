@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/guide/modules.md @ 7aae962c61e6f36448edc8bab6b37ff177aefdb3 -->
+<!-- translated-from: docs/ja/guide/modules.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
 # 模块与文件结构
 
 本指南说明如何组织由多个文件构成的程序。详细的语法规则见[语法参考](../reference/syntax.md#310-module--use--命名空间)
@@ -75,7 +75,7 @@ typl main.typl        # => 25
 
 ### 公开的单位
 
-- 函数、结构体、枚举、全局变量、宏，各自只有加了 `pub` 的才能被其他模块看到。写法是像 `(pub defun ...)`
+- 函数、结构体、枚举、trait、全局变量、宏，各自只有加了 `pub` 的才能被其他模块看到。写法是像 `(pub defun ...)`
   这样，把 `pub` 放在定义之前。
 - 写在 `impl` 中的方法，只有按项目写成 `(pub new ...)` 的才能从外部使用。
 - 结构体的**类型公开与字段公开是分开的**。`(pub defstruct point ...)` 使类型可见，各字段只有写成
@@ -113,8 +113,7 @@ typl main.typl        # => 25
 trait 的 `impl` 的方法即使不写 `pub` 也总是公开的。固有 `impl`（`(impl point ...)`）的方法只有加了 `pub`
 的才公开。
 
-trait 本身不能公开给其他模块。请把 trait 的定义、对它的 `impl`，以及通过 `:dyn` 使用该 trait 的代码放在同一个
-模块中。
+trait 也只有写成 `(pub deftrait ...)` 的才能被其他模块看到。在其他模块中，像 `shapes::Shape` 这样用路径来写，或者用 `use` 引入，再写到 `impl` 中。
 
 ## 5. 在文件内划分命名空间
 
