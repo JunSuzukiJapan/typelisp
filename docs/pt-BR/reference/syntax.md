@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # Referência de sintaxe do typelisp
 
 typelisp é um Lisp com tipagem estática, escrito em expressões S. Para a lista de funções e métodos embutidos,
@@ -1022,7 +1022,7 @@ por meio de `:dyn`, envolva-os em uma estrutura, como em `(defstruct flag (v boo
   Um nome de módulo é procurado nas definições próprias do módulo atual, depois nos aliases de `use` e
   depois nos nomes que a biblioteca padrão oferece, e fica fixado pelo primeiro encontrado. Os módulos pai
   não são procurados. Para usar uma definição de um módulo pai, escreva uma definição que leva `pub` como
-  caminho, como `::f`, ou traga-a com `use`. A mesma regra vale onde uma função é passada como valor,
+  caminho a partir da raiz, como `::geo::f`, ou traga-a com `use`. A mesma regra vale onde uma função é passada como valor,
   e "o tipo do primeiro argumento" do passo 4 é o tipo do primeiro parâmetro do tipo de função esperado
   ali (escrever `norm` onde se espera `(fn (pt) int)` dá o método `norm` de `pt`). Se o tipo esperado ainda
   não está fixado, o passo 4 é pulado.

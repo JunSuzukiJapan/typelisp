@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # typelisp Sözdizimi Başvurusu
 
 typelisp, S-ifadelerle yazılan, statik tür denetimli bir Lisp'tir. Yerleşik fonksiyonların ve metotların
@@ -1027,7 +1027,7 @@ Giremeyen bir türün değerini bir `:dyn` beklenen yere koymak tür hatasıdır
 
   Bir modül adı geçerli modülün kendi tanımlarında, sonra `use` takma adlarında, sonra standart
   kütüphanenin sunduğu adlarda aranır ve ilk bulunanla belirlenir. Üst modüllerde aranmaz. Bir üst modülün
-  tanımını kullanmak için `pub` taşıyan bir tanımı `::f` gibi bir yolla yazın ya da `use` ile içeri alın. Bir fonksiyonun değer olarak geçirildiği yerde de aynı kural geçerlidir;
+  tanımını kullanmak için `pub` taşıyan bir tanımı `::geo::f` gibi kökten başlayan bir yolla yazın ya da `use` ile içeri alın. Bir fonksiyonun değer olarak geçirildiği yerde de aynı kural geçerlidir;
   4. adımdaki "ilk argümanın türü" o zaman orada beklenen fonksiyon türünün ilk parametresinin türüdür
   (`(fn (pt) int)` beklenen yere `norm` yazmak `pt`'nin `norm` metodunu verir). Beklenen tür henüz
   belirlenmediyse 4. adım atlanır.

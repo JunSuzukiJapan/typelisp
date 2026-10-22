@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # Referensi Sintaks typelisp
 
 typelisp adalah Lisp dengan tipe statis, ditulis dalam S-expression. Untuk daftar fungsi bawaan dan
@@ -1068,7 +1068,7 @@ Untuk menangani nilai seperti itu melalui `:dyn`, bungkuslah dalam struct, seper
 
   Nama modul dicari di definisi milik modul saat ini sendiri, lalu di alias `use`, lalu di nama yang
   ditawarkan pustaka standar, dan ditetapkan oleh yang pertama ditemukan. Modul induk tidak dicari. Untuk
-  memakai definisi modul induk, tulis definisi yang diberi `pub` dengan path seperti `::f`, atau bawa
+  memakai definisi modul induk, tulis definisi yang diberi `pub` dengan path dari akar seperti `::geo::f`, atau bawa
   masuk dengan `use`. Aturan yang sama berlaku di tempat fungsi diteruskan sebagai
   nilai; "tipe argumen pertama" pada langkah 4 lalu adalah tipe parameter pertama dari tipe fungsi yang
   diharapkan di sana (menulis `norm` di tempat yang mengharapkan `(fn (pt) int)` memberi metode `norm`

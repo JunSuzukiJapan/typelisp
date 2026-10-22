@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # Riferimento della sintassi di typelisp
 
 typelisp è un Lisp a tipizzazione statica, scritto in S-expression. Per l'elenco delle funzioni e dei
@@ -1069,7 +1069,7 @@ tali valori attraverso `:dyn`, avvolgili in una struttura, come in `(defstruct f
   Un nome di modulo si cerca nelle definizioni proprie del modulo corrente, poi negli alias di `use`, poi
   nei nomi offerti dalla libreria standard, ed è fissato dal primo trovato. I moduli genitori non vengono
   cercati. Per usare una definizione di un modulo genitore, scrivi una definizione che porta `pub` come
-  percorso, ad esempio `::f`, oppure importala con `use`. La stessa regola vale dove una funzione viene passata come
+  percorso dalla radice, ad esempio `::geo::f`, oppure importala con `use`. La stessa regola vale dove una funzione viene passata come
   valore; "il tipo del primo argomento" del passo 4 è allora il tipo del primo parametro del tipo di
   funzione atteso lì (scrivere `norm` dove si attende `(fn (pt) int)` dà il metodo `norm` di `pt`). Se il
   tipo atteso non è ancora fissato, il passo 4 viene saltato.

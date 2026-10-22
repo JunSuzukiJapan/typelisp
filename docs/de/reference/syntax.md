@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # Syntaxreferenz von typelisp
 
 typelisp ist ein statisch typisiertes Lisp, geschrieben in S-Ausdrücken. Die Liste der eingebauten Funktionen
@@ -1064,7 +1064,7 @@ Typfehler. Um solche Werte über `:dyn` zu behandeln, hüllt man sie in eine Str
   Ein Modulname wird in den eigenen Definitionen des aktuellen Moduls, dann in den `use`-Aliasen, dann in
   den Namen, die die Standardbibliothek anbietet, gesucht und steht mit dem ersten Fund fest. Elternmodule
   werden nicht durchsucht. Um eine Definition eines Elternmoduls zu verwenden, schreibt man eine
-  Definition, die `pub` trägt, als Pfad wie `::f` oder holt sie mit `use` herein. Dieselbe Regel gilt, wo eine Funktion als Wert
+  Definition, die `pub` trägt, als Pfad von der Wurzel wie `::geo::f` oder holt sie mit `use` herein. Dieselbe Regel gilt, wo eine Funktion als Wert
   übergeben wird; „der Typ des ersten Arguments“ in Schritt 4 ist dann der erste Parametertyp des dort
   erwarteten Funktionstyps (`norm` an einer Stelle, die `(fn (pt) int)` erwartet, ergibt die Methode `norm`
   von `pt`). Steht der erwartete Typ noch nicht fest, wird Schritt 4 übersprungen.

@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # Referencja składni typelisp
 
 typelisp to statycznie typowany Lisp zapisywany w S-wyrażeniach. Listę funkcji wbudowanych i
@@ -1029,8 +1029,8 @@ wartości przez `:dyn`, opakuj je w strukturę, jak w `(defstruct flag (v bool))
 
   Nazwy modułu szuka się we własnych definicjach bieżącego modułu, potem w aliasach `use`, potem w nazwach
   udostępnianych przez bibliotekę standardową, a ustala ją pierwsze znalezisko. Modułów nadrzędnych się
-  nie przeszukuje. Aby użyć definicji modułu nadrzędnego, zapisz definicję mającą `pub` ścieżką, jak
-  `::f`, albo sprowadź ją przez `use`. Ta sama reguła obowiązuje tam, gdzie funkcję przekazuje się
+  nie przeszukuje. Aby użyć definicji modułu nadrzędnego, zapisz definicję mającą `pub` ścieżką od
+  korzenia, jak `::geo::f`, albo sprowadź ją przez `use`. Ta sama reguła obowiązuje tam, gdzie funkcję przekazuje się
   jako wartość; „typ pierwszego argumentu” z kroku 4 jest wtedy typem pierwszego parametru oczekiwanego
   tam typu funkcji (napisanie `norm` tam, gdzie oczekiwane jest `(fn (pt) int)`, daje metodę `norm` typu
   `pt`). Jeśli oczekiwany typ nie jest jeszcze ustalony, krok 4 jest pomijany.

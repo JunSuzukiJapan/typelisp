@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # Référence de la syntaxe de typelisp
 
 typelisp est un Lisp à typage statique, écrit en S-expressions. Pour la liste des fonctions et méthodes intégrées,
@@ -1043,7 +1043,7 @@ telles valeurs via `:dyn`, enveloppez-les dans une structure, comme `(defstruct 
   Un nom de module se cherche dans les définitions propres du module courant, puis dans les alias de
   `use`, puis dans les noms qu'offre la bibliothèque standard, et il est fixé par le premier trouvé. Les
   modules parents ne sont pas parcourus. Pour utiliser une définition d'un module parent, écrivez une
-  définition portant `pub` sous forme de chemin comme `::f`, ou importez-la avec `use`. La même règle s'applique là où une
+  définition portant `pub` sous forme de chemin depuis la racine comme `::geo::f`, ou importez-la avec `use`. La même règle s'applique là où une
   fonction est passée comme valeur ; « le type du premier argument » de l'étape 4 est alors le type du
   premier paramètre du type de fonction attendu à cet endroit (écrire `norm` là où `(fn (pt) int)` est
   attendu donne la méthode `norm` de `pt`). Si le type attendu n'est pas encore fixé, l'étape 4 est sautée.

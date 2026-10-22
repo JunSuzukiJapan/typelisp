@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # typelisp-syntaxisreferentie
 
 typelisp is een statisch getypeerde Lisp, geschreven in S-expressies. Voor de lijst met ingebouwde
@@ -1071,7 +1071,7 @@ zulke waarden via `:dyn` te behandelen, wikkel je ze in een struct, zoals in `(d
   Een modulenaam wordt gezocht in de eigen definities van de huidige module, dan in de `use`-aliassen, dan
   in de namen die de standaardbibliotheek aanbiedt, en ligt vast bij de eerste vondst. Oudermodules worden
   niet doorzocht. Om een definitie van een oudermodule te gebruiken, schrijf je een definitie die `pub`
-  draagt als pad zoals `::f`, of haal je haar binnen met `use`. Dezelfde regel geldt waar een functie als waarde wordt
+  draagt als pad vanaf de wortel zoals `::geo::f`, of haal je haar binnen met `use`. Dezelfde regel geldt waar een functie als waarde wordt
   doorgegeven; "het type van het eerste argument" in stap 4 is dan het eerste parametertype van het daar
   verwachte functietype (`norm` schrijven waar `(fn (pt) int)` wordt verwacht, geeft de methode `norm` van
   `pt`). Ligt het verwachte type nog niet vast, dan wordt stap 4 overgeslagen.

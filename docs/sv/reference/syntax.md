@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # Syntaxreferens för typelisp
 
 typelisp är ett statiskt typat Lisp, skrivet med S-uttryck. För listan över inbyggda funktioner och
@@ -1028,7 +1028,7 @@ hantera sådana värden genom `:dyn` omsluter man dem i en struct, som i `(defst
 
   Ett modulnamn söks i den aktuella modulens egna definitioner, sedan i `use`-aliasen, sedan i de namn som
   standardbiblioteket erbjuder, och bestäms av den första träffen. Föräldramoduler genomsöks inte. För att
-  använda en föräldramoduls definition skriver man en definition som har `pub` som en sökväg som `::f`,
+  använda en föräldramoduls definition skriver man en definition som har `pub` som en sökväg från roten som `::geo::f`,
   eller tar in den med `use`. Samma regel gäller där en funktion skickas som värde; "typen
   för det första argumentet" i steg 4 är då den första parametertypen i den funktionstyp som förväntas där
   (att skriva `norm` där `(fn (pt) int)` förväntas ger metoden `norm` hos `pt`). Är den förväntade typen

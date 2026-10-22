@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # Tham chiếu cú pháp typelisp
 
 typelisp là một ngôn ngữ Lisp có kiểu tĩnh, được viết bằng S-expression. Về danh sách các hàm và phương thức
@@ -1000,8 +1000,8 @@ qua `:dyn`, hãy bọc chúng trong một struct, như `(defstruct flag (v bool)
 
   Tên module được tìm trong các định nghĩa của chính module hiện tại, rồi trong các bí danh `use`, rồi
   trong các tên mà thư viện chuẩn cung cấp, và được xác định bởi cái tìm thấy đầu tiên. Không tìm trong
-  các module cha. Để dùng định nghĩa của module cha, hãy viết định nghĩa có `pub` bằng đường dẫn như
-  `::f`, hoặc đưa vào bằng `use`. Quy tắc này cũng áp dụng ở nơi một hàm được truyền
+  các module cha. Để dùng định nghĩa của module cha, hãy viết định nghĩa có `pub` bằng đường dẫn từ
+  gốc như `::geo::f`, hoặc đưa vào bằng `use`. Quy tắc này cũng áp dụng ở nơi một hàm được truyền
   như giá trị; khi đó "kiểu của đối số đầu tiên" ở bước 4 là kiểu tham số đầu tiên của kiểu hàm được mong
   đợi ở đó (viết `norm` ở nơi mong đợi `(fn (pt) int)` sẽ cho phương thức `norm` của `pt`). Nếu kiểu mong
   đợi chưa được xác định, bỏ qua bước 4.

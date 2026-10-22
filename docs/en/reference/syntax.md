@@ -1,4 +1,4 @@
-<!-- translated-from: docs/ja/reference/syntax.md @ d07d7036fc5a553e51ac4b2fe6beddc181daaa2a -->
+<!-- translated-from: docs/ja/reference/syntax.md @ a6ece39aff964153167e0b935a7099c32c16efdf -->
 # typelisp Syntax Reference
 
 typelisp is a statically typed Lisp, written in S-expressions. For the list of built-in functions and
@@ -1029,8 +1029,8 @@ values through `:dyn`, wrap them in a struct, as in `(defstruct flag (v bool))`.
 
   A module name is looked up in the current module's own definitions, then the `use` aliases, then the
   names the standard library offers, and is settled by the first one found. Parent modules are not
-  searched. To use a parent module's definition, write a definition that carries `pub` as a path such as
-  `::f`, or bring it in with `use`. The same rule applies where a function is
+  searched. To use a parent module's definition, write a definition that carries `pub` as a path from
+  the root such as `::geo::f`, or bring it in with `use`. The same rule applies where a function is
   passed as a value, with "the first argument's type" in step 4 being the first parameter type of the
   function type expected there (writing `norm` where `(fn (pt) int)` is expected gives `pt`'s method
   `norm`). If the expected type is not settled yet, step 4 is skipped.
