@@ -710,15 +710,14 @@ pub(super) fn int_boundary_native_fn(name: &str) -> bool {
     name == "sexpr-int"
 }
 
-/// `(untag-int E)` — see [`int_boundary_raw`].
-/// The `(TEMPLATE...)` list a `defstruct`/`defenum` form carries: one
-/// string per field, `type_key::field_key_template` of it.
+/// The `(TEMPLATE...)` list a `defstruct`/`defenum` form carries: each
+/// field's type, the owning type's parameters written as `(type-param N)`
+/// ([`core::type_form`]).
 pub(super) fn field_template_list(heap: &mut Heap, params: &[String], fields: &[Type]) -> Result<Value, Error> {
     let mut items = Items::new(heap);
     for field in fields {
-        let t = crate::type_key::field_key_template(params, field);
-        let s = items.heap().alloc_string(t);
-        items.push(s);
+        let t = core::type_form(items.heap(), field, params)?;
+        items.push(t);
     }
     items.finish_list()
 }
@@ -733,6 +732,7 @@ pub(super) fn string_list(heap: &mut Heap, items: &[String]) -> Result<Value, Er
     list.finish_list()
 }
 
+/// `(untag-int E)` — see [`int_boundary_raw`].
 pub(super) fn untag_int_form(heap: &mut Heap, e: Value) -> Result<Value, Error> {
     core::tagged(heap, wk::UNTAG_INT, &[e])
 }
@@ -4163,8 +4163,7 @@ impl Checker {
         if self.info.repr(&e.ty).niche_payload().is_none() {
             return Ok(e.retyped(to));
         }
-        let key = ConcreteNames::type_key(&e.ty).into();
-        Ok(Checked::of(Node::BoxOption { key, value: Box::new(e) }, to))
+        Ok(Checked::of(Node::BoxOption { value: Box::new(e) }, to))
     }
 
     /// The checker-side twin of `Interp::is_heap_repr_ty`, used to bake
@@ -6913,8 +6912,7 @@ impl Checker {
         // only has the trait.
         let order = &self.check_object_safe(trait_path)?.vtable_order;
         let supers = self.dyn_super_vtables(trait_path, order, &slots);
-        let key = ConcreteNames::type_key(&value.ty).into();
-        let node = Node::DynNew { key, trait_path: trait_path.clone(), slots, supers, value: Box::new(value) };
+        let node = Node::DynNew { trait_path: trait_path.clone(), slots, supers, value: Box::new(value) };
         Ok(Checked::of(node, Type::Dyn(trait_path.clone(), pins.to_vec())))
     }
 
@@ -11419,8 +11417,7 @@ impl Checker {
             SpawnKind::Task => super::registry::task_of(inner.ty.clone()),
             SpawnKind::Thread => super::registry::thread_of(inner.ty.clone()),
         };
-        let key = ConcreteNames::type_key(&ty).into();
-        Ok(Checked::of(Node::Spawn { tag: kind.tag(), key, call: Box::new(inner) }, ty))
+        Ok(Checked::of(Node::Spawn { tag: kind.tag(), handle: ty.clone(), call: Box::new(inner) }, ty))
     }
 
     /// `(select ((v (recv ch)) body...) ((send ch x) body...) (:else body...))`
@@ -11544,11 +11541,10 @@ impl Checker {
                 // answer, and hiding it would leave an arm that can only be
                 // written by testing the channel some other way.
                 let bound = super::registry::option_of(elem);
-                let key = ConcreteNames::type_key(&bound);
                 let chan_ty = chan.ty.clone();
                 let chan_name = format!("select operand {}", binds.len());
                 binds.push((chan_name.clone(), chan.ty.clone(), chan));
-                let child = env.extended_with_locs(vec![(var.clone(), bound, loc.clone())])?;
+                let child = env.extended_with_locs(vec![(var.clone(), bound.clone(), loc.clone())])?;
                 let (body, body_ty) = self.check_seq(heap, interp, &child, rest, &vec![None; rest.len()], expected)?;
                 let (joined, split) = match &ty {
                     Some(t) => join_or_first(t, &body_ty),
@@ -11557,7 +11553,7 @@ impl Checker {
                 ty = Some(joined);
                 let body = disagreeing_if(Checked::of(Node::Let { binds: Vec::new(), body }, body_ty), split);
                 let chan = Checked::of(Node::Local { name: chan_name.into() }, chan_ty);
-                SelectArm::Recv { var: var.into(), key: key.into(), chan, body }
+                SelectArm::Recv { var: var.into(), bound, chan, body }
             };
             arms.push(arm_form);
         }

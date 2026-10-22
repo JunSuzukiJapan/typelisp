@@ -81,9 +81,8 @@ pub enum Node {
     /// A value of variant `variant` of `owner<targs>`; `field_tys` are the
     /// variant's declared field types with `targs` substituted in.
     Construct { owner: crate::Path, targs: Vec<Type>, variant: usize, mutable: bool, field_tys: Vec<Type>, args: Vec<Checked> },
-    /// A niched `Option` put into the box a `Sexpr` holds it as; `key` is the
-    /// `Option`'s runtime identity.
-    BoxOption { key: Box<str>, value: Box<Checked> },
+    /// A niched `Option` put into the box a `Sexpr` holds it as.
+    BoxOption { value: Box<Checked> },
     /// The concrete value inside a trait object, as a `Sexpr` datum.
     DynValue { value: Box<Checked> },
     /// A call of the method `method` of `owner` (`args[0]` is the receiver
@@ -95,10 +94,9 @@ pub enum Node {
     /// The body of a generic function where `what` needs the type arguments:
     /// never executed, since every specialization checks the site again.
     ErasedGeneric { what: Box<str> },
-    /// `value` boxed as a trait object of `trait_path`; `key` is its concrete
-    /// type's identity, `slots` and `supers` the vtables.
+    /// `value` boxed as a trait object of `trait_path`; `slots` and `supers`
+    /// are the vtables.
     DynNew {
-        key: Box<str>,
         trait_path: crate::Path,
         slots: Vec<(crate::Path, String)>,
         supers: Vec<(crate::Path, Vec<(crate::Path, String)>)>,
@@ -147,9 +145,8 @@ pub enum Node {
     /// A niched `Option` of type `ty` holding `value`: `value` as a tagged
     /// field word, with no box.
     SomeOf { ty: Type, value: Box<Checked> },
-    /// Running `call` as a task or a thread (`tag`); `key` is the identity
-    /// of the handle it answers.
-    Spawn { tag: u32, key: Box<str>, call: Box<Checked> },
+    /// Running `call` as a task or a thread (`tag`), answering a `handle`.
+    Spawn { tag: u32, handle: Type, call: Box<Checked> },
     /// `(compile name)`.
     Compile { target: super::resolved::CompileTarget },
     /// `(trace ...)` or `(untrace ...)` (`tag`).
@@ -345,9 +342,9 @@ impl Node {
 /// One arm of a [`Node::Select`].
 #[derive(Clone, Debug, PartialEq)]
 pub enum SelectArm {
-    /// `((var (recv chan)) body...)`; `key` is the identity of the
-    /// `Option` `var` is bound to.
-    Recv { var: Box<str>, key: Box<str>, chan: Checked, body: Checked },
+    /// `((var (recv chan)) body...)`; `bound` is the `Option` `var` is
+    /// bound to.
+    Recv { var: Box<str>, bound: Type, chan: Checked, body: Checked },
     /// `((send chan value) body...)`; `kind` is how the value is stored.
     Send { kind: i64, chan: Checked, value: Checked, body: Checked },
     /// `(:else body...)`.
@@ -600,6 +597,92 @@ pub fn path_form(heap: &mut Heap, p: &crate::Path) -> Value {
     segs.extend(typelisp_mem::symbols::ns_names(p.ns()));
     segs.push(p.name_symbol());
     heap.intern_path(&segs)
+}
+
+/// A type, as a core form field writes one: the form
+/// [`typelisp_mem::type_key_of_form`] reads a value's runtime identity off.
+///
+/// `params` are the owning type's parameters, for a field's template: the
+/// `N`th is written `(type-param N)`. Any other type variable is a generic
+/// definition's own parameter, in a body that is lowered but never run, and
+/// is written `(type-var "NAME")`.
+pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value, Error> {
+    let mut f = Items::new(heap);
+    let tag = match ty {
+        Type::Named(p, args) | Type::Dyn(p, args) => {
+            let v = path_form(f.heap(), p);
+            f.push(v);
+            for a in args {
+                let v = type_form(f.heap(), a, params)?;
+                f.push(v);
+            }
+            if matches!(ty, Type::Named(..)) { wk::TYPE_NAMED } else { wk::TYPE_DYN }
+        }
+        Type::Fn(ps, rest, ret) => {
+            let mut l = Items::new(f.heap());
+            for p in ps {
+                let v = type_form(l.heap(), p, params)?;
+                l.push(v);
+            }
+            let l = l.finish_list()?;
+            f.push(l);
+            let r = match rest {
+                Some(t) => type_form(f.heap(), t, params)?,
+                None => Value::Empty,
+            };
+            f.push(r);
+            let r = type_form(f.heap(), ret, params)?;
+            f.push(r);
+            wk::TYPE_FN
+        }
+        Type::PtrTo(t) => {
+            let v = type_form(f.heap(), t, params)?;
+            f.push(v);
+            wk::TYPE_PTR
+        }
+        Type::CStruct(p) => {
+            let v = path_form(f.heap(), p);
+            f.push(v);
+            wk::TYPE_CSTRUCT
+        }
+        Type::Var(name) => match params.iter().position(|p| p == name) {
+            Some(i) => {
+                f.push(Value::Int(i as i64));
+                wk::TYPE_PARAM
+            }
+            None => {
+                let v = f.heap().alloc_string(name.clone());
+                f.push(v);
+                wk::TYPE_VAR
+            }
+        },
+        Type::Unit => wk::TYPE_UNIT,
+        Type::Never => wk::TYPE_NEVER,
+        Type::Ptr
+        | Type::CLong
+        | Type::CULong
+        | Type::I8
+        | Type::I16
+        | Type::I32
+        | Type::U8
+        | Type::U16
+        | Type::U32
+        | Type::F32
+        | Type::F64
+        | Type::Int
+        | Type::Ratio
+        | Type::Rational
+        | Type::RandomState
+        | Type::Bool
+        | Type::Char
+        | Type::Str
+        | Type::Symbol => {
+            let v = path_form(f.heap(), &crate::Path::root(&typelisp_mem::TypeKey::type_key(ty)));
+            f.push(v);
+            wk::TYPE_NAMED
+        }
+    };
+    f.finish(tag)
 }
 
 /// A node's `i`th field read as a [`crate::Path`] ([`path_value`]). Shared by

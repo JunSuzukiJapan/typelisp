@@ -40,7 +40,7 @@ use crate::eval::value::EvalError;
 
 use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, param_names,
-    path_field, param_reprs, repr_list, str_field, sym_field, tail_after, tail_after_value, Op,
+    path_field, param_reprs, repr_list, sym_field, type_key_field, tail_after, tail_after_value, Op,
 };
 use super::task_body::{TyplBody, TyplCx};
 use super::{FnDef, Interp};
@@ -1450,10 +1450,9 @@ impl Interp {
                     };
                     match tag.well_known() {
                         wk::RECV => {
-                            let Some(Value::Str(kid)) = parts.get(2) else {
-                                return Err(EvalError::Internal("eval: (select ..) recv arm has no key".into()));
+                            let Some(key) = parts.get(2).and_then(|k| typelisp_mem::type_key_of_form(heap, *k)) else {
+                                return Err(EvalError::Internal("eval: (select ..) recv arm has no type".into()));
                             };
-                            let key = heap.string(*kid).to_string();
                             let chan = self.eval_leaf(heap, parts[3], env)?;
                             ops.push(SelectOp::Recv(chan_id_of(heap, Some(chan))?, key));
                         }
@@ -1478,7 +1477,7 @@ impl Interp {
             Op::Task => {
                 // Field 0 is the result representation, read by the bridge and
                 // by nothing here; field 1 the handle's type key.
-                let key = str_field(heap, form, 1, "task")?;
+                let key = type_key_field(heap, form, 1, "task")?;
                 let call = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (task ..) has no call".to_string()))?;
                 match call_kind(heap, call)? {
@@ -1507,7 +1506,7 @@ impl Interp {
                 let ret = core::field(heap, form, 0)
                     .and_then(|r| Repr::read(heap, r))
                     .ok_or_else(|| EvalError::Internal("eval: (thread ..) has no result representation".to_string()))?;
-                let key = str_field(heap, form, 1, "thread")?;
+                let key = type_key_field(heap, form, 1, "thread")?;
                 let call = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (thread ..) has no call".to_string()))?;
                 match call_kind(heap, call)? {
@@ -2484,7 +2483,7 @@ impl Interp {
         // The value's runtime identity, spelled by the checker where the
         // instantiation was known: `gen<i32>` and `gen<string>` share `path`
         // and differ here.
-        let key = str_field(heap, form, 1, "construct")?;
+        let key = type_key_field(heap, form, 1, "construct")?;
         let variant = int_field(heap, form, 2, "construct")? as usize;
         let mutable = bool_field(heap, form, 3, "construct")?;
 
@@ -2510,7 +2509,7 @@ impl Interp {
         let method = sym_field(heap, form, 1, "assoc")?;
         // The result's runtime identity, for the built-in methods that build a
         // box: `Vector::new` has no field to read an instantiation off.
-        let ret_key = str_field(heap, form, 5, "assoc")?;
+        let ret_key = type_key_field(heap, form, 5, "assoc")?;
 
         // `Task<T>::wait` cannot go through `eval_builtin_method`: it may have to
         // *suspend*, and a builtin answers with a value or an error, with no way
@@ -2693,10 +2692,8 @@ impl Interp {
             // would niche: this node exists precisely because the slot the
             // value is going into needs the box.
             Frame::BoxOption { key } => {
-                let key = match key {
-                    Value::Str(id) => heap.string(id).to_string(),
-                    other => return Err(EvalError::Internal(format!("eval: (box-option ..): key is {:?}", other))),
-                };
+                let key = typelisp_mem::type_key_of_form(heap, key)
+                    .ok_or_else(|| EvalError::Internal(format!("eval: (box-option ..): not a type: {:?}", key)))?;
                 let (variant, fields) = if v.is_empty() { (1, vec![]) } else { (0, vec![v]) };
                 Ok((State::Apply(crate::type_key::alloc_enum_keyed(heap, &key, variant, fields)), None))
             }
@@ -3350,7 +3347,7 @@ mod tests {
     #[test]
     fn construct_builds_a_struct_and_field_get_reads_it() {
         let mut h = stress_heap();
-        let point = "(construct ::point \"point\" 0 true (int-any-width int-any-width) \
+        let point = "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
                        (int-any-width 1) (int-any-width 2))";
         assert_eq!(
             eval_ok(&mut h, &format!("(field-get {} 1 int-any-width)", point)),
@@ -3367,10 +3364,10 @@ mod tests {
     #[test]
     fn a_nested_construction_does_not_lose_the_outer_fields() {
         let mut h = stress_heap();
-        let inner = "(construct ::point \"point\" 0 true (int-any-width int-any-width) \
+        let inner = "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
                        (int-any-width 3) (int-any-width 4))";
         let outer = format!(
-            "(construct ::pair \"pair\" 0 true (str point) (str \"tag\") {})",
+            "(construct ::pair (type-named ::pair) 0 true (str point) (str \"tag\") {})",
             inner
         );
         let src = format!("(field-get (field-get {} 1 point) 0 int-any-width)", outer);
@@ -3382,7 +3379,7 @@ mod tests {
     #[test]
     fn a_struct_survives_being_bound_and_read_back() {
         let mut h = stress_heap();
-        let src = "(let ((p sexpr (construct ::point \"point\" 0 true (int-any-width int-any-width) \
+        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
                                     (int-any-width 5) (int-any-width 6))))
                      (field-get (var p) 1 int-any-width))";
         assert_eq!(eval_ok(&mut h, src), Value::Int(6));
@@ -3546,7 +3543,7 @@ mod tests {
     #[test]
     fn field_set_writes_through_the_struct() {
         let mut h = stress_heap();
-        let src = "(let ((p sexpr (construct ::point \"point\" 0 true (int-any-width int-any-width) \
+        let src = "(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width int-any-width) \
                                     (int-any-width 1) (int-any-width 2))))
                      (field-set (var p) 1 int-any-width (int-any-width 42))
                      (field-get (var p) 1 int-any-width))";
@@ -3558,7 +3555,7 @@ mod tests {
     #[test]
     fn the_object_survives_an_allocating_value_expression() {
         let mut h = stress_heap();
-        let src = r#"(let ((p sexpr (construct ::point "point" 0 true (int-any-width str)
+        let src = r#"(let ((p sexpr (construct ::point (type-named ::point) 0 true (int-any-width str)
                                       (int-any-width 1) (str "old"))))
                        (field-set (var p) 1 str (str "new"))
                        (field-get (var p) 1 str))"#;

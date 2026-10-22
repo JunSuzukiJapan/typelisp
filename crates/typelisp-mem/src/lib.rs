@@ -18,6 +18,7 @@ pub mod stack;
 pub mod symbols;
 pub mod tagged;
 pub mod tuple;
+pub mod type_form;
 pub mod value;
 
 pub use errors::{Error, Loc, LIBRARY_FILE};
@@ -27,6 +28,7 @@ pub use names::{ConcreteNames, TypeKey};
 pub use stack::grow_stack;
 pub use option::{is_niched_option_key, option_payload_niches, option_prints_wrapped};
 pub use symbols::{wk, NsId, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};
+pub use type_form::type_key_of_form;
 pub use tuple::{is_tuple_base_key, sexpr_tuple_arity, sexpr_tuple_key, TUPLE_MAX_ARITY};
 pub use tagged::{decode, encode, fixnum_fits, references_heap, try_encode, FIXNUM_MAX, FIXNUM_MIN, NIL_WORD};
 pub use value::{BoxId, ConsRef, FloatBox, NarrowInt, PathId, StrId, TypeKeyId, Value, BUILTIN_TYPE_KEYS};

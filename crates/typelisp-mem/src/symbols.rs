@@ -606,6 +606,23 @@ well_known_symbols! {
      the standard library offers every module — which a module must do
      before it defines one of those names."
     SHADOW => "shadow"
+
+    "Appended for the explicit-symbols plan's stage 5a (2026-10-23): how the
+     core IR writes a type — a value's runtime identity, a built-in's result
+     type, a field's type template. A named type is `(type-named PATH ARG...)`
+     with `PATH` the definition's path from the root; a field's template
+     names the owning type's `N`th parameter as `(type-param N)`, and a
+     generic definition's body, lowered but never run, names one of its own
+     parameters as `(type-var \"NAME\")`."
+    TYPE_NAMED => "type-named"
+    TYPE_FN => "type-fn"
+    TYPE_DYN => "type-dyn"
+    TYPE_PTR => "type-ptr"
+    TYPE_CSTRUCT => "type-cstruct"
+    TYPE_PARAM => "type-param"
+    TYPE_VAR => "type-var"
+    TYPE_UNIT => "type-unit"
+    TYPE_NEVER => "type-never"
 }
 
 
@@ -806,7 +823,8 @@ pub const CORE_VOCABULARY: &[u32] = &[
     wk::RETIRED_ELSE, wk::SPAWN, wk::TAG, wk::SPAWN_THREAD, wk::PAT_WHEN, wk::INTERNAL_MODULE_NAME,
     wk::ATTRIBUTE, wk::APPLY_INDIRECT, wk::CELLVAR, wk::CELLSET, wk::GLOBAL_INIT, wk::HASHTABLE_OP,
     wk::LLVM_OP, wk::SUSPEND, wk::VECTOR_OP, wk::REPR_HANDLE, wk::REPR_RAW_WORD, wk::REPR_STRUCT,
-    wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_NICHE, wk::REPR_NONE,
+    wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_NICHE, wk::REPR_NONE, wk::TYPE_NAMED, wk::TYPE_FN,
+    wk::TYPE_DYN, wk::TYPE_PTR, wk::TYPE_CSTRUCT, wk::TYPE_PARAM, wk::TYPE_VAR, wk::TYPE_UNIT, wk::TYPE_NEVER,
 ];
 
 /// The standard library module's segment under the root.

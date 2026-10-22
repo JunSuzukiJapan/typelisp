@@ -742,10 +742,7 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
         // `(box-option KEY E)` -> `(box-option (str ...) E)`: the key crosses
         // as the island's string literal, the way every type identity does.
         wk::BOX_OPTION => {
-            let key = match core::field(heap, form, 0) {
-                Some(Value::Str(id)) => heap.string(id).to_string(),
-                _ => return Err(malformed(heap, form)),
-            };
+            let key = core::field(heap, form, 0).and_then(|k| typelisp_mem::type_key_of_form(heap, k)).ok_or_else(|| malformed(heap, form))?;
             let inner = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
             let key = str_form(f.heap(), &key)?;
@@ -816,10 +813,9 @@ fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
                 if parts.len() != 5 {
                     return Err(Error::TypeError("compile: malformed select receive arm".into()));
                 }
-                let Value::Str(key_id) = parts[2] else {
-                    return Err(Error::TypeError("compile: a select receive arm has no key".into()));
+                let Some(key) = typelisp_mem::type_key_of_form(a.heap(), parts[2]) else {
+                    return Err(Error::TypeError("compile: a select receive arm has no type".into()));
                 };
-                let key = a.heap().string(key_id).to_string();
                 a.push(parts[0]);
                 a.push(parts[1]);
                 let key_form = str_form(a.heap(), &key)?;
@@ -1062,9 +1058,8 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: u32, cx: Ctx) -> Re
 /// `(spawn-thread RET-R KEY LAMBDA)` is the same with `rt_suspend_thread`,
 /// and wakes with a `Thread<T>` handle — `shim` names which.
 fn translate_spawn(heap: &mut Heap, form: Value, shim: &str, cx: Ctx) -> Result<Value, Error> {
-    let Some(Value::Str(key_id)) = core::field(heap, form, 1) else { return Err(malformed(heap, form)) };
+    let key = core::field(heap, form, 1).and_then(|k| typelisp_mem::type_key_of_form(heap, k)).ok_or_else(|| malformed(heap, form))?;
     let lambda = core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?;
-    let key = heap.string(key_id).to_string();
     let key = str_form(heap, &key)?;
     heap.push_root(key);
     let kind = Repr::Struct.field_kind();
@@ -1227,8 +1222,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
     // The result's runtime identity — see `Checker::assoc_form`. A container
     // op that builds a box hands this to the shim that builds it; everything
     // else ignores it.
-    let Value::Str(ret_key_id) = parts[5] else { return Err(malformed(heap, form)) };
-    let ret_key = heap.string(ret_key_id).to_string();
+    let ret_key = typelisp_mem::type_key_of_form(heap, parts[5]).ok_or_else(|| malformed(heap, form))?;
     let args = parts[6..].to_vec();
     // The receiver is `args[0]` by the same convention the checker builds an
     // instance call with, so its representation is the first of the list.
@@ -1596,10 +1590,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // graph: the *call* through it has no statically known target, but
         // every target it could reach is right here in the slot list.
         wk::DYN_NEW => {
-            let key = match core::field(heap, form, 0) {
-                Some(Value::Str(id)) => heap.string(id).to_string(),
-                _ => return Ok(()),
-            };
+            let Some(key) = core::field(heap, form, 0).and_then(|k| typelisp_mem::type_key_of_form(heap, k)) else { return Ok(()) };
             let Some(trait_path) = core::path_field(heap, form, 1) else { return Ok(()) };
             let slots = vtable_at(heap, form, 2)?;
             let supers = supers_at(heap, form, 3)?;
@@ -2044,8 +2035,7 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
     if parts.len() < 6 {
         return Err(malformed(heap, form));
     }
-    let Value::Str(key_id) = parts[0] else { return Err(malformed(heap, form)) };
-    let concrete_key = heap.string(key_id).to_string();
+    let concrete_key = typelisp_mem::type_key_of_form(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
     let trait_path = core::path_value(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
     let repr = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
     let id = *cx.dyn_tables.vtables.get(&(concrete_key.clone(), trait_path.clone())).ok_or_else(|| {
@@ -2546,7 +2536,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
         return Err(malformed(heap, form));
     }
     let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
-    let Value::Str(key_id) = parts[1] else { return Err(malformed(heap, form)) };
+    let key = typelisp_mem::type_key_of_form(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
     let Value::Int(variant) = parts[2] else { return Err(malformed(heap, form)) };
     let Value::Bool(mutable) = parts[3] else { return Err(malformed(heap, form)) };
     let field_reprs = repr_list(heap, parts[4])?;
@@ -2558,7 +2548,6 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     // was known, and interpreted and compiled code have to agree on it down to
     // the character — `gen<i32>` here and `gen` there is exactly the split
     // this field exists to prevent.
-    let key = heap.string(key_id).to_string();
     let type_name = if is_sexpr { Value::Empty } else { str_form(heap, &key)? };
     let mut f = Items::new(heap);
     f.push(Value::Bool(is_sexpr));
@@ -2939,9 +2928,8 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             // The node's own key, not one rebuilt from the path: the checker
             // spelled the instantiation, and the island compares the string it
             // is given against the one `construct` wrote.
-            let Some(Value::Str(key_id)) = core::field(heap, pat, 1) else { return Err(malformed(heap, pat)) };
+            let key = core::field(heap, pat, 1).and_then(|k| typelisp_mem::type_key_of_form(heap, k)).ok_or_else(|| malformed(heap, pat))?;
             let inner = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
-            let key = heap.string(key_id).to_string();
             // The same word seen as the downcast target, so the inner pattern
             // binds at *that* type's representation rather than the enclosing
             // value's — the three-way classification `pattern_bindings` makes
@@ -2974,12 +2962,11 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
         return Err(malformed(heap, pat));
     }
     let path = core::path_value(heap, parts[0]).ok_or_else(|| malformed(heap, pat))?;
-    let Value::Str(key_id) = parts[1] else { return Err(malformed(heap, pat)) };
+    let key = typelisp_mem::type_key_of_form(heap, parts[1]).ok_or_else(|| malformed(heap, pat))?;
     let Value::Int(variant) = parts[2] else { return Err(malformed(heap, pat)) };
     let Value::Bool(downcast) = parts[3] else { return Err(malformed(heap, pat)) };
     let field_reprs = repr_list(heap, parts[4])?;
     let subpats = parts[5..].to_vec();
-    let key = heap.string(key_id).to_string();
 
     let kind = if path == Path::root("sexpr") {
         MATCH_KIND_SEXPR
@@ -3438,11 +3425,11 @@ mod tests {
     #[test]
     fn an_ordinary_method_call_keeps_its_qualified_type_name() {
         assert_eq!(
-            bridged("(assoc ::i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b))"),
+            bridged("(assoc ::i32 + true int-any-width (int-any-width int-any-width) (type-named ::i32) (var a) (var b))"),
             r#"(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#
         );
         assert_eq!(
-            bridged("(assoc ::m::point area true int-any-width (struct) \"i32\" (var p))"),
+            bridged("(assoc ::m::point area true int-any-width (struct) (type-named ::i32) (var p))"),
             r#"(assoc "m::point" "area" true "tl_m::point''area" (2 var "p" false))"#
         );
     }
@@ -3452,18 +3439,18 @@ mod tests {
     #[test]
     fn a_vector_builtin_becomes_an_operation_carrying_its_element_kind() {
         assert_eq!(
-            bridged("(assoc ::vector get true int-any-width ((vector int-any-width) int-any-width) \"i32\" (var v) (int-any-width 0))"),
+            bridged("(assoc ::vector get true int-any-width ((vector int-any-width) int-any-width) (type-named ::i32) (var v) (int-any-width 0))"),
             r#"(vector-op "get" 1 (var "v" false) (int-any-width 0 0))"#
         );
         // A `sexpr` element is already tagged, so it passes through as kind 6.
         assert_eq!(
-            bridged("(assoc ::vector push true unit ((vector sexpr) sexpr) \"()\" (var v) (var x))"),
+            bridged("(assoc ::vector push true unit ((vector sexpr) sexpr) (type-unit) (var v) (var x))"),
             r#"(vector-op "push" 6 (var "v" false) (var "x" false))"#
         );
         // `new` has no receiver and no element to tag; the result is what
         // says it is a vector at all.
         assert_eq!(
-            bridged("(assoc ::vector new false (vector int-any-width) () \"vector<i32>\")"),
+            bridged("(assoc ::vector new false (vector int-any-width) () (type-named ::vector (type-named ::i32)))"),
             r#"(vector-op "new" 0 (str (int-any-width 0 118) (int-any-width 0 101) (int-any-width 0 99) (int-any-width 0 116) (int-any-width 0 111) (int-any-width 0 114) (int-any-width 0 60) (int-any-width 0 105) (int-any-width 0 51) (int-any-width 0 50) (int-any-width 0 62)))"#
         );
     }
@@ -3475,13 +3462,13 @@ mod tests {
     #[test]
     fn a_hash_table_builtin_carries_both_key_and_value_kinds() {
         assert_eq!(
-            bridged("(assoc ::hashtable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) \"()\" (var h) (var n) (var i) (var k) (var x))"),
+            bridged("(assoc ::hashtable bucket-put true unit ((hashtable str int-any-width) int-any-width int-any-width str int-any-width) (type-unit) (var h) (var n) (var i) (var k) (var x))"),
             r#"(hashtable-op "bucket-put" 6 1 () (var "h" false) (var "n" false) (var "i" false) (var "k" false) (var "x" false))"#
         );
         // A bucket read builds no box, so the name slot stays empty; the
         // island decodes the result by `key-kind`/`val-kind` instead.
         assert_eq!(
-            bridged("(assoc ::hashtable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) \"i32\" (var h) (var n) (var i))"),
+            bridged("(assoc ::hashtable bucket-value true int-any-width ((hashtable str int-any-width) int-any-width int-any-width) (type-named ::i32) (var h) (var n) (var i))"),
             r#"(hashtable-op "bucket-value" 6 1 () (var "h" false) (var "n" false) (var "i" false))"#
         );
     }
@@ -3491,7 +3478,7 @@ mod tests {
     /// name strings.
     #[test]
     fn an_llvm_method_becomes_an_operation_id() {
-        let printed = bridged("(assoc ::llvm-builder const-word true handle (handle int-any-width) \"llvm-value\" (var b) (int-any-width 42))");
+        let printed = bridged("(assoc ::llvm-builder const-word true handle (handle int-any-width) (type-named ::llvm-value) (var b) (int-any-width 42))");
         assert_eq!(
             printed,
             format!(
@@ -3507,10 +3494,10 @@ mod tests {
     /// `Repr::Scope` carries one.
     #[test]
     fn a_scope_routes_on_what_it_holds() {
-        let printed = bridged("(assoc ::scope get true enum ((scope handle) str) \"option<llvm-value>\" (var e) (var n))");
+        let printed = bridged("(assoc ::scope get true enum ((scope handle) str) (type-named ::option (type-named ::llvm-value)) (var e) (var n))");
         assert!(printed.starts_with("(llvm-op "), "expected a native-scope op, got {}", printed);
         assert_eq!(
-            bridged("(assoc ::scope get true enum ((scope int-any-width) str) \"option<i32>\" (var e) (var n))"),
+            bridged("(assoc ::scope get true enum ((scope int-any-width) str) (type-named ::option (type-named ::i32)) (var e) (var n))"),
             r#"(assoc "scope" "get" true "tl_scope''get" (2 var "e" false) (2 var "n" false))"#
         );
     }
@@ -3523,19 +3510,19 @@ mod tests {
     #[test]
     fn a_construct_tags_its_fields_from_its_own_representations() {
         assert_eq!(
-            bridged_with(&DEFS, "(construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
+            bridged_with(&DEFS, "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
             r#"(construct false true (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) 0 (1 int-any-width 0 1) (1 int-any-width 0 2))"#
         );
         // An enum field of `sexpr` is already tagged, hence the passthrough
         // kind 6.
         assert_eq!(
-            bridged_with(&DEFS, "(construct ::option \"option<sexpr>\" 1 false (sexpr) (var x))"),
+            bridged_with(&DEFS, "(construct ::option (type-named ::option (type-named ::sexpr)) 1 false (sexpr) (var x))"),
             r#"(construct false false (str (int-any-width 0 111) (int-any-width 0 112) (int-any-width 0 116) (int-any-width 0 105) (int-any-width 0 111) (int-any-width 0 110) (int-any-width 0 60) (int-any-width 0 115) (int-any-width 0 101) (int-any-width 0 120) (int-any-width 0 112) (int-any-width 0 114) (int-any-width 0 62)) 1 (6 var "x" false))"#
         );
         // `sexpr`'s own variants take untagged fields: their shapes follow
         // from the variant number, so the island derives them.
         assert_eq!(
-            bridged_with(&DEFS, &format!("(construct ::sexpr \"sexpr\" {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
+            bridged_with(&DEFS, &format!("(construct ::sexpr (type-named ::sexpr) {SEXPR_CONS} false (sexpr sexpr) (int-any-width 1) (int-any-width 2))")),
             format!("(construct true false () {SEXPR_CONS} (int-any-width 0 1) (int-any-width 0 2))")
         );
     }
@@ -3545,7 +3532,7 @@ mod tests {
     #[test]
     fn a_construct_needs_no_definition_recorded() {
         assert_eq!(
-            bridged_with(&[], "(construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
+            bridged_with(&[], "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1) (int-any-width 2))"),
             r#"(construct false true (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) 0 (1 int-any-width 0 1) (1 int-any-width 0 2))"#
         );
     }
@@ -3555,7 +3542,7 @@ mod tests {
     /// kind.
     #[test]
     fn a_construct_whose_arity_disagrees_with_its_representations_is_refused() {
-        let e = refused_with(&DEFS, "(construct ::point \"point\" 0 true (int-any-width int-any-width) (int-any-width 1))");
+        let e = refused_with(&DEFS, "(construct ::point (type-named ::point) 0 true (int-any-width int-any-width) (int-any-width 1))");
         assert!(e.contains("has 2 fields, constructed with 1"), "{}", e);
     }
 
@@ -3566,7 +3553,7 @@ mod tests {
     /// wrong box shape.
     #[test]
     fn a_pattern_on_an_unrecorded_type_is_refused() {
-        let e = refused_with(&[], "(match (var v) struct ((pat-ctor ::point \"point\" 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let e = refused_with(&[], "(match (var v) struct ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(e.contains("no definition recorded"), "{}", e);
     }
 
@@ -3595,13 +3582,13 @@ mod tests {
     #[test]
     fn a_match_pairs_every_pattern_with_its_body() {
         assert_eq!(
-            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::option \"option<sexpr>\" 0 false ()) (int-any-width 0)) ((pat-ctor ::option \"option<sexpr>\" 1 false (sexpr) (pat-bind x)) (var x)))"),
+            bridged_with(&DEFS, "(match (var v) enum ((pat-ctor ::option (type-named ::option (type-named ::sexpr)) 0 false ()) (int-any-width 0)) ((pat-ctor ::option (type-named ::option (type-named ::sexpr)) 1 false (sexpr) (pat-bind x)) (var x)))"),
             r#"(match false (var "v" false) (((pat-ctor 0 () 1 () false ()) int-any-width 0 0) ((pat-ctor 1 ((pat-bind "x" 2)) 1 (6) false ()) var "x" false)) 2)"#
         );
         // A struct scrutinee: pattern kind 2, and the field kinds come from
         // the `defstruct`.
         assert_eq!(
-            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor ::point \"point\" 0 false (int-any-width int-any-width) (pat-bind a) (pat-wild)) (var a)))"),
+            bridged_with(&DEFS, "(match (var p) struct ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-bind a) (pat-wild)) (var a)))"),
             r#"(match false (var "p" false) (((pat-ctor 0 ((pat-bind "a" 0) (pat-wild)) 2 (1 1) false ()) var "a" false)) 2)"#
         );
     }
@@ -3636,12 +3623,12 @@ mod tests {
     /// placeholder.
     #[test]
     fn only_a_downcast_pattern_carries_a_type_name() {
-        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point \"point\" 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let plain = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 false (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(plain.contains("(pat-ctor 0 ((pat-wild) (pat-wild)) 2 (1 1) false ())"), "{}", plain);
-        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point \"point\" 0 true (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
+        let down = bridged_with(&DEFS, "(match (var v) sexpr ((pat-ctor ::point (type-named ::point) 0 true (int-any-width int-any-width) (pat-wild) (pat-wild)) (int-any-width 1)))");
         assert!(down.contains("true (str (int-any-width 0 112)"), "{}", down);
         // A whole-value type test always tests, so it always carries one.
-        let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest ::point \"point\" (pat-bind p)) (var p)))");
+        let tt = bridged_with(&DEFS, "(match (var v) sexpr ((pat-typetest ::point (type-named ::point) (pat-bind p)) (var p)))");
         assert!(tt.contains(r#"(pat-typetest (str (int-any-width 0 112) (int-any-width 0 111) (int-any-width 0 105) (int-any-width 0 110) (int-any-width 0 116)) (pat-bind "p" 2))"#), "{}", tt);
     }
 
@@ -3667,7 +3654,7 @@ mod tests {
     fn a_value_pattern_crosses_as_a_name_and_a_test() {
         let printed = bridged_with(
             &DEFS,
-            r#"(match (var s) str ((pat-guard $match-scrut (assoc ::string equals true bool (str str) "bool" (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
+            r#"(match (var s) str ((pat-guard $match-scrut (assoc ::string equals true bool (str str) (type-named ::bool) (var $match-scrut) (str "a"))) (int-any-width 1)) ((pat-wild) (int-any-width 0)))"#,
         );
         assert!(printed.contains(r#"(pat-guard "$match-scrut" (assoc "string" "equals" true "tl_string''equals""#), "{}", printed);
         // A `str` scrutinee is a heap pointer, so this one *is* rooted.
@@ -3935,7 +3922,7 @@ mod tests {
     /// resolved at run time.
     #[test]
     fn a_trait_object_carries_the_ids_interned_for_it() {
-        let printed = bridged_with_dyn(r#"(dyn-new "point" ::shape ((::point area)) () struct (var p))"#);
+        let printed = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () struct (var p))"#);
         assert_eq!(printed, r#"(dyn-new 11 (2 var "p" false))"#);
         assert_eq!(bridged_with_dyn("(dyn-upcast ::drawable (var d))"), r#"(dyn-upcast 22 (2 var "d" false))"#);
         assert_eq!(
@@ -3956,9 +3943,9 @@ mod tests {
     /// that was always meant.
     #[test]
     fn the_boxed_values_kind_follows_its_representation() {
-        let as_struct = bridged_with_dyn(r#"(dyn-new "point" ::shape ((::point area)) () struct (var p))"#);
-        let as_enum = bridged_with_dyn(r#"(dyn-new "point" ::shape ((::point area)) () enum (var p))"#);
-        let as_int = bridged_with_dyn(r#"(dyn-new "point" ::shape ((::point area)) () int-any-width (var p))"#);
+        let as_struct = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () struct (var p))"#);
+        let as_enum = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () enum (var p))"#);
+        let as_int = bridged_with_dyn(r#"(dyn-new (type-named ::point) ::shape ((::point area)) () int-any-width (var p))"#);
         assert!(as_struct.contains("(2 var"), "{}", as_struct);
         assert!(as_enum.contains("(2 var"), "{}", as_enum);
         assert!(as_int.contains("(0 var"), "{}", as_int);
@@ -3994,7 +3981,7 @@ mod tests {
     #[test]
     fn a_defun_becomes_the_boundary_triple() {
         let (name, params, body) =
-            top_level(&[], "(defun ::m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc ::i32 + true int-any-width (int-any-width int-any-width) \"i32\" (var a) (var b)))")
+            top_level(&[], "(defun ::m::add ((a int-any-width) (b int-any-width)) int-any-width (assoc ::i32 + true int-any-width (int-any-width int-any-width) (type-named ::i32) (var a) (var b)))")
                 .expect("a defun is compiled");
         assert_eq!(name, "tl_m::add");
         assert_eq!(params, "((a . 0) (b . 0))");
@@ -4077,7 +4064,7 @@ mod tests {
         assert!(
             bridged_with(
                 &["(module ::m (defstruct ::m::point (int-any-width sexpr)))"],
-                "(construct ::m::point \"m::point\" 0 true (int-any-width sexpr) (int-any-width 1) (quote ()))"
+                "(construct ::m::point (type-named ::m::point) 0 true (int-any-width sexpr) (int-any-width 1) (quote ()))"
             )
             .contains("(1 int-any-width 0 1)")
         );

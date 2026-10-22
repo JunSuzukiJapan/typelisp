@@ -104,9 +104,9 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
             let forms = subs(s, info, cs)?;
             info.construct_form(s, owner, targs, *variant, *mutable, field_tys, &forms)
         }
-        Node::BoxOption { key, value } => {
-            let value = sub(s, info, value)?;
-            forms::box_option_form(s, key, value)
+        Node::BoxOption { value: inner } => {
+            let form = sub(s, info, inner)?;
+            forms::box_option_form(s, &inner.ty, form)
         }
         Node::DynValue { value } => {
             let value = sub(s, info, value)?;
@@ -121,9 +121,9 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
             forms::dyn_upcast_form(s, to, value)
         }
         Node::ErasedGeneric { what } => forms::erased_generic_form(s, what),
-        Node::DynNew { key, trait_path, slots, supers, value } => {
+        Node::DynNew { trait_path, slots, supers, value } => {
             let form = sub(s, info, value)?;
-            info.dyn_new_form(s, key, trait_path, slots, supers, &value.ty, form)
+            info.dyn_new_form(s, trait_path, slots, supers, &value.ty, form)
         }
         Node::DynCall { trait_path, method, slot, targets, args: cs } => {
             let a = args(s, info, cs)?;
@@ -216,11 +216,11 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
             let payload = repr.niche_payload().expect("a `SomeOf` is built only for a niched `Option`");
             forms::some_of_form(s, payload, value)
         }
-        Node::Spawn { tag, key, call } => {
+        Node::Spawn { tag, handle, call } => {
             let form = sub(s, info, call)?;
             let ret = info.repr_form(s, &call.ty)?;
             s.push_root(ret);
-            forms::spawn_form(s, *tag, ret, key, form)
+            forms::spawn_form(s, *tag, ret, handle, form)
         }
         Node::Compile { target } => forms::compile_fn_form(s, target),
         Node::Trace { tag, targets } => forms::trace_form(s, *tag, targets),
@@ -241,10 +241,10 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
             let mut forms = Vec::with_capacity(arms.len());
             for arm in arms {
                 let form = match arm {
-                    SelectArm::Recv { var, key, chan, body } => {
+                    SelectArm::Recv { var, bound, chan, body } => {
                         let chan = sub(s, info, chan)?;
                         let body = sub(s, info, body)?;
-                        forms::select_recv_arm(s, var, key, chan, body)?
+                        forms::select_recv_arm(s, var, bound, chan, body)?
                     }
                     SelectArm::Send { kind, chan, value, body } => {
                         let chan = sub(s, info, chan)?;
@@ -484,8 +484,7 @@ impl Info {
         // instantiation travels from here, the one place that knows it. The
         // representation above cannot stand in: `Repr::Vector(Int)` is
         // `Vector<i32>` and `Vector<i64>` at once.
-        let key = ConcreteNames::type_key(ret);
-        let key = f.heap().alloc_string(key);
+        let key = core::type_form(f.heap(), ret, &[])?;
         f.push(key);
         for (i, a) in args.iter().enumerate() {
             let form = if declared_int(i) { untag_int_form(f.heap(), a.form)? } else { a.form };
@@ -537,8 +536,7 @@ impl Info {
         f.push(m);
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
-        let key = ConcreteNames::type_key(ret);
-        let key = f.heap().alloc_string(key);
+        let key = core::type_form(f.heap(), ret, &[])?;
         f.push(key);
         f.finish(wk::METHODREF)
     }
@@ -616,8 +614,7 @@ impl Info {
         // above stays for the questions that are about the *definition*
         // (struct or enum, where it was defined); this is the one about the
         // *value* (which instantiation it is).
-        let key = ConcreteNames::type_key(&Type::Named(type_name.clone(), targs.to_vec()));
-        let key = f.heap().alloc_string(key);
+        let key = core::type_form(f.heap(), &Type::Named(type_name.clone(), targs.to_vec()), &[])?;
         f.push(key);
         f.push(Value::Int(variant as i64));
         f.push(Value::Bool(mutable));
@@ -774,8 +771,7 @@ impl Info {
                 // *downcast* it is the whole point — testing the base path
                 // alone let a `gen<string>` value into a `(the gen<i32> ...)`
                 // arm, which then read its field as an `i32`.
-                let key = ConcreteNames::type_key(&Type::Named(type_name.clone(), targs.clone()));
-                let key = f.heap().alloc_string(key);
+                let key = core::type_form(f.heap(), &Type::Named(type_name.clone(), targs.clone()), &[])?;
                 f.push(key);
                 f.push(Value::Int(*variant as i64));
                 f.push(Value::Bool(*downcast));
@@ -800,8 +796,7 @@ impl Info {
                 // arguments — it does now, and this is where that stops being
                 // decoration: `(the gen<i32> x)` no longer accepts a
                 // `gen<string>` and then reads its field as an `i32`.
-                let key = ConcreteNames::type_key(ty);
-                let key = f.heap().alloc_string(key);
+                let key = core::type_form(f.heap(), ty, &[])?;
                 f.push(key);
                 let one = self.pattern_form(f.heap(), sub)?;
                 f.push(one);
@@ -868,7 +863,7 @@ impl Info {
         f.finish(wk::LABELS)
     }
 
-    /// `(dyn-new "KEY" TRAIT ((TYPE SYM)...) ((TRAIT ((TYPE SYM)...))...) REPR
+    /// `(dyn-new TYPE TRAIT ((TYPE SYM)...) ((TRAIT ((TYPE SYM)...))...) REPR
     /// FORM)` — boxing a concrete value as a trait object.
     ///
     /// The trailing representation is the boxed value's own, and it cannot be
@@ -878,7 +873,6 @@ impl Info {
     pub(super) fn dyn_new_form(
         &self,
         heap: &mut Heap,
-        concrete_key: &str,
         trait_path: &Path,
         slots: &[(Path, String)],
         supers: &[(Path, Vec<(Path, String)>)],
@@ -886,7 +880,7 @@ impl Info {
         value: Value,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
-        let key = f.heap().alloc_string(concrete_key.to_string());
+        let key = core::type_form(f.heap(), value_ty, &[])?;
         f.push(key);
         let tp = core::path_form(f.heap(), trait_path);
         f.push(tp);

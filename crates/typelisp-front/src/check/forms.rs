@@ -227,10 +227,10 @@ pub(super) fn block_form(heap: &mut Heap, name: &str, body: Value, repr: Value) 
 ///
 /// `tag` is `"task"` or `"thread"`: `(thread RET-R KEY CALL)` is the same node
 /// for a task that runs on an OS thread of its own.
-pub(super) fn spawn_form(heap: &mut Heap, tag: u32, ret: Value, key: &str, call: Value) -> Result<Value, Error> {
+pub(super) fn spawn_form(heap: &mut Heap, tag: u32, ret: Value, handle: &Type, call: Value) -> Result<Value, Error> {
     let call = rooted(heap, call);
     let ret = rooted(heap, ret);
-    let key = heap.alloc_string(key.to_string());
+    let key = core::type_form(heap, handle, &[])?;
     let key = rooted(heap, key);
     let form = core::tagged(heap, tag, &[ret, key, call])?;
     Ok(rooted(heap, form))
@@ -268,7 +268,7 @@ pub(super) fn select_form(heap: &mut Heap, arms: &[Value]) -> Result<Value, Erro
 pub(super) fn select_recv_arm(
     heap: &mut Heap,
     var: &str,
-    opt_key: &str,
+    bound: &Type,
     chan: Value,
     body: Value,
 ) -> Result<Value, Error> {
@@ -283,7 +283,7 @@ pub(super) fn select_recv_arm(
     f.push(tag);
     let v = f.heap().intern_symbol(var);
     f.push(v);
-    let k = f.heap().alloc_string(opt_key.to_string());
+    let k = core::type_form(f.heap(), bound, &[])?;
     f.push(k);
     f.push(chan);
     f.push(body);
@@ -411,9 +411,10 @@ pub(super) fn some_of_form(heap: &mut Heap, payload: &Repr, value: Value) -> Res
 /// `none` = variant 1), under the identity `KEY` spells. The printer, `eq`
 /// and every other consumer of a `Sexpr` datum see the same box a boxed
 /// `Option` is; the niche is a statement about typed positions only.
-pub(super) fn box_option_form(heap: &mut Heap, key: &str, value: Value) -> Result<Value, Error> {
-    let key = heap.alloc_string(key.to_string());
+pub(super) fn box_option_form(heap: &mut Heap, option: &Type, value: Value) -> Result<Value, Error> {
     let mut s = RootScope::new(heap);
+    s.push_root(value);
+    let key = core::type_form(&mut s, option, &[])?;
     s.push_root(key);
     core::tagged(&mut s, wk::BOX_OPTION, &[key, value])
 }

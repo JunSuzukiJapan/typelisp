@@ -575,10 +575,25 @@ fn walk_nested_here(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Resu
             Ok(())
         }
         // `(select ARM...)`. Each arm is a list, not a node, so the default
-        // arm's `plain_sub_forms` cannot reach into one.
+        // arm's `plain_sub_forms` cannot reach into one. Only an arm's forms
+        // are walked: a receive arm's name and type, and a send arm's value
+        // kind, are not forms.
         wk::SELECT => {
             for arm in core::fields(heap, form)? {
-                for f in heap.list_to_vec(arm)?.iter().skip(1) {
+                let items = heap.list_to_vec(arm)?;
+                let forms = match items.first() {
+                    Some(Value::Symbol(tag)) => match tag.well_known() {
+                        wk::RECV => items.get(3..5),
+                        wk::SEND => items.get(2..5),
+                        wk::KW_ELSE => items.get(1..2),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(forms) = forms else {
+                    return Err(Error::TypeError(format!("compile: malformed select arm: {}", core::print(heap, arm))));
+                };
+                for f in forms {
                     walk_nested(heap, *f, out)?;
                 }
             }
