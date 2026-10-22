@@ -445,3 +445,34 @@ fn cond_and_case_else_work_inside_a_file_module() {
     );
     assert_eq!(result, Ok(Some(Value::Int(0))));
 }
+
+/// A module nested in the entry file reaches the file's own definitions by a
+/// path from the root. The `use` names the file being read: it must not load
+/// that file a second time (the path's leading empty segment once added
+/// nothing to the file's path, so the file loaded again as another module and
+/// the first one's `f` was no longer found).
+#[test]
+fn a_nested_module_uses_its_files_definition_by_a_path_from_the_root() {
+    let result = run_project(
+        "use-from-root",
+        &[(
+            "main.typl",
+            "(pub defun f () int 7)\n(module child (use ::main::f) (pub defun h () int (+ (f) (::main::f))))\n(+ (child::h) (main::f))",
+        )],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(Value::Int(21))));
+}
+
+/// A parent module is another module: a definition without `pub` cannot be
+/// brought into a module nested in it.
+#[test]
+fn a_nested_module_cannot_use_its_parents_private_definition() {
+    let result = run_project(
+        "use-private-from-root",
+        &[("main.typl", "(defun g () int 8)\n(module child (use ::main::g) (pub defun h () int (g)))\n(child::h)")],
+        "main.typl",
+    );
+    let err = result.expect_err("a private definition is not visible from a nested module");
+    assert!(err.contains("unresolved `::main::g`"), "{err}");
+}

@@ -561,6 +561,9 @@ impl Loader {
     /// (`file_ns`), which resolves the *name* `(use vector)` binds once this
     /// has loaded the file under its true root-derived path (`geo::vector`,
     /// never a synthetic relative one).
+    ///
+    /// A path from the root (`::a::b`, whose first segment is empty) is read
+    /// from the source root only, never beside the file.
     pub(crate) fn ensure_loaded(
         &mut self,
         heap: &mut Heap,
@@ -570,6 +573,10 @@ impl Loader {
         use_segs: &[String],
         cur_segs: &[String],
     ) -> Result<(), Error> {
+        let (use_segs, cur_segs) = match use_segs.split_first() {
+            Some((root, rest)) if root.is_empty() => (rest, &[][..]),
+            _ => (use_segs, cur_segs),
+        };
         for n in (1..=use_segs.len()).rev() {
             let module_segs: Vec<String> = use_segs[..n].to_vec();
             if self.try_load_module(heap, reader, checker, interp, &module_segs)? {
@@ -600,6 +607,9 @@ impl Loader {
         interp: &mut Interp,
         module_segs: &[String],
     ) -> Result<bool, Error> {
+        // An empty segment would add nothing to the file's path, so the file
+        // would load a second time as a module of another name.
+        assert!(module_segs.iter().all(|s| !s.is_empty()), "a module path has no empty segment: {module_segs:?}");
         let mut file = self.src_root.clone();
         for s in module_segs {
             file.push(s);

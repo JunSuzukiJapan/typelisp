@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stops a commit that CI's Translations job would reject, or that adds a
-# machine-specific absolute path or an emoji. Only checks that take seconds
+# machine-specific absolute path or an emoji (pre-push checks the
+# translations once more). Only checks that take seconds
 # belong here; the rest are listed in .claude/skills/commit-check/SKILL.md.
 #
 # Enable it once per clone:
@@ -15,7 +16,15 @@ cd "$repo_root"
 
 failed=0
 
-if ! out="$(scripts/check-translations.sh 2>&1)"; then
+# A translation records the commit of the original it was made from, so the
+# commit that changes a Japanese original cannot have up-to-date translations
+# yet: that one is let through, and the translations follow in the next
+# commit. pre-push makes sure they did before anything reaches CI.
+originals="$(git diff --cached --name-only | grep -E '^(docs/ja/|README_JP\.md$|editor/[^/]+/README_JP\.md$)' || true)"
+if [ -n "$originals" ]; then
+    echo "pre-commit: this commit changes Japanese originals; bring their translations up to date in the next commit:" >&2
+    echo "$originals" >&2
+elif ! out="$(scripts/check-translations.sh 2>&1)"; then
     echo "pre-commit: translations are out of date (CI / Translations fails on this):" >&2
     echo "$out" | grep -v '^all ' >&2
     failed=1

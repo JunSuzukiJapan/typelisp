@@ -1383,8 +1383,17 @@ impl Heap {
 
     /// What names mean in this session: its modules, its types and their
     /// members, what its `use`s brought in. Shared by every view of the heap.
-    pub fn names(&self) -> parking_lot::MutexGuard<'_, symbols::SessionNames> {
-        self.shared.names.lock()
+    ///
+    /// Panics when this thread already holds the guard: the mutex is not
+    /// reentrant, so a second lock would wait forever instead of failing.
+    pub fn names(&self) -> NamesGuard<'_> {
+        let at = &self.shared.names as *const _ as usize;
+        NAMES_HELD.with(|held| {
+            let mut held = held.borrow_mut();
+            assert!(!held.contains(&at), "this thread already holds the session's names; a second lock would wait forever");
+            held.push(at);
+        });
+        NamesGuard { guard: self.shared.names.lock(), at }
     }
 
     /// Intern a symbol as written inside module `ns` — the reader's entry
@@ -3432,6 +3441,40 @@ impl Drop for Heap {
         // A view dropped while native (a panic unwinding out of `native`'s
         // closure) is not running either; unregistering is all it needs.
         self.shared.threads.unregister(&self.slot);
+    }
+}
+
+thread_local! {
+    // The `SessionNames` mutexes this thread holds, by address (`Heap::names`).
+    static NAMES_HELD: std::cell::RefCell<Vec<usize>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// [`Heap::names`]'s guard: the session's names, locked by this thread.
+pub struct NamesGuard<'a> {
+    guard: parking_lot::MutexGuard<'a, symbols::SessionNames>,
+    at: usize,
+}
+
+impl std::ops::Deref for NamesGuard<'_> {
+    type Target = symbols::SessionNames;
+    fn deref(&self) -> &symbols::SessionNames {
+        &self.guard
+    }
+}
+
+impl std::ops::DerefMut for NamesGuard<'_> {
+    fn deref_mut(&mut self) -> &mut symbols::SessionNames {
+        &mut self.guard
+    }
+}
+
+impl Drop for NamesGuard<'_> {
+    fn drop(&mut self) {
+        NAMES_HELD.with(|held| {
+            let mut held = held.borrow_mut();
+            let i = held.iter().rposition(|a| *a == self.at).expect("a held guard is recorded");
+            held.remove(i);
+        });
     }
 }
 

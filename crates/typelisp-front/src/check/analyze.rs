@@ -9010,14 +9010,13 @@ impl Checker {
     fn use_target(&self, heap: &Heap, syms: &[typelisp_mem::SymRef]) -> Option<UseTarget> {
         use typelisp_mem::symbols::PathStep;
         let cur = self.info.cur_ns().ns;
-        let names = heap.names();
         let spelled: Vec<&str> = syms.iter().map(|s| s.name()).collect();
         let (first, rest) = syms.split_first()?;
         if rest.is_empty() {
             if let Some(found) = self.use_target_at(&Path::of_symbol(cur, *first)) {
                 return Some(found);
             }
-            match names.first_segment(cur, spelled[0]) {
+            match heap.names().first_segment(cur, spelled[0]) {
                 Some(PathStep::Module(m)) => return Some(UseTarget::Module(m)),
                 Some(PathStep::Type(_)) => return None,
                 None => {}
@@ -9028,7 +9027,7 @@ impl Checker {
         let file = typelisp_mem::symbols::find_ns(self.info.file_ns.last()?)?;
         let dir = typelisp_mem::symbols::ns_parent(file)?;
         let sibling = typelisp_mem::symbols::find_exact(dir, first.name())?;
-        let PathStep::Module(m) = names.reached(dir, &[sibling]).ok()? else { return None };
+        let PathStep::Module(m) = heap.names().reached(dir, &[sibling]).ok()? else { return None };
         if rest.is_empty() {
             return Some(UseTarget::Module(m));
         }
@@ -9039,15 +9038,14 @@ impl Checker {
     /// the module `from`.
     fn use_target_in(&self, heap: &Heap, from: typelisp_mem::NsId, spelled: &[&str]) -> Option<UseTarget> {
         use typelisp_mem::symbols::PathStep;
-        let names = heap.names();
-        let (walked, step) = names.follow_path(from, spelled).ok()?;
+        let (walked, step) = heap.names().follow_path(from, spelled).ok()?;
         let last = *walked.last().expect("a path has a last segment");
         if let PathStep::Module(m) = step {
             if let Some(found) = self.use_target_at(&Path::of_symbol(m, last)) {
                 return Some(found);
             }
         }
-        match names.reached(from, &walked).ok()? {
+        match heap.names().reached(from, &walked).ok()? {
             PathStep::Module(m) => Some(UseTarget::Module(m)),
             PathStep::Type(_) => None,
         }

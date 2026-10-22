@@ -13,9 +13,10 @@ CI（`.github/workflows/ci.yml`）が落とすものと、ユーザーが決め�
 
 `git config core.hooksPath` が `scripts/git-hooks` でなければ、
 `git config core.hooksPath scripts/git-hooks` を打つ（クローンごとに 1 回。クラウドセッションも）。
-フックが見るのは、翻訳の鮮度（CI の Translations と同じ `scripts/check-translations.sh`）、
-足した行のマシン固有の絶対パス、足した行の絵文字・アイコン記号。フックに止められたら、
-`--no-verify` で抜けずに直す。
+pre-commit が見るのは、翻訳の鮮度（CI の Translations と同じ `scripts/check-translations.sh`）、
+足した行のマシン固有の絶対パス、足した行の絵文字・アイコン記号。日本語の原本を変える
+コミットだけは翻訳の検査を飛ばす（訳の 1 行目に書くハッシュがまだ無いため）。その分は
+pre-push が push の前にもう一度検査する。フックに止められたら、`--no-verify` で抜けずに直す。
 
 ## 1. 警告 0 の cargo check（CI の Check と同じ）
 
@@ -65,11 +66,13 @@ scripts/with-llvm-env.sh scripts/test-serial.sh > <ログ> 2>&1
 変えたら `README.md`（英）、`editor/<エディタ>/README_JP.md` を変えたらその各言語版。
 
 1. 原本の変更をコミットする（訳の 1 行目に書くハッシュが要るので先に確定させる）。
+   このコミットは訳を含めない。pre-commit は原本を含むコミットの翻訳の検査を飛ばす。
 2. 英語を先に、そのあと残りの言語を、原本で変えた箇所だけ直す。訳し直しで他の段落を
    崩さない。
 3. 各訳の 1 行目 `<!-- translated-from: <原本> @ <完全なハッシュ> -->` を手順 1 のコミットにする。
    中身を直さずに 1 行目だけ進めない（古い訳が最新に見える）。
 4. `scripts/check-translations.sh` が「all N translations are up to date」になること。
+   なっていなければ pre-push が push を止める。
 
 ## 5. 文書の規則
 
