@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.18
+# ABI バージョン 0.3.19
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.18 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.19 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `f4be67525013b207`
+内容ハッシュ (FNV-1a 64): `a8eb6cea5c53595d`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -391,6 +391,7 @@
 | 272 | `type-var` |
 | 273 | `type-unit` |
 | 274 | `type-never` |
+| 275 | `type-ref` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
@@ -1413,6 +1414,7 @@
 - インスタンス `load-arg`: `(llvm-builder, llvm-function, int) -> llvm-value`
 - インスタンス `load-env`: `(llvm-builder, llvm-function, int) -> llvm-value`
 - インスタンス `load-raw`: `(llvm-builder, llvm-value, int) -> llvm-value`
+- インスタンス `load-type`: `(llvm-builder, llvm-module, int) -> llvm-value`
 - インスタンス `position-at-end`: `(llvm-builder, llvm-basic-block) -> ()`
 - インスタンス `scratch-slot`: `(llvm-builder, int) -> llvm-value`
 - インスタンス `store-arg`: `(llvm-builder, llvm-value, int, llvm-value) -> ()`

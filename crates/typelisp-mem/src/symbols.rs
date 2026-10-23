@@ -623,6 +623,12 @@ well_known_symbols! {
     TYPE_VAR => "type-var"
     TYPE_UNIT => "type-unit"
     TYPE_NEVER => "type-never"
+
+    "Appended for the explicit-symbols plan's stage 5d (2026-10-23): the
+     island's `(type-ref N)`, the type at place `N` of the compiling
+     process's type table, which compiled code reads from its module's
+     table."
+    TYPE_REF => "type-ref"
 }
 
 
@@ -825,6 +831,7 @@ pub const CORE_VOCABULARY: &[u32] = &[
     wk::LLVM_OP, wk::SUSPEND, wk::VECTOR_OP, wk::REPR_HANDLE, wk::REPR_RAW_WORD, wk::REPR_STRUCT,
     wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_NICHE, wk::REPR_NONE, wk::TYPE_NAMED, wk::TYPE_FN,
     wk::TYPE_DYN, wk::TYPE_PTR, wk::TYPE_CSTRUCT, wk::TYPE_PARAM, wk::TYPE_VAR, wk::TYPE_UNIT, wk::TYPE_NEVER,
+    wk::TYPE_REF,
 ];
 
 /// The standard library module's segment under the root.

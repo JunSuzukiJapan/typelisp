@@ -2092,14 +2092,13 @@ pub fn sleep_wait(secs: f64) -> Result<Waiting, SchedError> {
     Ok(Waiting::Until(std::time::Instant::now() + d))
 }
 
-/// The type of the type form a compiled suspension site appended as its
-/// second word — the bridge put it there, because a word on its own does not
-/// name the type the answer is built as. `what` is the operation and `ty` the
-/// type the form writes, for the message a malformed site gets.
-fn key_word(heap: &Heap, word: i64, what: &str, ty: &str) -> Result<TypeId, SchedError> {
-    let form = typelisp_abi::decode(word);
-    typelisp_mem::type_of_form(heap, form).ok_or_else(|| {
-        SchedError::Internal(format!("a compiled {} carried {:?} where its {} type should be", what, form, ty))
+/// The type a compiled suspension site appended as its second word — the
+/// bridge put it there, because the operation's own word does not name the
+/// type the answer is built as. `what` is the operation and `ty` the type it
+/// should be, for the message a malformed site gets.
+fn key_word(word: i64, what: &str, ty: &str) -> Result<TypeId, SchedError> {
+    TypeId::from_word(word).ok_or_else(|| {
+        SchedError::Internal(format!("a compiled {} carried {} where its {} type should be", what, word, ty))
     })
 }
 
@@ -2156,21 +2155,21 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         // own `Repr::field_kind` because the driver has only a word.
         // The capacity is an ordinary `i32` argument, so it crosses raw — the
         // suspension site tags only what the driver could not otherwise read.
-        // The second word is the channel's type, a type form the bridge
-        // appended at the site (as `recv`'s `Option<T>` is).
+        // The second word is the channel's type, which the bridge appended
+        // at the site (as `recv`'s `Option<T>` is).
         cs::SUSPEND_CHAN_NEW => {
-            let key = key_word(heap, second, "`Chan::new`", "`Chan<T>`")?;
+            let key = key_word(second, "`Chan::new`", "`Chan<T>`")?;
             Ok((Waiting::Chan(ChanOp::New(payload, key)), Wake::Tagged))
         }
         // The closure is tagged, and the answer — the handle — comes back
         // tagged like every other typed wake value. The second word is the
-        // handle's type, a type form appended by the bridge.
+        // handle's type, appended by the bridge.
         cs::SUSPEND_TASK => {
-            let key = key_word(heap, second, "`task`", "`Task<T>`")?;
+            let key = key_word(second, "`task`", "`Task<T>`")?;
             Ok((Waiting::Spawn(typelisp_abi::decode(payload), key), Wake::Tagged))
         }
         cs::SUSPEND_THREAD => {
-            let key = key_word(heap, second, "`thread`", "`Thread<T>`")?;
+            let key = key_word(second, "`thread`", "`Thread<T>`")?;
             Ok((Waiting::SpawnThread(typelisp_abi::decode(payload), key), Wake::Tagged))
         }
         cs::SUSPEND_MAIN => Ok((Waiting::Main, Wake::Unit)),
@@ -2192,7 +2191,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
         }
         cs::SUSPEND_CHAN_RECV => {
             let c = chan_id_of(heap, Some(typelisp_abi::decode(payload)))?;
-            let key = key_word(heap, second, "`recv`", "`Option<T>`")?;
+            let key = key_word(second, "`recv`", "`Option<T>`")?;
             Ok((Waiting::Chan(ChanOp::Recv(c, key)), Wake::Tagged))
         }
         // The arms travel in their own slot, and every word in them is
@@ -2220,7 +2219,7 @@ pub fn pending_wait(heap: &mut Heap) -> Result<(Waiting, Wake), SchedError> {
                 let base = 2 + 3 * i;
                 let c = chan_id_of(heap, Some(typelisp_abi::decode(words[base + 1])))?;
                 ops.push(if untag(words[base]) == 0 {
-                    SelectOp::Recv(c, key_word(heap, words[base + 2], "`select` receive arm", "`Option<T>`")?)
+                    SelectOp::Recv(c, key_word(words[base + 2], "`select` receive arm", "`Option<T>`")?)
                 } else {
                     SelectOp::Send(c, typelisp_abi::decode(words[base + 2]))
                 });

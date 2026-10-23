@@ -739,14 +739,14 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             f.push(v);
             f.finish(wk::SOME_OF)
         }
-        // `(box-option TYPE E)` -> `(box-option TYPE' E)`: the type crosses
-        // as the nodes that rebuild its form at run time, the way every type
-        // identity does.
+        // `(box-option TYPE E)` -> `(box-option (type-ref N) E)`: the type
+        // crosses as its place in the type table, the way every type
+        // identity does ([`type_ref`]).
         wk::BOX_OPTION => {
             let ty = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
             let inner = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
             let mut f = Items::new(heap);
-            let ty = quoted_form(f.heap(), ty)?;
+            let ty = type_ref(f.heap(), ty)?;
             f.push(ty);
             let v = to_island(f.heap(), inner, cx)?;
             f.push(v);
@@ -798,8 +798,8 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
 ///
 /// Two of the arm's fields change shape on the way. The receive arm's
 /// `Option<T>` is a type form, plain data in the core node, but the island
-/// needs it as a **value at run time**, so it becomes the nodes that rebuild
-/// that form, exactly as `vector-op`'s `pop` carries one.
+/// needs it as a **value at run time**, so it becomes the [`type_ref`] that
+/// reads it, exactly as `vector-op`'s `pop` carries one.
 /// The bound name stays plain: the island binds it at compile time, into its
 /// own scope, and never needs it as a value.
 fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error> {
@@ -816,7 +816,7 @@ fn translate_select(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Erro
                 }
                 a.push(parts[0]);
                 a.push(parts[1]);
-                let ty = quoted_form(a.heap(), parts[2])?;
+                let ty = type_ref(a.heap(), parts[2])?;
                 a.push(ty);
                 let chan = to_island(a.heap(), parts[3], cx)?;
                 a.push(chan);
@@ -1058,7 +1058,7 @@ fn translate_spawn_call(heap: &mut Heap, form: Value, spawn: u32, cx: Ctx) -> Re
 fn translate_spawn(heap: &mut Heap, form: Value, shim: &str, cx: Ctx) -> Result<Value, Error> {
     let ty = core::field(heap, form, 1).ok_or_else(|| malformed(heap, form))?;
     let lambda = core::field(heap, form, 2).ok_or_else(|| malformed(heap, form))?;
-    let key = quoted_form(heap, ty)?;
+    let key = type_ref(heap, ty)?;
     heap.push_root(key);
     let kind = Repr::Struct.field_kind();
     let node = suspend_node(heap, shim, kind, None, &[Repr::Fn], &[lambda], cx, Some(key));
@@ -1254,7 +1254,7 @@ fn translate_assoc(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error
             // the handle is built by the scheduler, which has no type to read
             // `T` off.
             if method == "recv" || method == "new" {
-                let key = quoted_form(heap, ret_type)?;
+                let key = type_ref(heap, ret_type)?;
                 return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, Some(key));
             }
             return suspend_node(heap, shim, ret.field_kind(), None, &reprs, &args, cx, None);
@@ -1349,7 +1349,7 @@ fn translate_vector_op(
         // The instantiated type, not the bare `vector`: this *is* the
         // value's runtime identity, and a pattern that tests it was compiled
         // from the same type (`Checker::pattern_form`).
-        let name = quoted_form(f.heap(), ret_type)?;
+        let name = type_ref(f.heap(), ret_type)?;
         f.push(name);
     } else {
         for a in args {
@@ -1359,7 +1359,7 @@ fn translate_vector_op(
     }
     if method == "pop" {
         // `pop`'s result *is* this `Option<T>`.
-        let name = quoted_form(f.heap(), ret_type)?;
+        let name = type_ref(f.heap(), ret_type)?;
         f.push(name);
     }
     f.finish(wk::VECTOR_OP)
@@ -1393,7 +1393,7 @@ fn translate_hashtable_op(
     // `keys`/`values`/`entries` build a `Vector<_>`. The ops that build
     // nothing (`count`, `clear`, and the whole bucket family) leave it empty.
     let builds_a_box = matches!(method, "new" | "keys" | "values" | "entries");
-    let result_name = if builds_a_box { quoted_form(f.heap(), ret_type)? } else { Value::Empty };
+    let result_name = if builds_a_box { type_ref(f.heap(), ret_type)? } else { Value::Empty };
     f.push(result_name);
     if method != "new" {
         for a in args {
@@ -1851,6 +1851,15 @@ fn sym_form(heap: &mut Heap, sym: SymRef) -> Result<Value, Error> {
     }
     let fields = f.as_slice().to_vec();
     sexpr_construct(f.heap(), SEXPR_SYM, &fields)
+}
+
+/// The node that reads the type `form` writes out of the module's type table:
+/// `(type-ref N)`, `N` the type's place in this process's table. The island
+/// loads it (`load-type`), and the module's table is filled when the module
+/// is linked here or written out (`compile::type_table`).
+fn type_ref(heap: &mut Heap, form: Value) -> Result<Value, Error> {
+    let ty = typelisp_mem::type_of_form(heap, form).ok_or_else(|| malformed(heap, form))?;
+    core::tagged(heap, wk::TYPE_REF, &[Value::Int(i64::from(ty.index()))])
 }
 
 /// A quoted datum, as the nodes that rebuild it at run time.
@@ -2544,7 +2553,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     // rebuilt from the path: the checker wrote it where the instantiation was
     // known, and interpreted and compiled code have to agree on it — `gen<i32>`
     // here and `gen` there is exactly the split this field exists to prevent.
-    let type_name = if is_sexpr { Value::Empty } else { quoted_form(heap, parts[1])? };
+    let type_name = if is_sexpr { Value::Empty } else { type_ref(heap, parts[1])? };
     let mut f = Items::new(heap);
     f.push(Value::Bool(is_sexpr));
     f.push(Value::Bool(mutable));
@@ -2939,7 +2948,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             } else {
                 Repr::Enum
             };
-            let name = quoted_form(heap, ty)?;
+            let name = type_ref(heap, ty)?;
             let mut f = Items::new(heap);
             f.push(name);
             let inner = translate_pattern(f.heap(), inner, &inner_repr, cx)?;
@@ -3016,7 +3025,7 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     // Only compiled when `downcast` is true: an ordinary pattern already knows
     // the scrutinee's type from its static type, and only a downcast has to
     // test it at run time.
-    let type_name = if downcast { quoted_form(f.heap(), parts[1])? } else { Value::Empty };
+    let type_name = if downcast { type_ref(f.heap(), parts[1])? } else { Value::Empty };
     f.push(type_name);
     f.finish(wk::PAT_CTOR)
 }
@@ -3280,14 +3289,13 @@ mod tests {
         core::print(&h, island)
     }
 
-    /// The island nodes that rebuild the type form `src` at run time — what a
-    /// site that hands the runtime a type carries.
+    /// The island node that reads the type form `src` out of the type table —
+    /// what a site that hands the runtime a type carries.
     fn type_nodes(src: &str) -> String {
         let mut h = Heap::with_capacity(1 << 16);
         let form = read_core(&mut h, src).expect("read failed").pop().unwrap();
-        h.push_root(form);
-        let nodes = quoted_form(&mut h, form).unwrap_or_else(|e| panic!("{:?} did not quote: {}", src, e));
-        core::print(&h, nodes)
+        let ty = typelisp_mem::type_of_form(&h, form).unwrap_or_else(|| panic!("{:?} is not a type form", src));
+        format!("(type-ref {})", ty.index())
     }
 
     fn record_all(h: &mut Heap, defs: &[&str]) -> Definitions {

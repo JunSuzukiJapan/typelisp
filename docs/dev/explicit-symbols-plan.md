@@ -537,6 +537,19 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
    - 5d. コンパイル済みコードがフォームでなく番号を使う。JIT は番号を定数にし、AOT は起動時に
      形の表から番号を埋める大域の表を読む（3.6。表を作る `rt_types_define` は 5c で入った）。
      FFI の型も番号にする。島を 2 回作り直す。
+     前半は済み。ブリッジは型を `(type-ref N)`（N はこのプロセスの型の番号）で出し、島はそれを
+     モジュールの型の表から読む命令（`load-type`）にする。表を埋めるのは `compile::type_table` で、
+     このプロセスに載せるモジュール（JIT）では番号を並べた定数の表に、外へ出すモジュール（島・
+     prelude・fasl・実行ファイル）では型の形の語の列と、それを `rt_types_define` で表にする
+     初期化関数（`typelisp_types_init.<モジュール名>`）にする。初期化関数は `jit_engine` と
+     実行ファイルの `main` の先頭が呼ぶ。ビットコードはすべて `type_table::write_bitcode` で
+     書き出す。計画の「JIT は番号を定数に」からのずれ: 命令に番号を直接書かず、定数の表を読む。
+     prelude と島のビットコードは JIT にも AOT にも載るので、どちらでも同じ書き方にするため。
+     最適化をかけない JIT（-O0）では表を読む命令が残る。`TypeId` の語はタグ付きの整数
+     （`TypeId::word`）。ABI は 0.3.19。
+     残りは FFI: `defffi` の型（`FfiDecl` の文字列）、コールバックのキー（`CallbackSig`、
+     `dump::parse_path` による切り戻し、`rt_ffi_callback_register`）、C メモリ層（`c_mem`）の
+     型キーの文字列。
    - 5e. 単型化した定義を `(元の定義のシンボル, [TypeId])` の表で識別し、`ConcreteNames` の
      切り戻しを消す。`NameView` を定義のシンボルから作る。
 6. `std` を子モジュールに分け、組み込み型を移す（5 節）。`std::prelude` を作り、テスト・例に

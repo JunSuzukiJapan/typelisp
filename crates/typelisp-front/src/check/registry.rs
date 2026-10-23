@@ -2738,6 +2738,10 @@ pub fn llvm_builder_def() -> AdtDef {
     // names its callee to the driver rather than being a `call` instruction
     // with it, so the target has to be a value that can be handed over.
     assoc.insert("build-fn-address".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_function_ty()], llvm_value_ty(), true));
+    // `load-type`: the word of the type at place `N` of the compiling
+    // process's type table, read out of the module's own table — the island's
+    // `(type-ref N)`.
+    assoc.insert("load-type".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), Type::Int], llvm_value_ty(), true));
     builtin_adt(Path::root("llvm-builder"), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 

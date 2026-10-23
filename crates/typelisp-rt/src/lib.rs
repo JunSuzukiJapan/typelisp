@@ -1151,48 +1151,20 @@ pub unsafe extern "C" fn rt_ratio_denominator(args: *const i64, argc: u32) -> i6
 // `defstruct` instance, `Vector<T>`, and `cons-cell<K,V>` alike — see its
 // doc comment.
 
-/// The interned type identity named by a tagged type-form argument.
-///
-/// Compiled code has no `Type`, so it hands these shims the type written as
-/// the core IR writes it (`(type-named ::point)`), rebuilt at run time from
-/// the nodes `core_bridge` compiled it to. This is where that form crosses
-/// back into the heap's type-key table, and the one place in this crate where
-/// an identity is minted.
-///
-/// The lookup runs first so the steady state mints nothing: a type is
-/// interned once (by the checker, or by the first value compiled code builds
-/// of it) and every later instance finds the id already there.
+/// The type a compiled call site handed in: the word the module's type table
+/// holds for it (`TypeId::word`), which the module's code reads from the
+/// table and passes on (`compile::type_table`).
 ///
 /// # Safety
 ///
-/// `raw` must decode to a type form; a `Heap` must be registered on this
-/// thread.
-unsafe fn type_key_arg(raw: i64, who: &str) -> TypeId {
-    let form = decode(raw);
-    typelisp_mem::type_of_form(active_heap(), form)
-        .unwrap_or_else(|| fatal(&format!("{}: type argument is not a type form: {:?}", who, form)))
-}
-
-/// The interned identity named by a tagged type-form argument, or `None` if
-/// this heap has never seen that type — [`type_key_arg`] without the minting.
-///
-/// What an instance *test* wants: a type no value here has ever had answers
-/// the question by itself, and minting an id for it would only grow a
-/// permanent table with a type nothing will ever carry.
-///
-/// # Safety
-///
-/// Same as [`type_key_arg`].
-unsafe fn existing_type_key_arg(raw: i64, who: &str) -> Option<TypeId> {
-    let form = decode(raw);
-    typelisp_mem::existing_type_of_form(active_heap(), form)
-        .unwrap_or_else(|()| fatal(&format!("{}: type argument is not a type form: {:?}", who, form)))
+/// A `Heap` need not be registered; `raw` is only read as a word.
+unsafe fn type_arg(raw: i64, who: &str) -> TypeId {
+    TypeId::from_word(raw).unwrap_or_else(|| fatal(&format!("{}: type argument {} is not a type", who, raw)))
 }
 
 /// `(rt-struct-new type-name field0 field1 ...)` for compiled code —
-/// allocates a boxed `Sexpr` struct. `args[0]` is a tagged type form (the
-/// struct's type, interned into a `TypeId` here rather than kept as a live
-/// `Sexpr` reference — the box stores the id, not the form);
+/// allocates a boxed `Sexpr` struct. `args[0]` is the struct's type (its
+/// `TypeId::word`);
 /// `args[1..argc]` are the
 /// field values, already-tagged `Sexpr`s copied into the new struct's field
 /// vector unchanged (this function doesn't interpret them, same as
@@ -1201,14 +1173,14 @@ unsafe fn existing_type_key_arg(raw: i64, who: &str) -> Option<TypeId> {
 /// # Safety
 ///
 /// `argc` must be `>= 1`, `args` must point to at least `argc` valid `i64`s,
-/// and `args[0]` must decode to a type form; a `Heap` must already be
+/// and `args[0]` must be a type's word; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_struct_new(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
         fatal("rt_struct_new: expected at least 1 argument (the type)");
     }
-    let type_key = type_key_arg(*args, "rt_struct_new");
+    let type_key = type_arg(*args, "rt_struct_new");
     let mut fields = Vec::with_capacity(argc as usize - 1);
     for i in 1..argc as isize {
         fields.push(decode(*args.offset(i)));
@@ -1279,22 +1251,22 @@ pub unsafe extern "C-unwind" fn rt_struct_field_get(args: *const i64, argc: u32)
 // invariant stays intact.
 
 /// `(rt-data-new type-name variant field0 field1 ...)` for compiled code —
-/// allocates a boxed enum value. `args[0]` is a tagged type form (the
-/// enum's type, interned like [`rt_struct_new`]'s), `args[1]` is the
+/// allocates a boxed enum value. `args[0]` is the enum's type (its
+/// `TypeId::word`), `args[1]` is the
 /// *raw* (untagged) variant index, `args[2..argc]` are the variant's field
 /// values, already-tagged `Sexpr`s stored unchanged.
 ///
 /// # Safety
 ///
 /// `argc` must be `>= 2`, `args` must point to at least `argc` valid
-/// `i64`s, and `args[0]` must decode to a type form; a `Heap` must
+/// `i64`s, and `args[0]` must be a type's word; a `Heap` must
 /// already be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_data_new(args: *const i64, argc: u32) -> i64 {
     if argc < 2 {
         fatal("rt_data_new: expected at least 2 arguments (type, variant)");
     }
-    let type_key = type_key_arg(*args, "rt_data_new");
+    let type_key = type_arg(*args, "rt_data_new");
     let variant = *args.add(1);
     if variant < 0 {
         fatal("rt_data_new: negative variant index");
@@ -1364,7 +1336,7 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
 /// against a `Sexpr` scrutinee — `compiler.rs`'s `compile-sexpr-instance-
 /// test`, `core_bridge::translate_pattern`'s `downcast`/`pat-typetest`
 /// encoding). Tests whether tagged `Sexpr` value `args[0]` is a boxed
-/// struct or enum whose own type is the one the type form `args[1]` writes, and —
+/// struct or enum whose own type is `args[1]`, and —
 /// for an enum — whose variant also matches the *raw* `args[2]` (`-1` skips
 /// the variant check, for a struct downcast or a `(the T p)` whole-enum
 /// bind, where any variant of `T` matches).
@@ -1381,7 +1353,7 @@ pub unsafe extern "C" fn rt_data_field(args: *const i64, argc: u32) -> i64 {
 /// # Safety
 ///
 /// `argc` must be `>= 3`, `args` must point to at least 3 valid `i64`s, and
-/// `args[1]` must decode to a type form; a `Heap` must already be
+/// `args[1]` must be a type's word; a `Heap` must already be
 /// registered on this thread.
 #[no_mangle]
 pub unsafe extern "C" fn rt_sexpr_instance_test(args: *const i64, argc: u32) -> i64 {
@@ -1389,9 +1361,7 @@ pub unsafe extern "C" fn rt_sexpr_instance_test(args: *const i64, argc: u32) -> 
         fatal("rt_sexpr_instance_test: expected 3 arguments");
     }
     let v = decode(*args);
-    let Some(type_key) = existing_type_key_arg(*args.add(1), "rt_sexpr_instance_test") else {
-        return 0;
-    };
+    let type_key = type_arg(*args.add(1), "rt_sexpr_instance_test");
     let id = match v {
         Value::Boxed(id) => id,
         _ => return 0,
@@ -2010,12 +1980,12 @@ pub unsafe extern "C" fn rt_struct_pop_field(args: *const i64, argc: u32) -> i64
 // already tagged, exactly as a struct field is.
 
 /// `(rt-hashtable-new type)` for compiled code — an empty `HashTable<K,V>`
-/// under the runtime identity of the type form `type`.
+/// whose type is `type`.
 ///
 /// # Safety
 ///
 /// A `Heap` must already be registered on this thread, and `args[0]` must be
-/// a tagged type form.
+/// a type's word.
 #[no_mangle]
 pub unsafe extern "C" fn rt_hashtable_new(args: *const i64, argc: u32) -> i64 {
     if argc < 1 {
@@ -2025,7 +1995,7 @@ pub unsafe extern "C" fn rt_hashtable_new(args: *const i64, argc: u32) -> i64 {
     // down through the island (`Checker::assoc_form` -> `hashtable-op`'s name
     // slot): `HashTable<string,i32>` and `HashTable<string,string>` are
     // different types and nothing in an empty table says which this is.
-    let key = type_key_arg(*args, "rt_hashtable_new");
+    let key = type_arg(*args, "rt_hashtable_new");
     encode(active_heap().alloc_hashtable(key))
 }
 
@@ -2187,7 +2157,7 @@ pub unsafe extern "C" fn rt_hashtable_keys(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_keys");
     // `args[1]` is the result's own type — a `Vector<K>`, whose instantiation
     // no value here carries. See `rt_hashtable_new`.
-    let key = type_key_arg(*args.add(1), "rt_hashtable_keys");
+    let key = type_arg(*args.add(1), "rt_hashtable_keys");
     let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
     encode(active_heap().alloc_struct(key, fields))
 }
@@ -2201,7 +2171,7 @@ pub unsafe extern "C" fn rt_hashtable_keys(args: *const i64, argc: u32) -> i64 {
 #[no_mangle]
 pub unsafe extern "C" fn rt_hashtable_values(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_values");
-    let key = type_key_arg(*args.add(1), "rt_hashtable_values");
+    let key = type_arg(*args.add(1), "rt_hashtable_values");
     let fields: Vec<Value> = active_heap().hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
     encode(active_heap().alloc_struct(key, fields))
 }
@@ -2221,16 +2191,15 @@ pub unsafe extern "C" fn rt_hashtable_values(args: *const i64, argc: u32) -> i64
 pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i64 {
     let id = hashtable_arg(args, argc, "rt_hashtable_entries");
     // Two identities, one handed in: the result is a `Vector<cons-cell<K,V>>`,
-    // so each cell's type is the vector form's one argument,
-    // `(type-named ::vector CELL)`.
-    let heap = active_heap();
-    let vec_form = decode(*args.add(1));
-    let vec_key = type_key_arg(*args.add(1), "rt_hashtable_entries");
-    let cell_key = match heap.list_to_vec(vec_form).as_deref() {
-        Ok([_, _, cell]) => typelisp_mem::type_of_form(heap, *cell),
-        _ => None,
-    }
-    .unwrap_or_else(|| fatal(&format!("rt_hashtable_entries: the result type is not a one-argument container: {:?}", vec_form)));
+    // so each cell's type is the vector type's one argument.
+    let vec_key = type_arg(*args.add(1), "rt_hashtable_entries");
+    let cell_key = match typelisp_mem::type_shape(vec_key) {
+        typelisp_mem::TypeShape::Named(_, _, args) if args.len() == 1 => args[0],
+        _ => fatal(&format!(
+            "rt_hashtable_entries: the result type `{}` is not a one-argument container",
+            &*typelisp_mem::type_name(vec_key)
+        )),
+    };
     let pairs = active_heap().hashtable_pairs(id);
     let mut fields = Vec::with_capacity(pairs.len());
     let mut rooted = 0usize;
@@ -4952,11 +4921,12 @@ pub unsafe extern "C" fn rt_dyn_upcast(args: *const i64, argc: u32) -> i64 {
     encode(active_heap().alloc_dyn(to, inner))
 }
 
-/// Interns the types an executable carries (`typelisp_mem::type_words`) and
-/// writes each one's id, as its word, into the table the generated code
-/// reads them from: `args` is `[words, word_count, table]`, `table` having a
-/// word for every type the list writes. AOT startup runs it before anything
-/// that reads the table; the JIT has the ids already.
+/// Interns the types a module that left its compiling process carries
+/// (`typelisp_mem::type_words`) and writes each one's `TypeId::word` into the
+/// table the module's code reads them from: `args` is `[words, word_count,
+/// table]`, `table` having a word for every type the list writes. The
+/// module's init function calls it (`compile::type_table`), and whoever loads
+/// the module runs that before any of its code.
 ///
 /// # Safety
 ///
@@ -5553,27 +5523,15 @@ mod tests {
     /// path (here, another `rt_*` call) rather than reborrowing the original
     /// `&mut heap` binding directly, which Stacked Borrows treats as
     /// invalidating the raw pointer.
-    /// `(type-named PATH ARG...)`, tagged — the type form compiled code hands
-    /// the shims. `path` is walked down the module tree from the root.
+    /// The word of the type at `path` (walked down the module tree from the
+    /// root) applied to the types `args` are the words of — what a compiled
+    /// call site reads out of its type table and hands the shims.
     fn make_type(path: &[&str], args: &[i64]) -> i64 {
-        use typelisp_mem::symbols::{child_ns, intern_exact, well_known_symbol, wk, NsId};
-        let heap = unsafe { active_heap() };
-        let mut segs = vec![intern_exact(NsId::ROOT, "")];
-        let mut ns = NsId::ROOT;
-        for (i, seg) in path.iter().enumerate() {
-            segs.push(intern_exact(ns, seg));
-            if i + 1 < path.len() {
-                ns = child_ns(ns, seg);
-            }
-        }
-        let mut form = Value::Empty;
-        for arg in args.iter().rev() {
-            form = heap.cons(decode(*arg), form).expect("cons");
-        }
-        let path = heap.intern_path(&segs);
-        form = heap.cons(path, form).expect("cons");
-        form = heap.cons(Value::Symbol(well_known_symbol(wk::TYPE_NAMED)), form).expect("cons");
-        encode(form)
+        use typelisp_mem::symbols::{child_ns, intern_exact, NsId};
+        let (name, modules) = path.split_last().expect("a path names something");
+        let ns = modules.iter().fold(NsId::ROOT, |ns, seg| child_ns(ns, seg));
+        let args: Vec<typelisp_mem::TypeId> = args.iter().map(|w| typelisp_mem::TypeId::from_word(*w).expect("a type's word")).collect();
+        typelisp_mem::intern_type(typelisp_mem::TypeShape::Named(ns, intern_exact(ns, name), args)).word()
     }
 
     fn make_str(s: &str) -> i64 {

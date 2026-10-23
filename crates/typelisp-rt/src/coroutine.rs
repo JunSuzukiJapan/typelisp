@@ -657,8 +657,8 @@ fn take_pending_call() -> Pending {
 
 /// `(task ...)` for compiled code: hand the scheduler a closure to run as a
 /// new task. `args[0]` is the closure, tagged — a heap box, rooted by the
-/// frame slot it sits in; `args[1]` is the handle's type (`Task<int>`), a
-/// type form the bridge appended, since nothing below the site knows `T`. The
+/// frame slot it sits in; `args[1]` is the handle's type (`Task<int>`),
+/// appended by the bridge, since nothing below the site knows `T`. The
 /// answer is the `Task<T>` handle, and it arrives on the next activation like
 /// every other suspension's.
 ///
@@ -676,7 +676,7 @@ pub unsafe extern "C" fn rt_suspend_task(args: *const i64, argc: u32) -> i64 {
 
 /// `(thread ...)` for compiled code: [`rt_suspend_task`]'s closure, for a task
 /// the scheduler runs on an OS thread of its own. `args[1]` is the handle's
-/// type (`Thread<int>`), a type form. The answer is the `Thread<T>` handle.
+/// type (`Thread<int>`). The answer is the `Thread<T>` handle.
 ///
 /// # Safety
 ///
@@ -858,8 +858,8 @@ pub unsafe extern "C" fn rt_suspend_wait(args: *const i64, argc: u32) -> i64 {
 /// Each shim only *records*; none of them touches a channel, and none of them
 /// blocks. That is the same division the other `rt_suspend_*` shims draw.
 ///
-/// `(Chan::new cap)`'s own `args[1]` is the channel's type (`Chan<int>`), a
-/// type form the bridge appended at the site — `recv`'s arrangement for its
+/// `(Chan::new cap)`'s own `args[1]` is the channel's type (`Chan<int>`),
+/// appended by the bridge at the site — `recv`'s arrangement for its
 /// `Option<T>`.
 ///
 /// # Safety
@@ -960,8 +960,8 @@ pub unsafe extern "C" fn rt_suspend_chan_select(args: *const i64, argc: u32) -> 
 
 /// `(recv ch)` for compiled code. See [`rt_suspend_chan_new`].
 ///
-/// `args[1]` is the `Option<T>` type the answer is built with — a type form
-/// the bridge appended at the call site, the same way `vector-op`'s `pop`
+/// `args[1]` is the `Option<T>` type the answer is built with, appended by
+/// the bridge at the call site, the same way `vector-op`'s `pop`
 /// carries one. Nothing here can derive it: a channel's buffer holds tagged
 /// words and a word does not name its type.
 ///

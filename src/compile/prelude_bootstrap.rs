@@ -511,11 +511,8 @@ pub fn build_prelude_artifact() -> Result<Vec<u8>, String> {
         let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
         let bitcode = {
             let m = module.borrow();
-            crate::compile::verify_module_naming_functions(&m, "prelude module").map(|()| {
-                // Carries a trailing NUL by design — see the identical call in
-                // `bootstrap.rs` for why it must not be trimmed.
-                m.write_bitcode_to_memory().as_slice().to_vec()
-            })
+            crate::compile::verify_module_naming_functions(&m, "prelude module")
+                .and_then(|()| crate::compile::type_table::write_bitcode(&m))
         };
         // Destroyed with the guard still held — see the same `drop` in
         // `bootstrap::build_island_bitcode`.

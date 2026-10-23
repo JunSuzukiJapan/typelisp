@@ -17,6 +17,8 @@
   （計画の 5b の項）。ABI は 0.3.17。
 - 5c も済み。型の表はプロセスに 1 つ、印字と vtable の表は定義か `TypeId` で引き、実行ファイルは
   起動時に型の表を作る（計画の 5c の項）。ABI は 0.3.18。
+- 5d の前半も済み。コンパイル済みコードは型をモジュールの型の表から読む（`compile::type_table`、
+  計画の 5d の項）。ABI は 0.3.19。
 
 ## 2. 4d で知っておくこと
 
@@ -34,9 +36,8 @@
 
 ## 3. 次にすること（順に）
 
-1. 5d。コンパイル済みコードが型をフォームでなく番号で使う（JIT は定数、AOT は起動時の表
-   `rt_types_define` の番号）。FFI の型（`FfiDecl` の文字列、`CallbackSig` のキー、
-   `CType::from_key`、`rt_ffi_callback_register`）も番号にする。
+1. 5d の後半。FFI の型（`FfiDecl` の文字列、`CallbackSig` のキー、`CType::from_key`、
+   `rt_ffi_callback_register`、`c_mem` の型キー）を `TypeId` と定義のシンボルにする。
 2. そのあと 5e（`print-object` の表の文字列キー `value_key_for_method` / `method_for_value` を含む）。
 3. そのあと段階 6〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
    段階 6 で `Info::in_scope` の移行のための広い規則

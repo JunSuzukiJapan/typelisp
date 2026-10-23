@@ -40,8 +40,22 @@ pub fn runtime_externals(module: &Module<'static>) -> Vec<(String, usize)> {
 ///
 /// Must be called with [`COMPILE_LOCK`] held, like everything that touches
 /// the shared context.
+///
+/// The module's type table is settled here for this process
+/// ([`type_table::settle_in_process`]), and a module loaded from bitcode has
+/// its types interned ([`type_table::init_functions`]) before this returns.
 pub fn jit_engine(module: &Module<'static>, externals: &[(String, usize)]) -> Result<orc::JitCode, String> {
-    orc::JitCode::new(module, externals)
+    type_table::settle_in_process(module)?;
+    let inits = type_table::init_functions(module);
+    let code = orc::JitCode::new(module, externals)?;
+    for init in inits {
+        let address = code.address(&init)?;
+        // SAFETY: `type_table::settle_for_export` made it a `void ()` function
+        // that only calls `rt_types_define` on the module's own constants.
+        let init: extern "C" fn() = unsafe { std::mem::transmute(address) };
+        init();
+    }
+    Ok(code)
 }
 
 pub mod abi_signature;
@@ -56,6 +70,7 @@ pub mod ffi;
 pub mod llvm_builtins;
 pub mod optimize;
 pub mod orc;
+pub mod type_table;
 
 /// Registers this crate's `llvm-*` builtin implementations with the
 /// interpreter, for the current thread.

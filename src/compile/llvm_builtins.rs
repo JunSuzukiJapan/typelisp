@@ -160,6 +160,7 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             "build-int-to-ptr" => Some(llvm_builder_build_int_to_ptr(args)),
             "build-ptr-to-int" => Some(llvm_builder_build_ptr_to_int(args)),
             "build-fn-address" => Some(llvm_builder_build_fn_address(args)),
+            "load-type" => Some(llvm_builder_load_type(args)),
             _ => None,
         };
     }
@@ -1984,6 +1985,21 @@ fn llvm_builder_build_fn_address(args: &[Value]) -> Result<Value, EvalError> {
         .borrow()
         .build_ptr_to_int(f.as_global_value().as_pointer_value(), ctx.i64_type(), "fn_address")
         .map_err(|e| EvalError::Internal(format!("build-fn-address: {}", e)))?;
+    Ok(llvm_value_value(v.into()))
+}
+
+/// `(load-type builder module n)`: the type at place `n` of this process's
+/// type table, as the word the runtime takes it in, read out of `module`'s
+/// own table ([`crate::compile::type_table::load`]).
+fn llvm_builder_load_type(args: &[Value]) -> Result<Value, EvalError> {
+    let builder = expect_llvm_builder(&args[0])?;
+    let module = expect_llvm_module(&args[1])?;
+    let n = expect_int(&args[2])?;
+    let ty = u32::try_from(n)
+        .ok()
+        .and_then(crate::TypeId::from_index)
+        .ok_or_else(|| EvalError::Internal(format!("load-type: {} is no type", n)))?;
+    let v = crate::compile::type_table::load(&builder.borrow(), &module.borrow(), ty).map_err(EvalError::Internal)?;
     Ok(llvm_value_value(v.into()))
 }
 

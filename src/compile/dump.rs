@@ -396,10 +396,9 @@ fn emit_bitcode(interp: &Interp, heap: &mut Heap, items: &[CompileTarget]) -> Re
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
     let bitcode = {
         let m = module.borrow();
-        m.verify().map_err(|e| format!("dump: the session module failed verification: {}", e)).map(|()| {
-            // Trailing NUL included by design — see `bootstrap.rs`'s write site.
-            m.write_bitcode_to_memory().as_slice().to_vec()
-        })
+        m.verify()
+            .map_err(|e| format!("dump: the session module failed verification: {}", e))
+            .and_then(|()| crate::compile::type_table::write_bitcode(&m))
     };
     // Destroyed with the guard still held, like every other module here.
     drop(module);

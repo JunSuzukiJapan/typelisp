@@ -178,15 +178,29 @@ pub fn type_name(id: TypeId) -> parking_lot::MappedRwLockReadGuard<'static, str>
 }
 
 impl TypeId {
-    /// The id as the word a call into the runtime carries it in.
-    pub fn word(self) -> i64 {
-        i64::from(self.0)
+    /// The id's place in the table: what the island's `(type-ref N)` writes,
+    /// inside the process that compiled it.
+    pub fn index(self) -> u32 {
+        self.0
     }
 
-    /// The id a [`Self::word`] carried, or `None` when no type has it.
+    /// The id at place `index`, or `None` when the table has no type there.
+    pub fn from_index(index: u32) -> Option<TypeId> {
+        ((index as usize) < table().read_recursive().types.len()).then_some(TypeId(index))
+    }
+
+    /// The id as compiled code holds it: a tagged fixnum, so that a frame
+    /// slot or an argument holding one is a word the collector can read.
+    pub fn word(self) -> i64 {
+        crate::encode(crate::Value::Int(i64::from(self.0)))
+    }
+
+    /// The id a [`Self::word`] carried, or `None` when the word is not one.
     pub fn from_word(w: i64) -> Option<TypeId> {
-        let id = u32::try_from(w).ok()?;
-        ((id as usize) < table().read_recursive().types.len()).then_some(TypeId(id))
+        if w & crate::tagged::FIXNUM_MASK != crate::tagged::FIXNUM_TAG {
+            return None;
+        }
+        Self::from_index(u32::try_from(w >> crate::tagged::FIXNUM_SHIFT).ok()?)
     }
 }
 

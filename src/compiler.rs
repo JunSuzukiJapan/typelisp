@@ -2085,6 +2085,10 @@ const SOURCE_TEMPLATE: &str = r#"
                  (compile-value m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup (sexpr-car (sexpr-cdr (sexpr-cdr e))))
                  (sexpr-int (sexpr-car (sexpr-cdr e)))))
       (box-option (compile-box-option m fn-name builder env fn-env captured cur-fn loop-exit loop-slot block-names block-exits block-slots protect exit-cleanup e))
+      ;; `(type-ref N)` -- a type, as the word the runtime takes it in: read
+      ;; out of the module's type table, whose place for the type is filled
+      ;; when the module is linked or written out (`compile::type_table`).
+      (type-ref (load-type builder m (sexpr-int (sexpr-car (sexpr-cdr e)))))
       (char (compile-char m fn-name builder e))
       (bool (compile-bool m fn-name builder e))
       (float-any-width (compile-float-any-width m fn-name builder e))
