@@ -19,7 +19,7 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use typelisp_mem::TypeKeyId;
+use typelisp_mem::TypeId;
 
 use crate::{type_key, Error, Heap, Loc, Value};
 
@@ -223,11 +223,11 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Boxed(id) if heap.is_f64(id) => OwnedForm::F64(heap.f64_value(id)),
         Value::Boxed(id) if heap.is_bignum(id) => OwnedForm::Bignum(heap.bignum_value(id).clone()),
         Value::Boxed(id) if heap.is_ratio(id) => OwnedForm::Ratio(heap.ratio_value(id).clone()),
-        Value::Boxed(id) if type_key::heap_type_is_id(heap, id, TypeKeyId::SEXPR_VECTOR) => {
+        Value::Boxed(id) if type_key::heap_type_is_id(heap, id, TypeId::SEXPR_VECTOR) => {
             OwnedForm::Vector(struct_fields_to_owned(heap, id)?)
         }
         Value::Boxed(id) if heap.sexpr_tuple_arity(id).is_some() => OwnedForm::Tuple(struct_fields_to_owned(heap, id)?),
-        Value::Boxed(id) if type_key::heap_type_is_id(heap, id, TypeKeyId::SEXPR_ARRAY) => {
+        Value::Boxed(id) if type_key::heap_type_is_id(heap, id, TypeId::SEXPR_ARRAY) => {
             // The fields of `typelisp_read::alloc_sexpr_array`'s box: `dims`
             // (a box of `Value::Int`s), `data`, `fill-pointer` (always `none`).
             let dims = match heap.struct_field(id, 0) {

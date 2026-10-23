@@ -1924,7 +1924,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         // datum and rebuilt into boxes at run time (`rt_list_to_sexpr_vector`,
         // `rt_lists_to_sexpr_array`) — CL's `compile-file` externalizes a
         // literal vector the same way, by its contents.
-        Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_VECTOR) => {
+        Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeId::SEXPR_VECTOR) => {
             let elems = struct_fields(heap, id);
             let list = quoted_list_form(heap, &elems)?;
             let mut f = Items::new(heap);
@@ -1941,7 +1941,7 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
             let fields = f.as_slice().to_vec();
             sexpr_construct(f.heap(), SEXPR_QUOTED_TUPLE, &fields)
         }
-        Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
+        Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeId::SEXPR_ARRAY) => {
             let parts = struct_fields(heap, id);
             let (Value::Boxed(dims_id), Value::Boxed(data_id)) = (parts[0], parts[1]) else {
                 return Err(Error::TypeError("compile: a quoted array's dims/data are not boxes".to_string()));

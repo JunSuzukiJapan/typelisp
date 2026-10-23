@@ -23,11 +23,11 @@
 //! register_stream_builtins`). That conversion is deliberately *not* here:
 //! it belongs to the calling convention, not to the operation.
 
-use typelisp_mem::{Heap, TypeKeyId, Value};
+use typelisp_mem::{spec, Heap, NsId, TypeId, TypeSpec, Value};
 
 use crate::stream::with_streams;
 
-// The types the results here are built with — `TypeKeyId::OPTION`, `RESULT`,
+// The types the results here are built with — `TypeId::OPTION`, `RESULT`,
 // and `FILE_ERROR` — come from `typelisp_mem`'s pre-interned table rather
 // than being named here, because this crate has no `Path` to derive a name
 // from (the same standing exception `rt_data_new` has, which receives its key
@@ -41,65 +41,66 @@ use crate::stream::with_streams;
 // representation `value.rs`'s `BoxedObj` doc comment describes, whose *fields
 // are its elements*. `file-list-directory` builds one directly.
 
-/// The runtime type key each builtin's *result* carries, and — for the ones
-/// that wrap something generic inside it — the key of that inner value.
+const FILE_ERROR: TypeSpec = TypeSpec::Named(NsId::ROOT, "fileerror", &[]);
+
+/// The runtime type each builtin's *result* carries, and — for the ones
+/// that wrap something generic inside it — the type of that inner value.
 ///
-/// A type's identity includes its instantiation
-/// (`typelisp_mem::ConcreteNames::type_key`), and these shims build their
-/// `Result`/`Option`/`Vector` boxes with no `Path` to derive one from: this
-/// crate sits below the checker. So the spelling is written here, once per
-/// builtin, and `tests/type_identity_guard_test.rs` compares every row
-/// against that builtin's own registry return type. Checked rather than
-/// assumed for the reason the module comment gives: a value built under a key
-/// nobody else spells is unmatchable and fails to print.
+/// A type's identity includes its instantiation, and these shims build their
+/// `Result`/`Option`/`Vector` boxes with no checker to ask: this crate sits
+/// below it. So the type is written here, once per builtin, and
+/// `tests/type_identity_guard_test.rs` compares every row against that
+/// builtin's own registry return type. Checked rather than assumed for the
+/// reason the module comment gives: a value built under a type nobody else
+/// gives it is unmatchable and fails to print.
 ///
 /// A builtin whose result is not a box (`stream-stdin`'s handle,
 /// `stream-open-p`'s `bool`) has no row and needs none.
-pub const RESULT_KEYS: &[(&str, &str)] = &[
-    ("stream-open-file", "result<i32,fileerror>"),
-    ("stream-close", "result<(),fileerror>"),
-    ("stream-input-p", "result<bool,fileerror>"),
-    ("stream-output-p", "result<bool,fileerror>"),
-    ("stream-listen", "result<bool,fileerror>"),
-    ("stream-position", "result<int,fileerror>"),
-    ("stream-at-line-start", "result<bool,fileerror>"),
-    ("stream-read-char", "result<option<char>,fileerror>"),
-    ("stream-unread-char", "result<(),fileerror>"),
-    ("stream-read-byte", "result<option<int>,fileerror>"),
-    ("stream-write-byte", "result<(),fileerror>"),
-    ("stream-write-string", "result<(),fileerror>"),
-    ("stream-finish-output", "result<(),fileerror>"),
-    ("stream-take-output-string", "result<string,fileerror>"),
-    ("file-delete", "result<(),fileerror>"),
-    ("file-truename", "result<string,fileerror>"),
-    ("file-modified-date", "result<std::universal-time,fileerror>"),
-    ("file-owner-name", "result<option<string>,fileerror>"),
-    ("file-list-directory", "result<vector<string>,fileerror>"),
-    ("file-create-directories", "result<(),fileerror>"),
-    ("file-rename", "result<(),fileerror>"),
+pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
+    ("stream-open-file", TypeSpec::Named(NsId::ROOT, "result", &[spec::I32, FILE_ERROR])),
+    ("stream-close", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-input-p", TypeSpec::Named(NsId::ROOT, "result", &[spec::BOOL, FILE_ERROR])),
+    ("stream-output-p", TypeSpec::Named(NsId::ROOT, "result", &[spec::BOOL, FILE_ERROR])),
+    ("stream-listen", TypeSpec::Named(NsId::ROOT, "result", &[spec::BOOL, FILE_ERROR])),
+    ("stream-position", TypeSpec::Named(NsId::ROOT, "result", &[spec::INT, FILE_ERROR])),
+    ("stream-at-line-start", TypeSpec::Named(NsId::ROOT, "result", &[spec::BOOL, FILE_ERROR])),
+    ("stream-read-char", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::CHAR]), FILE_ERROR])),
+    ("stream-unread-char", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-read-byte", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::INT]), FILE_ERROR])),
+    ("stream-write-byte", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-write-string", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-finish-output", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-take-output-string", TypeSpec::Named(NsId::ROOT, "result", &[spec::STRING, FILE_ERROR])),
+    ("file-delete", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
+    ("file-truename", TypeSpec::Named(NsId::ROOT, "result", &[spec::STRING, FILE_ERROR])),
+    ("file-modified-date", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::STD, "universal-time", &[]), FILE_ERROR])),
+    ("file-owner-name", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING]), FILE_ERROR])),
+    ("file-list-directory", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "vector", &[spec::STRING]), FILE_ERROR])),
+    ("file-create-directories", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
+    ("file-rename", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
 ];
 
-/// The key of the value *inside* the `Result` — [`RESULT_KEYS`]' companion for
+/// The type of the value *inside* the `Result` — [`RESULT_TYPES`]' companion for
 /// the three builtins whose payload is itself a box.
-pub const INNER_KEYS: &[(&str, &str)] = &[
-    ("stream-read-char", "option<char>"),
-    ("stream-read-byte", "option<int>"),
-    ("file-list-directory", "vector<string>"),
-    ("file-owner-name", "option<string>"),
+pub const INNER_TYPES: &[(&str, TypeSpec)] = &[
+    ("stream-read-char", TypeSpec::Named(NsId::ROOT, "option", &[spec::CHAR])),
+    ("stream-read-byte", TypeSpec::Named(NsId::ROOT, "option", &[spec::INT])),
+    ("file-list-directory", TypeSpec::Named(NsId::ROOT, "vector", &[spec::STRING])),
+    ("file-owner-name", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
 ];
 
-pub(crate) fn lookup(table: &[(&str, &'static str)], name: &str, what: &str) -> &'static str {
+pub(crate) fn lookup(heap: &Heap, table: &[(&str, TypeSpec)], name: &str, what: &str) -> TypeId {
     match table.iter().find(|(n, _)| *n == name) {
-        Some((_, key)) => key,
+        Some((_, ty)) => heap.intern_spec(ty),
         // Not a recoverable condition: a builtin that builds a box without a
         // row would give that value an identity nothing else spells.
-        None => crate::fatal(&format!("stream_builtin: no {} type key for `{}`", what, name)),
+        None => crate::fatal(&format!("stream_builtin: no {} type for `{}`", what, name)),
     }
 }
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
 fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
-    let key = heap.intern_type_key(lookup(RESULT_KEYS, name, "result"));
+    let key = lookup(heap, RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 0, vec![v])
 }
 
@@ -110,8 +111,8 @@ fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
     // `FileError` takes no type arguments, so its key is unchanged by the
     // instantiation rule and stays the pre-interned constant.
-    let err_val = heap.alloc_enum(TypeKeyId::FILE_ERROR, 0, vec![msg_val]);
-    let key = heap.intern_type_key(lookup(RESULT_KEYS, name, "result"));
+    let err_val = heap.alloc_enum(TypeId::FILE_ERROR, 0, vec![msg_val]);
+    let key = lookup(heap, RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 1, vec![err_val])
 }
 
@@ -119,7 +120,7 @@ fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
 /// niche when the payload allows one, else a box in `option_def`'s variant
 /// order (`Heap::alloc_option` decides).
 fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
-    heap.alloc_option(lookup(INNER_KEYS, name, "inner"), v)
+    heap.alloc_option(lookup(heap, INNER_TYPES, name, "inner"), v)
 }
 
 /// An argument that isn't the shape its signature promises. Unreachable
@@ -392,7 +393,7 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
                 }
             }
             let elems: Vec<Value> = names.into_iter().map(|n| heap.alloc_string(n)).collect();
-            let vec_val = { let k = heap.intern_type_key(lookup(INNER_KEYS, name, "inner")); heap.alloc_struct(k, elems) };
+            let vec_val = { let k = lookup(heap, INNER_TYPES, name, "inner"); heap.alloc_struct(k, elems) };
             Ok(result_ok(heap, name, vec_val))
         }
         // Succeeds when the directory already exists: `create_dir_all` is

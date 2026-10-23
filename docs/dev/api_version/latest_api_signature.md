@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.16
+# ABI バージョン 0.3.17
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.16 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.17 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `7526787e32b7cf04`
+内容ハッシュ (FNV-1a 64): `d77fc7c2d992fe45`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -392,9 +392,9 @@
 | 273 | `type-unit` |
 | 274 | `type-never` |
 
-## 組み込み型キー (typelisp_mem::BUILTIN_TYPE_KEYS)
+## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 
-| 番号 | 型キー |
+| 番号 | 型 |
 |---|---|
 | 0 | `option` |
 | 1 | `result` |
@@ -411,94 +411,96 @@
 | 12 | `std::internal-time` |
 | 13 | `std::heap-info` |
 | 14 | `neterror` |
-| 15 | `vector<option<sexpr>>` |
-| 16 | `std::array<option<sexpr>>` |
+| 15 | `sexpr` |
+| 16 | `option<sexpr>` |
+| 17 | `vector<option<sexpr>>` |
+| 18 | `std::array<option<sexpr>>` |
 
-## 実行時が組み立てる値の型キー (typelisp_rt)
+## 実行時が組み立てる値の型 (typelisp_rt)
 
-| 表 | 関数 | 型キー |
+| 表 | 関数 | 型 |
 |---|---|---|
-| sys_builtin::RESULT_KEYS | `parse-float` | `result<f64,parsefloaterror>` |
-| sys_builtin::RESULT_KEYS | `command-line-args` | `vector<string>` |
-| sys_builtin::RESULT_KEYS | `getenv` | `option<string>` |
-| sys_builtin::RESULT_KEYS | `home-directory` | `option<string>` |
-| sys_builtin::RESULT_KEYS | `machine-instance` | `option<string>` |
-| sys_builtin::RESULT_KEYS | `machine-version` | `option<string>` |
-| sys_builtin::RESULT_KEYS | `software-version` | `option<string>` |
-| sys_builtin::RESULT_KEYS | `timezone-offset-seconds` | `option<int>` |
-| sys_builtin::RESULT_KEYS | `timezone-daylight-p` | `option<bool>` |
-| sys_builtin::RESULT_KEYS | `dribble-start` | `result<(),fileerror>` |
-| sys_builtin::RESULT_KEYS | `dribble-stop` | `result<(),fileerror>` |
-| sys_builtin::RESULT_KEYS | `ed-open` | `result<(),fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-open-file` | `result<i32,fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-close` | `result<(),fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-input-p` | `result<bool,fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-output-p` | `result<bool,fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-listen` | `result<bool,fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-position` | `result<int,fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-at-line-start` | `result<bool,fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-read-char` | `result<option<char>,fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-unread-char` | `result<(),fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-read-byte` | `result<option<int>,fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-write-byte` | `result<(),fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-write-string` | `result<(),fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-finish-output` | `result<(),fileerror>` |
-| stream_builtin::RESULT_KEYS | `stream-take-output-string` | `result<string,fileerror>` |
-| stream_builtin::RESULT_KEYS | `file-delete` | `result<(),fileerror>` |
-| stream_builtin::RESULT_KEYS | `file-truename` | `result<string,fileerror>` |
-| stream_builtin::RESULT_KEYS | `file-modified-date` | `result<std::universal-time,fileerror>` |
-| stream_builtin::RESULT_KEYS | `file-owner-name` | `result<option<string>,fileerror>` |
-| stream_builtin::RESULT_KEYS | `file-list-directory` | `result<vector<string>,fileerror>` |
-| stream_builtin::RESULT_KEYS | `file-create-directories` | `result<(),fileerror>` |
-| stream_builtin::RESULT_KEYS | `file-rename` | `result<(),fileerror>` |
-| stream_builtin::INNER_KEYS | `stream-read-char` | `option<char>` |
-| stream_builtin::INNER_KEYS | `stream-read-byte` | `option<int>` |
-| stream_builtin::INNER_KEYS | `file-list-directory` | `vector<string>` |
-| stream_builtin::INNER_KEYS | `file-owner-name` | `option<string>` |
-| net_builtin::RESULT_KEYS | `net-resolve-begin` | `result<i32,neterror>` |
-| net_builtin::RESULT_KEYS | `net-resolve-finish` | `result<option<vector<string>>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-connect-begin` | `result<i32,neterror>` |
-| net_builtin::RESULT_KEYS | `net-connect-finish` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-listen` | `result<i32,neterror>` |
-| net_builtin::RESULT_KEYS | `net-tls-listen` | `result<i32,neterror>` |
-| net_builtin::RESULT_KEYS | `net-unix-connect` | `result<i32,neterror>` |
-| net_builtin::RESULT_KEYS | `net-unix-listen` | `result<i32,neterror>` |
-| net_builtin::RESULT_KEYS | `net-accept` | `result<option<i32>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-fill` | `result<option<int>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-pop-byte` | `result<option<int>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-pop-char` | `result<option<char>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-buffered-p` | `result<bool,neterror>` |
-| net_builtin::RESULT_KEYS | `net-push-string` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-push-byte` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-flush` | `result<option<int>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-socket-error` | `result<option<string>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-peer-subject` | `result<option<string>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-server-name` | `result<option<string>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-set-nodelay` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-set-keepalive` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-set-keepalive-period` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-tls-add-certificate` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-shutdown-write` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-local-address` | `result<string,neterror>` |
-| net_builtin::RESULT_KEYS | `net-peer-address` | `result<string,neterror>` |
-| net_builtin::RESULT_KEYS | `net-tls-start` | `result<(),neterror>` |
-| net_builtin::RESULT_KEYS | `net-tls-handshake` | `result<option<int>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-udp-bind` | `result<i32,neterror>` |
-| net_builtin::RESULT_KEYS | `net-udp-send-to` | `result<bool,neterror>` |
-| net_builtin::RESULT_KEYS | `net-udp-recv` | `result<option<vector<int>>,neterror>` |
-| net_builtin::RESULT_KEYS | `net-udp-last-sender` | `result<string,neterror>` |
-| net_builtin::INNER_KEYS | `net-resolve-finish` | `option<vector<string>>` |
-| net_builtin::INNER_KEYS | `net-tls-handshake` | `option<int>` |
-| net_builtin::INNER_KEYS | `net-udp-recv` | `option<vector<int>>` |
-| net_builtin::INNER_KEYS | `net-accept` | `option<i32>` |
-| net_builtin::INNER_KEYS | `net-fill` | `option<int>` |
-| net_builtin::INNER_KEYS | `net-flush` | `option<int>` |
-| net_builtin::INNER_KEYS | `net-socket-error` | `option<string>` |
-| net_builtin::INNER_KEYS | `net-peer-subject` | `option<string>` |
-| net_builtin::INNER_KEYS | `net-server-name` | `option<string>` |
-| net_builtin::INNER_KEYS | `net-pop-byte` | `option<int>` |
-| net_builtin::INNER_KEYS | `net-pop-char` | `option<char>` |
-| readtable::READER_MACRO_OPTION_KEY | | `option<(fn (std::string-input-stream,char) option<sexpr>)>` |
+| sys_builtin::RESULT_TYPES | `parse-float` | `result<f64,parsefloaterror>` |
+| sys_builtin::RESULT_TYPES | `command-line-args` | `vector<string>` |
+| sys_builtin::RESULT_TYPES | `getenv` | `option<string>` |
+| sys_builtin::RESULT_TYPES | `home-directory` | `option<string>` |
+| sys_builtin::RESULT_TYPES | `machine-instance` | `option<string>` |
+| sys_builtin::RESULT_TYPES | `machine-version` | `option<string>` |
+| sys_builtin::RESULT_TYPES | `software-version` | `option<string>` |
+| sys_builtin::RESULT_TYPES | `timezone-offset-seconds` | `option<int>` |
+| sys_builtin::RESULT_TYPES | `timezone-daylight-p` | `option<bool>` |
+| sys_builtin::RESULT_TYPES | `dribble-start` | `result<(),fileerror>` |
+| sys_builtin::RESULT_TYPES | `dribble-stop` | `result<(),fileerror>` |
+| sys_builtin::RESULT_TYPES | `ed-open` | `result<(),fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-open-file` | `result<i32,fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-close` | `result<(),fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-input-p` | `result<bool,fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-output-p` | `result<bool,fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-listen` | `result<bool,fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-position` | `result<int,fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-at-line-start` | `result<bool,fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-read-char` | `result<option<char>,fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-unread-char` | `result<(),fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-read-byte` | `result<option<int>,fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-write-byte` | `result<(),fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-write-string` | `result<(),fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-finish-output` | `result<(),fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-take-output-string` | `result<string,fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-delete` | `result<(),fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-truename` | `result<string,fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-modified-date` | `result<std::universal-time,fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-owner-name` | `result<option<string>,fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-list-directory` | `result<vector<string>,fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-create-directories` | `result<(),fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-rename` | `result<(),fileerror>` |
+| stream_builtin::INNER_TYPES | `stream-read-char` | `option<char>` |
+| stream_builtin::INNER_TYPES | `stream-read-byte` | `option<int>` |
+| stream_builtin::INNER_TYPES | `file-list-directory` | `vector<string>` |
+| stream_builtin::INNER_TYPES | `file-owner-name` | `option<string>` |
+| net_builtin::RESULT_TYPES | `net-resolve-begin` | `result<i32,neterror>` |
+| net_builtin::RESULT_TYPES | `net-resolve-finish` | `result<option<vector<string>>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-connect-begin` | `result<i32,neterror>` |
+| net_builtin::RESULT_TYPES | `net-connect-finish` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-listen` | `result<i32,neterror>` |
+| net_builtin::RESULT_TYPES | `net-tls-listen` | `result<i32,neterror>` |
+| net_builtin::RESULT_TYPES | `net-unix-connect` | `result<i32,neterror>` |
+| net_builtin::RESULT_TYPES | `net-unix-listen` | `result<i32,neterror>` |
+| net_builtin::RESULT_TYPES | `net-accept` | `result<option<i32>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-fill` | `result<option<int>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-pop-byte` | `result<option<int>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-pop-char` | `result<option<char>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-buffered-p` | `result<bool,neterror>` |
+| net_builtin::RESULT_TYPES | `net-push-string` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-push-byte` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-flush` | `result<option<int>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-socket-error` | `result<option<string>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-peer-subject` | `result<option<string>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-server-name` | `result<option<string>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-set-nodelay` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-set-keepalive` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-set-keepalive-period` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-tls-add-certificate` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-shutdown-write` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-local-address` | `result<string,neterror>` |
+| net_builtin::RESULT_TYPES | `net-peer-address` | `result<string,neterror>` |
+| net_builtin::RESULT_TYPES | `net-tls-start` | `result<(),neterror>` |
+| net_builtin::RESULT_TYPES | `net-tls-handshake` | `result<option<int>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-udp-bind` | `result<i32,neterror>` |
+| net_builtin::RESULT_TYPES | `net-udp-send-to` | `result<bool,neterror>` |
+| net_builtin::RESULT_TYPES | `net-udp-recv` | `result<option<vector<int>>,neterror>` |
+| net_builtin::RESULT_TYPES | `net-udp-last-sender` | `result<string,neterror>` |
+| net_builtin::INNER_TYPES | `net-resolve-finish` | `option<vector<string>>` |
+| net_builtin::INNER_TYPES | `net-tls-handshake` | `option<int>` |
+| net_builtin::INNER_TYPES | `net-udp-recv` | `option<vector<int>>` |
+| net_builtin::INNER_TYPES | `net-accept` | `option<i32>` |
+| net_builtin::INNER_TYPES | `net-fill` | `option<int>` |
+| net_builtin::INNER_TYPES | `net-flush` | `option<int>` |
+| net_builtin::INNER_TYPES | `net-socket-error` | `option<string>` |
+| net_builtin::INNER_TYPES | `net-peer-subject` | `option<string>` |
+| net_builtin::INNER_TYPES | `net-server-name` | `option<string>` |
+| net_builtin::INNER_TYPES | `net-pop-byte` | `option<int>` |
+| net_builtin::INNER_TYPES | `net-pop-char` | `option<char>` |
+| readtable::READER_MACRO_OPTION_TYPE | | `option<(fn (std::string-input-stream,char) option<sexpr>)>` |
 
 ## 型ごとの表現 (Repr)
 

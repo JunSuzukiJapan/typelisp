@@ -663,7 +663,7 @@ mod tests {
             ..TEST_HOOKS
         }));
 
-        let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
+        let boxed = heap.alloc_enum(typelisp_mem::TypeId::OPTION, 0, vec![Value::Int(7)]);
         let args = heap.cons(boxed, Value::Empty).expect("heap has room");
         let out = build_format(&mut heap, "~a", args).expect("format should succeed");
         assert_eq!(format::finish(out, &Opts::default()), "(some 7)");
@@ -679,7 +679,7 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 12);
         set_print_hooks(Some(TEST_HOOKS));
 
-        let boxed = heap.alloc_enum(typelisp_mem::TypeKeyId::OPTION, 0, vec![Value::Int(7)]);
+        let boxed = heap.alloc_enum(typelisp_mem::TypeId::OPTION, 0, vec![Value::Int(7)]);
         let args = heap.cons(boxed, Value::Empty).expect("heap has room");
         let err = build_format(&mut heap, "~a", args).expect_err("an unregistered enum");
         assert!(err.contains("option"), "{}", err);
@@ -698,7 +698,7 @@ mod tests {
             ..TEST_HOOKS
         }));
 
-        let pt = heap.intern_type_key("pt");
+        let pt = heap.intern_type(typelisp_mem::TypeShape::named(typelisp_mem::NsId::ROOT, "pt", &[]));
         let boxed = heap.alloc_struct(pt, vec![Value::Int(1)]);
         // `(v v)` — the two arguments `~a ~s` consumes.
         let tail = heap.cons(boxed, Value::Empty).expect("heap has room");

@@ -31,7 +31,7 @@
 //! drops a frame's values) and the `set_state` that re-roots what the next
 //! state carries. Nothing in between touches the heap.
 
-use typelisp_mem::{wk, Heap, SymRef, Value};
+use typelisp_mem::{wk, Heap, SymRef, TypeId, Value};
 use typelisp_rt::sched::{self, chan_id_of, io_deadline, io_wait, task_id_of, ChanOp, Progress, SchedError, SelectOp, Waiting, Wake};
 
 use crate::check::core;
@@ -40,7 +40,7 @@ use crate::eval::value::EvalError;
 
 use super::core_eval::{
     bool_field, construct_sexpr_core, env_lookup, extend_env, heap_err, int_field, match_core_pattern, param_names,
-    path_field, param_reprs, repr_list, sym_field, type_key_field, tail_after, tail_after_value, Op,
+    path_field, param_reprs, repr_list, sym_field, type_field, tail_after, tail_after_value, Op,
 };
 use super::task_body::{TyplBody, TyplCx};
 use super::{FnDef, Interp};
@@ -208,12 +208,12 @@ enum Spawn {
     /// It is made here.
     No,
     /// `(task CALL)`: it becomes a task of its own, whose handle is built
-    /// under this type key (`task<int>`).
-    Task(String),
+    /// under this type (`task<int>`).
+    Task(TypeId),
     /// `(thread CALL)`: it becomes a task on an OS thread of its own, which
     /// enters the compiled callee; the answer is read back by the node's
-    /// result representation, and the handle is built under the key.
-    Thread(Repr, String),
+    /// result representation, and the handle is built under the type.
+    Thread(Repr, TypeId),
 }
 
 /// The `ArgsKind` of an already-checked call node — what `(task CALL)` wraps.
@@ -304,9 +304,9 @@ enum Frame {
     DynValue,
     /// `(untag-int E)`: check that the value is a fixnum, keep it.
     UntagInt,
-    /// `(box-option KEY E)` — waiting on the value; `key` is the `Option`
-    /// instantiation's identity, as the form's own string.
-    BoxOption { key: Value },
+    /// `(box-option TYPE E)` — waiting on the value; `ty` is the `Option`
+    /// instantiation's identity.
+    BoxOption { ty: TypeId },
     /// `(set SYM VALUE)` — waiting on the value. The frame carries the *name*
     /// rather than the cell: the lookup happens on resume, once the value is
     /// in hand.
@@ -519,8 +519,7 @@ impl CpsStack {
             // Nothing to root: these carry only a plain integer, or nothing
             // at all. The value they are waiting on is rooted by the state
             // slots, and the object they act on is reachable from it.
-            Frame::Panic | Frame::FieldGet { .. } | Frame::DynValue | Frame::UntagInt => {}
-            Frame::BoxOption { key } => heap.push_root(*key),
+            Frame::Panic | Frame::FieldGet { .. } | Frame::DynValue | Frame::UntagInt | Frame::BoxOption { .. } => {}
         }
         self.frames.push((frame, base, loc));
     }
@@ -1450,7 +1449,7 @@ impl Interp {
                     };
                     match tag.well_known() {
                         wk::RECV => {
-                            let Some(key) = parts.get(2).and_then(|k| typelisp_mem::type_key_of_form(heap, *k)) else {
+                            let Some(key) = parts.get(2).and_then(|k| typelisp_mem::type_of_form(heap, *k)) else {
                                 return Err(EvalError::Internal("eval: (select ..) recv arm has no type".into()));
                             };
                             let chan = self.eval_leaf(heap, parts[3], env)?;
@@ -1476,8 +1475,8 @@ impl Interp {
 
             Op::Task => {
                 // Field 0 is the result representation, read by the bridge and
-                // by nothing here; field 1 the handle's type key.
-                let key = type_key_field(heap, form, 1, "task")?;
+                // by nothing here; field 1 the handle's type.
+                let key = type_field(heap, form, 1, "task")?;
                 let call = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (task ..) has no call".to_string()))?;
                 match call_kind(heap, call)? {
@@ -1501,12 +1500,12 @@ impl Interp {
             // own — as compiled code, which is all that thread can run
             // (`Self::spawn_thread`). Field 0 is the result representation,
             // which reads the compiled callee's answer back; field 1 the
-            // handle's type key.
+            // handle's type.
             Op::Thread => {
                 let ret = core::field(heap, form, 0)
                     .and_then(|r| Repr::read(heap, r))
                     .ok_or_else(|| EvalError::Internal("eval: (thread ..) has no result representation".to_string()))?;
-                let key = type_key_field(heap, form, 1, "thread")?;
+                let key = type_field(heap, form, 1, "thread")?;
                 let call = core::field(heap, form, 2)
                     .ok_or_else(|| EvalError::Internal("eval: (thread ..) has no call".to_string()))?;
                 match call_kind(heap, call)? {
@@ -1573,11 +1572,10 @@ impl Interp {
                 Ok(State::Eval(inner, env))
             }
             Op::BoxOption => {
-                let key = core::field(heap, form, 0)
-                    .ok_or_else(|| EvalError::Internal("eval: (box-option ..) has no key".to_string()))?;
+                let ty = type_field(heap, form, 0, "box-option")?;
                 let inner = core::field(heap, form, 1)
                     .ok_or_else(|| EvalError::Internal("eval: (box-option ..) has no operand".to_string()))?;
-                stack.push(heap, Frame::BoxOption { key }, loc.clone());
+                stack.push(heap, Frame::BoxOption { ty }, loc.clone());
                 Ok(State::Eval(inner, env))
             }
 
@@ -1878,11 +1876,11 @@ impl Interp {
         match spawn {
             Spawn::No => {}
             Spawn::Task(key) => {
-                let handle = self.spawn_task(heap, form, argv, kind, &key)?;
+                let handle = self.spawn_task(heap, form, argv, kind, key)?;
                 return Ok((State::Apply(handle), None));
             }
             Spawn::Thread(ret, key) => {
-                let handle = self.spawn_thread(heap, form, argv, kind, ret, &key)?;
+                let handle = self.spawn_thread(heap, form, argv, kind, ret, key)?;
                 return Ok((State::Apply(handle), None));
             }
         }
@@ -1944,7 +1942,7 @@ impl Interp {
         form: Value,
         argv: Vec<Value>,
         kind: ArgsKind,
-        key: &str,
+        key: TypeId,
     ) -> Result<Value, EvalError> {
         let argv_list = core::list(heap, &argv).map_err(heap_err)?;
         heap.push_root(argv_list);
@@ -1979,7 +1977,7 @@ impl Interp {
         argv: Vec<Value>,
         kind: ArgsKind,
         ret: Repr,
-        key: &str,
+        key: TypeId,
     ) -> Result<Value, EvalError> {
         let not_compilable = |what: String, why: String| {
             EvalError::Panic(format!("thread: {} {}; a thread runs only compiled code", what, why))
@@ -2439,8 +2437,10 @@ impl Interp {
                     Some(pid) => {
                         let type_name = crate::check::core::path_value(heap, Value::Path(pid))
                             .expect("a builtin's receiver is written by `core::path_form`");
-                        let ret_key = heap.builtin_fn_ret_key(id).to_string();
-                        match super::eval_builtin_method(heap, &type_name, &name, &argv, &ret_key) {
+                        let ret_type = heap
+                            .builtin_fn_ret_type(id)
+                            .expect("a builtin method's value carries its result type");
+                        match super::eval_builtin_method(heap, &type_name, &name, &argv, ret_type) {
                             Some(r) => r?,
                             None => {
                                 return Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, &name)))
@@ -2483,16 +2483,16 @@ impl Interp {
         // The value's runtime identity, spelled by the checker where the
         // instantiation was known: `gen<i32>` and `gen<string>` share `path`
         // and differ here.
-        let key = type_key_field(heap, form, 1, "construct")?;
+        let key = type_field(heap, form, 1, "construct")?;
         let variant = int_field(heap, form, 2, "construct")? as usize;
         let mutable = bool_field(heap, form, 3, "construct")?;
 
         let v = if super::is_sexpr_type(&path) {
             construct_sexpr_core(heap, variant, &argv)?
         } else if mutable {
-            crate::type_key::alloc_struct_keyed(heap, &key, argv)
+            crate::type_key::alloc_struct_of(heap, key, argv)
         } else {
-            crate::type_key::alloc_enum_keyed(heap, &key, variant, argv)
+            crate::type_key::alloc_enum_of(heap, key, variant, argv)
         };
         Ok((State::Apply(v), None))
     }
@@ -2509,7 +2509,7 @@ impl Interp {
         let method = sym_field(heap, form, 1, "assoc")?;
         // The result's runtime identity, for the built-in methods that build a
         // box: `Vector::new` has no field to read an instantiation off.
-        let ret_key = type_key_field(heap, form, 5, "assoc")?;
+        let ret_type = type_field(heap, form, 5, "assoc")?;
 
         // `Task<T>::wait` cannot go through `eval_builtin_method`: it may have to
         // *suspend*, and a builtin answers with a value or an error, with no way
@@ -2533,9 +2533,9 @@ impl Interp {
         if type_name == crate::Path::root("chan") {
             let op = match method.as_str() {
                 "new" => match argv.first() {
-                    // `ret_key` is the channel's own type (`chan<int>`), which
+                    // `ret_type` is the channel's own type (`chan<int>`), which
                     // the handle is built under.
-                    Some(Value::Int(n)) => ChanOp::New(*n, ret_key.clone()),
+                    Some(Value::Int(n)) => ChanOp::New(*n, ret_type),
                     other => {
                         return Err(EvalError::Internal(format!(
                             "Chan::new: {:?} is not a capacity",
@@ -2553,16 +2553,16 @@ impl Interp {
                     })?;
                     ChanOp::Send(c, v)
                 }
-                // `ret_key` *is* the `Option<T>` this answer is built with —
+                // `ret_type` *is* the `Option<T>` this answer is built with —
                 // the assoc node's result identity, the same slot
                 // `Vector<T>::pop` reads.
-                "recv" => ChanOp::Recv(chan_id_of(heap, argv.first().copied())?, ret_key.clone()),
-                _ => return self.finish_assoc_resolved(heap, form, argv, type_name, method, ret_key),
+                "recv" => ChanOp::Recv(chan_id_of(heap, argv.first().copied())?, ret_type),
+                _ => return self.finish_assoc_resolved(heap, form, argv, type_name, method, ret_type),
             };
             return Ok((State::Blocked(Waiting::Chan(op)), None));
         }
 
-        self.finish_assoc_resolved(heap, form, argv, type_name, method, ret_key)
+        self.finish_assoc_resolved(heap, form, argv, type_name, method, ret_type)
     }
 
     /// [`Self::finish_assoc`] past the interceptions: an ordinary method, a
@@ -2579,12 +2579,12 @@ impl Interp {
         argv: Vec<Value>,
         type_name: crate::Path,
         method: String,
-        ret_key: String,
+        ret_type: TypeId,
     ) -> Result<(State, Option<Frame>), EvalError> {
         let f = self.root.borrow().get_method(&type_name, &method);
         match f {
             Some(f) => self.enter_fn(heap, form, &f, argv),
-            None => match super::eval_builtin_method(heap, &type_name, &method, &argv, &ret_key) {
+            None => match super::eval_builtin_method(heap, &type_name, &method, &argv, ret_type) {
                 Some(result) => Ok((State::Apply(result?), None)),
                 None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&type_name, &method))),
             },
@@ -2688,14 +2688,12 @@ impl Interp {
                 }
                 other => Err(EvalError::Internal(format!("eval: (untag-int ..): not an int: {:?}", other))),
             },
-            // The box the checker asked for is built whether or not the key
+            // The box the checker asked for is built whether or not the type
             // would niche: this node exists precisely because the slot the
             // value is going into needs the box.
-            Frame::BoxOption { key } => {
-                let key = typelisp_mem::type_key_of_form(heap, key)
-                    .ok_or_else(|| EvalError::Internal(format!("eval: (box-option ..): not a type: {:?}", key)))?;
+            Frame::BoxOption { ty } => {
                 let (variant, fields) = if v.is_empty() { (1, vec![]) } else { (0, vec![v]) };
-                Ok((State::Apply(crate::type_key::alloc_enum_keyed(heap, &key, variant, fields)), None))
+                Ok((State::Apply(crate::type_key::alloc_enum_of(heap, ty, variant, fields)), None))
             }
 
             // Written through the cell rather than rebuilding the frame,

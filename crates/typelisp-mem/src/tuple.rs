@@ -23,6 +23,14 @@ pub fn sexpr_tuple_key(arity: usize) -> String {
     ConcreteNames::instantiated_type(&format!("{}{}", PREFIX, arity), &vec![ELEMENT; arity])
 }
 
+/// The type of the `#{..}` datum of `arity` elements, interned.
+pub fn sexpr_tuple_type(heap: &crate::Heap, arity: usize) -> crate::TypeId {
+    debug_assert!((1..=TUPLE_MAX_ARITY).contains(&arity), "no tuple type of arity {}", arity);
+    let internal = crate::symbols::child_ns(crate::NsId::STD, "%internal");
+    let elems = vec![crate::TypeId::OPTION_SEXPR; arity];
+    heap.intern_type(crate::TypeShape::named(internal, &format!("tuple{}", arity), &elems))
+}
+
 /// Whether `base` — a type key with its `<..>` arguments taken off
 /// ([`ConcreteNames::base_type`]) — names a tuple type, of any element types.
 pub fn is_tuple_base_key(base: &str) -> bool {

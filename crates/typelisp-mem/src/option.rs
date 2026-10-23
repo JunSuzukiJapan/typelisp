@@ -16,7 +16,7 @@
 //! printer must answer identically, and the AOT tier cannot see
 //! `typelisp-front`.
 
-use crate::{ConcreteNames, Heap, Value};
+use crate::{ConcreteNames, Heap, TypeId, Value};
 
 /// Whether `Option<P>` is niche-represented, given `P`'s type key.
 ///
@@ -48,25 +48,25 @@ pub fn option_prints_wrapped(key: &str) -> bool {
 }
 
 impl Heap {
-    /// An `Option` value under the identity `key` spells (`option<P>`): the
-    /// niche when `P` allows one — `v` itself for `some`, [`Value::Empty`]
-    /// for `none` — and a `BoxedObj::Enum` box (`some` = variant 0, `none` =
-    /// variant 1, `option_def`'s order) otherwise. **The one producer** for
-    /// Rust code that builds an `Option` from a key; the checker's
-    /// `some-of`/`none` forms are its typed twin.
-    pub fn alloc_option(&mut self, key: &str, v: Option<Value>) -> Value {
+    /// An `Option` value of the type `ty` (`option<P>`): the niche when `P`
+    /// allows one — `v` itself for `some`, [`Value::Empty`] for `none` — and a
+    /// `BoxedObj::Enum` box (`some` = variant 0, `none` = variant 1,
+    /// `option_def`'s order) otherwise. **The one producer** for Rust code
+    /// that builds an `Option` from a type; the checker's `some-of`/`none`
+    /// forms are its typed twin.
+    pub fn alloc_option(&mut self, ty: TypeId, v: Option<Value>) -> Value {
+        let key = self.type_key_name(ty).to_string();
         assert!(
-            ConcreteNames::base_type(key) == "option" && ConcreteNames::single_type_arg(key).is_some(),
-            "alloc_option: `{}` is not an `option<P>` key",
+            ConcreteNames::base_type(&key) == "option" && ConcreteNames::single_type_arg(&key).is_some(),
+            "alloc_option: `{}` is not an `option<P>` type",
             key
         );
-        if is_niched_option_key(key) {
+        if is_niched_option_key(&key) {
             return v.unwrap_or(Value::Empty);
         }
-        let id = self.intern_type_key(key);
         match v {
-            Some(x) => self.alloc_enum(id, 0, vec![x]),
-            None => self.alloc_enum(id, 1, vec![]),
+            Some(x) => self.alloc_enum(ty, 0, vec![x]),
+            None => self.alloc_enum(ty, 1, vec![]),
         }
     }
 }
@@ -93,15 +93,21 @@ mod tests {
     }
 
     #[test]
-    fn alloc_option_niches_or_boxes_by_the_key() {
+    fn alloc_option_niches_or_boxes_by_the_type() {
+        use crate::{NsId, TypeShape};
         let mut h = Heap::with_capacity(64);
-        assert_eq!(h.alloc_option("option<int>", Some(Value::Int(5))), Value::Int(5));
-        assert_eq!(h.alloc_option("option<int>", None), Value::Empty);
+        let int = h.intern_type(TypeShape::named(NsId::ROOT, "int", &[]));
+        let unit = h.intern_type(TypeShape::Unit);
+        let option_int = h.intern_type(TypeShape::named(NsId::ROOT, "option", &[int]));
+        let option_option_int = h.intern_type(TypeShape::named(NsId::ROOT, "option", &[option_int]));
+        let option_unit = h.intern_type(TypeShape::named(NsId::ROOT, "option", &[unit]));
+        assert_eq!(h.alloc_option(option_int, Some(Value::Int(5))), Value::Int(5));
+        assert_eq!(h.alloc_option(option_int, None), Value::Empty);
         assert_eq!(h.box_count(), 0);
-        let Value::Boxed(some) = h.alloc_option("option<option<int>>", Some(Value::Int(5))) else { panic!("boxed") };
+        let Value::Boxed(some) = h.alloc_option(option_option_int, Some(Value::Int(5))) else { panic!("boxed") };
         assert!(h.is_enum(some));
         assert_eq!(h.enum_variant(some), 0);
-        let Value::Boxed(none) = h.alloc_option("option<()>", None) else { panic!("boxed") };
+        let Value::Boxed(none) = h.alloc_option(option_unit, None) else { panic!("boxed") };
         assert_eq!(h.enum_variant(none), 1);
     }
 }

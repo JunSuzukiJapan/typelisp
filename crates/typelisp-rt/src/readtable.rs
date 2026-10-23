@@ -9,16 +9,23 @@
 //! depending on which side of the compile boundary made it.
 
 use crate::stream_builtin::ArgError;
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{spec, Heap, NsId, TypeSpec, Value};
 
-/// The type key of `Option<(fn (string-input-stream char) Option<Sexpr>)>` — what
+/// The type `Option<(fn (string-input-stream char) Option<Sexpr>)>` — what
 /// `get-macro-character` answers with.
 ///
-/// Spelled out because this crate sits below the checker and cannot compute
-/// it from a `Type`; `tests/type_identity_guard_test.rs` checks the spelling
-/// against what the registry's own declaration produces, for the reason that
-/// file gives: a box built under a key nobody else spells is unmatchable.
-pub const READER_MACRO_OPTION_KEY: &str = "option<(fn (std::string-input-stream,char) option<sexpr>)>";
+/// Written out because this crate sits below the checker and cannot compute
+/// it from a `Type`; `tests/type_identity_guard_test.rs` checks it against
+/// the registry's own declaration, for the reason that file gives: a box
+/// built under a type nobody else gives it is unmatchable.
+pub const READER_MACRO_OPTION_TYPE: TypeSpec = TypeSpec::Named(
+    NsId::ROOT,
+    "option",
+    &[TypeSpec::Fn(
+        &[TypeSpec::Named(NsId::STD, "string-input-stream", &[]), spec::CHAR],
+        &TypeSpec::Named(NsId::ROOT, "option", &[spec::SEXPR]),
+    )],
+);
 
 fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
     match args.get(i) {
@@ -27,10 +34,11 @@ fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
     }
 }
 
-/// `Some(f)`/`None` under [`READER_MACRO_OPTION_KEY`] — a niche, since a
+/// `Some(f)`/`None` of [`READER_MACRO_OPTION_TYPE`] — a niche, since a
 /// function value is never the empty list (`Heap::alloc_option`).
 fn found(heap: &mut Heap, f: Option<Value>) -> Value {
-    heap.alloc_option(READER_MACRO_OPTION_KEY, f)
+    let ty = heap.intern_spec(&READER_MACRO_OPTION_TYPE);
+    heap.alloc_option(ty, f)
 }
 
 /// Every readtable builtin, or `None` if `name` isn't one.

@@ -145,7 +145,7 @@ pub unsafe extern "C" fn rt_heap_live_count(_args: *const i64, _argc: u32) -> i6
 
 // ---- Stage 2/3: the tagged `Sexpr` representation ----------------------
 
-use typelisp_mem::{BoxId, TypeKeyId, Value};
+use typelisp_mem::{BoxId, TypeId, Value};
 use typelisp_abi::call_state::{Pending, State};
 
 /// `(cons car cdr)` for compiled code.
@@ -791,12 +791,12 @@ pub unsafe extern "C" fn rt_box_kind(args: *const i64, argc: u32) -> i64 {
                     (32, true) => 10,
                     (w, s) => fatal(&format!("rt_box_kind: a narrow box of an unknown width {}{}", if s { "i" } else { "u" }, w)),
                 }
-            } else if heap.is_struct(id) && heap.struct_type_key(id) == TypeKeyId::SEXPR_VECTOR {
+            } else if heap.is_struct(id) && heap.struct_type_key(id) == TypeId::SEXPR_VECTOR {
                 // `#(..)`'s box and `#nA(..)`'s: the `Sexpr` `vector`/`array`
                 // variants. Told apart by identity, since a struct box of any
                 // other type is not a `Sexpr` variant at all.
                 11
-            } else if heap.is_struct(id) && heap.struct_type_key(id) == TypeKeyId::SEXPR_ARRAY {
+            } else if heap.is_struct(id) && heap.struct_type_key(id) == TypeId::SEXPR_ARRAY {
                 12
             } else if heap.sexpr_tuple_arity(id).is_some() {
                 // `#{..}`'s box, of whatever arity: the `tuple` variant.
@@ -1167,10 +1167,10 @@ pub unsafe extern "C" fn rt_ratio_denominator(args: *const i64, argc: u32) -> i6
 ///
 /// `raw` must decode to a type form; a `Heap` must be registered on this
 /// thread.
-unsafe fn type_key_arg(raw: i64, who: &str) -> TypeKeyId {
-    let heap = active_heap();
-    let key = type_key_of_arg(heap, raw, who);
-    heap.intern_type_key(&key)
+unsafe fn type_key_arg(raw: i64, who: &str) -> TypeId {
+    let form = decode(raw);
+    typelisp_mem::type_of_form(active_heap(), form)
+        .unwrap_or_else(|| fatal(&format!("{}: type argument is not a type form: {:?}", who, form)))
 }
 
 /// The interned identity named by a tagged type-form argument, or `None` if
@@ -1178,27 +1178,20 @@ unsafe fn type_key_arg(raw: i64, who: &str) -> TypeKeyId {
 ///
 /// What an instance *test* wants: a type no value here has ever had answers
 /// the question by itself, and minting an id for it would only grow a
-/// permanent table with a name nothing will ever carry.
+/// permanent table with a type nothing will ever carry.
 ///
 /// # Safety
 ///
 /// Same as [`type_key_arg`].
-unsafe fn existing_type_key_arg(raw: i64, who: &str) -> Option<TypeKeyId> {
-    let heap = active_heap();
-    let key = type_key_of_arg(heap, raw, who);
-    heap.type_key_id(&key)
-}
-
-/// The type key a tagged type-form argument spells.
-fn type_key_of_arg(heap: &Heap, raw: i64, who: &str) -> String {
+unsafe fn existing_type_key_arg(raw: i64, who: &str) -> Option<TypeId> {
     let form = decode(raw);
-    typelisp_mem::type_key_of_form(heap, form)
-        .unwrap_or_else(|| fatal(&format!("{}: type argument is not a type form: {:?}", who, form)))
+    typelisp_mem::existing_type_of_form(active_heap(), form)
+        .unwrap_or_else(|()| fatal(&format!("{}: type argument is not a type form: {:?}", who, form)))
 }
 
 /// `(rt-struct-new type-name field0 field1 ...)` for compiled code —
 /// allocates a boxed `Sexpr` struct. `args[0]` is a tagged type form (the
-/// struct's type, interned into a `TypeKeyId` here rather than kept as a live
+/// struct's type, interned into a `TypeId` here rather than kept as a live
 /// `Sexpr` reference — the box stores the id, not the form);
 /// `args[1..argc]` are the
 /// field values, already-tagged `Sexpr`s copied into the new struct's field
@@ -2232,14 +2225,12 @@ pub unsafe extern "C" fn rt_hashtable_entries(args: *const i64, argc: u32) -> i6
     // `(type-named ::vector CELL)`.
     let heap = active_heap();
     let vec_form = decode(*args.add(1));
-    let vec_key_name = type_key_of_arg(heap, *args.add(1), "rt_hashtable_entries");
-    let cell_key_name = match heap.list_to_vec(vec_form).as_deref() {
-        Ok([_, _, cell]) => typelisp_mem::type_key_of_form(heap, *cell),
+    let vec_key = type_key_arg(*args.add(1), "rt_hashtable_entries");
+    let cell_key = match heap.list_to_vec(vec_form).as_deref() {
+        Ok([_, _, cell]) => typelisp_mem::type_of_form(heap, *cell),
         _ => None,
     }
-    .unwrap_or_else(|| fatal(&format!("rt_hashtable_entries: the result type is not a one-argument container: {}", vec_key_name)));
-    let vec_key = active_heap().intern_type_key(&vec_key_name);
-    let cell_key = active_heap().intern_type_key(&cell_key_name);
+    .unwrap_or_else(|| fatal(&format!("rt_hashtable_entries: the result type is not a one-argument container: {:?}", vec_form)));
     let pairs = active_heap().hashtable_pairs(id);
     let mut fields = Vec::with_capacity(pairs.len());
     let mut rooted = 0usize;
@@ -3924,7 +3915,7 @@ pub unsafe extern "C" fn rt_list_to_sexpr_vector(args: *const i64, argc: u32) ->
     // The elements are reachable only through `list`, which nothing else
     // roots while the box is allocated.
     heap.push_root(list);
-    let v = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, elems);
+    let v = heap.alloc_struct(TypeId::SEXPR_VECTOR, elems);
     heap.pop_root();
     encode(v)
 }
@@ -3935,7 +3926,7 @@ fn sexpr_tuple_of(heap: &mut Heap, elems: Vec<Value>) -> Value {
     if !(1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&elems.len()) {
         raise(format!("a tuple has 1 to {} elements, not {}", typelisp_mem::TUPLE_MAX_ARITY, elems.len()));
     }
-    let key = heap.intern_type_key(&typelisp_mem::sexpr_tuple_key(elems.len()));
+    let key = typelisp_mem::sexpr_tuple_type(heap, elems.len());
     heap.alloc_struct(key, elems)
 }
 
@@ -4001,7 +3992,7 @@ pub unsafe extern "C" fn rt_sexpr_tuple_items(args: *const i64, argc: u32) -> i6
     let Value::Boxed(id) = t else { fatal("rt_sexpr_tuple_items: argument is not a tuple") };
     let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
     heap.push_root(t);
-    let v = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, elems);
+    let v = heap.alloc_struct(TypeId::SEXPR_VECTOR, elems);
     heap.pop_root();
     encode(v)
 }

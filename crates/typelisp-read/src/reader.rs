@@ -23,7 +23,7 @@ use std::sync::Arc;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use typelisp_mem::{symbols, wk, Error, Heap, Loc, NsId, SymRef, TypeKeyId, Value};
+use typelisp_mem::{spec, symbols, wk, Error, Heap, Loc, NsId, SymRef, TypeId, TypeSpec, Value};
 
 /// The feature set consulted by `#+`/`#-` reader conditionals (CLHS 24.1.2 —
 /// the closest an s-expression reader has to a preprocessor). A feature is
@@ -1360,10 +1360,10 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
     }
 }
 
-/// The `Vector<int>` box an array's dimensions are kept in. Spelled here
-/// because the reader cannot derive a type key; `tests/type_identity_guard_test.rs`
-/// checks it against the one `ConcreteNames::type_key` produces.
-pub const ARRAY_DIMS_KEY: &str = "vector<int>";
+/// The `Vector<int>` box an array's dimensions are kept in. Written here
+/// because the reader has no checker to ask; `tests/type_identity_guard_test.rs`
+/// checks it against the type the checker gives it.
+pub const ARRAY_DIMS_TYPE: TypeSpec = TypeSpec::Named(NsId::ROOT, "vector", &[spec::INT]);
 
 /// `#(a b c)`: the elements, read as data, in a `Vector<Option<Sexpr>>` box —
 /// the `Sexpr` `vector` variant. The cursor is on the `(`.
@@ -1371,7 +1371,7 @@ fn read_vector(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value,
     cur.next(); // '('
     let mark = heap.root_count();
     let elems = read_elements(cur, heap, ctx, ')', "#(")?;
-    let v = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, elems);
+    let v = heap.alloc_struct(TypeId::SEXPR_VECTOR, elems);
     restore_roots(heap, mark);
     Ok(v)
 }
@@ -1391,7 +1391,7 @@ fn read_tuple(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
             elems.len()
         )));
     }
-    let key = heap.intern_type_key(&typelisp_mem::sexpr_tuple_key(elems.len()));
+    let key = typelisp_mem::sexpr_tuple_type(heap, elems.len());
     let v = heap.alloc_struct(key, elems);
     restore_roots(heap, mark);
     Ok(v)
@@ -1507,12 +1507,12 @@ fn read_array(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>, rank: usize) -> R
 /// The caller keeps every element of `data` rooted across the call.
 pub fn alloc_sexpr_array(heap: &mut Heap, dims: Vec<Value>, data: Vec<Value>) -> Value {
     let mark = heap.root_count();
-    let data_box = heap.alloc_struct(TypeKeyId::SEXPR_VECTOR, data);
+    let data_box = heap.alloc_struct(TypeId::SEXPR_VECTOR, data);
     heap.push_root(data_box);
-    let dims_key = heap.intern_type_key(ARRAY_DIMS_KEY);
+    let dims_key = heap.intern_spec(&ARRAY_DIMS_TYPE);
     let dims_box = heap.alloc_struct(dims_key, dims);
     heap.push_root(dims_box);
-    let array = heap.alloc_struct(TypeKeyId::SEXPR_ARRAY, vec![dims_box, data_box, Value::Empty]);
+    let array = heap.alloc_struct(TypeId::SEXPR_ARRAY, vec![dims_box, data_box, Value::Empty]);
     restore_roots(heap, mark);
     array
 }
@@ -1957,7 +1957,7 @@ fn read_type_arg(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<(Value, 
                 restore_roots(heap, mark);
                 return Err(type_args_error(&format!("a tuple type has 1 to {} elements", typelisp_mem::TUPLE_MAX_ARITY)));
             }
-            let key = heap.intern_type_key(&typelisp_mem::sexpr_tuple_key(elems.len()));
+            let key = typelisp_mem::sexpr_tuple_type(heap, elems.len());
             let v = heap.alloc_struct(key, elems);
             restore_roots(heap, mark);
             Ok((v, start.with_end(cur.line, cur.col)))

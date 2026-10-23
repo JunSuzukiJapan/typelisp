@@ -145,12 +145,16 @@
 ヒープの型表は文字列を登録しない。型の形をそのまま登録して番号（`TypeId`）を振る。
 
 ```
-TypeShape = Named(SymRef, [TypeId])
+TypeShape = Named(NsId, SymRef, [TypeId])
           | Fn([TypeId], rest: Option<TypeId>, ret: TypeId)
-          | Dyn(SymRef, [TypeId])
+          | Dyn(NsId, SymRef, [TypeId])
           | Ptr(TypeId)
+          | CStruct(NsId, SymRef)
           | Unit | Never
 ```
+
+- 定義は所属モジュール（`NsId`）とそこでの名前のシンボルの組で指す。チェッカーの `Path` と
+  同じ 2 つで、シンボルだけでは定義が決まらない（5b で `SymRef` だけの案から変えた）。
 
 - 同じ形には同じ番号（形の上でハッシュする）。箱は `TypeId` を持ち、比べるのは番号。
 - 型引数を取り出すのは形を読むだけ。文字列を切らない。
@@ -509,6 +513,12 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `TypeKeyId` を `TypeId` にする。5a の 1 か所はフォーム → 形になる。型から作る側
      （チェッカーの `Type`、ランタイムの手書きのキー、固定の型）も形を作る。型の名前の文字列は
      形から組み立てる表示だけにする。
+     済み。形は `typelisp_mem::TypeShape`、表は形でだけ引く（文字列から番号を引く手段は無い）。
+     型の名前は登録のときに形から 1 度組み立てる表示で、綴りは前のキーと同じ。チェッカーの型は
+     `type_key::type_id`、ランタイムの手書きの型は Rust の定数で木を書く `TypeSpec`
+     （`Heap::intern_spec`）で形にする。評価器・スケジューラ・組み込み関数の値は型を `TypeId` で
+     運ぶ。ダンプの形式は変わらず、ABI は 0.3.17。まだ文字列で引くのは、欄の型の雛形
+     （`field_key_template`）、`:dyn` の vtable の表、`dyn-new` の `type_key_field`。
    - 5c. 文字列を切る処理を形を読む処理にする。印字の表のキーと `rt_print_*` の登録を番号か
      シンボルにする。
    - 5d. コンパイル済みコードがフォームでなく番号を使う。JIT は番号を定数にし、AOT は起動時に

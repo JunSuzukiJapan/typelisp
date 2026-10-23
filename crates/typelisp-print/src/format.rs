@@ -3019,7 +3019,7 @@ impl Renderer {
                 // instantiation appears in no program's types, so no method was
                 // made for it; it is S-expression data, and data prints here,
                 // in the same syntax that method writes.
-                if key == typelisp_mem::BUILTIN_TYPE_KEYS[typelisp_mem::TypeKeyId::SEXPR_ARRAY.as_u32() as usize] {
+                if key == *heap.type_key_name(typelisp_mem::TypeId::SEXPR_ARRAY) {
                     return self.render_data_array(heap, ctx, id, standard, depth, out);
                 }
                 out.push_str(&format!("#<{}", crate::shared::name_view().type_key(&key)));

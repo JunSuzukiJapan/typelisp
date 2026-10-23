@@ -2411,18 +2411,21 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             (Ok(id), Ok(name)) => heap.scope_get(id, &name),
             (Err(e), _) | (_, Err(e)) => rt_llvm_fatal(&format!("rt_llvm_call: native-scope::get: {:?}", e)),
         };
-        // `Option<llvm-value>`, spelled through the one producer: a type's
+        // `Option<llvm-value>`, interned through the one producer: a type's
         // runtime identity includes its instantiation, and `native-scope::get`
         // is the one builtin here that returns a generic box.
-        let key = typelisp_mem::ConcreteNames::type_key(&crate::types::Type::Named(
-            crate::Path::root("option"),
-            vec![crate::types::Type::Named(crate::Path::root("llvm-value"), vec![])],
-        ));
+        let ty = typelisp_front::type_key::type_id(
+            heap,
+            &crate::types::Type::Named(
+                crate::Path::root("option"),
+                vec![crate::types::Type::Named(crate::Path::root("llvm-value"), vec![])],
+            ),
+        );
         // A niche (`Repr::Niche`): the handle's fixnum word for `some`, the
         // empty-list immediate for `none` — what `encode` makes of the
         // `Value` `alloc_option` answers, and what the island's `pat-some`
         // reads back.
-        let option = heap.alloc_option(&key, found);
+        let option = heap.alloc_option(ty, found);
         return crate::compile::runtime::encode(option);
     }
     let result: Result<Value, EvalError> = if op.type_key == "native-scope" {

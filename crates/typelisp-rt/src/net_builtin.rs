@@ -17,63 +17,65 @@
 //! signature still lives in the registry with the others, since the checker
 //! needs it.
 
-use typelisp_mem::{Heap, TypeKeyId, Value};
+use typelisp_mem::{spec, Heap, NsId, TypeId, TypeSpec, Value};
 
 use crate::stream::with_streams;
 use crate::stream_builtin::{int, lookup, text, ArgError};
 
-/// The runtime type key each builtin's *result* carries — [`crate::
-/// stream_builtin::RESULT_KEYS`]'s companion, checked against the registry
+const NET_ERROR: TypeSpec = TypeSpec::Named(NsId::ROOT, "neterror", &[]);
+
+/// The runtime type each builtin's *result* carries — [`crate::
+/// stream_builtin::RESULT_TYPES`]'s companion, checked against the registry
 /// by the same guard test and for the same reason.
-pub const RESULT_KEYS: &[(&str, &str)] = &[
-    ("net-resolve-begin", "result<i32,neterror>"),
-    ("net-resolve-finish", "result<option<vector<string>>,neterror>"),
-    ("net-connect-begin", "result<i32,neterror>"),
-    ("net-connect-finish", "result<(),neterror>"),
-    ("net-listen", "result<i32,neterror>"),
-    ("net-tls-listen", "result<i32,neterror>"),
-    ("net-unix-connect", "result<i32,neterror>"),
-    ("net-unix-listen", "result<i32,neterror>"),
-    ("net-accept", "result<option<i32>,neterror>"),
-    ("net-fill", "result<option<int>,neterror>"),
-    ("net-pop-byte", "result<option<int>,neterror>"),
-    ("net-pop-char", "result<option<char>,neterror>"),
-    ("net-buffered-p", "result<bool,neterror>"),
-    ("net-push-string", "result<(),neterror>"),
-    ("net-push-byte", "result<(),neterror>"),
-    ("net-flush", "result<option<int>,neterror>"),
-    ("net-socket-error", "result<option<string>,neterror>"),
-    ("net-peer-subject", "result<option<string>,neterror>"),
-    ("net-server-name", "result<option<string>,neterror>"),
-    ("net-set-nodelay", "result<(),neterror>"),
-    ("net-set-keepalive", "result<(),neterror>"),
-    ("net-set-keepalive-period", "result<(),neterror>"),
-    ("net-tls-add-certificate", "result<(),neterror>"),
-    ("net-shutdown-write", "result<(),neterror>"),
-    ("net-local-address", "result<string,neterror>"),
-    ("net-peer-address", "result<string,neterror>"),
-    ("net-tls-start", "result<(),neterror>"),
-    ("net-tls-handshake", "result<option<int>,neterror>"),
-    ("net-udp-bind", "result<i32,neterror>"),
-    ("net-udp-send-to", "result<bool,neterror>"),
-    ("net-udp-recv", "result<option<vector<int>>,neterror>"),
-    ("net-udp-last-sender", "result<string,neterror>"),
+pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
+    ("net-resolve-begin", TypeSpec::Named(NsId::ROOT, "result", &[spec::I32, NET_ERROR])),
+    ("net-resolve-finish", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[TypeSpec::Named(NsId::ROOT, "vector", &[spec::STRING])]), NET_ERROR])),
+    ("net-connect-begin", TypeSpec::Named(NsId::ROOT, "result", &[spec::I32, NET_ERROR])),
+    ("net-connect-finish", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-listen", TypeSpec::Named(NsId::ROOT, "result", &[spec::I32, NET_ERROR])),
+    ("net-tls-listen", TypeSpec::Named(NsId::ROOT, "result", &[spec::I32, NET_ERROR])),
+    ("net-unix-connect", TypeSpec::Named(NsId::ROOT, "result", &[spec::I32, NET_ERROR])),
+    ("net-unix-listen", TypeSpec::Named(NsId::ROOT, "result", &[spec::I32, NET_ERROR])),
+    ("net-accept", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::I32]), NET_ERROR])),
+    ("net-fill", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::INT]), NET_ERROR])),
+    ("net-pop-byte", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::INT]), NET_ERROR])),
+    ("net-pop-char", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::CHAR]), NET_ERROR])),
+    ("net-buffered-p", TypeSpec::Named(NsId::ROOT, "result", &[spec::BOOL, NET_ERROR])),
+    ("net-push-string", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-push-byte", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-flush", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::INT]), NET_ERROR])),
+    ("net-socket-error", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING]), NET_ERROR])),
+    ("net-peer-subject", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING]), NET_ERROR])),
+    ("net-server-name", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING]), NET_ERROR])),
+    ("net-set-nodelay", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-set-keepalive", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-set-keepalive-period", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-tls-add-certificate", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-shutdown-write", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-local-address", TypeSpec::Named(NsId::ROOT, "result", &[spec::STRING, NET_ERROR])),
+    ("net-peer-address", TypeSpec::Named(NsId::ROOT, "result", &[spec::STRING, NET_ERROR])),
+    ("net-tls-start", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, NET_ERROR])),
+    ("net-tls-handshake", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[spec::INT]), NET_ERROR])),
+    ("net-udp-bind", TypeSpec::Named(NsId::ROOT, "result", &[spec::I32, NET_ERROR])),
+    ("net-udp-send-to", TypeSpec::Named(NsId::ROOT, "result", &[spec::BOOL, NET_ERROR])),
+    ("net-udp-recv", TypeSpec::Named(NsId::ROOT, "result", &[TypeSpec::Named(NsId::ROOT, "option", &[TypeSpec::Named(NsId::ROOT, "vector", &[spec::INT])]), NET_ERROR])),
+    ("net-udp-last-sender", TypeSpec::Named(NsId::ROOT, "result", &[spec::STRING, NET_ERROR])),
 ];
 
-/// The key of the value inside the `Result`, for the builtins whose payload
+/// The type of the value inside the `Result`, for the builtins whose payload
 /// is itself a box.
-pub const INNER_KEYS: &[(&str, &str)] = &[
-    ("net-resolve-finish", "option<vector<string>>"),
-    ("net-tls-handshake", "option<int>"),
-    ("net-udp-recv", "option<vector<int>>"),
-    ("net-accept", "option<i32>"),
-    ("net-fill", "option<int>"),
-    ("net-flush", "option<int>"),
-    ("net-socket-error", "option<string>"),
-    ("net-peer-subject", "option<string>"),
-    ("net-server-name", "option<string>"),
-    ("net-pop-byte", "option<int>"),
-    ("net-pop-char", "option<char>"),
+pub const INNER_TYPES: &[(&str, TypeSpec)] = &[
+    ("net-resolve-finish", TypeSpec::Named(NsId::ROOT, "option", &[TypeSpec::Named(NsId::ROOT, "vector", &[spec::STRING])])),
+    ("net-tls-handshake", TypeSpec::Named(NsId::ROOT, "option", &[spec::INT])),
+    ("net-udp-recv", TypeSpec::Named(NsId::ROOT, "option", &[TypeSpec::Named(NsId::ROOT, "vector", &[spec::INT])])),
+    ("net-accept", TypeSpec::Named(NsId::ROOT, "option", &[spec::I32])),
+    ("net-fill", TypeSpec::Named(NsId::ROOT, "option", &[spec::INT])),
+    ("net-flush", TypeSpec::Named(NsId::ROOT, "option", &[spec::INT])),
+    ("net-socket-error", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
+    ("net-peer-subject", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
+    ("net-server-name", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
+    ("net-pop-byte", TypeSpec::Named(NsId::ROOT, "option", &[spec::INT])),
+    ("net-pop-char", TypeSpec::Named(NsId::ROOT, "option", &[spec::CHAR])),
 ];
 
 /// A `bool` argument.
@@ -94,7 +96,7 @@ fn opt_text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<Option<S
 }
 
 fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
-    let key = heap.intern_type_key(lookup(RESULT_KEYS, name, "result"));
+    let key = lookup(heap, RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 0, vec![v])
 }
 
@@ -102,13 +104,13 @@ fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
 /// message, the shape every built-in error type has.
 fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
-    let err_val = heap.alloc_enum(TypeKeyId::NET_ERROR, 0, vec![msg_val]);
-    let key = heap.intern_type_key(lookup(RESULT_KEYS, name, "result"));
+    let err_val = heap.alloc_enum(TypeId::NET_ERROR, 0, vec![msg_val]);
+    let key = lookup(heap, RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 1, vec![err_val])
 }
 
 fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
-    heap.alloc_option(lookup(INNER_KEYS, name, "inner"), v)
+    heap.alloc_option(lookup(heap, INNER_TYPES, name, "inner"), v)
 }
 
 /// The elements of a `Vector<int>` argument, as bytes. A `Vector<T>`'s box
@@ -180,7 +182,7 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
             match with_streams(heap, |t| t.net_resolve_finish(h)) {
                 Ok(Some(all)) => {
                     let elems: Vec<Value> = all.into_iter().map(|a| heap.alloc_string(a)).collect();
-                    let key = heap.intern_type_key("vector<string>");
+                    let key = heap.intern_spec(&TypeSpec::Named(NsId::ROOT, "vector", &[spec::STRING]));
                     let vec_val = heap.alloc_struct(key, elems);
                     let ov = option_value(heap, name, Some(vec_val));
                     Ok(result_ok(heap, name, ov))
@@ -269,7 +271,7 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
             match with_streams(heap, |t| t.net_udp_recv(h)) {
                 Ok(Some(data)) => {
                     let elems: Vec<Value> = data.into_iter().map(|b| Value::Int(b as i64)).collect();
-                    let key = heap.intern_type_key("vector<int>");
+                    let key = heap.intern_spec(&TypeSpec::Named(NsId::ROOT, "vector", &[spec::INT]));
                     let vec_val = heap.alloc_struct(key, elems);
                     let ov = option_value(heap, name, Some(vec_val));
                     Ok(result_ok(heap, name, ov))

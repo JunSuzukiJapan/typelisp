@@ -9410,10 +9410,10 @@ impl Checker {
             }
             // `#(..)` and `#nA(..)` written in source: a fresh collection
             // whose element type comes from the context.
-            Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_VECTOR) => {
+            Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeId::SEXPR_VECTOR) => {
                 self.check_vector_literal(heap, interp, env, id, expected)?
             }
-            Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
+            Value::Boxed(id) if crate::type_key::heap_type_is_id(heap, id, crate::TypeId::SEXPR_ARRAY) => {
                 self.check_array_literal(heap, interp, env, id, expected)?
             }
             // `#{..}` written in source: a fresh tuple of the literal elements.

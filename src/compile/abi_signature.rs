@@ -198,24 +198,29 @@ fn vocabulary(out: &mut String) {
     for (i, name) in typelisp_mem::BUILTIN_SYMBOLS.iter().enumerate() {
         writeln!(out, "| {} | `{}` |", i, name).unwrap();
     }
-    out.push_str("\n## 組み込み型キー (typelisp_mem::BUILTIN_TYPE_KEYS)\n\n| 番号 | 型キー |\n|---|---|\n");
-    for (i, key) in typelisp_mem::BUILTIN_TYPE_KEYS.iter().enumerate() {
-        writeln!(out, "| {} | `{}` |", i, key).unwrap();
+    // A type's spelling is its display, built from its shape by a heap.
+    let heap = typelisp_mem::Heap::with_capacity(64);
+    let name = |spec: &typelisp_mem::TypeSpec| heap.type_key_name(heap.intern_spec(spec)).to_string();
+    out.push_str("\n## 組み込み型 (typelisp_mem::BUILTIN_TYPES)\n\n| 番号 | 型 |\n|---|---|\n");
+    for (i, (ns, n, args)) in typelisp_mem::BUILTIN_TYPES.iter().enumerate() {
+        // type-identity-ok: prints the table's display, gives no value a type
+        let id = heap.intern_type(typelisp_mem::TypeShape::named(*ns, n, args));
+        writeln!(out, "| {} | `{}` |", i, &*heap.type_key_name(id)).unwrap();
     }
-    out.push_str("\n## 実行時が組み立てる値の型キー (typelisp_rt)\n\n| 表 | 関数 | 型キー |\n|---|---|---|\n");
-    let tables: [(&str, &[(&str, &str)]); 5] = [
-        ("sys_builtin::RESULT_KEYS", typelisp_rt::sys_builtin::RESULT_KEYS),
-        ("stream_builtin::RESULT_KEYS", typelisp_rt::stream_builtin::RESULT_KEYS),
-        ("stream_builtin::INNER_KEYS", typelisp_rt::stream_builtin::INNER_KEYS),
-        ("net_builtin::RESULT_KEYS", typelisp_rt::net_builtin::RESULT_KEYS),
-        ("net_builtin::INNER_KEYS", typelisp_rt::net_builtin::INNER_KEYS),
+    out.push_str("\n## 実行時が組み立てる値の型 (typelisp_rt)\n\n| 表 | 関数 | 型 |\n|---|---|---|\n");
+    let tables: [(&str, &[(&str, typelisp_mem::TypeSpec)]); 5] = [
+        ("sys_builtin::RESULT_TYPES", typelisp_rt::sys_builtin::RESULT_TYPES),
+        ("stream_builtin::RESULT_TYPES", typelisp_rt::stream_builtin::RESULT_TYPES),
+        ("stream_builtin::INNER_TYPES", typelisp_rt::stream_builtin::INNER_TYPES),
+        ("net_builtin::RESULT_TYPES", typelisp_rt::net_builtin::RESULT_TYPES),
+        ("net_builtin::INNER_TYPES", typelisp_rt::net_builtin::INNER_TYPES),
     ];
     for (table, rows) in tables {
-        for (name, key) in rows {
-            writeln!(out, "| {} | `{}` | `{}` |", table, name, key).unwrap();
+        for (f, spec) in rows {
+            writeln!(out, "| {} | `{}` | `{}` |", table, f, name(spec)).unwrap();
         }
     }
-    writeln!(out, "| readtable::READER_MACRO_OPTION_KEY | | `{}` |", typelisp_rt::readtable::READER_MACRO_OPTION_KEY).unwrap();
+    writeln!(out, "| readtable::READER_MACRO_OPTION_TYPE | | `{}` |", name(&typelisp_rt::readtable::READER_MACRO_OPTION_TYPE)).unwrap();
     out.push('\n');
 }
 

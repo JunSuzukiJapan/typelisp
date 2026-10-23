@@ -1,6 +1,6 @@
 //! Keeps the "a type is identified by its whole path" invariant enforceable.
 //!
-//! A heap value's type identity is an interned `TypeKeyId`, but the *name*
+//! A heap value's type identity is an interned `TypeId`, but the *name*
 //! it was interned under is a `String`, and so is a built-in type's name.
 //! Both are `String`, so nothing in the type system stops a new call site
 //! from spelling either one as `Path::last_segment` — the last segment alone
@@ -167,7 +167,7 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
             [
                 "alloc_struct(",
                 "alloc_enum(",
-                "intern_type_key(",
+                "intern_type(",
                 "struct_type_key(",
                 "enum_type_key(",
                 "struct_type_name(",
@@ -200,76 +200,80 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
 /// reason (`Result<_, ParseIntError>` and friends), and `typelisp_read::shim`
 /// the third (`Result<Sexpr, ReadError>`). They all name those types through
 /// `typelisp_mem`'s pre-interned table, whose entries every `Heap` mints at
-/// construction so that a `TypeKeyId` for them is a compile-time constant.
+/// construction so that a `TypeId` for them is a compile-time constant.
 ///
 /// This is that table's end of the agreement, checked rather than assumed — a
-/// value built under a key nobody else spells is unmatchable, prints as
+/// value built under a type nobody else gives it is unmatchable, prints as
 /// `<unknown-variant>`, and compares unequal to its own twin, silently.
 #[test]
-fn the_runtimes_type_keys_are_the_ones_type_key_of_produces() {
+fn the_runtimes_fixed_types_are_the_checkers() {
     use typelisp::types::Path;
-    use typelisp::{TypeKeyId, BUILTIN_TYPE_KEYS};
+    use typelisp::{Heap, TypeId};
 
-    for (key, path) in [
-        (TypeKeyId::OPTION, Path::root("option")),
-        (TypeKeyId::RESULT, Path::root("result")),
-        (TypeKeyId::FILE_ERROR, Path::root(typelisp::check::registry::FILE_ERROR)),
-        (TypeKeyId::READ_ERROR, Path::root(typelisp::check::registry::READ_ERROR)),
-        (TypeKeyId::PARSE_INT_ERROR, Path::root(typelisp::check::registry::PARSE_INT_ERROR)),
-        (TypeKeyId::PARSE_FLOAT_ERROR, Path::root(typelisp::check::registry::PARSE_FLOAT_ERROR)),
+    let mut heap = Heap::with_capacity(64);
+    for (id, path) in [
+        (TypeId::OPTION, Path::root("option")),
+        (TypeId::RESULT, Path::root("result")),
+        (TypeId::FILE_ERROR, Path::root(typelisp::check::registry::FILE_ERROR)),
+        (TypeId::READ_ERROR, Path::root(typelisp::check::registry::READ_ERROR)),
+        (TypeId::PARSE_INT_ERROR, Path::root(typelisp::check::registry::PARSE_INT_ERROR)),
+        (TypeId::PARSE_FLOAT_ERROR, Path::root(typelisp::check::registry::PARSE_FLOAT_ERROR)),
         // `file-list-directory` builds a `Vector<string>` box directly, and
         // `read-datum-at` pairs its datum with its end index in a
         // `cons-cell<Sexpr, int>` box (CL's second return value, which this
         // language has no multiple values to carry) — both on the runtime's
         // own side of the boundary, so both need the identity too.
-        (TypeKeyId::VECTOR, Path::root("vector")),
-        (TypeKeyId::CONS_CELL, Path::std("cons-cell")),
+        (TypeId::VECTOR, Path::root("vector")),
+        (TypeId::CONS_CELL, Path::std("cons-cell")),
         // The heap's own machinery: a `HashTable<K,V>` box, and the frames a
         // `Scope<V>` is made of.
-        (TypeKeyId::HASHTABLE, Path::root("hashtable")),
-        (TypeKeyId::SCOPE, Path::root("scope")),
-        (TypeKeyId::SCOPE_FRAME, Path::root("scope-frame")),
+        (TypeId::HASHTABLE, Path::root("hashtable")),
+        (TypeId::SCOPE, Path::root("scope")),
+        (TypeId::SCOPE_FRAME, Path::root("scope-frame")),
         // Three prelude `defstruct`s the runtime builds itself (in `std`, as
         // the whole prelude is, like `cons-cell` above), because the
         // facts in them belong to the runtime and not to the checker: two
         // clocks (`get-universal-time` / `get-internal-real-time`) and the
         // heap's own statistics (`heap-info`, which `room` prints).
-        (TypeKeyId::UNIVERSAL_TIME, Path::std("universal-time")),
-        (TypeKeyId::INTERNAL_TIME, Path::std("internal-time")),
-        (TypeKeyId::HEAP_INFO, Path::std("heap-info")),
+        (TypeId::UNIVERSAL_TIME, Path::std("universal-time")),
+        (TypeId::INTERNAL_TIME, Path::std("internal-time")),
+        (TypeId::HEAP_INFO, Path::std("heap-info")),
         // The socket layer's error type, built by `net_builtin`.
-        (TypeKeyId::NET_ERROR, Path::root("neterror")),
+        (TypeId::NET_ERROR, Path::root("neterror")),
+        (TypeId::SEXPR, Path::root("sexpr")),
     ] {
         assert_eq!(
-            BUILTIN_TYPE_KEYS[key.as_u32() as usize],
-            typelisp::type_key::type_key_of(&path),
-            "the pre-interned key at index {} is not the one `type_key_of` produces for `{}`",
-            key.as_u32(),
+            id,
+            typelisp::type_key::type_key_id(&mut heap, &path),
+            "the fixed type at index {} is not the checker's `{}`",
+            id.as_u32(),
             path
         );
     }
 }
 
-/// Every key a runtime shim spells for a builtin's *result* must be the one
-/// `ConcreteNames::type_key` produces for that builtin's registered return type.
+/// Every type a runtime shim gives a builtin's *result* must be the one the
+/// checker gives that builtin's registered return type.
 ///
-/// A type's runtime identity includes its instantiation now, and the shims
-/// below the checker (`typelisp_rt`, `typelisp_read`) have no `Path` to derive
-/// one from — so they carry tables of hand-written spellings, one row per
-/// builtin. Both sides are keyed by the *builtin's name*, which is what makes
-/// this check mechanical rather than a second hand-written list: the registry
-/// says what `stream-read-char` returns, the table says what key it builds,
-/// and they must agree character for character.
+/// A type's runtime identity includes its instantiation, and the shims below
+/// the checker (`typelisp_rt`, `typelisp_read`) have no checker to ask — so
+/// they carry tables of hand-written types, one row per builtin. Both sides
+/// are keyed by the *builtin's name*, which is what makes this check
+/// mechanical rather than a second hand-written list: the registry says what
+/// `stream-read-char` returns, the table says what type it builds, and they
+/// must be the same type.
 ///
 /// Getting this wrong is silent in exactly the way the module comment
 /// describes — the value would be unmatchable by a pattern the checker
-/// compiled from its own spelling.
+/// compiled from its own type.
 #[test]
-fn the_runtime_result_keys_match_the_registry() {
+fn the_runtime_result_types_match_the_registry() {
     use typelisp::check::Registry;
     use typelisp::types::Path;
+    use typelisp::{Heap, TypeSpec};
 
     let reg = Registry::with_builtins();
+    let heap = Heap::with_capacity(64);
     // A builtin is registered in `std` or in the library's internal module,
     // and the shims key it by its bare name — so the name has to pick out
     // exactly one of the two.
@@ -280,128 +284,121 @@ fn the_runtime_result_keys_match_the_registry() {
             .collect();
         match found.as_slice() {
             [sig] => (*sig).clone(),
-            [] => panic!("`{}` has a result-key row but no registry entry", name),
+            [] => panic!("`{}` has a result-type row but no registry entry", name),
             _ => panic!("`{}` is registered both in `std` and in the internal module", name),
         }
     };
-    let expected = |name: &str| -> String { typelisp_mem::ConcreteNames::type_key(&sig_of(name).ret) };
+    let check = |spec: &TypeSpec, ty: &typelisp::Type, what: &str| {
+        let written = heap.intern_spec(spec);
+        let checked = typelisp::type_key::type_id(&heap, ty);
+        assert_eq!(
+            written,
+            checked,
+            "{}: the runtime builds `{}`, the checker says `{}`",
+            what,
+            &*heap.type_key_name(written),
+            &*heap.type_key_name(checked)
+        );
+    };
 
-    for (name, key) in typelisp_rt::stream_builtin::RESULT_KEYS {
-        assert_eq!(*key, expected(name), "`{}`'s result key", name);
+    for (name, spec) in typelisp_rt::stream_builtin::RESULT_TYPES
+        .iter()
+        .chain(typelisp_rt::sys_builtin::RESULT_TYPES)
+        .chain(typelisp_rt::net_builtin::RESULT_TYPES)
+    {
+        check(spec, &sig_of(name).ret, &format!("`{}`'s result", name));
     }
-    for (name, key) in typelisp_rt::sys_builtin::RESULT_KEYS {
-        assert_eq!(*key, expected(name), "`{}`'s result key", name);
+    check(&typelisp_read::shim::READ_RESULT_TYPE, &sig_of("read").ret, "`read`'s result");
+    for name in ["get-macro-character", "get-dispatch-macro-character"] {
+        check(&typelisp_rt::readtable::READER_MACRO_OPTION_TYPE, &sig_of(name).ret, &format!("`{}`'s result", name));
     }
-    for (name, key) in typelisp_rt::net_builtin::RESULT_KEYS {
-        assert_eq!(*key, expected(name), "`{}`'s result key", name);
-    }
-    assert_eq!(typelisp_read::shim::READ_RESULT_KEY, expected("read"), "`read`'s result key");
-    assert_eq!(
-        typelisp_rt::readtable::READER_MACRO_OPTION_KEY,
-        expected("get-macro-character"),
-        "`get-macro-character`'s result key"
-    );
-    assert_eq!(
-        typelisp_rt::readtable::READER_MACRO_OPTION_KEY,
-        expected("get-dispatch-macro-character"),
-        "`get-dispatch-macro-character`'s result key"
-    );
-    assert_eq!(
-        typelisp_read::shim::READ_DATUM_RESULT_KEY,
-        expected("read-datum-at"),
-        "`read-datum-at`'s result key"
-    );
+    check(&typelisp_read::shim::READ_DATUM_RESULT_TYPE, &sig_of("read-datum-at").ret, "`read-datum-at`'s result");
 
-    // The *inner* keys: the box a `Result`'s `ok` payload is. Taken from the
-    // registry's own type rather than by unwrapping the outer key's spelling,
-    // so the check is about the identity and not about the parsing.
-    let ok_payload = |name: &str| -> String {
-        let sig = sig_of(name);
-        match &sig.ret {
-            typelisp::Type::Named(_, args) if !args.is_empty() => {
-                typelisp_mem::ConcreteNames::type_key(&args[0])
-            }
+    // The *inner* types: the box a `Result`'s `ok` payload is, taken from the
+    // registry's own type.
+    let ok_payload = |name: &str| -> typelisp::Type {
+        match sig_of(name).ret {
+            typelisp::Type::Named(_, args) if !args.is_empty() => args[0].clone(),
             other => panic!("`{}` returns {:?}, which has no payload type", name, other),
         }
     };
-    for (name, inner) in typelisp_rt::stream_builtin::INNER_KEYS {
-        assert_eq!(*inner, ok_payload(name), "`{}`'s inner key", name);
+    for (name, spec) in typelisp_rt::stream_builtin::INNER_TYPES.iter().chain(typelisp_rt::net_builtin::INNER_TYPES) {
+        check(spec, &ok_payload(name), &format!("`{}`'s inner value", name));
     }
-    for (name, inner) in typelisp_rt::net_builtin::INNER_KEYS {
-        assert_eq!(*inner, ok_payload(name), "`{}`'s inner key", name);
-    }
-    assert_eq!(
-        typelisp_read::shim::READ_DATUM_PAIR_KEY,
-        ok_payload("read-datum-at"),
-        "`read-datum-at`'s pair key"
+    check(&typelisp_read::shim::READ_DATUM_PAIR_TYPE, &ok_payload("read-datum-at"), "`read-datum-at`'s pair");
+    check(
+        &typelisp::eval::interp::MACROEXPAND_RESULT_TYPE,
+        &sig_of("macroexpand").ret,
+        "`macroexpand`'s result",
     );
+    check(&typelisp::eval::interp::EVAL_RESULT_TYPE, &sig_of("eval").ret, "`eval`'s result");
 }
 
 /// The boxes `#(..)` and `#nA(..)` read as are the `Sexpr` `vector`/`array`
-/// variants' payloads, so their pre-interned keys must be what
-/// `ConcreteNames::type_key` spells for the payload types the registry gives those
-/// variants — otherwise a `(the Vector<Option<Sexpr>> x)` downcast of a read
-/// vector would not match it. The array's dimensions box is spelled by the
-/// reader too.
+/// variants' payloads, so their fixed types must be the payload types the
+/// registry gives those variants — otherwise a `(the Vector<Option<Sexpr>> x)`
+/// downcast of a read vector would not match it. The array's dimensions box
+/// is typed by the reader too.
 #[test]
-fn the_read_vector_and_array_keys_are_the_sexpr_variants_payloads() {
+fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
     use typelisp::check::Registry;
     use typelisp::sexpr_variant;
     use typelisp::types::Path;
-    use typelisp::{TypeKeyId, BUILTIN_TYPE_KEYS};
+    use typelisp::{Heap, TypeId};
 
     let reg = Registry::with_builtins();
+    let heap = Heap::with_capacity(64);
     let sexpr = reg.type_def(&Path::root("sexpr")).expect("sexpr is registered");
-    let payload_key = |variant: usize| -> String {
+    let payload = |variant: usize| -> TypeId {
         let fields = &sexpr.variants[variant].fields;
         assert_eq!(fields.len(), 1, "`{}` should carry one payload", sexpr_variant::NAMES[variant]);
-        typelisp_mem::ConcreteNames::type_key(&fields[0])
+        typelisp::type_key::type_id(&heap, &fields[0])
     };
-    assert_eq!(BUILTIN_TYPE_KEYS[TypeKeyId::SEXPR_VECTOR.as_u32() as usize], payload_key(sexpr_variant::VECTOR));
-    assert_eq!(BUILTIN_TYPE_KEYS[TypeKeyId::SEXPR_ARRAY.as_u32() as usize], payload_key(sexpr_variant::ARRAY));
+    assert_eq!(TypeId::SEXPR_VECTOR, payload(sexpr_variant::VECTOR));
+    assert_eq!(TypeId::SEXPR_ARRAY, payload(sexpr_variant::ARRAY));
     assert_eq!(
-        typelisp_read::ARRAY_DIMS_KEY,
-        typelisp_mem::ConcreteNames::type_key(&typelisp::Type::Named(Path::root("vector"), vec![typelisp::Type::Int]))
+        heap.intern_spec(&typelisp_read::ARRAY_DIMS_TYPE),
+        typelisp::type_key::type_id(&heap, &typelisp::Type::Named(Path::root("vector"), vec![typelisp::Type::Int]))
     );
 }
 
-/// A `#{..}` datum is a tuple of `Option<Sexpr>` elements, whose key the
-/// reader and the runtime spell (`typelisp_mem::sexpr_tuple_key`) with no
-/// checker in hand. It has to be the key the checker gives that tuple type,
-/// or a tuple built in a program would not be the datum `read` builds from
-/// the same text, and the `tuple` variant would match only one of them.
+/// A `#{..}` datum is a tuple of `Option<Sexpr>` elements, whose type the
+/// reader and the runtime build (`typelisp_mem::sexpr_tuple_type`) with no
+/// checker in hand. It has to be the type the checker gives that tuple, or a
+/// tuple built in a program would not be the datum `read` builds from the
+/// same text, and the `tuple` variant would match only one of them.
 #[test]
-fn the_read_tuple_key_is_the_checkers_tuple_of_data() {
+fn the_read_tuple_type_is_the_checkers_tuple_of_data() {
     use typelisp::types::{tuple_path, Path};
-    use typelisp::Type;
+    use typelisp::{Heap, Type};
+    let heap = Heap::with_capacity(64);
     let data = Type::Named(Path::root("option"), vec![Type::Named(Path::root("sexpr"), vec![])]);
     for n in 1..=typelisp::TUPLE_MAX_ARITY {
         let ty = Type::Named(tuple_path(n), vec![data.clone(); n]);
-        assert_eq!(typelisp::sexpr_tuple_key(n), typelisp_mem::ConcreteNames::type_key(&ty), "arity {}", n);
+        assert_eq!(typelisp::sexpr_tuple_type(&heap, n), typelisp::type_key::type_id(&heap, &ty), "arity {}", n);
     }
 }
 
-/// The `TypeKeyId` constants must be the indices `Heap::with_capacity` interns
-/// [`BUILTIN_TYPE_KEYS`] at — the whole reason those constants can exist.
+/// The `TypeId` constants must be the ids `Heap::with_capacity` interns
+/// [`BUILTIN_TYPES`] at — the whole reason those constants can exist.
 ///
-/// Rule 3 above compares *names*, so an off-by-one in the constants would
-/// still let it pass while every runtime-built value silently took on a
+/// The tests above compare against the constants, so an off-by-one in them
+/// would let those pass while every runtime-built value silently took on a
 /// neighbour's identity. This checks the ids against a real heap.
 #[test]
-fn the_builtin_type_key_constants_are_what_a_heap_interns() {
-    use typelisp::{Heap, BUILTIN_TYPE_KEYS};
+fn the_builtin_type_constants_are_what_a_heap_interns() {
+    use typelisp::{Heap, TypeShape, BUILTIN_TYPES};
 
-    let mut heap = Heap::with_capacity(64);
-    for (i, name) in BUILTIN_TYPE_KEYS.iter().enumerate() {
-        let id = heap.intern_type_key(name);
+    let heap = Heap::with_capacity(64);
+    for (i, (ns, name, args)) in BUILTIN_TYPES.iter().enumerate() {
+        let id = heap.intern_type(TypeShape::named(*ns, name, args));
         assert_eq!(
             id.as_u32() as usize,
             i,
             "`{}` does not intern at its table index — `Heap::with_capacity` and \
-             `BUILTIN_TYPE_KEYS` have drifted apart",
-            name
+             `BUILTIN_TYPES` have drifted apart",
+            &*heap.type_key_name(id)
         );
-        assert_eq!(&*heap.type_key_name(id), *name);
     }
 }
 

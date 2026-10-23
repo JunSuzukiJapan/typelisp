@@ -5,11 +5,11 @@
 //! linking the reader. The same arrangement `typelisp_print::shim` has.
 
 use typelisp_abi::{active_heap, encode, fatal, tagged_arg};
-use typelisp_mem::{Heap, TypeKeyId, Value};
+use typelisp_mem::{spec, Heap, NsId, TypeId, TypeSpec, Value};
 
 use crate::reader::Reader;
 
-// The types the results here are built with — `TypeKeyId::RESULT`,
+// The types the results here are built with — `TypeId::RESULT`,
 // `READ_ERROR`, and `CONS_CELL` — come from `typelisp_mem`'s pre-interned
 // table rather than being named here, because this crate has no `Path` to
 // derive a name from (the same standing exception `typelisp_rt` has). That
@@ -22,19 +22,20 @@ use crate::reader::Reader;
 // `read-datum-at` pairs its datum with its end index in, since this language
 // has no multiple values for CL's second return value to be.
 
-/// The runtime type keys these two builtins' results carry.
+/// The runtime types these two builtins' results carry.
 ///
-/// A type's identity includes its instantiation
-/// (`typelisp_mem::ConcreteNames::type_key`), and this crate has no `Path` to
-/// derive one from — so they are spelled here and compared against the
+/// A type's identity includes its instantiation, and this crate has no
+/// checker to ask — so they are written here and compared against the
 /// registry's own return types by `tests/type_identity_guard_test.rs`, the
 /// same arrangement `typelisp_rt::stream_builtin` uses.
 ///
 /// `Option<Sexpr>` inside them is niche-represented — `some v` *is* `v` — so
-/// it builds no box and needs no key of its own.
-pub const READ_RESULT_KEY: &str = "result<option<sexpr>,readerror>";
-pub const READ_DATUM_RESULT_KEY: &str = "result<std::cons-cell<option<sexpr>,int>,readerror>";
-pub const READ_DATUM_PAIR_KEY: &str = "std::cons-cell<option<sexpr>,int>";
+/// it builds no box of its own.
+const OPTION_SEXPR: TypeSpec = TypeSpec::Named(NsId::ROOT, "option", &[spec::SEXPR]);
+const READ_ERROR: TypeSpec = TypeSpec::Named(NsId::ROOT, "readerror", &[]);
+pub const READ_RESULT_TYPE: TypeSpec = TypeSpec::Named(NsId::ROOT, "result", &[OPTION_SEXPR, READ_ERROR]);
+pub const READ_DATUM_PAIR_TYPE: TypeSpec = TypeSpec::Named(NsId::STD, "cons-cell", &[OPTION_SEXPR, spec::INT]);
+pub const READ_DATUM_RESULT_TYPE: TypeSpec = TypeSpec::Named(NsId::ROOT, "result", &[READ_DATUM_PAIR_TYPE, READ_ERROR]);
 
 /// The evaluator these two builtins read *with*, so `#.` and macro characters
 /// work the same way in a program's own `read` as they do in the loader's —
@@ -63,13 +64,13 @@ pub fn read_builtin(heap: &mut Heap, source: &str) -> Value {
 /// `Interp` to pass, falls back to [`evaluator`].
 pub fn read_builtin_with(heap: &mut Heap, source: &str, eval: Option<&dyn crate::reader::ReadEval>) -> Value {
     let reader = Reader::new();
-    let key = heap.intern_type_key(READ_RESULT_KEY);
+    let key = heap.intern_spec(&READ_RESULT_TYPE);
     let ns = heap.names().current_module();
     match reader.read_in_with(heap, "<input>", source, ns, eval) {
         Ok(v) => heap.alloc_enum(key, 0, vec![v]),
         Err(e) => {
             let msg = heap.alloc_string(format!("read: {}", e));
-            let err = heap.alloc_enum(TypeKeyId::READ_ERROR, 0, vec![msg]);
+            let err = heap.alloc_enum(TypeId::READ_ERROR, 0, vec![msg]);
             heap.alloc_enum(key, 1, vec![err])
         }
     }
@@ -97,8 +98,8 @@ pub fn read_datum_at_builtin_with(
 ) -> Value {
     let reader = Reader::new();
     let start = if start < 0 { 0usize } else { start as usize };
-    let key = heap.intern_type_key(READ_DATUM_RESULT_KEY);
-    let pair_key = heap.intern_type_key(READ_DATUM_PAIR_KEY);
+    let key = heap.intern_spec(&READ_DATUM_RESULT_TYPE);
+    let pair_key = heap.intern_spec(&READ_DATUM_PAIR_TYPE);
     let ns = heap.names().current_module();
     match reader.read_from_with(heap, source, start, preserve, ns, eval) {
         Ok((v, end)) => {
@@ -109,7 +110,7 @@ pub fn read_datum_at_builtin_with(
         }
         Err(e) => {
             let msg = heap.alloc_string(format!("read: {}", e));
-            let err = heap.alloc_enum(TypeKeyId::READ_ERROR, 0, vec![msg]);
+            let err = heap.alloc_enum(TypeId::READ_ERROR, 0, vec![msg]);
             heap.alloc_enum(key, 1, vec![err])
         }
     }

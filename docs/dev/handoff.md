@@ -1,4 +1,4 @@
-# 引き継ぎ（2026-10-22）
+# 引き継ぎ（2026-10-23）
 
 別のセッション（クラウドを含む）がこの作業を続けるための文書。作業の設計と段階は
 [explicit-symbols-plan.md](explicit-symbols-plan.md) にある。ここには、その計画のどこまで進んで
@@ -13,6 +13,8 @@
   ABI は 0.3.14。
 - 段階 5 は 5a まで済み。IR とコンパイル済みコードが型をフォームで運ぶ（計画の 5a の項）。
   ダンプの形式は 26、ABI は 0.3.16。
+- 5b も済み。ヒープの型の表は形（`TypeShape`）で引き、`TypeKeyId` は `TypeId` になった
+  （計画の 5b の項）。ABI は 0.3.17。
 
 ## 2. 4d で知っておくこと
 
@@ -30,11 +32,11 @@
 
 ## 3. 次にすること（順に）
 
-1. 5b。表を形にする（計画の段階 5 の項）。文字列のキーの作り手で残っているのは、ランタイムの
-   手書きのキー（`net_builtin.rs`・`stream_builtin.rs`・`sys_builtin.rs` の表、`"vector<string>"`
-   など）、deffi の C 型（`lower.rs`）、`c_struct.rs`、`fold.rs` の `ret_key`、組み込みの enum の
-   雛形（`type_key::field_key_template`）、ブリッジの `:dyn` の vtable の表。
-2. そのあと 5c〜5e（計画の段階 5 の項）。
+1. 5c。文字列を切る処理を形を読む処理にし、印字の表のキーと `rt_print_*` の登録を番号か
+   シンボルにする。文字列のキーで残っているのは、欄の型の雛形（`type_key::field_key_template`、
+   `check/core.rs`・`check/lower.rs`）、ブリッジの `:dyn` の vtable の表、評価器の `dyn-new` の
+   `type_key_field`、`eval/scope.rs` の表、`typelisp_mem::type_key_of_form`。
+2. そのあと 5d・5e（計画の段階 5 の項）。
 3. そのあと段階 6〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
    段階 6 で `Info::in_scope` の移行のための広い規則
    （`item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)`）を狭める。

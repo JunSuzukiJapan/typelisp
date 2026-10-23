@@ -66,7 +66,8 @@ use parking_lot::RwLock;
 
 use crate::Error;
 use super::symbols::{self, SymRef};
-use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, NarrowInt, PathId, StrId, StructPayload, TypeKeyId, Value};
+use super::type_shape::{self, TypeShape};
+use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, NarrowInt, PathId, StrId, StructPayload, TypeId, Value};
 
 /// How far past its initial capacity a heap may grow by default — see
 /// [`Heap::with_capacity`]. Large enough that program text plus a working set
@@ -427,17 +428,18 @@ impl Drop for Arena {
 
 /// Permanent, append-only identity tables — see `HeapShared::interning`.
 /// Grouped into one struct (rather than one lock per field) because
-/// `intern_type_key`/`intern_path` are the only writers and each only ever
+/// `intern_type`/`intern_path` are the only writers and each only ever
 /// touches its own pair, so one `RwLock` covering both pairs costs nothing
 /// extra in contention while keeping `HeapShared` from growing a lock per
 /// table.
 #[derive(Default)]
 struct Interning {
-    // interned type identities (permanent) — see `TypeKeyId`. The first
-    // `BUILTIN_TYPE_KEYS.len()` entries are pre-interned by `Heap::with_capacity`, so their
-    // ids are the `TypeKeyId` associated constants.
-    type_keys: Vec<String>,
-    type_key_ids: HashMap<String, u32>,
+    // interned type identities (permanent) — see `TypeId`. The first
+    // `BUILTIN_TYPES.len()` entries are pre-interned by `Heap::with_capacity`, so their
+    // ids are the `TypeId` associated constants. Each entry is the shape and
+    // its display.
+    types: Vec<(TypeShape, String)>,
+    type_ids: HashMap<TypeShape, u32>,
 
     // interned `::` paths (permanent; reference only permanent symbols)
     paths: Vec<Vec<SymRef>>,
@@ -816,15 +818,15 @@ impl Heap {
         });
 
         let slot = shared.threads.register();
-        let mut heap = Heap {
+        let heap = Heap {
             shared,
             slot,
             home_stack: 0,
             current_stack: 0,
             current,
         };
-        for key in crate::value::BUILTIN_TYPE_KEYS {
-            heap.intern_type_key(key);
+        for (ns, name, args) in crate::value::BUILTIN_TYPES {
+            heap.intern_type(TypeShape::named(*ns, name, args));
         }
         heap
     }
@@ -1422,47 +1424,51 @@ impl Heap {
 
     // ---- type identities ---------------------------------------------------
 
-    /// Intern a type identity by name, returning the [`TypeKeyId`] every
-    /// instance of that type carries. Permanent, like a symbol: equal names
-    /// always share one id, so "same type?" is `==` on the id.
+    /// Intern a type by its shape, returning the [`TypeId`] every instance of
+    /// that type carries. Permanent, like a symbol: equal shapes always share
+    /// one id, so "same type?" is `==` on the id.
     ///
-    /// Names are taken verbatim — unlike symbols, a type key is not folded.
-    /// The spelling is the type's whole `::` path, and producing it is the
-    /// front end's job (`typelisp-front`'s `type_key` module); this layer only
-    /// stores what it is given.
-    pub fn intern_type_key(&mut self, name: &str) -> TypeKeyId {
+    /// The shape's arguments are ids this heap already gave out; its display
+    /// is built from theirs here, once.
+    pub fn intern_type(&self, shape: TypeShape) -> TypeId {
         let mut interning = self.shared.interning.write();
-        if let Some(&id) = interning.type_key_ids.get(name) {
-            return TypeKeyId(id);
+        if let Some(&id) = interning.type_ids.get(&shape) {
+            return TypeId(id);
         }
-        let id = interning.type_keys.len() as u32;
-        interning.type_keys.push(name.to_string());
-        interning.type_key_ids.insert(name.to_string(), id);
-        TypeKeyId(id)
+        let name = type_shape::display(&shape, |arg| interning.types[arg.0 as usize].1.clone());
+        let id = interning.types.len() as u32;
+        interning.type_ids.insert(shape.clone(), id);
+        interning.types.push((shape, name));
+        TypeId(id)
     }
 
-    /// The id `name` interns to, if it has ever been interned in this heap.
+    /// The id `shape` interns to, if it has ever been interned in this heap.
     ///
-    /// The read-only half of [`intern_type_key`](Self::intern_type_key), for
-    /// asking "is this value of type `name`?" without minting an id for a type
-    /// no value has: `None` answers the question already (nothing can be an
-    /// instance of a type never named here).
-    pub fn type_key_id(&self, name: &str) -> Option<TypeKeyId> {
-        self.shared.interning.read_recursive().type_key_ids.get(name).map(|&id| TypeKeyId(id))
+    /// The read-only half of [`intern_type`](Self::intern_type), for asking
+    /// "is this value of that type?" without minting an id for a type no value
+    /// has: `None` answers the question already (nothing can be an instance of
+    /// a type never seen here).
+    pub fn find_type(&self, shape: &TypeShape) -> Option<TypeId> {
+        self.shared.interning.read_recursive().type_ids.get(shape).map(|&id| TypeId(id))
     }
 
-    /// The name behind an interned type identity — for printing, `Debug`, and
-    /// error messages. Not for comparison: compare the ids.
+    /// The shape `id` was interned from.
+    pub fn type_shape(&self, id: TypeId) -> TypeShape {
+        self.shared.interning.read_recursive().types[id.0 as usize].0.clone()
+    }
+
+    /// The display of an interned type — for printing, `Debug`, and error
+    /// messages. Not for comparison: compare the ids.
     ///
-    /// Returns a mapped read guard rather than `&str`: `type_keys` lives
+    /// Returns a mapped read guard rather than `&str`: `types` lives
     /// behind `shared.interning`'s lock, and `parking_lot::RwLockReadGuard`
     /// is what lets this narrow "the whole table, read-locked" down to "this
     /// one entry" while keeping the lock held for exactly the guard's
     /// lifetime (see `HeapShared`'s doc comment). Every existing call site
     /// only ever read the string through the old `&str` before dropping it,
     /// so `Deref<Target = str>` keeps them unchanged.
-    pub fn type_key_name(&self, key: TypeKeyId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        parking_lot::RwLockReadGuard::map(self.shared.interning.read_recursive(), |i| i.type_keys[key.0 as usize].as_str())
+    pub fn type_key_name(&self, key: TypeId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
+        parking_lot::RwLockReadGuard::map(self.shared.interning.read_recursive(), |i| i.types[key.0 as usize].1.as_str())
     }
 
 
@@ -1788,17 +1794,17 @@ impl Heap {
     /// method dispatch (`eval_builtin_method`) uses to decide what the
     /// fields mean; this layer itself doesn't interpret it.
     ///
-    /// Takes an interned [`TypeKeyId`] rather than a name, so a struct cannot
+    /// Takes an interned [`TypeId`] rather than a name, so a struct cannot
     /// be built without its type identity already existing as a comparable id
-    /// — see [`intern_type_key`](Self::intern_type_key).
-    pub fn alloc_struct(&mut self, type_key: TypeKeyId, fields: Vec<Value>) -> Value {
+    /// — see [`intern_type`](Self::intern_type).
+    pub fn alloc_struct(&mut self, type_key: TypeId, fields: Vec<Value>) -> Value {
         self.alloc_boxed(BoxedObj::Struct { type_key, payload: StructPayload::Fields(fields) })
     }
 
     /// The type identity of a boxed struct — what a "is this a `point`?" test
     /// compares. Panics if `id` doesn't hold a `BoxedObj::Struct` — same
     /// internal-invariant-trap convention as [`f64_value`](Self::f64_value).
-    pub fn struct_type_key(&self, id: BoxId) -> TypeKeyId {
+    pub fn struct_type_key(&self, id: BoxId) -> TypeId {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::Struct { type_key, .. }) => *type_key,
             _ => panic!("BoxId does not hold a Struct"),
@@ -1923,7 +1929,7 @@ impl Heap {
     /// of [`alloc_struct`](Self::alloc_struct); like `type_key` there,
     /// `variant` is stored uninterpreted — which variant means what is the
     /// checker's business, this layer only carries the index.
-    pub fn alloc_enum(&mut self, type_key: TypeKeyId, variant: usize, fields: Vec<Value>) -> Value {
+    pub fn alloc_enum(&mut self, type_key: TypeId, variant: usize, fields: Vec<Value>) -> Value {
         self.alloc_boxed(BoxedObj::Enum { type_key, variant, fields })
     }
 
@@ -1937,7 +1943,7 @@ impl Heap {
     /// The type identity of a boxed enum value — the enum peer of
     /// [`struct_type_key`](Self::struct_type_key). Panics if `id` doesn't hold
     /// a `BoxedObj::Enum`.
-    pub fn enum_type_key(&self, id: BoxId) -> TypeKeyId {
+    pub fn enum_type_key(&self, id: BoxId) -> TypeId {
         match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
             Some(BoxedObj::Enum { type_key, .. }) => *type_key,
             _ => panic!("BoxId does not hold an Enum"),
@@ -2237,19 +2243,15 @@ impl Heap {
     /// *method* (`i32::+`) and `None` for a free built-in (`eval`). See
     /// [`BoxedObj::Builtin`].
     ///
-    /// `name` is interned, so the box is two permanent indices wide and
+    /// `name` is interned, so the box holds only permanent indices and
     /// allocating one never triggers a collection (like
     /// [`alloc_cell`](Self::alloc_cell)).
-    pub fn alloc_builtin_fn(&mut self, recv_type: Option<PathId>, name: &str, ret_key: &str) -> Value {
+    pub fn alloc_builtin_fn(&mut self, recv_type: Option<PathId>, name: &str, ret_type: Option<TypeId>) -> Value {
         let name = match self.intern_string(name) {
             Value::Str(id) => id,
             _ => unreachable!("intern_string always returns Value::Str"),
         };
-        let ret_key = match self.intern_string(ret_key) {
-            Value::Str(id) => id,
-            _ => unreachable!("intern_string always returns Value::Str"),
-        };
-        self.alloc_boxed(BoxedObj::Builtin { recv_type, name, ret_key })
+        self.alloc_boxed(BoxedObj::Builtin { recv_type, name, ret_type })
     }
 
     /// True if `id` holds a `BoxedObj::Builtin`.
@@ -2280,14 +2282,12 @@ impl Heap {
     }
 
     /// The runtime identity of what a built-in function value returns — see
-    /// [`BoxedObj::Builtin`]'s `ret_key`. See `type_key_name`'s doc comment
-    /// for why this returns a mapped guard rather than `&str`.
-    pub fn builtin_fn_ret_key(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        let ret_key = match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
-            Some(BoxedObj::Builtin { ret_key, .. }) => *ret_key,
+    /// [`BoxedObj::Builtin`]'s `ret_type`.
+    pub fn builtin_fn_ret_type(&self, id: BoxId) -> Option<TypeId> {
+        match &self.shared.boxes.read_recursive().slots[id.0 as usize] {
+            Some(BoxedObj::Builtin { ret_type, .. }) => *ret_type,
             _ => panic!("BoxId does not hold a Builtin"),
-        };
-        self.string(ret_key)
+        }
     }
 
     // ---- random states ------------------------------------------------------
@@ -2384,7 +2384,7 @@ impl Heap {
     /// Stores an empty hash map, returning its `Value::Boxed` —
     /// `HashTable<K,V>`'s runtime representation (see `BoxedObj`/
     /// `StructPayload::Map`'s doc comments).
-    pub fn alloc_hashtable(&mut self, type_key: TypeKeyId) -> Value {
+    pub fn alloc_hashtable(&mut self, type_key: TypeId) -> Value {
         self.alloc_boxed(BoxedObj::Struct { type_key, payload: StructPayload::Map(HashMap::new()) })
     }
 
@@ -2508,7 +2508,7 @@ impl Heap {
     /// (frame *sharing* across `scope_clone_frames`) rather than a `HashMap`
     /// stored inline in the scope's payload.
     fn alloc_scope_frame(&mut self) -> BoxId {
-        let obj = BoxedObj::Struct { type_key: TypeKeyId::SCOPE_FRAME, payload: StructPayload::Frame(HashMap::new()) };
+        let obj = BoxedObj::Struct { type_key: TypeId::SCOPE_FRAME, payload: StructPayload::Frame(HashMap::new()) };
         match self.alloc_boxed(obj) {
             Value::Boxed(id) => id,
             _ => unreachable!("alloc_boxed always returns Value::Boxed"),
@@ -2553,7 +2553,7 @@ impl Heap {
     /// allocation this never itself triggers a collection.
     pub fn alloc_scope(&mut self) -> Value {
         let frame = self.alloc_scope_frame();
-        self.alloc_boxed(BoxedObj::Struct { type_key: TypeKeyId::SCOPE, payload: StructPayload::Frames(vec![frame]) })
+        self.alloc_boxed(BoxedObj::Struct { type_key: TypeId::SCOPE, payload: StructPayload::Frames(vec![frame]) })
     }
 
     /// `Scope::clone-frames`'s primitive: a brand-new scope box whose stack
@@ -2566,7 +2566,7 @@ impl Heap {
     /// they're called on). Panics like [`scope_get`](Self::scope_get).
     pub fn scope_clone_frames(&mut self, id: BoxId) -> Value {
         let frames = self.scope_frames(id);
-        self.alloc_boxed(BoxedObj::Struct { type_key: TypeKeyId::SCOPE, payload: StructPayload::Frames(frames) })
+        self.alloc_boxed(BoxedObj::Struct { type_key: TypeId::SCOPE, payload: StructPayload::Frames(frames) })
     }
 
     /// Pushes a fresh, empty frame onto a scope's stack. Panics like

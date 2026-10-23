@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{spec, Heap, NsId, TypeSpec, Value};
 use typelisp_rt::sched::{
     drive_main, start_workers, task_id_of, Progress, SchedError, SchedShared, TaskBody, Waiting,
 };
@@ -82,7 +82,8 @@ impl TaskBody for Probe {
             Probe::Parent { children, spawned, handles, waited, sum } => {
                 if *spawned < *children {
                     *spawned += 1;
-                    return Progress::Blocked(Waiting::Spawn(Value::Int(*spawned), "task<int>".to_string()));
+                    let task_int = heap.intern_spec(&TypeSpec::Named(NsId::ROOT, "task", &[spec::INT]));
+                    return Progress::Blocked(Waiting::Spawn(Value::Int(*spawned), task_int));
                 }
                 if *waited < handles.len() {
                     let id = task_id_of(heap, Some(handles[*waited])).expect("a task handle");

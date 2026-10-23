@@ -17,16 +17,16 @@
 //!   cargo +nightly miri test --test mem_test
 
 extern crate typelisp;
-use typelisp::{BoxId, Error, Heap, Value};
+use typelisp::{spec, BoxId, Error, Heap, NsId, TypeShape, TypeSpec, Value};
 
 /// `Heap::alloc_struct` with the type identity interned for you.
 ///
-/// The heap stores an interned `TypeKeyId`, not a name, so a struct cannot be
+/// The heap stores an interned `TypeId`, not a name, so a struct cannot be
 /// allocated without its identity already existing (that is the point — it is
 /// what makes "same type?" an integer comparison). These tests care about the
-/// *name* they wrote, so they mint it here.
+/// *name* they wrote, so they mint it here, as a root-level type.
 fn alloc_named_struct(h: &mut Heap, name: &str, fields: Vec<Value>) -> Value {
-    let key = h.intern_type_key(name);
+    let key = h.intern_type(TypeShape::named(NsId::ROOT, name, &[]));
     h.alloc_struct(key, fields)
 }
 
@@ -1115,10 +1115,10 @@ fn as_boxed(v: Value) -> BoxId {
 ///
 /// `Heap::alloc_hashtable` takes the value's runtime identity because
 /// `HashTable<string,int>` and `HashTable<string,string>` are different types
-/// and an empty table says nothing about which it is. At *this* layer the key
-/// is only a string nobody reads back, so one spelling serves every test here.
+/// and an empty table says nothing about which it is. At *this* layer the type
+/// is only an id nobody reads back, so one type serves every test here.
 fn new_hashtable(h: &mut Heap) -> Value {
-    let key = h.intern_type_key("hashtable<int,int>");
+    let key = h.intern_spec(&TypeSpec::Named(NsId::ROOT, "hashtable", &[spec::INT, spec::INT]));
     h.alloc_hashtable(key)
 }
 

@@ -53,7 +53,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use typelisp_mem::{wk, BoxId, Heap, RootScope, SymRef, Value};
+use typelisp_mem::{wk, BoxId, Heap, RootScope, SymRef, TypeId, Value};
 
 use crate::check::core;
 use crate::check::repr::Repr;
@@ -586,7 +586,7 @@ impl Interp {
             // fixed signature in `typelisp_rt`, so there is nothing for the
             // reference site to say. `""` records that absence rather than a
             // key nobody wrote.
-            None => Ok(heap.alloc_builtin_fn(None, path.last_segment(), "")),
+            None => Ok(heap.alloc_builtin_fn(None, path.last_segment(), None)),
         }
     }
 
@@ -602,8 +602,8 @@ impl Interp {
                 let Value::Path(recv) = crate::check::core::path_form(heap, &type_name) else {
                     unreachable!("Heap::intern_path always returns Value::Path")
                 };
-                let ret_key = type_key_field(heap, form, 3, "methodref")?;
-                Ok(heap.alloc_builtin_fn(Some(recv), &method, &ret_key))
+                let ret = type_field(heap, form, 3, "methodref")?;
+                Ok(heap.alloc_builtin_fn(Some(recv), &method, Some(ret)))
             }
         }
     }
@@ -1208,7 +1208,7 @@ pub(super) fn match_core_pattern(
             // The instantiation this pattern accepts — see `Pattern::Ctor`'s
             // `targs`. The path above still says `sexpr`-or-not; this says
             // which `gen<_>`.
-            let key = type_key_field(heap, pat, 1, "pat-ctor")?;
+            let ty = tested_type_field(heap, pat, 1, "pat-ctor")?;
             let variant = int_field(heap, pat, 2, "pat-ctor")? as usize;
             // Field 3 is the downcast flag. The interpreter applies the type
             // guard below either way, so it changes nothing here; it is the
@@ -1220,11 +1220,11 @@ pub(super) fn match_core_pattern(
                 return Err(EvalError::Internal(format!("eval: malformed pattern: {}", core::print(heap, pat))));
             }
             let subs = subs[5..].to_vec();
-            match_ctor(it, heap, env, &path, &key, variant, &subs, v)
+            match_ctor(it, heap, env, &path, ty, variant, &subs, v)
         }
         "pat-typetest" => {
             let path = path_field(heap, pat, 0, "pat-typetest")?;
-            let key = type_key_field(heap, pat, 1, "pat-typetest")?;
+            let ty = tested_type_field(heap, pat, 1, "pat-typetest")?;
             let inner = core::field(heap, pat, 2)
                 .ok_or_else(|| EvalError::Internal("eval: (pat-typetest ..) has no sub-pattern".to_string()))?;
             // `(the sexpr p)` tests nothing: every value is a `Sexpr`.
@@ -1232,7 +1232,7 @@ pub(super) fn match_core_pattern(
                 return match_core_pattern(it, heap, env, inner, v);
             }
             match v {
-                Value::Boxed(id) if crate::type_key::heap_type_is_key(heap, id, &key) => {
+                Value::Boxed(id) if ty.is_some_and(|t| crate::type_key::heap_type_is_id(heap, id, t)) => {
                     match_core_pattern(it, heap, env, inner, v)
                 }
                 _ => Ok(None),
@@ -1242,9 +1242,9 @@ pub(super) fn match_core_pattern(
     }
 }
 
-/// `(pat-ctor PATH KEY N DOWNCAST (REPR...) P...)` against `v`.
+/// `(pat-ctor PATH TYPE N DOWNCAST (REPR...) P...)` against `v`.
 ///
-/// The `KEY` guard is what keeps two unrelated ADTs that happen to share a
+/// The `TYPE` guard is what keeps two unrelated ADTs that happen to share a
 /// shape apart once a heterogeneous `Sexpr` can hold either — a variant index
 /// and a field count are not an identity. It is the *instantiation*, not the
 /// path (`gen<i32>`, not `gen`), which is what stops a `gen<string>` from
@@ -1257,7 +1257,7 @@ fn match_ctor(
     heap: &mut Heap,
     env: Value,
     path: &crate::Path,
-    key: &str,
+    ty: Option<TypeId>,
     variant: usize,
     subs: &[Value],
     v: Value,
@@ -1265,7 +1265,7 @@ fn match_ctor(
     match v {
         Value::Boxed(id)
             if heap.is_enum(id)
-                && crate::type_key::heap_type_is_key(heap, id, key)
+                && ty.is_some_and(|t| crate::type_key::heap_type_is_id(heap, id, t))
                 && heap.enum_variant(id) == variant
                 && heap.enum_field_count(id) == subs.len() =>
         {
@@ -1287,7 +1287,7 @@ fn match_ctor(
         // field count and the sub-patterns can fail here.
         Value::Boxed(id)
             if heap.is_struct(id)
-                && crate::type_key::heap_type_is_key(heap, id, key)
+                && ty.is_some_and(|t| crate::type_key::heap_type_is_id(heap, id, t))
                 && variant == 0
                 && heap.struct_field_count(id) == subs.len() =>
         {
@@ -1363,10 +1363,10 @@ fn match_sexpr_core(
         // `#(..)`/`#nA(..)`: the collection box is the datum. Only the
         // `Option<Sexpr>`-element instantiation is one — a `Vector<int>` that
         // reached a `Sexpr` is a downcast's business, not this variant's.
-        (SEXPR_VECTOR, Value::Boxed(id)) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_VECTOR) => {
+        (SEXPR_VECTOR, Value::Boxed(id)) if crate::type_key::heap_type_is_id(heap, id, crate::TypeId::SEXPR_VECTOR) => {
             one(heap, v)
         }
-        (SEXPR_ARRAY, Value::Boxed(id)) if crate::type_key::heap_type_is_id(heap, id, crate::TypeKeyId::SEXPR_ARRAY) => {
+        (SEXPR_ARRAY, Value::Boxed(id)) if crate::type_key::heap_type_is_id(heap, id, crate::TypeId::SEXPR_ARRAY) => {
             one(heap, v)
         }
         // `#{..}`: the payload is a fresh vector of the elements, rooted
@@ -1640,8 +1640,7 @@ pub(super) fn int_field(heap: &Heap, form: Value, i: usize, what: &str) -> Resul
     }
 }
 
-/// A field holding a string — a `construct` node's runtime type key, the one
-/// place the core IR carries a name rather than a path.
+/// A field holding a string.
 pub(super) fn str_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
     match core::field(heap, form, i) {
         Some(Value::Str(id)) => Ok(heap.string(id).to_string()),
@@ -1655,6 +1654,22 @@ pub(super) fn type_key_field(heap: &Heap, form: Value, i: usize, what: &str) -> 
     let v = core::field(heap, form, i);
     v.and_then(|v| typelisp_mem::type_key_of_form(heap, v))
         .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) field {} is not a type: {:?}", what, i, v)))
+}
+
+/// A field holding a type ([`core::type_form`]), interned.
+pub(super) fn type_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<TypeId, EvalError> {
+    let v = core::field(heap, form, i);
+    v.and_then(|v| typelisp_mem::type_of_form(heap, v))
+        .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) field {} is not a type: {:?}", what, i, v)))
+}
+
+/// The type a pattern tests for, held in field `i`: `None` when no value in
+/// this heap has ever had it, so nothing can match.
+fn tested_type_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Option<TypeId>, EvalError> {
+    let v = core::field(heap, form, i);
+    v.ok_or(())
+        .and_then(|v| typelisp_mem::existing_type_of_form(heap, v))
+        .map_err(|()| EvalError::Internal(format!("eval: ({} ..) field {} is not a type: {:?}", what, i, v)))
 }
 
 /// A field holding a boolean.
@@ -3362,7 +3377,8 @@ mod tests {
         let Value::Path(recv) = crate::check::core::path_form(&mut h, &crate::Path::root("i32")) else {
             unreachable!("Heap::intern_path always returns Value::Path")
         };
-        let plus = h.alloc_builtin_fn(Some(recv), "+", "i32");
+        let i32 = crate::type_key::type_id(&h, &crate::Type::I32);
+        let plus = h.alloc_builtin_fn(Some(recv), "+", Some(i32));
         h.push_root(plus);
         let name = match core_symbol("f") {
             Value::Symbol(id) => id,

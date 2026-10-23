@@ -152,7 +152,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     if PRINTING.with(|p| p.borrow().contains(&v)) {
         return Ok(None);
     }
-    // Looked up by the value's type *name*, not its interned `TypeKeyId`:
+    // Looked up by the value's type *name*, not its interned `TypeId`:
     // `rt_print_object_method` fills this table from the executable's static
     // strings before `rt_heap_init` runs (see `build_main_wrapper`), so there
     // is no heap to intern against at registration time. The borrow of the

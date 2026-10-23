@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::symbols::SymRef;
+use crate::symbols::{NsId, SymRef};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
@@ -154,76 +154,82 @@ pub struct StrId(pub(crate) u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PathId(pub(crate) u32);
 
-/// A type's **runtime identity**, interned in the heap's type-key table.
+/// A type's **runtime identity**: the number the heap's type table gives a
+/// [`TypeShape`](crate::TypeShape).
 ///
 /// Every [`BoxedObj::Struct`]/[`BoxedObj::Enum`] carries one of these, and
 /// asking "are these two values the same type?" or "is this value a `point`?"
-/// is an integer comparison on it. The identity used to be the type's name
-/// spelled out as a `String` on every instance, which meant every such test
-/// was a string comparison and every allocation copied the name again; the
-/// spelling now lives once, in the table, and only printing and diagnostics
-/// go back to it (see [`super::heap::Heap::type_key_name`]).
+/// is an integer comparison on it. The table registers the type's shape —
+/// the definition it names and its type arguments' own ids — so equal shapes
+/// share one id, and the type's name is a display built from the shape (see
+/// [`super::heap::Heap::type_key_name`]).
 ///
-/// Interning is permanent — an id stays valid for the heap's lifetime and
-/// equal names always share one id, exactly like an interned [`SymRef`].
+/// Interning is permanent — an id stays valid for the heap's lifetime, exactly
+/// like an interned [`SymRef`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct TypeKeyId(pub(crate) u32);
+pub struct TypeId(pub(crate) u32);
 
-/// The type keys every heap has from birth, interned by `Heap::with_capacity` in this
-/// order so that their ids are compile-time constants (the `TypeKeyId`
-/// associated constants below).
+/// The types every heap has from birth, interned by `Heap::with_capacity` in
+/// this order so that their ids are compile-time constants (the `TypeId`
+/// associated constants below). Each row is a named type: the module it is
+/// defined in, its name there, and its type arguments, every one of which is
+/// an earlier row.
 ///
 /// These are the types the *runtime* itself builds without a checker in the
 /// loop: what `typelisp-rt`'s shims wrap results in, what the reader returns,
 /// and what the heap's own `HashTable`/`Scope` machinery allocates. A user
-/// type is interned on first use like any other name; only these need to be
+/// type is interned on first use like any other; only these need to be
 /// nameable from Rust without a heap in hand.
-pub const BUILTIN_TYPE_KEYS: &[&str] = &[
-    "option",
-    "result",
-    "vector",
-    "std::cons-cell",
-    "hashtable",
-    "scope",
-    "scope-frame",
-    "readerror",
-    "fileerror",
-    "parseinterror",
-    "parsefloaterror",
-    "std::universal-time",
-    "std::internal-time",
-    "std::heap-info",
-    "neterror",
-    "vector<option<sexpr>>",
-    "std::array<option<sexpr>>",
+pub const BUILTIN_TYPES: &[(NsId, &str, &[TypeId])] = &[
+    (NsId::ROOT, "option", &[]),
+    (NsId::ROOT, "result", &[]),
+    (NsId::ROOT, "vector", &[]),
+    (NsId::STD, "cons-cell", &[]),
+    (NsId::ROOT, "hashtable", &[]),
+    (NsId::ROOT, "scope", &[]),
+    (NsId::ROOT, "scope-frame", &[]),
+    (NsId::ROOT, "readerror", &[]),
+    (NsId::ROOT, "fileerror", &[]),
+    (NsId::ROOT, "parseinterror", &[]),
+    (NsId::ROOT, "parsefloaterror", &[]),
+    (NsId::STD, "universal-time", &[]),
+    (NsId::STD, "internal-time", &[]),
+    (NsId::STD, "heap-info", &[]),
+    (NsId::ROOT, "neterror", &[]),
+    (NsId::ROOT, "sexpr", &[]),
+    (NsId::ROOT, "option", &[TypeId::SEXPR]),
+    (NsId::ROOT, "vector", &[TypeId::OPTION_SEXPR]),
+    (NsId::STD, "array", &[TypeId::OPTION_SEXPR]),
 ];
 
-impl TypeKeyId {
-    pub const OPTION: TypeKeyId = TypeKeyId(0);
-    pub const RESULT: TypeKeyId = TypeKeyId(1);
-    pub const VECTOR: TypeKeyId = TypeKeyId(2);
-    pub const CONS_CELL: TypeKeyId = TypeKeyId(3);
-    pub const HASHTABLE: TypeKeyId = TypeKeyId(4);
-    pub const SCOPE: TypeKeyId = TypeKeyId(5);
-    pub const SCOPE_FRAME: TypeKeyId = TypeKeyId(6);
-    pub const READ_ERROR: TypeKeyId = TypeKeyId(7);
-    pub const FILE_ERROR: TypeKeyId = TypeKeyId(8);
-    pub const PARSE_INT_ERROR: TypeKeyId = TypeKeyId(9);
-    pub const PARSE_FLOAT_ERROR: TypeKeyId = TypeKeyId(10);
-    pub const UNIVERSAL_TIME: TypeKeyId = TypeKeyId(11);
-    pub const INTERNAL_TIME: TypeKeyId = TypeKeyId(12);
+impl TypeId {
+    pub const OPTION: TypeId = TypeId(0);
+    pub const RESULT: TypeId = TypeId(1);
+    pub const VECTOR: TypeId = TypeId(2);
+    pub const CONS_CELL: TypeId = TypeId(3);
+    pub const HASHTABLE: TypeId = TypeId(4);
+    pub const SCOPE: TypeId = TypeId(5);
+    pub const SCOPE_FRAME: TypeId = TypeId(6);
+    pub const READ_ERROR: TypeId = TypeId(7);
+    pub const FILE_ERROR: TypeId = TypeId(8);
+    pub const PARSE_INT_ERROR: TypeId = TypeId(9);
+    pub const PARSE_FLOAT_ERROR: TypeId = TypeId(10);
+    pub const UNIVERSAL_TIME: TypeId = TypeId(11);
+    pub const INTERNAL_TIME: TypeId = TypeId(12);
     /// `(heap-info)`'s result — `room`'s report, as a struct a program can
     /// also read the numbers out of (`crate::Heap`'s own statistics).
-    pub const HEAP_INFO: TypeKeyId = TypeKeyId(13);
-    /// `NetError` — what every `net-*` builtin fails with. Appended after
-    /// the rest so no existing id moved.
-    pub const NET_ERROR: TypeKeyId = TypeKeyId(14);
+    pub const HEAP_INFO: TypeId = TypeId(13);
+    /// `NetError` — what every `net-*` builtin fails with.
+    pub const NET_ERROR: TypeId = TypeId(14);
+    pub const SEXPR: TypeId = TypeId(15);
+    /// `Option<Sexpr>`, the element type of the two boxes below.
+    pub const OPTION_SEXPR: TypeId = TypeId(16);
     /// The box a `Sexpr`'s `vector` variant is: what `#(..)` reads as. The
     /// reader builds it without a checker, and compiled code tests for it,
     /// so the identity is fixed here rather than derived.
-    pub const SEXPR_VECTOR: TypeKeyId = TypeKeyId(15);
+    pub const SEXPR_VECTOR: TypeId = TypeId(17);
     /// The box a `Sexpr`'s `array` variant is: what `#nA(..)` reads as.
-    pub const SEXPR_ARRAY: TypeKeyId = TypeKeyId(16);
+    pub const SEXPR_ARRAY: TypeId = TypeId(18);
 
     pub fn as_u32(&self) -> u32 {
         self.0
@@ -367,7 +373,7 @@ pub(crate) enum BoxedObj {
     /// always kept in reduced form with a positive denominator (the crate
     /// normalizes on construction). Same heap-boxing rationale as `Bignum`.
     Ratio(BigRational),
-    Struct { type_key: TypeKeyId, payload: StructPayload },
+    Struct { type_key: TypeId, payload: StructPayload },
     /// An enum (sum-ADT) value: `Option<T>`/`Result<T,E>`/a user `defenum`
     /// instance — one variant's index plus that variant's field values. The
     /// third case of the unification mechanism (after `Float` and `Struct`),
@@ -385,7 +391,7 @@ pub(crate) enum BoxedObj {
     /// index), mirroring `Struct`'s own. Enum values are immutable — no
     /// setter exists at any layer — so sharing one box between bindings is
     /// unobservable.
-    Enum { type_key: TypeKeyId, variant: usize, fields: Vec<Value> },
+    Enum { type_key: TypeId, variant: usize, fields: Vec<Value> },
     /// A shared mutable variable slot — the heap-resident replacement for
     /// the interpreter's `Rc<RefCell<RtValue>>` binding cells, for bindings
     /// whose static type's runtime representation is a `Value` (`Sexpr`,
@@ -476,12 +482,13 @@ pub(crate) enum BoxedObj {
     /// shims all test `is_compiled_closure` and refuse anything else, and the
     /// interpreter refuses to marshal one across the boundary, so this box
     /// stays interpreter-side.
-    /// `ret_key` is the runtime identity of what this builtin *returns*, for
+    /// `ret_type` is the runtime identity of what this builtin *returns*, for
     /// the container constructors whose result is a box with no field to read
-    /// an instantiation off (`Vector::new`, `HashTable::keys`). Spelled by the
+    /// an instantiation off (`Vector::new`, `HashTable::keys`). Written by the
     /// checker at the reference site, since applying the value later is too
-    /// late to ask.
-    Builtin { recv_type: Option<PathId>, name: StrId, ret_key: StrId },
+    /// late to ask. `None` for a free built-in, whose results build no such
+    /// box.
+    Builtin { recv_type: Option<PathId>, name: StrId, ret_type: Option<TypeId> },
     /// A `random-state` (CL's `random-state`): the current seed of a mutable
     /// PRNG stream, advanced in place on every draw.
     ///

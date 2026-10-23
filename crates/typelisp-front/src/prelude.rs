@@ -4329,7 +4329,7 @@ user-visible capacity."
 ;; used to be exactly that division, so the split costs nothing and removes
 ;; one.
 ;;
-;; `Heap`'s builtin type-key table names both (`TypeKeyId::UNIVERSAL_TIME` /
+;; `Heap`'s builtin type-key table names both (`TypeId::UNIVERSAL_TIME` /
 ;; `INTERNAL_TIME`): `get-universal-time`, `get-internal-real-time` and
 ;; `file-modified-date` build them from Rust, below the checker.
 (pub defstruct universal-time

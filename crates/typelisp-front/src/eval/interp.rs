@@ -30,7 +30,8 @@ use typelisp_mem::RootScope;
 
 use crate::check::core;
 use crate::check::repr::Repr;
-use crate::{wk, BoxId, Heap, MacroExpander, MacroLambda, Path, SymRef, Value};
+use crate::{wk, BoxId, Heap, MacroExpander, MacroLambda, Path, SymRef, TypeId, Value};
+use typelisp_mem::{spec, NsId, TypeSpec};
 
 use super::scope;
 pub use super::value::EvalError;
@@ -2535,21 +2536,21 @@ impl Interp {
         match self.expand_step(heap, form) {
             Ok(Some(v)) => {
                 heap.push_root(v);
-                let some = option_value(heap, MACROEXPAND_OPTION_KEY, Some(v));
+                let some = heap.alloc_option(TypeId::OPTION_SEXPR, Some(v));
                 heap.pop_root();
                 heap.push_root(some);
-                let out = result_ok(heap, MACROEXPAND_RESULT_KEY, some);
+                let out = result_ok(heap, &MACROEXPAND_RESULT_TYPE, some);
                 heap.pop_root();
                 Ok(out)
             }
             Ok(None) => {
-                let none = option_value(heap, MACROEXPAND_OPTION_KEY, None);
+                let none = heap.alloc_option(TypeId::OPTION_SEXPR, None);
                 heap.push_root(none);
-                let out = result_ok(heap, MACROEXPAND_RESULT_KEY, none);
+                let out = result_ok(heap, &MACROEXPAND_RESULT_TYPE, none);
                 heap.pop_root();
                 Ok(out)
             }
-            Err(msg) => Ok(result_err(heap, MACROEXPAND_RESULT_KEY, EVAL_ERROR, msg)),
+            Err(msg) => Ok(result_err(heap, &MACROEXPAND_RESULT_TYPE, EVAL_ERROR, msg)),
         }
     }
 
@@ -2569,13 +2570,13 @@ impl Interp {
                 Ok(None) => break,
                 Err(msg) => {
                     heap.truncate_roots(mark);
-                    return Ok(result_err(heap, MACROEXPAND_RESULT_KEY, EVAL_ERROR, msg));
+                    return Ok(result_err(heap, &MACROEXPAND_RESULT_TYPE, EVAL_ERROR, msg));
                 }
             }
         }
         heap.truncate_roots(mark);
         heap.push_root(cur);
-        let out = result_ok(heap, MACROEXPAND_RESULT_KEY, cur);
+        let out = result_ok(heap, &MACROEXPAND_RESULT_TYPE, cur);
         heap.pop_root();
         Ok(out)
     }
@@ -2693,7 +2694,7 @@ impl Interp {
     pub fn eval_form(&self, heap: &mut Heap, arg: &Value) -> Result<Value, EvalError> {
         let checker = match &self.checker {
             Some(c) => Rc::clone(c),
-            None => return Ok(result_err(heap, EVAL_RESULT_KEY, EVAL_ERROR, "eval: unavailable in this context (no checker handle)".to_string())),
+            None => return Ok(result_err(heap, &EVAL_RESULT_TYPE, EVAL_ERROR, "eval: unavailable in this context (no checker handle)".to_string())),
         };
         let form = *arg;
         // Root the form across type-checking (which allocates), then pop back
@@ -2707,7 +2708,7 @@ impl Interp {
         }
         let tl = match checked {
             Ok(tl) => tl,
-            Err(e) => return Ok(result_err(heap, EVAL_RESULT_KEY, EVAL_ERROR, e.to_string())),
+            Err(e) => return Ok(result_err(heap, &EVAL_RESULT_TYPE, EVAL_ERROR, e.to_string())),
         };
         // Decide the CL-style return before `exec` consumes `tl`: a definition
         // returns its own name symbol; an expression returns its value below.
@@ -2733,7 +2734,7 @@ impl Interp {
                 None => Value::Empty,
             },
         };
-        Ok(result_ok(heap, EVAL_RESULT_KEY, result))
+        Ok(result_ok(heap, &EVAL_RESULT_TYPE, result))
     }
 }
 
@@ -3121,12 +3122,12 @@ fn int_to_char(args: &[Value]) -> Result<Value, EvalError> {
 /// `try-int->char` (`registry::int_assoc`): the `Option`-returning
 /// counterpart of [`int_to_char`], for `Checker::check_as`'s `try-as` —
 /// same Unicode-scalar-value validity check, `None` instead of a panic.
-fn try_int_to_char(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+fn try_int_to_char(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     match args.first() {
         Some(Value::Int(n)) => {
             let in_u32_range = *n >= 0 && *n <= i64::from(u32::MAX);
             let c = in_u32_range.then_some(*n as u32).and_then(char::from_u32);
-            Ok(option_value(heap, ret_key, c.map(Value::Char)))
+            Ok(heap.alloc_option(ret_type, c.map(Value::Char)))
         }
         other => Err(EvalError::Internal(format!("try-int->char: expected an integer, got {:?}", other))),
     }
@@ -3198,11 +3199,11 @@ fn float_to_width(heap: &mut Heap, args: &[Value], single: bool) -> Result<Value
 /// question — `none` when rounding to binary32 would lose something. NaN
 /// converts (every NaN is a NaN in either width), which is why the test is
 /// written as a round trip rather than an equality.
-fn try_float_to_f32(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+fn try_float_to_f32(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     let v = expect_float(heap, &args[0])?;
     let exact = f64::from(v as f32).to_bits() == v.to_bits();
     let narrowed = if exact { Some(heap.alloc_f32(v as f32)) } else { None };
-    Ok(option_value(heap, ret_key, narrowed))
+    Ok(heap.alloc_option(ret_type, narrowed))
 }
 
 /// `int->i8`/`int->u32`/... (`registry::int_assoc`): a cast between two
@@ -3214,10 +3215,10 @@ fn int_to_width(args: &[Value], width: u32, signed: bool) -> Result<Value, EvalE
 /// `try-int->i8`/... (`registry::int_assoc`): [`int_to_width`] asked as a
 /// question — `none` when the value does not fit the target width, which is
 /// exactly when truncating would change it.
-fn try_int_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, ret_key: &str) -> Result<Value, EvalError> {
+fn try_int_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, ret_type: TypeId) -> Result<Value, EvalError> {
     let n = rt_i64(&args[0])?;
     let fits = crate::types::normalize_int(n, width, signed) == n;
-    Ok(option_value(heap, ret_key, fits.then_some(Value::Int(n))))
+    Ok(heap.alloc_option(ret_type, fits.then_some(Value::Int(n))))
 }
 
 /// The target width and signedness a `int->W`/`try-int->W` method name
@@ -3451,7 +3452,7 @@ fn int_low_word(a: IntArg) -> i64 {
 /// target (`int_to_width`'s meaning), and the question is answered exactly —
 /// a bignum fits a 64-bit C word when it is in that word's range, and never
 /// fits anything narrower.
-fn integer_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, try_variant: bool, ret_key: &str) -> Result<Value, EvalError> {
+fn integer_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, try_variant: bool, ret_type: TypeId) -> Result<Value, EvalError> {
     let a = expect_int(heap, &args[0])?;
     if !try_variant {
         return Ok(Value::Int(crate::types::normalize_int(int_low_word(a), width, signed)));
@@ -3461,7 +3462,7 @@ fn integer_to_width(heap: &mut Heap, args: &[Value], width: u32, signed: bool, t
         IntArg::Big(n) => width == 64 && if signed { n.to_i64().is_some() } else { n.to_u64().is_some() },
     };
     let word = int_low_word(a);
-    Ok(option_value(heap, ret_key, fits.then_some(Value::Int(word))))
+    Ok(heap.alloc_option(ret_type, fits.then_some(Value::Int(word))))
 }
 
 /// `int->int` on a fixed-width receiver (`(as int x)`): exact widening.
@@ -3476,7 +3477,7 @@ fn width_to_int(heap: &mut Heap, args: &[Value], width: u32, signed: bool) -> Re
 
 /// `int->float`/`int->ratio`/`int->char`/`try-int->char` on an `int`
 /// receiver.
-fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     let a = expect_int(heap, &args[0])?;
     match method {
         "int->float" => {
@@ -3495,7 +3496,7 @@ fn integer_conversion(heap: &mut Heap, method: &str, args: &[Value], ret_key: &s
             if method == "int->char" {
                 c.map(Value::Char).ok_or_else(|| EvalError::Panic(format!("int->char: {} is not a valid Unicode scalar value", a.into_big())))
             } else {
-                Ok(option_value(heap, ret_key, c.map(Value::Char)))
+                Ok(heap.alloc_option(ret_type, c.map(Value::Char)))
             }
         }
         "int->int" => Ok(args[0]),
@@ -3573,7 +3574,7 @@ fn eval_rational_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<
 }
 
 /// `rational`'s one-argument conversions, and `ratio->rational`.
-fn rational_unary(heap: &mut Heap, name: &str, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+fn rational_unary(heap: &mut Heap, name: &str, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     use typelisp_rt::rational::{rational_of, rational_result};
     let r = args
         .first()
@@ -3584,7 +3585,7 @@ fn rational_unary(heap: &mut Heap, name: &str, args: &[Value], ret_key: &str) ->
         "rational->int" => heap.int_from_bigint(r.to_integer()),
         "try-rational->int" => {
             let inner = if r.is_integer() { Some(heap.int_from_bigint(r.to_integer())) } else { None };
-            option_value(heap, ret_key, inner)
+            heap.alloc_option(ret_type, inner)
         }
         "rational->ratio" => heap.alloc_ratio(r),
         "rational->float" => heap.alloc_f64(r.to_f64().ok_or_else(|| EvalError::Internal("rational->float: conversion failed".into()))?),
@@ -3846,15 +3847,15 @@ pub(crate) fn eval_builtin_method(
     type_name: &Path,
     method: &str,
     args: &[Value],
-    ret_key: &str,
+    ret_type: TypeId,
 ) -> Option<Result<Value, EvalError>> {
     if *type_name == Path::root("hashtable") {
         return match method {
-            // `ret_key` is the *result's* runtime identity, spelled by the
+            // `ret_type` is the *result's* runtime identity, spelled by the
             // checker (`Checker::assoc_form`): these builders have no field to
             // read an instantiation off, and `Vector<i32>` and `Vector<i64>`
             // share a representation, so nothing here could derive it.
-            "new" => Some(Ok(crate::type_key::alloc_hashtable_keyed(heap, ret_key))),
+            "new" => Some(Ok(crate::type_key::alloc_hashtable_of(heap, ret_type))),
             // `get`/`set`/`remove` are prelude methods, written on these
             // five — see `registry::hashtable_def`.
             "bucket-count" => Some(hashtable_bucket_count(heap, args)),
@@ -3864,9 +3865,9 @@ pub(crate) fn eval_builtin_method(
             "bucket-delete" => Some(hashtable_bucket_delete(heap, args)),
             "count" => Some(hashtable_count(heap, args)),
             "clear" => Some(hashtable_clear(heap, args)),
-            "keys" => Some(hashtable_keys(heap, args, ret_key)),
-            "values" => Some(hashtable_values(heap, args, ret_key)),
-            "entries" => Some(hashtable_entries(heap, args, ret_key)),
+            "keys" => Some(hashtable_keys(heap, args, ret_type)),
+            "values" => Some(hashtable_values(heap, args, ret_type)),
+            "entries" => Some(hashtable_entries(heap, args, ret_type)),
             _ => None,
         };
     }
@@ -3883,12 +3884,12 @@ pub(crate) fn eval_builtin_method(
     if *type_name == Path::root("vector") {
         return match method {
             // type-identity-ok: the built-in `Vector`, a root name spelled in full
-            "new" => Some(Ok(crate::type_key::alloc_struct_keyed(heap, ret_key, Vec::new()))),
+            "new" => Some(Ok(crate::type_key::alloc_struct_of(heap, ret_type, Vec::new()))),
             "push" => Some(vector_push(heap, args)),
             "get" => Some(vector_get(heap, args)),
             "set" => Some(vector_set(heap, args)),
             "len" => Some(vector_len(heap, args)),
-            "pop" => Some(vector_pop(heap, args, ret_key)),
+            "pop" => Some(vector_pop(heap, args, ret_type)),
             _ => None,
         };
     }
@@ -3903,7 +3904,7 @@ pub(crate) fn eval_builtin_method(
             "clone-frames" => Some(scope_clone_frames_heap(heap, args)),
             "push-frame" => Some(scope_push_frame_heap(heap, args)),
             "pop-frame" => Some(scope_pop_frame_heap(heap, args)),
-            "get" => Some(scope_get_heap(heap, args, ret_key)),
+            "get" => Some(scope_get_heap(heap, args, ret_type)),
             "set" => Some(scope_set_heap(heap, args)),
             _ => None,
         };
@@ -3962,7 +3963,7 @@ pub(crate) fn eval_builtin_method(
             "eq" | "eql" | "equal" | "equalp" => eval_int_builtin("=", args, width, signed),
             "int->float" => Some(int_to_float(heap, args)),
             "int->char" => Some(int_to_char(args)),
-            "try-int->char" => Some(try_int_to_char(heap, args, ret_key)),
+            "try-int->char" => Some(try_int_to_char(heap, args, ret_type)),
             "int->int" => Some(width_to_int(heap, args, width, signed)),
             "int->ratio" => Some(int_to_ratio(heap, args)),
             _ if width_cast_target(method, "int->").is_some() => {
@@ -3971,7 +3972,7 @@ pub(crate) fn eval_builtin_method(
             }
             _ if width_cast_target(method, "try-int->").is_some() => {
                 let (w, sg) = width_cast_target(method, "try-int->").expect("just matched");
-                Some(try_int_to_width(heap, args, w, sg, ret_key))
+                Some(try_int_to_width(heap, args, w, sg, ret_type))
             }
             _ => None,
         };
@@ -3987,11 +3988,11 @@ pub(crate) fn eval_builtin_method(
             "eq" | "eql" | "equal" | "equalp" => eval_float_builtin(heap, "=", args, single),
             "float->f32" => Some(float_to_width(heap, args, true)),
             "float->f64" => Some(float_to_width(heap, args, false)),
-            "try-float->f32" => Some(try_float_to_f32(heap, args, ret_key)),
+            "try-float->f32" => Some(try_float_to_f32(heap, args, ret_type)),
             // Always `some`: widening is exact.
             "try-float->f64" => Some(float_to_width(heap, args, false).map(|v| {
                 let some = Some(v);
-                option_value(heap, ret_key, some)
+                heap.alloc_option(ret_type, some)
             })),
             "expt" => Some(float_expt(heap, args, single)),
             "sqrt" => Some(float_unary(heap, args, f64::sqrt, single)),
@@ -4027,15 +4028,15 @@ pub(crate) fn eval_builtin_method(
             "lognot" | "logcount" | "integer-length" => Some(integer_unary(heap, args, method)),
             "eq" | "eql" | "equal" | "equalp" => eval_integer_builtin(heap, "=", args),
             "int->float" | "int->ratio" | "int->char" | "try-int->char" | "int->int" => {
-                Some(integer_conversion(heap, method, args, ret_key))
+                Some(integer_conversion(heap, method, args, ret_type))
             }
             _ if width_cast_target(method, "int->").is_some() => {
                 let (w, sg) = width_cast_target(method, "int->").expect("just matched");
-                Some(integer_to_width(heap, args, w, sg, false, ret_key))
+                Some(integer_to_width(heap, args, w, sg, false, ret_type))
             }
             _ if width_cast_target(method, "try-int->").is_some() => {
                 let (w, sg) = width_cast_target(method, "try-int->").expect("just matched");
-                Some(integer_to_width(heap, args, w, sg, true, ret_key))
+                Some(integer_to_width(heap, args, w, sg, true, ret_type))
             }
             _ => None,
         };
@@ -4050,7 +4051,7 @@ pub(crate) fn eval_builtin_method(
             "ratio->float" => Some(ratio_to_float(heap, args)),
             "numerator" => Some(ratio_numerator(heap, args)),
             "denominator" => Some(ratio_denominator(heap, args)),
-            "ratio->rational" => Some(rational_unary(heap, method, args, ret_key)),
+            "ratio->rational" => Some(rational_unary(heap, method, args, ret_type)),
             _ => None,
         };
     }
@@ -4061,7 +4062,7 @@ pub(crate) fn eval_builtin_method(
             }
             "eq" | "eql" | "equal" | "equalp" => eval_rational_builtin(heap, "=", args),
             "rational->int" | "try-rational->int" | "rational->ratio" | "rational->float" | "numerator"
-            | "denominator" => Some(rational_unary(heap, method, args, ret_key)),
+            | "denominator" => Some(rational_unary(heap, method, args, ret_type)),
             _ => None,
         };
     }
@@ -4343,32 +4344,30 @@ impl Interp {
     }
 }
 
-/// `macroexpand`/`macroexpand-1`'s result and its inner `Option`, as runtime
-/// type keys. Both have a fixed signature, so unlike a container method's
-/// there is nothing for a call site to say — but the *spelling* still has to
-/// be the one `ConcreteNames::type_key` produces, which
-/// `tests/type_identity_guard_test.rs` checks against the registry.
 /// The prelude function the reader's macro-character hook goes through — see
 /// [`Interp::call_reader_macro_fn`]. It lives in [`crate::INTERNAL_MODULE`].
 const READER_MACRO_GLUE: &str = "call-reader-macro";
 
-const MACROEXPAND_RESULT_KEY: &str = "result<option<sexpr>,evalerror>";
-const MACROEXPAND_OPTION_KEY: &str = "option<sexpr>";
+/// `macroexpand`/`macroexpand-1`'s result type. It has a fixed signature, so
+/// unlike a container method's there is nothing for a call site to say — but
+/// the type still has to be the one the checker gives it, which
+/// `tests/type_identity_guard_test.rs` checks against the registry. Its inner
+/// `Option<Sexpr>` is [`TypeId::OPTION_SEXPR`].
+pub const MACROEXPAND_RESULT_TYPE: TypeSpec = TypeSpec::Named(
+    NsId::ROOT,
+    "result",
+    &[TypeSpec::Named(NsId::ROOT, "option", &[spec::SEXPR]), TypeSpec::Named(NsId::ROOT, "evalerror", &[])],
+);
 
-/// `eval`'s result key — the same shape as `macroexpand`'s, and the same
-/// fixed signature (`registry`'s `eval`: `Result<Option<Sexpr>, EvalError>`).
-const EVAL_RESULT_KEY: &str = "result<option<sexpr>,evalerror>";
+/// `eval`'s result type — the same as `macroexpand`'s, and the same fixed
+/// signature (`registry`'s `eval`: `Result<Option<Sexpr>, EvalError>`).
+pub const EVAL_RESULT_TYPE: TypeSpec = MACROEXPAND_RESULT_TYPE;
 
-/// `Some(v)`/`None` under the instantiation `key` spells — the niche when
-/// the payload allows one, else a box in `option_def`'s variant order
-/// (`some` = 0, `none` = 1). `Heap::alloc_option` decides which.
-fn option_value(heap: &mut Heap, key: &str, v: Option<Value>) -> Value {
-    heap.alloc_option(key, v)
-}
-
-/// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
-fn result_ok(heap: &mut Heap, key: &str, v: Value) -> Value {
-    crate::type_key::alloc_enum_keyed(heap, key, 0, vec![v])
+/// `Ok(v)` of the result type `ty`, matching `result_def`'s variant order
+/// (`ok` = 0, `err` = 1).
+fn result_ok(heap: &mut Heap, ty: &TypeSpec, v: Value) -> Value {
+    let ty = heap.intern_spec(ty);
+    crate::type_key::alloc_enum_of(heap, ty, 0, vec![v])
 }
 
 
@@ -4377,18 +4376,19 @@ fn result_ok(heap: &mut Heap, key: &str, v: Value) -> Value {
 /// `parsefloaterror`, `readerror`, `evalerror`), whose single variant carries
 /// exactly that string, before wrapping *that* in `Result`'s `err` variant.
 /// `err_type` must name one of those four — its variant index is 0, the only
-/// one each has. `result_key` is the *whole* result type's key
+/// one each has. `result` is the *whole* result type
 /// (`result<option<sexpr>,evalerror>`), which is what the caller's patterns
 /// test against.
-fn result_err(heap: &mut Heap, result_key: &str, err_type: &str, msg: String) -> Value {
+fn result_err(heap: &mut Heap, result: &TypeSpec, err_type: &str, msg: String) -> Value {
     let msg_val = str_rt(heap, msg);
     let err_val = alloc_typed_enum(heap, &Path::root(err_type), 0, vec![msg_val]);
-    // The `Result`'s own key, not the bare path: a value's identity carries
+    // The `Result`'s own type, not the bare path: a value's identity carries
     // its instantiation, and `result` matches no `result<option<sexpr>,
     // evalerror>` pattern. `err_type` needs no such treatment — a concrete
     // error type has no type arguments — but the wrapper does, which is why
-    // this takes two names rather than one.
-    crate::type_key::alloc_enum_keyed(heap, result_key, 1, vec![err_val])
+    // this takes two rather than one.
+    let result = heap.intern_spec(result);
+    crate::type_key::alloc_enum_of(heap, result, 1, vec![err_val])
 }
 
 /// The bucket primitives, the interpreted half of `rt_hashtable_bucket_*`.
@@ -4447,16 +4447,16 @@ fn hashtable_clear(heap: &mut Heap, args: &[Value]) -> Result<Value, EvalError> 
     Ok(Value::Empty)
 }
 
-fn hashtable_keys(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+fn hashtable_keys(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let fields = heap.hashtable_pairs(id).into_iter().map(|(k, _)| k).collect();
-    Ok(crate::type_key::alloc_struct_keyed(heap, ret_key, fields))
+    Ok(crate::type_key::alloc_struct_of(heap, ret_type, fields))
 }
 
-fn hashtable_values(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+fn hashtable_values(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let fields = heap.hashtable_pairs(id).into_iter().map(|(_, v)| v).collect();
-    Ok(crate::type_key::alloc_struct_keyed(heap, ret_key, fields))
+    Ok(crate::type_key::alloc_struct_of(heap, ret_type, fields))
 }
 
 /// Each entry becomes a `cons-cell<K,V>` (`prelude.rs`'s generic `car`/`cdr`
@@ -4466,21 +4466,25 @@ fn hashtable_values(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Va
 /// something only the checker/prelude can construct) wrapping the pair's
 /// already-encoded key/value `mem::Value`s straight from
 /// `Heap::hashtable_pairs`.
-fn hashtable_entries(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+fn hashtable_entries(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     // Two identities here, and only the outer one was handed in: the result is
-    // a `Vector<cons-cell<K,V>>`, so each cell's own key is one level inside
-    // it. `ConcreteNames::single_type_arg` is the inverse of the spelling,
-    // for exactly this.
-    let cell_key = typelisp_mem::ConcreteNames::single_type_arg(ret_key)
-        .unwrap_or_else(|| panic!("hashtable::entries: `{}` is not a one-argument container key", ret_key))
-        .to_string();
-    let fields = heap
-        .hashtable_pairs(id)
-        .into_iter()
-        .map(|(k, v)| crate::type_key::alloc_struct_keyed(heap, &cell_key, vec![k, v]))
-        .collect();
-    Ok(crate::type_key::alloc_struct_keyed(heap, ret_key, fields))
+    // a `Vector<cons-cell<K,V>>`, so each cell's own type is the vector's one
+    // argument.
+    let cell_type = match heap.type_shape(ret_type) {
+        typelisp_mem::TypeShape::Named(_, _, args) if args.len() == 1 => args[0],
+        _ => panic!("hashtable::entries: `{}` is not a one-argument container type", &*heap.type_key_name(ret_type)),
+    };
+    // Each cell is a new box that nothing points at until the vector is built,
+    // so each is rooted as it is made: building the next one can collect.
+    let mut s = RootScope::new(heap);
+    let mut fields = Vec::new();
+    for (k, v) in s.hashtable_pairs(id) {
+        let cell = crate::type_key::alloc_struct_of(&mut s, cell_type, vec![k, v]);
+        s.push_root(cell);
+        fields.push(cell);
+    }
+    Ok(crate::type_key::alloc_struct_of(&mut s, ret_type, fields))
 }
 
 /// The `BoxId` behind a `defstruct`/`Vector<T>`/`cons-cell<K,V>` instance —
@@ -4555,10 +4559,10 @@ fn vector_len(heap: &Heap, args: &[Value]) -> Result<Value, EvalError> {
 /// "might not be there" result. `ret_ty` is the call site's checked
 /// `Option<T>` return type; [`option_payload_ty`] extracts `T` for
 /// [`decode_field_typed`]'s type-directed decode of the popped element.
-fn vector_pop(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+fn vector_pop(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     let popped = heap.struct_pop_field(id);
-    Ok(option_value(heap, ret_key, popped))
+    Ok(heap.alloc_option(ret_type, popped))
 }
 
 
@@ -4748,10 +4752,10 @@ pub fn scope_pop_frame_heap(heap: &mut Heap, args: &[Value]) -> Result<Value, Ev
     Ok(Value::Empty)
 }
 
-pub(crate) fn scope_get_heap(heap: &mut Heap, args: &[Value], ret_key: &str) -> Result<Value, EvalError> {
+pub(crate) fn scope_get_heap(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value, EvalError> {
     let id = expect_struct_box(&args[0])?;
     // Scoped so the read-locked guard `expect_str` returns is dropped before
-    // `option_value` needs `heap` mutably below — unlike a plain `&str`,
+    // `alloc_option` needs `heap` mutably below — unlike a plain `&str`,
     // this guard's `Drop` impl keeps NLL from ending its borrow at its last
     // use, so it has to be ended explicitly (`typelisp-mem`'s `Heap::string`
     // doc comment, `docs/dev/os-threads-design.md` §3).
@@ -4759,7 +4763,7 @@ pub(crate) fn scope_get_heap(heap: &mut Heap, args: &[Value], ret_key: &str) -> 
         let name = expect_str(heap, &args[1])?;
         heap.scope_get(id, &name)
     };
-    Ok(option_value(heap, ret_key, found))
+    Ok(heap.alloc_option(ret_type, found))
 }
 
 /// `Heap::scope_set` panics on an empty frame stack (the mem layer's

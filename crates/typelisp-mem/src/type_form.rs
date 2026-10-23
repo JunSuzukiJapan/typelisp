@@ -21,8 +21,108 @@
 //! type two ways.
 
 use crate::names::ConcreteNames;
-use crate::symbols::{intern_exact, wk, NsId};
-use crate::{Heap, Value};
+use crate::symbols::{child_ns_named, intern_exact, wk, NsId, SymRef};
+use crate::{Heap, TypeId, TypeShape, Value};
+
+/// The interned identity of the type `form` writes, minting it if this heap
+/// has not seen the type before — or `None` when `form` is not a type form
+/// a value can have (a `type-param` or `type-var` names no type by itself).
+pub fn type_of_form(heap: &Heap, form: Value) -> Option<TypeId> {
+    match read_type(heap, form, true) {
+        Read::Found(id) => Some(id),
+        Read::Unseen => unreachable!("a minting read always finds the type"),
+        Read::NotAType => None,
+    }
+}
+
+/// [`type_of_form`] without the minting: `Ok(None)` when no value in this
+/// heap has ever had the type, which answers "is this value one of those?"
+/// on its own. `Err(())` when `form` is not a type form.
+pub fn existing_type_of_form(heap: &Heap, form: Value) -> Result<Option<TypeId>, ()> {
+    match read_type(heap, form, false) {
+        Read::Found(id) => Ok(Some(id)),
+        Read::Unseen => Ok(None),
+        Read::NotAType => Err(()),
+    }
+}
+
+enum Read {
+    Found(TypeId),
+    Unseen,
+    NotAType,
+}
+
+fn read_type(heap: &Heap, form: Value, mint: bool) -> Read {
+    let Some(shape) = read_shape(heap, form, mint) else { return Read::NotAType };
+    let Some(shape) = shape else { return Read::Unseen };
+    if mint {
+        Read::Found(heap.intern_type(shape))
+    } else {
+        heap.find_type(&shape).map_or(Read::Unseen, Read::Found)
+    }
+}
+
+/// The shape `form` writes: `None` when it is not a type form, `Some(None)`
+/// when one of its arguments was never interned and `mint` is off.
+fn read_shape(heap: &Heap, form: Value, mint: bool) -> Option<Option<TypeShape>> {
+    let Value::Cons(_) = form else { return None };
+    let Value::Symbol(tag) = heap.car(form).ok()? else { return None };
+    let fields = heap.list_to_vec(heap.cdr(form).ok()?).ok()?;
+    let arg = |f: Value| match read_type(heap, f, mint) {
+        Read::Found(id) => Some(Some(id)),
+        Read::Unseen => Some(None),
+        Read::NotAType => None,
+    };
+    let args = |forms: &[Value]| -> Option<Option<Vec<TypeId>>> { forms.iter().map(|f| arg(*f)).collect::<Option<Vec<_>>>().map(|v| v.into_iter().collect()) };
+    let shape = match (tag.well_known(), fields.as_slice()) {
+        (wk::TYPE_NAMED, [path, rest @ ..]) => {
+            let (ns, sym) = definition(heap, *path)?;
+            args(rest)?.map(|a| TypeShape::Named(ns, sym, a))
+        }
+        (wk::TYPE_DYN, [path, pins @ ..]) => {
+            let (ns, sym) = definition(heap, *path)?;
+            args(pins)?.map(|a| TypeShape::Dyn(ns, sym, a))
+        }
+        (wk::TYPE_FN, [params, rest, ret]) => {
+            let params = args(&heap.list_to_vec(*params).ok()?)?;
+            let rest = match rest {
+                Value::Empty => Some(None),
+                r => arg(*r)?.map(Some),
+            };
+            let ret = arg(*ret)?;
+            match (params, rest, ret) {
+                (Some(p), Some(r), Some(t)) => Some(TypeShape::Fn(p, r, t)),
+                _ => None,
+            }
+        }
+        (wk::TYPE_PTR, [pointee]) => arg(*pointee)?.map(TypeShape::Ptr),
+        (wk::TYPE_CSTRUCT, [path]) => {
+            let (ns, sym) = definition(heap, *path)?;
+            Some(TypeShape::CStruct(ns, sym))
+        }
+        (wk::TYPE_UNIT, []) => Some(TypeShape::Unit),
+        (wk::TYPE_NEVER, []) => Some(TypeShape::Never),
+        _ => return None,
+    };
+    Some(shape)
+}
+
+/// The definition a type form's path names: the module, walked down the
+/// tree from the root one segment at a time, and the name's symbol there.
+fn definition(heap: &Heap, path: Value) -> Option<(NsId, SymRef)> {
+    let Value::Path(id) = path else { return None };
+    let segments = heap.path_segments(id);
+    let (root, segs) = segments.split_first()?;
+    let (name, modules) = segs.split_last()?;
+    if *root != intern_exact(NsId::ROOT, "") {
+        return None;
+    }
+    let mut ns = NsId::ROOT;
+    for m in modules {
+        ns = child_ns_named(ns, *m)?;
+    }
+    Some((ns, *name))
+}
 
 /// The runtime-identity spelling of the type `form` writes — the key
 /// [`ConcreteNames`] spells for the same type — or `None` when `form` is not

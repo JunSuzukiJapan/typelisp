@@ -19,6 +19,7 @@ pub mod symbols;
 pub mod tagged;
 pub mod tuple;
 pub mod type_form;
+pub mod type_shape;
 pub mod value;
 
 pub use errors::{Error, Loc, LIBRARY_FILE};
@@ -28,10 +29,11 @@ pub use names::{ConcreteNames, TypeKey};
 pub use stack::grow_stack;
 pub use option::{is_niched_option_key, option_payload_niches, option_prints_wrapped};
 pub use symbols::{wk, NsId, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};
-pub use type_form::type_key_of_form;
-pub use tuple::{is_tuple_base_key, sexpr_tuple_arity, sexpr_tuple_key, TUPLE_MAX_ARITY};
+pub use type_form::{existing_type_of_form, type_key_of_form, type_of_form};
+pub use type_shape::{spec, TypeShape, TypeSpec};
+pub use tuple::{is_tuple_base_key, sexpr_tuple_arity, sexpr_tuple_key, sexpr_tuple_type, TUPLE_MAX_ARITY};
 pub use tagged::{decode, encode, fixnum_fits, references_heap, try_encode, FIXNUM_MAX, FIXNUM_MIN, NIL_WORD};
-pub use value::{BoxId, ConsRef, FloatBox, NarrowInt, PathId, StrId, TypeKeyId, Value, BUILTIN_TYPE_KEYS};
+pub use value::{BoxId, ConsRef, FloatBox, NarrowInt, PathId, StrId, TypeId, Value, BUILTIN_TYPES};
 
 /// `v` cut back to `width` bits and re-extended into the 64-bit word both
 /// engines carry integers in: sign-extended when `signed`, zero-extended
