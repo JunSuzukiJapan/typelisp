@@ -365,7 +365,7 @@ fn generic_defstruct_constructs_an_instance() {
             // it is, which is what lets a generic type's `print-object` be
             // found and what stops `(the pair<int,int> x)` from accepting this
             // one (docs/dev/type-identity-instantiation-plan.md).
-            assert_eq!(&*h.struct_type_name(id), "pair<int,bool>");
+            assert_eq!(&*h.struct_type_name(id), "pair<std::int,std::bool>");
             assert_eq!(h.struct_field(id, 0), Value::Int(1));
             assert_eq!(h.struct_field(id, 1), Value::Bool(true));
         }

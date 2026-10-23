@@ -24,26 +24,26 @@ use typelisp_mem::{spec, Heap, NsId, TypeId, TypeSpec, Value};
 // pre-interned table — same standing exception (and same guard test) as
 // [`crate::stream_builtin`]: this crate has no `Path` to derive a name from.
 
-const FILE_ERROR: TypeSpec = TypeSpec::Named(NsId::ROOT, "fileerror", &[]);
-const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(NsId::ROOT, "parsefloaterror", &[]);
+const FILE_ERROR: TypeSpec = TypeSpec::Named(NsId::STD, "fileerror", &[]);
+const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(NsId::STD, "parsefloaterror", &[]);
 
 /// The runtime type each of these builtins' results carries — the same
 /// table [`crate::stream_builtin::RESULT_TYPES`] keeps, for the same reason
 /// (a type's identity includes its instantiation, and this crate has no
 /// checker to ask), checked against the registry by the same guard test.
 pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
-    ("parse-float", TypeSpec::Named(NsId::ROOT, "result", &[spec::F64, PARSE_FLOAT_ERROR])),
-    ("command-line-args", TypeSpec::Named(NsId::ROOT, "vector", &[spec::STRING])),
-    ("getenv", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
-    ("home-directory", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
-    ("machine-instance", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
-    ("machine-version", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
-    ("software-version", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
-    ("timezone-offset-seconds", TypeSpec::Named(NsId::ROOT, "option", &[spec::INT])),
-    ("timezone-daylight-p", TypeSpec::Named(NsId::ROOT, "option", &[spec::BOOL])),
-    ("dribble-start", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
-    ("dribble-stop", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
-    ("ed-open", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
+    ("parse-float", TypeSpec::Named(NsId::STD, "result", &[spec::F64, PARSE_FLOAT_ERROR])),
+    ("command-line-args", TypeSpec::Named(NsId::STD, "vector", &[spec::STRING])),
+    ("getenv", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
+    ("home-directory", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
+    ("machine-instance", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
+    ("machine-version", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
+    ("software-version", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
+    ("timezone-offset-seconds", TypeSpec::Named(NsId::STD, "option", &[spec::INT])),
+    ("timezone-daylight-p", TypeSpec::Named(NsId::STD, "option", &[spec::BOOL])),
+    ("dribble-start", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("dribble-stop", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("ed-open", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
 ];
 
 fn type_of(name: &str) -> TypeId {

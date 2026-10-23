@@ -345,7 +345,7 @@ fn aref_on_a_vector_is_a_type_error_rather_than_a_second_meaning() {
     // `Vector<int>` subscript an `Array<T>` takes.
     let msg = check_err("(let ((v (the Vector<int> (Vector::new)))) (aref v 0))");
     assert!(msg.contains("is not an `Array<T>`"), "{}", msg);
-    assert!(msg.contains("vector<int>"), "{}", msg);
+    assert!(msg.contains("Vector<int>"), "{}", msg);
 }
 
 // ---- integration with the rest of the language ------------------------------

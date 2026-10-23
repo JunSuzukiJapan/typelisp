@@ -43,7 +43,7 @@ pub fn option_payload_niches(payload: TypeId) -> bool {
     match crate::type_shape(payload) {
         TypeShape::Unit | TypeShape::Never => false,
         shape @ TypeShape::Named(..) => {
-            let raw_word = ["ptr", "c-long", "c-ulong"].iter().any(|n| shape == TypeShape::named(NsId::ROOT, n, &[]));
+            let raw_word = ["ptr", "c-long", "c-ulong"].iter().any(|n| shape == TypeShape::named(NsId::STD, n, &[]));
             !(raw_word || option_payload(payload).is_some())
         }
         TypeShape::Fn(..) | TypeShape::Ptr(_) | TypeShape::Dyn(..) | TypeShape::CStruct(..) => true,
@@ -95,7 +95,7 @@ mod tests {
     use crate::intern_type;
 
     fn named(name: &str, args: &[TypeId]) -> TypeId {
-        intern_type(TypeShape::named(NsId::ROOT, name, args))
+        intern_type(TypeShape::named(NsId::STD, name, args))
     }
 
     #[test]

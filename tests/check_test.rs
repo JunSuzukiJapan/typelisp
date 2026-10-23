@@ -126,7 +126,7 @@ fn ret_of(src: &str, name: &str) -> Type {
 /// exists and means *non-empty*, so the two are not interchangeable in either
 /// direction here: these tests assert which one a form actually produces.
 fn opt_sexpr() -> Type {
-    Type::Named(Path::root("option"), vec![Type::Named(Path::root("sexpr"), vec![])])
+    Type::Named(Path::std("option"), vec![Type::Named(Path::std("sexpr"), vec![])])
 }
 
 fn ty(src: &str) -> Type {
@@ -286,7 +286,7 @@ fn ty_program(src: &str) -> Type {
 
 #[test]
 fn construct_some_infers_type_argument() {
-    assert_eq!(ty("(option::some 1)"), Type::Named(Path::root("option"), vec![Type::Int]));
+    assert_eq!(ty("(option::some 1)"), Type::Named(Path::std("option"), vec![Type::Int]));
 }
 
 #[test]
@@ -353,7 +353,7 @@ fn the_empty_list_is_an_option_sexpr_none() {
 #[test]
 fn construct_int_field_adopts_the_declared_width() {
     // The `int` variant's field is an `int`; the literal must adopt that type.
-    assert_eq!(ty("(int 5)"), Type::Named(Path::root("sexpr"), vec![]));
+    assert_eq!(ty("(int 5)"), Type::Named(Path::std("sexpr"), vec![]));
 }
 
 // ---- match ------------------------------------------------------------------

@@ -82,7 +82,7 @@ fn foldable_receiver(type_name: &Path) -> bool {
         .iter()
         .chain(crate::types::FLOAT_TYPE_NAMES.iter())
         .chain(["int", "ratio", "rational", "char", "bool"].iter())
-        .any(|n| *type_name == Path::root(n))
+        .any(|n| *type_name == Path::std(n))
 }
 
 /// Fold a builtin method call whose arguments are all literals.

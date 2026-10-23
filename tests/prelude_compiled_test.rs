@@ -14,9 +14,9 @@ fn f(name: &str) -> CompileTarget {
     CompileTarget::Fn(Path::std(name))
 }
 
-/// A method of a root-level type.
+/// A method of a type of the standard library.
 fn m(type_name: &str, name: &str) -> CompileTarget {
-    CompileTarget::Method(Path::root(type_name), typelisp_mem::symbols::intern(name))
+    CompileTarget::Method(Path::std(type_name), typelisp_mem::symbols::intern(name))
 }
 
 /// A prelude-loaded environment, with the compiled bodies (`compiled = true`)

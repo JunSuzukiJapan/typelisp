@@ -170,7 +170,7 @@ pub fn opt_key_effective_ty(decl_ty: &Type, has_default: bool) -> Type {
     if has_default {
         decl_ty.clone()
     } else {
-        Type::Named(Path::root("option"), vec![decl_ty.clone()])
+        Type::Named(Path::std("option"), vec![decl_ty.clone()])
     }
 }
 
@@ -628,16 +628,6 @@ impl<T> Names<T> {
     pub fn iter(&self) -> impl Iterator<Item = (&'static str, &T)> {
         self.into_iter()
     }
-
-    /// The same definitions keyed in the module `ns` instead, each under the
-    /// symbol its name reads as there.
-    pub fn moved_to(self, ns: NsId) -> Names<T> {
-        let mut out = Names::new(ns);
-        for (k, v) in self.map {
-            out.insert(k.name(), v);
-        }
-        out
-    }
 }
 
 impl<'a, T> IntoIterator for &'a Names<T> {
@@ -782,11 +772,6 @@ pub struct Docs {
 /// The checker's symbol table: one [`Namespace`] per module the session has.
 pub struct Registry {
     modules: HashMap<NsId, Namespace>,
-    /// What [`Self::with_builtins`] defined at the root — the built-in types
-    /// and `Sexpr`'s bare constructors — by the standard library's symbol of
-    /// each name, which is the one every module reads the name as (see
-    /// [`Self::publish_names`]): offered symbol -> the root's.
-    offered_root: HashMap<SymRef, SymRef>,
     pub def_locs: DefLocs,
     pub docs: Docs,
     /// Per-`defstruct` slot default forms, keyed by the type's path and
@@ -806,14 +791,14 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// A registry whose root namespace holds the built-in `Option`/`Result`/
-    /// the concrete error types/`Sexpr` and the i32 arithmetic/comparison
-    /// operators.
+    /// A registry whose standard library module holds the built-in types
+    /// (`Option`/`Result`/the concrete error types/`Sexpr`/the primitives ...),
+    /// functions and globals, with an empty root.
     pub fn with_builtins() -> Registry {
-        let mut root = Namespace::new(NsId::ROOT);
+        let mut std_ns = Namespace::new(NsId::STD);
         let mut internal = Namespace::new(crate::types::internal_ns());
         for def in builtin_sum_defs() {
-            root.add_type(def);
+            std_ns.add_type(def);
         }
         // `Sexpr` is the one type whose data constructors (`nil`/`int`/`str`/
         // ...) stay reachable as bare names without a `use` — so `(Int 5)`/
@@ -826,15 +811,15 @@ impl Registry {
         // quasiquote/`&rest`) goes through `Checker::sexpr_cons_ctor`/
         // `sexpr-cons` directly instead of this bare name.
         let def = sexpr_def();
-        root.register_ctors(&def.name, &def.variants);
-        root.ctors.remove("cons");
-        root.add_type(def);
-        root.add_type(hashtable_def());
-        root.add_type(vector_def());
-        root.add_type(task_def());
-        root.add_type(thread_def());
-        root.add_type(chan_def());
-        root.add_type(scope_def());
+        std_ns.register_ctors(&def.name, &def.variants);
+        std_ns.ctors.remove("cons");
+        std_ns.add_type(def);
+        std_ns.add_type(hashtable_def());
+        std_ns.add_type(vector_def());
+        std_ns.add_type(task_def());
+        std_ns.add_type(thread_def());
+        std_ns.add_type(chan_def());
+        std_ns.add_type(scope_def());
         // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
         // LLVM: four more builtin types, metadata-only like `hashtable_def`
         // (the runtime implementation lives in `eval_llvm_builtin_method` in
@@ -842,11 +827,11 @@ impl Registry {
         // own yet — it's only ever produced by `add-block` and consumed by
         // `position-at-end` — but still needs registering as a type so it
         // has a `Path` to appear as a parameter/return type.
-        root.add_type(llvm_module_def());
-        root.add_type(llvm_function_def());
-        root.add_type(llvm_builder_def());
-        root.add_type(llvm_basic_block_def());
-        root.add_type(llvm_value_def());
+        std_ns.add_type(llvm_module_def());
+        std_ns.add_type(llvm_function_def());
+        std_ns.add_type(llvm_builder_def());
+        std_ns.add_type(llvm_basic_block_def());
+        std_ns.add_type(llvm_value_def());
         // Primitive value types (i8..usize/f32/f64/bool/char/string) get a
         // method table too, so `defmethod` can target them (see
         // `check_defmethod`/`receiver_method`, which map a primitive
@@ -887,7 +872,7 @@ impl Registry {
                 ref t if t.is_float() => float_assoc(t.clone()),
                 _ => BTreeMap::new(),
             };
-            root.add_type(builtin_adt(name, &[], AdtKind::Sum, Vec::new(), assoc));
+            std_ns.add_type(builtin_adt(name, &[], AdtKind::Sum, Vec::new(), assoc));
         }
         // `random-state` (CL's `random-state`): a mutable PRNG stream, its
         // actual bit-twiddling done in Rust (`interp::eval_random_state_next`
@@ -909,7 +894,7 @@ impl Registry {
         // non-standard operation. The integer-to-state map lives in
         // `typelisp_rt::seeded_random_state`, which is where the reason it
         // isn't the identity is written down.
-        root.fns.insert("seed-random-state".to_string(), FnSig::builtin(vec![Type::Int], Type::RandomState));
+        std_ns.fns.insert("seed-random-state".to_string(), FnSig::builtin(vec![Type::Int], Type::RandomState));
         // `get-universal-time`/`get-internal-real-time` (CLHS 25.1): wall-clock
         // and monotonic-ish timers, respectively. `get-universal-time` counts
         // seconds since 1900-01-01 UTC (CL's epoch, 2208988800s before the
@@ -926,29 +911,29 @@ impl Registry {
         // already splits it costs nothing: `decode-universal-time`'s first
         // step is exactly this division, and `time`'s subtraction is two
         // field subtractions.
-        root.fns.insert("get-universal-time".to_string(), FnSig::builtin(vec![], universal_time()));
-        root.fns.insert("get-internal-real-time".to_string(), FnSig::builtin(vec![], internal_time()));
+        std_ns.fns.insert("get-universal-time".to_string(), FnSig::builtin(vec![], universal_time()));
+        std_ns.fns.insert("get-internal-real-time".to_string(), FnSig::builtin(vec![], internal_time()));
         // `get-internal-run-time` (CLHS 25.1): the same unit and the same
         // struct, but CPU time (`getrusage`) instead of elapsed time. The
         // pair is the point — a program blocked on I/O shows a large
         // difference, and that difference is exactly what a single "real
         // time" figure hides. Left out until 2026-09-05 because standing in
         // real time for it would have been a lie.
-        root.fns.insert("get-internal-run-time".to_string(), FnSig::builtin(vec![], internal_time()));
+        std_ns.fns.insert("get-internal-run-time".to_string(), FnSig::builtin(vec![], internal_time()));
         // `parse-float`: untrusted-text numeric parsing
         // (`docs/language-design.md` §4.1's planned conversion catalog) —
         // `Result`, not a panic, since the input is runtime text the caller
         // doesn't control (unlike a source literal, which the reader/checker
         // already validate before this code ever runs).
-        root.fns.insert("parse-float".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR))));
+        std_ns.fns.insert("parse-float".to_string(), FnSig::builtin(vec![Type::Str], result_of(Type::F64, error_ty(PARSE_FLOAT_ERROR))));
         // `read`: parses one `Sexpr` form out of a string with the same
         // reader `typl`/the REPL use for source text
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
         register_stream_builtins(&mut internal);
         register_net_builtins(&mut internal);
-        register_system_builtins(&mut root, &mut internal);
-        register_readtable_builtins(&mut root);
-        root.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
+        register_system_builtins(&mut std_ns, &mut internal);
+        register_readtable_builtins(&mut std_ns);
+        std_ns.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
         // `read-datum-at`: one datum from a string starting at a character
         // index, paired with where reading stopped — CL's `read-from-string`
         // and its second return value, which this language has no multiple
@@ -965,7 +950,7 @@ impl Registry {
         // but not the caller's lexical locals; a definition form registers
         // immediately. Result is a `Sexpr` (the value, or a definition's name
         // symbol); malformed/ill-typed input is `Err`, not a panic.
-        root.fns.insert("eval".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
+        std_ns.fns.insert("eval".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
         // `macroexpand-1`/`macroexpand`: what the checker does to a macro
         // call, made available to a program (CL's own, and the only way to
         // see a `defmacro`'s output without reading the checker's mind).
@@ -976,8 +961,8 @@ impl Registry {
         // strictly more than CL's boolean, since the caller cannot mistake a
         // macro that expands to itself for a non-macro. `macroexpand` repeats
         // until `none` and answers the final form, as CL's does.
-        root.fns.insert("macroexpand-1".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
-        root.fns.insert("macroexpand".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
+        std_ns.fns.insert("macroexpand-1".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
+        std_ns.fns.insert("macroexpand".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
         // The pretty printer's user-callable layout operators (CLHS 22.2.1),
         // minus the stream argument typelisp has no streams for. They act on
         // the logical block the `pprint-logical-block` special form opened
@@ -989,11 +974,11 @@ impl Registry {
         // `pprint-pop` returns `()` once the block's list is exhausted;
         // `pprint-list-exhausted` is the predicate to test first (the prelude
         // macro `pprint-exit-if-list-exhausted` is the CL-spelled wrapper).
-        root.fns.insert("pprint-newline".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Unit));
-        root.fns.insert("pprint-indent".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int], Type::Unit));
-        root.fns.insert("pprint-tab".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int, Type::Int], Type::Unit));
-        root.fns.insert("pprint-pop".to_string(), FnSig::builtin(vec![], option_of(sexpr())));
-        root.fns.insert("pprint-list-exhausted".to_string(), FnSig::builtin(vec![], Type::Bool));
+        std_ns.fns.insert("pprint-newline".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Unit));
+        std_ns.fns.insert("pprint-indent".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int], Type::Unit));
+        std_ns.fns.insert("pprint-tab".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int, Type::Int], Type::Unit));
+        std_ns.fns.insert("pprint-pop".to_string(), FnSig::builtin(vec![], option_of(sexpr())));
+        std_ns.fns.insert("pprint-list-exhausted".to_string(), FnSig::builtin(vec![], Type::Bool));
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
         // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +
@@ -1016,12 +1001,12 @@ impl Registry {
         // `is_empty`) rather than pattern-matching, so they survive that
         // fence. Same heap operations as `cons`/`car`/`cdr` (see
         // `Interp::eval_builtin`), so no new runtime machinery is needed.
-        root.fns.insert("sexpr-cons".to_string(), FnSig::builtin(vec![option_of(sexpr()), option_of(sexpr())], option_of(sexpr())));
-        root.fns.insert("sexpr-car".to_string(), FnSig::builtin(vec![option_of(sexpr())], option_of(sexpr())));
-        root.fns.insert("sexpr-cdr".to_string(), FnSig::builtin(vec![option_of(sexpr())], option_of(sexpr())));
-        root.fns.insert("sexpr-consp".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
-        root.fns.insert("sexpr-null".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
-        root.fns.insert("sexpr-atom".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        std_ns.fns.insert("sexpr-cons".to_string(), FnSig::builtin(vec![option_of(sexpr()), option_of(sexpr())], option_of(sexpr())));
+        std_ns.fns.insert("sexpr-car".to_string(), FnSig::builtin(vec![option_of(sexpr())], option_of(sexpr())));
+        std_ns.fns.insert("sexpr-cdr".to_string(), FnSig::builtin(vec![option_of(sexpr())], option_of(sexpr())));
+        std_ns.fns.insert("sexpr-consp".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        std_ns.fns.insert("sexpr-null".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        std_ns.fns.insert("sexpr-atom".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
         // Internal `Sexpr` payload extractors (Symbol/Sexpr redesign Phase 2):
         // typed field readers that used to be `match`-based typelisp defuns in
         // `compiler.rs` (`(match s ((Int n) n) (_ (panic ...)))`), moved to Rust
@@ -1031,9 +1016,9 @@ impl Registry {
         // predicate its non-panic-fallback caller (`form-is-borrowed?`) needs
         // to branch on a `Sym` node — a peer of
         // `sexpr-consp`/`sexpr-null`/`sexpr-atom`.
-        root.fns.insert("sexpr-int".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Int));
-        root.fns.insert("sexpr-f64".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F64));
-        root.fns.insert("sexpr-f32".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F32));
+        std_ns.fns.insert("sexpr-int".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Int));
+        std_ns.fns.insert("sexpr-f64".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F64));
+        std_ns.fns.insert("sexpr-f32".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::F32));
         // One extractor per integer type, not one per machine word: the five
         // narrow widths are separate `Sexpr` variants carrying separate boxes
         // (`BoxedObj::Narrow`), and each of these returns exactly its own.
@@ -1045,13 +1030,13 @@ impl Registry {
             ("sexpr-u32", Type::U32),
             ("sexpr-i32", Type::I32),
         ] {
-            root.fns.insert(name.to_string(), FnSig::builtin(vec![option_of(sexpr())], ty));
+            std_ns.fns.insert(name.to_string(), FnSig::builtin(vec![option_of(sexpr())], ty));
         }
-        root.fns.insert("sexpr-bool".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
-        root.fns.insert("sexpr-char".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Char));
-        root.fns.insert("sexpr-str".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Str));
-        root.fns.insert("sexpr-sym-name".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Str));
-        root.fns.insert("sexpr-symp".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        std_ns.fns.insert("sexpr-bool".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
+        std_ns.fns.insert("sexpr-char".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Char));
+        std_ns.fns.insert("sexpr-str".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Str));
+        std_ns.fns.insert("sexpr-sym-name".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Str));
+        std_ns.fns.insert("sexpr-symp".to_string(), FnSig::builtin(vec![option_of(sexpr())], Type::Bool));
         // `equal`/`equalp`: structural equality (CL `equal`/`equalp`), Rust
         // builtins (`Interp::eval_builtin`'s `sexpr_equal`/`sexpr_equalp`)
         // since the Symbol/Sexpr redesign fenced `match` off `Sexpr` (Phase 5).
@@ -1081,8 +1066,8 @@ impl Registry {
             type_params: vec!["t".to_string()],
             ..FnSig::builtin(vec![tvar("t"), tvar("t")], Type::Bool)
         };
-        root.fns.insert("equal".to_string(), eq_generic());
-        root.fns.insert("equalp".to_string(), eq_generic());
+        std_ns.fns.insert("equal".to_string(), eq_generic());
+        std_ns.fns.insert("equalp".to_string(), eq_generic());
         // `gensym` is *not* here: it moved into the prelude in Phase 4c, so
         // that CL's `*gensym-counter*` could be a real variable a program can
         // read and set. A builtin's counter lived on the `Heap` and nothing
@@ -1093,28 +1078,28 @@ impl Registry {
         // symbol intern table directly; `Sexpr::Sym` now wraps `Symbol` (not
         // `Str`), so the old prelude `(match s (Sym name) name)` /
         // `(Sym s)` definitions no longer type-check.
-        root.fns.insert("symbol->string".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Str));
-        root.fns.insert("string->symbol".to_string(), FnSig::builtin(vec![Type::Str], Type::Symbol));
+        std_ns.fns.insert("symbol->string".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Str));
+        std_ns.fns.insert("string->symbol".to_string(), FnSig::builtin(vec![Type::Str], Type::Symbol));
         // CL's `intern`: `(intern NAME NAMESPACE)` is the symbol `NAME` in the
         // module `NAMESPACE` names (`"keyword"` for a keyword). Written with
         // one argument, it interns in the module the call is written in —
         // CL's current package — which `Checker::check_call` fills in.
-        root.fns.insert("intern".to_string(), FnSig::builtin(vec![Type::Str, Type::Str], Type::Symbol));
+        std_ns.fns.insert("intern".to_string(), FnSig::builtin(vec![Type::Str, Type::Str], Type::Symbol));
         // CL's `keywordp`: owned by the keyword module. A Rust builtin because
         // the owner is not reachable from the language — a keyword's name says
         // nothing about it being one.
-        root.fns.insert("keywordp".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Bool));
+        std_ns.fns.insert("keywordp".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Bool));
         // `exit`: process termination (cl-equivalence-catalog.md §1.2). Unlike
         // `panic`/`unreachable`/`todo` (which unwind through `EvalError::Panic`,
         // a typelisp-level signal), this needs an actual OS call
         // (`std::process::exit`, in `Interp::eval_builtin`'s `"exit"` arm), so
         // it stays an ordinary `Rust` builtin rather than a `defmacro`. `Never`
         // return type, same as `panic`, so it satisfies any expected type.
-        root.fns.insert("exit".to_string(), FnSig::builtin(vec![Type::Int], Type::Never));
+        std_ns.fns.insert("exit".to_string(), FnSig::builtin(vec![Type::Int], Type::Never));
         // `compile` is a genuine special form (`Checker::check_compile`,
         // dispatched by name in `Checker::check_list` alongside `quote`/
         // `panic`/etc. — never an ordinary call), so unlike `compile-file`
-        // below it has no `root.fns` entry: its argument is an unevaluated
+        // below it has no `std_ns.fns` entry: its argument is an unevaluated
         // symbol or `::`-path, resolved directly against the current
         // namespace into an `compile-fn`(CompileTarget)` node.
         // `compile-file`: AOT-compiles an independent source file to a
@@ -1122,7 +1107,7 @@ impl Registry {
         // arm / `compile::aot::compile_file`). Same free-function shape as
         // `compile` above, just two string arguments (source path, output
         // path) instead of one.
-        root.fns.insert(
+        std_ns.fns.insert(
             "compile-file".to_string(),
             FnSig::builtin(vec![Type::Str, Type::Str], Type::Bool),
         );
@@ -1130,27 +1115,12 @@ impl Registry {
         // loaded from, plus one for what it has defined since — to a file
         // `typl --image` can start from. Same free-function shape as
         // `compile-file`, one path argument (see `compile::dump::dump_image`).
-        root.fns.insert(
+        std_ns.fns.insert(
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        // Everything registered above as a function or a global, and the
-        // internal module, belongs to the standard library's module. Built at
-        // the root and moved, so each registration above names its builtin
-        // the way a call to it is written.
-        let mut std_ns = Namespace::new(NsId::STD);
-        std_ns.fns = std::mem::replace(&mut root.fns, Names::new(NsId::ROOT)).moved_to(NsId::STD);
-        std_ns.vars = std::mem::replace(&mut root.vars, Names::new(NsId::ROOT)).moved_to(NsId::STD);
-        let offered_root = root.defined_symbols().map(|sym| (symbols::intern_exact(NsId::STD, sym.name()), sym)).collect();
-        let modules = [root, std_ns, internal].into_iter().map(|m| (m.ns, m)).collect();
-        Registry { modules, offered_root, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
-    }
-
-    /// The root's built-in definition every module reads `sym` as, if `sym`
-    /// is the symbol the standard library offers for one
-    /// ([`Self::publish_names`]).
-    pub fn offered_root(&self, sym: SymRef) -> Option<SymRef> {
-        self.offered_root.get(&sym).copied()
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal].into_iter().map(|m| (m.ns, m)).collect();
+        Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
     }
 
     /// The root module's definitions.
@@ -1292,7 +1262,7 @@ fn builtin_adt(
 
 /// `Option<T> = Some(T) | None`.
 fn option_def() -> AdtDef {
-    builtin_adt(Path::root("option"), &["t"], AdtKind::Sum, vec![
+    builtin_adt(Path::std("option"), &["t"], AdtKind::Sum, vec![
         Variant { name: "some".to_string(), fields: vec![tvar("t")] },
         Variant { name: "none".to_string(), fields: vec![] },
     ], BTreeMap::new())
@@ -1300,7 +1270,7 @@ fn option_def() -> AdtDef {
 
 /// `Result<T, E> = Ok(T) | Err(E)`.
 fn result_def() -> AdtDef {
-    builtin_adt(Path::root("result"), &["t", "e"], AdtKind::Sum, vec![
+    builtin_adt(Path::std("result"), &["t", "e"], AdtKind::Sum, vec![
         Variant { name: "ok".to_string(), fields: vec![tvar("t")] },
         Variant { name: "err".to_string(), fields: vec![tvar("e")] },
     ], BTreeMap::new())
@@ -1443,7 +1413,7 @@ fn register_stream_builtins(ns: &mut Namespace) {
     native(
         "file-list-directory",
         vec![Type::Str],
-        result_of(Type::Named(Path::root("vector"), vec![Type::Str]), file_err.clone()),
+        result_of(Type::Named(Path::std("vector"), vec![Type::Str]), file_err.clone()),
     );
     native("file-create-directories", vec![Type::Str], unit_or_err);
     // CL's `file-author`, spelled with the routing prefix. `Option` inside
@@ -1493,7 +1463,7 @@ fn register_net_builtins(ns: &mut Namespace) {
     native(
         "net-resolve-finish",
         vec![h.clone()],
-        result_of(option_of(Type::Named(Path::root("vector"), vec![Type::Str])), net_err.clone()),
+        result_of(option_of(Type::Named(Path::std("vector"), vec![Type::Str])), net_err.clone()),
     );
     native("net-connect-begin", vec![Type::Str], result_of(h.clone(), net_err.clone()));
     native("net-connect-finish", vec![h.clone()], unit_or_err.clone());
@@ -1525,13 +1495,13 @@ fn register_net_builtins(ns: &mut Namespace) {
     native("net-udp-bind", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
     native(
         "net-udp-send-to",
-        vec![h.clone(), Type::Str, Type::Named(Path::root("vector"), vec![Type::Int])],
+        vec![h.clone(), Type::Str, Type::Named(Path::std("vector"), vec![Type::Int])],
         result_of(Type::Bool, net_err.clone()),
     );
     native(
         "net-udp-recv",
         vec![h.clone()],
-        result_of(option_of(Type::Named(Path::root("vector"), vec![Type::Int])), net_err.clone()),
+        result_of(option_of(Type::Named(Path::std("vector"), vec![Type::Int])), net_err.clone()),
     );
     native("net-udp-last-sender", vec![h.clone()], result_of(Type::Str, net_err.clone()));
     native("net-listen", vec![Type::Str, Type::Int], result_of(h.clone(), net_err.clone()));
@@ -1602,7 +1572,7 @@ fn register_system_builtins(root: &mut Namespace, internal: &mut Namespace) {
     // `typl`, the executable under AOT — so one source file can be run either
     // way and index its arguments identically. See
     // `sys_builtin::COMMAND_LINE_ARGS` for how the two are made to agree.
-    native("command-line-args", vec![], Type::Named(Path::root("vector"), vec![Type::Str]));
+    native("command-line-args", vec![], Type::Named(Path::std("vector"), vec![Type::Str]));
     // `none` covers both "unset" and "not valid Unicode": a `string` here is
     // Rust's, so bytes that aren't UTF-8 have no value to hand back.
     native("getenv", vec![Type::Str], option_of(Type::Str));
@@ -1714,7 +1684,7 @@ fn register_readtable_builtins(root: &mut Namespace) {
 
 /// Whether `p` names one of [`BUILTIN_ERROR_TYPES`].
 pub fn is_builtin_error_type(p: &Path) -> bool {
-    p.is_simple() && BUILTIN_ERROR_TYPES.contains(&p.last_segment())
+    p.is_std() && BUILTIN_ERROR_TYPES.contains(&p.last_segment())
 }
 
 /// The concrete error type of every fallible built-in, one per failure
@@ -1739,7 +1709,7 @@ pub fn is_builtin_error_type(p: &Path) -> bool {
 fn builtin_error_defs() -> Vec<AdtDef> {
     BUILTIN_ERROR_TYPES
         .iter()
-        .map(|&name| builtin_adt(Path::root(name), &[], AdtKind::Sum, vec![Variant { name: name.to_string(), fields: vec![Type::Str] }], BTreeMap::new()))
+        .map(|&name| builtin_adt(Path::std(name), &[], AdtKind::Sum, vec![Variant { name: name.to_string(), fields: vec![Type::Str] }], BTreeMap::new()))
         .collect()
 }
 
@@ -1770,7 +1740,7 @@ fn sexpr_def() -> AdtDef {
     let variants = (0..sv::COUNT)
         .map(|v| Variant { name: sv::NAMES[v].to_string(), fields: sexpr_variant_fields(v) })
         .collect();
-    builtin_adt(Path::root("sexpr"), &[], AdtKind::Sum, variants, sexpr_assoc())
+    builtin_adt(Path::std("sexpr"), &[], AdtKind::Sum, variants, sexpr_assoc())
 }
 
 /// The fields of `Sexpr`'s variant number `v`.
@@ -1835,11 +1805,11 @@ fn sexpr_variant_fields(v: usize) -> Vec<Type> {
         sv::I32 => vec![Type::I32],
         // `#(..)` and `#nA(..)`. The payload is the collection box itself,
         // so construction and extraction are both the identity, like `str`.
-        sv::VECTOR => vec![Type::Named(Path::root("vector"), vec![option_of(sexpr())])],
+        sv::VECTOR => vec![Type::Named(Path::std("vector"), vec![option_of(sexpr())])],
         sv::ARRAY => vec![Type::Named(Path::std("array"), vec![option_of(sexpr())])],
         // `#{..}`. A tuple's type depends on its arity, so the payload is a
         // fresh vector of the elements rather than the box itself.
-        sv::TUPLE => vec![Type::Named(Path::root("vector"), vec![option_of(sexpr())])],
+        sv::TUPLE => vec![Type::Named(Path::std("vector"), vec![option_of(sexpr())])],
         _ => unreachable!("Sexpr has {} variants, not {}", sv::COUNT, v + 1),
     }
 }
@@ -1897,7 +1867,7 @@ fn symbol_assoc() -> BTreeMap<String, AssocFn> {
 }
 
 fn sexpr() -> Type {
-    Type::Named(Path::root("sexpr"), vec![])
+    Type::Named(Path::std("sexpr"), vec![])
 }
 
 /// `universal-time` (a prelude `defstruct`): a CL universal time split into
@@ -1923,22 +1893,22 @@ pub fn heap_info() -> Type {
 }
 
 fn hashtable_ty() -> Type {
-    Type::Named(Path::root("hashtable"), vec![tvar("k"), tvar("v")])
+    Type::Named(Path::std("hashtable"), vec![tvar("k"), tvar("v")])
 }
 
 pub(super) fn option_of(t: Type) -> Type {
-    Type::Named(Path::root("option"), vec![t])
+    Type::Named(Path::std("option"), vec![t])
 }
 
 /// One of [`builtin_error_defs`]' concrete error types, as a `Type` — the
 /// `E` in the `Result<T, E>` returned by the fallible Rust builtin that
 /// raises it (`parse-int`/`parse-float`/`read`/`eval`).
 fn error_ty(name: &str) -> Type {
-    Type::Named(Path::root(name), vec![])
+    Type::Named(Path::std(name), vec![])
 }
 
 fn result_of(t: Type, e: Type) -> Type {
-    Type::Named(Path::root("result"), vec![t, e])
+    Type::Named(Path::std("result"), vec![t, e])
 }
 
 /// `HashTable<K, V>`: a builtin (Rust-implemented) mutable hash map, with no
@@ -2007,25 +1977,25 @@ fn hashtable_def() -> AdtDef {
     // this snapshot, the same way `vector-iter<T>` walks `Vector<T>`.
     assoc.insert(
         "keys".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::root("vector"), vec![tvar("k")])), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("vector"), vec![tvar("k")])), instance: true, builtin: true },
     );
     assoc.insert(
         "values".to_string(),
-        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::root("vector"), vec![tvar("v")])), instance: true, builtin: true },
+        AssocFn { sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("vector"), vec![tvar("v")])), instance: true, builtin: true },
     );
     assoc.insert(
         "entries".to_string(),
         AssocFn {
-            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::root("vector"), vec![Type::Named(Path::std("cons-cell"), vec![tvar("k"), tvar("v")])])),
+            sig: FnSig::builtin(vec![hashtable_ty()], Type::Named(Path::std("vector"), vec![Type::Named(Path::std("cons-cell"), vec![tvar("k"), tvar("v")])])),
             instance: true,
             builtin: true,
         },
     );
-    builtin_adt(Path::root("hashtable"), &["k", "v"], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::std("hashtable"), &["k", "v"], AdtKind::Sum, Vec::new(), assoc)
 }
 
 fn vector_ty() -> Type {
-    Type::Named(Path::root("vector"), vec![tvar("t")])
+    Type::Named(Path::std("vector"), vec![tvar("t")])
 }
 
 /// `Vector<T>`: a builtin growable sequence. Reuses the same boxed-struct
@@ -2074,7 +2044,7 @@ fn vector_def() -> AdtDef {
         "pop".to_string(),
         AssocFn { sig: FnSig::builtin(vec![vector_ty()], option_of(tvar("t"))), instance: true, builtin: true },
     );
-    builtin_adt(Path::root("vector"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::std("vector"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Task<T>`, the type `(task (f ...))` yields.
@@ -2082,7 +2052,7 @@ fn vector_def() -> AdtDef {
 /// Spelled once, here, rather than at the checker's `task` — a type's identity is
 /// its whole path, and two places writing it is two places to get it wrong.
 pub(super) fn task_of(t: Type) -> Type {
-    Type::Named(Path::root("task"), vec![t])
+    Type::Named(Path::std("task"), vec![t])
 }
 
 /// `Task<T>`: a handle on a task that is running — what `(task (f ...))` returns.
@@ -2114,13 +2084,13 @@ fn task_def() -> AdtDef {
             builtin: true,
         },
     );
-    builtin_adt(Path::root("task"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::std("task"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Thread<T>`, the type `(thread (f ...))` yields — spelled once, here, for
 /// [`task_of`]'s reason.
 pub(super) fn thread_of(t: Type) -> Type {
-    Type::Named(Path::root("thread"), vec![t])
+    Type::Named(Path::std("thread"), vec![t])
 }
 
 /// `Thread<T>`: a handle on a task that runs on an OS thread of its own —
@@ -2153,7 +2123,7 @@ fn thread_def() -> AdtDef {
         "available-parallelism".to_string(),
         AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true },
     );
-    builtin_adt(Path::root("thread"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::std("thread"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Chan<T>`, the channel type.
@@ -2161,7 +2131,7 @@ fn thread_def() -> AdtDef {
 /// Spelled once, here, for the same reason [`task_of`] is: a type's identity
 /// is its whole path.
 pub(super) fn chan_of(t: Type) -> Type {
-    Type::Named(Path::root("chan"), vec![t])
+    Type::Named(Path::std("chan"), vec![t])
 }
 
 /// `Chan<T>`: a channel between tasks — Go's `chan T`.
@@ -2224,11 +2194,11 @@ fn chan_def() -> AdtDef {
         "cap".to_string(),
         AssocFn { sig: sig(vec![chan], Type::Int), instance: true, builtin: true },
     );
-    builtin_adt(Path::root("chan"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::std("chan"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 fn scope_ty() -> Type {
-    Type::Named(Path::root("scope"), vec![tvar("v")])
+    Type::Named(Path::std("scope"), vec![tvar("v")])
 }
 
 /// `Scope<V>`: a builtin (Rust-implemented) stack of `String`-keyed frames —
@@ -2278,28 +2248,28 @@ fn scope_def() -> AdtDef {
             builtin: true,
         },
     );
-    builtin_adt(Path::root("scope"), &["v"], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::std("scope"), &["v"], AdtKind::Sum, Vec::new(), assoc)
 }
 
 
 fn llvm_module_ty() -> Type {
-    Type::Named(Path::root("llvm-module"), vec![])
+    Type::Named(Path::std("llvm-module"), vec![])
 }
 
 fn llvm_function_ty() -> Type {
-    Type::Named(Path::root("llvm-function"), vec![])
+    Type::Named(Path::std("llvm-function"), vec![])
 }
 
 fn llvm_basic_block_ty() -> Type {
-    Type::Named(Path::root("llvm-basic-block"), vec![])
+    Type::Named(Path::std("llvm-basic-block"), vec![])
 }
 
 fn llvm_builder_ty() -> Type {
-    Type::Named(Path::root("llvm-builder"), vec![])
+    Type::Named(Path::std("llvm-builder"), vec![])
 }
 
 fn llvm_value_ty() -> Type {
-    Type::Named(Path::root("llvm-value"), vec![])
+    Type::Named(Path::std("llvm-value"), vec![])
 }
 
 fn assoc_fn(params: Vec<Type>, ret: Type, instance: bool) -> AssocFn {
@@ -2341,7 +2311,7 @@ pub fn llvm_module_def() -> AdtDef {
     // What comes back is a status word, not the value; the value is in the
     // frame, which is what makes stopping mid-body sayable at all.
     assoc.insert("add-coroutine-function".to_string(), assoc_fn(vec![llvm_module_ty(), Type::Str], llvm_function_ty(), true));
-    builtin_adt(Path::root("llvm-module"), &[], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::std("llvm-module"), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// A declared LLVM function (a `Module::add-function` result).
@@ -2352,13 +2322,13 @@ pub fn llvm_function_def() -> AdtDef {
     // *logical* argument out of the `i64*` array the old ABI passes. Under the
     // coroutine ABI the frame is a real parameter, so there is no array.
     assoc.insert("function-param".to_string(), assoc_fn(vec![llvm_function_ty(), Type::Int], llvm_value_ty(), true));
-    builtin_adt(Path::root("llvm-function"), &[], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::std("llvm-function"), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// An LLVM basic block. No methods of its own yet (Phase 0) — produced by
 /// `llvm-function::append-block`, consumed by `llvm-builder::position-at-end`.
 fn llvm_basic_block_def() -> AdtDef {
-    builtin_adt(Path::root("llvm-basic-block"), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
+    builtin_adt(Path::std("llvm-basic-block"), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
 }
 
 /// An IR builder. `load-arg` reads logical parameter `index` out of a
@@ -2747,13 +2717,13 @@ pub fn llvm_builder_def() -> AdtDef {
     // process's type table, read out of the module's own table — the island's
     // `(type-ref N)`.
     assoc.insert("load-type".to_string(), assoc_fn(vec![llvm_builder_ty(), llvm_module_ty(), Type::Int], llvm_value_ty(), true));
-    builtin_adt(Path::root("llvm-builder"), &[], AdtKind::Sum, Vec::new(), assoc)
+    builtin_adt(Path::std("llvm-builder"), &[], AdtKind::Sum, Vec::new(), assoc)
 }
 
 /// An LLVM SSA value (e.g. a constant). No methods of its own yet — produced
 /// by `llvm-builder::const-word`, consumed by `llvm-builder::build-ret`.
 fn llvm_value_def() -> AdtDef {
-    builtin_adt(Path::root("llvm-value"), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
+    builtin_adt(Path::std("llvm-value"), &[], AdtKind::Sum, Vec::new(), BTreeMap::new())
 }
 
 /// Built-in `String` instance methods ([cl-equivalence-catalog.md](../../../docs/dev/cl-equivalence-catalog.md)
@@ -3195,20 +3165,13 @@ impl Registry {
     /// Writes into the session's table of what names mean (`Heap::names`)
     /// the modules, types and traits this registry defines, so the forms
     /// read next can read a path through them, and what the standard library
-    /// makes every module read as its own: everything `std` defines and the
-    /// built-in definitions at the root. Called by the checker around every
-    /// top-level form; the table only grows, so writing what it holds
-    /// already changes nothing.
+    /// makes every module read as its own: everything `std` defines. Called
+    /// by the checker around every top-level form; the table only grows, so
+    /// writing what it holds already changes nothing.
     pub fn publish_names(&self, names: &mut typelisp_mem::symbols::SessionNames) {
         let std_ns = self.module_at(NsId::STD).expect("the registry always has the standard library's module");
         for sym in std_ns.defined_symbols() {
             names.export(sym);
-        }
-        // Under the standard library's symbol of the name, which is what the
-        // name reads as once these move into `std`; a name `std` defines too
-        // (`tuple`, `array`) then reads as one symbol for both.
-        for sym in self.offered_root.keys() {
-            names.export(*sym);
         }
         for ns in self.namespaces() {
             names.declare_module(ns.ns);

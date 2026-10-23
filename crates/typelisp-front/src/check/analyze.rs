@@ -597,9 +597,9 @@ fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Resu
     let data = is_option_of_sexpr(elem_ty);
     let mut s = RootScope::new(heap);
     let var = s.intern_symbol(VECTOR_LITERAL_VAR);
-    let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::root("vector"), vec![elem_ty.clone()]))?;
+    let vec_ty = forms::type_to_form(&mut s, &Type::Named(Path::std("vector"), vec![elem_ty.clone()]))?;
     s.push_root(vec_ty);
-    let new = forms::member_form(&mut s, &Path::root("vector"), "new")?;
+    let new = forms::member_form(&mut s, &Path::std("vector"), "new")?;
     s.push_root(new);
     let new_call = forms::list_from_vec_locs(&mut s, &[(new, None)])?;
     s.push_root(new_call);
@@ -1922,7 +1922,7 @@ impl Checker {
                         return Err(Error::TypeError(format!(
                             "defffi: `{}` is a callback taking or returning a function, which C \
                              could only do through another callback — declare that one as `ptr`",
-                            ConcreteNames::type_key(&ty)
+                            &ty
                         )));
                     }
                     Self::reject_raw_word_nested(t)?;
@@ -3103,7 +3103,7 @@ impl Checker {
                 "`{}` puts a raw C word inside another type, and every such slot tags what it \
                  holds — which would drop the word's top three bits. A `ptr`/`c-long`/`c-ulong` \
                  can be a parameter or a return type, and nothing else.",
-                ConcreteNames::type_key(ty)
+                ty
             )));
         }
         Ok(())
@@ -3123,7 +3123,7 @@ impl Checker {
                  or convert it (`as i32`, `as bignum`).",
                 what,
                 name,
-                ConcreteNames::type_key(ty)
+                ty
             )));
         }
         Ok(())
@@ -3748,7 +3748,7 @@ impl Checker {
                     SpecRequest::Fn { mangled, .. } => mangled.to_string(),
                     SpecRequest::Method { type_fq, mangled, .. } => format!("{}::{}", type_fq, mangled.name()),
                     SpecRequest::Blanket { trait_path, target } => {
-                        format!("impl {} {}", trait_path, ConcreteNames::type_key(target))
+                        format!("impl {} {}", trait_path, target)
                     }
                 };
                 return Err(Error::TypeError(format!(
@@ -4112,16 +4112,16 @@ impl Checker {
     /// and this can never disagree on a type.
     fn option_value(&self, ty: &Type, payload: Option<Checked>) -> Result<Checked, Error> {
         let Type::Named(name, targs) = ty else {
-            return Err(Error::TypeError(format!("option_value: `{}` is not an Option type", ConcreteNames::type_key(ty))));
+            return Err(Error::TypeError(format!("option_value: `{}` is not an Option type", ty)));
         };
         if !crate::types::path_is_builtin(name, "option") || targs.len() != 1 {
-            return Err(Error::TypeError(format!("option_value: `{}` is not an Option type", ConcreteNames::type_key(ty))));
+            return Err(Error::TypeError(format!("option_value: `{}` is not an Option type", ty)));
         }
         let node = if self.info.repr(ty).niche_payload().is_some() {
             match payload {
                 Some(value) => Node::SomeOf { ty: ty.clone(), value: Box::new(value) },
                 None => Node::Construct {
-                    owner: Path::root("sexpr"),
+                    owner: Path::std("sexpr"),
                     targs: Vec::new(),
                     variant: SEXPR_RESERVED_VARIANT,
                     mutable: false,
@@ -4171,8 +4171,8 @@ impl Checker {
     /// type the evaluator can't read off its own AST node).
     fn is_heap_repr(&self, ty: &Type) -> bool {
         match ty {
-            Type::Named(p, args) if *p == Path::root("scope") && args.len() == 1 => true,
-            Type::Named(p, _) if *p == Path::root("sexpr") || *p == Path::root("hashtable") => true,
+            Type::Named(p, args) if *p == Path::std("scope") && args.len() == 1 => true,
+            Type::Named(p, _) if *p == Path::std("sexpr") || *p == Path::std("hashtable") => true,
             Type::Named(p, _) => match self.info.reg.type_def(p) {
                 Some(d) if d.kind == AdtKind::Struct => true,
                 Some(d) if d.kind == AdtKind::Sum && !d.variants.is_empty() => true,
@@ -5989,8 +5989,8 @@ impl Checker {
             let describe = |params: &[Type], ret: &Type| {
                 format!(
                     "({}) {}",
-                    params.iter().map(ConcreteNames::type_key).collect::<Vec<_>>().join(" "),
-                    ConcreteNames::type_key(ret)
+                    params.iter().map(Type::to_string).collect::<Vec<_>>().join(" "),
+                    ret
                 )
             };
             if af.instance != want_instance {
@@ -6278,7 +6278,7 @@ impl Checker {
         match t {
             Type::Dyn(..) | Type::Fn(..) | Type::Never => Err(Error::TypeError(format!(
                 "`{}` cannot be the target of a blanket impl — it is not a nominal type",
-                ConcreteNames::type_key(t)
+                t
             ))),
             other => forms::type_to_form(heap, other),
         }
@@ -6326,7 +6326,7 @@ impl Checker {
         let target_var = match parts[1] {
             Value::Symbol(id) => {
                 let n = heap.symbol_spelling(id).to_string();
-                (head_params.contains(&n) && self.info.reg.type_def(&Path::root(&n)).is_none()).then_some(n)
+                (head_params.contains(&n) && self.info.reg.type_def(&Path::std(&n)).is_none()).then_some(n)
             }
             _ => None,
         };
@@ -6668,10 +6668,10 @@ impl Checker {
                             trait_fq,
                             sup.trait_path,
                             aname,
-                            ConcreteNames::type_key(&want),
+                            &want,
                             target_fq,
                             sup.trait_path,
-                            ConcreteNames::type_key(&actual)
+                            &actual
                         )))
                     }
                     None => {
@@ -6722,7 +6722,7 @@ impl Checker {
     /// through its vtable and falling back to the `Sexpr` catalog.
     fn sexpr_has_instance_method(&self, method: &str) -> bool {
         self.info.reg
-            .type_def(&Path::root("sexpr"))
+            .type_def(&Path::std("sexpr"))
             .and_then(|d| d.assoc.get(method))
             .is_some_and(|af| af.instance)
     }
@@ -7226,7 +7226,7 @@ impl Checker {
                 if targs.len() != def.params.len() || targs.iter().any(|t| self.type_is_open(t)) {
                     return Err(Error::TypeError(format!(
                         "`{}` is not fully concrete, so `:dyn {}`'s vtable cannot be laid out yet",
-                        ConcreteNames::type_key(concrete),
+                        concrete,
                         trait_path
                     )));
                 }
@@ -9126,7 +9126,7 @@ impl Checker {
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
         let elems: Vec<Value> = (0..heap.struct_field_count(id)).map(|i| heap.struct_field(id, i)).collect();
-        let elem_ty = match literal_element_type(expected, &Path::root("vector")) {
+        let elem_ty = match literal_element_type(expected, &Path::std("vector")) {
             Some(t) => t,
             None => self.first_element_type(heap, interp, env, &elems, "#(..)", "Vector<T>")?,
         };
@@ -9452,7 +9452,7 @@ impl Checker {
                 // option type is expected, the `Nil` value of `Sexpr` when a
                 // `Sexpr` is expected, and otherwise the unit value.
                 if let Some(Type::Named(n, _)) = expected {
-                    if *n == Path::root("option") {
+                    if *n == Path::std("option") {
                         // `Option`'s constructors moved to `Option::`/`use
                         // option` (no more bare `none`), but `()` denoting
                         // `None` is a language-core inference rule, not a
@@ -9460,7 +9460,7 @@ impl Checker {
                         // regardless of `use` status, so this bypasses
                         // `resolve_ctor` and goes straight to the known
                         // builtin path/variant index.
-                        return self.check_construct(heap, interp, env, (&Path::root("option"), OPTION_NONE), &[], &[], expected);
+                        return self.check_construct(heap, interp, env, (&Path::std("option"), OPTION_NONE), &[], &[], expected);
                     }
                     // The `Sexpr::nil` branch that used to sit here is gone:
                     // the empty list is `Option<Sexpr>`'s `none` now, which
@@ -9705,7 +9705,7 @@ impl Checker {
                         // so the printer's specialization has to be asked for here too.
                         self.request_print_object(&Type::Rational);
                         let node = Node::Assoc {
-                            owner: Path::root("ratio"),
+                            owner: Path::std("ratio"),
                             method: typelisp_mem::symbols::intern("ratio->rational"),
                             instance: true,
                             ret: Type::Rational,
@@ -10568,7 +10568,7 @@ impl Checker {
     /// [`Self::receiver_method`].
     fn sexpr_has_method(&self, method: &str) -> bool {
         self.info.reg
-            .type_def(&Path::root("sexpr"))
+            .type_def(&Path::std("sexpr"))
             .is_some_and(|d| d.assoc.get(method).is_some_and(|af| af.instance))
     }
 
@@ -10591,7 +10591,7 @@ impl Checker {
     /// `Sexpr` scrutinee while quietly failing on an `Option<Sexpr>` one.
     fn assoc_receiver_path(&self, ty: &Type, method: &str) -> Option<Path> {
         match ty {
-            t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::root("sexpr")),
+            t if is_option_of_sexpr(t) && self.sexpr_has_method(method) => Some(Path::std("sexpr")),
             other => nominal_path(other),
         }
     }
@@ -10731,7 +10731,7 @@ impl Checker {
             }
             MethodTarget::DynSexpr => {
                 let recv = Checked::of(Node::DynValue { value: Box::new(recv) }, sexpr_ty());
-                let type_fq = Path::root("sexpr");
+                let type_fq = Path::std("sexpr");
                 self.check_assoc_call(
                     heap,
                     interp,
@@ -10864,17 +10864,14 @@ impl Checker {
     }
 
     /// Every type, in any module, that has an instance method named `method`
-    /// — the types a failed method call could have meant. Named the way a
-    /// program writes them: bare for a root type, qualified otherwise.
-    /// Sorted, so the message is the same from run to run.
+    /// — the types a failed method call could have meant. Named the way the
+    /// current module writes them (`NameView`). Sorted, so the message is
+    /// the same from run to run.
     fn types_with_instance_method(&self, method: &str) -> Vec<String> {
+        let view = typelisp_print::shared::name_view();
         let mut out = Vec::new();
         for def in self.info.reg.namespaces().flat_map(|ns| ns.types.values()) {
-            let name = if def.name.parent().is_empty() {
-                def.name.last_segment().to_string()
-            } else {
-                def.name.segments().join("::")
-            };
+            let name = view.definition(def.name.ns(), def.name.name_symbol());
             if def.assoc.get(method).is_some_and(|af| af.instance) {
                 out.push(name.clone());
             }
@@ -10882,7 +10879,7 @@ impl Checker {
             // instantiation's, and is named with it.
             for i in def.insts.values() {
                 if i.assoc.get(method).is_some_and(|af| af.instance) {
-                    out.push(ConcreteNames::instantiated_type(&name, &i.args));
+                    out.push(Type::Named(def.name, i.args.clone()).to_string());
                 }
             }
         }
@@ -11580,7 +11577,7 @@ impl Checker {
     /// `T` of a `Chan<T>`, or a type error naming the operation.
     fn chan_element(&self, ty: &Type, what: &str) -> Result<Type, Error> {
         match ty {
-            Type::Named(p, args) if *p == Path::root("chan") && args.len() == 1 => Ok(args[0].clone()),
+            Type::Named(p, args) if *p == Path::std("chan") && args.len() == 1 => Ok(args[0].clone()),
             other => Err(Error::TypeError(format!(
                 "select: `{}` needs a Chan<T>, and this is `{}`",
                 what, other
@@ -11675,7 +11672,7 @@ impl Checker {
             if try_variant {
                 return Err(Error::TypeError(format!(
                     "try-as: `{}` either always succeeds or is a type error (a type's trait impls are known statically) — use `as`",
-                    ConcreteNames::type_key(&target)
+                    &target
                 )));
             }
             return self.coerce_to_dyn(env, src, trait_path, pins);
@@ -11747,7 +11744,7 @@ impl Checker {
         // cast is `int->W`, and `W` being a C word does not change which
         // family asked for it.
         let family = if target.is_int_family() || target.is_c_word() { "int" } else { "float" };
-        let name = ConcreteNames::type_key(target);
+        let name = target.scalar_name().expect("a width cast's target is a scalar");
         let method = if try_variant { format!("try-{}->{}", family, name) } else { format!("{}->{}", family, name) };
         let owner = prim_type_path(&src.ty).expect("a width cast's source is a primitive type");
         self.check_assoc_call(
@@ -11814,7 +11811,7 @@ impl Checker {
             many => {
                 let mut written: Vec<String> = many
                     .iter()
-                    .map(|i| format!("`{}::{}`", ConcreteNames::instantiated_type(&type_fq.to_string(), &i.args), member))
+                    .map(|i| format!("`{}::{}`", Type::Named(type_fq.clone(), i.args.clone()), member))
                     .collect();
                 written.sort();
                 Err(Error::TypeError(format!(
@@ -12219,7 +12216,7 @@ impl Checker {
                 wrap_some(self, inner, Type::Str)
             }
             None => {
-                let ty = Type::Named(Path::root("option"), vec![Type::Str]);
+                let ty = Type::Named(Path::std("option"), vec![Type::Str]);
                 option_none(self, ty)
             }
         }
@@ -13090,7 +13087,7 @@ impl Checker {
             "aref: `{}` is not an `Array<T>`. `aref` collects its subscripts into the \
              `Vector<i32>` an array is indexed by; a `Vector<T>`, `string` or `HashTable<K,V>` \
              takes its key directly, as `(get x k)` / `(setf (get x k) v)`.",
-            ConcreteNames::type_key(&recv_ty)
+            &recv_ty
         )))
     }
 
@@ -13662,7 +13659,7 @@ impl Checker {
     /// so a type that cannot be written is refused here instead of emitting a
     /// form that fails somewhere less legible.
     fn the_form(&self, heap: &mut Heap, outer: &str, elem: &Type, ctor: &str) -> Result<Value, Error> {
-        let ty = Type::Named(Path::root(outer), vec![elem.clone()]);
+        let ty = Type::Named(Path::std(outer), vec![elem.clone()]);
         let ty_form = forms::type_to_form(heap, &ty)?;
         let ty_form = forms::rooted(heap, ty_form);
         let ok = match self.parse_type_here_at(heap, ty_form, None) {
@@ -13676,7 +13673,7 @@ impl Checker {
             )));
         }
         let the = heap.intern_symbol("the");
-        let ctor = forms::member_form(heap, &Path::root(outer), ctor)?;
+        let ctor = forms::member_form(heap, &Path::std(outer), ctor)?;
         let ctor = forms::rooted(heap, ctor);
         let call = forms::list_from_vec_locs(heap, &[(ctor, None)])?;
         let call = forms::rooted(heap, call);
@@ -15566,7 +15563,7 @@ impl Checker {
         // `variants.len()` with nothing subtracted.
         let sexpr_sugar = is_option_of_sexpr(&scrut.ty);
         let sexpr_variants =
-            || self.info.reg.type_def(&Path::root("sexpr")).expect("sexpr is always registered").variants.len();
+            || self.info.reg.type_def(&Path::std("sexpr")).expect("sexpr is always registered").variants.len();
         // The retired `bignum` slot (`SEXPR_RETIRED_BIGNUM`) is neither writable
         // nor matchable, so it too is off the universe — one less than the
         // table says, in both the flat and the plain form.
@@ -16395,7 +16392,7 @@ impl Checker {
                     }
                 }
                 if let Some((adt, idx)) = self.info.resolve_ctor(id) {
-                    if adt != Path::root("sexpr") {
+                    if adt != Path::std("sexpr") {
                         let def = self.info.reg.type_def(&adt).expect("resolved ctor's type is registered");
                         no_generics(&adt, def)?;
                         return Ok(Some((adt, Vec::new(), idx)));
@@ -16461,9 +16458,9 @@ impl Checker {
             let must_name = || {
                 Error::TypeError(format!(
                     "pattern: `(the {} ..)` on a niche-represented Option must name a constructor — `(the {} (some x))` or `(the {} (none))` — since the Sexpr holds it boxed",
-                    ConcreteNames::type_key(&ty),
-                    ConcreteNames::type_key(&ty),
-                    ConcreteNames::type_key(&ty)
+                    &ty,
+                    &ty,
+                    &ty
                 ))
             };
             let sub_locs = heap.list_to_vec_locs(parts[2]).map_err(|_| must_name())?;
@@ -16875,7 +16872,7 @@ pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<V
 /// `Some(inner)` as a [`Checked`] — `Checker::check_as`'s `try-as` wrapper for a
 /// total conversion's already-computed result.
 fn wrap_some(checker: &Checker, inner: Checked, target: Type) -> Result<Checked, Error> {
-    let ty = Type::Named(Path::root("option"), vec![target.clone()]);
+    let ty = Type::Named(Path::std("option"), vec![target.clone()]);
     checker.option_value(&ty, Some(inner))
 }
 
@@ -17033,13 +17030,13 @@ fn has_open_hole(t: &Type) -> bool {
 /// check (below) that every individual variadic argument satisfies the
 /// declared element type before it's wrapped into the list.
 fn sexpr_ty() -> Type {
-    Type::Named(Path::root("sexpr"), vec![])
+    Type::Named(Path::std("sexpr"), vec![])
 }
 
 /// `Option<Sexpr>` — the type an S-expression datum has once the empty list
 /// is `none` (see [`is_option_of_sexpr`]).
 fn option_of_sexpr() -> Type {
-    Type::Named(Path::root("option"), vec![sexpr_ty()])
+    Type::Named(Path::std("option"), vec![sexpr_ty()])
 }
 
 /// Does an expected type ask for an S-expression?
@@ -17067,7 +17064,7 @@ fn is_option_of_sexpr(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, args)
         if crate::types::path_is_builtin(p, "option")
             && args.len() == 1
-            && matches!(&args[0], Type::Named(a, _) if *a == Path::root("sexpr")))
+            && matches!(&args[0], Type::Named(a, _) if *a == Path::std("sexpr")))
 }
 
 /// The `Sexpr` constructor name that exactly represents a value of `elem_ty`
@@ -17157,7 +17154,7 @@ fn int_lit_ty(expected: Option<&Type>) -> Type {
 /// with. Rejected here rather than silently cut, because a cut is a thing the
 /// caller can ask for and mean — that request is spelled `(as u8 300)`.
 fn int_lit_in_range(n: i64, ty: &Type) -> bool {
-    match crate::types::int_width_signed(&ConcreteNames::type_key(ty)) {
+    match ty.scalar_name().and_then(crate::types::int_width_signed) {
         Some((width, signed)) => crate::types::normalize_int(n, width, signed) == n,
         None => true,
     }
@@ -17172,8 +17169,8 @@ fn int_lit_in_range(n: i64, ty: &Type) -> bool {
 /// reaches the width cast through `bignum->int`, which is itself `i32`-wide,
 /// so suggesting `as` for one would send the caller at a second failure.
 fn int_lit_range_error(n: &str, ty: &Type, castable: bool) -> Error {
-    let name = ConcreteNames::type_key(ty);
-    let range = match crate::types::int_width_signed(&name) {
+    let name = ty.to_string();
+    let range = match ty.scalar_name().and_then(crate::types::int_width_signed) {
         Some((width, true)) => format!("{}..={}", -(1i64 << (width - 1)), (1i64 << (width - 1)) - 1),
         Some((width, false)) => format!("0..={}", (1i64 << width) - 1),
         None => String::new(),
@@ -17617,7 +17614,7 @@ fn loop_thereis_error(ty: &Type) -> Error {
     Error::TypeError(format!(
         "loop :thereis: expected an `Option<T>`, got `{}` — CL's `thereis` answers the first \
          non-nil value, and `Option` is what that is here (a `bool` test is `:always`/`:never`)",
-        ConcreteNames::type_key(ty)
+        ty
     ))
 }
 

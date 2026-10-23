@@ -100,8 +100,8 @@ impl CType {
             // points at is checked by the runtime, not the C signature.
             TypeShape::Ptr(_) => return Some(CType::Ptr),
             TypeShape::Unit => return Some(CType::Void),
-            // The primitives are the root's types without arguments.
-            TypeShape::Named(ns, name, args) if ns == NsId::ROOT && args.is_empty() => name.name(),
+            // The primitives are the standard library's types without arguments.
+            TypeShape::Named(ns, name, args) if ns == NsId::STD && args.is_empty() => name.name(),
             _ => return None,
         };
         // Covers the six widths *and* `c-long`/`c-ulong`, which that function
@@ -458,7 +458,7 @@ fn unspellable(ty: TypeId, where_: &str, decl: &FfiDecl) -> String {
         "defffi: `{}` declares `{}` as {}, which the FFI cannot spell in C. \
          It can spell the integer widths (i8/i16/i32/u8/u16/u32), c-long, c-ulong, f32, f64, \
          bool, string, ptr, and `()`.",
-        decl.path, &*typelisp_mem::type_name(ty), where_
+        decl.path, typelisp_print::shared::name_view().type_name(ty), where_
     )
 }
 
@@ -722,7 +722,7 @@ fn callback_ctypes(params: &[TypeId], ret: TypeId) -> Result<(Vec<CType>, CType)
                     "a callback takes `{}`, which the FFI cannot spell in C. It can spell the \
                      integer widths (i8/i16/i32/u8/u16/u32), c-long, c-ulong, f32, f64, bool, \
                      string and ptr.",
-                    &*typelisp_mem::type_name(*p)
+                    typelisp_print::shared::name_view().type_name(*p)
                 ))
             }
         }
@@ -737,7 +737,7 @@ fn callback_ctypes(params: &[TypeId], ret: TypeId) -> Result<(Vec<CType>, CType)
             )
         }
         Some(c) => c,
-        None => return Err(format!("a callback returns `{}`, which the FFI cannot spell in C", &*typelisp_mem::type_name(ret))),
+        None => return Err(format!("a callback returns `{}`, which the FFI cannot spell in C", typelisp_print::shared::name_view().type_name(ret))),
     };
     Ok((out, ret))
 }

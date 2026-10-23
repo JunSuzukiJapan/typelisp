@@ -19,11 +19,11 @@ use typelisp_mem::{spec, Heap, NsId, TypeSpec, Value};
 /// the registry's own declaration, for the reason that file gives: a box
 /// built under a type nobody else gives it is unmatchable.
 pub const READER_MACRO_OPTION_TYPE: TypeSpec = TypeSpec::Named(
-    NsId::ROOT,
+    NsId::STD,
     "option",
     &[TypeSpec::Fn(
         &[TypeSpec::Named(NsId::STD, "string-input-stream", &[]), spec::CHAR],
-        &TypeSpec::Named(NsId::ROOT, "option", &[spec::SEXPR]),
+        &TypeSpec::Named(NsId::STD, "option", &[spec::SEXPR]),
     )],
 );
 

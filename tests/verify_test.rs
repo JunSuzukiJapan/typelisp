@@ -155,5 +155,5 @@ fn a_trait_object_converted_to_a_trait_it_does_not_inherit_is_reported() {
            (defun go ((w :dyn walk)) i32 (pace w))
            (defun f ((s :dyn speak)) i32 (go s))"#,
     );
-    assert!(e.contains("cannot convert `dyn speak` to `dyn walk` — `speak` does not inherit `walk`"), "{}", e);
+    assert!(e.contains("cannot convert `:dyn speak` to `:dyn walk` — `speak` does not inherit `walk`"), "{}", e);
 }

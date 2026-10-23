@@ -130,7 +130,7 @@ pub fn alloc(arena: u64, count: i64, elem_size: usize, align: usize, positions: 
 /// Whether `addr` holds a live C object of type `ty`: inside a live block,
 /// at an offset where the block's element type has one.
 pub fn check(addr: usize, ty: TypeId) -> Result<(), String> {
-    let name = typelisp_mem::type_name(ty).to_string();
+    let name = typelisp_print::shared::name_view().type_name(ty);
     if addr == 0 {
         return Err(format!(
             "a `(ptr {})` from C is a null pointer. Declare it as `ptr` if it can be null.",

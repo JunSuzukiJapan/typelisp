@@ -13,7 +13,7 @@
 //! them. A form that breaks one is not analyzed on, since what it would have
 //! registered is missing and what follows would complain about that instead.
 
-use typelisp_mem::{ConcreteNames, Error, Loc};
+use typelisp_mem::{Error, Loc};
 
 use crate::types::Type;
 use crate::wk;
@@ -68,7 +68,7 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
                 Disagreement::Unsafe(Unsafe::RawWord { ty }) => format!(
                     "a `{}` is a raw machine word from the C FFI and can only be a value \
                      inside `(unsafe ...)` — nothing here can check that it points at anything",
-                    ConcreteNames::type_key(ty)
+                    ty
                 ),
                 Disagreement::Unsafe(Unsafe::TypedPtrAnswer { ty }) => format!(
                     "an `(unsafe ...)` cannot answer `{}`: the memory a typed pointer points at is freed \
@@ -120,20 +120,19 @@ fn walk(c: &Checked, outer: Option<&Loc>, out: &mut Vec<Error>) {
 }
 
 fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &NotDyn) -> String {
-    let key = ConcreteNames::type_key;
     let converts = |why: String| {
         let to = Type::Dyn(trait_path.clone(), pins.to_vec());
         format!(
             "cannot convert `{}` to `{}` — {}; box the concrete value as `:dyn {}` instead",
-            key(ty),
-            key(&to),
+            ty,
+            to,
             why,
             trait_path
         )
     };
     match why {
         NotDyn::NotNominal => {
-            format!("`{}` cannot be used as `:dyn {}`: it is not a nominal type", key(ty), trait_path)
+            format!("`{}` cannot be used as `:dyn {}`: it is not a nominal type", ty, trait_path)
         }
         NotDyn::Unimplemented => format!(
             "`{}` does not implement `{}`, so it cannot be used as `:dyn {}`",
@@ -141,12 +140,12 @@ fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &NotDyn) -> 
         ),
         NotDyn::NoHeapRepr => format!(
             "`{}` has no heap representation (its values are not `Sexpr`-encodable), so it cannot be boxed as `:dyn {}`",
-            key(ty),
+            ty,
             trait_path
         ),
         NotDyn::NichedOption => format!(
             "`{}` is a niche-represented Option with no box to carry a type key, so it cannot be boxed as `:dyn {}`",
-            key(ty),
+            ty,
             trait_path
         ),
         NotDyn::Assoc { owner, name, actual, pin } => format!(
@@ -154,10 +153,10 @@ fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &NotDyn) -> 
             owner,
             trait_path,
             name,
-            key(actual),
+            actual,
             trait_path,
             name,
-            key(pin)
+            pin
         ),
         NotDyn::NotInherited { from } => converts(format!("`{}` does not inherit `{}`", from, trait_path)),
         NotDyn::OutsideChain { from } => {
@@ -168,8 +167,8 @@ fn not_dyn(ty: &Type, trait_path: &crate::Path, pins: &[Type], why: &NotDyn) -> 
             from,
             trait_path,
             name,
-            key(actual),
-            key(want)
+            actual,
+            want
         )),
         NotDyn::Unpinned { from, name } => {
             converts(format!("`{}`'s `{}` is not pinned by `{}`", trait_path, name, from))

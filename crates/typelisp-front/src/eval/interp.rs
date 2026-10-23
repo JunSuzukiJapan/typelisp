@@ -746,8 +746,8 @@ impl Interp {
         // `construct` sites already get `mutable = true`
         // (`Checker::check_construct`) — but it never executes a
         // `TopLevel::Defstruct`, the only other place a struct `TypeEntry`
-        // gets populated, so it's seeded here by hand, directly at the root
-        // node (it has no defining module of its own). `hashtable`/`scope`
+        // gets populated, so it's seeded here by hand, in the standard
+        // library's module where the checker registered it. `hashtable`/`scope`
         // don't need this: both are `AdtKind::Sum` (`registry::hashtable_def`/
         // `scope_def`) with no `variants`/`field_names` of their own — user
         // code only ever builds one through its `::new()` assoc fn, never
@@ -759,8 +759,9 @@ impl Interp {
         // or a pattern to read here.
         // Its elements do print, though, and they are all of the one type
         // argument: a uniform template says so.
-        root.types.insert(
-            "vector".to_string(),
+        let vector = Path::std("vector");
+        root.get_or_create(&vector.parent()).types.insert(
+            vector.last_segment().to_string(),
             scope::TypeEntry::Struct {
                 reprs: Vec::new(),
                 templates: scope::FieldTemplates::Uniform(crate::type_key::field_template(&["t".to_string()], &crate::Type::Var("t".to_string()))),
@@ -774,8 +775,9 @@ impl Interp {
         // one either, but it prints as its type and the id (`#<chan<int> 3>`),
         // so the printer has to find it here — positionally, with no names.
         for handle in ["task", "thread", "chan"] {
-            root.types.insert(
-                handle.to_string(),
+            let handle = Path::std(handle);
+            root.get_or_create(&handle.parent()).types.insert(
+                handle.last_segment().to_string(),
                 scope::TypeEntry::Struct {
                     reprs: Vec::new(),
                     templates: scope::FieldTemplates::Positional(vec![crate::type_key::type_id(&crate::Type::Int)]),
@@ -2820,7 +2822,7 @@ impl Default for Interp {
 /// Whether `type_name` is the built-in `Sexpr` type, whose values are
 /// represented as a heap box rather than a Rust-side value.
 fn is_sexpr_type(type_name: &Path) -> bool {
-    *type_name == Path::root("sexpr")
+    *type_name == Path::std("sexpr")
 }
 
 pub(crate) fn rt_i64(v: &Value) -> Result<i64, EvalError> {
@@ -3779,14 +3781,14 @@ fn int_receiver_width(type_name: &Path) -> Option<(u32, bool)> {
     crate::types::INT_TYPE_NAMES
         .iter()
         .chain(crate::types::C_WORD_TYPE_NAMES.iter())
-        .find(|n| *type_name == Path::root(n))
+        .find(|n| *type_name == Path::std(n))
         .and_then(|n| crate::types::int_width_signed(n))
 }
 
 /// [`int_receiver_width`]'s float counterpart: `f32` and `f64` are one
 /// `Value::Float` (an `f64`) apart from which type labels them.
 fn is_float_receiver(type_name: &Path) -> bool {
-    crate::types::FLOAT_TYPE_NAMES.iter().any(|n| *type_name == Path::root(n))
+    crate::types::FLOAT_TYPE_NAMES.iter().any(|n| *type_name == Path::std(n))
 }
 
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
@@ -3826,7 +3828,7 @@ pub(crate) fn eval_builtin_method(
     args: &[Value],
     ret_type: TypeId,
 ) -> Option<Result<Value, EvalError>> {
-    if *type_name == Path::root("hashtable") {
+    if *type_name == Path::std("hashtable") {
         return match method {
             // `ret_type` is the *result's* runtime identity, spelled by the
             // checker (`Checker::assoc_form`): these builders have no field to
@@ -3849,7 +3851,7 @@ pub(crate) fn eval_builtin_method(
         };
     }
     // `join` is intercepted before this, as `Task<T>::wait` is.
-    if *type_name == Path::root("thread") {
+    if *type_name == Path::std("thread") {
         return match method {
             "current-id" => Some(Ok(Value::Int(typelisp_rt::sys_builtin::thread_current_id()))),
             "available-parallelism" => {
@@ -3858,7 +3860,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("vector") {
+    if *type_name == Path::std("vector") {
         return match method {
             // type-identity-ok: the built-in `Vector`, a root name spelled in full
             "new" => Some(Ok(crate::type_key::alloc_struct_of(heap, ret_type, Vec::new()))),
@@ -3870,7 +3872,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("scope") {
+    if *type_name == Path::std("scope") {
         // One representation: every `Scope<V>` is a `StructPayload::Frames`
         // heap box, and the element needs no encode or decode, so `V` never
         // enters into it — see this function's doc comment.
@@ -3886,7 +3888,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("string") {
+    if *type_name == Path::std("string") {
         return match method {
             "upcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_uppercase()).map(|s| str_rt(heap, s))),
             "downcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_lowercase()).map(|s| str_rt(heap, s))),
@@ -3908,7 +3910,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("char") {
+    if *type_name == Path::std("char") {
         return match method {
             "upcase" => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_uppercase()))),
             "downcase" => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_lowercase()))),
@@ -3957,7 +3959,7 @@ pub(crate) fn eval_builtin_method(
     if is_float_receiver(type_name) {
         // `f32` is binary32 and `f64` binary64: the receiver's own width says
         // what each result is rounded to (`float_at`).
-        let single = *type_name == Path::root("f32");
+        let single = *type_name == Path::std("f32");
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_float_builtin(heap, method, args, single)
@@ -3996,7 +3998,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("int") {
+    if *type_name == Path::std("int") {
         return match method {
             "+" | "-" | "*" | "truncate" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
             | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_integer_builtin(heap, method, args),
@@ -4018,7 +4020,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("ratio") {
+    if *type_name == Path::std("ratio") {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_ratio_builtin(heap, method, args)
@@ -4032,7 +4034,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("rational") {
+    if *type_name == Path::std("rational") {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_rational_builtin(heap, method, args)
@@ -4043,13 +4045,13 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("bool") {
+    if *type_name == Path::std("bool") {
         return match method {
             "eq" | "eql" | "equal" | "equalp" => Some(bool_eq(args)),
             _ => None,
         };
     }
-    if *type_name == Path::root("symbol") {
+    if *type_name == Path::std("symbol") {
         // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
         // `Sexpr::Sym`, so `eq`/`eql` reuse the `Sexpr` comparisons (interned
         // id identity — same name => same id => `eq`).
@@ -4059,7 +4061,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::root("sexpr") {
+    if *type_name == Path::std("sexpr") {
         return match method {
             // `eq`/`eql` now diverge, as anticipated by this arm's own prior
             // history (see `sexpr_eql`'s doc comment): `Sexpr::f64` became
@@ -4325,9 +4327,9 @@ const READER_MACRO_GLUE: &str = "call-reader-macro";
 /// `tests/type_identity_guard_test.rs` checks against the registry. Its inner
 /// `Option<Sexpr>` is [`TypeId::OPTION_SEXPR`].
 pub const MACROEXPAND_RESULT_TYPE: TypeSpec = TypeSpec::Named(
-    NsId::ROOT,
+    NsId::STD,
     "result",
-    &[TypeSpec::Named(NsId::ROOT, "option", &[spec::SEXPR]), TypeSpec::Named(NsId::ROOT, "evalerror", &[])],
+    &[TypeSpec::Named(NsId::STD, "option", &[spec::SEXPR]), TypeSpec::Named(NsId::STD, "evalerror", &[])],
 );
 
 /// `eval`'s result type — the same as `macroexpand`'s, and the same fixed
@@ -4352,7 +4354,7 @@ fn result_ok(heap: &mut Heap, ty: &TypeSpec, v: Value) -> Value {
 /// test against.
 fn result_err(heap: &mut Heap, result: &TypeSpec, err_type: &str, msg: String) -> Value {
     let msg_val = str_rt(heap, msg);
-    let err_val = alloc_typed_enum(heap, &Path::root(err_type), 0, vec![msg_val]);
+    let err_val = alloc_typed_enum(heap, &Path::std(err_type), 0, vec![msg_val]);
     // The `Result`'s own type, not the bare path: a value's identity carries
     // its instantiation, and `result` matches no `result<option<sexpr>,
     // evalerror>` pattern. `err_type` needs no such treatment — a concrete

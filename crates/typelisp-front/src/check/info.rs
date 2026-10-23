@@ -251,16 +251,12 @@ impl Info {
     /// current module without `pub`: only from that module itself. An
     /// enclosing or an enclosed module is another module.
     ///
-    /// Until the standard library is sorted into its own modules and the
-    /// built-in definitions at the root move into it
+    /// Until the standard library is sorted into its own modules
     /// (`docs/dev/explicit-symbols-plan.md`, stage 6), the library is in
-    /// scope everywhere, as the root it was moved out of was — its private
-    /// layer (`%internal`, a stream's handle) included — and its modules see
-    /// the root's private built-ins, the layer under `HashTable`'s
-    /// `get`/`set`.
+    /// scope everywhere — its private layer (`%internal`, a stream's handle,
+    /// the built-ins under `HashTable`'s `get`/`set`) included.
     pub(super) fn in_scope(&self, item_ns: NsId) -> bool {
-        let cur = self.ns;
-        item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)
+        item_ns == self.ns || in_std(item_ns)
     }
 
     /// Whether an associated function/method `af` of `type_fq` is reachable
@@ -287,7 +283,7 @@ impl Info {
     /// brought in under the name, then the definition in the module the
     /// symbol belongs to (a name a macro's expansion carried in from the
     /// macro's module), then what the standard library offers every module
-    /// under it (`std`'s own, and the built-in definitions at the root). No
+    /// under it. No
     /// enclosing module is consulted: a module sees what it defines and what
     /// it brings in (`docs/dev/explicit-symbols-plan.md`, 3.3).
     ///
@@ -311,11 +307,6 @@ impl Info {
         // where it was made says nothing about which definition it names.
         if sym.home() != here.ns && sym.well_known() == NOT_WELL_KNOWN {
             if let Some(found) = at(sym.home(), sym) {
-                return Some(found);
-            }
-        }
-        if let Some(root) = self.reg.offered_root(sym) {
-            if let Some(found) = at(NsId::ROOT, root) {
                 return Some(found);
             }
         }
@@ -433,7 +424,7 @@ impl Info {
     /// The `Sexpr` variant `name` — the one a value of a type with a `Sexpr`
     /// encoding is wrapped in — as `(type path, variant index)`.
     pub(super) fn sexpr_variant(&self, name: &str) -> (Path, usize) {
-        let path = Path::root("sexpr");
+        let path = Path::std("sexpr");
         let def = self.reg.type_def(&path).expect("sexpr is built in");
         let idx = def.variants.iter().position(|v| v.name == name).expect("sexpr has the variant");
         (path, idx)
@@ -445,11 +436,7 @@ impl Info {
     pub(super) fn offered_fn(&self, name: &str) -> Option<Path> {
         let sym = symbols::intern_exact(NsId::STD, name);
         let in_std = Path::of_symbol(NsId::STD, sym);
-        if self.reg.fn_sig(&in_std).is_some() {
-            return Some(in_std);
-        }
-        let root = Path::of_symbol(NsId::ROOT, self.reg.offered_root(sym)?);
-        self.reg.fn_sig(&root).is_some().then_some(root)
+        self.reg.fn_sig(&in_std).is_some().then_some(in_std)
     }
 
     /// The `Sexpr` `cons` variant's `(type path, variant index)`, read from the

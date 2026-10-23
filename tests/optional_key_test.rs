@@ -31,6 +31,7 @@ fn eval_ok_compiled(def_and_calls: &str, compile_name: &str) -> Value {
 fn check_err(src: &str) -> String {
     let mut h = Heap::with_capacity(1 << 16);
     let mut chk = Checker::new();
+    chk.publish_names(&h);
     let interp = Interp::new();
     let r = Reader::new();
     let vs = r.read_all(&mut h, src).expect("read failed");

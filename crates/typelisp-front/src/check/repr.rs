@@ -257,7 +257,7 @@ impl Repr {
             Type::Ratio => Repr::Ratio,
             Type::Rational => Repr::Rational,
             Type::RandomState => Repr::RandomState,
-            Type::Named(p, _) if *p == Path::root("sexpr") => Repr::Sexpr,
+            Type::Named(p, _) if *p == Path::std("sexpr") => Repr::Sexpr,
             // `Option<T>` is a niche whenever `T`'s values can be told from
             // the empty-list immediate: `none` is that immediate, `some v`
             // is `v`'s tagged word, and no box is built. Decided from the
@@ -775,37 +775,37 @@ mod tests {
         assert_eq!(of(Type::Str), Repr::Str);
         assert_eq!(of(Type::Symbol), Repr::Sym);
         assert_eq!(of(Type::Ratio), Repr::Ratio);
-        assert_eq!(of(Type::Named(Path::root("sexpr"), vec![])), Repr::Sexpr);
+        assert_eq!(of(Type::Named(Path::std("sexpr"), vec![])), Repr::Sexpr);
         assert_eq!(of(Type::Named(Path::root("point"), vec![])), Repr::Struct);
         assert_eq!(of(Type::Named(Path::root("my-enum"), vec![])), Repr::Enum);
         // The parametric builtins classify their elements too — the whole
         // reason they have variants of their own.
         assert_eq!(
-            of(Type::Named(Path::root("vector"), vec![Type::U32])),
+            of(Type::Named(Path::std("vector"), vec![Type::U32])),
             Repr::Vector(Box::new(Repr::Narrow))
         );
         assert_eq!(
-            of(Type::Named(Path::root("hashtable"), vec![Type::Str, Type::Bool])),
+            of(Type::Named(Path::std("hashtable"), vec![Type::Str, Type::Bool])),
             Repr::HashTable(Box::new(Repr::Str), Box::new(Repr::Bool))
         );
         // Recognized structurally rather than through the set — passing an
         // empty one must not turn `Option`/`Result` into `Repr::None`.
         let none: HashSet<Path> = HashSet::new();
         assert_eq!(
-            Repr::of(&Type::Named(Path::root("option"), vec![Type::I32]), &none, &none),
+            Repr::of(&Type::Named(Path::std("option"), vec![Type::I32]), &none, &none),
             Repr::Niche(Box::new(Repr::Narrow))
         );
         // The niche stops where the payload could be the empty word.
-        let option = |t: Type| Type::Named(Path::root("option"), vec![t]);
+        let option = |t: Type| Type::Named(Path::std("option"), vec![t]);
         assert_eq!(of(option(option(Type::I32))), Repr::Enum);
         assert_eq!(of(option(Type::Unit)), Repr::Enum);
         assert_eq!(of(option(Type::Ptr)), Repr::Enum);
         assert_eq!(of(option(Type::Named(Path::root("T"), vec![]))), Repr::Enum);
-        assert_eq!(of(option(Type::Named(Path::root("sexpr"), vec![]))), Repr::Niche(Box::new(Repr::Sexpr)));
+        assert_eq!(of(option(Type::Named(Path::std("sexpr"), vec![]))), Repr::Niche(Box::new(Repr::Sexpr)));
         assert_eq!(of(option(Type::Named(Path::root("point"), vec![]))), Repr::Niche(Box::new(Repr::Struct)));
         assert_eq!(of(option(Type::F64)), Repr::Niche(Box::new(Repr::F64)));
         assert_eq!(
-            Repr::of(&Type::Named(Path::root("result"), vec![Type::I32, Type::Str]), &none, &none),
+            Repr::of(&Type::Named(Path::std("result"), vec![Type::I32, Type::Str]), &none, &none),
             Repr::Enum
         );
         assert_eq!(of(Type::Fn(vec![], None, Box::new(Type::Unit))), Repr::Fn);

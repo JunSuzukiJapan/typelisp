@@ -95,6 +95,12 @@ impl Path {
         (self.ns == NsId::STD || self.ns == internal_ns()).then(|| self.last_segment())
     }
 
+    /// Whether this path is directly inside the standard library's module,
+    /// where the built-in types are defined.
+    pub fn is_std(&self) -> bool {
+        self.ns == NsId::STD
+    }
+
     /// Whether this path is directly inside the library's internal module.
     pub fn is_internal(&self) -> bool {
         self.ns == internal_ns()
@@ -242,24 +248,24 @@ impl fmt::Display for Path {
 /// Whether `p` is the built-in type `name`.
 ///
 /// Every built-in (`vector`/`hashtable`/`option`/`result`/`llvm-*`/`scope`/the
-/// primitives) is registered at the *root* namespace
-/// (`Registry::with_builtins`), so a qualified path can never be one however
-/// its last segment reads — which is the whole point of the `is_simple` half.
-/// Redefining a built-in type name is rejected at the root
-/// (`Checker::check_redef`), but nothing stops `(module m (defstruct vector
-/// ...))`, and compiled code that recognized the built-in by last segment
+/// primitives) is registered in the standard library's module
+/// (`Registry::with_builtins`), so a path anywhere else can never be one
+/// however its last segment reads — which is the whole point of the `is_std`
+/// half. Redefining a built-in type name there is rejected
+/// (`Checker::check_redef`), but nothing stops `(defstruct vector ...)` in
+/// another module, and compiled code that recognized the built-in by last segment
 /// alone lowered *that* type's methods to `vector-op`, reading a user struct
 /// as if it were a `Vector` — silently wrong for `vector`, a `BoxId does not
 /// hold a HashTable` abort for `hashtable` (fixed 2026-08-04).
 pub fn path_is_builtin(p: &Path, name: &str) -> bool {
-    p.is_simple() && p.last_segment() == name
+    p.is_std() && p.last_segment() == name
 }
 
 /// [`path_is_builtin`] against a set of names — for the "one of the natively
 /// lowered built-ins" tests, whose name lists live as consts below so every
 /// site reads the same list instead of spelling its own.
 pub fn path_is_builtin_any(p: &Path, names: &[&str]) -> bool {
-    p.is_simple() && names.contains(&p.last_segment())
+    p.is_std() && names.contains(&p.last_segment())
 }
 
 /// The LLVM handle *types* (`crate::compile::Repr::Handle`):
@@ -460,7 +466,7 @@ impl fmt::Display for Type {
                 write!(f, "}}")
             }
             Type::Named(p, ts) => {
-                let written = if p.is_simple() { builtin_spelling(p.last_segment()) } else { None };
+                let written = if p.is_std() { builtin_spelling(p.last_segment()) } else { None };
                 match written {
                     Some(w) => write!(f, "{}", w)?,
                     None => write!(f, "{}", view.definition(p.ns(), p.name_symbol()))?,
@@ -490,8 +496,10 @@ impl fmt::Display for Type {
             }
             Type::PtrTo(t) => write!(f, "{}", typelisp_mem::ConcreteNames::ptr_type(&t.to_string())),
             Type::CStruct(p) => write!(f, "{}", view.definition(p.ns(), p.name_symbol())),
-            // The scalars, each a root name no module can shadow.
-            other => write!(f, "{}", typelisp_mem::ConcreteNames::type_key(other)),
+            Type::Unit => write!(f, "()"),
+            Type::Never => write!(f, "!"),
+            // The scalars, each written as its name alone wherever the reader is.
+            scalar => write!(f, "{}", scalar.scalar_name().expect("every other type is written above")),
         }
     }
 }
@@ -542,6 +550,36 @@ fn builtin_spelling(name: &str) -> Option<&'static str> {
 }
 
 impl Type {
+    /// The name a scalar type is defined under in the standard library's
+    /// module (`int`, `string`, `ptr`), or `None` when `self` is not a
+    /// scalar. Its key, its path and its written form are all this name.
+    pub fn scalar_name(&self) -> Option<&'static str> {
+        Some(match self {
+            Type::Ptr => "ptr",
+            Type::CLong => "c-long",
+            Type::CULong => "c-ulong",
+            Type::I8 => "i8",
+            Type::I16 => "i16",
+            Type::I32 => "i32",
+            Type::U8 => "u8",
+            Type::U16 => "u16",
+            Type::U32 => "u32",
+            Type::F32 => "f32",
+            Type::F64 => "f64",
+            Type::Int => "int",
+            Type::Ratio => "ratio",
+            Type::Rational => "rational",
+            Type::RandomState => "random-state",
+            Type::Bool => "bool",
+            Type::Char => "char",
+            Type::Str => "string",
+            Type::Symbol => "symbol",
+            Type::Unit | Type::Never | Type::Named(..) | Type::Var(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) => {
+                return None
+            }
+        })
+    }
+
     /// The six built-in integer types (`i8`/`i16`/`i32`, `u8`/`u16`/`u32`).
     /// The one authoritative list, so callers that need to single out "an
     /// integer type" (`Checker::int_lit_ty`/pattern checking, `core_bridge`'s
@@ -658,11 +696,6 @@ pub fn primitive_types() -> Vec<Type> {
     ]
 }
 
-/// The registry [`Path`] a primitive `Type` is addressed by when used as a
-/// `defmethod` receiver (e.g. `Type::I32` -> `i32`). Mirrors the surface
-/// names [`primitive_by_name`] recognizes, so `(defmethod m ((self i32)) ...)`
-/// and this lookup agree on the same name. `None` for `Unit`/`Never`/`Named`/
-/// `Fn`, which are not primitive value types with their own method table here.
 /// The path a type's methods and `impl`s are registered under: a named
 /// type's own path, a primitive's built-in name ([`prim_type_path`]). `None`
 /// for a type with no name — a trait object, `()`, `!`, a function, a pointer
@@ -674,35 +707,18 @@ pub fn nominal_path(ty: &Type) -> Option<Path> {
     }
 }
 
+/// The registry [`Path`] a primitive `Type` is addressed by when used as a
+/// `defmethod` receiver (e.g. `Type::I32` -> `std::i32`). Mirrors the surface
+/// names [`primitive_by_name`] recognizes, so `(defmethod m ((self i32)) ...)`
+/// and this lookup agree on the same name. `None` for `ptr`, which is
+/// genuinely opaque — nothing to call on it — and for every type that is not
+/// a scalar. The two C words are addressable, because their conversions hang
+/// here; what they do *not* get is arithmetic (see `registry::c_word_assoc`).
 pub fn prim_type_path(ty: &Type) -> Option<Path> {
-    let name = match ty {
-        // `ptr` is genuinely opaque — nothing to call on it. The two C words
-        // are addressable, because their conversions hang here; what they do
-        // *not* get is arithmetic (see `registry::c_word_assoc`).
-        Type::Ptr => return None,
-        Type::CLong => "c-long",
-        Type::CULong => "c-ulong",
-        Type::I8 => "i8",
-        Type::I16 => "i16",
-        Type::I32 => "i32",
-        Type::U8 => "u8",
-        Type::U16 => "u16",
-        Type::U32 => "u32",
-        Type::F32 => "f32",
-        Type::F64 => "f64",
-        Type::Int => "int",
-        Type::Ratio => "ratio",
-        Type::Rational => "rational",
-        Type::RandomState => "random-state",
-        Type::Bool => "bool",
-        Type::Char => "char",
-        Type::Str => "string",
-        Type::Symbol => "symbol",
-        Type::Unit | Type::Never | Type::Named(..) | Type::Var(_) | Type::Dyn(..) | Type::Fn(..) | Type::PtrTo(_) | Type::CStruct(_) => {
-            return None
-        }
-    };
-    Some(Path::root(name))
+    match ty {
+        Type::Ptr => None,
+        other => other.scalar_name().map(Path::std),
+    }
 }
 
 /// One written type/trait *name* occurrence inside a type expression, with

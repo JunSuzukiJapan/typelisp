@@ -140,7 +140,7 @@ fn builtins_still_resolve() {
     // setup needed.
     assert_eq!(
         ty_program("(option::some 1)"),
-        Type::Named(Path::root("option"), vec![Type::Int])
+        Type::Named(Path::std("option"), vec![Type::Int])
     );
 }
 
@@ -166,13 +166,13 @@ fn bare_result_and_error_constructors_no_longer_resolve() {
 fn use_option_makes_constructors_callable_bare() {
     assert_eq!(
         ty_program("(use option) (some 1)"),
-        Type::Named(Path::root("option"), vec![Type::Int])
+        Type::Named(Path::std("option"), vec![Type::Int])
     );
     // `none` has no fields, so — same limitation as `option::none` alone,
     // see `prelude_test.rs`'s comment on this — it needs a declared return
     // type to seed `T` from; bare `(none)` with no context can't infer it.
     let src = "(use option) (defun f () Option<int> (none)) (f)";
-    assert_eq!(ty_program(src), Type::Named(Path::root("option"), vec![Type::Int]));
+    assert_eq!(ty_program(src), Type::Named(Path::std("option"), vec![Type::Int]));
 }
 
 #[test]

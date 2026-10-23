@@ -98,25 +98,7 @@ fn type_id_in(ty: &Type, params: &[String]) -> TypeId {
             Some(i) => TypeShape::Param(i as u32),
             None => panic!("the type variable `{}` has no runtime identity (internal error)", name),
         },
-        Type::Ptr
-        | Type::CLong
-        | Type::CULong
-        | Type::I8
-        | Type::I16
-        | Type::I32
-        | Type::U8
-        | Type::U16
-        | Type::U32
-        | Type::F32
-        | Type::F64
-        | Type::Int
-        | Type::Ratio
-        | Type::Rational
-        | Type::RandomState
-        | Type::Bool
-        | Type::Char
-        | Type::Str
-        | Type::Symbol => TypeShape::named(NsId::ROOT, &ty.type_key(), &[]),
+        scalar => TypeShape::named(NsId::STD, scalar.scalar_name().expect("every other type is matched above"), &[]),
     };
     typelisp_mem::intern_type(shape)
 }
@@ -237,30 +219,11 @@ pub fn definition_path(ty: TypeId) -> Option<Path> {
 }
 
 /// How a type is spelled as text: the whole path, plus its type arguments
-/// when it has any (`gen<i32>`, `hashtable<string,i32>`). For a type with no
+/// when it has any (`gen<std::i32>`, `std::hashtable<std::string,std::i32>`). For a type with no
 /// arguments this is [`type_key_of`] of its path, character for character.
 impl TypeKey for Type {
     fn type_key(&self) -> String {
         match self {
-            Type::Ptr => "ptr".into(),
-            Type::CLong => "c-long".into(),
-            Type::CULong => "c-ulong".into(),
-            Type::I8 => "i8".into(),
-            Type::I16 => "i16".into(),
-            Type::I32 => "i32".into(),
-            Type::U8 => "u8".into(),
-            Type::U16 => "u16".into(),
-            Type::U32 => "u32".into(),
-            Type::F32 => "f32".into(),
-            Type::F64 => "f64".into(),
-            Type::Int => "int".into(),
-            Type::Ratio => "ratio".into(),
-            Type::Rational => "rational".into(),
-            Type::RandomState => "random-state".into(),
-            Type::Bool => "bool".into(),
-            Type::Char => "char".into(),
-            Type::Str => "string".into(),
-            Type::Symbol => "symbol".into(),
             Type::Unit => "()".into(),
             Type::Never => "!".into(),
             Type::PtrTo(t) => ConcreteNames::ptr_type(&**t),
@@ -269,6 +232,7 @@ impl TypeKey for Type {
             Type::Var(name) => name.clone(),
             Type::Dyn(p, pins) => ConcreteNames::dyn_type(&p.to_string(), pins),
             Type::Fn(ps, rest, r) => ConcreteNames::fn_type(ps, rest.as_deref(), &**r),
+            scalar => type_key_of(&Path::std(scalar.scalar_name().expect("every other type is matched above"))).into_owned(),
         }
     }
 }

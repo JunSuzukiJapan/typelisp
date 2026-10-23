@@ -685,7 +685,7 @@ pub fn type_form(heap: &mut Heap, ty: &Type, params: &[String]) -> Result<Value,
         | Type::Char
         | Type::Str
         | Type::Symbol => {
-            let v = path_form(f.heap(), &crate::Path::root(&typelisp_mem::TypeKey::type_key(ty)));
+            let v = path_form(f.heap(), &crate::Path::std(ty.scalar_name().expect("a scalar has a name")));
             f.push(v);
             wk::TYPE_NAMED
         }

@@ -135,7 +135,7 @@ fn report(hits: &[Hit], rule: &str, fix: &str) {
 }
 
 /// Rule 1: deciding "is this path the built-in `X`?" by comparing the last
-/// segment to a string literal, without the `is_simple` half.
+/// segment to a string literal, without the `is_std` half.
 #[test]
 fn a_builtin_type_is_never_recognized_by_its_last_segment_alone() {
     let hits = scan(
@@ -211,24 +211,24 @@ fn the_runtimes_fixed_types_are_the_checkers() {
     use typelisp::TypeId;
 
     for (id, path) in [
-        (TypeId::OPTION, Path::root("option")),
-        (TypeId::RESULT, Path::root("result")),
-        (TypeId::FILE_ERROR, Path::root(typelisp::check::registry::FILE_ERROR)),
-        (TypeId::READ_ERROR, Path::root(typelisp::check::registry::READ_ERROR)),
-        (TypeId::PARSE_INT_ERROR, Path::root(typelisp::check::registry::PARSE_INT_ERROR)),
-        (TypeId::PARSE_FLOAT_ERROR, Path::root(typelisp::check::registry::PARSE_FLOAT_ERROR)),
+        (TypeId::OPTION, Path::std("option")),
+        (TypeId::RESULT, Path::std("result")),
+        (TypeId::FILE_ERROR, Path::std(typelisp::check::registry::FILE_ERROR)),
+        (TypeId::READ_ERROR, Path::std(typelisp::check::registry::READ_ERROR)),
+        (TypeId::PARSE_INT_ERROR, Path::std(typelisp::check::registry::PARSE_INT_ERROR)),
+        (TypeId::PARSE_FLOAT_ERROR, Path::std(typelisp::check::registry::PARSE_FLOAT_ERROR)),
         // `file-list-directory` builds a `Vector<string>` box directly, and
         // `read-datum-at` pairs its datum with its end index in a
         // `cons-cell<Sexpr, int>` box (CL's second return value, which this
         // language has no multiple values to carry) — both on the runtime's
         // own side of the boundary, so both need the identity too.
-        (TypeId::VECTOR, Path::root("vector")),
+        (TypeId::VECTOR, Path::std("vector")),
         (TypeId::CONS_CELL, Path::std("cons-cell")),
         // The heap's own machinery: a `HashTable<K,V>` box, and the frames a
         // `Scope<V>` is made of.
-        (TypeId::HASHTABLE, Path::root("hashtable")),
-        (TypeId::SCOPE, Path::root("scope")),
-        (TypeId::SCOPE_FRAME, Path::root("scope-frame")),
+        (TypeId::HASHTABLE, Path::std("hashtable")),
+        (TypeId::SCOPE, Path::std("scope")),
+        (TypeId::SCOPE_FRAME, Path::std("scope-frame")),
         // Three prelude `defstruct`s the runtime builds itself (in `std`, as
         // the whole prelude is, like `cons-cell` above), because the
         // facts in them belong to the runtime and not to the checker: two
@@ -238,8 +238,8 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         (TypeId::INTERNAL_TIME, Path::std("internal-time")),
         (TypeId::HEAP_INFO, Path::std("heap-info")),
         // The socket layer's error type, built by `net_builtin`.
-        (TypeId::NET_ERROR, Path::root("neterror")),
-        (TypeId::SEXPR, Path::root("sexpr")),
+        (TypeId::NET_ERROR, Path::std("neterror")),
+        (TypeId::SEXPR, Path::std("sexpr")),
     ] {
         assert_eq!(
             id,
@@ -345,7 +345,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
     use typelisp::TypeId;
 
     let reg = Registry::with_builtins();
-    let sexpr = reg.type_def(&Path::root("sexpr")).expect("sexpr is registered");
+    let sexpr = reg.type_def(&Path::std("sexpr")).expect("sexpr is registered");
     let payload = |variant: usize| -> TypeId {
         let fields = &sexpr.variants[variant].fields;
         assert_eq!(fields.len(), 1, "`{}` should carry one payload", sexpr_variant::NAMES[variant]);
@@ -355,7 +355,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
     assert_eq!(TypeId::SEXPR_ARRAY, payload(sexpr_variant::ARRAY));
     assert_eq!(
         typelisp_mem::intern_spec(&typelisp_read::ARRAY_DIMS_TYPE),
-        typelisp::type_key::type_id(&typelisp::Type::Named(Path::root("vector"), vec![typelisp::Type::Int]))
+        typelisp::type_key::type_id(&typelisp::Type::Named(Path::std("vector"), vec![typelisp::Type::Int]))
     );
 }
 
@@ -368,7 +368,7 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
 fn the_read_tuple_type_is_the_checkers_tuple_of_data() {
     use typelisp::types::{tuple_path, Path};
     use typelisp::Type;
-    let data = Type::Named(Path::root("option"), vec![Type::Named(Path::root("sexpr"), vec![])]);
+    let data = Type::Named(Path::std("option"), vec![Type::Named(Path::std("sexpr"), vec![])]);
     for n in 1..=typelisp::TUPLE_MAX_ARITY {
         let ty = Type::Named(tuple_path(n), vec![data.clone(); n]);
         assert_eq!(typelisp::sexpr_tuple_type(n), typelisp::type_key::type_id(&ty), "arity {}", n);

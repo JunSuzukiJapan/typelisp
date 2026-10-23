@@ -2520,8 +2520,8 @@ impl Interp {
         // *suspend*, and a builtin answers with a value or an error, with no way
         // to say "not yet". Intercepted here, where a `State` can say it.
         // `Thread<T>::join` is the same wait: a thread is a task.
-        if (method == "wait" && type_name == crate::Path::root("task"))
-            || (method == "join" && type_name == crate::Path::root("thread"))
+        if (method == "wait" && type_name == crate::Path::std("task"))
+            || (method == "join" && type_name == crate::Path::std("thread"))
         {
             let on = task_id_of(heap, argv.first().copied())?;
             return Ok((State::Blocked(Waiting::Task(on)), None));
@@ -2535,7 +2535,7 @@ impl Interp {
         // prelude's own `Iter::next`, and any `impl` a program writes) has to
         // fall through to ordinary resolution, and a monomorphized one
         // arrives under a mangled name that matches none of these.
-        if type_name == crate::Path::root("chan") {
+        if type_name == crate::Path::std("chan") {
             let op = match method.as_str() {
                 "new" => match argv.first() {
                     // `ret_type` is the channel's own type (`chan<int>`), which

@@ -110,7 +110,7 @@ fn a_mismatch_names_types_as_they_are_written() {
 
 #[test]
 fn types_display_in_source_syntax() {
-    let named = |n: &str, args: Vec<Type>| Type::Named(Path::root(n), args);
+    let named = |n: &str, args: Vec<Type>| Type::Named(Path::std(n), args);
     assert_eq!(named("vector", vec![named("option", vec![Type::Int])]).to_string(), "Vector<Option<int>>");
     assert_eq!(named("hashtable", vec![Type::Str, Type::I32]).to_string(), "HashTable<string,i32>");
     assert_eq!(Type::Named(Path::of(&["geo", "point"]), vec![]).to_string(), "geo::point");

@@ -1259,7 +1259,8 @@ mod native_method_list_tests {
         for (_, type_locals) in PRIMITIVES {
             for type_local in *type_locals {
                 let def = registry
-                    .root()
+                    .module_at(typelisp_mem::NsId::STD)
+                    .expect("the registry always has the standard library's module")
                     .types
                     .get(*type_local)
                     .unwrap_or_else(|| panic!("`{}` is not a built-in type in the registry", type_local));

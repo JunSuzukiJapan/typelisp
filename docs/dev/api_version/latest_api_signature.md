@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.23
+# ABI バージョン 0.3.24
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.23 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.24 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `c0e7272387cbef08`
+内容ハッシュ (FNV-1a 64): `c504f6bb31fe4543`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -396,111 +396,111 @@
 
 | 番号 | 型 |
 |---|---|
-| 0 | `option` |
-| 1 | `result` |
-| 2 | `vector` |
+| 0 | `std::option` |
+| 1 | `std::result` |
+| 2 | `std::vector` |
 | 3 | `std::cons-cell` |
-| 4 | `hashtable` |
-| 5 | `scope` |
-| 6 | `scope-frame` |
-| 7 | `readerror` |
-| 8 | `fileerror` |
-| 9 | `parseinterror` |
-| 10 | `parsefloaterror` |
+| 4 | `std::hashtable` |
+| 5 | `std::scope` |
+| 6 | `std::scope-frame` |
+| 7 | `std::readerror` |
+| 8 | `std::fileerror` |
+| 9 | `std::parseinterror` |
+| 10 | `std::parsefloaterror` |
 | 11 | `std::universal-time` |
 | 12 | `std::internal-time` |
 | 13 | `std::heap-info` |
-| 14 | `neterror` |
-| 15 | `sexpr` |
-| 16 | `option<sexpr>` |
-| 17 | `vector<option<sexpr>>` |
-| 18 | `std::array<option<sexpr>>` |
+| 14 | `std::neterror` |
+| 15 | `std::sexpr` |
+| 16 | `std::option<std::sexpr>` |
+| 17 | `std::vector<std::option<std::sexpr>>` |
+| 18 | `std::array<std::option<std::sexpr>>` |
 
 ## 実行時が組み立てる値の型 (typelisp_rt)
 
 | 表 | 関数 | 型 |
 |---|---|---|
-| sys_builtin::RESULT_TYPES | `parse-float` | `result<f64,parsefloaterror>` |
-| sys_builtin::RESULT_TYPES | `command-line-args` | `vector<string>` |
-| sys_builtin::RESULT_TYPES | `getenv` | `option<string>` |
-| sys_builtin::RESULT_TYPES | `home-directory` | `option<string>` |
-| sys_builtin::RESULT_TYPES | `machine-instance` | `option<string>` |
-| sys_builtin::RESULT_TYPES | `machine-version` | `option<string>` |
-| sys_builtin::RESULT_TYPES | `software-version` | `option<string>` |
-| sys_builtin::RESULT_TYPES | `timezone-offset-seconds` | `option<int>` |
-| sys_builtin::RESULT_TYPES | `timezone-daylight-p` | `option<bool>` |
-| sys_builtin::RESULT_TYPES | `dribble-start` | `result<(),fileerror>` |
-| sys_builtin::RESULT_TYPES | `dribble-stop` | `result<(),fileerror>` |
-| sys_builtin::RESULT_TYPES | `ed-open` | `result<(),fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-open-file` | `result<i32,fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-close` | `result<(),fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-input-p` | `result<bool,fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-output-p` | `result<bool,fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-listen` | `result<bool,fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-position` | `result<int,fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-at-line-start` | `result<bool,fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-read-char` | `result<option<char>,fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-unread-char` | `result<(),fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-read-byte` | `result<option<int>,fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-write-byte` | `result<(),fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-write-string` | `result<(),fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-finish-output` | `result<(),fileerror>` |
-| stream_builtin::RESULT_TYPES | `stream-take-output-string` | `result<string,fileerror>` |
-| stream_builtin::RESULT_TYPES | `file-delete` | `result<(),fileerror>` |
-| stream_builtin::RESULT_TYPES | `file-truename` | `result<string,fileerror>` |
-| stream_builtin::RESULT_TYPES | `file-modified-date` | `result<std::universal-time,fileerror>` |
-| stream_builtin::RESULT_TYPES | `file-owner-name` | `result<option<string>,fileerror>` |
-| stream_builtin::RESULT_TYPES | `file-list-directory` | `result<vector<string>,fileerror>` |
-| stream_builtin::RESULT_TYPES | `file-create-directories` | `result<(),fileerror>` |
-| stream_builtin::RESULT_TYPES | `file-rename` | `result<(),fileerror>` |
-| stream_builtin::INNER_TYPES | `stream-read-char` | `option<char>` |
-| stream_builtin::INNER_TYPES | `stream-read-byte` | `option<int>` |
-| stream_builtin::INNER_TYPES | `file-list-directory` | `vector<string>` |
-| stream_builtin::INNER_TYPES | `file-owner-name` | `option<string>` |
-| net_builtin::RESULT_TYPES | `net-resolve-begin` | `result<i32,neterror>` |
-| net_builtin::RESULT_TYPES | `net-resolve-finish` | `result<option<vector<string>>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-connect-begin` | `result<i32,neterror>` |
-| net_builtin::RESULT_TYPES | `net-connect-finish` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-listen` | `result<i32,neterror>` |
-| net_builtin::RESULT_TYPES | `net-tls-listen` | `result<i32,neterror>` |
-| net_builtin::RESULT_TYPES | `net-unix-connect` | `result<i32,neterror>` |
-| net_builtin::RESULT_TYPES | `net-unix-listen` | `result<i32,neterror>` |
-| net_builtin::RESULT_TYPES | `net-accept` | `result<option<i32>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-fill` | `result<option<int>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-pop-byte` | `result<option<int>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-pop-char` | `result<option<char>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-buffered-p` | `result<bool,neterror>` |
-| net_builtin::RESULT_TYPES | `net-push-string` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-push-byte` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-flush` | `result<option<int>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-socket-error` | `result<option<string>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-peer-subject` | `result<option<string>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-server-name` | `result<option<string>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-set-nodelay` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-set-keepalive` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-set-keepalive-period` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-tls-add-certificate` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-shutdown-write` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-local-address` | `result<string,neterror>` |
-| net_builtin::RESULT_TYPES | `net-peer-address` | `result<string,neterror>` |
-| net_builtin::RESULT_TYPES | `net-tls-start` | `result<(),neterror>` |
-| net_builtin::RESULT_TYPES | `net-tls-handshake` | `result<option<int>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-udp-bind` | `result<i32,neterror>` |
-| net_builtin::RESULT_TYPES | `net-udp-send-to` | `result<bool,neterror>` |
-| net_builtin::RESULT_TYPES | `net-udp-recv` | `result<option<vector<int>>,neterror>` |
-| net_builtin::RESULT_TYPES | `net-udp-last-sender` | `result<string,neterror>` |
-| net_builtin::INNER_TYPES | `net-resolve-finish` | `option<vector<string>>` |
-| net_builtin::INNER_TYPES | `net-tls-handshake` | `option<int>` |
-| net_builtin::INNER_TYPES | `net-udp-recv` | `option<vector<int>>` |
-| net_builtin::INNER_TYPES | `net-accept` | `option<i32>` |
-| net_builtin::INNER_TYPES | `net-fill` | `option<int>` |
-| net_builtin::INNER_TYPES | `net-flush` | `option<int>` |
-| net_builtin::INNER_TYPES | `net-socket-error` | `option<string>` |
-| net_builtin::INNER_TYPES | `net-peer-subject` | `option<string>` |
-| net_builtin::INNER_TYPES | `net-server-name` | `option<string>` |
-| net_builtin::INNER_TYPES | `net-pop-byte` | `option<int>` |
-| net_builtin::INNER_TYPES | `net-pop-char` | `option<char>` |
-| readtable::READER_MACRO_OPTION_TYPE | | `option<(fn (std::string-input-stream,char) option<sexpr>)>` |
+| sys_builtin::RESULT_TYPES | `parse-float` | `std::result<std::f64,std::parsefloaterror>` |
+| sys_builtin::RESULT_TYPES | `command-line-args` | `std::vector<std::string>` |
+| sys_builtin::RESULT_TYPES | `getenv` | `std::option<std::string>` |
+| sys_builtin::RESULT_TYPES | `home-directory` | `std::option<std::string>` |
+| sys_builtin::RESULT_TYPES | `machine-instance` | `std::option<std::string>` |
+| sys_builtin::RESULT_TYPES | `machine-version` | `std::option<std::string>` |
+| sys_builtin::RESULT_TYPES | `software-version` | `std::option<std::string>` |
+| sys_builtin::RESULT_TYPES | `timezone-offset-seconds` | `std::option<std::int>` |
+| sys_builtin::RESULT_TYPES | `timezone-daylight-p` | `std::option<std::bool>` |
+| sys_builtin::RESULT_TYPES | `dribble-start` | `std::result<(),std::fileerror>` |
+| sys_builtin::RESULT_TYPES | `dribble-stop` | `std::result<(),std::fileerror>` |
+| sys_builtin::RESULT_TYPES | `ed-open` | `std::result<(),std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-open-file` | `std::result<std::i32,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-close` | `std::result<(),std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-input-p` | `std::result<std::bool,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-output-p` | `std::result<std::bool,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-listen` | `std::result<std::bool,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-position` | `std::result<std::int,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-at-line-start` | `std::result<std::bool,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-read-char` | `std::result<std::option<std::char>,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-unread-char` | `std::result<(),std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-read-byte` | `std::result<std::option<std::int>,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-write-byte` | `std::result<(),std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-write-string` | `std::result<(),std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-finish-output` | `std::result<(),std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `stream-take-output-string` | `std::result<std::string,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-delete` | `std::result<(),std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-truename` | `std::result<std::string,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-modified-date` | `std::result<std::universal-time,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-owner-name` | `std::result<std::option<std::string>,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-list-directory` | `std::result<std::vector<std::string>,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-create-directories` | `std::result<(),std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-rename` | `std::result<(),std::fileerror>` |
+| stream_builtin::INNER_TYPES | `stream-read-char` | `std::option<std::char>` |
+| stream_builtin::INNER_TYPES | `stream-read-byte` | `std::option<std::int>` |
+| stream_builtin::INNER_TYPES | `file-list-directory` | `std::vector<std::string>` |
+| stream_builtin::INNER_TYPES | `file-owner-name` | `std::option<std::string>` |
+| net_builtin::RESULT_TYPES | `net-resolve-begin` | `std::result<std::i32,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-resolve-finish` | `std::result<std::option<std::vector<std::string>>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-connect-begin` | `std::result<std::i32,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-connect-finish` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-listen` | `std::result<std::i32,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-tls-listen` | `std::result<std::i32,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-unix-connect` | `std::result<std::i32,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-unix-listen` | `std::result<std::i32,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-accept` | `std::result<std::option<std::i32>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-fill` | `std::result<std::option<std::int>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-pop-byte` | `std::result<std::option<std::int>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-pop-char` | `std::result<std::option<std::char>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-buffered-p` | `std::result<std::bool,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-push-string` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-push-byte` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-flush` | `std::result<std::option<std::int>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-socket-error` | `std::result<std::option<std::string>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-peer-subject` | `std::result<std::option<std::string>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-server-name` | `std::result<std::option<std::string>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-set-nodelay` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-set-keepalive` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-set-keepalive-period` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-tls-add-certificate` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-shutdown-write` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-local-address` | `std::result<std::string,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-peer-address` | `std::result<std::string,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-tls-start` | `std::result<(),std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-tls-handshake` | `std::result<std::option<std::int>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-udp-bind` | `std::result<std::i32,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-udp-send-to` | `std::result<std::bool,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-udp-recv` | `std::result<std::option<std::vector<std::int>>,std::neterror>` |
+| net_builtin::RESULT_TYPES | `net-udp-last-sender` | `std::result<std::string,std::neterror>` |
+| net_builtin::INNER_TYPES | `net-resolve-finish` | `std::option<std::vector<std::string>>` |
+| net_builtin::INNER_TYPES | `net-tls-handshake` | `std::option<std::int>` |
+| net_builtin::INNER_TYPES | `net-udp-recv` | `std::option<std::vector<std::int>>` |
+| net_builtin::INNER_TYPES | `net-accept` | `std::option<std::i32>` |
+| net_builtin::INNER_TYPES | `net-fill` | `std::option<std::int>` |
+| net_builtin::INNER_TYPES | `net-flush` | `std::option<std::int>` |
+| net_builtin::INNER_TYPES | `net-socket-error` | `std::option<std::string>` |
+| net_builtin::INNER_TYPES | `net-peer-subject` | `std::option<std::string>` |
+| net_builtin::INNER_TYPES | `net-server-name` | `std::option<std::string>` |
+| net_builtin::INNER_TYPES | `net-pop-byte` | `std::option<std::int>` |
+| net_builtin::INNER_TYPES | `net-pop-char` | `std::option<std::char>` |
+| readtable::READER_MACRO_OPTION_TYPE | | `std::option<(fn (std::string-input-stream,std::char) std::option<std::sexpr>)>` |
 
 ## 型ごとの表現 (Repr)
 
@@ -508,91 +508,91 @@
 |---|---|---|---|---|
 | `!` | `!` | none | 0 | 0 |
 | `()` | `()` | unit | 100 | 0 |
-| `(fn (std::string-input-stream char) Option<Sexpr>)` | `(fn (std::string-input-stream,char) option<sexpr>)` | fn | 6 | 2 |
-| `Chan<t>` | `chan<t>` | struct | 6 | 2 |
-| `HashTable<k,v>` | `hashtable<k,v>` | hashtable | 6 | 2 |
-| `Option<(fn (std::string-input-stream char) Option<Sexpr>)>` | `option<(fn (std::string-input-stream,char) option<sexpr>)>` | niche | 101 | 2 |
-| `Option<Sexpr>` | `option<sexpr>` | niche | 101 | 2 |
-| `Option<bool>` | `option<bool>` | niche | 101 | 0 |
-| `Option<c-long>` | `option<c-long>` | enum | 6 | 2 |
-| `Option<c-ulong>` | `option<c-ulong>` | enum | 6 | 2 |
-| `Option<char>` | `option<char>` | niche | 101 | 0 |
-| `Option<f32>` | `option<f32>` | niche | 101 | 2 |
-| `Option<f64>` | `option<f64>` | niche | 101 | 2 |
-| `Option<i16>` | `option<i16>` | niche | 101 | 0 |
-| `Option<i32>` | `option<i32>` | niche | 101 | 0 |
-| `Option<i8>` | `option<i8>` | niche | 101 | 0 |
-| `Option<int>` | `option<int>` | niche | 101 | 2 |
-| `Option<string>` | `option<string>` | niche | 101 | 2 |
-| `Option<t>` | `option<t>` | enum | 6 | 2 |
-| `Option<u16>` | `option<u16>` | niche | 101 | 0 |
-| `Option<u32>` | `option<u32>` | niche | 101 | 0 |
-| `Option<u8>` | `option<u8>` | niche | 101 | 0 |
-| `Option<v>` | `option<v>` | enum | 6 | 2 |
-| `Result<(),fileerror>` | `result<(),fileerror>` | enum | 6 | 2 |
-| `Result<(),neterror>` | `result<(),neterror>` | enum | 6 | 2 |
-| `Result<Option<Sexpr>,evalerror>` | `result<option<sexpr>,evalerror>` | enum | 6 | 2 |
-| `Result<Option<Sexpr>,readerror>` | `result<option<sexpr>,readerror>` | enum | 6 | 2 |
-| `Result<Option<Vector<int>>,neterror>` | `result<option<vector<int>>,neterror>` | enum | 6 | 2 |
-| `Result<Option<Vector<string>>,neterror>` | `result<option<vector<string>>,neterror>` | enum | 6 | 2 |
-| `Result<Option<char>,fileerror>` | `result<option<char>,fileerror>` | enum | 6 | 2 |
-| `Result<Option<char>,neterror>` | `result<option<char>,neterror>` | enum | 6 | 2 |
-| `Result<Option<i32>,neterror>` | `result<option<i32>,neterror>` | enum | 6 | 2 |
-| `Result<Option<int>,fileerror>` | `result<option<int>,fileerror>` | enum | 6 | 2 |
-| `Result<Option<int>,neterror>` | `result<option<int>,neterror>` | enum | 6 | 2 |
-| `Result<Option<string>,fileerror>` | `result<option<string>,fileerror>` | enum | 6 | 2 |
-| `Result<Option<string>,neterror>` | `result<option<string>,neterror>` | enum | 6 | 2 |
-| `Result<Vector<string>,fileerror>` | `result<vector<string>,fileerror>` | enum | 6 | 2 |
-| `Result<bool,fileerror>` | `result<bool,fileerror>` | enum | 6 | 2 |
-| `Result<bool,neterror>` | `result<bool,neterror>` | enum | 6 | 2 |
-| `Result<f64,parsefloaterror>` | `result<f64,parsefloaterror>` | enum | 6 | 2 |
-| `Result<i32,fileerror>` | `result<i32,fileerror>` | enum | 6 | 2 |
-| `Result<i32,neterror>` | `result<i32,neterror>` | enum | 6 | 2 |
-| `Result<int,fileerror>` | `result<int,fileerror>` | enum | 6 | 2 |
-| `Result<std::cons-cell<Option<Sexpr>,int>,readerror>` | `result<std::cons-cell<option<sexpr>,int>,readerror>` | enum | 6 | 2 |
-| `Result<std::universal-time,fileerror>` | `result<std::universal-time,fileerror>` | enum | 6 | 2 |
-| `Result<string,fileerror>` | `result<string,fileerror>` | enum | 6 | 2 |
-| `Result<string,neterror>` | `result<string,neterror>` | enum | 6 | 2 |
-| `Task<t>` | `task<t>` | struct | 6 | 2 |
-| `Thread<t>` | `thread<t>` | struct | 6 | 2 |
-| `Vector<Option<Sexpr>>` | `vector<option<sexpr>>` | vector | 6 | 2 |
-| `Vector<int>` | `vector<int>` | vector | 6 | 2 |
-| `Vector<k>` | `vector<k>` | vector | 6 | 2 |
-| `Vector<std::cons-cell<k,v>>` | `vector<std::cons-cell<k,v>>` | vector | 6 | 2 |
-| `Vector<string>` | `vector<string>` | vector | 6 | 2 |
-| `Vector<t>` | `vector<t>` | vector | 6 | 2 |
-| `Vector<v>` | `vector<v>` | vector | 6 | 2 |
-| `bool` | `bool` | bool | 4 | 0 |
-| `c-long` | `c-long` | raw-word | 0 | 0 |
-| `c-ulong` | `c-ulong` | raw-word | 0 | 0 |
-| `char` | `char` | char | 3 | 0 |
+| `(fn (std::string-input-stream char) Option<Sexpr>)` | `(fn (std::string-input-stream,std::char) std::option<std::sexpr>)` | fn | 6 | 2 |
+| `Chan<t>` | `std::chan<t>` | struct | 6 | 2 |
+| `HashTable<k,v>` | `std::hashtable<k,v>` | hashtable | 6 | 2 |
+| `Option<(fn (std::string-input-stream char) Option<Sexpr>)>` | `std::option<(fn (std::string-input-stream,std::char) std::option<std::sexpr>)>` | niche | 101 | 2 |
+| `Option<Sexpr>` | `std::option<std::sexpr>` | niche | 101 | 2 |
+| `Option<bool>` | `std::option<std::bool>` | niche | 101 | 0 |
+| `Option<c-long>` | `std::option<std::c-long>` | enum | 6 | 2 |
+| `Option<c-ulong>` | `std::option<std::c-ulong>` | enum | 6 | 2 |
+| `Option<char>` | `std::option<std::char>` | niche | 101 | 0 |
+| `Option<f32>` | `std::option<std::f32>` | niche | 101 | 2 |
+| `Option<f64>` | `std::option<std::f64>` | niche | 101 | 2 |
+| `Option<i16>` | `std::option<std::i16>` | niche | 101 | 0 |
+| `Option<i32>` | `std::option<std::i32>` | niche | 101 | 0 |
+| `Option<i8>` | `std::option<std::i8>` | niche | 101 | 0 |
+| `Option<int>` | `std::option<std::int>` | niche | 101 | 2 |
+| `Option<string>` | `std::option<std::string>` | niche | 101 | 2 |
+| `Option<t>` | `std::option<t>` | enum | 6 | 2 |
+| `Option<u16>` | `std::option<std::u16>` | niche | 101 | 0 |
+| `Option<u32>` | `std::option<std::u32>` | niche | 101 | 0 |
+| `Option<u8>` | `std::option<std::u8>` | niche | 101 | 0 |
+| `Option<v>` | `std::option<v>` | enum | 6 | 2 |
+| `Result<(),std::fileerror>` | `std::result<(),std::fileerror>` | enum | 6 | 2 |
+| `Result<(),std::neterror>` | `std::result<(),std::neterror>` | enum | 6 | 2 |
+| `Result<Option<Sexpr>,std::evalerror>` | `std::result<std::option<std::sexpr>,std::evalerror>` | enum | 6 | 2 |
+| `Result<Option<Sexpr>,std::readerror>` | `std::result<std::option<std::sexpr>,std::readerror>` | enum | 6 | 2 |
+| `Result<Option<Vector<int>>,std::neterror>` | `std::result<std::option<std::vector<std::int>>,std::neterror>` | enum | 6 | 2 |
+| `Result<Option<Vector<string>>,std::neterror>` | `std::result<std::option<std::vector<std::string>>,std::neterror>` | enum | 6 | 2 |
+| `Result<Option<char>,std::fileerror>` | `std::result<std::option<std::char>,std::fileerror>` | enum | 6 | 2 |
+| `Result<Option<char>,std::neterror>` | `std::result<std::option<std::char>,std::neterror>` | enum | 6 | 2 |
+| `Result<Option<i32>,std::neterror>` | `std::result<std::option<std::i32>,std::neterror>` | enum | 6 | 2 |
+| `Result<Option<int>,std::fileerror>` | `std::result<std::option<std::int>,std::fileerror>` | enum | 6 | 2 |
+| `Result<Option<int>,std::neterror>` | `std::result<std::option<std::int>,std::neterror>` | enum | 6 | 2 |
+| `Result<Option<string>,std::fileerror>` | `std::result<std::option<std::string>,std::fileerror>` | enum | 6 | 2 |
+| `Result<Option<string>,std::neterror>` | `std::result<std::option<std::string>,std::neterror>` | enum | 6 | 2 |
+| `Result<Vector<string>,std::fileerror>` | `std::result<std::vector<std::string>,std::fileerror>` | enum | 6 | 2 |
+| `Result<bool,std::fileerror>` | `std::result<std::bool,std::fileerror>` | enum | 6 | 2 |
+| `Result<bool,std::neterror>` | `std::result<std::bool,std::neterror>` | enum | 6 | 2 |
+| `Result<f64,std::parsefloaterror>` | `std::result<std::f64,std::parsefloaterror>` | enum | 6 | 2 |
+| `Result<i32,std::fileerror>` | `std::result<std::i32,std::fileerror>` | enum | 6 | 2 |
+| `Result<i32,std::neterror>` | `std::result<std::i32,std::neterror>` | enum | 6 | 2 |
+| `Result<int,std::fileerror>` | `std::result<std::int,std::fileerror>` | enum | 6 | 2 |
+| `Result<std::cons-cell<Option<Sexpr>,int>,std::readerror>` | `std::result<std::cons-cell<std::option<std::sexpr>,std::int>,std::readerror>` | enum | 6 | 2 |
+| `Result<std::universal-time,std::fileerror>` | `std::result<std::universal-time,std::fileerror>` | enum | 6 | 2 |
+| `Result<string,std::fileerror>` | `std::result<std::string,std::fileerror>` | enum | 6 | 2 |
+| `Result<string,std::neterror>` | `std::result<std::string,std::neterror>` | enum | 6 | 2 |
+| `Task<t>` | `std::task<t>` | struct | 6 | 2 |
+| `Thread<t>` | `std::thread<t>` | struct | 6 | 2 |
+| `Vector<Option<Sexpr>>` | `std::vector<std::option<std::sexpr>>` | vector | 6 | 2 |
+| `Vector<int>` | `std::vector<std::int>` | vector | 6 | 2 |
+| `Vector<k>` | `std::vector<k>` | vector | 6 | 2 |
+| `Vector<std::cons-cell<k,v>>` | `std::vector<std::cons-cell<k,v>>` | vector | 6 | 2 |
+| `Vector<string>` | `std::vector<std::string>` | vector | 6 | 2 |
+| `Vector<t>` | `std::vector<t>` | vector | 6 | 2 |
+| `Vector<v>` | `std::vector<v>` | vector | 6 | 2 |
+| `bool` | `std::bool` | bool | 4 | 0 |
+| `c-long` | `std::c-long` | raw-word | 0 | 0 |
+| `c-ulong` | `std::c-ulong` | raw-word | 0 | 0 |
+| `char` | `std::char` | char | 3 | 0 |
 | `e` | `e` | none | 0 | 0 |
-| `f32` | `f32` | f32 | 11 | 0 |
-| `f64` | `f64` | f64 | 2 | 0 |
-| `i16` | `i16` | int-any-width | 1 | 0 |
-| `i32` | `i32` | int-any-width | 1 | 0 |
-| `i8` | `i8` | int-any-width | 1 | 0 |
-| `int` | `int` | int | 6 | 2 |
+| `f32` | `std::f32` | f32 | 11 | 0 |
+| `f64` | `std::f64` | f64 | 2 | 0 |
+| `i16` | `std::i16` | int-any-width | 1 | 0 |
+| `i32` | `std::i32` | int-any-width | 1 | 0 |
+| `i8` | `std::i8` | int-any-width | 1 | 0 |
+| `int` | `std::int` | int | 6 | 2 |
 | `k` | `k` | none | 0 | 0 |
-| `llvm-basic-block` | `llvm-basic-block` | handle | 1 | 0 |
-| `llvm-builder` | `llvm-builder` | handle | 1 | 0 |
-| `llvm-function` | `llvm-function` | handle | 1 | 0 |
-| `llvm-module` | `llvm-module` | handle | 1 | 0 |
-| `llvm-value` | `llvm-value` | handle | 1 | 0 |
-| `random-state` | `random-state` | random-state | 6 | 2 |
-| `ratio` | `ratio` | ratio | 6 | 2 |
-| `rational` | `rational` | rational | 6 | 2 |
-| `scope<v>` | `scope<v>` | scope | 6 | 2 |
-| `std::array<Option<Sexpr>>` | `std::array<option<sexpr>>` | none | 0 | 0 |
+| `random-state` | `std::random-state` | random-state | 6 | 2 |
+| `ratio` | `std::ratio` | ratio | 6 | 2 |
+| `rational` | `std::rational` | rational | 6 | 2 |
+| `std::array<Option<Sexpr>>` | `std::array<std::option<std::sexpr>>` | none | 0 | 0 |
 | `std::heap-info` | `std::heap-info` | none | 0 | 0 |
 | `std::internal-time` | `std::internal-time` | none | 0 | 0 |
+| `std::llvm-basic-block` | `std::llvm-basic-block` | handle | 1 | 0 |
+| `std::llvm-builder` | `std::llvm-builder` | handle | 1 | 0 |
+| `std::llvm-function` | `std::llvm-function` | handle | 1 | 0 |
+| `std::llvm-module` | `std::llvm-module` | handle | 1 | 0 |
+| `std::llvm-value` | `std::llvm-value` | handle | 1 | 0 |
+| `std::scope<v>` | `std::scope<v>` | scope | 6 | 2 |
 | `std::universal-time` | `std::universal-time` | none | 0 | 0 |
-| `string` | `string` | str | 6 | 2 |
-| `symbol` | `symbol` | sym | 6 | 0 |
+| `string` | `std::string` | str | 6 | 2 |
+| `symbol` | `std::symbol` | sym | 6 | 0 |
 | `t` | `t` | none | 0 | 0 |
-| `u16` | `u16` | int-any-width | 1 | 0 |
-| `u32` | `u32` | int-any-width | 1 | 0 |
-| `u8` | `u8` | int-any-width | 1 | 0 |
+| `u16` | `std::u16` | int-any-width | 1 | 0 |
+| `u32` | `std::u32` | int-any-width | 1 | 0 |
+| `u8` | `std::u8` | int-any-width | 1 | 0 |
 | `v` | `v` | none | 0 | 0 |
 
 ## ランタイム関数
@@ -945,14 +945,14 @@
 
 ## 組み込み型
 
-### `bool` (sum, 型引数 [])
+### `std::bool` (sum, 型引数 [])
 
 - インスタンス `eq`: `(bool, bool) -> bool`
 - インスタンス `eql`: `(bool, bool) -> bool`
 - インスタンス `equal`: `(bool, bool) -> bool`
 - インスタンス `equalp`: `(bool, bool) -> bool`
 
-### `c-long` (sum, 型引数 [])
+### `std::c-long` (sum, 型引数 [])
 
 - インスタンス `int->c-long`: `(c-long) -> c-long`
 - インスタンス `int->c-ulong`: `(c-long) -> c-ulong`
@@ -972,7 +972,7 @@
 - インスタンス `try-int->u32`: `(c-long) -> Option<u32>`
 - インスタンス `try-int->u8`: `(c-long) -> Option<u8>`
 
-### `c-ulong` (sum, 型引数 [])
+### `std::c-ulong` (sum, 型引数 [])
 
 - インスタンス `int->c-long`: `(c-ulong) -> c-long`
 - インスタンス `int->c-ulong`: `(c-ulong) -> c-ulong`
@@ -992,7 +992,7 @@
 - インスタンス `try-int->u32`: `(c-ulong) -> Option<u32>`
 - インスタンス `try-int->u8`: `(c-ulong) -> Option<u8>`
 
-### `chan` (struct, 型引数 [t])
+### `std::chan` (struct, 型引数 [t])
 
 - インスタンス `cap`: `(Chan<t>) -> int`
 - インスタンス `close`: `(Chan<t>) -> ()`
@@ -1001,7 +1001,7 @@
 - インスタンス `recv`: `(Chan<t>) -> Option<t>`
 - インスタンス `send`: `(Chan<t>, t) -> ()`
 
-### `char` (sum, 型引数 [])
+### `std::char` (sum, 型引数 [])
 
 - インスタンス `<`: `(char, char) -> bool`
 - インスタンス `<=`: `(char, char) -> bool`
@@ -1019,11 +1019,11 @@
 - インスタンス `lt`: `(char, char) -> bool`
 - インスタンス `upcase`: `(char) -> char`
 
-### `evalerror` (sum, 型引数 [])
+### `std::evalerror` (sum, 型引数 [])
 
 - 変種 0 `evalerror`: `string`
 
-### `f32` (sum, 型引数 [])
+### `std::f32` (sum, 型引数 [])
 
 - インスタンス `*`: `(f32, f32) -> f32`
 - インスタンス `+`: `(f32, f32) -> f32`
@@ -1068,7 +1068,7 @@
 - インスタンス `try-float->f32`: `(f32) -> Option<f32>`
 - インスタンス `try-float->f64`: `(f32) -> Option<f64>`
 
-### `f64` (sum, 型引数 [])
+### `std::f64` (sum, 型引数 [])
 
 - インスタンス `*`: `(f64, f64) -> f64`
 - インスタンス `+`: `(f64, f64) -> f64`
@@ -1113,11 +1113,11 @@
 - インスタンス `try-float->f32`: `(f64) -> Option<f32>`
 - インスタンス `try-float->f64`: `(f64) -> Option<f64>`
 
-### `fileerror` (sum, 型引数 [])
+### `std::fileerror` (sum, 型引数 [])
 
 - 変種 0 `fileerror`: `string`
 
-### `hashtable` (sum, 型引数 [k, v])
+### `std::hashtable` (sum, 型引数 [k, v])
 
 - インスタンス `bucket-count`: `(HashTable<k,v>, int) -> int`
 - インスタンス `bucket-delete`: `(HashTable<k,v>, int, int) -> ()`
@@ -1131,7 +1131,7 @@
 - 関連関数 `new`: `() -> HashTable<k,v>`
 - インスタンス `values`: `(HashTable<k,v>) -> Vector<v>`
 
-### `i16` (sum, 型引数 [])
+### `std::i16` (sum, 型引数 [])
 
 - インスタンス `*`: `(i16, i16) -> i16`
 - インスタンス `+`: `(i16, i16) -> i16`
@@ -1181,7 +1181,7 @@
 - インスタンス `try-int->u32`: `(i16) -> Option<u32>`
 - インスタンス `try-int->u8`: `(i16) -> Option<u8>`
 
-### `i32` (sum, 型引数 [])
+### `std::i32` (sum, 型引数 [])
 
 - インスタンス `*`: `(i32, i32) -> i32`
 - インスタンス `+`: `(i32, i32) -> i32`
@@ -1231,7 +1231,7 @@
 - インスタンス `try-int->u32`: `(i32) -> Option<u32>`
 - インスタンス `try-int->u8`: `(i32) -> Option<u8>`
 
-### `i8` (sum, 型引数 [])
+### `std::i8` (sum, 型引数 [])
 
 - インスタンス `*`: `(i8, i8) -> i8`
 - インスタンス `+`: `(i8, i8) -> i8`
@@ -1281,7 +1281,7 @@
 - インスタンス `try-int->u32`: `(i8) -> Option<u32>`
 - インスタンス `try-int->u8`: `(i8) -> Option<u8>`
 
-### `int` (sum, 型引数 [])
+### `std::int` (sum, 型引数 [])
 
 - インスタンス `*`: `(int, int) -> int`
 - インスタンス `+`: `(int, int) -> int`
@@ -1332,131 +1332,131 @@
 - インスタンス `try-int->u32`: `(int) -> Option<u32>`
 - インスタンス `try-int->u8`: `(int) -> Option<u8>`
 
-### `llvm-basic-block` (sum, 型引数 [])
+### `std::llvm-basic-block` (sum, 型引数 [])
 
 
-### `llvm-builder` (sum, 型引数 [])
+### `std::llvm-builder` (sum, 型引数 [])
 
-- インスタンス `alloca-args`: `(llvm-builder, int) -> llvm-value`
-- インスタンス `block-terminated?`: `(llvm-builder) -> bool`
-- インスタンス `build-add`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-and`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-ashr`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-br`: `(llvm-builder, llvm-basic-block) -> ()`
-- インスタンス `build-call`: `(llvm-builder, llvm-function, llvm-value, int) -> llvm-value`
-- インスタンス `build-call-with-env`: `(llvm-builder, llvm-function, llvm-value, int, llvm-value, int) -> llvm-value`
-- インスタンス `build-cond-br`: `(llvm-builder, llvm-value, llvm-basic-block, llvm-basic-block) -> ()`
-- インスタンス `build-fadd`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fceil`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-fcmp-eq`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fcmp-ge`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fcmp-gt`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fcmp-le`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fcmp-lt`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fcmp-ne`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fcos`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-fdiv`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fexp`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-ffloor`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-flog`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-fmaxnum`: `(llvm-builder, llvm-module, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fminnum`: `(llvm-builder, llvm-module, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fmul`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fn-address`: `(llvm-builder, llvm-function) -> llvm-value`
-- インスタンス `build-fpow`: `(llvm-builder, llvm-module, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fptosi`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-free`: `(llvm-builder, llvm-value) -> ()`
-- インスタンス `build-frem`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-fround`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-fround32`: `(llvm-builder, llvm-value) -> llvm-value`
-- インスタンス `build-fsin`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-fsqrt`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-fsub`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-ftrunc`: `(llvm-builder, llvm-module, llvm-value) -> llvm-value`
-- インスタンス `build-icmp-eq`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-icmp-ge`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-icmp-gt`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-icmp-le`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-icmp-lt`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-icmp-ne`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-int-to-ptr`: `(llvm-builder, llvm-value) -> llvm-value`
-- インスタンス `build-lshr`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-make-closure`: `(llvm-builder, llvm-module, llvm-function, llvm-value, int, int, int) -> llvm-value`
-- インスタンス `build-malloc`: `(llvm-builder, int) -> llvm-value`
-- インスタンス `build-mul`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-or`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-ptr-to-int`: `(llvm-builder, llvm-value) -> llvm-value`
-- インスタンス `build-ret`: `(llvm-builder, llvm-value) -> ()`
-- インスタンス `build-sadd-overflow`: `(llvm-builder, llvm-module, llvm-value, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-select`: `(llvm-builder, llvm-value, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-shl`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-sitofp`: `(llvm-builder, llvm-value) -> llvm-value`
-- インスタンス `build-slot-ptr`: `(llvm-builder, llvm-value, int) -> llvm-value`
-- インスタンス `build-smul-overflow`: `(llvm-builder, llvm-module, llvm-value, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-ssub-overflow`: `(llvm-builder, llvm-module, llvm-value, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-sub`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `build-xor`: `(llvm-builder, llvm-value, llvm-value) -> llvm-value`
-- インスタンス `const-word`: `(llvm-builder, int) -> llvm-value`
-- インスタンス `coroutine-apply`: `(llvm-builder, llvm-module, llvm-value, llvm-value, int) -> llvm-value`
-- インスタンス `coroutine-begin`: `(llvm-builder, llvm-module, llvm-function) -> ()`
-- インスタンス `coroutine-call`: `(llvm-builder, llvm-module, llvm-value, llvm-value, int) -> llvm-value`
-- インスタンス `coroutine-call-env`: `(llvm-builder, llvm-module, llvm-value, llvm-value, int, llvm-value, int) -> llvm-value`
-- インスタンス `coroutine-dyn-call`: `(llvm-builder, llvm-module, llvm-value, llvm-value, llvm-value, int) -> llvm-value`
-- インスタンス `coroutine-end`: `(llvm-builder, llvm-module, llvm-value) -> ()`
-- インスタンス `coroutine-suspend`: `(llvm-builder, llvm-module) -> llvm-value`
-- インスタンス `coroutine-unwind`: `(llvm-builder, llvm-module) -> ()`
-- 関連関数 `create`: `() -> llvm-builder`
-- インスタンス `frame-clear-handler`: `(llvm-builder, llvm-module) -> ()`
-- インスタンス `frame-set-handler`: `(llvm-builder, llvm-module, llvm-basic-block) -> ()`
-- インスタンス `frame-slot`: `(llvm-builder) -> llvm-value`
-- インスタンス `frame-slot-rooted`: `(llvm-builder, llvm-module) -> llvm-value`
-- インスタンス `load-arg`: `(llvm-builder, llvm-function, int) -> llvm-value`
-- インスタンス `load-env`: `(llvm-builder, llvm-function, int) -> llvm-value`
-- インスタンス `load-raw`: `(llvm-builder, llvm-value, int) -> llvm-value`
-- インスタンス `load-type`: `(llvm-builder, llvm-module, int) -> llvm-value`
-- インスタンス `position-at-end`: `(llvm-builder, llvm-basic-block) -> ()`
-- インスタンス `scratch-slot`: `(llvm-builder, int) -> llvm-value`
-- インスタンス `store-arg`: `(llvm-builder, llvm-value, int, llvm-value) -> ()`
+- インスタンス `alloca-args`: `(std::llvm-builder, int) -> std::llvm-value`
+- インスタンス `block-terminated?`: `(std::llvm-builder) -> bool`
+- インスタンス `build-add`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-and`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-ashr`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-br`: `(std::llvm-builder, std::llvm-basic-block) -> ()`
+- インスタンス `build-call`: `(std::llvm-builder, std::llvm-function, std::llvm-value, int) -> std::llvm-value`
+- インスタンス `build-call-with-env`: `(std::llvm-builder, std::llvm-function, std::llvm-value, int, std::llvm-value, int) -> std::llvm-value`
+- インスタンス `build-cond-br`: `(std::llvm-builder, std::llvm-value, std::llvm-basic-block, std::llvm-basic-block) -> ()`
+- インスタンス `build-fadd`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fceil`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fcmp-eq`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fcmp-ge`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fcmp-gt`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fcmp-le`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fcmp-lt`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fcmp-ne`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fcos`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fdiv`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fexp`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-ffloor`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-flog`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fmaxnum`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fminnum`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fmul`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fn-address`: `(std::llvm-builder, std::llvm-function) -> std::llvm-value`
+- インスタンス `build-fpow`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fptosi`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-free`: `(std::llvm-builder, std::llvm-value) -> ()`
+- インスタンス `build-frem`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fround`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fround32`: `(std::llvm-builder, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fsin`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fsqrt`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-fsub`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-ftrunc`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-icmp-eq`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-icmp-ge`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-icmp-gt`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-icmp-le`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-icmp-lt`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-icmp-ne`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-int-to-ptr`: `(std::llvm-builder, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-lshr`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-make-closure`: `(std::llvm-builder, std::llvm-module, std::llvm-function, std::llvm-value, int, int, int) -> std::llvm-value`
+- インスタンス `build-malloc`: `(std::llvm-builder, int) -> std::llvm-value`
+- インスタンス `build-mul`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-or`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-ptr-to-int`: `(std::llvm-builder, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-ret`: `(std::llvm-builder, std::llvm-value) -> ()`
+- インスタンス `build-sadd-overflow`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-select`: `(std::llvm-builder, std::llvm-value, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-shl`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-sitofp`: `(std::llvm-builder, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-slot-ptr`: `(std::llvm-builder, std::llvm-value, int) -> std::llvm-value`
+- インスタンス `build-smul-overflow`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-ssub-overflow`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-sub`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `build-xor`: `(std::llvm-builder, std::llvm-value, std::llvm-value) -> std::llvm-value`
+- インスタンス `const-word`: `(std::llvm-builder, int) -> std::llvm-value`
+- インスタンス `coroutine-apply`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, int) -> std::llvm-value`
+- インスタンス `coroutine-begin`: `(std::llvm-builder, std::llvm-module, std::llvm-function) -> ()`
+- インスタンス `coroutine-call`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, int) -> std::llvm-value`
+- インスタンス `coroutine-call-env`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, int, std::llvm-value, int) -> std::llvm-value`
+- インスタンス `coroutine-dyn-call`: `(std::llvm-builder, std::llvm-module, std::llvm-value, std::llvm-value, std::llvm-value, int) -> std::llvm-value`
+- インスタンス `coroutine-end`: `(std::llvm-builder, std::llvm-module, std::llvm-value) -> ()`
+- インスタンス `coroutine-suspend`: `(std::llvm-builder, std::llvm-module) -> std::llvm-value`
+- インスタンス `coroutine-unwind`: `(std::llvm-builder, std::llvm-module) -> ()`
+- 関連関数 `create`: `() -> std::llvm-builder`
+- インスタンス `frame-clear-handler`: `(std::llvm-builder, std::llvm-module) -> ()`
+- インスタンス `frame-set-handler`: `(std::llvm-builder, std::llvm-module, std::llvm-basic-block) -> ()`
+- インスタンス `frame-slot`: `(std::llvm-builder) -> std::llvm-value`
+- インスタンス `frame-slot-rooted`: `(std::llvm-builder, std::llvm-module) -> std::llvm-value`
+- インスタンス `load-arg`: `(std::llvm-builder, std::llvm-function, int) -> std::llvm-value`
+- インスタンス `load-env`: `(std::llvm-builder, std::llvm-function, int) -> std::llvm-value`
+- インスタンス `load-raw`: `(std::llvm-builder, std::llvm-value, int) -> std::llvm-value`
+- インスタンス `load-type`: `(std::llvm-builder, std::llvm-module, int) -> std::llvm-value`
+- インスタンス `position-at-end`: `(std::llvm-builder, std::llvm-basic-block) -> ()`
+- インスタンス `scratch-slot`: `(std::llvm-builder, int) -> std::llvm-value`
+- インスタンス `store-arg`: `(std::llvm-builder, std::llvm-value, int, std::llvm-value) -> ()`
 
-### `llvm-function` (sum, 型引数 [])
+### `std::llvm-function` (sum, 型引数 [])
 
-- インスタンス `append-block`: `(llvm-function, string) -> llvm-basic-block`
-- インスタンス `function-param`: `(llvm-function, int) -> llvm-value`
+- インスタンス `append-block`: `(std::llvm-function, string) -> std::llvm-basic-block`
+- インスタンス `function-param`: `(std::llvm-function, int) -> std::llvm-value`
 
-### `llvm-module` (sum, 型引数 [])
+### `std::llvm-module` (sum, 型引数 [])
 
-- インスタンス `add-coroutine-function`: `(llvm-module, string) -> llvm-function`
-- インスタンス `add-function`: `(llvm-module, string) -> llvm-function`
-- インスタンス `add-function-with-env`: `(llvm-module, string) -> llvm-function`
-- 関連関数 `create`: `(string) -> llvm-module`
-- インスタンス `get-function`: `(llvm-module, string) -> llvm-function`
-- インスタンス `to-string`: `(llvm-module) -> string`
-- インスタンス `verify`: `(llvm-module) -> bool`
+- インスタンス `add-coroutine-function`: `(std::llvm-module, string) -> std::llvm-function`
+- インスタンス `add-function`: `(std::llvm-module, string) -> std::llvm-function`
+- インスタンス `add-function-with-env`: `(std::llvm-module, string) -> std::llvm-function`
+- 関連関数 `create`: `(string) -> std::llvm-module`
+- インスタンス `get-function`: `(std::llvm-module, string) -> std::llvm-function`
+- インスタンス `to-string`: `(std::llvm-module) -> string`
+- インスタンス `verify`: `(std::llvm-module) -> bool`
 
-### `llvm-value` (sum, 型引数 [])
+### `std::llvm-value` (sum, 型引数 [])
 
 
-### `neterror` (sum, 型引数 [])
+### `std::neterror` (sum, 型引数 [])
 
 - 変種 0 `neterror`: `string`
 
-### `option` (sum, 型引数 [t])
+### `std::option` (sum, 型引数 [t])
 
 - 変種 0 `some`: `t`
 - 変種 1 `none`: 
 
-### `parsefloaterror` (sum, 型引数 [])
+### `std::parsefloaterror` (sum, 型引数 [])
 
 - 変種 0 `parsefloaterror`: `string`
 
-### `parseinterror` (sum, 型引数 [])
+### `std::parseinterror` (sum, 型引数 [])
 
 - 変種 0 `parseinterror`: `string`
 
-### `random-state` (sum, 型引数 [])
+### `std::random-state` (sum, 型引数 [])
 
 
-### `ratio` (sum, 型引数 [])
+### `std::ratio` (sum, 型引数 [])
 
 - インスタンス `*`: `(ratio, ratio) -> ratio`
 - インスタンス `+`: `(ratio, ratio) -> ratio`
@@ -1480,7 +1480,7 @@
 - インスタンス `ratio->int`: `(ratio) -> int`
 - インスタンス `ratio->rational`: `(ratio) -> rational`
 
-### `rational` (sum, 型引数 [])
+### `std::rational` (sum, 型引数 [])
 
 - インスタンス `*`: `(rational, rational) -> rational`
 - インスタンス `+`: `(rational, rational) -> rational`
@@ -1505,25 +1505,25 @@
 - インスタンス `rational->ratio`: `(rational) -> ratio`
 - インスタンス `try-rational->int`: `(rational) -> Option<int>`
 
-### `readerror` (sum, 型引数 [])
+### `std::readerror` (sum, 型引数 [])
 
 - 変種 0 `readerror`: `string`
 
-### `result` (sum, 型引数 [t, e])
+### `std::result` (sum, 型引数 [t, e])
 
 - 変種 0 `ok`: `t`
 - 変種 1 `err`: `e`
 
-### `scope` (sum, 型引数 [v])
+### `std::scope` (sum, 型引数 [v])
 
-- インスタンス `clone-frames`: `(scope<v>) -> scope<v>`
-- インスタンス `get`: `(scope<v>, string) -> Option<v>`
-- 関連関数 `new`: `() -> scope<v>`
-- インスタンス `pop-frame`: `(scope<v>) -> ()`
-- インスタンス `push-frame`: `(scope<v>) -> ()`
-- インスタンス `set`: `(scope<v>, string, v) -> ()`
+- インスタンス `clone-frames`: `(std::scope<v>) -> std::scope<v>`
+- インスタンス `get`: `(std::scope<v>, string) -> Option<v>`
+- 関連関数 `new`: `() -> std::scope<v>`
+- インスタンス `pop-frame`: `(std::scope<v>) -> ()`
+- インスタンス `push-frame`: `(std::scope<v>) -> ()`
+- インスタンス `set`: `(std::scope<v>, string, v) -> ()`
 
-### `sexpr` (sum, 型引数 [])
+### `std::sexpr` (sum, 型引数 [])
 
 - 変種 0 `nil`: 
 - 変種 1 `int`: `int`
@@ -1549,7 +1549,7 @@
 - インスタンス `eq`: `(Option<Sexpr>, Option<Sexpr>) -> bool`
 - インスタンス `eql`: `(Option<Sexpr>, Option<Sexpr>) -> bool`
 
-### `string` (sum, 型引数 [])
+### `std::string` (sum, 型引数 [])
 
 - インスタンス `<`: `(string, string) -> bool`
 - インスタンス `<=`: `(string, string) -> bool`
@@ -1567,22 +1567,22 @@
 - インスタンス `substring`: `(string, int, int) -> string`
 - インスタンス `upcase`: `(string) -> string`
 
-### `symbol` (sum, 型引数 [])
+### `std::symbol` (sum, 型引数 [])
 
 - インスタンス `eq`: `(symbol, symbol) -> bool`
 - インスタンス `eql`: `(symbol, symbol) -> bool`
 
-### `task` (struct, 型引数 [t])
+### `std::task` (struct, 型引数 [t])
 
 - インスタンス `wait`: `(Task<t>) -> t`
 
-### `thread` (struct, 型引数 [t])
+### `std::thread` (struct, 型引数 [t])
 
 - 関連関数 `available-parallelism`: `() -> int`
 - 関連関数 `current-id`: `() -> int`
 - インスタンス `join`: `(Thread<t>) -> t`
 
-### `u16` (sum, 型引数 [])
+### `std::u16` (sum, 型引数 [])
 
 - インスタンス `*`: `(u16, u16) -> u16`
 - インスタンス `+`: `(u16, u16) -> u16`
@@ -1632,7 +1632,7 @@
 - インスタンス `try-int->u32`: `(u16) -> Option<u32>`
 - インスタンス `try-int->u8`: `(u16) -> Option<u8>`
 
-### `u32` (sum, 型引数 [])
+### `std::u32` (sum, 型引数 [])
 
 - インスタンス `*`: `(u32, u32) -> u32`
 - インスタンス `+`: `(u32, u32) -> u32`
@@ -1682,7 +1682,7 @@
 - インスタンス `try-int->u32`: `(u32) -> Option<u32>`
 - インスタンス `try-int->u8`: `(u32) -> Option<u8>`
 
-### `u8` (sum, 型引数 [])
+### `std::u8` (sum, 型引数 [])
 
 - インスタンス `*`: `(u8, u8) -> u8`
 - インスタンス `+`: `(u8, u8) -> u8`
@@ -1732,7 +1732,7 @@
 - インスタンス `try-int->u32`: `(u8) -> Option<u32>`
 - インスタンス `try-int->u8`: `(u8) -> Option<u8>`
 
-### `vector` (struct, 型引数 [t])
+### `std::vector` (struct, 型引数 [t])
 
 - インスタンス `get`: `(Vector<t>, int) -> t`
 - インスタンス `len`: `(Vector<t>) -> int`
@@ -1745,83 +1745,83 @@
 
 | 関数 | シム | シグネチャ |
 |---|---|---|
-| `std::%internal::dribble-start` | `rt_dribble_start` | `(string) -> Result<(),fileerror>` |
-| `std::%internal::dribble-stop` | `rt_dribble_stop` | `() -> Result<(),fileerror>` |
-| `std::%internal::ed-open` | `rt_ed_open` | `(string, int) -> Result<(),fileerror>` |
-| `std::%internal::file-create-directories` | `rt_file_create_directories` | `(string) -> Result<(),fileerror>` |
-| `std::%internal::file-delete` | `rt_file_delete` | `(string) -> Result<(),fileerror>` |
+| `std::%internal::dribble-start` | `rt_dribble_start` | `(string) -> Result<(),std::fileerror>` |
+| `std::%internal::dribble-stop` | `rt_dribble_stop` | `() -> Result<(),std::fileerror>` |
+| `std::%internal::ed-open` | `rt_ed_open` | `(string, int) -> Result<(),std::fileerror>` |
+| `std::%internal::file-create-directories` | `rt_file_create_directories` | `(string) -> Result<(),std::fileerror>` |
+| `std::%internal::file-delete` | `rt_file_delete` | `(string) -> Result<(),std::fileerror>` |
 | `std::%internal::file-directory-p` | `rt_file_directory_p` | `(string) -> bool` |
 | `std::%internal::file-exists-p` | `rt_file_exists_p` | `(string) -> bool` |
-| `std::%internal::file-list-directory` | `rt_file_list_directory` | `(string) -> Result<Vector<string>,fileerror>` |
-| `std::%internal::file-modified-date` | `rt_file_modified_date` | `(string) -> Result<std::universal-time,fileerror>` |
-| `std::%internal::file-owner-name` | `rt_file_owner_name` | `(string) -> Result<Option<string>,fileerror>` |
-| `std::%internal::file-rename` | `rt_file_rename` | `(string, string) -> Result<(),fileerror>` |
-| `std::%internal::file-truename` | `rt_file_truename` | `(string) -> Result<string,fileerror>` |
+| `std::%internal::file-list-directory` | `rt_file_list_directory` | `(string) -> Result<Vector<string>,std::fileerror>` |
+| `std::%internal::file-modified-date` | `rt_file_modified_date` | `(string) -> Result<std::universal-time,std::fileerror>` |
+| `std::%internal::file-owner-name` | `rt_file_owner_name` | `(string) -> Result<Option<string>,std::fileerror>` |
+| `std::%internal::file-rename` | `rt_file_rename` | `(string, string) -> Result<(),std::fileerror>` |
+| `std::%internal::file-truename` | `rt_file_truename` | `(string) -> Result<string,std::fileerror>` |
 | `std::%internal::make-random-state-fresh` | `rt_make_random_state_fresh` | `() -> random-state` |
-| `std::%internal::net-accept` | `rt_net_accept` | `(i32) -> Result<Option<i32>,neterror>` |
-| `std::%internal::net-buffered-p` | `rt_net_buffered_p` | `(i32) -> Result<bool,neterror>` |
-| `std::%internal::net-connect-begin` | `rt_net_connect_begin` | `(string) -> Result<i32,neterror>` |
-| `std::%internal::net-connect-finish` | `rt_net_connect_finish` | `(i32) -> Result<(),neterror>` |
-| `std::%internal::net-fill` | `rt_net_fill` | `(i32) -> Result<Option<int>,neterror>` |
-| `std::%internal::net-flush` | `rt_net_flush` | `(i32) -> Result<Option<int>,neterror>` |
-| `std::%internal::net-listen` | `rt_net_listen` | `(string, int) -> Result<i32,neterror>` |
-| `std::%internal::net-local-address` | `rt_net_local_address` | `(i32) -> Result<string,neterror>` |
-| `std::%internal::net-peer-address` | `rt_net_peer_address` | `(i32) -> Result<string,neterror>` |
-| `std::%internal::net-peer-subject` | `rt_net_peer_subject` | `(i32) -> Result<Option<string>,neterror>` |
-| `std::%internal::net-pop-byte` | `rt_net_pop_byte` | `(i32) -> Result<Option<int>,neterror>` |
-| `std::%internal::net-pop-char` | `rt_net_pop_char` | `(i32) -> Result<Option<char>,neterror>` |
-| `std::%internal::net-push-byte` | `rt_net_push_byte` | `(i32, int) -> Result<(),neterror>` |
-| `std::%internal::net-push-string` | `rt_net_push_string` | `(i32, string) -> Result<(),neterror>` |
-| `std::%internal::net-resolve-begin` | `rt_net_resolve_begin` | `(string, int) -> Result<i32,neterror>` |
-| `std::%internal::net-resolve-finish` | `rt_net_resolve_finish` | `(i32) -> Result<Option<Vector<string>>,neterror>` |
-| `std::%internal::net-server-name` | `rt_net_server_name` | `(i32) -> Result<Option<string>,neterror>` |
-| `std::%internal::net-set-keepalive` | `rt_net_set_keepalive` | `(i32, bool) -> Result<(),neterror>` |
-| `std::%internal::net-set-keepalive-period` | `rt_net_set_keepalive_period` | `(i32, int) -> Result<(),neterror>` |
-| `std::%internal::net-set-nodelay` | `rt_net_set_nodelay` | `(i32, bool) -> Result<(),neterror>` |
-| `std::%internal::net-shutdown-write` | `rt_net_shutdown_write` | `(i32) -> Result<(),neterror>` |
-| `std::%internal::net-socket-error` | `rt_net_socket_error` | `(i32) -> Result<Option<string>,neterror>` |
-| `std::%internal::net-tls-add-certificate` | `rt_net_tls_add_certificate` | `(i32, string, string, string) -> Result<(),neterror>` |
-| `std::%internal::net-tls-handshake` | `rt_net_tls_handshake` | `(i32) -> Result<Option<int>,neterror>` |
-| `std::%internal::net-tls-listen` | `rt_net_tls_listen` | `(string, int, string, string, Option<string>) -> Result<i32,neterror>` |
-| `std::%internal::net-tls-start` | `rt_net_tls_start` | `(i32, string, Option<string>, Option<string>, Option<string>) -> Result<(),neterror>` |
-| `std::%internal::net-udp-bind` | `rt_net_udp_bind` | `(string, int) -> Result<i32,neterror>` |
-| `std::%internal::net-udp-last-sender` | `rt_net_udp_last_sender` | `(i32) -> Result<string,neterror>` |
-| `std::%internal::net-udp-recv` | `rt_net_udp_recv` | `(i32) -> Result<Option<Vector<int>>,neterror>` |
-| `std::%internal::net-udp-send-to` | `rt_net_udp_send_to` | `(i32, string, Vector<int>) -> Result<bool,neterror>` |
-| `std::%internal::net-unix-connect` | `rt_net_unix_connect` | `(string) -> Result<i32,neterror>` |
-| `std::%internal::net-unix-listen` | `rt_net_unix_listen` | `(string) -> Result<i32,neterror>` |
+| `std::%internal::net-accept` | `rt_net_accept` | `(i32) -> Result<Option<i32>,std::neterror>` |
+| `std::%internal::net-buffered-p` | `rt_net_buffered_p` | `(i32) -> Result<bool,std::neterror>` |
+| `std::%internal::net-connect-begin` | `rt_net_connect_begin` | `(string) -> Result<i32,std::neterror>` |
+| `std::%internal::net-connect-finish` | `rt_net_connect_finish` | `(i32) -> Result<(),std::neterror>` |
+| `std::%internal::net-fill` | `rt_net_fill` | `(i32) -> Result<Option<int>,std::neterror>` |
+| `std::%internal::net-flush` | `rt_net_flush` | `(i32) -> Result<Option<int>,std::neterror>` |
+| `std::%internal::net-listen` | `rt_net_listen` | `(string, int) -> Result<i32,std::neterror>` |
+| `std::%internal::net-local-address` | `rt_net_local_address` | `(i32) -> Result<string,std::neterror>` |
+| `std::%internal::net-peer-address` | `rt_net_peer_address` | `(i32) -> Result<string,std::neterror>` |
+| `std::%internal::net-peer-subject` | `rt_net_peer_subject` | `(i32) -> Result<Option<string>,std::neterror>` |
+| `std::%internal::net-pop-byte` | `rt_net_pop_byte` | `(i32) -> Result<Option<int>,std::neterror>` |
+| `std::%internal::net-pop-char` | `rt_net_pop_char` | `(i32) -> Result<Option<char>,std::neterror>` |
+| `std::%internal::net-push-byte` | `rt_net_push_byte` | `(i32, int) -> Result<(),std::neterror>` |
+| `std::%internal::net-push-string` | `rt_net_push_string` | `(i32, string) -> Result<(),std::neterror>` |
+| `std::%internal::net-resolve-begin` | `rt_net_resolve_begin` | `(string, int) -> Result<i32,std::neterror>` |
+| `std::%internal::net-resolve-finish` | `rt_net_resolve_finish` | `(i32) -> Result<Option<Vector<string>>,std::neterror>` |
+| `std::%internal::net-server-name` | `rt_net_server_name` | `(i32) -> Result<Option<string>,std::neterror>` |
+| `std::%internal::net-set-keepalive` | `rt_net_set_keepalive` | `(i32, bool) -> Result<(),std::neterror>` |
+| `std::%internal::net-set-keepalive-period` | `rt_net_set_keepalive_period` | `(i32, int) -> Result<(),std::neterror>` |
+| `std::%internal::net-set-nodelay` | `rt_net_set_nodelay` | `(i32, bool) -> Result<(),std::neterror>` |
+| `std::%internal::net-shutdown-write` | `rt_net_shutdown_write` | `(i32) -> Result<(),std::neterror>` |
+| `std::%internal::net-socket-error` | `rt_net_socket_error` | `(i32) -> Result<Option<string>,std::neterror>` |
+| `std::%internal::net-tls-add-certificate` | `rt_net_tls_add_certificate` | `(i32, string, string, string) -> Result<(),std::neterror>` |
+| `std::%internal::net-tls-handshake` | `rt_net_tls_handshake` | `(i32) -> Result<Option<int>,std::neterror>` |
+| `std::%internal::net-tls-listen` | `rt_net_tls_listen` | `(string, int, string, string, Option<string>) -> Result<i32,std::neterror>` |
+| `std::%internal::net-tls-start` | `rt_net_tls_start` | `(i32, string, Option<string>, Option<string>, Option<string>) -> Result<(),std::neterror>` |
+| `std::%internal::net-udp-bind` | `rt_net_udp_bind` | `(string, int) -> Result<i32,std::neterror>` |
+| `std::%internal::net-udp-last-sender` | `rt_net_udp_last_sender` | `(i32) -> Result<string,std::neterror>` |
+| `std::%internal::net-udp-recv` | `rt_net_udp_recv` | `(i32) -> Result<Option<Vector<int>>,std::neterror>` |
+| `std::%internal::net-udp-send-to` | `rt_net_udp_send_to` | `(i32, string, Vector<int>) -> Result<bool,std::neterror>` |
+| `std::%internal::net-unix-connect` | `rt_net_unix_connect` | `(string) -> Result<i32,std::neterror>` |
+| `std::%internal::net-unix-listen` | `rt_net_unix_listen` | `(string) -> Result<i32,std::neterror>` |
 | `std::%internal::net-wait` | `rt_suspend_io` | `(i32, int) -> ()` |
 | `std::%internal::net-wait-for` | `rt_suspend_io_for` | `(i32, int, f64) -> bool` |
 | `std::%internal::random-state-copy` | `rt_random_state_copy` | `(random-state) -> random-state` |
 | `std::%internal::random-state-next` | `rt_random_state_next` | `(random-state, int) -> int` |
-| `std::%internal::read-datum-at` | `rt_read_datum_at` | `(string, int, bool) -> Result<std::cons-cell<Option<Sexpr>,int>,readerror>` |
-| `std::%internal::stream-at-line-start` | `rt_stream_at_line_start` | `(i32) -> Result<bool,fileerror>` |
-| `std::%internal::stream-close` | `rt_stream_close` | `(i32) -> Result<(),fileerror>` |
+| `std::%internal::read-datum-at` | `rt_read_datum_at` | `(string, int, bool) -> Result<std::cons-cell<Option<Sexpr>,int>,std::readerror>` |
+| `std::%internal::stream-at-line-start` | `rt_stream_at_line_start` | `(i32) -> Result<bool,std::fileerror>` |
+| `std::%internal::stream-close` | `rt_stream_close` | `(i32) -> Result<(),std::fileerror>` |
 | `std::%internal::stream-describe` | `rt_stream_describe` | `(i32) -> string` |
-| `std::%internal::stream-finish-output` | `rt_stream_finish_output` | `(i32) -> Result<(),fileerror>` |
-| `std::%internal::stream-input-p` | `rt_stream_input_p` | `(i32) -> Result<bool,fileerror>` |
-| `std::%internal::stream-listen` | `rt_stream_listen` | `(i32) -> Result<bool,fileerror>` |
-| `std::%internal::stream-open-file` | `rt_stream_open_file` | `(string, int) -> Result<i32,fileerror>` |
+| `std::%internal::stream-finish-output` | `rt_stream_finish_output` | `(i32) -> Result<(),std::fileerror>` |
+| `std::%internal::stream-input-p` | `rt_stream_input_p` | `(i32) -> Result<bool,std::fileerror>` |
+| `std::%internal::stream-listen` | `rt_stream_listen` | `(i32) -> Result<bool,std::fileerror>` |
+| `std::%internal::stream-open-file` | `rt_stream_open_file` | `(string, int) -> Result<i32,std::fileerror>` |
 | `std::%internal::stream-open-p` | `rt_stream_open_p` | `(i32) -> bool` |
-| `std::%internal::stream-output-p` | `rt_stream_output_p` | `(i32) -> Result<bool,fileerror>` |
-| `std::%internal::stream-position` | `rt_stream_position` | `(i32) -> Result<int,fileerror>` |
-| `std::%internal::stream-read-byte` | `rt_stream_read_byte` | `(i32) -> Result<Option<int>,fileerror>` |
-| `std::%internal::stream-read-char` | `rt_stream_read_char` | `(i32) -> Result<Option<char>,fileerror>` |
+| `std::%internal::stream-output-p` | `rt_stream_output_p` | `(i32) -> Result<bool,std::fileerror>` |
+| `std::%internal::stream-position` | `rt_stream_position` | `(i32) -> Result<int,std::fileerror>` |
+| `std::%internal::stream-read-byte` | `rt_stream_read_byte` | `(i32) -> Result<Option<int>,std::fileerror>` |
+| `std::%internal::stream-read-char` | `rt_stream_read_char` | `(i32) -> Result<Option<char>,std::fileerror>` |
 | `std::%internal::stream-stderr` | `rt_stream_stderr` | `() -> i32` |
 | `std::%internal::stream-stdin` | `rt_stream_stdin` | `() -> i32` |
 | `std::%internal::stream-stdout` | `rt_stream_stdout` | `() -> i32` |
 | `std::%internal::stream-string-input` | `rt_stream_string_input` | `(string) -> i32` |
 | `std::%internal::stream-string-output` | `rt_stream_string_output` | `() -> i32` |
-| `std::%internal::stream-take-output-string` | `rt_stream_take_output_string` | `(i32) -> Result<string,fileerror>` |
-| `std::%internal::stream-unread-char` | `rt_stream_unread_char` | `(i32, char) -> Result<(),fileerror>` |
-| `std::%internal::stream-write-byte` | `rt_stream_write_byte` | `(i32, int) -> Result<(),fileerror>` |
-| `std::%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> Result<(),fileerror>` |
+| `std::%internal::stream-take-output-string` | `rt_stream_take_output_string` | `(i32) -> Result<string,std::fileerror>` |
+| `std::%internal::stream-unread-char` | `rt_stream_unread_char` | `(i32, char) -> Result<(),std::fileerror>` |
+| `std::%internal::stream-write-byte` | `rt_stream_write_byte` | `(i32, int) -> Result<(),std::fileerror>` |
+| `std::%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> Result<(),std::fileerror>` |
 | `std::command-line-args` | `rt_command_line_args` | `() -> Vector<string>` |
 | `std::compile-file` |  | `(string, string) -> bool` |
 | `std::dump` |  | `(string) -> bool` |
 | `std::equal` | `rt_sexpr_equal` | `<t> (t, t) -> bool` |
 | `std::equalp` | `rt_sexpr_equalp` | `<t> (t, t) -> bool` |
-| `std::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
+| `std::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::exit` | `rt_exit` | `(int) -> !` |
 | `std::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
 | `std::get-internal-real-time` | `rt_get_internal_real_time` | `() -> std::internal-time` |
@@ -1837,15 +1837,15 @@
 | `std::machine-instance` | `rt_machine_instance` | `() -> Option<string>` |
 | `std::machine-type` | `rt_machine_type` | `() -> string` |
 | `std::machine-version` | `rt_machine_version` | `() -> Option<string>` |
-| `std::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
-| `std::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,evalerror>` |
-| `std::parse-float` | `rt_parse_float` | `(string) -> Result<f64,parsefloaterror>` |
+| `std::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
+| `std::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
+| `std::parse-float` | `rt_parse_float` | `(string) -> Result<f64,std::parsefloaterror>` |
 | `std::pprint-indent` | `rt_pprint_indent` | `(symbol, int) -> ()` |
 | `std::pprint-list-exhausted` | `rt_pprint_list_exhausted` | `() -> bool` |
 | `std::pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |
 | `std::pprint-pop` | `rt_pprint_pop` | `() -> Option<Sexpr>` |
 | `std::pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
-| `std::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,readerror>` |
+| `std::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,std::readerror>` |
 | `std::seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
 | `std::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
 | `std::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |

@@ -60,7 +60,7 @@ use crate::types::Path;
 /// process-wide LLVM `Context` must never happen.
 pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-    if *type_name == Path::root("llvm-module") {
+    if *type_name == Path::std("llvm-module") {
         return match method {
             "create" => Some(llvm_module_create(heap, args)),
             "add-function" => Some(llvm_module_add_function(heap, args)),
@@ -72,14 +72,14 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             _ => None,
         };
     }
-    if *type_name == Path::root("llvm-function") {
+    if *type_name == Path::std("llvm-function") {
         return match method {
             "append-block" => Some(llvm_function_append_block(heap, args)),
             "function-param" => Some(llvm_function_param(args)),
             _ => None,
         };
     }
-    if *type_name == Path::root("llvm-builder") {
+    if *type_name == Path::std("llvm-builder") {
         return match method {
             "create" => Some(llvm_builder_create()),
             "position-at-end" => Some(llvm_builder_position_at_end(args)),
@@ -2432,8 +2432,8 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
         // is the one builtin here that returns a generic box.
         let ty = typelisp_front::type_key::type_id(
             &crate::types::Type::Named(
-                crate::Path::root("option"),
-                vec![crate::types::Type::Named(crate::Path::root("llvm-value"), vec![])],
+                crate::Path::std("option"),
+                vec![crate::types::Type::Named(crate::Path::std("llvm-value"), vec![])],
             ),
         );
         // A niche (`Repr::Niche`): the handle's fixnum word for `some`, the
@@ -2455,7 +2455,7 @@ pub(crate) unsafe extern "C" fn rt_llvm_call(args: *const i64, argc: u32) -> i64
             other => rt_llvm_fatal(&format!("rt_llvm_call: unknown native-scope method {}", other)),
         }
     } else {
-        match eval_llvm_builtin_method(heap, &Path::root(op.type_key), &op.method, &vals) {
+        match eval_llvm_builtin_method(heap, &Path::std(op.type_key), &op.method, &vals) {
             Some(r) => r,
             None => rt_llvm_fatal(&format!("rt_llvm_call: {} has no builtin method {}", op.type_key, op.method)),
         }

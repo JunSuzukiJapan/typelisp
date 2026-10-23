@@ -99,7 +99,7 @@ fn parses_never_type_annotation() {
 #[test]
 fn result_ok_infers_from_return_type() {
     let src = "(defun mk () Result<int,ParseIntError> (result::ok 1))";
-    assert_eq!(ret_of(src, "mk"), Type::Named(Path::root("result"), vec![Type::Int, error_ty()]));
+    assert_eq!(ret_of(src, "mk"), Type::Named(Path::std("result"), vec![Type::Int, error_ty()]));
 }
 
 #[test]
@@ -130,7 +130,7 @@ fn match_result_arms_must_agree() {
 }
 
 fn error_ty() -> Type {
-    Type::Named(Path::root("parseinterror"), vec![])
+    Type::Named(Path::std("parseinterror"), vec![])
 }
 
 // ---- the `Error` trait / user-defined error types (TODO T3) -----------------

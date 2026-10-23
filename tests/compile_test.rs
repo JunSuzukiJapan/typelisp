@@ -469,7 +469,7 @@ fn the_compiler_body_compiles_an_int_literal_node() {
 #[test]
 fn the_compiler_body_compiles_a_two_parameter_addition() {
     let module = expect_llvm_module(eval_ok_in_island(
-        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false)))"#,
+        r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '(assoc "i32" "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false)))"#,
     ));
     // See `compile::COMPILE_LOCK`'s doc comment — every LLVM-Context-touching
     // call, even from a test driving the raw builtins directly rather than
@@ -530,7 +530,7 @@ fn the_compiler_body_compiles_a_labels_form_that_captures_an_outer_scope_value()
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored (add-function m "rt_push_sexpr_root"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_i32''+" (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_std::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply "rec" (0 var "n" false)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     // Every compiled function allocates its activation record on the GC heap
@@ -960,7 +960,7 @@ fn the_compiler_body_compiles_a_call_to_another_compiled_function() {
     let module = expect_llvm_module(eval_ok_in_island(
         r#"
         (let ((m (llvm-module::create "mod")))
-          (compile-function m "double" '((x . 0)) '(assoc "i32" "+" true "tl_i32''+" (0 var "x" false) (0 var "x" false)))
+          (compile-function m "double" '((x . 0)) '(assoc "i32" "+" true "tl_std::i32''+" (0 var "x" false) (0 var "x" false)))
           (compile-function m "quadruple" '((n . 0)) '(call "double" (0 call "double" (0 var "n" false)))))
         "#,
     ));
@@ -1598,7 +1598,7 @@ fn the_compiler_body_boxes_a_bare_labels_sibling_reference_that_captures_an_oute
     let module = expect_llvm_module(eval_ok_in_island(
         r#"(let ((m (llvm-module::create "mod")))
              (let ((ignored-new (add-function m "rt_coroutine_closure_new"))) ())
-             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_i32''+" (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
+             (compile-function m "outer" '((offset . 0) (n . 0)) '(labels ((offset . 0)) (("rec" ((k . 0)) (assoc "i32" "+" true "tl_std::i32''+" (0 var "k" false) (0 var "offset" false)))) (apply-indirect (var "rec" true) (0 int-any-width 0 5)))))"#,
     ));
     let _guard = COMPILE_LOCK.lock().unwrap();
     let engine = jit(&module);
@@ -6277,11 +6277,11 @@ fn bridge_to_island_text_with(defs: &[&str], core_src: &str) -> String {
 /// node, which is a later stage. Only the *body* is bridged here.
 #[test]
 fn the_island_compiles_a_body_the_new_bridge_produced() {
-    let body = bridge_to_island_text("(assoc ::i32 + true int-any-width (int-any-width int-any-width) (type-named ::i32) (var a) (var b))");
+    let body = bridge_to_island_text("(assoc ::std::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var a) (var b))");
     // The bridge reproduces exactly the text the hand-written test above
     // feeds `compile-function` — the two are checked against each other here
     // rather than only against the island, so a change to either is visible.
-    assert_eq!(body, r#"(assoc "i32" "+" true "tl_i32''+" (0 var "a" false) (0 var "b" false))"#);
+    assert_eq!(body, r#"(assoc "i32" "+" true "tl_std::i32''+" (0 var "a" false) (0 var "b" false))"#);
 
     let module = expect_llvm_module(eval_ok_in_island(&format!(
         r#"(compile-function (llvm-module::create "mod") "add2" '((a . 0) (b . 0)) '{})"#,
@@ -6303,9 +6303,9 @@ fn the_island_compiles_a_body_the_new_bridge_produced() {
 #[test]
 fn the_island_compiles_a_bridged_let_and_if() {
     let body = bridge_to_island_text(
-        "(let ((d int-any-width (assoc ::i32 - true int-any-width (int-any-width int-any-width) (type-named ::i32) (var a) (var b))))
-           (if (assoc ::i32 < true bool (int-any-width int-any-width) (type-named ::bool) (var d) (int-any-width 0))
-               (assoc ::i32 - true int-any-width (int-any-width int-any-width) (type-named ::i32) (int-any-width 0) (var d))
+        "(let ((d int-any-width (assoc ::std::i32 - true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var a) (var b))))
+           (if (assoc ::std::i32 < true bool (int-any-width int-any-width) (type-named ::std::bool) (var d) (int-any-width 0))
+               (assoc ::std::i32 - true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (int-any-width 0) (var d))
                (var d)))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&format!(
@@ -6388,11 +6388,11 @@ fn the_island_runs_a_bridged_loop() {
     let body = bridge_to_island_text(
         "(let ((acc int-any-width (int-any-width 0)) (i int-any-width (int-any-width 0)))
            (loop unit
-             (if (assoc ::i32 < true bool (int-any-width int-any-width) (type-named ::bool) (var i) (var b))
+             (if (assoc ::std::i32 < true bool (int-any-width int-any-width) (type-named ::std::bool) (var i) (var b))
                  (unit)
                  (break))
-             (set acc (assoc ::i32 + true int-any-width (int-any-width int-any-width) (type-named ::i32) (var acc) (var a)))
-             (set i (assoc ::i32 + true int-any-width (int-any-width int-any-width) (type-named ::i32) (var i) (int-any-width 1))))
+             (set acc (assoc ::std::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var acc) (var a)))
+             (set i (assoc ::std::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var i) (int-any-width 1))))
            (var acc))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
@@ -6425,11 +6425,11 @@ fn the_island_runs_a_bridged_loop() {
 fn the_island_runs_a_bridged_labels_block() {
     let body = bridge_to_island_text(
         "(labels ((rec ((n int-any-width) (acc int-any-width)) int-any-width
-                    (if (assoc ::i32 < true bool (int-any-width int-any-width) (type-named ::bool) (var n) (int-any-width 1))
+                    (if (assoc ::std::i32 < true bool (int-any-width int-any-width) (type-named ::std::bool) (var n) (int-any-width 1))
                         (var acc)
                         (apply (var rec) int-any-width (int-any-width int-any-width)
-                          (assoc ::i32 - true int-any-width (int-any-width int-any-width) (type-named ::i32) (var n) (int-any-width 1))
-                          (assoc ::i32 * true int-any-width (int-any-width int-any-width) (type-named ::i32) (var acc) (var n))))))
+                          (assoc ::std::i32 - true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var n) (int-any-width 1))
+                          (assoc ::std::i32 * true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var acc) (var n))))))
            (apply (var rec) int-any-width (int-any-width int-any-width) (var a) (int-any-width 1)))",
     );
     let module = expect_llvm_module(eval_ok_in_island(&compile_function_source(
@@ -6461,7 +6461,7 @@ fn the_island_runs_a_bridged_labels_block() {
 fn the_island_accepts_a_bridged_escaping_closure() {
     let body = bridge_to_island_text(
         "(let ((n int-any-width (var a)))
-           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc ::i32 + true int-any-width (int-any-width int-any-width) (type-named ::i32) (var x) (var n)))))
+           (let ((f fn (lambda ((x int-any-width)) int-any-width (assoc ::std::i32 + true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (var x) (var n)))))
              (apply (var f) int-any-width (int-any-width) (int-any-width 1))))",
     );
     // The capture really is a cell on both sides of the boundary.
@@ -6524,9 +6524,9 @@ fn the_island_runs_a_whole_bridged_defun() {
     let form = read_core(
             &mut h,
             "(defun ::m::clamp ((x int-any-width) (lo int-any-width) (hi int-any-width)) int-any-width
-               (if (assoc ::i32 < true bool (int-any-width int-any-width) (type-named ::bool) (var x) (var lo))
+               (if (assoc ::std::i32 < true bool (int-any-width int-any-width) (type-named ::std::bool) (var x) (var lo))
                    (var lo)
-                   (if (assoc ::i32 < true bool (int-any-width int-any-width) (type-named ::bool) (var hi) (var x))
+                   (if (assoc ::std::i32 < true bool (int-any-width int-any-width) (type-named ::std::bool) (var hi) (var x))
                        (var hi)
                        (var x))))",
         )

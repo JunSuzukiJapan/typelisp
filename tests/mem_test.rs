@@ -1118,7 +1118,7 @@ fn as_boxed(v: Value) -> BoxId {
 /// and an empty table says nothing about which it is. At *this* layer the type
 /// is only an id nobody reads back, so one type serves every test here.
 fn new_hashtable(h: &mut Heap) -> Value {
-    let key = typelisp_mem::intern_spec(&TypeSpec::Named(NsId::ROOT, "hashtable", &[spec::INT, spec::INT]));
+    let key = typelisp_mem::intern_spec(&TypeSpec::Named(NsId::STD, "hashtable", &[spec::INT, spec::INT]));
     h.alloc_hashtable(key)
 }
 

@@ -814,7 +814,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // A builtin *static* method (`Thread::current-id`) is the same:
             // `core_bridge` lowers it to a plain `rt_*` call, and there is no
             // function for the graph to reach either.
-            if key.0.is_simple()
+            if key.0.is_std()
                 && (crate::compile::externs::rt_suspend_method_symbol(key.0.last_segment(), key.1.name()).is_some()
                     || crate::compile::externs::rt_static_method_symbol(key.0.last_segment(), key.1.name()).is_some())
             {

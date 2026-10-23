@@ -60,7 +60,7 @@ fn nested_and_variadic_calls_fold_bottom_up() {
     // A fold inside a body that is otherwise not constant.
     assert_eq!(
         lowered("(defun f ((x int)) int (+ x (* 2 3)))"),
-        "(defun ::f ((x int)) int (assoc ::int + true int (int int) (type-named ::int) (var x) (int 6)))"
+        "(defun ::f ((x int)) int (assoc ::std::int + true int (int int) (type-named ::std::int) (var x) (int 6)))"
     );
 }
 
@@ -134,11 +134,11 @@ fn a_dead_branch_is_still_checked() {
 fn a_call_that_would_raise_is_left_to_raise_at_runtime() {
     assert_eq!(
         lowered("(/ 1 0)"),
-        "(expr (assoc ::int / true rational (int int) (type-named ::rational) (int 1) (int 0)))"
+        "(expr (assoc ::std::int / true rational (int int) (type-named ::std::rational) (int 1) (int 0)))"
     );
     assert_eq!(
         lowered("(mod (the i32 1) 0)"),
-        "(expr (assoc ::i32 mod true int-any-width (int-any-width int-any-width) (type-named ::i32) (int-any-width 1) (int-any-width 0)))"
+        "(expr (assoc ::std::i32 mod true int-any-width (int-any-width int-any-width) (type-named ::std::i32) (int-any-width 1) (int-any-width 0)))"
     );
     // The fold must not have turned the runtime panic into a check error.
     let mut s = Session::new(Load::Prelude);
@@ -150,7 +150,7 @@ fn a_call_that_would_raise_is_left_to_raise_at_runtime() {
 fn a_non_literal_argument_is_not_folded() {
     assert_eq!(
         lowered("(let ((x 5)) (+ x 1))"),
-        "(expr (let ((x int (int 5))) (assoc ::int + true int (int int) (type-named ::int) (var x) (int 1))))"
+        "(expr (let ((x int (int 5))) (assoc ::std::int + true int (int int) (type-named ::std::int) (var x) (int 1))))"
     );
 }
 
@@ -161,9 +161,9 @@ fn a_result_with_no_literal_node_is_not_folded() {
     // control string, so the method cannot be written down and is covered by
     // `every_scalar_builtin_with_a_literal_result_folds` skipping it.
     // An `Option`.
-    assert!(lowered("(try-int->char 65)").contains("(assoc ::int try-int->char"));
+    assert!(lowered("(try-int->char 65)").contains("(assoc ::std::int try-int->char"));
     // A heap string, whose identity `eq` could observe.
-    assert!(lowered("(char->string #\\a)").contains("(assoc ::char char->string"));
+    assert!(lowered("(char->string #\\a)").contains("(assoc ::std::char char->string"));
 }
 
 // ---- the fold is the value ------------------------------------------------
@@ -206,7 +206,7 @@ fn literal_of(ty: &Type) -> Option<String> {
         Type::Ratio => "1/2".to_string(),
         Type::Char => "#\\a".to_string(),
         Type::Bool => "true".to_string(),
-        t if t.is_integer() => format!("(the {} 1)", typelisp_mem::ConcreteNames::type_key(t)),
+        t if t.is_integer() => format!("(the {} 1)", t),
         _ => return None,
     })
 }
@@ -222,7 +222,7 @@ fn every_scalar_builtin_with_a_literal_result_folds() {
     let mut no_literal = Vec::new();
     let mut exercised = 0;
     for recv in receivers {
-        let def = Session::new(Load::Bare).checker.registry().type_def(&Path::root(recv)).expect("a primitive is registered").clone();
+        let def = Session::new(Load::Bare).checker.registry().type_def(&Path::std(recv)).expect("a primitive is registered").clone();
         for (name, af) in &def.assoc {
             if !af.builtin || !af.instance {
                 continue;
