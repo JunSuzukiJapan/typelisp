@@ -186,7 +186,7 @@ fn constants(out: &mut String) {
     ]);
     const_table!(out, "C メモリ (typelisp_rt::c_mem)", typelisp_rt::c_mem, [
         KIND_I8, KIND_I16, KIND_I32, KIND_U8, KIND_U16, KIND_U32, KIND_C_LONG, KIND_C_ULONG,
-        KIND_F32, KIND_F64, KIND_BOOL, KIND_PTR, DESC_FIELD, DESC_PAIR,
+        KIND_F32, KIND_F64, KIND_BOOL, KIND_PTR,
     ]);
     const_table!(out, "終了コード (typelisp_rt)", typelisp_rt, [EXIT_CODE_PANIC, EXIT_CODE_SUCCESS]);
     const_table!(out, "ダンプ形式 (typelisp_front::dump)", typelisp_front::dump, [FORMAT_VERSION, CONTAINER_VERSION]);

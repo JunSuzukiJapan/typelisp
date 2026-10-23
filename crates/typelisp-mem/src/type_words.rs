@@ -6,6 +6,8 @@
 //! reads. A shape names the types it is made of by their positions earlier in
 //! the same list, and a definition by its module and its symbol: the module as
 //! its segments from the root, the symbol as its home module and its name.
+//! A definition alone is written the same way ([`definition_words`]), for
+//! the tables an executable registers definitions in.
 //!
 //! ```text
 //! type   := NAMED ns sym N type-pos^N | DYN ns sym N type-pos^N
@@ -131,6 +133,25 @@ fn write_sym(words: &mut Vec<Word>, sym: SymRef) {
     words.push(Word::Str(sym.name()));
 }
 
+/// `ns sym`: the definition `sym` names in the module `ns`, as words.
+pub fn definition_words(ns: NsId, sym: SymRef) -> Vec<Word> {
+    let mut words = Vec::new();
+    write_ns(&mut words, ns);
+    write_sym(&mut words, sym);
+    words
+}
+
+/// The definition [`definition_words`] wrote.
+///
+/// # Safety
+///
+/// As [`define`].
+pub unsafe fn read_definition(words: &[i64]) -> (NsId, SymRef) {
+    let mut reader = Reader { words, at: 0 };
+    let ns = reader.ns();
+    (ns, reader.sym())
+}
+
 /// Interns the types `words` writes, in order, and returns their ids.
 ///
 /// # Safety
@@ -250,5 +271,12 @@ mod tests {
         for (ty, pos) in wanted.iter().zip(positions) {
             assert_eq!(ids[pos], *ty, "{}", &*crate::type_name(*ty));
         }
+    }
+
+    #[test]
+    fn a_definition_reads_back() {
+        let m = child_ns(child_ns(NsId::ROOT, "type-words-test"), "inner");
+        let sym = intern_exact(m, "callback");
+        assert_eq!(unsafe { read_definition(&placed(&definition_words(m, sym))) }, (m, sym));
     }
 }

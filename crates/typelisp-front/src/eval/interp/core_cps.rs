@@ -1414,6 +1414,7 @@ impl Interp {
             | Op::Unit
             | Op::Var
             | Op::Quote
+            | Op::TypeValue
             | Op::Lambda
             | Op::FnRef
             | Op::MethodRef
@@ -2326,11 +2327,15 @@ impl Interp {
         // argument (`analyze::ffi_callback`). The answer is a raw word, which
         // is how the interpreter carries a `ptr`.
         if path == crate::Path::std(crate::ffi_callback::ADDRESS_BUILTIN) {
-            let key = match argv.first() {
-                Some(Value::Str(id)) => heap.string(*id).to_string(),
-                _ => return Err(EvalError::Internal("ffi: a callback address without its key".to_string())),
+            let function = argv.first().and_then(|v| core::path_value(heap, *v));
+            let ty = match argv.get(1) {
+                Some(Value::Int(n)) => u32::try_from(*n).ok().and_then(typelisp_mem::TypeId::from_index),
+                _ => None,
             };
-            let addr = self.callback_address(heap, &key)?;
+            let (Some(function), Some(ty)) = (function, ty) else {
+                return Err(EvalError::Internal(format!("ffi: a callback address needs its function and its type, got {:?}", argv)));
+            };
+            let addr = self.callback_address(heap, crate::ffi_callback::CallbackSig { function, ty })?;
             return Ok((State::Apply(Value::Int(addr as i64)), None));
         }
         // The memory behind `def-c-struct`s and typed pointers

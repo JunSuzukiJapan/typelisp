@@ -280,10 +280,10 @@ impl Checker {
         })
     }
 
-    /// Every `(offset, key)` a C object of type `ty` placed at `base` starts
+    /// Every `(offset, type)` a C object of type `ty` placed at `base` starts
     /// at: itself, and — for a struct — each field, recursively.
-    fn c_positions(&self, ty: &Type, base: u64, out: &mut Vec<(u64, String)>) -> Result<(), Error> {
-        out.push((base, typelisp_mem::ConcreteNames::type_key(ty)));
+    fn c_positions(&self, ty: &Type, base: u64, out: &mut Vec<(u64, Type)>) -> Result<(), Error> {
+        out.push((base, ty.clone()));
         if let Type::CStruct(p) = ty {
             for f in self.c_struct_def(p)?.fields {
                 self.c_positions(&f.ty, base + f.offset, out)?;
@@ -292,17 +292,19 @@ impl Checker {
         Ok(())
     }
 
-    /// The layout descriptor `c-alloc` hands the runtime for element type `ty`.
-    fn c_desc(&self, ty: &Type) -> Result<String, Error> {
+    /// The layout `c-alloc` hands the runtime for element type `ty`, as its
+    /// arguments: `SIZE ALIGN`, then `OFFSET TYPE` for each C object an
+    /// element holds.
+    fn c_layout_args(&self, heap: &mut Heap, interp: &dyn MacroExpander, ty: &Type) -> Result<Vec<Checked>, Error> {
         let (size, align) = self.c_layout(ty)?;
         let mut positions = Vec::new();
         self.c_positions(ty, 0, &mut positions)?;
-        let mut s = format!("{}{}{}", size, c_mem::DESC_FIELD, align);
-        for (off, key) in positions {
-            s.push(c_mem::DESC_FIELD);
-            s.push_str(&format!("{}{}{}", off, c_mem::DESC_PAIR, key));
+        let mut out = vec![self.c_word(heap, interp, size)?, self.c_word(heap, interp, align)?];
+        for (off, t) in positions {
+            out.push(self.c_word(heap, interp, off)?);
+            out.push(Checked::type_value(&t));
         }
-        Ok(s)
+        Ok(out)
     }
 
     // ---- types ---------------------------------------------------------------
@@ -462,12 +464,11 @@ impl Checker {
         self.check(heap, interp, &Env::new(), Value::Int(n as i64), Some(&Type::I32))
     }
 
-    /// `(" c-ptr-check" FORM KEY)` — `value`, a typed pointer to `pointee`
+    /// `(" c-ptr-check" FORM TYPE)` — `value`, a typed pointer to `pointee`
     /// that came from C, once it is known to point into live memory.
-    pub(super) fn c_checked_from_c(&self, heap: &mut Heap, value: Checked, pointee: &Type) -> Result<Checked, Error> {
-        let key = self.str_literal(heap, &typelisp_mem::ConcreteNames::type_key(pointee))?;
+    pub(super) fn c_checked_from_c(&self, value: Checked, pointee: &Type) -> Result<Checked, Error> {
         let ty = value.ty.clone();
-        self.c_call(b::PTR_CHECK, vec![value.retyped(Type::Ptr), key], ty)
+        self.c_call(b::PTR_CHECK, vec![value.retyped(Type::Ptr), Checked::type_value(pointee)], ty)
     }
 
     /// An `int` argument, as the raw word the builtin reads.
@@ -524,11 +525,12 @@ impl Checker {
             Some(n) => self.c_int_arg(heap, interp, env, *n, nth_loc(arg_locs, 1).as_ref())?,
             None => self.c_word(heap, interp, 1)?,
         };
-        let desc = self.c_desc(&elem)?;
-        let desc = self.str_literal(heap, &desc)?;
+        let layout = self.c_layout_args(heap, interp, &elem)?;
         let arena = self.c_arena_var()?;
         self.c_arena.set(Some(true));
-        self.c_call(b::ALLOC, vec![arena, count, desc], ptr_ty)
+        let mut args = vec![arena, count];
+        args.extend(layout);
+        self.c_call(b::ALLOC, args, ptr_ty)
     }
 
     /// `(c-ref p i)`: a pointer to the `i`th element from `p`, which must
@@ -549,8 +551,7 @@ impl Checker {
         let i = self.c_int_arg(heap, interp, env, args[1], nth_loc(arg_locs, 1).as_ref())?;
         let (size, _) = self.c_layout(&elem)?;
         let size = self.c_word(heap, interp, size)?;
-        let key = self.str_literal(heap, &typelisp_mem::ConcreteNames::type_key(&elem))?;
-        self.c_call(b::INDEX, vec![p, i, size, key], ty)
+        self.c_call(b::INDEX, vec![p, i, size, Checked::type_value(&elem)], ty)
     }
 
     /// The value a load of `ty` at `addr + offset` answers.
@@ -566,7 +567,7 @@ impl Checker {
         let loaded = self.c_call(b::LOAD, vec![addr, off, kind_arg], ty.clone())?;
         match ty {
             // A pointer read back from memory C may have written.
-            Type::PtrTo(pointee) => self.c_checked_from_c(heap, loaded, pointee),
+            Type::PtrTo(pointee) => self.c_checked_from_c(loaded, pointee),
             _ => Ok(loaded),
         }
     }

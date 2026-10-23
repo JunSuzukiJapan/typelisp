@@ -109,28 +109,7 @@ pub fn settle_for_export(module: &Module<'static>) -> Result<(), String> {
     let mut types = TypeWords::default();
     let slots: Vec<(GlobalValue<'static>, usize)> = slots.into_iter().map(|(g, ty)| (g, types.add(ty))).collect();
 
-    let mut strings = std::collections::HashMap::new();
-    let mut words = Vec::new();
-    for w in types.words() {
-        match w {
-            Word::Int(n) => words.push(i64_ty.const_int(*n as u64, true)),
-            Word::Str(text) => {
-                let address = *strings.entry(*text).or_insert_with(|| {
-                    let g = module.add_global(ctx.i8_type().array_type(text.len() as u32), None, "typelisp.types.string");
-                    g.set_initializer(&ctx.const_string(text.as_bytes(), false));
-                    g.set_constant(true);
-                    g.set_linkage(Linkage::Private);
-                    g.as_pointer_value().const_to_int(i64_ty)
-                });
-                words.push(address);
-                words.push(i64_ty.const_int(text.len() as u64, false));
-            }
-        }
-    }
-    let shapes = module.add_global(i64_ty.array_type(words.len() as u32), None, "typelisp.types.shapes");
-    shapes.set_initializer(&i64_ty.const_array(&words));
-    shapes.set_constant(true);
-    shapes.set_linkage(Linkage::Private);
+    let (shapes, nwords) = constant_words(module, "typelisp.types.shapes", types.words());
     let len = types.len() as u32;
     let table = module.add_global(i64_ty.array_type(len), None, "typelisp.types");
     table.set_initializer(&i64_ty.array_type(len).const_zero());
@@ -149,7 +128,7 @@ pub fn settle_for_export(module: &Module<'static>) -> Result<(), String> {
     let args = builder.build_alloca(i64_ty.array_type(3), "args").map_err(|e| e.to_string())?;
     let arg_words = [
         shapes.as_pointer_value().const_to_int(i64_ty),
-        i64_ty.const_int(words.len() as u64, false),
+        i64_ty.const_int(nwords as u64, false),
         table.as_pointer_value().const_to_int(i64_ty),
     ];
     for (i, w) in arg_words.into_iter().enumerate() {
@@ -162,6 +141,37 @@ pub fn settle_for_export(module: &Module<'static>) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     builder.build_return(None).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// `words` as a constant array of `module` named `name`, each string written
+/// as the address of a constant of its own and its length; with the array's
+/// length in words.
+pub fn constant_words(module: &Module<'static>, name: &str, words: &[Word]) -> (GlobalValue<'static>, usize) {
+    let ctx = super::llvm_context();
+    let i64_ty = ctx.i64_type();
+    let mut strings = std::collections::HashMap::new();
+    let mut placed = Vec::new();
+    for w in words {
+        match w {
+            Word::Int(n) => placed.push(i64_ty.const_int(*n as u64, true)),
+            Word::Str(text) => {
+                let address = *strings.entry(*text).or_insert_with(|| {
+                    let g = module.add_global(ctx.i8_type().array_type(text.len() as u32), None, &format!("{}.string", name));
+                    g.set_initializer(&ctx.const_string(text.as_bytes(), false));
+                    g.set_constant(true);
+                    g.set_linkage(Linkage::Private);
+                    g.as_pointer_value().const_to_int(i64_ty)
+                });
+                placed.push(address);
+                placed.push(i64_ty.const_int(text.len() as u64, false));
+            }
+        }
+    }
+    let array = module.add_global(i64_ty.array_type(placed.len() as u32), None, name);
+    array.set_initializer(&i64_ty.const_array(&placed));
+    array.set_constant(true);
+    array.set_linkage(Linkage::Private);
+    (array, placed.len())
 }
 
 /// The functions that intern the types of the exported modules `module` was

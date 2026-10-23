@@ -651,10 +651,9 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         // each running a function compiled into this module; the generated
         // `main` registers them before anything runs.
         let mut callback_entries = Vec::new();
-        for (i, key) in chk.ffi_callback_keys().into_iter().enumerate() {
-            let sig = typelisp_front::ffi_callback::CallbackSig::parse(&key)?;
+        for (i, sig) in chk.ffi_callbacks().into_iter().enumerate() {
             let entry = crate::compile::ffi::emit_callback_entry_in_module(&m, &format!("tl_ffi_callback_entry${}", i), &sig)?;
-            callback_entries.push((key, entry));
+            callback_entries.push((sig, entry));
         }
         build_main_wrapper(
             ctx,
@@ -734,7 +733,7 @@ fn build_main_wrapper(
     print_objects: &[(String, String)],
     format_calls: &[(String, String)],
     printer_globals: &[(&str, usize)],
-    callback_entries: &[(String, inkwell::values::FunctionValue<'static>)],
+    callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
     eval_env: Option<(&[u8], &str, bool)>,
     main_returns_int: bool,
 ) -> Result<(), String> {
@@ -850,18 +849,19 @@ fn build_main_wrapper(
                 .map_err(|e| format!("failed to build rt_upcast_set call: {}", e))?;
         }
     }
-    // The C callback entries (`typelisp_rt::ffi_callback`): the key a callback
-    // argument looks up, and the entry's address. Constants only, like the
-    // tables above.
-    for (i, (key, entry)) in callback_entries.iter().enumerate() {
+    // The C callback entries (`typelisp_rt::ffi_callback`): the entry's
+    // address under the function's definition and the function type C calls
+    // it at, which is what a callback argument looks up.
+    for (i, (sig, entry)) in callback_entries.iter().enumerate() {
         let i64_ty = ctx.i64_type();
-        let g = builder
-            .build_global_string_ptr(key, &format!("ffi_callback_key${}", i))
-            .map_err(|e| format!("failed to build a callback key: {}", e))?;
+        let definition = typelisp_mem::type_words::definition_words(sig.function.ns(), sig.function.name_symbol());
+        let (definition, len) =
+            crate::compile::type_table::constant_words(module, &format!("ffi_callback_function${}", i), &definition);
         let words = [
-            g.as_pointer_value().const_to_int(i64_ty),
-            i64_ty.const_int(key.len() as u64, false),
             entry.as_global_value().as_pointer_value().const_to_int(i64_ty),
+            crate::compile::type_table::load(&builder, module, sig.ty)?,
+            definition.as_pointer_value().const_to_int(i64_ty),
+            i64_ty.const_int(len as u64, false),
         ];
         call_shim(ctx, module, &builder, "rt_ffi_callback_register", &words)?;
     }

@@ -17,8 +17,9 @@
   （計画の 5b の項）。ABI は 0.3.17。
 - 5c も済み。型の表はプロセスに 1 つ、印字と vtable の表は定義か `TypeId` で引き、実行ファイルは
   起動時に型の表を作る（計画の 5c の項）。ABI は 0.3.18。
-- 5d の前半も済み。コンパイル済みコードは型をモジュールの型の表から読む（`compile::type_table`、
-  計画の 5d の項）。ABI は 0.3.19。
+- 5d も済み。コンパイル済みコードは型をモジュールの型の表から読み（`compile::type_table`）、
+  FFI の型・コールバック・C メモリ層は `TypeId` と定義のシンボルで引く（計画の 5d の項）。
+  ダンプの形式は 27、ABI は 0.3.20。
 
 ## 2. 4d で知っておくこと
 
@@ -36,10 +37,10 @@
 
 ## 3. 次にすること（順に）
 
-1. 5d の後半。FFI の型（`FfiDecl` の文字列、`CallbackSig` のキー、`CType::from_key`、
-   `rt_ffi_callback_register`、`c_mem` の型キー）を `TypeId` と定義のシンボルにする。
-2. そのあと 5e（`print-object` の表の文字列キー `value_key_for_method` / `method_for_value` を含む）。
-3. そのあと段階 6〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
+1. 5e（`print-object` の表の文字列キー `value_key_for_method` / `method_for_value` を含む）。
+   FFI の thunk とコールバックの本体の LLVM 名はまだパスの文字列から作る
+   （`ConcreteNames::symbol(&path.to_string())`）。これも 5e の単型化の識別と一緒に直す。
+2. そのあと段階 6〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
    段階 6 で `Info::in_scope` の移行のための広い規則
    （`item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)`）を狭める。
 

@@ -547,9 +547,14 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      prelude と島のビットコードは JIT にも AOT にも載るので、どちらでも同じ書き方にするため。
      最適化をかけない JIT（-O0）では表を読む命令が残る。`TypeId` の語はタグ付きの整数
      （`TypeId::word`）。ABI は 0.3.19。
-     残りは FFI: `defffi` の型（`FfiDecl` の文字列）、コールバックのキー（`CallbackSig`、
-     `dump::parse_path` による切り戻し、`rt_ffi_callback_register`）、C メモリ層（`c_mem`）の
-     型キーの文字列。
+     後半（FFI）も済み。`defffi` の IR は C の型を型のフォームで持ち、`FfiDecl` の型は
+     `TypeId`。コールバックは関数の定義（`NsId` と `SymRef`）と関数型の `TypeId` の組で識別し、
+     呼び出し側は `(quote PATH)` と `(type-value TYPE)` を渡す。`type-value` は組み込みに型を
+     値として渡す IR の節で、評価器は型の番号を、ブリッジは `(type-ref N)` を返す。実行ファイルは
+     定義を `type_words::definition_words` の語の列で埋め込み、`rt_ffi_callback_register` で
+     登録する。C メモリ層（`c_mem`）は型を `TypeId` で持ち、`c-alloc` は配置を
+     `SIZE ALIGN OFFSET TYPE ...` の引数で受け取る。パスから定義を引く処理は
+     `symbols::definition_of_path` の 1 か所。ダンプの形式は 27、ABI は 0.3.20。
    - 5e. 単型化した定義を `(元の定義のシンボル, [TypeId])` の表で識別し、`ConcreteNames` の
      切り戻しを消す。`NameView` を定義のシンボルから作る。
 6. `std` を子モジュールに分け、組み込み型を移す（5 節）。`std::prelude` を作り、テスト・例に

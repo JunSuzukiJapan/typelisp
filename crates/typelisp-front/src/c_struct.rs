@@ -18,11 +18,11 @@ use crate::eval::EvalError;
 pub const ARENA_OPEN: &str = " c-arena-open";
 /// `(ARENA)` → `()`: frees what the arena owns.
 pub const ARENA_CLOSE: &str = " c-arena-close";
-/// `(ARENA COUNT DESC)` → the block's address.
+/// `(ARENA COUNT SIZE ALIGN OFFSET TYPE ...)` → the block's address.
 pub const ALLOC: &str = " c-alloc";
-/// `(ADDR KEY)` → `ADDR`, if it points at a live `KEY`.
+/// `(ADDR TYPE)` → `ADDR`, if it points at a live `TYPE`.
 pub const PTR_CHECK: &str = " c-ptr-check";
-/// `(ADDR I SIZE KEY)` → the address of the `I`th element.
+/// `(ADDR I SIZE TYPE)` → the address of the `I`th element.
 pub const INDEX: &str = " c-index";
 /// `(ADDR OFFSET)` → the address of a field.
 pub const OFFSET: &str = " c-offset";
@@ -78,11 +78,13 @@ fn eval_known(heap: &mut Heap, name: &str, argv: &[Value]) -> Result<Value, Eval
             other => Err(EvalError::Internal(format!("{}: argument {} is not a word: {:?}", name, i, other))),
         }
     };
-    let text = |heap: &Heap, i: usize| -> Result<String, EvalError> {
-        match argv.get(i) {
-            Some(Value::Str(id)) => Ok(heap.string(*id).to_string()),
-            other => Err(EvalError::Internal(format!("{}: argument {} is not a string: {:?}", name, i, other))),
-        }
+    // A `(type-value TYPE)` argument: the type's id.
+    let ty = |i: usize| -> Result<typelisp_mem::TypeId, EvalError> {
+        let n = word(i)?;
+        u32::try_from(n)
+            .ok()
+            .and_then(typelisp_mem::TypeId::from_index)
+            .ok_or_else(|| EvalError::Internal(format!("{}: argument {} is not a type: {}", name, i, n)))
     };
     let raised = EvalError::Panic;
     Ok(match name {
@@ -91,15 +93,19 @@ fn eval_known(heap: &mut Heap, name: &str, argv: &[Value]) -> Result<Value, Eval
             c_mem::arena_close(word(0)? as u64).map_err(EvalError::Internal)?;
             Value::Empty
         }
-        ALLOC => Value::Int(c_mem::alloc(word(0)? as u64, word(1)?, &text(heap, 2)?).map_err(raised)? as i64),
+        ALLOC => {
+            if argv.len() < 4 || argv.len() % 2 != 0 {
+                return Err(EvalError::Internal(format!("{}: expected a layout of offsets and types, got {} arguments", name, argv.len())));
+            }
+            let positions = (4..argv.len()).step_by(2).map(|i| Ok((word(i)? as usize, ty(i + 1)?))).collect::<Result<_, EvalError>>()?;
+            Value::Int(c_mem::alloc(word(0)? as u64, word(1)?, word(2)? as usize, word(3)? as usize, positions).map_err(raised)? as i64)
+        }
         PTR_CHECK => {
             let addr = word(0)?;
-            c_mem::check(addr as usize, &text(heap, 1)?).map_err(raised)?;
+            c_mem::check(addr as usize, ty(1)?).map_err(raised)?;
             Value::Int(addr)
         }
-        INDEX => Value::Int(
-            c_mem::index(word(0)? as usize, word(1)?, word(2)? as usize, &text(heap, 3)?).map_err(raised)? as i64,
-        ),
+        INDEX => Value::Int(c_mem::index(word(0)? as usize, word(1)?, word(2)? as usize, ty(3)?).map_err(raised)? as i64),
         OFFSET => Value::Int(word(0)?.wrapping_add(word(1)?)),
         LOAD => {
             let kind = word(2)?;

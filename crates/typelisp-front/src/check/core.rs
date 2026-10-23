@@ -83,6 +83,8 @@ pub enum Node {
     Construct { owner: crate::Path, targs: Vec<Type>, variant: usize, mutable: bool, field_tys: Vec<Type>, args: Vec<Checked> },
     /// A niched `Option` put into the box a `Sexpr` holds it as.
     BoxOption { value: Box<Checked> },
+    /// The type `ty`, as the value an internal builtin is handed a type in.
+    TypeValue { ty: Type },
     /// The concrete value inside a trait object, as a `Sexpr` datum.
     DynValue { value: Box<Checked> },
     /// A call of the method `method` of `owner` (`args[0]` is the receiver
@@ -324,6 +326,7 @@ impl Node {
             }
             Node::Literal { .. }
             | Node::Quote { .. }
+            | Node::TypeValue { .. }
             | Node::Local { .. }
             | Node::Global { .. }
             | Node::FnRef { .. }
@@ -362,6 +365,11 @@ impl Drop for Checked {
 }
 
 impl Checked {
+    /// The type `ty`, as the value an internal builtin is handed a type in.
+    pub fn type_value(ty: &Type) -> Checked {
+        Checked::of(Node::TypeValue { ty: ty.clone() }, Type::Int)
+    }
+
     /// The same expression, seen at type `ty`: a widening that needs no
     /// runtime work (a `Symbol` where a `Sexpr` is expected, ...). The node
     /// stays as it is.
@@ -696,22 +704,8 @@ pub fn path_field(heap: &Heap, form: Value, i: usize) -> Option<crate::Path> {
 /// `None` when `v` is not a path from the root.
 pub fn path_value(heap: &Heap, v: Value) -> Option<crate::Path> {
     let Value::Path(id) = v else { return None };
-    let segments = heap.path_segments(id);
-    let (root, segs) = segments.split_first()?;
-    if *root != typelisp_mem::symbols::intern_exact(typelisp_mem::NsId::ROOT, "") {
-        return None;
-    }
-    let (name, modules) = segs.split_last()?;
-    let ns = modules.iter().fold(typelisp_mem::NsId::ROOT, |ns, m| {
-        typelisp_mem::symbols::child_ns_named(ns, *m).unwrap_or_else(|| {
-            panic!(
-                "`{}` is not a module of `{}`: the path was not written by `path_form`",
-                m.name(),
-                typelisp_mem::symbols::ns_path(ns).join("::")
-            )
-        })
-    });
-    Some(crate::Path::of_symbol(ns, *name))
+    let (ns, name) = typelisp_mem::symbols::definition_of_path(&heap.path_segments(id))?;
+    Some(crate::Path::of_symbol(ns, name))
 }
 
 /// A node's `i`th field read as a symbol's name, or `None` if it is not a

@@ -109,48 +109,9 @@ impl ConcreteNames {
         format!("(fn ({}) {})", inner.join(","), ret.type_key())
     }
 
-    /// The parameter and return keys of a function type's key, or `None`
-    /// for any other key — and for one with a `&rest` parameter, which no
-    /// caller can pass on.
-    pub fn split_fn_type(key: &str) -> Option<(Vec<String>, String)> {
-        let rest = key.strip_prefix("(fn (")?.strip_suffix(')')?;
-        let mut depth = 0i32;
-        let mut close = None;
-        for (i, c) in rest.char_indices() {
-            match c {
-                '(' | '<' => depth += 1,
-                '>' => depth -= 1,
-                ')' if depth == 0 => {
-                    close = Some(i);
-                    break;
-                }
-                ')' => depth -= 1,
-                _ => {}
-            }
-        }
-        let close = close?;
-        let params_src = &rest[..close];
-        let ret = rest[close + 1..].strip_prefix(' ')?.to_string();
-        let params: Vec<String> = if params_src.is_empty() {
-            Vec::new()
-        } else {
-            Self::split_top_level(params_src).into_iter().map(str::to_string).collect()
-        };
-        if params.iter().any(|p| p.starts_with("&rest ")) {
-            return None;
-        }
-        Some((params, ret))
-    }
-
     /// The key of a typed pointer to `pointee`: `(ptr point)`.
     pub fn ptr_type<T: TypeKey + ?Sized>(pointee: &T) -> String {
         format!("(ptr {})", pointee.type_key())
-    }
-
-    /// The pointee's key of a typed pointer's key, or `None` for any other
-    /// key.
-    pub fn ptr_target(key: &str) -> Option<&str> {
-        key.strip_prefix("(ptr ")?.strip_suffix(')')
     }
 
     /// A type key without its instantiation: `option<char>` -> `option`,
@@ -172,28 +133,6 @@ impl ConcreteNames {
         } else {
             (base, Some(&key[base.len() + 1..key.len() - 1]))
         }
-    }
-
-    /// `src` cut at its commas outside any `<>` or `()` — a function type's
-    /// parameter list is spelled `(fn (int,string) int)`, and its commas are
-    /// its own.
-    fn split_top_level(src: &str) -> Vec<&str> {
-        let mut out = Vec::new();
-        let mut depth = 0i32;
-        let mut start = 0;
-        for (i, c) in src.char_indices() {
-            match c {
-                '<' | '(' => depth += 1,
-                '>' | ')' => depth -= 1,
-                ',' if depth == 0 => {
-                    out.push(&src[start..i]);
-                    start = i + 1;
-                }
-                _ => {}
-            }
-        }
-        out.push(&src[start..]);
-        out
     }
 
     /// The placeholder a key template writes the owning type's `index`th
@@ -317,15 +256,9 @@ mod tests {
     }
 
     #[test]
-    fn a_function_type_reads_back() {
+    fn a_function_type_is_not_an_instantiation() {
         let key = N::fn_type(&["(ptr point)", "i32"], None, &"bool");
         assert_eq!(key, "(fn ((ptr point),i32) bool)");
-        assert_eq!(N::split_fn_type(&key), Some((vec!["(ptr point)".into(), "i32".into()], "bool".into())));
-        assert_eq!(N::split_fn_type("(fn () ())"), Some((vec![], "()".into())));
-        assert_eq!(N::split_fn_type("(fn (ptr,ptr) i32)"), Some((vec!["ptr".into(), "ptr".into()], "i32".into())));
-        assert_eq!(N::split_fn_type("(fn (hashtable<string,int>) int)"), Some((vec!["hashtable<string,int>".into()], "int".into())));
-        assert_eq!(N::split_fn_type("ptr"), None);
-        assert_eq!(N::split_fn_type(&N::fn_type(&["i32"], Some(&"i32"), &"i32")), None);
         assert_eq!(N::split_type(&key).1, None);
     }
 

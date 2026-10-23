@@ -55,11 +55,11 @@ pub(super) struct LiftedCallback {
 }
 
 impl Checker {
-    /// Every callback entry the checked code asks for, as its key
-    /// ([`CallbackSig::key`]). Read by `compile::aot::compile_file`, which
-    /// emits one entry per key and registers it at startup.
-    pub fn ffi_callback_keys(&self) -> Vec<String> {
-        self.callback_keys.borrow().iter().cloned().collect()
+    /// Every callback entry the checked code asks for, in the order it first
+    /// asked. Read by `compile::aot::compile_file`, which emits one entry per
+    /// callback and registers it at startup.
+    pub fn ffi_callbacks(&self) -> Vec<CallbackSig> {
+        self.callbacks.borrow().clone()
     }
 
     /// The argument `arg` to a `defffi` parameter declared `fn_ty` — a
@@ -101,12 +101,15 @@ impl Checker {
         };
         let sig = CallbackSig::from_fn_type(&target, fn_ty)
             .ok_or_else(|| Error::TypeError(format!("internal error: `{}` is not a callback type", fn_ty)))?;
-        let key = sig.key();
-        self.callback_keys.borrow_mut().insert(key.clone());
-        // `(call PATH (REPR) (str KEY))` to the address builtin — the
-        // entry's address, as a raw word.
-        let arg = self.str_literal(heap, &key)?;
-        Ok(Checked::of(Node::Call { path: Path::std(ADDRESS_BUILTIN), args: vec![arg] }, Type::Ptr))
+        if !self.callbacks.borrow().contains(&sig) {
+            self.callbacks.borrow_mut().push(sig);
+        }
+        // `(call PATH (REPR REPR) (quote FUNCTION) (type-value TYPE))` to the
+        // address builtin — the entry's address, as a raw word.
+        let function = core::path_form(heap, &target);
+        let function = self.quoted(heap, function, sexpr_ty());
+        let ty = Checked::type_value(fn_ty);
+        Ok(Checked::of(Node::Call { path: Path::std(ADDRESS_BUILTIN), args: vec![function, ty] }, Type::Ptr))
     }
 
     /// A path for a lifted definition, in the current namespace, that names

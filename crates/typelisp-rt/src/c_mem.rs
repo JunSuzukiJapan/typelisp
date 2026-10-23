@@ -20,7 +20,7 @@
 //! The table is process-wide rather than per thread, because a task can be
 //! resumed on another OS thread than the one that allocated.
 //!
-//! A block records, for its element type, every `(offset, type key)` at which
+//! A block records, for its element type, every `(offset, type)` at which
 //! a C object starts — the element itself at offset 0, each field, each field
 //! of an embedded struct — so "is this a `point` or an `i32`?" is a lookup.
 //!
@@ -35,10 +35,8 @@ use std::alloc::Layout;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 
-use typelisp_abi::{active_heap, fatal, raise};
-use typelisp_mem::Value;
-
-use crate::decode;
+use typelisp_abi::{fatal, raise};
+use typelisp_mem::TypeId;
 
 /// What a load or store reads or writes, as the checker encodes it. One code
 /// per C scalar type; a typed pointer is loaded and stored as [`KIND_PTR`].
@@ -55,17 +53,12 @@ pub const KIND_F64: i64 = 10;
 pub const KIND_BOOL: i64 = 11;
 pub const KIND_PTR: i64 = 12;
 
-/// Separates the fields of an allocation descriptor, and an offset from its
-/// type key within one — characters no type key contains.
-pub const DESC_FIELD: char = '\u{1f}';
-pub const DESC_PAIR: char = '\u{1e}';
-
 struct Block {
     len: usize,
     elem_size: usize,
     layout: Layout,
-    /// Every `(offset within an element, type key)` a C object starts at.
-    positions: Arc<Vec<(usize, String)>>,
+    /// Every `(offset within an element, type)` a C object starts at.
+    positions: Arc<Vec<(usize, TypeId)>>,
 }
 
 #[derive(Default)]
@@ -107,26 +100,13 @@ pub fn arena_close(arena: u64) -> Result<(), String> {
     })
 }
 
-/// A parsed allocation descriptor: element size, alignment, positions.
-fn parse_desc(desc: &str) -> Result<(usize, usize, Vec<(usize, String)>), String> {
-    let bad = || format!("c-alloc: malformed layout descriptor {:?}", desc);
-    let mut parts = desc.split(DESC_FIELD);
-    let size: usize = parts.next().and_then(|s| s.parse().ok()).ok_or_else(bad)?;
-    let align: usize = parts.next().and_then(|s| s.parse().ok()).ok_or_else(bad)?;
-    let mut positions = Vec::new();
-    for p in parts {
-        let (off, key) = p.split_once(DESC_PAIR).ok_or_else(bad)?;
-        positions.push((off.parse().map_err(|_| bad())?, key.to_string()));
-    }
-    Ok((size, align, positions))
-}
-
-/// Allocates `count` zeroed elements laid out by `desc` in `arena`.
-pub fn alloc(arena: u64, count: i64, desc: &str) -> Result<usize, String> {
+/// Allocates `count` zeroed elements in `arena`, each `elem_size` bytes
+/// aligned to `align`, with a C object of each type of `positions` at its
+/// offset.
+pub fn alloc(arena: u64, count: i64, elem_size: usize, align: usize, positions: Vec<(usize, TypeId)>) -> Result<usize, String> {
     if count < 1 {
         return Err(format!("c-alloc: the element count must be at least 1, got {}", count));
     }
-    let (elem_size, align, positions) = parse_desc(desc)?;
     let len = elem_size
         .checked_mul(count as usize)
         .ok_or_else(|| format!("c-alloc: {} elements of {} bytes do not fit in memory", count, elem_size))?;
@@ -147,13 +127,14 @@ pub fn alloc(arena: u64, count: i64, desc: &str) -> Result<usize, String> {
     })
 }
 
-/// Whether `addr` holds a live C object whose type key is `key`: inside a
-/// live block, at an offset where the block's element type has one.
-pub fn check(addr: usize, key: &str) -> Result<(), String> {
+/// Whether `addr` holds a live C object of type `ty`: inside a live block,
+/// at an offset where the block's element type has one.
+pub fn check(addr: usize, ty: TypeId) -> Result<(), String> {
+    let name = typelisp_mem::type_name(ty).to_string();
     if addr == 0 {
         return Err(format!(
             "a `(ptr {})` from C is a null pointer. Declare it as `ptr` if it can be null.",
-            key
+            name
         ));
     }
     let found = with_state(|s| {
@@ -162,26 +143,26 @@ pub fn check(addr: usize, key: &str) -> Result<(), String> {
             return None;
         }
         let rel = (addr - base) % blk.elem_size;
-        Some(blk.positions.iter().any(|(off, k)| *off == rel && k == key))
+        Some(blk.positions.iter().any(|(off, t)| *off == rel && *t == ty))
     });
     match found {
         Some(true) => Ok(()),
         Some(false) => Err(format!(
             "a `(ptr {})` from C points into memory an `unsafe` allocated, but not at a `{}`",
-            key, key
+            name, name
         )),
         None => Err(format!(
             "a `(ptr {})` from C does not point into memory an `unsafe` allocated with `c-alloc` — \
              memory C allocated, or memory already freed, cannot be read through a typed pointer. \
              Declare it as `ptr` to pass it on without reading it.",
-            key
+            name
         )),
     }
 }
 
-/// `(c-ref p i)`: the address of the `i`th `key` from `addr`, `size` bytes
+/// `(c-ref p i)`: the address of the `i`th `ty` from `addr`, `size` bytes
 /// each, which must still be inside the same allocation.
-pub fn index(addr: usize, i: i64, size: usize, key: &str) -> Result<usize, String> {
+pub fn index(addr: usize, i: i64, size: usize, ty: TypeId) -> Result<usize, String> {
     let target = (addr as i128) + (i as i128) * (size as i128);
     let in_same_block = with_state(|s| {
         let (base, blk) = s.blocks.range(..=addr).next_back()?;
@@ -193,7 +174,7 @@ pub fn index(addr: usize, i: i64, size: usize, key: &str) -> Result<usize, Strin
     match in_same_block {
         Some(true) => {
             let target = target as usize;
-            check(target, key)?;
+            check(target, ty)?;
             Ok(target)
         }
         Some(false) => Err(format!("c-ref: index {} is outside the allocation", i)),
@@ -243,12 +224,9 @@ pub unsafe fn store(addr: usize, kind: i64, word: i64) {
     }
 }
 
-/// A tagged string argument's text.
-unsafe fn string_arg(word: i64, who: &str) -> String {
-    match decode(word) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        other => fatal(&format!("{}: expected a string, got {:?}", who, other)),
-    }
+/// A type argument, as `TypeId::word` writes one.
+fn type_arg(word: i64, who: &str) -> TypeId {
+    TypeId::from_word(word).unwrap_or_else(|| fatal(&format!("{}: expected a type, got {:#x}", who, word)))
 }
 
 unsafe fn args_of<'a>(args: *const i64, argc: u32, want: u32, who: &str) -> &'a [i64] {
@@ -282,49 +260,52 @@ pub unsafe extern "C" fn rt_c_arena_close(args: *const i64, argc: u32) -> i64 {
     0
 }
 
-/// `(" c-alloc" ARENA COUNT DESC)`.
+/// `(" c-alloc" ARENA COUNT SIZE ALIGN OFFSET TYPE ...)`: an element of
+/// `SIZE` bytes aligned to `ALIGN`, with a C object of each `TYPE` at its
+/// `OFFSET`.
 ///
 /// # Safety
 ///
-/// `args` must point to three readable `i64`s, the last a tagged string, and
-/// a `Heap` must be registered on this thread.
+/// `args` must point to `argc` readable `i64`s, at least four and an even
+/// number, and a `Heap` must be registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_c_alloc(args: *const i64, argc: u32) -> i64 {
-    let a = args_of(args, argc, 3, "rt_c_alloc");
-    let desc = string_arg(a[2], "rt_c_alloc");
-    match alloc(a[0] as u64, a[1], &desc) {
+    let a = args_of(args, argc, 4, "rt_c_alloc");
+    if a.len() % 2 != 0 {
+        fatal("rt_c_alloc: an offset without its type");
+    }
+    let positions = a[4..].chunks(2).map(|p| (p[0] as usize, type_arg(p[1], "rt_c_alloc"))).collect();
+    match alloc(a[0] as u64, a[1], a[2] as usize, a[3] as usize, positions) {
         Ok(p) => p as i64,
         Err(msg) => raise(msg),
     }
 }
 
-/// `(" c-ptr-check" ADDR KEY)`: `ADDR`, once [`check`] accepts it.
+/// `(" c-ptr-check" ADDR TYPE)`: `ADDR`, once [`check`] accepts it.
 ///
 /// # Safety
 ///
-/// `args` must point to two readable `i64`s, the second a tagged string, and
-/// a `Heap` must be registered on this thread.
+/// `args` must point to two readable `i64`s, and a `Heap` must be registered
+/// on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_c_ptr_check(args: *const i64, argc: u32) -> i64 {
     let a = args_of(args, argc, 2, "rt_c_ptr_check");
-    let key = string_arg(a[1], "rt_c_ptr_check");
-    match check(a[0] as usize, &key) {
+    match check(a[0] as usize, type_arg(a[1], "rt_c_ptr_check")) {
         Ok(()) => a[0],
         Err(msg) => raise(msg),
     }
 }
 
-/// `(" c-index" ADDR I SIZE KEY)`.
+/// `(" c-index" ADDR I SIZE TYPE)`.
 ///
 /// # Safety
 ///
-/// `args` must point to four readable `i64`s, the last a tagged string, and
-/// a `Heap` must be registered on this thread.
+/// `args` must point to four readable `i64`s, and a `Heap` must be
+/// registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_c_index(args: *const i64, argc: u32) -> i64 {
     let a = args_of(args, argc, 4, "rt_c_index");
-    let key = string_arg(a[3], "rt_c_index");
-    match index(a[0] as usize, a[1], a[2] as usize, &key) {
+    match index(a[0] as usize, a[1], a[2] as usize, type_arg(a[3], "rt_c_index")) {
         Ok(p) => p as i64,
         Err(msg) => raise(msg),
     }

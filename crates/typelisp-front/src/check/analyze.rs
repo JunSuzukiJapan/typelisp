@@ -1102,9 +1102,9 @@ pub struct Checker {
     /// holds the table), since it has no table of definitions to fetch one
     /// from by name. The interpreter needs none of it.
     format_calls: RefCell<BTreeSet<crate::CompileTarget>>,
-    /// Every C callback entry asked for so far, by key — see
-    /// [`Self::ffi_callback_keys`].
-    callback_keys: RefCell<BTreeSet<String>>,
+    /// Every C callback entry asked for so far — see
+    /// [`Self::ffi_callbacks`].
+    callbacks: RefCell<Vec<crate::ffi_callback::CallbackSig>>,
     /// Definitions lifted out of this form for a C callback, placed ahead of
     /// it by [`Self::check_form_at`] — see `analyze::ffi_callback`.
     lifted: RefCell<Vec<ffi_callback::LiftedCallback>>,
@@ -1199,7 +1199,7 @@ impl Checker {
             infer_probe: Cell::new(false),
             probe_holes: Cell::new(0),
             format_calls: RefCell::new(BTreeSet::new()),
-            callback_keys: RefCell::new(BTreeSet::new()),
+            callbacks: RefCell::new(Vec::new()),
             lifted: RefCell::new(Vec::new()),
             labels_scopes: RefCell::new(Vec::new()),
             callback_seq: Cell::new(0),
@@ -1951,7 +1951,7 @@ impl Checker {
     /// # What is not decided here
     ///
     /// Whether a declared type can be spelled in C at all. That question is
-    /// answered once, by `CType::from_key` in the backend, because the backend
+    /// answered once, by `CType::from_type` in the backend, because the backend
     /// is what has to emit the conversion — a second list here would be a
     /// second list to keep in agreement. `Interp::exec` reaches the backend
     /// while checking this very form's file, so the answer still arrives
@@ -14929,7 +14929,7 @@ impl Checker {
         // A typed pointer a C function returned has to point into memory an
         // `unsafe` here allocated.
         if let (true, Type::PtrTo(pointee)) = (sig.ffi, &ty) {
-            return self.c_checked_from_c(heap, call, pointee);
+            return self.c_checked_from_c(call, pointee);
         }
         Ok(call)
     }

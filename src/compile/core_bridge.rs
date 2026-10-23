@@ -701,6 +701,12 @@ fn to_island_here(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Error>
             let sym = symbol_field_sym(heap, form, 0)?;
             sym_form(heap, sym)
         }
+        // `(type-value TYPE)` -> `(type-ref N)`: a type handed to a builtin
+        // is read out of the module's type table like every type identity.
+        wk::TYPE_VALUE => {
+            let ty = core::field(heap, form, 0).ok_or_else(|| malformed(heap, form))?;
+            type_ref(heap, ty)
+        }
 
         // ---- trait objects -----------------------------------------------
         wk::DYN_NEW => translate_dyn_new(heap, form, cx),

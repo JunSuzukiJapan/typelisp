@@ -115,7 +115,7 @@ fn walk_here(
         // No sub-forms at all. `quote`'s datum is the important one: it is
         // user data, and descending into it is exactly the mistake the module
         // comment describes.
-        wk::INT_ANY_WIDTH | wk::INT | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::TRACE | wk::UNTRACE | wk::DISASSEMBLE_FN | wk::BREAK => Ok(()),
+        wk::INT_ANY_WIDTH | wk::INT | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::TYPE_VALUE | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::TRACE | wk::UNTRACE | wk::DISASSEMBLE_FN | wk::BREAK => Ok(()),
 
         wk::VAR => {
             note(sym(heap, form, 0)?, bound, siblings, seen, order);
@@ -340,9 +340,9 @@ fn plain_sub_forms(heap: &Heap, form: Value, tag: SymRef) -> Result<Vec<Value>, 
         // lets that refusal be the error a user sees.
         wk::STEP => from(0),
         wk::RETURN | wk::PANIC | wk::DYN_VALUE | wk::UNTAG_INT | wk::TAG_INT => from(0),
-        // `(some-of REPR E)` / `(box-option KEY E)` — the operand only; the
-        // representation is not a form (a parametric one is a list headed by
-        // a symbol, `field-get`'s trap below) and the key is a `(str ...)`.
+        // `(some-of REPR E)` / `(box-option TYPE E)` — the operand only;
+        // neither the representation nor the type is a form (each is a list
+        // headed by a symbol, `field-get`'s trap below).
         wk::SOME_OF | wk::BOX_OPTION => from(1),
         // `(block NAME BODY REPR)` — the body only. The name is a `(str ...)`
         // node and *not* a sub-form to walk: it is a compile-time label,
@@ -611,7 +611,7 @@ fn walk_nested_here(heap: &Heap, form: Value, out: &mut HashSet<SymRef>) -> Resu
             }
             Ok(())
         }
-        wk::INT_ANY_WIDTH | wk::INT | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::VAR | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::TRACE | wk::UNTRACE | wk::DISASSEMBLE_FN | wk::BREAK => Ok(()),
+        wk::INT_ANY_WIDTH | wk::INT | wk::FLOAT_ANY_WIDTH | wk::BIGNUM | wk::RATIO | wk::CHAR | wk::BOOL | wk::STR | wk::SYM | wk::UNIT | wk::QUOTE | wk::TYPE_VALUE | wk::VAR | wk::GLOBAL | wk::FNREF | wk::METHODREF | wk::COMPILE_FN | wk::TRACE | wk::UNTRACE | wk::DISASSEMBLE_FN | wk::BREAK => Ok(()),
         _ => {
             for f in plain_sub_forms(heap, form, tag)? {
                 walk_nested(heap, f, out)?;

@@ -578,12 +578,12 @@ pub struct Interp {
     /// in this interpreter's module tree — on a worker as on the main thread
     /// before the interpreter joined. Set by `shim::rt_eval_init`.
     pub(crate) executable_printer: std::cell::Cell<bool>,
-    /// The C callback entries this session has made, by key
+    /// The C callback entries this session has made, by callback
     /// (`crate::ffi_callback`), each with the compiled body it runs — kept so
     /// the code stays alive while C may hold the entry, and compared on every
     /// lookup so a redefined function gets an entry of its own. Per session,
     /// not per process: an entry runs code this session compiled.
-    callback_entries: RefCell<HashMap<String, (usize, Rc<dyn CompiledBody>)>>,
+    callback_entries: RefCell<HashMap<crate::ffi_callback::CallbackSig, (usize, Rc<dyn CompiledBody>)>>,
     /// The bodies of entries [`Self::callback_entries`] has replaced: C may
     /// still call an old entry, so what it runs must not be freed.
     retired_callback_bodies: RefCell<Vec<Rc<dyn CompiledBody>>>,
@@ -1461,30 +1461,25 @@ impl Interp {
     /// leak leaves the slot dangling — which the rest of the process then
     /// follows, since an AOT program has no later crossing to refresh it.
     /// Re-registering the moved address is what closes that.
-    /// The address of the entry C calls for the callback `key` names — made
-    /// by the backend the first time it is asked for, and again whenever the
+    /// The address of the entry C calls for the callback `sig` — made by the
+    /// backend the first time it is asked for, and again whenever the
     /// function has since been redefined or recompiled.
-    pub(crate) fn callback_address(&self, heap: &mut Heap, key: &str) -> Result<usize, EvalError> {
-        self.make_callback_entry(heap, key).map_err(EvalError::Panic)
+    pub(crate) fn callback_address(&self, heap: &mut Heap, sig: crate::ffi_callback::CallbackSig) -> Result<usize, EvalError> {
+        self.make_callback_entry(heap, sig).map_err(EvalError::Panic)
     }
 
     /// [`Self::callback_address`], failing as a message — the shape the
     /// runtime's factory answers in.
-    fn make_callback_entry(&self, heap: &mut Heap, key: &str) -> Result<usize, String> {
-        let sig = crate::ffi_callback::CallbackSig::parse(key)?;
-        let current = self
-            .root
-            .borrow()
-            .get_fn(&crate::dump::parse_path(&sig.path))
-            .and_then(|f| f.compiled.borrow().clone());
-        if let (Some((addr, body)), Some(now)) = (self.callback_entries.borrow().get(key), &current) {
+    fn make_callback_entry(&self, heap: &mut Heap, sig: crate::ffi_callback::CallbackSig) -> Result<usize, String> {
+        let current = self.root.borrow().get_fn(&sig.function).and_then(|f| f.compiled.borrow().clone());
+        if let (Some((addr, body)), Some(now)) = (self.callback_entries.borrow().get(&sig), &current) {
             if Rc::ptr_eq(body, now) {
                 return Ok(*addr);
             }
         }
         let make = backend("a C callback").map_err(|e| e.to_string())?.callback_entry;
-        let (addr, body) = make(self, heap, key)?;
-        if let Some((_, old)) = self.callback_entries.borrow_mut().insert(key.to_string(), (addr, body)) {
+        let (addr, body) = make(self, heap, sig)?;
+        if let Some((_, old)) = self.callback_entries.borrow_mut().insert(sig, (addr, body)) {
             self.retired_callback_bodies.borrow_mut().push(old);
         }
         Ok(addr)
@@ -4100,12 +4095,12 @@ struct Recording {
 /// the node (it owns the readers), and the backend emits the thunk (it owns
 /// the codegen).
 ///
-/// `params`/`ret` are *C type* spellings — `ConcreteNames::type_key`'s
-/// output, so `"i8"`, `"f32"`, `"string"`, `"ptr"`. The `Repr`s beside them in
-/// the node say how each value crosses the compiled boundary; these say what
-/// the C function is declared to take, which is a different question with a
-/// different answer for all six integer widths. Which spellings are actually
-/// callable is the backend's to decide, and it decides it in one place.
+/// `params`/`ret` are the declared types — `i8`, `f32`, `string`, `ptr`.
+/// The `Repr`s beside them in the node say how each value crosses the
+/// compiled boundary; these say what the C function is declared to take,
+/// which is a different question with a different answer for all six
+/// integer widths. Which types are actually callable is the backend's to
+/// decide, and it decides it in one place.
 #[derive(Clone, Debug)]
 pub struct FfiDecl {
     /// The typelisp-side name, which is also what the thunk's LLVM symbol is
@@ -4116,8 +4111,8 @@ pub struct FfiDecl {
     /// The library to look it up in. `None` means the running process, which
     /// is what reaches libc and everything else already linked.
     pub library: Option<String>,
-    pub params: Vec<String>,
-    pub ret: String,
+    pub params: Vec<TypeId>,
+    pub ret: TypeId,
 }
 
 /// Everything the interpreter needs from the LLVM backend, as plain `fn`
@@ -4175,10 +4170,10 @@ pub struct Backend {
     /// decides where a `FnDef` lives stays the one place that puts anything
     /// into it (`Interp::exec`).
     pub define_ffi: DefineFfiFn,
-    /// Makes the entry C calls for a callback — `crate::ffi_callback`'s key
-    /// names the function and its C signature — and answers its address.
-    /// The function is compiled first if it is not already.
-    pub callback_entry: fn(&Interp, &mut Heap, &str) -> Result<(usize, Rc<dyn CompiledBody>), String>,
+    /// Makes the entry C calls for a callback — the function and the
+    /// function type C calls it at (`crate::ffi_callback`) — and answers its
+    /// address. The function is compiled first if it is not already.
+    pub callback_entry: fn(&Interp, &mut Heap, crate::ffi_callback::CallbackSig) -> Result<(usize, Rc<dyn CompiledBody>), String>,
 }
 
 thread_local! {
@@ -4202,15 +4197,18 @@ pub fn set_backend(backend: Backend) {
     typelisp_rt::ffi_callback::set_factory(callback_entry_from_compiled_code);
 }
 
-/// [`typelisp_rt::ffi_callback::set_factory`]'s factory: the entry for `key`,
-/// made through the interpreter compiled code is running under. The call
-/// that asks is made on that interpreter's thread (the bridge puts it there,
-/// `externs::needs_interpreter`), which is where the interpreter is active.
-fn callback_entry_from_compiled_code(key: &str) -> Result<usize, String> {
+/// [`typelisp_rt::ffi_callback::set_factory`]'s factory: the entry for
+/// `callback`, made through the interpreter compiled code is running under.
+/// The call that asks is made on that interpreter's thread (the bridge puts
+/// it there, `externs::needs_interpreter`), which is where the interpreter is
+/// active.
+fn callback_entry_from_compiled_code(callback: typelisp_rt::ffi_callback::Callback) -> Result<usize, String> {
+    let (ns, sym, ty) = callback;
+    let sig = crate::ffi_callback::CallbackSig { function: Path::of_symbol(ns, sym), ty };
     // SAFETY: the runtime asks only from inside a compiled call, which
     // registered this thread's heap on the way in.
     let heap = unsafe { typelisp_abi::active_heap() };
-    match with_active_interp(|i| i.make_callback_entry(heap, key)) {
+    match with_active_interp(|i| i.make_callback_entry(heap, sig)) {
         Some(r) => r,
         None => Err("ffi: a C callback was asked for with no interpreter running on this thread".to_string()),
     }

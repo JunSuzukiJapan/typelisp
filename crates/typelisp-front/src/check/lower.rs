@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use typelisp_mem::{wk, ConcreteNames, Error, Heap, RootScope, Value};
+use typelisp_mem::{wk, Error, Heap, RootScope, Value};
 
 use crate::nominal_path;
 use crate::types::{Path, Type};
@@ -92,6 +92,11 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
             None => core::tagged(s, *tag, &[]),
         },
         Node::Quote { datum } => forms::quote_form(s, *datum),
+        Node::TypeValue { ty } => {
+            let form = core::type_form(s, ty, &[])?;
+            s.push_root(form);
+            core::tagged(s, wk::TYPE_VALUE, &[form])
+        }
         Node::Local { name } => forms::var_form(s, name),
         Node::Global { path, ty } => info.global_form(s, path, ty),
         Node::FnRef { path, params } => info.fnref_form(s, path, params),
@@ -960,7 +965,7 @@ impl Info {
         f.finish(wk::DEFUN)
     }
 
-    /// `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR (CTYPE...) RET-CTYPE)`.
+    /// `(defffi PATH C-SYMBOL LIBRARY ((SYM REPR)...) RET-REPR (TYPE...) RET-TYPE)`.
     ///
     /// Fields 3-4 are `defun`'s own, so `Interp::exec` reads them back with
     /// the readers it already has: what it registers is an ordinary [`FnDef`]
@@ -969,7 +974,7 @@ impl Info {
     /// synthesized (`a0`, `a1`, ...) — a C declaration has none, and `FnDef`
     /// wants one per parameter.
     ///
-    /// The last two fields spell the C types, and are *deliberately* redundant
+    /// The last two fields are the declared types, *deliberately* redundant
     /// with the `REPR`s beside them. A `Repr` folds all six integer widths into
     /// `Repr::Narrow` (see its doc comment), which is the right answer for the
     /// question a `Repr` exists to answer — how a value crosses the compiled
@@ -1012,12 +1017,12 @@ impl Info {
         f.push(r);
         let mut cs = Items::new(f.heap());
         for t in params {
-            let k = cs.heap().intern_symbol(&ConcreteNames::type_key(t));
+            let k = core::type_form(cs.heap(), t, &[])?;
             cs.push(k);
         }
-        let ctypes = cs.finish_list()?;
-        f.push(ctypes);
-        let rk = f.heap().intern_symbol(&ConcreteNames::type_key(ret));
+        let types = cs.finish_list()?;
+        f.push(types);
+        let rk = core::type_form(f.heap(), ret, &[])?;
         f.push(rk);
         f.finish(wk::DEFFFI)
     }

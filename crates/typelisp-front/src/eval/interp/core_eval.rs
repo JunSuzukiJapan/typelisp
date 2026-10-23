@@ -122,6 +122,7 @@ pub(super) enum Op {
     /// `(box-option KEY E)` — a niched `Option` value put into the box a
     /// `Sexpr` slot holds it as: `Heap::alloc_option` under `KEY`.
     BoxOption,
+    TypeValue,
     Global,
     SetGlobal,
     Assoc,
@@ -191,6 +192,7 @@ impl Op {
             wk::TAG_INT => Op::TagInt,
             wk::SOME_OF => Op::SomeOf,
             wk::BOX_OPTION => Op::BoxOption,
+            wk::TYPE_VALUE => Op::TypeValue,
             wk::GLOBAL => Op::Global,
             wk::SET_GLOBAL => Op::SetGlobal,
             wk::ASSOC => Op::Assoc,
@@ -347,6 +349,10 @@ impl Interp {
             // specifies for a literal, and the reason its consequences are
             // undefined if one is destructively modified.
             Op::Quote => self.literal_field(heap, form),
+
+            // A type handed to an internal builtin: its id, as the number
+            // compiled code's `TypeId::word` tags.
+            Op::TypeValue => Ok(Value::Int(i64::from(type_field(heap, form, 0, "type-value")?.index()))),
 
             // ---- globals -------------------------------------------------
             Op::Global => self.global_core(heap, form),
@@ -2227,14 +2233,21 @@ pub fn read_ffi_decl(heap: &Heap, tl: Value) -> Result<crate::eval::interp::FfiD
                 )))
             }
         },
-        params: sym_list_field(heap, tl, 5, "defffi")?,
-        ret: sym_field(heap, tl, 6, "defffi")?,
+        params: match core::field(heap, tl, 5) {
+            Some(list) => heap
+                .list_to_vec(list)
+                .map_err(|e| EvalError::Internal(format!("exec: (defffi ..) field 5: {}", e)))?
+                .into_iter()
+                .map(|form| typelisp_mem::type_of_form(heap, form).ok_or_else(|| EvalError::Internal(format!("exec: (defffi ..) a C parameter is not a type: {:?}", form))))
+                .collect::<Result<_, _>>()?,
+            None => return Err(EvalError::Internal("exec: (defffi ..) has no field 5".to_string())),
+        },
+        ret: type_field(heap, tl, 6, "defffi")?,
     })
 }
 
 /// A field holding a bare symbol list `(SYM...)` — a `defmacro`'s parameters
-/// (all `Sexpr`, so no representations), a `defenum`'s variant names, or a
-/// `defffi`'s C parameter types.
+/// (all `Sexpr`, so no representations) or a `defenum`'s variant names.
 fn sym_list_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<String>, EvalError> {
     let list = core::field(heap, form, i)
         .ok_or_else(|| EvalError::Internal(format!("exec: ({} ..) has no field {}", what, i)))?;

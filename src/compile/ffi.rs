@@ -47,7 +47,8 @@ use inkwell::types::{BasicMetadataTypeEnum, BasicType, BasicTypeEnum};
 use inkwell::values::{BasicMetadataValueEnum, BasicValueEnum, FunctionValue, IntValue};
 
 use typelisp_front::eval::interp::{CompiledBody, FfiDecl, Interp};
-use typelisp_mem::ConcreteNames;
+use typelisp_front::ffi_callback::CallbackSig;
+use typelisp_mem::{ConcreteNames, NsId, TypeId, TypeShape};
 
 use crate::compile::llvm_builtins::compiled_fn_type;
 use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
@@ -62,7 +63,7 @@ use crate::compile::{llvm_context, CompiledFn, COMPILE_LOCK};
 ///
 /// **This enum is the one list of what the FFI can spell.** The checker
 /// deliberately does not keep a second one: it parses the declared types like
-/// any other annotation and lets [`Self::from_key`] be the judge, because the
+/// any other annotation and lets [`Self::from_type`] be the judge, because the
 /// judge should be whatever actually has to emit the conversion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CType {
@@ -88,33 +89,30 @@ enum CType {
 
 impl CType {
     /// The C type a declared typelisp type means, or `None` if it means none.
-    ///
-    /// The spellings are `ConcreteNames::type_key`'s, which is what the
-    /// `defffi` node carries — one producer, so there is nothing to keep in
-    /// agreement.
-    fn from_key(key: &str) -> Option<CType> {
-        // A callback parameter: what crosses is the address of the entry C
-        // calls (`typelisp_front::ffi_callback`), so to the thunk it is a
-        // pointer. Whether the callback's own types can be spelled is
-        // [`callback_ctypes`]'s question.
-        if ConcreteNames::split_fn_type(key).is_some() {
-            return Some(CType::Ptr);
-        }
-        // A typed pointer is an address like any other; which C object it
-        // points at is checked by the runtime, not the C signature.
-        if ConcreteNames::ptr_target(key).is_some() {
-            return Some(CType::Ptr);
-        }
+    fn from_type(ty: TypeId) -> Option<CType> {
+        let name = match typelisp_mem::type_shape(ty) {
+            // A callback parameter: what crosses is the address of the entry
+            // C calls (`typelisp_front::ffi_callback`), so to the thunk it is
+            // a pointer. Whether the callback's own types can be spelled is
+            // [`callback_ctypes`]'s question.
+            TypeShape::Fn(..) => return Some(CType::Ptr),
+            // A typed pointer is an address like any other; which C object it
+            // points at is checked by the runtime, not the C signature.
+            TypeShape::Ptr(_) => return Some(CType::Ptr),
+            TypeShape::Unit => return Some(CType::Void),
+            // The primitives are the root's types without arguments.
+            TypeShape::Named(ns, name, args) if ns == NsId::ROOT && args.is_empty() => name.name(),
+            _ => return None,
+        };
         // Covers the six widths *and* `c-long`/`c-ulong`, which that function
         // answers 64 for — the one place the LP64 assumption is written down.
-        if let Some((bits, signed)) = typelisp_front::types::int_width_signed(key) {
+        if let Some((bits, signed)) = typelisp_front::types::int_width_signed(name) {
             return Some(CType::Int { bits, signed });
         }
-        match key {
+        match name {
             "f32" => Some(CType::F32),
             "f64" => Some(CType::F64),
             "bool" => Some(CType::Bool),
-            "()" | "unit" => Some(CType::Void),
             "string" => Some(CType::Str),
             "ptr" => Some(CType::Ptr),
             _ => None,
@@ -176,8 +174,7 @@ pub(crate) fn emit_thunk(module: &Module<'static>, decl: &FfiDecl) -> Result<Fun
     let builder = ctx.create_builder();
 
     let params = ctypes(&decl.params, decl)?;
-    let ret = CType::from_key(&decl.ret)
-        .ok_or_else(|| unspellable(&decl.ret, "a return type", decl))?;
+    let ret = CType::from_type(decl.ret).ok_or_else(|| unspellable(decl.ret, "a return type", decl))?;
 
     // ---- the C function, under its real signature ----
     let arg_tys: Vec<BasicMetadataTypeEnum<'static>> =
@@ -435,32 +432,33 @@ fn call_shim(
 
 /// Every declared parameter as a [`CType`], or an error naming the first one
 /// that is not spellable in C.
-fn ctypes(keys: &[String], decl: &FfiDecl) -> Result<Vec<CType>, String> {
+fn ctypes(types: &[TypeId], decl: &FfiDecl) -> Result<Vec<CType>, String> {
     // A callback parameter's own types are checked here, at the declaration,
     // rather than when an entry is first made for it.
-    for k in keys {
-        if let Some((params, ret)) = ConcreteNames::split_fn_type(k) {
-            callback_ctypes(&params, &ret).map_err(|e| format!("defffi: `{}`: {}", decl.path, e))?;
+    for t in types {
+        if let TypeShape::Fn(params, _, ret) = typelisp_mem::type_shape(*t) {
+            callback_ctypes(&params, ret).map_err(|e| format!("defffi: `{}`: {}", decl.path, e))?;
         }
     }
-    keys.iter()
-        .map(|k| match CType::from_key(k) {
+    types
+        .iter()
+        .map(|t| match CType::from_type(*t) {
             Some(CType::Void) => Err(format!(
                 "defffi: `{}` declares a `()` parameter, which is not a value C can be passed",
                 decl.path
             )),
             Some(c) => Ok(c),
-            None => Err(unspellable(k, "a parameter type", decl)),
+            None => Err(unspellable(*t, "a parameter type", decl)),
         })
         .collect()
 }
 
-fn unspellable(key: &str, where_: &str, decl: &FfiDecl) -> String {
+fn unspellable(ty: TypeId, where_: &str, decl: &FfiDecl) -> String {
     format!(
         "defffi: `{}` declares `{}` as {}, which the FFI cannot spell in C. \
          It can spell the integer widths (i8/i16/i32/u8/u16/u32), c-long, c-ulong, f32, f64, \
          bool, string, ptr, and `()`.",
-        decl.path, key, where_
+        decl.path, &*typelisp_mem::type_name(ty), where_
     )
 }
 
@@ -711,12 +709,12 @@ pub fn define_ffi(_interp: &Interp, decl: &FfiDecl) -> Result<Rc<dyn CompiledBod
 // its answer into the C value it returns. Both conversions are the ones the
 // thunk already has, run in the other direction.
 
-/// A callback's C parameter and return types, from their type keys — or why
-/// C cannot call a function with them.
-fn callback_ctypes(params: &[String], ret: &str) -> Result<(Vec<CType>, CType), String> {
+/// A callback's C parameter and return types — or why C cannot call a
+/// function with them.
+fn callback_ctypes(params: &[TypeId], ret: TypeId) -> Result<(Vec<CType>, CType), String> {
     let mut out = Vec::with_capacity(params.len());
     for p in params {
-        match CType::from_key(p) {
+        match CType::from_type(*p) {
             Some(CType::Void) => return Err("a callback parameter cannot be `()`".to_string()),
             Some(c) => out.push(c),
             None => {
@@ -724,12 +722,12 @@ fn callback_ctypes(params: &[String], ret: &str) -> Result<(Vec<CType>, CType), 
                     "a callback takes `{}`, which the FFI cannot spell in C. It can spell the \
                      integer widths (i8/i16/i32/u8/u16/u32), c-long, c-ulong, f32, f64, bool, \
                      string and ptr.",
-                    p
+                    &*typelisp_mem::type_name(*p)
                 ))
             }
         }
     }
-    let ret = match CType::from_key(ret) {
+    let ret = match CType::from_type(ret) {
         // Who would free it? C did not make it and cannot know how.
         Some(CType::Str) => {
             return Err(
@@ -739,7 +737,7 @@ fn callback_ctypes(params: &[String], ret: &str) -> Result<(Vec<CType>, CType), 
             )
         }
         Some(c) => c,
-        None => return Err(format!("a callback returns `{}`, which the FFI cannot spell in C", ret)),
+        None => return Err(format!("a callback returns `{}`, which the FFI cannot spell in C", &*typelisp_mem::type_name(ret))),
     };
     Ok((out, ret))
 }
@@ -752,7 +750,7 @@ fn emit_callback_entry(
     name: &str,
     target: IntValue<'static>,
     params: &[CType],
-    pointees: &[Option<String>],
+    pointees: &[Option<TypeId>],
     ret: CType,
 ) -> Result<FunctionValue<'static>, String> {
     let ctx = llvm_context();
@@ -807,7 +805,7 @@ fn emit_callback_entry(
     store(1, i64_ty.const_int(params.len() as u64, false))?;
     for (i, c) in params.iter().enumerate() {
         let v = entry.get_nth_param(i as u32).expect("the entry has one parameter per declared type");
-        let (kind, word, aux) = match (c, pointees.get(i).and_then(|p| p.as_deref())) {
+        let (kind, word, aux) = match (c, pointees.get(i).copied().flatten()) {
             // Copied into a typelisp string by the runtime, where a bad one
             // can fail inside the callback rather than here.
             (CType::Str, _) => (
@@ -818,15 +816,11 @@ fn emit_callback_entry(
                 zero,
             ),
             // A typed pointer, checked by the runtime against the memory
-            // `unsafe`s allocated — `aux` is the pointee's key, as a C string.
+            // `unsafe`s allocated — `aux` is the pointee type, read out of
+            // the module's type table.
             (_, Some(pointee)) => {
-                let key = builder
-                    .build_global_string_ptr(pointee, "cb_pointee")
-                    .map_err(|e| format!("ffi: failed to emit a pointee key: {}", e))?;
-                let key = builder
-                    .build_ptr_to_int(key.as_pointer_value(), i64_ty, "cb_pointee_addr")
-                    .map_err(|e| format!("ffi: failed to take a pointee key's address: {}", e))?;
-                (2, c_to_word(&builder, v, *c)?, key)
+                let pointee = crate::compile::type_table::load(&builder, module, pointee)?;
+                (2, c_to_word(&builder, v, *c)?, pointee)
             }
             _ => (0, c_to_word(&builder, v, *c)?, zero),
         };
@@ -862,31 +856,32 @@ fn emit_callback_entry(
     Ok(entry)
 }
 
-/// The C types a callback key declares.
-fn callback_sig_ctypes(sig: &typelisp_front::ffi_callback::CallbackSig) -> Result<(Vec<CType>, CType), String> {
-    callback_ctypes(&sig.params, &sig.ret)
-}
-
-/// [`emit_callback_entry`] for the callback `sig` names, into an executable's
+/// [`emit_callback_entry`] for the callback `sig`, into an executable's
 /// module: the body is the module's own compiled function.
 pub(crate) fn emit_callback_entry_in_module(
     module: &Module<'static>,
     name: &str,
-    sig: &typelisp_front::ffi_callback::CallbackSig,
+    sig: &CallbackSig,
 ) -> Result<FunctionValue<'static>, String> {
-    let (params, ret) = callback_sig_ctypes(sig)?;
-    let pointees = callback_pointees(sig);
-    let symbol = ConcreteNames::symbol(&sig.path);
+    let (params, ret) = sig.signature();
+    let (ctypes, cret) = callback_ctypes(&params, ret)?;
+    let symbol = ConcreteNames::symbol(&sig.function.to_string());
     let body = module
         .get_function(&symbol)
-        .ok_or_else(|| format!("compile-file: `{}` is passed to C as a callback but was not compiled", sig.path))?;
+        .ok_or_else(|| format!("compile-file: `{}` is passed to C as a callback but was not compiled", sig.function))?;
     let target = body.as_global_value().as_pointer_value().const_to_int(llvm_context().i64_type());
-    emit_callback_entry(module, name, target, &params, &pointees, ret)
+    emit_callback_entry(module, name, target, &ctypes, &pointees(&params), cret)
 }
 
-/// Each parameter's pointee key, for the ones that are typed pointers.
-fn callback_pointees(sig: &typelisp_front::ffi_callback::CallbackSig) -> Vec<Option<String>> {
-    sig.params.iter().map(|p| ConcreteNames::ptr_target(p).map(str::to_string)).collect()
+/// Each parameter's pointee type, for the ones that are typed pointers.
+fn pointees(params: &[TypeId]) -> Vec<Option<TypeId>> {
+    params
+        .iter()
+        .map(|p| match typelisp_mem::type_shape(*p) {
+            TypeShape::Ptr(pointee) => Some(pointee),
+            _ => None,
+        })
+        .collect()
 }
 
 thread_local! {
@@ -896,16 +891,16 @@ thread_local! {
     static SESSION_ENTRIES: std::cell::RefCell<Vec<CompiledFn>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-/// `Backend::callback_entry`: compile the function `key` names if it is not
+/// `Backend::callback_entry`: compile the function `sig` names if it is not
 /// already, emit its entry and JIT it.
 pub fn callback_entry(
     interp: &Interp,
     heap: &mut typelisp_mem::Heap,
-    key: &str,
+    sig: CallbackSig,
 ) -> Result<(usize, Rc<dyn CompiledBody>), String> {
-    let sig = typelisp_front::ffi_callback::CallbackSig::parse(key)?;
-    let (params, ret) = callback_sig_ctypes(&sig)?;
-    let path = typelisp_front::dump::parse_path(&sig.path);
+    let (params, ret) = sig.signature();
+    let (ctypes, cret) = callback_ctypes(&params, ret)?;
+    let path = sig.function;
     let compiled = |interp: &Interp| interp.root.borrow().get_fn(&path).and_then(|f| f.compiled.borrow().clone());
     if compiled(interp).is_none() {
         let target = crate::CompileTarget::Fn(path.clone());
@@ -920,7 +915,7 @@ pub fn callback_entry(
     let _guard = COMPILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let module = llvm_context().create_module("ffi_callback");
     let target = llvm_context().i64_type().const_int(body.address() as u64, false);
-    let entry = emit_callback_entry(&module, "ffi_callback_entry", target, &params, &callback_pointees(&sig), ret)?;
+    let entry = emit_callback_entry(&module, "ffi_callback_entry", target, &ctypes, &pointees(&params), cret)?;
     let name = entry.get_name().to_str().map_err(|e| format!("ffi: entry name: {}", e))?.to_string();
     module
         .verify()

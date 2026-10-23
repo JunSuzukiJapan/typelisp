@@ -8,8 +8,9 @@
 //! typelisp function to completion ([`rt_ffi_callback_invoke`]), turns the
 //! answer back and re-enters the native section ([`rt_ffi_callback_leave`]).
 //!
-//! Entries are kept in a table keyed by `typelisp_front::ffi_callback`'s key
-//! (function path plus C signature). An executable fills it at startup
+//! Entries are kept in a table keyed by the function's definition (its module
+//! and its symbol) and the function type C calls it at. An executable fills it
+//! at startup
 //! ([`rt_ffi_callback_register`]); a session fills it on first use through
 //! the factory the front end installs ([`set_factory`]).
 //!
@@ -28,21 +29,25 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use typelisp_abi::{active_heap, fatal, raise};
-use typelisp_mem::Value;
+use typelisp_mem::{NsId, SymRef, TypeId, Value};
 
 use crate::decode;
 
-/// Entry addresses by key, as an executable registered them at startup. A
+/// A callback: the definition of the function C is handed, and the function
+/// type it is called at.
+pub type Callback = (NsId, SymRef, TypeId);
+
+/// Entry addresses by callback, as an executable registered them at startup. A
 /// process-wide table: an entry is plain code, callable from any thread that
 /// runs typelisp, and never removed — C may keep the address for as long as
 /// the process lives. A session keeps the entries it makes itself, per
 /// interpreter (they run code that session compiled), and asks [`FACTORY`].
-static ENTRIES: Mutex<Option<HashMap<String, usize>>> = Mutex::new(None);
+static ENTRIES: Mutex<Option<HashMap<Callback, usize>>> = Mutex::new(None);
 
 /// What makes an entry nobody registered: set by a session that can compile
 /// one (the JIT), absent in an executable, where every entry was registered
 /// at startup.
-static FACTORY: OnceLock<fn(&str) -> Result<usize, String>> = OnceLock::new();
+static FACTORY: OnceLock<fn(Callback) -> Result<usize, String>> = OnceLock::new();
 
 thread_local! {
     /// A callback's failure, waiting for the C call around it to return —
@@ -50,22 +55,22 @@ thread_local! {
     static PENDING: RefCell<Option<Box<dyn Any + Send>>> = const { RefCell::new(None) };
 }
 
-/// The entry registered for `key`, if any.
-pub fn lookup(key: &str) -> Option<usize> {
+/// The entry registered for `callback`, if any.
+pub fn lookup(callback: Callback) -> Option<usize> {
     let guard = ENTRIES.lock().unwrap_or_else(|e| e.into_inner());
-    guard.as_ref().and_then(|m| m.get(key).copied())
+    guard.as_ref().and_then(|m| m.get(&callback).copied())
 }
 
-/// Records the entry for `key` — an executable's, at startup.
-pub fn register(key: &str, addr: usize) {
+/// Records the entry for `callback` — an executable's, at startup.
+pub fn register(callback: Callback, addr: usize) {
     let mut guard = ENTRIES.lock().unwrap_or_else(|e| e.into_inner());
-    guard.get_or_insert_with(HashMap::new).insert(key.to_string(), addr);
+    guard.get_or_insert_with(HashMap::new).insert(callback, addr);
 }
 
 /// Installs the factory [`rt_ffi_callback_address`] asks for an entry nobody
 /// registered. The first installation wins; every session installs the same
 /// function.
-pub fn set_factory(f: fn(&str) -> Result<usize, String>) {
+pub fn set_factory(f: fn(Callback) -> Result<usize, String>) {
     let _ = FACTORY.set(f);
 }
 
@@ -78,29 +83,33 @@ pub fn resume_pending() {
     }
 }
 
-/// `(" ffi-callback-address" KEY)`: the address of the entry for `args[0]`
-/// (a tagged string), as a raw word.
+/// `(" ffi-callback-address" PATH TYPE)`: the address of the entry for the
+/// function the path `args[0]` names, called at the function type `args[1]`,
+/// as a raw word.
 ///
 /// # Safety
 ///
-/// `args` must point to at least one readable `i64`, and a `Heap` must be
+/// `args` must point to at least two readable `i64`s, and a `Heap` must be
 /// registered on this thread.
 #[no_mangle]
 pub unsafe extern "C-unwind" fn rt_ffi_callback_address(args: *const i64, argc: u32) -> i64 {
-    if argc < 1 {
-        fatal("rt_ffi_callback_address: expected 1 argument");
+    if argc < 2 {
+        fatal("rt_ffi_callback_address: expected 2 arguments");
     }
-    let key = match decode(*args) {
-        Value::Str(id) => active_heap().string(id).to_string(),
-        other => fatal(&format!("rt_ffi_callback_address: the key is not a string, got {:?}", other)),
+    let (ns, sym) = match decode(*args) {
+        Value::Path(id) => typelisp_mem::symbols::definition_of_path(&active_heap().path_segments(id))
+            .unwrap_or_else(|| fatal("rt_ffi_callback_address: the function's path does not start at the root")),
+        other => fatal(&format!("rt_ffi_callback_address: the function is not a path, got {:?}", other)),
     };
-    if let Some(addr) = lookup(&key) {
+    let ty = TypeId::from_word(*args.add(1))
+        .unwrap_or_else(|| fatal("rt_ffi_callback_address: the function type is not a type"));
+    if let Some(addr) = lookup((ns, sym, ty)) {
         return addr as i64;
     }
     match FACTORY.get() {
         // The session keeps its own entries (they run code it compiled), so
         // nothing is registered here.
-        Some(make) => match make(&key) {
+        Some(make) => match make((ns, sym, ty)) {
             Ok(addr) => addr as i64,
             Err(msg) => raise(msg),
         },
@@ -108,25 +117,26 @@ pub unsafe extern "C-unwind" fn rt_ffi_callback_address(args: *const i64, argc: 
     }
 }
 
-/// Registers an entry an executable carries: `args` is `[key address, key
-/// length, entry address]`, the key being a string constant in the
-/// executable. Called by the generated `main` before anything runs.
+/// Registers an entry an executable carries: `args` is `[entry address,
+/// function type, definition address, definition length]`, the definition
+/// being the words `typelisp_mem::type_words::definition_words` writes, a
+/// constant in the executable. Called by the generated `main` before
+/// anything runs.
 ///
 /// # Safety
 ///
-/// `args` must point to three readable `i64`s; the first two must describe a
-/// valid UTF-8 byte string.
+/// `args` must point to four readable `i64`s; the last two must describe
+/// the words of a definition, whose strings are constants.
 #[no_mangle]
 pub unsafe extern "C" fn rt_ffi_callback_register(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_ffi_callback_register: expected 3 arguments");
+    if argc < 4 {
+        fatal("rt_ffi_callback_register: expected 4 arguments");
     }
-    let bytes = std::slice::from_raw_parts(*args as usize as *const u8, *args.add(1) as usize);
-    let key = match std::str::from_utf8(bytes) {
-        Ok(k) => k,
-        Err(_) => fatal("rt_ffi_callback_register: the key is not UTF-8"),
-    };
-    register(key, *args.add(2) as usize);
+    let ty = TypeId::from_word(*args.add(1))
+        .unwrap_or_else(|| fatal("rt_ffi_callback_register: the function type is not a type"));
+    let words = std::slice::from_raw_parts(*args.add(2) as usize as *const i64, *args.add(3) as usize);
+    let (ns, sym) = typelisp_mem::type_words::read_definition(words);
+    register((ns, sym, ty), *args as usize);
     0
 }
 
@@ -178,8 +188,8 @@ pub unsafe extern "C" fn rt_ffi_callback_leave(_args: *const i64, _argc: u32) ->
 /// ..., kind(n-1), word(n-1), aux(n-1)]`, the function a coroutine-ABI body.
 /// A kind of `0` is a word already in the function's own representation; `1`
 /// is a C string's address, copied into a typelisp string here; `2` is a
-/// typed pointer, whose `aux` is the address of its pointee's key (a C
-/// string) — it has to point at such an object in memory an `unsafe`
+/// typed pointer, whose `aux` is its pointee type (a `TypeId::word`) — it
+/// has to point at such an object in memory an `unsafe`
 /// allocated ([`crate::c_mem::check`]). `aux` is otherwise unused.
 ///
 /// Answers the function's value, or `0` when it failed or an earlier
@@ -215,8 +225,9 @@ pub unsafe extern "C" fn rt_ffi_callback_invoke(args: *const i64, argc: u32) -> 
                 // before the body starts need no roots of their own.
                 1 => callback_string(*word),
                 2 => {
-                    let key = std::ffi::CStr::from_ptr(*aux as usize as *const std::ffi::c_char).to_string_lossy();
-                    match crate::c_mem::check(*word as usize, &key) {
+                    let pointee = TypeId::from_word(*aux)
+                        .unwrap_or_else(|| fatal("rt_ffi_callback_invoke: a typed pointer's pointee is not a type"));
+                    match crate::c_mem::check(*word as usize, pointee) {
                         Ok(()) => *word,
                         Err(msg) => raise(msg),
                     }

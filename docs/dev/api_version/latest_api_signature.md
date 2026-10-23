@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.19
+# ABI バージョン 0.3.20
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.19 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.20 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `a8eb6cea5c53595d`
+内容ハッシュ (FNV-1a 64): `c895504969d2f6e2`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -95,8 +95,6 @@
 | KIND_F64 | 10 |
 | KIND_BOOL | 11 |
 | KIND_PTR | 12 |
-| DESC_FIELD | '\u{1f}' |
-| DESC_PAIR | '\u{1e}' |
 
 ## 終了コード (typelisp_rt)
 
@@ -109,7 +107,7 @@
 
 | 名前 | 値 |
 |---|---|
-| FORMAT_VERSION | 26 |
+| FORMAT_VERSION | 27 |
 | CONTAINER_VERSION | 1 |
 
 ## well-known シンボル (typelisp_mem::BUILTIN_SYMBOLS)
@@ -392,6 +390,7 @@
 | 273 | `type-unit` |
 | 274 | `type-never` |
 | 275 | `type-ref` |
+| 276 | `type-value` |
 
 ## 組み込み型 (typelisp_mem::BUILTIN_TYPES)
 

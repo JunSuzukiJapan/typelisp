@@ -629,6 +629,10 @@ well_known_symbols! {
      process's type table, which compiled code reads from its module's
      table."
     TYPE_REF => "type-ref"
+    "Appended for the explicit-symbols plan's stage 5d (2026-10-23): a type
+     handed to a builtin as a value, `(type-value TYPE)` — the id of the
+     type `TYPE` writes."
+    TYPE_VALUE => "type-value"
 }
 
 
@@ -831,7 +835,7 @@ pub const CORE_VOCABULARY: &[u32] = &[
     wk::LLVM_OP, wk::SUSPEND, wk::VECTOR_OP, wk::REPR_HANDLE, wk::REPR_RAW_WORD, wk::REPR_STRUCT,
     wk::REPR_ENUM, wk::REPR_DYN, wk::REPR_NICHE, wk::REPR_NONE, wk::TYPE_NAMED, wk::TYPE_FN,
     wk::TYPE_DYN, wk::TYPE_PTR, wk::TYPE_CSTRUCT, wk::TYPE_PARAM, wk::TYPE_VAR, wk::TYPE_UNIT, wk::TYPE_NEVER,
-    wk::TYPE_REF,
+    wk::TYPE_REF, wk::TYPE_VALUE,
 ];
 
 /// The standard library module's segment under the root.
@@ -1189,6 +1193,28 @@ pub fn find_exact(ns: NsId, name: &str) -> Option<SymRef> {
 /// — the tree's own key, as [`ns_names`] gives it — if there is one.
 pub fn child_ns_named(parent: NsId, name: SymRef) -> Option<NsId> {
     table().nodes[parent.0 as usize].children.get(&name).copied()
+}
+
+/// The definition a path from the root names — the module it is in and the
+/// symbol it is defined under — reading `segments` as the tree's own keys:
+/// the root's empty name, each module's name in its parent, then the
+/// definition's name. `None` when the path does not start at the root.
+///
+/// # Panics
+///
+/// When a module segment is not a child of the module before it: the path
+/// was not written from the tree.
+pub fn definition_of_path(segments: &[SymRef]) -> Option<(NsId, SymRef)> {
+    let (root, segs) = segments.split_first()?;
+    if *root != intern_exact(NsId::ROOT, "") {
+        return None;
+    }
+    let (name, modules) = segs.split_last()?;
+    let ns = modules.iter().fold(NsId::ROOT, |ns, m| {
+        child_ns_named(ns, *m)
+            .unwrap_or_else(|| panic!("`{}` is not a module of `{}`: the path was not written from the tree", m.name(), ns_path(ns).join("::")))
+    });
+    Some((ns, *name))
 }
 
 /// The module `ns` is a child of; `None` for the root and the system module.
