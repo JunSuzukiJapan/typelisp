@@ -7355,7 +7355,7 @@ impl Checker {
         if let Some(m) = own {
             for (bare, target) in &m.aliases {
                 if self.info.reg.type_def(target).is_some() {
-                    imports.insert(bare.to_string(), target.to_string());
+                    imports.insert((target.ns(), target.name_symbol()), bare);
                 }
             }
         }
@@ -7363,14 +7363,17 @@ impl Checker {
         // are written as if brought in — except where this module's own
         // definition or import takes the name.
         if let Some(std_ns) = self.info.reg.module_at(typelisp_mem::NsId::STD) {
-            for name in std_ns.types.keys().chain(std_ns.traits.keys()) {
-                if own.is_some_and(|m| m.types.contains_key(name) || m.traits.contains_key(name)) {
+            for sym in std_ns.types.symbols().chain(std_ns.traits.symbols()) {
+                let name = sym.name();
+                if own.is_some_and(|m| m.types.contains_key(name)
+                    || m.traits.contains_key(name)
+                    || m.aliases.get(name).is_some_and(|t| self.info.reg.type_def(t).is_some())) {
                     continue;
                 }
-                imports.entry(name.to_string()).or_insert_with(|| Path::std(name).to_string());
+                imports.entry((typelisp_mem::NsId::STD, sym)).or_insert(name);
             }
         }
-        typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(typelisp_mem::symbols::ns_path(self.info.ns), imports));
+        typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(self.info.ns, imports));
     }
 
     /// [`Self::enter_module`], plus recording `segs` as the file currently

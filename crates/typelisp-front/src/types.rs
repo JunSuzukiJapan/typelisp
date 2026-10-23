@@ -463,13 +463,13 @@ impl fmt::Display for Type {
                 let written = if p.is_simple() { builtin_spelling(p.last_segment()) } else { None };
                 match written {
                     Some(w) => write!(f, "{}", w)?,
-                    None => write!(f, "{}", view.path(&p.to_string()))?,
+                    None => write!(f, "{}", view.definition(p.ns(), p.name_symbol()))?,
                 }
                 if ts.is_empty() { Ok(()) } else { args(f, ts) }
             }
             Type::Var(name) => write!(f, "{}", name),
             Type::Dyn(p, pins) => {
-                write!(f, ":dyn {}", view.path(&p.to_string()))?;
+                write!(f, ":dyn {}", view.definition(p.ns(), p.name_symbol()))?;
                 if pins.is_empty() { Ok(()) } else { args(f, pins) }
             }
             Type::Fn(ps, rest, r) => {
@@ -488,7 +488,10 @@ impl fmt::Display for Type {
                 }
                 write!(f, ") {})", r)
             }
-            other => write!(f, "{}", view.type_key(&typelisp_mem::ConcreteNames::type_key(other))),
+            Type::PtrTo(t) => write!(f, "{}", typelisp_mem::ConcreteNames::ptr_type(&t.to_string())),
+            Type::CStruct(p) => write!(f, "{}", view.definition(p.ns(), p.name_symbol())),
+            // The scalars, each a root name no module can shadow.
+            other => write!(f, "{}", typelisp_mem::ConcreteNames::type_key(other)),
         }
     }
 }

@@ -1997,8 +1997,8 @@ fn quoted_form(heap: &mut Heap, datum: Value) -> Result<Value, Error> {
         // `compile-file` gives an object it cannot externalize.
         Value::Boxed(id) => {
             // Only a struct or enum box carries a type name to report.
-            let what = match crate::type_key::heap_type_key(heap, id) {
-                Some(key) => format!("a `{}` object", typelisp_print::shared::name_view().type_key(&key)),
+            let what = match crate::type_key::heap_type_id(heap, id) {
+                Some(ty) => format!("a `{}` object", typelisp_print::shared::name_view().type_name(ty)),
                 None => "an object".to_string(),
             };
             Err(Error::TypeError(format!(

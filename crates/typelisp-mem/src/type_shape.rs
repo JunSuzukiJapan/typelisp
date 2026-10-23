@@ -60,18 +60,23 @@ impl TypeShape {
 }
 
 /// How the type `shape` is displayed, given its arguments' displays by
-/// `name_of` — the spelling [`ConcreteNames`] gives the same type.
-pub(crate) fn display(shape: &TypeShape, name_of: impl Fn(TypeId) -> String) -> String {
+/// `name_of` and its definition's by `definition_of` — the spelling
+/// [`ConcreteNames`] gives the same type.
+pub(crate) fn display(
+    shape: &TypeShape,
+    name_of: impl Fn(TypeId) -> String,
+    definition_of: impl Fn(NsId, SymRef) -> String,
+) -> String {
     let names = |ids: &[TypeId]| ids.iter().map(|id| name_of(*id)).collect::<Vec<_>>();
     match shape {
-        TypeShape::Named(ns, sym, args) => ConcreteNames::instantiated_type(&definition(*ns, *sym), &names(args)),
-        TypeShape::Dyn(ns, sym, pins) => ConcreteNames::dyn_type(&definition(*ns, *sym), &names(pins)),
+        TypeShape::Named(ns, sym, args) => ConcreteNames::instantiated_type(&definition_of(*ns, *sym), &names(args)),
+        TypeShape::Dyn(ns, sym, pins) => ConcreteNames::dyn_type(&definition_of(*ns, *sym), &names(pins)),
         TypeShape::Fn(params, rest, ret) => {
             let rest = rest.map(&name_of);
             ConcreteNames::fn_type(&names(params), rest.as_ref(), &name_of(*ret))
         }
         TypeShape::Ptr(pointee) => ConcreteNames::ptr_type(&name_of(*pointee)),
-        TypeShape::CStruct(ns, sym) => definition(*ns, *sym),
+        TypeShape::CStruct(ns, sym) => definition_of(*ns, *sym),
         TypeShape::Unit => "()".to_string(),
         TypeShape::Never => "!".to_string(),
         TypeShape::Param(n) => ConcreteNames::template_param(*n as usize),
@@ -128,7 +133,7 @@ impl TypeTable {
         if let Some(&id) = self.ids.get(&shape) {
             return TypeId(id);
         }
-        let name = display(&shape, |arg| self.types[arg.0 as usize].1.clone());
+        let name = display(&shape, |arg| self.types[arg.0 as usize].1.clone(), definition);
         let id = self.types.len() as u32;
         self.ids.insert(shape.clone(), id);
         self.types.push((shape, name));

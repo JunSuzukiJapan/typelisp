@@ -951,13 +951,20 @@ fn build_main_wrapper(
         // Type names are written for the module the program was checked in,
         // as the interpreter writes them — the view the checker left behind.
         let view = typelisp_print::shared::name_view();
-        let (module_ptr, module_len) = literal(&builder, &view.module().join("::"))?;
+        let words = |name: &str, words: &[typelisp_mem::type_words::Word]| {
+            let (global, len) = crate::compile::type_table::constant_words(module, name, words);
+            (global.as_pointer_value().const_to_int(i64_ty), i64_ty.const_int(len as u64, false))
+        };
+        let (module_ptr, module_len) = words("print_name_module", &typelisp_mem::type_words::ns_words(view.module()));
         call(&builder, "rt_print_name_module", &[module_ptr, module_len])?;
-        let imports: std::collections::BTreeMap<&String, &String> = view.imports().iter().collect();
-        for (name, path) in imports {
+        // In the order of the names, so the executable is the same each time.
+        let mut imports: Vec<(&(typelisp_mem::NsId, typelisp_mem::symbols::SymRef), &&'static str)> = view.imports().iter().collect();
+        imports.sort_by_key(|(_, name)| **name);
+        for (i, ((ns, sym), name)) in imports.into_iter().enumerate() {
+            let (def_ptr, def_len) =
+                words(&format!("print_name_import${}", i), &typelisp_mem::type_words::definition_words(*ns, *sym));
             let (name_ptr, name_len) = literal(&builder, name)?;
-            let (path_ptr, path_len) = literal(&builder, path)?;
-            call(&builder, "rt_print_name_import", &[name_ptr, name_len, path_ptr, path_len])?;
+            call(&builder, "rt_print_name_import", &[def_ptr, def_len, name_ptr, name_len])?;
         }
     }
     // The environment `eval` needs, as one immutable blob. Registration only —

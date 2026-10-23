@@ -572,6 +572,12 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      チェッカーの中のメソッドの表（`AdtDef::assoc`・`insts`・テンプレート）はまだメソッド名の
      文字列で引く（段階 7）。名前を切る処理で残るのはダンプのキー（`dump::parse_path`・
      `parse_method_key`。段階 8）。
+     後半も済み。`NameView` は今のモジュールの `NsId` と、取り込んだ定義（`NsId` と `SymRef`）から
+     取り込み名への表を持つ。定義の表示は節の木で決め（今のモジュールか、取り込んだか、その下か）、
+     型の表示は型の形をたどる（`NameView::type_name`。型の表の表示と同じ `type_shape::display` に
+     定義の書き方を渡す）。文字列は最後に組むだけで、切らない。実行ファイルはモジュールを
+     `type_words::ns_words`、取り込んだ定義を `definition_words` の語の列で
+     `rt_print_name_module` / `rt_print_name_import` に渡す。ABI は 0.3.22。
 6. `std` を子モジュールに分け、組み込み型を移す（5 節）。`std::prelude` を作り、テスト・例に
    `use` を足す。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

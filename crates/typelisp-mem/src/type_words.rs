@@ -7,7 +7,8 @@
 //! the same list, and a definition by its module and its symbol: the module as
 //! its segments from the root, the symbol as its home module and its name.
 //! A definition alone is written the same way ([`definition_words`]), for
-//! the tables an executable registers definitions in.
+//! the tables an executable registers definitions in, and so is a module
+//! alone ([`ns_words`]).
 //!
 //! ```text
 //! type   := NAMED ns sym N type-pos^N | DYN ns sym N type-pos^N
@@ -131,6 +132,22 @@ fn write_ns(words: &mut Vec<Word>, ns: NsId) {
 fn write_sym(words: &mut Vec<Word>, sym: SymRef) {
     write_ns(words, sym.home());
     words.push(Word::Str(sym.name()));
+}
+
+/// `ns`: the module `ns`, as words.
+pub fn ns_words(ns: NsId) -> Vec<Word> {
+    let mut words = Vec::new();
+    write_ns(&mut words, ns);
+    words
+}
+
+/// The module [`ns_words`] wrote.
+///
+/// # Safety
+///
+/// As [`define`].
+pub unsafe fn read_ns(words: &[i64]) -> NsId {
+    Reader { words, at: 0 }.ns()
 }
 
 /// `ns sym`: the definition `sym` names in the module `ns`, as words.
@@ -278,5 +295,7 @@ mod tests {
         let m = child_ns(child_ns(NsId::ROOT, "type-words-test"), "inner");
         let sym = intern_exact(m, "callback");
         assert_eq!(unsafe { read_definition(&placed(&definition_words(m, sym))) }, (m, sym));
+        assert_eq!(unsafe { read_ns(&placed(&ns_words(m))) }, m);
+        assert_eq!(unsafe { read_ns(&placed(&ns_words(NsId::ROOT))) }, NsId::ROOT);
     }
 }

@@ -2968,7 +2968,6 @@ impl Renderer {
             }
             Value::Boxed(id) if heap.is_struct(id) => {
                 let ty = crate::stored_type(heap, id).expect("a struct box has a type");
-                let key = typelisp_mem::type_name(ty).to_string();
                 // A `Vector<T>` prints in CL's vector syntax, which reads
                 // back as `#(..)` — or, with `*print-array*` off, as its type
                 // and length alone.
@@ -2976,7 +2975,7 @@ impl Renderer {
                 if typelisp_mem::type_shape(ty).named_definition() == vector {
                     let n = heap.struct_field_count(id);
                     if !ctx.print_vars.array {
-                        out.push_str(&format!("#<{} {}>", crate::shared::name_view().type_key(&key), n));
+                        out.push_str(&format!("#<{} {}>", crate::shared::name_view().type_name(ty), n));
                         return Ok(());
                     }
                     out.push_str("#(");
@@ -3022,7 +3021,7 @@ impl Renderer {
                 if ty == typelisp_mem::TypeId::SEXPR_ARRAY {
                     return self.render_data_array(heap, ctx, id, standard, depth, out);
                 }
-                out.push_str(&format!("#<{}", crate::shared::name_view().type_key(&key)));
+                out.push_str(&format!("#<{}", crate::shared::name_view().type_name(ty)));
                 for i in 0..heap.struct_field_count(id) {
                     if Self::length_reached(ctx, i) {
                         out.push_str(" ...");
@@ -3075,7 +3074,7 @@ impl Renderer {
             // its instantiation (`hashtable<string,int>`) from `HashTable::new`.
             Value::Boxed(id) if heap.is_hashtable(id) => out.push_str(&format!(
                 "#<{} count={}>",
-                crate::shared::name_view().type_key(&heap.struct_type_name(id)),
+                crate::shared::name_view().type_name(heap.struct_type_key(id)),
                 heap.hashtable_count(id)
             )),
             Value::Boxed(id) if heap.is_scope(id) => {
@@ -3094,13 +3093,9 @@ impl Renderer {
                 let text = match heap.builtin_fn_recv(id) {
                     None => format!("#<builtin {}>", heap.builtin_fn_name(id)),
                     Some(pid) => {
-                        // The receiver type's path, spelled straight from the
-                        // heap's interned segments — `typelisp::types::Path`'s
-                        // `Display` is the same `::` join, and this crate has
-                        // no `Path` to borrow it from.
-                        let segs: Vec<&str> =
-                            heap.path_segments(pid).iter().map(|s| heap.symbol_spelling(*s)).collect();
-                        format!("#<builtin {}::{}>", crate::shared::name_view().path(&segs.join("::")), heap.builtin_fn_name(id))
+                        let (ns, sym) = typelisp_mem::symbols::definition_of_path(&heap.path_segments(pid))
+                            .expect("a builtin's receiver is a path from the root");
+                        format!("#<builtin {}::{}>", crate::shared::name_view().definition(ns, sym), heap.builtin_fn_name(id))
                     }
                 };
                 out.push_str(&text);
