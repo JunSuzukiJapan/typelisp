@@ -1608,6 +1608,7 @@ impl Checker {
         self.publish_names(heap);
         heap.names().enter_module(self.current_module());
         let r = self.check_one_form(heap, interp, v, loc_hint);
+        self.info.reg.reexport_std_in_prelude();
         self.publish_names(heap);
         r
     }
@@ -7360,18 +7361,22 @@ impl Checker {
                 }
             }
         }
-        // The standard library offers its types to every module, so they
+        // Every module reads what `std::prelude` re-exports, so its types
         // are written as if brought in — except where this module's own
         // definition or import takes the name.
-        if let Some(std_ns) = self.info.reg.module_at(typelisp_mem::NsId::STD) {
-            for sym in std_ns.types.symbols().chain(std_ns.traits.symbols()) {
-                let name = sym.name();
+        if let Some(prelude) = self.info.reg.module_at(crate::types::prelude_ns()) {
+            for local in prelude.reexports.symbols() {
+                let target = prelude.aliases.get_sym(local).expect("a re-export is one of the module's imports");
+                if self.info.reg.type_def(target).is_none() && self.info.reg.trait_def(target).is_none() {
+                    continue;
+                }
+                let name = local.name();
                 if own.is_some_and(|m| m.types.contains_key(name)
                     || m.traits.contains_key(name)
                     || m.aliases.get(name).is_some_and(|t| self.info.reg.type_def(t).is_some())) {
                     continue;
                 }
-                imports.entry((typelisp_mem::NsId::STD, sym)).or_insert(name);
+                imports.entry((target.ns(), target.name_symbol())).or_insert(name);
             }
         }
         typelisp_print::shared::set_name_view(typelisp_mem::NameView::new(self.info.ns, imports));

@@ -31,7 +31,7 @@
 use typelisp_mem::{symbols, wk, Heap, NsId, Value};
 
 use crate::check::core;
-use crate::{DefLocs, Docs, Loc, Registry, SymRef, TopLevelForm};
+use crate::{DefLocs, Docs, Loc, Path, Registry, SymRef, TopLevelForm};
 
 /// Tags whose fields are *not* sub-expressions, so a walk must not descend
 /// into them.
@@ -507,8 +507,8 @@ pub struct CompletionCandidate {
 
 /// Every bare name visible for completion while checking module
 /// `module_path`, as `Checker::find_named` reaches one: that module's own
-/// definitions and what its `use`s brought in, then what every module is
-/// offered, the standard library's definitions.
+/// definitions and what its `use`s brought in, then what every module reads
+/// without a `use`, the definitions `std::prelude` re-exports.
 /// An ancestor's definitions are not visible without a `use`, so none are
 /// offered.
 pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<CompletionCandidate> {
@@ -517,9 +517,17 @@ pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<Comp
         return out;
     };
     push_namespace(reg, here, &mut out);
-    if here.ns != NsId::STD {
-        if let Some(std_ns) = reg.module_at(NsId::STD) {
-            push_definitions(std_ns, &mut out);
+    if let Some(prelude) = reg.module_at(crate::types::prelude_ns()) {
+        let offered: std::collections::HashSet<Path> = prelude
+            .reexports
+            .symbols()
+            .map(|local| *prelude.aliases.get_sym(local).expect("a re-export is one of the module's imports"))
+            .collect();
+        let homes: std::collections::HashSet<NsId> = offered.iter().map(Path::ns).collect();
+        // This module's own definitions are pushed above.
+        for home in homes.into_iter().filter(|home| *home != here.ns) {
+            let m = reg.module_at(home).expect("a re-exported definition's module is in the registry");
+            push_definitions(m, |sym| offered.contains(&Path::of_symbol(home, sym)), &mut out);
         }
     }
     out
@@ -528,7 +536,7 @@ pub fn completion_candidates(reg: &Registry, module_path: &[String]) -> Vec<Comp
 /// Push every name in `ns` into `out`: its definitions, its child modules and
 /// what its `use`s brought in.
 fn push_namespace(reg: &Registry, ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>) {
-    push_definitions(ns, out);
+    push_definitions(ns, |_| true, out);
     for (name, _) in reg.children(ns.ns) {
         out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Module, detail: "module".to_string() });
     }
@@ -543,32 +551,33 @@ fn push_namespace(reg: &Registry, ns: &crate::Namespace, out: &mut Vec<Completio
     }
 }
 
-/// Push the names of what `ns` defines into `out`.
-fn push_definitions(ns: &crate::Namespace, out: &mut Vec<CompletionCandidate>) {
-    for (name, sig) in ns.fns.iter() {
+/// Push the names of what `ns` defines into `out`, those whose symbol `keep`
+/// accepts.
+fn push_definitions(ns: &crate::Namespace, keep: impl Fn(SymRef) -> bool, out: &mut Vec<CompletionCandidate>) {
+    for (name, sig) in ns.fns.symbols().filter(|s| keep(*s)).map(|s| (s.name(), ns.fns.get_sym(s).expect("a key of the table"))) {
         out.push(CompletionCandidate {
             name: name.to_string(),
             kind: CompletionKind::Function,
             detail: format!("({:?}) -> {:?}", sig.params, sig.ret),
         });
     }
-    for name in ns.macros.keys() {
+    for name in ns.macros.symbols().filter(|s| keep(*s)).map(|s| s.name()) {
         out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Macro, detail: "macro".to_string() });
     }
-    for name in ns.types.keys() {
+    for name in ns.types.symbols().filter(|s| keep(*s)).map(|s| s.name()) {
         out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Type, detail: "type".to_string() });
     }
-    for (name, vi) in ns.vars.iter() {
+    for (name, vi) in ns.vars.symbols().filter(|s| keep(*s)).map(|s| (s.name(), ns.vars.get_sym(s).expect("a key of the table"))) {
         out.push(CompletionCandidate {
             name: name.to_string(),
             kind: CompletionKind::Variable,
             detail: format!("{:?}", vi.ty),
         });
     }
-    for name in ns.traits.keys() {
+    for name in ns.traits.symbols().filter(|s| keep(*s)).map(|s| s.name()) {
         out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Trait, detail: "trait".to_string() });
     }
-    for name in ns.ctors.keys() {
+    for name in ns.ctors.symbols().filter(|s| keep(*s)).map(|s| s.name()) {
         out.push(CompletionCandidate { name: name.to_string(), kind: CompletionKind::Function, detail: "constructor".to_string() });
     }
 }

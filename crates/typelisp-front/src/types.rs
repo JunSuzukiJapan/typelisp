@@ -28,6 +28,10 @@ pub const USER_MODULE: &str = "user";
 /// name out of the way of a user's own modules.
 pub const INTERNAL_MODULE: &str = "%internal";
 
+/// The child of [`STD_MODULE`] whose re-exports every module reads without a
+/// `use`.
+pub const PRELUDE_MODULE: &str = "prelude";
+
 /// The name of a definition: the module it is in and the symbol its name
 /// reads as there.
 ///
@@ -187,6 +191,12 @@ fn module_ns<'a>(segments: impl Iterator<Item = &'a str>) -> NsId {
 pub fn internal_ns() -> NsId {
     static NS: std::sync::OnceLock<NsId> = std::sync::OnceLock::new();
     *NS.get_or_init(|| symbols::child_ns(NsId::STD, INTERNAL_MODULE))
+}
+
+/// The module every module reads its re-exports from, `std::prelude`.
+pub fn prelude_ns() -> NsId {
+    static NS: std::sync::OnceLock<NsId> = std::sync::OnceLock::new();
+    *NS.get_or_init(|| symbols::child_ns(NsId::STD, PRELUDE_MODULE))
 }
 
 impl PartialOrd for Path {

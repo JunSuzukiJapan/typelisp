@@ -1120,7 +1120,26 @@ impl Registry {
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
         let modules = [Namespace::new(NsId::ROOT), std_ns, internal].into_iter().map(|m| (m.ns, m)).collect();
-        Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() }
+        let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
+        reg.reexport_std_in_prelude();
+        reg
+    }
+
+    /// Makes `std::prelude` re-export every definition of `std`, as a
+    /// `(pub use std::name)` written there would. Run again whenever `std`
+    /// may have gained a definition, so what every module reads without a
+    /// `use` is what `std` defines.
+    pub fn reexport_std_in_prelude(&mut self) {
+        let defined: Vec<SymRef> = self
+            .module_at(NsId::STD)
+            .expect("the registry always has the standard library's module")
+            .defined_symbols()
+            .collect();
+        let prelude = self.module_mut(crate::types::prelude_ns());
+        for sym in defined {
+            prelude.aliases.insert(sym.name(), Path::of_symbol(NsId::STD, sym));
+            prelude.reexports.insert(sym.name(), ());
+        }
     }
 
     /// The root module's definitions.
@@ -3164,14 +3183,15 @@ fn tvar(name: &str) -> Type {
 impl Registry {
     /// Writes into the session's table of what names mean (`Heap::names`)
     /// the modules, types and traits this registry defines, so the forms
-    /// read next can read a path through them, and what the standard library
-    /// makes every module read as its own: everything `std` defines. Called
+    /// read next can read a path through them, and what every module reads
+    /// as its own: what `std::prelude` re-exports. Called
     /// by the checker around every top-level form; the table only grows, so
     /// writing what it holds already changes nothing.
     pub fn publish_names(&self, names: &mut typelisp_mem::symbols::SessionNames) {
-        let std_ns = self.module_at(NsId::STD).expect("the registry always has the standard library's module");
-        for sym in std_ns.defined_symbols() {
-            names.export(sym);
+        let prelude = self.module_at(crate::types::prelude_ns()).expect("the registry always has `std::prelude`");
+        for local in prelude.reexports.symbols() {
+            let target = prelude.aliases.get_sym(local).expect("a re-export is one of the module's imports");
+            names.export(target.name_symbol());
         }
         for ns in self.namespaces() {
             names.declare_module(ns.ns);

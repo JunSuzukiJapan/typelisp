@@ -599,6 +599,13 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
    - 6c. `std::prelude` を作り、素の名前の最後の引き先（リーダーの 3 番目、解析の
      `Info::find_named` の最後）を `std::prelude` の再公開にする。この段階では今どこからでも
      見えるもの（`std` の定義）を全部再公開し、振る舞いは変えない。
+     済み。`std::prelude` は `std` の子モジュール（`types::prelude_ns`）で、`Registry::reexport_std_in_prelude`
+     が `std` の定義を 1 つずつ `(pub use std::name)` と同じ別名と再公開の印にする。`with_builtins` の最後と、
+     フォームを 1 つ検査するたびに呼ぶ（`std` を読む途中で `%internal` のフォームも読むため）。リーダーが
+     取り込みなしで読む名前（`publish_names`）、`find_named` の最後、補完、型の表示名は、この再公開から
+     読む。別名表のキーは `std::prelude` 自身のシンボルなので、`find_named` の最後で見つかるのは語彙の
+     名前（どのモジュールでも同じシンボル）だけで、ほかの名前はリーダーが定義のシンボルを渡すため
+     シンボルの所属で見つかる。ダンプには `std::prelude` の表も入る。
    - 6d. prelude のソースと組み込みの型・関数を `std` の子モジュール（`std::primitive` ほか）に分ける。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。

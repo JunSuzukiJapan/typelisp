@@ -282,9 +282,9 @@ impl Info {
     /// This module's own definition comes first, then what a `use` here
     /// brought in under the name, then the definition in the module the
     /// symbol belongs to (a name a macro's expansion carried in from the
-    /// macro's module), then what the standard library offers every module
-    /// under it. No
-    /// enclosing module is consulted: a module sees what it defines and what
+    /// macro's module, or one the reader read as the definition
+    /// `std::prelude` re-exports), then what `std::prelude` re-exports under
+    /// it. No enclosing module is consulted: a module sees what it defines and what
     /// it brings in (`docs/dev/explicit-symbols-plan.md`, 3.3).
     ///
     /// An import of something `lookup` does not find (a type, where a
@@ -310,7 +310,12 @@ impl Info {
                 return Some(found);
             }
         }
-        at(NsId::STD, sym)
+        // A member of the vocabulary is read as one symbol in every module,
+        // `std::prelude` too, so it is the key `std::prelude`'s table holds.
+        let prelude = self.reg.module_at(crate::types::prelude_ns())?;
+        prelude.reexports.get_sym(sym)?;
+        let target = prelude.aliases.get_sym(sym).expect("a re-export is one of the module's imports");
+        at(target.ns(), target.name_symbol())
     }
 
     /// What a bare module-level name means — a function, a global variable
