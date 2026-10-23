@@ -1,9 +1,20 @@
-//! What the heap's type table registers: a type's shape.
+//! The type table: every type a value of this process can have, registered
+//! by its shape.
 //!
 //! A shape names its definition by the module it is in and its symbol there —
 //! the two halves of a definition's path — and its type arguments by their
 //! own ids, so equal types have equal shapes and one id. Reading a type's
 //! arguments is reading its shape; nothing takes a spelling apart.
+//!
+//! The table belongs to the process, like the symbol table its shapes point
+//! into, not to a heap: an id means the same type to every heap, every thread
+//! and every table that holds one, including the ones filled before any heap
+//! exists (an interpreter's built-in types, an executable's startup).
+
+use std::collections::HashMap;
+use std::sync::OnceLock;
+
+use parking_lot::RwLock;
 
 use crate::names::ConcreteNames;
 use crate::symbols::{ns_path, NsId, SymRef};
@@ -23,6 +34,11 @@ pub enum TypeShape {
     CStruct(NsId, SymRef),
     Unit,
     Never,
+    /// The owning type's Nth parameter, in a field's template: what a field
+    /// declared `Option<T>` in `gen<T>` is before an instantiation of `gen`
+    /// says what `T` is. No value has it; [`crate::Heap::instantiate`]
+    /// replaces it.
+    Param(u32),
 }
 
 impl TypeShape {
@@ -30,6 +46,16 @@ impl TypeShape {
     /// `args`.
     pub fn named(ns: NsId, name: &str, args: &[TypeId]) -> TypeShape {
         TypeShape::Named(ns, crate::symbols::intern_exact(ns, name), args.to_vec())
+    }
+
+    /// The definition a named type is an instantiation of — what a table of
+    /// facts about the definition (its variants' names, its fields') is keyed
+    /// by.
+    pub fn named_definition(&self) -> Option<(NsId, SymRef)> {
+        match self {
+            TypeShape::Named(ns, sym, _) => Some((*ns, *sym)),
+            _ => None,
+        }
     }
 }
 
@@ -48,6 +74,7 @@ pub(crate) fn display(shape: &TypeShape, name_of: impl Fn(TypeId) -> String) -> 
         TypeShape::CStruct(ns, sym) => definition(*ns, *sym),
         TypeShape::Unit => "()".to_string(),
         TypeShape::Never => "!".to_string(),
+        TypeShape::Param(n) => ConcreteNames::template_param(*n as usize),
     }
 }
 
@@ -87,20 +114,109 @@ pub mod spec {
     pub const UNIT: TypeSpec = TypeSpec::Unit;
 }
 
-impl crate::Heap {
-    /// Intern the type `spec` writes.
-    pub fn intern_spec(&self, spec: &TypeSpec) -> TypeId {
-        match spec {
-            TypeSpec::Named(ns, name, args) => {
-                let args: Vec<TypeId> = args.iter().map(|a| self.intern_spec(a)).collect();
-                self.intern_type(TypeShape::named(*ns, name, &args))
-            }
-            TypeSpec::Fn(params, ret) => {
-                let params: Vec<TypeId> = params.iter().map(|p| self.intern_spec(p)).collect();
-                let ret = self.intern_spec(ret);
-                self.intern_type(TypeShape::Fn(params, None, ret))
-            }
-            TypeSpec::Unit => self.intern_type(TypeShape::Unit),
+/// The interned types: each one's shape and display, and the reverse map.
+/// The first [`crate::BUILTIN_TYPES`] rows are interned when the table is
+/// made, in order, so their ids are the `TypeId` associated constants.
+#[derive(Default)]
+struct TypeTable {
+    types: Vec<(TypeShape, String)>,
+    ids: HashMap<TypeShape, u32>,
+}
+
+impl TypeTable {
+    fn intern(&mut self, shape: TypeShape) -> TypeId {
+        if let Some(&id) = self.ids.get(&shape) {
+            return TypeId(id);
         }
+        let name = display(&shape, |arg| self.types[arg.0 as usize].1.clone());
+        let id = self.types.len() as u32;
+        self.ids.insert(shape.clone(), id);
+        self.types.push((shape, name));
+        TypeId(id)
+    }
+}
+
+static TYPES: OnceLock<RwLock<TypeTable>> = OnceLock::new();
+
+/// `parking_lot`'s lock, because [`type_name`] hands out a guard narrowed to
+/// one entry. Every read is `read_recursive`: one thread can hold two such
+/// guards at once, and a plain `read` would queue behind a waiting writer.
+fn table() -> &'static RwLock<TypeTable> {
+    TYPES.get_or_init(|| {
+        let mut table = TypeTable::default();
+        for (ns, name, args) in crate::value::BUILTIN_TYPES {
+            table.intern(TypeShape::named(*ns, name, args));
+        }
+        RwLock::new(table)
+    })
+}
+
+/// Intern a type by its shape, returning the [`TypeId`] every instance of
+/// that type carries. Permanent, like a symbol: equal shapes always share
+/// one id, so "same type?" is `==` on the id. The display is built here,
+/// once, from the arguments' displays.
+pub fn intern_type(shape: TypeShape) -> TypeId {
+    table().write().intern(shape)
+}
+
+/// The id `shape` interns to, if it has ever been interned — for asking "is
+/// this value of that type?" without minting an id for a type no value has.
+pub fn find_type(shape: &TypeShape) -> Option<TypeId> {
+    table().read_recursive().ids.get(shape).map(|&id| TypeId(id))
+}
+
+/// The shape `id` was interned from.
+pub fn type_shape(id: TypeId) -> TypeShape {
+    table().read_recursive().types[id.0 as usize].0.clone()
+}
+
+/// The display of an interned type — for printing, `Debug`, and error
+/// messages. Not for comparison: compare the ids. A guard rather than a
+/// `&str` because the entry lives behind the table's lock.
+pub fn type_name(id: TypeId) -> parking_lot::MappedRwLockReadGuard<'static, str> {
+    parking_lot::RwLockReadGuard::map(table().read_recursive(), |t| t.types[id.0 as usize].1.as_str())
+}
+
+impl TypeId {
+    /// The id as the word a call into the runtime carries it in.
+    pub fn word(self) -> i64 {
+        i64::from(self.0)
+    }
+
+    /// The id a [`Self::word`] carried, or `None` when no type has it.
+    pub fn from_word(w: i64) -> Option<TypeId> {
+        let id = u32::try_from(w).ok()?;
+        ((id as usize) < table().read_recursive().types.len()).then_some(TypeId(id))
+    }
+}
+
+/// The type `template` is with each [`TypeShape::Param`] N replaced by
+/// `args[N]` — a field's declared type in the instantiation whose arguments
+/// are `args`.
+pub fn instantiate(template: TypeId, args: &[TypeId]) -> TypeId {
+    let each = |ids: &[TypeId]| ids.iter().map(|t| instantiate(*t, args)).collect::<Vec<_>>();
+    let shape = match type_shape(template) {
+        TypeShape::Param(n) => return args[n as usize],
+        TypeShape::Named(ns, sym, a) => TypeShape::Named(ns, sym, each(&a)),
+        TypeShape::Dyn(ns, sym, pins) => TypeShape::Dyn(ns, sym, each(&pins)),
+        TypeShape::Fn(params, rest, ret) => TypeShape::Fn(each(&params), rest.map(|r| instantiate(r, args)), instantiate(ret, args)),
+        TypeShape::Ptr(pointee) => TypeShape::Ptr(instantiate(pointee, args)),
+        TypeShape::CStruct(..) | TypeShape::Unit | TypeShape::Never => return template,
+    };
+    intern_type(shape)
+}
+
+/// Intern the type `spec` writes.
+pub fn intern_spec(spec: &TypeSpec) -> TypeId {
+    match spec {
+        TypeSpec::Named(ns, name, args) => {
+            let args: Vec<TypeId> = args.iter().map(intern_spec).collect();
+            intern_type(TypeShape::named(*ns, name, &args))
+        }
+        TypeSpec::Fn(params, ret) => {
+            let params: Vec<TypeId> = params.iter().map(intern_spec).collect();
+            intern_type(TypeShape::Fn(params, None, intern_spec(ret)))
+        }
+        TypeSpec::Unit => intern_type(TypeShape::Unit),
     }
 }

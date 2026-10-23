@@ -2736,9 +2736,9 @@ impl Renderer {
         } else {
             out.push_str(&format!("#{}A", dims.len()));
         }
-        let data_key = crate::stored_type_key(heap, data_id).expect("a struct box has a type name").to_string();
+        let data_ty = crate::stored_type(heap, data_id).expect("a struct box has a type");
         let mut next = 0usize;
-        self.render_array_level(heap, ctx, data_id, &data_key, &dims, 0, &mut next, standard, depth, out)
+        self.render_array_level(heap, ctx, data_id, data_ty, &dims, 0, &mut next, standard, depth, out)
     }
 
     /// One level of [`Self::render_data_array`]'s nesting: the element at
@@ -2749,7 +2749,7 @@ impl Renderer {
         heap: &mut Heap,
         ctx: RenderCtx<'_>,
         data_id: typelisp_mem::BoxId,
-        data_key: &str,
+        data_ty: typelisp_mem::TypeId,
         dims: &[usize],
         level: usize,
         next: &mut usize,
@@ -2761,7 +2761,7 @@ impl Renderer {
             let i = *next;
             *next += 1;
             let f = heap.struct_field(data_id, i);
-            return self.render_field(heap, ctx, data_key, None, i, f, standard, depth + 1, out);
+            return self.render_field(heap, ctx, data_ty, None, i, f, standard, depth + 1, out);
         }
         out.push('(');
         let stride: usize = dims[level + 1..].iter().product();
@@ -2775,7 +2775,7 @@ impl Renderer {
             if i > 0 {
                 out.push(' ');
             }
-            self.render_array_level(heap, ctx, data_id, data_key, dims, level + 1, next, standard, depth, out)?;
+            self.render_array_level(heap, ctx, data_id, data_ty, dims, level + 1, next, standard, depth, out)?;
         }
         out.push(')');
         Ok(())
@@ -2785,7 +2785,7 @@ impl Renderer {
         &mut self,
         heap: &mut Heap,
         ctx: RenderCtx<'_>,
-        type_key: &str,
+        ty: typelisp_mem::TypeId,
         variant: Option<usize>,
         index: usize,
         f: Value,
@@ -2793,7 +2793,7 @@ impl Renderer {
         depth: usize,
         out: &mut String,
     ) -> Result<(), String> {
-        if !ctx.env.field_is_niched_option(type_key, variant, index)? {
+        if !ctx.env.field_is_niched_option(ty, variant, index)? {
             return self.render(heap, ctx, f, standard, depth, out);
         }
         if f == Value::Empty {
@@ -2967,13 +2967,13 @@ impl Renderer {
                 out.push_str(&text);
             }
             Value::Boxed(id) if heap.is_struct(id) => {
-                let key = crate::stored_type_key(heap, id)
-                    .expect("a struct box has a type name")
-                    .to_string();
+                let ty = crate::stored_type(heap, id).expect("a struct box has a type");
+                let key = typelisp_mem::type_name(ty).to_string();
                 // A `Vector<T>` prints in CL's vector syntax, which reads
                 // back as `#(..)` — or, with `*print-array*` off, as its type
                 // and length alone.
-                if typelisp_mem::ConcreteNames::base_type(&key) == "vector" {
+                let vector = typelisp_mem::type_shape(typelisp_mem::TypeId::VECTOR).named_definition();
+                if typelisp_mem::type_shape(ty).named_definition() == vector {
                     let n = heap.struct_field_count(id);
                     if !ctx.print_vars.array {
                         out.push_str(&format!("#<{} {}>", crate::shared::name_view().type_key(&key), n));
@@ -2989,7 +2989,7 @@ impl Renderer {
                             out.push(' ');
                         }
                         let f = heap.struct_field(id, i);
-                        self.render_field(heap, ctx, &key, None, i, f, standard, depth + 1, out)?;
+                        self.render_field(heap, ctx, ty, None, i, f, standard, depth + 1, out)?;
                     }
                     out.push(')');
                     return Ok(());
@@ -2998,7 +2998,7 @@ impl Renderer {
                 // read from `#{..}` has no `print-object` made for it, and a
                 // typed one whose elements have none would otherwise fall to
                 // the `#<..>` below.
-                if typelisp_mem::is_tuple_base_key(typelisp_mem::ConcreteNames::base_type(&key)) {
+                if typelisp_mem::tuple_type_arity(ty).is_some() {
                     out.push_str("#{");
                     for i in 0..heap.struct_field_count(id) {
                         if Self::length_reached(ctx, i) {
@@ -3009,7 +3009,7 @@ impl Renderer {
                             out.push(' ');
                         }
                         let f = heap.struct_field(id, i);
-                        self.render_field(heap, ctx, &key, None, i, f, standard, depth + 1, out)?;
+                        self.render_field(heap, ctx, ty, None, i, f, standard, depth + 1, out)?;
                     }
                     out.push('}');
                     return Ok(());
@@ -3019,7 +3019,7 @@ impl Renderer {
                 // instantiation appears in no program's types, so no method was
                 // made for it; it is S-expression data, and data prints here,
                 // in the same syntax that method writes.
-                if key == *heap.type_key_name(typelisp_mem::TypeId::SEXPR_ARRAY) {
+                if ty == typelisp_mem::TypeId::SEXPR_ARRAY {
                     return self.render_data_array(heap, ctx, id, standard, depth, out);
                 }
                 out.push_str(&format!("#<{}", crate::shared::name_view().type_key(&key)));
@@ -3032,7 +3032,7 @@ impl Renderer {
                     // `x: 1` — the name the definition gives the field, when it
                     // gives one. Not `:x`, which would read as a keyword
                     // argument (`(point::make :x 1)`).
-                    if let Some(name) = ctx.env.field_name(&key, i)? {
+                    if let Some(name) = ctx.env.field_name(ty, i)? {
                         out.push_str(&name);
                         out.push_str(": ");
                     }
@@ -3040,14 +3040,12 @@ impl Renderer {
                     // `&mut` here (the `print-object` dispatch needs it), so the
                     // read cannot stay borrowed across it.
                     let f = heap.struct_field(id, i);
-                    self.render_field(heap, ctx, &key, None, i, f, standard, depth + 1, out)?;
+                    self.render_field(heap, ctx, ty, None, i, f, standard, depth + 1, out)?;
                 }
                 out.push('>');
             }
             Value::Boxed(id) if heap.is_enum(id) => {
-                let type_key = crate::stored_type_key(heap, id)
-                    .expect("an enum box has a type name")
-                    .to_string();
+                let ty = crate::stored_type(heap, id).expect("an enum box has a type");
                 let variant = heap.enum_variant(id);
                 // Every enum is registered — a user `defenum`'s own exec, and
                 // the built-in sum types (`Option`/`Result`/the error types),
@@ -3055,7 +3053,7 @@ impl Renderer {
                 // up front — so a lookup that comes up empty is broken (a
                 // stale `Path`, an enum this table was never told about), and
                 // says so.
-                let name = ctx.env.enum_variant_name(&type_key, variant)?;
+                let name = ctx.env.enum_variant_name(ty, variant)?;
                 if heap.enum_field_count(id) == 0 {
                     out.push_str(&name);
                 } else {
@@ -3068,7 +3066,7 @@ impl Renderer {
                         }
                         out.push(' ');
                         let f = heap.enum_field(id, i);
-                        self.render_field(heap, ctx, &type_key, Some(variant), i, f, standard, depth + 1, out)?;
+                        self.render_field(heap, ctx, ty, Some(variant), i, f, standard, depth + 1, out)?;
                     }
                     out.push(')');
                 }

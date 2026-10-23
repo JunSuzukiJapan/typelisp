@@ -26,7 +26,7 @@ use typelisp::{spec, BoxId, Error, Heap, NsId, TypeShape, TypeSpec, Value};
 /// what makes "same type?" an integer comparison). These tests care about the
 /// *name* they wrote, so they mint it here, as a root-level type.
 fn alloc_named_struct(h: &mut Heap, name: &str, fields: Vec<Value>) -> Value {
-    let key = h.intern_type(TypeShape::named(NsId::ROOT, name, &[]));
+    let key = typelisp_mem::intern_type(TypeShape::named(NsId::ROOT, name, &[]));
     h.alloc_struct(key, fields)
 }
 
@@ -1118,7 +1118,7 @@ fn as_boxed(v: Value) -> BoxId {
 /// and an empty table says nothing about which it is. At *this* layer the type
 /// is only an id nobody reads back, so one type serves every test here.
 fn new_hashtable(h: &mut Heap) -> Value {
-    let key = h.intern_spec(&TypeSpec::Named(NsId::ROOT, "hashtable", &[spec::INT, spec::INT]));
+    let key = typelisp_mem::intern_spec(&TypeSpec::Named(NsId::ROOT, "hashtable", &[spec::INT, spec::INT]));
     h.alloc_hashtable(key)
 }
 

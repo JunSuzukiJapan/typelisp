@@ -85,8 +85,8 @@ impl ConcreteNames {
     }
 
     /// A list of type arguments: each one's key, joined by `,`. A key has
-    /// `,` only inside its own brackets, so [`Self::type_arg_list`] reads the
-    /// list back unambiguously. What goes between the `<>` of an
+    /// `,` only inside its own brackets, so the list reads back
+    /// unambiguously. What goes between the `<>` of an
     /// instantiated type and of a specialization.
     pub fn type_args<A: TypeKey>(args: &[A]) -> String {
         args.iter().map(TypeKey::type_key).collect::<Vec<_>>().join(",")
@@ -174,27 +174,6 @@ impl ConcreteNames {
         }
     }
 
-    /// The type arguments inside a key, split at the outermost level only:
-    /// `hashtable<string,option<int>>` -> `["string", "option<int>"]`. Empty
-    /// for a key with no instantiation.
-    pub fn type_arg_list(key: &str) -> Vec<&str> {
-        match Self::split_type(key).1 {
-            Some(inner) => Self::split_top_level(inner),
-            None => Vec::new(),
-        }
-    }
-
-    /// The one type argument inside `key`: `vector<cons-cell<i32,string>>`
-    /// -> `cons-cell<i32,string>`. `None` when the key names no
-    /// instantiation or names more than one argument — "the first of
-    /// several" is not a question any caller is asking.
-    pub fn single_type_arg(key: &str) -> Option<&str> {
-        match Self::type_arg_list(key).as_slice() {
-            [one] => Some(one),
-            _ => None,
-        }
-    }
-
     /// `src` cut at its commas outside any `<>` or `()` — a function type's
     /// parameter list is spelled `(fn (int,string) int)`, and its commas are
     /// its own.
@@ -222,36 +201,6 @@ impl ConcreteNames {
     /// with a name.
     pub fn template_param(index: usize) -> String {
         format!("${}", index)
-    }
-
-    /// A key template ([`Self::template_param`]s in place of the owning
-    /// type's parameters) at one instantiation's argument keys.
-    ///
-    /// A template that names a parameter the instantiation does not supply is
-    /// a definition/value mismatch, and aborts rather than answering with a
-    /// `$N` in it.
-    pub fn instantiate_template(template: &str, args: &[&str]) -> String {
-        let mut out = String::with_capacity(template.len());
-        let mut rest = template;
-        while let Some(i) = rest.find('$') {
-            out.push_str(&rest[..i]);
-            let digits: String = rest[i + 1..].chars().take_while(|c| c.is_ascii_digit()).collect();
-            let n: usize = digits.parse().unwrap_or_else(|_| {
-                panic!("type key template `{}`: `$` is not followed by a parameter index", template)
-            });
-            let arg = args.get(n).unwrap_or_else(|| {
-                panic!(
-                    "type key template `{}` names parameter {} but the instantiation has {} argument(s)",
-                    template,
-                    n,
-                    args.len()
-                )
-            });
-            out.push_str(arg);
-            rest = &rest[i + 1 + digits.len()..];
-        }
-        out.push_str(rest);
-        out
     }
 
     // ---- specializations -------------------------------------------------
@@ -363,9 +312,6 @@ mod tests {
         let key = N::instantiated_type("gen", &["i32", "vector<cons-cell<int,int>>"]);
         assert_eq!(key, "gen<i32,vector<cons-cell<int,int>>>");
         assert_eq!(N::split_type(&key), ("gen", Some("i32,vector<cons-cell<int,int>>")));
-        assert_eq!(N::type_arg_list(&key), vec!["i32", "vector<cons-cell<int,int>>"]);
-        assert_eq!(N::single_type_arg(&key), None);
-        assert_eq!(N::single_type_arg("option<char>"), Some("char"));
         assert_eq!(N::instantiated_type::<&str>("point", &[]), "point");
         assert_eq!(N::split_type("point"), ("point", None));
     }
@@ -381,7 +327,6 @@ mod tests {
         assert_eq!(N::split_fn_type("ptr"), None);
         assert_eq!(N::split_fn_type(&N::fn_type(&["i32"], Some(&"i32"), &"i32")), None);
         assert_eq!(N::split_type(&key).1, None);
-        assert_eq!(N::type_arg_list(&N::instantiated_type("gen", &[key.as_str(), "int"])), vec![key.as_str(), "int"]);
     }
 
     #[test]
@@ -407,25 +352,5 @@ mod tests {
         assert_eq!(N::link_name_of_symbol(&sym), Some(link.as_str()));
         assert_eq!(N::method_symbol("geo::point", "area <int>"), sym);
         assert_eq!(N::link_name_of_symbol("rt_heap_init"), None);
-    }
-
-    #[test]
-    fn type_arguments_split_at_their_own_level_only() {
-        assert_eq!(N::type_arg_list("int"), Vec::<&str>::new());
-        assert_eq!(N::type_arg_list("option<int>"), vec!["int"]);
-        assert_eq!(N::type_arg_list("hashtable<string,option<int>>"), vec!["string", "option<int>"]);
-        assert_eq!(
-            N::type_arg_list("gen<(fn (int,string) int),vector<cons-cell<int,int>>>"),
-            vec!["(fn (int,string) int)", "vector<cons-cell<int,int>>"]
-        );
-    }
-
-    #[test]
-    fn a_template_takes_an_instantiations_arguments() {
-        let t = format!("option<{}>", N::template_param(1));
-        assert_eq!(N::instantiate_template(&t, &["int", "string"]), "option<string>");
-        assert_eq!(N::instantiate_template("hashtable<$1,vector<$0>>", &["string", "int"]), "hashtable<int,vector<string>>");
-        assert_eq!(N::instantiate_template("int", &[]), "int");
-        assert_eq!(N::instantiate_template("$10", &["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"]), "k");
     }
 }

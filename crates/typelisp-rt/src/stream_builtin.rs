@@ -89,9 +89,9 @@ pub const INNER_TYPES: &[(&str, TypeSpec)] = &[
     ("file-owner-name", TypeSpec::Named(NsId::ROOT, "option", &[spec::STRING])),
 ];
 
-pub(crate) fn lookup(heap: &Heap, table: &[(&str, TypeSpec)], name: &str, what: &str) -> TypeId {
+pub(crate) fn lookup(table: &[(&str, TypeSpec)], name: &str, what: &str) -> TypeId {
     match table.iter().find(|(n, _)| *n == name) {
-        Some((_, ty)) => heap.intern_spec(ty),
+        Some((_, ty)) => typelisp_mem::intern_spec(ty),
         // Not a recoverable condition: a builtin that builds a box without a
         // row would give that value an identity nothing else spells.
         None => crate::fatal(&format!("stream_builtin: no {} type for `{}`", what, name)),
@@ -100,7 +100,7 @@ pub(crate) fn lookup(heap: &Heap, table: &[(&str, TypeSpec)], name: &str, what: 
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
 fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
-    let key = lookup(heap, RESULT_TYPES, name, "result");
+    let key = lookup(RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 0, vec![v])
 }
 
@@ -112,7 +112,7 @@ fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
     // `FileError` takes no type arguments, so its key is unchanged by the
     // instantiation rule and stays the pre-interned constant.
     let err_val = heap.alloc_enum(TypeId::FILE_ERROR, 0, vec![msg_val]);
-    let key = lookup(heap, RESULT_TYPES, name, "result");
+    let key = lookup(RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 1, vec![err_val])
 }
 
@@ -120,7 +120,7 @@ fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
 /// niche when the payload allows one, else a box in `option_def`'s variant
 /// order (`Heap::alloc_option` decides).
 fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
-    heap.alloc_option(lookup(heap, INNER_TYPES, name, "inner"), v)
+    heap.alloc_option(lookup(INNER_TYPES, name, "inner"), v)
 }
 
 /// An argument that isn't the shape its signature promises. Unreachable
@@ -393,7 +393,7 @@ pub fn stream_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Res
                 }
             }
             let elems: Vec<Value> = names.into_iter().map(|n| heap.alloc_string(n)).collect();
-            let vec_val = { let k = lookup(heap, INNER_TYPES, name, "inner"); heap.alloc_struct(k, elems) };
+            let vec_val = { let k = lookup(INNER_TYPES, name, "inner"); heap.alloc_struct(k, elems) };
             Ok(result_ok(heap, name, vec_val))
         }
         // Succeeds when the directory already exists: `create_dir_all` is

@@ -556,7 +556,7 @@ pub(crate) fn native_lowered_primitive_methods(type_local: &str) -> &'static [&'
 /// reference-counted `ClosureBox`, plus the shared binding cells
 /// (`BoxedObj::Cell`) captured names live in so compiled and interpreted
 /// `setf` mutate the very same object.
-pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 339] {
+pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 340] {
     use typelisp_rt::c_mem::{
         rt_c_alloc, rt_c_arena_close, rt_c_arena_open, rt_c_index, rt_c_load, rt_c_offset, rt_c_ptr_check, rt_c_store,
     };
@@ -642,7 +642,7 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 339] {
         rt_ffi_cstring_new, rt_ffi_cstring_free, rt_ffi_string_from_cstr, rt_ffi_enter_native, rt_ffi_leave_native,
         rt_str_length, rt_str_lt, rt_str_new, rt_str_ref, rt_str_substring, rt_str_upcase, rt_str_downcase, rt_int_fits, rt_int_fits_char, rt_f64_fits_f32, rt_struct_field_count, rt_struct_field_get, rt_struct_field_set,
         rt_struct_new, rt_struct_pop_field, rt_struct_push_field, rt_sym_name, rt_symp, rt_truncate_sexpr_roots,
-        rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_upcast_set, rt_vtable_set,
+        rt_dyn_new, rt_dyn_upcast, rt_dyn_value, rt_dyn_vtable, rt_types_define, rt_upcast_set, rt_vtable_set,
         rt_throw, rt_throw_matches, rt_throw_take_value,
         rt_frame_call, rt_frame_open, rt_frame_call_env, rt_frame_apply, rt_frame_dyn_call, rt_pending_arg, rt_pending_argc,
         rt_pending_env, rt_pending_envc,
@@ -673,6 +673,9 @@ pub(crate) fn rt_extern_functions() -> [(&'static str, usize); 339] {
         ("rt_dyn_upcast", rt_dyn_upcast as *const () as usize),
         ("rt_vtable_set", rt_vtable_set as *const () as usize),
         ("rt_upcast_set", rt_upcast_set as *const () as usize),
+        // The type table an executable's startup fills from the shapes it
+        // carries (`typelisp_mem::type_words`); AOT-only like the two above.
+        ("rt_types_define", rt_types_define as *const () as usize),
         // The small system builtins (`typelisp_rt::sys_builtin`): parsing,
         // the clock, and process exit. Each was a gap that made every
         // function calling it uncompilable, and each closed the same way the

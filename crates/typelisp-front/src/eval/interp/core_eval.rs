@@ -400,7 +400,7 @@ impl Interp {
     /// operand through a frame rather than a recursive call, reaches the same
     /// boxing here rather than a second copy of it.
     pub(super) fn dyn_new_with_value(&self, heap: &mut Heap, form: Value, v: Value) -> Result<Value, EvalError> {
-        let concrete_key = type_key_field(heap, form, 0, "dyn-new")?;
+        let concrete = type_field(heap, form, 0, "dyn-new")?;
         let trait_path = path_field(heap, form, 1, "dyn-new")?;
         let slots = method_list(heap, form, 2, "dyn-new")?;
         let supers = super_list(heap, form, 3)?;
@@ -409,7 +409,7 @@ impl Interp {
         // `alloc_dyn` cannot collect, but compiling a slot below does, and the
         // boxed value is reachable from nothing else meanwhile.
         s.push_root(v);
-        let ids = self.register_dyn_box(&concrete_key, &trait_path, &slots, &supers);
+        let ids = self.register_dyn_box(concrete, &trait_path, &slots, &supers);
         let id = *ids
             .first()
             .ok_or_else(|| EvalError::Internal("eval: (dyn-new ..) registered no vtable".to_string()))?;
@@ -1648,14 +1648,6 @@ pub(super) fn str_field(heap: &Heap, form: Value, i: usize, what: &str) -> Resul
     }
 }
 
-/// A field holding a type ([`core::type_form`]), read as the runtime identity
-/// it spells.
-pub(super) fn type_key_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<String, EvalError> {
-    let v = core::field(heap, form, i);
-    v.and_then(|v| typelisp_mem::type_key_of_form(heap, v))
-        .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) field {} is not a type: {:?}", what, i, v)))
-}
-
 /// A field holding a type ([`core::type_form`]), interned.
 pub(super) fn type_field(heap: &Heap, form: Value, i: usize, what: &str) -> Result<TypeId, EvalError> {
     let v = core::field(heap, form, i);
@@ -1881,7 +1873,7 @@ impl Interp {
                 let fields = repr_list(heap, fields, "defstruct")?;
                 let templates = core::field(heap, tl, 2)
                     .ok_or_else(|| EvalError::Internal("exec: (defstruct ..) has no field template list".to_string()))?;
-                let templates = type_key_list(heap, templates, "defstruct")?;
+                let templates = type_list(heap, templates, "defstruct")?;
                 let names = core::field(heap, tl, 3)
                     .ok_or_else(|| EvalError::Internal("exec: (defstruct ..) has no field name list".to_string()))?;
                 let names = str_list(heap, names, "defstruct")?;
@@ -1940,7 +1932,7 @@ impl Interp {
                 let mut templates = Vec::with_capacity(names.len());
                 for ((n, fields), ts) in names.into_iter().zip(lists).zip(template_lists) {
                     variants.push((n, repr_list(heap, fields, "defenum")?));
-                    templates.push(type_key_list(heap, ts, "defenum")?);
+                    templates.push(type_list(heap, ts, "defenum")?);
                 }
                 self.root.borrow_mut().register_enum(&name, EnumDef { variants, templates });
                 self.printer_tables_changed();
@@ -2156,13 +2148,13 @@ pub(super) fn repr_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<Repr
 /// templates.
 /// A list of field types ([`core::type_form`], parameters as `(type-param N)`),
 /// each read as the key template it spells.
-fn type_key_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<String>, EvalError> {
+fn type_list(heap: &Heap, list: Value, what: &str) -> Result<Vec<crate::TypeId>, EvalError> {
     let vs = heap
         .list_to_vec(list)
         .map_err(|e| EvalError::Internal(format!("exec: ({} ..) template list: {}", what, e)))?;
     vs.into_iter()
         .map(|v| {
-            typelisp_mem::type_key_of_form(heap, v)
+            typelisp_mem::type_of_form(heap, v)
                 .ok_or_else(|| EvalError::Internal(format!("exec: ({} ..) not a field type: {:?}", what, v)))
         })
         .collect()
@@ -3377,7 +3369,7 @@ mod tests {
         let Value::Path(recv) = crate::check::core::path_form(&mut h, &crate::Path::root("i32")) else {
             unreachable!("Heap::intern_path always returns Value::Path")
         };
-        let i32 = crate::type_key::type_id(&h, &crate::Type::I32);
+        let i32 = crate::type_key::type_id(&crate::Type::I32);
         let plus = h.alloc_builtin_fn(Some(recv), "+", Some(i32));
         h.push_root(plus);
         let name = match core_symbol("f") {

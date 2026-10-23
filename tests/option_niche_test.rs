@@ -30,11 +30,11 @@ fn both(defs: &str, names: &[&str], expr: &str) -> String {
 // ---- representation ------------------------------------------------------
 
 /// The checker's decision (`Repr::of_by` on a `Type`) and the runtime's
-/// (`option_payload_niches` on a type key) are two spellings of one rule,
+/// (`option_payload_niches` on the type's id) are two spellings of one rule,
 /// and every producer of an `Option` value uses one or the other — so they
 /// are pinned together here over every kind of payload.
 #[test]
-fn the_type_side_and_the_key_side_agree_on_what_niches() {
+fn the_type_side_and_the_id_side_agree_on_what_niches() {
     let named = |n: &str, args: Vec<Type>| Type::Named(Path::root(n), args);
     let option = |t: Type| named("option", vec![t]);
     let payloads = vec![
@@ -68,8 +68,9 @@ fn the_type_side_and_the_key_side_agree_on_what_niches() {
     for payload in payloads {
         let ty = option(payload.clone());
         let by_type = Repr::of_by(&ty, &|_| None).niche_payload().is_some();
-        let by_key = typelisp_mem::is_niched_option_key(&typelisp_mem::ConcreteNames::type_key(&ty));
-        assert_eq!(by_type, by_key, "Option<{:?}> ({})", payload, typelisp_mem::ConcreteNames::type_key(&ty));
+        let id = typelisp::type_key::type_id(&ty);
+        let by_id = typelisp_mem::is_niched_option(id);
+        assert_eq!(by_type, by_id, "Option<{:?}> ({})", payload, &*typelisp_mem::type_name(id));
     }
 }
 

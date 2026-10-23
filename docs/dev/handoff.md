@@ -15,6 +15,8 @@
   ダンプの形式は 26、ABI は 0.3.16。
 - 5b も済み。ヒープの型の表は形（`TypeShape`）で引き、`TypeKeyId` は `TypeId` になった
   （計画の 5b の項）。ABI は 0.3.17。
+- 5c も済み。型の表はプロセスに 1 つ、印字と vtable の表は定義か `TypeId` で引き、実行ファイルは
+  起動時に型の表を作る（計画の 5c の項）。ABI は 0.3.18。
 
 ## 2. 4d で知っておくこと
 
@@ -32,11 +34,10 @@
 
 ## 3. 次にすること（順に）
 
-1. 5c。文字列を切る処理を形を読む処理にし、印字の表のキーと `rt_print_*` の登録を番号か
-   シンボルにする。文字列のキーで残っているのは、欄の型の雛形（`type_key::field_key_template`、
-   `check/core.rs`・`check/lower.rs`）、ブリッジの `:dyn` の vtable の表、評価器の `dyn-new` の
-   `type_key_field`、`eval/scope.rs` の表、`typelisp_mem::type_key_of_form`。
-2. そのあと 5d・5e（計画の段階 5 の項）。
+1. 5d。コンパイル済みコードが型をフォームでなく番号で使う（JIT は定数、AOT は起動時の表
+   `rt_types_define` の番号）。FFI の型（`FfiDecl` の文字列、`CallbackSig` のキー、
+   `CType::from_key`、`rt_ffi_callback_register`）も番号にする。
+2. そのあと 5e（`print-object` の表の文字列キー `value_key_for_method` / `method_for_value` を含む）。
 3. そのあと段階 6〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
    段階 6 で `Info::in_scope` の移行のための広い規則
    （`item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)`）を狭める。

@@ -22,19 +22,18 @@ use parking_lot::RwLock;
 /// for what stays behind and why.
 #[derive(Default)]
 pub struct PrintShared {
-    /// `(base type key, variant index) -> variant name` — the old
-    /// `ENUM_NAMES`.
+    /// `(definition, variant index) -> variant name`.
     pub(crate) enum_names: RwLock<crate::aot::VariantNames>,
-    /// `(base type key, variant index or NO_VARIANT, field index or
-    /// EVERY_FIELD) -> the field's type key template`, filled by
+    /// `(definition, variant index or NO_VARIANT, field index or
+    /// EVERY_FIELD) -> the field's declared type`, filled by
     /// `rt_print_field_template` — what says a struct or enum field holds a
     /// niche-represented `Option` (`PrintEnv::field_is_niched_option`).
     pub(crate) field_templates: RwLock<crate::aot::FieldTemplates>,
-    /// `(base type key, field index) -> field name`, filled by
+    /// `(definition, field index) -> field name`, filled by
     /// `rt_print_field_name` — what a struct prints before each field's
     /// value (`PrintEnv::field_name`).
     pub(crate) field_names: RwLock<crate::aot::FieldNames>,
-    /// `type key -> the address of that type's compiled `print-object``,
+    /// `type display -> the address of that type's compiled `print-object``,
     /// filled by `rt_print_object_method`.
     pub(crate) print_object: RwLock<HashMap<String, usize>>,
     /// `definition -> the address of its compiled body`, filled by

@@ -199,8 +199,8 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
 /// compile boundary. `sys_builtin` is the second such place, for the same
 /// reason (`Result<_, ParseIntError>` and friends), and `typelisp_read::shim`
 /// the third (`Result<Sexpr, ReadError>`). They all name those types through
-/// `typelisp_mem`'s pre-interned table, whose entries every `Heap` mints at
-/// construction so that a `TypeId` for them is a compile-time constant.
+/// `typelisp_mem`'s pre-interned table, whose entries the type table interns
+/// first so that a `TypeId` for them is a compile-time constant.
 ///
 /// This is that table's end of the agreement, checked rather than assumed — a
 /// value built under a type nobody else gives it is unmatchable, prints as
@@ -208,9 +208,8 @@ fn a_heap_values_type_identity_is_only_touched_through_type_key() {
 #[test]
 fn the_runtimes_fixed_types_are_the_checkers() {
     use typelisp::types::Path;
-    use typelisp::{Heap, TypeId};
+    use typelisp::TypeId;
 
-    let mut heap = Heap::with_capacity(64);
     for (id, path) in [
         (TypeId::OPTION, Path::root("option")),
         (TypeId::RESULT, Path::root("result")),
@@ -244,7 +243,7 @@ fn the_runtimes_fixed_types_are_the_checkers() {
     ] {
         assert_eq!(
             id,
-            typelisp::type_key::type_key_id(&mut heap, &path),
+            typelisp::type_key::type_key_id(&path),
             "the fixed type at index {} is not the checker's `{}`",
             id.as_u32(),
             path
@@ -270,10 +269,9 @@ fn the_runtimes_fixed_types_are_the_checkers() {
 fn the_runtime_result_types_match_the_registry() {
     use typelisp::check::Registry;
     use typelisp::types::Path;
-    use typelisp::{Heap, TypeSpec};
+    use typelisp::TypeSpec;
 
     let reg = Registry::with_builtins();
-    let heap = Heap::with_capacity(64);
     // A builtin is registered in `std` or in the library's internal module,
     // and the shims key it by its bare name — so the name has to pick out
     // exactly one of the two.
@@ -289,15 +287,15 @@ fn the_runtime_result_types_match_the_registry() {
         }
     };
     let check = |spec: &TypeSpec, ty: &typelisp::Type, what: &str| {
-        let written = heap.intern_spec(spec);
-        let checked = typelisp::type_key::type_id(&heap, ty);
+        let written = typelisp_mem::intern_spec(spec);
+        let checked = typelisp::type_key::type_id(ty);
         assert_eq!(
             written,
             checked,
             "{}: the runtime builds `{}`, the checker says `{}`",
             what,
-            &*heap.type_key_name(written),
-            &*heap.type_key_name(checked)
+            &*typelisp_mem::type_name(written),
+            &*typelisp_mem::type_name(checked)
         );
     };
 
@@ -344,21 +342,20 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
     use typelisp::check::Registry;
     use typelisp::sexpr_variant;
     use typelisp::types::Path;
-    use typelisp::{Heap, TypeId};
+    use typelisp::TypeId;
 
     let reg = Registry::with_builtins();
-    let heap = Heap::with_capacity(64);
     let sexpr = reg.type_def(&Path::root("sexpr")).expect("sexpr is registered");
     let payload = |variant: usize| -> TypeId {
         let fields = &sexpr.variants[variant].fields;
         assert_eq!(fields.len(), 1, "`{}` should carry one payload", sexpr_variant::NAMES[variant]);
-        typelisp::type_key::type_id(&heap, &fields[0])
+        typelisp::type_key::type_id(&fields[0])
     };
     assert_eq!(TypeId::SEXPR_VECTOR, payload(sexpr_variant::VECTOR));
     assert_eq!(TypeId::SEXPR_ARRAY, payload(sexpr_variant::ARRAY));
     assert_eq!(
-        heap.intern_spec(&typelisp_read::ARRAY_DIMS_TYPE),
-        typelisp::type_key::type_id(&heap, &typelisp::Type::Named(Path::root("vector"), vec![typelisp::Type::Int]))
+        typelisp_mem::intern_spec(&typelisp_read::ARRAY_DIMS_TYPE),
+        typelisp::type_key::type_id(&typelisp::Type::Named(Path::root("vector"), vec![typelisp::Type::Int]))
     );
 }
 
@@ -370,34 +367,32 @@ fn the_read_vector_and_array_types_are_the_sexpr_variants_payloads() {
 #[test]
 fn the_read_tuple_type_is_the_checkers_tuple_of_data() {
     use typelisp::types::{tuple_path, Path};
-    use typelisp::{Heap, Type};
-    let heap = Heap::with_capacity(64);
+    use typelisp::Type;
     let data = Type::Named(Path::root("option"), vec![Type::Named(Path::root("sexpr"), vec![])]);
     for n in 1..=typelisp::TUPLE_MAX_ARITY {
         let ty = Type::Named(tuple_path(n), vec![data.clone(); n]);
-        assert_eq!(typelisp::sexpr_tuple_type(&heap, n), typelisp::type_key::type_id(&heap, &ty), "arity {}", n);
+        assert_eq!(typelisp::sexpr_tuple_type(n), typelisp::type_key::type_id(&ty), "arity {}", n);
     }
 }
 
-/// The `TypeId` constants must be the ids `Heap::with_capacity` interns
+/// The `TypeId` constants must be the ids the type table interns
 /// [`BUILTIN_TYPES`] at — the whole reason those constants can exist.
 ///
 /// The tests above compare against the constants, so an off-by-one in them
 /// would let those pass while every runtime-built value silently took on a
-/// neighbour's identity. This checks the ids against a real heap.
+/// neighbour's identity. This checks the ids against the table.
 #[test]
-fn the_builtin_type_constants_are_what_a_heap_interns() {
-    use typelisp::{Heap, TypeShape, BUILTIN_TYPES};
+fn the_builtin_type_constants_are_what_the_table_interns() {
+    use typelisp::{TypeShape, BUILTIN_TYPES};
 
-    let heap = Heap::with_capacity(64);
     for (i, (ns, name, args)) in BUILTIN_TYPES.iter().enumerate() {
-        let id = heap.intern_type(TypeShape::named(*ns, name, args));
+        let id = typelisp_mem::intern_type(TypeShape::named(*ns, name, args));
         assert_eq!(
             id.as_u32() as usize,
             i,
-            "`{}` does not intern at its table index — `Heap::with_capacity` and \
+            "`{}` does not intern at its table index — the type table and \
              `BUILTIN_TYPES` have drifted apart",
-            &*heap.type_key_name(id)
+            &*typelisp_mem::type_name(id)
         );
     }
 }

@@ -22,7 +22,7 @@
 use std::cell::RefCell;
 use std::io::Write;
 
-use typelisp_mem::{wk, BoxId, Heap, SymRef, Value};
+use typelisp_mem::{wk, BoxId, Heap, SymRef, TypeId, Value};
 use crate::format::{self, PrintVars, RenderCtx};
 use crate::pprint::{self, IndentKind, NewlineKind, Op, Opts, Out, Style, TabKind};
 use crate::PrintEnv;
@@ -36,13 +36,13 @@ use crate::PrintEnv;
 /// directly.
 #[derive(Clone, Copy)]
 pub struct PrintHooks {
-    /// `(type_key, variant) -> name`. See [`PrintEnv::enum_variant_name`].
-    pub enum_variant_name: fn(&str, usize) -> Result<String, String>,
-    /// `(type_key, variant, index) -> is a niched Option`. See
+    /// `(type, variant) -> name`. See [`PrintEnv::enum_variant_name`].
+    pub enum_variant_name: fn(TypeId, usize) -> Result<String, String>,
+    /// `(type, variant, index) -> is a niched Option`. See
     /// [`PrintEnv::field_is_niched_option`].
-    pub field_is_niched_option: fn(&str, Option<usize>, usize) -> Result<bool, String>,
-    /// `(type_key, index) -> field name`. See [`PrintEnv::field_name`].
-    pub field_name: fn(&str, usize) -> Result<Option<String>, String>,
+    pub field_is_niched_option: fn(TypeId, Option<usize>, usize) -> Result<bool, String>,
+    /// `(type, index) -> field name`. See [`PrintEnv::field_name`].
+    pub field_name: fn(TypeId, usize) -> Result<Option<String>, String>,
     /// `(heap, value, escape) -> rendering`. See [`PrintEnv::print_object`].
     pub print_object: fn(&mut Heap, Value, bool) -> Result<Option<String>, String>,
     /// `(heap, resolved name, value, colon, at) -> rendering`, for
@@ -65,14 +65,18 @@ pub struct PrintHooks {
 /// A unit test that prints without standing a program up installs its own
 /// hooks for what it needs.
 pub const BARE_HOOKS: PrintHooks = PrintHooks {
-    enum_variant_name: |key, _| Err(format!("printing a `{}` needs a program that defines it, and none is installed", key)),
-    field_is_niched_option: |key, _, _| Err(format!("printing a `{}` needs a program that defines it, and none is installed", key)),
-    field_name: |key, _| Err(format!("printing a `{}` needs a program that defines it, and none is installed", key)),
+    enum_variant_name: |ty, _| Err(no_program_for(ty)),
+    field_is_niched_option: |ty, _, _| Err(no_program_for(ty)),
+    field_name: |ty, _| Err(no_program_for(ty)),
     print_object: |_, _, _| Err(NO_PROGRAM_FOR_METHODS.to_string()),
     format_call: |_, name, _, _, _| Err(format!("format: ~/{}/ needs a program that defines it, and none is installed", name)),
     opts: |_| Err(NO_PROGRAM.to_string()),
     print_vars: |_| Err(NO_PROGRAM.to_string()),
 };
+
+fn no_program_for(ty: TypeId) -> String {
+    format!("printing a `{}` needs a program that defines it, and none is installed", &*typelisp_mem::type_name(ty))
+}
 
 const NO_PROGRAM: &str = "printing needs a program to read the printer control variables from, and none is installed";
 const NO_PROGRAM_FOR_METHODS: &str = "printing needs a program to look up `print-object` methods in, and none is installed";
@@ -200,16 +204,16 @@ struct RtPrintEnv {
 }
 
 impl PrintEnv for RtPrintEnv {
-    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Result<String, String> {
-        (self.hooks.enum_variant_name)(type_key, variant)
+    fn enum_variant_name(&self, ty: TypeId, variant: usize) -> Result<String, String> {
+        (self.hooks.enum_variant_name)(ty, variant)
     }
 
-    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> Result<bool, String> {
-        (self.hooks.field_is_niched_option)(type_key, variant, index)
+    fn field_is_niched_option(&self, ty: TypeId, variant: Option<usize>, index: usize) -> Result<bool, String> {
+        (self.hooks.field_is_niched_option)(ty, variant, index)
     }
 
-    fn field_name(&self, type_key: &str, index: usize) -> Result<Option<String>, String> {
-        (self.hooks.field_name)(type_key, index)
+    fn field_name(&self, ty: TypeId, index: usize) -> Result<Option<String>, String> {
+        (self.hooks.field_name)(ty, index)
     }
 
     fn print_object(&self, heap: &mut Heap, v: Value, escape: bool) -> Result<Option<String>, String> {
@@ -654,9 +658,9 @@ mod tests {
         let mut heap = Heap::with_capacity(1 << 12);
 
         set_print_hooks(Some(PrintHooks {
-            enum_variant_name: |key, variant| match (key, variant) {
-                ("option", 0) => Ok("some".to_string()),
-                _ => Err(format!("no variant {} of {}", variant, key)),
+            enum_variant_name: |ty, variant| match (ty, variant) {
+                (typelisp_mem::TypeId::OPTION, 0) => Ok("some".to_string()),
+                _ => Err(format!("no variant {} of {}", variant, &*typelisp_mem::type_name(ty))),
             },
             field_is_niched_option: |_, _, _| Ok(false),
             print_object: |_, _, _| Ok(None),
@@ -698,7 +702,7 @@ mod tests {
             ..TEST_HOOKS
         }));
 
-        let pt = heap.intern_type(typelisp_mem::TypeShape::named(typelisp_mem::NsId::ROOT, "pt", &[]));
+        let pt = typelisp_mem::intern_type(typelisp_mem::TypeShape::named(typelisp_mem::NsId::ROOT, "pt", &[]));
         let boxed = heap.alloc_struct(pt, vec![Value::Int(1)]);
         // `(v v)` — the two arguments `~a ~s` consumes.
         let tail = heap.cons(boxed, Value::Empty).expect("heap has room");

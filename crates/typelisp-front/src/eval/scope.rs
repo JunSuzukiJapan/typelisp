@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use crate::Path;
+use crate::{Path, TypeId};
 
 use super::interp::{EnumDef, FnDef};
 use super::value::Slot;
@@ -30,7 +30,7 @@ pub(crate) enum TypeEntry {
     /// A `defstruct`, with its fields' representations — what
     /// `(defstruct PATH (REPR...) (TEMPLATE...))` publishes, and what the
     /// compile bridge reads a `construct`'s and a pattern's field kinds from
-    /// — and its fields' key templates, the printer's question. A built-in
+    /// — and its fields' type templates, the printer's question. A built-in
     /// that reuses the struct representation but whose fields are internal
     /// (`Vector<T>`) records no representations: nothing ever names those
     /// fields. Its *elements* still print, so it records a uniform template.
@@ -44,20 +44,20 @@ pub(crate) enum TypeEntry {
     Enum(EnumDef),
 }
 
-/// A struct's fields' types as key templates (`type_key::field_key_template`):
-/// one per declared field, or one for every element of a type whose fields
-/// are its elements (`Vector<T>`, whose count only the value knows).
+/// A struct's fields' types as templates (`type_key::field_template`): one
+/// per declared field, or one for every element of a type whose fields are
+/// its elements (`Vector<T>`, whose count only the value knows).
 #[derive(Clone)]
 pub(crate) enum FieldTemplates {
-    Positional(Vec<String>),
-    Uniform(String),
+    Positional(Vec<TypeId>),
+    Uniform(TypeId),
 }
 
 impl FieldTemplates {
-    pub(crate) fn get(&self, index: usize) -> Option<&str> {
+    pub(crate) fn get(&self, index: usize) -> Option<TypeId> {
         match self {
-            FieldTemplates::Positional(v) => v.get(index).map(String::as_str),
-            FieldTemplates::Uniform(t) => Some(t),
+            FieldTemplates::Positional(v) => v.get(index).copied(),
+            FieldTemplates::Uniform(t) => Some(*t),
         }
     }
 }
@@ -148,12 +148,12 @@ impl ModuleScope {
         }
     }
 
-    /// The key template of field `index` of the type registered at `name` —
+    /// The type template of field `index` of the type registered at `name` —
     /// of `variant` for an enum, of the struct otherwise. The printer's other
     /// question ([`typelisp_print::PrintEnv::field_is_niched_option`]).
-    pub(crate) fn field_template(&self, name: &Path, variant: Option<usize>, index: usize) -> Result<&str, String> {
+    pub(crate) fn field_template(&self, name: &Path, variant: Option<usize>, index: usize) -> Result<TypeId, String> {
         let template = match (self.type_entry(name)?, variant) {
-            (TypeEntry::Enum(def), Some(v)) => def.templates.get(v).and_then(|ts| ts.get(index)).map(String::as_str),
+            (TypeEntry::Enum(def), Some(v)) => def.templates.get(v).and_then(|ts| ts.get(index)).copied(),
             (TypeEntry::Struct { templates, .. }, None) => templates.get(index),
             (TypeEntry::Enum(_), None) => return Err(format!("internal error: enum `{}` asked for as a struct", name)),
             (TypeEntry::Struct { .. }, Some(_)) => return Err(format!("internal error: struct `{}` asked for as an enum", name)),
@@ -287,7 +287,7 @@ impl ModuleScope {
         (structs, enums)
     }
 
-    /// Every registered type's field key templates, for an AOT executable's
+    /// Every registered type's field type templates, for an AOT executable's
     /// startup registration (`typelisp_print::aot::rt_print_field_template`):
     /// `(path, variant or None, field index or None for every field,
     /// template)`, in tree order.
@@ -323,7 +323,7 @@ impl ModuleScope {
         }
     }
 
-    pub(crate) fn collect_field_templates(&self, prefix: &[String], out: &mut Vec<(Path, Option<usize>, Option<usize>, String)>) {
+    pub(crate) fn collect_field_templates(&self, prefix: &[String], out: &mut Vec<(Path, Option<usize>, Option<usize>, TypeId)>) {
         for (name, entry) in &self.types {
             let mut segs = prefix.to_vec();
             segs.push(name.clone());
@@ -331,16 +331,16 @@ impl ModuleScope {
             match entry {
                 TypeEntry::Struct { templates: FieldTemplates::Positional(ts), .. } => {
                     for (i, t) in ts.iter().enumerate() {
-                        out.push((path.clone(), None, Some(i), t.clone()));
+                        out.push((path.clone(), None, Some(i), *t));
                     }
                 }
                 TypeEntry::Struct { templates: FieldTemplates::Uniform(t), .. } => {
-                    out.push((path.clone(), None, None, t.clone()));
+                    out.push((path.clone(), None, None, *t));
                 }
                 TypeEntry::Enum(def) => {
                     for (v, ts) in def.templates.iter().enumerate() {
                         for (i, t) in ts.iter().enumerate() {
-                            out.push((path.clone(), Some(v), Some(i), t.clone()));
+                            out.push((path.clone(), Some(v), Some(i), *t));
                         }
                     }
                 }

@@ -46,16 +46,16 @@ pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
     ("ed-open", TypeSpec::Named(NsId::ROOT, "result", &[spec::UNIT, FILE_ERROR])),
 ];
 
-fn type_of(heap: &Heap, name: &str) -> TypeId {
+fn type_of(name: &str) -> TypeId {
     match RESULT_TYPES.iter().find(|(n, _)| *n == name) {
-        Some((_, ty)) => heap.intern_spec(ty),
+        Some((_, ty)) => typelisp_mem::intern_spec(ty),
         None => crate::fatal(&format!("sys_builtin: no result type for `{}`", name)),
     }
 }
 
 /// `Ok(v)`, matching `result_def`'s variant order (`ok` = 0, `err` = 1).
 fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
-    let key = type_of(heap, name);
+    let key = type_of(name);
     heap.alloc_enum(key, 0, vec![v])
 }
 
@@ -65,7 +65,7 @@ fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
 fn result_err(heap: &mut Heap, name: &str, err_type_key: TypeId, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
     let err_val = heap.alloc_enum(err_type_key, 0, vec![msg_val]);
-    let key = type_of(heap, name);
+    let key = type_of(name);
     heap.alloc_enum(key, 1, vec![err_val])
 }
 
@@ -192,7 +192,7 @@ pub fn command_line_args(heap: &mut Heap) -> Value {
     };
     let elems: Vec<Value> = args.into_iter().map(|a| heap.alloc_string(a)).collect();
     {
-        let key = type_of(heap, "command-line-args");
+        let key = type_of("command-line-args");
         heap.alloc_struct(key, elems)
     }
 }
@@ -229,7 +229,7 @@ pub fn home_directory(heap: &mut Heap) -> Value {
 /// [`crate::stream_builtin`] so neither module has to be linked for the
 /// other's sake (see this module's note on archive-member granularity).
 fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
-    heap.alloc_option(type_of(heap, name), v)
+    heap.alloc_option(type_of(name), v)
 }
 
 /// `(lisp-implementation-version)` (CLHS 25.1): this build's version, taken

@@ -142,7 +142,9 @@
 
 ### 3.5 実行時の型の識別（型キーの置き換え）
 
-ヒープの型表は文字列を登録しない。型の形をそのまま登録して番号（`TypeId`）を振る。
+型の表は文字列を登録しない。型の形をそのまま登録して番号（`TypeId`）を振る。表はヒープでなく
+プロセスに 1 つ（5c で変えた。欄の型の雛形や `rt_print_*` の登録は、ヒープを作る前に番号が
+要る）。組み込みの型を最初に登録するので、`TypeId` の定数はどのプロセスでも同じ番号になる。
 
 ```
 TypeShape = Named(NsId, SymRef, [TypeId])
@@ -151,7 +153,10 @@ TypeShape = Named(NsId, SymRef, [TypeId])
           | Ptr(TypeId)
           | CStruct(NsId, SymRef)
           | Unit | Never
+          | Param(u32)
 ```
+
+- `Param(n)` は欄の型の雛形の中の、持ち主の型の n 番目の引数。値の型にはならない。
 
 - 定義は所属モジュール（`NsId`）とそこでの名前のシンボルの組で指す。チェッカーの `Path` と
   同じ 2 つで、シンボルだけでは定義が決まらない（5b で `SymRef` だけの案から変えた）。
@@ -521,8 +526,17 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      （`field_key_template`）、`:dyn` の vtable の表、`dyn-new` の `type_key_field`。
    - 5c. 文字列を切る処理を形を読む処理にする。印字の表のキーと `rt_print_*` の登録を番号か
      シンボルにする。
+     済み。型の表をプロセスに 1 つにした（3.5）。欄の型の雛形は `Param` を含む形の `TypeId`
+     （`type_key::field_template`）で、値の型引数で埋めるのは `typelisp_mem::instantiate`。
+     印字の表（変種名・欄の雛形・欄の名前）は定義（`NsId` と `SymRef` の組）で引き、
+     `:dyn` の vtable の表と `dyn-new` は `TypeId` で引く。実行ファイルは使う型の形を語の列
+     （`typelisp_mem::type_words`）で埋め込み、起動時に `rt_types_define` が番号の表にして、
+     `rt_print_*` の登録はその表の番号で行う（3.6 の起動時の表を 5d から前倒しした）。
+     ABI は 0.3.18。文字列のキーで残るのは、FFI の型（`defffi` の宣言とコールバックの署名、
+     `rt_ffi_callback_register`。5d）と `print-object` の表（`value_key_for_method`。5e）。
    - 5d. コンパイル済みコードがフォームでなく番号を使う。JIT は番号を定数にし、AOT は起動時に
-     形の表から番号を埋める大域の表を読む（3.6）。島を 2 回作り直す。
+     形の表から番号を埋める大域の表を読む（3.6。表を作る `rt_types_define` は 5c で入った）。
+     FFI の型も番号にする。島を 2 回作り直す。
    - 5e. 単型化した定義を `(元の定義のシンボル, [TypeId])` の表で識別し、`ConcreteNames` の
      切り戻しを消す。`NameView` を定義のシンボルから作る。
 6. `std` を子モジュールに分け、組み込み型を移す（5 節）。`std::prelude` を作り、テスト・例に

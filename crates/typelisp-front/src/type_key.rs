@@ -52,33 +52,51 @@ pub fn type_key_of(p: &Path) -> Cow<'static, str> {
     }
 }
 
-/// The interned identity of the type `p` names, minting it if this heap has
-/// not seen the type before.
-pub fn type_key_id(heap: &mut Heap, p: &Path) -> TypeId {
-    heap.intern_type(TypeShape::Named(p.ns(), p.name_symbol(), Vec::new()))
+/// The interned identity of the type `p` names, minting it if it has/// not seen the type before.
+pub fn type_key_id(p: &Path) -> TypeId {
+    typelisp_mem::intern_type(TypeShape::Named(p.ns(), p.name_symbol(), Vec::new()))
 }
 
-/// The interned identity of the type `p` names, or `None` if no value in this
-/// heap has ever been of that type — which answers "is `id` one of those?"
+/// The interned identity of the type `p` names, or `None` if no value has
+/// ever been of that type — which answers "is `id` one of those?"
 /// on its own, without minting anything.
-fn existing_type_key_id(heap: &Heap, p: &Path) -> Option<TypeId> {
-    heap.find_type(&TypeShape::Named(p.ns(), p.name_symbol(), Vec::new()))
+fn existing_type_key_id(p: &Path) -> Option<TypeId> {
+    typelisp_mem::find_type(&TypeShape::Named(p.ns(), p.name_symbol(), Vec::new()))
 }
 
-/// The interned identity of the type `ty`, minting it if this heap has not
-/// seen the type before. The one place a checker type becomes a runtime one;
-/// the shape is the one `core::type_form` writes for the same type.
-pub fn type_id(heap: &Heap, ty: &Type) -> TypeId {
-    let ids = |tys: &[Type]| tys.iter().map(|t| type_id(heap, t)).collect::<Vec<_>>();
+/// The interned identity of the type `ty`, minting it if it has not been seen
+/// before. The one place a checker type becomes a runtime one; the shape is
+/// the one `core::type_form` writes for the same type.
+pub fn type_id(ty: &Type) -> TypeId {
+    type_id_in(ty, &[])
+}
+
+/// A field's declared type as a *template*: its type with each of the owning
+/// type's parameters (`params`, in declaration order) as a
+/// [`TypeShape::Param`] — `Option<T>` in a `gen<T>` is `option<$0>`.
+/// [`typelisp_mem::instantiate`] gives back the type a particular
+/// instantiation's field has, from the value's own type; that is how the
+/// printer, which sees a struct only through its box, learns that a field is
+/// a niche-represented `Option` it must render as one.
+pub fn field_template(params: &[String], field: &Type) -> TypeId {
+    type_id_in(field, params)
+}
+
+/// [`type_id`], with the type variables `params` names as parameters.
+fn type_id_in(ty: &Type, params: &[String]) -> TypeId {
+    let ids = |tys: &[Type]| tys.iter().map(|t| type_id_in(t, params)).collect::<Vec<_>>();
     let shape = match ty {
         Type::Named(p, args) => TypeShape::Named(p.ns(), p.name_symbol(), ids(args)),
         Type::Dyn(p, pins) => TypeShape::Dyn(p.ns(), p.name_symbol(), ids(pins)),
-        Type::Fn(ps, rest, r) => TypeShape::Fn(ids(ps), rest.as_deref().map(|t| type_id(heap, t)), type_id(heap, r)),
-        Type::PtrTo(t) => TypeShape::Ptr(type_id(heap, t)),
+        Type::Fn(ps, rest, r) => TypeShape::Fn(ids(ps), rest.as_deref().map(|t| type_id_in(t, params)), type_id_in(r, params)),
+        Type::PtrTo(t) => TypeShape::Ptr(type_id_in(t, params)),
         Type::CStruct(p) => TypeShape::CStruct(p.ns(), p.name_symbol()),
         Type::Unit => TypeShape::Unit,
         Type::Never => TypeShape::Never,
-        Type::Var(name) => panic!("the type variable `{}` has no runtime identity (internal error)", name),
+        Type::Var(name) => match params.iter().position(|p| p == name) {
+            Some(i) => TypeShape::Param(i as u32),
+            None => panic!("the type variable `{}` has no runtime identity (internal error)", name),
+        },
         Type::Ptr
         | Type::CLong
         | Type::CULong
@@ -99,13 +117,13 @@ pub fn type_id(heap: &Heap, ty: &Type) -> TypeId {
         | Type::Str
         | Type::Symbol => TypeShape::named(NsId::ROOT, &ty.type_key(), &[]),
     };
-    heap.intern_type(shape)
+    typelisp_mem::intern_type(shape)
 }
 
 /// Allocate a boxed struct of the type `p` names — `Heap::alloc_struct` with
 /// the identity resolved for you. The one place a struct's key is written.
 pub fn alloc_typed_struct(heap: &mut Heap, p: &Path, fields: Vec<crate::Value>) -> crate::Value {
-    let key = type_key_id(heap, p);
+    let key = type_key_id(p);
     heap.alloc_struct(key, fields)
 }
 
@@ -117,7 +135,7 @@ pub fn alloc_typed_enum(
     variant: usize,
     fields: Vec<crate::Value>,
 ) -> crate::Value {
-    let key = type_key_id(heap, p);
+    let key = type_key_id(p);
     heap.alloc_enum(key, variant, fields)
 }
 
@@ -140,7 +158,7 @@ pub fn alloc_sexpr_vector(heap: &mut Heap, elems: Vec<crate::Value>) -> crate::V
 /// Its type is `typelisp_mem::sexpr_tuple_type`'s, which
 /// `tests/type_identity_guard_test.rs` holds equal to the checker's.
 pub fn alloc_sexpr_tuple(heap: &mut Heap, elems: Vec<crate::Value>) -> crate::Value {
-    let ty = typelisp_mem::sexpr_tuple_type(heap, elems.len());
+    let ty = typelisp_mem::sexpr_tuple_type(elems.len());
     heap.alloc_struct(ty, elems)
 }
 
@@ -176,7 +194,7 @@ fn stored_key(heap: &Heap, id: BoxId) -> Option<TypeId> {
 /// *decode fields* still test `is_struct`/`is_enum` for their own reasons.
 pub fn heap_type_is(heap: &Heap, id: BoxId, p: &Path) -> bool {
     match stored_key(heap, id) {
-        Some(k) => existing_type_key_id(heap, p) == Some(k),
+        Some(k) => existing_type_key_id(p) == Some(k),
         None => false,
     }
 }
@@ -200,37 +218,21 @@ pub fn heap_type_is_id(heap: &Heap, id: BoxId, key: TypeId) -> bool {
 /// another owned key, or just printed) — a clone of an interned type name is
 /// cheap next to that.
 pub fn heap_type_key(heap: &Heap, id: BoxId) -> Option<String> {
-    stored_key(heap, id).map(|k| heap.type_key_name(k).to_string())
+    stored_key(heap, id).map(|k| typelisp_mem::type_name(k).to_string())
     // type-identity-ok: reading the spelling back out is this function's job
 }
 
-/// The type boxed value `id` belongs to, or `None` when the box carries no
-/// type identity. The one place a stored key is parsed back into a [`Path`] —
-/// lossless because a path segment can never contain `::`.
+/// The type boxed value `id` belongs to — the definition its type
+/// instantiates — or `None` when the box carries no type identity.
 pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
-    heap_type_key(heap, id).map(|k| {
-        // The *base*: a key carries its instantiation now (`gen<i32>`), and a
-        // `Path` has no room for one. Callers that need the arguments ask
-        // [`heap_type_key`] and [`ConcreteNames`] instead — the printer's
-        // dispatch is the one that does.
-        Path::from_segments(ConcreteNames::base_type(&k).split("::").map(str::to_string).collect())
-    })
+    stored_key(heap, id).map(|ty| definition_path(ty).expect("a box's type is a named one"))
 }
 
-/// A field's type as a *key template*: its key with each of the owning
-/// type's parameters (`params`, in declaration order) written as
-/// [`ConcreteNames::template_param`] — `Option<T>` in a `gen<T>` is
-/// `option<$0>`. [`ConcreteNames::instantiate_template`] turns one back into
-/// the key a particular instantiation's field has, from the value's own key;
-/// that is how the printer, which sees a struct only through its box, learns
-/// that a field is a niche-represented `Option` it must render as one.
-pub fn field_key_template(params: &[String], field: &Type) -> String {
-    let subst: std::collections::BTreeMap<String, Type> = params
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (p.clone(), Type::Var(ConcreteNames::template_param(i))))
-        .collect();
-    ConcreteNames::type_key(&crate::check::analyze::subst_apply(field, &subst))
+/// The definition the named type `ty` instantiates, or `None` when `ty` is
+/// not a named type.
+pub fn definition_path(ty: TypeId) -> Option<Path> {
+    let (ns, sym) = typelisp_mem::type_shape(ty).named_definition()?;
+    Some(Path::of_symbol(ns, sym))
 }
 
 /// How a type is spelled as a runtime identity: the whole path, plus its type

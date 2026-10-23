@@ -198,14 +198,13 @@ fn vocabulary(out: &mut String) {
     for (i, name) in typelisp_mem::BUILTIN_SYMBOLS.iter().enumerate() {
         writeln!(out, "| {} | `{}` |", i, name).unwrap();
     }
-    // A type's spelling is its display, built from its shape by a heap.
-    let heap = typelisp_mem::Heap::with_capacity(64);
-    let name = |spec: &typelisp_mem::TypeSpec| heap.type_key_name(heap.intern_spec(spec)).to_string();
+    // A type's spelling is its display, built from its shape.
+    let name = |spec: &typelisp_mem::TypeSpec| typelisp_mem::type_name(typelisp_mem::intern_spec(spec)).to_string();
     out.push_str("\n## 組み込み型 (typelisp_mem::BUILTIN_TYPES)\n\n| 番号 | 型 |\n|---|---|\n");
     for (i, (ns, n, args)) in typelisp_mem::BUILTIN_TYPES.iter().enumerate() {
         // type-identity-ok: prints the table's display, gives no value a type
-        let id = heap.intern_type(typelisp_mem::TypeShape::named(*ns, n, args));
-        writeln!(out, "| {} | `{}` |", i, &*heap.type_key_name(id)).unwrap();
+        let id = typelisp_mem::intern_type(typelisp_mem::TypeShape::named(*ns, n, args));
+        writeln!(out, "| {} | `{}` |", i, &*typelisp_mem::type_name(id)).unwrap();
     }
     out.push_str("\n## 実行時が組み立てる値の型 (typelisp_rt)\n\n| 表 | 関数 | 型 |\n|---|---|---|\n");
     let tables: [(&str, &[(&str, typelisp_mem::TypeSpec)]); 5] = [

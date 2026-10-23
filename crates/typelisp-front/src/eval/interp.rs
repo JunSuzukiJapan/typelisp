@@ -524,11 +524,10 @@ pub struct EnumDef {
     /// `(defenum PATH (SYM...) ((REPR...)...) ((TEMPLATE...)...))` form
     /// carries exactly this, plus the templates below.
     pub(crate) variants: Vec<(String, Vec<Repr>)>,
-    /// Each variant's fields' types as key templates
-    /// (`type_key::field_key_template`), parallel to `variants` — what the
-    /// printer instantiates to learn that a field holds a niche-represented
-    /// `Option` (`scope::FieldTemplates`).
-    pub(crate) templates: Vec<Vec<String>>,
+    /// Each variant's fields' types as templates (`type_key::field_template`),
+    /// parallel to `variants` — what the printer instantiates to learn that a
+    /// field holds a niche-represented `Option` (`scope::FieldTemplates`).
+    pub(crate) templates: Vec<Vec<crate::TypeId>>,
 }
 
 /// The interpreter state: a runtime mirror of the checker's module tree
@@ -664,11 +663,9 @@ pub struct Interp {
     /// needs no GC root — `BoxedObj::Dyn`'s own `value` is all the collector
     /// ever has to trace.
     pub(crate) vtables: RefCell<Vec<Vec<(Path, String)>>>,
-    /// `(concrete type key, trait path)` -> `vtable_id`, so the same pair
-    /// interns to one id however many times it is boxed. The key's first
-    /// half is `ConcreteNames::type_key`'s rendering (the `dyn-new` node's own concrete
-    /// key), since `Type` has no `Hash`.
-    pub vtable_ids: RefCell<HashMap<(String, Path), u32>>,
+    /// `(concrete type, trait path)` -> `vtable_id`, so the same pair
+    /// interns to one id however many times it is boxed.
+    pub vtable_ids: RefCell<HashMap<(crate::TypeId, Path), u32>>,
     /// `(vtable id, trait id)` -> the vtable id the *same concrete type* uses
     /// for that trait: the supertrait upcast table `dyn-upcast` reads.
     ///
@@ -765,7 +762,7 @@ impl Interp {
             "vector".to_string(),
             scope::TypeEntry::Struct {
                 reprs: Vec::new(),
-                templates: scope::FieldTemplates::Uniform("$0".to_string()),
+                templates: scope::FieldTemplates::Uniform(crate::type_key::field_template(&["t".to_string()], &crate::Type::Var("t".to_string()))),
                 names: Vec::new(),
             },
         );
@@ -780,7 +777,7 @@ impl Interp {
                 handle.to_string(),
                 scope::TypeEntry::Struct {
                     reprs: Vec::new(),
-                    templates: scope::FieldTemplates::Positional(vec![typelisp_mem::ConcreteNames::type_key(&crate::Type::Int)]),
+                    templates: scope::FieldTemplates::Positional(vec![crate::type_key::type_id(&crate::Type::Int)]),
                     names: Vec::new(),
                 },
             );
@@ -804,7 +801,7 @@ impl Interp {
             let templates = def
                 .variants
                 .iter()
-                .map(|v| v.fields.iter().map(|t| crate::type_key::field_key_template(&def.params, t)).collect())
+                .map(|v| v.fields.iter().map(|t| crate::type_key::field_template(&def.params, t)).collect())
                 .collect();
             let variants = def
                 .variants
@@ -990,67 +987,58 @@ impl Interp {
     /// Every vtable interned so far, as `(id, slots)` — for a code generator
     /// that has to emit the table itself rather than patch it in from JIT
     /// addresses (`compile::aot::build_main_wrapper`).
-    /// Every enum in the program as `(type key, variant index, variant
+    /// Every enum in the program as `(definition, variant index, variant
     /// name)` — what an AOT executable's startup registers so its printer can
     /// name a variant (`typelisp_print::aot`), since the box carries only the
     /// index.
-    ///
-    /// Keyed by `type_key::type_key_of`, not by the `Path`'s `Display`: the
-    /// key is what the box actually stores, and the two are only the same for
-    /// a root-module type (see `src/type_key.rs`'s module doc comment).
-    pub fn enum_variant_descriptors(&self) -> Vec<(String, usize, String)> {
+    pub fn enum_variant_descriptors(&self) -> Vec<(Path, usize, String)> {
         let (_, enums) = self.root.borrow().collect_struct_and_enum_types();
         let mut out = Vec::new();
         for (path, def) in &enums {
-            let key = crate::type_key::type_key_of(path);
             for (i, (name, _)) in def.variants.iter().enumerate() {
-                out.push((key.to_string(), i, name.clone()));
+                out.push((path.clone(), i, name.clone()));
             }
         }
         // `collect_struct_and_enum_types` returns a `HashMap`, so sort for a
         // deterministic startup sequence — two runs of `compile-file` on the
         // same source must produce the same executable.
-        out.sort();
+        out.sort_by_cached_key(|(path, i, _)| (path.to_string(), *i));
         out
     }
 
-    /// Every struct's field names, spelled for
-    /// `typelisp_print::aot::rt_print_field_name`: `(base type key, index,
-    /// name)` — the executable's copy of what [`Self::field_name`] reads from
-    /// the scope tree here. Sorted, for the same reason
-    /// [`Self::enum_variant_descriptors`] is.
-    pub fn field_name_descriptors(&self) -> Vec<(String, i64, String)> {
+    /// Every struct's field names, as `(definition, index, name)` for
+    /// `typelisp_print::aot::rt_print_field_name` — the executable's copy of
+    /// what [`Self::field_name`] reads from the scope tree here. Sorted, for
+    /// the same reason [`Self::enum_variant_descriptors`] is.
+    pub fn field_name_descriptors(&self) -> Vec<(Path, i64, String)> {
         let mut raw = Vec::new();
         self.root.borrow().collect_field_names(&[], &mut raw);
-        let mut out: Vec<(String, i64, String)> = raw
-            .into_iter()
-            .map(|(path, index, name)| (crate::type_key::type_key_of(&path).into_owned(), index as i64, name))
-            .collect();
-        out.sort();
+        let mut out: Vec<(Path, i64, String)> = raw.into_iter().map(|(path, index, name)| (path, index as i64, name)).collect();
+        out.sort_by_cached_key(|(path, index, _)| (path.to_string(), *index));
         out
     }
 
-    /// Every type's field key templates, spelled for
-    /// `typelisp_print::aot::rt_print_field_template`: `(base type key,
-    /// variant or NO_VARIANT, index or EVERY_FIELD, template)` — the
-    /// executable's copy of what [`Self::field_is_niched_option`] reads
-    /// from the scope tree here. Sorted, for the same reason
-    /// [`Self::enum_variant_descriptors`] is.
-    pub fn field_template_descriptors(&self) -> Vec<(String, i64, i64, String)> {
+    /// Every type's field templates, as `(definition, variant or NO_VARIANT,
+    /// index or EVERY_FIELD, template)` for
+    /// `typelisp_print::aot::rt_print_field_template` — the executable's copy
+    /// of what [`Self::field_is_niched_option`] reads from the scope tree
+    /// here. Sorted, for the same reason [`Self::enum_variant_descriptors`]
+    /// is.
+    pub fn field_template_descriptors(&self) -> Vec<(Path, i64, i64, crate::TypeId)> {
         let mut raw = Vec::new();
         self.root.borrow().collect_field_templates(&[], &mut raw);
-        let mut out: Vec<(String, i64, i64, String)> = raw
+        let mut out: Vec<(Path, i64, i64, crate::TypeId)> = raw
             .into_iter()
             .map(|(path, variant, index, t)| {
                 (
-                    crate::type_key::type_key_of(&path).into_owned(),
+                    path,
                     variant.map_or(typelisp_print::aot::NO_VARIANT, |v| v as i64),
                     index.map_or(typelisp_print::aot::EVERY_FIELD, |i| i as i64),
                     t,
                 )
             })
             .collect();
-        out.sort();
+        out.sort_by_cached_key(|(path, variant, index, _)| (path.to_string(), *variant, *index));
         out
     }
 
@@ -1058,7 +1046,7 @@ impl Interp {
         self.vtables.borrow().iter().cloned().enumerate().map(|(i, s)| (i as u32, s)).collect()
     }
 
-    /// The vtable id for boxing a `concrete_key`-typed value as
+    /// The vtable id for boxing a `concrete`-typed value as
     /// `trait_path` — interning the (type, trait) pair so repeated boxing
     /// reuses one table. The sole source of vtable ids; the compiled tier's
     /// parallel table (`typelisp_rt`) is keyed by the same numbers.
@@ -1066,8 +1054,8 @@ impl Interp {
     /// `slots` comes from the checker (`dyn-new`), already in
     /// `TraitDef::method_order` order and already monomorphized, so this only
     /// records it.
-    pub(crate) fn vtable_id_for(&self, concrete_key: &str, trait_path: &Path, slots: &[(Path, String)]) -> u32 {
-        let key = (concrete_key.to_string(), trait_path.clone());
+    pub(crate) fn vtable_id_for(&self, concrete: crate::TypeId, trait_path: &Path, slots: &[(Path, String)]) -> u32 {
+        let key = (concrete, trait_path.clone());
         if let Some(&id) = self.vtable_ids.borrow().get(&key) {
             return id;
         }
@@ -1114,18 +1102,18 @@ impl Interp {
     /// entry nothing is allowed to ask for is simply never read.
     pub fn register_dyn_box(
         &self,
-        concrete_key: &str,
+        concrete: crate::TypeId,
         trait_path: &Path,
         slots: &[(Path, String)],
         supers: &[(Path, Vec<(Path, String)>)],
     ) -> Vec<u32> {
-        let id = self.vtable_id_for(concrete_key, trait_path, slots);
+        let id = self.vtable_id_for(concrete, trait_path, slots);
         if supers.is_empty() {
             return vec![id];
         }
         let mut tables: Vec<(u32, u32)> = vec![(id, self.trait_id_for(trait_path))];
         for (sup, sup_slots) in supers {
-            tables.push((self.vtable_id_for(concrete_key, sup, sup_slots), self.trait_id_for(sup)));
+            tables.push((self.vtable_id_for(concrete, sup, sup_slots), self.trait_id_for(sup)));
         }
         for &(from, _) in &tables {
             for &(to, to_trait) in &tables {
@@ -2438,45 +2426,36 @@ impl Interp {
         }
     }
 
-    /// The name of `variant` of the enum whose type key is `type_key` — the
-    /// printer's question, answered from the scope tree.
+    /// The name of `variant` of the enum of type `ty` — the printer's
+    /// question, answered from the scope tree.
     ///
     /// The tree holds every `TypeEntry::Enum`: a user `defenum`'s own exec,
     /// *and* the built-in sum types (`Option`/`Result`/the error types),
     /// which `Interp::new` seeds from `registry::builtin_sum_defs` up front
     /// precisely so this lookup never needs a second table to fall back to.
-    /// Coming up empty means the lookup itself is broken (a stale key, an
+    /// Coming up empty means the lookup itself is broken (a stale type, an
     /// enum the tree was never told about), not that the name lives
     /// somewhere else — which is why it is a printing error rather than
     /// anything plausible.
-    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Result<String, String> {
-        // The *base*: a key carries its instantiation now (`option<char>`), and
-        // the enum is registered under its bare path. Splitting is what
-        // `heap_type_path` does for every other lookup; missing it here is why
-        // `(some 1)` printed as `(<unknown-variant> 1)`.
-        let base = typelisp_mem::ConcreteNames::base_type(type_key);
-        let path = Path::from_segments(base.split("::").map(str::to_string).collect());
-        self.root.borrow().enum_variant_name(&path, variant)
+    fn enum_variant_name(&self, ty: crate::TypeId, variant: usize) -> Result<String, String> {
+        self.root.borrow().enum_variant_name(&printed_definition(ty)?, variant)
     }
 
     /// The registered definition's field template, instantiated by the
-    /// key's own arguments — `gen<option<int>>`'s field `$0` is
+    /// type's own arguments — `gen<option<int>>`'s field `$0` is
     /// `option<int>`, a niche. See [`typelisp_print::PrintEnv`].
-    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> Result<bool, String> {
-        let base = typelisp_mem::ConcreteNames::base_type(type_key);
-        let path = Path::from_segments(base.split("::").map(str::to_string).collect());
-        let root = self.root.borrow();
-        let template = root.field_template(&path, variant, index)?;
-        let args = typelisp_mem::ConcreteNames::type_arg_list(type_key);
-        Ok(typelisp_mem::option_prints_wrapped(&typelisp_mem::ConcreteNames::instantiate_template(template, &args)))
+    fn field_is_niched_option(&self, ty: crate::TypeId, variant: Option<usize>, index: usize) -> Result<bool, String> {
+        let template = self.root.borrow().field_template(&printed_definition(ty)?, variant, index)?;
+        let typelisp_mem::TypeShape::Named(_, _, args) = typelisp_mem::type_shape(ty) else {
+            unreachable!("`printed_definition` found a named type")
+        };
+        Ok(typelisp_mem::option_prints_wrapped(typelisp_mem::instantiate(template, &args)))
     }
 
     /// The name the struct's definition gives field `index`, from the scope
     /// tree. See [`typelisp_print::PrintEnv::field_name`].
-    fn field_name(&self, type_key: &str, index: usize) -> Result<Option<String>, String> {
-        let base = typelisp_mem::ConcreteNames::base_type(type_key);
-        let path = Path::from_segments(base.split("::").map(str::to_string).collect());
-        Ok(self.root.borrow().field_name(&path, index)?.map(str::to_string))
+    fn field_name(&self, ty: crate::TypeId, index: usize) -> Result<Option<String>, String> {
+        Ok(self.root.borrow().field_name(&printed_definition(ty)?, index)?.map(str::to_string))
     }
 
     /// A printer control variable's current value, for
@@ -4366,7 +4345,7 @@ pub const EVAL_RESULT_TYPE: TypeSpec = MACROEXPAND_RESULT_TYPE;
 /// `Ok(v)` of the result type `ty`, matching `result_def`'s variant order
 /// (`ok` = 0, `err` = 1).
 fn result_ok(heap: &mut Heap, ty: &TypeSpec, v: Value) -> Value {
-    let ty = heap.intern_spec(ty);
+    let ty = typelisp_mem::intern_spec(ty);
     crate::type_key::alloc_enum_of(heap, ty, 0, vec![v])
 }
 
@@ -4387,7 +4366,7 @@ fn result_err(heap: &mut Heap, result: &TypeSpec, err_type: &str, msg: String) -
     // evalerror>` pattern. `err_type` needs no such treatment — a concrete
     // error type has no type arguments — but the wrapper does, which is why
     // this takes two rather than one.
-    let result = heap.intern_spec(result);
+    let result = typelisp_mem::intern_spec(result);
     crate::type_key::alloc_enum_of(heap, result, 1, vec![err_val])
 }
 
@@ -4471,9 +4450,9 @@ fn hashtable_entries(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Resul
     // Two identities here, and only the outer one was handed in: the result is
     // a `Vector<cons-cell<K,V>>`, so each cell's own type is the vector's one
     // argument.
-    let cell_type = match heap.type_shape(ret_type) {
+    let cell_type = match typelisp_mem::type_shape(ret_type) {
         typelisp_mem::TypeShape::Named(_, _, args) if args.len() == 1 => args[0],
-        _ => panic!("hashtable::entries: `{}` is not a one-argument container type", &*heap.type_key_name(ret_type)),
+        _ => panic!("hashtable::entries: `{}` is not a one-argument container type", &*typelisp_mem::type_name(ret_type)),
     };
     // Each cell is a new box that nothing points at until the vector is built,
     // so each is rooted as it is made: building the next one can collect.
@@ -4576,15 +4555,15 @@ fn vector_pop(heap: &mut Heap, args: &[Value], ret_type: TypeId) -> Result<Value
 /// the same reason: a nested `Interp` (`compile-file` builds its own) leaves
 /// the slot pointing at a finished one otherwise.
 const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::runtime::PrintHooks {
-    enum_variant_name: |type_key, variant| {
-        with_active_interp(|i| i.enum_variant_name(type_key, variant)).unwrap_or_else(|| Err(NO_INTERP_FOR_TYPES.to_string()))
+    enum_variant_name: |ty, variant| {
+        with_active_interp(|i| i.enum_variant_name(ty, variant)).unwrap_or_else(|| Err(NO_INTERP_FOR_TYPES.to_string()))
     },
-    field_is_niched_option: |type_key, variant, index| {
-        with_active_interp(|i| i.field_is_niched_option(type_key, variant, index))
+    field_is_niched_option: |ty, variant, index| {
+        with_active_interp(|i| i.field_is_niched_option(ty, variant, index))
             .unwrap_or_else(|| Err(NO_INTERP_FOR_TYPES.to_string()))
     },
-    field_name: |type_key, index| {
-        with_active_interp(|i| i.field_name(type_key, index)).unwrap_or_else(|| Err(NO_INTERP_FOR_TYPES.to_string()))
+    field_name: |ty, index| {
+        with_active_interp(|i| i.field_name(ty, index)).unwrap_or_else(|| Err(NO_INTERP_FOR_TYPES.to_string()))
     },
     print_object: |heap, v, escape| {
         with_active_interp(|i| i.print_object(heap, v, escape)).unwrap_or_else(|| Err(NO_INTERP_FOR_METHODS.to_string()))
@@ -4602,6 +4581,12 @@ const INTERP_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::
         None => Err(NO_INTERP_FOR_PRINTER_VARS.to_string()),
     },
 };
+
+/// The definition of a printed box's type, which is always a named one.
+fn printed_definition(ty: crate::TypeId) -> Result<Path, String> {
+    crate::type_key::definition_path(ty)
+        .ok_or_else(|| format!("internal error: a box's type `{}` names no definition", &*typelisp_mem::type_name(ty)))
+}
 
 const NO_INTERP_FOR_PRINTER_VARS: &str = "printing needs a running program to read the printer control variables from";
 const NO_INTERP_FOR_TYPES: &str = "printing needs a running program to look its types up in";

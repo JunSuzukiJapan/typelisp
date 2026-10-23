@@ -3926,7 +3926,7 @@ fn sexpr_tuple_of(heap: &mut Heap, elems: Vec<Value>) -> Value {
     if !(1..=typelisp_mem::TUPLE_MAX_ARITY).contains(&elems.len()) {
         raise(format!("a tuple has 1 to {} elements, not {}", typelisp_mem::TUPLE_MAX_ARITY, elems.len()));
     }
-    let key = typelisp_mem::sexpr_tuple_type(heap, elems.len());
+    let key = typelisp_mem::sexpr_tuple_type(elems.len());
     heap.alloc_struct(key, elems)
 }
 
@@ -4950,6 +4950,30 @@ pub unsafe extern "C" fn rt_dyn_upcast(args: *const i64, argc: u32) -> i64 {
     }
     let inner = active_heap().dyn_value(id);
     encode(active_heap().alloc_dyn(to, inner))
+}
+
+/// Interns the types an executable carries (`typelisp_mem::type_words`) and
+/// writes each one's id, as its word, into the table the generated code
+/// reads them from: `args` is `[words, word_count, table]`, `table` having a
+/// word for every type the list writes. AOT startup runs it before anything
+/// that reads the table; the JIT has the ids already.
+///
+/// # Safety
+///
+/// `argc` must be `>= 3`, `args` must point to 3 valid `i64`s, `words` to
+/// `word_count` words of a list `TypeWords` wrote (its strings placed as
+/// constants), and `table` to as many writable words as the list has types.
+#[no_mangle]
+pub unsafe extern "C" fn rt_types_define(args: *const i64, argc: u32) -> i64 {
+    if argc < 3 {
+        fatal("rt_types_define: expected 3 arguments");
+    }
+    let words = std::slice::from_raw_parts(*args as usize as *const i64, *args.add(1) as usize);
+    let table = *args.add(2) as usize as *mut i64;
+    for (i, id) in typelisp_mem::type_words::define(words).into_iter().enumerate() {
+        *table.add(i) = id.word();
+    }
+    0
 }
 
 /// Registers the upcast `(vtable args[0], trait id args[1]) -> vtable

@@ -29,9 +29,9 @@ use typelisp_mem::ConcreteNames;
 /// (`Interp::register_dyn_box`).
 #[derive(Clone, Copy)]
 pub struct DynTables<'a> {
-    /// `(concrete type key, trait path)` -> vtable id, for every trait
-    /// object this translation boxes (`dyn-new`).
-    pub vtables: &'a HashMap<(String, Path), u32>,
+    /// `(concrete type, trait path)` -> vtable id, for every trait object
+    /// this translation boxes (`dyn-new`).
+    pub vtables: &'a HashMap<(crate::TypeId, Path), u32>,
     /// Trait path -> trait id, for every supertrait this translation upcasts
     /// to (`dyn-upcast`). The upcast's *target vtable* is not here: it
     /// depends on the value's concrete type and is looked up at run time

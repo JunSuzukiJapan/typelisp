@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.17
+# ABI バージョン 0.3.18
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.17 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.18 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `d77fc7c2d992fe45`
+内容ハッシュ (FNV-1a 64): `f4be67525013b207`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -937,6 +937,7 @@
 | `rt_timezone_daylight_p` | `i64 (ptr, i32)` |
 | `rt_timezone_offset_seconds` | `i64 (ptr, i32)` |
 | `rt_truncate_sexpr_roots` | `i64 (ptr, i32)` |
+| `rt_types_define` | `i64 (ptr, i32)` |
 | `rt_upcast_set` | `i64 (ptr, i32)` |
 | `rt_vector_to_sexpr_tuple` | `i64 (ptr, i32)` |
 | `rt_vtable_set` | `i64 (ptr, i32)` |

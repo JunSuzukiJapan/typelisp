@@ -39,12 +39,12 @@ use crate::Path;
 /// comment.
 #[derive(Default)]
 pub(crate) struct PrintSnapshot {
-    /// `(base type key, variant index) -> variant name`.
+    /// `(definition, variant index) -> variant name`.
     enum_names: typelisp_print::aot::VariantNames,
-    /// `(base type key, variant or NO_VARIANT, index or EVERY_FIELD) ->
-    /// the field's type key template` — `Interp::field_template_descriptors`.
+    /// `(definition, variant or NO_VARIANT, index or EVERY_FIELD) -> the
+    /// field's type template` — `Interp::field_template_descriptors`.
     field_templates: typelisp_print::aot::FieldTemplates,
-    /// `(base type key, index) -> field name` — `Interp::field_name_descriptors`.
+    /// `(definition, index) -> field name` — `Interp::field_name_descriptors`.
     field_names: typelisp_print::aot::FieldNames,
     /// Every method with a `print-object`'s signature, and every function and
     /// method with the signature `~/name/` calls, by what it is.
@@ -110,13 +110,13 @@ fn current() -> Arc<PrintSnapshot> {
 }
 
 const WORKER_PRINT_HOOKS: typelisp_print::runtime::PrintHooks = typelisp_print::runtime::PrintHooks {
-    enum_variant_name: |key, variant| typelisp_print::aot::variant_name_in(&current().enum_names, key, variant),
-    field_is_niched_option: |key, variant, index| {
-        typelisp_print::aot::field_is_niched_in(&current().field_templates, key, variant, index)
+    enum_variant_name: |ty, variant| typelisp_print::aot::variant_name_in(&current().enum_names, ty, variant),
+    field_is_niched_option: |ty, variant, index| {
+        typelisp_print::aot::field_is_niched_in(&current().field_templates, ty, variant, index)
     },
-    field_name: |key, index| {
+    field_name: |ty, index| {
         let snapshot = current();
-        typelisp_print::aot::field_name_in(&snapshot.field_names, &snapshot.field_templates, key, index)
+        typelisp_print::aot::field_name_in(&snapshot.field_names, &snapshot.field_templates, ty, index)
     },
     print_object: worker_print_object,
     format_call: worker_format_call,
@@ -235,14 +235,14 @@ impl Interp {
     /// code. Kept until the next drive starts ([`Self::refresh_print_snapshot`]).
     fn publish_print_snapshot(&self) {
         let mut snapshot = PrintSnapshot::default();
-        for (key, variant, name) in self.enum_variant_descriptors() {
-            snapshot.enum_names.insert((key, variant), name);
+        for (path, variant, name) in self.enum_variant_descriptors() {
+            snapshot.enum_names.insert(((path.ns(), path.name_symbol()), variant), name);
         }
-        for (key, variant, index, template) in self.field_template_descriptors() {
-            snapshot.field_templates.insert((key, variant, index), template);
+        for (path, variant, index, template) in self.field_template_descriptors() {
+            snapshot.field_templates.insert(((path.ns(), path.name_symbol()), variant, index), template);
         }
-        for (key, index, name) in self.field_name_descriptors() {
-            snapshot.field_names.insert((key, index), name);
+        for (path, index, name) in self.field_name_descriptors() {
+            snapshot.field_names.insert(((path.ns(), path.name_symbol()), index), name);
         }
         let mut defs: Vec<(crate::CompileTarget, Rc<super::FnDef>)> = Vec::new();
         let mut methods = Vec::new();

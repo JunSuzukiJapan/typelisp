@@ -25,10 +25,10 @@
 use std::cell::RefCell;
 
 use typelisp_abi::{decode, encode, fatal};
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{Heap, TypeId, Value};
 
 use crate::runtime::{set_print_hooks, PrintHooks};
-use crate::stored_type_key;
+use crate::stored_type;
 
 // `(type key, variant index) -> variant name`, filled by
 // [`rt_print_enum_variant`] — now `shared::PrintShared::enum_names`
@@ -52,15 +52,15 @@ thread_local! {
 /// The hooks an AOT executable prints under: the tables its startup filled
 /// (see the module doc comment).
 const AOT_HOOKS: PrintHooks = PrintHooks {
-    enum_variant_name: |key, variant| variant_name_in(&crate::shared::print_shared().enum_names.read(), key, variant),
-    field_is_niched_option: |key, variant, index| {
-        field_is_niched_in(&crate::shared::print_shared().field_templates.read(), key, variant, index)
+    enum_variant_name: |ty, variant| variant_name_in(&crate::shared::print_shared().enum_names.read(), ty, variant),
+    field_is_niched_option: |ty, variant, index| {
+        field_is_niched_in(&crate::shared::print_shared().field_templates.read(), ty, variant, index)
     },
-    field_name: |key, index| {
+    field_name: |ty, index| {
         let shared = crate::shared::print_shared();
         let names = shared.field_names.read();
         let templates = shared.field_templates.read();
-        field_name_in(&names, &templates, key, index)
+        field_name_in(&names, &templates, ty, index)
     },
     print_object: aot_print_object,
     format_call: aot_format_call,
@@ -68,57 +68,67 @@ const AOT_HOOKS: PrintHooks = PrintHooks {
     print_vars: |heap| crate::runtime::read_print_vars(heap, &|name| aot_global(heap, name)),
 };
 
-/// `(base type key, variant) -> name`: what [`rt_print_enum_variant`] fills.
-pub type VariantNames = std::collections::HashMap<(String, usize), String>;
-/// `(base type key, variant or NO_VARIANT, index or EVERY_FIELD) -> template`:
-/// what [`rt_print_field_template`] fills.
-pub type FieldTemplates = std::collections::HashMap<(String, i64, i64), String>;
-/// `(base type key, index) -> field name`: what [`rt_print_field_name`] fills.
-pub type FieldNames = std::collections::HashMap<(String, i64), String>;
+/// A definition, as the tables below are keyed by it: its module and its
+/// symbol there. A value's type is an instantiation of one
+/// ([`typelisp_mem::TypeShape::named_definition`]).
+pub type Definition = (typelisp_mem::NsId, typelisp_mem::SymRef);
+/// `(definition, variant) -> name`: what [`rt_print_enum_variant`] fills.
+pub type VariantNames = std::collections::HashMap<(Definition, usize), String>;
+/// `(definition, variant or NO_VARIANT, index or EVERY_FIELD) -> the field's
+/// declared type, its definition's parameters as `TypeShape::Param`s`: what
+/// [`rt_print_field_template`] fills.
+pub type FieldTemplates = std::collections::HashMap<(Definition, i64, i64), TypeId>;
+/// `(definition, index) -> field name`: what [`rt_print_field_name`] fills.
+pub type FieldNames = std::collections::HashMap<(Definition, i64), String>;
 
-/// The template registered for field `index` of `key`'s type, or the one
-/// registered for every field of it (`Vector<T>`'s elements). Looked up under
-/// the key's *base*: the tables hold one entry per type, while the key a
-/// value carries names its instantiation (`option<char>`).
-fn field_template_in<'t>(templates: &'t FieldTemplates, key: &str, variant: Option<usize>, index: usize) -> Option<&'t String> {
-    let base = typelisp_mem::ConcreteNames::base_type(key).to_string();
+/// The definition `ty` instantiates. Every box's type is a named one.
+fn definition_of(ty: TypeId) -> Result<Definition, String> {
+    typelisp_mem::type_shape(ty)
+        .named_definition()
+        .ok_or_else(|| format!("internal error: a box's type `{}` names no definition", &*typelisp_mem::type_name(ty)))
+}
+
+/// The template registered for field `index` of `ty`'s definition, or the one
+/// registered for every field of it (`Vector<T>`'s elements).
+fn field_template_in(templates: &FieldTemplates, ty: TypeId, variant: Option<usize>, index: usize) -> Result<Option<TypeId>, String> {
+    let def = definition_of(ty)?;
     let variant = variant.map_or(NO_VARIANT, |v| v as i64);
-    templates.get(&(base.clone(), variant, index as i64)).or_else(|| templates.get(&(base, variant, EVERY_FIELD)))
+    Ok(templates.get(&(def, variant, index as i64)).or_else(|| templates.get(&(def, variant, EVERY_FIELD))).copied())
 }
 
 /// [`crate::PrintEnv::enum_variant_name`] answered from a registration table
 /// — an AOT executable's, or a worker thread's copy of the interpreter's.
-pub fn variant_name_in(names: &VariantNames, key: &str, variant: usize) -> Result<String, String> {
-    let base = typelisp_mem::ConcreteNames::base_type(key);
-    names
-        .get(&(base.to_string(), variant))
-        .cloned()
-        .ok_or_else(|| format!("internal error: no name is registered for variant {} of `{}`", variant, key))
+pub fn variant_name_in(names: &VariantNames, ty: TypeId, variant: usize) -> Result<String, String> {
+    names.get(&(definition_of(ty)?, variant)).cloned().ok_or_else(|| {
+        format!("internal error: no name is registered for variant {} of `{}`", variant, &*typelisp_mem::type_name(ty))
+    })
 }
 
 /// [`crate::PrintEnv::field_is_niched_option`] from a registration table: the
-/// field's template, instantiated by the arguments the value's own key
-/// carries. Every field of every registered type has a template, so a
-/// missing one is a broken registration.
-pub fn field_is_niched_in(templates: &FieldTemplates, key: &str, variant: Option<usize>, index: usize) -> Result<bool, String> {
-    let template = field_template_in(templates, key, variant, index)
-        .ok_or_else(|| format!("internal error: no type is registered for field {} of `{}`", index, key))?;
-    let args = typelisp_mem::ConcreteNames::type_arg_list(key);
-    Ok(typelisp_mem::option_prints_wrapped(&typelisp_mem::ConcreteNames::instantiate_template(template, &args)))
+/// field's template, instantiated by the arguments of the value's own type.
+/// Every field of every registered type has a template, so a missing one is
+/// a broken registration.
+pub fn field_is_niched_in(templates: &FieldTemplates, ty: TypeId, variant: Option<usize>, index: usize) -> Result<bool, String> {
+    let template = field_template_in(templates, ty, variant, index)?.ok_or_else(|| {
+        format!("internal error: no type is registered for field {} of `{}`", index, &*typelisp_mem::type_name(ty))
+    })?;
+    let typelisp_mem::TypeShape::Named(_, _, args) = typelisp_mem::type_shape(ty) else {
+        unreachable!("`definition_of` found a named type")
+    };
+    Ok(typelisp_mem::option_prints_wrapped(typelisp_mem::instantiate(template, &args)))
 }
 
 /// [`crate::PrintEnv::field_name`] from a registration table. The name table
 /// holds only named fields, so the template table — which holds every field
 /// of every struct — is what tells a positional field (`Ok(None)`) from a type
 /// nobody registered (`Err`).
-pub fn field_name_in(names: &FieldNames, templates: &FieldTemplates, key: &str, index: usize) -> Result<Option<String>, String> {
-    let base = typelisp_mem::ConcreteNames::base_type(key).to_string();
-    if let Some(name) = names.get(&(base, index as i64)) {
+pub fn field_name_in(names: &FieldNames, templates: &FieldTemplates, ty: TypeId, index: usize) -> Result<Option<String>, String> {
+    if let Some(name) = names.get(&(definition_of(ty)?, index as i64)) {
         return Ok(Some(name.clone()));
     }
-    match field_template_in(templates, key, None, index) {
+    match field_template_in(templates, ty, None, index)? {
         Some(_) => Ok(None),
-        None => Err(format!("internal error: no struct `{}` with a field {} is registered", key, index)),
+        None => Err(format!("internal error: no struct `{}` with a field {} is registered", &*typelisp_mem::type_name(ty), index)),
     }
 }
 
@@ -152,14 +162,12 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     if PRINTING.with(|p| p.borrow().contains(&v)) {
         return Ok(None);
     }
-    // Looked up by the value's type *name*, not its interned `TypeId`:
-    // `rt_print_object_method` fills this table from the executable's static
-    // strings before `rt_heap_init` runs (see `build_main_wrapper`), so there
-    // is no heap to intern against at registration time. The borrow of the
-    // name is kept inside this block so `heap` is free again for the method
-    // call below.
+    // Looked up by the display of the value's type, not its `TypeId`: the
+    // registration knows the method by its name, which spells the
+    // instantiation it is for (`ConcreteNames::value_key_for_method`).
     let Some(addr) = ({
-        let Some(key) = stored_type_key(heap, id) else { return Ok(None) };
+        let Some(ty) = stored_type(heap, id) else { return Ok(None) };
+        let key = typelisp_mem::type_name(ty).to_string();
         crate::shared::print_shared().print_object.read().get(&key).copied()
     }) else {
         return Ok(None);
@@ -181,7 +189,7 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
         other => {
             // Only the error path needs the name back, so it is read here
             // rather than kept borrowed across the compiled call above.
-            let key = stored_type_key(heap, id).unwrap_or_else(|| "<untyped box>".to_string());
+            let key = stored_type(heap, id).map_or_else(|| "<untyped box>".to_string(), |ty| typelisp_mem::type_name(ty).to_string());
             Err(format!("print-object on `{}` returned {:?}, not a string", key, other))
         }
     }
@@ -227,25 +235,49 @@ unsafe fn static_str(args: *const i64, i: usize, who: &str) -> &'static str {
     }
 }
 
-/// Registers one enum variant's name: `args` is `[key_ptr, key_len, variant,
-/// name_ptr, name_len]`.
+/// The definition the type in word `i` of `args` instantiates — a word an
+/// executable's startup read out of its type table.
+///
+/// # Safety
+///
+/// `args` must point to more than `i` valid `i64`s.
+unsafe fn definition_arg(args: *const i64, i: usize, who: &str) -> Definition {
+    let ty = type_arg(args, i, who);
+    match definition_of(ty) {
+        Ok(def) => def,
+        Err(e) => fatal(&format!("{}: {}", who, e)),
+    }
+}
+
+/// The type in word `i` of `args`.
+///
+/// # Safety
+///
+/// `args` must point to more than `i` valid `i64`s.
+unsafe fn type_arg(args: *const i64, i: usize, who: &str) -> TypeId {
+    let w = *args.add(i);
+    TypeId::from_word(w).unwrap_or_else(|| fatal(&format!("{}: argument {} ({}) is no type", who, i, w)))
+}
+
+/// Registers one enum variant's name: `args` is `[type, variant, name_ptr,
+/// name_len]`, `type` being an instantiation of the enum's definition.
 ///
 /// Installs [`AOT_HOOKS`] on first use, so the generated startup sequence is
 /// just the registration calls with nothing to remember to do first.
 ///
 /// # Safety
 ///
-/// `args` must point to 5 valid `i64`s in those representations.
+/// `args` must point to 4 valid `i64`s in those representations.
 #[no_mangle]
 pub unsafe extern "C" fn rt_print_enum_variant(args: *const i64, argc: u32) -> i64 {
-    if argc < 5 {
-        fatal("rt_print_enum_variant: expected 5 arguments");
+    if argc < 4 {
+        fatal("rt_print_enum_variant: expected 4 arguments");
     }
-    let key = static_str(args, 0, "rt_print_enum_variant");
-    let variant = *args.add(2) as usize;
-    let name = static_str(args, 3, "rt_print_enum_variant");
+    let def = definition_arg(args, 0, "rt_print_enum_variant");
+    let variant = *args.add(1) as usize;
+    let name = static_str(args, 2, "rt_print_enum_variant");
     install();
-    crate::shared::print_shared().enum_names.write().insert((key.to_string(), variant), name.to_string());
+    crate::shared::print_shared().enum_names.write().insert((def, variant), name.to_string());
     0
 }
 
@@ -256,44 +288,46 @@ pub const NO_VARIANT: i64 = -1;
 /// applies to every field of the type — a `Vector<T>`'s elements.
 pub const EVERY_FIELD: i64 = -1;
 
-/// Registers one field's type key template: `args` is `[key_ptr, key_len,
-/// variant, index, template_ptr, template_len]`, with `variant`
-/// [`NO_VARIANT`] for a struct and `index` [`EVERY_FIELD`] for a uniform
-/// template. See `Interp::field_template_descriptors`.
+/// Registers one field's declared type: `args` is `[type, variant, index,
+/// template]`, `type` being an instantiation of the definition and
+/// `template` the field's type with the definition's parameters as
+/// `TypeShape::Param`s; `variant` is [`NO_VARIANT`] for a struct and `index`
+/// [`EVERY_FIELD`] for a uniform template. See
+/// `Interp::field_template_descriptors`.
 ///
 /// # Safety
 ///
-/// `args` must point to 6 valid `i64`s in those representations.
+/// `args` must point to 4 valid `i64`s in those representations.
 #[no_mangle]
 pub unsafe extern "C" fn rt_print_field_template(args: *const i64, argc: u32) -> i64 {
-    if argc < 6 {
-        fatal("rt_print_field_template: expected 6 arguments");
+    if argc < 4 {
+        fatal("rt_print_field_template: expected 4 arguments");
     }
-    let key = static_str(args, 0, "rt_print_field_template");
-    let variant = *args.add(2);
-    let index = *args.add(3);
-    let template = static_str(args, 4, "rt_print_field_template");
+    let def = definition_arg(args, 0, "rt_print_field_template");
+    let variant = *args.add(1);
+    let index = *args.add(2);
+    let template = type_arg(args, 3, "rt_print_field_template");
     install();
-    crate::shared::print_shared().field_templates.write().insert((key.to_string(), variant, index), template.to_string());
+    crate::shared::print_shared().field_templates.write().insert((def, variant, index), template);
     0
 }
 
-/// Registers one struct field's name: `args` is `[key_ptr, key_len, index,
-/// name_ptr, name_len]`. See `Interp::field_name_descriptors`.
+/// Registers one struct field's name: `args` is `[type, index, name_ptr,
+/// name_len]`. See `Interp::field_name_descriptors`.
 ///
 /// # Safety
 ///
-/// `args` must point to 5 valid `i64`s in those representations.
+/// `args` must point to 4 valid `i64`s in those representations.
 #[no_mangle]
 pub unsafe extern "C" fn rt_print_field_name(args: *const i64, argc: u32) -> i64 {
-    if argc < 5 {
-        fatal("rt_print_field_name: expected 5 arguments");
+    if argc < 4 {
+        fatal("rt_print_field_name: expected 4 arguments");
     }
-    let key = static_str(args, 0, "rt_print_field_name");
-    let index = *args.add(2);
-    let name = static_str(args, 3, "rt_print_field_name");
+    let def = definition_arg(args, 0, "rt_print_field_name");
+    let index = *args.add(1);
+    let name = static_str(args, 2, "rt_print_field_name");
     install();
-    crate::shared::print_shared().field_names.write().insert((key.to_string(), index), name.to_string());
+    crate::shared::print_shared().field_names.write().insert((def, index), name.to_string());
     0
 }
 

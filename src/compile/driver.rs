@@ -292,7 +292,7 @@ fn prepare_targets(interp: &Interp, heap: &mut Heap, body: &[Value]) -> Result<(
     // Every trait object boxed needs its vtable id, and every upcast target
     // its trait id, for the same reason.
     for site in &targets.dyn_boxes {
-        interp.register_dyn_box(&site.concrete_key, &site.trait_path, &site.slots, &site.supers);
+        interp.register_dyn_box(site.concrete, &site.trait_path, &site.slots, &site.supers);
     }
     for to_trait in &targets.dyn_upcasts {
         interp.trait_id_for(to_trait);

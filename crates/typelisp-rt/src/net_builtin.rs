@@ -96,7 +96,7 @@ fn opt_text(heap: &Heap, args: &[Value], i: usize, who: &str) -> Result<Option<S
 }
 
 fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
-    let key = lookup(heap, RESULT_TYPES, name, "result");
+    let key = lookup(RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 0, vec![v])
 }
 
@@ -105,12 +105,12 @@ fn result_ok(heap: &mut Heap, name: &str, v: Value) -> Value {
 fn result_err(heap: &mut Heap, name: &str, msg: String) -> Value {
     let msg_val = heap.alloc_string(msg);
     let err_val = heap.alloc_enum(TypeId::NET_ERROR, 0, vec![msg_val]);
-    let key = lookup(heap, RESULT_TYPES, name, "result");
+    let key = lookup(RESULT_TYPES, name, "result");
     heap.alloc_enum(key, 1, vec![err_val])
 }
 
 fn option_value(heap: &mut Heap, name: &str, v: Option<Value>) -> Value {
-    heap.alloc_option(lookup(heap, INNER_TYPES, name, "inner"), v)
+    heap.alloc_option(lookup(INNER_TYPES, name, "inner"), v)
 }
 
 /// The elements of a `Vector<int>` argument, as bytes. A `Vector<T>`'s box
@@ -182,7 +182,7 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
             match with_streams(heap, |t| t.net_resolve_finish(h)) {
                 Ok(Some(all)) => {
                     let elems: Vec<Value> = all.into_iter().map(|a| heap.alloc_string(a)).collect();
-                    let key = heap.intern_spec(&TypeSpec::Named(NsId::ROOT, "vector", &[spec::STRING]));
+                    let key = typelisp_mem::intern_spec(&TypeSpec::Named(NsId::ROOT, "vector", &[spec::STRING]));
                     let vec_val = heap.alloc_struct(key, elems);
                     let ov = option_value(heap, name, Some(vec_val));
                     Ok(result_ok(heap, name, ov))
@@ -271,7 +271,7 @@ pub fn net_builtin(heap: &mut Heap, name: &str, args: &[Value]) -> Option<Result
             match with_streams(heap, |t| t.net_udp_recv(h)) {
                 Ok(Some(data)) => {
                     let elems: Vec<Value> = data.into_iter().map(|b| Value::Int(b as i64)).collect();
-                    let key = heap.intern_spec(&TypeSpec::Named(NsId::ROOT, "vector", &[spec::INT]));
+                    let key = typelisp_mem::intern_spec(&TypeSpec::Named(NsId::ROOT, "vector", &[spec::INT]));
                     let vec_val = heap.alloc_struct(key, elems);
                     let ov = option_value(heap, name, Some(vec_val));
                     Ok(result_ok(heap, name, ov))

@@ -398,7 +398,7 @@ fn is_read_literal_box(heap: &Heap, id: typelisp_mem::BoxId) -> bool {
     heap_type_is_id(heap, id, typelisp_mem::TypeId::SEXPR_VECTOR)
         || heap_type_is_id(heap, id, typelisp_mem::TypeId::SEXPR_ARRAY)
         || heap.sexpr_tuple_arity(id).is_some()
-        || heap_type_is_id(heap, id, heap.intern_spec(&typelisp_read::ARRAY_DIMS_TYPE))
+        || heap_type_is_id(heap, id, typelisp_mem::intern_spec(&typelisp_read::ARRAY_DIMS_TYPE))
 }
 
 /// The last segment of a `(defun PATH ...)` form's name, or `None` for anything

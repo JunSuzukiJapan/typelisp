@@ -728,9 +728,9 @@ fn build_main_wrapper(
     global_init_names: &[String],
     vtables: &[(u32, Vec<(Path, String)>)],
     upcasts: &[(u32, u32, u32)],
-    enum_variants: &[(String, usize, String)],
-    field_templates: &[(String, i64, i64, String)],
-    field_names: &[(String, i64, String)],
+    enum_variants: &[(Path, usize, String)],
+    field_templates: &[(Path, i64, i64, crate::TypeId)],
+    field_names: &[(Path, i64, String)],
     print_objects: &[(String, String)],
     format_calls: &[(String, String)],
     printer_globals: &[(&str, usize)],
@@ -910,28 +910,38 @@ fn build_main_wrapper(
                 .map_err(|e| format!("failed to build {} call: {}", name, e))?;
             Ok(())
         };
-        for (key, variant, name) in enum_variants {
-            let (key_ptr, key_len) = literal(&builder, key)?;
+        // The definitions and the field types, by their positions in the
+        // executable's type table: a type's id is this process's number, so
+        // the executable carries the shapes and its startup interns them.
+        let mut types = typelisp_mem::type_words::TypeWords::default();
+        let definition = |types: &mut typelisp_mem::type_words::TypeWords, path: &Path| types.add(typelisp_front::type_key::type_key_id(path));
+        let enum_variants: Vec<(usize, usize, &String)> =
+            enum_variants.iter().map(|(path, variant, name)| (definition(&mut types, path), *variant, name)).collect();
+        let field_templates: Vec<(usize, i64, i64, usize)> = field_templates
+            .iter()
+            .map(|(path, variant, index, template)| (definition(&mut types, path), *variant, *index, types.add(*template)))
+            .collect();
+        let field_names: Vec<(usize, i64, &String)> =
+            field_names.iter().map(|(path, index, name)| (definition(&mut types, path), *index, name)).collect();
+        let table = emit_type_table(ctx, module, &builder, &types, "typelisp_print_types")?;
+        for (def, variant, name) in enum_variants {
             let (name_ptr, name_len) = literal(&builder, name)?;
-            call(
-                &builder,
-                "rt_print_enum_variant",
-                &[key_ptr, key_len, i64_ty.const_int(*variant as u64, false), name_ptr, name_len],
-            )?;
+            let def = table.load(&builder, def)?;
+            call(&builder, "rt_print_enum_variant", &[def, i64_ty.const_int(variant as u64, false), name_ptr, name_len])?;
         }
-        for (key, variant, index, template) in field_templates {
-            let (key_ptr, key_len) = literal(&builder, key)?;
-            let (t_ptr, t_len) = literal(&builder, template)?;
+        for (def, variant, index, template) in field_templates {
+            let def = table.load(&builder, def)?;
+            let template = table.load(&builder, template)?;
             call(
                 &builder,
                 "rt_print_field_template",
-                &[key_ptr, key_len, i64_ty.const_int(*variant as u64, true), i64_ty.const_int(*index as u64, true), t_ptr, t_len],
+                &[def, i64_ty.const_int(variant as u64, true), i64_ty.const_int(index as u64, true), template],
             )?;
         }
-        for (key, index, name) in field_names {
-            let (key_ptr, key_len) = literal(&builder, key)?;
+        for (def, index, name) in field_names {
             let (name_ptr, name_len) = literal(&builder, name)?;
-            call(&builder, "rt_print_field_name", &[key_ptr, key_len, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
+            let def = table.load(&builder, def)?;
+            call(&builder, "rt_print_field_name", &[def, i64_ty.const_int(index as u64, true), name_ptr, name_len])?;
         }
         for (key, symbol) in print_objects {
             let target = module.get_function(symbol).ok_or_else(|| {
@@ -1148,6 +1158,76 @@ const EVAL_SHIMS: [&str; 3] = ["rt_eval", "rt_set_macro_character", "rt_set_disp
 
 /// Emits one call to the `rt_*` shim `name` with `words` as its argument
 /// array — the startup-registration calling pattern, spelled once.
+/// A type table an executable's startup fills ([`emit_type_table`]): a
+/// global of one word per type, holding each type's id once
+/// `rt_types_define` has run.
+struct TypeTable {
+    global: inkwell::values::GlobalValue<'static>,
+    len: u32,
+}
+
+impl TypeTable {
+    /// The id of the type at `pos`, read out of the table.
+    fn load(&self, builder: &inkwell::builder::Builder<'static>, pos: usize) -> Result<inkwell::values::IntValue<'static>, String> {
+        let i64_ty = crate::compile::llvm_context().i64_type();
+        let array_ty = i64_ty.array_type(self.len);
+        let slot = unsafe {
+            builder
+                .build_gep(array_ty, self.global.as_pointer_value(), &[i64_ty.const_zero(), i64_ty.const_int(pos as u64, false)], "type_slot")
+                .map_err(|e| format!("failed to build a type-table gep: {}", e))?
+        };
+        Ok(builder.build_load(i64_ty, slot, "type_id").map_err(|e| format!("failed to load a type id: {}", e))?.into_int_value())
+    }
+}
+
+/// Embeds the types `types` writes (`typelisp_mem::type_words`) in `module`
+/// and emits the startup call that interns them into a table named `name`.
+fn emit_type_table(
+    ctx: &'static Context,
+    module: &Module<'static>,
+    builder: &inkwell::builder::Builder<'static>,
+    types: &typelisp_mem::type_words::TypeWords,
+    name: &str,
+) -> Result<TypeTable, String> {
+    use typelisp_mem::type_words::Word;
+    let i64_ty = ctx.i64_type();
+    let mut strings: std::collections::HashMap<&'static str, inkwell::values::IntValue<'static>> = std::collections::HashMap::new();
+    let mut words = Vec::new();
+    for w in types.words() {
+        match w {
+            Word::Int(n) => words.push(i64_ty.const_int(*n as u64, true)),
+            Word::Str(text) => {
+                let address = *strings.entry(text).or_insert_with(|| {
+                    let g = module.add_global(ctx.i8_type().array_type(text.len() as u32), None, &format!("{}_str", name));
+                    g.set_initializer(&ctx.const_string(text.as_bytes(), false));
+                    g.set_constant(true);
+                    g.as_pointer_value().const_to_int(i64_ty)
+                });
+                words.push(address);
+                words.push(i64_ty.const_int(text.len() as u64, false));
+            }
+        }
+    }
+    let list = module.add_global(i64_ty.array_type(words.len() as u32), None, &format!("{}_shapes", name));
+    list.set_initializer(&i64_ty.const_array(&words));
+    list.set_constant(true);
+    let len = types.len() as u32;
+    let table = module.add_global(i64_ty.array_type(len), None, name);
+    table.set_initializer(&i64_ty.array_type(len).const_zero());
+    call_shim(
+        ctx,
+        module,
+        builder,
+        "rt_types_define",
+        &[
+            list.as_pointer_value().const_to_int(i64_ty),
+            i64_ty.const_int(words.len() as u64, false),
+            table.as_pointer_value().const_to_int(i64_ty),
+        ],
+    )?;
+    Ok(TypeTable { global: table, len })
+}
+
 fn call_shim(
     ctx: &'static Context,
     module: &Module<'static>,

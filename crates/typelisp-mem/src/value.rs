@@ -154,22 +154,22 @@ pub struct StrId(pub(crate) u32);
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct PathId(pub(crate) u32);
 
-/// A type's **runtime identity**: the number the heap's type table gives a
-/// [`TypeShape`](crate::TypeShape).
+/// A type's **runtime identity**: the number the process's type table
+/// ([`crate::type_shape`]) gives a [`TypeShape`](crate::TypeShape).
 ///
 /// Every [`BoxedObj::Struct`]/[`BoxedObj::Enum`] carries one of these, and
 /// asking "are these two values the same type?" or "is this value a `point`?"
 /// is an integer comparison on it. The table registers the type's shape —
 /// the definition it names and its type arguments' own ids — so equal shapes
 /// share one id, and the type's name is a display built from the shape (see
-/// [`super::heap::Heap::type_key_name`]).
+/// [`crate::type_name`]).
 ///
-/// Interning is permanent — an id stays valid for the heap's lifetime, exactly
-/// like an interned [`SymRef`].
+/// Interning is permanent — an id stays valid for the process's lifetime,
+/// exactly like an interned [`SymRef`].
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct TypeId(pub(crate) u32);
 
-/// The types every heap has from birth, interned by `Heap::with_capacity` in
+/// The types the type table has from birth, interned when it is made in
 /// this order so that their ids are compile-time constants (the `TypeId`
 /// associated constants below). Each row is a named type: the module it is
 /// defined in, its name there, and its type arguments, every one of which is
@@ -179,7 +179,7 @@ pub struct TypeId(pub(crate) u32);
 /// loop: what `typelisp-rt`'s shims wrap results in, what the reader returns,
 /// and what the heap's own `HashTable`/`Scope` machinery allocates. A user
 /// type is interned on first use like any other; only these need to be
-/// nameable from Rust without a heap in hand.
+/// nameable from Rust as constants.
 pub const BUILTIN_TYPES: &[(NsId, &str, &[TypeId])] = &[
     (NsId::ROOT, "option", &[]),
     (NsId::ROOT, "result", &[]),

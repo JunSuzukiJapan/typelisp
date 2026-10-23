@@ -23,7 +23,7 @@
 //! [`PrintEnv`], which the interpreter implements directly and an AOT-linked
 //! executable implements from tables its startup code registers.
 
-use typelisp_mem::{Heap, Value};
+use typelisp_mem::{Heap, TypeId, Value};
 
 pub mod aot;
 pub mod format;
@@ -37,9 +37,9 @@ pub mod shim;
 ///
 /// Two questions, both unanswerable from the heap alone:
 ///
-/// - an enum box stores its type key and variant *index*, never the variant's
+/// - an enum box stores its type and variant *index*, never the variant's
 ///   name — `(some 3)` prints as `(some 3)` only because someone can map
-///   `("option", 0)` back to `"some"`;
+///   `option`'s variant 0 back to `"some"`;
 /// - a type may implement the `print-object` trait, in which case its own
 ///   method decides the text, and finding that method means knowing the
 ///   program's method table.
@@ -48,28 +48,28 @@ pub mod shim;
 /// interpreter, so its startup code registers the same facts as data (see
 /// `typelisp_rt::printer`) and answers from those.
 pub trait PrintEnv {
-    /// The name of `variant` of the enum whose type key is `type_key`. `Err`
-    /// when this environment has never heard of that type or variant: every
-    /// enum a value can be of is registered, so that is a broken lookup.
-    fn enum_variant_name(&self, type_key: &str, variant: usize) -> Result<String, String>;
+    /// The name of `variant` of the enum of type `ty`. `Err` when this
+    /// environment has never heard of that type or variant: every enum a
+    /// value can be of is registered, so that is a broken lookup.
+    fn enum_variant_name(&self, ty: TypeId, variant: usize) -> Result<String, String>;
 
     /// Whether field `index` of the struct (`variant` `None`) or enum
-    /// variant (`variant` `Some`) whose type key is `type_key` is a
+    /// variant (`variant` `Some`) of type `ty` is a
     /// niche-represented `Option` that prints with its wrapper — a field
     /// whose word is the payload itself or the empty list, with no box to
     /// say which `Option` it is (`typelisp_mem::option_prints_wrapped`;
     /// `Option<sexpr>` prints as the datum it is). The renderer cannot read
     /// that off the word, so it asks the program's definition: the field's
-    /// declared type, instantiated by the key the value carries. `Err` for a
+    /// declared type, instantiated by the type the value carries. `Err` for a
     /// type or field this environment has never heard of.
-    fn field_is_niched_option(&self, type_key: &str, variant: Option<usize>, index: usize) -> Result<bool, String>;
+    fn field_is_niched_option(&self, ty: TypeId, variant: Option<usize>, index: usize) -> Result<bool, String>;
 
-    /// The name the definition of the struct whose type key is `type_key`
-    /// gives field `index`, which prints before the field's value
+    /// The name the definition of the struct of type `ty` gives field
+    /// `index`, which prints before the field's value
     /// (`#<point x: 1 y: 2>`). `Ok(None)` for a type whose fields have no
     /// names — a `Vector<T>`'s elements, a handle's id — which print
     /// positionally; `Err` for a type this environment has never heard of.
-    fn field_name(&self, type_key: &str, index: usize) -> Result<Option<String>, String>;
+    fn field_name(&self, ty: TypeId, index: usize) -> Result<Option<String>, String>;
 
     /// `v`'s own `print-object` rendering, or `None` when its type has no
     /// such method (the overwhelmingly common case — the caller then falls
@@ -100,24 +100,13 @@ pub trait PrintEnv {
     fn format_call(&self, heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String>;
 }
 
-/// The type key stored in boxed value `id`, or `None` when the box carries no
-/// type name.
-///
-/// The printer's own reader for what `typelisp::type_key` writes. It stays a
-/// *string* here on purpose: this crate has no `Path`, and every question the
-/// printer asks of a type identity — display it, look up a variant name,
-/// dispatch `print-object` — is answered by the key as written.
-///
-/// Owned rather than borrowed: `Heap::struct_type_name`/`enum_type_name` hand
-/// back a read-locked guard (`docs/dev/os-threads-design.md` §3), and every
-/// caller here holds the result across other heap/table calls the guard's
-/// lock could not stay alive through anyway — a short clone of an interned
-/// type name is cheap next to that.
-pub(crate) fn stored_type_key(heap: &Heap, id: typelisp_mem::BoxId) -> Option<String> {
+/// The type of boxed value `id`, or `None` when the box is neither a struct
+/// nor an enum.
+pub(crate) fn stored_type(heap: &Heap, id: typelisp_mem::BoxId) -> Option<TypeId> {
     if heap.is_struct(id) {
-        Some(heap.struct_type_name(id).to_string())
+        Some(heap.struct_type_key(id))
     } else if heap.is_enum(id) {
-        Some(heap.enum_type_name(id).to_string())
+        Some(heap.enum_type_key(id))
     } else {
         None
     }

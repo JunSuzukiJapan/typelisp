@@ -1391,7 +1391,7 @@ fn read_tuple(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, 
             elems.len()
         )));
     }
-    let key = typelisp_mem::sexpr_tuple_type(heap, elems.len());
+    let key = typelisp_mem::sexpr_tuple_type(elems.len());
     let v = heap.alloc_struct(key, elems);
     restore_roots(heap, mark);
     Ok(v)
@@ -1509,7 +1509,7 @@ pub fn alloc_sexpr_array(heap: &mut Heap, dims: Vec<Value>, data: Vec<Value>) ->
     let mark = heap.root_count();
     let data_box = heap.alloc_struct(TypeId::SEXPR_VECTOR, data);
     heap.push_root(data_box);
-    let dims_key = heap.intern_spec(&ARRAY_DIMS_TYPE);
+    let dims_key = typelisp_mem::intern_spec(&ARRAY_DIMS_TYPE);
     let dims_box = heap.alloc_struct(dims_key, dims);
     heap.push_root(dims_box);
     let array = heap.alloc_struct(TypeId::SEXPR_ARRAY, vec![dims_box, data_box, Value::Empty]);
@@ -1957,7 +1957,7 @@ fn read_type_arg(cur: &mut Cursor, heap: &mut Heap, ns: NsId) -> Result<(Value, 
                 restore_roots(heap, mark);
                 return Err(type_args_error(&format!("a tuple type has 1 to {} elements", typelisp_mem::TUPLE_MAX_ARITY)));
             }
-            let key = typelisp_mem::sexpr_tuple_type(heap, elems.len());
+            let key = typelisp_mem::sexpr_tuple_type(elems.len());
             let v = heap.alloc_struct(key, elems);
             restore_roots(heap, mark);
             Ok((v, start.with_end(cur.line, cur.col)))

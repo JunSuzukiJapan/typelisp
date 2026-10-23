@@ -37,7 +37,7 @@ fn character(args: &[Value], i: usize, who: &str) -> Result<char, ArgError> {
 /// `Some(f)`/`None` of [`READER_MACRO_OPTION_TYPE`] — a niche, since a
 /// function value is never the empty list (`Heap::alloc_option`).
 fn found(heap: &mut Heap, f: Option<Value>) -> Value {
-    let ty = heap.intern_spec(&READER_MACRO_OPTION_TYPE);
+    let ty = typelisp_mem::intern_spec(&READER_MACRO_OPTION_TYPE);
     heap.alloc_option(ty, f)
 }
 

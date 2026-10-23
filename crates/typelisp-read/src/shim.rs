@@ -64,7 +64,7 @@ pub fn read_builtin(heap: &mut Heap, source: &str) -> Value {
 /// `Interp` to pass, falls back to [`evaluator`].
 pub fn read_builtin_with(heap: &mut Heap, source: &str, eval: Option<&dyn crate::reader::ReadEval>) -> Value {
     let reader = Reader::new();
-    let key = heap.intern_spec(&READ_RESULT_TYPE);
+    let key = typelisp_mem::intern_spec(&READ_RESULT_TYPE);
     let ns = heap.names().current_module();
     match reader.read_in_with(heap, "<input>", source, ns, eval) {
         Ok(v) => heap.alloc_enum(key, 0, vec![v]),
@@ -98,8 +98,8 @@ pub fn read_datum_at_builtin_with(
 ) -> Value {
     let reader = Reader::new();
     let start = if start < 0 { 0usize } else { start as usize };
-    let key = heap.intern_spec(&READ_DATUM_RESULT_TYPE);
-    let pair_key = heap.intern_spec(&READ_DATUM_PAIR_TYPE);
+    let key = typelisp_mem::intern_spec(&READ_DATUM_RESULT_TYPE);
+    let pair_key = typelisp_mem::intern_spec(&READ_DATUM_PAIR_TYPE);
     let ns = heap.names().current_module();
     match reader.read_from_with(heap, source, start, preserve, ns, eval) {
         Ok((v, end)) => {

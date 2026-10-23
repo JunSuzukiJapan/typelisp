@@ -330,8 +330,8 @@ fn empty_names() -> &'static HashSet<SymRef> {
     EMPTY.get_or_init(HashSet::new)
 }
 
-fn empty_vtables() -> &'static HashMap<(String, Path), u32> {
-    static EMPTY: std::sync::OnceLock<HashMap<(String, Path), u32>> = std::sync::OnceLock::new();
+fn empty_vtables() -> &'static HashMap<(crate::TypeId, Path), u32> {
+    static EMPTY: std::sync::OnceLock<HashMap<(crate::TypeId, Path), u32>> = std::sync::OnceLock::new();
     EMPTY.get_or_init(HashMap::new)
 }
 
@@ -1524,7 +1524,7 @@ pub struct Targets {
 
 /// One `dyn-new` site's vtable identity.
 pub struct DynBoxSite {
-    pub concrete_key: String,
+    pub concrete: crate::TypeId,
     pub trait_path: Path,
     pub slots: Vec<(Path, String)>,
     pub supers: Vec<(Path, Vec<(Path, String)>)>,
@@ -1587,15 +1587,15 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         // graph: the *call* through it has no statically known target, but
         // every target it could reach is right here in the slot list.
         wk::DYN_NEW => {
-            let Some(key) = core::field(heap, form, 0).and_then(|k| typelisp_mem::type_key_of_form(heap, k)) else { return Ok(()) };
+            let Some(concrete) = core::field(heap, form, 0).and_then(|k| typelisp_mem::type_of_form(heap, k)) else { return Ok(()) };
             let Some(trait_path) = core::path_field(heap, form, 1) else { return Ok(()) };
             let slots = vtable_at(heap, form, 2)?;
             let supers = supers_at(heap, form, 3)?;
             for key in &slots {
                 push_unique(&mut t.methods, key.clone());
             }
-            if !t.dyn_boxes.iter().any(|s| s.concrete_key == key && s.trait_path == trait_path) {
-                t.dyn_boxes.push(DynBoxSite { concrete_key: key, trait_path, slots, supers });
+            if !t.dyn_boxes.iter().any(|s| s.concrete == concrete && s.trait_path == trait_path) {
+                t.dyn_boxes.push(DynBoxSite { concrete, trait_path, slots, supers });
             }
         }
         // The conversion calls nothing — it swaps the box's table for one the
@@ -2032,13 +2032,14 @@ fn translate_dyn_new(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, Err
     if parts.len() < 6 {
         return Err(malformed(heap, form));
     }
-    let concrete_key = typelisp_mem::type_key_of_form(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
+    let concrete = typelisp_mem::type_of_form(heap, parts[0]).ok_or_else(|| malformed(heap, form))?;
     let trait_path = core::path_value(heap, parts[1]).ok_or_else(|| malformed(heap, form))?;
     let repr = Repr::read(heap, parts[4]).ok_or_else(|| malformed(heap, form))?;
-    let id = *cx.dyn_tables.vtables.get(&(concrete_key.clone(), trait_path.clone())).ok_or_else(|| {
+    let id = *cx.dyn_tables.vtables.get(&(concrete, trait_path.clone())).ok_or_else(|| {
         Error::TypeError(format!(
             "compile: no vtable id interned for `{}` as `:dyn {}` (internal error)",
-            concrete_key, trait_path
+            &*typelisp_mem::type_name(concrete),
+            trait_path
         ))
     })?;
     let mut f = Items::new(heap);
@@ -3236,8 +3237,8 @@ mod tests {
         h.set_gc_stress(true);
         let definitions = Definitions::new();
         let globals = globals();
-        let vtables: HashMap<(String, Path), u32> =
-            [(("point".to_string(), Path::root("shape")), 11u32)].into_iter().collect();
+        let vtables: HashMap<(crate::TypeId, Path), u32> =
+            [((typelisp_front::type_key::type_key_id(&Path::root("point")), Path::root("shape")), 11u32)].into_iter().collect();
         let trait_ids: HashMap<Path, u32> = [(Path::root("drawable"), 22u32)].into_iter().collect();
         let cx = Ctx::with_dyn_tables(
             &definitions,

@@ -66,7 +66,6 @@ use parking_lot::RwLock;
 
 use crate::Error;
 use super::symbols::{self, SymRef};
-use super::type_shape::{self, TypeShape};
 use super::value::{BoxId, BoxedObj, Cell, ConsRef, FloatBox, LocId, NarrowInt, PathId, StrId, StructPayload, TypeId, Value};
 
 /// How far past its initial capacity a heap may grow by default — see
@@ -427,20 +426,10 @@ impl Drop for Arena {
 }
 
 /// Permanent, append-only identity tables — see `HeapShared::interning`.
-/// Grouped into one struct (rather than one lock per field) because
-/// `intern_type`/`intern_path` are the only writers and each only ever
-/// touches its own pair, so one `RwLock` covering both pairs costs nothing
-/// extra in contention while keeping `HeapShared` from growing a lock per
-/// table.
+/// Grouped into one struct (rather than one lock per field) so that
+/// `HeapShared` does not grow a lock per table.
 #[derive(Default)]
 struct Interning {
-    // interned type identities (permanent) — see `TypeId`. The first
-    // `BUILTIN_TYPES.len()` entries are pre-interned by `Heap::with_capacity`, so their
-    // ids are the `TypeId` associated constants. Each entry is the shape and
-    // its display.
-    types: Vec<(TypeShape, String)>,
-    type_ids: HashMap<TypeShape, u32>,
-
     // interned `::` paths (permanent; reference only permanent symbols)
     paths: Vec<Vec<SymRef>>,
     path_ids: HashMap<Vec<SymRef>, u32>,
@@ -656,8 +645,8 @@ pub struct HeapShared {
     // backs — see `push_permanent_root`) must read the same way from every
     // thread that names it.
     permanent_roots: Mutex<Slab<Value>>,
-    // `parking_lot::RwLock`, not `std::sync::RwLock`: `type_key_name`/
-    // `path_segments` return a reference borrowed from inside this lock, and
+    // `parking_lot::RwLock`, not `std::sync::RwLock`: `path_segments`
+    // returns a reference borrowed from inside this lock, and
     // only `parking_lot`'s guards can be `.map()`ped to shrink that
     // reference down from "the whole table" to "the one entry" while still
     // keeping the lock held for exactly the returned guard's lifetime.
@@ -825,9 +814,6 @@ impl Heap {
             current_stack: 0,
             current,
         };
-        for (ns, name, args) in crate::value::BUILTIN_TYPES {
-            heap.intern_type(TypeShape::named(*ns, name, args));
-        }
         heap
     }
 
@@ -838,9 +824,8 @@ impl Heap {
     /// starting with an empty `in_flight_throw` of its own like any other
     /// fresh `RootStack`) and otherwise starts it exactly like
     /// [`with_capacity`](Self::with_capacity) starts the first one — empty
-    /// `session_roots`, no interned type keys to add (those, the reader
-    /// macro tables and the source locations are already in
-    /// `shared.interning`, done once by whichever view created the heap).
+    /// `session_roots`; the interned paths, the reader macro tables and the
+    /// source locations are already in `shared.interning`.
     ///
     /// The view is registered in `shared`'s thread registry for as long as
     /// it lives, as running on the calling thread. From then on a collection
@@ -1422,56 +1407,6 @@ impl Heap {
     }
 
 
-    // ---- type identities ---------------------------------------------------
-
-    /// Intern a type by its shape, returning the [`TypeId`] every instance of
-    /// that type carries. Permanent, like a symbol: equal shapes always share
-    /// one id, so "same type?" is `==` on the id.
-    ///
-    /// The shape's arguments are ids this heap already gave out; its display
-    /// is built from theirs here, once.
-    pub fn intern_type(&self, shape: TypeShape) -> TypeId {
-        let mut interning = self.shared.interning.write();
-        if let Some(&id) = interning.type_ids.get(&shape) {
-            return TypeId(id);
-        }
-        let name = type_shape::display(&shape, |arg| interning.types[arg.0 as usize].1.clone());
-        let id = interning.types.len() as u32;
-        interning.type_ids.insert(shape.clone(), id);
-        interning.types.push((shape, name));
-        TypeId(id)
-    }
-
-    /// The id `shape` interns to, if it has ever been interned in this heap.
-    ///
-    /// The read-only half of [`intern_type`](Self::intern_type), for asking
-    /// "is this value of that type?" without minting an id for a type no value
-    /// has: `None` answers the question already (nothing can be an instance of
-    /// a type never seen here).
-    pub fn find_type(&self, shape: &TypeShape) -> Option<TypeId> {
-        self.shared.interning.read_recursive().type_ids.get(shape).map(|&id| TypeId(id))
-    }
-
-    /// The shape `id` was interned from.
-    pub fn type_shape(&self, id: TypeId) -> TypeShape {
-        self.shared.interning.read_recursive().types[id.0 as usize].0.clone()
-    }
-
-    /// The display of an interned type — for printing, `Debug`, and error
-    /// messages. Not for comparison: compare the ids.
-    ///
-    /// Returns a mapped read guard rather than `&str`: `types` lives
-    /// behind `shared.interning`'s lock, and `parking_lot::RwLockReadGuard`
-    /// is what lets this narrow "the whole table, read-locked" down to "this
-    /// one entry" while keeping the lock held for exactly the guard's
-    /// lifetime (see `HeapShared`'s doc comment). Every existing call site
-    /// only ever read the string through the old `&str` before dropping it,
-    /// so `Deref<Target = str>` keeps them unchanged.
-    pub fn type_key_name(&self, key: TypeId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        parking_lot::RwLockReadGuard::map(self.shared.interning.read_recursive(), |i| i.types[key.0 as usize].1.as_str())
-    }
-
-
     // ---- paths ------------------------------------------------------------
 
     /// Intern a `::` path from its symbol segments, returning a `Value::Path`.
@@ -1488,8 +1423,13 @@ impl Heap {
         Value::Path(PathId(id))
     }
 
-    /// The symbol segments of an interned path. See `type_key_name`'s doc
-    /// comment for why this returns a mapped guard rather than `&[SymRef]`.
+    /// The symbol segments of an interned path.
+    ///
+    /// Returns a mapped read guard rather than `&[SymRef]`: the table lives
+    /// behind `shared.interning`'s lock, and `parking_lot::RwLockReadGuard`
+    /// is what lets this narrow "the whole table, read-locked" down to "this
+    /// one entry" while keeping the lock held for exactly the guard's
+    /// lifetime (see `HeapShared`'s doc comment).
     pub fn path_segments(&self, id: PathId) -> parking_lot::MappedRwLockReadGuard<'_, [SymRef]> {
         parking_lot::RwLockReadGuard::map(self.shared.interning.read_recursive(), |i| i.paths[id.0 as usize].as_slice())
     }
@@ -1502,7 +1442,7 @@ impl Heap {
         Value::Str(StrId(self.shared.strings.write().store.alloc(s)))
     }
 
-    /// The contents of a stored string. See `type_key_name`'s doc comment
+    /// The contents of a stored string. See `path_segments`'s doc comment
     /// for why this returns a mapped guard rather than `&str`.
     pub fn string(&self, id: StrId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
         parking_lot::RwLockReadGuard::map(self.shared.strings.read_recursive(), |s| {
@@ -1747,7 +1687,7 @@ impl Heap {
     /// The `BigInt` behind a boxed bignum. Panics if `id` doesn't hold a
     /// `BoxedObj::Bignum` — same internal-invariant-trap convention as
     /// [`f64_value`](Self::f64_value).
-    /// See `type_key_name`'s doc comment for why this returns a mapped guard
+    /// See `path_segments`'s doc comment for why this returns a mapped guard
     /// rather than `&num_bigint::BigInt`.
     pub fn bignum_value(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, num_bigint::BigInt> {
         parking_lot::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
@@ -1773,7 +1713,7 @@ impl Heap {
 
     /// The `BigRational` behind a boxed ratio. Panics if `id` doesn't hold a
     /// `BoxedObj::Ratio` — same convention as [`bignum_value`](Self::bignum_value).
-    /// See `type_key_name`'s doc comment for why this returns a mapped guard
+    /// See `path_segments`'s doc comment for why this returns a mapped guard
     /// rather than `&num_rational::BigRational`.
     pub fn ratio_value(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, num_rational::BigRational> {
         parking_lot::RwLockReadGuard::map(self.shared.boxes.read_recursive(), |b| match &b.slots[id.0 as usize] {
@@ -1796,7 +1736,7 @@ impl Heap {
     ///
     /// Takes an interned [`TypeId`] rather than a name, so a struct cannot
     /// be built without its type identity already existing as a comparable id
-    /// — see [`intern_type`](Self::intern_type).
+    /// — see [`crate::intern_type`].
     pub fn alloc_struct(&mut self, type_key: TypeId, fields: Vec<Value>) -> Value {
         self.alloc_boxed(BoxedObj::Struct { type_key, payload: StructPayload::Fields(fields) })
     }
@@ -1813,9 +1753,8 @@ impl Heap {
 
     /// The *name* of a boxed struct's type, for printing and diagnostics.
     /// Comparisons use [`struct_type_key`](Self::struct_type_key) instead.
-    /// See `type_key_name`'s doc comment for why this returns a mapped guard.
-    pub fn struct_type_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        self.type_key_name(self.struct_type_key(id))
+    pub fn struct_type_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'static, str> {
+        crate::type_name(self.struct_type_key(id))
     }
 
     /// The number of fields a boxed struct holds — e.g. `Vector<T>::length`
@@ -1904,7 +1843,7 @@ impl Heap {
         if !self.is_struct(id) {
             return None;
         }
-        crate::tuple::sexpr_tuple_arity(&self.type_key_name(self.struct_type_key(id)))
+        crate::tuple::sexpr_tuple_arity(self.struct_type_key(id))
     }
 
     pub fn is_struct(&self, id: BoxId) -> bool {
@@ -1952,9 +1891,8 @@ impl Heap {
 
     /// The *name* of a boxed enum value's type, for printing and diagnostics.
     /// Comparisons use [`enum_type_key`](Self::enum_type_key) instead.
-    /// See `type_key_name`'s doc comment for why this returns a mapped guard.
-    pub fn enum_type_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
-        self.type_key_name(self.enum_type_key(id))
+    pub fn enum_type_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'static, str> {
+        crate::type_name(self.enum_type_key(id))
     }
 
     /// The variant index of a boxed enum value — what a `match` arm's tag
@@ -2271,7 +2209,7 @@ impl Heap {
     }
 
     /// A built-in function value's name. Panics like
-    /// [`builtin_fn_recv`](Self::builtin_fn_recv). See `type_key_name`'s doc
+    /// [`builtin_fn_recv`](Self::builtin_fn_recv). See `path_segments`'s doc
     /// comment for why this returns a mapped guard rather than `&str`.
     pub fn builtin_fn_name(&self, id: BoxId) -> parking_lot::MappedRwLockReadGuard<'_, str> {
         let name = match &self.shared.boxes.read_recursive().slots[id.0 as usize] {

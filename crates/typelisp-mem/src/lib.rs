@@ -20,6 +20,7 @@ pub mod tagged;
 pub mod tuple;
 pub mod type_form;
 pub mod type_shape;
+pub mod type_words;
 pub mod value;
 
 pub use errors::{Error, Loc, LIBRARY_FILE};
@@ -27,11 +28,11 @@ pub use heap::{FrameRaw, Heap, RootScope, RootStackId};
 pub use name_view::NameView;
 pub use names::{ConcreteNames, TypeKey};
 pub use stack::grow_stack;
-pub use option::{is_niched_option_key, option_payload_niches, option_prints_wrapped};
+pub use option::{is_niched_option, option_payload_niches, option_prints_wrapped};
 pub use symbols::{wk, NsId, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};
 pub use type_form::{existing_type_of_form, type_key_of_form, type_of_form};
-pub use type_shape::{spec, TypeShape, TypeSpec};
-pub use tuple::{is_tuple_base_key, sexpr_tuple_arity, sexpr_tuple_key, sexpr_tuple_type, TUPLE_MAX_ARITY};
+pub use type_shape::{find_type, instantiate, intern_spec, intern_type, spec, type_name, type_shape, TypeShape, TypeSpec};
+pub use tuple::{sexpr_tuple_arity, sexpr_tuple_type, tuple_type_arity, TUPLE_MAX_ARITY};
 pub use tagged::{decode, encode, fixnum_fits, references_heap, try_encode, FIXNUM_MAX, FIXNUM_MIN, NIL_WORD};
 pub use value::{BoxId, ConsRef, FloatBox, NarrowInt, PathId, StrId, TypeId, Value, BUILTIN_TYPES};
 

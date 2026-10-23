@@ -24,9 +24,10 @@ use crate::names::ConcreteNames;
 use crate::symbols::{child_ns_named, intern_exact, wk, NsId, SymRef};
 use crate::{Heap, TypeId, TypeShape, Value};
 
-/// The interned identity of the type `form` writes, minting it if this heap
-/// has not seen the type before — or `None` when `form` is not a type form
-/// a value can have (a `type-param` or `type-var` names no type by itself).
+/// The interned identity of the type `form` writes, minting it if it has not
+/// been seen before — or `None` when `form` is not a type form (a `type-var`
+/// names no type by itself). A `type-param` reads as [`TypeShape::Param`],
+/// which a field's template holds.
 pub fn type_of_form(heap: &Heap, form: Value) -> Option<TypeId> {
     match read_type(heap, form, true) {
         Read::Found(id) => Some(id),
@@ -35,8 +36,8 @@ pub fn type_of_form(heap: &Heap, form: Value) -> Option<TypeId> {
     }
 }
 
-/// [`type_of_form`] without the minting: `Ok(None)` when no value in this
-/// heap has ever had the type, which answers "is this value one of those?"
+/// [`type_of_form`] without the minting: `Ok(None)` when no value has ever
+/// had the type, which answers "is this value one of those?"
 /// on its own. `Err(())` when `form` is not a type form.
 pub fn existing_type_of_form(heap: &Heap, form: Value) -> Result<Option<TypeId>, ()> {
     match read_type(heap, form, false) {
@@ -56,9 +57,9 @@ fn read_type(heap: &Heap, form: Value, mint: bool) -> Read {
     let Some(shape) = read_shape(heap, form, mint) else { return Read::NotAType };
     let Some(shape) = shape else { return Read::Unseen };
     if mint {
-        Read::Found(heap.intern_type(shape))
+        Read::Found(crate::intern_type(shape))
     } else {
-        heap.find_type(&shape).map_or(Read::Unseen, Read::Found)
+        crate::find_type(&shape).map_or(Read::Unseen, Read::Found)
     }
 }
 
@@ -102,6 +103,7 @@ fn read_shape(heap: &Heap, form: Value, mint: bool) -> Option<Option<TypeShape>>
         }
         (wk::TYPE_UNIT, []) => Some(TypeShape::Unit),
         (wk::TYPE_NEVER, []) => Some(TypeShape::Never),
+        (wk::TYPE_PARAM, [Value::Int(n)]) => Some(TypeShape::Param(u32::try_from(*n).ok()?)),
         _ => return None,
     };
     Some(shape)
