@@ -243,7 +243,7 @@ fn the_runtimes_fixed_types_are_the_checkers() {
     ] {
         assert_eq!(
             id,
-            typelisp::type_key::type_key_id(&path),
+            typelisp::type_key::type_key_id(&path, Vec::new()),
             "the fixed type at index {} is not the checker's `{}`",
             id.as_u32(),
             path

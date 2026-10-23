@@ -556,8 +556,7 @@ fn compile_target_payload(heap: &mut Heap, target: &CompileTarget) -> Result<Val
             let mut f = Items::new(heap);
             let tp = path_form(f.heap(), type_name);
             f.push(tp);
-            let m = f.heap().intern_symbol(method);
-            f.push(m);
+            f.push(Value::Symbol(*method));
             f.finish(wk::METHOD)
         }
     }

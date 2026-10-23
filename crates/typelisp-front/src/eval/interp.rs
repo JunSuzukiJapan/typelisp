@@ -25,7 +25,7 @@ use num_rational::BigRational;
 use num_traits::{FromPrimitive, ToPrimitive, Zero};
 
 use crate::check::registry::EVAL_ERROR;
-use crate::type_key::{alloc_typed_enum, heap_type_path};
+use crate::type_key::alloc_typed_enum;
 use typelisp_mem::RootScope;
 
 use crate::check::core;
@@ -64,14 +64,13 @@ pub use core_eval::read_ffi_decl;
 /// exactly one [`scope::ModuleScope`] tree node — its own defining module —
 /// rather than in a flat program-wide table; see that module's doc comment.
 pub struct FnDef {
-    /// This definition's link name: a free function's fully-qualified path
-    /// (`m::inc`), or a method's [`typelisp_mem::ConcreteNames::method_link`].
+    /// The definition this is.
     ///
     /// The scope tree keys these by their *last* segment inside a namespace,
     /// which is enough to find one but not enough to *name* one: `enter` has
     /// an `Rc<FnDef>` in hand and nothing else. `trace` needs both — a name
     /// to look up in its table, and a name to print.
-    pub name: String,
+    pub target: crate::CompileTarget,
     /// Parameter names, including the receiver name first for instance methods.
     pub params: Vec<String>,
     /// The body's core forms, in order.
@@ -407,20 +406,22 @@ pub(crate) fn encode_crossing_value(heap: &Heap, v: &Value, repr: &Repr) -> Resu
 }
 
 /// The method `print-object` dispatches `v` to: its type's path and the
-/// method's name there — the *specialization*'s name when `v` is a generic
-/// type's instantiation. Monomorphization registers one body per
-/// instantiation (`print-object <i32>`), and the value's key is what says
-/// which — the thing it did not carry until 2026-08-31, which is why a
-/// generic type's `print-object` never fired. `None` for a value no method
-/// can be for.
-pub(crate) fn print_object_target(heap: &Heap, v: Value) -> Option<(Path, String)> {
+/// method's name there — the *specialization* at the value's type arguments
+/// when `v` is a generic type's instantiation, since monomorphization makes
+/// one body per instantiation and the value's type is what says which.
+/// `None` for a value no method can be for.
+pub(crate) fn print_object_target(heap: &Heap, v: Value) -> Option<(Path, SymRef)> {
     let Value::Boxed(id) = v else { return None };
-    let type_path = heap_type_path(heap, id)?;
-    let method = match crate::type_key::heap_type_key(heap, id) {
-        Some(key) => typelisp_mem::ConcreteNames::method_for_value(&key, "print-object"),
-        None => "print-object".to_string(),
+    let typelisp_mem::TypeShape::Named(ns, ty, args) = typelisp_mem::type_shape(crate::type_key::heap_type_id(heap, id)?) else {
+        return None;
     };
-    Some((type_path, method))
+    let method = typelisp_mem::symbols::intern("print-object");
+    let name = if args.is_empty() {
+        method
+    } else {
+        typelisp_mem::specialization::specialization(typelisp_mem::specialization::Generic::Method(ns, ty, method), &args)
+    };
+    Some((Path::of_symbol(ns, ty), name))
 }
 
 /// Whether `f` is a `print-object` implementation by its signature — the
@@ -611,13 +612,13 @@ pub struct Interp {
     /// The values currently being rendered by their own `print-object`
     /// method, innermost last — [`Self::print_object`]'s re-entry guard.
     pub(crate) printing: RefCell<Vec<Value>>,
-    /// The link names `trace` is currently watching ([`FnDef::name`]).
+    /// The definitions `trace` is currently watching.
     ///
     /// Here rather than a flag on each [`FnDef`] so that tracing survives
     /// **redefinition**: redefining a function replaces the `Rc<FnDef>` in
     /// the scope tree, and a flag on the old one would go with it. CL traces
     /// a *name*, and so does this.
-    pub(crate) traced: RefCell<HashSet<String>>,
+    pub(crate) traced: RefCell<HashSet<crate::CompileTarget>>,
     /// `!traced.is_empty()`, kept as a `Cell` so the check on the hot path in
     /// [`Self::enter`] is a load and not a `RefCell` borrow. Every write to
     /// `traced` updates it.
@@ -662,7 +663,7 @@ pub struct Interp {
     /// is the sole source of). Neither table holds heap values, so a vtable
     /// needs no GC root — `BoxedObj::Dyn`'s own `value` is all the collector
     /// ever has to trace.
-    pub(crate) vtables: RefCell<Vec<Vec<(Path, String)>>>,
+    pub(crate) vtables: RefCell<Vec<Vec<(Path, SymRef)>>>,
     /// `(concrete type, trait path)` -> `vtable_id`, so the same pair
     /// interns to one id however many times it is boxed.
     pub vtable_ids: RefCell<HashMap<(crate::TypeId, Path), u32>>,
@@ -976,7 +977,7 @@ impl Interp {
             .map(|(type_name, method)| {
                 self.root
                     .borrow()
-                    .get_method(type_name, method)
+                    .get_method(type_name, method.name())
                     .and_then(|f| f.compiled.borrow().as_ref().map(|c| (c.address(), c.body_abi())))
                     .unwrap_or((0, typelisp_abi::BODY_ABI_CLASSIC))
             })
@@ -1042,7 +1043,7 @@ impl Interp {
         out
     }
 
-    pub fn vtable_descriptors(&self) -> Vec<(u32, Vec<(Path, String)>)> {
+    pub fn vtable_descriptors(&self) -> Vec<(u32, Vec<(Path, SymRef)>)> {
         self.vtables.borrow().iter().cloned().enumerate().map(|(i, s)| (i as u32, s)).collect()
     }
 
@@ -1054,7 +1055,7 @@ impl Interp {
     /// `slots` comes from the checker (`dyn-new`), already in
     /// `TraitDef::method_order` order and already monomorphized, so this only
     /// records it.
-    pub(crate) fn vtable_id_for(&self, concrete: crate::TypeId, trait_path: &Path, slots: &[(Path, String)]) -> u32 {
+    pub(crate) fn vtable_id_for(&self, concrete: crate::TypeId, trait_path: &Path, slots: &[(Path, SymRef)]) -> u32 {
         let key = (concrete, trait_path.clone());
         if let Some(&id) = self.vtable_ids.borrow().get(&key) {
             return id;
@@ -1104,8 +1105,8 @@ impl Interp {
         &self,
         concrete: crate::TypeId,
         trait_path: &Path,
-        slots: &[(Path, String)],
-        supers: &[(Path, Vec<(Path, String)>)],
+        slots: &[(Path, SymRef)],
+        supers: &[(Path, Vec<(Path, SymRef)>)],
     ) -> Vec<u32> {
         let id = self.vtable_id_for(concrete, trait_path, slots);
         if supers.is_empty() {
@@ -1511,8 +1512,8 @@ impl Interp {
         let f = self
             .root
             .borrow()
-            .get_method(&type_path, &method)
-            .ok_or_else(|| EvalError::Internal(format!("vtable slot names `{}::{}`, which is not registered", type_path, method)))?;
+            .get_method(&type_path, method.name())
+            .ok_or_else(|| EvalError::Internal(format!("vtable slot names `{}::{}`, which is not registered", type_path, method.name())))?;
         let v = self.reify(heap, &f)?;
         Ok(typelisp_rt::encode(v))
     }
@@ -2356,7 +2357,7 @@ impl Interp {
         if self.printing.borrow().contains(&v) {
             return Ok(None);
         }
-        let Some(f) = self.root.borrow().get_method(&type_path, &method) else {
+        let Some(f) = self.root.borrow().get_method(&type_path, method.name()) else {
             return Ok(None);
         };
         if !is_print_object_sig(&f) {
@@ -2379,10 +2380,10 @@ impl Interp {
 
     /// `~/name/`'s rendering of `v` — CL's function-call directive.
     ///
-    /// `name` is what the checker resolved the directive to
-    /// ([`crate::CompileTarget::link_name`]) — `(name v colon at)` resolved
-    /// at the site, against the type of every argument the directive can
-    /// meet — so the definition is fetched by what it is, not looked up.
+    /// `name` is the [`crate::CompileTarget::link_name`] of what the checker
+    /// resolved the directive to — `(name v colon at)` resolved at the site,
+    /// against the type of every argument the directive can meet — so the
+    /// definition is the one registered under that name, not one looked up.
     pub(crate) fn format_call(
         &self,
         heap: &mut Heap,
@@ -2391,7 +2392,9 @@ impl Interp {
         colon: bool,
         at: bool,
     ) -> Result<String, String> {
-        let Some(f) = self.target_def(&crate::CompileTarget::from_link_name(name)) else {
+        let mut defs = Vec::new();
+        self.root.borrow().collect_defs(&mut defs);
+        let Some(f) = defs.into_iter().find(|f| f.target.link_name() == name) else {
             return Err(format!("format: ~/{}/ — no such definition", name));
         };
         // Whether the argument's *declared* representation is a raw machine
@@ -4260,22 +4263,13 @@ fn eval_llvm_builtin_method(
 }
 
 impl crate::CompileTarget {
-    /// The definition a [`Self::link_name`] names.
-    pub fn from_link_name(name: &str) -> crate::CompileTarget {
-        match typelisp_mem::ConcreteNames::split_method_link(name) {
-            Some((type_name, method)) => crate::CompileTarget::Method(crate::dump::parse_path(type_name), method.to_string()),
-            None => crate::CompileTarget::Fn(crate::dump::parse_path(name)),
-        }
-    }
-
     /// The definition's name as one string: its path for a function,
     /// [`typelisp_mem::ConcreteNames::method_link`] for a method. What the runtime's
-    /// messages say, and what a rewritten `~/name/` control string carries
-    /// for [`Self::from_link_name`] to read back.
+    /// messages say, and what a rewritten `~/name/` control string carries.
     pub fn link_name(&self) -> String {
         match self {
             crate::CompileTarget::Fn(path) => path.to_string(),
-            crate::CompileTarget::Method(type_name, method) => typelisp_mem::ConcreteNames::method_link(type_name, method),
+            crate::CompileTarget::Method(type_name, method) => typelisp_mem::ConcreteNames::method_link(type_name, method.name()),
         }
     }
 
@@ -4284,7 +4278,7 @@ impl crate::CompileTarget {
     pub fn written_name(&self) -> String {
         match self {
             crate::CompileTarget::Fn(path) => path.to_string(),
-            crate::CompileTarget::Method(type_name, method) => format!("{}::{}", type_name, method),
+            crate::CompileTarget::Method(type_name, method) => format!("{}::{}", type_name, method.name()),
         }
     }
 }

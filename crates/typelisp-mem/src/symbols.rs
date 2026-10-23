@@ -1126,10 +1126,21 @@ pub fn intern_at_home(ns: NsId, name: &str) -> SymRef {
 /// exactly as given rather than folded to lowercase.
 ///
 /// For a definition's name, which the compiler may build with characters a
-/// reader never produces (a specialization's `name <args>`): folding would
-/// turn two definitions into one.
+/// reader never produces: folding would turn two definitions into one.
 pub fn intern_exact(ns: NsId, name: &str) -> SymRef {
     table().read(ns, name)
+}
+
+/// A new symbol of `home` that no table holds: nothing reads as it, so a
+/// definition it names is reached only through whoever made it — a
+/// definition the source cannot write ([`crate::specialization`]). `name`
+/// is what it is shown as.
+pub fn unlisted(home: NsId, name: &str) -> SymRef {
+    let mut t = table();
+    // Leaked like every header, for the reasons `SymTable::create` gives.
+    let header: &'static Symbol = Box::leak(Box::new(Symbol { spelling: name.into(), home, well_known: NOT_WELL_KNOWN }));
+    t.created += 1;
+    SymRef(header as *const Symbol)
 }
 
 /// [`intern_at_home`] for a home given as segments from the root.

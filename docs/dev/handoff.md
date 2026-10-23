@@ -20,6 +20,9 @@
 - 5d も済み。コンパイル済みコードは型をモジュールの型の表から読み（`compile::type_table`）、
   FFI の型・コールバック・C メモリ層は `TypeId` と定義のシンボルで引く（計画の 5d の項）。
   ダンプの形式は 27、ABI は 0.3.20。
+- 5e は前半まで済み。単型化した定義は元の定義と型引数の `TypeId` の表
+  （`typelisp_mem::specialization`）で識別し、名前はどの表にも載らないシンボル。生成した名前を
+  切って読み戻す `ConcreteNames` の関数は消した（計画の 5e の項）。ダンプの形式は 28、ABI は 0.3.21。
 
 ## 2. 4d で知っておくこと
 
@@ -37,9 +40,9 @@
 
 ## 3. 次にすること（順に）
 
-1. 5e（`print-object` の表の文字列キー `value_key_for_method` / `method_for_value` を含む）。
-   FFI の thunk とコールバックの本体の LLVM 名はまだパスの文字列から作る
-   （`ConcreteNames::symbol(&path.to_string())`）。これも 5e の単型化の識別と一緒に直す。
+1. 5e 後半: `NameView` を定義のシンボルと型の形から作る（計画 3.7）。今は `::` やかっこで
+   文字列を切って表示を組み立てている（`typelisp_mem::name_view`）。実行ファイルへは
+   `rt_print_name_module` / `rt_print_name_import` がパスの文字列で渡している。
 2. そのあと段階 6〜9（計画の 6 節）。各段階で全テストを通してからコミットし、push する。
    段階 6 で `Info::in_scope` の移行のための広い規則
    （`item_ns == cur || in_std(item_ns) || (in_std(cur) && item_ns == NsId::ROOT)`）を狭める。

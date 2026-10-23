@@ -164,8 +164,8 @@ pub(super) enum Verdict {
 }
 
 /// The name an accumulation clause with no `:into` accumulates into. The
-/// space makes it unwritable in source, the same trick `ConcreteNames::specialization`
-/// uses — two anonymous accumulations in one loop are CL-illegal anyway, and
+/// space makes it unwritable in source, as every generated name is
+/// (`typelisp_mem::names`) — two anonymous accumulations in one loop are CL-illegal anyway, and
 /// this way the name can never collide with a `:with` variable.
 const ANON_ACC: &str = "loop acc";
 
@@ -501,7 +501,7 @@ fn accumulate(
 
 /// The flag that suppresses the stepping pass on the first time round.
 /// It contains a space, so no source can write it and no user variable can
-/// collide with it — the same trick `ConcreteNames::specialization` uses. So do the
+/// collide with it, as with every generated name (`typelisp_mem::names`). So do the
 /// per-clause state names [`state_name`] makes.
 const FIRST_FLAG: &str = "loop first";
 

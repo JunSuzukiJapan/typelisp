@@ -438,8 +438,8 @@ impl Interp {
         let has_native_dispatcher = self.dyn_dispatch_compiled.borrow().contains(&trait_path);
         if has_native_dispatcher {
             for (type_name, method) in &slots {
-                if !self.root.borrow().method_compiled(type_name, method) {
-                    let target = crate::CompileTarget::Method(type_name.clone(), method.clone());
+                if !self.root.borrow().method_compiled(type_name, method.name()) {
+                    let target = crate::CompileTarget::Method(type_name.clone(), *method);
                     (crate::eval::interp::backend_compile_function()?)(self, &mut s, &target)?;
                 }
             }
@@ -636,7 +636,7 @@ impl Interp {
             Some(wk::FN) => crate::CompileTarget::Fn(path_field(heap, payload, 0, who)?),
             Some(wk::METHOD) => {
                 let type_name = path_field(heap, payload, 0, who)?;
-                let method = sym_field(heap, payload, 1, who)?;
+                let method = self.sym_field(heap, payload, 1, who)?;
                 crate::CompileTarget::Method(type_name, method)
             }
             other => {
@@ -652,7 +652,7 @@ impl Interp {
     pub fn target_def(&self, target: &crate::CompileTarget) -> Option<Rc<FnDef>> {
         match target {
             crate::CompileTarget::Fn(path) => self.root.borrow().get_fn(path),
-            crate::CompileTarget::Method(type_name, method) => self.root.borrow().get_method(type_name, method),
+            crate::CompileTarget::Method(type_name, method) => self.root.borrow().get_method(type_name, method.name()),
         }
     }
 
@@ -686,16 +686,16 @@ impl Interp {
                 if def.compiled.borrow().is_some() {
                     let note = format!(
                         "; note: `{}` has a compiled body — calls to it from other compiled code are not traced\n",
-                        def.name
+                        def.target.link_name()
                     );
                     self.trace_write(heap, &note)?;
                 }
-                self.traced.borrow_mut().insert(def.name.clone());
+                self.traced.borrow_mut().insert(def.target.clone());
             } else {
-                self.traced.borrow_mut().remove(&def.name);
+                self.traced.borrow_mut().remove(&def.target);
             }
         }
-        let mut names: Vec<String> = self.traced.borrow().iter().cloned().collect();
+        let mut names: Vec<String> = self.traced.borrow().iter().map(crate::CompileTarget::link_name).collect();
         names.sort();
         self.trace_armed.set(!names.is_empty());
         // Symbols are interned pointers rather than cells, so the `Vec` holding
@@ -724,7 +724,7 @@ impl Interp {
         // `RefCell` borrow, a hash lookup — belongs behind them, which is why
         // the set membership is tested only once one of the two is armed.
         let stepping = self.stepping.get() && self.trace_depth.get() <= self.step_quiet_depth.get();
-        if stepping || (self.trace_armed.get() && self.traced.borrow().contains(&f.name)) {
+        if stepping || (self.trace_armed.get() && self.traced.borrow().contains(&f.target)) {
             return self.enter_watched(heap, f, argv, stepping);
         }
         self.enter_plain(heap, f, argv)
@@ -762,7 +762,7 @@ impl Interp {
         // A trace that cannot be written supersedes the call's own outcome,
         // the way an error in an `unwind-protect` cleanup supersedes the exit
         // in flight.
-        self.trace_call_exit(heap, &f.name, depth, f.sig.as_ref().map(|s| &s.1), result.as_ref().copied())?;
+        self.trace_call_exit(heap, &f.target.link_name(), depth, f.sig.as_ref().map(|s| &s.1), result.as_ref().copied())?;
         result
     }
 
@@ -808,9 +808,9 @@ impl Interp {
             .map(|(i, a)| self.trace_render(heap, *a, reprs.and_then(|r| r.get(i))))
             .collect();
         let call = if rendered.is_empty() {
-            format!("({})", f.name)
+            format!("({})", f.target.link_name())
         } else {
-            format!("({} {})", f.name, rendered.join(" "))
+            format!("({} {})", f.target.link_name(), rendered.join(" "))
         };
         self.trace_line(heap, depth, &call)?;
         if stepping {
@@ -1540,7 +1540,7 @@ pub(super) fn tail_after_value(heap: &Heap, list: Value, n: usize) -> Result<Val
 
 /// A field holding a vtable's slots: `((PATH SYM)...)`, the owning type and
 /// method name for each of the trait's methods, in slot order.
-pub(super) fn method_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<(crate::Path, String)>, EvalError> {
+pub(super) fn method_list(heap: &Heap, form: Value, i: usize, what: &str) -> Result<Vec<(crate::Path, SymRef)>, EvalError> {
     let field = core::field(heap, form, i)
         .ok_or_else(|| EvalError::Internal(format!("eval: ({} ..) has no field {}", what, i)))?;
     let entries = heap
@@ -1550,7 +1550,7 @@ pub(super) fn method_list(heap: &Heap, form: Value, i: usize, what: &str) -> Res
 }
 
 /// One `(PATH SYM)` slot entry.
-fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, String), EvalError> {
+fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, SymRef), EvalError> {
     let parts = heap
         .list_to_vec(entry)
         .map_err(|e| EvalError::Internal(format!("eval: vtable slot: {}", e)))?;
@@ -1562,12 +1562,12 @@ fn method_entry(heap: &Heap, entry: Value) -> Result<(crate::Path, String), Eval
     let Value::Symbol(name) = name else {
         return Err(EvalError::Internal(format!("eval: vtable slot method is {:?}", name)));
     };
-    Ok((ty, heap.symbol_spelling(name).to_string()))
+    Ok((ty, name))
 }
 
 /// One supertrait's dispatch table: the trait it is for, and that trait's
 /// method slots as `(implementing type, method name)`.
-pub(super) type SuperTable = (crate::Path, Vec<(crate::Path, String)>);
+pub(super) type SuperTable = (crate::Path, Vec<(crate::Path, SymRef)>);
 
 /// The supertrait tables field: `((PATH ((PATH SYM)...))...)`.
 pub(super) fn super_list(heap: &Heap, form: Value, i: usize) -> Result<Vec<SuperTable>, EvalError> {
@@ -1769,14 +1769,14 @@ impl Interp {
             // separate field needed.
             "defmethod" => {
                 let type_name = path_field(heap, tl, 0, "defmethod")?;
-                let method = sym_field(heap, tl, 1, "defmethod")?;
+                let method = self.sym_field(heap, tl, 1, "defmethod")?;
                 let _instance = bool_field(heap, tl, 2, "defmethod")?;
                 let (params, param_reprs) = param_list(heap, tl, 3, "defmethod")?;
                 let ret = repr_field(heap, tl, 4, "defmethod")?;
                 let body = body_forms(heap, tl, 5, "defmethod")?;
                 heap.push_permanent_root(tl);
                 let def = FnDef { ffi: false,
-                    name: typelisp_mem::ConcreteNames::method_link(&type_name, &method),
+                    target: crate::CompileTarget::Method(type_name.clone(), method),
                     params,
                     body,
                     rest: false,
@@ -1788,7 +1788,7 @@ impl Interp {
                     .borrow_mut()
                     .get_or_create(&type_name.parent())
                     .methods
-                    .insert((type_name.last_segment().to_string(), method), Rc::new(def));
+                    .insert((type_name.last_segment().to_string(), method.name().to_string()), Rc::new(def));
                 self.printer_tables_changed();
                 Ok(None)
             }
@@ -1819,7 +1819,7 @@ impl Interp {
                 // arguments into one `Sexpr` before the call.
                 let sig = (vec![Repr::Sexpr; params.len()], Repr::Sexpr);
                 let def = FnDef { ffi: false,
-                    name: name.to_string(),
+                    target: crate::CompileTarget::Fn(name.clone()),
                     params,
                     body,
                     rest,
@@ -1992,7 +1992,7 @@ impl Interp {
                     .map_err(EvalError::Panic)?;
                 heap.push_permanent_root(tl);
                 let def = FnDef { ffi: true,
-                    name: name.to_string(),
+                    target: crate::CompileTarget::Fn(name.clone()),
                     params,
                     body: Vec::new(),
                     rest: false,
@@ -2110,7 +2110,7 @@ impl Interp {
     ) {
         heap.push_permanent_root(tl);
         let def =
-            FnDef { ffi: false, name: name.to_string(), params, body, rest, lambda, sig: Some((param_reprs, ret)), compiled: RefCell::new(None) };
+            FnDef { ffi: false, target: crate::CompileTarget::Fn(name), params, body, rest, lambda, sig: Some((param_reprs, ret)), compiled: RefCell::new(None) };
         self.root
             .borrow_mut()
             .get_or_create(&name.parent())

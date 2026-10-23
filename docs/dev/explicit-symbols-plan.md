@@ -557,6 +557,21 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `symbols::definition_of_path` の 1 か所。ダンプの形式は 27、ABI は 0.3.20。
    - 5e. 単型化した定義を `(元の定義のシンボル, [TypeId])` の表で識別し、`ConcreteNames` の
      切り戻しを消す。`NameView` を定義のシンボルから作る。
+     前半は済み。単型化した定義は表（`typelisp_mem::specialization`）で、元の定義（関数なら
+     所属モジュールと名前のシンボル、メソッドなら型の定義とメソッド名のシンボル）と型引数の
+     `TypeId` の列から引く。名前はどの表にも載らないシンボル（`symbols::unlisted`）で、綴り
+     （`unwrap <int>`）は表示とリンク名のためだけにある。チェッカーはメソッド名を IR まで
+     （`Node::Assoc`・`MethodRef`・vtable の表・`defmethod`・`CompileTarget::Method`）シンボルの
+     まま運ぶ。ダンプは単型化のシンボルを元の定義と型引数の形（`owned_form::OwnedSym`・
+     `OwnedType`）で書き、読むときに表から同じシンボルを引く（`Path` の serde も同じ形）。
+     `print-object` の振り分けは値の型の形から表を引き、実行ファイルの登録と印字側の表
+     （`rt_print_object_method`）は `TypeId` で引く。インタプリタの `FnDef` は自分の定義
+     （`CompileTarget`）を持ち、`~/name/` とフレームの警告は名前を切らずに、定義から作った名前と
+     照合する。コンパイル済みコードは引用したシンボルを綴りから作り直すので、単型化した関数を
+     C のコールバックに渡すときは、それを呼ぶ定義を別に作る。ダンプの形式は 28、ABI は 0.3.21。
+     チェッカーの中のメソッドの表（`AdtDef::assoc`・`insts`・テンプレート）はまだメソッド名の
+     文字列で引く（段階 7）。名前を切る処理で残るのはダンプのキー（`dump::parse_path`・
+     `parse_method_key`。段階 8）。
 6. `std` を子モジュールに分け、組み込み型を移す（5 節）。`std::prelude` を作り、テスト・例に
    `use` を足す。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

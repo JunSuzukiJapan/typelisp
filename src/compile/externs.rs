@@ -1116,7 +1116,7 @@ mod scc_tests {
             interp.root.borrow_mut().define_fn(
                 name.to_string(),
                 Rc::new(FnDef { ffi: false,
-                    name: name.to_string(),
+                    target: crate::CompileTarget::Fn(Path::root(name)),
                     params: vec![],
                     body: vec![call],
                     rest: false,

@@ -18,6 +18,8 @@ use crate::{wk, nominal_path, parse_type_spanned, prim_type_path, Error, Heap, L
 
 use super::loop_dsl;
 use typelisp_mem::ConcreteNames;
+use typelisp_mem::specialization::{specialization, Generic};
+use typelisp_mem::{SymRef, TypeId};
 use super::semantic::{TypeKind, TypeUse};
 
 use super::resolved::{CompileTarget, Pattern};
@@ -389,10 +391,10 @@ enum SpecRequest {
     /// A generic associated method (`MethodTemplate`, keyed
     /// `(type_fq, template)`) at concrete type arguments `args`: the owner's,
     /// then the method's own. `template` is the method's name for one written
-    /// for every instantiation, and its [`ConcreteNames::specialization`] for
+    /// for every instantiation, and its [`method_specialization`] for
     /// one written for a single instantiation (which has only its own type
     /// parameters left).
-    Method { type_fq: Path, template: String, args: Vec<Type>, mangled: String },
+    Method { type_fq: Path, template: String, args: Vec<Type>, mangled: SymRef },
     /// A `BlanketImpl` at one concrete `target` type — the whole `impl`,
     /// since a blanket's methods are only ever wanted together.
     Blanket { trait_path: Path, target: Type },
@@ -537,8 +539,7 @@ struct StructOptions {
 /// The synthetic `TopLevel::Module` path under which `check_form` bundles
 /// monomorphized specializations together with the form that requested them.
 /// Contains a space, which [`crate::read::Reader`] treats as a delimiter — so
-/// no user-written `module` form can ever collide with it (see
-/// [`ConcreteNames::specialization`] for the same trick on function names).
+/// no user-written `module` form can ever collide with it.
 pub const MONO_BUNDLE_MODULE: &str = "<monomorph specializations>";
 
 /// Upper bound on specializations generated while draining one top-level
@@ -1031,7 +1032,7 @@ pub struct Checker {
     /// fully-qualified path — see [`FnTemplate`].
     generic_fn_templates: HashMap<Path, FnTemplate>,
     /// Every generic method's retained template, keyed by `(owner type
-    /// path, method name)` — the [`ConcreteNames::specialization`] for a method written
+    /// path, method name)` — the [`method_specialization`]'s name for a method written
     /// for one instantiation of its type. See [`MethodTemplate`].
     generic_method_templates: HashMap<(Path, String), MethodTemplate>,
     /// Instantiations already requested *during the current top-level form* —
@@ -2749,10 +2750,8 @@ impl Checker {
         };
         let (af, inst) = self.select_method(def, name, receiver, None)?;
         // A method written for one instantiation has its own name there.
-        let template = match &inst {
-            Some(args) => ConcreteNames::specialization(name, args),
-            None => name.to_string(),
-        };
+        let template_sym = written_member(type_fq, name, inst.as_deref());
+        let template = template_sym.name().to_string();
         let ty = Type::Fn(af.sig.params.clone(), af.sig.rest.clone().map(Box::new), Box::new(af.sig.ret.clone()));
         // A method written for one instantiation (`(impl Box<int> ...)`)
         // mentions none of the owner's parameters, so it has one type, like a
@@ -2763,7 +2762,7 @@ impl Checker {
             let ret = af.sig.ret.clone();
             // Called through a function value, this method still builds the box.
             self.request_print_object(&ret);
-            let node = Node::MethodRef { owner: type_fq.clone(), method: template.into(), params, ret };
+            let node = Node::MethodRef { owner: type_fq.clone(), method: template_sym, params, ret };
             return Ok(Checked::of(node, ty));
         }
         let not_here = || {
@@ -2796,7 +2795,7 @@ impl Checker {
         };
         // Called through a function value, this method still builds the box.
         self.request_print_object(&ret);
-        let node = Node::MethodRef { owner: type_fq.clone(), method: mangled.into(), params, ret };
+        let node = Node::MethodRef { owner: type_fq.clone(), method: mangled, params, ret };
         Ok(Checked::of(node, resolved_ty))
     }
 
@@ -3648,7 +3647,7 @@ impl Checker {
     /// [`Self::drain_specializations`], because this runs inside expression
     /// checking (`&self`) which cannot re-enter definition checking.
     fn request_fn_specialization(&self, base: &Path, args: Vec<Type>) -> Path {
-        let mangled = Path::from_segments(ConcreteNames::specialized_path(&base.segments(), &args));
+        let mangled = fn_specialization(base, &args);
         let mut memo = self.spec_memo.borrow_mut();
         if memo.insert((mangled.clone(), None)) {
             self.spec_pending.borrow_mut().push(SpecRequest::Fn {
@@ -3715,15 +3714,15 @@ impl Checker {
         })
     }
 
-    fn request_method_specialization(&self, type_fq: &Path, template: &str, base: &str, args: Vec<Type>) -> String {
-        let mangled = ConcreteNames::specialization(base, &args);
+    fn request_method_specialization(&self, type_fq: &Path, template: &str, base: &str, args: Vec<Type>) -> SymRef {
+        let mangled = method_specialization(type_fq, base, &args);
         let mut memo = self.spec_memo.borrow_mut();
-        if memo.insert((type_fq.clone(), Some(mangled.clone()))) {
+        if memo.insert((type_fq.clone(), Some(mangled.name().to_string()))) {
             self.spec_pending.borrow_mut().push(SpecRequest::Method {
                 type_fq: type_fq.clone(),
                 template: template.to_string(),
                 args,
-                mangled: mangled.clone(),
+                mangled,
             });
         }
         mangled
@@ -3746,7 +3745,7 @@ impl Checker {
             if out.len() >= SPECIALIZATION_BUDGET {
                 let last = match &req {
                     SpecRequest::Fn { mangled, .. } => mangled.to_string(),
-                    SpecRequest::Method { type_fq, mangled, .. } => format!("{}::{}", type_fq, mangled),
+                    SpecRequest::Method { type_fq, mangled, .. } => format!("{}::{}", type_fq, mangled.name()),
                     SpecRequest::Blanket { trait_path, target } => {
                         format!("impl {} {}", trait_path, ConcreteNames::type_key(target))
                     }
@@ -3898,12 +3897,12 @@ impl Checker {
                     .chain(own_vars.into_iter().zip(args[owner_n..].iter().cloned()))
                     .collect();
                 let (saved_ns, saved_loops, saved_bindings) = self.enter_specialization(ns, bindings);
-                let result = self.specialize_method_form(heap, interp, &parts, mangled);
+                let result = self.specialize_method_form(heap, interp, &parts, *mangled);
                 self.exit_specialization(saved_ns, saved_loops, saved_bindings);
                 result
             }
-            MethodTemplate::Getter { index } => self.synthesize_accessor(heap, type_fq, args, index, mangled, true),
-            MethodTemplate::Setter { index } => self.synthesize_accessor(heap, type_fq, args, index, mangled, false),
+            MethodTemplate::Getter { index } => self.synthesize_accessor(heap, type_fq, args, index, *mangled, true),
+            MethodTemplate::Setter { index } => self.synthesize_accessor(heap, type_fq, args, index, *mangled, false),
         }
     }
 
@@ -3912,7 +3911,7 @@ impl Checker {
         heap: &mut Heap,
         interp: &dyn MacroExpander,
         parts: &[Value],
-        mangled: &str,
+        mangled: SymRef,
     ) -> Result<TopLevelForm, Error> {
         let MethodSig { method, instance, self_name, recv_ty, type_fq, params, ret, body_start, .. } =
             self.parse_defmethod_sig(heap, parts, &[])?;
@@ -3946,7 +3945,7 @@ impl Checker {
         type_fq: &Path,
         args: &[Type],
         index: usize,
-        mangled: &str,
+        mangled: SymRef,
         getter: bool,
     ) -> Result<TopLevelForm, Error> {
         let def = self.info.reg.type_def(type_fq).expect("an accessor template implies the type exists");
@@ -4216,6 +4215,7 @@ impl Checker {
             // The trait head is a trait, never a type variable; only the
             // associated-type pins can still be open.
             Type::Dyn(_, pins) => pins.iter().any(|p| self.type_is_open(p)),
+            Type::PtrTo(t) => self.type_is_open(t),
             _ => false,
         }
     }
@@ -6118,7 +6118,7 @@ impl Checker {
         // `HashTable::keys`) is a construction site with no `construct` node,
         // so the printer's specialization has to be asked for here too.
         self.request_print_object(&ty);
-        let node = Node::Assoc { owner: type_fq.clone(), method: name.into(), instance: true, ret: ty.clone(), args: typed };
+        let node = Node::Assoc { owner: type_fq.clone(), method: name, instance: true, ret: ty.clone(), args: typed };
         Ok(Checked::of(node, ty))
     }
 
@@ -6144,7 +6144,7 @@ impl Checker {
         for (aname, ty) in &b.assoc {
             items.push(vec![
                 crate::owned_form::OwnedForm::Keyword("type".into()),
-                crate::owned_form::OwnedForm::Sym(aname.clone(), typelisp_mem::symbols::ns_path(ns)),
+                crate::owned_form::OwnedForm::Sym(crate::owned_form::OwnedSym::Named(aname.clone(), typelisp_mem::symbols::ns_path(ns))),
                 ty.clone(),
             ]);
         }
@@ -6698,18 +6698,18 @@ impl Checker {
     /// `dyn_vtable_slots`) pull it in. An instantiation's own `impl` is not
     /// skipped: it was checked, and has code, under that instantiation's
     /// name.
-    fn dyn_impl_targets(&self, trait_path: &Path, method: &str) -> Vec<(Path, String)> {
+    fn dyn_impl_targets(&self, trait_path: &Path, method: &str) -> Vec<(Path, SymRef)> {
         let mut out = Vec::new();
         for ty in self.info.reg.trait_impls(trait_path) {
             let Some(def) = self.info.reg.type_def(&ty) else { continue };
             if def.params.is_empty() && def.impls.contains(trait_path) && def.assoc.contains_key(method) {
-                out.push((ty.clone(), method.to_string()));
+                out.push((ty.clone(), written_member(&ty, method, None)));
             }
             // An instantiation's own `impl` has code already, under that
             // instantiation's name.
             for i in def.insts.values() {
                 if i.impls.contains(trait_path) && i.assoc.contains_key(method) {
-                    out.push((ty.clone(), ConcreteNames::specialization(method, &i.args)));
+                    out.push((ty.clone(), written_member(&ty, method, Some(&i.args))));
                 }
             }
         }
@@ -6826,8 +6826,8 @@ impl Checker {
         &self,
         trait_path: &Path,
         order: &[String],
-        slots: &[(Path, String)],
-    ) -> Vec<(Path, Vec<(Path, String)>)> {
+        slots: &[(Path, SymRef)],
+    ) -> Vec<(Path, Vec<(Path, SymRef)>)> {
         let mut out = Vec::new();
         for sup in self.supertrait_closure(trait_path) {
             let Some(sdef) = self.info.reg.trait_def(&sup) else { continue };
@@ -7130,7 +7130,7 @@ impl Checker {
         concrete: &Type,
         trait_path: &Path,
         pins: &[Type],
-    ) -> Result<Result<Vec<(Path, String)>, NotDyn>, Error> {
+    ) -> Result<Result<Vec<(Path, SymRef)>, NotDyn>, Error> {
         self.dyn_assoc_subst(trait_path, pins)?;
         let tdef = self.check_object_safe(trait_path)?;
         let Some(type_fq) = nominal_path(concrete) else {
@@ -7218,7 +7218,7 @@ impl Checker {
             // body is only code-generated once specialized, so the slot must
             // name the specialization — the same rewrite `check_assoc_call`
             // does for a static call.
-            let mut name = m.clone();
+            let mut name = typelisp_mem::symbols::intern(m);
             if !def.params.is_empty()
                 && self.generic_method_templates.contains_key(&(type_fq.clone(), m.clone()))
             {
@@ -7582,10 +7582,8 @@ impl Checker {
         // the method has at `box<int>` whichever `impl` wrote it. So the same
         // method may not also be written for every instantiation.
         let inst_args = self.written_instantiation(&recv_ty);
-        let def_name = match &inst_args {
-            Some(args) => ConcreteNames::specialization(&method, args),
-            None => method.clone(),
-        };
+        let def_sym = written_member(&type_fq, &method, inst_args.as_deref());
+        let def_name = def_sym.name().to_string();
         if let Some(def) = self.info.reg.type_def(&type_fq) {
             if inst_args.is_some() && def.assoc.contains_key(&method) {
                 return Err(Error::TypeError(format!(
@@ -7822,7 +7820,7 @@ impl Checker {
         }
         all.extend(params);
         let lowered = self.lowered_all(heap, &body)?;
-        self.info.method_definition_form(heap, &type_fq, &def_name, instance, &type_params, &all, &ret, &lowered)
+        self.info.method_definition_form(heap, &type_fq, def_sym, instance, &type_params, &all, &ret, &lowered)
     }
 
     /// Parses a `defmethod` form's name, receiver, parameters, and return
@@ -8114,7 +8112,7 @@ impl Checker {
                 self.info.method_definition_form(
                     &mut s,
                     &type_fq,
-                    field_name,
+                    typelisp_mem::symbols::intern(field_name),
                     true,
                     &type_params,
                     &[("self".to_string(), recv_ty.clone())],
@@ -8151,7 +8149,7 @@ impl Checker {
                 self.info.method_definition_form(
                     &mut s,
                     &type_fq,
-                    &setter_name,
+                    typelisp_mem::symbols::intern(&setter_name),
                     true,
                     &type_params,
                     &[("self".to_string(), recv_ty.clone()), ("value".to_string(), field_ty.clone())],
@@ -9692,7 +9690,7 @@ impl Checker {
                         self.request_print_object(&Type::Rational);
                         let node = Node::Assoc {
                             owner: Path::root("ratio"),
-                            method: "ratio->rational".into(),
+                            method: typelisp_mem::symbols::intern("ratio->rational"),
                             instance: true,
                             ret: Type::Rational,
                             args: vec![typed],
@@ -10885,20 +10883,19 @@ impl Checker {
     fn written_instantiation(&self, ty: &Type) -> Option<Vec<Type>> {
         let Type::Named(n, args) = ty else { return None };
         let def = self.info.reg.type_def(n)?;
-        let is_var = |t: &Type| matches!(t, Type::Var(_));
-        (!def.params.is_empty() && args.len() == def.params.len() && !args.iter().any(is_var)).then(|| args.clone())
+        (!def.params.is_empty() && args.len() == def.params.len() && !args.iter().any(|t| self.type_is_open(t))).then(|| args.clone())
     }
 
     /// The name `method` has when written for the type `ty` itself: its own
-    /// name for a type without parameters, its [`ConcreteNames::specialization`]
-    /// at `ty`'s arguments for one instantiation of a generic type. What a
+    /// name for a type without parameters, its [`method_specialization`] at
+    /// `ty`'s arguments for one instantiation of a generic type. What a
     /// blanket `impl` materialized at `ty` registers it under, so a call or a
-    /// vtable slot naming it before the materialization runs spells it the
+    /// vtable slot naming it before the materialization runs names it the
     /// same way.
-    fn name_written_for(&self, ty: &Type, method: &str) -> String {
-        match self.written_instantiation(ty) {
-            Some(args) => ConcreteNames::specialization(method, &args),
-            None => method.to_string(),
+    fn name_written_for(&self, ty: &Type, method: &str) -> SymRef {
+        match (ty, self.written_instantiation(ty)) {
+            (Type::Named(type_fq, _), Some(args)) => method_specialization(type_fq, method, &args),
+            _ => typelisp_mem::symbols::intern(method),
         }
     }
 
@@ -11105,7 +11102,7 @@ impl Checker {
         // specialization drain.
         if let Some(what) = self.validate_where_bounds(&format!("{}::{}", type_fq, method), &af.sig.bounds, &subst, &env.bounds) {
             let ty = subst_apply(&af.sig.ret, &subst);
-            let node = Node::Assoc { owner: type_fq.clone(), method: method.into(), instance, ret: ty.clone(), args: typed };
+            let node = Node::Assoc { owner: type_fq.clone(), method: typelisp_mem::symbols::intern(method), instance, ret: ty.clone(), args: typed };
             return Ok(disagreeing(Checked::of(node, ty.clone()), what, ty));
         }
         // Monomorphization, method side: a call on a generic owner whose
@@ -11119,11 +11116,8 @@ impl Checker {
         // A method written for one instantiation has its own name there
         // (`twice <int>`), and is a template only through its own type
         // parameters.
-        let template = match &inst {
-            Some(args) => ConcreteNames::specialization(method, args),
-            None => method.to_string(),
-        };
-        let mut method_name = template.clone();
+        let mut method_name = written_member(type_fq, method, inst.as_deref());
+        let template = method_name.name().to_string();
         if (!def.params.is_empty() || !af.sig.type_params.is_empty())
             && self.generic_method_templates.contains_key(&(type_fq.clone(), template.clone()))
         {
@@ -11138,7 +11132,7 @@ impl Checker {
         // `HashTable::keys`) is a construction site with no `construct` node,
         // so the printer's specialization has to be asked for here too.
         self.request_print_object(&ty);
-        let node = Node::Assoc { owner: type_fq.clone(), method: method_name.into(), instance, ret: ty.clone(), args: typed };
+        let node = Node::Assoc { owner: type_fq.clone(), method: method_name, instance, ret: ty.clone(), args: typed };
         Ok(Checked::of(node, ty))
     }
 
@@ -11790,17 +11784,17 @@ impl Checker {
     /// The one body a written `Type::member` names for a tool that wants one
     /// (`compile`, `trace`, `documentation`, `ed`): the method's own name when
     /// it is written for every instantiation, the instantiation's name
-    /// ([`ConcreteNames::specialization`]) when only one instantiation wrote
-    /// it. Several instantiations writing it need the name to say which, as
+    /// ([`method_specialization`]) when only one instantiation wrote it.
+    /// Several instantiations writing it need the name to say which, as
     /// `Type<args>::member` ([`Self::instantiated_member`]).
-    fn member_body_name(&self, type_fq: &Path, member: &str, who: &str) -> Result<String, Error> {
+    fn member_body_name(&self, type_fq: &Path, member: &str, who: &str) -> Result<SymRef, Error> {
         let def = self.info.reg.type_def(type_fq).expect("the resolution found the member on this type");
         if def.assoc.contains_key(member) {
-            return Ok(member.to_string());
+            return Ok(written_member(type_fq, member, None));
         }
         let owners: Vec<&InstImpls> = def.insts.values().filter(|i| i.assoc.contains_key(member)).collect();
         match owners.as_slice() {
-            [one] => Ok(ConcreteNames::specialization(member, &one.args)),
+            [one] => Ok(written_member(type_fq, member, Some(&one.args))),
             many => {
                 let mut written: Vec<String> = many
                     .iter()
@@ -11822,7 +11816,7 @@ impl Checker {
     /// A written `Type<args>::member` — a method one instantiation's own
     /// `impl` wrote, named by that instantiation: the type and the method's
     /// name there.
-    fn instantiated_member(&self, ty: &Type, member: &str, who: &str) -> Result<(Path, String), Error> {
+    fn instantiated_member(&self, ty: &Type, member: &str, who: &str) -> Result<(Path, SymRef), Error> {
         let ty = self.canon(ty);
         let (type_fq, args) = match &ty {
             Type::Named(type_fq, args) => (type_fq, args),
@@ -11833,7 +11827,7 @@ impl Checker {
             .type_def(type_fq)
             .ok_or_else(|| Error::TypeError(format!("{}: no type `{}` is visible from here", who, type_fq)))?;
         if def.insts.get(&ConcreteNames::type_args(args)).is_some_and(|i| i.assoc.contains_key(member)) {
-            return Ok((type_fq.clone(), ConcreteNames::specialization(member, args)));
+            return Ok((type_fq.clone(), written_member(type_fq, member, Some(args))));
         }
         Err(Error::TypeError(if def.assoc.contains_key(member) {
             format!(
@@ -11881,8 +11875,8 @@ impl Checker {
         // an ordinary `Sexpr -> Sexpr` function — the interpreter keeps it in
         // the same `fns` table a `defun` goes in — so a `CompileTarget::Fn`
         // reaches it.
-        let method_target = |type_fq: Path, method: String| {
-            if self.generic_method_templates.contains_key(&(type_fq.clone(), method.clone())) {
+        let method_target = |type_fq: Path, method: SymRef| {
+            if self.generic_method_templates.contains_key(&(type_fq.clone(), method.name().to_string())) {
                 return Err(generic_err());
             }
             Ok(CompileTarget::Method(type_fq, method))
@@ -12090,7 +12084,7 @@ impl Checker {
         let written = match written_name {
             WrittenName::Instantiated(ty, member) => {
                 let (type_fq, method) = self.instantiated_member(ty, member, who)?;
-                return Ok(DefRef::Method(type_fq, method));
+                return Ok(DefRef::Method(type_fq, method.name().to_string()));
             }
             WrittenName::Bare(sym) => Written::Bare(*sym),
             WrittenName::Path(target, _) => Written::Path(*target),
@@ -12101,7 +12095,7 @@ impl Checker {
             Some(Resolved::Macro(path, _)) => return Ok(DefRef::Macro(path)),
             Some(Resolved::Member(type_fq, member)) => {
                 let method = self.member_body_name(&type_fq, &member, who)?;
-                return Ok(DefRef::Method(type_fq, method));
+                return Ok(DefRef::Method(type_fq, method.name().to_string()));
             }
             Some(Resolved::Ctor(..)) => {
                 return Err(Error::TypeError(format!(
@@ -14359,10 +14353,10 @@ impl Checker {
                 (crate::CompileTarget::Fn(path.clone()), args.first())
             }
             Node::Assoc { owner, method, args, .. } => {
-                if self.info.reg.type_def(owner).and_then(|def| def.assoc.get(&**method)).is_some_and(|af| af.builtin) {
+                if self.info.reg.type_def(owner).and_then(|def| def.assoc.get(method.name())).is_some_and(|af| af.builtin) {
                     return Err(not_a_definition());
                 }
-                (crate::CompileTarget::Method(owner.clone(), method.to_string()), args.first())
+                (crate::CompileTarget::Method(owner.clone(), *method), args.first())
             }
             _ => return Err(not_a_definition()),
         };
@@ -16827,12 +16821,36 @@ fn called_width(ty: &Type) -> Type {
 /// `((TYPE SYM)...)` — a vtable's contents, or the implementation targets a
 /// `dyn-call` could reach: each entry the owning type's path and the method
 /// name.
-pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, String)]) -> Result<Value, Error> {
+/// The specialization of the generic function `base` at `args`.
+fn fn_specialization(base: &Path, args: &[Type]) -> Path {
+    let ids: Vec<TypeId> = args.iter().map(crate::type_key::type_id).collect();
+    Path::of_symbol(base.ns(), specialization(Generic::Fn(base.ns(), base.name_symbol()), &ids))
+}
+
+/// The name `type_fq`'s `method` has as written for the instantiation
+/// `inst`, `None` for every instantiation: the name itself, or its
+/// [`method_specialization`] at those arguments.
+fn written_member(type_fq: &Path, method: &str, inst: Option<&[Type]>) -> SymRef {
+    match inst {
+        Some(args) => method_specialization(type_fq, method, args),
+        None => typelisp_mem::symbols::intern(method),
+    }
+}
+
+/// The name of `type_fq`'s method `method` at the type arguments `args`:
+/// the owner's, then the method's own. What a method written for one
+/// instantiation is named too, so a call names it the same way whichever
+/// `impl` wrote it.
+fn method_specialization(type_fq: &Path, method: &str, args: &[Type]) -> SymRef {
+    let ids: Vec<TypeId> = args.iter().map(crate::type_key::type_id).collect();
+    specialization(Generic::Method(type_fq.ns(), type_fq.name_symbol(), typelisp_mem::symbols::intern(method)), &ids)
+}
+
+pub(super) fn vtable_form(heap: &mut Heap, slots: &[(Path, SymRef)]) -> Result<Value, Error> {
     let mut f = Items::new(heap);
     for (ty, method) in slots {
         let tp = core::path_form(f.heap(), ty);
-        let m = f.heap().intern_symbol(method);
-        let one = core::list(f.heap(), &[tp, m])?;
+        let one = core::list(f.heap(), &[tp, Value::Symbol(*method)])?;
         f.push(one);
     }
     f.finish_list()

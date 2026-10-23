@@ -19,7 +19,9 @@
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use typelisp_mem::TypeId;
+use typelisp_mem::specialization::{specialization, specialized, Generic};
+use typelisp_mem::symbols::{intern_at_home_path, ns_of, ns_path};
+use typelisp_mem::{SymRef, TypeId, TypeShape};
 
 use crate::{type_key, Error, Heap, Loc, Value};
 
@@ -44,19 +46,17 @@ pub enum OwnedForm {
     Int(i64),
     Char(char),
     Bool(bool),
-    /// An interned symbol, by name and the segments of its home module from
-    /// the root (re-interned in that module on load, never resolved again:
-    /// the home is where the symbol already was).
-    Sym(String, Vec<String>),
+    /// A symbol other than a keyword.
+    Sym(OwnedSym),
     /// A keyword, by name — without the colon that spells it (re-interned in
     /// the keyword module on load). Its own variant because being a keyword
     /// is where a symbol belongs, which a name does not say.
     Keyword(String),
     /// A string, by content (re-allocated on load).
     Str(String),
-    /// A `::`-path, by its segments' symbols, each as [`Self::Sym`] keeps
-    /// one: the path stays the symbols it was read as.
-    Path(Vec<(String, Vec<String>)>),
+    /// A `::`-path, by its segments' symbols: the path stays the symbols it
+    /// was read as.
+    Path(Vec<OwnedSym>),
     /// One variant per float width. Not one `Float(f64)` with the width left
     /// to the reader: a dump is a round trip, and a round trip that widens an
     /// `f32` gives back a value whose box no longer matches its type.
@@ -90,6 +90,115 @@ pub enum OwnedForm {
     /// `#NA(..)`: the `Sexpr` array variant's box, by its dimensions and its
     /// elements in row-major order.
     Array { dims: Vec<i64>, data: Vec<OwnedForm> },
+}
+
+/// A symbol written down, so that reading it back gives the same symbol.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum OwnedSym {
+    /// By its name and the segments of its home module from the root
+    /// (re-interned in that module on load, never resolved again: the home
+    /// is where the symbol already was).
+    Named(String, Vec<String>),
+    /// A specialization, by what it is of and at which types: nothing reads
+    /// as it, so its name would read back as some other symbol.
+    Specialization(Box<OwnedGeneric>, Vec<OwnedType>),
+}
+
+/// A [`typelisp_mem::specialization::Generic`] written down.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum OwnedGeneric {
+    Fn(Vec<String>, OwnedSym),
+    Method(Vec<String>, OwnedSym, OwnedSym),
+}
+
+/// A type's [`TypeShape`] written down, its modules as their segments from
+/// the root and its symbols as [`OwnedSym`]s.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum OwnedType {
+    Named(Vec<String>, OwnedSym, Vec<OwnedType>),
+    Dyn(Vec<String>, OwnedSym, Vec<OwnedType>),
+    Fn(Vec<OwnedType>, Option<Box<OwnedType>>, Box<OwnedType>),
+    Ptr(Box<OwnedType>),
+    CStruct(Vec<String>, OwnedSym),
+    Unit,
+    Never,
+    Param(u32),
+}
+
+impl OwnedSym {
+    pub fn of(sym: SymRef) -> OwnedSym {
+        match specialized(sym) {
+            Some((generic, args)) => {
+                let generic = match generic {
+                    Generic::Fn(ns, name) => OwnedGeneric::Fn(ns_path(ns), OwnedSym::of(name)),
+                    Generic::Method(ns, ty, method) => OwnedGeneric::Method(ns_path(ns), OwnedSym::of(ty), OwnedSym::of(method)),
+                };
+                OwnedSym::Specialization(Box::new(generic), args.into_iter().map(OwnedType::of).collect())
+            }
+            None => OwnedSym::Named(sym.name().to_string(), ns_path(sym.home())),
+        }
+    }
+
+    pub fn symbol(&self) -> SymRef {
+        match self {
+            OwnedSym::Named(name, home) => intern_at_home_path(home, name),
+            OwnedSym::Specialization(generic, args) => {
+                let generic = match &**generic {
+                    OwnedGeneric::Fn(ns, name) => Generic::Fn(ns_of(ns), name.symbol()),
+                    OwnedGeneric::Method(ns, ty, method) => Generic::Method(ns_of(ns), ty.symbol(), method.symbol()),
+                };
+                specialization(generic, &args.iter().map(OwnedType::type_id).collect::<Vec<_>>())
+            }
+        }
+    }
+}
+
+impl OwnedType {
+    pub fn of(ty: TypeId) -> OwnedType {
+        let all = |ids: Vec<TypeId>| ids.into_iter().map(OwnedType::of).collect();
+        match typelisp_mem::type_shape(ty) {
+            TypeShape::Named(ns, sym, args) => OwnedType::Named(ns_path(ns), OwnedSym::of(sym), all(args)),
+            TypeShape::Dyn(ns, sym, pins) => OwnedType::Dyn(ns_path(ns), OwnedSym::of(sym), all(pins)),
+            TypeShape::Fn(params, rest, ret) => {
+                OwnedType::Fn(all(params), rest.map(|r| Box::new(OwnedType::of(r))), Box::new(OwnedType::of(ret)))
+            }
+            TypeShape::Ptr(pointee) => OwnedType::Ptr(Box::new(OwnedType::of(pointee))),
+            TypeShape::CStruct(ns, sym) => OwnedType::CStruct(ns_path(ns), OwnedSym::of(sym)),
+            TypeShape::Unit => OwnedType::Unit,
+            TypeShape::Never => OwnedType::Never,
+            TypeShape::Param(n) => OwnedType::Param(n),
+        }
+    }
+
+    pub fn type_id(&self) -> TypeId {
+        let all = |tys: &[OwnedType]| tys.iter().map(OwnedType::type_id).collect();
+        // type-identity-ok: the shape the dump wrote from a TypeId, no path spelled
+        typelisp_mem::intern_type(match self {
+            OwnedType::Named(ns, sym, args) => TypeShape::Named(ns_of(ns), sym.symbol(), all(args)),
+            OwnedType::Dyn(ns, sym, pins) => TypeShape::Dyn(ns_of(ns), sym.symbol(), all(pins)),
+            OwnedType::Fn(params, rest, ret) => TypeShape::Fn(all(params), rest.as_ref().map(|r| r.type_id()), ret.type_id()),
+            OwnedType::Ptr(pointee) => TypeShape::Ptr(pointee.type_id()),
+            OwnedType::CStruct(ns, sym) => TypeShape::CStruct(ns_of(ns), sym.symbol()),
+            OwnedType::Unit => TypeShape::Unit,
+            OwnedType::Never => TypeShape::Never,
+            OwnedType::Param(n) => TypeShape::Param(*n),
+        })
+    }
+}
+
+/// A [`SymRef`] field written as its [`OwnedSym`]. For
+/// `#[serde(with = "sym_serde")]`.
+pub mod sym_serde {
+    use super::{OwnedSym, SymRef};
+
+    pub fn serialize<S: serde::Serializer>(sym: &SymRef, s: S) -> Result<S::Ok, S::Error> {
+        serde::Serialize::serialize(&OwnedSym::of(*sym), s)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<SymRef, D::Error> {
+        let sym: OwnedSym = serde::Deserialize::deserialize(d)?;
+        Ok(sym.symbol())
+    }
 }
 
 /// One cell of a flattened cons spine ([`OwnedForm::Cons`]): the element in the
@@ -192,14 +301,9 @@ pub fn value_to_owned(heap: &Heap, v: Value) -> Result<OwnedForm, Error> {
         Value::Char(c) => OwnedForm::Char(c),
         Value::Bool(b) => OwnedForm::Bool(b),
         Value::Symbol(id) if id.is_keyword() => OwnedForm::Keyword(id.name().to_string()),
-        Value::Symbol(id) => OwnedForm::Sym(id.name().to_string(), typelisp_mem::symbols::ns_path(id.home())),
+        Value::Symbol(id) => OwnedForm::Sym(OwnedSym::of(id)),
         Value::Str(id) => OwnedForm::Str(heap.string(id).to_string()),
-        Value::Path(id) => OwnedForm::Path(
-            heap.path_segments(id)
-                .iter()
-                .map(|s| (s.name().to_string(), typelisp_mem::symbols::ns_path(s.home())))
-                .collect(),
-        ),
+        Value::Path(id) => OwnedForm::Path(heap.path_segments(id).iter().map(|s| OwnedSym::of(*s)).collect()),
         Value::Cons(_) => {
             // The spine iteratively; only the elements recurse.
             let mut cells = Vec::new();
@@ -270,13 +374,13 @@ pub fn owned_to_value(heap: &mut Heap, f: &OwnedForm) -> Result<Value, Error> {
         OwnedForm::Int(n) => Value::Int(*n),
         OwnedForm::Char(c) => Value::Char(*c),
         OwnedForm::Bool(b) => Value::Bool(*b),
-        OwnedForm::Sym(name, home) => Value::Symbol(typelisp_mem::symbols::intern_at_home_path(home, name)),
+        OwnedForm::Sym(sym) => Value::Symbol(sym.symbol()),
         OwnedForm::Keyword(name) => heap.intern_keyword(name),
         OwnedForm::Str(s) => heap.alloc_string(s.clone()),
         OwnedForm::Path(segs) => {
             // Symbols are permanent (never collected), so the intermediate
             // `SymRef`s need no rooting while later segments intern.
-            let ids: Vec<_> = segs.iter().map(|(name, home)| typelisp_mem::symbols::intern_at_home_path(home, name)).collect();
+            let ids: Vec<_> = segs.iter().map(OwnedSym::symbol).collect();
             heap.intern_path(&ids)
         }
         OwnedForm::F32(x) => heap.alloc_f32(*x),

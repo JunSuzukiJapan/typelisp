@@ -444,9 +444,6 @@ impl JitCode {
             end_unwind_table(module)?;
         }
         let object = machine.write_to_memory_buffer(module, FileType::Object).map_err(|e| e.to_string())?;
-        for warning in super::codegen_prep::take_frame_warnings() {
-            eprintln!("{}", warning);
-        }
         let defined: Vec<String> = module
             .get_functions()
             .filter(|f| f.count_basic_blocks() > 0)

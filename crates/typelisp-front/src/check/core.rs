@@ -30,7 +30,7 @@
 //! emits core IR, the evaluator and bridge that consume it, and the fasl that
 //! restores it.
 
-use typelisp_mem::{wk, Error, Heap, Loc, RootScope, Value};
+use typelisp_mem::{wk, Error, Heap, Loc, RootScope, SymRef, Value};
 
 use crate::types::Type;
 
@@ -75,7 +75,7 @@ pub enum Node {
     FnRef { path: crate::Path, params: Vec<Type> },
     /// A method of `owner` reified as a value: `method` is the name it is
     /// registered under (a specialization's own name for a generic one).
-    MethodRef { owner: crate::Path, method: Box<str>, params: Vec<Type>, ret: Type },
+    MethodRef { owner: crate::Path, method: SymRef, params: Vec<Type>, ret: Type },
     /// A call of the free function at `path`.
     Call { path: crate::Path, args: Vec<Checked> },
     /// A value of variant `variant` of `owner<targs>`; `field_tys` are the
@@ -90,7 +90,7 @@ pub enum Node {
     /// A call of the method `method` of `owner` (`args[0]` is the receiver
     /// when `instance`), returning `ret`. A builtin's call over literal
     /// arguments lowers to its value.
-    Assoc { owner: crate::Path, method: Box<str>, instance: bool, ret: Type, args: Vec<Checked> },
+    Assoc { owner: crate::Path, method: SymRef, instance: bool, ret: Type, args: Vec<Checked> },
     /// A trait object re-made around the table of the trait `to`.
     DynUpcast { to: crate::Path, value: Box<Checked> },
     /// The body of a generic function where `what` needs the type arguments:
@@ -100,13 +100,13 @@ pub enum Node {
     /// are the vtables.
     DynNew {
         trait_path: crate::Path,
-        slots: Vec<(crate::Path, String)>,
-        supers: Vec<(crate::Path, Vec<(crate::Path, String)>)>,
+        slots: Vec<(crate::Path, SymRef)>,
+        supers: Vec<(crate::Path, Vec<(crate::Path, SymRef)>)>,
         value: Box<Checked>,
     },
     /// A call through a trait object's vtable slot `slot`; `targets` are the
     /// bodies it may reach.
-    DynCall { trait_path: crate::Path, method: Box<str>, slot: usize, targets: Vec<(crate::Path, String)>, args: Vec<Checked> },
+    DynCall { trait_path: crate::Path, method: Box<str>, slot: usize, targets: Vec<(crate::Path, SymRef)>, args: Vec<Checked> },
     /// `binds` in scope for `body`, which runs in order; each binding is its
     /// name, its type and its value. With no bindings this is `progn`.
     Let { binds: Vec<(String, Type, Checked)>, body: Vec<Checked> },

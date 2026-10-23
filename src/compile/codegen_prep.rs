@@ -98,16 +98,16 @@ pub(crate) fn install_diagnostic_handler() {
 }
 
 /// The warnings for every function code generation has found a frame past
-/// [`FRAME_WARNING_BYTES`] in since the last call, named as the source names
-/// them.
-pub(crate) fn take_frame_warnings() -> Vec<String> {
+/// [`FRAME_WARNING_BYTES`] in since the last call, one of `targets` named as
+/// the source names it.
+pub(crate) fn take_frame_warnings(targets: &[crate::CompileTarget]) -> Vec<String> {
     let found = std::mem::take(&mut *FRAME_DIAGNOSTICS.lock().unwrap_or_else(|e| e.into_inner()));
-    found.iter().map(|text| frame_warning(text)).collect()
+    found.iter().map(|text| frame_warning(text, targets)).collect()
 }
 
 /// LLVM's "stack frame size (N) exceeds limit (L) in function 'SYMBOL'" as
 /// this compiler's own warning; LLVM's words whole when they are not that.
-fn frame_warning(text: &str) -> String {
+fn frame_warning(text: &str, targets: &[crate::CompileTarget]) -> String {
     let number_after = |key: &str| -> Option<&str> {
         let rest = &text[text.find(key)? + key.len()..];
         rest.split(')').next()
@@ -115,9 +115,10 @@ fn frame_warning(text: &str) -> String {
     let symbol = text.rsplit_once(" in function '").map(|(_, s)| s.trim_end_matches('\''));
     match (number_after("stack frame size ("), symbol) {
         (Some(size), Some(symbol)) => {
-            let name = typelisp_mem::ConcreteNames::link_name_of_symbol(symbol)
-                .map(|link| crate::CompileTarget::from_link_name(link).written_name())
-                .unwrap_or_else(|| symbol.to_string());
+            let name = targets
+                .iter()
+                .find(|t| crate::compile::symbols::target_symbol_name(t) == symbol)
+                .map_or_else(|| symbol.to_string(), crate::CompileTarget::written_name);
             format!(
                 "warning: compiled function `{}` needs a {}-byte stack frame (more than {}); \
                  a thread with less stack than that left overflows when it calls it",
@@ -530,14 +531,14 @@ mod tests {
     fn a_frame_past_the_limit_is_reported_by_its_written_name() {
         let _guard = COMPILE_LOCK.lock().unwrap();
         let module = llvm_context().create_module("frame_warning_test");
-        let big = typelisp_mem::ConcreteNames::symbol("demo::big");
-        let small = typelisp_mem::ConcreteNames::symbol("demo::small");
-        with_frame(&module, &big, (FRAME_WARNING_BYTES / 8 + 1000) as u32);
-        with_frame(&module, &small, 16);
-        take_frame_warnings();
+        let targets = [crate::CompileTarget::Fn(crate::Path::of(&["demo", "big"])), crate::CompileTarget::Fn(crate::Path::of(&["demo", "small"]))];
+        let [big, small] = &targets.each_ref().map(crate::compile::symbols::target_symbol_name);
+        with_frame(&module, big, (FRAME_WARNING_BYTES / 8 + 1000) as u32);
+        with_frame(&module, small, 16);
+        take_frame_warnings(&[]);
         prepare(&module).unwrap();
         host_machine().write_to_memory_buffer(&module, FileType::Object).unwrap();
-        let warnings = take_frame_warnings();
+        let warnings = take_frame_warnings(&targets);
         assert_eq!(warnings.len(), 1, "{:?}", warnings);
         assert!(warnings[0].starts_with("warning: compiled function `demo::big` needs a "), "{}", warnings[0]);
         assert!(warnings[0].contains(&format!("(more than {})", FRAME_WARNING_BYTES)), "{}", warnings[0]);

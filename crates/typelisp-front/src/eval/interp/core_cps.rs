@@ -1996,9 +1996,9 @@ impl Interp {
             }
             ArgsKind::Assoc => {
                 let type_name = path_field(heap, form, 0, "assoc")?;
-                let method = sym_field(heap, form, 1, "assoc")?;
-                let name = typelisp_mem::ConcreteNames::method_link(&type_name, &method);
-                let Some(f) = self.root.borrow().get_method(&type_name, &method) else {
+                let method = self.sym_field(heap, form, 1, "assoc")?;
+                let name = typelisp_mem::ConcreteNames::method_link(&type_name, method.name());
+                let Some(f) = self.root.borrow().get_method(&type_name, method.name()) else {
                     return Err(not_compilable(format!("`{}`", name), "is a built-in with no body to compile".to_string()));
                 };
                 let target = crate::CompileTarget::Method(type_name, method);
@@ -2102,7 +2102,7 @@ impl Interp {
                 heap.push_permanent_root(body);
                 let def = FnDef {
                     ffi: false,
-                    name: path.to_string(),
+                    target: crate::CompileTarget::Fn(path),
                     params: names,
                     body: forms,
                     rest: false,
@@ -2185,10 +2185,10 @@ impl Interp {
         // Two `Cell` loads on the path every call takes; the set membership is
         // tested only once one of them is armed.
         let stepping = self.stepping.get() && self.trace_depth.get() <= self.step_quiet_depth.get();
-        let watched = stepping || (self.trace_armed.get() && self.traced.borrow().contains(&f.name));
+        let watched = stepping || (self.trace_armed.get() && self.traced.borrow().contains(&f.target));
         let watch = if watched {
             let depth = self.trace_call_entry(heap, f, &argv, stepping)?;
-            Some(Frame::TracedCall { name: f.name.clone(), depth, ret: f.sig.as_ref().map(|s| s.1.clone()) })
+            Some(Frame::TracedCall { name: f.target.link_name(), depth, ret: f.sig.as_ref().map(|s| s.1.clone()) })
         } else if Self::enters_library(heap, call_form, f) {
             Some(Frame::LibraryCall)
         } else {
@@ -2631,10 +2631,10 @@ impl Interp {
         argv[0] = inner;
         // Visibility was settled where the value was boxed, so this is the
         // direct lookup, not `resolve_method`'s `home`-relative one.
-        let f = self.root.borrow().get_method(&target_type, &target_method);
+        let f = self.root.borrow().get_method(&target_type, target_method.name());
         match f {
             Some(f) => self.enter_fn(heap, form, &f, argv),
-            None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&target_type, &target_method))),
+            None => Err(EvalError::NoSuchFunction(typelisp_mem::ConcreteNames::method_link(&target_type, target_method.name()))),
         }
     }
 

@@ -139,7 +139,7 @@ fn worker_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option
         return Ok(None);
     }
     let snapshot = current();
-    let (address, abi, receiver) = match snapshot.defs.get(&crate::CompileTarget::Method(type_path.clone(), method)) {
+    let (address, abi, receiver) = match snapshot.defs.get(&crate::CompileTarget::Method(type_path, method)) {
         None => return Ok(None),
         Some(PrintMethod::Interpreted) => return Err(interpreted_off_main(&format!("print-object of `{}`", type_path))),
         Some(PrintMethod::Compiled { address, abi, receiver }) => (*address, *abi, receiver.clone()),
@@ -159,7 +159,7 @@ fn worker_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option
 /// `Interp::format_call`, from the snapshot.
 fn worker_format_call(heap: &mut Heap, name: &str, v: Value, colon: bool, at: bool) -> Result<String, String> {
     let snapshot = current();
-    let (address, abi, receiver) = match snapshot.defs.get(&crate::CompileTarget::from_link_name(name)) {
+    let (address, abi, receiver) = match snapshot.defs.iter().find(|(target, _)| target.link_name() == name).map(|(_, m)| m) {
         None => return Err(format!("format: ~/{}/ — no such definition", name)),
         Some(PrintMethod::Interpreted) => return Err(interpreted_off_main(&format!("`{}`, which a ~/name/ directive calls,", name))),
         Some(PrintMethod::Compiled { address, abi, receiver }) => (*address, *abi, receiver.clone()),
@@ -244,16 +244,11 @@ impl Interp {
         for (path, index, name) in self.field_name_descriptors() {
             snapshot.field_names.insert(((path.ns(), path.name_symbol()), index), name);
         }
-        let mut defs: Vec<(crate::CompileTarget, Rc<super::FnDef>)> = Vec::new();
-        let mut methods = Vec::new();
-        self.root.borrow().collect_methods(&[], &mut methods);
-        defs.extend(methods.into_iter().map(|(type_path, method, f)| (crate::CompileTarget::Method(type_path, method), f)));
-        let mut fns = Vec::new();
-        self.root.borrow().collect_fns(&[], &mut fns);
-        defs.extend(fns.into_iter().map(|(path, f)| (crate::CompileTarget::Fn(path), f)));
+        let mut defs = Vec::new();
+        self.root.borrow().collect_defs(&mut defs);
         let mut bodies = self.printer_bodies.borrow_mut();
-        for (target, f) in defs {
-            let print_object = matches!(target, crate::CompileTarget::Method(..)) && super::is_print_object_sig(&f);
+        for f in defs {
+            let print_object = matches!(f.target, crate::CompileTarget::Method(..)) && super::is_print_object_sig(&f);
             if !print_object && super::format_call_receiver_is_word(&f).is_none() {
                 continue;
             }
@@ -264,7 +259,7 @@ impl Interp {
                 }
                 _ => PrintMethod::Interpreted,
             };
-            snapshot.defs.insert(target, entry);
+            snapshot.defs.insert(f.target.clone(), entry);
         }
         for name in typelisp_print::runtime::PRINTER_GLOBALS {
             let path = Path::std(name);

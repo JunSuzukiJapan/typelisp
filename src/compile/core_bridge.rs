@@ -1516,7 +1516,7 @@ pub struct Targets {
     /// `(type, method)` pairs called as an instance/static method — including
     /// every vtable slot a `dyn-new` lays out and every implementation a
     /// `dyn-call` could dispatch to.
-    pub methods: Vec<(Path, String)>,
+    pub methods: Vec<(Path, SymRef)>,
     /// Globals read or assigned.
     pub globals: Vec<Path>,
     /// Trait objects boxed here: the emitted IR names a vtable by a *constant*
@@ -1532,8 +1532,8 @@ pub struct Targets {
 pub struct DynBoxSite {
     pub concrete: crate::TypeId,
     pub trait_path: Path,
-    pub slots: Vec<(Path, String)>,
-    pub supers: Vec<(Path, Vec<(Path, String)>)>,
+    pub slots: Vec<(Path, SymRef)>,
+    pub supers: Vec<(Path, Vec<(Path, SymRef)>)>,
 }
 
 /// Collect everything `body`'s forms depend on externally.
@@ -1579,7 +1579,7 @@ fn collect_into_here(heap: &Heap, form: Value, t: &mut Targets) -> Result<(), Er
         }
         // `(assoc PATH SYM ...)` / `(methodref PATH SYM ...)`.
         wk::ASSOC | wk::METHODREF => {
-            if let (Some(p), Some(m)) = (core::path_field(heap, form, 0), core::sym_name_field(heap, form, 1)) {
+            if let (Some(p), Some(Value::Symbol(m))) = (core::path_field(heap, form, 0), core::field(heap, form, 1)) {
                 push_unique(&mut t.methods, (p, m));
             }
         }
@@ -1638,7 +1638,7 @@ fn push_unique<T: PartialEq>(out: &mut Vec<T>, v: T) {
 }
 
 /// Field `i` as a vtable `((TYPE SYM)...)`.
-fn vtable_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, String)>, Error> {
+fn vtable_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, SymRef)>, Error> {
     let Some(list) = core::field(heap, form, i) else { return Ok(Vec::new()) };
     vtable_of(heap, list)
 }
@@ -1652,14 +1652,14 @@ fn vtable_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, String)>, 
 /// the only symptom was an AOT executable aborting on the empty slot — the
 /// abort `rt_vtable_slot` used to raise, now the driver's no-interpreter
 /// case.)
-fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, String)>, Error> {
+fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, SymRef)>, Error> {
     let mut out = Vec::new();
     for entry in heap.list_to_vec(list)? {
         let parts = heap.list_to_vec(entry)?;
         if let [ty, m] = parts.as_slice() {
             let Some(path) = core::path_value(heap, *ty) else { continue };
             if let Value::Symbol(id) = m {
-                out.push((path, heap.symbol_spelling(*id).to_string()));
+                out.push((path, *id));
             }
         }
     }
@@ -1668,7 +1668,7 @@ fn vtable_of(heap: &Heap, list: Value) -> Result<Vec<(Path, String)>, Error> {
 
 /// Field `i` as a supertrait table list `((TRAIT ((TYPE SYM)...))...)`.
 #[allow(clippy::type_complexity)]
-fn supers_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, Vec<(Path, String)>)>, Error> {
+fn supers_at(heap: &Heap, form: Value, i: usize) -> Result<Vec<(Path, Vec<(Path, SymRef)>)>, Error> {
     let Some(list) = core::field(heap, form, i) else { return Ok(Vec::new()) };
     let mut out = Vec::new();
     for entry in heap.list_to_vec(list)? {
@@ -1843,6 +1843,12 @@ fn sexpr_leaf(
 ///   (`(module m ...)`'s `'foo` compiled, compared against the same `'foo`
 ///   interpreted).
 fn sym_form(heap: &mut Heap, sym: SymRef) -> Result<Value, Error> {
+    if typelisp_mem::specialization::specialized(sym).is_some() {
+        return Err(Error::TypeError(format!(
+            "internal error: the specialization `{}` is quoted, and its name reads back as no symbol",
+            sym.name()
+        )));
+    }
     if sym.well_known() != typelisp_mem::NOT_WELL_KNOWN {
         return sexpr_construct(heap, SEXPR_SYM_WK, &[Value::Int(sym.well_known() as i64)]);
     }
@@ -3253,7 +3259,7 @@ mod tests {
         let definitions = Definitions::new();
         let globals = globals();
         let vtables: HashMap<(crate::TypeId, Path), u32> =
-            [((typelisp_front::type_key::type_key_id(&Path::root("point")), Path::root("shape")), 11u32)].into_iter().collect();
+            [((typelisp_front::type_key::type_key_id(&Path::root("point"), Vec::new()), Path::root("shape")), 11u32)].into_iter().collect();
         let trait_ids: HashMap<Path, u32> = [(Path::root("drawable"), 22u32)].into_iter().collect();
         let cx = Ctx::with_dyn_tables(
             &definitions,

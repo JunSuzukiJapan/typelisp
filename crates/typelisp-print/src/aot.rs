@@ -162,14 +162,8 @@ fn aot_print_object(heap: &mut Heap, v: Value, escape: bool) -> Result<Option<St
     if PRINTING.with(|p| p.borrow().contains(&v)) {
         return Ok(None);
     }
-    // Looked up by the display of the value's type, not its `TypeId`: the
-    // registration knows the method by its name, which spells the
-    // instantiation it is for (`ConcreteNames::value_key_for_method`).
-    let Some(addr) = ({
-        let Some(ty) = stored_type(heap, id) else { return Ok(None) };
-        let key = typelisp_mem::type_name(ty).to_string();
-        crate::shared::print_shared().print_object.read().get(&key).copied()
-    }) else {
+    let Some(ty) = stored_type(heap, id) else { return Ok(None) };
+    let Some(addr) = crate::shared::print_shared().print_object.read().get(&ty).copied() else {
         return Ok(None);
     };
     // SAFETY: `addr` came from `rt_print_object_method`, whose only caller is
@@ -331,22 +325,22 @@ pub unsafe extern "C" fn rt_print_field_name(args: *const i64, argc: u32) -> i64
     0
 }
 
-/// Registers one type's compiled `print-object`: `args` is `[key_ptr,
-/// key_len, fn_addr]`.
+/// Registers one type's compiled `print-object`: `args` is `[type,
+/// fn_addr]`.
 ///
 /// # Safety
 ///
-/// `args` must point to 3 valid `i64`s, the third being the address of a
+/// `args` must point to 2 valid `i64`s, the second being the address of a
 /// function compiled under the shared compiled-function ABI.
 #[no_mangle]
 pub unsafe extern "C" fn rt_print_object_method(args: *const i64, argc: u32) -> i64 {
-    if argc < 3 {
-        fatal("rt_print_object_method: expected 3 arguments");
+    if argc < 2 {
+        fatal("rt_print_object_method: expected 2 arguments");
     }
-    let key = static_str(args, 0, "rt_print_object_method");
-    let addr = *args.add(2) as usize;
+    let ty = type_arg(args, 0, "rt_print_object_method");
+    let addr = *args.add(1) as usize;
     install();
-    crate::shared::print_shared().print_object.write().insert(key.to_string(), addr);
+    crate::shared::print_shared().print_object.write().insert(ty, addr);
     0
 }
 

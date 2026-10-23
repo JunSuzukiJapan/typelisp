@@ -204,31 +204,29 @@ impl fmt::Debug for Path {
     }
 }
 
-/// Written out as its segments, the one form that means the same thing in
-/// another process.
+/// Written out as its module's segments and its name's symbol
+/// ([`crate::owned_form::OwnedSym`]), the one form that means the same thing
+/// in another process.
 impl serde::Serialize for Path {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        s.serialize_newtype_struct("Path", &self.segments())
+        s.serialize_newtype_struct("Path", &(symbols::ns_path(self.ns), crate::owned_form::OwnedSym::of(self.name)))
     }
 }
 
 impl<'de> serde::Deserialize<'de> for Path {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Path, D::Error> {
-        struct Segments;
-        impl<'de> serde::de::Visitor<'de> for Segments {
+        struct Written;
+        impl<'de> serde::de::Visitor<'de> for Written {
             type Value = Path;
             fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                write!(f, "a path's segments")
+                write!(f, "a path's module and name")
             }
             fn visit_newtype_struct<D: serde::Deserializer<'de>>(self, d: D) -> Result<Path, D::Error> {
-                let segs: Vec<String> = serde::Deserialize::deserialize(d)?;
-                if segs.is_empty() {
-                    return Err(serde::de::Error::custom("a path with no segments"));
-                }
-                Ok(Path::from_segments(segs))
+                let (ns, name): (Vec<String>, crate::owned_form::OwnedSym) = serde::Deserialize::deserialize(d)?;
+                Ok(Path::of_symbol(symbols::ns_of(&ns), name.symbol()))
             }
         }
-        d.deserialize_newtype_struct("Path", Segments)
+        d.deserialize_newtype_struct("Path", Written)
     }
 }
 

@@ -33,9 +33,9 @@ pub struct PrintShared {
     /// `rt_print_field_name` — what a struct prints before each field's
     /// value (`PrintEnv::field_name`).
     pub(crate) field_names: RwLock<crate::aot::FieldNames>,
-    /// `type display -> the address of that type's compiled `print-object``,
-    /// filled by `rt_print_object_method`.
-    pub(crate) print_object: RwLock<HashMap<String, usize>>,
+    /// `type -> the address of that type's compiled `print-object``, filled
+    /// by `rt_print_object_method`.
+    pub(crate) print_object: RwLock<HashMap<typelisp_mem::TypeId, usize>>,
     /// `definition -> the address of its compiled body`, filled by
     /// `rt_format_call_method` — what `~/name/` calls through. The name is the
     /// one the checker resolved a directive to (`CompileTarget::link_name`),

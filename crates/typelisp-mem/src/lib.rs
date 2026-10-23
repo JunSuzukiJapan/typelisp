@@ -14,6 +14,7 @@ pub mod heap;
 pub mod name_view;
 pub mod names;
 pub mod option;
+pub mod specialization;
 pub mod stack;
 pub mod symbols;
 pub mod tagged;

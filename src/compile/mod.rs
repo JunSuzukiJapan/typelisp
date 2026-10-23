@@ -332,7 +332,7 @@ impl CompiledFn {
         externals: &[(String, usize)],
         body_abi: u8,
     ) -> Result<CompiledFn, String> {
-        Ok(Self::new_multi(module, &[fn_name.to_string()], externals, body_abi)?
+        Ok(Self::link(module, &[fn_name.to_string()], &[], externals, body_abi)?
             .pop()
             .expect("one name asked for, one function back"))
     }
@@ -346,12 +346,29 @@ impl CompiledFn {
     /// ever the set of targets *outside* this group.
     pub fn new_multi(
         module: &Module<'static>,
+        targets: &[crate::CompileTarget],
+        externals: &[(String, usize)],
+        body_abi: u8,
+    ) -> Result<Vec<CompiledFn>, String> {
+        let fn_names: Vec<String> = targets.iter().map(symbols::target_symbol_name).collect();
+        Self::link(module, &fn_names, targets, externals, body_abi)
+    }
+
+    /// The functions `fn_names` of `module`, linked once; a stack frame code
+    /// generation warns about is named as the source names it when it is
+    /// one of `targets`'.
+    fn link(
+        module: &Module<'static>,
         fn_names: &[String],
+        targets: &[crate::CompileTarget],
         externals: &[(String, usize)],
         body_abi: u8,
     ) -> Result<Vec<CompiledFn>, String> {
         destroy_retired_llvm();
         let code = Arc::new(jit_engine(module, externals)?);
+        for warning in codegen_prep::take_frame_warnings(targets) {
+            eprintln!("{}", warning);
+        }
         fn_names
             .iter()
             .map(|fn_name| {

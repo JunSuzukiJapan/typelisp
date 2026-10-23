@@ -291,7 +291,7 @@ pub struct AdtDef {
     /// what covers every instantiation. A method or trait is in one or the
     /// other, never both (`Checker::check_defmethod_in_form` and
     /// `Checker::check_impl_form` refuse the overlap), so a method's
-    /// instantiation is named by [`ConcreteNames::specialization`] with nothing else
+    /// instantiation is named by its [`typelisp_mem::specialization`] with nothing else
     /// answering to that name.
     pub insts: BTreeMap<String, InstImpls>,
 }

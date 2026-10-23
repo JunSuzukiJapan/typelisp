@@ -80,6 +80,20 @@ impl Checker {
                 let lambda = self.lowered(heap, &checked)?;
                 self.lift_lambda(heap, lambda, fn_ty)?
             }
+            // Compiled code rebuilds the quoted name of what it hands C by
+            // its spelling (`core_bridge::quoted_form`), and a
+            // specialization's reads as no symbol (`typelisp_mem::
+            // specialization`) — so C is handed a definition of its own that
+            // calls it.
+            Node::FnRef { path, .. } if typelisp_mem::specialization::specialized(path.name_symbol()).is_some() => {
+                let Type::Fn(params, _, ret) = fn_ty else { unreachable!("a callback's type is a function type") };
+                let params: Vec<(String, Type)> = params.iter().enumerate().map(|(i, t)| (format!("a{}", i), t.clone())).collect();
+                let args = params.iter().map(|(n, t)| Checked::of(Node::Local { name: n.as_str().into() }, t.clone())).collect();
+                let call = Checked::of(Node::Call { path: *path, args }, (**ret).clone());
+                let lambda = Checked::of(Node::Lambda { params, ret: (**ret).clone(), body: vec![call] }, fn_ty.clone());
+                let lambda = self.lowered(heap, &lambda)?;
+                self.lift_lambda(heap, lambda, fn_ty)?
+            }
             Node::FnRef { path, .. } => {
                 if self.info.reg.fn_sig(path).is_some_and(|s| s.builtin) {
                     return Err(Error::TypeError(format!(

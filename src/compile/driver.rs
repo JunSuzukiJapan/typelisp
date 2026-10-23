@@ -27,7 +27,7 @@ use inkwell::memory_buffer::MemoryBuffer;
 use inkwell::module::Module;
 use inkwell::AddressSpace;
 
-use typelisp_mem::{Heap, RootScope, Value};
+use typelisp_mem::{Heap, RootScope, SymRef, Value};
 
 use crate::check::repr::Repr;
 use crate::eval::interp::{intern_names, intern_params, str_rt, EvalError, Interp, Uncompilable};
@@ -179,7 +179,7 @@ fn compile_library(lib: &crate::compile::CompiledLibrary) -> Result<Vec<(usize, 
             module.get_function(&target_symbol_name(&lib.items[i])).is_some_and(|f| f.count_basic_blocks() > 0)
         })
         .collect();
-    let internal_names: Vec<String> = items.iter().map(|&i| target_symbol_name(&lib.items[i])).collect();
+    let installed: Vec<CompileTarget> = items.iter().map(|&i| lib.items[i].clone()).collect();
     // Wire only the `rt_*` shims the module actually forward-declares.
     // Skipping the rest is not a leniency: a module can only *call* what
     // it declares, so a shim with no declaration here has no call site to
@@ -195,7 +195,7 @@ fn compile_library(lib: &crate::compile::CompiledLibrary) -> Result<Vec<(usize, 
     // install until the artifact was regenerated, for a mapping the
     // artifact had no use for.
     let externals = crate::compile::runtime_externals(&module);
-    let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &internal_names, &externals, lib.body_abi)
+    let compiled_fns = crate::compile::CompiledFn::new_multi(&module, &installed, &externals, lib.body_abi)
         .map_err(|e| format!("{} JIT install failed: {}", lib.label, e))?;
 
     Ok(items.into_iter().zip(compiled_fns).collect())
@@ -756,7 +756,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             .map(CompileTarget::Fn),
     );
 
-    let method_targets: Vec<(Path, String)> = targets
+    let method_targets: Vec<(Path, SymRef)> = targets
         .methods
         .into_iter()
         .filter(|(t, m)| !matches!(node, CompileTarget::Method(own_t, own_m) if own_t == t && own_m == m))
@@ -769,7 +769,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // is deliberately excluded from this list: it is a genuine
             // prelude `defmethod` (`vector-iter::new`) and must be
             // `compile`d like any other method.
-            if path_is_builtin(&key.0, "vector") && matches!(key.1.as_str(), "new" | "get" | "set" | "len" | "push" | "pop") {
+            if path_is_builtin(&key.0, "vector") && matches!(key.1.name(), "new" | "get" | "set" | "len" | "push" | "pop") {
                 return false;
             }
             // `HashTable<K,V>`'s builtin methods lowered to a `hashtable-op`
@@ -778,7 +778,7 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // and `get`/`set`/`remove`/`maphash`/`size` — are deliberately
             // absent from that list, so they are validated and transitively
             // compiled like any other method.
-            if path_is_builtin(&key.0, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&key.1.as_str()) {
+            if path_is_builtin(&key.0, "hashtable") && HASHTABLE_BUILTIN_METHODS.contains(&key.1.name()) {
                 return false;
             }
             // `llvm-*`/`scope` builtin methods are natively lowered to
@@ -815,21 +815,21 @@ pub(crate) fn call_graph_edges(interp: &Interp, heap: &Heap, node: &CompileTarge
             // `core_bridge` lowers it to a plain `rt_*` call, and there is no
             // function for the graph to reach either.
             if key.0.is_simple()
-                && (crate::compile::externs::rt_suspend_method_symbol(key.0.last_segment(), &key.1).is_some()
-                    || crate::compile::externs::rt_static_method_symbol(key.0.last_segment(), &key.1).is_some())
+                && (crate::compile::externs::rt_suspend_method_symbol(key.0.last_segment(), key.1.name()).is_some()
+                    || crate::compile::externs::rt_static_method_symbol(key.0.last_segment(), key.1.name()).is_some())
             {
                 return false;
             }
-            interp.root.borrow().has_method(&key.0, &key.1)
+            interp.root.borrow().has_method(&key.0, key.1.name())
                 || !path_is_builtin_any(&key.0, &NATIVE_LOWERED_PRIMITIVES)
-                || !is_native_lowered_primitive_method(key.0.last_segment(), &key.1)
+                || !is_native_lowered_primitive_method(key.0.last_segment(), key.1.name())
         })
         .collect();
     for (type_name, method) in &method_targets {
-        if !interp.root.borrow().has_method(type_name, method) {
+        if !interp.root.borrow().has_method(type_name, method.name()) {
             return Err(EvalError::Uncompilable {
                 caller: node.link_name(),
-                target: typelisp_mem::ConcreteNames::method_link(type_name, method),
+                target: typelisp_mem::ConcreteNames::method_link(type_name, method.name()),
             });
         }
     }
@@ -993,8 +993,7 @@ pub fn compile_scc(interp: &Interp, heap: &mut Heap, members: &[CompileTarget]) 
     // catchable Rust error. Verifying first turns that into a clean
     // `Panic` instead.
     module.borrow().verify().map_err(|e| EvalError::Panic(format!("compile: module failed verification: {}", e)))?;
-    let internal_names: Vec<String> = members.iter().map(target_symbol_name).collect();
-    let compiled_fns = crate::compile::CompiledFn::new_multi(&module.borrow(), &internal_names, &externals, crate::compile::EMITTED_BODY_ABI)
+    let compiled_fns = crate::compile::CompiledFn::new_multi(&module.borrow(), members, &externals, crate::compile::EMITTED_BODY_ABI)
         .map_err(|e| EvalError::Panic(format!("compile: JIT failed: {}", e)))?;
     for (member, compiled) in members.iter().zip(compiled_fns) {
         let f = interp.target_def(member).expect("member is a registered definition");

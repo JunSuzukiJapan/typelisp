@@ -134,7 +134,7 @@ fn collect_aot_item(
         wk::DEFMETHOD => {
             let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "compile-file: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
-                Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
+                Some(Value::Symbol(id)) => id,
                 _ => return Err("compile-file: defmethod without a name".to_string()),
             };
             items.push(CompileTarget::Method(type_path, method));
@@ -519,40 +519,24 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     }
 
     // Which types have a compiled `print-object`, for the printer's AOT
-    // startup registration. Read off `items` rather than off the method
-    // tables because the address has to name a function *this file* compiled:
-    // `compile-file` compiles every top-level body in the file, so an `impl
-    // print-object` in it is here whether or not anything calls it.
-    let mut print_objects: Vec<(String, String)> = items
-        .iter()
-        .filter_map(|item| match item {
-            CompileTarget::Method(type_path, method) => {
-                Some((ConcreteNames::value_key_for_method(&type_path.to_string(), "print-object", method)?, target_symbol_name(item)))
+    // startup registration: this file's, and the prelude's own (`complex`,
+    // `pathname`, the streams, the error types, ...), which no item of this
+    // file names — they are chosen by the printer at run time, never called.
+    // Their bodies are in the module already, the prelude bitcode having been
+    // linked in whole above, so registering them is all that is missing;
+    // without it an executable printed a `complex` as `#<complex re: 1.0 im:
+    // 2.0>` where `typl` said `#C(1.0 2.0)`. Read off the items rather than
+    // off the method tables because the address has to name a function the
+    // module has a body for: `compile-file` compiles every top-level body in
+    // the file, so an `impl print-object` in it is here whether or not
+    // anything calls it.
+    let mut print_objects: Vec<(typelisp_mem::TypeId, String)> = Vec::new();
+    for item in items.iter().chain(&prelude.items) {
+        if let Some(ty) = print_object_receiver(item) {
+            if !print_objects.iter().any(|(t, _)| *t == ty) {
+                print_objects.push((ty, target_symbol_name(item)));
             }
-            CompileTarget::Fn(_) => None,
-        })
-        .collect();
-    // The prelude's own `print-object`s (`complex`, `pathname`, the streams,
-    // the error types, ...), which no item of this file names: they are
-    // chosen by the printer at run time, never called. Their bodies are in
-    // the module already — the prelude bitcode was linked in whole above —
-    // so registering them is all that is missing; without it an executable
-    // printed a `complex` as `#<complex re: 1.0 im: 2.0>` where `typl` said
-    // `#C(1.0 2.0)`. A type this file implements itself is already listed.
-    {
-        let m = module.borrow();
-        let mut prelude_methods: Vec<(String, String)> = m
-            .get_functions()
-            .filter(|f| f.count_basic_blocks() > 0)
-            .filter_map(|f| {
-                let symbol = f.get_name().to_str().ok()?.to_string();
-                let (type_path, method) = ConcreteNames::split_method_link(ConcreteNames::link_name_of_symbol(&symbol)?)?;
-                Some((ConcreteNames::value_key_for_method(type_path, "print-object", method)?, symbol))
-            })
-            .filter(|(key, _)| !print_objects.iter().any(|(k, _)| k == key))
-            .collect();
-        prelude_methods.sort();
-        print_objects.extend(prelude_methods);
+        }
     }
 
     // What the `~/name/` directives in this file resolved to
@@ -673,7 +657,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
             main_returns_int,
         )
             .and_then(|()| m.verify().map_err(|e| format!("module failed verification: {}", e)))
-            .and_then(|()| write_executable(&m, output_path, &link_libraries))
+            .and_then(|()| write_executable(&m, output_path, &link_libraries, &items))
     };
     // Destroyed here rather than left to fall out of scope: `module` was
     // declared before the guard, so its own drop would run *after* the guard
@@ -684,6 +668,20 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
     result
 }
 
+
+/// The type of the values `target` prints when it is a `print-object`: the
+/// type it is written for, at the type arguments it was specialized at.
+fn print_object_receiver(target: &CompileTarget) -> Option<typelisp_mem::TypeId> {
+    use typelisp_mem::specialization::{specialized, Generic};
+    let CompileTarget::Method(type_path, method) = target else { return None };
+    let print_object = typelisp_mem::symbols::intern("print-object");
+    let args = match specialized(*method) {
+        Some((Generic::Method(_, _, base), args)) if base == print_object => args,
+        None if *method == print_object => Vec::new(),
+        _ => return None,
+    };
+    Some(typelisp_front::type_key::type_key_id(type_path, args))
+}
 
 /// Adds a real, C-ABI `main` to `module` that calls the compiled entry
 /// point (the symbol `entry_symbol`, `tl_p::main` for `p.typl` — called
@@ -725,12 +723,12 @@ fn build_main_wrapper(
     module: &Module<'static>,
     entry_symbol: &str,
     global_init_names: &[String],
-    vtables: &[(u32, Vec<(Path, String)>)],
+    vtables: &[(u32, Vec<(Path, typelisp_mem::SymRef)>)],
     upcasts: &[(u32, u32, u32)],
     enum_variants: &[(Path, usize, String)],
     field_templates: &[(Path, i64, i64, crate::TypeId)],
     field_names: &[(Path, i64, String)],
-    print_objects: &[(String, String)],
+    print_objects: &[(typelisp_mem::TypeId, String)],
     format_calls: &[(String, String)],
     printer_globals: &[(&str, usize)],
     callback_entries: &[(typelisp_front::ffi_callback::CallbackSig, inkwell::values::FunctionValue<'static>)],
@@ -779,11 +777,12 @@ fn build_main_wrapper(
             .map_err(|e| format!("failed to alloca vtable-set args: {}", e))?;
         for (id, slots) in vtables {
             for (slot, (type_name, method)) in slots.iter().enumerate() {
-                let symbol = ConcreteNames::method_symbol(type_name, method);
+                let symbol = ConcreteNames::method_symbol(type_name, method.name());
                 let target = module.get_function(&symbol).ok_or_else(|| {
                     format!(
                         "compile-file: dyn dispatch target `{}::{}` was not compiled into this file",
-                        type_name, method
+                        type_name,
+                        method.name()
                     )
                 })?;
                 let fn_ptr = target.as_global_value().as_pointer_value().const_to_int(i64_ty);
@@ -914,7 +913,7 @@ fn build_main_wrapper(
         // table (`compile::type_table`): a type's id is this process's number,
         // so the executable carries the shapes and its startup interns them.
         let ty = |ty: crate::TypeId| crate::compile::type_table::load(&builder, module, ty);
-        let definition = |path: &Path| ty(typelisp_front::type_key::type_key_id(path));
+        let definition = |path: &Path| ty(typelisp_front::type_key::type_key_id(path, Vec::new()));
         for (path, variant, name) in enum_variants {
             let (name_ptr, name_len) = literal(&builder, name)?;
             call(&builder, "rt_print_enum_variant", &[definition(path)?, i64_ty.const_int(*variant as u64, false), name_ptr, name_len])?;
@@ -930,13 +929,12 @@ fn build_main_wrapper(
             let (name_ptr, name_len) = literal(&builder, name)?;
             call(&builder, "rt_print_field_name", &[definition(path)?, i64_ty.const_int(*index as u64, true), name_ptr, name_len])?;
         }
-        for (key, symbol) in print_objects {
+        for (receiver, symbol) in print_objects {
             let target = module.get_function(symbol).ok_or_else(|| {
                 format!("compile-file: `print-object` implementation `{}` was not compiled into this file", symbol)
             })?;
-            let (key_ptr, key_len) = literal(&builder, key)?;
             let fn_ptr = classic_door(ctx, module, target)?;
-            call(&builder, "rt_print_object_method", &[key_ptr, key_len, fn_ptr])?;
+            call(&builder, "rt_print_object_method", &[ty(*receiver)?, fn_ptr])?;
         }
         for (name, symbol) in format_calls {
             let target = module.get_function(symbol).ok_or_else(|| {
@@ -1571,7 +1569,7 @@ pub(crate) fn assembly_of(module: &Module<'static>) -> Result<String, String> {
         .map_err(|e| format!("failed to emit assembly: {}", e))?;
     // Already said when the function was compiled; showing its code is not a
     // second occasion to.
-    crate::compile::codegen_prep::take_frame_warnings();
+    crate::compile::codegen_prep::take_frame_warnings(&[]);
     String::from_utf8(buf.as_slice().to_vec()).map_err(|e| format!("the assembler emitted invalid UTF-8: {}", e))
 }
 
@@ -1650,7 +1648,7 @@ fn classic_door(
     Ok(door.as_global_value().as_pointer_value().const_to_int(i64_ty))
 }
 
-fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[String]) -> Result<(), String> {
+fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[String], items: &[CompileTarget]) -> Result<(), String> {
     // The whole program's IR, for reading. An AOT module is the one the
     // island's output is hardest to see: it is neither `disassemble`'s
     // single function nor a committed dump, and by the time anything is
@@ -1671,7 +1669,7 @@ fn write_executable(module: &Module<'static>, output_path: &str, libraries: &[St
     target_machine
         .write_to_file(module, FileType::Object, std::path::Path::new(&object_path))
         .map_err(|e| format!("failed to emit object file: {}", e))?;
-    for warning in crate::compile::codegen_prep::take_frame_warnings() {
+    for warning in crate::compile::codegen_prep::take_frame_warnings(items) {
         eprintln!("{}", warning);
     }
 
@@ -1841,7 +1839,7 @@ mod tests {
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_ping_test");
-        write_executable(&module, out_path.to_str().unwrap(), &[]).expect("write_executable failed");
+        write_executable(&module, out_path.to_str().unwrap(), &[], &[]).expect("write_executable failed");
 
         let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
         assert_eq!(status.code(), Some(42));
@@ -1880,7 +1878,7 @@ mod tests {
         module.verify().expect("module failed verification");
 
         let out_path = tmp_path("rt_heap_init_test");
-        write_executable(&module, out_path.to_str().unwrap(), &[]).expect("write_executable failed");
+        write_executable(&module, out_path.to_str().unwrap(), &[], &[]).expect("write_executable failed");
 
         let status = Command::new(&out_path).status().expect("failed to run the compiled executable");
         assert_eq!(status.code(), Some(0));

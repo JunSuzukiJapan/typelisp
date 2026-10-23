@@ -1,15 +1,10 @@
-//! [`ConcreteNames`]: the one place a generic thing's concrete name is spelled
-//! and read back.
-//!
-//! A generic type, function or method has no single name: each instantiation
-//! is a thing of its own, and has to be told apart from every other by a
-//! string — a heap value's type key (`gen<i32>`), a specialization's
-//! registered name (`unwrap <i32>`), a method's link name (`point''area`), an
-//! LLVM symbol (`tl_point''area`). Each of those is built in one tier and read
-//! back in another, so a spelling decided twice is a lookup that fails in
+//! [`ConcreteNames`]: the one place a generated name is spelled — a type's
+//! display (`gen<i32>`), a method's link name (`point''area`), an LLVM symbol
+//! (`tl_point''area`). A spelling decided twice is a lookup that fails in
 //! between. Everything here works on strings, because this crate is below
 //! every tier that needs it (the printer's AOT tier cannot see the front end);
-//! the front end's `Type` reaches it through [`TypeKey`].
+//! the front end's `Type` reaches it through [`TypeKey`]. A specialization is
+//! named in [`crate::specialization`], by a symbol rather than a string.
 //!
 //! Why no generated name can collide with one a program writes: every
 //! generated name has a space, a `'` or a `<` where a source name cannot, the
@@ -114,86 +109,11 @@ impl ConcreteNames {
         format!("(ptr {})", pointee.type_key())
     }
 
-    /// A type key without its instantiation: `option<char>` -> `option`,
-    /// `point` -> `point`. What looks a *type* up from the key a *value*
-    /// carries — registration is per type, a key names an instantiation.
-    pub fn base_type(key: &str) -> &str {
-        match key.find('<') {
-            Some(i) if key.ends_with('>') => &key[..i],
-            _ => key,
-        }
-    }
-
-    /// A key split into its type and the arguments as written:
-    /// `gen<i32>` -> `("gen", Some("i32"))`, `point` -> `("point", None)`.
-    pub fn split_type(key: &str) -> (&str, Option<&str>) {
-        let base = Self::base_type(key);
-        if base.len() == key.len() {
-            (key, None)
-        } else {
-            (base, Some(&key[base.len() + 1..key.len() - 1]))
-        }
-    }
-
     /// The placeholder a key template writes the owning type's `index`th
     /// parameter as: `$0`. `$` never occurs in a key, so it cannot collide
     /// with a name.
     pub fn template_param(index: usize) -> String {
         format!("${}", index)
-    }
-
-    // ---- specializations -------------------------------------------------
-
-    /// The name a generic function or method has at type arguments `args`:
-    /// `unwrap <i32>`. A method's arguments are its type's, then its own. The
-    /// space keeps it from being a written name.
-    pub fn specialization<A: TypeKey>(base: &str, args: &[A]) -> String {
-        format!("{} <{}>", base, Self::type_args(args))
-    }
-
-    /// A function's path segments at type arguments `args`: the last segment
-    /// becomes its [`Self::specialization`], the module stays.
-    pub fn specialized_path<A: TypeKey>(segments: &[String], args: &[A]) -> Vec<String> {
-        let (last, parent) = segments.split_last().expect("a path has at least one segment");
-        let mut out = parent.to_vec();
-        out.push(Self::specialization(last, args));
-        out
-    }
-
-    /// A name split into what was written and the type arguments of its
-    /// specialization: `print-object <i32>` -> `("print-object", Some("i32"))`,
-    /// `area` -> `("area", None)`.
-    pub fn split_specialization(name: &str) -> (&str, Option<&str>) {
-        match name.split_once(" <") {
-            Some((base, rest)) => match rest.strip_suffix('>') {
-                Some(args) => (base, Some(args)),
-                None => (name, None),
-            },
-            None => (name, None),
-        }
-    }
-
-    /// The name `method` has for a value whose key is `value_key`: its
-    /// specialization at the value's type arguments (`("gen<i32>",
-    /// "print-object")` -> `print-object <i32>`), or `method` itself for a
-    /// type without parameters. How a dispatcher holding a value finds the
-    /// body registered for that value's instantiation.
-    pub fn method_for_value(value_key: &str, method: &str) -> String {
-        match Self::split_type(value_key).1 {
-            Some(args) => format!("{} <{}>", method, args),
-            None => method.to_string(),
-        }
-    }
-
-    /// The other direction of [`Self::method_for_value`]: the key of the
-    /// values `name` — `method` or one of its specializations, registered on
-    /// the type `type_key` — is for. `None` when `name` is not `method`.
-    pub fn value_key_for_method(type_key: &str, method: &str, name: &str) -> Option<String> {
-        match Self::split_specialization(name) {
-            (base, _) if base != method => None,
-            (_, Some(args)) => Some(format!("{}<{}>", type_key, args)),
-            (_, None) => Some(type_key.to_string()),
-        }
     }
 
     // ---- link names and symbols -----------------------------------------
@@ -227,12 +147,6 @@ impl ConcreteNames {
         Self::symbol(&Self::method_link(type_path, method))
     }
 
-    /// The link name a [`Self::symbol`] was built from, or `None` for a
-    /// symbol that is not one.
-    pub fn link_name_of_symbol(symbol: &str) -> Option<&str> {
-        symbol.strip_prefix(SYMBOL_PREFIX)
-    }
-
     /// The key a blanket `impl` of `trait_path` materialized at the type
     /// `target_key` is remembered under among the specializations already
     /// asked for — kept apart from every specialization's name by its
@@ -247,43 +161,23 @@ mod tests {
     use super::ConcreteNames as N;
 
     #[test]
-    fn an_instantiated_type_reads_back() {
-        let key = N::instantiated_type("gen", &["i32", "vector<cons-cell<int,int>>"]);
-        assert_eq!(key, "gen<i32,vector<cons-cell<int,int>>>");
-        assert_eq!(N::split_type(&key), ("gen", Some("i32,vector<cons-cell<int,int>>")));
+    fn an_instantiated_type_is_spelled_with_its_arguments() {
+        assert_eq!(N::instantiated_type("gen", &["i32", "vector<cons-cell<int,int>>"]), "gen<i32,vector<cons-cell<int,int>>>");
         assert_eq!(N::instantiated_type::<&str>("point", &[]), "point");
-        assert_eq!(N::split_type("point"), ("point", None));
     }
 
     #[test]
-    fn a_function_type_is_not_an_instantiation() {
-        let key = N::fn_type(&["(ptr point)", "i32"], None, &"bool");
-        assert_eq!(key, "(fn ((ptr point),i32) bool)");
-        assert_eq!(N::split_type(&key).1, None);
+    fn a_function_type_is_spelled_with_its_parameters() {
+        assert_eq!(N::fn_type(&["(ptr point)", "i32"], None, &"bool"), "(fn ((ptr point),i32) bool)");
     }
 
     #[test]
-    fn a_specialization_reads_back() {
-        let name = N::specialization("print-object", &["i32"]);
-        assert_eq!(name, "print-object <i32>");
-        assert_eq!(N::split_specialization(&name), ("print-object", Some("i32")));
-        assert_eq!(N::method_for_value("gen<i32>", "print-object"), name);
-        assert_eq!(N::method_for_value("point", "print-object"), "print-object");
-        assert_eq!(N::value_key_for_method("gen", "print-object", &name).as_deref(), Some("gen<i32>"));
-        assert_eq!(N::value_key_for_method("point", "print-object", "print-object").as_deref(), Some("point"));
-        assert_eq!(N::value_key_for_method("point", "print-object", "area"), None);
-        assert_eq!(N::specialized_path(&["m".into(), "f".into()], &["int"]), vec!["m".to_string(), "f <int>".into()]);
-    }
-
-    #[test]
-    fn a_link_name_and_its_symbol_read_back() {
-        let link = N::method_link("geo::point", "area <int>");
-        assert_eq!(link, "geo::point''area <int>");
-        assert_eq!(N::split_method_link(&link), Some(("geo::point", "area <int>")));
+    fn a_link_name_and_its_symbol() {
+        let link = N::method_link("geo::point", "area");
+        assert_eq!(link, "geo::point''area");
+        assert_eq!(N::split_method_link(&link), Some(("geo::point", "area")));
         assert_eq!(N::split_method_link("geo::area"), None);
-        let sym = N::symbol(&link);
-        assert_eq!(N::link_name_of_symbol(&sym), Some(link.as_str()));
-        assert_eq!(N::method_symbol("geo::point", "area <int>"), sym);
-        assert_eq!(N::link_name_of_symbol("rt_heap_init"), None);
+        assert_eq!(N::method_symbol("geo::point", "area"), N::symbol(&link));
+        assert_eq!(N::symbol(&link), "tl_geo::point''area");
     }
 }

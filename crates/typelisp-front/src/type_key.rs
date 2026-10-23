@@ -52,9 +52,10 @@ pub fn type_key_of(p: &Path) -> Cow<'static, str> {
     }
 }
 
-/// The interned identity of the type `p` names, minting it if it has/// not seen the type before.
-pub fn type_key_id(p: &Path) -> TypeId {
-    typelisp_mem::intern_type(TypeShape::Named(p.ns(), p.name_symbol(), Vec::new()))
+/// The interned identity of the type `p` names at the type arguments
+/// `args`, minting it if it has not seen the type before.
+pub fn type_key_id(p: &Path, args: Vec<TypeId>) -> TypeId {
+    typelisp_mem::intern_type(TypeShape::Named(p.ns(), p.name_symbol(), args))
 }
 
 /// The interned identity of the type `p` names, or `None` if no value has
@@ -123,7 +124,7 @@ fn type_id_in(ty: &Type, params: &[String]) -> TypeId {
 /// Allocate a boxed struct of the type `p` names — `Heap::alloc_struct` with
 /// the identity resolved for you. The one place a struct's key is written.
 pub fn alloc_typed_struct(heap: &mut Heap, p: &Path, fields: Vec<crate::Value>) -> crate::Value {
-    let key = type_key_id(p);
+    let key = type_key_id(p, Vec::new());
     heap.alloc_struct(key, fields)
 }
 
@@ -135,7 +136,7 @@ pub fn alloc_typed_enum(
     variant: usize,
     fields: Vec<crate::Value>,
 ) -> crate::Value {
-    let key = type_key_id(p);
+    let key = type_key_id(p, Vec::new());
     heap.alloc_enum(key, variant, fields)
 }
 
@@ -174,9 +175,9 @@ pub fn alloc_enum_of(heap: &mut Heap, ty: TypeId, variant: usize, fields: Vec<cr
     heap.alloc_enum(ty, variant, fields)
 }
 
-/// The type key stored in boxed value `id`, or `None` when the box is neither
-/// a struct nor an enum (a closure, a cell, a string builder, ...).
-fn stored_key(heap: &Heap, id: BoxId) -> Option<TypeId> {
+/// The type of boxed value `id`, or `None` when the box is neither a struct
+/// nor an enum (a closure, a cell, a string builder, ...).
+pub fn heap_type_id(heap: &Heap, id: BoxId) -> Option<TypeId> {
     if heap.is_struct(id) {
         Some(heap.struct_type_key(id)) // type-identity-ok: this is the reader
     } else if heap.is_enum(id) {
@@ -193,7 +194,7 @@ fn stored_key(heap: &Heap, id: BoxId) -> Option<TypeId> {
 /// never both, so the key comparison alone settles it. Callers that go on to
 /// *decode fields* still test `is_struct`/`is_enum` for their own reasons.
 pub fn heap_type_is(heap: &Heap, id: BoxId, p: &Path) -> bool {
-    match stored_key(heap, id) {
+    match heap_type_id(heap, id) {
         Some(k) => existing_type_key_id(p) == Some(k),
         None => false,
     }
@@ -204,7 +205,7 @@ pub fn heap_type_is(heap: &Heap, id: BoxId, p: &Path) -> bool {
 /// (`#(..)`'s box, say). The id is already the identity, so there is no name
 /// to look up.
 pub fn heap_type_is_id(heap: &Heap, id: BoxId, key: TypeId) -> bool {
-    stored_key(heap, id) == Some(key)
+    heap_type_id(heap, id) == Some(key)
 }
 
 /// The raw key stored in boxed value `id` — the spelling, instantiation and
@@ -218,14 +219,14 @@ pub fn heap_type_is_id(heap: &Heap, id: BoxId, key: TypeId) -> bool {
 /// another owned key, or just printed) — a clone of an interned type name is
 /// cheap next to that.
 pub fn heap_type_key(heap: &Heap, id: BoxId) -> Option<String> {
-    stored_key(heap, id).map(|k| typelisp_mem::type_name(k).to_string())
+    heap_type_id(heap, id).map(|k| typelisp_mem::type_name(k).to_string())
     // type-identity-ok: reading the spelling back out is this function's job
 }
 
 /// The type boxed value `id` belongs to — the definition its type
 /// instantiates — or `None` when the box carries no type identity.
 pub fn heap_type_path(heap: &Heap, id: BoxId) -> Option<Path> {
-    stored_key(heap, id).map(|ty| definition_path(ty).expect("a box's type is a named one"))
+    heap_type_id(heap, id).map(|ty| definition_path(ty).expect("a box's type is a named one"))
 }
 
 /// The definition the named type `ty` instantiates, or `None` when `ty` is
@@ -235,22 +236,9 @@ pub fn definition_path(ty: TypeId) -> Option<Path> {
     Some(Path::of_symbol(ns, sym))
 }
 
-/// How a type is spelled as a runtime identity: the whole path, plus its type
-/// arguments when it has any (`gen<i32>`, `hashtable<string,i32>`).
-///
-/// The same spelling three separate mechanisms need:
-///
-/// * a heap value's type key — which instantiation this value is,
-/// * a specialization's registered name ([`ConcreteNames::specialization`]),
-/// * a `:dyn` box's concrete key (`Checker::coerce_to_dyn`).
-///
-/// They are one question asked in three places. `:dyn` was the only one that
-/// answered it with the type arguments included, which is exactly why a
-/// generic type's `print-object` could never be found: the value said `gen`
-/// and the registration said `print-object <i32>`.
-///
-/// For a type with no arguments this is [`type_key_of`] of its path, character
-/// for character — so the keys of every non-generic type are unchanged.
+/// How a type is spelled as text: the whole path, plus its type arguments
+/// when it has any (`gen<i32>`, `hashtable<string,i32>`). For a type with no
+/// arguments this is [`type_key_of`] of its path, character for character.
 impl TypeKey for Type {
     fn type_key(&self) -> String {
         match self {

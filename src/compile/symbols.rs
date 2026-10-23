@@ -82,7 +82,7 @@ pub fn callee_symbol_name(path: &crate::Path) -> String {
 pub fn target_symbol_name(target: &crate::CompileTarget) -> String {
     match target {
         crate::CompileTarget::Fn(path) => ConcreteNames::symbol(&path.to_string()),
-        crate::CompileTarget::Method(type_path, method) => ConcreteNames::method_symbol(type_path, method),
+        crate::CompileTarget::Method(type_path, method) => ConcreteNames::method_symbol(type_path, method.name()),
     }
 }
 

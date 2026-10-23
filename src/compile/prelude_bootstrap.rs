@@ -81,6 +81,8 @@ pub struct AotPrelude {
     /// address their globals by baked-in slot id, so the storage has to exist,
     /// with the same numbering, before any of them runs.
     pub global_inits: Vec<(Path, Value)>,
+    /// Every definition the bitcode carries a body for.
+    pub items: Vec<CompileTarget>,
 }
 
 /// [`load`], plus what an AOT executable needs to *carry* the prelude rather
@@ -123,6 +125,7 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
     }
 
     let globals = state.globals.clone();
+    let items = state.items.clone();
     // Types and definitions only: the bodies go into the *executable* (the
     // caller links `bitcode` into its module), so JIT-installing them here
     // would compile every prelude body a second time, per `compile-file`, for
@@ -146,7 +149,7 @@ pub fn load_for_aot(heap: &mut Heap, chk: &mut crate::Checker, interp: &mut Inte
         ));
     }
 
-    Ok(AotPrelude { bitcode: unit.bitcode, global_inits })
+    Ok(AotPrelude { bitcode: unit.bitcode, global_inits, items })
 }
 
 /// The `defvar`s in `tl`, in the order [`collect_item`] numbers them:
@@ -314,7 +317,7 @@ pub(crate) fn collect_item(heap: &Heap, tl: Value, plan: &mut PreludePlan) -> Re
         wk::DEFMETHOD => {
             let type_path = core::path_field(heap, tl, 0).ok_or_else(|| "prelude: defmethod without a type".to_string())?;
             let method = match core::field(heap, tl, 1) {
-                Some(Value::Symbol(id)) => heap.symbol_spelling(id).to_string(),
+                Some(Value::Symbol(id)) => id,
                 _ => return Err("prelude: defmethod without a name".to_string()),
             };
             plan.items.push(CompileTarget::Method(type_path, method));

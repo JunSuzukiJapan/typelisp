@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use typelisp_mem::{wk, Error, Heap, RootScope, Value};
+use typelisp_mem::{wk, Error, Heap, RootScope, SymRef, Value};
 
 use crate::nominal_path;
 use crate::types::{Path, Type};
@@ -100,7 +100,7 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
         Node::Local { name } => forms::var_form(s, name),
         Node::Global { path, ty } => info.global_form(s, path, ty),
         Node::FnRef { path, params } => info.fnref_form(s, path, params),
-        Node::MethodRef { owner, method, params, ret } => info.methodref_form(s, owner, method, params, ret),
+        Node::MethodRef { owner, method, params, ret } => info.methodref_form(s, owner, *method, params, ret),
         Node::Call { path, args: cs } => {
             let a = args(s, info, cs)?;
             info.call_form(s, path, &a)
@@ -119,7 +119,7 @@ fn lower_node(heap: &mut Heap, info: &Info, node: &Node) -> Result<Value, Error>
         }
         Node::Assoc { owner, method, instance, ret, args: cs } => {
             let a = args(s, info, cs)?;
-            lower_assoc(s, info, owner, method, *instance, ret, &a)
+            lower_assoc(s, info, owner, *method, *instance, ret, &a)
         }
         Node::DynUpcast { to, value } => {
             let value = sub(s, info, value)?;
@@ -300,14 +300,14 @@ fn lower_assoc(
     heap: &mut Heap,
     info: &Info,
     owner: &Path,
-    method: &str,
+    method: SymRef,
     instance: bool,
     ret: &Type,
     args: &[Arg],
 ) -> Result<Value, Error> {
-    let builtin = info.reg.type_def(owner).and_then(|d| d.assoc.get(method)).is_some_and(|af| af.builtin);
+    let builtin = info.reg.type_def(owner).and_then(|d| d.assoc.get(method.name())).is_some_and(|af| af.builtin);
     if builtin {
-        if let Some(folded) = fold::fold_builtin_method(heap, owner, method, args, ret)? {
+        if let Some(folded) = fold::fold_builtin_method(heap, owner, method.name(), args, ret)? {
             return Ok(folded);
         }
     }
@@ -451,7 +451,7 @@ impl Info {
         &self,
         heap: &mut Heap,
         type_name: &Path,
-        method: &str,
+        method: SymRef,
         instance: bool,
         ret: &Type,
         args: &[Arg],
@@ -459,8 +459,7 @@ impl Info {
         let mut f = Items::new(heap);
         let ty_path = core::path_form(f.heap(), type_name);
         f.push(ty_path);
-        let m = f.heap().intern_symbol(method);
-        f.push(m);
+        f.push(Value::Symbol(method));
         f.push(Value::Bool(instance));
         let ret_repr = self.repr_form(f.heap(), ret)?;
         f.push(ret_repr);
@@ -472,8 +471,8 @@ impl Info {
         let boundary = self
             .reg
             .type_def(type_name)
-            .and_then(|d| d.assoc.get(method))
-            .filter(|af| af.builtin && int_boundary_raw(type_name, method))
+            .and_then(|d| d.assoc.get(method.name()))
+            .filter(|af| af.builtin && int_boundary_raw(type_name, method.name()))
             .map(|af| (af.sig.params.clone(), af.sig.ret.clone()));
         let declared_int = |i: usize| boundary.as_ref().and_then(|(ps, _)| ps.get(i)).is_some_and(|t| *t == Type::Int);
         // An untagged argument is a raw word from here on, and its
@@ -530,15 +529,14 @@ impl Info {
         &self,
         heap: &mut Heap,
         type_name: &Path,
-        method: &str,
+        method: SymRef,
         params: &[Type],
         ret: &Type,
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
         let ty_path = core::path_form(f.heap(), type_name);
         f.push(ty_path);
-        let m = f.heap().intern_symbol(method);
-        f.push(m);
+        f.push(Value::Symbol(method));
         let reprs = self.repr_forms(f.heap(), params.to_vec())?;
         f.push(reprs);
         let key = core::type_form(f.heap(), ret, &[])?;
@@ -879,8 +877,8 @@ impl Info {
         &self,
         heap: &mut Heap,
         trait_path: &Path,
-        slots: &[(Path, String)],
-        supers: &[(Path, Vec<(Path, String)>)],
+        slots: &[(Path, SymRef)],
+        supers: &[(Path, Vec<(Path, SymRef)>)],
         value_ty: &Type,
         value: Value,
     ) -> Result<Value, Error> {
@@ -922,7 +920,7 @@ impl Info {
         trait_path: &Path,
         method: &str,
         slot: usize,
-        impl_targets: &[(Path, String)],
+        impl_targets: &[(Path, SymRef)],
         args: &[Arg],
     ) -> Result<Value, Error> {
         let mut f = Items::new(heap);
@@ -1062,7 +1060,7 @@ impl Info {
         &self,
         heap: &mut Heap,
         type_name: &Path,
-        method: &str,
+        method: SymRef,
         instance: bool,
         type_params: &[String],
         params: &[(String, Type)],
@@ -1085,7 +1083,7 @@ impl Info {
         &self,
         heap: &mut Heap,
         type_name: &Path,
-        method: &str,
+        method: SymRef,
         instance: bool,
         params: &[(String, Type)],
         ret: &Type,
@@ -1094,8 +1092,7 @@ impl Info {
         let mut f = Items::new(heap);
         let path = core::path_form(f.heap(), type_name);
         f.push(path);
-        let m = f.heap().intern_symbol(method);
-        f.push(m);
+        f.push(Value::Symbol(method));
         f.push(Value::Bool(instance));
         let ps = self.param_list_form(f.heap(), params)?;
         f.push(ps);
