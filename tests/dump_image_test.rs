@@ -60,6 +60,21 @@ fn a_function_defined_in_one_session_is_callable_from_the_image() {
     assert_eq!(run(&dir, &["--image", "session.typld", "use.typl"]).trim(), "27");
 }
 
+/// A re-export is part of the module's table, so a path through the
+/// re-exporting module still reaches the definition from the image.
+#[test]
+fn a_re_export_comes_back_from_the_image() {
+    let dir = scratch("reexport");
+    write(
+        &dir,
+        "mk.typl",
+        "(module geo (pub defun triple ((n int)) int (* n 3)))\n(pub use geo::triple)\n(dump \"session.typld\")\n",
+    );
+    write(&dir, "use.typl", "(println \"~a\" (mk::triple 9))\n");
+    run(&dir, &["mk.typl"]);
+    assert_eq!(run(&dir, &["--image", "session.typld", "use.typl"]).trim(), "27");
+}
+
 /// The whole point of pairing bitcode with type information: a definition the
 /// session `(compile)`d comes back compiled, not re-tree-walked.
 ///

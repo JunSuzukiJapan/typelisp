@@ -2196,10 +2196,10 @@ impl Checker {
                     wk::DEFTRAIT => return self.check_deftrait(heap, interp, &elems[1..], parts_locs, false, def_loc),
                     wk::DEFTYPE => return self.check_deftype(heap, &elems[1..], parts_locs, false, def_loc),
                     wk::IMPL => return self.check_impl(heap, interp, &elems[1..], parts_locs),
-                    wk::USE => return self.check_use_forms(heap, &elems[1..], parts_locs, false),
-                    wk::IMPORT => return self.check_use_forms(heap, &elems[1..], parts_locs, false),
+                    wk::USE => return self.check_use_forms(heap, &elems[1..], parts_locs, false, false),
+                    wk::IMPORT => return self.check_use_forms(heap, &elems[1..], parts_locs, false, false),
                     wk::SHADOWING_IMPORT => {
-                        return self.check_use_forms(heap, &elems[1..], parts_locs, true)
+                        return self.check_use_forms(heap, &elems[1..], parts_locs, true, false)
                     }
                     // The reader made each name the module's own.
                     wk::SHADOW => return self.nothing_form(heap),
@@ -2304,6 +2304,7 @@ impl Checker {
                 wk::DEFENUM => return self.check_defenum(heap, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFTRAIT => return self.check_deftrait(heap, interp, &parts[1..], inner_locs, true, def_loc),
                 wk::DEFTYPE => return self.check_deftype(heap, &parts[1..], inner_locs, true, def_loc),
+                wk::USE => return self.check_use_forms(heap, &parts[1..], inner_locs, false, true),
                 _ => {}
             }
             if id.is(wk::DEF_C_STRUCT) {
@@ -2311,7 +2312,7 @@ impl Checker {
             }
         }
         Err(Error::TypeError(
-            "pub: expected defun/defsignature/defffi/defmacro/defstruct/defenum/deftrait/deftype/defvar/defparameter/defconstant"
+            "pub: expected defun/defsignature/defffi/defmacro/defstruct/defenum/deftrait/deftype/defvar/defparameter/defconstant/use"
                 .into(),
         ))
     }
@@ -8817,24 +8818,28 @@ impl Checker {
     /// The forms `use` bundles into are recorded in a dump one by one
     /// (`dump::record_definitions`), so several paths lower to several `use`
     /// nodes rather than one node naming several targets.
+    ///
+    /// `public` is `(pub use path...)`, a re-export: what each path brings in
+    /// is also reached through this module (`Namespace::reexports`).
     fn check_use_forms(
         &mut self,
         heap: &mut Heap,
         parts: &[Value],
         parts_locs: &[Option<Loc>],
         shadowing: bool,
+        public: bool,
     ) -> Result<TopLevelForm, Error> {
         let what = if shadowing { "shadowing-import" } else { "use" };
         if parts.is_empty() {
             return Err(Error::TypeError(format!("{}: ({} path...)", what, what)));
         }
         if parts.len() == 1 {
-            return self.check_use(heap, parts, parts_locs, shadowing);
+            return self.check_use(heap, parts, parts_locs, shadowing, public);
         }
         let mut nodes = Vec::with_capacity(parts.len());
         for (i, p) in parts.iter().enumerate() {
             let loc = parts_locs.get(i).cloned().unwrap_or(None);
-            let node = self.check_use(heap, std::slice::from_ref(p), &[loc], shadowing)?;
+            let node = self.check_use(heap, std::slice::from_ref(p), &[loc], shadowing, public)?;
             nodes.push(forms::rooted(heap, node));
         }
         // Labelled with a name in the module the imports landed in (a `Path`
@@ -8851,6 +8856,7 @@ impl Checker {
         parts: &[Value],
         parts_locs: &[Option<Loc>],
         shadowing: bool,
+        public: bool,
     ) -> Result<TopLevelForm, Error> {
         if parts.len() != 1 {
             return Err(Error::TypeError("use: (use path)".into()));
@@ -8864,7 +8870,7 @@ impl Checker {
         let bare = segs.last().cloned().unwrap();
         let path_loc = parts_locs.first().and_then(|l| l.as_ref());
         let alias = self.info.fq(&bare);
-        match self.use_target(heap, &syms) {
+        let form = match self.use_target(heap, &syms) {
             // A module-level value — a function or a global, one or the
             // other, since a name has one value.
             Some(UseTarget::Value(target)) => {
@@ -8937,6 +8943,9 @@ impl Checker {
             }
             // A module alias — `(use std::math)` makes `math` a short name for `std::math`.
             Some(UseTarget::Module(ns)) => {
+                if public {
+                    return Err(Error::TypeError(format!("pub use: `{}` is a module, and only a definition is re-exported", segs.join("::"))));
+                }
                 let target_path = Path::of_module(ns);
                 self.register_use_for_reading(heap, self.info.ns, &syms);
                 self.info.reg.module_mut(self.info.ns).mod_aliases.insert(bare.clone(), ns);
@@ -8949,7 +8958,11 @@ impl Checker {
             // checker, and retry. Displays as "use: unresolved `...`" when no
             // driver handles it.
             None => Err(Error::ModuleNotLoaded(segs)),
+        }?;
+        if public {
+            self.info.reg.module_mut(self.info.ns).reexports.insert(bare, ());
         }
+        Ok(form)
     }
 
     /// What a `use` path written in the current module names: a function

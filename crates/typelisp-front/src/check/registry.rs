@@ -536,6 +536,10 @@ pub struct Namespace {
     /// `use` imports of definitions (a function, a global, a macro, a type, a
     /// `deftype` alias): the name it is brought in under -> the definition.
     pub aliases: Names<Path>,
+    /// The names among [`Self::aliases`] a `(pub use ...)` brought in: what
+    /// a path through this module reaches, `m::name` for `m`'s re-export of
+    /// `name`.
+    pub reexports: Names<()>,
     /// `use` aliases for modules: short name -> the module.
     pub mod_aliases: Names<NsId>,
     /// `deftype` aliases defined directly here, keyed by unqualified name.
@@ -672,6 +676,7 @@ impl Namespace {
             ctors: Names::new(ns),
             vars: Names::new(ns),
             aliases: Names::new(ns),
+            reexports: Names::new(ns),
             mod_aliases: Names::new(ns),
             type_aliases: Names::new(ns),
             static_uses: Names::new(ns),

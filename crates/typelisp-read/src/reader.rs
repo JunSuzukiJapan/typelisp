@@ -972,6 +972,15 @@ fn is_use_head(head: SymRef) -> bool {
     head.is(wk::USE) || head.is(wk::IMPORT) || head.is(wk::SHADOWING_IMPORT)
 }
 
+/// A form's elements read so far, without the `pub` a re-export
+/// (`(pub use path)`) begins with: what is read as a `use`.
+fn without_pub(elems: &[Value]) -> &[Value] {
+    match elems {
+        [Value::Symbol(p), rest @ ..] if p.is(wk::PUB) => rest,
+        _ => elems,
+    }
+}
+
 /// What a `(use path...)` form brings in, brought in as soon as each path
 /// has been read — so the rest of the same form, and of the `(module ...)`
 /// around it, can read through it (`point::origin-x` after
@@ -981,6 +990,7 @@ fn is_use_head(head: SymRef) -> bool {
 /// evaluator nothing can be loaded, and the `use` reports the path when it
 /// is checked.
 fn note_use(heap: &mut Heap, ctx: Ctx<'_>, elems: &[Value]) -> Result<(), Error> {
+    let elems = without_pub(elems);
     let (Some(Value::Symbol(head)), Some(&last)) = (elems.first(), elems.last()) else { return Ok(()) };
     if elems.len() < 2 || !is_use_head(*head) {
         return Ok(());
@@ -1147,7 +1157,7 @@ fn read_list(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
                 break;
             }
             Some(_) => {
-                let paths = match elems.first() {
+                let paths = match without_pub(&elems).first() {
                     Some(Value::Symbol(h)) if is_use_head(*h) => PathMode::Raw,
                     Some(Value::Symbol(h)) if elems.len() == 1 && (h.is(wk::MODULE) || h.is(wk::IN_MODULE)) => PathMode::Declare,
                     _ => PathMode::Resolve,

@@ -70,6 +70,59 @@ fn use_injects_name_into_current_scope() {
     assert_eq!(ty_program(src), Type::Int);
 }
 
+// ---- pub use: re-exports ----------------------------------------------------
+
+#[test]
+fn a_re_exported_function_is_reached_through_the_re_exporting_module() {
+    let src = "(module geo (pub defun area ((r int)) int r)) \
+               (module shapes (pub use geo::area)) \
+               (shapes::area 5)";
+    assert_eq!(ty_program(src), Type::Int);
+}
+
+#[test]
+fn a_re_exported_function_can_be_brought_in_from_the_re_exporting_module() {
+    let src = "(module geo (pub defun area ((r int)) int r)) \
+               (module shapes (pub use geo::area)) \
+               (use shapes::area) \
+               (area 5)";
+    assert_eq!(ty_program(src), Type::Int);
+}
+
+#[test]
+fn a_re_export_of_a_re_export_reaches_the_definition() {
+    let src = "(module geo (pub defun area ((r int)) int r)) \
+               (module shapes (pub use geo::area)) \
+               (module all (pub use shapes::area)) \
+               (all::area 5)";
+    assert_eq!(ty_program(src), Type::Int);
+}
+
+#[test]
+fn a_re_exported_type_is_reached_through_the_re_exporting_module() {
+    let src = "(module geo (pub defstruct point (pub x int))) \
+               (module shapes (pub use geo::point)) \
+               (defun x-of ((p shapes::point)) int p::x) \
+               (x-of (make-instance 'geo::point :x 3))";
+    assert_eq!(ty_program(src), Type::Int);
+}
+
+#[test]
+fn a_use_without_pub_is_not_reached_through_the_module() {
+    let src = "(module geo (pub defun area ((r int)) int r)) \
+               (module shapes (use geo::area)) \
+               (shapes::area 5)";
+    assert!(program(src).is_err());
+}
+
+#[test]
+fn a_module_is_not_re_exported() {
+    let src = "(module geo (pub defun area ((r int)) int r)) \
+               (module shapes (pub use geo))";
+    let err = program(src).expect_err("a module is not re-exported");
+    assert!(err.to_string().contains("only a definition is re-exported"), "{}", err);
+}
+
 // `cross_module_static_method_and_construct`/`cross_module_qualified_constructor_and_match`
 // used to define a type + static method inside a module via `defstruct` and
 // resolve both via fully-qualified paths — dropped when `defstruct` was

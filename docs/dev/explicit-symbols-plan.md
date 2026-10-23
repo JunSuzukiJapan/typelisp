@@ -579,7 +579,18 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `type_words::ns_words`、取り込んだ定義を `definition_words` の語の列で
      `rt_print_name_module` / `rt_print_name_import` に渡す。ABI は 0.3.22。
 6. `std` を子モジュールに分け、組み込み型を移す（5 節）。`std::prelude` を作り、テスト・例に
-   `use` を足す。
+   `use` を足す。振る舞いを変えない順に次の 5 つに分ける。
+   - 6a. 再公開 `(pub use PATH)`。取り込んだ定義を、そのモジュールを通るパスからも引けるようにする
+     （`m::name` が `m` の再公開を指す）。モジュールの表に再公開の印を持ち、ダンプにも書く。
+     済み。印は `Namespace::reexports`（取り込みの名前の集合）で、`Info::find_written` が
+     ほかのモジュールへのパスでたどる。モジュールの再公開はエラー。ダンプの形式は 29、ABI は 0.3.23。
+   - 6b. `std::prelude` を作り、素の名前の最後の引き先（リーダーの 3 番目、解析の
+     `Info::find_named` の最後）を `std::prelude` の再公開にする。この段階では今どこからでも
+     見えるもの（`std` とルートの組み込み）を全部再公開し、振る舞いは変えない。
+   - 6c. ルートにある組み込みの型・関数を `std` の子モジュール（`std::primitive` ほか）へ移す。
+   - 6d. prelude のソースを子モジュールに分ける。
+   - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
+     `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。
 8. ダンプ・fasl を 3.6 の形に。
 9. 利用者向け文書（日本語の原本、翻訳）。

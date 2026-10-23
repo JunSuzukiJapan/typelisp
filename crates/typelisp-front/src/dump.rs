@@ -48,7 +48,7 @@ use crate::Type;
 /// anyone has to migrate — the same stance SBCL takes with its core files
 /// ("there is absolutely no binary compatibility of core images between
 /// different runtime support programs").
-pub const FORMAT_VERSION: u32 = 28;
+pub const FORMAT_VERSION: u32 = 29;
 
 /// Which table an entry came out of. Part of its identity: `foo` the function
 /// and `foo` the macro are different entries in the same namespace.
@@ -78,6 +78,7 @@ pub mod cat {
     pub const TYPE_ALIAS: u8 = 22;
     pub const STRUCT_DEFAULT: u8 = 23;
     pub const C_STRUCT: u8 = 24;
+    pub const REEXPORT: u8 = 25;
 }
 
 /// One registry entry, with its value already serialized.
@@ -154,6 +155,7 @@ impl RegistrySignature {
             cat::TYPE_ALIAS => "type-alias",
             cat::STRUCT_DEFAULT => "struct-defaults",
             cat::C_STRUCT => "c-struct",
+            cat::REEXPORT => "reexport",
             _ => "doc",
         };
         let mut out = Vec::new();
@@ -392,6 +394,7 @@ fn walk_ns(
     table!(cat::CTOR, ns.ctors);
     table!(cat::VAR, ns.vars);
     table!(cat::ALIAS, ns.aliases);
+    table!(cat::REEXPORT, ns.reexports);
     // A module is written as its segments from the root, as a `Path` is.
     let mut rows: Vec<_> = ns.mod_aliases.iter().collect();
     rows.sort_by_key(|(name, _)| *name);
@@ -501,6 +504,9 @@ pub fn apply_entries(
             cat::ALIAS => {
                 let v: Path = bincode::deserialize(&e.payload).map_err(|err| read_failed("use alias", err))?;
                 reg.module_mut(module).aliases.insert(e.name, v);
+            }
+            cat::REEXPORT => {
+                reg.module_mut(module).reexports.insert(e.name, ());
             }
             cat::MOD_ALIAS => {
                 let v: Vec<String> = bincode::deserialize(&e.payload).map_err(|err| read_failed("module alias", err))?;

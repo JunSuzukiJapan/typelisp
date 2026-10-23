@@ -477,18 +477,24 @@ impl Info {
     /// The definition at `p` itself comes first: a path's, which must be
     /// `pub` unless it is in scope, or the current module's own. A name of
     /// the current module that it does not define is then looked up as a
-    /// bare name is ([`Self::find_named`]). A path into another module that
-    /// leads to nothing names nothing.
+    /// bare name is ([`Self::find_named`]). A path into another module
+    /// reaches what that module re-exports under the name
+    /// (`Namespace::reexports`) as the re-exported definition's own path
+    /// does; anything else it leads to names nothing.
     pub(super) fn find_written<T>(
         &self,
         p: &Path,
         mut lookup: impl FnMut(&Namespace, SymRef) -> Option<(bool, T)>,
     ) -> Option<(Path, T)> {
-        if let Some((public, v)) = self.reg.module_at(p.ns()).and_then(|m| lookup(m, p.name_symbol())) {
+        let module = self.reg.module_at(p.ns());
+        if let Some((public, v)) = module.and_then(|m| lookup(m, p.name_symbol())) {
             return (public || self.in_scope(p.ns())).then_some((*p, v));
         }
         if p.ns() != self.cur_ns().ns {
-            return None;
+            let m = module?;
+            m.reexports.get_sym(p.name_symbol())?;
+            let target = *m.aliases.get_sym(p.name_symbol())?;
+            return self.find_written(&target, lookup);
         }
         self.find_named(p.name_symbol(), |m, k| lookup(m, k).map(|(_, v)| v))
     }
