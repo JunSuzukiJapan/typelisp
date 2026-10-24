@@ -321,6 +321,23 @@ fn cross_module_macro_generating_a_quoted_path_to_a_third_module() {
     assert_eq!(result, Ok(Some(Value::Int(77))));
 }
 
+/// A bare name in a macro's body means what it means in the macro's module,
+/// a `use` there included: `answer` is `dep::answer` brought into `lib`, and
+/// `main` has neither a definition nor an import of that name.
+#[test]
+fn a_bare_name_a_macro_imported_means_its_import_where_expanded() {
+    let result = run_project(
+        "macro-cross-module-imported-name",
+        &[
+            ("dep.typl", "(pub defun answer () int 88)"),
+            ("lib.typl", "(use dep::answer)\n(pub defmacro get-answer () '(answer))"),
+            ("main.typl", "(use lib)\n(lib::get-answer)"),
+        ],
+        "main.typl",
+    );
+    assert_eq!(result, Ok(Some(Value::Int(88))));
+}
+
 /// A `defmacro` inside a `(module ...)` block of a file is usable for the
 /// rest of the block and the rest of the file. The block is checked as one
 /// top-level form and runs later with the file's bundle, so the macro used to

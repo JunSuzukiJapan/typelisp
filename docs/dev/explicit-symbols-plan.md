@@ -633,6 +633,11 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      次にシンボルの関数（`gensym` `intern` `symbol->string` `string->symbol` `keywordp`）を `std::symbol` へ、
      `exit` を `std::process` へ移した。ABI は 0.3.30。
      次に `Hash` と `sxhash-string` `*sxhash-mask*` を `std::hash` へ移した（ABI は変わらない）。
+     次に `Error` と `SimpleError` `WrappedError` `wrap-error` `describe-error` `assert` `assert-eq` `warn`
+     を `std::error` へ移した。チェッカーや `typl test` が組み立てる式で標準ライブラリの名前を指すときは、
+     `std` で新しくシンボルを作らず、`std` で読んだシンボル（`SessionNames::read(NsId::STD, ..)`）を使う。
+     マクロの展開などで持ち込まれたシンボルは、属するモジュールでの意味（定義か、そこでの取り込み）で
+     解決する（`Info::find_named`）。組み込みのエラー型（`ParseIntError` など）は、それぞれの分野と一緒に移す。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

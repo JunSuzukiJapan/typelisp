@@ -188,7 +188,7 @@ fn run_one(heap: &mut Heap, checker: &Rc<RefCell<Checker>>, interp: &mut Interp,
     let mut call = list(heap, &[t.name]).map_err(err)?;
     if t.returns != TestReturn::Unit {
         // The standard library's names, whichever module the test is in.
-        let sym = |heap: &mut Heap, s: &str| heap.intern_symbol_in(typelisp_mem::NsId::STD, s);
+        let sym = |heap: &mut Heap, s: &str| Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, s));
         let (e, ok, er, under) = (sym(heap, "e"), sym(heap, "ok"), sym(heap, "err"), sym(heap, "_"));
         let print = match t.returns {
             TestReturn::ResultError => vec![sym(heap, "describe-error"), e],

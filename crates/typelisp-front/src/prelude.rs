@@ -2577,7 +2577,8 @@ user-visible capacity."
 ;; the root of the chain. Its return type mentions a trait object of the very
 ;; trait being declared, which is why `deftrait` pre-registers the trait
 ;; before parsing its own method signatures.
-(deftrait Error ()
+(module error
+(pub deftrait Error ()
   (message ((self Self)) string)
   (source ((self Self)) Option<:dyn Error>
     "The error this one wraps, if any. Defaults to `none` — most error types
@@ -2605,10 +2606,10 @@ user-visible capacity."
 ;; is what admits the boxing while `E` is still open: the checker leaves an
 ;; erased-generic placeholder here and lays out the real vtable when the call
 ;; site's concrete `E` specializes this body (`Checker::coerce_to_dyn`).
-(defun as-dyn-error<T,E> ((r Result<T,E>)) Result<T, :dyn Error> (:where (Error E))
+(pub defun as-dyn-error<T,E> ((r Result<T,E>)) Result<T, :dyn Error> (:where (Error E))
   (match r
     ((ok v) (result::ok v))
-    ((err e) (result::err (as :dyn Error e)))))
+    ((err e) (result::err (as :dyn Error e))))))
 
 ;; Sequence operations over `Iter` (redesign Phase 6.5) — the typed rebuild
 ;; of the `Sexpr` list library removed in Phase 5 (`length`/`append`/`nth`/
@@ -7192,6 +7193,7 @@ user-visible capacity."
 ;; name resolution and the static escape analysis turn every one of them into
 ;; a compile-time error, so there is nothing left to signal at run time.
 
+(module error
 (pub defstruct SimpleError
   "An error that carries nothing but its message — CL's `simple-error`."
   (text string))
@@ -7200,7 +7202,7 @@ user-visible capacity."
 (impl Error SimpleError
   (message ((self Self)) string self::text))
 (impl print-object SimpleError
-  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "simpleerror")))
+  (print-object ((self Self) (escape bool)) string (std::%internal::error-print-object self escape "simpleerror")))
 
 ;; CL's `simple-error` is what `(error "...")` signals; the same
 ;; convenience here is a constructor that formats, since a `Result` is
@@ -7218,7 +7220,7 @@ user-visible capacity."
   (message ((self Self)) string self::text)
   (source ((self Self)) Option<:dyn Error> (Option::some self::cause)))
 (impl print-object WrappedError
-  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "wrappederror")))
+  (print-object ((self Self) (escape bool)) string (std::%internal::error-print-object self escape "wrappederror")))
 
 ;; `(wrap-error "reading the config" e)` — the same widening `as-dyn-error`
 ;; does, with a sentence attached. Generic over the cause's concrete type for
@@ -7248,10 +7250,10 @@ user-visible capacity."
 ;; every restart is declined. A macro rather than a function so the failure
 ;; message can name the test *as written*; with a second argument, that is
 ;; the message instead.
-(defmacro assert (c &rest msg)
+(pub defmacro assert (c &rest msg)
   (if (sexpr-null msg)
       `(if ,c () (panic (format false "assertion failed: ~s" (quote ,c))))
-      `(if ,c () (panic ,(sexpr-car msg)))))
+      `(if ,c () (panic ,(sexpr-car msg))))))
 
 ;; Rust's `assert_eq!`, for `#[test]` functions above all: when the two sides
 ;; differ, the panic shows both. The comparison and the printing are a generic
@@ -7263,20 +7265,21 @@ user-visible capacity."
   (if (equals left right)
       ()
       (panic (format false "~a~%  left: ~a~% right: ~a" header (print-object left true) (print-object right true))))))
-(defmacro assert-eq (left right &rest msg)
+(module error
+(pub defmacro assert-eq (left right &rest msg)
   (if (sexpr-null msg)
-      `(%internal::check-assert-eq ,left ,right ,(format false "assertion failed: ~s" `(assert-eq ,left ,right)))
-      `(%internal::check-assert-eq ,left ,right ,(sexpr-car msg))))
+      `(std::%internal::check-assert-eq ,left ,right ,(format false "assertion failed: ~s" `(assert-eq ,left ,right)))
+      `(std::%internal::check-assert-eq ,left ,right ,(sexpr-car msg))))
 
 ;; CL's `warn`: say something on `*error-output*` and carry on. The only
 ;; thing in this language that reports without either returning a `Result` or
 ;; ending the program. Takes a control string like `print`/`println`, and
 ;; prefixes the line the way CL's warning report does.
-(defmacro warn (control &rest args)
+(pub defmacro warn (control &rest args)
   `(progn
      (format *error-output* "WARNING: ")
      (format *error-output* ,control ,@args)
-     (format *error-output* "~%")))
+     (format *error-output* "~%"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Scoped rebinding of a global — cl-parity-plan.md Phase 7b.

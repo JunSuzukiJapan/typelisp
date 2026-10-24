@@ -611,7 +611,7 @@ fn vector_literal_form(heap: &mut Heap, elem_ty: &Type, elems: &[Value]) -> Resu
     let bindings = forms::list_from_vec_locs(&mut s, &[(binding, None)])?;
     s.push_root(bindings);
     let let_sym = s.intern_symbol("let");
-    let push = s.intern_symbol_in(typelisp_mem::NsId::STD, "push");
+    let push = Value::Symbol(s.names().read(typelisp_mem::NsId::STD, "push"));
     let mut items: Vec<(Value, Option<Loc>)> = vec![(let_sym, None), (bindings, None)];
     for &e in elems {
         let ef = literal_element_form(&mut s, e, data)?;
@@ -13110,10 +13110,10 @@ impl Checker {
         let idx = heap.intern_symbol(&self.gensym_place());
         let empty = self.the_form(heap, "vector", &Type::Int, "new")?;
         let empty = forms::rooted(heap, empty);
-        let push = heap.intern_symbol_in(typelisp_mem::NsId::STD, "push");
+        let push = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "push"));
         let progn = heap.intern_symbol("progn");
-        let getter = heap.intern_symbol_in(typelisp_mem::NsId::STD, "get");
-        let setter = heap.intern_symbol_in(typelisp_mem::NsId::STD, "set");
+        let getter = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "get"));
+        let setter = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "set"));
         // Rooted as each lands: these are freshly built syntax lists held
         // only in a `Vec<Value>`, and every later iteration allocates more.
         let mut body: Vec<(Value, Option<Loc>)> = vec![(progn, None)];
@@ -13186,8 +13186,8 @@ impl Checker {
     /// a b) c)` for strings, `(append (iter (append a b)) c)` for sequences.
     /// `args` holds at least two operands.
     fn append_fold(&self, heap: &mut Heap, args: &[Value], strings: bool) -> Result<Value, Error> {
-        let append = heap.intern_symbol_in(typelisp_mem::NsId::STD, "append");
-        let iter = heap.intern_symbol_in(typelisp_mem::NsId::STD, "iter");
+        let append = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "append"));
+        let iter = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "iter"));
         let mut acc = args[0];
         for (i, next) in args[1..].iter().enumerate() {
             if i > 0 && !strings {
@@ -13232,7 +13232,7 @@ impl Checker {
             ("string", 0) => heap.alloc_string(String::new()),
             ("string", 1) => {
                 let the = heap.intern_symbol("the");
-                let string = heap.intern_symbol_in(typelisp_mem::NsId::STD, "string");
+                let string = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "string"));
                 forms::list_from_vec_locs(heap, &[(the, None), (string, None), (seqs[0], None)])?
             }
             ("string", _) => self.append_fold(heap, seqs, true)?,
@@ -13243,7 +13243,7 @@ impl Checker {
                 )))
             }
             ("vector", 1) => {
-                let copy = heap.intern_symbol_in(typelisp_mem::NsId::STD, "copy-seq");
+                let copy = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "copy-seq"));
                 forms::list_from_vec_locs(heap, &[(copy, None), (seqs[0], None)])?
             }
             ("vector", _) => self.append_fold(heap, seqs, false)?,
@@ -13382,7 +13382,7 @@ impl Checker {
             // every type that has a binary `gcd`, so this expands rather than
             // passing through the way `+`/`max` do.
             "gcd" | "lcm" => {
-                let abs_sym = heap.intern_symbol_in(typelisp_mem::NsId::STD, "abs");
+                let abs_sym = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "abs"));
                 let expansion = forms::list_from_vec_locs(heap, &[(abs_sym, None), (x, None)])?;
                 heap.push_root(expansion);
                 let result = self.check(heap, interp, env, expansion, expected);
@@ -13436,10 +13436,10 @@ impl Checker {
         args: &[Value],
         expected: Option<&Type>,
     ) -> Result<Checked, Error> {
-        let log_sym = heap.intern_symbol_in(typelisp_mem::NsId::STD, "log");
+        let log_sym = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "log"));
         let log_number = forms::list_from_vec_locs(heap, &[(log_sym, None), (args[0], None)])?;
         let log_base = forms::list_from_vec_locs(heap, &[(log_sym, None), (args[1], None)])?;
-        let div_sym = heap.intern_symbol_in(typelisp_mem::NsId::STD, "/");
+        let div_sym = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "/"));
         let expansion = forms::list_from_vec_locs(heap, &[(div_sym, None), (log_number, None), (log_base, None)])?;
         heap.push_root(expansion);
         let result = self.check(heap, interp, env, expansion, expected);
@@ -14483,13 +14483,13 @@ impl Checker {
         // `(format false control args…)`, as source: the same special form,
         // one destination over.
         let mut inner: Vec<(Value, Option<Loc>)> =
-            vec![(heap.intern_symbol_in(typelisp_mem::NsId::STD, "format"), None), (Value::Bool(false), None)];
+            vec![(Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "format")), None), (Value::Bool(false), None)];
         for (i, &a) in args[1..].iter().enumerate() {
             inner.push((a, nth_loc(arg_locs, 1 + i)));
         }
         let inner = forms::list_from_vec_locs(heap, &inner)?;
         heap.push_root(inner);
-        let write_string = heap.intern_symbol_in(typelisp_mem::NsId::STD, "write-string");
+        let write_string = Value::Symbol(heap.names().read(typelisp_mem::NsId::STD, "write-string"));
         let form =
             forms::list_from_vec_locs(heap, &[(write_string, None), (args[0], nth_loc(arg_locs, 0)), (inner, None)]);
         let result = form.and_then(|form| {
@@ -14529,8 +14529,13 @@ impl Checker {
         if head.is(wk::EPRINTLN) {
             text.push_str("~%");
         }
-        let mut items: Vec<(Value, Option<Loc>)> =
-            vec![(heap.intern_symbol_in(typelisp_mem::NsId::STD, "format"), None), (heap.intern_symbol_in(typelisp_mem::NsId::STD, "*error-output*"), None)];
+        let mut items: Vec<(Value, Option<Loc>)> = {
+            let names = heap.names();
+            vec![
+                (Value::Symbol(names.read(typelisp_mem::NsId::STD, "format")), None),
+                (Value::Symbol(names.read(typelisp_mem::NsId::STD, "*error-output*")), None),
+            ]
+        };
         let mut s = RootScope::new(heap);
         let control = s.alloc_string(text);
         s.push_root(control);
@@ -16123,7 +16128,7 @@ impl Checker {
         }
         let form = {
             let mut s = RootScope::new(heap);
-            let equals = s.intern_symbol_in(typelisp_mem::NsId::STD, "equals");
+            let equals = Value::Symbol(s.names().read(typelisp_mem::NsId::STD, "equals"));
             let scrut = s.intern_symbol(MATCH_SCRUT);
             core::list(&mut s, &[equals, scrut, expr])?
         };
@@ -16194,7 +16199,7 @@ impl Checker {
                 let home = typelisp_mem::symbols::ns_path(id.home()).join("::");
                 let expr = {
                     let mut s = RootScope::new(heap);
-                    let f = s.intern_symbol_in(crate::types::std_module("symbol"), "intern");
+                    let f = Value::Symbol(s.names().read(typelisp_mem::NsId::STD, "intern"));
                     let name = s.alloc_string(id.name().to_string());
                     s.push_root(name);
                     let home = s.alloc_string(home);

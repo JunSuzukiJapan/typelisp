@@ -150,10 +150,10 @@ impl Checker {
                 // wrong in its own words, and is the only way a `:dyn Error`
                 // can be shown at all: a trait object carries its trait's
                 // methods and nothing else.
-                let bound = |name: &str| TraitBound { trait_path: Path::std(name), assoc: BTreeMap::new() };
-                if self.type_implements(&args[1], &bound("error"), 0) {
+                let bound = |trait_path: Path| TraitBound { trait_path, assoc: BTreeMap::new() };
+                if self.type_implements(&args[1], &bound(Path::in_ns(crate::types::std_module("error"), "error")), 0) {
                     TestReturn::ResultError
-                } else if self.type_implements(&args[1], &bound("print-object"), 0) {
+                } else if self.type_implements(&args[1], &bound(Path::std("print-object")), 0) {
                     TestReturn::ResultPrinted
                 } else {
                     return Err(Error::TypeError(format!(

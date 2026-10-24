@@ -280,11 +280,11 @@ impl Info {
     /// path.
     ///
     /// This module's own definition comes first, then what a `use` here
-    /// brought in under the name, then the definition in the module the
-    /// symbol belongs to (a name a macro's expansion carried in from the
-    /// macro's module, or one the reader read as the definition
-    /// `std::prelude` re-exports), then what `std::prelude` re-exports under
-    /// it. No enclosing module is consulted: a module sees what it defines and what
+    /// brought in under the name, then what the name means in the module the
+    /// symbol belongs to, its definition or its import there (a name a
+    /// macro's expansion carried in from the macro's module, or one the
+    /// reader read as the definition `std::prelude` re-exports), then what
+    /// `std::prelude` re-exports under it. No enclosing module is consulted: a module sees what it defines and what
     /// it brings in (`docs/dev/explicit-symbols-plan.md`, 3.3).
     ///
     /// An import of something `lookup` does not find (a type, where a
@@ -308,6 +308,11 @@ impl Info {
         if sym.home() != here.ns && sym.well_known() == NOT_WELL_KNOWN {
             if let Some(found) = at(sym.home(), sym) {
                 return Some(found);
+            }
+            if let Some(target) = self.reg.module_at(sym.home()).and_then(|home| home.aliases.get_sym(sym)) {
+                if let Some(found) = at(target.ns(), target.name_symbol()) {
+                    return Some(found);
+                }
             }
         }
         // A member of the vocabulary is read as one symbol in every module,

@@ -529,7 +529,7 @@ impl Build<'_, '_> {
     /// The standard library's symbol for `name`: what the expansion calls
     /// is the library's, whichever module the loop is written in.
     fn sym(&mut self, name: &str) -> Value {
-        self.s.intern_symbol_in(typelisp_mem::NsId::STD, name)
+        Value::Symbol(self.s.names().read(typelisp_mem::NsId::STD, name))
     }
 
     /// A list, rooted before it is returned — every caller holds it across a
