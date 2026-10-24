@@ -257,7 +257,7 @@ impl Repr {
             Type::Ratio => Repr::Ratio,
             Type::Rational => Repr::Rational,
             Type::RandomState => Repr::RandomState,
-            Type::Named(p, _) if *p == Path::std("sexpr") => Repr::Sexpr,
+            Type::Named(p, _) if crate::types::path_is_builtin(p, "sexpr") => Repr::Sexpr,
             // `Option<T>` is a niche whenever `T`'s values can be told from
             // the empty-list immediate: `none` is that immediate, `some v`
             // is `v`'s tagged word, and no box is built. Decided from the

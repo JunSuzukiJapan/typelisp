@@ -774,8 +774,9 @@ impl Interp {
         // (`typelisp_rt::sched::task_handle`). Nothing constructs or matches
         // one either, but it prints as its type and the id (`#<chan<int> 3>`),
         // so the printer has to find it here — positionally, with no names.
-        for handle in ["task", "thread", "chan"] {
-            let handle = Path::std(handle);
+        use crate::check::registry::{chan_of, task_of, thread_of};
+        for handle_of in [task_of, thread_of, chan_of] {
+            let crate::Type::Named(handle, _) = handle_of(crate::Type::Int) else { unreachable!("a handle type is named") };
             root.get_or_create(&handle.parent()).types.insert(
                 handle.last_segment().to_string(),
                 scope::TypeEntry::Struct {
@@ -2822,7 +2823,7 @@ impl Default for Interp {
 /// Whether `type_name` is the built-in `Sexpr` type, whose values are
 /// represented as a heap box rather than a Rust-side value.
 fn is_sexpr_type(type_name: &Path) -> bool {
-    *type_name == Path::std("sexpr")
+    crate::types::path_is_builtin(type_name, "sexpr")
 }
 
 pub(crate) fn rt_i64(v: &Value) -> Result<i64, EvalError> {
@@ -3781,14 +3782,14 @@ fn int_receiver_width(type_name: &Path) -> Option<(u32, bool)> {
     crate::types::INT_TYPE_NAMES
         .iter()
         .chain(crate::types::C_WORD_TYPE_NAMES.iter())
-        .find(|n| *type_name == Path::std(n))
+        .find(|n| crate::types::path_is_builtin(type_name, n))
         .and_then(|n| crate::types::int_width_signed(n))
 }
 
 /// [`int_receiver_width`]'s float counterpart: `f32` and `f64` are one
 /// `Value::Float` (an `f64`) apart from which type labels them.
 fn is_float_receiver(type_name: &Path) -> bool {
-    crate::types::FLOAT_TYPE_NAMES.iter().any(|n| *type_name == Path::std(n))
+    crate::types::FLOAT_TYPE_NAMES.iter().any(|n| crate::types::path_is_builtin(type_name, n))
 }
 
 /// Built-in (Rust-implemented) instance/static methods for nominal types that
@@ -3828,7 +3829,7 @@ pub(crate) fn eval_builtin_method(
     args: &[Value],
     ret_type: TypeId,
 ) -> Option<Result<Value, EvalError>> {
-    if *type_name == Path::std("hashtable") {
+    if crate::types::path_is_builtin(type_name, "hashtable") {
         return match method {
             // `ret_type` is the *result's* runtime identity, spelled by the
             // checker (`Checker::assoc_form`): these builders have no field to
@@ -3851,7 +3852,7 @@ pub(crate) fn eval_builtin_method(
         };
     }
     // `join` is intercepted before this, as `Task<T>::wait` is.
-    if *type_name == Path::std("thread") {
+    if crate::types::path_is_builtin(type_name, "thread") {
         return match method {
             "current-id" => Some(Ok(Value::Int(typelisp_rt::sys_builtin::thread_current_id()))),
             "available-parallelism" => {
@@ -3860,7 +3861,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("vector") {
+    if crate::types::path_is_builtin(type_name, "vector") {
         return match method {
             // type-identity-ok: the built-in `Vector`, a root name spelled in full
             "new" => Some(Ok(crate::type_key::alloc_struct_of(heap, ret_type, Vec::new()))),
@@ -3872,7 +3873,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("scope") {
+    if crate::types::path_is_builtin(type_name, "scope") {
         // One representation: every `Scope<V>` is a `StructPayload::Frames`
         // heap box, and the element needs no encode or decode, so `V` never
         // enters into it — see this function's doc comment.
@@ -3888,7 +3889,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("string") {
+    if crate::types::path_is_builtin(type_name, "string") {
         return match method {
             "upcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_uppercase()).map(|s| str_rt(heap, s))),
             "downcase" => Some(expect_str(heap, &args[0]).map(|s| s.to_ascii_lowercase()).map(|s| str_rt(heap, s))),
@@ -3910,7 +3911,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("char") {
+    if crate::types::path_is_builtin(type_name, "char") {
         return match method {
             "upcase" => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_uppercase()))),
             "downcase" => Some(expect_char(&args[0]).map(|c| Value::Char(c.to_ascii_lowercase()))),
@@ -3959,7 +3960,7 @@ pub(crate) fn eval_builtin_method(
     if is_float_receiver(type_name) {
         // `f32` is binary32 and `f64` binary64: the receiver's own width says
         // what each result is rounded to (`float_at`).
-        let single = *type_name == Path::std("f32");
+        let single = crate::types::path_is_builtin(type_name, "f32");
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_float_builtin(heap, method, args, single)
@@ -3998,7 +3999,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("int") {
+    if crate::types::path_is_builtin(type_name, "int") {
         return match method {
             "+" | "-" | "*" | "truncate" | "mod" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" | "logand"
             | "logior" | "logxor" | "ash" | "logbitp" | "logtest" => eval_integer_builtin(heap, method, args),
@@ -4020,7 +4021,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("ratio") {
+    if crate::types::path_is_builtin(type_name, "ratio") {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_ratio_builtin(heap, method, args)
@@ -4034,7 +4035,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("rational") {
+    if crate::types::path_is_builtin(type_name, "rational") {
         return match method {
             "+" | "-" | "*" | "/" | "<" | "<=" | ">" | ">=" | "=" | "/=" | "max" | "min" => {
                 eval_rational_builtin(heap, method, args)
@@ -4045,13 +4046,13 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("bool") {
+    if crate::types::path_is_builtin(type_name, "bool") {
         return match method {
             "eq" | "eql" | "equal" | "equalp" => Some(bool_eq(args)),
             _ => None,
         };
     }
-    if *type_name == Path::std("symbol") {
+    if crate::types::path_is_builtin(type_name, "symbol") {
         // A `Symbol` value shares the `Value::Symbol(id)` carrier of a
         // `Sexpr::Sym`, so `eq`/`eql` reuse the `Sexpr` comparisons (interned
         // id identity — same name => same id => `eq`).
@@ -4061,7 +4062,7 @@ pub(crate) fn eval_builtin_method(
             _ => None,
         };
     }
-    if *type_name == Path::std("sexpr") {
+    if crate::types::path_is_builtin(type_name, "sexpr") {
         return match method {
             // `eq`/`eql` now diverge, as anticipated by this arm's own prior
             // history (see `sexpr_eql`'s doc comment): `Sexpr::f64` became

@@ -812,6 +812,7 @@ impl StdModule {
     pub const STD: StdModule = StdModule(&[]);
     pub const TIME: StdModule = StdModule(&["time"]);
     pub const REPL: StdModule = StdModule(&["repl"]);
+    pub const THREAD: StdModule = StdModule(&["thread"]);
 
     /// The module, found one segment at a time from `std`.
     pub fn ns(self) -> NsId {

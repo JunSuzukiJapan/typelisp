@@ -2572,7 +2572,7 @@ fn translate_construct(heap: &mut Heap, form: Value, cx: Ctx) -> Result<Value, E
     let Value::Bool(mutable) = parts[3] else { return Err(malformed(heap, form)) };
     let field_reprs = repr_list(heap, parts[4])?;
     let args = parts[5..].to_vec();
-    let is_sexpr = path == Path::std("sexpr");
+    let is_sexpr = path_is_builtin(&path, "sexpr");
 
     // The value's runtime type identity, taken from the node rather than
     // rebuilt from the path: the checker wrote it where the instantiation was
@@ -2819,7 +2819,7 @@ fn pattern_bindings(
             let path = core::path_value(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
             let sub = core::field(heap, pat, 2).ok_or_else(|| malformed(heap, pat))?;
-            let repr = if path == Path::std("sexpr") {
+            let repr = if path_is_builtin(&path, "sexpr") {
                 Repr::Sexpr
             } else if cx.defs.is_struct(heap, &path)? {
                 Repr::Struct
@@ -2966,7 +2966,7 @@ fn translate_pattern(heap: &mut Heap, pat: Value, value: &Repr, cx: Ctx) -> Resu
             // for this node, made once more here.
             let path = core::path_value(heap, core::field(heap, pat, 0).ok_or_else(|| malformed(heap, pat))?)
                 .ok_or_else(|| malformed(heap, pat))?;
-            let inner_repr = if path == Path::std("sexpr") {
+            let inner_repr = if path_is_builtin(&path, "sexpr") {
                 Repr::Sexpr
             } else if cx.defs.is_struct(heap, &path)? {
                 Repr::Struct
@@ -2997,7 +2997,7 @@ fn translate_ctor_pattern(heap: &mut Heap, pat: Value, cx: Ctx) -> Result<Value,
     let field_reprs = repr_list(heap, parts[4])?;
     let subpats = parts[5..].to_vec();
 
-    let kind = if path == Path::std("sexpr") {
+    let kind = if path_is_builtin(&path, "sexpr") {
         MATCH_KIND_SEXPR
     } else if cx.defs.is_struct(heap, &path)? {
         MATCH_KIND_STRUCT

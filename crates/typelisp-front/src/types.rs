@@ -99,10 +99,12 @@ impl Path {
         in_std(self.ns).then(|| self.last_segment())
     }
 
-    /// Whether this path is directly inside the standard library's module,
-    /// where the built-in types are defined.
+    /// Whether this path is inside the standard library — `std` or a module
+    /// in it — where the built-in types are defined. A type's name there is
+    /// its identity: no two of the library's modules define a type of one
+    /// name ([`crate::check::Registry::reexport_std_in_prelude`] asserts it).
     pub fn is_std(&self) -> bool {
-        self.ns == NsId::STD
+        in_std(self.ns)
     }
 
     /// Whether this path is directly inside the library's internal module.

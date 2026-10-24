@@ -622,6 +622,14 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      次に環境の関数を `std::env` へ、時刻帯の下請けを `std::time` へ移した。ABI は 0.3.28。
      次にソケットの型と関数を `std::net` へ移した。組み込みのエラー型（`NetError` `FileError` など）は
      まだ `std` にあり、まとめて移す。
+     次に `Task` `Thread` と `sleep` `yield` を `std::thread` へ、`Chan` と `WaitGroup` `Mutex` `Context`
+     などを `std::sync` へ移した。`std` は `std::prelude` が再公開する子モジュールの名前を取り込む
+     （各名前の `(use PATH)` と同じ）。`std` の外で `Chan::new` と書くと、先頭の `Chan` は
+     自分のモジュール・ルート・`std` の順に探され、`std` の取り込みとして見つかる。
+     `Path::is_std` は `std` とその子モジュールの定義を指す（`types::in_std`）。型とトレイトの名前が
+     `std` の木で重ならないことは `reexport_std_in_prelude` が確かめる。組み込みの型や関数かどうかは
+     `Path::std(..)` との比較ではなく `types::path_is_builtin`（型）と `Path::std_builtin_name`（関数）で
+     問う。ABI は 0.3.29。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

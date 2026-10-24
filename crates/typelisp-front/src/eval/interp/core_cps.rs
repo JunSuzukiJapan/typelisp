@@ -2303,14 +2303,14 @@ impl Interp {
         // `(yield)` gives up the rest of this turn — not a builtin, for the
         // same reason `wait` is not: a builtin answers with a value, and this
         // has to say "stop here" instead.
-        if path == crate::Path::std("yield") {
+        if path.std_builtin_name() == Some("yield") {
             return Ok((State::Blocked(Waiting::Yield), None));
         }
         // `(sleep secs)` is the same shape: it has to say "not before then",
         // which no builtin's return value can. Intercepted here rather than
         // left to `eval_builtin`, whose implementation stops the whole OS
         // thread — with tasks, that would stop every one of them.
-        if path == crate::Path::std("sleep") {
+        if path.std_builtin_name() == Some("sleep") {
             return self.sleep_until(heap, &argv);
         }
         // `(net-wait h interest)` — "not before this socket is ready" — is
@@ -2326,7 +2326,7 @@ impl Interp {
         // A C callback's entry address — the checker's lowering of a callback
         // argument (`analyze::ffi_callback`). The answer is a raw word, which
         // is how the interpreter carries a `ptr`.
-        if path == crate::Path::std(crate::ffi_callback::ADDRESS_BUILTIN) {
+        if path.std_builtin_name() == Some(crate::ffi_callback::ADDRESS_BUILTIN) {
             let function = argv.first().and_then(|v| core::path_value(heap, *v));
             let ty = match argv.get(1) {
                 Some(Value::Int(n)) => u32::try_from(*n).ok().and_then(typelisp_mem::TypeId::from_index),
@@ -2520,8 +2520,8 @@ impl Interp {
         // *suspend*, and a builtin answers with a value or an error, with no way
         // to say "not yet". Intercepted here, where a `State` can say it.
         // `Thread<T>::join` is the same wait: a thread is a task.
-        if (method == "wait" && type_name == crate::Path::std("task"))
-            || (method == "join" && type_name == crate::Path::std("thread"))
+        if (method == "wait" && crate::types::path_is_builtin(&type_name, "task"))
+            || (method == "join" && crate::types::path_is_builtin(&type_name, "thread"))
         {
             let on = task_id_of(heap, argv.first().copied())?;
             return Ok((State::Blocked(Waiting::Task(on)), None));
@@ -2535,7 +2535,7 @@ impl Interp {
         // prelude's own `Iter::next`, and any `impl` a program writes) has to
         // fall through to ordinary resolution, and a monomorphized one
         // arrives under a mangled name that matches none of these.
-        if type_name == crate::Path::std("chan") {
+        if crate::types::path_is_builtin(&type_name, "chan") {
             let op = match method.as_str() {
                 "new" => match argv.first() {
                     // `ret_type` is the channel's own type (`chan<int>`), which

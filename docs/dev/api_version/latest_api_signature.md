@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.28
+# ABI バージョン 0.3.29
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.28 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.29 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `9245b9608245c4fe`
+内容ハッシュ (FNV-1a 64): `8559ec06b8f9462e`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -509,7 +509,7 @@
 | `!` | `!` | none | 0 | 0 |
 | `()` | `()` | unit | 100 | 0 |
 | `(fn (std::string-input-stream char) Option<Sexpr>)` | `(fn (std::string-input-stream,std::char) std::option<std::sexpr>)` | fn | 6 | 2 |
-| `Chan<t>` | `std::chan<t>` | struct | 6 | 2 |
+| `Chan<t>` | `std::sync::chan<t>` | struct | 6 | 2 |
 | `HashTable<k,v>` | `std::hashtable<k,v>` | hashtable | 6 | 2 |
 | `Option<(fn (std::string-input-stream char) Option<Sexpr>)>` | `std::option<(fn (std::string-input-stream,std::char) std::option<std::sexpr>)>` | niche | 101 | 2 |
 | `Option<Sexpr>` | `std::option<std::sexpr>` | niche | 101 | 2 |
@@ -553,8 +553,8 @@
 | `Result<std::time::universal-time,std::fileerror>` | `std::result<std::time::universal-time,std::fileerror>` | enum | 6 | 2 |
 | `Result<string,std::fileerror>` | `std::result<std::string,std::fileerror>` | enum | 6 | 2 |
 | `Result<string,std::neterror>` | `std::result<std::string,std::neterror>` | enum | 6 | 2 |
-| `Task<t>` | `std::task<t>` | struct | 6 | 2 |
-| `Thread<t>` | `std::thread<t>` | struct | 6 | 2 |
+| `Task<t>` | `std::thread::task<t>` | struct | 6 | 2 |
+| `Thread<t>` | `std::thread::thread<t>` | struct | 6 | 2 |
 | `Vector<Option<Sexpr>>` | `std::vector<std::option<std::sexpr>>` | vector | 6 | 2 |
 | `Vector<int>` | `std::vector<std::int>` | vector | 6 | 2 |
 | `Vector<k>` | `std::vector<k>` | vector | 6 | 2 |
@@ -991,15 +991,6 @@
 - インスタンス `try-int->u16`: `(c-ulong) -> Option<u16>`
 - インスタンス `try-int->u32`: `(c-ulong) -> Option<u32>`
 - インスタンス `try-int->u8`: `(c-ulong) -> Option<u8>`
-
-### `std::chan` (struct, 型引数 [t])
-
-- インスタンス `cap`: `(Chan<t>) -> int`
-- インスタンス `close`: `(Chan<t>) -> ()`
-- インスタンス `len`: `(Chan<t>) -> int`
-- 関連関数 `new`: `(int) -> Chan<t>`
-- インスタンス `recv`: `(Chan<t>) -> Option<t>`
-- インスタンス `send`: `(Chan<t>, t) -> ()`
 
 ### `std::char` (sum, 型引数 [])
 
@@ -1572,11 +1563,20 @@
 - インスタンス `eq`: `(symbol, symbol) -> bool`
 - インスタンス `eql`: `(symbol, symbol) -> bool`
 
-### `std::task` (struct, 型引数 [t])
+### `std::sync::chan` (struct, 型引数 [t])
+
+- インスタンス `cap`: `(Chan<t>) -> int`
+- インスタンス `close`: `(Chan<t>) -> ()`
+- インスタンス `len`: `(Chan<t>) -> int`
+- 関連関数 `new`: `(int) -> Chan<t>`
+- インスタンス `recv`: `(Chan<t>) -> Option<t>`
+- インスタンス `send`: `(Chan<t>, t) -> ()`
+
+### `std::thread::task` (struct, 型引数 [t])
 
 - インスタンス `wait`: `(Task<t>) -> t`
 
-### `std::thread` (struct, 型引数 [t])
+### `std::thread::thread` (struct, 型引数 [t])
 
 - 関連関数 `available-parallelism`: `() -> int`
 - 関連関数 `current-id`: `() -> int`
@@ -1868,13 +1868,13 @@
 | `std::sexpr-u16` | `rt_sexpr_u16` | `(Option<Sexpr>) -> u16` |
 | `std::sexpr-u32` | `rt_sexpr_u32` | `(Option<Sexpr>) -> u32` |
 | `std::sexpr-u8` | `rt_sexpr_u8` | `(Option<Sexpr>) -> u8` |
-| `std::sleep` | `rt_suspend_sleep` | `(f64) -> ()` |
 | `std::string->symbol` | `rt_intern_symbol` | `(string) -> symbol` |
 | `std::symbol->string` | `rt_sym_name` | `(symbol) -> string` |
+| `std::thread::sleep` | `rt_suspend_sleep` | `(f64) -> ()` |
+| `std::thread::yield` | `rt_suspend_yield` | `() -> ()` |
 | `std::time::get-internal-real-time` | `rt_get_internal_real_time` | `() -> std::time::internal-time` |
 | `std::time::get-internal-run-time` | `rt_get_internal_run_time` | `() -> std::time::internal-time` |
 | `std::time::get-universal-time` | `rt_get_universal_time` | `() -> std::time::universal-time` |
 | `std::time::timezone-daylight-p` | `rt_timezone_daylight_p` | `(int, int) -> Option<bool>` |
 | `std::time::timezone-offset-seconds` | `rt_timezone_offset_seconds` | `(int, int) -> Option<int>` |
-| `std::yield` | `rt_suspend_yield` | `() -> ()` |
 

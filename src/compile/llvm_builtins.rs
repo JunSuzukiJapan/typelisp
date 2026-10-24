@@ -60,7 +60,7 @@ use crate::types::Path;
 /// process-wide LLVM `Context` must never happen.
 pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method: &str, args: &[Value]) -> Option<Result<Value, EvalError>> {
     let _guard = crate::compile::COMPILE_LOCK.lock().unwrap();
-    if *type_name == Path::std("llvm-module") {
+    if crate::types::path_is_builtin(type_name, "llvm-module") {
         return match method {
             "create" => Some(llvm_module_create(heap, args)),
             "add-function" => Some(llvm_module_add_function(heap, args)),
@@ -72,14 +72,14 @@ pub(crate) fn eval_llvm_builtin_method(heap: &mut Heap, type_name: &Path, method
             _ => None,
         };
     }
-    if *type_name == Path::std("llvm-function") {
+    if crate::types::path_is_builtin(type_name, "llvm-function") {
         return match method {
             "append-block" => Some(llvm_function_append_block(heap, args)),
             "function-param" => Some(llvm_function_param(args)),
             _ => None,
         };
     }
-    if *type_name == Path::std("llvm-builder") {
+    if crate::types::path_is_builtin(type_name, "llvm-builder") {
         return match method {
             "create" => Some(llvm_builder_create()),
             "position-at-end" => Some(llvm_builder_position_at_end(args)),

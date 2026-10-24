@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -817,6 +817,8 @@ impl Registry {
         let mut time = Namespace::new(crate::types::std_module("time"));
         let mut repl = Namespace::new(crate::types::std_module("repl"));
         let mut env = Namespace::new(crate::types::std_module("env"));
+        let mut thread = Namespace::new(crate::types::std_module("thread"));
+        let mut sync = Namespace::new(crate::types::std_module("sync"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -836,9 +838,9 @@ impl Registry {
         std_ns.add_type(def);
         std_ns.add_type(hashtable_def());
         std_ns.add_type(vector_def());
-        std_ns.add_type(task_def());
-        std_ns.add_type(thread_def());
-        std_ns.add_type(chan_def());
+        thread.add_type(task_def());
+        thread.add_type(thread_def());
+        sync.add_type(chan_def());
         std_ns.add_type(scope_def());
         // The (typelisp-hosted) `compile`/`compile-file` compiler's view of
         // LLVM: four more builtin types, metadata-only like `hashtable_def`
@@ -956,7 +958,7 @@ impl Registry {
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
         register_stream_builtins(&mut internal);
         register_net_builtins(&mut internal);
-        register_system_builtins(&mut std_ns, &mut env, &mut time, &mut internal);
+        register_system_builtins(&mut env, &mut thread, &mut time, &mut internal);
         register_readtable_builtins(&mut std_ns);
         std_ns.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
         // `read-datum-at`: one datum from a string starting at a character
@@ -1144,7 +1146,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
@@ -1154,7 +1156,10 @@ impl Registry {
     /// modules of [`PRELUDE_MODULES`], as a `(pub use std::...::name)`
     /// written there would. Run again whenever one of them may have gained a
     /// definition, so what every module reads without a `use` is what they
-    /// define.
+    /// define. `std` itself imports each one it does not define, the way
+    /// every other module's paths reach them through `std`. Also asserts that
+    /// no two of the library's modules define a type of one name, which
+    /// [`Path::is_std`] relies on.
     pub fn reexport_std_in_prelude(&mut self) {
         let offered: Vec<NsId> =
             std::iter::once(NsId::STD).chain(PRELUDE_MODULES.iter().map(|m| crate::types::std_module(m))).collect();
@@ -1164,12 +1169,27 @@ impl Registry {
             .flat_map(|m| m.defined_symbols().map(|sym| Path::of_symbol(m.ns, sym)))
             .collect();
         let prelude = self.module_mut(crate::types::prelude_ns());
-        for path in defined {
+        for &path in &defined {
             let name = path.name_symbol().name();
             if let Some(prev) = prelude.aliases.insert(name, path) {
                 assert!(prev == path, "the standard library defines `{}` twice: `{}` and `{}`", name, prev, path);
             }
             prelude.reexports.insert(name, ());
+        }
+        // `std` imports what `std::prelude` offers, as a `(use PATH)` of each
+        // written there would, so a path starting at one of those names leads
+        // through `std`'s imports.
+        let std_module = self.module_mut(NsId::STD);
+        for path in defined.into_iter().filter(|p| p.ns() != NsId::STD) {
+            std_module.aliases.insert(path.name_symbol().name(), path);
+        }
+        let mut types: HashMap<&str, NsId> = HashMap::new();
+        for m in self.modules.values().filter(|m| crate::types::in_std(m.ns)) {
+            for sym in m.types.symbols().chain(m.traits.symbols()).chain(m.c_structs.symbols()) {
+                if let Some(prev) = types.insert(sym.name(), m.ns) {
+                    assert!(prev == m.ns, "the standard library defines the type `{}` in two modules", sym.name());
+                }
+            }
         }
     }
 
@@ -1605,7 +1625,7 @@ fn register_net_builtins(ns: &mut Namespace) {
 /// The environment the program is running in (CLHS 25.1), in `std::env` —
 /// plus the two things CL has no equivalent of at all and a script cannot do
 /// without, `command-line-args` and `getenv`. Also the host primitives that
-/// belong elsewhere: `sleep`/`yield` in `std`, the local time zone in
+/// belong elsewhere: `sleep`/`yield` in `std::thread`, the local time zone in
 /// `std::time`, and the REPL tools' runtime half in `std::%internal`.
 ///
 /// All free functions: none has a receiver to dispatch on, the same reason
@@ -1613,7 +1633,7 @@ fn register_net_builtins(ns: &mut Namespace) {
 /// `lisp-implementation-type` is deliberately *not* here — it is a constant
 /// string, so the prelude defines it in typelisp rather than spending a
 /// builtin on it.
-fn register_system_builtins(root: &mut Namespace, env: &mut Namespace, time: &mut Namespace, internal: &mut Namespace) {
+fn register_system_builtins(env: &mut Namespace, thread: &mut Namespace, time: &mut Namespace, internal: &mut Namespace) {
     let native = |ns: &mut Namespace, name: &str, params: Vec<Type>, ret: Type| {
         ns.fns.insert(name.to_string(), FnSig::builtin(params, ret));
     };
@@ -1632,12 +1652,12 @@ fn register_system_builtins(root: &mut Namespace, env: &mut Namespace, time: &mu
     // fractional wait has to be writable; an integer literal does not become
     // a float here, so `(sleep 1)` is a type error and `(sleep 1.0)` is not
     // (the rule Rust has, and the reason the docs say so out loud).
-    native(root, "sleep", vec![Type::F64], Type::Unit);
+    native(thread, "sleep", vec![Type::F64], Type::Unit);
     // `(yield)` — give up the rest of this task's turn (Go's `runtime.Gosched`).
     // Registered as an ordinary nullary builtin, but the evaluator intercepts
     // it: only a `State` can say "stop here", which a builtin's return value
     // cannot.
-    native(root, "yield", vec![], Type::Unit);
+    native(thread, "yield", vec![], Type::Unit);
     native(env, "lisp-implementation-version", vec![], Type::Str);
     native(env, "machine-type", vec![], Type::Str);
     native(env, "software-type", vec![], Type::Str);
@@ -2096,8 +2116,8 @@ fn vector_def() -> AdtDef {
 ///
 /// Spelled once, here, rather than at the checker's `task` — a type's identity is
 /// its whole path, and two places writing it is two places to get it wrong.
-pub(super) fn task_of(t: Type) -> Type {
-    Type::Named(Path::std("task"), vec![t])
+pub fn task_of(t: Type) -> Type {
+    Type::Named(Path::in_ns(crate::types::std_module("thread"), "task"), vec![t])
 }
 
 /// `Task<T>`: a handle on a task that is running — what `(task (f ...))` returns.
@@ -2129,13 +2149,13 @@ fn task_def() -> AdtDef {
             builtin: true,
         },
     );
-    builtin_adt(Path::std("task"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::in_ns(crate::types::std_module("thread"), "task"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Thread<T>`, the type `(thread (f ...))` yields — spelled once, here, for
 /// [`task_of`]'s reason.
-pub(super) fn thread_of(t: Type) -> Type {
-    Type::Named(Path::std("thread"), vec![t])
+pub fn thread_of(t: Type) -> Type {
+    Type::Named(Path::in_ns(crate::types::std_module("thread"), "thread"), vec![t])
 }
 
 /// `Thread<T>`: a handle on a task that runs on an OS thread of its own —
@@ -2168,15 +2188,15 @@ fn thread_def() -> AdtDef {
         "available-parallelism".to_string(),
         AssocFn { sig: FnSig::builtin(vec![], Type::Int), instance: false, builtin: true },
     );
-    builtin_adt(Path::std("thread"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::in_ns(crate::types::std_module("thread"), "thread"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 /// `Chan<T>`, the channel type.
 ///
 /// Spelled once, here, for the same reason [`task_of`] is: a type's identity
 /// is its whole path.
-pub(super) fn chan_of(t: Type) -> Type {
-    Type::Named(Path::std("chan"), vec![t])
+pub fn chan_of(t: Type) -> Type {
+    Type::Named(Path::in_ns(crate::types::std_module("sync"), "chan"), vec![t])
 }
 
 /// `Chan<T>`: a channel between tasks — Go's `chan T`.
@@ -2239,7 +2259,7 @@ fn chan_def() -> AdtDef {
         "cap".to_string(),
         AssocFn { sig: sig(vec![chan], Type::Int), instance: true, builtin: true },
     );
-    builtin_adt(Path::std("chan"), &["t"], AdtKind::Struct, Vec::new(), assoc)
+    builtin_adt(Path::in_ns(crate::types::std_module("sync"), "chan"), &["t"], AdtKind::Struct, Vec::new(), assoc)
 }
 
 fn scope_ty() -> Type {

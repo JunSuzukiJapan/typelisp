@@ -7348,9 +7348,10 @@ user-visible capacity."
 ;; `Option<T>`, which is `next`'s type exactly — the shape was chosen for
 ;; this. Unlike `Vector<T>`, a channel really is its own cursor: receiving
 ;; consumes, so there is no second cursor to keep.
+(module sync
 (impl Iter Chan<T>
   (:type Item T)
-  (next ((self Self)) Option<T> (recv self)))
+  (next ((self Self)) Option<T> (recv self))))
 
 ;; The body of `after`, split out because `task` takes a call form.
 (module %internal (pub defun sleep-then-send ((sec f64) (ch Chan<()>)) ()
@@ -7363,9 +7364,10 @@ user-visible capacity."
 ;;
 ;; Capacity 1 so the sending task can finish even if nobody ever receives —
 ;; the reason Go's own `time.After` buffers one.
+(module sync
 (pub defun after ((sec f64)) Chan<()>
   (let ((ch (the Chan<()> (Chan::new 1))))
-    (task (%internal::sleep-then-send sec ch))
+    (task (std::%internal::sleep-then-send sec ch))
     ch))
 
 
@@ -7401,7 +7403,7 @@ user-visible capacity."
     "A wait group with nothing outstanding."
     (let ((c (the Chan<int> (Chan::new 1))))
       (send c 0)
-      (make-instance 'WaitGroup :count c :gate (the Chan<()> (Chan::new 0))))))
+      (make-instance 'WaitGroup :count c :gate (the Chan<()> (Chan::new 0)))))))
 
 ;; The body of `add` and `done`: move the counter by `n` while holding its
 ;; token. Closing the gate before the token goes back means whoever next
@@ -7418,13 +7420,14 @@ user-visible capacity."
           (if (and (> old 0) (eq new 0)) (close wg::gate) ())
           (send wg::count new))))))
 
+(module sync
 (impl WaitGroup
   (pub add (self (n int)) ()
     "Add `n` to the counter, before starting the work it counts."
-    (%internal::wait-group-shift self n "add: a wait group's counter went below zero"))
+    (std::%internal::wait-group-shift self n "add: a wait group's counter went below zero"))
   (pub done (self) ()
     "One of the counted things finished. At zero, every waiter is released."
-    (%internal::wait-group-shift self -1 "done: a wait group's counter went below zero"))
+    (std::%internal::wait-group-shift self -1 "done: a wait group's counter went below zero"))
   (pub wait (self) ()
     "Wait until the counter reaches zero. Any number of tasks may."
     (let* ((c (unwrap (recv self::count)))
@@ -7432,7 +7435,7 @@ user-visible capacity."
       (send self::count c)
       (if (eq c 0)
           ()
-          (progn (recv g) ())))))
+          (progn (recv g) ()))))))
 
 
 ;; ---- Thread ---------------------------------------------------------------
@@ -7440,10 +7443,11 @@ user-visible capacity."
 ;; Rust's `std::thread::spawn`: run `f` on an OS thread of its own, and get
 ;; the `Thread<T>` whose `join` answers with what it returned. `(thread (f))`
 ;; spelled as a function, for a body that is a closure already.
+(module thread
 (impl Thread<T>
   (pub spawn ((f (fn () T))) Thread<T>
     "Run `f` on an OS thread of its own. `(join th)` waits for its result."
-    (thread (f))))
+    (thread (f)))))
 
 
 ;; ---- Mutex --------------------------------------------------------------
@@ -7471,6 +7475,7 @@ user-visible capacity."
 ;; guarantee to be had in a language with neither ownership nor borrowing.
 ;; Reading it outside `with-lock` is undefined in the sense that matters:
 ;; another task may be halfway through changing it.
+(module sync
 (pub defstruct Mutex<T> (pub v T) (gate Chan<()>))
 
 (impl Mutex<T>
@@ -7527,11 +7532,12 @@ user-visible capacity."
 ;; Each `(Context::background)` is a fresh root, so cancelling one reaches
 ;; only what was made from it — Go's single shared background, which cannot
 ;; be cancelled, has no counterpart.
-(pub defstruct Context (done-ch Chan<()>) (cancelled Mutex<bool>) (children Vector<Context>) (parent Option<Context>))
+(pub defstruct Context (done-ch Chan<()>) (cancelled Mutex<bool>) (children Vector<Context>) (parent Option<Context>)))
 (module %internal (pub defun context-child ((parent Option<Context>)) Context
   (make-instance 'Context :done-ch (the Chan<()> (Chan::new 0)) :cancelled (Mutex::new false) :children (the Vector<Context> (Vector::new)) :parent parent)))
+(module sync
 (impl Context
-  (pub background () Context (%internal::context-child (Option::none)))
+  (pub background () Context (std::%internal::context-child (Option::none)))
   (pub done (self) Chan<()> self::done-ch)
   (pub is-cancelled (self) bool
     (with-lock (c self::cancelled) c))
@@ -7554,23 +7560,24 @@ user-visible capacity."
                         (doiter (k (iter rest)) (push p::children k)))))
           ((none) ())))))
   (pub with-cancel ((parent Context)) Context
-    (let ((child (%internal::context-child (Option::some parent))) (dead false))
+    (let ((child (std::%internal::context-child (Option::some parent))) (dead false))
       (with-lock (c parent::cancelled)
         (if c (setf dead true) (progn (push parent::children child) false)))
       (when dead (cancel child))
-      child)))
+      child))))
 (module %internal (pub defun cancel-after ((ctx Context) (sec f64)) ()
   (select
     ((v (recv (done ctx))) ())
     ((v (recv (after sec))) (cancel ctx)))))
+(module sync
 (impl Context
   (pub with-timeout ((parent Context) (sec f64)) Context
     (let ((child (Context::with-cancel parent)))
-      (task (%internal::cancel-after child sec))
+      (task (std::%internal::cancel-after child sec))
       child)))
 (impl print-object Context
   (print-object ((self Self) (escape bool)) string
-    (if (is-cancelled self) "#<context cancelled>" "#<context>")))
+    (if (is-cancelled self) "#<context cancelled>" "#<context>"))))
 
 
 "##;

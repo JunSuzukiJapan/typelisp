@@ -1307,7 +1307,7 @@ fn match_ctor(
             }
             Ok(Some(binds))
         }
-        sv if *path == crate::Path::std("sexpr") => match_sexpr_core(it, heap, env, variant, subs, sv),
+        sv if crate::types::path_is_builtin(path, "sexpr") => match_sexpr_core(it, heap, env, variant, subs, sv),
         _ => Ok(None),
     }
 }

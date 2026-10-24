@@ -4172,8 +4172,8 @@ impl Checker {
     /// type the evaluator can't read off its own AST node).
     fn is_heap_repr(&self, ty: &Type) -> bool {
         match ty {
-            Type::Named(p, args) if *p == Path::std("scope") && args.len() == 1 => true,
-            Type::Named(p, _) if *p == Path::std("sexpr") || *p == Path::std("hashtable") => true,
+            Type::Named(p, args) if crate::types::path_is_builtin(p, "scope") && args.len() == 1 => true,
+            Type::Named(p, _) if crate::types::path_is_builtin(p, "sexpr") || crate::types::path_is_builtin(p, "hashtable") => true,
             Type::Named(p, _) => match self.info.reg.type_def(p) {
                 Some(d) if d.kind == AdtKind::Struct => true,
                 Some(d) if d.kind == AdtKind::Sum && !d.variants.is_empty() => true,
@@ -9457,7 +9457,7 @@ impl Checker {
                 // option type is expected, the `Nil` value of `Sexpr` when a
                 // `Sexpr` is expected, and otherwise the unit value.
                 if let Some(Type::Named(n, _)) = expected {
-                    if *n == Path::std("option") {
+                    if crate::types::path_is_builtin(n, "option") {
                         // `Option`'s constructors moved to `Option::`/`use
                         // option` (no more bare `none`), but `()` denoting
                         // `None` is a language-core inference rule, not a
@@ -11582,7 +11582,7 @@ impl Checker {
     /// `T` of a `Chan<T>`, or a type error naming the operation.
     fn chan_element(&self, ty: &Type, what: &str) -> Result<Type, Error> {
         match ty {
-            Type::Named(p, args) if *p == Path::std("chan") && args.len() == 1 => Ok(args[0].clone()),
+            Type::Named(p, args) if crate::types::path_is_builtin(p, "chan") && args.len() == 1 => Ok(args[0].clone()),
             other => Err(Error::TypeError(format!(
                 "select: `{}` needs a Chan<T>, and this is `{}`",
                 what, other
@@ -13085,7 +13085,7 @@ impl Checker {
         let Ok(recv_ty) = self.check_at(heap, interp, env, recv, None, None).map(|c| c.ty.clone()) else {
             return Err(err);
         };
-        if matches!(&recv_ty, Type::Named(p, _) if *p == Path::std("array")) {
+        if matches!(&recv_ty, Type::Named(p, _) if crate::types::path_is_builtin(p, "array")) {
             return Err(err);
         }
         Err(Error::TypeError(format!(
@@ -14860,7 +14860,7 @@ impl Checker {
         // `(intern NAME)`: CL's current package is the module the call is
         // written in, which only the checker knows, so it becomes the second
         // argument here — the module's path as `intern` reads one.
-        if sig.builtin && args.len() == 1 && *name == Path::std("intern") {
+        if sig.builtin && args.len() == 1 && name.std_builtin_name() == Some("intern") {
             let ns = heap.alloc_string(typelisp_mem::symbols::ns_path(self.info.ns).join("::"));
             heap.push_root(ns);
             let r = self.check_call(heap, interp, env, name, &[args[0], ns], &[arg_locs[0].clone(), None]);
@@ -16397,7 +16397,7 @@ impl Checker {
                     }
                 }
                 if let Some((adt, idx)) = self.info.resolve_ctor(id) {
-                    if adt != Path::std("sexpr") {
+                    if !crate::types::path_is_builtin(&adt, "sexpr") {
                         let def = self.info.reg.type_def(&adt).expect("resolved ctor's type is registered");
                         no_generics(&adt, def)?;
                         return Ok(Some((adt, Vec::new(), idx)));
@@ -17069,7 +17069,7 @@ fn is_option_of_sexpr(ty: &Type) -> bool {
     matches!(ty, Type::Named(p, args)
         if crate::types::path_is_builtin(p, "option")
             && args.len() == 1
-            && matches!(&args[0], Type::Named(a, _) if *a == Path::std("sexpr")))
+            && matches!(&args[0], Type::Named(a, _) if crate::types::path_is_builtin(a, "sexpr")))
 }
 
 /// The `Sexpr` constructor name that exactly represents a value of `elem_ty`
