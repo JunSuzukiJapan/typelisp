@@ -329,31 +329,39 @@ pub(crate) const RT_SUSPEND_BOOL_ANSWER: &str = "rt_suspend_io_for";
 /// The shim a call to `path` lowers to, when `path` is a free builtin.
 ///
 /// [`rt_builtin_symbol`] answers for a bare name, and a name is not a
-/// function: a builtin lives in the standard library's module or its internal
-/// module ([`typelisp_front::types::Path::std_builtin_name`]), and the same
-/// last segment anywhere else — or an internal builtin's name directly in
-/// `std` — is somebody's own function, which has to reach its own compiled
-/// body.
+/// function: a builtin lives in the module of the standard library the
+/// registry keeps it in ([`typelisp_front::types::Path::std_builtin_name`]),
+/// and the same last segment anywhere else is somebody's own function, which
+/// has to reach its own compiled body.
 pub(crate) fn builtin_shim(path: &crate::Path) -> Option<&'static str> {
     let name = path.std_builtin_name()?;
     let shim = rt_builtin_symbol(name)?;
-    let at_home = internal_builtins().contains(name) == path.is_internal();
-    at_home.then_some(shim)
+    (builtin_homes().get(name) == Some(&path.ns())).then_some(shim)
 }
 
 pub(crate) fn is_rt_builtin(path: &crate::Path) -> bool {
     builtin_shim(path).is_some()
 }
 
-/// The names of the builtins the registry keeps in the internal module.
-fn internal_builtins() -> &'static std::collections::HashSet<String> {
-    static NAMES: std::sync::OnceLock<std::collections::HashSet<String>> = std::sync::OnceLock::new();
-    NAMES.get_or_init(|| {
+/// The module the registry keeps each free builtin in, by the builtin's name
+/// — `std` for one the checker lowers to without a signature
+/// ([`typelisp_front::check::registry::lowered_builtins`]).
+fn builtin_homes() -> &'static std::collections::HashMap<String, typelisp_mem::NsId> {
+    static HOMES: std::sync::OnceLock<std::collections::HashMap<String, typelisp_mem::NsId>> = std::sync::OnceLock::new();
+    HOMES.get_or_init(|| {
         let reg = typelisp_front::check::Registry::with_builtins();
-        let ns = reg
-            .module_at(typelisp_front::types::internal_ns())
-            .expect("the registry keeps its internal builtins in their own module");
-        ns.fns.iter().filter(|(_, sig)| sig.builtin).map(|(name, _)| name.to_string()).collect()
+        let mut homes: std::collections::HashMap<String, typelisp_mem::NsId> = typelisp_front::check::registry::lowered_builtins()
+            .map(|name| (name.to_string(), typelisp_mem::NsId::STD))
+            .collect();
+        for ns in reg.namespaces() {
+            for (name, sig) in ns.fns.iter() {
+                if sig.builtin {
+                    let prev = homes.insert(name.to_string(), ns.ns);
+                    assert!(prev.is_none(), "builtin `{}` is registered in two modules", name);
+                }
+            }
+        }
+        homes
     })
 }
 

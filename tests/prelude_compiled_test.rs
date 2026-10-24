@@ -84,8 +84,8 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
         // was: `char::char->string`
         CompileTarget::Fn(Path::internal("reader-whitespacep")),
         // was: `random-state-next` / `make-random-state-fresh`
-        f("random"),
-        f("make-random-state"),
+        CompileTarget::Fn(Path::in_ns(typelisp::std_module("random"), "random")),
+        CompileTarget::Fn(Path::in_ns(typelisp::std_module("random"), "make-random-state")),
     ] {
         assert!(interp.is_compiled(&target), "`{:?}` should have a compiled body after load_prelude", target);
     }

@@ -256,7 +256,7 @@ impl Info {
     /// scope everywhere — its private layer (`%internal`, a stream's handle,
     /// the built-ins under `HashTable`'s `get`/`set`) included.
     pub(super) fn in_scope(&self, item_ns: NsId) -> bool {
-        item_ns == self.ns || in_std(item_ns)
+        item_ns == self.ns || crate::types::in_std(item_ns)
     }
 
     /// Whether an associated function/method `af` of `type_fq` is reachable
@@ -529,7 +529,3 @@ impl Info {
     }
 }
 
-/// Whether `ns` is the standard library's module or one inside it.
-fn in_std(ns: NsId) -> bool {
-    std::iter::successors(Some(ns), |m| symbols::ns_parent(*m)).any(|m| m == NsId::STD)
-}

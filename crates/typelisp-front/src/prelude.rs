@@ -4283,15 +4283,16 @@ user-visible capacity."
 ;; default stream `random` draws from when no state is given; typelisp has no
 ;; dynamic binding, so — like every other `*...*` global in this prelude —
 ;; it's an ordinary assignable one instead, seeded fresh once at prelude load.
-(pub defvar (*random-state* random-state) (%internal::make-random-state-fresh))
+(module random
+(pub defvar (*random-state* random-state) (std::%internal::make-random-state-fresh))
 
 ;; CL's `random`: `(random limit &optional random-state)`. Omitting the state
 ;; draws from (and advances) `*random-state*`; passing one draws from (and
 ;; advances) that instead.
 (pub defun random ((n int) &optional (state random-state)) int
   (match state
-    ((some s) (%internal::random-state-next s n))
-    ((none) (%internal::random-state-next *random-state* n))))
+    ((some s) (std::%internal::random-state-next s n))
+    ((none) (std::%internal::random-state-next *random-state* n))))
 
 ;; CL's `random-state-p`: always `true` for any argument that type-checks at
 ;; all — unlike CL, a statically typed `random-state` parameter already rules
@@ -4307,8 +4308,8 @@ user-visible capacity."
 ;; `nil` case); passing an explicit state still copies it, same as CL.
 (pub defun make-random-state (&optional (state random-state)) random-state
   (match state
-    ((some s) (%internal::random-state-copy s))
-    ((none) (%internal::make-random-state-fresh))))
+    ((some s) (std::%internal::random-state-copy s))
+    ((none) (std::%internal::make-random-state-fresh)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Time (CLHS 25.1). `internal-time-units-per-second` is CL's own constant of

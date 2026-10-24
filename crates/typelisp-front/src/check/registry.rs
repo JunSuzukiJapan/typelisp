@@ -505,6 +505,22 @@ pub struct TypeAlias {
     pub public: bool,
 }
 
+/// The builtins the checker lowers a form to without giving them a
+/// signature — `format`, `print` and the pretty printer's directives, C
+/// memory ([`crate::c_struct`]), a C callback's address
+/// ([`crate::ffi_callback`]): they live in `std`, in no table, so no source
+/// reaches one by its name.
+pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
+    ["format-rt", "print-rt", "println-rt", "pprint-rt", "pprint-block-start-rt", "pprint-block-end-rt"]
+        .into_iter()
+        .chain(crate::c_struct::BUILTINS.iter().map(|(name, _)| *name))
+        .chain(std::iter::once(crate::ffi_callback::ADDRESS_BUILTIN))
+}
+
+/// The modules inside `std` whose definitions `std::prelude` re-exports,
+/// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
+pub const PRELUDE_MODULES: &[&str] = &["random"];
+
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
 /// ([`typelisp_mem::symbols`]); [`Registry`] holds one of these per module
@@ -797,6 +813,7 @@ impl Registry {
     pub fn with_builtins() -> Registry {
         let mut std_ns = Namespace::new(NsId::STD);
         let mut internal = Namespace::new(crate::types::internal_ns());
+        let mut random = Namespace::new(crate::types::std_module("random"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -894,7 +911,7 @@ impl Registry {
         // non-standard operation. The integer-to-state map lives in
         // `typelisp_rt::seeded_random_state`, which is where the reason it
         // isn't the identity is written down.
-        std_ns.fns.insert("seed-random-state".to_string(), FnSig::builtin(vec![Type::Int], Type::RandomState));
+        random.fns.insert("seed-random-state".to_string(), FnSig::builtin(vec![Type::Int], Type::RandomState));
         // `get-universal-time`/`get-internal-real-time` (CLHS 25.1): wall-clock
         // and monotonic-ish timers, respectively. `get-universal-time` counts
         // seconds since 1900-01-01 UTC (CL's epoch, 2208988800s before the
@@ -1119,26 +1136,32 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
     }
 
-    /// Makes `std::prelude` re-export every definition of `std`, as a
-    /// `(pub use std::name)` written there would. Run again whenever `std`
-    /// may have gained a definition, so what every module reads without a
-    /// `use` is what `std` defines.
+    /// Makes `std::prelude` re-export every definition of `std` and of the
+    /// modules of [`PRELUDE_MODULES`], as a `(pub use std::...::name)`
+    /// written there would. Run again whenever one of them may have gained a
+    /// definition, so what every module reads without a `use` is what they
+    /// define.
     pub fn reexport_std_in_prelude(&mut self) {
-        let defined: Vec<SymRef> = self
-            .module_at(NsId::STD)
-            .expect("the registry always has the standard library's module")
-            .defined_symbols()
+        let offered: Vec<NsId> =
+            std::iter::once(NsId::STD).chain(PRELUDE_MODULES.iter().map(|m| crate::types::std_module(m))).collect();
+        let defined: Vec<Path> = offered
+            .into_iter()
+            .filter_map(|ns| self.module_at(ns))
+            .flat_map(|m| m.defined_symbols().map(|sym| Path::of_symbol(m.ns, sym)))
             .collect();
         let prelude = self.module_mut(crate::types::prelude_ns());
-        for sym in defined {
-            prelude.aliases.insert(sym.name(), Path::of_symbol(NsId::STD, sym));
-            prelude.reexports.insert(sym.name(), ());
+        for path in defined {
+            let name = path.name_symbol().name();
+            if let Some(prev) = prelude.aliases.insert(name, path) {
+                assert!(prev == path, "the standard library defines `{}` twice: `{}` and `{}`", name, prev, path);
+            }
+            prelude.reexports.insert(name, ());
         }
     }
 

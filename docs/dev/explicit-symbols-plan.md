@@ -607,6 +607,12 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      名前（どのモジュールでも同じシンボル）だけで、ほかの名前はリーダーが定義のシンボルを渡すため
      シンボルの所属で見つかる。ダンプには `std::prelude` の表も入る。
    - 6d. prelude のソースと組み込みの型・関数を `std` の子モジュール（`std::primitive` ほか）に分ける。
+     途中。組み込みも prelude のソースも `std` の子モジュールに置けるようにした。`std::prelude` が再公開する
+     のは `std` の定義と `registry::PRELUDE_MODULES` に挙げた子モジュールの定義（6e で 5 節の範囲に狭める）。
+     同じ名前を 2 つのモジュールで定義すると `reexport_std_in_prelude` が止まる（`std::lazy` のように
+     `use` して使うモジュールは挙げない）。コンパイル済みコードが呼ぶ組み込みの置き場所は
+     `externs::builtin_homes`（レジストリの `builtin` 関数と、シグネチャを持たない下ろし先の
+     `registry::lowered_builtins`）。最初に乱数を `std::random` へ移した。ABI は 0.3.25。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

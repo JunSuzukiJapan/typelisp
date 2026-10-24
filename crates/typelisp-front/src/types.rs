@@ -93,10 +93,10 @@ impl Path {
     }
 
     /// The name of the free builtin this path names, if it names one where
-    /// builtins are registered: `std::name` or `std::%internal::name`. The
-    /// same last segment anywhere else is somebody's own definition.
+    /// builtins are registered: `std` or a module inside it. The same last
+    /// segment anywhere else is somebody's own definition.
     pub fn std_builtin_name(&self) -> Option<&'static str> {
-        (self.ns == NsId::STD || self.ns == internal_ns()).then(|| self.last_segment())
+        in_std(self.ns).then(|| self.last_segment())
     }
 
     /// Whether this path is directly inside the standard library's module,
@@ -191,6 +191,16 @@ fn module_ns<'a>(segments: impl Iterator<Item = &'a str>) -> NsId {
 pub fn internal_ns() -> NsId {
     static NS: std::sync::OnceLock<NsId> = std::sync::OnceLock::new();
     *NS.get_or_init(|| symbols::child_ns(NsId::STD, INTERNAL_MODULE))
+}
+
+/// Whether `ns` is the standard library's module or one inside it.
+pub fn in_std(ns: NsId) -> bool {
+    std::iter::successors(Some(ns), |m| symbols::ns_parent(*m)).any(|m| m == NsId::STD)
+}
+
+/// The standard library's child module `segment`, `std::segment`.
+pub fn std_module(segment: &str) -> NsId {
+    symbols::child_ns(NsId::STD, segment)
 }
 
 /// The module every module reads its re-exports from, `std::prelude`.

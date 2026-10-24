@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.24
+# ABI バージョン 0.3.25
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.24 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.25 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `c504f6bb31fe4543`
+内容ハッシュ (FNV-1a 64): `6f9f13d2306185f0`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1845,8 +1845,8 @@
 | `std::pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |
 | `std::pprint-pop` | `rt_pprint_pop` | `() -> Option<Sexpr>` |
 | `std::pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
+| `std::random::seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
 | `std::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,std::readerror>` |
-| `std::seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
 | `std::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
 | `std::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
 | `std::sexpr-atom` | `rt_atom` | `(Option<Sexpr>) -> bool` |
