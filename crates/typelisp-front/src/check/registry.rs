@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -816,6 +816,7 @@ impl Registry {
         let mut random = Namespace::new(crate::types::std_module("random"));
         let mut time = Namespace::new(crate::types::std_module("time"));
         let mut repl = Namespace::new(crate::types::std_module("repl"));
+        let mut env = Namespace::new(crate::types::std_module("env"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -955,7 +956,7 @@ impl Registry {
         // (`crate::read::Reader::read`) — CL's `read-from-string`.
         register_stream_builtins(&mut internal);
         register_net_builtins(&mut internal);
-        register_system_builtins(&mut std_ns, &mut internal);
+        register_system_builtins(&mut std_ns, &mut env, &mut time, &mut internal);
         register_readtable_builtins(&mut std_ns);
         std_ns.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
         // `read-datum-at`: one datum from a string starting at a character
@@ -1143,7 +1144,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
@@ -1601,61 +1602,60 @@ fn register_net_builtins(ns: &mut Namespace) {
     native("net-wait-for", vec![h, Type::Int, Type::F64], Type::Bool);
 }
 
-/// The environment the program is running in (CLHS 25.1) — plus the two
-/// things CL has no equivalent of at all and a script cannot do without,
-/// `command-line-args` and `getenv`.
+/// The environment the program is running in (CLHS 25.1), in `std::env` —
+/// plus the two things CL has no equivalent of at all and a script cannot do
+/// without, `command-line-args` and `getenv`. Also the host primitives that
+/// belong elsewhere: `sleep`/`yield` in `std`, the local time zone in
+/// `std::time`, and the REPL tools' runtime half in `std::%internal`.
 ///
 /// All free functions: none has a receiver to dispatch on, the same reason
 /// the `random-state` primitives above are free functions.
 /// `lisp-implementation-type` is deliberately *not* here — it is a constant
 /// string, so the prelude defines it in typelisp rather than spending a
 /// builtin on it.
-fn register_system_builtins(root: &mut Namespace, internal: &mut Namespace) {
-    let mut native = |name: &str, params: Vec<Type>, ret: Type| {
-        root.fns.insert(
-            name.to_string(),
-            FnSig::builtin(params, ret),
-        );
+fn register_system_builtins(root: &mut Namespace, env: &mut Namespace, time: &mut Namespace, internal: &mut Namespace) {
+    let native = |ns: &mut Namespace, name: &str, params: Vec<Type>, ret: Type| {
+        ns.fns.insert(name.to_string(), FnSig::builtin(params, ret));
     };
     // Element 0 names the program in both worlds — the script path under
     // `typl`, the executable under AOT — so one source file can be run either
     // way and index its arguments identically. See
     // `sys_builtin::COMMAND_LINE_ARGS` for how the two are made to agree.
-    native("command-line-args", vec![], Type::Named(Path::std("vector"), vec![Type::Str]));
+    native(env, "command-line-args", vec![], Type::Named(Path::std("vector"), vec![Type::Str]));
     // `none` covers both "unset" and "not valid Unicode": a `string` here is
     // Rust's, so bytes that aren't UTF-8 have no value to hand back.
-    native("getenv", vec![Type::Str], option_of(Type::Str));
+    native(env, "getenv", vec![Type::Str], option_of(Type::Str));
     // `$HOME`, or `none` — the primitive under `user-homedir-pathname`, which
     // CL explicitly allows to answer `NIL`.
-    native("home-directory", vec![], option_of(Type::Str));
+    native(env, "home-directory", vec![], option_of(Type::Str));
     // CL's `sleep`, in CL's unit. `f64` and not an integer type because a
     // fractional wait has to be writable; an integer literal does not become
     // a float here, so `(sleep 1)` is a type error and `(sleep 1.0)` is not
     // (the rule Rust has, and the reason the docs say so out loud).
-    native("sleep", vec![Type::F64], Type::Unit);
+    native(root, "sleep", vec![Type::F64], Type::Unit);
     // `(yield)` — give up the rest of this task's turn (Go's `runtime.Gosched`).
     // Registered as an ordinary nullary builtin, but the evaluator intercepts
     // it: only a `State` can say "stop here", which a builtin's return value
     // cannot.
-    native("yield", vec![], Type::Unit);
-    native("lisp-implementation-version", vec![], Type::Str);
-    native("machine-type", vec![], Type::Str);
-    native("software-type", vec![], Type::Str);
+    native(root, "yield", vec![], Type::Unit);
+    native(env, "lisp-implementation-version", vec![], Type::Str);
+    native(env, "machine-type", vec![], Type::Str);
+    native(env, "software-type", vec![], Type::Str);
     // The three CLHS 25.1 names that need the host rather than a build-time
     // constant, and that CL explicitly lets answer `NIL`. `machine-version`
     // is the chip this is *running* on; `machine-type` above is the
     // architecture the binary was *built* for.
-    native("machine-instance", vec![], option_of(Type::Str));
-    native("machine-version", vec![], option_of(Type::Str));
-    native("software-version", vec![], option_of(Type::Str));
+    native(env, "machine-instance", vec![], option_of(Type::Str));
+    native(env, "machine-version", vec![], option_of(Type::Str));
+    native(env, "software-version", vec![], option_of(Type::Str));
     // The local time zone at a given universal time — the primitive under
     // `decode-`/`encode-universal-time`'s no-zone default, which is CL's
     // local time. Split into `day`/`second` because a whole universal time
     // does not fit an `i32`, and reported in *seconds* west because the
     // offset is not always a whole number of hours (India is +5:30).
     // `none` when the C library cannot represent that instant.
-    native("timezone-offset-seconds", vec![Type::Int, Type::Int], option_of(Type::Int));
-    native("timezone-daylight-p", vec![Type::Int, Type::Int], option_of(Type::Bool));
+    native(time, "timezone-offset-seconds", vec![Type::Int, Type::Int], option_of(Type::Int));
+    native(time, "timezone-daylight-p", vec![Type::Int, Type::Int], option_of(Type::Bool));
 
     // The REPL tool layer's runtime half (CLHS 25.2 / 25.1), with `heap-info`
     // in `std::repl`. The other four tools — `trace`/`untrace`/`step`/

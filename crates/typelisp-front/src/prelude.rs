@@ -6389,6 +6389,7 @@ user-visible capacity."
 ;; The environment the program is running in (CLHS 25.1), plus the two things
 ;; CL has no equivalent of and a script cannot do without.
 
+(module env
 (pub defun lisp-implementation-type () string
   "The name of this implementation. A constant, so it is written here rather
    than spent on a builtin."
@@ -6414,7 +6415,7 @@ user-visible capacity."
    `NIL` here for exactly this case, so the `Option` is not an extra."
   (match (home-directory)
     ((none) (option::none))
-    ((some h) (option::some (to-pathname h)))))
+    ((some h) (option::some (to-pathname h))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The REPL tool layer (CLHS 25.2): `room` and `dribble`.

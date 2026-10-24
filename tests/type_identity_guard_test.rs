@@ -268,22 +268,17 @@ fn the_runtimes_fixed_types_are_the_checkers() {
 #[test]
 fn the_runtime_result_types_match_the_registry() {
     use typelisp::check::Registry;
-    use typelisp::types::Path;
     use typelisp::TypeSpec;
 
     let reg = Registry::with_builtins();
-    // A builtin is registered in `std` or in the library's internal module,
-    // and the shims key it by its bare name — so the name has to pick out
-    // exactly one of the two.
+    // A builtin is registered in one of the library's modules, and the shims
+    // key it by its bare name — so the name has to pick out exactly one.
     let sig_of = |name: &str| {
-        let found: Vec<_> = [Path::std(name), Path::internal(name)]
-            .iter()
-            .filter_map(|p| reg.fn_sig(p))
-            .collect();
+        let found: Vec<_> = reg.namespaces().filter_map(|ns| ns.fns.get(name).filter(|sig| sig.builtin)).collect();
         match found.as_slice() {
             [sig] => (*sig).clone(),
             [] => panic!("`{}` has a result-type row but no registry entry", name),
-            _ => panic!("`{}` is registered both in `std` and in the internal module", name),
+            _ => panic!("`{}` is registered in more than one module", name),
         }
     };
     let check = |spec: &TypeSpec, ty: &typelisp::Type, what: &str| {

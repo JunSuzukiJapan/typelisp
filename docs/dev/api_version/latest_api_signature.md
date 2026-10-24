@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.27
+# ABI バージョン 0.3.28
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.27 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.28 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `62c4f6690dc0933b`
+内容ハッシュ (FNV-1a 64): `9245b9608245c4fe`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1816,23 +1816,25 @@
 | `std::%internal::stream-unread-char` | `rt_stream_unread_char` | `(i32, char) -> Result<(),std::fileerror>` |
 | `std::%internal::stream-write-byte` | `rt_stream_write_byte` | `(i32, int) -> Result<(),std::fileerror>` |
 | `std::%internal::stream-write-string` | `rt_stream_write_string` | `(i32, string) -> Result<(),std::fileerror>` |
-| `std::command-line-args` | `rt_command_line_args` | `() -> Vector<string>` |
 | `std::compile-file` |  | `(string, string) -> bool` |
 | `std::dump` |  | `(string) -> bool` |
+| `std::env::command-line-args` | `rt_command_line_args` | `() -> Vector<string>` |
+| `std::env::getenv` | `rt_getenv` | `(string) -> Option<string>` |
+| `std::env::home-directory` | `rt_home_directory` | `() -> Option<string>` |
+| `std::env::lisp-implementation-version` | `rt_lisp_implementation_version` | `() -> string` |
+| `std::env::machine-instance` | `rt_machine_instance` | `() -> Option<string>` |
+| `std::env::machine-type` | `rt_machine_type` | `() -> string` |
+| `std::env::machine-version` | `rt_machine_version` | `() -> Option<string>` |
+| `std::env::software-type` | `rt_software_type` | `() -> string` |
+| `std::env::software-version` | `rt_software_version` | `() -> Option<string>` |
 | `std::equal` | `rt_sexpr_equal` | `<t> (t, t) -> bool` |
 | `std::equalp` | `rt_sexpr_equalp` | `<t> (t, t) -> bool` |
 | `std::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::exit` | `rt_exit` | `(int) -> !` |
 | `std::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
 | `std::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
-| `std::getenv` | `rt_getenv` | `(string) -> Option<string>` |
-| `std::home-directory` | `rt_home_directory` | `() -> Option<string>` |
 | `std::intern` | `rt_intern` | `(string, string) -> symbol` |
 | `std::keywordp` | `rt_keywordp` | `(symbol) -> bool` |
-| `std::lisp-implementation-version` | `rt_lisp_implementation_version` | `() -> string` |
-| `std::machine-instance` | `rt_machine_instance` | `() -> Option<string>` |
-| `std::machine-type` | `rt_machine_type` | `() -> string` |
-| `std::machine-version` | `rt_machine_version` | `() -> Option<string>` |
 | `std::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::parse-float` | `rt_parse_float` | `(string) -> Result<f64,std::parsefloaterror>` |
@@ -1867,14 +1869,12 @@
 | `std::sexpr-u32` | `rt_sexpr_u32` | `(Option<Sexpr>) -> u32` |
 | `std::sexpr-u8` | `rt_sexpr_u8` | `(Option<Sexpr>) -> u8` |
 | `std::sleep` | `rt_suspend_sleep` | `(f64) -> ()` |
-| `std::software-type` | `rt_software_type` | `() -> string` |
-| `std::software-version` | `rt_software_version` | `() -> Option<string>` |
 | `std::string->symbol` | `rt_intern_symbol` | `(string) -> symbol` |
 | `std::symbol->string` | `rt_sym_name` | `(symbol) -> string` |
 | `std::time::get-internal-real-time` | `rt_get_internal_real_time` | `() -> std::time::internal-time` |
 | `std::time::get-internal-run-time` | `rt_get_internal_run_time` | `() -> std::time::internal-time` |
 | `std::time::get-universal-time` | `rt_get_universal_time` | `() -> std::time::universal-time` |
-| `std::timezone-daylight-p` | `rt_timezone_daylight_p` | `(int, int) -> Option<bool>` |
-| `std::timezone-offset-seconds` | `rt_timezone_offset_seconds` | `(int, int) -> Option<int>` |
+| `std::time::timezone-daylight-p` | `rt_timezone_daylight_p` | `(int, int) -> Option<bool>` |
+| `std::time::timezone-offset-seconds` | `rt_timezone_offset_seconds` | `(int, int) -> Option<int>` |
 | `std::yield` | `rt_suspend_yield` | `() -> ()` |
 
