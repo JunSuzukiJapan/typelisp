@@ -2117,11 +2117,12 @@ user-visible capacity."
 ;; string in a trait method is the *default body's* return value, not a
 ;; docstring (`take_leading_docstring`'s rule), and this method has no
 ;; default body. Its contract is the paragraph above.
-(deftrait Hash (Eq)
+(module hash
+(pub deftrait Hash (Eq)
   (sxhash ((self Self)) int))
 
 ;; The mask that keeps a hash non-negative and fixnum-sized: 2^30-1.
-(pub defconstant (*sxhash-mask* int) 1073741823)
+(pub defconstant (*sxhash-mask* int) 1073741823))
 
 ;; FNV-1a over a string's code points, written in typelisp rather than Rust:
 ;; it is pure arithmetic on values the language already has, which is the
@@ -2138,13 +2139,14 @@ user-visible capacity."
 (module %internal (pub defconstant (*fnv-offset-basis* u32) 2166136261))
 (module %internal (pub defconstant (*fnv-prime* u32) 16777619))
 
+(module hash
 (pub defun sxhash-string ((s string)) int
   "FNV-1a over `s`'s code points — the hash `string`'s `Hash` impl uses."
-  (let ((h %internal::*fnv-offset-basis*) (i 0) (n (length s)))
+  (let ((h std::%internal::*fnv-offset-basis*) (i 0) (n (length s)))
     (progn
       (while (< i n)
         (progn
-          (setf h (* (logxor h (as u32 (char->int (ref s i)))) %internal::*fnv-prime*))
+          (setf h (* (logxor h (as u32 (char->int (ref s i)))) std::%internal::*fnv-prime*))
           (setf i (+ i 1))))
       (logand (as int h) *sxhash-mask*))))
 
@@ -2162,7 +2164,7 @@ user-visible capacity."
 (impl Hash ratio  (sxhash ((self Self)) int
   (logand (+ (* 31 (sxhash (numerator self))) (sxhash (denominator self))) *sxhash-mask*)))
 (impl Hash rational (sxhash ((self Self)) int
-  (logand (+ (* 31 (sxhash (numerator self))) (sxhash (denominator self))) *sxhash-mask*)))
+  (logand (+ (* 31 (sxhash (numerator self))) (sxhash (denominator self))) *sxhash-mask*))))
 
 ;; ---------------------------------------------------------------------------
 ;; `HashTable<K,V>`'s lookup, insert and delete — cl-parity-plan.md Phase 6a.
