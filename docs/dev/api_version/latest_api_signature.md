@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.25
+# ABI バージョン 0.3.26
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.25 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.26 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `6f9f13d2306185f0`
+内容ハッシュ (FNV-1a 64): `11d37f37b8fb679a`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -407,8 +407,8 @@
 | 8 | `std::fileerror` |
 | 9 | `std::parseinterror` |
 | 10 | `std::parsefloaterror` |
-| 11 | `std::universal-time` |
-| 12 | `std::internal-time` |
+| 11 | `std::time::universal-time` |
+| 12 | `std::time::internal-time` |
 | 13 | `std::heap-info` |
 | 14 | `std::neterror` |
 | 15 | `std::sexpr` |
@@ -448,7 +448,7 @@
 | stream_builtin::RESULT_TYPES | `stream-take-output-string` | `std::result<std::string,std::fileerror>` |
 | stream_builtin::RESULT_TYPES | `file-delete` | `std::result<(),std::fileerror>` |
 | stream_builtin::RESULT_TYPES | `file-truename` | `std::result<std::string,std::fileerror>` |
-| stream_builtin::RESULT_TYPES | `file-modified-date` | `std::result<std::universal-time,std::fileerror>` |
+| stream_builtin::RESULT_TYPES | `file-modified-date` | `std::result<std::time::universal-time,std::fileerror>` |
 | stream_builtin::RESULT_TYPES | `file-owner-name` | `std::result<std::option<std::string>,std::fileerror>` |
 | stream_builtin::RESULT_TYPES | `file-list-directory` | `std::result<std::vector<std::string>,std::fileerror>` |
 | stream_builtin::RESULT_TYPES | `file-create-directories` | `std::result<(),std::fileerror>` |
@@ -550,7 +550,7 @@
 | `Result<i32,std::neterror>` | `std::result<std::i32,std::neterror>` | enum | 6 | 2 |
 | `Result<int,std::fileerror>` | `std::result<std::int,std::fileerror>` | enum | 6 | 2 |
 | `Result<std::cons-cell<Option<Sexpr>,int>,std::readerror>` | `std::result<std::cons-cell<std::option<std::sexpr>,std::int>,std::readerror>` | enum | 6 | 2 |
-| `Result<std::universal-time,std::fileerror>` | `std::result<std::universal-time,std::fileerror>` | enum | 6 | 2 |
+| `Result<std::time::universal-time,std::fileerror>` | `std::result<std::time::universal-time,std::fileerror>` | enum | 6 | 2 |
 | `Result<string,std::fileerror>` | `std::result<std::string,std::fileerror>` | enum | 6 | 2 |
 | `Result<string,std::neterror>` | `std::result<std::string,std::neterror>` | enum | 6 | 2 |
 | `Task<t>` | `std::task<t>` | struct | 6 | 2 |
@@ -579,14 +579,14 @@
 | `rational` | `std::rational` | rational | 6 | 2 |
 | `std::array<Option<Sexpr>>` | `std::array<std::option<std::sexpr>>` | none | 0 | 0 |
 | `std::heap-info` | `std::heap-info` | none | 0 | 0 |
-| `std::internal-time` | `std::internal-time` | none | 0 | 0 |
 | `std::llvm-basic-block` | `std::llvm-basic-block` | handle | 1 | 0 |
 | `std::llvm-builder` | `std::llvm-builder` | handle | 1 | 0 |
 | `std::llvm-function` | `std::llvm-function` | handle | 1 | 0 |
 | `std::llvm-module` | `std::llvm-module` | handle | 1 | 0 |
 | `std::llvm-value` | `std::llvm-value` | handle | 1 | 0 |
 | `std::scope<v>` | `std::scope<v>` | scope | 6 | 2 |
-| `std::universal-time` | `std::universal-time` | none | 0 | 0 |
+| `std::time::internal-time` | `std::time::internal-time` | none | 0 | 0 |
+| `std::time::universal-time` | `std::time::universal-time` | none | 0 | 0 |
 | `string` | `std::string` | str | 6 | 2 |
 | `symbol` | `std::symbol` | sym | 6 | 0 |
 | `t` | `t` | none | 0 | 0 |
@@ -1753,7 +1753,7 @@
 | `std::%internal::file-directory-p` | `rt_file_directory_p` | `(string) -> bool` |
 | `std::%internal::file-exists-p` | `rt_file_exists_p` | `(string) -> bool` |
 | `std::%internal::file-list-directory` | `rt_file_list_directory` | `(string) -> Result<Vector<string>,std::fileerror>` |
-| `std::%internal::file-modified-date` | `rt_file_modified_date` | `(string) -> Result<std::universal-time,std::fileerror>` |
+| `std::%internal::file-modified-date` | `rt_file_modified_date` | `(string) -> Result<std::time::universal-time,std::fileerror>` |
 | `std::%internal::file-owner-name` | `rt_file_owner_name` | `(string) -> Result<Option<string>,std::fileerror>` |
 | `std::%internal::file-rename` | `rt_file_rename` | `(string, string) -> Result<(),std::fileerror>` |
 | `std::%internal::file-truename` | `rt_file_truename` | `(string) -> Result<string,std::fileerror>` |
@@ -1824,10 +1824,7 @@
 | `std::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::exit` | `rt_exit` | `(int) -> !` |
 | `std::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
-| `std::get-internal-real-time` | `rt_get_internal_real_time` | `() -> std::internal-time` |
-| `std::get-internal-run-time` | `rt_get_internal_run_time` | `() -> std::internal-time` |
 | `std::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
-| `std::get-universal-time` | `rt_get_universal_time` | `() -> std::universal-time` |
 | `std::getenv` | `rt_getenv` | `(string) -> Option<string>` |
 | `std::heap-info` | `rt_heap_info` | `() -> std::heap-info` |
 | `std::home-directory` | `rt_home_directory` | `() -> Option<string>` |
@@ -1874,6 +1871,9 @@
 | `std::software-version` | `rt_software_version` | `() -> Option<string>` |
 | `std::string->symbol` | `rt_intern_symbol` | `(string) -> symbol` |
 | `std::symbol->string` | `rt_sym_name` | `(symbol) -> string` |
+| `std::time::get-internal-real-time` | `rt_get_internal_real_time` | `() -> std::time::internal-time` |
+| `std::time::get-internal-run-time` | `rt_get_internal_run_time` | `() -> std::time::internal-time` |
+| `std::time::get-universal-time` | `rt_get_universal_time` | `() -> std::time::universal-time` |
 | `std::timezone-daylight-p` | `rt_timezone_daylight_p` | `(int, int) -> Option<bool>` |
 | `std::timezone-offset-seconds` | `rt_timezone_offset_seconds` | `(int, int) -> Option<int>` |
 | `std::yield` | `rt_suspend_yield` | `() -> ()` |

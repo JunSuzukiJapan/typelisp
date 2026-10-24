@@ -801,6 +801,23 @@ impl NsId {
     pub const CORE: NsId = NsId(4);
 }
 
+/// A module of the standard library named from Rust, as its segments under
+/// `std`: `StdModule(&[])` is `std` itself and `StdModule(&["time"])` is
+/// `std::time`. What the runtime's constant type tables write a module as,
+/// since only `std`'s own `NsId` is fixed.
+#[derive(Clone, Copy, Debug)]
+pub struct StdModule(pub &'static [&'static str]);
+
+impl StdModule {
+    pub const STD: StdModule = StdModule(&[]);
+    pub const TIME: StdModule = StdModule(&["time"]);
+
+    /// The module, found one segment at a time from `std`.
+    pub fn ns(self) -> NsId {
+        self.0.iter().fold(NsId::STD, |ns, segment| child_ns(ns, segment))
+    }
+}
+
 /// The vocabulary members owned by [`NsId::STD`] rather than the system
 /// module: names the standard library defines, which a module may define for
 /// itself only after declaring so (`shadow`). Exported by `std`.

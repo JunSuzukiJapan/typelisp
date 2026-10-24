@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 use parking_lot::RwLock;
 
 use crate::names::ConcreteNames;
-use crate::symbols::{ns_path, NsId, SymRef};
+use crate::symbols::{ns_path, NsId, StdModule, SymRef};
 use crate::value::TypeId;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -98,7 +98,7 @@ fn definition(ns: NsId, sym: SymRef) -> String {
 #[derive(Debug)]
 pub enum TypeSpec {
     /// The named type `name` of the module, with these arguments.
-    Named(NsId, &'static str, &'static [TypeSpec]),
+    Named(StdModule, &'static str, &'static [TypeSpec]),
     /// A function of these parameters, with no `&rest`, returning the last.
     Fn(&'static [TypeSpec], &'static TypeSpec),
     Unit,
@@ -107,15 +107,15 @@ pub enum TypeSpec {
 /// The types the runtime's [`TypeSpec`]s are written with.
 pub mod spec {
     use super::TypeSpec::{self, Named};
-    use crate::symbols::NsId;
+    use crate::symbols::StdModule;
 
-    pub const INT: TypeSpec = Named(NsId::STD, "int", &[]);
-    pub const I32: TypeSpec = Named(NsId::STD, "i32", &[]);
-    pub const F64: TypeSpec = Named(NsId::STD, "f64", &[]);
-    pub const BOOL: TypeSpec = Named(NsId::STD, "bool", &[]);
-    pub const CHAR: TypeSpec = Named(NsId::STD, "char", &[]);
-    pub const STRING: TypeSpec = Named(NsId::STD, "string", &[]);
-    pub const SEXPR: TypeSpec = Named(NsId::STD, "sexpr", &[]);
+    pub const INT: TypeSpec = Named(StdModule::STD, "int", &[]);
+    pub const I32: TypeSpec = Named(StdModule::STD, "i32", &[]);
+    pub const F64: TypeSpec = Named(StdModule::STD, "f64", &[]);
+    pub const BOOL: TypeSpec = Named(StdModule::STD, "bool", &[]);
+    pub const CHAR: TypeSpec = Named(StdModule::STD, "char", &[]);
+    pub const STRING: TypeSpec = Named(StdModule::STD, "string", &[]);
+    pub const SEXPR: TypeSpec = Named(StdModule::STD, "sexpr", &[]);
     pub const UNIT: TypeSpec = TypeSpec::Unit;
 }
 
@@ -150,7 +150,7 @@ fn table() -> &'static RwLock<TypeTable> {
     TYPES.get_or_init(|| {
         let mut table = TypeTable::default();
         for (ns, name, args) in crate::value::BUILTIN_TYPES {
-            table.intern(TypeShape::named(*ns, name, args));
+            table.intern(TypeShape::named(ns.ns(), name, args));
         }
         RwLock::new(table)
     })
@@ -230,7 +230,7 @@ pub fn intern_spec(spec: &TypeSpec) -> TypeId {
     match spec {
         TypeSpec::Named(ns, name, args) => {
             let args: Vec<TypeId> = args.iter().map(intern_spec).collect();
-            intern_type(TypeShape::named(*ns, name, &args))
+            intern_type(TypeShape::named(ns.ns(), name, &args))
         }
         TypeSpec::Fn(params, ret) => {
             let params: Vec<TypeId> = params.iter().map(intern_spec).collect();

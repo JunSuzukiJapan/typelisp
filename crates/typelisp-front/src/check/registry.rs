@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -814,6 +814,7 @@ impl Registry {
         let mut std_ns = Namespace::new(NsId::STD);
         let mut internal = Namespace::new(crate::types::internal_ns());
         let mut random = Namespace::new(crate::types::std_module("random"));
+        let mut time = Namespace::new(crate::types::std_module("time"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -928,15 +929,15 @@ impl Registry {
         // already splits it costs nothing: `decode-universal-time`'s first
         // step is exactly this division, and `time`'s subtraction is two
         // field subtractions.
-        std_ns.fns.insert("get-universal-time".to_string(), FnSig::builtin(vec![], universal_time()));
-        std_ns.fns.insert("get-internal-real-time".to_string(), FnSig::builtin(vec![], internal_time()));
+        time.fns.insert("get-universal-time".to_string(), FnSig::builtin(vec![], universal_time()));
+        time.fns.insert("get-internal-real-time".to_string(), FnSig::builtin(vec![], internal_time()));
         // `get-internal-run-time` (CLHS 25.1): the same unit and the same
         // struct, but CPU time (`getrusage`) instead of elapsed time. The
         // pair is the point — a program blocked on I/O shows a large
         // difference, and that difference is exactly what a single "real
         // time" figure hides. Left out until 2026-09-05 because standing in
         // real time for it would have been a lie.
-        std_ns.fns.insert("get-internal-run-time".to_string(), FnSig::builtin(vec![], internal_time()));
+        time.fns.insert("get-internal-run-time".to_string(), FnSig::builtin(vec![], internal_time()));
         // `parse-float`: untrusted-text numeric parsing
         // (`docs/language-design.md` §4.1's planned conversion catalog) —
         // `Result`, not a panic, since the input is runtime text the caller
@@ -1136,7 +1137,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
@@ -1917,14 +1918,14 @@ fn sexpr() -> Type {
 /// of `get-universal-time`/`file-modified-date` — see the comment at
 /// `get-universal-time`'s registration for why a struct and not a number.
 pub fn universal_time() -> Type {
-    Type::Named(Path::std("universal-time"), vec![])
+    Type::Named(Path::in_ns(crate::types::std_module("time"), "universal-time"), vec![])
 }
 
 /// `internal-time` (a prelude `defstruct`): `get-internal-real-time`'s
 /// reading, as whole seconds plus microseconds within that second.
 /// [`universal_time`]'s monotonic counterpart.
 pub fn internal_time() -> Type {
-    Type::Named(Path::std("internal-time"), vec![])
+    Type::Named(Path::in_ns(crate::types::std_module("time"), "internal-time"), vec![])
 }
 
 /// `heap-info` (a prelude `defstruct`): what `(heap-info)` reports and what

@@ -23,7 +23,7 @@ use std::sync::Arc;
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
-use typelisp_mem::{spec, symbols, wk, Error, Heap, Loc, NsId, SymRef, TypeId, TypeSpec, Value};
+use typelisp_mem::{spec, symbols, wk, Error, Heap, Loc, NsId, StdModule, SymRef, TypeId, TypeSpec, Value};
 
 /// The feature set consulted by `#+`/`#-` reader conditionals (CLHS 24.1.2 —
 /// the closest an s-expression reader has to a preprocessor). A feature is
@@ -1373,7 +1373,7 @@ fn read_hash(cur: &mut Cursor, heap: &mut Heap, ctx: Ctx<'_>) -> Result<Value, E
 /// The `Vector<int>` box an array's dimensions are kept in. Written here
 /// because the reader has no checker to ask; `tests/type_identity_guard_test.rs`
 /// checks it against the type the checker gives it.
-pub const ARRAY_DIMS_TYPE: TypeSpec = TypeSpec::Named(NsId::STD, "vector", &[spec::INT]);
+pub const ARRAY_DIMS_TYPE: TypeSpec = TypeSpec::Named(StdModule::STD, "vector", &[spec::INT]);
 
 /// `#(a b c)`: the elements, read as data, in a `Vector<Option<Sexpr>>` box —
 /// the `Sexpr` `vector` variant. The cursor is on the `(`.

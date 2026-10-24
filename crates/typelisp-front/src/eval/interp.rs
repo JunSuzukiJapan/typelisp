@@ -31,7 +31,7 @@ use typelisp_mem::RootScope;
 use crate::check::core;
 use crate::check::repr::Repr;
 use crate::{wk, BoxId, Heap, MacroExpander, MacroLambda, Path, SymRef, TypeId, Value};
-use typelisp_mem::{spec, NsId, TypeSpec};
+use typelisp_mem::{spec, StdModule, TypeSpec};
 
 use super::scope;
 pub use super::value::EvalError;
@@ -4327,9 +4327,9 @@ const READER_MACRO_GLUE: &str = "call-reader-macro";
 /// `tests/type_identity_guard_test.rs` checks against the registry. Its inner
 /// `Option<Sexpr>` is [`TypeId::OPTION_SEXPR`].
 pub const MACROEXPAND_RESULT_TYPE: TypeSpec = TypeSpec::Named(
-    NsId::STD,
+    StdModule::STD,
     "result",
-    &[TypeSpec::Named(NsId::STD, "option", &[spec::SEXPR]), TypeSpec::Named(NsId::STD, "evalerror", &[])],
+    &[TypeSpec::Named(StdModule::STD, "option", &[spec::SEXPR]), TypeSpec::Named(StdModule::STD, "evalerror", &[])],
 );
 
 /// `eval`'s result type — the same as `macroexpand`'s, and the same fixed

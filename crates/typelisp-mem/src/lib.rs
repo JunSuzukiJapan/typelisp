@@ -30,7 +30,7 @@ pub use name_view::NameView;
 pub use names::{ConcreteNames, TypeKey};
 pub use stack::grow_stack;
 pub use option::{is_niched_option, option_payload_niches, option_prints_wrapped};
-pub use symbols::{wk, NsId, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};
+pub use symbols::{wk, NsId, StdModule, SymRef, Symbol, BUILTIN_SYMBOLS, NOT_WELL_KNOWN};
 pub use type_form::{existing_type_of_form, type_key_of_form, type_of_form};
 pub use type_shape::{find_type, instantiate, intern_spec, intern_type, spec, type_name, type_shape, TypeShape, TypeSpec};
 pub use tuple::{sexpr_tuple_arity, sexpr_tuple_type, tuple_type_arity, TUPLE_MAX_ARITY};

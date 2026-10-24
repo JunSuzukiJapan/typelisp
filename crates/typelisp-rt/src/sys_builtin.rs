@@ -18,32 +18,32 @@
 //! `std::time` machinery in with it — see this crate's own module docs on how
 //! archive-member granularity decides what an AOT binary pays for.
 
-use typelisp_mem::{spec, Heap, NsId, TypeId, TypeSpec, Value};
+use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
 
 // The types these results are built with come from `typelisp_mem`'s
 // pre-interned table — same standing exception (and same guard test) as
 // [`crate::stream_builtin`]: this crate has no `Path` to derive a name from.
 
-const FILE_ERROR: TypeSpec = TypeSpec::Named(NsId::STD, "fileerror", &[]);
-const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(NsId::STD, "parsefloaterror", &[]);
+const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "fileerror", &[]);
+const PARSE_FLOAT_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "parsefloaterror", &[]);
 
 /// The runtime type each of these builtins' results carries — the same
 /// table [`crate::stream_builtin::RESULT_TYPES`] keeps, for the same reason
 /// (a type's identity includes its instantiation, and this crate has no
 /// checker to ask), checked against the registry by the same guard test.
 pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
-    ("parse-float", TypeSpec::Named(NsId::STD, "result", &[spec::F64, PARSE_FLOAT_ERROR])),
-    ("command-line-args", TypeSpec::Named(NsId::STD, "vector", &[spec::STRING])),
-    ("getenv", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
-    ("home-directory", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
-    ("machine-instance", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
-    ("machine-version", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
-    ("software-version", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
-    ("timezone-offset-seconds", TypeSpec::Named(NsId::STD, "option", &[spec::INT])),
-    ("timezone-daylight-p", TypeSpec::Named(NsId::STD, "option", &[spec::BOOL])),
-    ("dribble-start", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("dribble-stop", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("ed-open", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("parse-float", TypeSpec::Named(StdModule::STD, "result", &[spec::F64, PARSE_FLOAT_ERROR])),
+    ("command-line-args", TypeSpec::Named(StdModule::STD, "vector", &[spec::STRING])),
+    ("getenv", TypeSpec::Named(StdModule::STD, "option", &[spec::STRING])),
+    ("home-directory", TypeSpec::Named(StdModule::STD, "option", &[spec::STRING])),
+    ("machine-instance", TypeSpec::Named(StdModule::STD, "option", &[spec::STRING])),
+    ("machine-version", TypeSpec::Named(StdModule::STD, "option", &[spec::STRING])),
+    ("software-version", TypeSpec::Named(StdModule::STD, "option", &[spec::STRING])),
+    ("timezone-offset-seconds", TypeSpec::Named(StdModule::STD, "option", &[spec::INT])),
+    ("timezone-daylight-p", TypeSpec::Named(StdModule::STD, "option", &[spec::BOOL])),
+    ("dribble-start", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("dribble-stop", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("ed-open", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
 ];
 
 fn type_of(name: &str) -> TypeId {

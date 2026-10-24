@@ -23,7 +23,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::symbols::{NsId, SymRef};
+use crate::symbols::{StdModule, SymRef};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 
@@ -180,26 +180,26 @@ pub struct TypeId(pub(crate) u32);
 /// and what the heap's own `HashTable`/`Scope` machinery allocates. A user
 /// type is interned on first use like any other; only these need to be
 /// nameable from Rust as constants.
-pub const BUILTIN_TYPES: &[(NsId, &str, &[TypeId])] = &[
-    (NsId::STD, "option", &[]),
-    (NsId::STD, "result", &[]),
-    (NsId::STD, "vector", &[]),
-    (NsId::STD, "cons-cell", &[]),
-    (NsId::STD, "hashtable", &[]),
-    (NsId::STD, "scope", &[]),
-    (NsId::STD, "scope-frame", &[]),
-    (NsId::STD, "readerror", &[]),
-    (NsId::STD, "fileerror", &[]),
-    (NsId::STD, "parseinterror", &[]),
-    (NsId::STD, "parsefloaterror", &[]),
-    (NsId::STD, "universal-time", &[]),
-    (NsId::STD, "internal-time", &[]),
-    (NsId::STD, "heap-info", &[]),
-    (NsId::STD, "neterror", &[]),
-    (NsId::STD, "sexpr", &[]),
-    (NsId::STD, "option", &[TypeId::SEXPR]),
-    (NsId::STD, "vector", &[TypeId::OPTION_SEXPR]),
-    (NsId::STD, "array", &[TypeId::OPTION_SEXPR]),
+pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
+    (StdModule::STD, "option", &[]),
+    (StdModule::STD, "result", &[]),
+    (StdModule::STD, "vector", &[]),
+    (StdModule::STD, "cons-cell", &[]),
+    (StdModule::STD, "hashtable", &[]),
+    (StdModule::STD, "scope", &[]),
+    (StdModule::STD, "scope-frame", &[]),
+    (StdModule::STD, "readerror", &[]),
+    (StdModule::STD, "fileerror", &[]),
+    (StdModule::STD, "parseinterror", &[]),
+    (StdModule::STD, "parsefloaterror", &[]),
+    (StdModule::TIME, "universal-time", &[]),
+    (StdModule::TIME, "internal-time", &[]),
+    (StdModule::STD, "heap-info", &[]),
+    (StdModule::STD, "neterror", &[]),
+    (StdModule::STD, "sexpr", &[]),
+    (StdModule::STD, "option", &[TypeId::SEXPR]),
+    (StdModule::STD, "vector", &[TypeId::OPTION_SEXPR]),
+    (StdModule::STD, "array", &[TypeId::OPTION_SEXPR]),
 ];
 
 impl TypeId {

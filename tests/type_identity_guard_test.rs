@@ -229,13 +229,13 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         (TypeId::HASHTABLE, Path::std("hashtable")),
         (TypeId::SCOPE, Path::std("scope")),
         (TypeId::SCOPE_FRAME, Path::std("scope-frame")),
-        // Three prelude `defstruct`s the runtime builds itself (in `std`, as
-        // the whole prelude is, like `cons-cell` above), because the
+        // Three prelude `defstruct`s the runtime builds itself, because the
         // facts in them belong to the runtime and not to the checker: two
-        // clocks (`get-universal-time` / `get-internal-real-time`) and the
-        // heap's own statistics (`heap-info`, which `room` prints).
-        (TypeId::UNIVERSAL_TIME, Path::std("universal-time")),
-        (TypeId::INTERNAL_TIME, Path::std("internal-time")),
+        // clocks (`get-universal-time` / `get-internal-real-time`, in
+        // `std::time`) and the heap's own statistics (`heap-info`, which
+        // `room` prints).
+        (TypeId::UNIVERSAL_TIME, Path::in_ns(typelisp::std_module("time"), "universal-time")),
+        (TypeId::INTERNAL_TIME, Path::in_ns(typelisp::std_module("time"), "internal-time")),
         (TypeId::HEAP_INFO, Path::std("heap-info")),
         // The socket layer's error type, built by `net_builtin`.
         (TypeId::NET_ERROR, Path::std("neterror")),
@@ -386,7 +386,7 @@ fn the_builtin_type_constants_are_what_the_table_interns() {
     use typelisp::{TypeShape, BUILTIN_TYPES};
 
     for (i, (ns, name, args)) in BUILTIN_TYPES.iter().enumerate() {
-        let id = typelisp_mem::intern_type(TypeShape::named(*ns, name, args));
+        let id = typelisp_mem::intern_type(TypeShape::named(ns.ns(), name, args));
         assert_eq!(
             id.as_u32() as usize,
             i,

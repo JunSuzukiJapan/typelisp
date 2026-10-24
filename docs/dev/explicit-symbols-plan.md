@@ -613,6 +613,10 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `use` して使うモジュールは挙げない）。コンパイル済みコードが呼ぶ組み込みの置き場所は
      `externs::builtin_homes`（レジストリの `builtin` 関数と、シグネチャを持たない下ろし先の
      `registry::lowered_builtins`）。最初に乱数を `std::random` へ移した。ABI は 0.3.25。
+     次に時刻を `std::time` へ移した。ランタイムが組み立てる型の定数表（`TypeSpec`、`BUILTIN_TYPES`）は
+     モジュールを `StdModule`（`std` の下の段の並び。1 段ずつたどる）で書く。子モジュールのマクロの雛形が
+     後で定義される `std` の名前を使うときは `std::` を付けて書く（付けないと子モジュールのシンボルになる）。
+     ABI は 0.3.26。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

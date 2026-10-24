@@ -17,7 +17,7 @@
 //!   cargo +nightly miri test --test mem_test
 
 extern crate typelisp;
-use typelisp::{spec, BoxId, Error, Heap, NsId, TypeShape, TypeSpec, Value};
+use typelisp::{spec, BoxId, Error, Heap, NsId, StdModule, TypeShape, TypeSpec, Value};
 
 /// `Heap::alloc_struct` with the type identity interned for you.
 ///
@@ -1118,7 +1118,7 @@ fn as_boxed(v: Value) -> BoxId {
 /// and an empty table says nothing about which it is. At *this* layer the type
 /// is only an id nobody reads back, so one type serves every test here.
 fn new_hashtable(h: &mut Heap) -> Value {
-    let key = typelisp_mem::intern_spec(&TypeSpec::Named(NsId::STD, "hashtable", &[spec::INT, spec::INT]));
+    let key = typelisp_mem::intern_spec(&TypeSpec::Named(StdModule::STD, "hashtable", &[spec::INT, spec::INT]));
     h.alloc_hashtable(key)
 }
 

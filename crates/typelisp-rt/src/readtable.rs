@@ -9,7 +9,7 @@
 //! depending on which side of the compile boundary made it.
 
 use crate::stream_builtin::ArgError;
-use typelisp_mem::{spec, Heap, NsId, TypeSpec, Value};
+use typelisp_mem::{spec, Heap, StdModule, TypeSpec, Value};
 
 /// The type `Option<(fn (string-input-stream char) Option<Sexpr>)>` — what
 /// `get-macro-character` answers with.
@@ -19,11 +19,11 @@ use typelisp_mem::{spec, Heap, NsId, TypeSpec, Value};
 /// the registry's own declaration, for the reason that file gives: a box
 /// built under a type nobody else gives it is unmatchable.
 pub const READER_MACRO_OPTION_TYPE: TypeSpec = TypeSpec::Named(
-    NsId::STD,
+    StdModule::STD,
     "option",
     &[TypeSpec::Fn(
-        &[TypeSpec::Named(NsId::STD, "string-input-stream", &[]), spec::CHAR],
-        &TypeSpec::Named(NsId::STD, "option", &[spec::SEXPR]),
+        &[TypeSpec::Named(StdModule::STD, "string-input-stream", &[]), spec::CHAR],
+        &TypeSpec::Named(StdModule::STD, "option", &[spec::SEXPR]),
     )],
 );
 

@@ -4317,6 +4317,7 @@ user-visible capacity."
 ;; implementation's choice (microseconds), not something CL fixes, matching
 ;; every real CL implementation's own "implementation-defined granularity"
 ;; latitude.
+(module time
 (pub defvar (internal-time-units-per-second int) 1000000)
 
 ;; The two clock readings, as structs rather than numbers.
@@ -4373,11 +4374,11 @@ user-visible capacity."
            (,r0 (internal-time-seconds (get-internal-run-time))))
        (let ((,result ,form))
          (progn
-           (format *trace-output* "Real time: ~,3f seconds~%"
+           (format std::*trace-output* "Real time: ~,3f seconds~%"
                    (- (internal-time-seconds (get-internal-real-time)) ,t0))
-           (format *trace-output* "Run time: ~,3f seconds~%"
+           (format std::*trace-output* "Run time: ~,3f seconds~%"
                    (- (internal-time-seconds (get-internal-run-time)) ,r0))
-           ,result)))))
+           ,result))))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -6511,6 +6512,7 @@ user-visible capacity."
 ;; ut 9)` still passes a bare `9`. That is CL's `&optional time-zone` with its
 ;; `nil` default, and the static-type shape of CL's supplied-p variable.
 
+(module time
 (pub defstruct decoded-time
   (pub second int) (pub minute int) (pub hour int)
   (pub date int) (pub month int) (pub year int) (pub day-of-week int)
@@ -6530,7 +6532,7 @@ user-visible capacity."
               sign (truncate mag 60) (mod mag 60)
               (ecase self::day-of-week
                 (0 "Mon") (1 "Tue") (2 "Wed") (3 "Thu") (4 "Fri") (5 "Sat") (6 "Sun"))
-              (if self::daylight-p " dst" "")))))
+              (if self::daylight-p " dst" ""))))))
 
 ;; The civil-calendar conversions are Howard Hinnant's `civil_from_days` /
 ;; `days_from_civil`, shifted from the Unix epoch to CL's. They are exact
@@ -6586,16 +6588,17 @@ user-visible capacity."
     ((some d) d)
     ((none) (panic "the local time zone at this universal time is unknown")))))
 
+(module time
 (pub defun encode-universal-time ((second int) (minute int) (hour int)
                                   (date int) (month int) (year int)
                                   &optional (zone int)) universal-time
   "The universal time for this date and time. `zone` is an offset in hours
    west of Greenwich, as CL's is; omitting it means the arguments are in
    *local* time, which is CL's default too."
-  (let ((day0 (%internal::days-from-civil year month date))
+  (let ((day0 (std::%internal::days-from-civil year month date))
         (s0 (+ (* hour 3600) (* minute 60) second)))
     (match zone
-      ((some z) (%internal::ut-shift day0 s0 (* z 3600)))
+      ((some z) (std::%internal::ut-shift day0 s0 (* z 3600)))
       ;; Local time is a guess and one correction, which is what SBCL's
       ;; `encode-universal-time` does. The components name a *local* time,
       ;; but the offset that turns them into a universal time is itself a
@@ -6605,11 +6608,11 @@ user-visible capacity."
       ;; a local time inside one is ambiguous in any case (CL does not say
       ;; which side to pick, and neither does this).
       ((none)
-       (let ((utc (%internal::ut-shift day0 s0 0)))
-         (let ((west0 (%internal::local-zone-west utc::day utc::second)))
-           (let ((guess (%internal::ut-shift utc::day utc::second west0)))
-             (let ((west1 (%internal::local-zone-west guess::day guess::second)))
-               (%internal::ut-shift guess::day guess::second (- west1 west0))))))))))
+       (let ((utc (std::%internal::ut-shift day0 s0 0)))
+         (let ((west0 (std::%internal::local-zone-west utc::day utc::second)))
+           (let ((guess (std::%internal::ut-shift utc::day utc::second west0)))
+             (let ((west1 (std::%internal::local-zone-west guess::day guess::second)))
+               (std::%internal::ut-shift guess::day guess::second (- west1 west0)))))))))))
 
 (module %internal (pub defun decode-at-west ((ut universal-time) (west int) (daylight bool)) decoded-time
   "`ut` broken into calendar components `west` seconds west of Greenwich.
@@ -6644,6 +6647,7 @@ user-visible capacity."
                              :daylight-p daylight
                              :zone (/ (int->float west) (int->float 3600))))))))
 
+(module time
 (pub defun decode-universal-time ((ut universal-time) &optional (zone int)) decoded-time
   "`ut` broken into its calendar components. `zone` is an offset in hours west
    of Greenwich, as CL's is; omitting it decodes into *local* time, which is
@@ -6656,15 +6660,15 @@ user-visible capacity."
    `day-of-week` is CL's: 0 is Monday, 6 is Sunday. 1900-01-01 -- universal
    time 0 -- was a Monday, which is what makes it a plain remainder."
   (match zone
-    ((some z) (%internal::decode-at-west ut (* z 3600) false))
-    ((none) (%internal::decode-at-west ut
-                            (%internal::local-zone-west ut::day ut::second)
-                            (%internal::local-zone-daylight ut::day ut::second)))))
+    ((some z) (std::%internal::decode-at-west ut (* z 3600) false))
+    ((none) (std::%internal::decode-at-west ut
+                            (std::%internal::local-zone-west ut::day ut::second)
+                            (std::%internal::local-zone-daylight ut::day ut::second)))))
 
 (pub defun get-decoded-time () decoded-time
   "Now, in local time, broken into its calendar components -- CL's
    `get-decoded-time`, which is exactly this composition."
-  (decode-universal-time (get-universal-time)))
+  (decode-universal-time (get-universal-time))))
 
 ;; ---------------------------------------------------------------------------
 ;; Asking the user a question (CLHS 25.2). Both read from

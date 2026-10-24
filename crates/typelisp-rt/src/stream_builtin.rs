@@ -23,7 +23,7 @@
 //! register_stream_builtins`). That conversion is deliberately *not* here:
 //! it belongs to the calling convention, not to the operation.
 
-use typelisp_mem::{spec, Heap, NsId, TypeId, TypeSpec, Value};
+use typelisp_mem::{spec, Heap, StdModule, TypeId, TypeSpec, Value};
 
 use crate::stream::with_streams;
 
@@ -41,7 +41,7 @@ use crate::stream::with_streams;
 // representation `value.rs`'s `BoxedObj` doc comment describes, whose *fields
 // are its elements*. `file-list-directory` builds one directly.
 
-const FILE_ERROR: TypeSpec = TypeSpec::Named(NsId::STD, "fileerror", &[]);
+const FILE_ERROR: TypeSpec = TypeSpec::Named(StdModule::STD, "fileerror", &[]);
 
 /// The runtime type each builtin's *result* carries, and — for the ones
 /// that wrap something generic inside it — the type of that inner value.
@@ -57,36 +57,36 @@ const FILE_ERROR: TypeSpec = TypeSpec::Named(NsId::STD, "fileerror", &[]);
 /// A builtin whose result is not a box (`stream-stdin`'s handle,
 /// `stream-open-p`'s `bool`) has no row and needs none.
 pub const RESULT_TYPES: &[(&str, TypeSpec)] = &[
-    ("stream-open-file", TypeSpec::Named(NsId::STD, "result", &[spec::I32, FILE_ERROR])),
-    ("stream-close", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("stream-input-p", TypeSpec::Named(NsId::STD, "result", &[spec::BOOL, FILE_ERROR])),
-    ("stream-output-p", TypeSpec::Named(NsId::STD, "result", &[spec::BOOL, FILE_ERROR])),
-    ("stream-listen", TypeSpec::Named(NsId::STD, "result", &[spec::BOOL, FILE_ERROR])),
-    ("stream-position", TypeSpec::Named(NsId::STD, "result", &[spec::INT, FILE_ERROR])),
-    ("stream-at-line-start", TypeSpec::Named(NsId::STD, "result", &[spec::BOOL, FILE_ERROR])),
-    ("stream-read-char", TypeSpec::Named(NsId::STD, "result", &[TypeSpec::Named(NsId::STD, "option", &[spec::CHAR]), FILE_ERROR])),
-    ("stream-unread-char", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("stream-read-byte", TypeSpec::Named(NsId::STD, "result", &[TypeSpec::Named(NsId::STD, "option", &[spec::INT]), FILE_ERROR])),
-    ("stream-write-byte", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("stream-write-string", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("stream-finish-output", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("stream-take-output-string", TypeSpec::Named(NsId::STD, "result", &[spec::STRING, FILE_ERROR])),
-    ("file-delete", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("file-truename", TypeSpec::Named(NsId::STD, "result", &[spec::STRING, FILE_ERROR])),
-    ("file-modified-date", TypeSpec::Named(NsId::STD, "result", &[TypeSpec::Named(NsId::STD, "universal-time", &[]), FILE_ERROR])),
-    ("file-owner-name", TypeSpec::Named(NsId::STD, "result", &[TypeSpec::Named(NsId::STD, "option", &[spec::STRING]), FILE_ERROR])),
-    ("file-list-directory", TypeSpec::Named(NsId::STD, "result", &[TypeSpec::Named(NsId::STD, "vector", &[spec::STRING]), FILE_ERROR])),
-    ("file-create-directories", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
-    ("file-rename", TypeSpec::Named(NsId::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-open-file", TypeSpec::Named(StdModule::STD, "result", &[spec::I32, FILE_ERROR])),
+    ("stream-close", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-input-p", TypeSpec::Named(StdModule::STD, "result", &[spec::BOOL, FILE_ERROR])),
+    ("stream-output-p", TypeSpec::Named(StdModule::STD, "result", &[spec::BOOL, FILE_ERROR])),
+    ("stream-listen", TypeSpec::Named(StdModule::STD, "result", &[spec::BOOL, FILE_ERROR])),
+    ("stream-position", TypeSpec::Named(StdModule::STD, "result", &[spec::INT, FILE_ERROR])),
+    ("stream-at-line-start", TypeSpec::Named(StdModule::STD, "result", &[spec::BOOL, FILE_ERROR])),
+    ("stream-read-char", TypeSpec::Named(StdModule::STD, "result", &[TypeSpec::Named(StdModule::STD, "option", &[spec::CHAR]), FILE_ERROR])),
+    ("stream-unread-char", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-read-byte", TypeSpec::Named(StdModule::STD, "result", &[TypeSpec::Named(StdModule::STD, "option", &[spec::INT]), FILE_ERROR])),
+    ("stream-write-byte", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-write-string", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-finish-output", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("stream-take-output-string", TypeSpec::Named(StdModule::STD, "result", &[spec::STRING, FILE_ERROR])),
+    ("file-delete", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("file-truename", TypeSpec::Named(StdModule::STD, "result", &[spec::STRING, FILE_ERROR])),
+    ("file-modified-date", TypeSpec::Named(StdModule::STD, "result", &[TypeSpec::Named(StdModule::TIME, "universal-time", &[]), FILE_ERROR])),
+    ("file-owner-name", TypeSpec::Named(StdModule::STD, "result", &[TypeSpec::Named(StdModule::STD, "option", &[spec::STRING]), FILE_ERROR])),
+    ("file-list-directory", TypeSpec::Named(StdModule::STD, "result", &[TypeSpec::Named(StdModule::STD, "vector", &[spec::STRING]), FILE_ERROR])),
+    ("file-create-directories", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
+    ("file-rename", TypeSpec::Named(StdModule::STD, "result", &[spec::UNIT, FILE_ERROR])),
 ];
 
 /// The type of the value *inside* the `Result` — [`RESULT_TYPES`]' companion for
 /// the three builtins whose payload is itself a box.
 pub const INNER_TYPES: &[(&str, TypeSpec)] = &[
-    ("stream-read-char", TypeSpec::Named(NsId::STD, "option", &[spec::CHAR])),
-    ("stream-read-byte", TypeSpec::Named(NsId::STD, "option", &[spec::INT])),
-    ("file-list-directory", TypeSpec::Named(NsId::STD, "vector", &[spec::STRING])),
-    ("file-owner-name", TypeSpec::Named(NsId::STD, "option", &[spec::STRING])),
+    ("stream-read-char", TypeSpec::Named(StdModule::STD, "option", &[spec::CHAR])),
+    ("stream-read-byte", TypeSpec::Named(StdModule::STD, "option", &[spec::INT])),
+    ("file-list-directory", TypeSpec::Named(StdModule::STD, "vector", &[spec::STRING])),
+    ("file-owner-name", TypeSpec::Named(StdModule::STD, "option", &[spec::STRING])),
 ];
 
 pub(crate) fn lookup(table: &[(&str, TypeSpec)], name: &str, what: &str) -> TypeId {
