@@ -16194,7 +16194,7 @@ impl Checker {
                 let home = typelisp_mem::symbols::ns_path(id.home()).join("::");
                 let expr = {
                     let mut s = RootScope::new(heap);
-                    let f = s.intern_symbol_in(typelisp_mem::NsId::STD, "intern");
+                    let f = s.intern_symbol_in(crate::types::std_module("symbol"), "intern");
                     let name = s.alloc_string(id.name().to_string());
                     s.push_root(name);
                     let home = s.alloc_string(home);

@@ -3246,6 +3246,7 @@ mod tests {
     /// this session is told it has.
     fn read_core(h: &mut Heap, src: &str) -> Result<Vec<Value>, Error> {
         h.names().declare_module(typelisp_mem::symbols::ns_of(&["m".to_string()]));
+        h.names().declare_module(typelisp_front::types::std_module("symbol"));
         Ok(crate::Reader::new()
             .read_all_in_spanned_within(h, "<core>", src, typelisp_mem::NsId::CORE)?
             .into_iter()
@@ -3455,7 +3456,7 @@ mod tests {
         // (`sym`'s kind is `0`: an interned symbol is a tagged word the
         // collector never reclaims, so it needs no root — `Repr::class`.)
         assert_eq!(
-            bridged("(call ::std::symbol->string (sym) (var s))"),
+            bridged("(call ::std::symbol::symbol->string (sym) (var s))"),
             r#"(call "rt_sym_name" (0 var "s" false))"#
         );
     }

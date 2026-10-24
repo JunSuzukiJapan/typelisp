@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -819,6 +819,8 @@ impl Registry {
         let mut env = Namespace::new(crate::types::std_module("env"));
         let mut thread = Namespace::new(crate::types::std_module("thread"));
         let mut sync = Namespace::new(crate::types::std_module("sync"));
+        let mut symbol = Namespace::new(crate::types::std_module("symbol"));
+        let mut process = Namespace::new(crate::types::std_module("process"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -1105,24 +1107,24 @@ impl Registry {
         // symbol intern table directly; `Sexpr::Sym` now wraps `Symbol` (not
         // `Str`), so the old prelude `(match s (Sym name) name)` /
         // `(Sym s)` definitions no longer type-check.
-        std_ns.fns.insert("symbol->string".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Str));
-        std_ns.fns.insert("string->symbol".to_string(), FnSig::builtin(vec![Type::Str], Type::Symbol));
+        symbol.fns.insert("symbol->string".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Str));
+        symbol.fns.insert("string->symbol".to_string(), FnSig::builtin(vec![Type::Str], Type::Symbol));
         // CL's `intern`: `(intern NAME NAMESPACE)` is the symbol `NAME` in the
         // module `NAMESPACE` names (`"keyword"` for a keyword). Written with
         // one argument, it interns in the module the call is written in —
         // CL's current package — which `Checker::check_call` fills in.
-        std_ns.fns.insert("intern".to_string(), FnSig::builtin(vec![Type::Str, Type::Str], Type::Symbol));
+        symbol.fns.insert("intern".to_string(), FnSig::builtin(vec![Type::Str, Type::Str], Type::Symbol));
         // CL's `keywordp`: owned by the keyword module. A Rust builtin because
         // the owner is not reachable from the language — a keyword's name says
         // nothing about it being one.
-        std_ns.fns.insert("keywordp".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Bool));
+        symbol.fns.insert("keywordp".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Bool));
         // `exit`: process termination (cl-equivalence-catalog.md §1.2). Unlike
         // `panic`/`unreachable`/`todo` (which unwind through `EvalError::Panic`,
         // a typelisp-level signal), this needs an actual OS call
         // (`std::process::exit`, in `Interp::eval_builtin`'s `"exit"` arm), so
         // it stays an ordinary `Rust` builtin rather than a `defmacro`. `Never`
         // return type, same as `panic`, so it satisfies any expected type.
-        std_ns.fns.insert("exit".to_string(), FnSig::builtin(vec![Type::Int], Type::Never));
+        process.fns.insert("exit".to_string(), FnSig::builtin(vec![Type::Int], Type::Never));
         // `compile` is a genuine special form (`Checker::check_compile`,
         // dispatched by name in `Checker::check_list` alongside `quote`/
         // `panic`/etc. — never an ordinary call), so unlike `compile-file`
@@ -1146,7 +1148,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg

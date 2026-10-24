@@ -333,6 +333,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; CL. Uninterned symbols would buy nothing — every place a symbol acts as a
 ;; binder is keyed by name (`Env::vars`), so two same-named uninterned symbols
 ;; would collide exactly where it matters most.
+(module symbol
 (pub defvar (*gensym-counter* int) 0)
 
 (pub defun gensym (&optional (prefix string "g")) Symbol
@@ -340,7 +341,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
   (let ((n *gensym-counter*))
     (progn
       (setf *gensym-counter* (+ n 1))
-      (string->symbol (format false " ~a~a" prefix n)))))
+      (string->symbol (format false " ~a~a" prefix n))))))
 
 ;; `dotimes`: `gensym` replaces the old `check_dotimes`'s "leading-space,
 ;; unwritable-in-source" hidden binding trick with the macro system's own

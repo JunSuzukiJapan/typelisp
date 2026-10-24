@@ -630,6 +630,8 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      `std` の木で重ならないことは `reexport_std_in_prelude` が確かめる。組み込みの型や関数かどうかは
      `Path::std(..)` との比較ではなく `types::path_is_builtin`（型）と `Path::std_builtin_name`（関数）で
      問う。ABI は 0.3.29。
+     次にシンボルの関数（`gensym` `intern` `symbol->string` `string->symbol` `keywordp`）を `std::symbol` へ、
+     `exit` を `std::process` へ移した。ABI は 0.3.30。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

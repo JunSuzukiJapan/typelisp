@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.29
+# ABI バージョン 0.3.30
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.29 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.30 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `8559ec06b8f9462e`
+内容ハッシュ (FNV-1a 64): `73d3950b1aec558f`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1830,11 +1830,8 @@
 | `std::equal` | `rt_sexpr_equal` | `<t> (t, t) -> bool` |
 | `std::equalp` | `rt_sexpr_equalp` | `<t> (t, t) -> bool` |
 | `std::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
-| `std::exit` | `rt_exit` | `(int) -> !` |
 | `std::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
 | `std::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
-| `std::intern` | `rt_intern` | `(string, string) -> symbol` |
-| `std::keywordp` | `rt_keywordp` | `(symbol) -> bool` |
 | `std::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::parse-float` | `rt_parse_float` | `(string) -> Result<f64,std::parsefloaterror>` |
@@ -1843,6 +1840,7 @@
 | `std::pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |
 | `std::pprint-pop` | `rt_pprint_pop` | `() -> Option<Sexpr>` |
 | `std::pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
+| `std::process::exit` | `rt_exit` | `(int) -> !` |
 | `std::random::seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
 | `std::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,std::readerror>` |
 | `std::repl::heap-info` | `rt_heap_info` | `() -> std::repl::heap-info` |
@@ -1868,8 +1866,10 @@
 | `std::sexpr-u16` | `rt_sexpr_u16` | `(Option<Sexpr>) -> u16` |
 | `std::sexpr-u32` | `rt_sexpr_u32` | `(Option<Sexpr>) -> u32` |
 | `std::sexpr-u8` | `rt_sexpr_u8` | `(Option<Sexpr>) -> u8` |
-| `std::string->symbol` | `rt_intern_symbol` | `(string) -> symbol` |
-| `std::symbol->string` | `rt_sym_name` | `(symbol) -> string` |
+| `std::symbol::intern` | `rt_intern` | `(string, string) -> symbol` |
+| `std::symbol::keywordp` | `rt_keywordp` | `(symbol) -> bool` |
+| `std::symbol::string->symbol` | `rt_intern_symbol` | `(string) -> symbol` |
+| `std::symbol::symbol->string` | `rt_sym_name` | `(symbol) -> string` |
 | `std::thread::sleep` | `rt_suspend_sleep` | `(f64) -> ()` |
 | `std::thread::yield` | `rt_suspend_yield` | `() -> ()` |
 | `std::time::get-internal-real-time` | `rt_get_internal_real_time` | `() -> std::time::internal-time` |
