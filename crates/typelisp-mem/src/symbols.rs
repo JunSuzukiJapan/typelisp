@@ -811,6 +811,7 @@ pub struct StdModule(pub &'static [&'static str]);
 impl StdModule {
     pub const STD: StdModule = StdModule(&[]);
     pub const TIME: StdModule = StdModule(&["time"]);
+    pub const REPL: StdModule = StdModule(&["repl"]);
 
     /// The module, found one segment at a time from `std`.
     pub fn ns(self) -> NsId {

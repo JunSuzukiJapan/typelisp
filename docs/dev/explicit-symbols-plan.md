@@ -617,6 +617,8 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      モジュールを `StdModule`（`std` の下の段の並び。1 段ずつたどる）で書く。子モジュールのマクロの雛形が
      後で定義される `std` の名前を使うときは `std::` を付けて書く（付けないと子モジュールのシンボルになる）。
      ABI は 0.3.26。
+     次に `room` `dribble` `heap-info` を `std::repl` へ移した。`std::prelude` の名前を定義するときに
+     `shadow` を求めないのは `std` とその子モジュール（`types::in_std`）。ABI は 0.3.27。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

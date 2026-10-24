@@ -2255,7 +2255,7 @@ impl Checker {
         &self.info.reg
     }
 
-    /// Refuses a definition, written in any module but `std`, of a name the
+    /// Refuses a definition, written outside `std` and its modules, of a name the
     /// standard library offers every module: such a name reads as the
     /// library's symbol, so the module must first make it its own with
     /// `(shadow name)`. `name_form` is what the definition form names —
@@ -2272,7 +2272,7 @@ impl Checker {
                 _ => return Ok(()),
             }
         };
-        if self.current_module() == typelisp_mem::NsId::STD || !heap.names().offers(name) {
+        if crate::types::in_std(self.current_module()) || !heap.names().offers(name) {
             return Ok(());
         }
         Err(Error::TypeError(format!(

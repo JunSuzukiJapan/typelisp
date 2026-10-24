@@ -6423,6 +6423,7 @@ user-visible capacity."
 ;; -- are special forms, because each takes the *name* of a definition rather
 ;; than a value. These two take neither, so they are ordinary functions here.
 
+(module repl
 (pub defstruct heap-info
   "What the collector knows about itself: the numbers `room` prints.
 
@@ -6489,8 +6490,8 @@ user-visible capacity."
    -- this language's shape for CL's supplied-p, and the reason one name can
    mean both `start` and `stop` the way CL's does."
   (match path
-    ((some p) (%internal::dribble-start p))
-    ((none) (%internal::dribble-stop))))
+    ((some p) (std::%internal::dribble-start p))
+    ((none) (std::%internal::dribble-stop)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Universal time, decomposed (CLHS 25.1).

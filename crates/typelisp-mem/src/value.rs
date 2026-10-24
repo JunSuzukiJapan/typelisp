@@ -194,7 +194,7 @@ pub const BUILTIN_TYPES: &[(StdModule, &str, &[TypeId])] = &[
     (StdModule::STD, "parsefloaterror", &[]),
     (StdModule::TIME, "universal-time", &[]),
     (StdModule::TIME, "internal-time", &[]),
-    (StdModule::STD, "heap-info", &[]),
+    (StdModule::REPL, "heap-info", &[]),
     (StdModule::STD, "neterror", &[]),
     (StdModule::STD, "sexpr", &[]),
     (StdModule::STD, "option", &[TypeId::SEXPR]),

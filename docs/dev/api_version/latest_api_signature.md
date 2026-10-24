@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.26
+# ABI バージョン 0.3.27
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.26 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.27 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `11d37f37b8fb679a`
+内容ハッシュ (FNV-1a 64): `62c4f6690dc0933b`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -409,7 +409,7 @@
 | 10 | `std::parsefloaterror` |
 | 11 | `std::time::universal-time` |
 | 12 | `std::time::internal-time` |
-| 13 | `std::heap-info` |
+| 13 | `std::repl::heap-info` |
 | 14 | `std::neterror` |
 | 15 | `std::sexpr` |
 | 16 | `std::option<std::sexpr>` |
@@ -578,12 +578,12 @@
 | `ratio` | `std::ratio` | ratio | 6 | 2 |
 | `rational` | `std::rational` | rational | 6 | 2 |
 | `std::array<Option<Sexpr>>` | `std::array<std::option<std::sexpr>>` | none | 0 | 0 |
-| `std::heap-info` | `std::heap-info` | none | 0 | 0 |
 | `std::llvm-basic-block` | `std::llvm-basic-block` | handle | 1 | 0 |
 | `std::llvm-builder` | `std::llvm-builder` | handle | 1 | 0 |
 | `std::llvm-function` | `std::llvm-function` | handle | 1 | 0 |
 | `std::llvm-module` | `std::llvm-module` | handle | 1 | 0 |
 | `std::llvm-value` | `std::llvm-value` | handle | 1 | 0 |
+| `std::repl::heap-info` | `std::repl::heap-info` | none | 0 | 0 |
 | `std::scope<v>` | `std::scope<v>` | scope | 6 | 2 |
 | `std::time::internal-time` | `std::time::internal-time` | none | 0 | 0 |
 | `std::time::universal-time` | `std::time::universal-time` | none | 0 | 0 |
@@ -1826,7 +1826,6 @@
 | `std::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
 | `std::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
 | `std::getenv` | `rt_getenv` | `(string) -> Option<string>` |
-| `std::heap-info` | `rt_heap_info` | `() -> std::heap-info` |
 | `std::home-directory` | `rt_home_directory` | `() -> Option<string>` |
 | `std::intern` | `rt_intern` | `(string, string) -> symbol` |
 | `std::keywordp` | `rt_keywordp` | `(symbol) -> bool` |
@@ -1844,6 +1843,7 @@
 | `std::pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
 | `std::random::seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
 | `std::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,std::readerror>` |
+| `std::repl::heap-info` | `rt_heap_info` | `() -> std::repl::heap-info` |
 | `std::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
 | `std::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
 | `std::sexpr-atom` | `rt_atom` | `(Option<Sexpr>) -> bool` |

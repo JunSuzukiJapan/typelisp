@@ -233,10 +233,10 @@ fn the_runtimes_fixed_types_are_the_checkers() {
         // facts in them belong to the runtime and not to the checker: two
         // clocks (`get-universal-time` / `get-internal-real-time`, in
         // `std::time`) and the heap's own statistics (`heap-info`, which
-        // `room` prints).
+        // `room` prints, in `std::repl`).
         (TypeId::UNIVERSAL_TIME, Path::in_ns(typelisp::std_module("time"), "universal-time")),
         (TypeId::INTERNAL_TIME, Path::in_ns(typelisp::std_module("time"), "internal-time")),
-        (TypeId::HEAP_INFO, Path::std("heap-info")),
+        (TypeId::HEAP_INFO, Path::in_ns(typelisp::std_module("repl"), "heap-info")),
         // The socket layer's error type, built by `net_builtin`.
         (TypeId::NET_ERROR, Path::std("neterror")),
         (TypeId::SEXPR, Path::std("sexpr")),
