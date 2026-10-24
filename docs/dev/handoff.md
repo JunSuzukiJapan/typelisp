@@ -43,7 +43,7 @@
 
 1. 段階 6。計画の 6 節で 6a〜6e に分けた。6a（再公開 `(pub use PATH)`）と 6b（ルートの組み込みを
    `std` へ移す。6a の後で 6b と 6c の順を入れ替えた）と 6c（`std::prelude` が `std` を全部再公開）は済み。
-   6d（prelude のソースと組み込みを `std` の子モジュールに分ける）は途中。乱数を `std::random`、時刻を `std::time`、`room` などを `std::repl`、環境の関数を `std::env` へ移した。
+   6d（prelude のソースと組み込みを `std` の子モジュールに分ける）は途中。乱数を `std::random`、時刻を `std::time`、`room` などを `std::repl`、環境の関数を `std::env`、ソケットを `std::net` へ移した。
    次は 5 節の表に沿ってほかのまとまりを子モジュールへ移し、それぞれ `registry::PRELUDE_MODULES` に足す。
    利用者向け文書はまだ `pub use` を書いていない（`docs/ja/reference/syntax.md` の 3.10 と
    「`pub` が付けられるのは」の節は「`use` には付けられない」のまま）。6e で同じ節を書き換えるので、

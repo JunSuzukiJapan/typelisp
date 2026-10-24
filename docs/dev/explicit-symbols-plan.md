@@ -620,6 +620,8 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      次に `room` `dribble` `heap-info` を `std::repl` へ移した。`std::prelude` の名前を定義するときに
      `shadow` を求めないのは `std` とその子モジュール（`types::in_std`）。ABI は 0.3.27。
      次に環境の関数を `std::env` へ、時刻帯の下請けを `std::time` へ移した。ABI は 0.3.28。
+     次にソケットの型と関数を `std::net` へ移した。組み込みのエラー型（`NetError` `FileError` など）は
+     まだ `std` にあり、まとめて移す。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

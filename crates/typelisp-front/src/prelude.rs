@@ -5052,20 +5052,21 @@ user-visible capacity."
 (module %internal (pub defconstant (net-readable int) 0))
 (module %internal (pub defconstant (net-writable int) 1))
 
+(module net
 (pub defstruct socket-stream (h i32))
 (pub defstruct socket-byte-stream (h i32))
 (pub defstruct socket-listener (h i32))
 (impl print-object socket-stream
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "socket-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "socket-stream" self::h)))
 (impl print-object socket-byte-stream
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "socket-byte-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "socket-byte-stream" self::h)))
 (impl print-object socket-listener
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "socket-listener" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "socket-listener" self::h)))
 
 (impl Error NetError
   (message ((self Self)) string (match self ((NetError m) m))))
 (impl print-object NetError
-  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "neterror")))
+  (print-object ((self Self) (escape bool)) string (std::%internal::error-print-object self escape "neterror"))))
 
 ;; `unwrap-io`'s twin: the socket operations whose failure means the program
 ;; is already broken (a closed handle) panic; the ordinary failures -- a
@@ -5117,52 +5118,53 @@ user-visible capacity."
   (when (%internal::stream-open-p h) (%internal::tcp-drain h))
   (%internal::unwrap-io (%internal::stream-close h))))
 
+(module net
 (impl Stream socket-stream
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::tcp-close self::h)))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::tcp-close self::h)))
 (impl InputStream socket-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (%internal::tcp-read-char self::h))
+  (read-item ((self Self)) Option<char> (std::%internal::tcp-read-char self::h))
   ;; True when something is already buffered: the one honest `true` a socket
   ;; can give, and what makes `read-char-no-hang` on it mean what it says.
-  (listen ((self Self)) bool (%internal::unwrap-net (%internal::net-buffered-p self::h))))
+  (listen ((self Self)) bool (std::%internal::unwrap-net (std::%internal::net-buffered-p self::h))))
 (impl OutputStream socket-stream
   (:type Item char)
   (write-item ((self Self) (c char)) ()
-    (%internal::unwrap-net (%internal::net-push-string self::h (char->string c)))
-    (%internal::tcp-drain self::h)))
+    (std::%internal::unwrap-net (std::%internal::net-push-string self::h (char->string c)))
+    (std::%internal::tcp-drain self::h)))
 (impl CharInput socket-stream)
 (impl PeekInput socket-stream
-  (unread-char ((self Self) (c char)) () (%internal::unwrap-io (%internal::stream-unread-char self::h c))))
+  (unread-char ((self Self) (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
 (impl CharOutput socket-stream
   ;; Write-through: each `write-string` reaches the peer before it returns,
   ;; as Go's `net.Conn.Write` does. A caller sending many small pieces can
   ;; batch them in a `string-output-stream` first.
   (write-string ((self Self) (s string)) ()
-    (%internal::unwrap-net (%internal::net-push-string self::h s))
-    (%internal::tcp-drain self::h))
-  (at-line-start ((self Self)) bool (%internal::unwrap-io (%internal::stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (%internal::tcp-drain self::h)))
+    (std::%internal::unwrap-net (std::%internal::net-push-string self::h s))
+    (std::%internal::tcp-drain self::h))
+  (at-line-start ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
+  (finish-output ((self Self)) () (std::%internal::tcp-drain self::h)))
 
 (impl Stream socket-byte-stream
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::tcp-close self::h)))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::tcp-close self::h)))
 (impl InputStream socket-byte-stream
   (:type Item int)
-  (read-item ((self Self)) Option<int> (%internal::tcp-read-byte self::h))
-  (listen ((self Self)) bool (%internal::unwrap-net (%internal::net-buffered-p self::h))))
+  (read-item ((self Self)) Option<int> (std::%internal::tcp-read-byte self::h))
+  (listen ((self Self)) bool (std::%internal::unwrap-net (std::%internal::net-buffered-p self::h))))
 (impl OutputStream socket-byte-stream
   (:type Item int)
   (write-item ((self Self) (b int)) ()
-    (%internal::unwrap-net (%internal::net-push-byte self::h b))
-    (%internal::tcp-drain self::h)))
+    (std::%internal::unwrap-net (std::%internal::net-push-byte self::h b))
+    (std::%internal::tcp-drain self::h)))
 (impl ByteInput socket-byte-stream)
 (impl ByteOutput socket-byte-stream
-  (finish-output ((self Self)) () (%internal::tcp-drain self::h)))
+  (finish-output ((self Self)) () (std::%internal::tcp-drain self::h)))
 
 (impl Stream socket-listener
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h)))))
 
 ;; Waiting with a clock. `net-wait-for` answers `false` when `secs` ran out
 ;; first; the operations that take a timeout turn that into a `NetError`, so
@@ -5219,15 +5221,16 @@ user-visible capacity."
          (setf i (+ i 1))
          (when (>= i n) (return (result::err e)))))))))
 
+(module net
 (pub defun tcp-connect ((host string) (port int) &key (timeout f64)) Result<socket-stream, NetError>
   "Connect to `host` (a name or an address) on `port`. `Err` if the name does
    not resolve, the connection is refused, or -- with `:timeout` seconds
    given -- nobody answers in time: ordinary outcomes, not panics. The task
    waits for the name and the handshake; other tasks keep running."
-  (match (%internal::tcp-resolve host port timeout)
+  (match (std::%internal::tcp-resolve host port timeout)
     ((err e) (result::err e))
     ((ok addrs)
-     (match (%internal::tcp-connect-addr addrs timeout)
+     (match (std::%internal::tcp-connect-addr addrs timeout)
        ((ok h) (result::ok (make-instance 'socket-stream :h h)))
        ((err e) (result::err e))))))
 
@@ -5243,35 +5246,35 @@ user-visible capacity."
    side presents when the server asks for one. The result is an ordinary
    `socket-stream`; what crosses the socket is ciphertext. The handshake is
    done here, so a certificate that does not check out is this call's `Err`."
-  (match (%internal::tcp-resolve host port timeout)
+  (match (std::%internal::tcp-resolve host port timeout)
     ((err e) (result::err e))
     ((ok addrs)
-     (match (%internal::tcp-connect-addr addrs timeout)
+     (match (std::%internal::tcp-connect-addr addrs timeout)
        ((err e) (result::err e))
        ((ok h)
-        (match (%internal::net-tls-start h (match server-name ((some n) n) ((none) host)) ca-file cert-file key-file)
-          ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (result::err e)))
+        (match (std::%internal::net-tls-start h (match server-name ((some n) n) ((none) host)) ca-file cert-file key-file)
+          ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (result::err e)))
           ((ok _)
            (loop
-             (match (%internal::net-tls-handshake h)
+             (match (std::%internal::net-tls-handshake h)
                ((ok (none)) (return (the Result<socket-stream, NetError> (result::ok (make-instance 'socket-stream :h h)))))
                ((ok (some interest))
-                (match (%internal::tcp-wait-within h interest timeout "tls-connect")
+                (match (std::%internal::tcp-wait-within h interest timeout "tls-connect")
                   ((ok _) ())
-                  ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (return (result::err e))))))
-               ((err e) (progn (%internal::unwrap-io (%internal::stream-close h)) (return (result::err e)))))))))))))
+                  ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (return (result::err e))))))
+               ((err e) (progn (std::%internal::unwrap-io (std::%internal::stream-close h)) (return (result::err e)))))))))))))
 
 (pub defun unix-connect ((path string)) Result<socket-stream, NetError>
   "Connect to the Unix-domain socket at `path`. A local connect completes
    at once or is refused -- there is nothing to wait for -- so no timeout."
-  (match (%internal::net-unix-connect path)
+  (match (std::%internal::net-unix-connect path)
     ((ok h) (result::ok (make-instance 'socket-stream :h h)))
     ((err e) (result::err e))))
 
 (pub defun unix-listen ((path string)) Result<socket-listener, NetError>
   "Listen on a Unix-domain socket at `path`, which must not exist yet; a
    leftover file is refused rather than replaced. `close` removes the file."
-  (match (%internal::net-unix-listen path)
+  (match (std::%internal::net-unix-listen path)
     ((ok h) (result::ok (make-instance 'socket-listener :h h)))
     ((err e) (result::err e))))
 
@@ -5279,7 +5282,7 @@ user-visible capacity."
   "Listen on `host`:`port` -- 127.0.0.1 for this machine only, 0.0.0.0 for
    every interface. Port `0` lets the OS pick a free one; `local-address`
    says which."
-  (match (%internal::net-listen host port)
+  (match (std::%internal::net-listen host port)
     ((ok h) (result::ok (make-instance 'socket-listener :h h)))
     ((err e) (result::err e))))
 
@@ -5296,7 +5299,7 @@ user-visible capacity."
    `socket-error` saying why. With `:client-ca` (PEM) every client must
    present a certificate issued by one in that file, and one that does not
    fails the same way; without it, clients are not asked for one."
-  (match (%internal::net-tls-listen host port cert-file key-file client-ca)
+  (match (std::%internal::net-tls-listen host port cert-file key-file client-ca)
     ((ok h) (result::ok (make-instance 'socket-listener :h h)))
     ((err e) (result::err e))))
 
@@ -5309,19 +5312,19 @@ user-visible capacity."
    Clients asking for a name nobody added, or sending none, get the
    certificate `tls-listen` was given. Takes effect for the next handshake;
    `requested-server-name` on a connection says which name it asked for."
-    (%internal::net-tls-add-certificate self::h name cert-file key-file))
+    (std::%internal::net-tls-add-certificate self::h name cert-file key-file))
   (pub accept (self &key (timeout f64)) Result<socket-stream, NetError>
     "The next connection, waiting for one -- at most `:timeout` seconds if
    given, after which the `Err` says so. The usual shape of a server is
    `(loop (match (accept l) ((ok c) (task (serve c))) ((err e) ...)))`: one task
    per connection, each free to wait on its own socket."
     (loop
-      (match (%internal::net-accept self::h)
+      (match (std::%internal::net-accept self::h)
         ;; `the`: a loop's type is the join of its `return`s, and this one is
         ;; seen first with its `E` still a hole.
         ((ok (some h)) (return (the Result<socket-stream, NetError> (result::ok (make-instance 'socket-stream :h h)))))
         ((ok (none))
-         (match (%internal::tcp-wait-within self::h %internal::net-readable timeout "accept")
+         (match (std::%internal::tcp-wait-within self::h std::%internal::net-readable timeout "accept")
            ((ok _) ())
            ((err e) (return (result::err e)))))
         ((err e) (return (result::err e)))))))
@@ -5333,13 +5336,13 @@ user-visible capacity."
    on a read: `(if (wait-readable c 5.0) (read-line c) ...)`. What it
    promises is that the *next* read will not park; a `read-line` may still
    wait for the rest of its line."
-    (if (%internal::unwrap-net (%internal::net-buffered-p self::h))
+    (if (std::%internal::unwrap-net (std::%internal::net-buffered-p self::h))
         true
-        (%internal::net-wait-for self::h %internal::net-readable secs)))
+        (std::%internal::net-wait-for self::h std::%internal::net-readable secs)))
   (pub wait-writable (self (secs f64)) bool
     "Wait until the socket will take output, or `secs` run out: `true` if the
    former."
-    (%internal::net-wait-for self::h %internal::net-writable secs))
+    (std::%internal::net-wait-for self::h std::%internal::net-writable secs))
   (pub socket-error (self) Option<NetError>
     "Why the peer's side of this connection is gone, if it is: the first
    failure the peer caused (a reset, a TLS alert, a close under a write).
@@ -5347,14 +5350,14 @@ user-visible capacity."
    input, which is not a failure. Reads on a failed connection say `none`
    and writes go nowhere, so this is how to tell a client that finished
    from one that broke off, the way Go's `bufio.Scanner.Err` is."
-    (match (%internal::unwrap-net (%internal::net-socket-error self::h))
+    (match (std::%internal::unwrap-net (std::%internal::net-socket-error self::h))
       ((some m) (option::some (NetError::NetError m)))
       ((none) (option::none)))))
 
 (impl socket-byte-stream
   (pub socket-error (self) Option<NetError>
     "`socket-error` of the same connection, seen as bytes."
-    (match (%internal::unwrap-net (%internal::net-socket-error self::h))
+    (match (std::%internal::unwrap-net (std::%internal::net-socket-error self::h))
       ((some m) (option::some (NetError::NetError m)))
       ((none) (option::none)))))
 
@@ -5366,14 +5369,14 @@ user-visible capacity."
    on the client it is the name the server's certificate was issued to.
    `none` on a plain connection, before the handshake, or when the peer sent
    no certificate (a server that did not ask for one)."
-    (%internal::unwrap-net (%internal::net-peer-subject self::h)))
+    (std::%internal::unwrap-net (std::%internal::net-peer-subject self::h)))
   (pub requested-server-name (self) Option<string>
     "On a server-side TLS connection, the name the client asked for (SNI),
    once the handshake has read it: how a server holding certificates for
    several names -- `tls-add-certificate` -- knows which site this is.
    `none` on a plain or client-side connection, or when the client sent no
    name (it connected by address)."
-    (%internal::unwrap-net (%internal::net-server-name self::h)))
+    (std::%internal::unwrap-net (std::%internal::net-server-name self::h)))
   (pub set-nodelay (self (on bool)) ()
     "Whether small writes go out at once (Nagle's algorithm off). Each
    `write-string` reaches the socket before it returns, so with Nagle on a
@@ -5381,7 +5384,7 @@ user-visible capacity."
    peer's delayed ACK before the second leaves; a request/response protocol
    wants this `true`. A Unix-domain socket has no Nagle and accepts this as
    already so."
-    (%internal::unwrap-net (%internal::net-set-nodelay self::h on)))
+    (std::%internal::unwrap-net (std::%internal::net-set-nodelay self::h on)))
   (pub set-keepalive (self (on bool)) ()
     "Whether the OS probes this connection while it is idle, so that a peer
    that vanished without closing -- a pulled cable, a crashed host -- is
@@ -5389,13 +5392,13 @@ user-visible capacity."
    OS default period is long (two hours on most systems);
    `set-keepalive-period` shortens it. A Unix-domain socket has no
    keepalive; asking is an error."
-    (%internal::unwrap-net (%internal::net-set-keepalive self::h on)))
+    (std::%internal::unwrap-net (std::%internal::net-set-keepalive self::h on)))
   (pub set-keepalive-period (self (secs int)) ()
     "How long the connection must be idle before the first keepalive probe,
    and then how long between probes -- whole seconds, at least 1, the way
    Go's `SetKeepAlivePeriod` sets both. Takes effect with `set-keepalive`
    on."
-    (%internal::unwrap-net (%internal::net-set-keepalive-period self::h secs))))
+    (std::%internal::unwrap-net (std::%internal::net-set-keepalive-period self::h secs))))
 
 (pub defun byte-stream-of ((s socket-stream)) socket-byte-stream
   "The same connection as a byte stream. Both views share one buffer, so a
@@ -5411,20 +5414,20 @@ user-visible capacity."
     "Send what is buffered and close the sending side only: the peer reads end
    of input, and this side can still read the reply. What a request/response
    exchange says with -- the whole request has been sent."
-    (%internal::tcp-drain self::h)
-    (%internal::unwrap-net (%internal::net-shutdown-write self::h)))
+    (std::%internal::tcp-drain self::h)
+    (std::%internal::unwrap-net (std::%internal::net-shutdown-write self::h)))
   (pub local-address (self) string
     "This side's address as `host:port`."
-    (%internal::unwrap-net (%internal::net-local-address self::h))))
+    (std::%internal::unwrap-net (std::%internal::net-local-address self::h))))
 (impl socket-listener
   (pub local-address (self) string
     "The address being listened on, as `host:port`. After `(tcp-listen host 0)`
    this is how the chosen port is learned."
-    (%internal::unwrap-net (%internal::net-local-address self::h))))
+    (std::%internal::unwrap-net (std::%internal::net-local-address self::h))))
 (impl socket-stream
   (pub peer-address (self) string
     "The other side's address as `host:port`."
-    (%internal::unwrap-net (%internal::net-peer-address self::h))))
+    (std::%internal::unwrap-net (std::%internal::net-peer-address self::h))))
 
 (pub defmacro with-connection (spec &rest body)
   "`(with-connection (var host port) body...)` -- connect, run the body,
@@ -5452,48 +5455,48 @@ user-visible capacity."
 
 (pub defstruct udp-socket (h i32))
 (impl print-object udp-socket
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "udp-socket" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "udp-socket" self::h)))
 (pub defstruct datagram (pub bytes Vector<int>) (pub from string))
 
 (pub defun udp-bind ((host string) (port int)) Result<udp-socket, NetError>
   "A UDP socket on `host`:`port` (`0`: any free port; `local-address` says
    which). Sending needs one too -- bind to port `0`."
-  (match (%internal::net-udp-bind host port)
+  (match (std::%internal::net-udp-bind host port)
     ((ok h) (result::ok (make-instance 'udp-socket :h h)))
     ((err e) (result::err e))))
 
 (impl Stream udp-socket
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 
 (impl udp-socket
   (pub local-address (self) string
     "This socket's address as `host:port`."
-    (%internal::unwrap-net (%internal::net-local-address self::h)))
+    (std::%internal::unwrap-net (std::%internal::net-local-address self::h)))
   (pub send-to (self (host string) (port int) (bytes Vector<int>)) Result<(), NetError>
     "Send `bytes` as one datagram to `host`:`port`. Resolves the name (waiting
    for it), then sends -- waiting only if the socket's own buffer is full.
    Delivery is not confirmed; that is UDP."
-    (match (%internal::tcp-resolve host port (option::none))
+    (match (std::%internal::tcp-resolve host port (option::none))
       ((err e) (result::err e))
       ((ok addrs)
        (loop
-         (match (%internal::net-udp-send-to self::h (get addrs 0) bytes)
-           ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (%internal::net-wait self::h %internal::net-writable)))
+         (match (std::%internal::net-udp-send-to self::h (get addrs 0) bytes)
+           ((ok sent) (if sent (return (the Result<(), NetError> (result::ok ()))) (std::%internal::net-wait self::h std::%internal::net-writable)))
            ((err e) (return (result::err e))))))))
   (pub recv-from (self &key (timeout f64)) Result<datagram, NetError>
     "The next datagram, waiting for one -- at most `:timeout` seconds if given.
    `from` is the sender as `ip:port`, which `send-to` accepts back."
     (loop
-      (match (%internal::net-udp-recv self::h)
+      (match (std::%internal::net-udp-recv self::h)
         ((ok (some bytes))
          (return (the Result<datagram, NetError>
-                      (result::ok (make-instance 'datagram :bytes bytes :from (%internal::unwrap-net (%internal::net-udp-last-sender self::h)))))))
+                      (result::ok (make-instance 'datagram :bytes bytes :from (std::%internal::unwrap-net (std::%internal::net-udp-last-sender self::h)))))))
         ((ok (none))
-         (match (%internal::tcp-wait-within self::h %internal::net-readable timeout "recv-from")
+         (match (std::%internal::tcp-wait-within self::h std::%internal::net-readable timeout "recv-from")
            ((ok _) ())
            ((err e) (return (result::err e)))))
-        ((err e) (return (result::err e)))))))
+        ((err e) (return (result::err e))))))))
 
 ;; ---- Bytes and text ----------------------------------------------------------
 
