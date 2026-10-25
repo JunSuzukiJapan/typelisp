@@ -106,8 +106,12 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
 #[test]
 fn macro_expanders_have_native_bodies_too() {
     let (_heap, _chk, interp) = env(true);
-    for name in ["cond", "case", "when", "and", "while", "dotimes", "do", "setq"] {
+    for name in ["cond", "case", "when", "and"] {
         assert!(interp.is_compiled(&f(name)), "`{}`'s expander should have a compiled body after load_prelude", name);
+    }
+    for name in ["while", "dotimes", "do", "setq"] {
+        let target = CompileTarget::Fn(Path::in_ns(typelisp::std_module("control"), name));
+        assert!(interp.is_compiled(&target), "`{}`'s expander should have a compiled body after load_prelude", name);
     }
 }
 

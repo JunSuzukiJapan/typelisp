@@ -314,7 +314,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; automatically once this `break` is found, with no special-casing needed
 ;; (unlike the old `check_while`, which seeded the loop-stack frame with
 ;; `Unit` directly).
-(defmacro while (test &rest body) `(loop (if (not ,test) (break) ()) ,@body))
+(module control
+(pub defmacro while (test &rest body) `(loop (if (not ,test) (break) ()) ,@body)))
 
 
 ;; ---------------------------------------------------------------------------
@@ -346,7 +347,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; `dotimes`: `gensym` replaces the old `check_dotimes`'s "leading-space,
 ;; unwritable-in-source" hidden binding trick with the macro system's own
 ;; (already-proven, see `case`'s `tmp`) hygiene mechanism.
-(defmacro dotimes (spec &rest body)
+(module control
+(pub defmacro dotimes (spec &rest body)
   (let ((var (sexpr-car spec)) (count-expr (sexpr-car (sexpr-cdr spec))) (limit (gensym)))
     `(let ((,var 0) (,limit ,count-expr))
        (while (< ,var ,limit) ,@body (setf ,var (+ ,var 1))))))
@@ -378,7 +380,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; It used to have to be spelled `(Nil)` for exactly the reason that no
 ;; longer holds — `Sexpr` carried the empty list, `()` did not, and the two
 ;; branches would not agree.
-(defmacro dolist (spec &rest body)
+(pub defmacro dolist (spec &rest body)
   (let ((var (sexpr-car spec))
         (list-expr (sexpr-car (sexpr-cdr spec)))
         (rest-spec (sexpr-cdr (sexpr-cdr spec)))
@@ -388,7 +390,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
          (while (sexpr-consp ,cursor)
            (let ((,var (sexpr-car ,cursor))) ,@body)
            (setf ,cursor (sexpr-cdr ,cursor)))
-         ,result))))
+         ,result)))))
 
 ;; `when`/`unless`: single-armed `if`. The taken side ends in a trailing
 ;; `()` (after `body`, not instead of it) so its value is always `Unit`,
@@ -410,9 +412,10 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; the same shape `while-let` (further down) uses for its own loop
 ;; condition. Uses no `,@`, so it could have lived next to `and`/`or`
 ;; instead — kept here purely to group the whole reduction set together.
-(defmacro if-let (binding then els)
+(module control
+(pub defmacro if-let (binding then els)
   (let ((pattern (sexpr-car binding)) (val (sexpr-car (sexpr-cdr binding))))
-    `(match ,val (,pattern ,then) (_ ,els))))
+    `(match ,val (,pattern ,then) (_ ,els)))))
 
 ;; `nthcdr`/`nth`/`elt`/`last`/`butlast`/`take`/`subseq`/`copy-list`/`member`/
 ;; `any` and the destructive `nconc`/`nreverse` were removed with the rest of
@@ -487,14 +490,15 @@ pub const SOURCE_TEMPLATE: &str = r##"
 
 ;; Clojure's `->`: each step gets the value so far as its first argument.
 ;; A bare symbol `g` is the step `(g)`.
-(defmacro -> (x &rest forms)
+(module control
+(pub defmacro -> (x &rest forms)
   (if (sexpr-null forms)
       x
       (let ((step (sexpr-car forms)))
         `(-> ,(if (sexpr-consp step)
                   `(,(sexpr-car step) ,x ,@(sexpr-cdr step))
                   `(,step ,x))
-             ,@(sexpr-cdr forms)))))
+             ,@(sexpr-cdr forms))))))
 
 ;; Higher-order helpers (roadmap step 7c) — the motivating use case for
 ;; `defun`'s generic type parameters (`Checker::check_call`'s `unify`/
@@ -833,11 +837,12 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; these were written. Phase 5b lifted that restriction and they stayed
 ;; `defun`s — nothing at a call site tells the two apart for a `char`
 ;; receiver, so moving them would be churn.
-(defun digit-weight ((c char) &optional (radix int 10)) Option<int>
+(module char
+(pub defun digit-weight ((c char) &optional (radix int 10)) Option<int>
   (let* ((n (char->int c))
          ;; `-1` means "not a digit character at all", which the range test
          ;; below rejects along with a weight too large for `radix`.
-         (w (cond ((%internal::ascii-digit-code n) (- n 48))
+         (w (cond ((std::%internal::ascii-digit-code n) (- n 48))
                   ((and (>= n 97) (<= n 122)) (+ (- n 97) 10))
                   ((and (>= n 65) (<= n 90)) (+ (- n 65) 10))
                   (:else -1))))
@@ -847,10 +852,10 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; the rest upper-case letters, as CL specifies (so `radix` tops out at 36).
 ;; Indexing a literal with `string`'s `ref` rather than computing a code point
 ;; keeps this off `int->char`, per this section's header.
-(defun digit->char ((weight int) &optional (radix int 10)) Option<char>
+(pub defun digit->char ((weight int) &optional (radix int 10)) Option<char>
   (if (or (< weight 0) (>= weight radix))
       (option::none)
-      (option::some (ref "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" weight))))
+      (option::some (ref "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ" weight)))))
 ;; CL's `char-name`/`name-char`, over exactly the characters this language's
 ;; reader spells by name (`read::reader`'s named-character table). Anything
 ;; else gets `none`, which is what CL says for every graphic character.
@@ -866,7 +871,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
           ((equal self #\nul)       (option::some "nul"))
           ((equal self #\backspace) (option::some "backspace"))
           (:else (option::none)))))
-(defun name->char ((name string)) Option<char>
+(module char
+(pub defun name->char ((name string)) Option<char>
   (cond ((equalp name "space")     (option::some #\space))
         ((equalp name "newline")   (option::some #\newline))
         ((equalp name "linefeed")  (option::some #\newline))
@@ -876,7 +882,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
         ((equalp name "nul")       (option::some #\nul))
         ((equalp name "null")      (option::some #\nul))
         ((equalp name "backspace") (option::some #\backspace))
-        (:else (option::none))))
+        (:else (option::none)))))
 
 ;; CL's string catalog beyond the primitives in `registry::string_assoc`
 ;; (`upcase`/`downcase`/`length`/`ref`/`substring`/`append`/`equal`/`<`).
@@ -1077,18 +1083,19 @@ pub const SOURCE_TEMPLATE: &str = r##"
       (while (and (< i n) (not hit))
         (progn (if (equal (ref bag i) c) (progn (setf hit true) ()) ()) (setf i (+ i 1))))
       hit))))
-(defun left-trim ((s string) &optional (bag string " \t\n\r")) string
+(module string
+(pub defun left-trim ((s string) &optional (bag string " \t\n\r")) string
   (let ((i 0) (n (length s)))
     (progn
-      (while (and (< i n) (%internal::char-in-bag (ref s i) bag)) (setf i (+ i 1)))
+      (while (and (< i n) (std::%internal::char-in-bag (ref s i) bag)) (setf i (+ i 1)))
       (substring s i n))))
-(defun right-trim ((s string) &optional (bag string " \t\n\r")) string
+(pub defun right-trim ((s string) &optional (bag string " \t\n\r")) string
   (let ((j (length s)))
     (progn
-      (while (and (> j 0) (%internal::char-in-bag (ref s (- j 1)) bag)) (setf j (- j 1)))
+      (while (and (> j 0) (std::%internal::char-in-bag (ref s (- j 1)) bag)) (setf j (- j 1)))
       (substring s 0 j))))
-(defun trim ((s string) &optional (bag string " \t\n\r")) string
-  (right-trim (left-trim s bag) bag))
+(pub defun trim ((s string) &optional (bag string " \t\n\r")) string
+  (right-trim (left-trim s bag) bag)))
 
 ;; `parse-integer`: CL's, under this language's name and with its `Result` —
 ;; the text is runtime input the caller does not control, so failure is a
@@ -1195,7 +1202,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; a single (mistyped) form.
 ;;
 ;; `until` is `while` with the condition negated.
-(defmacro until (test &rest body) `(while (not ,test) ,@body))
+(module control
+(pub defmacro until (test &rest body) `(while (not ,test) ,@body)))
 ;;
 ;; `while-let` loops for as long as `binding`'s pattern matches `val`,
 ;; re-evaluating `val` each iteration (so it can be a call like `(next i)`
@@ -1206,10 +1214,11 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; val)`; `pattern` must be a constructor pattern (e.g. `(some x)`) to
 ;; usefully narrow `val`'s type — a bare variable would match unconditionally
 ;; (binding the whole scrutinee) and the macro would loop forever.
-(defmacro while-let (binding &rest body)
+(module control
+(pub defmacro while-let (binding &rest body)
   (let ((pattern (sexpr-car binding))
         (val (sexpr-car (sexpr-cdr binding))))
-    `(loop (match ,val (,pattern ,@body) (_ (break))))))
+    `(loop (match ,val (,pattern ,@body) (_ (break)))))))
 
 ;; `doiter`: iterate a value of any type implementing the `Iter` trait
 ;; (`Item`/`next`, declared
@@ -1296,7 +1305,8 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; binding needing to line up across three passes, `temps` is computed once
 ;; up front as `((temp1 var1 step1) (temp2 var2 step2) ...)` and each later
 ;; pass just projects the two fields it needs out of that same triple.
-(defmacro do (bindings test-result &rest body)
+(module control
+(pub defmacro do (bindings test-result &rest body)
   (let ((test (sexpr-car test-result))
         (result (sexpr-cdr test-result))
         (temps (sexpr-map (lambda ((b Option<Sexpr>)) Option<Sexpr> (list (gensym) (sexpr-car b) (sexpr-car (sexpr-cdr (sexpr-cdr b)))))
@@ -1306,7 +1316,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
          ,@body
          (let ,(sexpr-map (lambda ((tr Option<Sexpr>)) Option<Sexpr> (list (sexpr-car tr) (sexpr-car (sexpr-cdr (sexpr-cdr tr))))) temps)
            ,@(sexpr-map (lambda ((tr Option<Sexpr>)) Option<Sexpr> (list (quote setf) (sexpr-car (sexpr-cdr tr)) (sexpr-car tr))) temps)))
-       ,@result)))
+       ,@result))))
 
 ;; ---------------------------------------------------------------------------
 ;; `destructuring-bind` (cl-parity-plan.md Phase 4a).
@@ -1480,12 +1490,13 @@ pub const SOURCE_TEMPLATE: &str = r##"
                ,(%internal::dbind-parts rest next whole body))))))
     (_ (%internal::dbind-tail true tv whole body)))))
 
+(module control
 (pub defmacro destructuring-bind (lambda-list form &rest body)
   "Bind the variables of `lambda-list` to the parts of the list `form`
    evaluates to, then run `body`. Every variable is an `Option<Sexpr>`."
   (let ((tv (gensym)))
     `(let ((,tv ,form))
-       ,(%internal::dbind-parts lambda-list tv lambda-list body))))
+       ,(std::%internal::dbind-parts lambda-list tv lambda-list body)))))
 
 ;; `Iter`: the trait `doiter` requires every iterable type to implement — a single
 ;; `next` method returning the next element, or `(none)` once exhausted.
@@ -3726,6 +3737,7 @@ user-visible capacity."
 
 ;; `prog1`/`prog2`: evaluate everything, answer with the first (or second)
 ;; form's value. The `gensym` keeps that value from being re-evaluated.
+(module control
 (pub defmacro prog1 (first &rest rest)
   "`(prog1 form more...)` -- every form runs; the value is `form`'s."
   (let ((tmp (gensym))) `(let ((,tmp ,first)) ,@rest ,tmp)))
@@ -3787,7 +3799,7 @@ user-visible capacity."
       `(let ,tmps ,@sets ()))))
 (pub defmacro psetq (&rest pairs)
   "CL's `psetq`. `psetf` with places restricted to variables; same expansion."
-  `(psetf ,@pairs))
+  `(psetf ,@pairs)))
 
 ;; `pushnew`: push unless already present. A method rather than a macro —
 ;; CL needs a macro because its `place` must be re-written, and a `Vector<T>`
@@ -7317,6 +7329,7 @@ user-visible capacity."
          (setf ,place ,value)
          (unwind-protect (progn ,@body) (setf ,place ,saved)))))))
 
+(module control
 (pub defmacro dlet (bindings &rest body)
   "Assign each global for the extent of `body`, restoring it on the way out
    however `body` is left. CL spells this `let`; this language's `let` is
@@ -7324,8 +7337,8 @@ user-visible capacity."
   (if (sexpr-null bindings)
       (sexpr-cons (quote progn) body)
       (let ((b (sexpr-car bindings)))
-        `(%internal::dlet1 ,(sexpr-car b) ,(sexpr-car (sexpr-cdr b))
-                (dlet ,(sexpr-cdr bindings) ,@body)))))
+        `(std::%internal::dlet1 ,(sexpr-car b) ,(sexpr-car (sexpr-cdr b))
+                (dlet ,(sexpr-cdr bindings) ,@body))))))
 
 
 ;; CL's `with-standard-io-syntax`: run `body` with every printer control
