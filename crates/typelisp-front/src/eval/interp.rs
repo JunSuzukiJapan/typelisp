@@ -2464,7 +2464,7 @@ impl Interp {
     /// The prelude defines every one of them, so a missing one means there is
     /// no prelude to print under.
     fn printer_global(&self, heap: &Heap, name: &str) -> Result<Value, String> {
-        self.global_value(heap, &crate::Path::std(name))
+        self.global_value(heap, &crate::types::printer_global(name))
             .ok_or_else(|| format!("{} is not defined: printing needs the prelude that defines it", name))
     }
 

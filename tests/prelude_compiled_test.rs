@@ -79,8 +79,8 @@ fn the_families_that_used_to_be_blocked_are_compiled_now() {
     let (_heap, _chk, interp) = env(true);
     for target in [
         // was: `stream-read-char` / `stream-write-string`
-        CompileTarget::Method(Path::std("file-stream"), typelisp_mem::symbols::intern("read-char")),
-        CompileTarget::Method(Path::std("string-output-stream"), typelisp_mem::symbols::intern("write-string")),
+        CompileTarget::Method(Path::in_ns(typelisp::std_module("io"), "file-stream"), typelisp_mem::symbols::intern("read-char")),
+        CompileTarget::Method(Path::in_ns(typelisp::std_module("io"), "string-output-stream"), typelisp_mem::symbols::intern("write-string")),
         // was: `char::char->string`
         CompileTarget::Fn(Path::internal("reader-whitespacep")),
         // was: `random-state-next` / `make-random-state-fresh`

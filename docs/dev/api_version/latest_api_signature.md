@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.33
+# ABI バージョン 0.3.34
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.33 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.34 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `5a21282fee6a1342`
+内容ハッシュ (FNV-1a 64): `9922abbc3430f921`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -500,7 +500,7 @@
 | net_builtin::INNER_TYPES | `net-server-name` | `std::option<std::string>` |
 | net_builtin::INNER_TYPES | `net-pop-byte` | `std::option<std::int>` |
 | net_builtin::INNER_TYPES | `net-pop-char` | `std::option<std::char>` |
-| readtable::READER_MACRO_OPTION_TYPE | | `std::option<(fn (std::string-input-stream,std::char) std::option<std::sexpr>)>` |
+| readtable::READER_MACRO_OPTION_TYPE | | `std::option<(fn (std::io::string-input-stream,std::char) std::option<std::sexpr>)>` |
 
 ## 型ごとの表現 (Repr)
 
@@ -508,10 +508,10 @@
 |---|---|---|---|---|
 | `!` | `!` | none | 0 | 0 |
 | `()` | `()` | unit | 100 | 0 |
-| `(fn (std::string-input-stream char) Option<Sexpr>)` | `(fn (std::string-input-stream,std::char) std::option<std::sexpr>)` | fn | 6 | 2 |
+| `(fn (std::io::string-input-stream char) Option<Sexpr>)` | `(fn (std::io::string-input-stream,std::char) std::option<std::sexpr>)` | fn | 6 | 2 |
 | `Chan<t>` | `std::sync::chan<t>` | struct | 6 | 2 |
 | `HashTable<k,v>` | `std::hashtable<k,v>` | hashtable | 6 | 2 |
-| `Option<(fn (std::string-input-stream char) Option<Sexpr>)>` | `std::option<(fn (std::string-input-stream,std::char) std::option<std::sexpr>)>` | niche | 101 | 2 |
+| `Option<(fn (std::io::string-input-stream char) Option<Sexpr>)>` | `std::option<(fn (std::io::string-input-stream,std::char) std::option<std::sexpr>)>` | niche | 101 | 2 |
 | `Option<Sexpr>` | `std::option<std::sexpr>` | niche | 101 | 2 |
 | `Option<bool>` | `std::option<std::bool>` | niche | 101 | 0 |
 | `Option<c-long>` | `std::option<std::c-long>` | enum | 6 | 2 |
@@ -1832,19 +1832,19 @@
 | `std::eval::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::eval::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::eval::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
+| `std::fmt::pprint-indent` | `rt_pprint_indent` | `(symbol, int) -> ()` |
+| `std::fmt::pprint-list-exhausted` | `rt_pprint_list_exhausted` | `() -> bool` |
+| `std::fmt::pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |
+| `std::fmt::pprint-pop` | `rt_pprint_pop` | `() -> Option<Sexpr>` |
+| `std::fmt::pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
 | `std::num::parse-float` | `rt_parse_float` | `(string) -> Result<f64,std::parsefloaterror>` |
-| `std::pprint-indent` | `rt_pprint_indent` | `(symbol, int) -> ()` |
-| `std::pprint-list-exhausted` | `rt_pprint_list_exhausted` | `() -> bool` |
-| `std::pprint-newline` | `rt_pprint_newline` | `(symbol) -> ()` |
-| `std::pprint-pop` | `rt_pprint_pop` | `() -> Option<Sexpr>` |
-| `std::pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
 | `std::process::exit` | `rt_exit` | `(int) -> !` |
 | `std::random::seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
-| `std::reader::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
-| `std::reader::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
+| `std::reader::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::io::string-input-stream char) Option<Sexpr>)>` |
+| `std::reader::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::io::string-input-stream char) Option<Sexpr>)>` |
 | `std::reader::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,std::readerror>` |
-| `std::reader::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
-| `std::reader::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
+| `std::reader::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::io::string-input-stream char) Option<Sexpr>)) -> ()` |
+| `std::reader::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::io::string-input-stream char) Option<Sexpr>)) -> ()` |
 | `std::repl::heap-info` | `rt_heap_info` | `() -> std::repl::heap-info` |
 | `std::sexpr-atom` | `rt_atom` | `(Option<Sexpr>) -> bool` |
 | `std::sexpr-bool` | `rt_sexpr_bool` | `(Option<Sexpr>) -> bool` |

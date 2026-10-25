@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval", "num", "char", "string", "control", "iter", "seq", "fmt", "path", "io", "fs", "collections"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -825,6 +825,7 @@ impl Registry {
         let mut reader = Namespace::new(crate::types::std_module("reader"));
         let mut eval = Namespace::new(crate::types::std_module("eval"));
         let mut num = Namespace::new(crate::types::std_module("num"));
+        let mut fmt = Namespace::new(crate::types::std_module("fmt"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -1007,11 +1008,11 @@ impl Registry {
         // `pprint-pop` returns `()` once the block's list is exhausted;
         // `pprint-list-exhausted` is the predicate to test first (the prelude
         // macro `pprint-exit-if-list-exhausted` is the CL-spelled wrapper).
-        std_ns.fns.insert("pprint-newline".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Unit));
-        std_ns.fns.insert("pprint-indent".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int], Type::Unit));
-        std_ns.fns.insert("pprint-tab".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int, Type::Int], Type::Unit));
-        std_ns.fns.insert("pprint-pop".to_string(), FnSig::builtin(vec![], option_of(sexpr())));
-        std_ns.fns.insert("pprint-list-exhausted".to_string(), FnSig::builtin(vec![], Type::Bool));
+        fmt.fns.insert("pprint-newline".to_string(), FnSig::builtin(vec![Type::Symbol], Type::Unit));
+        fmt.fns.insert("pprint-indent".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int], Type::Unit));
+        fmt.fns.insert("pprint-tab".to_string(), FnSig::builtin(vec![Type::Symbol, Type::Int, Type::Int], Type::Unit));
+        fmt.fns.insert("pprint-pop".to_string(), FnSig::builtin(vec![], option_of(sexpr())));
+        fmt.fns.insert("pprint-list-exhausted".to_string(), FnSig::builtin(vec![], Type::Bool));
         // `cons`/`car`/`cdr`/`set-car`/`set-cdr` are no longer `Sexpr` builtins:
         // the Symbol/Sexpr redesign (Phase 4b) repurposes `cons`/`car`/`cdr` to
         // the generic `cons<T,U>` pair (`prelude.rs`'s free `cons` +
@@ -1152,7 +1153,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval, num, fmt].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
@@ -1723,7 +1724,7 @@ fn register_system_builtins(env: &mut Namespace, thread: &mut Namespace, time: &
 /// per call.
 pub fn reader_macro_fn_type() -> Type {
     Type::Fn(
-        vec![Type::Named(Path::std("string-input-stream"), vec![]), Type::Char],
+        vec![Type::Named(Path::in_ns(crate::types::std_module("io"), "string-input-stream"), vec![]), Type::Char],
         None,
         Box::new(option_of(sexpr())),
     )

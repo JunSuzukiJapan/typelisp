@@ -932,7 +932,7 @@ impl Interp {
     /// prelude defines every such global with that type, so a missing one
     /// means there is no prelude, and any other shape is a broken invariant.
     fn stream_global(&self, heap: &mut Heap, name: &str) -> Result<i64, EvalError> {
-        let v = self.global_value(heap, &crate::Path::std(name)).ok_or_else(|| {
+        let v = self.global_value(heap, &crate::Path::in_ns(crate::types::std_module("io"), name)).ok_or_else(|| {
             EvalError::Internal(format!("{} is not defined: writing to it needs the prelude that defines it", name))
         })?;
         let malformed = || EvalError::Internal(format!("{} holds {:?}, not a standard-stream", name, v));

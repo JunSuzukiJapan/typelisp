@@ -652,6 +652,23 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      次に `Iter` と `doiter` `map` `filter` `collect` `foldl` `foldr` を `std::iter` へ、`Iter` の上の CL の列と
      リストの関数（`length` `append` `nth` `find` `sort` `assoc` `first` `rest` `remove` `union` など）を `std::seq`
      へ移した（ABI は変わらない）。各型への `Iter` の impl と、型ごとの反復子（`vector-iter` など）は型と一緒に移す。
+     次に印字の制御変数・`print-object`・`pprint-*`・`prin1` などを `std::fmt` へ、パス名を `std::path` へ、
+     ストリームのトレイトと型・標準のストリームを `std::io` へ、ファイルの関数を `std::fs` へ、`HashSet`
+     `SortedTable` `Deque` を `std::collections` へ、複素数を `std::num` へ、`string->utf8` などを `std::string` へ
+     移した。印字の制御変数の置き場所を答えるのは `types::printer_global`。チェッカーが書き換えで呼ぶ
+     標準ライブラリの関数（`atan2` など）は `std::prelude` の再公開から引く（`Info::offered_fn`）。
+     `time` マクロは雛形が `*trace-output*` を使うので、その定義より後ろに置いた（読む時点で `std::io` が
+     まだ無いとパスが読めない）。ABI は 0.3.34。
+     `Array` を `std::array` へ移すと、モジュール `array` と型 `Array` が小文字に畳まれて同じ名前になり、
+     利用者の `Array::new` がモジュールに解決された。ユーザーの決定で、先にシンボルの大文字と小文字を
+     区別するようにする（下の 6d'）。`Array` `BitVector` と、`Option` `Result` `Vector` `Sexpr` `HashTable`
+     のように同名のモジュールに移る型は、その後で移す。
+   - 6d'. シンボルの大文字と小文字を区別する（2026-10-25、ユーザー決定）。リーダーとシンボル表は名前を
+     小文字に畳まない。型名は大文字始まりで書く（`Option` `Result` `Vector` `HashTable` `Sexpr` `Scope`
+     `Chan` `Task` `Thread`、組み込みのエラー型）。`option::some` のような小文字の綴りは別の名前で、
+     解決できない。基本型（`int` `string` `char` `f64` など）と、定義が小文字で書いている型
+     （`cons-cell` `universal-time` など）は書いた綴りのまま。`*print-case*` は消し、シンボルは書いた
+     綴りのまま印字する。`string` と `char` は型もモジュールも小文字なので、区別しても名前が重なる。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

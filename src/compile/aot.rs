@@ -582,7 +582,7 @@ pub fn compile_file(source_path: &str, output_path: &str) -> Result<(), String> 
         .iter()
         .map(|name| {
             let id = interp
-                .compiled_global_id(&Path::std(name))
+                .compiled_global_id(&crate::types::printer_global(name))
                 .ok_or_else(|| format!("internal error: printer variable {} was never promoted", name))?;
             Ok((*name, id))
         })

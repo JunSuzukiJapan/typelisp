@@ -153,7 +153,7 @@ impl Checker {
                 let bound = |trait_path: Path| TraitBound { trait_path, assoc: BTreeMap::new() };
                 if self.type_implements(&args[1], &bound(Path::in_ns(crate::types::std_module("error"), "error")), 0) {
                     TestReturn::ResultError
-                } else if self.type_implements(&args[1], &bound(Path::std("print-object")), 0) {
+                } else if self.type_implements(&args[1], &bound(Path::in_ns(crate::types::std_module("fmt"), "print-object")), 0) {
                     TestReturn::ResultPrinted
                 } else {
                     return Err(Error::TypeError(format!(

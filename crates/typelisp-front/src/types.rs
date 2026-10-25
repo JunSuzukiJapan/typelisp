@@ -205,6 +205,12 @@ pub fn std_module(segment: &str) -> NsId {
     symbols::child_ns(NsId::STD, segment)
 }
 
+/// The printer control variable `name` (`*print-base*` ...), which the
+/// prelude defines in `std::fmt`.
+pub fn printer_global(name: &str) -> Path {
+    Path::in_ns(std_module("fmt"), name)
+}
+
 /// The module every module reads its re-exports from, `std::prelude`.
 pub fn prelude_ns() -> NsId {
     static NS: std::sync::OnceLock<NsId> = std::sync::OnceLock::new();

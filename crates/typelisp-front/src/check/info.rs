@@ -7,7 +7,7 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use typelisp_mem::symbols::{self, NOT_WELL_KNOWN};
+use typelisp_mem::symbols::NOT_WELL_KNOWN;
 use typelisp_mem::{NsId, SymRef};
 
 use crate::{Error, Loc, Path, Type, Value};
@@ -444,9 +444,9 @@ impl Info {
     /// a form the checker rewrites into a call of a library function, which
     /// means the library's whatever the module defines.
     pub(super) fn offered_fn(&self, name: &str) -> Option<Path> {
-        let sym = symbols::intern_exact(NsId::STD, name);
-        let in_std = Path::of_symbol(NsId::STD, sym);
-        self.reg.fn_sig(&in_std).is_some().then_some(in_std)
+        let prelude = self.reg.module_at(crate::types::prelude_ns())?;
+        let path = *prelude.aliases.get(name)?;
+        self.reg.fn_sig(&path).is_some().then_some(path)
     }
 
     /// The `Sexpr` `cons` variant's `(type path, variant index)`, read from the

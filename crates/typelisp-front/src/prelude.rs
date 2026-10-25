@@ -226,6 +226,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 ;; printing section further down; they are defined here, ahead of everything
 ;; else, because printing reads all of them and `gensym` below already prints
 ;; (it formats the names it makes).
+(module fmt
 (pub defvar (*print-pretty* bool) false)
 (pub defvar (*print-right-margin* int) 80)
 (pub defvar (*print-miser-width* int) 0)
@@ -237,7 +238,7 @@ pub const SOURCE_TEMPLATE: &str = r##"
 (pub defvar (*print-case* symbol) :downcase)
 (pub defvar (*print-readably* bool) false)
 (pub defvar (*print-lines* int) 0)
-(pub defvar (*print-array* bool) true)
+(pub defvar (*print-array* bool) true))
 
 ;; Loop/branch primitive reduction (LLVMコンパイラ作業に先立つ整理): `loop`/
 ;; `break`/`return` (looping) and `if`/`match` (branching) are the only forms
@@ -3874,8 +3875,9 @@ user-visible capacity."
 ;; carries a type key, which is to say a `defstruct` or `defenum` box --
 ;; every scalar reaches the printer as an immediate or as an untyped box and
 ;; never asks. What the impls buy is the bound.
-(deftrait print-object ()
-  (print-object ((self Self) (escape bool)) string))
+(module fmt
+(pub deftrait print-object ()
+  (print-object ((self Self) (escape bool)) string)))
 
 ;; The scalar impls. Each renders its receiver the way the printer would
 ;; anyway, `escape` picking `~s` over `~a` -- so `(print-object x escape)` in
@@ -4073,6 +4075,7 @@ user-visible capacity."
 ;; inside a `doiter` over it is not seen by that loop.
 
 ;; A set is a table whose values are `()`.
+(module collections
 (pub defstruct HashSet<T> (table HashTable<T,()>))
 (impl HashSet<T>
   (pub new () HashSet<T> (make-instance 'HashSet :table (the HashTable<T,()> (HashTable::new))))
@@ -4090,7 +4093,7 @@ user-visible capacity."
     (let ((out "#<hashset"))
       (doiter (x (iter self))
         (setf out (append (append out " ") (print-object x escape))))
-      (append out ">"))))
+      (append out ">")))))
 
 
 ;; Sorted parallel vectors of keys and values, found by binary search on
@@ -4116,26 +4119,27 @@ user-visible capacity."
       (setf j (+ j 1)))
     (pop v)
     x)))
+(module collections
 (pub defstruct SortedTable<K,V> (ks Vector<K>) (vs Vector<V>))
 (impl SortedTable<K,V>
   (pub new () SortedTable<K,V>
     (make-instance 'SortedTable :ks (the Vector<K> (Vector::new)) :vs (the Vector<V> (Vector::new))))
   (pub get (self (k K)) Option<V> (:where (Ord K))
-    (let ((i (%internal::sorted-position self::ks k)))
+    (let ((i (std::%internal::sorted-position self::ks k)))
       (if (and (< i (len self::ks)) (equals (get self::ks i) k))
           (Option::some (get self::vs i))
           (Option::none))))
   (pub set (self (k K) (v V)) () (:where (Ord K))
-    (let ((i (%internal::sorted-position self::ks k)))
+    (let ((i (std::%internal::sorted-position self::ks k)))
       (if (and (< i (len self::ks)) (equals (get self::ks i) k))
           (set self::vs i v)
-          (progn (%internal::vector-insert-at self::ks i k)
-                 (%internal::vector-insert-at self::vs i v)))))
+          (progn (std::%internal::vector-insert-at self::ks i k)
+                 (std::%internal::vector-insert-at self::vs i v)))))
   (pub remove (self (k K)) Option<V> (:where (Ord K))
-    (let ((i (%internal::sorted-position self::ks k)))
+    (let ((i (std::%internal::sorted-position self::ks k)))
       (if (and (< i (len self::ks)) (equals (get self::ks i) k))
-          (progn (%internal::vector-remove-at self::ks i)
-                 (Option::some (%internal::vector-remove-at self::vs i)))
+          (progn (std::%internal::vector-remove-at self::ks i)
+                 (Option::some (std::%internal::vector-remove-at self::vs i)))
           (Option::none))))
   (pub count (self) int (len self::ks))
   (pub clear (self) ()
@@ -4153,20 +4157,21 @@ user-visible capacity."
     (let ((out "#<sortedtable"))
       (doiter (#{k v} (iter self))
         (setf out (append (append (append (append out " ") (print-object k escape)) " ") (print-object v escape))))
-      (append out ">"))))
+      (append out ">")))))
 
 
 ;; Two stacks back to back: `before` holds the front half reversed (its top
 ;; is the first element), `after` the back half in order. A pop from an empty
 ;; side moves half of the other side across, so a run of pops from one end
 ;; costs a constant amount per element.
+(module collections
 (pub defstruct Deque<T> (before Vector<T>) (after Vector<T>))
 (impl Deque<T>
   (pub new () Deque<T>
     (make-instance 'Deque :before (the Vector<T> (Vector::new)) :after (the Vector<T> (Vector::new))))
   (pub count (self) int (+ (len self::before) (len self::after)))
   (pub push-front (self (x T)) () (push self::before x))
-  (pub push-back (self (x T)) () (push self::after x)))
+  (pub push-back (self (x T)) () (push self::after x))))
 (module %internal (pub defun deque-refill<T> ((into Vector<T>) (from Vector<T>)) ()
   (let ((n (len from)) (h (truncate (+ (len from) 1) 2)) (rest (the Vector<T> (Vector::new))))
     (let ((i (- h 1)))
@@ -4174,12 +4179,13 @@ user-visible capacity."
     (let ((i h)) (while (< i n) (push rest (get from i)) (setf i (+ i 1))))
     (while (> (len from) 0) (pop from))
     (doiter (x (iter rest)) (push from x)))))
+(module collections
 (impl Deque<T>
   (pub pop-front (self) Option<T>
-    (when (= 0 (len self::before)) (%internal::deque-refill self::before self::after))
+    (when (= 0 (len self::before)) (std::%internal::deque-refill self::before self::after))
     (pop self::before))
   (pub pop-back (self) Option<T>
-    (when (= 0 (len self::after)) (%internal::deque-refill self::after self::before))
+    (when (= 0 (len self::after)) (std::%internal::deque-refill self::after self::before))
     (pop self::after))
   (pub get (self (i int)) Option<T>
     (let ((nf (len self::before)))
@@ -4207,7 +4213,7 @@ user-visible capacity."
     (let ((out "#<deque"))
       (doiter (x (iter self))
         (setf out (append (append out " ") (print-object x escape))))
-      (append out ">"))))
+      (append out ">")))))
 
 ;; `pprint-exit-if-list-exhausted` (CLHS): leave the enclosing
 ;; `pprint-logical-block` when its list is used up. CL implements this as a
@@ -4219,8 +4225,9 @@ user-visible capacity."
 ;;     (loop (pprint-exit-if-list-exhausted)
 ;;           (print "~w" (pprint-pop))
 ;;           (if (pprint-list-exhausted) () (progn (print " ") (pprint-newline :fill)))))
+(module fmt
 (pub defmacro pprint-exit-if-list-exhausted ()
-  `(if (pprint-list-exhausted) (break) ()))
+  `(if (pprint-list-exhausted) (break) ())))
 
 ;; The "what to print" controls (CLHS 22.1.1), read by the printer
 ;; on every printing operation just like the layout controls. All of the printer
@@ -4300,7 +4307,8 @@ user-visible capacity."
 ;; A `print-object` method should read its own `escape` parameter rather than
 ;; this global: the parameter carries the per-call value the directive picked,
 ;; and this one only says what `write` starts from.
-(pub defvar (*print-escape* bool) true)
+(module fmt
+(pub defvar (*print-escape* bool) true))
 
 ;; ---------------------------------------------------------------------------
 ;; `random-state` (CLHS 12.1.6): a mutable PRNG stream. The actual
@@ -4389,27 +4397,8 @@ user-visible capacity."
   "`it` as a number of seconds — what a difference of two readings is
    reported in."
   (+ (int->float it::second)
-     (/ (int->float it::microsecond) (int->float internal-time-units-per-second))))
+     (/ (int->float it::microsecond) (int->float internal-time-units-per-second)))))
 
-;; CL's `time` macro: run `form`, print how long it took to standard output,
-;; and return `form`'s own value unchanged. CL doesn't specify the report's
-;; format, so this prints the two figures that mean different things: elapsed
-;; time, and the CPU time `get-internal-run-time` reads out of `getrusage`.
-;; A form that is mostly waiting on I/O shows a large gap between them, which
-;; is exactly what a single "real time" line hid until 2026-09-05. (Still no
-;; multiple-value `values` — see docs/dev/cl-missing-classes-and-methods.md
-;; §3.4 for that standing rule.)
-(pub defmacro time (form)
-  (let ((t0 (gensym)) (r0 (gensym)) (result (gensym)))
-    `(let ((,t0 (internal-time-seconds (get-internal-real-time)))
-           (,r0 (internal-time-seconds (get-internal-run-time))))
-       (let ((,result ,form))
-         (progn
-           (format std::*trace-output* "Real time: ~,3f seconds~%"
-                   (- (internal-time-seconds (get-internal-real-time)) ,t0))
-           (format std::*trace-output* "Run time: ~,3f seconds~%"
-                   (- (internal-time-seconds (get-internal-run-time)) ,r0))
-           ,result))))))
 
 
 ;; ---------------------------------------------------------------------------
@@ -4456,6 +4445,7 @@ user-visible capacity."
 ;;
 ;; The struct's fields are `pub` so `z::re` reads like `z::x` on any other
 ;; struct; `realpart`/`imagpart` are the CL spellings of the same reads.
+(module num
 (pub defstruct complex (pub re f64) (pub im f64))
 
 ;; CL's two-argument `atan`, which `phase` is built on. `(atan y x)` is sugar
@@ -4553,15 +4543,16 @@ user-visible capacity."
 ;; changes nothing.
 (impl print-object complex
   (print-object ((self Self) (escape bool)) string
-    (format false "#C(~a ~a)" self::re self::im)))
+    (format false "#C(~a ~a)" self::re self::im))))
 
+(module path
 (pub defstruct pathname
   (directory Vector<string>)
   (name Option<string>)
   ;; CL's "type". Named `extension` here to keep the field out of the way of
   ;; `(:type ...)`, which is `impl` syntax; `pathname-type` is the reader.
   (extension Option<string>)
-  (absolutep bool))
+  (absolutep bool)))
 
 (module %internal (pub defun split-on-slash ((s string)) Vector<string>
   "Every `/`-separated piece, empty ones included -- so a leading `/` yields a
@@ -4592,10 +4583,11 @@ user-visible capacity."
           ()))
       at))))
 
+(module path
 (pub defun parse-namestring ((s string)) pathname
   "Take a file name apart. A trailing `/` (or an empty name) means a pathname
    with no name -- a directory."
-  (let ((parts (%internal::split-on-slash s))
+  (let ((parts (std::%internal::split-on-slash s))
         (dirs (the Vector<string> (Vector::new)))
         (file "")
         (i 0))
@@ -4616,11 +4608,11 @@ user-visible capacity."
         :directory dirs
         :name (if (equal file "")
             (option::none)
-            (let ((at (%internal::name-type-dot file)))
+            (let ((at (std::%internal::name-type-dot file)))
               (if (< at 0) (option::some file) (option::some (substring file 0 at)))))
-        :extension (let ((at (%internal::name-type-dot file)))
+        :extension (let ((at (std::%internal::name-type-dot file)))
           (if (< at 0) (option::none) (option::some (substring file (+ at 1) (length file)))))
-        :absolutep (and (> (length s) 0) (equal (ref s 0) #\/))))))
+        :absolutep (and (> (length s) 0) (equal (ref s 0) #\/)))))))
 
 (module %internal (pub defun pathname-file-part ((p pathname)) string
   "`name.type`, as text -- \"\" for a pathname naming only a directory."
@@ -4642,7 +4634,8 @@ user-visible capacity."
 
 ;; The pathname designator. Two implementations, and no more are expected:
 ;; the point is that a file operation can take either without asking which.
-(deftrait Pathish ()
+(module path
+(pub deftrait Pathish ()
   "What can name a file: a `string` or a `pathname`."
   (namestring ((self Self)) string)
   (to-pathname ((self Self)) pathname))
@@ -4655,7 +4648,7 @@ user-visible capacity."
   (to-pathname ((self Self)) pathname (parse-namestring self)))
 
 (impl Pathish pathname
-  (namestring ((self Self)) string (append (%internal::pathname-directory-part self) (%internal::pathname-file-part self)))
+  (namestring ((self Self)) string (append (std::%internal::pathname-directory-part self) (std::%internal::pathname-file-part self)))
   (to-pathname ((self Self)) pathname self))
 
 ;; CL's `#P"..."` (CLHS 22.1.3.11) when it has to read back, the namestring
@@ -4690,11 +4683,11 @@ user-visible capacity."
 
 (pub defun directory-namestring<P> ((p P)) string (:where (Pathish P))
   "Everything up to and including the last `/`."
-  (%internal::pathname-directory-part (to-pathname p)))
+  (std::%internal::pathname-directory-part (to-pathname p)))
 
 (pub defun file-namestring<P> ((p P)) string (:where (Pathish P))
   "The `name.type` part alone."
-  (%internal::pathname-file-part (to-pathname p)))
+  (std::%internal::pathname-file-part (to-pathname p)))
 
 (pub defun merge-pathnames<P,D> ((p P) (default D)) pathname (:where (Pathish P) (Pathish D))
   "Fill in whatever `p` leaves out from `default`, as CL's does: a missing
@@ -4722,7 +4715,7 @@ user-visible capacity."
              (<= (length prefix) (length full))
              (equal (substring full 0 (length prefix)) prefix))
         (substring full (length prefix) (length full))
-        full)))
+        full))))
 
 ;; ---------------------------------------------------------------------------
 ;; Streams (CLHS 21) and files (CLHS 20).
@@ -4751,14 +4744,15 @@ user-visible capacity."
 ;; (the collector only runs when the cons arena fills, so a finalizer would
 ;; fire unpredictably or never). Prefer `with-open-file`, which closes for you.
 
-(deftrait Stream ()
+(module io
+(pub deftrait Stream ()
   "What every stream can do, whatever it carries and whichever way it goes."
   (open-stream-p ((self Self)) bool)
   (close ((self Self)) ()))
 
 ;; Direction. `Item` is left open so a byte stream can pin it to `i32` later
 ;; without a parallel trait hierarchy; the character layers below pin it.
-(deftrait InputStream (Stream)
+(pub deftrait InputStream (Stream)
   "A stream that yields items."
   (:type Item)
   ;; `read-item` yields the next item, or `none` at end of input. Said in a
@@ -4780,7 +4774,7 @@ user-visible capacity."
   ;; anything ready, so `read-char-no-hang` on it always answers `none`.
   (listen ((self Self)) bool false))
 
-(deftrait OutputStream (Stream)
+(pub deftrait OutputStream (Stream)
   "A stream that accepts items."
   (:type Item)
   (write-item ((self Self) (x Item)) ()))
@@ -4789,7 +4783,7 @@ user-visible capacity."
 ;; what lets these carry default bodies written in terms of characters --
 ;; every method below is a default, so implementing `CharInput` for a type
 ;; that already implements `InputStream` with `Item = char` costs one line.
-(deftrait CharInput ((InputStream (Item char)))
+(pub deftrait CharInput ((InputStream (Item char)))
   "A character input stream. Every method has a default body."
   (read-char ((self Self)) Option<char>
     "The next character, or `none` at end of input."
@@ -4846,7 +4840,7 @@ user-visible capacity."
 ;; This is what `read-sexpr` needs and `read-char`/`read-line` do not: finding
 ;; where an atom ends means looking at the character *after* it, which the
 ;; next read must still see.
-(deftrait PeekInput (CharInput)
+(pub deftrait PeekInput (CharInput)
   "A character input stream that can put a character back. One is enough --
    that is all CL's `unread-char` promises."
   (unread-char ((self Self) (c char)) ())
@@ -4856,7 +4850,7 @@ user-visible capacity."
       ((none) (option::none))
       ((some c) (progn (unread-char self c) (option::some c))))))
 
-(deftrait CharOutput ((OutputStream (Item char)))
+(pub deftrait CharOutput ((OutputStream (Item char)))
   "A character output stream. Every method has a default body."
   (write-char ((self Self) (c char)) ()
     (write-item self c))
@@ -4898,7 +4892,7 @@ user-visible capacity."
 ;;
 ;; `Item` is `i32` rather than a byte type this language does not have. The
 ;; value is always 0..255 -- `write-byte` refuses anything else, as CL's does.
-(deftrait ByteInput ((InputStream (Item int)))
+(pub deftrait ByteInput ((InputStream (Item int)))
   "A byte input stream. Every method has a default body."
   (read-byte ((self Self)) Option<int>
     "The next byte, or `none` at end of input."
@@ -4914,7 +4908,7 @@ user-visible capacity."
               ((none) (progn (setf going false) ())))))
       got)))
 
-(deftrait ByteOutput ((OutputStream (Item int)))
+(pub deftrait ByteOutput ((OutputStream (Item int)))
   "A byte output stream. Every method has a default body."
   (write-byte ((self Self) (b int)) ()
     "Write one byte. `b` outside 0..255 is an error."
@@ -4934,7 +4928,7 @@ user-visible capacity."
 (pub defstruct binary-file-stream (h i32))
 (pub defstruct string-input-stream (h i32))
 (pub defstruct string-output-stream (h i32))
-(pub defstruct standard-stream (h i32))
+(pub defstruct standard-stream (h i32)))
 
 ;; A stream prints the way SBCL prints one: its type, what it is attached to
 ;; (`for "file /tmp/a.txt"`, `for "standard output"`, a socket's addresses)
@@ -4946,21 +4940,23 @@ user-visible capacity."
     (if (equal d "")
         (format false "#<~a {~d}>" type h)
         (format false "#<~a ~a {~d}>" type d h)))))
+(module io
 (impl print-object file-stream
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "file-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "file-stream" self::h)))
 (impl print-object binary-file-stream
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "binary-file-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "binary-file-stream" self::h)))
 (impl print-object string-input-stream
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "string-input-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "string-input-stream" self::h)))
 (impl print-object string-output-stream
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "string-output-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "string-output-stream" self::h)))
 (impl print-object standard-stream
-  (print-object ((self Self) (escape bool)) string (%internal::stream-print-object "standard-stream" self::h)))
+  (print-object ((self Self) (escape bool)) string (std::%internal::stream-print-object "standard-stream" self::h))))
 
+(module fs
 (impl Error FileError
   (message ((self Self)) string (match self ((FileError m) m))))
 (impl print-object FileError
-  (print-object ((self Self) (escape bool)) string (%internal::error-print-object self escape "fileerror")))
+  (print-object ((self Self) (escape bool)) string (std::%internal::error-print-object self escape "fileerror"))))
 
 ;; `unwrap-io` turns the native layer's `Result` into a panic, for the
 ;; operations whose failure means the program is already broken (writing to a
@@ -4972,85 +4968,86 @@ user-visible capacity."
     ((ok v) v)
     ((err e) (panic (message e))))))
 
+(module io
 (impl Stream file-stream
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl InputStream file-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (%internal::unwrap-io (%internal::stream-read-char self::h)))
-  (listen ((self Self)) bool (%internal::unwrap-io (%internal::stream-listen self::h))))
+  (read-item ((self Self)) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
+  (listen ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
 (impl OutputStream file-stream
   (:type Item char)
   (write-item ((self Self) (c char)) ()
-    (%internal::unwrap-io (%internal::stream-write-string self::h (char->string c)))))
+    (std::%internal::unwrap-io (std::%internal::stream-write-string self::h (char->string c)))))
 (impl CharInput file-stream)
 (impl PeekInput file-stream
-  (unread-char ((self Self) (c char)) () (%internal::unwrap-io (%internal::stream-unread-char self::h c))))
+  (unread-char ((self Self) (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
 (impl CharOutput file-stream
   ;; Overridden: one native call per string beats one per character, and this
   ;; is the stream people write bulk output to.
   (write-string ((self Self) (s string)) ()
-    (%internal::unwrap-io (%internal::stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (%internal::unwrap-io (%internal::stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (%internal::unwrap-io (%internal::stream-finish-output self::h))))
+    (std::%internal::unwrap-io (std::%internal::stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
+  (finish-output ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h))))
 
 (impl Stream binary-file-stream
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl InputStream binary-file-stream
   (:type Item int)
-  (read-item ((self Self)) Option<int> (%internal::unwrap-io (%internal::stream-read-byte self::h)))
-  (listen ((self Self)) bool (%internal::unwrap-io (%internal::stream-listen self::h))))
+  (read-item ((self Self)) Option<int> (std::%internal::unwrap-io (std::%internal::stream-read-byte self::h)))
+  (listen ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
 (impl OutputStream binary-file-stream
   (:type Item int)
-  (write-item ((self Self) (b int)) () (%internal::unwrap-io (%internal::stream-write-byte self::h b))))
+  (write-item ((self Self) (b int)) () (std::%internal::unwrap-io (std::%internal::stream-write-byte self::h b))))
 (impl ByteInput binary-file-stream)
 (impl ByteOutput binary-file-stream
-  (finish-output ((self Self)) () (%internal::unwrap-io (%internal::stream-finish-output self::h))))
+  (finish-output ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h))))
 
 (impl Stream string-input-stream
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl InputStream string-input-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (%internal::unwrap-io (%internal::stream-read-char self::h)))
+  (read-item ((self Self)) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
   ;; The one kind that can honestly say `true`: the whole text is in memory.
-  (listen ((self Self)) bool (%internal::unwrap-io (%internal::stream-listen self::h))))
+  (listen ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
 (impl CharInput string-input-stream)
 (impl PeekInput string-input-stream
-  (unread-char ((self Self) (c char)) () (%internal::unwrap-io (%internal::stream-unread-char self::h c))))
+  (unread-char ((self Self) (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
 
 (impl Stream string-output-stream
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl OutputStream string-output-stream
   (:type Item char)
   (write-item ((self Self) (c char)) ()
-    (%internal::unwrap-io (%internal::stream-write-string self::h (char->string c)))))
+    (std::%internal::unwrap-io (std::%internal::stream-write-string self::h (char->string c)))))
 (impl CharOutput string-output-stream
   (write-string ((self Self) (s string)) ()
-    (%internal::unwrap-io (%internal::stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (%internal::unwrap-io (%internal::stream-at-line-start self::h))))
+    (std::%internal::unwrap-io (std::%internal::stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h))))
 
 (impl Stream standard-stream
-  (open-stream-p ((self Self)) bool (%internal::stream-open-p self::h))
-  (close ((self Self)) () (%internal::unwrap-io (%internal::stream-close self::h))))
+  (open-stream-p ((self Self)) bool (std::%internal::stream-open-p self::h))
+  (close ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-close self::h))))
 (impl InputStream standard-stream
   (:type Item char)
-  (read-item ((self Self)) Option<char> (%internal::unwrap-io (%internal::stream-read-char self::h)))
-  (listen ((self Self)) bool (%internal::unwrap-io (%internal::stream-listen self::h))))
+  (read-item ((self Self)) Option<char> (std::%internal::unwrap-io (std::%internal::stream-read-char self::h)))
+  (listen ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-listen self::h))))
 (impl OutputStream standard-stream
   (:type Item char)
   (write-item ((self Self) (c char)) ()
-    (%internal::unwrap-io (%internal::stream-write-string self::h (char->string c)))))
+    (std::%internal::unwrap-io (std::%internal::stream-write-string self::h (char->string c)))))
 (impl CharInput standard-stream)
 (impl PeekInput standard-stream
-  (unread-char ((self Self) (c char)) () (%internal::unwrap-io (%internal::stream-unread-char self::h c))))
+  (unread-char ((self Self) (c char)) () (std::%internal::unwrap-io (std::%internal::stream-unread-char self::h c))))
 (impl CharOutput standard-stream
   (write-string ((self Self) (s string)) ()
-    (%internal::unwrap-io (%internal::stream-write-string self::h s)))
-  (at-line-start ((self Self)) bool (%internal::unwrap-io (%internal::stream-at-line-start self::h)))
-  (finish-output ((self Self)) () (%internal::unwrap-io (%internal::stream-finish-output self::h))))
+    (std::%internal::unwrap-io (std::%internal::stream-write-string self::h s)))
+  (at-line-start ((self Self)) bool (std::%internal::unwrap-io (std::%internal::stream-at-line-start self::h)))
+  (finish-output ((self Self)) () (std::%internal::unwrap-io (std::%internal::stream-finish-output self::h)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Sockets. Three structs over one more kind of handle in the same native
@@ -5531,6 +5528,7 @@ user-visible capacity."
 
 ;; ---- Bytes and text ----------------------------------------------------------
 
+(module string
 (pub defun string->utf8 ((s string)) Vector<int>
   "The UTF-8 encoding of `s`, one byte (0..255) per element."
   (let ((out (the Vector<int> (Vector::new))) (i 0) (n-chars (length s)))
@@ -5582,7 +5580,7 @@ user-visible capacity."
                     ((none) (progn (setf bad true) ()))))
                 (setf i (+ i width))
                 ())))))
-    (if bad (option::none) (option::some out))))
+    (if bad (option::none) (option::some out)))))
 
 ;; CL's standard streams. Ordinary assignable globals rather than dynamically
 ;; bound specials — `(setf *standard-output* s)` does globally what CL's
@@ -5600,9 +5598,10 @@ user-visible capacity."
 ;; that numbering or publish the vtable addresses (see the check at the end of
 ;; `compile::prelude_bootstrap::build_dump`). Dispatching on an already-boxed
 ;; `:dyn` is fine, which is why the composed streams below work.
-(pub defvar (*standard-input*  standard-stream) (make-instance 'standard-stream :h (%internal::stream-stdin)))
-(pub defvar (*standard-output* standard-stream) (make-instance 'standard-stream :h (%internal::stream-stdout)))
-(pub defvar (*error-output*    standard-stream) (make-instance 'standard-stream :h (%internal::stream-stderr)))
+(module io
+(pub defvar (*standard-input*  standard-stream) (make-instance 'standard-stream :h (std::%internal::stream-stdin)))
+(pub defvar (*standard-output* standard-stream) (make-instance 'standard-stream :h (std::%internal::stream-stdout)))
+(pub defvar (*error-output*    standard-stream) (make-instance 'standard-stream :h (std::%internal::stream-stderr)))
 
 ;; CL's `*trace-output*`: where a program's own progress reporting goes, as
 ;; opposed to its output (`*standard-output*`) or its errors (`*error-output*`).
@@ -5615,12 +5614,34 @@ user-visible capacity."
 ;; above), so those three are not here. A program can build its own
 ;; `(make-two-way-stream ...)` and pass it around; only the *prelude* is
 ;; barred from holding one in a global.
-(pub defvar (*trace-output* standard-stream) (make-instance 'standard-stream :h (%internal::stream-stdout)))
+(pub defvar (*trace-output* standard-stream) (make-instance 'standard-stream :h (std::%internal::stream-stdout))))
+
+(module time
+;; CL's `time` macro: run `form`, print how long it took to standard output,
+;; and return `form`'s own value unchanged. CL doesn't specify the report's
+;; format, so this prints the two figures that mean different things: elapsed
+;; time, and the CPU time `get-internal-run-time` reads out of `getrusage`.
+;; A form that is mostly waiting on I/O shows a large gap between them, which
+;; is exactly what a single "real time" line hid until 2026-09-05. (Still no
+;; multiple-value `values` — see docs/dev/cl-missing-classes-and-methods.md
+;; §3.4 for that standing rule.)
+(pub defmacro time (form)
+  (let ((t0 (gensym)) (r0 (gensym)) (result (gensym)))
+    `(let ((,t0 (internal-time-seconds (get-internal-real-time)))
+           (,r0 (internal-time-seconds (get-internal-run-time))))
+       (let ((,result ,form))
+         (progn
+           (format *trace-output* "Real time: ~,3f seconds~%"
+                   (- (internal-time-seconds (get-internal-real-time)) ,t0))
+           (format *trace-output* "Run time: ~,3f seconds~%"
+                   (- (internal-time-seconds (get-internal-run-time)) ,r0))
+           ,result))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Composite streams. These are the whole argument for the trait design: each
 ;; is a struct and one method, with no native support whatsoever.
 
+(module io
 (pub defstruct broadcast-stream (parts Vector<:dyn CharOutput>))
 ;; The composites print as SBCL's do: a broadcast stream by name alone, the
 ;; others with the streams they are made of, under SBCL's own labels. They
@@ -5756,16 +5777,16 @@ user-visible capacity."
 
 (pub defun make-string-input-stream ((s string)) string-input-stream
   "A stream that yields the characters of `s`."
-  (make-instance 'string-input-stream :h (%internal::stream-string-input s)))
+  (make-instance 'string-input-stream :h (std::%internal::stream-string-input s)))
 
 (pub defun make-string-output-stream () string-output-stream
   "A stream that accumulates what is written to it; drain it with
    `get-output-stream-string`."
-  (make-instance 'string-output-stream :h (%internal::stream-string-output)))
+  (make-instance 'string-output-stream :h (std::%internal::stream-string-output)))
 
 (pub defun get-output-stream-string ((s string-output-stream)) string
   "Everything written to `s` since the last call, clearing it."
-  (%internal::unwrap-io (%internal::stream-take-output-string s::h)))
+  (std::%internal::unwrap-io (std::%internal::stream-take-output-string s::h)))
 
 (pub defun make-broadcast-stream ((parts Vector<:dyn CharOutput>)) broadcast-stream
   "A stream that writes to every component, in order."
@@ -5783,13 +5804,14 @@ user-visible capacity."
 (pub defun make-peek-stream ((in :dyn CharInput)) peek-stream
   "`in` with one character of pushback added, so it can be `read-sexpr`-ed.
    The built-in leaf streams already have pushback and need no wrapping."
-  (make-instance 'peek-stream :inner in :pending (option::none)))
+  (make-instance 'peek-stream :inner in :pending (option::none))))
 
 ;; `open`'s direction, as named constants rather than as CL's `:direction`
 ;; keyword argument: the direction is required, and three constants read at
 ;; least as well as `:direction :output` when there is nothing to default.
 ;; (`&key` does exist -- `make-pathname` uses it, where most components are
 ;; genuinely optional.)
+(module fs
 (pub defconstant (direction-input int) 0)
 (pub defconstant (direction-output int) 1)
 (pub defconstant (direction-append int) 2)
@@ -5798,7 +5820,7 @@ user-visible capacity."
   "Open `name` -- a string or a `pathname` -- in one of `direction-input` /
    `direction-output` / `direction-append`. `Err` if the file cannot be
    opened: a missing file is an ordinary outcome, not a panic."
-  (match (%internal::stream-open-file (namestring name) direction)
+  (match (std::%internal::stream-open-file (namestring name) direction)
     ((ok h) (result::ok (make-instance 'file-stream :h h)))
     ((err e) (result::err e))))
 
@@ -5811,7 +5833,7 @@ user-visible capacity."
 (pub defun open-binary<P> ((name P) (direction int)) Result<binary-file-stream, FileError> (:where (Pathish P))
   "Open `name` for byte I/O in one of `direction-input` / `direction-output` /
    `direction-append`."
-  (match (%internal::stream-open-file (namestring name) direction)
+  (match (std::%internal::stream-open-file (namestring name) direction)
     ((ok h) (result::ok (make-instance 'binary-file-stream :h h)))
     ((err e) (result::err e))))
 
@@ -5822,7 +5844,7 @@ user-visible capacity."
   (open-binary name direction-output))
 
 (pub defun open-output<P> ((name P)) Result<file-stream, FileError> (:where (Pathish P))
-  (open-file name direction-output))
+  (open-file name direction-output)))
 
 ;; CL's `input-stream-p`/`output-stream-p` have no counterpart here, and do
 ;; not need one: direction is part of the type. A value that can be read from
@@ -5840,6 +5862,7 @@ user-visible capacity."
 ;; Convenience over the traits. These are ordinary generic functions -- the
 ;; point of the trait layer is that they need no cases.
 
+(module io
 (pub defun write-lines<S,I> ((s S) (lines I)) () (:where (CharOutput S) (Iter I (Item string)))
   "Write each of `lines`, one per line."
   (doiter (l lines) (write-line s l)))
@@ -5858,7 +5881,7 @@ user-visible capacity."
       (match (read-line s)
         ((none) (break))
         ((some l) (push out l))))
-    out))
+    out)))
 
 ;; ---------------------------------------------------------------------------
 ;; The one-object printers (CLHS 22.1.3) -- cl-parity-plan.md Phase 8a.
@@ -5882,6 +5905,7 @@ user-visible capacity."
 ;; where the type is known. The stream is optional, as in CL, and defaults to
 ;; `*standard-output*`.
 
+(module fmt
 (pub defmacro prin1 (x &rest stream)
   "Write `x` in reader syntax to `stream` (default `*standard-output*`) and
    return it. CL's `prin1`; `~s` is the same rendering."
@@ -5929,7 +5953,7 @@ user-visible capacity."
   "`x` as a string, the way `*print-escape*` says. CL's `write-to-string`."
   (let ((v (gensym)))
     `(let ((,v ,x))
-       (if *print-escape* (format false "~s" ,v) (format false "~a" ,v)))))
+       (if *print-escape* (format false "~s" ,v) (format false "~a" ,v))))))
 
 ;; ---------------------------------------------------------------------------
 ;; `read` over a stream (CL's `read`; typelisp's own `read` takes a string,
@@ -6308,6 +6332,7 @@ user-visible capacity."
 ;; value is produced *before* the close, so `(with-open-file ...)` still
 ;; returns something useful.
 
+(module fs
 (pub defmacro with-open-file (spec &rest body)
   "`(with-open-file (var name direction) body...)` -- open, run the body, close.
    Yields `Result<body-value, FileError>`: opening can fail, and the body's
@@ -6323,8 +6348,9 @@ user-visible capacity."
         (let ((,var ,s))
           (let ((,result (progn ,@body)))
             (progn (close ,var) (result::ok ,result)))))
-       ((err ,e) (result::err ,e)))))
+       ((err ,e) (result::err ,e))))))
 
+(module io
 (pub defmacro with-input-from-string (spec &rest body)
   "`(with-input-from-string (var string) body...)`."
   (let ((var (sexpr-car spec)) (text (sexpr-car (sexpr-cdr spec))))
@@ -6336,12 +6362,13 @@ user-visible capacity."
   "`(with-output-to-string (var) body...)` -- returns everything written."
   (let ((var (sexpr-car spec)))
     `(let ((,var (make-string-output-stream)))
-       (progn ,@body (get-output-stream-string ,var)))))
+       (progn ,@body (get-output-stream-string ,var))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Whole-file convenience. `name` is any `Pathish` here as everywhere else, so
 ;; a string and a `pathname` are equally ordinary arguments.
 
+(module fs
 (pub defun read-file-string<P> ((name P)) Result<string, FileError> (:where (Pathish P))
   "The entire contents of `name`."
   (match (open-input name)
@@ -6362,17 +6389,17 @@ user-visible capacity."
 
 (pub defun probe-file<P> ((name P)) bool (:where (Pathish P))
   "Whether `name` exists."
-  (%internal::file-exists-p (namestring name)))
+  (std::%internal::file-exists-p (namestring name)))
 
 (pub defun delete-file<P> ((name P)) Result<(), FileError> (:where (Pathish P))
   "Remove `name`. `Ok(())` on success."
-  (match (%internal::file-delete (namestring name))
+  (match (std::%internal::file-delete (namestring name))
     ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
 (pub defun rename-file<P,Q> ((from P) (to Q)) Result<(), FileError> (:where (Pathish P) (Pathish Q))
   "Rename `from` to `to`. `Ok(())` on success."
-  (match (%internal::file-rename (namestring from) (namestring to))
+  (match (std::%internal::file-rename (namestring from) (namestring to))
     ((ok _) (result::ok ()))
     ((err e) (result::err e))))
 
@@ -6384,24 +6411,24 @@ user-visible capacity."
 (pub defun truename<P> ((name P)) Result<string, FileError> (:where (Pathish P))
   "`name` with symlinks resolved and `.`/`..` removed, as an absolute path.
    `Err` if it does not exist -- resolving a path means looking at it."
-  (%internal::file-truename (namestring name)))
+  (std::%internal::file-truename (namestring name)))
 
 (pub defun file-write-date<P> ((name P)) Result<universal-time, FileError> (:where (Pathish P))
   "When `name` was last modified, as a universal time -- the same scale
    `get-universal-time` counts on, so `decode-universal-time` reads it."
-  (%internal::file-modified-date (namestring name)))
+  (std::%internal::file-modified-date (namestring name)))
 
 (pub defun file-author<P> ((name P)) Result<Option<string>, FileError> (:where (Pathish P))
   "Who owns file `name` (CLHS 20.1). `none` -- not an error -- when the
    owning user id has no entry in the password database: CL separates the
    two, saying `NIL` when the author cannot be determined and signalling
    only when the file itself is not there."
-  (%internal::file-owner-name (namestring name)))
+  (std::%internal::file-owner-name (namestring name)))
 
 (pub defun directory-p<P> ((name P)) bool (:where (Pathish P))
   "Whether `name` is a directory. `false` for a plain file and for something
    that is not there at all; `probe-file` is what separates those two."
-  (%internal::file-directory-p (namestring name)))
+  (std::%internal::file-directory-p (namestring name)))
 
 (pub defun directory<P> ((name P)) Result<Vector<string>, FileError> (:where (Pathish P))
   "The entries of directory `name`, as truenames: absolute, with symlinks
@@ -6413,14 +6440,14 @@ user-visible capacity."
    match and the argument simply names the directory to list. `.` and `..`
    are not entries. The order is the operating system's -- sort it if you
    need a stable one."
-  (%internal::file-list-directory (namestring name)))
+  (std::%internal::file-list-directory (namestring name)))
 
 (pub defun ensure-directories-exist<P> ((name P)) Result<(), FileError> (:where (Pathish P))
   "Create directory `name` and any missing parent. `Ok(())` if it already
    exists -- that is what `ensure` means."
-  (match (%internal::file-create-directories (namestring name))
+  (match (std::%internal::file-create-directories (namestring name))
     ((ok _) (result::ok ()))
-    ((err e) (result::err e))))
+    ((err e) (result::err e)))))
 
 ;; ---------------------------------------------------------------------------
 ;; The environment the program is running in (CLHS 25.1), plus the two things
@@ -6715,6 +6742,7 @@ user-visible capacity."
 ;; is what CL specifies; end of input is the one thing that can stop them,
 ;; and it answers `false`.
 
+(module io
 (pub defun y-or-n-p ((question string)) bool
   "Ask `question` and accept a single `y` or `n` (in either case)."
   (let ((answer false) (settled false))
@@ -6751,7 +6779,7 @@ user-visible capacity."
                    (if (equalp a "no")
                        (progn (setf settled true) ())
                        ())))))))
-      answer)))
+      answer))))
 
 ;; ---------------------------------------------------------------------------
 ;; Multi-dimensional arrays (CLHS 15) — cl-parity-plan.md Phase 6b.
@@ -7361,6 +7389,7 @@ user-visible capacity."
 ;; (`*read-base*`, `*read-default-float-format*` and `*read-suppress*` are
 ;; not), so that is the one reader variable here; `*package*` and
 ;; `*readtable*` are not values either.
+(module fmt
 (pub defmacro with-standard-io-syntax (&rest body)
   `(dlet ((*read-eval* true)
           (*print-base* 10)
@@ -7373,7 +7402,7 @@ user-visible capacity."
           (*print-readably* true)
           (*print-right-margin* 0)
           (*print-miser-width* 0))
-     ,@body))
+     ,@body)))
 
 
 ;; ---- Channels -----------------------------------------------------------

@@ -33,7 +33,6 @@ use typelisp_mem::{Heap, Value};
 use super::{CompiledBody, Interp};
 use crate::check::repr::Repr;
 use crate::eval::value::Slot;
-use crate::Path;
 
 /// Everything a worker's printer knows about the program — see the module
 /// comment.
@@ -262,7 +261,7 @@ impl Interp {
             snapshot.defs.insert(f.target.clone(), entry);
         }
         for name in typelisp_print::runtime::PRINTER_GLOBALS {
-            let path = Path::std(name);
+            let path = crate::types::printer_global(name);
             let place = match self.compiled_global_id(&path) {
                 Some(id) => Some(GlobalRef::Compiled(id)),
                 None => self.root.borrow().get_global(&path).map(GlobalRef::Cell),

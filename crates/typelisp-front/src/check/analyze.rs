@@ -14472,7 +14472,7 @@ impl Checker {
         if concrete
             // Lowercase: symbol names are interned case-folded, so that is how
             // the prelude's `CharOutput` is spelled in the registry.
-            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::std("charoutput"), assoc: BTreeMap::new() }, 0)
+            && !self.type_implements(dest_ty, &TraitBound { trait_path: Path::in_ns(crate::types::std_module("io"), "charoutput"), assoc: BTreeMap::new() }, 0)
         {
             return Err(Error::TypeError(format!(
                 "format: the destination must be `true` (stdout), `false` (build the string only), \

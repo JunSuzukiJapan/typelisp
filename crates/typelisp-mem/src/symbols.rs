@@ -813,6 +813,7 @@ impl StdModule {
     pub const TIME: StdModule = StdModule(&["time"]);
     pub const REPL: StdModule = StdModule(&["repl"]);
     pub const THREAD: StdModule = StdModule(&["thread"]);
+    pub const IO: StdModule = StdModule(&["io"]);
 
     /// The module, found one segment at a time from `std`.
     pub fn ns(self) -> NsId {
@@ -1538,8 +1539,7 @@ impl SessionNames {
         let mut at = if first.name().is_empty() {
             PathStep::Module(NsId::ROOT)
         } else {
-            let home = (first.well_known() == NOT_WELL_KNOWN).then(|| first.home());
-            [Some(ns), home, Some(NsId::ROOT), Some(NsId::STD)]
+            let home = (first.well_known() == NOT_WELL_KNOWN).then(|| first.home());            [Some(ns), home, Some(NsId::ROOT), Some(NsId::STD)]
                 .into_iter()
                 .flatten()
                 .find_map(|outer| t.step_in_symbol(self, outer, *first))

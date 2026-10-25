@@ -22,7 +22,7 @@ pub const READER_MACRO_OPTION_TYPE: TypeSpec = TypeSpec::Named(
     StdModule::STD,
     "option",
     &[TypeSpec::Fn(
-        &[TypeSpec::Named(StdModule::STD, "string-input-stream", &[]), spec::CHAR],
+        &[TypeSpec::Named(StdModule::IO, "string-input-stream", &[]), spec::CHAR],
         &TypeSpec::Named(StdModule::STD, "option", &[spec::SEXPR]),
     )],
 );
