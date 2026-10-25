@@ -1,11 +1,11 @@
-# ABI バージョン 0.3.31
+# ABI バージョン 0.3.32
 
 `scripts/regen-abi-version.sh` が生成した文書。手で編集しない。
 
-コンパイラが生成するコードが、ABI バージョン 0.3.31 のランタイムライブラリについて仮定していることの一覧。
+コンパイラが生成するコードが、ABI バージョン 0.3.32 のランタイムライブラリについて仮定していることの一覧。
 ここに書かれていない前提(シムが引数をどう扱うか、生成コードがヒープを直接読む箇所など)は含まない。
 
-内容ハッシュ (FNV-1a 64): `2ff7902efef30d91`
+内容ハッシュ (FNV-1a 64): `85ef135b7f92dd96`
 
 ## 呼び出し規約 (typelisp_abi)
 
@@ -1829,11 +1829,9 @@
 | `std::env::machine-version` | `rt_machine_version` | `() -> Option<string>` |
 | `std::env::software-type` | `rt_software_type` | `() -> string` |
 | `std::env::software-version` | `rt_software_version` | `() -> Option<string>` |
-| `std::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
-| `std::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
-| `std::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
-| `std::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
-| `std::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
+| `std::eval::eval` | `rt_eval` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
+| `std::eval::macroexpand` | `rt_macroexpand` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
+| `std::eval::macroexpand-1` | `rt_macroexpand_1` | `(Option<Sexpr>) -> Result<Option<Sexpr>,std::evalerror>` |
 | `std::parse-float` | `rt_parse_float` | `(string) -> Result<f64,std::parsefloaterror>` |
 | `std::pprint-indent` | `rt_pprint_indent` | `(symbol, int) -> ()` |
 | `std::pprint-list-exhausted` | `rt_pprint_list_exhausted` | `() -> bool` |
@@ -1842,10 +1840,12 @@
 | `std::pprint-tab` | `rt_pprint_tab` | `(symbol, int, int) -> ()` |
 | `std::process::exit` | `rt_exit` | `(int) -> !` |
 | `std::random::seed-random-state` | `rt_seed_random_state` | `(int) -> random-state` |
-| `std::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,std::readerror>` |
+| `std::reader::get-dispatch-macro-character` | `rt_get_dispatch_macro_character` | `(char, char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
+| `std::reader::get-macro-character` | `rt_get_macro_character` | `(char) -> Option<(fn (std::string-input-stream char) Option<Sexpr>)>` |
+| `std::reader::read` | `rt_read` | `(string) -> Result<Option<Sexpr>,std::readerror>` |
+| `std::reader::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
+| `std::reader::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
 | `std::repl::heap-info` | `rt_heap_info` | `() -> std::repl::heap-info` |
-| `std::set-dispatch-macro-character` | `rt_set_dispatch_macro_character` | `(char, char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
-| `std::set-macro-character` | `rt_set_macro_character` | `(char, (fn (std::string-input-stream char) Option<Sexpr>)) -> ()` |
 | `std::sexpr-atom` | `rt_atom` | `(Option<Sexpr>) -> bool` |
 | `std::sexpr-bool` | `rt_sexpr_bool` | `(Option<Sexpr>) -> bool` |
 | `std::sexpr-car` | `rt_car` | `(Option<Sexpr>) -> Option<Sexpr>` |

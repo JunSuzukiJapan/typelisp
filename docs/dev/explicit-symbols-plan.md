@@ -641,6 +641,8 @@ LLVM の型は `%core`。`std::prelude` が公開するもの: `std::primitive` 
      次に `Eq` `Ord` `equal` `equalp` を `std::cmp` へ、算術のトレイトを `std::ops` へ移した（トレイトの定義だけを
      移し、各型への impl は `std` に残す）。文書にない名前を探す `root_names_documented_test` は、`std` とその
      子モジュール（`std::%internal` を除く）を数える。ABI は 0.3.31。
+     次に `read` とリーダーマクロ・`read-sexpr` などを `std::reader` へ、`eval` `macroexpand` を `std::eval` へ
+     移した。評価器が読む `*read-eval*` も `std::reader` で名指しする。ABI は 0.3.32。
    - 6e. `std::prelude` の再公開を 5 節の範囲に狭め、テスト・例・文書に `use` を足し、
      `Info::in_scope` の広い規則を狭める。`std::prelude` の名前を定義するときの `shadow` を要求する。
 7. 局所の束縛と IR の変数を `SymRef` に、定義を指す IR を定義のシンボルに（島の再生成は 2 回）。

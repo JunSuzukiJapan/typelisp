@@ -6128,6 +6128,7 @@ user-visible capacity."
 ;; `Option` の `none` になった時点(docs/dev/null-elimination-plan.md)で `Ok(none)` は
 ;; 「入力終端」と「空リストを読んだ」の両方を同じ場所で意味してしまう。今のうちに
 ;; 二つを分けておけば、その変更が呼び出し側全部に波及せずに済む。
+(module reader
 (pub defenum ReadOutcome
   "What one `read-sexpr` produced: a datum, or nothing because the input ended."
   (eof)
@@ -6138,12 +6139,12 @@ user-visible capacity."
    `read-preserving-whitespace`. `Ok(eof)` at end of input (so a read loop
    ends on a value rather than an error), `Err` if what is there is not a
    datum."
-  (let ((text (%internal::reader-scan-datum s)))
+  (let ((text (std::%internal::reader-scan-datum s)))
     (if (equal text "")
         (result::ok (ReadOutcome::eof))
         (match (read text)
           ((ok v) (result::ok (ReadOutcome::datum v)))
-          ((err e) (result::err e))))))
+          ((err e) (result::err e)))))))
 
 (module %internal (pub defun reader-read-one-until<S> ((s S) (stop Option<char>)) Result<ReadOutcome, ReadError> (:where (PeekInput S))
   "`read-sexpr-preserving-whitespace` with an extra delimiter -- what
@@ -6155,6 +6156,7 @@ user-visible capacity."
           ((ok v) (result::ok (ReadOutcome::datum v)))
           ((err e) (result::err e)))))))
 
+(module reader
 (pub defun read-sexpr<S> ((s S)) Result<ReadOutcome, ReadError> (:where (PeekInput S))
   "Read one datum from `s` -- CL's `read`. `Ok(eof)` at end of input (so a
    read loop ends on a value rather than an error), `Err` if what is there is
@@ -6170,7 +6172,7 @@ user-visible capacity."
       ;; belongs to whatever comes next.
       (match (peek-char s)
         ((none) ())
-        ((some c) (if (%internal::reader-whitespacep c) (%internal::reader-skip-one s) ())))
+        ((some c) (if (std::%internal::reader-whitespacep c) (std::%internal::reader-skip-one s) ())))
       v)))
 
 ;; CL's `read-from-string`, whose *second* return value is where reading
@@ -6185,14 +6187,14 @@ user-visible capacity."
   "One datum from `s` beginning at character index `start`, paired with the
    index reading stopped at. Consumes the whitespace character that ended the
    datum, as CL's `read-from-string` does."
-  (%internal::read-datum-at s start false))
+  (std::%internal::read-datum-at s start false))
 
 (pub defun read-from-string-preserving-whitespace ((s string) &optional (start int 0))
     Result<cons-cell<Option<Sexpr>, int>, ReadError>
   "`read-from-string` without consuming the whitespace that ended the datum --
    CL's `read-from-string` with `:preserve-whitespace t`. The difference shows
    in the returned index, and so in what the next read sees."
-  (%internal::read-datum-at s start true))
+  (std::%internal::read-datum-at s start true))
 
 ;; CL's `*read-eval*`: whether `#.` may run code. `false` makes every `#.` a
 ;; read error -- the switch for reading text that is data rather than
@@ -6200,7 +6202,7 @@ user-visible capacity."
 ;; is running to evaluate it. Read by the evaluator's side of the reader hook
 ;; (`Interp::read_eval_allowed`) at each `#.`, so a `setf` takes effect on the
 ;; next form read.
-(pub defvar (*read-eval* bool) true)
+(pub defvar (*read-eval* bool) true))
 
 
 ;; ---------------------------------------------------------------------------
@@ -6241,6 +6243,7 @@ user-visible capacity."
 ;; which decides how `#n=` labels and the like are scoped. This reader has no
 ;; such cross-call state, so a reader macro calling this is not a different
 ;; kind of call from a program doing it.
+(module reader
 (pub defun read-delimited-list<S> ((terminator char) (s S)) Result<Option<Sexpr>, ReadError> (:where (PeekInput S))
   "Every datum on `s` up to `terminator`, as a list. The terminator is
    consumed; reaching end of input first is an `Err`."
@@ -6248,7 +6251,7 @@ user-visible capacity."
     (progn
       (while going
         (progn
-          (%internal::reader-scan-atmosphere s)
+          (std::%internal::reader-scan-atmosphere s)
           (match (peek-char s)
             ((none)
              (progn
@@ -6258,8 +6261,8 @@ user-visible capacity."
                ()))
             ((some c)
              (if (equal c terminator)
-                 (progn (%internal::reader-skip-one s) (setf going false) ())
-                 (match (%internal::reader-read-one-until s (option::some terminator))
+                 (progn (std::%internal::reader-skip-one s) (setf going false) ())
+                 (match (std::%internal::reader-read-one-until s (option::some terminator))
                    ((err e) (progn (setf failed (option::some e)) (setf going false) ()))
                    ((ok found)
                     (match found
@@ -6272,7 +6275,7 @@ user-visible capacity."
                       ((datum v) (progn (push acc v) ()))))))))))
       (match failed
         ((some e) (result::err e))
-        ((none) (result::ok (%internal::sexpr-list-from acc)))))))
+        ((none) (result::ok (std::%internal::sexpr-list-from acc))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; The `with-...` macros, which are the reason `close` rarely appears in user

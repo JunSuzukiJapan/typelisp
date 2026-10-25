@@ -2582,7 +2582,7 @@ impl Interp {
     /// anything runs. A session without the prelude has no such global, and
     /// `#.` is allowed, CL's default.
     pub(crate) fn read_eval_allowed(&self, heap: &Heap) -> Result<(), String> {
-        match self.global_value(heap, &crate::Path::std("*read-eval*")) {
+        match self.global_value(heap, &crate::Path::in_ns(crate::types::std_module("reader"), "*read-eval*")) {
             Some(Value::Bool(false)) => Err("`#.` is switched off: `*read-eval*` is false".to_string()),
             _ => Ok(()),
         }

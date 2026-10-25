@@ -519,7 +519,7 @@ pub fn lowered_builtins() -> impl Iterator<Item = &'static str> {
 
 /// The modules inside `std` whose definitions `std::prelude` re-exports,
 /// with `std`'s own ([`Registry::reexport_std_in_prelude`]).
-pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops"];
+pub const PRELUDE_MODULES: &[&str] = &["random", "time", "repl", "env", "net", "thread", "sync", "symbol", "process", "hash", "error", "cmp", "ops", "reader", "eval"];
 
 /// One module's definitions. The module's children are not here: what
 /// modules exist, and which is inside which, is the symbol table's tree
@@ -822,6 +822,8 @@ impl Registry {
         let mut symbol = Namespace::new(crate::types::std_module("symbol"));
         let mut process = Namespace::new(crate::types::std_module("process"));
         let mut cmp = Namespace::new(crate::types::std_module("cmp"));
+        let mut reader = Namespace::new(crate::types::std_module("reader"));
+        let mut eval = Namespace::new(crate::types::std_module("eval"));
         for def in builtin_sum_defs() {
             std_ns.add_type(def);
         }
@@ -962,8 +964,8 @@ impl Registry {
         register_stream_builtins(&mut internal);
         register_net_builtins(&mut internal);
         register_system_builtins(&mut env, &mut thread, &mut time, &mut internal);
-        register_readtable_builtins(&mut std_ns);
-        std_ns.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
+        register_readtable_builtins(&mut reader);
+        reader.fns.insert("read".to_string(), FnSig::builtin(vec![Type::Str], result_of(option_of(sexpr()), error_ty(READ_ERROR))));
         // `read-datum-at`: one datum from a string starting at a character
         // index, paired with where reading stopped — CL's `read-from-string`
         // and its second return value, which this language has no multiple
@@ -980,7 +982,7 @@ impl Registry {
         // but not the caller's lexical locals; a definition form registers
         // immediately. Result is a `Sexpr` (the value, or a definition's name
         // symbol); malformed/ill-typed input is `Err`, not a panic.
-        std_ns.fns.insert("eval".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
+        eval.fns.insert("eval".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
         // `macroexpand-1`/`macroexpand`: what the checker does to a macro
         // call, made available to a program (CL's own, and the only way to
         // see a `defmacro`'s output without reading the checker's mind).
@@ -991,8 +993,8 @@ impl Registry {
         // strictly more than CL's boolean, since the caller cannot mistake a
         // macro that expands to itself for a non-macro. `macroexpand` repeats
         // until `none` and answers the final form, as CL's does.
-        std_ns.fns.insert("macroexpand-1".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
-        std_ns.fns.insert("macroexpand".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
+        eval.fns.insert("macroexpand-1".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
+        eval.fns.insert("macroexpand".to_string(), FnSig::builtin(vec![option_of(sexpr())], result_of(option_of(sexpr()), error_ty(EVAL_ERROR))));
         // The pretty printer's user-callable layout operators (CLHS 22.2.1),
         // minus the stream argument typelisp has no streams for. They act on
         // the logical block the `pprint-logical-block` special form opened
@@ -1149,7 +1151,7 @@ impl Registry {
             "dump".to_string(),
             FnSig::builtin(vec![Type::Str], Type::Bool),
         );
-        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp].into_iter().map(|m| (m.ns, m)).collect();
+        let modules = [Namespace::new(NsId::ROOT), std_ns, internal, random, time, repl, env, thread, sync, symbol, process, cmp, reader, eval].into_iter().map(|m| (m.ns, m)).collect();
         let mut reg = Registry { modules, def_locs: DefLocs::default(), docs: Docs::default(), struct_defaults: BTreeMap::new() };
         reg.reexport_std_in_prelude();
         reg
@@ -1727,7 +1729,7 @@ pub fn reader_macro_fn_type() -> Type {
 }
 
 /// The readtable (CLHS 23.1): the character-to-function table the reader
-/// consults before it does anything else with a character.
+/// consults before it does anything else with a character, in `std::reader`.
 ///
 /// Four functions, not CL's eight. There is no `*readtable*` and no
 /// `copy-readtable`, because there is no readtable *object* — a first-class
@@ -1736,9 +1738,9 @@ pub fn reader_macro_fn_type() -> Type {
 /// `make-dispatch-macro-character` is absent for a different reason:
 /// `set-dispatch-macro-character` makes the character dispatching by itself,
 /// which leaves the separate step nothing to do.
-fn register_readtable_builtins(root: &mut Namespace) {
+fn register_readtable_builtins(reader: &mut Namespace) {
     let mut native = |name: &str, params: Vec<Type>, ret: Type| {
-        root.fns.insert(
+        reader.fns.insert(
             name.to_string(),
             FnSig::builtin(params, ret),
         );
